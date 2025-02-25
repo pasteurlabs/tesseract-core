@@ -4,7 +4,7 @@
 
 Autodiff-native, self-documenting software components for Simulation Intelligence. :package:
 
-[Read the docs](https://pasteur-labs-docs.readthedocs-hosted.com/projects/tesseract-core/latest/) |
+[Read the docs](https://pasteur-labs-tesseract-core.readthedocs-hosted.com/en/latest/) |
 [Report an issue](https://github.com/pasteurlabs/tesseract-core-core/issues) |
 [Talk to the community](https://si-tesseract.discourse.group/) |
 [Contribute](CONTRIBUTING.md)
@@ -56,7 +56,8 @@ Tesseracts provide built-in support for propagating [gradient information](https
    {"result":{"object_type":"array","shape":[1],"dtype":"float64","data":{"buffer":[3.0],"encoding":"json"}}}⏎
    ```
 
-Now you're ready to dive into the [documentation](https://pasteur-labs-docs.readthedocs-hosted.com/projects/tesseract-core/latest/) for more information on [installation](https://pasteur-labs-docs.readthedocs-hosted.com/projects/tesseract-core/latest/content/user-guide/installation.html), [creating Tesseracts](https://pasteur-labs-docs.readthedocs-hosted.com/projects/tesseract-core/latest/content/user-guide/create.html), and [invoking them](https://pasteur-labs-docs.readthedocs-hosted.com/projects/tesseract-core/latest/content/user-guide/use.html).
+Now you're ready to dive into the [documentation](https://pasteur-labs-tesseract-core.readthedocs-hosted.com/en/latest/) for more information on [installation](https://pasteur-labs-tesseract-core.readthedocs-hosted.com/en/latest/content/user-guide/installation.html), [creating Tesseracts](https://pasteur-labs-tesseract-core.readthedocs-hosted.com/en/latest/content/user-guide/create.html), and [invoking
+them](https://pasteur-labs-tesseract-core.readthedocs-hosted.com/en/latest/content/user-guide/use.html).
 
 ## License
 
