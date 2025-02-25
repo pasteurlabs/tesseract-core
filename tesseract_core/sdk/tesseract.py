@@ -25,7 +25,7 @@ class Tesseract:
     HTTP requests or `docker exec` invocations (only possible for local
     instances spawned when instantiating the class).
     """
-    url: str
+
     image: str
     volumes: list[str] | None
     gpus: list[str] | None
@@ -54,19 +54,21 @@ class Tesseract:
         return obj
 
     def __enter__(self):
-        self._serve(volumes=self.volumes, gpus=self.gpus)
-        self._client = HTTPClient(self.url)
+        url = self._serve(volumes=self.volumes, gpus=self.gpus)
+        self._client = HTTPClient(url)
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
         engine.teardown(self.project_id)
+        self.project_id = None
+        self.container_id = None
 
     def _serve(
         self,
         port: str = "",
         volumes: list[str] | None = None,
         gpus: list[str] | None = None,
-    ) -> None:
+    ) -> str:
         if self.container_id:
             raise RuntimeError(
                 "Client already attached to the Tesseract container {self.container_id}"
@@ -80,7 +82,7 @@ class Tesseract:
         # contains multiple json dicts, one for each container, separated by newlines,
         # but json.loads will only parse the first one.
         # The first_container dict contains useful info like container id, ports, etc.
-        first_container = json.loads(result.stdout) 
+        first_container = json.loads(result.stdout)
 
         if first_container:
             first_container_id = first_container["ID"]
@@ -90,7 +92,7 @@ class Tesseract:
 
         self.project_id = project_id
         self.container_id = first_container_id
-        self.url = f"http://localhost:{first_container_port}"
+        return f"http://localhost:{first_container_port}"
 
     @cached_property
     def openapi_schema(self) -> dict:
