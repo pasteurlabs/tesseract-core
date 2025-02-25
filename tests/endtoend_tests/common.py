@@ -44,14 +44,6 @@ def build_tesseract(sourcedir, image_name, tag=None, build_retries=3):
     else:
         image_name = f"{image_name}:latest"
 
-    reqfile = sourcedir / "tesseract_requirements.txt"
-    if reqfile.exists():
-        with open(reqfile) as f:
-            requirements = f.read()
-        if "git+ssh" in requirements:
-            # Use SSH agent forwarding in the build to allow fetching private dependencies
-            build_args.append("--forward-ssh-agent")
-
     for _ in range(build_retries):
         result = cli_runner.invoke(
             app,
