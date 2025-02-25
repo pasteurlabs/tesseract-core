@@ -80,7 +80,6 @@ with Tesseract.from_image(image="rbf_fitting") as tess:
             {"mse": 1.0}
         )["weights"]
 
-
         # Update weights
         weights = jnp.array(inputs["weights"])
         updates, opt_state = optimizer.update(grad_weights, opt_state, weights)
