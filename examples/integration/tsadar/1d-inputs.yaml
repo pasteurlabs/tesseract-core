@@ -1,0 +1,91 @@
+parameters:
+    electron:
+        Te:
+            val: .5
+            active: True
+            lb: 0.001
+            ub: 1.5
+        ne:
+            val: .2
+            active: True
+            lb: .001
+            ub: 1.
+        fe:
+            active: False
+            type: dlm
+            dim: 1
+            nv: 64
+            params:
+                m:
+                    val: 2.5
+                    lb: 2.0
+                    ub: 5.0
+    ion-1:
+        Ti:
+            val: .2
+            active: False
+            lb: 0.01
+            ub: 3.
+            same: False
+        Z:
+            val: 8.
+            active: False
+            lb: 1.
+            ub: 25.
+        A:
+            val: 40.
+            active: False
+        fract:
+            val: 1.
+            active: False
+    general:
+        amp1:
+            val: 1.
+            active: True
+            lb: 0.01
+            ub: 3.75
+        amp2:
+            val: 1.
+            active: True
+            lb: 0.01
+            ub: 3.75
+        amp3:
+            val: 1.
+            active: False
+            lb: 0.
+            ub: 10.
+        lam:
+            val: 524.0
+            active: True
+            lb: 523.
+            ub: 528.
+        Te_gradient:
+            val: 0.0
+            active: False
+            lb: 0.
+            ub: 10.
+            num_grad_points: 1
+        ne_gradient:
+            val: 0.
+            active: False
+            lb: 0.
+            ub: 15.
+            num_grad_points: 1
+        ud:
+            val: 0.0
+            angle: 0.0
+            active: False
+            lb: -10.0
+            ub: 10.0
+        Va:
+            val: 0.0
+            angle: 0.0
+            active: False
+            lb: -20.5
+            ub: 20.5
+
+
+other:
+    refit: False
+    refit_thresh: 5.0
+    calc_sigmas: false

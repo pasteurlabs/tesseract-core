@@ -1,0 +1,184 @@
+parameters:
+    electron:
+        Te:
+            val: .6
+            active: False
+            lb: 0.01
+            ub: 1.5
+        ne:
+            val: 0.2
+            active: False
+            lb: 0.001
+            ub: 1.0
+
+    ion-1:
+        Ti:
+            val: 0.12
+            active: False
+            same: False
+            lb: 0.001
+            ub: 1.0
+        Z:
+            val: 14.0
+            active: False
+            lb: 0.5
+            ub: 7.0
+        A:
+            val: 40.0
+            active: False
+        fract:
+            val: 0.1
+            active: False
+
+    general:
+        amp1:
+            val: 1.
+            active: False
+            lb: 0.01
+            ub: 3.75
+        amp2:
+            val: 1.
+            active: False
+            lb: 0.01
+            ub: 3.75
+        amp3:
+            val: 1.0
+            active: False
+            lb: 0.01
+            ub: 3.75
+        lam:
+            val: 526.5
+            active: False
+            lb: 523.0
+            ub: 528.0
+        Te_gradient:
+            val: 0.0
+            active: False
+            lb: 0.
+            ub: 10.
+            num_grad_points: 1
+        ne_gradient:
+            val: 0.
+            active: False
+            lb: 0.
+            ub: 15.
+            num_grad_points: 1
+        ud:
+            val: 0.0
+            angle: 0.0
+            active: False
+            lb: -100.0
+            ub: 100.0
+        Va:
+            val: 0.0
+            angle: 0.0
+            active: False
+            lb: -20.5
+            ub: 20.5
+
+other:
+    expandedions: False
+    extraoptions:
+        spectype: 1d
+        load_ion_spec: false
+        load_ele_spec: True
+        fit_IAW: False
+        fit_EPWb: True
+        fit_EPWr: True
+        absolute_timing: false
+    PhysParams:
+        background: [0, 0]
+        norm: 0
+        widIRF:
+            spect_stddev_ele: 1.3
+            spect_stddev_ion: 0.015
+    iawoff: 0
+    iawfilter: [1, 4, 24, 528]
+    CCDsize: [1024, 1024]
+    flatbg: 0
+    gain: 1
+    points_per_pixel: 5
+    ang_res_unit: 10
+    lam_res_unit: 5
+    refit: False
+    refit_thresh: 0.25
+    calc_sigmas: False
+
+data:
+    shotnum: 101675
+    shotDay: False
+    launch_data_visualizer: True
+    fit_rng:
+        blue_min: 450
+        blue_max: 510
+        red_min: 540
+        red_max: 625
+        iaw_min: 525.5
+        iaw_max: 527.5
+        iaw_cf_min: 526.49
+        iaw_cf_max: 526.51
+        forward_epw_start: 400
+        forward_epw_end: 700
+        forward_iaw_start: 525.75
+        forward_iaw_end: 527.25
+    bgscaleE: 1.0
+    bgscaleI: 0.1
+    bgshotmult: 1
+    ion_loss_scale: 1.0
+    ele_t0: 0
+    ion_t0_shift: 0
+    ele_lam_shift: 0.0
+    probe_beam: P9
+    dpixel: 2
+    lineouts:
+        type:
+            pixel
+        start: 400
+        end: 600
+        skip: 50
+    background:
+        type:
+            pixel
+        slice: 900
+
+plotting:
+    n_sigmas: 3
+    rolling_std_width: 5
+    data_cbar_u: 10
+    data_cbar_l: 0
+    ion_window_start: 525
+    ion_window_end: 528
+    ele_window_start: 425
+    ele_window_end: 625
+
+optimizer:
+    # use adam for nn / stochastic gradient descent
+    # use L-BFGS-B for full batch / parameter learning
+    # although adam will work here too
+    method: l-bfgs-b
+    moment_loss: false
+    loss_method: l2
+    hessian: False
+    y_norm: True
+    x_norm: False
+    grad_method: AD
+    batch_size: 2
+    num_epochs: 120
+    learning_rate: 1.0e-2
+    parameter_norm: True
+    refine_factor: 0
+    num_mins: 1
+
+nn:
+    use: false
+    conv_filters: 32|32|16
+    linear_widths: 16|8
+
+dist_fit:
+    window:
+        len: 0.2 #should be even
+        type: hamming # one of [hamming, hann, bartlett]
+
+mlflow:
+    experiment: inverse-thomson-scattering
+    run: new
