@@ -156,11 +156,6 @@ jobs:
       - name: Set up Git repository
         uses: actions/checkout@v4
 
-      - name: Set up custom SSH key
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.ORG_DEPLOY_KEY }}
-
       # Use Conda to install Python (setup-python action doesn't support ARM)
       - uses: conda-incubator/setup-miniconda@v3
         with:
