@@ -216,9 +216,7 @@ def docker_buildx(
         try:
             with contextlib.closing(docker.APIClient()) as api_client:
                 api_client.prune_builds(all=True, filters={"until": start.isoformat()})
-        except (
-            docker.errors.DockerException
-        ):
+        except docker.errors.DockerException:
             logger.warning(
                 "Docker build cache could not be cleared; consider doing so manually."
             )
