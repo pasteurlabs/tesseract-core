@@ -27,3 +27,11 @@ def test_suggestion_on_misspelled_command(cli_runner):
     assert result.exit_code == 2, result.stdout
     assert "No such command 'wellbloodygreatinnit'." in result.stderr
     assert "Did you mean" not in result.stderr
+
+
+def test_version(cli_runner):
+    from tesseract_core import __version__
+
+    result = cli_runner.invoke(cli, ["--version"])
+    assert result.exit_code == 0, result.stdout
+    assert __version__ in result.stdout
