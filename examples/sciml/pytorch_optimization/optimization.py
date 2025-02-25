@@ -8,12 +8,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-# disabling jit compiler for now
+# disabling jit compiler for now
 import torch._dynamo
+
 torch._dynamo.config.disable = True
 
-from tesseract_core import Tesseract
-from tesseract_api import log_rosenbrock
+from tesseract_api import log_rosenbrock  # noqa: E402
+
+from tesseract_core import Tesseract  # noqa: E402
 
 parser = argparse.ArgumentParser()
 parser.add_argument("-n", "--niter", help="The number of iterations", default=300)
