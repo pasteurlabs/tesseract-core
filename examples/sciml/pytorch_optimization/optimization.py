@@ -1,16 +1,21 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+
 import argparse
 
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+
+# disabling jit compiler for now
+import torch._dynamo
+torch._dynamo.config.disable = True
+
+from tesseract_core import Tesseract
 from tesseract_api import log_rosenbrock
-from tesseract_client import Client
 
 parser = argparse.ArgumentParser()
-parser.add_argument("-p", "--port", help="Port of tesseract server", required=True)
 parser.add_argument("-n", "--niter", help="The number of iterations", default=300)
 parser.add_argument(
     "-l",
@@ -30,8 +35,6 @@ parser.add_argument(
 )
 
 args = vars(parser.parse_args())
-
-port = int(args["port"])
 
 torch.manual_seed(int(args["seed"]))
 
@@ -53,9 +56,6 @@ inputs = {
     "b": b,
 }
 
-# Initialize Tesseract client
-client = Client(host="127.0.0.1", port=port)
-
 # setup optimizer: either Adam or SGD (default)
 assert args["opt"] in ["SGD", "Adam"], "Only Adam or SGD optimizer supported."
 opt = getattr(torch.optim, args["opt"])((x0, y0), lr=float(args["lr"]))
@@ -64,46 +64,41 @@ opt = getattr(torch.optim, args["opt"])((x0, y0), lr=float(args["lr"]))
 losses = []
 x = []
 y = []
-for _i in range(int(args["niter"])):
-    # zero out the gradients
-    opt.zero_grad()
+with Tesseract.from_image(image="pytorch_optimization") as pytorch_optimization:
+    for _i in range(int(args["niter"])):
+        # zero out the gradients
+        opt.zero_grad()
 
-    # get loss
-    output = client.request("apply", method="POST", payload={"inputs": inputs})
-    loss = output["loss"]["data"]["buffer"]
+        # get loss
+        output = pytorch_optimization.apply(inputs)
+        loss = output["loss"]
 
-    # append values
-    losses.append(loss)
-    x.append(inputs["x"])
-    y.append(inputs["y"])
+        # append values
+        losses.append(loss)
+        x.append(inputs["x"])
+        y.append(inputs["y"])
 
-    # get gradients
-    jacobian_response = client.request(
-        "jacobian",
-        method="POST",
-        payload={
-            "inputs": inputs,
-            "jac_inputs": jac_inputs,
-            "jac_outputs": ["loss"],
-        },
-    )
+        # get gradients
+        jacobian_response = pytorch_optimization.jacobian(
+            inputs=inputs, jac_inputs=jac_inputs, jac_outputs=["loss"]
+        )
 
-    # insert gradients into pytorch tensors where optimizer expects them
-    if "x" in jac_inputs:
-        x0.grad = torch.as_tensor(
-            jacobian_response["loss"]["x"]["data"]["buffer"]
-        ).unsqueeze(0)
-    if "y" in jac_inputs:
-        y0.grad = torch.as_tensor(
-            jacobian_response["loss"]["y"]["data"]["buffer"]
-        ).unsqueeze(0)
+        # insert gradients into pytorch tensors where optimizer expects them
+        if "x" in jac_inputs:
+            x0.grad = (
+                torch.as_tensor(jacobian_response["loss"]["x"]).float().unsqueeze(0)
+            )
+        if "y" in jac_inputs:
+            y0.grad = (
+                torch.as_tensor(jacobian_response["loss"]["y"]).float().unsqueeze(0)
+            )
 
-    # make optimization step
-    opt.step()
+        # make optimization step
+        opt.step()
 
-    # update inputs
-    inputs["x"] = x0.detach().item()
-    inputs["y"] = y0.detach().item()
+        # update inputs
+        inputs["x"] = x0.detach().item()
+        inputs["y"] = y0.detach().item()
 
 # plotting
 X, Y = np.meshgrid(np.linspace(-3, 3, 100), np.linspace(-3, 3, 100), indexing="xy")
