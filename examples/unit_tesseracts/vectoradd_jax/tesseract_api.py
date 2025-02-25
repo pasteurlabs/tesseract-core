@@ -6,7 +6,7 @@ from typing import Any
 
 import jax.numpy as jnp
 import jax.tree
-from jax import ShapeDtypeStruct, eval_shape, jit, jvp, vjp
+from jax import ShapeDtypeStruct, eval_shape, jacrev, jit, jvp, vjp
 from pydantic import BaseModel, Field, model_validator
 from typing_extensions import Self
 
@@ -164,6 +164,4 @@ def jac_jit(
     jac_outputs: tuple[str],
 ):
     filtered_apply = filter_func(apply_jit, inputs, jac_outputs)
-    return jax.jacrev(filtered_apply)(
-        flatten_with_paths(inputs, include_paths=jac_inputs)
-    )
+    return jacrev(filtered_apply)(flatten_with_paths(inputs, include_paths=jac_inputs))
