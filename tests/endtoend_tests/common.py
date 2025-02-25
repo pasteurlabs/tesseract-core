@@ -6,6 +6,7 @@ import traceback
 from typer.testing import CliRunner
 
 from tesseract_core.sdk.cli import app
+from tesseract_core.sdk.engine import parse_requirements
 
 
 def image_exists(client, image_name):
@@ -46,9 +47,8 @@ def build_tesseract(sourcedir, image_name, tag=None, build_retries=3):
 
     reqfile = sourcedir / "tesseract_requirements.txt"
     if reqfile.exists():
-        with open(reqfile) as f:
-            requirements = f.read()
-        if "git+ssh" in requirements:
+        _, remote_dependencies = parse_requirements(reqfile)
+        if any("git+ssh" in line for line in remote_dependencies):
             # Use SSH agent forwarding in the build to allow fetching private dependencies
             build_args.append("--forward-ssh-agent")
 
