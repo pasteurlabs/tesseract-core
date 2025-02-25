@@ -4,7 +4,6 @@ import pytest
 from tesseract_core import Tesseract
 from tesseract_core.sdk.tesseract import (
     HTTPClient,
-    LocalClient,
     _decode_array,
     _encode_array,
     _tree_map,
@@ -17,7 +16,9 @@ def mock_serving(mocker):
     serve_mock.return_value = "proj-id-123"
 
     subprocess_run_mock = mocker.patch("subprocess.run")
-    subprocess_run_mock.return_value.stdout = '{"ID": "abc1234"}'
+    subprocess_run_mock.return_value.stdout = (
+        '{"ID": "abc1234", "Publishers":[{"PublishedPort": 54321}]}'
+    )
 
     teardown_mock = mocker.patch("tesseract_core.sdk.engine.teardown")
     return {
@@ -30,14 +31,11 @@ def mock_serving(mocker):
 @pytest.fixture
 def mock_clients(mocker):
     mocker.patch("tesseract_core.sdk.tesseract.HTTPClient._run_tesseract")
-    mocker.patch("tesseract_core.sdk.tesseract.LocalClient._run_tesseract")
 
 
 def test_Tesseract_init():
     # Instantiate with a url
     t = Tesseract(url="localhost")
-
-    assert t.client_type == "http"
 
     # The attributes for local Tesseracts should not be set
     assert not hasattr(t, "image")
@@ -55,21 +53,18 @@ def test_Tesseract_from_image():
 
     # Let's also check that stuff we don't expect there is not there
     assert not hasattr(t, "url")
-    assert t.client_type == "local"
 
 
 def test_Tesseract_schema_methods(mocker, mock_serving):
-    mocked_run = mocker.patch("tesseract_core.sdk.engine.exec_tesseract")
-    mocked_run.return_value = '{"#defs": {"some": "stuff"}}', None
+    mocked_run = mocker.patch("tesseract_core.sdk.tesseract.HTTPClient._run_tesseract")
+    mocked_run.return_value = {"#defs": {"some": "stuff"}}
 
     with Tesseract.from_image("sometesseract:0.2.3") as t:
         input_schema = t.input_schema
         output_schema = t.output_schema
         openapi_schema = t.openapi_schema
 
-    assert (
-        input_schema == output_schema == openapi_schema == {"#defs": {"some": "stuff"}}
-    )
+    assert input_schema == output_schema == openapi_schema == mocked_run.return_value
 
 
 def test_serve_lifecycle(mock_serving, mock_clients):
@@ -84,21 +79,11 @@ def test_serve_lifecycle(mock_serving, mock_clients):
 
     mock_serving["teardown_mock"].assert_called_with("proj-id-123")
 
-
-def test_LocalClient_exec(mocker):
-    mocked_exec = mocker.patch("tesseract_core.sdk.engine.exec_tesseract")
-    mocked_exec.return_value = '{"result": [4,4,4]}', None
-
-    client = LocalClient(container_id="1234567")
-
-    out = client._run_tesseract("apply", {"inputs": {"a": 1}})
-
-    assert out == {"result": [4, 4, 4]}
-    mocked_exec.assert_called_with(
-        "1234567",
-        "apply",
-        ['{"inputs": {"a": 1}}'],
-    )
+    # check that the same Tesseract obj cannot be used to instantiate two containers
+    with pytest.raises(RuntimeError):
+        with t:
+            with t:
+                pass
 
 
 def test_HTTPClient_run_tesseract(mocker):
