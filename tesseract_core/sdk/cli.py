@@ -134,7 +134,7 @@ def _validate_tesseract_name(name: str | None) -> str:
 def version_callback(value: bool | None) -> None:
     """Typer callback for version option."""
     if value:
-        from . import __version__
+        from tesseract_core import __version__
 
         typer.echo(__version__)
         raise typer.Exit()
