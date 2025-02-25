@@ -25,12 +25,14 @@ class Tesseract:
     HTTP requests or `docker exec` invocations (only possible for local
     instances spawned when instantiating the class).
     """
-
-    _client: HTTPClient | LocalClient
+    url: str
     image: str
     volumes: list[str] | None
     gpus: list[str] | None
-    project_id: str
+
+    _client: HTTPClient
+    project_id: str | None = None
+    container_id: str | None = None
 
     def __init__(self, url: str) -> None:
         self._client = HTTPClient(url)
@@ -52,12 +54,8 @@ class Tesseract:
         return obj
 
     def __enter__(self):
-        if not self.client_type == "local":
-            raise ValueError(
-                "Use Tesseract.from_image(...) to create a context-managed Tesseract instance."
-            )
         self._serve(volumes=self.volumes, gpus=self.gpus)
-        self._client = LocalClient(self.tesseract_container_id)
+        self._client = HTTPClient(self.url)
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
@@ -69,40 +67,30 @@ class Tesseract:
         volumes: list[str] | None = None,
         gpus: list[str] | None = None,
     ) -> None:
-        if hasattr(self, "tesseract_container_id"):
-            self.tesseract_container_id: str
+        if self.container_id:
             raise RuntimeError(
-                "Client already attached to the Tesseract "
-                f"container {self.tesseract_container_id}"
+                "Client already attached to the Tesseract container {self.container_id}"
             )
         project_id = engine.serve([self.image], port=port, volumes=volumes, gpus=gpus)
 
         command = ["docker", "compose", "-p", project_id, "ps", "--format", "json"]
         result = subprocess.run(command, capture_output=True, text=True)
 
-        containers = json.loads(result.stdout)
+        # This relies on the fact that result.stdout from docker compose ps
+        # contains multiple json dicts, one for each container, separated by newlines,
+        # but json.loads will only parse the first one.
+        # The first_container dict contains useful info like container id, ports, etc.
+        first_container = json.loads(result.stdout) 
 
-        if containers:
-            first_container_id = containers["ID"]
+        if first_container:
+            first_container_id = first_container["ID"]
+            first_container_port = first_container["Publishers"][0]["PublishedPort"]
         else:
             raise RuntimeError("No containers found.")
 
-        self.tesseract_container_id = first_container_id
         self.project_id = project_id
-
-    @cached_property
-    def client_type(self) -> str:
-        """Get the type of client being used ('http' or 'local')."""
-        return (
-            "http"
-            if hasattr(self, "_client") and isinstance(self._client, HTTPClient)
-            else "local"
-        )
-
-    @property
-    def url(self) -> str | None:
-        """Get the URL if using HTTP client, None for local client."""
-        return getattr(self._client, "url", None)
+        self.container_id = first_container_id
+        self.url = f"http://localhost:{first_container_port}"
 
     @cached_property
     def openapi_schema(self) -> dict:
@@ -351,46 +339,3 @@ class HTTPClient:
             endpoint = "openapi.json"
 
         return self._request(endpoint, method, payload)
-
-
-class LocalClient:
-    """A client that connects to a local Tesseract."""
-
-    def __init__(self, container_id: str) -> None:
-        self.container_id = container_id
-
-    def _run_tesseract(
-        self,
-        endpoint: str,
-        payload: dict | None = None,
-    ) -> dict:
-        command = endpoint.replace("_", "-")
-        if payload:
-            encoded_payload = _tree_map(
-                _encode_array, payload, is_leaf=lambda x: hasattr(x, "shape")
-            )
-        else:
-            encoded_payload = None
-
-        args = []
-        if encoded_payload:
-            args.append(json.dumps(encoded_payload))
-
-        out, err = engine.exec_tesseract(self.container_id, command, args)
-
-        if err:
-            raise RuntimeError(err)
-
-        data = json.loads(out)
-
-        if command in [
-            "apply",
-            "jacobian",
-            "jacobian-vector-product",
-            "vector-jacobian-product",
-        ]:
-            data = _tree_map(
-                _decode_array, data, is_leaf=lambda x: type(x) is dict and "shape" in x
-            )
-
-        return data
