@@ -3,25 +3,13 @@
 
 """This is an optimisation scripts for the RBF fitting example."""
 
-import argparse
-
 import jax.numpy as jnp
+import matplotlib.pyplot as plt
 import optax
 from jax import random
-from matplotlib import pyplot as plt
 from plotting import plot_loss, plot_rbf
-from tesseract_client import Client
 
-parser = argparse.ArgumentParser(description="RBF tesseract optimisation script")
-parser.add_argument(
-    "-p", "--port", help="Port at which RBF tesseract is being served", required=True
-)
-args = vars(parser.parse_args())
-
-if "port" not in args:
-    raise ValueError("Port at which RBF tesseract is being served is required.")
-
-port = int(args["port"])
+from tesseract_core.sdk.tesseract import Tesseract
 
 # JAX random keys
 key = random.PRNGKey(42)
@@ -57,9 +45,6 @@ inputs = {
 jac_inputs = ["weights", "length_scale"]
 jac_outputs = ["mse"]
 
-# Initialize Tesseract client
-client = Client(host="127.0.0.1", port=port)
-
 # Initialize optimizer
 optimizer = optax.adam(learning_rate=0.5)
 opt_state = optimizer.init(jnp.array(inputs["weights"]))
@@ -68,34 +53,33 @@ opt_state = optimizer.init(jnp.array(inputs["weights"]))
 loss_history = []
 max_iterations = 100
 print(f"Starting the optimization process for {max_iterations} iterations.")
-for n_iteration in range(max_iterations):
-    if n_iteration % 10 == 0:
-        print(f" ---- iteration {n_iteration} / {max_iterations}")
 
-    # Compute loss
-    apply_response = client.request("apply", method="POST", payload={"inputs": inputs})
-    loss = apply_response["mse"]["data"]["buffer"]
-    loss_history.append(loss)
+# Initialize Tesseract client
+with Tesseract.from_image(image="rbf_fitting") as tess:
+    for n_iteration in range(max_iterations):
+        if n_iteration % 10 == 0:
+            print(f" ---- iteration {n_iteration} / {max_iterations}")
 
-    # Compute gradients
-    jacobian_response = client.request(
-        "jacobian",
-        method="POST",
-        payload={
-            "inputs": inputs,
-            "jac_inputs": jac_inputs,
-            "jac_outputs": jac_outputs,
-        },
-    )
+        # Compute loss
+        apply_response = tess.apply(inputs)
+        loss = apply_response["mse"]
+        loss_history.append(loss)
 
-    buffer = jacobian_response["weights"]["mse"]["data"]["buffer"]
-    grad_weights = jnp.array(buffer, dtype=jnp.float32)
+        # Compute gradients
+        jacobian_response = tess.jacobian(
+            inputs,
+            jac_inputs,
+            jac_outputs,
+        )
 
-    # Update weights
-    weights = jnp.array(inputs["weights"])
-    updates, opt_state = optimizer.update(grad_weights, opt_state, weights)
-    weights = optax.apply_updates(weights, updates)
-    inputs["weights"] = weights.tolist()
+        buffer = jacobian_response["mse"]["weights"]
+        grad_weights = jnp.array(buffer, dtype=jnp.float32)
+
+        # Update weights
+        weights = jnp.array(inputs["weights"])
+        updates, opt_state = optimizer.update(grad_weights, opt_state, weights)
+        weights = optax.apply_updates(weights, updates)
+        inputs["weights"] = weights.tolist()
 
 print("Optimisation completed!")
 

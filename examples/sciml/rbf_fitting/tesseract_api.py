@@ -4,8 +4,10 @@
 import jax
 import jax.numpy as jnp
 from pydantic import BaseModel, Field, model_validator
+from typing_extensions import Self
 
 from tesseract_core.runtime import Array, Differentiable, Float32
+from tesseract_core.runtime.tree_transforms import filter_func, flatten_with_paths
 
 
 def gaussian_rbf(x: float, c: float, length_scale: float) -> float:
@@ -25,7 +27,13 @@ def mse_error(
     for coeff, center in zip(weights, x_centers, strict=False):
         y_hat += coeff * gaussian_rbf(x_target, center, length_scale)
 
-    return jnp.mean((y_target - y_hat) ** 2)
+    return {"mse": jnp.mean((y_target - y_hat) ** 2)}
+
+
+# @jax.jit
+def apply_jit(inputs: dict) -> dict:
+    ordered_keys = ["x_centers", "weights", "length_scale", "x_target", "y_target"]
+    return mse_error(*(inputs[key] for key in ordered_keys))
 
 
 #
@@ -49,20 +57,22 @@ class InputSchema(BaseModel):
     )
 
     @model_validator(mode="after")
-    def validate_shape_targets(self) -> None:
+    def validate_shape_targets(self) -> Self:
         if self.x_target.shape != self.y_target.shape:
             raise ValueError(
                 f"x_target and y_target must have the same shape. "
                 f"Got {self.x_target.shape} and {self.y_target.shape} instead."
             )
+        return self
 
     @model_validator(mode="after")
-    def validate_shape_weights(self) -> None:
+    def validate_shape_weights(self) -> Self:
         if self.x_centers.shape != self.weights.shape:
             raise ValueError(
                 f"x_centers and weights must have the same shape. "
                 f"Got {self.x_centers.shape} and {self.weights.shape} instead."
             )
+        return self
 
 
 class OutputSchema(BaseModel):
@@ -77,14 +87,7 @@ class OutputSchema(BaseModel):
 
 
 def apply(inputs: InputSchema) -> OutputSchema:
-    mse = mse_error(
-        inputs.x_centers,
-        inputs.weights,
-        inputs.length_scale,
-        inputs.x_target,
-        inputs.y_target,
-    )
-    return OutputSchema(mse=mse)
+    return apply_jit(inputs.model_dump())
 
 
 #
@@ -97,20 +100,7 @@ def jacobian(
     jac_inputs: set[str],
     jac_outputs: set[str],
 ):
-    mse_signature = ["x_centers", "weights", "length_scale", "x_target", "y_target"]
-
-    jac_result = {}
-    for dx in jac_inputs:
-        grad_func = jax.jacrev(mse_error, argnums=mse_signature.index(dx))
-        for dy in jac_outputs:
-            jac_result[dx] = {
-                dy: grad_func(
-                    inputs.x_centers,
-                    inputs.weights,
-                    inputs.length_scale,
-                    inputs.x_target,
-                    inputs.y_target,
-                )
-            }
-
-    return jac_result
+    filtered_apply = filter_func(apply_jit, inputs.model_dump(), jac_outputs)
+    return jax.jacrev(filtered_apply)(
+        flatten_with_paths(inputs, include_paths=jac_inputs)
+    )
