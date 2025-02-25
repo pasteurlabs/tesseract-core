@@ -2,11 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from functools import partial
+from typing import Any
+
+import jax.numpy as jnp
 import jax.tree
 from jax import ShapeDtypeStruct, eval_shape, jacrev, jit, jvp, vjp
-import jax.numpy as jnp
 from pydantic import BaseModel, Field, model_validator
-from typing import Any
 from typing_extensions import Self
 
 from tesseract_core.runtime import Array, Differentiable, Float32
@@ -159,9 +160,7 @@ def jac_jit(
     jac_outputs: tuple[str],
 ):
     filtered_apply = filter_func(apply_jit, inputs, jac_outputs)
-    return jacrev(filtered_apply)(
-        flatten_with_paths(inputs, include_paths=jac_inputs)
-    )
+    return jacrev(filtered_apply)(flatten_with_paths(inputs, include_paths=jac_inputs))
 
 
 @partial(jit, static_argnames=["jvp_inputs", "jvp_outputs"])

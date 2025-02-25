@@ -164,6 +164,4 @@ def jac_jit(
     jac_outputs: tuple[str],
 ):
     filtered_apply = filter_func(apply_jit, inputs, jac_outputs)
-    return jacrev(filtered_apply)(
-        flatten_with_paths(inputs, include_paths=jac_inputs)
-    )
+    return jacrev(filtered_apply)(flatten_with_paths(inputs, include_paths=jac_inputs))

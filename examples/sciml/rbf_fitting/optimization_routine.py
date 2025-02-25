@@ -74,10 +74,7 @@ with Tesseract.from_image(image="rbf_fitting") as tess:
         # )["mse"]["weights"]
         # Option 2: Use VJP
         grad_weights = tess.vector_jacobian_product(
-            inputs,
-            diff_inputs,
-            diff_outputs,
-            {"mse": 1.0}
+            inputs, diff_inputs, diff_outputs, {"mse": 1.0}
         )["weights"]
 
         # Update weights
