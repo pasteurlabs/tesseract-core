@@ -1,0 +1,8 @@
+name: vectoradd
+version: "1.2.3"
+description: |
+  Simple tesseract that adds two vectors.
+
+build_config:
+  package_data: []
+  custom_build_steps: []

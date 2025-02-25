@@ -1,0 +1,7 @@
+name: "pytorch_optimization"
+version: "1.0.0"
+
+build_config:
+  # Platform to build the container for. In general, images can only be executed
+  # on the platform they were built for. For apple silicon use "linux/arm64"
+  # target_platform: "native"

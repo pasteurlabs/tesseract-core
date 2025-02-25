@@ -1,0 +1,98 @@
+[project]
+name = "tesseract-core"
+description = "A toolkit for re-usable, autodiff-native software components."
+readme = "README.md"
+authors = [
+    {name = "The Tesseract team @ Pasteur Labs + OSS contributors", email = "info@simulation.science"},
+]
+license = { text = "Apache-2.0" }
+requires-python = ">=3.10"
+dependencies = [
+    "docker",
+    "jinja2",
+    "rich",
+    "typer",
+    "pyyaml",
+    "pydantic",
+    "numpy",
+    "requests",
+]
+dynamic = ["version"]
+
+[project.optional-dependencies]
+# Populated by our custom hook based on dependencies in `tesseract_core/runtime/meta/pyproject.toml`
+# Changes to this list will be ignored
+runtime = []
+
+dev = [
+    "fastapi",
+    "httpx",  # required by fastapi test client
+    "jsf",
+    "requests",
+    "numpy",
+    "pre-commit",
+    "pytest",
+    "pytest-cov",
+    "pytest-mock",
+    "moto[server]",
+    "aiobotocore>=2.19.0",  # without this pip dependency resolution fails
+    "typeguard",
+    "detect-secrets[gibberish]",
+    # also add all other extras here
+    "tesseract-core[runtime]",
+]
+
+[project.urls]
+Homepage = "https://github.com/pasteurlabs/tesseract-core"
+Documentation = "https://pasteur-labs-docs.readthedocs-hosted.com/projects/tesseract-core/latest/"
+
+[project.scripts]
+tesseract = "tesseract_core.sdk.cli:entrypoint"
+
+[build-system]
+requires = ["hatchling", "hatch-vcs", "toml"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "tesseract_core/_version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["tesseract_core"]
+
+[tool.hatch.metadata.hooks.custom]
+path = "inject_runtime_pyproject.py"
+
+[tool.pytest.ini_options]
+addopts = ["--typeguard-packages=tesseract_core"]
+testpaths = ["tests"]
+filterwarnings = [
+    "error",
+    # ignored by default
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+    "ignore::ImportWarning",
+    # raised by Cython, usually harmless
+    "ignore:numpy.dtype size changed",
+    "ignore:numpy.ufunc size changed",
+    # sometimes, dependencies leak resources
+    "ignore:.*socket\\.socket.*:pytest.PytestUnraisableExceptionWarning",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["tesseract_core"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "pass",
+]
+ignore_errors = true
+omit = [
+    "tesseract_core/_version.py",
+]

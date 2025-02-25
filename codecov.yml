@@ -1,0 +1,13 @@
+coverage:
+  status:
+    project:
+      default:
+        informational: true
+        only_pulls: false
+    patch: off
+comment:
+  layout: "condensed_header, diff, condensed_files, condensed_footer"
+  hide_project_coverage: false
+ignore:
+  - "tesseract_core/_version.py"
+  - "tesseract_core/**/vendor/**/*.py"

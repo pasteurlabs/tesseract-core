@@ -1,0 +1,66 @@
+name: Publish
+
+on:
+  workflow_dispatch:
+
+  release:
+    types:
+      - published
+
+jobs:
+  release:
+    name: "Release"
+    runs-on: '${{ matrix.os }}'
+    strategy:
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+        python-version:
+          - "3.10"
+          - "3.11"
+          - "3.12"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # make sure tags are fetched so we can get a version
+      - name: Fetch Tags
+        run: |
+          git fetch --prune --unshallow --tags
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Build & Upload Packages
+        run: pip install twine build
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          # https://github.com/azure/login/tree/v2/?tab=readme-ov-file#creds
+          creds: |
+            {
+              "clientId": "${{ secrets.PL_INTERNAL_TOOLS_AZ_CLIENT_ID }}",
+              "clientSecret": "${{ secrets.PL_INTERNAL_TOOLS_AZ_CLIENT_SECRET }}",
+              "subscriptionId": "${{ vars.PL_INTERNAL_TOOLS_AZ_CLIENT_SUB_ID }}",
+              "tenantId": "${{ secrets.PL_INTERNAL_TOOLS_AZ_TENANT_ID }}"
+            }
+
+      - name: Build Package
+        run: python -m build
+
+      - name: Get Publish Token
+        run: |
+          PUBLISH_TOKEN=$(az account get-access-token --query accessToken -o tsv)
+          echo "PUBLISH_TOKEN=$PUBLISH_TOKEN" >> $GITHUB_ENV
+
+      - name: Upload
+        run: |
+          twine upload dist/* \
+            -u token_user \
+            -p $PUBLISH_TOKEN \
+            --skip-existing \
+            --repository-url ${{vars.PL_INTERNAL_PYPI_PUSH_URL}}

@@ -1,0 +1,4 @@
+name: "univariate"
+version: "0.1.0"
+description: |
+  Unit tesseract that evaluates the rosenbrock function and derivatives.

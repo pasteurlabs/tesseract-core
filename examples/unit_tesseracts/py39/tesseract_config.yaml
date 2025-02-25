@@ -1,0 +1,7 @@
+name: "py39"
+version: "0.1.0"
+description: |
+  Empty Tesseract that requires Python 3.9 (set through a custom Docker image).
+
+build_config:
+  base_image: "python:3.9-slim-buster"

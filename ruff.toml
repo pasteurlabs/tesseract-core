@@ -1,0 +1,63 @@
+# Set to the lowest supported Python version.
+# !! tesseract_runtime still supports Python 3.9 !!
+target-version = "py39"
+
+# Set the target line length for formatting.
+line-length = 88
+
+# Exclude a variety of commonly ignored directories.
+extend-exclude = [
+    ".venv",
+    "_version.py",
+    "tesseract_core/**/vendor/**/*.py",
+]
+
+# Also lint/format Jupyter Notebooks.
+extend-include = [ "*.ipynb" ]
+
+src = ["."]
+
+[lint]
+# Select and/or ignore rules for linting.
+# Full list of available rules: https://docs.astral.sh/ruff/rules/
+extend-select = [
+    "ANN", # Type annotations
+    "B", # Flake8 bugbear
+    "D", # Pydocstyle
+    "E", # Pycodestyle errors
+    "F", # Pyflakes
+    "I", # Isort
+    "NPY", # Numpy
+    "RUF", # Ruff-specific rules
+    "UP", # Pyupgrade
+    "W", # Pycodestyle warnings
+]
+ignore = [
+    "E731", # Do not assign a lambda expression, use a def
+    "D100", # Pydocstyle: missing docstring in public module
+    "D104", # Pydocstyle: missing docstring in public package
+    "D105", # Pydocstyle: missing docstring in magic method
+    "D107", # Pydocstyle: missing docstring in __init__
+    "D203", # Pydocstyle: one blank line before class' docstring. Conflicts with D211
+    "D213", # Pydocstyle: multiline docstring summary start on 2nd line. Conflicts with D212
+    "ANN202", # Type annotations: allow missing return type for private functions
+    "ANN401", # Type annotations: allow Any
+]
+
+[lint.extend-per-file-ignores]
+# Ignore missing docstrings and type annotations for selected directories
+"./*.py" = ["D101", "D102", "D103", "ANN"]
+"tests/*" = ["D101", "D102", "D103", "ANN"]
+"examples/**/*" = ["D101", "D102", "D103", "ANN"]
+"tesseract_core/sdk/templates/*" = ["D101", "D102", "D103", "ANN"]
+
+[lint.pydocstyle]
+convention = "google"
+
+[lint.pycodestyle]
+max-line-length = 120 # Allow some flexibility in line lengths: up to 120 cols
+max-doc-length = 120
+
+[format]
+# Enable reformatting of code snippets in docstrings.
+docstring-code-format = true

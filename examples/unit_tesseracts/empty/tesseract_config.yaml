@@ -1,0 +1,6 @@
+name: "empty"
+version: "0.1.0"
+
+description: |
+  Empty Tesseract. This is the simplest possible Tesseract, which does nothing.
+  Useful for testing the Tesseract framework itself.

@@ -1,0 +1,91 @@
+# Stage 1: Build Python environment and install requirements
+{% if config.build_config.target_platform.strip() == "native" %}
+FROM {{ config.build_config.base_image }} AS build_stage
+{% else %}
+FROM --platform={{ config.build_config.target_platform }} {{ config.build_config.base_image }} AS build_stage
+{% endif %}
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    git \
+    ssh \
+    && rm -rf /var/lib/apt/lists/*
+
+{% if config.build_config.extra_packages %}
+# Install extra packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    {{ config.build_config.extra_packages | join(" ") }} \
+    && rm -rf /var/lib/apt/lists/*
+{% endif %}
+
+# Create virtual environment
+RUN python3 -m venv /python-env
+ENV PATH="/python-env/bin:$PATH"
+
+{% if use_ssh_mount %}
+# Set up SSH config
+RUN mkdir -p -m 0700 ~/.ssh && ssh-keyscan github.com >> ~/.ssh/known_hosts
+{% endif %}
+
+# Copy all dependencies, for both the specific Tesseract and the runtime
+WORKDIR /tmp/build
+COPY {{ tesseract_runtime_location }} ./tesseract_runtime/
+COPY {{ tesseract_source_directory }}/tesseract_requirements.txt* ./
+COPY local_requirements* ./local_requirements
+
+# Install all dependencies
+RUN {% if use_ssh_mount %}--mount=type=ssh{% endif %} \
+    TESSERACT_DEPS=$(find ./local_requirements/ -mindepth 1 -maxdepth 1 2>/dev/null || echo "") && \
+    if [ -f tesseract_requirements.txt ]; then TESSERACT_DEPS="$TESSERACT_DEPS -r tesseract_requirements.txt"; fi && \
+    pip install ./tesseract_runtime $TESSERACT_DEPS
+
+# Stage 2: Set up runtime environment
+{% if config.build_config.target_platform.strip() == "native" %}
+FROM {{ config.build_config.base_image }} AS run_stage
+{% else %}
+FROM --platform={{ config.build_config.target_platform }} {{ config.build_config.base_image }} AS run_stage
+{% endif %}
+
+{% if config.build_config.extra_packages %}
+# Install extra packages again since they may include runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    {{ config.build_config.extra_packages | join(" ") }} \
+    && rm -rf /var/lib/apt/lists/*
+{% endif %}
+
+# Drop to a non-root user
+RUN useradd --create-home -s /bin/bash tesseractor
+WORKDIR /tesseract
+RUN chown tesseractor:tesseractor /tesseract
+USER tesseractor
+
+# Set environment variables
+ENV TESSERACT_NAME="{{ config.name }}" \
+    TESSERACT_VERSION="{{ config.version }}" \
+    TESSERACT_DESCRIPTION="{{ config.description | replace('"', '\\"') | replace('\n', '\\n') }}" \
+    TESSERACT_API_PATH="/tesseract/tesseract_api.py"
+
+# Copy only necessary files
+COPY --from=build_stage /python-env /python-env
+COPY "{{ tesseract_source_directory }}/tesseract_api.py" ${TESSERACT_API_PATH}
+
+ENV PATH="/python-env/bin:$PATH"
+
+{% if config.build_config.package_data %}
+# Copy package data to image
+{% for source_path, target_path in config.build_config.package_data %}
+COPY ["{{ tesseract_source_directory }}/{{ source_path }}", "{{ target_path }}"]
+{% endfor %}
+{% endif %}
+
+{% if config.build_config.custom_build_steps %}
+# Custom build steps
+{{ config.build_config.custom_build_steps | join("\n") }}
+{% endif %}
+
+# Final sanity check to ensure the runtime is installed and tesseract_api.py is valid
+RUN ["tesseract-runtime", "check"]
+
+EXPOSE 8000
+ENTRYPOINT ["tesseract-runtime"]
+CMD ["--help"]

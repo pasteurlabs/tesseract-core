@@ -1,0 +1,35 @@
+services:
+{% for service in services %}
+  {{ service.name }}:
+    image: {{ service.image }}
+    restart: always
+    entrypoint: tesseract-runtime serve
+    ports:
+      - {{ service.port }}
+    {%- if service.volumes %}
+    volumes:
+    {%- for volume in service.volumes %}
+      - {{ volume }}
+    {% endfor -%}
+    {% endif %}
+    healthcheck:
+      test: python -c "import requests; requests.get('http://localhost:8000/health').raise_for_status()" || exit 1
+      interval: 3s
+      retries: 10
+      start_period: 1s
+    networks:
+      - multi-tesseract-network
+    {%- if service.gpus %}
+    deploy:
+      resources:
+        reservations:
+          devices:
+          - driver: nvidia
+            capabilities: [gpu]
+            {{ service.gpus }}
+    {% endif %}
+{% endfor %}
+
+networks:
+  multi-tesseract-network:
+    name: multi-tesseract-network

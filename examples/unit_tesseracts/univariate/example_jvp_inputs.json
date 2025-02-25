@@ -1,0 +1,17 @@
+{
+    "inputs": {
+        "x": 0.0,
+        "y": 0.0
+    },
+    "jvp_inputs": [
+        "x",
+        "y"
+    ],
+    "jvp_outputs": [
+        "result"
+    ],
+    "tangent_vector": {
+        "x": 1.0,
+        "y": 0.0
+    }
+}

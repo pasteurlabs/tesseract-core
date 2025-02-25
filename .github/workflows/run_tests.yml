@@ -1,0 +1,180 @@
+name: Run test suite
+
+on:
+  pull_request:
+
+  push:
+    branches:
+      - main
+
+jobs:
+  tests-base:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+        # test with oldest and latest supported Python versions
+        # NOTE: If bumping the minimum Python version here, also do it in
+        # ruff.toml, setup.py and other CI files as well.
+        python-version: ["3.10", "3.12"]
+        runtime-deps: ["latest"]
+
+        include:
+          - os: ubuntu-latest
+            python-version: "3.12"
+            runtime-deps: "oldest"
+
+      fail-fast: false
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Set up Git repository
+        uses: actions/checkout@v4
+
+      - name: Set up WSL (Windows)
+        uses: Vampire/setup-wsl@v4
+        if: runner.os == 'Windows'
+        with:
+          distribution: Ubuntu-24.04
+
+      - name: Set up Python
+        if: runner.os != 'Windows'
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Set up Python (Windows)
+        if: runner.os == 'Windows'
+        shell: wsl-bash {0}
+        run: |
+          python_version=${{ matrix.python-version }}
+          if [ $python_version == "3.12" ]; then
+            # Python 3.12 is the default `python3` in Ubuntu 24.04
+            python_version="3"
+          fi
+
+          export DEBIAN_FRONTEND=noninteractive
+          sudo apt-get update
+          sudo apt-get install -y software-properties-common gnupg2
+          sudo add-apt-repository ppa:deadsnakes/ppa
+          sudo apt-get install -y python3-pip python${python_version} python${python_version}-venv
+
+          python${python_version} -m venv ~/venv
+
+          export PATH="$HOME/venv/bin:$PATH"
+          python -m pip install --upgrade pip
+
+      - name: Install package
+        if: runner.os != 'Windows'
+        run: |
+          pip install .[dev] -r requirements-dev.txt
+
+          if [ "${{ matrix.runtime-deps }}" == "oldest" ]; then
+            # replace >= with == in pyproject.toml to install oldest runtime deps
+            sed -i 's/>=/==/g' ./tesseract_core/runtime/meta/pyproject.toml
+            # roll back changes to requires-python
+            sed -i 's/requires-python\s*=\s*\"==/requires-python = \">=/g' ./tesseract_core/runtime/meta/pyproject.toml
+            pip install .[runtime]
+          fi
+
+      - name: Install package (Windows)
+        if: runner.os == 'Windows'
+        shell: wsl-bash {0}
+        run: |
+          export PATH="$HOME/venv/bin:$PATH"
+
+          pip install .[dev] -r requirements-dev.txt
+
+          if [ "${{ matrix.runtime-deps }}" == "oldest" ]; then
+            # replace >= with == in pyproject.toml to install oldest runtime deps
+            sed -i 's/>=/==/g' ./tesseract_core/runtime/meta/pyproject.toml
+            # roll back changes to requires-python
+            sed -i 's/requires-python\s*=\s*\"==/requires-python = \">=/g' ./tesseract_core/runtime/meta/pyproject.toml
+            pip install .[runtime]
+          fi
+
+      - name: Run test suite
+        if: runner.os != 'Windows'
+        run: |
+          pytest --skip-endtoend
+
+      - name: Run test suite (Windows)
+        if: runner.os == 'Windows'
+        shell: wsl-bash {0}
+        run: |
+          export PATH="$HOME/venv/bin:$PATH"
+          pytest --skip-endtoend
+
+  get-e2e-matrix:
+    runs-on: ubuntu-latest
+
+    outputs:
+      matrix: ${{ steps.get-matrix.outputs.matrix }}
+
+    steps:
+      - name: Set up Git repository
+        uses: actions/checkout@v4
+
+      - name: Get available unit Tesseracts
+        id: get-matrix
+        env:
+          E2E_TEST_DIR: examples/unit_tesseracts
+        run: |
+          # get JSON array of directories in E2E_TEST_DIR
+          subjobs=$(
+            find "${{ env.E2E_TEST_DIR }}" -type d -maxdepth 1 -mindepth 1 -exec basename {} \; \
+            | jq -R -s -c 'split("\n")[:-1]'
+          )
+          # add "base" to subjobs
+          subjobs=$(echo "$subjobs" | jq -c -r '. + ["base"]')
+          printf 'matrix=%s' "$subjobs" >> $GITHUB_OUTPUT
+
+  tests-e2e:
+    needs: get-e2e-matrix
+
+    strategy:
+      matrix:
+        os: [ubuntu-22.04]
+        python-version: ["3.12"]
+
+        # Test on arm to ensure compatibility with Apple M1 chips
+        # (OSX runners don't have access to Docker so we use Linux ARM runners instead)
+        arch: [x64, arm]
+
+        unit-tesseract: ${{ fromJson(needs.get-e2e-matrix.outputs.matrix) }}
+
+      fail-fast: false
+
+    runs-on: ${{ matrix.arch == 'x64' && matrix.os == 'ubuntu-22.04' && 'ubuntu-22.04' || matrix.arch == 'arm' && matrix.os == 'ubuntu-22.04' && 'linux-arm64-ubuntu2204' }}
+
+    defaults:
+      run:
+        shell: bash -el {0}
+
+    steps:
+      - name: Set up Git repository
+        uses: actions/checkout@v4
+
+      - name: Set up custom SSH key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.ORG_DEPLOY_KEY }}
+
+      # Use Conda to install Python (setup-python action doesn't support ARM)
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-update-conda: true
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install package
+        run: |
+          pip install .[dev] -r requirements-dev.txt
+
+      - name: Run test suite
+        run: |
+          if [ "${{ matrix.unit-tesseract }}" == "base" ]; then
+            pytest --always-run-endtoend tests/endtoend_tests -k "not test_unit_tesseracts"
+          else
+            pytest --always-run-endtoend tests/endtoend_tests/test_unit_tesseracts.py -k "[${{ matrix.unit-tesseract }}]"
+          fi

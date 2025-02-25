@@ -1,0 +1,39 @@
+name: "Feature Request"
+description: Create a new feature request
+labels: [
+  "enhancement"
+]
+
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: "Summary"
+      description: Provide a brief summary of the requested feature.
+      placeholder: |
+        A clear and concise description of what the feature is.
+    validations:
+      required: true
+
+  - type: textarea
+    id: neccesity
+    attributes:
+      label: "Why is this needed?"
+      description: Provide an explanation of why this feature is needed. Who is it for? What problem does it solve? Why do none of the existing features solve this problem?
+      placeholder: |
+        A clear and concise description of what itch this feature scratches.
+    validations:
+      required: true
+
+  - type: textarea
+    id: basic_example
+    attributes:
+      label: "Usage example"
+      description: Please describe how end users would interact with the proposed feature. Include any code snippets or output examples that you think will help us understand.
+      placeholder: |
+        ```bash
+        $ tesseract run ... --myfeature
+        <desired output>
+        ```
+    validations:
+      required: true

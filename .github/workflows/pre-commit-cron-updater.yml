@@ -1,0 +1,87 @@
+name: Auto update pre-commit hooks
+
+on:
+  workflow_dispatch:  # Allows manual trigger
+  schedule:
+    - cron:  '0 0 * * 1'  # 12AM only on Mondays
+
+jobs:
+  auto-update-hooks:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - uses: actions/setup-python@v5
+      with:
+          python-version: '3.12'
+          cache: 'pip'
+
+    - name: Install pre-commit
+      run: pip install pre-commit
+
+    - name: Run pre-commit autoupdate
+      run: pre-commit autoupdate
+
+    - name: Detect if changes were made
+      id: git-diff
+      run: |
+        changes=false
+        git diff --exit-code || changes=true
+        echo "update_done=$changes" >> $GITHUB_OUTPUT
+
+    - name: Run pre-commit
+      id: pre-commit
+      if: steps.git-diff.outputs.update_done == 'true'
+      run: |
+        # Run twice so we only fail if there are non-fixable issues
+        rc=0
+        pre-commit run --all-files || true
+        pre-commit run --all-files > /tmp/pre-commit.log || rc=$?
+
+        # Add log as step output
+        echo "pre-commit-log<<EOF" > $GITHUB_OUTPUT
+        cat /tmp/pre-commit.log >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+        # Add linting outcome as step output
+        if [ $rc -eq 0 ]; then
+          echo "pre-commit-outcome=success" >> $GITHUB_OUTPUT
+        else
+          echo "pre-commit-outcome=failure" >> $GITHUB_OUTPUT
+        fi
+
+    # Distinguish 3 cases:
+    # 1. No changes were made -> do nothing (steps below are skipped)
+    # 2. Changes were made and pre-commit ran successfully -> create PR
+    # 3. Changes were made but pre-commit failed -> create PR with draft status
+
+    - name: Create Pull Request (all good)
+      if: steps.pre-commit.outputs.pre-commit-outcome == 'success'
+      uses: peter-evans/create-pull-request@v7
+      with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: Update pre-commit hooks
+          title: "chore: update pre-commit hooks"
+          branch: _bot/update-precommit
+          draft: false
+          body: |
+            Pre-commit hooks have been updated successfully without conflicts.
+
+    - name: Create Pull Request (conflicts)
+      if: steps.pre-commit.outputs.pre-commit-outcome == 'failure'
+      uses: peter-evans/create-pull-request@v7
+      with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: Update pre-commit hooks
+          title: "chore: update pre-commit hooks [review required]"
+          branch: _bot/update-precommit
+          draft: true
+          body: |
+            Pre-commit is unable to automatically update the hooks due to unresolvable conflicts.
+            Please review the changes and merge manually.
+
+            Log:
+            ```
+            ${{ steps.pre-commit.outputs.pre-commit-log }}
+            ```

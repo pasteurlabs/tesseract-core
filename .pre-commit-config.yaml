@@ -1,0 +1,43 @@
+repos:
+- repo: https://github.com/pre-commit/pre-commit-hooks
+  rev: v5.0.0
+  hooks:
+  - id: check-added-large-files
+    additional_dependencies: [--isolated]
+  - id: check-json
+    additional_dependencies: [--isolated]
+  - id: check-toml
+    additional_dependencies: [--isolated]
+  - id: check-yaml
+    additional_dependencies: [--isolated]
+    exclude: "^.*templates/.*[yaml|yml]$"
+  - id: detect-private-key
+    additional_dependencies: [--isolated]
+  - id: end-of-file-fixer
+    additional_dependencies: [--isolated]
+  - id: trailing-whitespace
+    additional_dependencies: [--isolated]
+
+- repo: https://github.com/astral-sh/ruff-pre-commit
+  # Ruff version.
+  rev: v0.9.7
+  hooks:
+  # Run the linter.
+  - id: ruff
+    args: [--fix]
+    types_or: [pyi, python, jupyter]
+    # Ignore global python configuration for private registry and install hooks from public index
+    # Add for each hook
+    # Reference: https://github.com/pre-commit/pre-commit/issues/1454#issuecomment-1816328894
+    additional_dependencies: [--isolated]
+  # Run the formatter.
+  - id: ruff-format
+    types_or: [pyi, python, jupyter]
+    additional_dependencies: [--isolated]
+
+- repo: https://github.com/Yelp/detect-secrets
+  rev: v1.5.0
+  hooks:
+  - id: detect-secrets
+    args: ['--baseline', '.secrets.baseline']
+    additional_dependencies: [--isolated, 'gibberish-detector']

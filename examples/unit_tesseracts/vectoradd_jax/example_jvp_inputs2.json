@@ -1,0 +1,33 @@
+{
+    "inputs": {
+        "a": {
+            "v": [
+                1.0,
+                2.0,
+                3.0
+            ]
+        },
+        "b": {
+            "v": [
+                4.0,
+                5.0,
+                6.0
+            ],
+           "s": 3.0
+       }
+    },
+    "jvp_inputs": [
+        "a.v"
+    ],
+    "jvp_outputs": [
+        "vector_add.result",
+        "vector_add.normed_result"
+    ],
+    "tangent_vector": {
+        "a.v": [
+            0.0,
+            5.0,
+            2.0
+        ]
+    }
+}

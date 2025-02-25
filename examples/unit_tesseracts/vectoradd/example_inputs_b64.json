@@ -1,0 +1,26 @@
+{
+    "inputs": {
+        "a": {
+            "object_type": "array",
+            "shape": [
+                3
+            ],
+            "dtype": "float64",
+            "data": {
+                "buffer": "AAAAAAAAHEAAAAAAAAAmQAAAAAAAAC5A",
+                "encoding": "base64"
+            }
+        },
+        "b": {
+            "object_type": "array",
+            "shape": [
+                3
+            ],
+            "dtype": "float64",
+            "data": {
+                "buffer": "AAAAAAAAHEAAAAAAAAAmQAAAAAAAAC5A",
+                "encoding": "base64"
+            }
+        }
+    }
+}

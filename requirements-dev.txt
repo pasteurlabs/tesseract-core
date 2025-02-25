@@ -1,0 +1,11 @@
+-r ./requirements.txt
+-r tesseract_core/runtime/meta/requirements.txt
+httpx==0.28.0
+pre-commit==4.1.0
+pytest-cov==6.0.0
+pytest==8.3.1
+pytest-mock==3.14.0
+jsf==0.11.2
+typeguard==4.4.1
+moto[server]==5.1.0
+detect-secrets[gibberish]==1.5.0

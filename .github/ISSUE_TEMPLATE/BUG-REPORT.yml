@@ -1,0 +1,59 @@
+name: "Bug Report"
+description: Report a new bug encountered while using Tesseract.
+labels: [
+  "bug"
+]
+
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: "Description"
+      description: Please describe your issue in as much detail as necessary. Include relevant information that you think will help us understand the problem.
+      placeholder: |
+        A clear and concise description of the bug and what you expected to happen.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reprod
+    attributes:
+      label: "Steps to reproduce"
+      description: Please provide detailed steps for reproducing the issue. Include any code snippets or commands that you used when the issue occurred.
+      value: |
+        ```bash
+        $ tesseract run ...
+        ```
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: "Logs"
+      description: Please copy and paste any relevant log output. This will be automatically formatted into code, so no need for backticks.
+      render: bash
+    validations:
+      required: false
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: "OS"
+      description: What is the impacted environment?
+      multiple: true
+      options:
+        - Windows
+        - Linux
+        - Mac
+    validations:
+      required: true
+
+  - type: textarea
+    id: tesseractVersion
+    attributes:
+      label: Tesseract version
+      value: |
+        Paste the output of `tesseract --version` here.
+    validations:
+      required: true

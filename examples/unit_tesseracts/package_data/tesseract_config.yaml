@@ -1,0 +1,6 @@
+name: "package_data"
+version: "0.1.0"
+
+build_config:
+  package_data:
+    - [parameters.json, parameters.json]

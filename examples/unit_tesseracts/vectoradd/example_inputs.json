@@ -1,0 +1,22 @@
+{
+   "inputs": {
+       "a":{
+          "object_type":"array",
+          "shape":[3],
+          "dtype":"int64",
+          "data":{
+             "buffer":[1, 2, 3],
+             "encoding":"json"
+          }
+       },
+       "b":{
+           "object_type":"array",
+           "shape":[3],
+           "dtype":"int64",
+           "data":{
+              "buffer":[4, 5, 6],
+              "encoding":"json"
+           }
+        }
+    }
+}
