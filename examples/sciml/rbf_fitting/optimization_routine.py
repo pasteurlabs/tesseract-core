@@ -42,8 +42,8 @@ inputs = {
     "y_target": y_target.tolist(),
 }
 
-jac_inputs = ["weights", "length_scale"]
-jac_outputs = ["mse"]
+diff_inputs = ["weights"]
+diff_outputs = ["mse"]
 
 # Initialize optimizer
 optimizer = optax.adam(learning_rate=0.5)
@@ -66,14 +66,21 @@ with Tesseract.from_image(image="rbf_fitting") as tess:
         loss_history.append(loss)
 
         # Compute gradients
-        jacobian_response = tess.jacobian(
+        # Option 1: Use Jacobian
+        # grad_weights = tess.jacobian(
+        #     inputs,
+        #     diff_inputs,
+        #     diff_outputs,
+        # )["mse"]["weights"]
+        # Option 2: Use VJP
+        grad_weights = tess.vector_jacobian_product(
             inputs,
-            jac_inputs,
-            jac_outputs,
-        )
+            diff_inputs,
+            diff_outputs,
+            {"mse": 1.0}
+        )["weights"]
 
-        buffer = jacobian_response["mse"]["weights"]
-        grad_weights = jnp.array(buffer, dtype=jnp.float32)
+
 
         # Update weights
         weights = jnp.array(inputs["weights"])
