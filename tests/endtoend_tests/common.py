@@ -6,7 +6,6 @@ import traceback
 from typer.testing import CliRunner
 
 from tesseract_core.sdk.cli import app
-from tesseract_core.sdk.engine import parse_requirements
 
 
 def image_exists(client, image_name):
