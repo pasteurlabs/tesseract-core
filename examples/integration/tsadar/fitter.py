@@ -1,10 +1,10 @@
 import numpy as np
-from matplotlib import pyplot as plt
-from matplotlib.animation import FuncAnimation
 from numpy import ndarray
 from scipy.optimize import minimize
 
 from tesseract_core import Tesseract
+
+from .animate import animate
 
 tesseract_url = "http://localhost:8000"  # Change this to the correct address
 
@@ -114,28 +114,4 @@ res = minimize(
     callback=callback,
 )
 
-n = len(trajectory)
-
-optim_steps = np.linspace(0, n, n + 1)
-
-# repeat last trajectory point
-for _ in range(10):
-    trajectory.append(trajectory[-1])
-    optim_steps = np.append(optim_steps, n)
-fig, ax = plt.subplots()
-
-
-def update(i):
-    ax.clear()
-    ax.set_xlabel("Wavelength")
-    ax.set_ylabel("Intensity")
-    ax.set_title(f"Optimization step {int(optim_steps[i])}")
-
-    ax.plot(trajectory[i], label="Fit")
-    ax.plot(true_electron_spectrum, label="True")
-    ax.legend()
-    ax.grid()
-
-
-ani = FuncAnimation(fig, update, frames=len(trajectory), repeat=False)
-ani.save("fit_trajectory.gif", writer="imagemagick", fps=3)
+animate(trajectory, true_electron_spectrum)
