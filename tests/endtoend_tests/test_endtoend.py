@@ -416,9 +416,7 @@ def test_tesseract_cli_options_parsing(built_image_name, tmpdir):
     tmpdir.chmod(0o0707)
 
     examples_dir = Path(__file__).parent.parent.parent / "examples"
-    example_inputs = (
-        examples_dir / "unit_tesseracts" / "vectoradd" / "example_inputs.json"
-    )
+    example_inputs = examples_dir / "vectoradd" / "example_inputs.json"
 
     test_commands = (
         ["apply", "-f", "json+binref", "-o", str(tmpdir), f"@{example_inputs}"],

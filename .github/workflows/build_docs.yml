@@ -30,8 +30,8 @@ jobs:
 
       - name: Build required examples
         run: |
-          tesseract build examples/unit_tesseracts/helloworld --tag latest
-          tesseract build examples/unit_tesseracts/vectoradd --tag latest
+          tesseract build examples/helloworld --tag latest
+          tesseract build examples/vectoradd --tag latest
 
       - name: Build docs
         run: |

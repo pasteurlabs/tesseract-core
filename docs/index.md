@@ -95,12 +95,12 @@ content/using-tesseracts/advanced.md
 ```
 
 ```{toctree}
-:caption: Examples
+:caption: Tutorials
 :maxdepth: 2
 :hidden:
 
-content/examples/univariate.md
-content/examples/dataloader.md
+Official Tutorials <https://si-tesseract.discourse.group/c/showcase/tutorials/12>
+How-to Guides <https://si-tesseract.discourse.group/c/support/how-to-guides/10>
 ```
 
 ```{toctree}

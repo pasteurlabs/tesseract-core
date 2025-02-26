@@ -36,7 +36,7 @@ Tesseracts provide built-in support for propagating [gradient information](https
 2. Build an example Tesseract:
 
    ```bash
-   $ tesseract build examples/unit_tesseracts/vectoradd --tag 0.1.0
+   $ tesseract build examples/vectoradd --tag 0.1.0
    ```
 
 3. Display its API documentation:
