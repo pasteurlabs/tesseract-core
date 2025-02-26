@@ -247,9 +247,6 @@ def create_apply_schema(
     return ApplyInputSchema, ApplyOutputSchema
 
 
-i = 0
-
-
 def create_abstract_eval_schema(
     InputSchema: type[BaseModel], OutputSchema: type[BaseModel]
 ) -> tuple[type[BaseModel], type[BaseModel]]:
