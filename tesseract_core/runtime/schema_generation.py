@@ -24,6 +24,7 @@ from pydantic import (
     RootModel,
     create_model,
 )
+from tesseract_core.runtime.array_encoding import AllowedDtypes
 
 from .schema_types import (
     Array,
@@ -246,7 +247,7 @@ def create_apply_schema(
 
     return ApplyInputSchema, ApplyOutputSchema
 
-
+i = 0
 def create_abstract_eval_schema(
     InputSchema: type[BaseModel], OutputSchema: type[BaseModel]
 ) -> tuple[type[BaseModel], type[BaseModel]]:
@@ -258,7 +259,22 @@ def create_abstract_eval_schema(
 
     def replace_array_with_shapedtype(obj: T, _: Any) -> Union[T, type[ShapeDType]]:
         if is_array_annotation(obj):
-            return ShapeDType
+            expected_shape = obj.__metadata__[0].expected_shape
+            expected_dtype = obj.__metadata__[0].expected_dtype
+
+            def validate(shapedtype):
+                if isinstance(shapedtype, (ShapeDType, dict)):
+                    shape = getattr(shapedtype, "shape")
+                    if expected_shape is Ellipsis:
+                        return shapedtype
+                    for (actual, expected) in zip(shape, expected_shape, strict=True):
+                        if expected is None:
+                            continue
+                        if actual != expected:
+                            raise ValueError(f"Expected shape: {expected_shape}. Found: {shape}.")
+                return shapedtype
+
+            return Annotated[ShapeDType, AfterValidator(validate)]
 
         return obj
 
