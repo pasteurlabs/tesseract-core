@@ -15,6 +15,7 @@ from typing import (
 
 import numpy as np
 from pydantic import (
+    AfterValidator,
     BaseModel,
     ConfigDict,
     GetCoreSchemaHandler,
@@ -35,6 +36,32 @@ AnnotatedType = type(Annotated[Any, Any])
 EllipsisType = type(Ellipsis)
 
 
+def _validate_key(expected_shape, expected_dtype) -> tuple:
+    if not isinstance(expected_shape, (tuple, EllipsisType)):
+        raise ValueError(
+            "Shape in Array[<shape>, <dtype>] must be a tuple or '...' (ellipsis)"
+        )
+
+    if isinstance(expected_shape, tuple):
+        for dim in expected_shape:
+            if dim is not None and not isinstance(dim, int):
+                raise ValueError(
+                    "Shape values in Array[<shape>, <dtype>] must be integers or None"
+                )
+
+    if is_array_annotation(expected_dtype):
+        expected_dtype = expected_dtype.__metadata__[0].expected_dtype
+
+    allowed_dtypes = get_args(AllowedDtypes)
+
+    if expected_dtype not in allowed_dtypes and expected_dtype is not None:
+        raise ValueError(
+            f"Invalid dtype in Array[<shape>, <dtype>]: {expected_dtype} "
+            f"(must be one of {allowed_dtypes} or a scalar Array type like, Array[(), Int32])"
+        )
+    return expected_shape, expected_dtype
+
+
 class ShapeDType(BaseModel):
     """Data structure describing an array's shape and data type."""
 
@@ -42,6 +69,34 @@ class ShapeDType(BaseModel):
     dtype: AllowedDtypes
     # Ignore extra fields in the model, to allow encoded arrays to be passed
     model_config = ConfigDict(extra="ignore")
+
+    def __class_getitem__(
+        cls,
+        key: tuple[
+            Union[tuple[Optional[int], ...], EllipsisType],
+            Union[AnnotatedType, str, None],
+        ],
+    ) -> AnnotatedType:
+        expected_shape, expected_dtype = _validate_key(*key)
+
+        def validate(shapedtype):
+            if isinstance(shapedtype, ShapeDType):
+                shape = shapedtype.shape
+                if expected_shape is Ellipsis:
+                    return shapedtype
+                for actual, expected in zip(shape, expected_shape, strict=True):
+                    if expected is not None and actual != expected:
+                        raise ValueError(
+                            f"Expected shape: {expected_shape}. Found: {shape}."
+                        )
+            return shapedtype
+
+        return Annotated[ShapeDType, AfterValidator(validate)]
+
+    @classmethod
+    def from_array_annotation(cls, obj: AnnotatedType) -> AnnotatedType:
+        key = (obj.__metadata__[0].expected_shape, obj.__metadata__[0].expected_dtype)
+        return cls.__class_getitem__(key)
 
 
 class ArrayFlags(IntEnum):
@@ -237,31 +292,7 @@ class Array:
         ],
     ) -> AnnotatedType:
         """Create a new type annotation based on the given shape and dtype."""
-        expected_shape, expected_dtype = key
-
-        if not isinstance(expected_shape, (tuple, EllipsisType)):
-            raise ValueError(
-                "Shape in Array[<shape>, <dtype>] must be a tuple or '...' (ellipsis)"
-            )
-
-        if isinstance(expected_shape, tuple):
-            for dim in expected_shape:
-                if dim is not None and not isinstance(dim, int):
-                    raise ValueError(
-                        "Shape values in Array[<shape>, <dtype>] must be integers or None"
-                    )
-
-        if is_array_annotation(expected_dtype):
-            expected_dtype = expected_dtype.__metadata__[0].expected_dtype
-
-        allowed_dtypes = get_args(AllowedDtypes)
-
-        if expected_dtype not in allowed_dtypes and expected_dtype is not None:
-            raise ValueError(
-                f"Invalid dtype in Array[<shape>, <dtype>]: {expected_dtype} "
-                f"(must be one of {allowed_dtypes} or a scalar Array type like, Array[(), Int32])"
-            )
-
+        expected_shape, expected_dtype = _validate_key(*key)
         classvars = {
             "expected_shape": expected_shape,
             "expected_dtype": expected_dtype,

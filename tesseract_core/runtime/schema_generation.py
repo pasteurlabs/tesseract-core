@@ -258,24 +258,7 @@ def create_abstract_eval_schema(
 
     def replace_array_with_shapedtype(obj: T, _: Any) -> Union[T, type[ShapeDType]]:
         if is_array_annotation(obj):
-            expected_shape = obj.__metadata__[0].expected_shape
-
-            def validate(shapedtype):
-                if isinstance(shapedtype, (ShapeDType, dict)):
-                    shape = shapedtype.shape
-                    if expected_shape is Ellipsis:
-                        return shapedtype
-                    for actual, expected in zip(shape, expected_shape, strict=True):
-                        if expected is None:
-                            continue
-                        if actual != expected:
-                            raise ValueError(
-                                f"Expected shape: {expected_shape}. Found: {shape}."
-                            )
-                return shapedtype
-
-            return Annotated[ShapeDType, AfterValidator(validate)]
-
+            return ShapeDType.from_array_annotation(obj)
         return obj
 
     GeneratedInputSchema = apply_function_to_model_tree(
