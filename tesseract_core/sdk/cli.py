@@ -798,13 +798,7 @@ def run_container(
             error_string = f"Error running Tesseract '{tesseract_image}' \n\n Error: Unimplemented command '{cmd}'.  "
             raise UserError(error_string) from e
 
-        # FIXME: do we want this? ending up here when the json payload is invalid
-        message = re.sub(
-            r"tesseract-runtime",
-            f"tesseract run {tesseract_image}",
-            str(e),
-        )
-        raise UserError(f"Error running Tesseract. \n\n{message}") from e
+        raise UserError(f"Error running Tesseract. \n\n{e}") from e
 
     if invoke_help:
         # Replace references to tesseract-runtime with tesseract run
