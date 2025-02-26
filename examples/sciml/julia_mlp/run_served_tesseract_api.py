@@ -8,5 +8,5 @@ from tesseract_core import Tesseract
 
 with Tesseract.from_image(image="julia_flux_mlp") as julia_flux_mlp:
     data = julia_flux_mlp.apply(inputs={"n_epochs": 10})
-state = data["state"]
-print(data["metrics"])
+
+print(f"state = {data['state']}, metrics = {data['metrics']}")
