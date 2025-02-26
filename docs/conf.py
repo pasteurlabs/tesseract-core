@@ -23,8 +23,8 @@ os.environ["TESSERACT_API_PATH"] = os.path.abspath(
 )
 
 project = "Tesseract"
-copyright = "2025, The Tesseract Team @ Pasteur Labs"
-author = "The Tesseract Team @ Pasteur Labs"
+copyright = "2025, Pasteur Labs"
+author = "The Tesseract Team @ Pasteur Labs + OSS contributors"
 
 # The short X.Y version
 parsed_version = re.match(r"(\d+\.\d+\.\d+)", __version__)

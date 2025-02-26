@@ -205,7 +205,7 @@ def test_model_from_json(tmpdir):
                 "buffer": base64.b64encode(arr_int.tobytes()).decode(),
                 "encoding": "base64",
             },
-            # pasteur types include a 'object_type' field in all serializations.
+            # we include a 'object_type' field in all serializations.
             # for backwards compatibility this field is not required, but if
             # given must be Literal["array"].
             "object_type": "array",

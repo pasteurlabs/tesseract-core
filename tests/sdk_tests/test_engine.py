@@ -289,10 +289,7 @@ def test_parse_requirements(tmpdir):
     --find-links https://data.pyg.org/whl/torch-2.5.1+cpu.html
     torch_scatter==2.1.2+pt25cpu
 
-    ./internal_packages/pasteur-types
-    ./internal_packages/blocky
-    ./internal_packages/prequod
-    ./internal_packages/supersede
+    ./internal_packages/foobar
     """
     reqs_file = Path(tmpdir) / "requirements.txt"
     with open(reqs_file, "w") as fi:
@@ -300,10 +297,7 @@ def test_parse_requirements(tmpdir):
     locals, remotes = engine.parse_requirements(reqs_file)
 
     assert locals == [
-        "./internal_packages/pasteur-types",
-        "./internal_packages/blocky",
-        "./internal_packages/prequod",
-        "./internal_packages/supersede",
+        "./internal_packages/foobar",
     ]
     assert remotes == [
         "--extra-index-url https://download.pytorch.org/whl/cpu",
