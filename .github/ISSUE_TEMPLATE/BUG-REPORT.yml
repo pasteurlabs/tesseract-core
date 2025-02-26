@@ -1,8 +1,6 @@
 name: "Bug Report"
 description: Report a new bug encountered while using Tesseract.
-labels: [
-  "bug"
-]
+type: "Bug"
 
 body:
   - type: textarea
@@ -49,7 +47,7 @@ body:
     validations:
       required: true
 
-  - type: textarea
+  - type: input
     id: tesseractVersion
     attributes:
       label: Tesseract version
