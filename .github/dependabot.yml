@@ -1,31 +1,17 @@
 version: 2
 
-registries:
-  pl-internal-dependencies:
-    type: python-index
-    url: https://pkgs.dev.azure.com/pasteur-labs/d89796ea-4a5b-48aa-9930-4cebcdc9d64a/_packaging/internal/pypi/simple/
-    username: "pasteur-labs"
-    password: ${{secrets.PL_INTERNAL_TOOLS_AZ_DEVOPS_TOKEN}}
-  public:
-    type: python-index
-    url: https://pypi.org/simple
-
 updates:
 - package-ecosystem: pip
   directory: "/"
   schedule:
-    interval: "daily"
+    interval: "weekly"
     timezone: "America/New_York"
   open-pull-requests-limit: 10
-  # This marks our internal registry as trusted
-  insecure-external-code-execution: allow
-  registries:
-  - pl-internal-dependencies
-  - public
 
-  ignore:
-  - dependency-name: "*"
-    update-types: ["version-update:semver-patch"]
+  groups:
+    deps:
+      patterns:
+          - "*"
 
   commit-message:
     prefix: chore
@@ -41,10 +27,6 @@ updates:
     actions:
       patterns:
       - "*"
-
-  ignore:
-  - dependency-name: "*"
-    update-types: ["version-update:semver-patch"]
 
   commit-message:
     prefix: ci
