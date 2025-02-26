@@ -28,21 +28,8 @@ jobs:
           pip install .[dev] -r requirements.txt
           pip install -r docs/requirements.txt
 
-      - name: Build required examples
-        run: |
-          tesseract build examples/helloworld --tag latest
-          tesseract build examples/vectoradd --tag latest
-
       - name: Build docs
         run: |
           cd docs
           export SPHINXOPTS="-W"  # treat warnings as errors
           make html
-
-      - name: Upload HTML files
-        uses: actions/upload-artifact@v4
-        if: ${{ inputs.artifact_name }}
-        with:
-          name: ${{ inputs.artifact_name }}
-          path: docs/build/html
-          if-no-files-found: error
