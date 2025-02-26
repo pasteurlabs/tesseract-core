@@ -35,7 +35,7 @@ jobs:
           pytest \
             --skip-endtoend \
             --cov-report=term-missing:skip-covered \
-            --cov=tesseract --cov=tesseract_runtime \
+            --cov=tesseract_core \
           | tee pytest-coverage.txt
 
       - name: Upload coverage reports to Codecov
