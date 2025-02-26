@@ -1,10 +1,10 @@
 import numpy as np
 from numpy import ndarray
 from scipy.optimize import minimize
+from matplotlib.animation import FuncAnimation
+import matplotlib.pyplot as plt
 
 from tesseract_core import Tesseract
-
-from .animate import animate
 
 tesseract_url = "http://localhost:8000"  # Change this to the correct address
 
@@ -43,12 +43,6 @@ def to_dict(params: ndarray) -> dict:
         "amp2": params[3],
         "lam": params[4],
     }
-
-
-def mse(pred: ndarray, true: ndarray) -> float:
-    """Mean Squared Error."""
-    mse = np.mean(np.square(pred - true))
-    return mse
 
 
 def jacobian(parameters: np.ndarray, true_electron_spectrum: np.ndarray) -> np.ndarray:
@@ -97,9 +91,16 @@ electron_spectrum = tsadar.apply(to_dict(parameters))["electron_spectrum"]
 trajectory.append(electron_spectrum)
 
 
+def mse(pred: ndarray, true: ndarray) -> float:
+    """Mean Squared Error."""
+    mse = np.mean(np.square(pred - true))
+    trajectory.append(pred)
+    print(f"loss {mse}")
+    return mse
+
 def callback(xk):
     electron_spectrum = tsadar.apply(to_dict(xk))["electron_spectrum"]
-    trajectory.append(electron_spectrum)
+    # trajectory.append(electron_spectrum)
     print(f"loss: {mse(electron_spectrum, true_electron_spectrum)}")
 
 
@@ -111,7 +112,36 @@ res = minimize(
     x0=parameters,
     method="L-BFGS-B",
     options={"maxiter": 200, "maxls": 10},
-    callback=callback,
+    # callback=callback,
 )
+
+
+def animate(trajectory : list[np.ndarray], true_electron_spectrum: np.ndarray):
+    
+    n = len(trajectory)
+
+    optim_steps = np.linspace(0, n, n + 1)
+
+    # repeat last trajectory point
+    for _ in range(10):
+        trajectory.append(trajectory[-1])
+        optim_steps = np.append(optim_steps, n)
+    fig, ax = plt.subplots()
+
+
+    def update(i):
+        ax.clear()
+        ax.set_xlabel("Wavelength")
+        ax.set_ylabel("Intensity")
+        ax.set_title(f"Optimization step {int(optim_steps[i])}")
+
+        ax.plot(trajectory[i], label="Fit")
+        ax.plot(true_electron_spectrum, label="True")
+        ax.legend()
+        ax.grid()
+
+
+    ani = FuncAnimation(fig, update, frames=len(trajectory), repeat=False)
+    ani.save("fit_trajectory.gif", writer="imagemagick", fps=3)
 
 animate(trajectory, true_electron_spectrum)
