@@ -119,7 +119,7 @@ jobs:
       - name: Get available unit Tesseracts
         id: get-matrix
         env:
-          E2E_TEST_DIR: examples/unit_tesseracts
+          E2E_TEST_DIR: examples
         run: |
           # get JSON array of directories in E2E_TEST_DIR
           subjobs=$(
@@ -169,7 +169,7 @@ jobs:
       - name: Run test suite
         run: |
           if [ "${{ matrix.unit-tesseract }}" == "base" ]; then
-            pytest --always-run-endtoend tests/endtoend_tests -k "not test_unit_tesseracts"
+            pytest --always-run-endtoend tests/endtoend_tests -k "not test_examples"
           else
-            pytest --always-run-endtoend tests/endtoend_tests/test_unit_tesseracts.py -k "[${{ matrix.unit-tesseract }}]"
+            pytest --always-run-endtoend tests/endtoend_tests/test_examples.py -k "[${{ matrix.unit-tesseract }}]"
           fi

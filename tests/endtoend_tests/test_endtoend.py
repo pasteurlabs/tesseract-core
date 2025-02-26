@@ -416,9 +416,7 @@ def test_tesseract_cli_options_parsing(built_image_name, tmpdir):
     tmpdir.chmod(0o0707)
 
     examples_dir = Path(__file__).parent.parent.parent / "examples"
-    example_inputs = (
-        examples_dir / "unit_tesseracts" / "vectoradd" / "example_inputs.json"
-    )
+    example_inputs = examples_dir / "vectoradd" / "example_inputs.json"
 
     test_commands = (
         ["apply", "-f", "json+binref", "-o", str(tmpdir), f"@{example_inputs}"],
@@ -445,22 +443,31 @@ def test_tesseract_cli_options_parsing(built_image_name, tmpdir):
 
 def test_tarball_install(dummy_tesseract_package):
     import subprocess
-    from shutil import copy
+    from textwrap import dedent
 
-    examples_dir = Path(__file__).parent.parent.parent / "examples"
-    tarball_tesseract = examples_dir / "build_config" / "install_tarball"
+    tesseract_api = dedent("""
+    import cowsay
+    from pydantic import BaseModel
+
+    class InputSchema(BaseModel):
+        message: str = "Hello, Tesseractor!"
+
+    class OutputSchema(BaseModel):
+        out: str
+
+    def apply(inputs: InputSchema) -> OutputSchema:
+        return OutputSchema(out=cowsay.get_output_string("cow", inputs.message))
+    """)
+
+    tesseract_requirements = "./cowsay-6.1-py3-none-any.whl"
 
     subprocess.run(
         ["pip", "download", "cowsay==6.1", "-d", str(dummy_tesseract_package)]
     )
-    copy(
-        tarball_tesseract / "tesseract_api.py",
-        dummy_tesseract_package / "tesseract_api.py",
-    )
-    copy(
-        tarball_tesseract / "tesseract_requirements.txt",
-        dummy_tesseract_package / "tesseract_requirements.txt",
-    )
+    with open(dummy_tesseract_package / "tesseract_api.py", "w") as f:
+        f.write(tesseract_api)
+    with open(dummy_tesseract_package / "tesseract_requirements.txt", "w") as f:
+        f.write(tesseract_requirements)
 
     cli_runner = CliRunner(mix_stderr=False)
     result = cli_runner.invoke(

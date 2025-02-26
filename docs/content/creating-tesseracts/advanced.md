@@ -104,8 +104,7 @@ various circumstances:
  ssh into a server (e.g., private repositories which you specify via "git+ssh://..."),
  you can make your ssh agent available to `tesseract build` with the option
  `--forward-ssh-agent`. Alternatively you can use `pip download` to download a dependency
- to the machine that builds the tesseract as illustrated
- [here](https://github.com/pasteurlabs/tesseract-core/blob/main/examples/build_config/install_tarball/README.md).
+ to the machine that builds the Tesseract.
 
 ## Customizing the build process
 

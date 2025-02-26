@@ -33,12 +33,12 @@ and so on.
 :::{tab-item} CLI
 :sync: cli
 ```bash
-$ tesseract run vectoradd apply @examples/unit_tesseracts/vectoradd/example_inputs.json
+$ tesseract run vectoradd apply @examples/vectoradd/example_inputs.json
 {"result":{"object_type":"array","shape":[3],"dtype":"float64","data":{"buffer":[5.0,7.0,9.0],"encoding":"json"}}}
 ```
 
 Where the `example_inputs.json` passed as input just contains the following:
-```{literalinclude} ../../../examples/unit_tesseracts/vectoradd/example_inputs.json
+```{literalinclude} ../../../examples/vectoradd/example_inputs.json
 :caption: example_inputs.json
 ```
 
@@ -59,12 +59,12 @@ You can then simply curl its `/apply` endpoint
 ```bash
 $ curl http://<tesseract-address>:<port>/apply \ # Replace with actual address
   -H "Content-Type: application/json" \
-  -d @examples/unit_tesseracts/vectoradd/example_inputs.json
+  -d @examples/vectoradd/example_inputs.json
 {"result":{"object_type":"array","shape":[3],"dtype":"float64","data":{"buffer":[5.0,7.0,9.0],"encoding":"json"}}}
 ```
 
 Where the payload `example_inputs.json` we POST to the `/apply` endpoint is the following:
-```{literalinclude} ../../../examples/unit_tesseracts/vectoradd/example_inputs.json
+```{literalinclude} ../../../examples/vectoradd/example_inputs.json
 :caption: example_inputs.json
 ```
 :::
@@ -101,21 +101,21 @@ on the `a` vector, at $a = (1,2,3)$, $b = (4,5,6)$:
 :::{tab-item} CLI
 :sync: cli
 ```bash
-$ tesseract run vectoradd jacobian @examples/unit_tesseracts/vectoradd/example_jacobian_inputs.json
+$ tesseract run vectoradd jacobian @examples/vectoradd/example_jacobian_inputs.json
 {"result":{"a":{"object_type":"array","shape":[3,3],"dtype":"float64","data":{"buffer":[[3.0,0.0,0.0],[0.0,3.0,0.0],[0.0,0.0,3.0]],"encoding":"json"}}}}
 ```
 :::
 :::{tab-item} REST API
 :sync: http
 ```bash
-$ curl -d @examples/unit_tesseracts/vectoradd/example_jacobian_inputs.json \
+$ curl -d @examples/vectoradd/example_jacobian_inputs.json \
   -H "Content-Type: application/json" \
   http://<tesseract-address>:<port>/jacobian
 {"result":{"a":{"object_type":"array","shape":[3,3],"dtype":"float64","data":{"buffer":[[1.0,0.0,0.0],[0.0,1.0,0.0],[0.0,0.0,1.0]],"encoding":"json"}}}}
 ```
 Notice that the payload we posted contains information about which inputs and outputs we want to consider
 when computing derivatives:
-```{literalinclude} ../../../examples/unit_tesseracts/vectoradd/example_jacobian_inputs.json
+```{literalinclude} ../../../examples/vectoradd/example_jacobian_inputs.json
 :caption: example_jacobian_inputs.json
 ```
 :::

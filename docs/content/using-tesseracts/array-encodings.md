@@ -14,7 +14,7 @@ you can make Tesseracts return base64-encoded arrays by setting the format to `j
 :::{tab-item} CLI
 :sync: cli
 ```bash
-$ tesseract run vectoradd apply -f "json+base64" @examples/unit_tesseracts/vectoradd/example_inputs_b64.json
+$ tesseract run vectoradd apply -f "json+base64" @examples/vectoradd/example_inputs_b64.json
 {"result":{"object_type":"array","shape":[3],"dtype":"float64","data":{"buffer":"AAAAAAAALEAAAAAAAAA2QAAAAAAAAD5A","encoding":"base64"}}}
 ```
 :::
@@ -24,7 +24,7 @@ $ tesseract run vectoradd apply -f "json+base64" @examples/unit_tesseracts/vecto
 $ curl \
   -H "Accept: application/json+base64" \
   -H "Content-Type: application/json" \
-  -d @examples/unit_tesseracts/vectoradd/example_inputs.json \
+  -d @examples/vectoradd/example_inputs.json \
   http://<tesseract-address>:<port>/apply
 {"result":{"object_type":"array","shape":[3],"dtype":"float64","data":{"buffer":"AAAAAAAALEAAAAAAAAA2QAAAAAAAAD5A","encoding":"base64"}}}
 ```
@@ -63,7 +63,7 @@ It is also possible to use [MessagePack](https://msgpack.org/index.html) for an 
 :::{tab-item} CLI
 :sync: cli
 ```bash
-$ tesseract run vectoradd apply --output-format msgpack @examples/unit_tesseracts/vectoradd/example_inputs.json
+$ tesseract run vectoradd apply --output-format msgpack @examples/vectoradd/example_inputs.json
 ��result��nd��type�<f8�kind��shape��data�@@"@
 ```
 :::
@@ -73,7 +73,7 @@ $ tesseract run vectoradd apply --output-format msgpack @examples/unit_tesseract
 $ curl \
   -H "Accept: application/msgpack" \
   -H "Content-Type: application/json" \
-  -d @examples/unit_tesseracts/vectoradd/example_inputs.json \
+  -d @examples/vectoradd/example_inputs.json \
   --output - \
   http://<tesseract-address>:<port>/apply
 ��result��nd��type�<f8�kind��shape��data�@@"@
