@@ -34,7 +34,7 @@ Other options include:
 
 The `tesseract_api.py` produced by `tesseract init` contains some boilerplate code
 which can guide you. Let's follow it section by section and pretend we want to implement
-a very simple `helloworld` Tesseract: one that accepts a string `name` and returns `"Hello {name}!`.
+a very simple `helloworld` Tesseract: one that accepts a string `name` and returns `"Hello {name}!"`.
 
 The first section in `tesseract_api.py` looks like this:
 
