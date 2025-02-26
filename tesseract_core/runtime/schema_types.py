@@ -36,7 +36,7 @@ AnnotatedType = type(Annotated[Any, Any])
 EllipsisType = type(Ellipsis)
 
 
-def _validate_key(expected_shape, expected_dtype) -> tuple:
+def _ensure_valid_shapedtype(expected_shape, expected_dtype) -> tuple:
     if not isinstance(expected_shape, (tuple, EllipsisType)):
         raise ValueError(
             "Shape in Array[<shape>, <dtype>] must be a tuple or '...' (ellipsis)"
@@ -77,7 +77,7 @@ class ShapeDType(BaseModel):
             Union[AnnotatedType, str, None],
         ],
     ) -> AnnotatedType:
-        expected_shape, expected_dtype = _validate_key(*key)
+        expected_shape, expected_dtype = _ensure_valid_shapedtype(*key)
 
         def validate(shapedtype):
             if isinstance(shapedtype, ShapeDType):
@@ -95,8 +95,9 @@ class ShapeDType(BaseModel):
 
     @classmethod
     def from_array_annotation(cls, obj: AnnotatedType) -> AnnotatedType:
-        key = (obj.__metadata__[0].expected_shape, obj.__metadata__[0].expected_dtype)
-        return cls.__class_getitem__(key)
+        shape = obj.__metadata__[0].expected_shape
+        dtype = obj.__metadata__[0].expected_dtype
+        return cls[shape, dtype]
 
 
 class ArrayFlags(IntEnum):
@@ -292,7 +293,7 @@ class Array:
         ],
     ) -> AnnotatedType:
         """Create a new type annotation based on the given shape and dtype."""
-        expected_shape, expected_dtype = _validate_key(*key)
+        expected_shape, expected_dtype = _ensure_valid_shapedtype(*key)
         classvars = {
             "expected_shape": expected_shape,
             "expected_dtype": expected_dtype,
