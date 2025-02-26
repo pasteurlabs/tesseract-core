@@ -14,7 +14,7 @@ The [`tesseract` command line application](../api/tesseract-cli.md) provides too
 Download the {download}`Tesseract examples </downloads/examples.zip>` and run the following command from where you unpacked the archive:
 
 ```bash
-$ tesseract build examples/unit_tesseracts/helloworld/
+$ tesseract build examples/helloworld
  [i] Building image ...
  [i] Built image sha256:95e0b89e9634, ['helloworld:latest']
 ```
@@ -103,8 +103,8 @@ The OpenAPI docs for the `vectoradd` Tesseract, documenting its endpoints and va
 The folder passed to `tesseract build` contains the files needed to build and run the Tesseract:
 
 ```bash
-$ tree examples/unit_tesseracts/helloworld
-examples/unit_tesseracts/helloworld
+$ tree examples/helloworld
+examples/helloworld
 ├── tesseract_api.py
 ├── tesseract_config.yaml
 └── tesseract_requirements.txt
@@ -118,15 +118,15 @@ These files are all that's needed to define a Tesseract.
  `apply`, `jacobian`, `jacobian_vector_product`, and `vector_jacobian_product`. Out of all of the endpoints you
  can implement, only `apply` is required for a Tesseract to work.
 
-```{literalinclude} ../../../examples/unit_tesseracts/helloworld/tesseract_api.py
+```{literalinclude} ../../../examples/helloworld/tesseract_api.py
 :pyobject: InputSchema
 ```
 
-```{literalinclude} ../../../examples/unit_tesseracts/helloworld/tesseract_api.py
+```{literalinclude} ../../../examples/helloworld/tesseract_api.py
 :pyobject: OutputSchema
 ```
 
-```{literalinclude} ../../../examples/unit_tesseracts/helloworld/tesseract_api.py
+```{literalinclude} ../../../examples/helloworld/tesseract_api.py
 :pyobject: apply
 ```
 
@@ -135,7 +135,7 @@ These files are all that's needed to define a Tesseract.
 
 `tesseract_config.yaml` contains the Tesseract's metadata, such as its name, description, version, and build configuration.
 
-```{literalinclude} ../../../examples/unit_tesseracts/helloworld/tesseract_config.yaml
+```{literalinclude} ../../../examples/helloworld/tesseract_config.yaml
 ```
 
 ### `tesseract_requirements.txt`
@@ -146,7 +146,7 @@ These files are all that's needed to define a Tesseract.
 The `tesseract_requirements.txt` file is optional. In fact, `tesseract_api.py` is free to invoke functions that are not written in Python at all. In this case, use the `build_config` section in [`tesseract_config.yaml`](quickstart-tr-config) to provide data files and install the necessary dependencies.
 ```
 
-```{literalinclude} ../../../examples/unit_tesseracts/helloworld/tesseract_requirements.txt
+```{literalinclude} ../../../examples/helloworld/tesseract_requirements.txt
 ```
 
 

@@ -39,7 +39,7 @@ Some shells use `[` and `]` as special characters, and might error out on the `p
 Windows and WSL users can encounter an issue while trying to build a Tesseract:
 
 ```bash
-$ tesseract build examples/unit_tesseracts/vectoradd/ vectoradd
+$ tesseract build examples/vectoradd/ vectoradd
 
 Uncaught error: [Errno 20] Not a directory: ...
 # similarly
@@ -57,7 +57,7 @@ We are looking to improve support for Windows users, but in meantime consider on
 "Tesseract" is widely known term, and other software projects adopted it too. This sometimes can lead to multiple executables with the same name, as can happen if you also have [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) installed. In that case, you may encounter following error:
 
 ```
-$ tesseract build examples/unit_tesseracts/vectoradd/ vectoradd
+$ tesseract build examples/vectoradd/ vectoradd
 
 read_params_file: Can't open vectoradd
 Error in findFileFormatStream: failed to read first 12 bytes of file

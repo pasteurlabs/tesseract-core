@@ -4,7 +4,7 @@ The `tesseract_config.yaml` file contains a Tesseract's metadata, such as its na
 
 ## Example file
 
-```{literalinclude} ../../../examples/unit_tesseracts/helloworld/tesseract_config.yaml
+```{literalinclude} ../../../examples/helloworld/tesseract_config.yaml
 ```
 
 ## Schema

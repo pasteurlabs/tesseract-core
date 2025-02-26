@@ -16,7 +16,7 @@ import pytest
 
 here = Path(__file__).parent
 
-UNIT_TESSERACT_PATH = here / ".." / "examples" / "unit_tesseracts"
+UNIT_TESSERACT_PATH = here / ".." / "examples"
 UNIT_TESSERACTS = [Path(tr).stem for tr in UNIT_TESSERACT_PATH.glob("*/")]
 
 
