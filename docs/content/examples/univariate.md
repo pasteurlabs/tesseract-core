@@ -31,7 +31,7 @@ The easiest way to set up a new tesseract is with the `init` command, which will
 three files:
 
 ```bash
-$ tesseract init --name univariate --target-dir
+$ tesseract init --name univariate --target-dir your/path/to/univariate
 $ ls your/path/to/univariate
 tesseract_config.yaml
 tesseract_requirements.txt
@@ -65,7 +65,7 @@ At this point you could already build the tesseract and evaluate the Rosenbrock
 function with
 
 ```bash
-$ tesseract build examples/unit_tesseracts/univariate
+$ tesseract build your/path/to/univariate
 $ tesseract run univariate apply '{"inputs": {"x":1, "y":1}}'
 {
   "result": {
@@ -100,6 +100,6 @@ $ tesseract serve univariate
 {"project_id": "tesseract-flivhk7muce0", "containers": [{"name": "tesseract-flivhk7muce0-sha256-glfafackzws6-1", "port": "58354"}]}%
 ```
 
-The served tesseract can be conveniently used via the python API
+The served tesseract can be conveniently used via the Python API (code below uses [animation module](../../../examples/unit_tesseracts/univariate/animate.py) from the `univariate` example).
 ```{literalinclude} ../../../examples/unit_tesseracts/univariate/optimize.py
 ```
