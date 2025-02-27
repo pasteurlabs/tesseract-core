@@ -277,6 +277,11 @@ def build_image(
     Returns:
         An Image object representing an image on the local machine.
     """
+    if not isinstance(src_dir, Path):
+        src_dir = Path(src_dir)
+    if not isinstance(build_dir, Path):
+        build_dir = Path(build_dir)
+
     dockerfile_path = build_dir / "Dockerfile"
     with open(dockerfile_path, "w") as f:
         logger.debug(f"Writing Dockerfile to {dockerfile_path}")
@@ -284,16 +289,23 @@ def build_image(
 
     copytree(src_dir, build_dir / "__tesseract_source__")
 
-    if (Path(src_dir) / "tesseract_requirements.txt").exists():
+    reqstxt = src_dir / "tesseract_requirements.txt"
+    envyml = src_dir / "tesseract_environment.yml"
+    if reqstxt.exists() and envyml.exists():
+        raise ValueError(
+            "Found more than one dependency file. You can only specify one."
+        )
+
+    if reqstxt.exists():
         local_dependencies, remote_dependencies = parse_requirements(
-            Path(src_dir) / "tesseract_requirements.txt"
+            src_dir / "tesseract_requirements.txt"
         )
 
         if local_dependencies:
             local_requirements_path = build_dir / "local_requirements"
             Path.mkdir(local_requirements_path)
             for dependency in local_dependencies:
-                src = Path(src_dir) / dependency
+                src = src_dir / dependency
                 dest = build_dir / "local_requirements" / src.name
                 if src.is_file():
                     copy(src, dest)
@@ -303,19 +315,20 @@ def build_image(
         # We need to write a new requirements file in the build dir, where we explicitly
         # removed the local dependencies
         requirements_file_path = (
-            Path(build_dir) / "__tesseract_source__" / "tesseract_requirements.txt"
+            build_dir / "__tesseract_source__" / "tesseract_requirements.txt"
         )
         with requirements_file_path.open("w", encoding="utf-8") as f:
             for dependency in remote_dependencies:
                 f.write(f"{dependency}\n")
 
-    elif (Path(src_dir) / "tesseract_environment.yml").exists():
+    elif envyml.exists():
         copy(
-            Path(src_dir) / "tesseract_environment.yml",
-            Path(build_dir) / "__tesseract_source__" / "tesseract_environment.yml"
+            src_dir / "tesseract_environment.yml",
+            build_dir / "__tesseract_source__" / "tesseract_environment.yml",
         )
     else:
-        raise
+        # default to empty tesseract_requirements.txt
+        (build_dir / "__tesseract_source__" / "tesseract_requirements.txt").touch()
 
     def _ignore_pycache(_, names: list[str]) -> list[str]:
         ignore = []

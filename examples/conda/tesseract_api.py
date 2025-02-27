@@ -1,8 +1,8 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from pydantic import BaseModel, Field
 import jax
+from pydantic import BaseModel, Field
 
 
 class InputSchema(BaseModel):
@@ -15,4 +15,4 @@ class OutputSchema(BaseModel):
 
 def apply(inputs: InputSchema) -> OutputSchema:
     """Greet a person whose name is given as input."""
-    return OutputSchema(greeting=f"Hello {inputs.name}!")
+    return OutputSchema(greeting=f"Hello from a conda tesseract! {jax} is installed!")
