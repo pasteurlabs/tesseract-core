@@ -7,6 +7,10 @@ on:
     branches:
       - main
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   tests-base:
     strategy:
@@ -151,10 +155,6 @@ jobs:
             unit-tesseract: "base"
 
       fail-fast: false
-
-    concurrency:
-      group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-      cancel-in-progress: true
 
     runs-on: ${{ matrix.arch == 'x64' && matrix.os == 'ubuntu-22.04' && 'ubuntu-22.04' || matrix.arch == 'arm' && matrix.os == 'ubuntu-22.04' && 'linux-arm64-ubuntu2204' }}
 
