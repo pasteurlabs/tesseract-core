@@ -130,71 +130,7 @@ def test_tesseract_run_stdout(built_image_name):
 
 def test_tesseract_serve_pipeline(docker_client, built_image_name):
     cli_runner = CliRunner(mix_stderr=False)
-
-    # Serve
-    run_res = cli_runner.invoke(
-        app,
-        [
-            "serve",
-            built_image_name,
-        ],
-        catch_exceptions=False,
-    )
-    assert run_res.exit_code == 0, run_res.stderr
-    assert run_res.stdout
-
-    project_meta = json.loads(run_res.stdout)
-
-    project_id = project_meta["project_id"]
-    project_containers = [
-        c for c in docker_client.containers.list() if project_id in c.name
-    ]
-    if not project_containers:
-        raise ValueError(f"Could not find container for project '{project_id}'")
-
-    project_container = project_containers[0]
-    assert project_container.name == project_meta["containers"][0]["name"]
-
-    port_key = next(iter(project_container.ports))
-    port = project_container.ports[port_key][0]["HostPort"]
-    assert port == project_meta["containers"][0]["port"]
-
-    # Ensure served Tesseract is usable
-    res = requests.get(f"http://localhost:{port}/health")
-    assert res.status_code == 200, res.text
-
-    # Ensure project id is shown in `tesseract ps`
-    run_res = cli_runner.invoke(
-        app,
-        ["ps"],
-        env={"COLUMNS": "1000"},
-        catch_exceptions=False,
-    )
-    assert run_res.exit_code == 0, run_res.stderr
-    assert project_id in run_res.stdout
-    assert port in run_res.stdout
-    assert project_container.short_id in run_res.stdout
-
-    # Teardown
-    run_res = cli_runner.invoke(
-        app,
-        [
-            "teardown",
-            project_id,
-        ],
-        catch_exceptions=False,
-    )
-    assert run_res.exit_code == 0, run_res.stderr
-
-
-@pytest.mark.parametrize("tear_all", [True, False])
-def test_tesseract_teardown_multiple(built_image_name, tear_all):
-    """Teardown multiple projects."""
-    cli_runner = CliRunner(mix_stderr=False)
-
-    project_ids = []
-    for _ in range(0, 5):
-        # Serve
+    try:
         run_res = cli_runner.invoke(
             app,
             [
@@ -203,38 +139,102 @@ def test_tesseract_teardown_multiple(built_image_name, tear_all):
             ],
             catch_exceptions=False,
         )
+
         assert run_res.exit_code == 0, run_res.stderr
         assert run_res.stdout
 
         project_meta = json.loads(run_res.stdout)
 
         project_id = project_meta["project_id"]
-        project_ids.append(project_id)
+        project_containers = [
+            c for c in docker_client.containers.list() if project_id in c.name
+        ]
+        if not project_containers:
+            raise ValueError(f"Could not find container for project '{project_id}'")
 
-    # Teardown multiple/all
-    args = ["teardown"]
-    if tear_all:
-        args.extend(["--all"])
-    else:
-        args.extend(project_ids)
+        project_container = project_containers[0]
+        assert project_container.name == project_meta["containers"][0]["name"]
 
-    run_res = cli_runner.invoke(
-        app,
-        args,
-        catch_exceptions=False,
-    )
-    assert run_res.exit_code == 0, run_res.stderr
+        port_key = next(iter(project_container.ports))
+        port = project_container.ports[port_key][0]["HostPort"]
+        assert port == project_meta["containers"][0]["port"]
 
-    # Ensure all projects are killed
-    run_res = cli_runner.invoke(
-        app,
-        ["ps"],
-        env={"COLUMNS": "1000"},
-        catch_exceptions=False,
-    )
-    assert run_res.exit_code == 0, run_res.stderr
-    for project_id in project_ids:
-        assert project_id not in run_res.stdout
+        # Ensure served Tesseract is usable
+        res = requests.get(f"http://localhost:{port}/health")
+        assert res.status_code == 200, res.text
+
+        # Ensure project id is shown in `tesseract ps`
+        run_res = cli_runner.invoke(
+            app,
+            ["ps"],
+            env={"COLUMNS": "1000"},
+            catch_exceptions=False,
+        )
+        assert run_res.exit_code == 0, run_res.stderr
+        assert project_id in run_res.stdout
+        assert port in run_res.stdout
+        assert project_container.short_id in run_res.stdout
+    finally:
+        run_res = cli_runner.invoke(
+            app,
+            [
+                "teardown",
+                project_id,
+            ],
+            catch_exceptions=False,
+        )
+        assert run_res.exit_code == 0, run_res.stderr
+
+
+@pytest.mark.parametrize("tear_all", [True, False])
+def test_tesseract_teardown_multiple(built_image_name, tear_all):
+    """Teardown multiple projects."""
+    cli_runner = CliRunner(mix_stderr=False)
+
+    project_ids = []
+    try:
+        for _ in range(0, 5):
+            # Serve
+            run_res = cli_runner.invoke(
+                app,
+                [
+                    "serve",
+                    built_image_name,
+                ],
+                catch_exceptions=False,
+            )
+            assert run_res.exit_code == 0, run_res.stderr
+            assert run_res.stdout
+
+            project_meta = json.loads(run_res.stdout)
+
+            project_id = project_meta["project_id"]
+            project_ids.append(project_id)
+
+    finally:
+        # Teardown multiple/all
+        args = ["teardown"]
+        if tear_all:
+            args.extend(["--all"])
+        else:
+            args.extend(project_ids)
+
+        run_res = cli_runner.invoke(
+            app,
+            args,
+            catch_exceptions=False,
+        )
+        assert run_res.exit_code == 0, run_res.stderr
+        # Ensure all projects are killed
+        run_res = cli_runner.invoke(
+            app,
+            ["ps"],
+            env={"COLUMNS": "1000"},
+            catch_exceptions=False,
+        )
+        assert run_res.exit_code == 0, run_res.stderr
+        for project_id in project_ids:
+            assert project_id not in run_res.stdout
 
 
 def test_tesseract_serve_ports_error(built_image_name):
@@ -345,8 +345,6 @@ def test_tesseract_serve_ports(built_image_name, port):
         res = requests.get(f"http://localhost:{port}/health")
         assert res.status_code == 200, res.text
         assert str(port) in run_res.stdout
-
-    # Teardown.
     finally:
         run_res = cli_runner.invoke(
             app,
@@ -369,45 +367,57 @@ def test_tesseract_serve_with_volumes(built_image_name, tmp_path, docker_client)
     tmp_path.chmod(0o0707)
 
     dest = Path("/foo/")
-    run_res = cli_runner.invoke(
-        app,
-        [
-            "serve",
-            "--volume",
-            f"{tmp_path}:{dest}",
-            built_image_name,
-            built_image_name,
-        ],
-        catch_exceptions=False,
-    )
-    assert run_res.exit_code == 0, run_res.stderr
-    assert run_res.stdout
+    try:
+        run_res = cli_runner.invoke(
+            app,
+            [
+                "serve",
+                "--volume",
+                f"{tmp_path}:{dest}",
+                built_image_name,
+                built_image_name,
+            ],
+            catch_exceptions=False,
+        )
+        assert run_res.exit_code == 0, run_res.stderr
+        assert run_res.stdout
 
-    project_meta = json.loads(run_res.stdout)
-    tesseract0_id = project_meta["containers"][0]["name"]
-    tesseract0 = docker_client.containers.get(tesseract0_id)
-    tesseract1_id = project_meta["containers"][1]["name"]
-    tesseract1 = docker_client.containers.get(tesseract1_id)
+        project_meta = json.loads(run_res.stdout)
+        project_id = project_meta["project_id"]
+        tesseract0_id = project_meta["containers"][0]["name"]
+        tesseract0 = docker_client.containers.get(tesseract0_id)
+        tesseract1_id = project_meta["containers"][1]["name"]
+        tesseract1 = docker_client.containers.get(tesseract1_id)
 
-    # Create file outside the containers and check it from inside the container
-    tmpfile = Path(tmp_path) / "hi"
-    with open(tmpfile, "w") as hello:
-        hello.write("world")
-        hello.flush()
+        # Create file outside the containers and check it from inside the container
+        tmpfile = Path(tmp_path) / "hi"
+        with open(tmpfile, "w") as hello:
+            hello.write("world")
+            hello.flush()
 
-    exit_code, output = tesseract0.exec_run(["cat", f"{dest}/hi"])
-    assert exit_code == 0
-    assert output.decode() == "world"
+        exit_code, output = tesseract0.exec_run(["cat", f"{dest}/hi"])
+        assert exit_code == 0
+        assert output.decode() == "world"
 
-    # Create file inside a container and check it from the other
-    bar_file = dest / "bar"
-    exit_code, output = tesseract0.exec_run(["touch", f"{bar_file}"])
-    assert exit_code == 0
-    exit_code, output = tesseract1.exec_run(["cat", f"{bar_file}"])
-    assert exit_code == 0
+        # Create file inside a container and check it from the other
+        bar_file = dest / "bar"
+        exit_code, output = tesseract0.exec_run(["touch", f"{bar_file}"])
+        assert exit_code == 0
+        exit_code, output = tesseract1.exec_run(["cat", f"{bar_file}"])
+        assert exit_code == 0
 
-    # The file should exist outside the container
-    assert (tmp_path / "bar").exists()
+        # The file should exist outside the container
+        assert (tmp_path / "bar").exists()
+    finally:
+        run_res = cli_runner.invoke(
+            app,
+            [
+                "teardown",
+                project_id,
+            ],
+            catch_exceptions=False,
+        )
+        assert run_res.exit_code == 0, run_res.stderr
 
 
 def test_tesseract_cli_options_parsing(built_image_name, tmpdir):
@@ -445,7 +455,8 @@ def test_tarball_install(dummy_tesseract_package):
     import subprocess
     from textwrap import dedent
 
-    tesseract_api = dedent("""
+    tesseract_api = dedent(
+        """
     import cowsay
     from pydantic import BaseModel
 
@@ -457,7 +468,8 @@ def test_tarball_install(dummy_tesseract_package):
 
     def apply(inputs: InputSchema) -> OutputSchema:
         return OutputSchema(out=cowsay.get_output_string("cow", inputs.message))
-    """)
+    """
+    )
 
     tesseract_requirements = "./cowsay-6.1-py3-none-any.whl"
 
