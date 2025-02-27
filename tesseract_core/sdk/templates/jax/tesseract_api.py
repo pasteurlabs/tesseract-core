@@ -50,7 +50,7 @@ def apply(inputs: InputSchema) -> OutputSchema:
     # should be safe)
 
     out = apply_jit(inputs.model_dump())
-
+    
     # Optional: Insert any post-processing that doesn't require tracing
     # For example, you might want to save to disk or modify a non-differentiable
     # output. Again, do not modify any differentiable output in a non-linear way.
