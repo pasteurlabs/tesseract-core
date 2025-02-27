@@ -695,6 +695,32 @@ def teardown(
         )
 
 
+def _sanitize_error_output(error_output: str, tesseract_image: str) -> str:
+    """Remove references to tesseract-runtime and unavailable commands from error output."""
+    # Replace references to tesseract-runtime with tesseract run
+    error_output = re.sub(
+        r"Try 'tesseract-runtime",
+        f"Try 'tesseract run {tesseract_image}",
+        error_output,
+    )
+
+    error_output = re.sub(
+        r"Usage: tesseract-runtime",
+        f"Usage: tesseract run {tesseract_image}",
+        error_output,
+    )
+
+    # Hide commands in help strings that users are not supposed to use via tesseract run
+    error_output = re.sub(
+        r"^│\s+(serve|health|metrics)\s+.*?$\n",
+        "",
+        error_output,
+        flags=re.MULTILINE,
+    )
+
+    return error_output
+
+
 @app.command(
     "run",
     # We need to ignore unknown options to forward the args to the Tesseract container
@@ -796,25 +822,15 @@ def run_container(
     ) as e:
         if "No such command" in str(e):
             error_string = f"Error running Tesseract '{tesseract_image}' \n\n Error: Unimplemented command '{cmd}'.  "
-            raise UserError(error_string) from e
+        else:
+            error_string = _sanitize_error_output(
+                f"Error running Tesseract. \n\n{e}", tesseract_image
+            )
 
-        raise UserError(f"Error running Tesseract. \n\n{e}") from e
+        raise UserError(error_string) from e
 
     if invoke_help:
-        # Replace references to tesseract-runtime with tesseract run
-        result_err = re.sub(
-            r"^\s*Usage: tesseract-runtime",
-            f"Usage: tesseract run {tesseract_image}",
-            result_err,
-        )
-
-        # Hide commands in help strings that users are not supposed to use via tesseract run
-        result_err = re.sub(
-            r"^│\s+(serve|health|metrics)\s+.*?$\n",
-            "",
-            result_err,
-            flags=re.MULTILINE,
-        )
+        result_err = _sanitize_error_output(result_err, tesseract_image)
 
     typer.echo(result_err, err=True, nl=False)
     typer.echo(result_out, nl=False)
