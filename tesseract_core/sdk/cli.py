@@ -712,7 +712,7 @@ def _sanitize_error_output(error_output: str, tesseract_image: str) -> str:
 
     # Hide commands in help strings that users are not supposed to use via tesseract run
     error_output = re.sub(
-        r"^│\s+(serve|health|metrics)\s+.*?$\n",
+        r"^│\s+(serve|health)\s+.*?$\n",
         "",
         error_output,
         flags=re.MULTILINE,
