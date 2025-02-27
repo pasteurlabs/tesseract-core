@@ -4,8 +4,8 @@
 
 Autodiff-native, self-documenting software components for Simulation Intelligence. :package:
 
-[Read the docs](https://pasteur-labs-tesseract-core.readthedocs-hosted.com/en/latest/) |
-[Report an issue](https://github.com/pasteurlabs/tesseract-core-core/issues) |
+[Read the docs](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/) |
+[Report an issue](https://github.com/pasteurlabs/tesseract-core/issues) |
 [Talk to the community](https://si-tesseract.discourse.group/) |
 [Contribute](CONTRIBUTING.md)
 
@@ -20,7 +20,7 @@ Autodiff-native, self-documenting software components for Simulation Intelligenc
 
 Tesseracts are components that expose experimental, research-grade software to the world. They are self-contained, self-documenting, and self-executing, via command line and HTTP. They are designed to be easy to create, easy to use, and easy to share, including in a production environment. This repository contains all you need to define your own and execute them.
 
-Tesseracts provide built-in support for propagating [gradient information](https://en.wikipedia.org/wiki/Differentiable_programming) at the level of individual components, making it easy to build complex, diverse software pipelines that can be optimized end-to-end.
+Tesseracts provide built-in support for [differentiable programming](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/introduction/differentiable-programming.html) by propagating gradient information at the level of individual components, making it easy to build complex, diverse software pipelines that can be optimized end-to-end.
 
 ## Quick start
 
@@ -56,8 +56,10 @@ Tesseracts provide built-in support for propagating [gradient information](https
    {"result":{"object_type":"array","shape":[1],"dtype":"float64","data":{"buffer":[3.0],"encoding":"json"}}}⏎
    ```
 
-Now you're ready to dive into the [documentation](https://pasteur-labs-tesseract-core.readthedocs-hosted.com/en/latest/) for more information on [installation](https://pasteur-labs-tesseract-core.readthedocs-hosted.com/en/latest/content/user-guide/installation.html), [creating Tesseracts](https://pasteur-labs-tesseract-core.readthedocs-hosted.com/en/latest/content/user-guide/create.html), and [invoking
-them](https://pasteur-labs-tesseract-core.readthedocs-hosted.com/en/latest/content/user-guide/use.html).
+Now you're ready to dive into the [documentation](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/) for more information on
+[installation](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/introduction/installation.html),
+[creating Tesseracts](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/creating-tesseracts/create.html), and
+[invoking them](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/using-tesseracts/use.html).
 
 ## License
 
