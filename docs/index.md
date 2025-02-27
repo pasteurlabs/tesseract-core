@@ -99,7 +99,7 @@ content/using-tesseracts/advanced.md
 :maxdepth: 2
 :hidden:
 
-Official Tutorials <https://si-tesseract.discourse.group/c/showcase/tutorials/12>
+Expert showcase <https://si-tesseract.discourse.group/c/showcase/expert-showcase/12>
 How-to Guides <https://si-tesseract.discourse.group/c/support/how-to-guides/10>
 ```
 
