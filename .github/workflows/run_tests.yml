@@ -138,13 +138,23 @@ jobs:
         os: [ubuntu-22.04]
         python-version: ["3.12"]
 
-        # Test on arm to ensure compatibility with Apple M1 chips
-        # (OSX runners don't have access to Docker so we use Linux ARM runners instead)
-        arch: [x64, arm]
+        arch: ["x64"]
 
         unit-tesseract: ${{ fromJson(needs.get-e2e-matrix.outputs.matrix) }}
 
+        include:
+          # Test on arm to ensure compatibility with Apple M1 chips
+          # (OSX runners don't have access to Docker so we use Linux ARM runners instead)
+          - os: "ubuntu-22.04"
+            python-version: "3.12"
+            arch: "arm"
+            unit-tesseract: "base"
+
       fail-fast: false
+
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
 
     runs-on: ${{ matrix.arch == 'x64' && matrix.os == 'ubuntu-22.04' && 'ubuntu-22.04' || matrix.arch == 'arm' && matrix.os == 'ubuntu-22.04' && 'linux-arm64-ubuntu2204' }}
 
