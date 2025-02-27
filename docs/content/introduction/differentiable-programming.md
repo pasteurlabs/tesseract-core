@@ -1,7 +1,7 @@
 (tr-autodiff)=
 # Differentiable Programming basics
 
-Differentiable Programming (DP) is a technique to compute the derivative of a (software) function with respect to its inputs. It is a key ingredient in many optimization algorithms, such as gradient descent, and is widely used in machine learning and scientific computing. Automatic differentiation (autodiff or AD) is a technique to compute the derivative of a function automatically, without the need to manually derive and implement the derivative.
+[Differentiable Programming](https://en.wikipedia.org/wiki/Differentiable_programming) (DP) is a technique to compute the derivative of a (software) function with respect to its inputs. It is a key ingredient in many optimization algorithms, such as gradient descent, and is widely used in machine learning and scientific computing. Automatic differentiation (autodiff or AD) is a technique to compute the derivative of a function automatically, without the need to manually derive and implement the derivative.
 
 Tesseracts natively support DP and autodiff as an optional feature – as long as at least one of the input or output arrays is marked as differentiable, and an [AD endpoint](#ad-endpoints) is implemented, the Tesseract can be differentiated with respect to its inputs.
 
