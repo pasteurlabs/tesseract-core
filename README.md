@@ -20,7 +20,7 @@ Autodiff-native, self-documenting software components for Simulation Intelligenc
 
 Tesseracts are components that expose experimental, research-grade software to the world. They are self-contained, self-documenting, and self-executing, via command line and HTTP. They are designed to be easy to create, easy to use, and easy to share, including in a production environment. This repository contains all you need to define your own and execute them.
 
-Tesseracts provide built-in support for propagating [gradient information](https://en.wikipedia.org/wiki/Differentiable_programming) at the level of individual components, making it easy to build complex, diverse software pipelines that can be optimized end-to-end.
+Tesseracts provide built-in support for [differentiable programming](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/introduction/differentiable-programming.html) by propagating gradient information at the level of individual components, making it easy to build complex, diverse software pipelines that can be optimized end-to-end.
 
 ## Quick start
 

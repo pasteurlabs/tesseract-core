@@ -104,6 +104,14 @@ How-to Guides <https://si-tesseract.discourse.group/c/support/how-to-guides/10>
 ```
 
 ```{toctree}
+:caption: Misc
+:maxdepth: 2
+:hidden:
+
+content/misc/faq.md
+```
+
+```{toctree}
 :caption: API Reference
 :maxdepth: 2
 :hidden:
@@ -114,12 +122,4 @@ content/api/tesseract-cli.md
 content/api/tesseract-api.md
 content/api/tesseract-runtime-cli.md
 content/api/tesseract-runtime-api.md
-```
-
-```{toctree}
-:caption: Misc
-:maxdepth: 2
-:hidden:
-
-content/misc/faq.md
 ```
