@@ -288,29 +288,34 @@ def build_image(
         local_dependencies, remote_dependencies = parse_requirements(
             Path(src_dir) / "tesseract_requirements.txt"
         )
+
+        if local_dependencies:
+            local_requirements_path = build_dir / "local_requirements"
+            Path.mkdir(local_requirements_path)
+            for dependency in local_dependencies:
+                src = Path(src_dir) / dependency
+                dest = build_dir / "local_requirements" / src.name
+                if src.is_file():
+                    copy(src, dest)
+                else:
+                    copytree(src, dest)
+
+        # We need to write a new requirements file in the build dir, where we explicitly
+        # removed the local dependencies
+        requirements_file_path = (
+            Path(build_dir) / "__tesseract_source__" / "tesseract_requirements.txt"
+        )
+        with requirements_file_path.open("w", encoding="utf-8") as f:
+            for dependency in remote_dependencies:
+                f.write(f"{dependency}\n")
+
+    elif (Path(src_dir) / "tesseract_environment.yml").exists():
+        copy(
+            Path(src_dir) / "tesseract_environment.yml",
+            Path(build_dir) / "__tesseract_source__" / "tesseract_environment.yml"
+        )
     else:
-        remote_dependencies = []
-        local_dependencies = []
-
-    if local_dependencies:
-        local_requirements_path = build_dir / "local_requirements"
-        Path.mkdir(local_requirements_path)
-        for dependency in local_dependencies:
-            src = Path(src_dir) / dependency
-            dest = build_dir / "local_requirements" / src.name
-            if src.is_file():
-                copy(src, dest)
-            else:
-                copytree(src, dest)
-
-    # We need to write a new requirements file in the build dir, where we explicitly
-    # removed the local dependencies
-    requirements_file_path = (
-        Path(build_dir) / "__tesseract_source__" / "tesseract_requirements.txt"
-    )
-    with requirements_file_path.open("w", encoding="utf-8") as f:
-        for dependency in remote_dependencies:
-            f.write(f"{dependency}\n")
+        raise
 
     def _ignore_pycache(_, names: list[str]) -> list[str]:
         ignore = []

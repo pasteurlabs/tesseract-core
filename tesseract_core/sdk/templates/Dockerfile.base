@@ -18,10 +18,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 {% endif %}
 
-# Create virtual environment
-RUN python3 -m venv /python-env
-ENV PATH="/python-env/bin:$PATH"
-
 {% if use_ssh_mount %}
 # Set up SSH config
 RUN mkdir -p -m 0700 ~/.ssh && ssh-keyscan github.com >> ~/.ssh/known_hosts
@@ -31,13 +27,22 @@ RUN mkdir -p -m 0700 ~/.ssh && ssh-keyscan github.com >> ~/.ssh/known_hosts
 WORKDIR /tmp/build
 COPY {{ tesseract_runtime_location }} ./tesseract_runtime/
 COPY {{ tesseract_source_directory }}/tesseract_requirements.txt* ./
+COPY {{ tesseract_source_directory }}/tesseract_environment.yml* ./
 COPY local_requirements* ./local_requirements
 
 # Install all dependencies
 RUN {% if use_ssh_mount %}--mount=type=ssh{% endif %} \
-    TESSERACT_DEPS=$(find ./local_requirements/ -mindepth 1 -maxdepth 1 2>/dev/null || echo "") && \
-    if [ -f tesseract_requirements.txt ]; then TESSERACT_DEPS="$TESSERACT_DEPS -r tesseract_requirements.txt"; fi && \
-    pip install ./tesseract_runtime $TESSERACT_DEPS
+    if [ -f tesseract_requirements.txt ]; then \
+        python3 -m venv /python-env && \
+        TESSERACT_DEPS=$(find ./local_requirements/ -mindepth 1 -maxdepth 1 2>/dev/null || echo "") && \
+        TESSERACT_DEPS="$TESSERACT_DEPS -r tesseract_requirements.txt" && \
+        pip install ./tesseract_runtime $TESSERACT_DEPS; \
+    elif [ -f tesseract_environment.yml ]; then \
+        conda env create --file tesseract_environment.yml -p /python-env && \
+        conda run -p /python-env pip install ./tesseract_runtime; \
+    fi
+
+ENV PATH="/python-env/bin:$PATH"
 
 # Stage 2: Set up runtime environment
 {% if config.build_config.target_platform.strip() == "native" %}
