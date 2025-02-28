@@ -275,7 +275,7 @@ def tesseract_requirements_hook(src_dir, build_dir, template_dir):
 
     reqstxt = src_dir / "tesseract_requirements.txt"
     if reqstxt.exists():
-        local_dependencies, remote_dependencies = parse_requirements()
+        local_dependencies, remote_dependencies = parse_requirements(reqstxt)
     else:
         local_dependencies, remote_dependencies = [], []
 
