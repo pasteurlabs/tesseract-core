@@ -269,8 +269,8 @@ def create_dockerfile(
 
 
 def tesseract_requirements_hook(src_dir, build_dir, template_dir):
-    build_script = template_dir / "build_tesseract_requirements.sh"
-    copy(build_script, build_dir / "build_tesseract_requirements.sh")
+    build_script = template_dir / "build_python_venv.sh"
+    copy(build_script, build_dir / "__tesseract_source__" / "build_python_venv.sh")
 
     local_dependencies, remote_dependencies = parse_requirements(
         src_dir / "tesseract_requirements.txt"
@@ -337,10 +337,7 @@ def build_image(
 
     template_dir = Path(sdk.__file__).parent / "templates"
 
-    if python_env_hook is None:
-        # default to empty tesseract_requirements.txt
-        (build_dir / "__tesseract_source__" / "tesseract_requirements.txt").touch()
-    else:
+    if python_env_hook is not None:
         python_env_hook(src_dir, build_dir, template_dir)
 
     def _ignore_pycache(_, names: list[str]) -> list[str]:
@@ -489,14 +486,7 @@ def build_tesseract(
         build_dir.mkdir(exist_ok=True)
         keep_build_dir = True
 
-    buildfrom = "tesseract_environment"
-    hooks = {
-        "tesseract_environment": tesseract_environment_hook,
-        "tesseract_requirements": tesseract_requirements_hook,
-    }
-    dockerfile = create_dockerfile(
-        config, use_ssh_mount=inject_ssh, buildfrom=buildfrom
-    )
+    dockerfile = create_dockerfile(config, use_ssh_mount=inject_ssh)
 
     try:
         out = build_image(
@@ -507,7 +497,6 @@ def build_tesseract(
             inject_ssh=inject_ssh,
             keep_build_cache=keep_build_cache,
             generate_only=generate_only,
-            python_env_hook=hooks[buildfrom],
         )
     finally:
         if not keep_build_dir:

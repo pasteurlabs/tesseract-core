@@ -28,10 +28,10 @@ WORKDIR /tmp/build
 COPY {{ tesseract_runtime_location }} ./tesseract_runtime/
 COPY {{ tesseract_source_directory }}/tesseract_requirements.txt* ./
 COPY {{ tesseract_source_directory }}/tesseract_environment.yml* ./
+COPY {{ tesseract_source_directory }}/build_python_venv.sh* ./
 COPY local_requirements* ./local_requirements
-COPY {{ python_venv_builder }} ./
 
-RUN {% if use_ssh_mount %}--mount=type=ssh{% endif %} bash {{ python_venv_builder }}
+RUN {% if use_ssh_mount %}--mount=type=ssh{% endif %} bash build_python_venv.sh
 ENV PATH="/python-env/bin:$PATH"
 
 # Stage 2: Set up runtime environment
