@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.2] - 2025-02-27
+
+### Bug Fixes
+
+- Validate ShapeDType in abstract-eval schemas (#40)
+- Resolve paths before passing volumes to docker (#48)
+- Dangling Tesseracts in e2e tests (#51)
+- Sanitize error output (#52)
+
+### Documentation
+
+- Python API for Julia example (#37)
+- Fix links again (#49)
+
 ## [0.7.1] - 2025-02-26
 
 ### Bug Fixes

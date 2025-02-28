@@ -194,6 +194,11 @@ def test_abstract_eval_endpoint(testmodule):
     result = abstract_eval_endpoint(inputs)
     assert result
 
+    with pytest.raises(ValueError):
+        failing_inputs_shapedtype = inputs_shapedtype.copy()
+        failing_inputs_shapedtype["scalar"]["shape"] = (1, 2, 3)
+        inputs = EndpointSchema.model_validate({"inputs": failing_inputs_shapedtype})
+
 
 @pytest.mark.parametrize(
     "ad_inout",

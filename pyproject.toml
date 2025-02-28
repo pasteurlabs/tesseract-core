@@ -27,7 +27,7 @@ dynamic = [
 
 [project.urls]
 Homepage = "https://github.com/pasteurlabs/tesseract-core"
-Documentation = "https://pasteur-labs-tesseract-core.readthedocs-hosted.com/en/latest/"
+Documentation = "https://docs.pasteurlabs.ai/projects/tesseract-core/latest"
 
 [build-system]
 requires = ["hatchling", "hatch-vcs", "toml"]

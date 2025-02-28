@@ -258,8 +258,7 @@ def create_abstract_eval_schema(
 
     def replace_array_with_shapedtype(obj: T, _: Any) -> Union[T, type[ShapeDType]]:
         if is_array_annotation(obj):
-            return ShapeDType
-
+            return ShapeDType.from_array_annotation(obj)
         return obj
 
     GeneratedInputSchema = apply_function_to_model_tree(
