@@ -104,6 +104,51 @@ def set_at_path(tree: Any, values: dict[str, Any]) -> Any:
     return tree
 
 
+def bump_at_path(tree: Any, bumps: dict[str, Any]) -> Any:
+    """Bump a collection of paths in a nested pytree.
+
+    `bumps` argument is a flat dictionary with paths as keys and bumps as values.
+
+    Paths can have a structure like `a.b.[0].c.{key}` where:
+    - `a` is an attribute / key of the input tree
+    - `b.[0]` is the first element of the list `b`
+    - `c.{key}` is the value of the key `key` in the dictionary `c`
+    """
+    tree = deepcopy(tree)
+
+    def _bump_recursive(tree: Any, path: list[str], bump: float) -> Any:
+        key, path = path[0], path[1:]
+        method, idx = path_to_index_op(key)
+        if method in ("seq", "dict"):
+            if not path:
+                tree[idx] = tree[idx] + bump
+                return
+            return _bump_recursive(tree[idx], path, bump)
+        elif method == "getattr":
+            if hasattr(tree, key):
+                if not path:
+                    setattr(tree, key, getattr(tree, key) + bump)
+                    return
+                return _bump_recursive(getattr(tree, key), path, bump)
+            elif isinstance(tree, Mapping):
+                # If the key is not an attribute, try to access it as a key in a dictionary
+                # This is useful for accessing keys of models that have been dumped to dictionaries
+                if not path:
+                    tree[key] = tree[key] + bump
+                    return
+                return _bump_recursive(tree[key], path, bump)
+            else:
+                raise AttributeError(f"Attribute {key} not found in {tree}")
+        else:
+            raise AssertionError(f"Invalid method: {method}")
+
+    for path, bump in bumps.items():
+        split_path = path.split(".")
+        _bump_recursive(tree, split_path, bump)
+
+    return tree
+
+
 def flatten_with_paths(
     tree: Union[Mapping, Sequence, BaseModel],
     include_paths: set[str],
