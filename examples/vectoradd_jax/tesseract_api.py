@@ -33,9 +33,9 @@ class InputSchema(BaseModel):
         description="An arbitrary vector and a scalar to multiply it by "
         "must be of same shape as b"
     )
-    donothing: str = Field(
-        description="Abritrary string to test jax doesn't complain about non-diff inputs",
-        default="donothing",
+    norm_ord: int = Field(
+        description="Order of norm (see numpy.linalg.norm)",
+        default=2,
     )
 
     @model_validator(mode="after")
@@ -71,11 +71,13 @@ def apply_jit(inputs: dict) -> dict:
     return {
         "vector_add": {
             "result": add_result,
-            "normed_result": add_result / jnp.linalg.norm(add_result, ord=2),
+            "normed_result": add_result
+            / jnp.linalg.norm(add_result, ord=inputs["norm_ord"]),
         },
         "vector_min": {
             "result": min_result,
-            "normed_result": min_result / jnp.linalg.norm(min_result, ord=2),
+            "normed_result": min_result
+            / jnp.linalg.norm(min_result, ord=inputs["norm_ord"]),
         },
     }
 
