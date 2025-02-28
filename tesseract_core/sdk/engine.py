@@ -241,13 +241,14 @@ def get_runtime_dir() -> Path:
 def create_dockerfile(
     user_config: TesseractConfig,
     use_ssh_mount: bool = False,
-    environment_specification="tesseract_requirements.txt",
+    python_environment: str = "tesseract_requirements.txt",
 ) -> str:
     """Create the Dockerfile for the package.
 
     Args:
         user_config: The Tesseract configuration object.
         use_ssh_mount: Whether to use SSH mount to install dependencies (prevents caching).
+        python_environment: Python environment file to use in build_python_venv.sh
 
     Returns:
         A string with the Dockerfile content.
@@ -260,7 +261,7 @@ def create_dockerfile(
         "tesseract_runtime_location": "__tesseract_runtime__",
         "config": user_config,
         "use_ssh_mount": use_ssh_mount,
-        "environment_specification": environment_specification,
+        "python_environment": python_environment,
     }
 
     logger.debug(f"Generating Dockerfile from template: {template_name}")
@@ -274,9 +275,7 @@ def tesseract_requirements_hook(src_dir, build_dir, template_dir):
 
     reqstxt = src_dir / "tesseract_requirements.txt"
     if reqstxt.exists():
-        local_dependencies, remote_dependencies = parse_requirements(
-
-        )
+        local_dependencies, remote_dependencies = parse_requirements()
     else:
         local_dependencies, remote_dependencies = [], []
 
@@ -309,7 +308,7 @@ def build_image(
     inject_ssh: bool = False,
     keep_build_cache: bool = False,
     generate_only: bool = False,
-    environment_specification="tesseract_requirements.txt",
+    python_environment="tesseract_requirements.txt",
 ) -> docker.models.images.Image | None:
     """Build the image from a Dockerfile.
 
@@ -332,7 +331,7 @@ def build_image(
 
     template_dir = Path(sdk.__file__).parent / "templates"
 
-    if environment_specification == "tesseract_requirements.txt":
+    if python_environment == "tesseract_requirements.txt":
         tesseract_requirements_hook(src_dir, build_dir, template_dir)
 
     def _ignore_pycache(_, names: list[str]) -> list[str]:
@@ -438,8 +437,6 @@ def build_tesseract(
     config_override: tuple[tuple[list[str], str], ...] = (),
     keep_build_cache: bool = False,
     generate_only: bool = False,
-    environment_specification = "tesseract_requirements.txt"
-    # environment_specification = "tesseract_environment.yml"
 ) -> docker.models.images.Image | Path:
     """Build a new Tesseract from a context directory.
 
@@ -483,7 +480,11 @@ def build_tesseract(
         build_dir.mkdir(exist_ok=True)
         keep_build_dir = True
 
-    dockerfile = create_dockerfile(config, use_ssh_mount=inject_ssh, environment_specification=config.build_config.python_environment)
+    dockerfile = create_dockerfile(
+        config,
+        use_ssh_mount=inject_ssh,
+        python_environment=config.build_config.python_environment,
+    )
 
     try:
         out = build_image(
@@ -494,7 +495,7 @@ def build_tesseract(
             inject_ssh=inject_ssh,
             keep_build_cache=keep_build_cache,
             generate_only=generate_only,
-            environment_specification=config.build_config.python_environment
+            python_environment=config.build_config.python_environment,
         )
     finally:
         if not keep_build_dir:

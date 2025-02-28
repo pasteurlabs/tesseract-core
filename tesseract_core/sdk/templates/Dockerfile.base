@@ -26,7 +26,7 @@ RUN mkdir -p -m 0700 ~/.ssh && ssh-keyscan github.com >> ~/.ssh/known_hosts
 # Copy all dependencies, for both the specific Tesseract and the runtime
 WORKDIR /tmp/build
 COPY {{ tesseract_runtime_location }} ./tesseract_runtime/
-COPY {{ tesseract_source_directory }}/{{ environment_specification }}* ./
+COPY {{ tesseract_source_directory }}/{{ python_environment }}* ./
 COPY {{ tesseract_source_directory }}/build_python_venv.sh* ./
 COPY local_requirements* ./local_requirements
 
