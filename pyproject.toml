@@ -16,6 +16,7 @@ dependencies = [
     "pydantic",
     "numpy",
     "requests",
+    "pip",
 ]
 dynamic = [
     # Injected via hatch-vcs
