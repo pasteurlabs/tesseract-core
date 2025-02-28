@@ -6,4 +6,6 @@ build_config:
   base_image: "condaforge/miniforge3:latest"
   package_data:
    - [build_python_venv.sh, build_python_venv.sh]
-  python_environment: "tesseract_environment.yaml"
+  requirements:
+    provider: conda
+    file: tesseract_environment.yaml
