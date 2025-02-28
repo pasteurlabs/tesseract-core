@@ -238,7 +238,11 @@ def get_runtime_dir() -> Path:
     return Path(tesseract_core.__file__).parent / "runtime"
 
 
-def create_dockerfile(user_config: TesseractConfig, use_ssh_mount: bool = False) -> str:
+def create_dockerfile(
+    user_config: TesseractConfig,
+    use_ssh_mount: bool = False,
+    buildfrom="tesseract_requirements",
+) -> str:
     """Create the Dockerfile for the package.
 
     Args:
@@ -256,11 +260,50 @@ def create_dockerfile(user_config: TesseractConfig, use_ssh_mount: bool = False)
         "tesseract_runtime_location": "__tesseract_runtime__",
         "config": user_config,
         "use_ssh_mount": use_ssh_mount,
+        "python_venv_builder": f"build_{buildfrom}.sh",
     }
 
     logger.debug(f"Generating Dockerfile from template: {template_name}")
 
     return template.render(template_values)
+
+
+def tesseract_requirements_hook(src_dir, build_dir, template_dir):
+    build_script = template_dir / "build_tesseract_requirements.sh"
+    copy(build_script, build_dir / "build_tesseract_requirements.sh")
+
+    local_dependencies, remote_dependencies = parse_requirements(
+        src_dir / "tesseract_requirements.txt"
+    )
+
+    if local_dependencies:
+        local_requirements_path = build_dir / "local_requirements"
+        Path.mkdir(local_requirements_path)
+        for dependency in local_dependencies:
+            src = src_dir / dependency
+            dest = build_dir / "local_requirements" / src.name
+            if src.is_file():
+                copy(src, dest)
+            else:
+                copytree(src, dest)
+
+    # We need to write a new requirements file in the build dir, where we explicitly
+    # removed the local dependencies
+    requirements_file_path = (
+        build_dir / "__tesseract_source__" / "tesseract_requirements.txt"
+    )
+    with requirements_file_path.open("w", encoding="utf-8") as f:
+        for dependency in remote_dependencies:
+            f.write(f"{dependency}\n")
+
+
+def tesseract_environment_hook(src_dir, build_dir, template_dir):
+    build_script = template_dir / "build_tesseract_environment.sh"
+    copy(build_script, build_dir / "build_tesseract_environment.sh")
+    copy(
+        src_dir / "tesseract_environment.yml",
+        build_dir / "__tesseract_source__" / "tesseract_environment.yml",
+    )
 
 
 def build_image(
@@ -271,6 +314,7 @@ def build_image(
     inject_ssh: bool = False,
     keep_build_cache: bool = False,
     generate_only: bool = False,
+    python_env_hook: Callable | None = None,
 ) -> docker.models.images.Image | None:
     """Build the image from a Dockerfile.
 
@@ -289,46 +333,15 @@ def build_image(
 
     copytree(src_dir, build_dir / "__tesseract_source__")
 
-    reqstxt = src_dir / "tesseract_requirements.txt"
-    envyml = src_dir / "tesseract_environment.yml"
-    if reqstxt.exists() and envyml.exists():
-        raise ValueError(
-            "Found more than one dependency file. You can only specify one."
-        )
+    from tesseract_core import sdk
 
-    if reqstxt.exists():
-        local_dependencies, remote_dependencies = parse_requirements(
-            src_dir / "tesseract_requirements.txt"
-        )
+    template_dir = Path(sdk.__file__).parent / "templates"
 
-        if local_dependencies:
-            local_requirements_path = build_dir / "local_requirements"
-            Path.mkdir(local_requirements_path)
-            for dependency in local_dependencies:
-                src = src_dir / dependency
-                dest = build_dir / "local_requirements" / src.name
-                if src.is_file():
-                    copy(src, dest)
-                else:
-                    copytree(src, dest)
-
-        # We need to write a new requirements file in the build dir, where we explicitly
-        # removed the local dependencies
-        requirements_file_path = (
-            build_dir / "__tesseract_source__" / "tesseract_requirements.txt"
-        )
-        with requirements_file_path.open("w", encoding="utf-8") as f:
-            for dependency in remote_dependencies:
-                f.write(f"{dependency}\n")
-
-    elif envyml.exists():
-        copy(
-            src_dir / "tesseract_environment.yml",
-            build_dir / "__tesseract_source__" / "tesseract_environment.yml",
-        )
-    else:
+    if python_env_hook is None:
         # default to empty tesseract_requirements.txt
         (build_dir / "__tesseract_source__" / "tesseract_requirements.txt").touch()
+    else:
+        python_env_hook(src_dir, build_dir, template_dir)
 
     def _ignore_pycache(_, names: list[str]) -> list[str]:
         ignore = []
@@ -476,7 +489,14 @@ def build_tesseract(
         build_dir.mkdir(exist_ok=True)
         keep_build_dir = True
 
-    dockerfile = create_dockerfile(config, use_ssh_mount=inject_ssh)
+    buildfrom = "tesseract_environment"
+    hooks = {
+        "tesseract_environment": tesseract_environment_hook,
+        "tesseract_requirements": tesseract_requirements_hook,
+    }
+    dockerfile = create_dockerfile(
+        config, use_ssh_mount=inject_ssh, buildfrom=buildfrom
+    )
 
     try:
         out = build_image(
@@ -487,6 +507,7 @@ def build_tesseract(
             inject_ssh=inject_ssh,
             keep_build_cache=keep_build_cache,
             generate_only=generate_only,
+            python_env_hook=hooks[buildfrom],
         )
     finally:
         if not keep_build_dir:
