@@ -21,10 +21,12 @@ from tesseract_core.runtime.tree_transforms import filter_func, flatten_with_pat
 
 class InputSchema(BaseModel):
     example: Differentiable[Float32]
+    b: Differentiable[Float32]
 
 
 class OutputSchema(BaseModel):
     example: Differentiable[Float32]
+    c: Differentiable[Float32]
 
 
 #
@@ -37,7 +39,10 @@ class OutputSchema(BaseModel):
 # to Input/OutputSchema
 @jit
 def apply_jit(inputs: dict) -> dict:
-    return inputs
+    return {
+        "example": inputs["example"] + inputs["b"],
+        "c": inputs["example"] * inputs["b"],
+    }
 
 
 def apply(inputs: InputSchema) -> OutputSchema:
@@ -50,7 +55,7 @@ def apply(inputs: InputSchema) -> OutputSchema:
     # should be safe)
 
     out = apply_jit(inputs.model_dump())
-    
+
     # Optional: Insert any post-processing that doesn't require tracing
     # For example, you might want to save to disk or modify a non-differentiable
     # output. Again, do not modify any differentiable output in a non-linear way.
