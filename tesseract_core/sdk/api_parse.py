@@ -79,6 +79,8 @@ class TesseractBuildConfig(BaseModel):
         ),
     )
 
+    python_environment: Path = "tesseract_requirements.txt"
+
     model_config = ConfigDict(extra="forbid")
 
 

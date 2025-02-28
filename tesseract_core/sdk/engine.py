@@ -272,9 +272,13 @@ def tesseract_requirements_hook(src_dir, build_dir, template_dir):
     build_script = template_dir / "build_python_venv.sh"
     copy(build_script, build_dir / "__tesseract_source__" / "build_python_venv.sh")
 
-    local_dependencies, remote_dependencies = parse_requirements(
-        src_dir / "tesseract_requirements.txt"
-    )
+    reqstxt = src_dir / "tesseract_requirements.txt"
+    if reqstxt.exists():
+        local_dependencies, remote_dependencies = parse_requirements(
+
+        )
+    else:
+        local_dependencies, remote_dependencies = [], []
 
     if local_dependencies:
         local_requirements_path = build_dir / "local_requirements"
@@ -479,7 +483,7 @@ def build_tesseract(
         build_dir.mkdir(exist_ok=True)
         keep_build_dir = True
 
-    dockerfile = create_dockerfile(config, use_ssh_mount=inject_ssh, environment_specification=environment_specification)
+    dockerfile = create_dockerfile(config, use_ssh_mount=inject_ssh, environment_specification=config.build_config.python_environment)
 
     try:
         out = build_image(
@@ -490,7 +494,7 @@ def build_tesseract(
             inject_ssh=inject_ssh,
             keep_build_cache=keep_build_cache,
             generate_only=generate_only,
-            environment_specification=environment_specification
+            environment_specification=config.build_config.python_environment
         )
     finally:
         if not keep_build_dir:
