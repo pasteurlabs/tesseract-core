@@ -297,15 +297,6 @@ def tesseract_requirements_hook(src_dir, build_dir, template_dir):
             f.write(f"{dependency}\n")
 
 
-def tesseract_environment_hook(src_dir, build_dir, template_dir):
-    build_script = template_dir / "build_tesseract_environment.sh"
-    copy(build_script, build_dir / "build_tesseract_environment.sh")
-    copy(
-        src_dir / "tesseract_environment.yml",
-        build_dir / "__tesseract_source__" / "tesseract_environment.yml",
-    )
-
-
 def build_image(
     src_dir: str | Path,
     image_name: str,
