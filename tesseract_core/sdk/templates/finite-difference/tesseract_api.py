@@ -6,9 +6,9 @@
 
 from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from tesseract_core.runtime import Differentiable, Field, Float32
+from tesseract_core.runtime import Differentiable, Float32
 from tesseract_core.runtime.tree_transforms import bump_at_path, flatten_with_paths
 
 #
