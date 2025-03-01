@@ -1,0 +1,11 @@
+{
+    "inputs": {
+         "a": {
+             "v": {"shape": [3], "dtype": "float32"},
+             "s": {"shape":[],"dtype":"float32"}
+         },
+        "b": {"v":{"shape": [3], "dtype": "float32"},
+              "s":{"shape": [], "dtype":"float32"}
+        }
+     }
+}
