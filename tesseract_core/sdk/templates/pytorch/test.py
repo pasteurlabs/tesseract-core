@@ -8,7 +8,7 @@ tesseract = Tesseract(url="http://localhost:8000")
 # out = tesseract.apply({"b": 2.0, "example": 1.0})
 
 inputs = {
-    "a": {"v": np.array([1.0, 2.0, 3.0])},
+    "a": {"v": np.array([1.0, 2.0, 3.0]), "s": 2.0},
     "b": {"v": np.array([4.0, 5.0, 6.0]), "s": 3.0},
 }
 
@@ -19,8 +19,8 @@ jvp_outputs = ["vector_add.result", "vector_min.normed_result"]
 tangent_vector = {"a.v": np.array([0.0, 5.0, 2.0])}
 
 cotangent_vector = {
-    "vector_min.normed_result": np.array([0.1, 0.2, 0.3]),
-    "vector_add.result": np.array([0.4, 0.5, 0.6]),
+    "vector_add.result": np.array([0.1, 0.2, 0.3]),
+    "vector_min.normed_result": np.array([0.4, 0.5, 0.6]),
 }
 out = tesseract.apply(inputs)
 

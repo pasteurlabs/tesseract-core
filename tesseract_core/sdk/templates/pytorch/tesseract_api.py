@@ -188,6 +188,7 @@ def jacobian_vector_product(
     # create a positional function that accepts a list of values
     filtered_pos_func = filter_pos_func(evaluate, tensor_inputs, jvp_outputs, treedef)
 
+    print(f"pos_inputs: {pos_inputs}")
     tangent = torch.func.jvp(filtered_pos_func, tuple(pos_inputs), tuple(pos_tangent))
 
     return tangent[1]
@@ -205,18 +206,19 @@ def vector_jacobian_product(
 
     # flatten the dictionaries such that they can be accessed by paths
     flat_dict_inputs = flatten_with_paths(tensor_inputs, vjp_inputs)
-    # flat_dict_tangent = flatten_with_paths(tensor_tangent, jvp_outputs)
 
     # transform the dictionaries into a list of values for a positional function
     pos_inputs, treedef = tree_flatten(flat_dict_inputs)
-    pos_cotangent, _ = tree_flatten(tensor_cotangent)
 
     # create a positional function that accepts a list of values
     filtered_pos_func = filter_pos_func(evaluate, tensor_inputs, vjp_outputs, treedef)
 
-    _, vjp_func = torch.func.vjp(filtered_pos_func, tuple(pos_inputs))
+    print(f"pos_inputs: {pos_inputs}")
+    res, vjp_func = torch.func.vjp(filtered_pos_func, *pos_inputs)
 
-    return vjp_func(tuple(pos_cotangent))[0]
+    res = vjp_func(tensor_cotangent)[0]
+
+    return res
 
 
 def filter_pos_func(
