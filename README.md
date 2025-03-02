@@ -56,7 +56,8 @@ Tesseracts provide built-in support for [differentiable programming](https://doc
    {"result":{"object_type":"array","shape":[1],"dtype":"float64","data":{"buffer":[3.0],"encoding":"json"}}}⏎
    ```
 
-Now you're ready to dive into the [documentation](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/) for more information on
+> [!TIP]
+> Now you're ready to dive into the [documentation](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/) for more information on
 [installation](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/introduction/installation.html),
 [creating Tesseracts](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/creating-tesseracts/create.html), and
 [invoking them](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/using-tesseracts/use.html).
