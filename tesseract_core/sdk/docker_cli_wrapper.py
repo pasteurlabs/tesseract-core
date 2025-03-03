@@ -48,7 +48,8 @@ class DockerWrapper:
             self.short_id = self.id[:12] if self.id else None
             self.attrs = json_dict
             self.tags = json_dict.get("RepoTags", None)
-            self.name = self.tags[0] if self.tags else None
+            # Docker images may be prefixed with the registry URL
+            self.name = self.tags[0].split("/")[-1] if self.tags else None
 
     def get_all_containers(self) -> dict:
         """Returns the current list of containers."""
@@ -182,14 +183,12 @@ class DockerWrapper:
         Return exit code and stdout.
         """
         try:
-            print("AKOAKO === ENTERING EXEC_RUN")
             result = subprocess.run(
                 ["docker", "exec", container_id, *command],
                 check=True,
                 capture_output=True,
                 text=True,
             )
-            print("AKOAKO === EXITING EXEC_RUN")
             return result.returncode, result.stdout
         except subprocess.CalledProcessError as ex:
             raise RuntimeError(
@@ -199,7 +198,7 @@ class DockerWrapper:
     def run_container(
         self,
         image_id: str,
-        command: str,
+        command: list[str],
         parsed_volumes: dict,
         gpus: list[int | str] | None = None,
     ) -> bool:
@@ -245,7 +244,9 @@ class DockerWrapper:
             return result.stdout, result.stderr
 
         except subprocess.CalledProcessError as ex:
-            raise RuntimeError(f"{ex.stderr}") from ex
+            raise RuntimeError(
+                f"Error running command: `{' '.join(cmd_list)}`. \n\n{ex.stderr}"
+            ) from ex
 
     def docker_buildx(
         self,
@@ -303,6 +304,8 @@ class DockerWrapper:
         if return_code != 0:
             raise RuntimeError("Error while building Docker image", logs)
 
+        # Update self.images
+        self._update_images()
         # Get image object
         image = self.get_image(tag)
         return image

@@ -754,19 +754,18 @@ def run_container(
         )
 
     except RuntimeError as e:
+        if "repository" in str(e) or "Repository" in str(e):
+            raise UserError(
+                "Tesseract image not found. "
+                f"Are you sure your tesseract image name is {tesseract_image}?\n\n{e}"
+            ) from e
+
         if "No such command" in str(e):
             error_string = f"Error running Tesseract '{tesseract_image}' \n\n Error: Unimplemented command '{cmd}'.  "
         else:
             error_string = _sanitize_error_output(
                 f"Error running Tesseract. \n\n{e}", tesseract_image
             )
-
-
-        if "repository" in str(e) or "Repository" in str(e):
-            raise UserError(
-                "Tesseract image not found. "
-                f"Are you sure your tesseract image name is {tesseract_image}?\n\n{e}"
-            ) from e
 
         raise UserError(error_string) from e
 
