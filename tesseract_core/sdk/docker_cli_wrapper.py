@@ -27,6 +27,7 @@ class DockerWrapper:
 
         def __init__(self, json_dict: dict) -> None:
             self.id = json_dict.get("Id", None)
+            self.short_id = self.id[:12] if self.id else None
             self.name = json_dict.get("Name", None)
             ports = json_dict.get("NetworkSettings", None)
             if ports:
@@ -48,18 +49,17 @@ class DockerWrapper:
             self.short_id = self.id[:12] if self.id else None
             self.attrs = json_dict
             self.tags = json_dict.get("RepoTags", None)
-            self.name = self.tags[0] if self.tags else None
+            # Docker images may be prefixed with the registry URL
+            self.name = self.tags[0].split("/")[-1] if self.tags else None
 
     def get_all_containers(self) -> dict:
         """Returns the current list of containers."""
-        if not self.containers:
-            self._update_containers()
+        self._update_containers()
         return self.containers
 
     def get_all_images(self) -> dict:
         """Returns the current list of images."""
-        if not self.images:
-            self._update_images()
+        self._update_images()
         return self.images
 
     def get_projects(self) -> dict:
@@ -182,14 +182,12 @@ class DockerWrapper:
         Return exit code and stdout.
         """
         try:
-            print("AKOAKO === ENTERING EXEC_RUN")
             result = subprocess.run(
                 ["docker", "exec", container_id, *command],
                 check=True,
                 capture_output=True,
                 text=True,
             )
-            print("AKOAKO === EXITING EXEC_RUN")
             return result.returncode, result.stdout
         except subprocess.CalledProcessError as ex:
             raise RuntimeError(
@@ -199,7 +197,7 @@ class DockerWrapper:
     def run_container(
         self,
         image_id: str,
-        command: str,
+        command: list[str],
         parsed_volumes: dict,
         gpus: list[int | str] | None = None,
     ) -> bool:
@@ -207,12 +205,14 @@ class DockerWrapper:
         # Convert the parsed_volumes into a list of strings in proper argument format,
         # `-v host_path:container_path:mode`.
         if not parsed_volumes:
-            parsed_volumes = []
+            volume_args = []
         else:
-            parsed_volumes = [
-                f"-v {host_path}:{volume_info['bind']}:{volume_info['mode']}"
-                for host_path, volume_info in parsed_volumes.items()
-            ]
+            volume_args = []
+            for host_path, volume_info in parsed_volumes.items():
+                volume_args.append("-v")
+                volume_args.append(
+                    f"{host_path}:{volume_info['bind']}:{volume_info['mode']}"
+                )
 
         if gpus:
             gpus_str = ",".join(gpus)
@@ -225,7 +225,7 @@ class DockerWrapper:
             "docker",
             "run",
             "--rm",
-            *parsed_volumes,
+            *volume_args,
             *([gpus_option] if gpus_option else []),
             image_id,
             *command,
@@ -245,7 +245,9 @@ class DockerWrapper:
             return result.stdout, result.stderr
 
         except subprocess.CalledProcessError as ex:
-            raise RuntimeError(f"{ex.stderr}") from ex
+            raise RuntimeError(
+                f"Error running command: `{' '.join(cmd_list)}`. \n\n{ex.stderr}"
+            ) from ex
 
     def docker_buildx(
         self,
@@ -303,6 +305,8 @@ class DockerWrapper:
         if return_code != 0:
             raise RuntimeError("Error while building Docker image", logs)
 
+        # Update self.images
+        self._update_images()
         # Get image object
         image = self.get_image(tag)
         return image
@@ -316,7 +320,10 @@ class DockerWrapper:
                 text=True,
                 check=True,
             )
-            container_ids = result.stdout.strip().split("\n")
+            if not result.stdout:
+                container_ids = []
+            else:
+                container_ids = result.stdout.strip().split("\n")
 
             # Check if theres any cleaned up containers.
             for container_id in self.containers:
@@ -347,7 +354,10 @@ class DockerWrapper:
                 text=True,
                 check=True,
             )
-            images = image_ids.stdout.strip().split("\n")
+            if not image_ids.stdout:
+                images = []
+            else:
+                images = image_ids.stdout.strip().split("\n")
 
             # Clean up deleted images.
             for image in self.images:

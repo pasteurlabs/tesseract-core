@@ -281,16 +281,16 @@ def mocked_docker(monkeypatch):
         if "run" in args[0]:
             # Return args to `docker run` as json.
             args = args[0]
-
             return_dict = {"volumes": {}, "device_requests": None}
             volume_arg = args[3]
             while "-v" in volume_arg:
                 # Add all the volumes and remove them from arg list.
-                volume = args[3].split(" ")[1].split(":")
+                volume = args[4].split(":")
                 return_dict["volumes"].update(
                     {volume[0]: {"bind": volume[1], "mode": volume[2]}}
                 )
                 # Remove this argument to fix indexing for none volume cases.
+                args.pop(4)
                 args.pop(3)
                 volume_arg = args[3]
 

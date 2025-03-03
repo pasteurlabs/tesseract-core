@@ -9,12 +9,9 @@ from tesseract_core.sdk.cli import app
 
 
 def image_exists(docker_wrapper, image_name):
-    # Docker images may be prefixed with the registry URL
-    return any(
-        tag.split("/")[-1] == image_name
-        for img in docker_wrapper.get_all_images()
-        for tag in img.tags
-    )
+    images = docker_wrapper.get_all_images()
+    # If any image.name starts with image_name, we consider it exists
+    return any(image_name in image.name for image in images)
 
 
 def print_debug_info(result):
@@ -26,7 +23,7 @@ def print_debug_info(result):
         traceback.print_exception(*result.exc_info)
 
 
-def build_tesseract(sourcedir, image_name, tag=None, build_retries=3):
+def build_tesseract(docker_wrapper, sourcedir, image_name, tag=None, build_retries=3):
     cli_runner = CliRunner()
 
     build_args = [
@@ -58,4 +55,5 @@ def build_tesseract(sourcedir, image_name, tag=None, build_retries=3):
 
     print_debug_info(result)
     assert result.exit_code == 0, result.exception
+    assert docker_wrapper.get_image(image_name)
     return image_name

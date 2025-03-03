@@ -18,7 +18,9 @@ from tesseract_core.sdk.cli import AVAILABLE_RECIPES, app
 @pytest.fixture(scope="module")
 def built_image_name(docker_wrapper, shared_dummy_image_name, dummy_tesseract_location):
     """Build the dummy Tesseract image for the tests."""
-    image_name = build_tesseract(dummy_tesseract_location, shared_dummy_image_name)
+    image_name = build_tesseract(
+        docker_wrapper, dummy_tesseract_location, shared_dummy_image_name
+    )
     assert image_exists(docker_wrapper, image_name)
     yield image_name
 
@@ -42,7 +44,9 @@ def test_build_from_init_endtoend(
         assert yaml.safe_load(config_yaml)["name"] == dummy_image_name
 
     img_tag = "foo" if tag else None
-    image_name = build_tesseract(tmp_path, dummy_image_name, tag=img_tag)
+    image_name = build_tesseract(
+        docker_wrapper, tmp_path, dummy_image_name, tag=img_tag
+    )
     assert image_exists(docker_wrapper, image_name)
 
     # Test that the image can be run and that --help is forwarded correctly
@@ -131,7 +135,6 @@ def test_tesseract_run_stdout(built_image_name):
 def test_tesseract_serve_pipeline(docker_wrapper, built_image_name):
     cli_runner = CliRunner(mix_stderr=False)
     try:
-
         # Serve
         run_res = cli_runner.invoke(
             app,
@@ -184,6 +187,7 @@ def test_tesseract_serve_pipeline(docker_wrapper, built_image_name):
             catch_exceptions=False,
         )
         assert run_res.exit_code == 0, run_res.stderr
+
 
 @pytest.mark.parametrize("tear_all", [True, False])
 def test_tesseract_teardown_multiple(built_image_name, tear_all):
@@ -382,6 +386,7 @@ def test_tesseract_serve_with_volumes(built_image_name, tmp_path, docker_wrapper
         assert run_res.exit_code == 0, run_res.stderr
         assert run_res.stdout
         project_meta = json.loads(run_res.stdout)
+        project_id = project_meta["project_id"]
         tesseract0_id = project_meta["containers"][0]["name"]
         tesseract0 = docker_wrapper.get_container(tesseract0_id)
         assert tesseract0 is not None
@@ -393,7 +398,9 @@ def test_tesseract_serve_with_volumes(built_image_name, tmp_path, docker_wrapper
         with open(tmpfile, "w") as hello:
             hello.write("world")
             hello.flush()
-        exit_code, output = docker_wrapper.exec_run(tesseract0.name, ["cat", f"{dest}/hi"])
+        exit_code, output = docker_wrapper.exec_run(
+            tesseract0.name, ["cat", f"{dest}/hi"]
+        )
         assert exit_code == 0
         assert output == "world"
 
@@ -403,7 +410,9 @@ def test_tesseract_serve_with_volumes(built_image_name, tmp_path, docker_wrapper
             tesseract0.name, ["touch", f"{bar_file}"]
         )
         assert exit_code == 0
-        exit_code, output = docker_wrapper.exec_run(tesseract1.name, ["cat", f"{bar_file}"])
+        exit_code, output = docker_wrapper.exec_run(
+            tesseract1.name, ["cat", f"{bar_file}"]
+        )
         assert exit_code == 0
 
         # The file should exist outside the container
