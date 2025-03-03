@@ -4,9 +4,6 @@ from tesseract_core import Tesseract
 
 tesseract = Tesseract(url="http://localhost:8000")
 
-# Test the function
-# out = tesseract.apply({"b": 2.0, "example": 1.0})
-
 inputs = {
     "a": {"v": np.array([1.0, 2.0, 3.0]), "s": 2.0},
     "b": {"v": np.array([4.0, 5.0, 6.0]), "s": 3.0},
@@ -24,19 +21,12 @@ cotangent_vector = {
 }
 out = tesseract.apply(inputs)
 
-print(out)
 
-
-# jac = tesseract.jacobian({"b" : 2.0, "example": 1.0}, jac_inputs=("example", "b"), jac_outputs=("example", ))
-
-# print(jac)
-
-# vjp = tesseract.vector_jacobian_product(
-#     {"b" : 2.0, "example": 1.0},
-#     vjp_inputs=["example"],
-#     vjp_outputs=["example"],
-#     cotangent_vector={"example": 1.0},
-# )
+jac = tesseract.jacobian(
+    inputs=inputs,
+    jac_inputs=jvp_inputs,
+    jac_outputs=jvp_outputs,
+)
 
 jvp = tesseract.jacobian_vector_product(
     inputs,

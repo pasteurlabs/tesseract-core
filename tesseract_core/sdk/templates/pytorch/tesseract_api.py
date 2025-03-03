@@ -14,6 +14,7 @@ from typing_extensions import Self
 
 from tesseract_core.runtime import Array, Differentiable, Float32
 from tesseract_core.runtime.tree_transforms import (
+    filter_func,
     flatten_with_paths,
     set_at_path,
 )
@@ -140,32 +141,31 @@ def apply(inputs: InputSchema) -> OutputSchema:
 #
 
 
-# def jacobian(
-#     inputs: InputSchema,
-#     jac_inputs: set[str],
-#     jac_outputs: set[str],
-# ):
-#     # Convert to pytorch tensors to enable torch.jit and torch.autograd
-#     inputs = convert_to_tensors(inputs.model_dump())
+def jacobian(
+    inputs: InputSchema,
+    jac_inputs: set[str],
+    jac_outputs: set[str],
+):
+    # Convert to pytorch tensors to enable torch.jit and torch.autograd
+    tensor_inputs = convert_to_tensors(inputs.model_dump())
 
-#     #
-#     filtered_eval = filter_func(evaluate, inputs, jac_outputs)
+    filtered_eval = filter_func(evaluate, inputs, jac_outputs)
 
-#     for key in jac_inputs:
-#         inputs[key] = torch.nn.Parameter(inputs[key])
+    for key in jac_inputs:
+        tensor_inputs[key] = torch.nn.Parameter(tensor_inputs[key])
 
-#     jac_result = {dy: {} for dy in jac_outputs}
-#     with torch.enable_grad():
-#         output = evaluate(inputs)
-#         for dx in jac_inputs:
-#             for dy in jac_outputs:
-#                 grads = torch.autograd.grad(output[dy], inputs[dx], retain_graph=True)[
-#                     0
-#                 ]
+    jac_result = {dy: {} for dy in jac_outputs}
+    with torch.enable_grad():
+        output = filtered_eval(inputs)
 
-#                 jac_result[dy][dx] = grads
+        differentiable_inputs = {key: inputs[key] for key in jac_inputs}
+        differentiable_outputs = {key: output[key] for key in jac_outputs}
 
-#     return jac_result
+        grads = torch.autograd.grad(differentiable_outputs, differentiable_inputs)[0]
+
+        print(grads)
+
+    return jac_result
 
 
 def jacobian_vector_product(
@@ -186,10 +186,9 @@ def jacobian_vector_product(
     pos_tangent, _ = tree_flatten(tensor_tangent)
 
     # create a positional function that accepts a list of values
-    filtered_pos_func = filter_pos_func(evaluate, tensor_inputs, jvp_outputs, treedef)
+    filtered_pos_eval = filter_pos_func(evaluate, tensor_inputs, jvp_outputs, treedef)
 
-    print(f"pos_inputs: {pos_inputs}")
-    tangent = torch.func.jvp(filtered_pos_func, tuple(pos_inputs), tuple(pos_tangent))
+    tangent = torch.func.jvp(filtered_pos_eval, tuple(pos_inputs), tuple(pos_tangent))
 
     return tangent[1]
 
@@ -200,6 +199,14 @@ def vector_jacobian_product(
     vjp_outputs: set[str],
     cotangent_vector: dict[str, Any],
 ):
+    # Make ordering of vjp in and output args deterministic
+    # Necessacy as torch.vjp function requires inputs and outputs to be in the same order
+    # this is not necessary when using JAX
+    vjp_inputs = list(vjp_inputs)
+    vjp_outputs = list(vjp_outputs)
+    vjp_inputs.sort()
+    vjp_outputs.sort()
+
     # convert all numbers and arrays to torch tensors
     tensor_inputs = convert_to_tensors(inputs.model_dump())
     tensor_cotangent = convert_to_tensors(cotangent_vector)
@@ -217,8 +224,8 @@ def vector_jacobian_product(
 
     res = vjp_func(tensor_cotangent)
 
+    # rebuild the dictionary from the list of results
     res_dict = {}
-
     for key, value in zip(vjp_inputs, res):
         res_dict[key] = value
 
@@ -241,17 +248,11 @@ def filter_pos_func(
 
     # function that accepts positional arguments
     def filtered_pos_func(*args):
-        print(f"args: {args}")
-
         # convert back to dictionary
         new_inputs = tree_unflatten(pytree, args)
 
-        print(f"new_inputs: {new_inputs}")
-
         # partially update the default inputs with the new values
         updated_inputs = set_at_path(default_inputs, new_inputs)
-
-        print(f"updated_inputs: {updated_inputs}")
 
         return flatten_with_paths(func(updated_inputs), output_paths)
 
