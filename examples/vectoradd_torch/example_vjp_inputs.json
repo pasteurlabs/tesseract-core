@@ -5,7 +5,8 @@
                 1.0,
                 2.0,
                 3.0
-            ]
+            ],
+            "s": 2.0
         },
         "b": {
             "v": [
@@ -13,16 +14,15 @@
                 5.0,
                 6.0
             ],
-           "s": 3.0
-       }
+            "s": 3.0
+        }
     },
-    "vjp_inputs": [
-        "a.v",
-        "b.v"
+    "jac_inputs": [
+        "a.v"
     ],
-    "vjp_outputs": [
+    "jac_outputs": [
         "vector_add.result",
-        "vector_add.normed_result"
+        "vector_min.normed_result"
     ],
     "cotangent_vector": {
         "vector_add.result": [
@@ -30,7 +30,7 @@
             0.2,
             0.3
         ],
-        "vector_add.normed_result": [
+        "vector_min.normed_result": [
             0.4,
             0.5,
             0.6

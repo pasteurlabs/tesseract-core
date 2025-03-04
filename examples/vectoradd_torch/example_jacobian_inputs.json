@@ -5,7 +5,8 @@
                 1.0,
                 2.0,
                 3.0
-            ]
+            ],
+            "s": 2.0
         },
         "b": {
             "v": [
@@ -13,15 +14,14 @@
                 5.0,
                 6.0
             ],
-           "s": 3.0
-       }
+            "s": 3.0
+        }
     },
     "jac_inputs": [
-        "a.v",
-        "b.v"
+        "a.v"
     ],
     "jac_outputs": [
         "vector_add.result",
-        "vector_add.normed_result"
+        "vector_min.normed_result"
     ]
 }

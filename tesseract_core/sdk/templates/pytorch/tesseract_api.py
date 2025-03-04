@@ -190,7 +190,7 @@ def filter_pos_func(
     # function that accepts positional arguments
     def filtered_pos_func(*args):
         # convert back to dictionary
-        new_inputs = tree_unflatten(pytree, args)
+        new_inputs = tree_unflatten(args, pytree)
 
         # partially update the default inputs with the new values
         updated_inputs = set_at_path(default_inputs, new_inputs)
