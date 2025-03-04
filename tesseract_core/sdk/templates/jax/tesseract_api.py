@@ -21,11 +21,8 @@ from tesseract_core.runtime.tree_transforms import filter_func, flatten_with_pat
 # Note: This template uses equinox filter_jit to automatically treat non-array
 # inputs/outputs as static. As Tesseract scalar objects (e.g. Float32) are
 # essentially just wrappers around numpy 0D arrays, they will be considered to
-# be dynamic and will be traced by JAX. This is regardless of whether they are
-# tagged as Differentiable or not (the only purpose of the Differentiable tag
-# is to determine valid values for AD endpoint arguments not named `inputs`
-# and declaring a Float32 without the Differentiable flag provided no performance
-# gain). If you want to treat numerical value(s) as scalar you will need to use
+# be dynamic and will be traced by JAX. 
+# If you want to treat numerical values as scalar you will need to use
 # primitive Python types (e.g. float, int) instead of Float32, placing them in
 # hashable containers (e.g. tuple) if necessary.
 
