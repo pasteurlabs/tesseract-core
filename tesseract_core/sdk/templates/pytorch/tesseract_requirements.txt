@@ -3,6 +3,7 @@
 
 # Add Python requirements like this:
 torch --index-url https://download.pytorch.org/whl/cpu
+optree==0.14.0
 
 # This may contain private dependencies via SSH URLs:
 # git+ssh://git@github.com/username/repo.git@branch
