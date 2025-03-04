@@ -117,6 +117,8 @@ def jacobian(
     jac_inputs: set[str],
     jac_outputs: set[str],
 ):
+    jac_inputs = list(jac_inputs)
+    jac_outputs = list(jac_outputs)
     jac_inputs.sort()
     jac_outputs.sort()
 
@@ -181,6 +183,8 @@ def vector_jacobian_product(
     # Make ordering of vjp in and output args deterministic
     # Necessacy as torch.vjp function requires inputs and outputs to be in the same order
     # this is not necessary when using JAX
+    vjp_inputs = list(vjp_inputs)
+    vjp_outputs = list(vjp_outputs)
     vjp_inputs.sort()
     vjp_outputs.sort()
 
