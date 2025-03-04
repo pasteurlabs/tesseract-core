@@ -3,7 +3,7 @@
 
 import ast
 from pathlib import Path
-from typing import Annotated, NamedTuple
+from typing import Annotated, Literal, NamedTuple
 
 import yaml
 from pydantic import (
@@ -46,6 +46,13 @@ RelativePath = Annotated[str, AfterValidator(assert_relative_path)]
 StrictStr = Annotated[str, Strict()]
 
 
+class PythonRequirements(BaseModel):
+    provider: Literal["python-pip", "conda"] = "python-pip"
+    file: Literal["tesseract_requirements.txt", "tesseract_environment.yaml"] = (
+        "tesseract_requirements.txt"
+    )
+
+
 class TesseractBuildConfig(BaseModel):
     """Configuration options for building a Tesseract."""
 
@@ -77,6 +84,10 @@ class TesseractBuildConfig(BaseModel):
             "Custom steps to run during ``docker build`` (after everything else is installed). "
             "Example: ``[\"RUN echo 'Hello, world!'\"]``"
         ),
+    )
+
+    requirements: PythonRequirements = PythonRequirements(
+        provide="python-pip", file="tesseract_requirements.txt"
     )
 
     model_config = ConfigDict(extra="forbid")
