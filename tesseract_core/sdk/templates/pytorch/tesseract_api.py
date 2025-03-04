@@ -8,8 +8,8 @@ from typing import Any, Callable
 
 import numpy as np
 import torch
-from optree import PyTreeSpec, tree_flatten, tree_unflatten
 from pydantic import BaseModel
+from torch.utils._pytree import TreeSpec, tree_flatten, tree_unflatten
 
 from tesseract_core.runtime import Differentiable, Float32
 from tesseract_core.runtime.tree_transforms import (
@@ -76,8 +76,6 @@ def jacobian(
     jac_inputs: set[str],
     jac_outputs: set[str],
 ):
-    jac_inputs = list(jac_inputs)
-    jac_outputs = list(jac_outputs)
     jac_inputs.sort()
     jac_outputs.sort()
 
@@ -142,8 +140,6 @@ def vector_jacobian_product(
     # Make ordering of vjp in and output args deterministic
     # Necessacy as torch.vjp function requires inputs and outputs to be in the same order
     # this is not necessary when using JAX
-    vjp_inputs = list(vjp_inputs)
-    vjp_outputs = list(vjp_outputs)
     vjp_inputs.sort()
     vjp_outputs.sort()
 
@@ -176,7 +172,7 @@ def filter_pos_func(
     func: Callable[[dict], dict],
     default_inputs: dict,
     output_paths: set[str],
-    pytree: PyTreeSpec,
+    pytree: TreeSpec,
     output_to_tuple: bool = False,
 ) -> Callable:
     """Returns a reduced func with default inputs that operates on positional arguments.
