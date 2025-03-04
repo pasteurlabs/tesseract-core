@@ -319,7 +319,10 @@ class DockerWrapper:
                 text=True,
                 check=True,
             )
-            container_ids = result.stdout.strip().split("\n")
+            if not result.stdout:
+                container_ids = []
+            else:
+                container_ids = result.stdout.strip().split("\n")
 
             # Check if theres any cleaned up containers.
             for container_id in self.containers:
@@ -350,7 +353,10 @@ class DockerWrapper:
                 text=True,
                 check=True,
             )
-            images = image_ids.stdout.strip().split("\n")
+            if not image_ids.stdout:
+                images = []
+            else:
+                images = image_ids.stdout.strip().split("\n")
 
             # Clean up deleted images.
             for image in self.images:
