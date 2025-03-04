@@ -239,9 +239,11 @@ Here, it will be possible in principle to differentiate `a` in the Tesseract's o
 parameter `x` and with respect to each of the components of the matrix `r` -- but not with respect to `s`.
 
 ```{warning}
-Differentiable can only be used on {py:class}`tesseract_core.runtime.Array` types, which includes aliases for
+`Differentiable` can only be used on {py:class}`tesseract_core.runtime.Array` types, which includes aliases for
 rank 0 tensors like {py:class}`Float64 <tesseract_core.runtime.Float64>`. Do not use it on
 Python base types -- things like `Differentiable[float]` will trigger errors.
+
+Additionally, `Differentiable` is currently ONLY used to determine valid inputs/outputs for differentiation. That is, passing e.g. `jac_inputs=["non_differentiable_arg"]` to the `jacobian` endpoint will raise a validation error even before the endpoint is invoked.
 ```
 
 Aside from marking the parameters with respect to which your Tesseract is differentiable, one also
