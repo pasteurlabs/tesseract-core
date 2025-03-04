@@ -14,6 +14,7 @@ from typing import Any, Optional
 
 import click
 import typer
+from pydantic import ValidationError
 
 from tesseract_core.runtime.config import get_config
 from tesseract_core.runtime.core import create_endpoints, get_tesseract_api
@@ -58,6 +59,11 @@ def _prettify_docstring(docstr: str) -> str:
     docstring_lines = docstr.split("\n")
     dedented_lines = dedent("\n".join(docstring_lines[1:]))
     return "\n".join([docstring_lines[0].lstrip(), dedented_lines])
+
+
+def _prettify_validation_errors(e: ValidationError) -> str:
+    """Prettify validation errors."""
+    return "\n" + "\n".join([f"Error: {error['type']}" for error in e.errors()])
 
 
 def _parse_arg_callback(
@@ -223,9 +229,16 @@ def _create_user_defined_cli_command(
 
         if InputSchema is not None:
             payload, base_dir = optional_args["payload"]
-            user_function_args["payload"] = InputSchema.model_validate(
-                payload, context={"base_dir": base_dir}
-            )
+            try:
+                user_function_args["payload"] = InputSchema.model_validate(
+                    payload, context={"base_dir": base_dir}
+                )
+            except ValidationError as e:
+                raise click.BadParameter(
+                    _prettify_validation_errors(e),
+                    param=InputSchema,
+                    param_hint=InputSchema.__name__,
+                ) from e
 
         result = user_function(**user_function_args)
         result = output_to_bytes(result, output_format, output_path)
