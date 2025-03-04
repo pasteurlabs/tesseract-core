@@ -23,8 +23,7 @@ from tesseract_core.runtime.tree_transforms import filter_func, flatten_with_pat
 # essentially just wrappers around numpy 0D arrays, they will be considered to
 # be dynamic and will be traced by JAX. 
 # If you want to treat numerical values as scalar you will need to use
-# primitive Python types (e.g. float, int) instead of Float32, placing them in
-# hashable containers (e.g. tuple) if necessary.
+# built-in Python types (e.g. float, int) instead of Float32.
 
 
 class InputSchema(BaseModel):
