@@ -18,7 +18,7 @@
     },
     "jac_inputs": [
         "a.v",
-        "b.v"
+        "a.s"
     ],
     "jac_outputs": [
         "vector_add.result",

@@ -1,17 +1,23 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from functools import partial
-from typing import Any
+from typing import Any, Callable
 
-import jax.numpy as jnp
-import jax.tree
-from jax import ShapeDtypeStruct, eval_shape, jacrev, jit, jvp, vjp
+import numpy as np
+import torch
+from optree import PyTreeSpec, tree_flatten, tree_unflatten
 from pydantic import BaseModel, Field, model_validator
 from typing_extensions import Self
 
 from tesseract_core.runtime import Array, Differentiable, Float32
-from tesseract_core.runtime.tree_transforms import filter_func, flatten_with_paths
+from tesseract_core.runtime.tree_transforms import (
+    flatten_with_paths,
+    set_at_path,
+)
+
+#
+# Schemata
+#
 
 
 class Vector_and_Scalar(BaseModel):
@@ -59,8 +65,12 @@ class OutputSchema(BaseModel):
     vector_min: Result_and_Norm
 
 
-@jit
-def apply_jit(inputs: dict) -> dict:
+#
+# Required endpoints
+#
+
+
+def evaluate(inputs: Any) -> Any:
     a_scaled = inputs["a"]["s"] * inputs["a"]["v"]
     b_scaled = inputs["b"]["s"] * inputs["b"]["v"]
     add_result = a_scaled + b_scaled
@@ -68,45 +78,100 @@ def apply_jit(inputs: dict) -> dict:
     return {
         "vector_add": {
             "result": add_result,
-            "normed_result": add_result / jnp.linalg.norm(add_result, ord=2),
+            "normed_result": add_result / torch.linalg.norm(add_result, ord=2),
         },
         "vector_min": {
             "result": min_result,
-            "normed_result": min_result / jnp.linalg.norm(min_result, ord=2),
+            "normed_result": min_result / torch.linalg.norm(min_result, ord=2),
         },
     }
 
 
 def apply(inputs: InputSchema) -> OutputSchema:
-    """Multiplies a vector `a` by `s`, and sums the result to `b`."""
-    return apply_jit(inputs.model_dump())
+    # Convert to pytorch tensors to enable torch.jit
+    inputs = convert_to_tensors(inputs.model_dump())
+
+    # Optional: Insert any pre-processing/setup that doesn't require tracing
+    # and is only required when specifically running your apply function
+    # and not your differentiable endpoints.
+    # For example, you might want to set up a logger or mlflow server.
+    # Pre-processing should not modify any input that could impact the
+    # differentiable outputs in a nonlinear way (a constant shift
+    # should be safe)
+
+    out = evaluate(inputs)
+
+    # Optional: Insert any post-processing that doesn't require tracing
+    # For example, you might want to save to disk or modify a non-differentiable
+    # output. Again, do not modify any differentiable output in a non-linear way.
+    return out
 
 
-def abstract_eval(abstract_inputs):
-    """Calculate output shape of apply from the shape of its inputs."""
-    jaxified_inputs = jax.tree.map(
-        lambda x: ShapeDtypeStruct(**x),
-        abstract_inputs.model_dump(),
-        is_leaf=lambda x: (x.keys() == {"shape", "dtype"}),
+#
+# Pytorch-handled AD endpoints (no need to modify)
+#
+
+
+def jacobian(
+    inputs: InputSchema,
+    jac_inputs: set[str],
+    jac_outputs: set[str],
+):
+    jac_inputs = list(jac_inputs)
+    jac_outputs = list(jac_outputs)
+    jac_inputs.sort()
+    jac_outputs.sort()
+
+    # convert all numbers and arrays to torch tensors
+    tensor_inputs = convert_to_tensors(inputs.model_dump())
+
+    # flatten the dictionaries such that they can be accessed by paths
+    path_inputs = flatten_with_paths(tensor_inputs, jac_inputs)
+
+    # transform the dictionaries into a list of values for a positional function
+    pos_inputs, treedef = tree_flatten(path_inputs)
+
+    # create a positional function that accepts a list of values and returns a set of tuples
+    filtered_pos_eval = filter_pos_func(
+        evaluate, tensor_inputs, jac_outputs, treedef, True
     )
-    jax_shapes = eval_shape(apply_jit, jaxified_inputs)
-    return jax.tree.map(
-        lambda sd: {"shape": sd.shape, "dtype": str(sd.dtype)}, jax_shapes
-    )
+
+    # calculate the jacobian
+    jacobian = torch.autograd.functional.jacobian(filtered_pos_eval, tuple(pos_inputs))
+
+    # rebuild the dictionary from the list of results
+    res_dict = {}
+    for dy, dys in zip(jac_outputs, jacobian):
+        res_dict[dy] = {}
+        for dx, dxs in zip(jac_inputs, dys):
+            res_dict[dy][dx] = dxs
+
+    return res_dict
 
 
 def jacobian_vector_product(
     inputs: InputSchema,
     jvp_inputs: set[str],
     jvp_outputs: set[str],
-    tangent_vector: dict[str, Any],
+    tangent: dict[str, Any],
 ):
-    return jvp_jit(
-        inputs.model_dump(),
-        tuple(jvp_inputs),
-        tuple(jvp_outputs),
-        tangent_vector,
-    )
+    # convert all numbers and arrays to torch tensors
+    tensor_inputs = convert_to_tensors(inputs.model_dump())
+    tensor_tangent = convert_to_tensors(tangent)
+
+    # flatten the dictionaries such that they can be accessed by paths
+    path_inputs = flatten_with_paths(tensor_inputs, jvp_inputs)
+
+    # transform the dictionaries into a list of values for a positional function
+    pos_inputs, treedef = tree_flatten(path_inputs)
+    pos_tangent, _ = tree_flatten(tensor_tangent)
+
+    # create a positional function that accepts a list of values
+    filtered_pos_eval = filter_pos_func(evaluate, tensor_inputs, jvp_outputs, treedef)
+
+    tangent = torch.func.jvp(filtered_pos_eval, tuple(pos_inputs), tuple(pos_tangent))
+
+    return tangent[1]
 
 
 def vector_jacobian_product(
@@ -115,53 +180,84 @@ def vector_jacobian_product(
     vjp_outputs: set[str],
     cotangent_vector: dict[str, Any],
 ):
-    return vjp_jit(
-        inputs.model_dump(),
-        tuple(vjp_inputs),
-        tuple(vjp_outputs),
-        cotangent_vector,
-    )
+    # Make ordering of vjp in and output args deterministic
+    # Necessacy as torch.vjp function requires inputs and outputs to be in the same order
+    # this is not necessary when using JAX
+    vjp_inputs = list(vjp_inputs)
+    vjp_outputs = list(vjp_outputs)
+    vjp_inputs.sort()
+    vjp_outputs.sort()
+
+    # convert all numbers and arrays to torch tensors
+    tensor_inputs = convert_to_tensors(inputs.model_dump())
+    tensor_cotangent = convert_to_tensors(cotangent_vector)
+
+    # flatten the dictionaries such that they can be accessed by paths
+    path_inputs = flatten_with_paths(tensor_inputs, vjp_inputs)
+
+    # transform the dictionaries into a list of values for a positional function
+    pos_inputs, treedef = tree_flatten(path_inputs)
+
+    # create a positional function that accepts a list of values
+    filtered_pos_func = filter_pos_func(evaluate, tensor_inputs, vjp_outputs, treedef)
+
+    _, vjp_func = torch.func.vjp(filtered_pos_func, *pos_inputs)
+
+    res = vjp_func(tensor_cotangent)
+
+    # rebuild the dictionary from the list of results
+    res_dict = {}
+    for key, value in zip(vjp_inputs, res):
+        res_dict[key] = value
+
+    return res_dict
 
 
-def jacobian(
-    inputs: InputSchema,
-    jac_inputs: set[str],
-    jac_outputs: set[str],
-):
-    return jac_jit(inputs.model_dump(), tuple(jac_inputs), tuple(jac_outputs))
+def filter_pos_func(
+    func: Callable[[dict], dict],
+    default_inputs: dict,
+    output_paths: set[str],
+    pytree: PyTreeSpec,
+    output_to_tuple: bool = False,
+) -> Callable:
+    """Returns a reduced func with default inputs that operates on positional arguments.
+
+    The returned function will accept a tuple of positional arguments,
+    convert them back to a dictionary and update the default inputs
+    with the new values at each path. It will then call the original function with the updated inputs
+    and return a dictionary `{output_path: value}`.
+    """
+
+    # function that accepts positional arguments
+    def filtered_pos_func(*args):
+        # convert back to dictionary
+        new_inputs = tree_unflatten(pytree, args)
+
+        # partially update the default inputs with the new values
+        updated_inputs = set_at_path(default_inputs, new_inputs)
+
+        path_outputs = flatten_with_paths(func(updated_inputs), output_paths)
+
+        if output_to_tuple:
+            return tuple(tree_flatten(path_outputs)[0])
+
+        return path_outputs
+
+    return filtered_pos_func
 
 
-@partial(jit, static_argnames=["jvp_inputs", "jvp_outputs"])
-def jvp_jit(
-    inputs: dict, jvp_inputs: tuple[str], jvp_outputs: tuple[str], tangent_vector: dict
-):
-    filtered_apply = filter_func(apply_jit, inputs, jvp_outputs)
-    return jvp(
-        filtered_apply,
-        [flatten_with_paths(inputs, include_paths=jvp_inputs)],
-        [tangent_vector],
-    )[1]
-
-
-@partial(jit, static_argnames=["vjp_inputs", "vjp_outputs"])
-def vjp_jit(
-    inputs: dict,
-    vjp_inputs: tuple[str],
-    vjp_outputs: tuple[str],
-    cotangent_vector: dict,
-):
-    filtered_apply = filter_func(apply_jit, inputs, vjp_outputs)
-    _, vjp_func = vjp(
-        filtered_apply, flatten_with_paths(inputs, include_paths=vjp_inputs)
-    )
-    return vjp_func(cotangent_vector)[0]
-
-
-@partial(jit, static_argnames=["jac_inputs", "jac_outputs"])
-def jac_jit(
-    inputs: dict,
-    jac_inputs: tuple[str],
-    jac_outputs: tuple[str],
-):
-    filtered_apply = filter_func(apply_jit, inputs, jac_outputs)
-    return jacrev(filtered_apply)(flatten_with_paths(inputs, include_paths=jac_inputs))
+def convert_to_tensors(data):
+    if isinstance(data, np.ndarray):
+        return torch.from_numpy(data)
+    elif isinstance(data, (np.floating, float)):
+        return torch.tensor(data)
+    elif isinstance(data, (np.integer, int)):
+        return torch.tensor(data)
+    elif isinstance(data, (np.bool_, bool)):
+        return torch.tensor(data)
+    elif isinstance(data, dict):
+        return {key: convert_to_tensors(value) for key, value in data.items()}
+    elif isinstance(data, list):
+        return [convert_to_tensors(item) for item in data]
+    else:
+        raise TypeError(f"Unsupported data type: {type(data)}")
