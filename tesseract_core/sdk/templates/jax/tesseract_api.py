@@ -28,10 +28,12 @@ from tesseract_core.runtime.tree_transforms import filter_func, flatten_with_pat
 
 class InputSchema(BaseModel):
     example: Differentiable[Float32]
+    b: Differentiable[Float32]
 
 
 class OutputSchema(BaseModel):
     example: Differentiable[Float32]
+    c: Differentiable[Float32]
 
 
 #
@@ -44,7 +46,10 @@ class OutputSchema(BaseModel):
 # to Input/OutputSchema
 @eqx.filter_jit
 def apply_jit(inputs: dict) -> dict:
-    return inputs
+    return {
+        "example": inputs["example"] + inputs["b"],
+        "c": inputs["example"] * inputs["b"],
+    }
 
 
 def apply(inputs: InputSchema) -> OutputSchema:
