@@ -1,7 +1,7 @@
-name: vectoradd_jax
+name: vectoradd_torch
 version: "2025/02/05"
 description: |
-  Tesseract that adds/subtracts two vectors. Uses jax internally.
+  Tesseract that adds/subtracts two vectors. Uses torch internally.
 
 build_config:
   target_platform: "native"
