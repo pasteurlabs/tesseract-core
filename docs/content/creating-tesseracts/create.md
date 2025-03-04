@@ -212,12 +212,10 @@ class InputSchema(BaseModel):
 
 A key feature of Tesseracts is their ability to expose endpoints for calculating various kinds of derivatives when the operation they implement is differentiable, which in turn makes it possible to combine multiple Tesseracts into automatically differentiable workflows! This is advantageous in multiple contexts: shape optimization, model calibration, and so on.
 
-In order to make your Tesseract differentiable with respect to some parameter, you need
-to mark that parameter with the {py:class}`tesseract_core.runtime.Differentiable` type annotation.
-The outputs that can be differentiated should be marked as `Differentiable` as well.
-
-In other words, all outputs marked as `Differentiable` will be considered differentiable with respect to
+Keeping with one of Tesseract's key foci being *validation*, the type annotation {py:class}`tesseract_core.runtime.Differentiable` is introduced to mark outputs that can be differentiated, and inputs that can be differentiated with respect to.
+All outputs marked as `Differentiable` will be considered differentiable with respect to
 all inputs marked as `Differentiable`.
+Attempting to differentiate (with respect to) an output/input (e.g. by passing `jac_inputs=["non_differentiable_arg"]` to the `jacobian` endpoint) will raise a validation error even before the endpoint is invoked.
 
 For example:
 
@@ -239,7 +237,7 @@ Here, it will be possible in principle to differentiate `a` in the Tesseract's o
 parameter `x` and with respect to each of the components of the matrix `r` -- but not with respect to `s`.
 
 ```{warning}
-Differentiable can only be used on {py:class}`tesseract_core.runtime.Array` types, which includes aliases for
+`Differentiable` can only be used on {py:class}`tesseract_core.runtime.Array` types, which includes aliases for
 rank 0 tensors like {py:class}`Float64 <tesseract_core.runtime.Float64>`. Do not use it on
 Python base types -- things like `Differentiable[float]` will trigger errors.
 ```
