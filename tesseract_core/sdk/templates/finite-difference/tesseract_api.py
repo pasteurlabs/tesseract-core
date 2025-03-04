@@ -9,12 +9,20 @@ from typing import Any, Literal
 import numpy as np
 from pydantic import BaseModel, Field
 
-from tesseract_core.runtime import Differentiable, Float64
+from tesseract_core.runtime import Array, Differentiable, Float64
 from tesseract_core.runtime.tree_transforms import (
     bump_at_path,
     flatten_with_paths,
     get_at_path,
 )
+
+# WARNING! This finite difference implementation is intended for testing/educational purposes only.
+# While finite difference is relatively efficient for forward mode (i.e. JVP and tall Jacobians),
+# it can be prohibitively slow and memory intensive for reverse mode (i.e. VJP and wide Jacobians).
+# Moreover, finite difference is prone to numerical instability, sensitive to the choice of epsilon,
+# and may not be accurate for complex functions.
+# Where possible, 64-bit floating point arithmetic is recommended to minimize numerical errors.
+
 
 APPLY_CACHE = {}
 
@@ -24,13 +32,13 @@ APPLY_CACHE = {}
 
 
 class InputSchema(BaseModel):
-    example: Differentiable[Float64]
+    in_vec: Differentiable[Array[(3, 2), Float64]]
     eps: float = Field(default=1e-3)
     mode: Literal["forward", "reverse", "central"] = Field(default="forward")
 
 
 class OutputSchema(BaseModel):
-    example: Differentiable[Float64]
+    out_vec: Differentiable[Array[(3, 2), Float64]]
 
 
 #
@@ -39,7 +47,7 @@ class OutputSchema(BaseModel):
 
 
 def apply(inputs: InputSchema) -> OutputSchema:
-    return {"example": inputs.example}
+    return {"out_vec": 3 * inputs.in_vec}
 
 
 #
@@ -53,16 +61,18 @@ def jacobian(
     jac_outputs: set[str],
 ):
     jacobian = {}
+
     for dy_path in jac_outputs:
         jacobian[dy_path] = {}
+
     for dx_path in jac_inputs:
         jac_at_dx_path_init = False
         # All primals will be ND-arrays
         primal_to_bump = get_at_path(inputs, dx_path)
 
-        for i, basis_vector in enumerate(_std_basis(primal_to_bump)):
+        for i, basis_primal in enumerate(_std_basis(primal_to_bump)):
             jac_row = jacobian_vector_product(
-                inputs, set([dx_path]), jac_outputs, {dx_path: basis_vector}
+                inputs, set([dx_path]), jac_outputs, {dx_path: basis_primal}
             )
             if not jac_at_dx_path_init:
                 prod_dims_dx = (
@@ -82,29 +92,23 @@ def jacobian(
     return jacobian
 
 
-def _std_basis(nd_array):
-    prod_dims = np.prod(nd_array.shape) if len(nd_array.shape) > 0 else 1
-    flat_basis = np.eye(prod_dims, dtype=nd_array.dtype).flatten()
-    return flat_basis.reshape((-1, *nd_array.shape))
-
-
 def jacobian_vector_product(
     inputs: InputSchema,
     jvp_inputs: set[str],
     jvp_outputs: set[str],
     tangent_vector: dict[str, Any],
 ):
-    tangent_norm = sum([(ele**2).sum() for ele in tangent_vector.values()]) ** 0.5
+    tangent_norm = np.linalg.norm(list(tangent_vector.values()))
 
     if inputs.mode == "central":
         denom = 2
     else:
         denom = 1
-
-    if inputs.mode == "reverse":
         inputs_hash = hash(inputs.model_dump_json())
         if inputs_hash not in APPLY_CACHE:
             APPLY_CACHE[inputs_hash] = apply(inputs)
+
+    if inputs.mode == "reverse":
         apply_up = APPLY_CACHE[inputs_hash]
     else:
         bump_up_vector = {
@@ -114,9 +118,6 @@ def jacobian_vector_product(
         apply_up = apply(bump_at_path(inputs, bump_up_vector))
 
     if inputs.mode == "forward":
-        inputs_hash = hash(inputs.model_dump_json())
-        if inputs_hash not in APPLY_CACHE:
-            APPLY_CACHE[inputs_hash] = apply(inputs)
         apply_down = APPLY_CACHE[inputs_hash]
     else:
         bump_down_vector = {
@@ -129,8 +130,10 @@ def jacobian_vector_product(
     filtered_down = flatten_with_paths(apply_down, include_paths=jvp_outputs)
 
     return {
-        k: tangent_norm * (filtered_up[k] - filtered_down[k]) / inputs.eps
-        for k in jvp_outputs
+        dy_path: tangent_norm
+        * (filtered_up[dy_path] - filtered_down[dy_path])
+        / inputs.eps
+        for dy_path in jvp_outputs
     }
 
 
@@ -140,4 +143,26 @@ def vector_jacobian_product(
     vjp_outputs: set[str],
     cotangent_vector: dict[str, Any],
 ):
-    return None
+    jac = jacobian(inputs, vjp_inputs, vjp_outputs)
+    return {
+        dx_path: sum(
+            np.tensordot(
+                cotangent_vector[dy_path],
+                jac[dy_path][dx_path],
+                axes=len(cotangent_vector[dy_path].shape),
+            )
+            for dy_path in vjp_outputs
+        )
+        for dx_path in vjp_inputs
+    }
+
+
+#
+# Helper functions
+#
+
+
+def _std_basis(nd_array):
+    prod_dims = np.prod(nd_array.shape) if len(nd_array.shape) > 0 else 1
+    flat_basis = np.eye(prod_dims, dtype=nd_array.dtype).flatten()
+    return flat_basis.reshape((-1, *nd_array.shape))
