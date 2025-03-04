@@ -3,6 +3,7 @@
 
 # Add Python requirements like this:
 jax[cpu]
+equinox
 
 # This may contain private dependencies via SSH URLs:
 # git+ssh://git@github.com/username/repo.git@branch
