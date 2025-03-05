@@ -652,6 +652,10 @@ def test_unit_tesseract_endtoend(
                 assert_contains_array_allclose(output_json, array)
 
     # Stage 3: Test HTTP server
+    if unit_tesseract_config.volume_mounts is not None:
+        # TODO: Mounts are not supported in HTTP mode yet, skip rest of the test for now
+        return
+
     try:
         result = cli_runner.invoke(
             app,
