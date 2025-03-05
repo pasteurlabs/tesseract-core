@@ -10,6 +10,7 @@ extend-exclude = [
     ".venv",
     "_version.py",
     "tesseract_core/**/vendor/**/*.py",
+    "deleteme"
 ]
 
 # Also lint/format Jupyter Notebooks.
