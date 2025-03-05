@@ -18,7 +18,9 @@ from tesseract_core.sdk.cli import AVAILABLE_RECIPES, app
 @pytest.fixture(scope="module")
 def built_image_name(docker_wrapper, shared_dummy_image_name, dummy_tesseract_location):
     """Build the dummy Tesseract image for the tests."""
-    image_name = build_tesseract(dummy_tesseract_location, shared_dummy_image_name)
+    image_name = build_tesseract(
+        docker_wrapper, dummy_tesseract_location, shared_dummy_image_name
+    )
     assert image_exists(docker_wrapper, image_name)
     yield image_name
 
@@ -42,7 +44,9 @@ def test_build_from_init_endtoend(
         assert yaml.safe_load(config_yaml)["name"] == dummy_image_name
 
     img_tag = "foo" if tag else None
-    image_name = build_tesseract(tmp_path, dummy_image_name, tag=img_tag)
+    image_name = build_tesseract(
+        docker_wrapper, tmp_path, dummy_image_name, tag=img_tag
+    )
     assert image_exists(docker_wrapper, image_name)
 
     # Test that the image can be run and that --help is forwarded correctly
