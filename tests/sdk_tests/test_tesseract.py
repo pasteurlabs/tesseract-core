@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+from pydantic import ValidationError
 
 from tesseract_core import Tesseract
 from tesseract_core.sdk.tesseract import (
@@ -106,6 +107,43 @@ def test_HTTPClient_run_tesseract(mocker):
         url="http://somehost/apply",
         json={"inputs": {"a": 1}},
     )
+
+
+def test_HTTPClient__run_tesseract_raises_validation_error(mocker):
+    mock_response = mocker.Mock()
+    mock_response.json.return_value = {
+        "detail": [
+            {
+                "type": "missing",
+                "loc": ["body", "inputs", "a"],
+                "msg": "Field required",
+                "input": {"whoops": "whatever"},
+            },
+            {
+                "type": "missing",
+                "loc": ["body", "inputs", "b"],
+                "msg": "Field required",
+                "input": {"whoops": "whatever"},
+            },
+            {
+                "type": "extra_forbidden",
+                "loc": ["body", "inputs", "whoops"],
+                "msg": "Extra inputs are not permitted",
+                "input": "whatever",
+            },
+        ]
+    }
+    mock_response.status_code = 422
+
+    mocker.patch(
+        "requests.request",
+        return_value=mock_response,
+    )
+
+    client = HTTPClient("somehost")
+
+    with pytest.raises(ValidationError):
+        client._run_tesseract("apply", {"inputs": {"whoops": "whatever"}})
 
 
 @pytest.mark.parametrize(
