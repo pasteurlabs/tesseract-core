@@ -317,7 +317,10 @@ class HTTPClient:
         response = requests.request(method=method, url=url, json=encoded_payload)
         data = response.json()
 
-        if response.status_code == requests.codes.unprocessable_entity and "detail" in data:
+        if (
+            response.status_code == requests.codes.unprocessable_entity
+            and "detail" in data
+        ):
             errors = [
                 InitErrorDetails(
                     type=e["type"],
