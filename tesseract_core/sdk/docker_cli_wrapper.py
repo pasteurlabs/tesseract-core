@@ -53,14 +53,12 @@ class DockerWrapper:
 
     def get_all_containers(self) -> dict:
         """Returns the current list of containers."""
-        if not self.containers:
-            self._update_containers()
+        self._update_containers()
         return self.containers
 
     def get_all_images(self) -> dict:
         """Returns the current list of images."""
-        if not self.images:
-            self._update_images()
+        self._update_images()
         return self.images
 
     def get_projects(self) -> dict:

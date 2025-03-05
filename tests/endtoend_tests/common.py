@@ -23,7 +23,7 @@ def print_debug_info(result):
         traceback.print_exception(*result.exc_info)
 
 
-def build_tesseract(sourcedir, image_name, tag=None, build_retries=3):
+def build_tesseract(docker_wrapper, sourcedir, image_name, tag=None, build_retries=3):
     cli_runner = CliRunner()
 
     build_args = [
@@ -55,4 +55,5 @@ def build_tesseract(sourcedir, image_name, tag=None, build_retries=3):
 
     print_debug_info(result)
     assert result.exit_code == 0, result.exception
+    assert docker_wrapper.get_image(image_name)
     return image_name

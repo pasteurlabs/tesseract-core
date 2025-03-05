@@ -562,10 +562,11 @@ def test_unit_tesseract_endtoend(
     """Test that unit Tesseract images can be built and used to serve REST API."""
     from tesseract_core.sdk.cli import app
 
-    cli_runner = CliRunner()
+    cli_runner = CliRunner(mix_stderr=False)
 
     # Stage 1: Build
     img_name = build_tesseract(
+        docker_wrapper,
         unit_tesseract_path,
         dummy_image_name,
         tag="sometag",
