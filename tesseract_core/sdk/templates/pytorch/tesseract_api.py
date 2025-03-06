@@ -76,11 +76,6 @@ def jacobian(
     jac_inputs: set[str],
     jac_outputs: set[str],
 ):
-    jac_inputs = list(jac_inputs)
-    jac_outputs = list(jac_outputs)
-    jac_inputs.sort()
-    jac_outputs.sort()
-
     # convert all numbers and arrays to torch tensors
     tensor_inputs = convert_to_tensors(inputs.model_dump())
 
@@ -125,6 +120,8 @@ def jacobian_vector_product(
     pos_inputs, treedef = tree_flatten(path_inputs)
     pos_tangent, _ = tree_flatten(tensor_tangent)
 
+    # sort
+
     # create a positional function that accepts a list of values
     filtered_pos_eval = filter_pos_func(evaluate, tensor_inputs, jvp_outputs, treedef)
 
@@ -141,11 +138,13 @@ def vector_jacobian_product(
 ):
     # Make ordering of vjp in and output args deterministic
     # Necessacy as torch.vjp function requires inputs and outputs to be in the same order
-    # this is not necessary when using JAX
     vjp_inputs = list(vjp_inputs)
     vjp_outputs = list(vjp_outputs)
     vjp_inputs.sort()
     vjp_outputs.sort()
+
+    # sort the cotangent vector
+    cotangent_vector = {key: cotangent_vector[key] for key in vjp_outputs}
 
     # convert all numbers and arrays to torch tensors
     tensor_inputs = convert_to_tensors(inputs.model_dump())
@@ -208,7 +207,7 @@ def filter_pos_func(
 def convert_to_tensors(data):
     """Convert all numbers and arrays to torch tensors."""
     if isinstance(data, np.ndarray):
-        return torch.from_numpy(data)
+        return torch.from_numpy(data.copy())
     elif isinstance(data, (np.floating, float)):
         return torch.tensor(data)
     elif isinstance(data, (np.integer, int)):
@@ -221,3 +220,15 @@ def convert_to_tensors(data):
         return [convert_to_tensors(item) for item in data]
     else:
         raise TypeError(f"Unsupported data type: {type(data)}")
+
+
+def convert_to_numpy(data):
+    """Convert all numbers and arrays to numpy arrays."""
+    if isinstance(data, torch.Tensor):
+        return data.detach().numpy()
+    elif isinstance(data, dict):
+        return {key: convert_to_numpy(value) for key, value in data.items()}
+    elif isinstance(data, list):
+        return [convert_to_numpy(item) for item in data]
+    else:
+        return data

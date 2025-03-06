@@ -20,8 +20,8 @@ jvp_outputs = ["vector_add.result", "vector_min.normed_result"]
 tangent_vector = {"a.v": [0.0, 5.0, 2.0]}
 
 cotangent_vector = {
-    "vector_add.result": [0.1, 0.2, 0.3],
     "vector_min.normed_result": [0.4, 0.5, 0.6],
+    "vector_add.result": [0.1, 0.2, 0.3],
 }
 out = tesseract.apply(inputs)
 
