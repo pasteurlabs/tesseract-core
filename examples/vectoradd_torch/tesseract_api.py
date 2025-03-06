@@ -249,7 +249,7 @@ def filter_pos_func(
 def convert_to_tensors(data):
     """Convert all numbers and arrays to torch tensors."""
     if isinstance(data, np.ndarray):
-        return torch.from_numpy(data)
+        return torch.from_numpy(data.copy())
     elif isinstance(data, (np.floating, float)):
         return torch.tensor(data)
     elif isinstance(data, (np.integer, int)):
@@ -262,3 +262,15 @@ def convert_to_tensors(data):
         return [convert_to_tensors(item) for item in data]
     else:
         raise TypeError(f"Unsupported data type: {type(data)}")
+
+
+def convert_to_numpy(data):
+    """Convert all numbers and arrays to numpy arrays."""
+    if isinstance(data, torch.Tensor):
+        return data.detach().numpy()
+    elif isinstance(data, dict):
+        return {key: convert_to_numpy(value) for key, value in data.items()}
+    elif isinstance(data, list):
+        return [convert_to_numpy(item) for item in data]
+    else:
+        return data
