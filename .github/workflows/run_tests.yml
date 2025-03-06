@@ -7,6 +7,10 @@ on:
     branches:
       - main
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   tests-base:
     strategy:
@@ -33,7 +37,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up WSL (Windows)
-        uses: Vampire/setup-wsl@v4
+        uses: Vampire/setup-wsl@v5
         if: runner.os == 'Windows'
         with:
           distribution: Ubuntu-24.04
@@ -138,11 +142,17 @@ jobs:
         os: [ubuntu-22.04]
         python-version: ["3.12"]
 
-        # Test on arm to ensure compatibility with Apple M1 chips
-        # (OSX runners don't have access to Docker so we use Linux ARM runners instead)
-        arch: [x64, arm]
+        arch: ["x64"]
 
         unit-tesseract: ${{ fromJson(needs.get-e2e-matrix.outputs.matrix) }}
+
+        include:
+          # Test on arm to ensure compatibility with Apple M1 chips
+          # (OSX runners don't have access to Docker so we use Linux ARM runners instead)
+          - os: "ubuntu-22.04"
+            python-version: "3.12"
+            arch: "arm"
+            unit-tesseract: "base"
 
       fail-fast: false
 

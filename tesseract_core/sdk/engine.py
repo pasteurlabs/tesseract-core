@@ -732,6 +732,8 @@ def _parse_volumes(options: list[str]) -> dict[str, dict[str, str]]:
                 f"Invalid mount volume specification {option} "
                 "(must be `/path/to/source:/path/totarget:(ro|rw)`)",
             )
+        # Docker doesn't like paths like ".", so we convert to absolute path here
+        source = str(Path(source).resolve())
         return source, {"bind": target, "mode": mode}
 
     return dict(_parse_option(opt) for opt in options)
@@ -787,7 +789,7 @@ def run_tesseract(
                     f"Output path {arg} cannot start with '@' (used only for input files)"
                 )
 
-            local_path = Path(arg)
+            local_path = Path(arg).resolve()
             local_path.mkdir(parents=True, exist_ok=True)
 
             if not local_path.is_dir():

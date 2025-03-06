@@ -11,6 +11,8 @@ from urllib.parse import urlparse, urlunparse
 
 import numpy as np
 import requests
+from pydantic import ValidationError
+from pydantic_core import InitErrorDetails
 
 from . import engine
 
@@ -313,9 +315,23 @@ class HTTPClient:
             encoded_payload = None
 
         response = requests.request(method=method, url=url, json=encoded_payload)
-        response.raise_for_status()
-
         data = response.json()
+
+        if (
+            response.status_code == requests.codes.unprocessable_entity
+            and "detail" in data
+        ):
+            errors = [
+                InitErrorDetails(
+                    type=e["type"],
+                    loc=tuple(e["loc"]),
+                    input=e.get("input"),
+                )
+                for e in data["detail"]
+            ]
+            raise ValidationError.from_exception_data(f"endpoint {endpoint}", errors)
+        else:
+            response.raise_for_status()
 
         if endpoint in [
             "apply",

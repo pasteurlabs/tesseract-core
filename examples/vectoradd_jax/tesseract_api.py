@@ -1,12 +1,11 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from functools import partial
 from typing import Any
 
+import equinox as eqx
+import jax
 import jax.numpy as jnp
-import jax.tree
-from jax import ShapeDtypeStruct, eval_shape, jacrev, jit, jvp, vjp
 from pydantic import BaseModel, Field, model_validator
 from typing_extensions import Self
 
@@ -34,6 +33,10 @@ class InputSchema(BaseModel):
         description="An arbitrary vector and a scalar to multiply it by "
         "must be of same shape as b"
     )
+    norm_ord: int = Field(
+        description="Order of norm (see numpy.linalg.norm)",
+        default=2,
+    )
 
     @model_validator(mode="after")
     def validate_shape_inputs(self) -> Self:
@@ -59,7 +62,7 @@ class OutputSchema(BaseModel):
     vector_min: Result_and_Norm
 
 
-@jit
+@eqx.filter_jit
 def apply_jit(inputs: dict) -> dict:
     a_scaled = inputs["a"]["s"] * inputs["a"]["v"]
     b_scaled = inputs["b"]["s"] * inputs["b"]["v"]
@@ -68,11 +71,13 @@ def apply_jit(inputs: dict) -> dict:
     return {
         "vector_add": {
             "result": add_result,
-            "normed_result": add_result / jnp.linalg.norm(add_result, ord=2),
+            "normed_result": add_result
+            / jnp.linalg.norm(add_result, ord=inputs["norm_ord"]),
         },
         "vector_min": {
             "result": min_result,
-            "normed_result": min_result / jnp.linalg.norm(min_result, ord=2),
+            "normed_result": min_result
+            / jnp.linalg.norm(min_result, ord=inputs["norm_ord"]),
         },
     }
 
@@ -85,11 +90,11 @@ def apply(inputs: InputSchema) -> OutputSchema:
 def abstract_eval(abstract_inputs):
     """Calculate output shape of apply from the shape of its inputs."""
     jaxified_inputs = jax.tree.map(
-        lambda x: ShapeDtypeStruct(**x),
+        lambda x: jax.ShapeDtypeStruct(**x),
         abstract_inputs.model_dump(),
         is_leaf=lambda x: (x.keys() == {"shape", "dtype"}),
     )
-    jax_shapes = eval_shape(apply_jit, jaxified_inputs)
+    jax_shapes = jax.eval_shape(apply_jit, jaxified_inputs)
     return jax.tree.map(
         lambda sd: {"shape": sd.shape, "dtype": str(sd.dtype)}, jax_shapes
     )
@@ -131,19 +136,19 @@ def jacobian(
     return jac_jit(inputs.model_dump(), tuple(jac_inputs), tuple(jac_outputs))
 
 
-@partial(jit, static_argnames=["jvp_inputs", "jvp_outputs"])
+@eqx.filter_jit
 def jvp_jit(
     inputs: dict, jvp_inputs: tuple[str], jvp_outputs: tuple[str], tangent_vector: dict
 ):
     filtered_apply = filter_func(apply_jit, inputs, jvp_outputs)
-    return jvp(
+    return jax.jvp(
         filtered_apply,
         [flatten_with_paths(inputs, include_paths=jvp_inputs)],
         [tangent_vector],
     )[1]
 
 
-@partial(jit, static_argnames=["vjp_inputs", "vjp_outputs"])
+@eqx.filter_jit
 def vjp_jit(
     inputs: dict,
     vjp_inputs: tuple[str],
@@ -151,17 +156,19 @@ def vjp_jit(
     cotangent_vector: dict,
 ):
     filtered_apply = filter_func(apply_jit, inputs, vjp_outputs)
-    _, vjp_func = vjp(
+    _, vjp_func = jax.vjp(
         filtered_apply, flatten_with_paths(inputs, include_paths=vjp_inputs)
     )
     return vjp_func(cotangent_vector)[0]
 
 
-@partial(jit, static_argnames=["jac_inputs", "jac_outputs"])
+@eqx.filter_jit
 def jac_jit(
     inputs: dict,
     jac_inputs: tuple[str],
     jac_outputs: tuple[str],
 ):
     filtered_apply = filter_func(apply_jit, inputs, jac_outputs)
-    return jacrev(filtered_apply)(flatten_with_paths(inputs, include_paths=jac_inputs))
+    return jax.jacrev(filtered_apply)(
+        flatten_with_paths(inputs, include_paths=jac_inputs)
+    )
