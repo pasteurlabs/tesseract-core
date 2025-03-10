@@ -10,6 +10,7 @@ from typing import (
     Annotated,
     Any,
     Literal,
+    Self,
     TypeVar,
     Union,
     get_args,
@@ -22,7 +23,9 @@ from pydantic import (
     ConfigDict,
     Field,
     RootModel,
+    ValidationInfo,
     create_model,
+    field_validator,
 )
 
 from .schema_types import (
@@ -34,6 +37,7 @@ from .schema_types import (
     is_differentiable,
     safe_issubclass,
 )
+from .tree_transforms import get_at_path
 
 # Constants to mark sequence and dict indexing in pytree paths
 SEQ_INDEX_SENTINEL = object()
@@ -320,10 +324,10 @@ def _path_to_pattern(path: Sequence[Union[str, object]]) -> str:
     for part in path:
         if part is SEQ_INDEX_SENTINEL:
             is_literal = False
-            part = r"\[\d+\]"
+            part = r"\[-?\d+\]"
         elif part is DICT_INDEX_SENTINEL:
             is_literal = False
-            part = r"\{.*?\}"
+            part = r"\{[a-zA-Z0-9_.]+\}"
         final_path.append(part)
 
     if is_literal:
@@ -332,10 +336,15 @@ def _path_to_pattern(path: Sequence[Union[str, object]]) -> str:
     return r"\.".join(final_path)
 
 
-def _pattern_to_type(pattern: str) -> type:
+def _pattern_to_type(pattern: str, validate: bool = False) -> type:
     """Convert a string pattern (which may be a literal or regex) to a type that can be used for validation."""
     if _is_regex_pattern(pattern):
-        return Annotated[str, Field(pattern=pattern)]
+        if validate:
+            return Annotated[
+                str, Field(pattern=pattern), AfterValidator(path_validator)
+            ]
+        else:
+            return Annotated[str, Field(pattern=pattern)]
 
     return Literal[pattern]
 
@@ -343,6 +352,19 @@ def _pattern_to_type(pattern: str) -> type:
 def _is_regex_pattern(pattern: str) -> bool:
     # Poor man's regex detection, but it should work for our purposes
     return "\\" in pattern
+
+
+def path_validator(path: str, info: ValidationInfo) -> str:
+    # We only need to validate diff_inputs once
+    # Not when they appear again in OutputSchema
+    if "Input" in info.config["title"]:
+        try:
+            get_at_path(info.data["inputs"], path)
+        except (LookupError, AttributeError) as exc:
+            raise ValueError(
+                f"Could not find {info.field_name} path {path} in inputs."
+            ) from exc
+    return path
 
 
 def create_autodiff_schema(
@@ -364,7 +386,7 @@ def create_autodiff_schema(
         raise RuntimeError("No differentiable outputs found in the output schema")
 
     diffable_input_type = Union[
-        tuple(_pattern_to_type(p) for p in diffable_inputs.keys())
+        tuple(_pattern_to_type(p, validate=True) for p in diffable_inputs.keys())
     ]
     diffable_output_type = Union[
         tuple(_pattern_to_type(p) for p in diffable_outputs.keys())
@@ -390,7 +412,7 @@ def create_autodiff_schema(
     )
 
     def result_validator(
-        result: dict[str, Any],
+        result: dict[str, Any], info: ValidationInfo
     ) -> dict[str, Any]:
         """Validate the result of a Jacobian computation.
 
@@ -398,7 +420,19 @@ def create_autodiff_schema(
         to ensure they match what's expected from the schema.
         """
         if ad_flavor == "jacobian":
+            if info.context["output_keys"] != result.keys():
+                raise ValueError(
+                    "Error when validating output of jacobian:\n"
+                    f"Expected keys {info.context['output_keys']} in output; got {set(result.keys())}"
+                )
             for output_path, subout in result.items():
+                if info.context["input_keys"] != subout.keys():
+                    raise ValueError(
+                        "Error when validating output of jacobian:\n"
+                        "Expected output with structure "
+                        f"{{{tuple(info.context['output_keys'])}: {{{tuple(info.context['input_keys'])}: ...}}}}, "
+                        f"got {set(subout.keys())} for output key {output_path}."
+                    )
                 output_shape = _find_shape_from_path(diffable_outputs, output_path)
                 for input_path, arr in subout.items():
                     input_shape = _find_shape_from_path(diffable_inputs, input_path)
@@ -442,6 +476,11 @@ def create_autodiff_schema(
                         )
 
         elif ad_flavor == "jvp":
+            if info.context["output_keys"] != result.keys():
+                raise ValueError(
+                    "Error when validating output of jacobian_vector_product:\n"
+                    f"Expected keys {info.context['output_keys']} in output; got {set(result.keys())}"
+                )
             for output_path, arr in result.items():
                 output_shape = _find_shape_from_path(diffable_outputs, output_path)
                 if output_shape is Ellipsis:
@@ -465,6 +504,11 @@ def create_autodiff_schema(
                     )
 
         elif ad_flavor == "vjp":
+            if info.context["input_keys"] != result.keys():
+                raise ValueError(
+                    "Error when validating output of vector_jacobian_product:\n"
+                    f"Expected keys {info.context['input_keys']} in output; got {set(result.keys())}"
+                )
             for input_path, arr in result.items():
                 input_shape = _find_shape_from_path(diffable_inputs, input_path)
                 if input_shape is Ellipsis:
@@ -553,7 +597,21 @@ def create_autodiff_schema(
                     "The shape of each array is the same as the shape of the corresponding input array."
                 ),
             )
+
             model_config = ConfigDict(extra="forbid")
+
+            @field_validator("tangent_vector", mode="after")
+            def _validate_ad_input(
+                cls, tangent_vector: dict, info: ValidationInfo
+            ) -> dict:
+                """Raise an exception if the input of an autodiff function does not conform to given input keys."""
+                # Cotangent vector needs same keys as output_keys
+                if set(tangent_vector.keys()) != info.data["jvp_inputs"]:
+                    raise ValueError(
+                        f"Expected tangent_vector with keys conforming to jvp_inputs: {info.data['jvp_inputs']}, "
+                        f"got {set(tangent_vector.keys())}."
+                    )
+                return tangent_vector
 
         class JVPOutputSchema(RootModel):
             root: Annotated[
@@ -597,6 +655,19 @@ def create_autodiff_schema(
             )
 
             model_config = ConfigDict(extra="forbid")
+
+            @field_validator("cotangent_vector", mode="after")
+            @classmethod
+            def validate_cotangent_vector(
+                cls, cotangent_vector, info: ValidationInfo
+            ) -> Self:
+                """Raise an exception if cotangent vector keys are not identical to vjp_outputs."""
+                if set(cotangent_vector.keys()) != info.data["vjp_outputs"]:
+                    raise ValueError(
+                        f"Expected cotangent_vector with keys conforming to vjp_outputs: {info.data['vjp_outputs']}, "
+                        f"got {set(cotangent_vector.keys())}."
+                    )
+                return cotangent_vector
 
         class VJPOutputSchema(RootModel):
             root: Annotated[

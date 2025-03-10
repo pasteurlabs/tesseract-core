@@ -30,8 +30,7 @@ class InputSchema(BaseModel):
         description="An arbitrary vector and a scalar to multiply it by"
     )
     b: Vector_and_Scalar = Field(
-        description="An arbitrary vector and a scalar to multiply it by "
-        "must be of same shape as b"
+        description="An arbitrary vector and a scalar to multiply it by must be of same shape as b"
     )
     norm_ord: int = Field(
         description="Order of norm (see numpy.linalg.norm)",
@@ -42,8 +41,7 @@ class InputSchema(BaseModel):
     def validate_shape_inputs(self) -> Self:
         if self.a.v.shape != self.b.v.shape:
             raise ValueError(
-                f"a.v and b.v must have the same shape. "
-                f"Got {self.a.v.shape} and {self.b.v.shape} instead."
+                f"a.v and b.v must have the same shape. Got {self.a.v.shape} and {self.b.v.shape} instead."
             )
         return self
 
@@ -89,12 +87,14 @@ def apply(inputs: InputSchema) -> OutputSchema:
 
 def abstract_eval(abstract_inputs):
     """Calculate output shape of apply from the shape of its inputs."""
+    print(abstract_inputs.model_dump())
     jaxified_inputs = jax.tree.map(
         lambda x: jax.ShapeDtypeStruct(**x),
         abstract_inputs.model_dump(),
         is_leaf=lambda x: (x.keys() == {"shape", "dtype"}),
     )
     jax_shapes = jax.eval_shape(apply_jit, jaxified_inputs)
+    print(jax_shapes)
     return jax.tree.map(
         lambda sd: {"shape": sd.shape, "dtype": str(sd.dtype)}, jax_shapes
     )

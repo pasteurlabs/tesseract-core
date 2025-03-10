@@ -10,7 +10,7 @@ import sys
 from collections.abc import Callable, Generator
 from pathlib import Path
 from textwrap import dedent
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import click
 import typer
@@ -61,9 +61,27 @@ def _prettify_docstring(docstr: str) -> str:
     return "\n".join([docstring_lines[0].lstrip(), dedented_lines])
 
 
-def _prettify_validation_errors(e: ValidationError) -> str:
+# https://docs.pydantic.dev/latest/errors/errors/#customize-error-messages
+def loc_to_dot_sep(loc: tuple[Union[str, int], ...]) -> str:
+    path = ""
+    for i, x in enumerate(loc):
+        if isinstance(x, str):
+            if i > 0:
+                path += "."
+            path += x
+        elif isinstance(x, int):
+            path += f"[{x}]"
+        else:
+            raise TypeError("Unexpected type")
+    return path
+
+
+def _prettify_validation_errors(err: ValidationError) -> str:
     """Prettify validation errors."""
-    return "\n" + "\n".join([f"Error: {error['type']}" for error in e.errors()])
+    new_errors: list[dict[str, Any]] = err.errors()
+    for error in new_errors:
+        error["loc"] = loc_to_dot_sep(error["loc"])
+    return new_errors
 
 
 def _parse_arg_callback(

@@ -57,7 +57,7 @@ def jacobian(
         assert len(key_parts) == 2
 
         idx = int(key_parts[1][1:-1])
-        jac = np.ones(3, *inputs.data[idx].shape)
+        jac = np.zeros((3, *inputs.data[idx].shape))
         jac[0, :, 0] = 1.0
         jac[1, :, 1] = 1.0
         jac[2, :, 2] = 1.0
