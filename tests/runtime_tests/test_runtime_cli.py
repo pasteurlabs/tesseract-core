@@ -24,7 +24,7 @@ from tesseract_core.runtime.file_interactions import load_bytes, output_to_bytes
 
 
 # Only necessary when matching multi-word string
-def format_stderr(stderr):
+def format_stderr(stderr: str) -> str:
     return " ".join(stderr.replace("│", "").strip("\n").split())
 
 
