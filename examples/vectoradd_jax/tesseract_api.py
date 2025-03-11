@@ -9,19 +9,21 @@ import jax.numpy as jnp
 from pydantic import BaseModel, Field, model_validator
 from typing_extensions import Self
 
-from tesseract_core.runtime import Array, Differentiable, Float32
+from tesseract_core.runtime import Array, Differentiable, Float64
 from tesseract_core.runtime.tree_transforms import filter_func, flatten_with_paths
+
+jax.config.update("jax_enable_x64", True)
 
 
 class Vector_and_Scalar(BaseModel):
-    v: Differentiable[Array[(None,), Float32]] = Field(
+    v: Differentiable[Array[(None,), Float64]] = Field(
         description="An arbitrary vector"
     )
-    s: Differentiable[Float32] = Field(description="A scalar", default=1.0)
+    s: Differentiable[Float64] = Field(description="A scalar", default=1.0)
 
     # we lose the ability to use methods such as this when using model_dump
     # unless we reconstruct nested models
-    def scale(self) -> Differentiable[Array[(None,), Float32]]:
+    def scale(self) -> Differentiable[Array[(None,), Float64]]:
         return self.s * self.v
 
 
@@ -49,10 +51,10 @@ class InputSchema(BaseModel):
 
 
 class Result_and_Norm(BaseModel):
-    result: Differentiable[Array[(None,), Float32]] = Field(
+    result: Differentiable[Array[(None,), Float64]] = Field(
         description="Vector s_a·a + s_b·b"
     )
-    normed_result: Differentiable[Array[(None,), Float32]] = Field(
+    normed_result: Differentiable[Array[(None,), Float64]] = Field(
         description="Normalized Vector s_a·a + s_b·b/|s_a·a + s_b·b|"
     )
 

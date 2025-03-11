@@ -6,6 +6,8 @@ from pydantic import BaseModel, Field
 
 from tesseract_core.runtime import Differentiable, Float64, ShapeDType
 
+jax.config.update("jax_enable_x64", True)
+
 
 def rosenbrock(x: float, y: float, a: float = 1.0, b: float = 100.0) -> float:
     return (a - x) ** 2 + b * (y - x**2) ** 2

@@ -4,12 +4,12 @@
 import numpy as np
 from pydantic import BaseModel, Field, model_validator
 
-from tesseract_core.runtime import Array, Differentiable, Float32, Float64
+from tesseract_core.runtime import Array, Differentiable, Float32
 
 
 class InputSchema(BaseModel):
     a: Differentiable[Array[(None,), Float32]] = Field(
-        description="An arbitrary vector normalized according to [...]"
+        description="An arbitrary vector."
     )
     b: Differentiable[Array[(None,), Float32]] = Field(
         description="An arbitrary vector. Needs to have the same dimensions as a."
@@ -31,7 +31,7 @@ class InputSchema(BaseModel):
 
 
 class OutputSchema(BaseModel):
-    result: Differentiable[Array[(None,), Float64]] = Field(
+    result: Differentiable[Array[(None,), Float32]] = Field(
         description="Vector s·a + b"
     )
 

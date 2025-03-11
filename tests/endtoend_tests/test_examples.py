@@ -101,6 +101,7 @@ class SampleRequest:
 @dataclass
 class Config:
     test_with_random_inputs: bool = False
+    check_gradients: bool = False
     sample_requests: list[SampleRequest] = None
     volume_mounts: list[str] = None
 
@@ -138,6 +139,7 @@ TEST_CASES = {
     ),
     "vectoradd": Config(
         test_with_random_inputs=True,
+        check_gradients=True,
         sample_requests=[
             SampleRequest(
                 endpoint="apply",
@@ -613,6 +615,19 @@ def test_unit_tesseract_endtoend(
             catch_exceptions=False,
         )
         assert result.exit_code == 0, result.output
+
+    if unit_tesseract_config.check_gradients:
+        result = cli_runner.invoke(
+            app,
+            [
+                "run",
+                img_name,
+                *extra_args,
+                "check_gradients",
+            ],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0, result
 
     if unit_tesseract_config.sample_requests:
         for request in unit_tesseract_config.sample_requests:
