@@ -92,7 +92,7 @@ def abstract_eval(abstract_inputs):
     jaxified_inputs = jax.tree.map(
         lambda x: jax.ShapeDtypeStruct(**x),
         abstract_inputs.model_dump(),
-        is_leaf=lambda x: (x.keys() == {"shape", "dtype"}),
+        is_leaf=lambda x: type(x) is dict and (x.keys() == {"shape", "dtype"}),
     )
     jax_shapes = jax.eval_shape(apply_jit, jaxified_inputs)
     return jax.tree.map(
