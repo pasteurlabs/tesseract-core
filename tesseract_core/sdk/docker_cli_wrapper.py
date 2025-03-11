@@ -30,16 +30,28 @@ class DockerWrapper:
             self.short_id = self.id[:12] if self.id else None
             self.name = json_dict.get("Name", None)
             ports = json_dict.get("NetworkSettings", None)
-            if ports:
+            if ports and ports.get("Ports", None):
                 ports = ports["Ports"]
                 port_key = next(iter(ports))  # Get the first port key
-                self.host_port = ports[port_key][0]["HostPort"]  # Get the host port
+                if ports[port_key]:
+                    self.host_port = ports[port_key][0].get(
+                        "HostPort"
+                    )  # Get the host port
+            else:
+                self.host_port = None
             self.attrs = json_dict
             self.project_id = json_dict.get("Config", None)
             if self.project_id:
                 self.project_id = self.project_id["Labels"].get(
                     "com.docker.compose.project", None
                 )
+
+        def __str__(self) -> str:
+            string = (
+                f"Container id: {self.id}, name: {self.name}, project_id: {self.project_id},"
+                "ports: {self.host_port}, attrs: {self.attrs}"
+            )
+            return string
 
     class Image:
         """Image class to wrap Docker image details."""
@@ -51,6 +63,9 @@ class DockerWrapper:
             self.tags = json_dict.get("RepoTags", None)
             # Docker images may be prefixed with the registry URL
             self.name = self.tags[0].split("/")[-1] if self.tags else None
+
+        def __str__(self) -> str:
+            return f"Image id: {self.id}, name: {self.name}, tags: {self.tags}, attrs: {self.attrs}"
 
     def get_all_containers(self) -> dict:
         """Returns the current list of containers."""
@@ -64,10 +79,9 @@ class DockerWrapper:
 
     def get_projects(self) -> dict:
         """Returns the current list of projects."""
-        if not self.project_container_map:
-            # Check if containers is updated
-            self.get_all_containers()
-            self._update_projects()
+        # Check if containers is updated
+        self.get_all_containers()
+        self._update_projects()
         return self.project_container_map
 
     def get_container(self, container: str) -> Container:
@@ -381,6 +395,7 @@ class DockerWrapper:
     def _update_projects(self) -> None:
         """Updates the list of projects by going through containers."""
         for container_id, container in self.containers.items():
+            print("AKOAKO Looking at container ", container)
             if container.project_id:
                 if container.project_id not in self.project_container_map:
                     self.project_container_map[container.project_id] = []
@@ -395,6 +410,9 @@ class DockerWrapper:
         """
         if not docker_asset_ids:
             return {}
+
+        # Set metadata in case no images exist and metadata does not get initialized.
+        metadata = None
         try:
             result = subprocess.run(
                 ["docker", "inspect", *docker_asset_ids],
@@ -403,12 +421,16 @@ class DockerWrapper:
                 text=True,
             )
             metadata = json.loads(result.stdout)
+
         except subprocess.CalledProcessError as e:
             # Handle the error if some images do not exist.
             error_message = e.stderr
             for asset_id in docker_asset_ids:
                 if f"No such image: {asset_id}" in error_message:
                     print(f"Image {asset_id} is not a valid image.")
+
+        if not metadata:
+            return {}
 
         asset_meta_dict = {}
         # Parse the output into a dictionary of only Tesseract assets

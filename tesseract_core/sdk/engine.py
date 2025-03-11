@@ -419,6 +419,9 @@ def teardown(
         # Get copy of keys to iterate over since the dictionary will change as we are
         # tearing down projects.
         project_ids = list(docker_wrapper.get_projects())
+        if not project_ids:
+            logger.info("No Tesseract projects to teardown")
+            return
 
     if not project_ids:
         raise ValueError("Docker Compose project ID is empty or None, cannot teardown")
