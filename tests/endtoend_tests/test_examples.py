@@ -29,7 +29,8 @@ from typer.testing import CliRunner
 
 # Only necessary when matching multi-word string
 def format_stderr(stderr: str) -> str:
-    return " ".join(re.sub(r"[^\w \d_.,!? ]+", "", stderr).split())
+    no_color = re.sub(r"\x1b\[[0-9;]*m", "", stderr)
+    return " ".join(re.sub(r"[^\w \d_.,!?:;\-]+", " ", no_color).split())
 
 
 def json_normalize(obj: str):
