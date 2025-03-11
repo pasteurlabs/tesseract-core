@@ -22,6 +22,12 @@ from tesseract_core.runtime.cli import _add_user_commands_to_cli
 from tesseract_core.runtime.cli import tesseract_runtime as cli_cmd
 from tesseract_core.runtime.file_interactions import load_bytes, output_to_bytes
 
+
+# Only necessary when matching multi-word string
+def format_stderr(stderr):
+    return " ".join(stderr.replace("│", "").strip("\n").split())
+
+
 test_input = {
     "a": [1.0, 2.0, 3.0],
     "b": [1, 1, 1],
@@ -237,10 +243,10 @@ def test_apply_command_binref(cli, cli_runner, dummy_tesseract_module, tmpdir):
         ["apply", json.dumps({"inputs": test_input_binref})],
         catch_exceptions=False,
     )
-    print(result.stderr.replace("│", ""))
+    stderr_fmt = format_stderr(result.stderr)
     assert result.exit_code == 2
-    assert "ValueError" in result.stderr
-    assert "binref encoded with a relative path" in result.stderr.replace("│", "")
+    assert "Value error" in stderr_fmt
+    assert "binref encoded with a relative path" in stderr_fmt
 
 
 def test_apply_command_noenv(
