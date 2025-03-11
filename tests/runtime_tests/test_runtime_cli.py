@@ -232,12 +232,15 @@ def test_apply_command_binref(cli, cli_runner, dummy_tesseract_module, tmpdir):
     expected = dummy_tesseract_module.apply(test_input_val).model_dump_json()
     assert json.loads(result.stdout) == json.loads(expected)
 
-    with pytest.raises(ValueError, match="binref encoded with a relative path"):
-        result = cli_runner.invoke(
-            cli,
-            ["apply", json.dumps({"inputs": test_input_binref})],
-            catch_exceptions=False,
-        )
+    result = cli_runner.invoke(
+        cli,
+        ["apply", json.dumps({"inputs": test_input_binref})],
+        catch_exceptions=False,
+    )
+    print(result.stderr.replace("│", ""))
+    assert result.exit_code == 2
+    assert "ValueError" in result.stderr
+    assert "binref encoded with a relative path" in result.stderr.replace("│", "")
 
 
 def test_apply_command_noenv(
@@ -443,7 +446,10 @@ def test_optional_arguments_stay_optional_in_cli(
 
 def test_apply_fails_if_required_args_missing(cli, cli_runner):
     result = cli_runner.invoke(cli, ["apply", json.dumps({"inputs": {"a": [1, 2, 3]}})])
-    assert result.exit_code == 1, result.stdout
+    print("Result:", result)
+    print(result.exit_code, result.stdout, result.stderr)
+    assert result.exit_code == 2
+    assert "missing" in result.stderr
 
 
 def test_stdout_redirect_cli():

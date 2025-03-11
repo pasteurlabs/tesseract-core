@@ -10,7 +10,6 @@ from typing import (
     Annotated,
     Any,
     Literal,
-    Self,
     TypeVar,
     Union,
     get_args,
@@ -327,7 +326,7 @@ def _path_to_pattern(path: Sequence[Union[str, object]]) -> str:
             part = r"\[-?\d+\]"
         elif part is DICT_INDEX_SENTINEL:
             is_literal = False
-            part = r"\{[a-zA-Z0-9_.]+\}"
+            part = r"\{[\w 0-9_.,!?\/\$£%\&:;<>\-]+\}"
         final_path.append(part)
 
     if is_literal:
@@ -420,13 +419,13 @@ def create_autodiff_schema(
         to ensure they match what's expected from the schema.
         """
         if ad_flavor == "jacobian":
-            if info.context["output_keys"] != result.keys():
+            if set(info.context["output_keys"]) != set(result.keys()):
                 raise ValueError(
                     "Error when validating output of jacobian:\n"
                     f"Expected keys {info.context['output_keys']} in output; got {set(result.keys())}"
                 )
             for output_path, subout in result.items():
-                if info.context["input_keys"] != subout.keys():
+                if set(info.context["input_keys"]) != set(subout.keys()):
                     raise ValueError(
                         "Error when validating output of jacobian:\n"
                         "Expected output with structure "
@@ -476,9 +475,8 @@ def create_autodiff_schema(
                         )
 
         elif ad_flavor == "jvp":
-            if info.context["output_keys"] != result.keys():
+            if set(info.context["output_keys"]) != set(result.keys()):
                 raise ValueError(
-                    "Error when validating output of jacobian_vector_product:\n"
                     f"Expected keys {info.context['output_keys']} in output; got {set(result.keys())}"
                 )
             for output_path, arr in result.items():
@@ -504,9 +502,8 @@ def create_autodiff_schema(
                     )
 
         elif ad_flavor == "vjp":
-            if info.context["input_keys"] != result.keys():
+            if set(info.context["input_keys"]) != set(result.keys()):
                 raise ValueError(
-                    "Error when validating output of vector_jacobian_product:\n"
                     f"Expected keys {info.context['input_keys']} in output; got {set(result.keys())}"
                 )
             for input_path, arr in result.items():
@@ -601,16 +598,22 @@ def create_autodiff_schema(
             model_config = ConfigDict(extra="forbid")
 
             @field_validator("tangent_vector", mode="after")
-            def _validate_ad_input(
+            @classmethod
+            def validate_tangent_vector(
                 cls, tangent_vector: dict, info: ValidationInfo
             ) -> dict:
                 """Raise an exception if the input of an autodiff function does not conform to given input keys."""
                 # Cotangent vector needs same keys as output_keys
-                if set(tangent_vector.keys()) != info.data["jvp_inputs"]:
+                try:
+                    if set(tangent_vector.keys()) != info.data["jvp_inputs"]:
+                        raise ValueError(
+                            f"Expected tangent vector with keys conforming to jvp_inputs: {info.data['jvp_inputs']}, "
+                            f"got {set(tangent_vector.keys())}."
+                        )
+                except KeyError as e:
                     raise ValueError(
-                        f"Expected tangent_vector with keys conforming to jvp_inputs: {info.data['jvp_inputs']}, "
-                        f"got {set(tangent_vector.keys())}."
-                    )
+                        "Unable to validate tangent vector as jvp_inputs either missing or invalid"
+                    ) from e
                 return tangent_vector
 
         class JVPOutputSchema(RootModel):
@@ -659,14 +662,19 @@ def create_autodiff_schema(
             @field_validator("cotangent_vector", mode="after")
             @classmethod
             def validate_cotangent_vector(
-                cls, cotangent_vector, info: ValidationInfo
-            ) -> Self:
+                cls, cotangent_vector: dict, info: ValidationInfo
+            ) -> dict:
                 """Raise an exception if cotangent vector keys are not identical to vjp_outputs."""
-                if set(cotangent_vector.keys()) != info.data["vjp_outputs"]:
+                try:
+                    if set(cotangent_vector.keys()) != info.data["vjp_outputs"]:
+                        raise ValueError(
+                            "Expected cotangent vector with keys conforming to vjp_outputs:",
+                            f"{info.data['vjp_outputs']}, got {set(cotangent_vector.keys())}.",
+                        )
+                except KeyError as e:
                     raise ValueError(
-                        f"Expected cotangent_vector with keys conforming to vjp_outputs: {info.data['vjp_outputs']}, "
-                        f"got {set(cotangent_vector.keys())}."
-                    )
+                        "Unable to validate cotangent vector as vjp_outputs either missing or invalid"
+                    ) from e
                 return cotangent_vector
 
         class VJPOutputSchema(RootModel):

@@ -636,8 +636,10 @@ def test_unit_tesseract_endtoend(
                 output = json_normalize(result.output)
             else:
                 assert result.exit_code != 0
-                # Result is an error message
-                output = "\n".join(traceback.format_exception(*result.exc_info))
+                # Result is an error message, need to remove pretty printing
+                output = "".join(traceback.format_exception(*result.exc_info))
+                output = output.replace("│", "")
+                print(output)
 
             if request.output_contains_pattern is not None:
                 patterns = request.output_contains_pattern
