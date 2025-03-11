@@ -9,7 +9,7 @@ from typing import (
     Any,
     Callable,
     Literal,
-    Namedtuple,
+    NamedTuple,
     Optional,
     Union,
     get_args,
@@ -29,7 +29,7 @@ ADEndpointName = Literal[
 ]
 
 
-class GradientCheckResult(Namedtuple):
+class GradientCheckResult(NamedTuple):
     in_path: str
     out_path: str
     idx: tuple[int, ...]
