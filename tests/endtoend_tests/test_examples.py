@@ -203,6 +203,21 @@ TEST_CASES = {
                 output_contains_array=np.array([7.0, 11.0, 15.0], dtype="float32"),
             ),
             SampleRequest(
+                endpoint="abstract_eval",
+                payload={
+                    "inputs": {
+                        "a": {
+                            "v": {"shape": [3], "dtype": "float32"},
+                            "s": {"shape": [], "dtype": "float32"},
+                        },
+                        "b": {
+                            "v": {"shape": [3], "dtype": "float32"},
+                            "s": {"shape": [], "dtype": "float32"},
+                        },
+                    }
+                },
+            ),
+            SampleRequest(
                 endpoint="apply",
                 payload={"inputs": {}},
                 expected_status_code=422,
