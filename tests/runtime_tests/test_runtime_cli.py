@@ -4,6 +4,7 @@
 import copy
 import json
 import os
+import re
 import subprocess
 import sys
 import traceback
@@ -25,7 +26,7 @@ from tesseract_core.runtime.file_interactions import load_bytes, output_to_bytes
 
 # Only necessary when matching multi-word string
 def format_stderr(stderr: str) -> str:
-    return " ".join(stderr.replace("│", "").strip("\n").split())
+    return " ".join(re.sub(r"[^\w \d_.,!? ]+", "", stderr).split())
 
 
 test_input = {

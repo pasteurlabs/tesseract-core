@@ -326,7 +326,7 @@ def _path_to_pattern(path: Sequence[Union[str, object]]) -> str:
             part = r"\[-?\d+\]"
         elif part is DICT_INDEX_SENTINEL:
             is_literal = False
-            part = r"\{[\w 0-9_.,!?\/\$£%\&:;<>\-]+\}"
+            part = r"\{[\w \d_.,!?\/\$£%\&:;<>\-]+\}"
         final_path.append(part)
 
     if is_literal:

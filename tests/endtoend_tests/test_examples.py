@@ -11,6 +11,7 @@ Add test cases for specific unit Tesseracts to the TEST_CASES dictionary.
 
 import base64
 import json
+import re
 import time
 import traceback
 from dataclasses import dataclass
@@ -26,8 +27,9 @@ from common import build_tesseract
 from typer.testing import CliRunner
 
 
+# Only necessary when matching multi-word string
 def format_stderr(stderr: str) -> str:
-    return " ".join(stderr.replace("│", "").strip("\n").split())
+    return " ".join(re.sub(r"[^\w \d_.,!? ]+", "", stderr).split())
 
 
 def json_normalize(obj: str):
