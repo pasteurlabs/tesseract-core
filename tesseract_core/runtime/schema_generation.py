@@ -349,12 +349,9 @@ def _is_regex_pattern(pattern: str) -> bool:
 
 
 def input_path_validator(path: str, info: ValidationInfo) -> str:
-    print("Validating input path: ", path)
     if "[" in path or "{" in path:
-        print("is regex")
         try:
             get_at_path(info.data["inputs"], path)
-            print(get_at_path(info.data["inputs"], path))
         except (LookupError, AttributeError) as exc:
             raise ValueError(
                 f"Could not find {info.field_name} path {path} in inputs."
