@@ -381,7 +381,7 @@ def create_autodiff_schema(
         raise RuntimeError("No differentiable outputs found in the output schema")
 
     diffable_input_type = Union[
-        tuple(_pattern_to_type(p, validate=True) for p in diffable_inputs.keys())
+        tuple(_pattern_to_type(p) for p in diffable_inputs.keys())
     ]
     diffable_output_type = Union[
         tuple(_pattern_to_type(p) for p in diffable_outputs.keys())
