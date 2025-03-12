@@ -53,7 +53,7 @@ def replace_arrays(inpobj, replace_fn):
 testinput = NestedModel(
     testdiffarr=make_array((5, 6), "float64"),
     testfoo=[SubModel(foo=1.0, bar=[1, 2, 3]), SubModel(foo=4.0, bar=[])],
-    testbar={"hey there!": SubModel(foo=5.0, bar=[2])},
+    testbar={"hey there": SubModel(foo=5.0, bar=[2])},
     testbaz=make_array((1, 2, 3), "uint8"),
     testset={1, 2, 3},
     testtuple=(1, "hello"),
@@ -73,7 +73,7 @@ testinput_arrays_only = {
         {"bar": [testinput["testfoo"][0]["bar"][0]]},
         {"bar": []},
     ],
-    "testbar": {"hey there!": {"bar": [testinput["testbar"]["hey there!"]["bar"][0]]}},
+    "testbar": {"hey there": {"bar": [testinput["testbar"]["hey there"]["bar"][0]]}},
     "testlazysequence": [
         (testinput["testlazysequence"][0][1],),
         (testinput["testlazysequence"][1][1],),
@@ -166,7 +166,7 @@ def test_create_jacobian_schema():
         jac_testinput[var] = [
             "testdiffarr",
             "testfoo.[0].bar.[0]",
-            "testbar.{hey there!}.bar.[0]",
+            "testbar.{hey there}.bar.[0]",
         ]
         InputSchema.model_validate(jac_testinput)
 
@@ -196,7 +196,7 @@ def test_create_jacobian_schema():
 
     # Test LookupError (from KeyError) (only raised on jac_inputs)
     with pytest.raises(ValidationError):
-        jac_testinput["jac_inputs"] = ["testbar.{hey there}.bar.[0]"]
+        jac_testinput["jac_inputs"] = ["testbar.{hey ther}.bar.[0]"]
         InputSchema.model_validate(jac_testinput)
 
     ctx = {
@@ -250,16 +250,16 @@ def test_create_jvp_schema():
         jvp_testinput[var] = [
             "testdiffarr",
             "testfoo.[0].bar.[0]",
-            "testbar.{hey there!}.bar.[0]",
+            "testbar.{hey there}.bar.[0]",
             "testlazysequence.[0].[1]",
         ]
         if var == "jvp_inputs":
             jvp_testinput["tangent_vector"] = {
                 **jvp_testinput["tangent_vector"],
                 "testfoo.[0].bar.[0]": testinput["testfoo"][0]["bar"][0],
-                "testbar.{hey there!}.bar.[0]": testinput["testbar"]["hey there!"][
-                    "bar"
-                ][0],
+                "testbar.{hey there}.bar.[0]": testinput["testbar"]["hey there"]["bar"][
+                    0
+                ],
                 "testlazysequence.[0].[1]": testinput["testlazysequence"][0][1],
             }
         InputSchema.model_validate(jvp_testinput)
@@ -302,9 +302,9 @@ def test_create_jvp_schema():
 
     # Test LookupError (from KeyError) (only raised on jvp_inputs)
     with pytest.raises(ValidationError):
-        jvp_testinput["jvp_inputs"] = ["testbar.{hey there}.bar.[0]"]
+        jvp_testinput["jvp_inputs"] = ["testbar.{hey ther}.bar.[0]"]
         jvp_testinput["tangent_vector"] = {
-            "testbar.{hey there}.bar.[0]": testinput["testbar"]["hey there!"]["bar"][0]
+            "testbar.{hey ther}.bar.[0]": testinput["testbar"]["hey there"]["bar"][0]
         }
         InputSchema.model_validate(jvp_testinput)
 
@@ -401,7 +401,7 @@ def test_create_vjp_schema():
 
     # Test LookupError (from KeyError) (only raised on vjp_inputs)
     with pytest.raises(ValidationError):
-        vjp_testinput["vjp_inputs"] = ["testbar.{hey there}.bar.[0]"]
+        vjp_testinput["vjp_inputs"] = ["testbar.{hey ther}.bar.[0]"]
         InputSchema.model_validate(vjp_testinput)
 
     # Mis-aligned cotangent vector

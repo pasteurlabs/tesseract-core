@@ -230,7 +230,7 @@ def _create_user_defined_cli_command(
                 )
             except ValidationError as e:
                 raise click.BadParameter(
-                    e,  # _prettify_validation_errors(e),
+                    e,
                     param=InputSchema,
                     param_hint=InputSchema.__name__,
                 ) from e

@@ -24,6 +24,7 @@ from tesseract_core.runtime.cli import tesseract_runtime as cli_cmd
 from tesseract_core.runtime.file_interactions import load_bytes, output_to_bytes
 
 
+# Remove color codes and box
 # Only necessary when matching multi-word string
 def format_stderr(stderr: str) -> str:
     no_color = re.sub(r"\x1b\[[0-9;]*m", "", stderr)
@@ -245,6 +246,8 @@ def test_apply_command_binref(cli, cli_runner, dummy_tesseract_module, tmpdir):
         ["apply", json.dumps({"inputs": test_input_binref})],
         catch_exceptions=False,
     )
+    # Click with rich adds color codes and boxes to the output
+    # which we need to remove in case they break multi-word pattern matching
     stderr_fmt = format_stderr(result.stderr)
     assert result.exit_code == 2
     assert "Value error" in stderr_fmt

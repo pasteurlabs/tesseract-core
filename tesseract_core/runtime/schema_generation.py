@@ -326,7 +326,7 @@ def _path_to_pattern(path: Sequence[Union[str, object]]) -> str:
             part = r"\[-?\d+\]"
         elif part is DICT_INDEX_SENTINEL:
             is_literal = False
-            part = r"\{[\w \d_.,!?\/\$£%\&:;<>\-]+\}"
+            part = r"\{[\w \-]+\}"
         final_path.append(part)
 
     if is_literal:
@@ -335,17 +335,12 @@ def _path_to_pattern(path: Sequence[Union[str, object]]) -> str:
     return r"\.".join(final_path)
 
 
-def _pattern_to_type(pattern: str, validate: bool = False) -> type:
+def _pattern_to_type(pattern: str) -> type:
     """Convert a string pattern (which may be a literal or regex) to a type that can be used for validation."""
     if _is_regex_pattern(pattern):
-        if validate:
-            return Annotated[
-                str, Field(pattern=pattern), AfterValidator(path_validator)
-            ]
-        else:
-            return Annotated[str, Field(pattern=pattern)]
-
-    return Literal[pattern]
+        return Annotated[str, Field(pattern=pattern)]
+    else:
+        return Literal[pattern]
 
 
 def _is_regex_pattern(pattern: str) -> bool:
@@ -353,12 +348,13 @@ def _is_regex_pattern(pattern: str) -> bool:
     return "\\" in pattern
 
 
-def path_validator(path: str, info: ValidationInfo) -> str:
-    # We only need to validate diff_inputs once
-    # Not when they appear again in OutputSchema
-    if "Input" in info.config["title"]:
+def input_path_validator(path: str, info: ValidationInfo) -> str:
+    print("Validating input path: ", path)
+    if "[" in path or "{" in path:
+        print("is regex")
         try:
             get_at_path(info.data["inputs"], path)
+            print(get_at_path(info.data["inputs"], path))
         except (LookupError, AttributeError) as exc:
             raise ValueError(
                 f"Could not find {info.field_name} path {path} in inputs."
@@ -539,7 +535,9 @@ def create_autodiff_schema(
             inputs: InputSchema = Field(
                 ..., description="The input data to compute the Jacobian at."
             )
-            jac_inputs: set[diffable_input_type] = Field(
+            jac_inputs: set[
+                Annotated[diffable_input_type, AfterValidator(input_path_validator)]
+            ] = Field(
                 ...,
                 description="The set of differentiable inputs to compute the Jacobian with respect to.",
                 min_length=1,
@@ -576,7 +574,9 @@ def create_autodiff_schema(
             inputs: InputSchema = Field(
                 ..., description="The input data to compute the JVP at."
             )
-            jvp_inputs: set[diffable_input_type] = Field(
+            jvp_inputs: set[
+                Annotated[diffable_input_type, AfterValidator(input_path_validator)]
+            ] = Field(
                 ...,
                 description="The set of differentiable inputs to compute the JVP with respect to.",
                 min_length=1,
@@ -638,7 +638,9 @@ def create_autodiff_schema(
             inputs: InputSchema = Field(
                 ..., description="The input data to compute the VJP at."
             )
-            vjp_inputs: set[diffable_input_type] = Field(
+            vjp_inputs: set[
+                Annotated[diffable_input_type, AfterValidator(input_path_validator)]
+            ] = Field(
                 ...,
                 description="The set of differentiable inputs to compute the VJP with respect to.",
                 min_length=1,

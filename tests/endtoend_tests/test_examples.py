@@ -643,8 +643,10 @@ def test_unit_tesseract_endtoend(
                 output = json_normalize(result.output)
             else:
                 assert result.exit_code != 0
-                # Result is an error message, need to remove pretty printing
+                # Result is an error message
                 output = "".join(traceback.format_exception(*result.exc_info))
+                # Click with rich adds color codes and boxes to the output
+                # which we need to remove in case they break multi-word pattern matching
                 output = format_stderr(output)
 
             if request.output_contains_pattern is not None:
