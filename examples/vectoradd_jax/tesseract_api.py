@@ -91,14 +91,29 @@ def apply(inputs: InputSchema) -> OutputSchema:
 
 def abstract_eval(abstract_inputs):
     """Calculate output shape of apply from the shape of its inputs."""
+    is_shapedtye_dict = lambda x: type(x) is dict and (x.keys() == {"shape", "dtype"})
+    is_shapedtye_struct = lambda x: isinstance(x, jax.ShapeDtypeStruct)
+
     jaxified_inputs = jax.tree.map(
-        lambda x: jax.ShapeDtypeStruct(**x),
+        lambda x: jax.ShapeDtypeStruct(**x) if is_shapedtye_dict(x) else x,
         abstract_inputs.model_dump(),
-        is_leaf=lambda x: (x.keys() == {"shape", "dtype"}),
+        is_leaf=is_shapedtye_dict,
     )
-    jax_shapes = jax.eval_shape(apply_jit, jaxified_inputs)
+    dynamic_inputs, static_inputs = eqx.partition(
+        jaxified_inputs, filter_spec=is_shapedtye_struct
+    )
+
+    def wrapped_apply(dynamic_inputs):
+        inputs = eqx.combine(static_inputs, dynamic_inputs)
+        return apply_jit(inputs)
+
+    jax_shapes = jax.eval_shape(wrapped_apply, dynamic_inputs)
     return jax.tree.map(
-        lambda sd: {"shape": sd.shape, "dtype": str(sd.dtype)}, jax_shapes
+        lambda x: {"shape": x.shape, "dtype": str(x.dtype)}
+        if is_shapedtye_struct(x)
+        else x,
+        jax_shapes,
+        is_leaf=is_shapedtye_struct,
     )
 
 
