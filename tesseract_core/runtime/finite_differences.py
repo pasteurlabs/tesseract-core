@@ -20,6 +20,7 @@ from typing import (
 
 import numpy as np
 from pydantic import BaseModel
+from pydantic.fields import FieldInfo
 from rich.progress import Progress
 
 from .core import create_endpoints
@@ -126,9 +127,14 @@ def get_differentiale_paths(
 
         # Peel off Set
         unpacked = get_args(ann)[0]
+
         # Peel off Annotated
         if get_origin(unpacked) is Annotated:
-            unpacked = get_args(unpacked)[0]
+            unpacked, *other = get_args(unpacked)
+            for item in other:
+                if isinstance(item, FieldInfo):
+                    return [item.metadata[0].pattern]
+
         # Peel off Union
         if get_origin(unpacked) is Union:
             unpacked = get_args(unpacked)
