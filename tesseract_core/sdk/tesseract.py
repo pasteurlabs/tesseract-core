@@ -147,6 +147,18 @@ class Tesseract:
         payload = {"inputs": inputs}
         return self._run_tesseract("apply", payload)
 
+    def abstract_eval(self, inputs: dict) -> dict:
+        """Run abstract eval endpoint.
+
+        Args:
+            inputs: a dictionary with the (abstract) inputs.
+
+        Returns:
+            dictionary with the results.
+        """
+        payload = {"inputs": inputs}
+        return self._run_tesseract("abstract_eval", payload)
+
     def jacobian(
         self, inputs: dict, jac_inputs: list[str], jac_outputs: list[str]
     ) -> dict:

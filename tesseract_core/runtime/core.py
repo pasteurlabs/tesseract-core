@@ -2,13 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import importlib
-import re
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Optional, Union
-
-from pydantic import BaseModel
+from typing import Any, Union
 
 from .config import get_config
 from .schema_generation import (
@@ -16,7 +13,6 @@ from .schema_generation import (
     create_apply_schema,
     create_autodiff_schema,
 )
-from .tree_transforms import get_at_path
 
 
 def load_module_from_path(path: Union[Path, str]) -> ModuleType:
@@ -57,98 +53,6 @@ def get_supported_endpoints(api_module: ModuleType) -> tuple[str, ...]:
 def get_tesseract_api() -> ModuleType:
     """Import tesseract_api.py file."""
     return load_module_from_path(get_config().tesseract_api_path)
-
-
-def _validate_ad_input(
-    inputs: BaseModel,
-    input_keys: set[str],
-    output_keys: set[str],
-    endpoint_name: str,
-    tangent_cotangent_vector: Optional[dict[str, Any]] = None,
-):
-    """Raise an exception if the input of an autodiff function does not conform to given input keys."""
-    # Could be moved to a model validator
-    for input_key in input_keys:
-        if not re.match(r"^[a-zA-Z0-9_.\[\]{}]+$", input_key):
-            raise RuntimeError(
-                f"Error when validating input of function {endpoint_name}:\n"
-                f"Invalid input key {input_key}."
-            )
-
-        try:
-            get_at_path(inputs, input_key)
-        except Exception as exc:
-            raise RuntimeError(
-                f"Error when validating input of function {endpoint_name}:\n"
-                f"Could not find input path {input_key} in inputs."
-            ) from exc
-
-    if endpoint_name == "jacobian_vector_product":
-        # Tangent vector needs same keys as input_keys
-        if set(tangent_cotangent_vector.keys()) != input_keys:
-            raise RuntimeError(
-                f"Error when validating input of function {endpoint_name}:\n"
-                f"Expected tangent vector with keys {input_keys}, got {set(tangent_cotangent_vector.keys())}."
-            )
-
-    if endpoint_name == "vector_jacobian_product":
-        # Cotangent vector needs same keys as output_keys
-        if set(tangent_cotangent_vector.keys()) != output_keys:
-            raise RuntimeError(
-                f"Error when validating input of function {endpoint_name}:\n"
-                f"Expected cotangent vector with keys {output_keys}, got {set(tangent_cotangent_vector.keys())}."
-            )
-
-
-def _validate_ad_output(
-    input: Any,
-    output: Any,
-    input_keys: set[str],
-    output_keys: set[str],
-    endpoint_name: str,
-):
-    """Raise an exception if the output structure of an autodiff function does not conform to given keys."""
-    if not isinstance(output, dict):
-        raise RuntimeError(
-            f"Error when validating output of function {endpoint_name}:\n"
-            f"Expected output to be a dictionary, got {type(output)}"
-        )
-
-    if endpoint_name == "jacobian":
-        if output_keys != output.keys():
-            raise RuntimeError(
-                "Error when validating output of jacobian:\n"
-                f"Expected keys {output_keys} in output; got {set(output.keys())}"
-            )
-        for subkey, subout in output.items():
-            if not isinstance(subout, dict):
-                raise RuntimeError(
-                    "Error when validating output of jacobian:\n"
-                    f"Expected output with structure {{{tuple(output_keys)}: {{{tuple(input_keys)}: ...}}}}, "
-                    f"got unexpected type {type(subout)} for output key {subkey}."
-                )
-            if input_keys != subout.keys():
-                raise RuntimeError(
-                    "Error when validating output of jacobian:\n"
-                    f"Expected output with structure {{{tuple(output_keys)}: {{{tuple(input_keys)}: ...}}}}, "
-                    f"got {set(subout.keys())} for output key {subkey}."
-                )
-
-    elif endpoint_name == "jacobian_vector_product":
-        if output_keys != output.keys():
-            raise RuntimeError(
-                "Error when validating output of jacobian_vector_product:\n"
-                f"Expected keys {output_keys} in output; got {set(output.keys())}"
-            )
-
-    elif endpoint_name == "vector_jacobian_product":
-        if input_keys != output.keys():
-            raise RuntimeError(
-                "Error when validating output of vector_jacobian_product:\n"
-                f"Expected keys {input_keys} in output; got {set(output.keys())}"
-            )
-    else:
-        raise RuntimeError(f"Unknown endpoint name {endpoint_name}")
 
 
 def create_endpoints(api_module: ModuleType) -> list[Callable]:
@@ -207,16 +111,16 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
 
             Differentiates ``jac_outputs`` with respect to ``jac_inputs``, at the point ``inputs``.
             """
-            _validate_ad_input(
-                payload.inputs, payload.jac_inputs, payload.jac_outputs, "jacobian"
-            )
             out = api_module.jacobian(
                 payload.inputs, payload.jac_inputs, payload.jac_outputs
             )
-            _validate_ad_output(
-                payload.inputs, out, payload.jac_inputs, payload.jac_outputs, "jacobian"
+            return JacobianOutputSchema.model_validate(
+                out,
+                context={
+                    "output_keys": payload.jac_outputs,
+                    "input_keys": payload.jac_inputs,
+                },
             )
-            return JacobianOutputSchema.model_validate(out)
 
         endpoints.append(jacobian)
 
@@ -232,27 +136,15 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
             Evaluates the Jacobian vector product between the Jacobian given by ``jvp_outputs``
             with respect to ``jvp_inputs`` at the point ``inputs`` and the given tangent vector.
             """
-            _validate_ad_input(
-                payload.inputs,
-                payload.jvp_inputs,
-                payload.jvp_outputs,
-                "jacobian_vector_product",
-                tangent_cotangent_vector=payload.tangent_vector,
-            )
             out = api_module.jacobian_vector_product(
                 payload.inputs,
                 payload.jvp_inputs,
                 payload.jvp_outputs,
                 payload.tangent_vector,
             )
-            _validate_ad_output(
-                payload.inputs,
-                out,
-                payload.jvp_inputs,
-                payload.jvp_outputs,
-                "jacobian_vector_product",
+            return JVPOutputSchema.model_validate(
+                out, context={"output_keys": payload.jvp_outputs}
             )
-            return JVPOutputSchema.model_validate(out)
 
         endpoints.append(jacobian_vector_product)
 
@@ -268,27 +160,15 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
             Computes the vector Jacobian product between the Jacobian given by ``vjp_outputs``
             with respect to ``vjp_inputs`` at the point ``inputs`` and the given cotangent vector.
             """
-            _validate_ad_input(
-                payload.inputs,
-                payload.vjp_inputs,
-                payload.vjp_outputs,
-                "vector_jacobian_product",
-                tangent_cotangent_vector=payload.cotangent_vector,
-            )
             out = api_module.vector_jacobian_product(
                 payload.inputs,
                 payload.vjp_inputs,
                 payload.vjp_outputs,
                 payload.cotangent_vector,
             )
-            _validate_ad_output(
-                payload.inputs,
-                out,
-                payload.vjp_inputs,
-                payload.vjp_outputs,
-                "vector_jacobian_product",
+            return VJPOutputSchema.model_validate(
+                out, context={"input_keys": payload.vjp_inputs}
             )
-            return VJPOutputSchema.model_validate(out)
 
         endpoints.append(vector_jacobian_product)
 

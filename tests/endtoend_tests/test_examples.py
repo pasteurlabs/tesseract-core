@@ -11,6 +11,7 @@ Add test cases for specific unit Tesseracts to the TEST_CASES dictionary.
 
 import base64
 import json
+import re
 import time
 import traceback
 from dataclasses import dataclass
@@ -24,6 +25,12 @@ import pytest
 import requests
 from common import build_tesseract
 from typer.testing import CliRunner
+
+
+# Only necessary when matching multi-word string
+def format_stderr(stderr: str) -> str:
+    no_color = re.sub(r"\x1b\[[0-9;]*m", "", stderr)
+    return " ".join(re.sub(r"[^\w \d_.,!?:;\-]+", " ", no_color).split())
 
 
 def json_normalize(obj: str):
@@ -749,7 +756,10 @@ def test_unit_tesseract_endtoend(
             else:
                 assert result.exit_code != 0
                 # Result is an error message
-                output = "\n".join(traceback.format_exception(*result.exc_info))
+                output = "".join(traceback.format_exception(*result.exc_info))
+                # Click with rich adds color codes and boxes to the output
+                # which we need to remove in case they break multi-word pattern matching
+                output = format_stderr(output)
 
             if request.output_contains_pattern is not None:
                 patterns = request.output_contains_pattern
