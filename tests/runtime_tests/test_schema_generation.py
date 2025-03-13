@@ -53,7 +53,7 @@ def replace_arrays(inpobj, replace_fn):
 testinput = NestedModel(
     testdiffarr=make_array((5, 6), "float64"),
     testfoo=[SubModel(foo=1.0, bar=[1, 2, 3]), SubModel(foo=4.0, bar=[])],
-    testbar={"hey there!": SubModel(foo=5.0, bar=[2])},
+    testbar={"hey there": SubModel(foo=5.0, bar=[2])},
     testbaz=make_array((1, 2, 3), "uint8"),
     testset={1, 2, 3},
     testtuple=(1, "hello"),
@@ -73,7 +73,7 @@ testinput_arrays_only = {
         {"bar": [testinput["testfoo"][0]["bar"][0]]},
         {"bar": []},
     ],
-    "testbar": {"hey there!": {"bar": [testinput["testbar"]["hey there!"]["bar"][0]]}},
+    "testbar": {"hey there": {"bar": [testinput["testbar"]["hey there"]["bar"][0]]}},
     "testlazysequence": [
         (testinput["testlazysequence"][0][1],),
         (testinput["testlazysequence"][1][1],),
@@ -166,7 +166,7 @@ def test_create_jacobian_schema():
         jac_testinput[var] = [
             "testdiffarr",
             "testfoo.[0].bar.[0]",
-            "testbar.{hey there!}.bar.[0]",
+            "testbar.{hey there}.bar.[0]",
         ]
         InputSchema.model_validate(jac_testinput)
 
@@ -184,20 +184,49 @@ def test_create_jacobian_schema():
             jac_testinput[var] = ["moo"]
             InputSchema.model_validate(jac_testinput)
 
-    OutputSchema.model_validate(testoutput)
+    jac_testinput = valid_jac_input.copy()
+    # Test LookupError (from IndexError) (only raised on jac_inputs)
+    with pytest.raises(ValidationError):
+        jac_testinput["jac_inputs"] = ["testfoo.[2].bar.[0]"]
+        InputSchema.model_validate(jac_testinput)
 
     with pytest.raises(ValidationError):
-        OutputSchema.model_validate(testinput)
+        jac_testinput["jac_inputs"] = ["testlazysequence.[0].[2]"]
+        InputSchema.model_validate(jac_testinput)
+
+    # Test LookupError (from KeyError) (only raised on jac_inputs)
+    with pytest.raises(ValidationError):
+        jac_testinput["jac_inputs"] = ["testbar.{hey ther}.bar.[0]"]
+        InputSchema.model_validate(jac_testinput)
+
+    ctx = {
+        "input_keys": valid_jac_input["jac_inputs"],
+        "output_keys": valid_jac_input["jac_outputs"],
+    }
+
+    OutputSchema.model_validate(testoutput, context=ctx)
+
+    # Input instead of output
+    with pytest.raises(ValidationError):
+        OutputSchema.model_validate(testinput, context=ctx)
 
     # Extra keys
     with pytest.raises(ValidationError):
-        OutputSchema.model_validate({**testoutput, "foo": 1})
+        OutputSchema.model_validate({**testoutput, "foo": 1}, context=ctx)
 
     # Extra keys (nested)
     with pytest.raises(ValidationError):
         out = testoutput.copy()
         out["testdiffarr"]["foo"] = 1
-        OutputSchema.model_validate(out)
+        OutputSchema.model_validate(out, context=ctx)
+
+    # Missing keys
+    with pytest.raises(ValidationError):
+        OutputSchema.model_validate({**testoutput, "testdiffarr": {}}, context=ctx)
+
+    # Flat dict
+    with pytest.raises(ValidationError):
+        OutputSchema.model_validate(testoutput["testdiffarr"], context=ctx)
 
 
 def test_create_jvp_schema():
@@ -221,28 +250,91 @@ def test_create_jvp_schema():
         jvp_testinput[var] = [
             "testdiffarr",
             "testfoo.[0].bar.[0]",
+            "testbar.{hey there}.bar.[0]",
             "testlazysequence.[0].[1]",
         ]
+        if var == "jvp_inputs":
+            jvp_testinput["tangent_vector"] = {
+                **jvp_testinput["tangent_vector"],
+                "testfoo.[0].bar.[0]": testinput["testfoo"][0]["bar"][0],
+                "testbar.{hey there}.bar.[0]": testinput["testbar"]["hey there"]["bar"][
+                    0
+                ],
+                "testlazysequence.[0].[1]": testinput["testlazysequence"][0][1],
+            }
         InputSchema.model_validate(jvp_testinput)
 
         with pytest.raises(ValidationError):
             jvp_testinput[var] = []
+            if var == "jvp_inputs":
+                jvp_testinput["tangent_vector"] = {}
             InputSchema.model_validate(jvp_testinput)
 
         with pytest.raises(ValidationError):
             # non-differentiable array
             jvp_testinput[var] = ["testbaz"]
+            if var == "jvp_inputs":
+                jvp_testinput["tangent_vector"] = {"testbaz": testinput["testbaz"]}
             InputSchema.model_validate(jvp_testinput)
 
         with pytest.raises(ValidationError):
             # non-existing
             jvp_testinput[var] = ["moo"]
+            if var == "jvp_inputs":
+                jvp_testinput["tangent_vector"] = {"moo": testinput["testdiffarr"]}
             InputSchema.model_validate(jvp_testinput)
 
-    OutputSchema.model_validate(testoutput)
+    jvp_testinput = valid_jvp_input.copy()
+    # Test LookupError (from IndexError) (only raised on jvp_inputs)
+    with pytest.raises(ValidationError):
+        jvp_testinput["jvp_inputs"] = ["testfoo.[2].bar.[0]"]
+        jvp_testinput["tangent_vector"] = {
+            "testfoo.[2].bar.[0]": testinput["testdiffarr"]
+        }
+        InputSchema.model_validate(jvp_testinput)
 
     with pytest.raises(ValidationError):
-        OutputSchema.model_validate(testinput)
+        jvp_testinput["jvp_inputs"] = ["testlazysequence.[0].[2]"]
+        jvp_testinput["tangent_vector"] = {
+            "testlazysequence.[0].[2]": testinput["testdiffarr"]
+        }
+        InputSchema.model_validate(jvp_testinput)
+
+    # Test LookupError (from KeyError) (only raised on jvp_inputs)
+    with pytest.raises(ValidationError):
+        jvp_testinput["jvp_inputs"] = ["testbar.{hey ther}.bar.[0]"]
+        jvp_testinput["tangent_vector"] = {
+            "testbar.{hey ther}.bar.[0]": testinput["testbar"]["hey there"]["bar"][0]
+        }
+        InputSchema.model_validate(jvp_testinput)
+
+    # Mis-aligned tangent vector
+    jvp_testinput = valid_jvp_input.copy()
+    with pytest.raises(ValidationError):
+        jvp_testinput["tangent_vector"] = {**jvp_testinput["tangent_vector"], "foo": 1}
+        InputSchema.model_validate(jvp_testinput)
+
+    OutputSchema.model_validate(
+        testoutput, context={"output_keys": valid_jvp_input["jvp_outputs"]}
+    )
+
+    with pytest.raises(ValidationError):
+        OutputSchema.model_validate(
+            testinput, context={"output_keys": valid_jvp_input["jvp_outputs"]}
+        )
+
+    # Extra keys
+    with pytest.raises(ValidationError):
+        OutputSchema.model_validate(
+            {**testoutput, "foo": 1},
+            context={"output_keys": valid_jvp_input["jvp_outputs"]},
+        )
+
+    # Missing keys
+    with pytest.raises(ValidationError):
+        OutputSchema.model_validate(
+            {}, context={"output_keys": valid_jvp_input["jvp_outputs"]}
+        )
 
 
 def test_create_vjp_schema():
@@ -269,26 +361,79 @@ def test_create_vjp_schema():
             "testfoo.[0].bar.[0]",
             "testlazysequence.[0].[1]",
         ]
+        if var == "vjp_outputs":
+            vjp_testinput["cotangent_vector"] = {
+                **vjp_testinput["cotangent_vector"],
+                "testfoo.[0].bar.[0]": 1,
+                "testlazysequence.[0].[1]": testinput["testlazysequence"][0][1],
+            }
         InputSchema.model_validate(vjp_testinput)
 
         with pytest.raises(ValidationError):
             vjp_testinput[var] = []
+            if var == "vjp_outputs":
+                vjp_testinput["cotangent_vector"] = {}
             InputSchema.model_validate(vjp_testinput)
 
         with pytest.raises(ValidationError):
             # non-differentiable array
             vjp_testinput[var] = ["testbaz"]
+            if var == "vjp_outputs":
+                vjp_testinput["cotangent_vector"] = {"testbaz": testinput["testbaz"]}
             InputSchema.model_validate(vjp_testinput)
 
         with pytest.raises(ValidationError):
             # non-existing
             vjp_testinput[var] = ["moo"]
+            if var == "vjp_outputs":
+                vjp_testinput["cotangent_vector"] = {"moo": 1}
             InputSchema.model_validate(vjp_testinput)
 
-    OutputSchema.model_validate(testoutput)
+    vjp_testinput = valid_vjp_input.copy()
+    # Test LookupError (from IndexError) (only raised on vjp_inputs)
+    with pytest.raises(ValidationError):
+        vjp_testinput["vjp_inputs"] = ["testfoo.[2].bar.[0]"]
+        InputSchema.model_validate(vjp_testinput)
 
     with pytest.raises(ValidationError):
-        OutputSchema.model_validate(testinput)
+        vjp_testinput["vjp_inputs"] = ["testlazysequence.[0].[2]"]
+        InputSchema.model_validate(vjp_testinput)
+
+    # Test LookupError (from KeyError) (only raised on vjp_inputs)
+    with pytest.raises(ValidationError):
+        vjp_testinput["vjp_inputs"] = ["testbar.{hey ther}.bar.[0]"]
+        InputSchema.model_validate(vjp_testinput)
+
+    # Mis-aligned cotangent vector
+    vjp_testinput = valid_vjp_input.copy()
+    with pytest.raises(ValidationError):
+        vjp_testinput["cotangent_vector"] = {
+            **vjp_testinput["cotangent_vector"],
+            "foo": 1,
+        }
+        InputSchema.model_validate(vjp_testinput)
+
+    OutputSchema.model_validate(
+        testoutput, context={"input_keys": valid_vjp_input["vjp_inputs"]}
+    )
+
+    with pytest.raises(ValidationError):
+        OutputSchema.model_validate(
+            testinput, context={"input_keys": valid_vjp_input["vjp_inputs"]}
+        )
+
+    # Extra keys
+    with pytest.raises(ValidationError):
+        OutputSchema.model_validate(
+            {**testoutput, "foo": 1},
+            context={"input_keys": valid_vjp_input["vjp_inputs"]},
+        )
+
+    # Missing keys
+    with pytest.raises(ValidationError):
+        OutputSchema.model_validate(
+            {}, context={"input_keys": valid_vjp_input["vjp_inputs"]}
+        )
 
 
 def test_untyped_container_schema_generation():

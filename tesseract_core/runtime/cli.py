@@ -14,6 +14,7 @@ from typing import Any, Optional
 
 import click
 import typer
+from pydantic import ValidationError
 
 from tesseract_core.runtime.config import get_config
 from tesseract_core.runtime.core import create_endpoints, get_tesseract_api
@@ -223,9 +224,16 @@ def _create_user_defined_cli_command(
 
         if InputSchema is not None:
             payload, base_dir = optional_args["payload"]
-            user_function_args["payload"] = InputSchema.model_validate(
-                payload, context={"base_dir": base_dir}
-            )
+            try:
+                user_function_args["payload"] = InputSchema.model_validate(
+                    payload, context={"base_dir": base_dir}
+                )
+            except ValidationError as e:
+                raise click.BadParameter(
+                    e,
+                    param=InputSchema,
+                    param_hint=InputSchema.__name__,
+                ) from e
 
         result = user_function(**user_function_args)
         result = output_to_bytes(result, output_format, output_path)
