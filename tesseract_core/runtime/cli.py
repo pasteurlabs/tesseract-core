@@ -188,7 +188,7 @@ def check() -> None:
     type=click.FLOAT,
     required=False,
     help="Step size for finite differences.",
-    default=1e-6,
+    default=1e-4,
     show_default=True,
 )
 @click.option(
@@ -285,8 +285,11 @@ def check_gradients(
                 typer.echo(
                     f"  Input path: '{failure.in_path}', Output path: '{failure.out_path}', Index: {failure.idx}"
                 )
-                typer.echo(f"  {endpoint} value: {failure.grad_val}")
-                typer.echo(f"  Finite difference value: {failure.ref_val}")
+                if failure.exception:
+                    typer.echo(f"  Encountered exception: {failure.exception}")
+                else:
+                    typer.echo(f"  {endpoint} value: {failure.grad_val}")
+                    typer.echo(f"  Finite difference value: {failure.ref_val}")
                 typer.echo()
 
     if failed:

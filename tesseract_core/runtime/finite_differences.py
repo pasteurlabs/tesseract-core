@@ -1,11 +1,13 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import traceback
 from collections.abc import Sequence
 from functools import wraps
 from pathlib import Path
 from types import ModuleType
 from typing import (
+    Annotated,
     Any,
     Callable,
     Literal,
@@ -18,7 +20,6 @@ from typing import (
 
 import numpy as np
 from pydantic import BaseModel
-from pydantic_core import PydanticSerializationError
 from rich.progress import Progress
 
 from .core import create_endpoints
@@ -33,8 +34,9 @@ class GradientCheckResult(NamedTuple):
     in_path: str
     out_path: str
     idx: tuple[int, ...]
-    grad_val: np.ndarray
-    ref_val: np.ndarray
+    grad_val: Optional[np.ndarray]
+    ref_val: Optional[np.ndarray]
+    exception: Optional[str]
 
 
 def get_input_schema(endpoint_function: Callable) -> type[BaseModel]:
@@ -45,7 +47,51 @@ def get_input_schema(endpoint_function: Callable) -> type[BaseModel]:
     return schema
 
 
-def get_differentiale_paths(endpoint_function: Callable) -> tuple[list[str], list[str]]:
+def expand_regex_path(path_pattern: str, inputs: dict[str, Any]) -> list[str]:
+    """Expand a regex path pattern to a list of all matching paths."""
+    is_regex = "\\" in path_pattern
+    if not is_regex:
+        parts = path_pattern.split(".")
+    else:
+        parts = path_pattern.split("\\.")
+
+    def _handle_part(
+        parts: tuple[str], current_inputs: Any, current_path: list[str]
+    ) -> list[str]:
+        """Recursively expand each part separately."""
+        if not parts:
+            return [".".join(current_path)]
+
+        paths = []
+        part = parts[0]
+
+        if part.startswith("\\["):
+            # sequence access
+            for i, _ in enumerate(current_inputs):
+                subpaths = _handle_part(
+                    parts[1:], current_inputs[i], [*current_path, f"[{i}]"]
+                )
+                paths.extend(subpaths)
+        elif part.startswith("\\{"):
+            # dictionary access
+            for key in current_inputs:
+                subpaths = _handle_part(
+                    parts[1:], current_inputs[key], [*current_path, f"{{{key}}}"]
+                )
+                paths.extend(subpaths)
+        else:
+            subpaths = _handle_part(
+                parts[1:], current_inputs[part], [*current_path, part]
+            )
+            paths.extend(subpaths)
+        return paths
+
+    return _handle_part(parts, inputs, [])
+
+
+def get_differentiale_paths(
+    endpoint_function: Callable, inputs: dict[str, Any], outputs: dict[str, Any]
+) -> tuple[list[str], list[str]]:
     """Get the differentiale paths of an endpoint function.
 
     Since we don't know which endpoint function we are dealing with / is available, we need to
@@ -70,18 +116,39 @@ def get_differentiale_paths(endpoint_function: Callable) -> tuple[list[str], lis
     ad_outputs = InputSchema.model_fields[ad_outputs_field].annotation
 
     def _annotation_to_paths(ann: Any) -> list[str]:
-        # Annotations are either Set[Union[Literal[...], ...]] or Set[Literal[...]]
+        # Annotations are either:
+        #   -  Set[Union[Literal[...], Annotated[str, FieldInfo]]]
+        #   -  Set[Literal[...]] / Set[Annotated[str, FieldInfo]]
         unpacked_once = get_args(ann)[0]
         if get_origin(unpacked_once) is Union:
-            # Union[Literal[...], ...]
+            # Unpack the Union
             literals = get_args(unpacked_once)
         else:
-            # Literal[...]
             literals = [unpacked_once]
-        return [get_args(lit)[0] for lit in literals]
 
-    ad_inputs = _annotation_to_paths(ad_inputs)
-    ad_outputs = _annotation_to_paths(ad_outputs)
+        out = []
+        for lit in literals:
+            if get_origin(lit) is Literal:
+                out.append(get_args(lit)[0])
+            elif get_origin(lit) is Annotated:
+                # Is a regex path
+                field_info = get_args(lit)[1]
+                out.append(field_info.metadata[0].pattern)
+            else:
+                raise AssertionError(f"Unexpected type {get_origin(lit)}")
+        return out
+
+    input_patterns = _annotation_to_paths(ad_inputs)
+    output_patterns = _annotation_to_paths(ad_outputs)
+
+    ad_inputs = []
+    for pattern in input_patterns:
+        ad_inputs.extend(expand_regex_path(pattern, inputs))
+
+    ad_outputs = []
+    for pattern in output_patterns:
+        ad_outputs.extend(expand_regex_path(pattern, outputs))
+
     return ad_inputs, ad_outputs
 
 
@@ -94,7 +161,12 @@ def _cached_jacobian(fn: Callable) -> Callable:
         _, _, input_path, output_path, arr_idx, *_ = args
         key = (input_path, output_path, tuple(arr_idx))
         if key not in cache:
-            cache[key] = fn(*args, **kwargs)
+            try:
+                cache[key] = fn(*args, **kwargs)
+            except Exception as e:
+                cache[key] = e
+        if isinstance(cache[key], Exception):
+            raise cache[key]
         return cache[key]
 
     _wrapper.clear_cache = cache.clear
@@ -110,27 +182,30 @@ def _jacobian_via_apply(
     arr_idx: tuple[int, ...],
     eps: float = 1e-4,
 ) -> np.ndarray:
-    """Compute a Jacobian row using finite differences."""
+    """Compute a Jacobian row using central finite differences."""
     apply_fn = endpoints_func["apply"]
+    ApplySchema = get_input_schema(apply_fn)
 
-    def _apply(inputs):
-        ApplySchema = get_input_schema(apply_fn)
-        return apply_fn(ApplySchema.model_validate({"inputs": inputs})).model_dump()
+    def _perturbed_apply(inputs, eps):
+        input_val = get_at_path(inputs, input_path).copy()
+        if arr_idx:
+            # array
+            input_val[arr_idx] += eps
+        else:
+            # scalar
+            input_val += eps
+        inputs_plus = set_at_path(inputs, {input_path: input_val})
+        return apply_fn(
+            ApplySchema.model_validate({"inputs": inputs_plus})
+        ).model_dump()
 
-    output = _apply(inputs)
-    input_val = get_at_path(inputs, input_path).copy()
-    if arr_idx:
-        # array
-        input_val[arr_idx] += eps
-    else:
-        # scalar
-        input_val += eps
-    inputs_plus = set_at_path(inputs, {input_path: input_val})
-    output_plus = _apply(inputs_plus)
-    forward_diff = (
-        get_at_path(output_plus, output_path) - get_at_path(output, output_path)
-    ) / eps
-    return forward_diff
+    output_plus = _perturbed_apply(inputs, eps)
+    output_minus = _perturbed_apply(inputs, -eps)
+
+    central_diff = (
+        get_at_path(output_plus, output_path) - get_at_path(output_minus, output_path)
+    ) / (2 * eps)
+    return central_diff
 
 
 @_cached_jacobian
@@ -292,42 +367,59 @@ def check_endpoint_gradients(
             )
 
             for in_path, out_path, idx in items_to_check:
-                result_apply = _jacobian_via_apply(
-                    endpoint_functions,
-                    inputs,
-                    in_path,
-                    out_path,
-                    idx,
-                    eps=eps,
-                )
-                result_grad = _jacobian_via_grad(
-                    endpoint_functions,
-                    inputs,
-                    in_path,
-                    out_path,
-                    idx,
-                )
-                if not np.allclose(result_apply, result_grad, atol=1e-8, rtol=rtol):
-                    failures.append(
-                        GradientCheckResult(
+                num_evals += 1
+
+                failure = None
+                try:
+                    result_apply = _jacobian_via_apply(
+                        endpoint_functions,
+                        inputs,
+                        in_path,
+                        out_path,
+                        idx,
+                        eps=eps,
+                    )
+                    result_grad = _jacobian_via_grad(
+                        endpoint_functions,
+                        inputs,
+                        in_path,
+                        out_path,
+                        idx,
+                    )
+                except Exception as e:
+                    tb = traceback.extract_tb(e.__traceback__)
+                    exc_info = f"{type(e).__name__}: '{e}' in file {tb[-1].filename}, line {tb[-1].lineno}"
+                    failure = GradientCheckResult(
+                        in_path=in_path,
+                        out_path=out_path,
+                        idx=idx,
+                        ref_val=None,
+                        grad_val=None,
+                        exception=exc_info,
+                    )
+                else:
+                    if not np.allclose(result_apply, result_grad, atol=1e-8, rtol=rtol):
+                        failure = GradientCheckResult(
                             in_path=in_path,
                             out_path=out_path,
                             idx=idx,
                             ref_val=result_apply,
                             grad_val=result_grad,
+                            exception=None,
                         )
-                    )
+
+                if failure:
+                    failures.append(failure)
                     progress.update(
                         subtask,
                         description=f"Checking gradients for {endpoint}... (failures: {len(failures)})",
                     )
 
                 progress.update(subtask, advance=1)
-                num_evals += 1
+
     except BaseException as e:
-        is_interrupt = isinstance(e, KeyboardInterrupt) or (
-            isinstance(e, PydanticSerializationError) and "KeyboardInterrupt" in str(e)
-        )
+        # Somtimes, Pydantic re-raises exceptions as Pydantic<...>Exception so we check the string representation
+        is_interrupt = isinstance(e, KeyboardInterrupt) or "KeyboardInterrupt" in str(e)
         if not is_interrupt:
             raise
         print("Interrupted")
@@ -359,7 +451,7 @@ def check_gradients(
         base_dir: The base directory to resolve relative paths.
         endpoints: The AD endpoints to check. If not provided, all available endpoints are checked.
         max_evals: The target number of ``apply`` evaluations to perform.
-        eps: The epsilon to use for finite differences.
+        eps: The epsilon to use for finite differences, as a fraction of the maximum absolute value of each input.
         rtol: The relative tolerance to use for comparison.
         seed: The random seed to use for sampling. If not provided, a random seed is used.
         show_progress: Whether to show a progress bar.
@@ -389,9 +481,20 @@ def check_gradients(
         if endpoint not in available_endpoints:
             raise ValueError(f"Endpoint {endpoint} not found in {api_module.__name__}")
 
+    # Load inputs and dump as dict to ensure validation has been done
+    InputSchema = get_input_schema(endpoint_functions["apply"])
+    inputs = InputSchema.model_validate(
+        inputs, context={"base_dir": base_dir}
+    ).inputs.model_dump()
+    outputs = endpoint_functions["apply"](
+        InputSchema.model_validate({"inputs": inputs})
+    ).model_dump()
+
     # Get differentiale paths
     diff_inputs, diff_outputs = get_differentiale_paths(
-        endpoint_functions[endpoints[0]]
+        endpoint_functions[endpoints[0]],
+        inputs,
+        outputs,
     )
 
     if not input_paths:
@@ -411,12 +514,6 @@ def check_gradients(
             raise ValueError(
                 f"Output path {path} not found in differentiable paths ({diff_outputs})"
             )
-
-    # Load inputs and dump as dict to ensure validation has been done
-    InputSchema = get_input_schema(endpoint_functions["apply"])
-    inputs = InputSchema.model_validate(
-        inputs, context={"base_dir": base_dir}
-    ).inputs.model_dump()
 
     # Check gradients for each endpoint separately
     rng = np.random.RandomState(seed)

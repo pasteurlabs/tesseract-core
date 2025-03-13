@@ -4,7 +4,7 @@
 import numpy as np
 from pydantic import BaseModel, Field, model_validator
 
-from tesseract_core.runtime import Array, Differentiable, Float32
+from tesseract_core.runtime import Array, Differentiable, Float32, Float64
 
 
 class InputSchema(BaseModel):
@@ -31,7 +31,7 @@ class InputSchema(BaseModel):
 
 
 class OutputSchema(BaseModel):
-    result: Differentiable[Array[(None,), Float32]] = Field(
+    result: Differentiable[Array[(None,), Float64]] = Field(
         description="Vector s·a + b"
     )
 
