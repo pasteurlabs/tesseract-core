@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.0] - 2025-03-13
+
+### Features
+
+- Raise proper error (`ValidationError`) for invalid inputs (#67)
+- Add `abstract_eval` method to `tesseract_core.Tesseract` (#76)
+
+### Bug Fixes
+
+- Jax template now uses equinox `filter_jit` to allow non-array inputs (#56)
+- Added pip as dependency (#58)
+- Issue #74 (#75)
+
+### Documentation
+
+- Updated comments in jax recipe and docs on Differentiable flag (#65)
+
 ## [0.7.2] - 2025-02-27
 
 ### Bug Fixes
