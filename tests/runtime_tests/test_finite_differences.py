@@ -93,9 +93,9 @@ class DummyModule(ModuleType):
 
 rng = np.random.default_rng(0)
 input_data = {
-    "in_data": rng.rand(10, 3),
-    "in_dict": {"key": rng.rand(3, 3, 3)},
-    "in_scalar": rng.rand(1)[0],
+    "in_data": rng.random((10, 3)),
+    "in_dict": {"key": rng.random((3, 3, 3))},
+    "in_scalar": rng.random(1)[0],
     "in_aux": "auxiliary",
 }
 

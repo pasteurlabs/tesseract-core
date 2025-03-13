@@ -116,26 +116,37 @@ def get_differentiale_paths(
     ad_outputs = InputSchema.model_fields[ad_outputs_field].annotation
 
     def _annotation_to_paths(ann: Any) -> list[str]:
-        # Annotations are either:
-        #   -  Set[Union[Literal[...], Annotated[str, FieldInfo]]]
-        #   -  Set[Literal[...]] / Set[Annotated[str, FieldInfo]]
-        unpacked_once = get_args(ann)[0]
-        if get_origin(unpacked_once) is Union:
-            # Unpack the Union
-            literals = get_args(unpacked_once)
-        else:
-            literals = [unpacked_once]
+        # Annotations are of the form:
+        #  inputs:
+        #    Set[Annotated[Union[Literal[...], Annotated[str, FieldInfo]]], AfterValidator]
+        #  outputs:
+        #    Set[Union[Literal[...], Annotated[str, FieldInfo]]]
+        # Where the Union may be missing in the case of a single path.
+        # We're after the Literal values and regex patterns of FieldInfo.
 
+        # Peel off Set
+        unpacked = get_args(ann)[0]
+        # Peel off Annotated
+        if get_origin(unpacked) is Annotated:
+            unpacked = get_args(unpacked)[0]
+        # Peel off Union
+        if get_origin(unpacked) is Union:
+            unpacked = get_args(unpacked)
+        else:
+            unpacked = [unpacked]
+
+        # Iterate over the unpacked types and extract the paths
         out = []
-        for lit in literals:
-            if get_origin(lit) is Literal:
-                out.append(get_args(lit)[0])
-            elif get_origin(lit) is Annotated:
-                # Is a regex path
-                field_info = get_args(lit)[1]
+        for item in unpacked:
+            if get_origin(item) is Literal:
+                # Is a Literal
+                out.append(get_args(item)[0])
+            elif get_origin(item) is Annotated:
+                # Is a Field with regex path
+                field_info = get_args(item)[1]
                 out.append(field_info.metadata[0].pattern)
             else:
-                raise AssertionError(f"Unexpected type {get_origin(lit)}")
+                raise AssertionError(f"Unexpected type {get_origin(item)}")
         return out
 
     input_patterns = _annotation_to_paths(ad_inputs)
