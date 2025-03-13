@@ -4,6 +4,7 @@
 import copy
 import json
 import os
+import re
 import subprocess
 import sys
 import traceback
@@ -21,6 +22,14 @@ import tesseract_core.runtime
 from tesseract_core.runtime.cli import _add_user_commands_to_cli
 from tesseract_core.runtime.cli import tesseract_runtime as cli_cmd
 from tesseract_core.runtime.file_interactions import load_bytes, output_to_bytes
+
+
+# Remove color codes and box
+# Only necessary when matching multi-word string
+def format_stderr(stderr: str) -> str:
+    no_color = re.sub(r"\x1b\[[0-9;]*m", "", stderr)
+    return " ".join(re.sub(r"[^\w \d_.,!?:;\-]+", " ", no_color).split())
+
 
 test_input = {
     "a": [1.0, 2.0, 3.0],
@@ -232,12 +241,17 @@ def test_apply_command_binref(cli, cli_runner, dummy_tesseract_module, tmpdir):
     expected = dummy_tesseract_module.apply(test_input_val).model_dump_json()
     assert json.loads(result.stdout) == json.loads(expected)
 
-    with pytest.raises(ValueError, match="binref encoded with a relative path"):
-        result = cli_runner.invoke(
-            cli,
-            ["apply", json.dumps({"inputs": test_input_binref})],
-            catch_exceptions=False,
-        )
+    result = cli_runner.invoke(
+        cli,
+        ["apply", json.dumps({"inputs": test_input_binref})],
+        catch_exceptions=False,
+    )
+    # Click with rich adds color codes and boxes to the output
+    # which we need to remove in case they break multi-word pattern matching
+    stderr_fmt = format_stderr(result.stderr)
+    assert result.exit_code == 2
+    assert "Value error" in stderr_fmt
+    assert "binref encoded with a relative path" in stderr_fmt
 
 
 def test_apply_command_noenv(
@@ -443,7 +457,10 @@ def test_optional_arguments_stay_optional_in_cli(
 
 def test_apply_fails_if_required_args_missing(cli, cli_runner):
     result = cli_runner.invoke(cli, ["apply", json.dumps({"inputs": {"a": [1, 2, 3]}})])
-    assert result.exit_code == 1, result.stdout
+    print("Result:", result)
+    print(result.exit_code, result.stdout, result.stderr)
+    assert result.exit_code == 2
+    assert "missing" in result.stderr
 
 
 def test_stdout_redirect_cli():

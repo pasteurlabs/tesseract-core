@@ -11,7 +11,7 @@ from types import ModuleType
 
 import numpy as np
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from tesseract_core.runtime import Array, Differentiable, Float32
 from tesseract_core.runtime.core import create_endpoints
@@ -264,12 +264,12 @@ def test_ad_endpoint(testmodule, ad_inout, endpoint_name):
         ),
         # Non-existent container index
         (
-            "Could not find input path array_seq.[100]",
+            "array_seq.[100]",
             {"array_seq.[100]", "array_dict.{a}", "scalar_diff"},
             {"result_seq.[0]"},
         ),
         (
-            "Could not find input path array_dict.{xyz}",
+            "array_dict.{xyz}",
             {"array_seq.[0]", "array_dict.{xyz}", "scalar_diff"},
             {"result_seq.[0]"},
         ),
@@ -357,7 +357,7 @@ def test_ad_endpoint_invalid(testmodule, ad_inout_invalid, endpoint_name):
             "cotangent_vector": cotangent_vector,
         }
 
-    with pytest.raises((ValueError, RuntimeError)) as excinfo:
+    with pytest.raises(ValidationError) as excinfo:
         inputs = EndpointSchema.model_validate(inputs)
         endpoint_func(inputs)
 
@@ -415,7 +415,7 @@ def test_ad_endpoint_bad_tangent(testmodule, endpoint_name, failure_mode):
             "cotangent_vector": cotangent_vector,
         }
 
-    with pytest.raises((ValueError, RuntimeError)) as excinfo:
+    with pytest.raises(ValidationError) as excinfo:
         inputs = EndpointSchema.model_validate(inputs)
         endpoint_func(inputs)
 
