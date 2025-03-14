@@ -133,3 +133,36 @@ def filter_func(
         return flatten_with_paths(func(updated_inputs), output_paths)
 
     return filtered_func
+
+
+def filter_pos_func(
+    func: Callable[[dict], dict],
+    default_inputs: dict,
+    output_paths: set[str],
+    keys: list[str],
+    output_to_tuple: bool = False,
+) -> Callable:
+    """Returns a reduced func with default inputs that operates on positional arguments.
+
+    The returned function will accept a tuple of positional arguments,
+    convert them back to a dictionary and update the default inputs
+    with the new values at each path. It will then call the original function with the updated inputs
+    and return a dictionary `{output_path: value}`.
+    """
+
+    # function that accepts positional arguments
+    def filtered_pos_func(*args):
+        # convert back to dictionary
+        new_inputs = dict(zip(keys, args))
+
+        # partially update the default inputs with the new values
+        updated_inputs = set_at_path(default_inputs, new_inputs)
+
+        path_outputs = flatten_with_paths(func(updated_inputs), output_paths)
+
+        if output_to_tuple:
+            return tuple(path_outputs.values())
+
+        return path_outputs
+
+    return filtered_pos_func
