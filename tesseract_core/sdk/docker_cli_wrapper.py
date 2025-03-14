@@ -143,12 +143,6 @@ class DockerWrapper:
                 check=True,
                 capture_output=True,
             )
-            # Update project containers map with the new project
-            containers = self._project_containers(project_name)
-            json_dicts = self._get_docker_metadata(containers)
-            for container_id, json_dict in json_dicts.items():
-                container = self.Container(json_dict)
-                self.containers[container_id] = container
             return project_name
         except subprocess.CalledProcessError as ex:
             logger.error(str(ex))
@@ -163,12 +157,6 @@ class DockerWrapper:
                 check=True,
                 capture_output=True,
             )
-            # Remove the project from the project_container_map
-            # Remove the containers from the containers list
-            containers = self.get_projects().get(project_id, None)
-            for container in containers:
-                del self.containers[container]
-            del self.project_container_map[project_id]
             return True
         except subprocess.CalledProcessError as ex:
             logger.error(str(ex))
@@ -340,10 +328,9 @@ class DockerWrapper:
                 container_ids = result.stdout.strip().split("\n")
 
             # Check if theres any cleaned up containers.
-            for container_id in self.containers:
+            for container_id in list(self.containers.keys()):
                 if container_id not in container_ids:
                     del self.containers[container_id]
-
             # Filter list to exclude container ids that are already in self.containers
             # also exclude empty strings.
             container_ids = [
@@ -394,8 +381,8 @@ class DockerWrapper:
 
     def _update_projects(self) -> None:
         """Updates the list of projects by going through containers."""
+        self.project_container_map = {}
         for container_id, container in self.containers.items():
-            print("AKOAKO Looking at container ", container)
             if container.project_id:
                 if container.project_id not in self.project_container_map:
                     self.project_container_map[container.project_id] = []
@@ -428,6 +415,10 @@ class DockerWrapper:
             for asset_id in docker_asset_ids:
                 if f"No such image: {asset_id}" in error_message:
                     print(f"Image {asset_id} is not a valid image.")
+            if "No such object" in error_message:
+                raise RuntimeError(
+                    "Unhealthy container found. Please restart docker."
+                ) from e
 
         if not metadata:
             return {}
