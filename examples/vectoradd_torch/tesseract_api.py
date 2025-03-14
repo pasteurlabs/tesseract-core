@@ -200,15 +200,8 @@ def vector_jacobian_product(
     filtered_pos_func = filter_pos_func(evaluate, tensor_inputs, vjp_outputs, treedef)
 
     _, vjp_func = torch.func.vjp(filtered_pos_func, *pos_inputs)
-
-    res = vjp_func(tensor_cotangent)
-
-    # rebuild the dictionary from the list of results
-    res_dict = {}
-    for key, value in zip(vjp_inputs, res):
-        res_dict[key] = value
-
-    return res_dict
+    vjp_vals = vjp_funct(tensor_cotangent)
+    return dict(zip(vjp_inputs, vjp_vals))
 
 
 def filter_pos_func(
