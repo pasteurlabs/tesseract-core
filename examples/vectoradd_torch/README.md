@@ -1,7 +1,7 @@
 # Vectoradd (with jax)
 
 This tesseract is similar to `vectoradd`, but returns a nested dictionary
-with an entry for the vectors added and one for the vectors added.
+with an entry for the vectors added and one for the vectors subtracted.
 These both contain result and normed_result as outputs.
 The tesseract uses jax behind the scenes. Also,
 it exposes the `vector_jacobian_product` and `jacobian_vector_product` endpoints,
