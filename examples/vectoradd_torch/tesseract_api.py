@@ -88,9 +88,6 @@ def evaluate(inputs: Any) -> Any:
 
 
 def apply(inputs: InputSchema) -> OutputSchema:
-    # Convert to pytorch tensors to enable torch.jit
-    inputs = convert_to_tensors(inputs.model_dump())
-
     # Optional: Insert any pre-processing/setup that doesn't require tracing
     # and is only required when specifically running your apply function
     # and not your differentiable endpoints.
@@ -98,8 +95,10 @@ def apply(inputs: InputSchema) -> OutputSchema:
     # Pre-processing should not modify any input that could impact the
     # differentiable outputs in a nonlinear way (a constant shift
     # should be safe)
-
-    out = evaluate(inputs)
+    
+    # Convert to pytorch tensors to enable torch.jit
+    tensor_inputs = convert_to_tensors(inputs.model_dump())
+    out = evaluate(tensor_inputs)
 
     # Optional: Insert any post-processing that doesn't require tracing
     # For example, you might want to save to disk or modify a non-differentiable
