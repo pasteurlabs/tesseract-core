@@ -88,9 +88,6 @@ def evaluate(inputs: Any) -> Any:
 
 
 def apply(inputs: InputSchema) -> OutputSchema:
-    # Convert to pytorch tensors to enable torch.jit
-    inputs = convert_to_tensors(inputs.model_dump())
-
     # Optional: Insert any pre-processing/setup that doesn't require tracing
     # and is only required when specifically running your apply function
     # and not your differentiable endpoints.
@@ -98,8 +95,10 @@ def apply(inputs: InputSchema) -> OutputSchema:
     # Pre-processing should not modify any input that could impact the
     # differentiable outputs in a nonlinear way (a constant shift
     # should be safe)
-
-    out = evaluate(inputs)
+    
+    # Convert to pytorch tensors to enable torch.jit
+    tensor_inputs = convert_to_tensors(inputs.model_dump())
+    out = evaluate(tensor_inputs)
 
     # Optional: Insert any post-processing that doesn't require tracing
     # For example, you might want to save to disk or modify a non-differentiable
@@ -135,11 +134,9 @@ def jacobian(
     jacobian = torch.autograd.functional.jacobian(filtered_pos_eval, tuple(pos_inputs))
 
     # rebuild the dictionary from the list of results
-    res_dict = {}
-    for dy, dys in zip(jac_outputs, jacobian):
-        res_dict[dy] = {}
-        for dx, dxs in zip(jac_inputs, dys):
-            res_dict[dy][dx] = dxs
+    jac_dict = {}
+    for dy, jac_row in zip(jac_outputs, jacobian):
+        jac_dict = dict(zip(jac_inputs, jac_row))
 
     return res_dict
 
@@ -166,9 +163,8 @@ def jacobian_vector_product(
     # create a positional function that accepts a list of values
     filtered_pos_eval = filter_pos_func(evaluate, tensor_inputs, jvp_outputs, treedef)
 
-    tangent = torch.func.jvp(filtered_pos_eval, tuple(pos_inputs), tuple(pos_tangent))
-
-    return tangent[1]
+    _, jvp = torch.func.jvp(filtered_pos_eval, tuple(pos_inputs), tuple(pos_tangent))
+    return jvp
 
 
 def vector_jacobian_product(
@@ -201,15 +197,8 @@ def vector_jacobian_product(
     filtered_pos_func = filter_pos_func(evaluate, tensor_inputs, vjp_outputs, treedef)
 
     _, vjp_func = torch.func.vjp(filtered_pos_func, *pos_inputs)
-
-    res = vjp_func(tensor_cotangent)
-
-    # rebuild the dictionary from the list of results
-    res_dict = {}
-    for key, value in zip(vjp_inputs, res):
-        res_dict[key] = value
-
-    return res_dict
+    vjp_vals = vjp_funct(tensor_cotangent)
+    return dict(zip(vjp_inputs, vjp_vals))
 
 
 def filter_pos_func(
