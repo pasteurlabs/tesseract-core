@@ -134,11 +134,9 @@ def jacobian(
     jacobian = torch.autograd.functional.jacobian(filtered_pos_eval, tuple(pos_inputs))
 
     # rebuild the dictionary from the list of results
-    res_dict = {}
-    for dy, dys in zip(jac_outputs, jacobian):
-        res_dict[dy] = {}
-        for dx, dxs in zip(jac_inputs, dys):
-            res_dict[dy][dx] = dxs
+    jac_dict = {}
+    for dy, jac_row in zip(jac_outputs, jacobian):
+        jac_dict = dict(zip(jac_inputs, jac_row))
 
     return res_dict
 
