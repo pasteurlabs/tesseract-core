@@ -1,19 +1,16 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from typing import Any, Callable
+from typing import Any
 
 import numpy as np
 import torch
 from pydantic import BaseModel, Field, model_validator
-from torch.utils._pytree import TreeSpec, tree_flatten, tree_unflatten
+from torch.utils._pytree import tree_map
 from typing_extensions import Self
 
 from tesseract_core.runtime import Array, Differentiable, Float32
-from tesseract_core.runtime.tree_transforms import (
-    flatten_with_paths,
-    set_at_path,
-)
+from tesseract_core.runtime.tree_transforms import filter_pos_func, flatten_with_paths
 
 #
 # Schemata
@@ -95,9 +92,9 @@ def apply(inputs: InputSchema) -> OutputSchema:
     # Pre-processing should not modify any input that could impact the
     # differentiable outputs in a nonlinear way (a constant shift
     # should be safe)
-    
+
     # Convert to pytorch tensors to enable torch.jit
-    tensor_inputs = convert_to_tensors(inputs.model_dump())
+    tensor_inputs = tree_map(convert_to_tensors, inputs.model_dump())
     out = evaluate(tensor_inputs)
 
     # Optional: Insert any post-processing that doesn't require tracing
@@ -117,26 +114,29 @@ def jacobian(
     jac_outputs: set[str],
 ):
     # convert all numbers and arrays to torch tensors
-    tensor_inputs = convert_to_tensors(inputs.model_dump())
+    tensor_inputs = tree_map(convert_to_tensors, inputs.model_dump())
 
     # flatten the dictionaries such that they can be accessed by paths
     path_inputs = flatten_with_paths(tensor_inputs, jac_inputs)
 
     # transform the dictionaries into a list of values for a positional function
-    pos_inputs, treedef = tree_flatten(path_inputs)
+    pos_inputs = path_inputs.values()
+    keys = path_inputs.keys()
 
     # create a positional function that accepts a list of values and returns a set of tuples
     filtered_pos_eval = filter_pos_func(
-        evaluate, tensor_inputs, jac_outputs, treedef, True
+        evaluate, tensor_inputs, jac_outputs, keys, True
     )
 
     # calculate the jacobian
     jacobian = torch.autograd.functional.jacobian(filtered_pos_eval, tuple(pos_inputs))
 
     # rebuild the dictionary from the list of results
-    jac_dict = {}
-    for dy, jac_row in zip(jac_outputs, jacobian):
-        jac_dict = dict(zip(jac_inputs, jac_row))
+    res_dict = {}
+    for dy, dys in zip(jac_outputs, jacobian):
+        res_dict[dy] = {}
+        for dx, dxs in zip(jac_inputs, dys):
+            res_dict[dy][dx] = dxs
 
     return res_dict
 
@@ -148,23 +148,26 @@ def jacobian_vector_product(
     tangent: dict[str, Any],
 ):
     # convert all numbers and arrays to torch tensors
-    tensor_inputs = convert_to_tensors(inputs.model_dump())
-    tensor_tangent = convert_to_tensors(tangent)
+    tensor_inputs = tree_map(convert_to_tensors, inputs.model_dump())
+    tensor_tangent = tree_map(convert_to_tensors, tangent)
 
     # flatten the dictionaries such that they can be accessed by paths
     path_inputs = flatten_with_paths(tensor_inputs, jvp_inputs)
 
     # transform the dictionaries into a list of values for a positional function
-    pos_inputs, treedef = tree_flatten(path_inputs)
-    pos_tangent, _ = tree_flatten(tensor_tangent)
+    pos_inputs = path_inputs.values()
+    keys_inputs = path_inputs.keys()
 
-    # sort
+    pos_tangent = tensor_tangent.values()
 
     # create a positional function that accepts a list of values
-    filtered_pos_eval = filter_pos_func(evaluate, tensor_inputs, jvp_outputs, treedef)
+    filtered_pos_eval = filter_pos_func(
+        evaluate, tensor_inputs, jvp_outputs, keys_inputs
+    )
 
-    _, jvp = torch.func.jvp(filtered_pos_eval, tuple(pos_inputs), tuple(pos_tangent))
-    return jvp
+    tangent = torch.func.jvp(filtered_pos_eval, tuple(pos_inputs), tuple(pos_tangent))
+
+    return tangent[1]
 
 
 def vector_jacobian_product(
@@ -175,63 +178,34 @@ def vector_jacobian_product(
 ):
     # Make ordering of vjp in and output args deterministic
     # Necessacy as torch.vjp function requires inputs and outputs to be in the same order
-    vjp_inputs = list(vjp_inputs)
-    vjp_outputs = list(vjp_outputs)
-    vjp_inputs.sort()
-    vjp_outputs.sort()
-
-    # sort the cotangent vector
     cotangent_vector = {key: cotangent_vector[key] for key in vjp_outputs}
 
     # convert all numbers and arrays to torch tensors
-    tensor_inputs = convert_to_tensors(inputs.model_dump())
-    tensor_cotangent = convert_to_tensors(cotangent_vector)
+    tensor_inputs = tree_map(convert_to_tensors, inputs.model_dump())
+    tensor_cotangent = tree_map(convert_to_tensors, cotangent_vector)
 
     # flatten the dictionaries such that they can be accessed by paths
     path_inputs = flatten_with_paths(tensor_inputs, vjp_inputs)
 
     # transform the dictionaries into a list of values for a positional function
-    pos_inputs, treedef = tree_flatten(path_inputs)
+    pos_inputs = path_inputs.values()
+    keys_inputs = path_inputs.keys()
 
     # create a positional function that accepts a list of values
-    filtered_pos_func = filter_pos_func(evaluate, tensor_inputs, vjp_outputs, treedef)
+    filtered_pos_func = filter_pos_func(
+        evaluate, tensor_inputs, vjp_outputs, keys_inputs
+    )
 
     _, vjp_func = torch.func.vjp(filtered_pos_func, *pos_inputs)
-    vjp_vals = vjp_funct(tensor_cotangent)
-    return dict(zip(vjp_inputs, vjp_vals))
 
+    res = vjp_func(tensor_cotangent)
 
-def filter_pos_func(
-    func: Callable[[dict], dict],
-    default_inputs: dict,
-    output_paths: set[str],
-    pytree: TreeSpec,
-    output_to_tuple: bool = False,
-) -> Callable:
-    """Returns a reduced func with default inputs that operates on positional arguments.
+    # rebuild the dictionary from the list of results
+    res_dict = {}
+    for key, value in zip(vjp_inputs, res):
+        res_dict[key] = value
 
-    The returned function will accept a tuple of positional arguments,
-    convert them back to a dictionary and update the default inputs
-    with the new values at each path. It will then call the original function with the updated inputs
-    and return a dictionary `{output_path: value}`.
-    """
-
-    # function that accepts positional arguments
-    def filtered_pos_func(*args):
-        # convert back to dictionary
-        new_inputs = tree_unflatten(args, pytree)
-
-        # partially update the default inputs with the new values
-        updated_inputs = set_at_path(default_inputs, new_inputs)
-
-        path_outputs = flatten_with_paths(func(updated_inputs), output_paths)
-
-        if output_to_tuple:
-            return tuple(tree_flatten(path_outputs)[0])
-
-        return path_outputs
-
-    return filtered_pos_func
+    return res_dict
 
 
 def convert_to_tensors(data):
@@ -244,21 +218,5 @@ def convert_to_tensors(data):
         return torch.tensor(data)
     elif isinstance(data, (np.bool_, bool)):
         return torch.tensor(data)
-    elif isinstance(data, dict):
-        return {key: convert_to_tensors(value) for key, value in data.items()}
-    elif isinstance(data, list):
-        return [convert_to_tensors(item) for item in data]
     else:
         raise TypeError(f"Unsupported data type: {type(data)}")
-
-
-def convert_to_numpy(data):
-    """Convert all numbers and arrays to numpy arrays."""
-    if isinstance(data, torch.Tensor):
-        return data.detach().numpy()
-    elif isinstance(data, dict):
-        return {key: convert_to_numpy(value) for key, value in data.items()}
-    elif isinstance(data, list):
-        return [convert_to_numpy(item) for item in data]
-    else:
-        return data

@@ -52,10 +52,9 @@ def apply(inputs: InputSchema) -> OutputSchema:
     # differentiable outputs in a nonlinear way (a constant shift
     # should be safe)
 
-    # Convert to pytorch tensors
-    inputs = tree_map(convert_to_tensors, inputs.model_dump())
-
-    out = evaluate(inputs)
+    # Convert to pytorch tensors to enable torch.jit
+    tensor_inputs = tree_map(convert_to_tensors, inputs.model_dump())
+    out = evaluate(tensor_inputs)
 
     # Optional: Insert any post-processing that doesn't require tracing
     # For example, you might want to save to disk or modify a non-differentiable
