@@ -301,6 +301,96 @@ TEST_CASES = {
             ),
         ],
     ),
+    "vectoradd_torch": Config(
+        test_with_random_inputs=True,
+        sample_requests=[
+            SampleRequest(
+                endpoint="apply",
+                payload={
+                    "inputs": {
+                        "a": {"v": encode_array([1, 2, 3]), "s": 3},
+                        "b": {"v": encode_array([4, 5, 6]), "s": 1},
+                    },
+                },
+                output_contains_array=np.array([7.0, 11.0, 15.0], dtype="float32"),
+            ),
+            SampleRequest(
+                endpoint="apply",
+                payload={"inputs": {}},
+                expected_status_code=422,
+                output_contains_pattern="missing",
+            ),
+            SampleRequest(
+                endpoint="jacobian",
+                payload={
+                    "inputs": {
+                        "a": {"v": encode_array([1, 2, 3]), "s": 2},
+                        "b": {"v": encode_array([4, 5, 6]), "s": 1},
+                    },
+                    "jac_inputs": ["a.s", "a.v"],
+                    "jac_outputs": ["vector_add.result"],
+                },
+                output_contains_pattern=['"a.s":', '"a.v":'],
+                output_contains_array=np.array([[1, 2, 3]], dtype="float32"),
+            ),
+            SampleRequest(
+                endpoint="jacobian_vector_product",
+                payload={
+                    "inputs": {
+                        "a": {"v": encode_array([1, 2, 3]), "s": 2},
+                        "b": {"v": encode_array([4, 5, 6]), "s": 1},
+                    },
+                    "jvp_inputs": ["a.v"],
+                    "jvp_outputs": ["vector_add.result"],
+                    "tangent_vector": {"a.v": encode_array([0.1, 0.2, 0.3])},
+                },
+                output_contains_array=np.array([0.2, 0.4, 0.6], dtype="float32"),
+            ),
+            SampleRequest(
+                endpoint="jacobian_vector_product",
+                payload={
+                    "inputs": {
+                        "a": {"v": encode_array([1, 2, 3]), "s": 2},
+                        "b": {"v": encode_array([4, 5, 6]), "s": 1},
+                    },
+                    "jvp_inputs": ["a.s"],
+                    "jvp_outputs": ["vector_add.result"],
+                    "tangent_vector": {"a.s": 0.5},
+                },
+                output_contains_array=np.array([0.5, 1.0, 1.5], dtype="float32"),
+            ),
+            SampleRequest(
+                endpoint="vector_jacobian_product",
+                payload={
+                    "inputs": {
+                        "a": {"v": encode_array([1.0, 2.0, 3.0]), "s": 2},
+                        "b": {"v": encode_array([4.0, 5.0, 6.0]), "s": 1},
+                    },
+                    "vjp_inputs": ["a.v"],
+                    "vjp_outputs": ["vector_add.result"],
+                    "cotangent_vector": {
+                        "vector_add.result": encode_array([0.1, 0.2, 0.3]),
+                    },
+                },
+                output_contains_array=np.array([0.2, 0.4, 0.6], dtype="float32"),
+            ),
+            SampleRequest(
+                endpoint="vector_jacobian_product",
+                payload={
+                    "inputs": {
+                        "a": {"v": encode_array([1.0, 2.0, 3.0]), "s": 2},
+                        "b": {"v": encode_array([4.0, 5.0, 6.0]), "s": 1},
+                    },
+                    "vjp_inputs": ["a.s"],
+                    "vjp_outputs": ["vector_add.result"],
+                    "cotangent_vector": {
+                        "vector_add.result": encode_array([0.1, 0.2, 0.3]),
+                    },
+                },
+                output_contains_array=np.array([1.4], dtype="float32"),
+            ),
+        ],
+    ),
     "univariate": Config(
         test_with_random_inputs=True,
         sample_requests=[
