@@ -125,7 +125,7 @@ def jacobian(
 
     # create a positional function that accepts a list of values and returns a set of tuples
     filtered_pos_eval = filter_pos_func(
-        evaluate, tensor_inputs, jac_outputs, keys, True
+        evaluate, tensor_inputs, jac_outputs, keys, output_to_tuple=True
     )
 
     # calculate the jacobian
