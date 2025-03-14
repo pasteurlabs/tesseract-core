@@ -5,11 +5,9 @@
 
 import json
 import re
-import subprocess
 import sys
 import time
 import webbrowser
-from collections import defaultdict
 from contextlib import nullcontext
 from enum import Enum
 from logging import getLogger
@@ -18,11 +16,6 @@ from types import SimpleNamespace
 from typing import Annotated, Any, NoReturn
 
 import click
-import docker
-import docker.errors
-import docker.models
-import docker.models.containers
-import docker.models.images
 import typer
 from jinja2 import Environment, PackageLoader, StrictUndefined
 from rich.console import Console as RichConsole
@@ -35,6 +28,7 @@ from .api_parse import (
     TesseractConfig,
     get_non_base_fields_in_tesseract_config,
 )
+from .docker_cli_wrapper import DockerWrapper
 from .exceptions import UserError
 from .logs import DEFAULT_CONSOLE, set_logger
 
@@ -296,9 +290,10 @@ def build_image(
                 keep_build_cache=keep_build_cache,
                 generate_only=generate_only,
             )
-    except docker.errors.BuildError as e:
-        raise UserError(f"Error building Tesseract: {e}") from e
-    except docker.errors.APIError as e:
+    except RuntimeError as e:
+        # If "build" in error message:
+        if "build" in str(e):
+            raise UserError(f"Error building Tesseract: {e}") from e
         raise UserError(f"Docker server error: {e}") from e
     except TypeError as e:
         raise UserError(f"Input error building Tesseract: {e}") from e
@@ -443,19 +438,13 @@ def serve(
         )
 
     try:
-        project_id = engine.serve(image_names, port, volume, gpus)
-        containers = engine.project_containers(project_id)
-        _display_container_meta(containers)
+        project_id, docker_wrapper = engine.serve(image_names, port, volume, gpus)
+        container_ports = _display_project_meta(project_id, docker_wrapper)
         logger.info(
             f"Docker Compose Project ID, use it with 'tesseract teardown' command: {project_id}"
         )
 
-        project_meta = {"project_id": project_id, "containers": []}
-        for container in containers:
-            project_meta["containers"].append(
-                {"name": container.name, "port": _get_container_host_port(container)}
-            )
-
+        project_meta = {"project_id": project_id, "containers": container_ports}
         json_info = json.dumps(project_meta)
         typer.echo(json_info, nl=False)
 
@@ -471,30 +460,31 @@ def serve(
 @engine.needs_docker
 def list_tesseract_images() -> None:
     """Display all Tesseract images."""
-    tesseract_images = engine.get_tesseract_images()
-    _display_tesseract_image_meta(tesseract_images)
+    docker_wrapper = DockerWrapper()
+    _display_tesseract_image_meta(docker_wrapper)
 
 
 @app.command("ps")
 @engine.needs_docker
 def list_tesseract_containers() -> None:
     """Display all Tesseract containers."""
-    tesseract_containers = engine.get_tesseract_containers()
-    _display_tesseract_containers_meta(tesseract_containers)
+    docker_wrapper = DockerWrapper()
+    _display_tesseract_containers_meta(docker_wrapper)
 
 
 def _display_tesseract_image_meta(
-    docker_assets: list[docker.models.images.Image],
+    docker_wrapper: DockerWrapper,
 ) -> None:
     """Display Tesseract image metadata."""
     table = RichTable("ID", "Tags", "Name", "Version", "Description")
-    for asset in docker_assets:
-        tesseract_vals = _get_tesseract_env_vals(asset)
+    images = docker_wrapper.get_all_images()
+    for image in images:
+        tesseract_vals = _get_tesseract_env_vals(image)
         if tesseract_vals:
             table.add_row(
                 # Checksum Type + First 12 Chars of ID
-                asset.id[:19],
-                str(asset.attrs["RepoTags"]),
+                image.id[:19],
+                image.name,
                 tesseract_vals["TESSERACT_NAME"],
                 tesseract_vals["TESSERACT_VERSION"],
                 tesseract_vals.get("TESSERACT_DESCRIPTION", "").replace("\n", " "),
@@ -503,21 +493,21 @@ def _display_tesseract_image_meta(
 
 
 def _display_tesseract_containers_meta(
-    docker_assets: list[docker.models.containers.Container],
+    docker_wrapper: DockerWrapper,
 ) -> None:
     """Display Tesseract containers metadata."""
     table = RichTable("ID", "Name", "Version", "Host Port", "Project ID", "Description")
-    docker_compose_projects = _docker_compose_projects()
 
-    for asset in docker_assets:
-        tesseract_vals = _get_tesseract_env_vals(asset)
+    containers = docker_wrapper.get_all_containers()
+    for _, container in containers.items():
+        tesseract_vals = _get_tesseract_env_vals(container)
         if tesseract_vals:
-            tesseract_project = _find_tesseract_project(asset, docker_compose_projects)
+            tesseract_project = _find_tesseract_project(container, docker_wrapper)
             table.add_row(
-                asset.id[:12],
+                container.id[:12],
                 tesseract_vals["TESSERACT_NAME"],
                 tesseract_vals["TESSERACT_VERSION"],
-                _get_container_host_port(asset),
+                container.host_port,
                 tesseract_project,
                 tesseract_vals.get("TESSERACT_DESCRIPTION", "").replace("\\n", " "),
             )
@@ -525,7 +515,7 @@ def _display_tesseract_containers_meta(
 
 
 def _get_tesseract_env_vals(
-    docker_asset: docker.models.images.Image | docker.models.containers.Container,
+    docker_asset: DockerWrapper.Image | DockerWrapper.Container,
 ) -> dict:
     """Convert Tesseract environment variables from list to dictionary."""
     env_vals = [s for s in docker_asset.attrs["Config"]["Env"] if "TESSERACT_" in s]
@@ -533,59 +523,20 @@ def _get_tesseract_env_vals(
 
 
 def _find_tesseract_project(
-    tesseract: docker.models.containers.Container,
-    docker_compose_projects: defaultdict[str, list],
+    tesseract: DockerWrapper.Container,
+    docker_wrapper: DockerWrapper,
 ) -> str:
     """Find the Tesseract Project ID for a given tesseract."""
+    if tesseract.project_id is not None:
+        return tesseract.project_id
+
     tesseract_id = tesseract.id[:12]
 
-    for project, containers in docker_compose_projects.items():
+    for project, containers in docker_wrapper.get_projects.items():
         if tesseract_id in containers:
             return project
 
     return "Unknown"
-
-
-def _docker_compose_projects() -> defaultdict[str, list]:
-    """List Docker Compose projects.
-
-    Build a dictionary {project_name: [container ID]}.
-    """
-    proc = subprocess.run(
-        ["docker", "compose", "ls", "--format", "json"],
-        check=True,
-        capture_output=True,
-    )
-
-    out = proc.stdout.decode().strip()
-    compose_projects = json.loads(out)
-
-    projects_map = defaultdict(list)
-
-    for project in compose_projects:
-        project_name = project["Name"]
-
-        proc = subprocess.run(
-            [
-                "docker",
-                "compose",
-                "--project-name",
-                project_name,
-                "ps",
-                "--format",
-                "json",
-            ],
-            check=True,
-            capture_output=True,
-        )
-        # This command outputs a series of JSON documents, one for each
-        # container, instead of a JSON with a list of entries.
-        compose_ps = proc.stdout.decode().strip().split("\n")
-        for asset in compose_ps:
-            metadata = json.loads(asset)
-            projects_map[project_name].append(metadata["ID"])
-
-    return projects_map
 
 
 @app.command("apidoc")
@@ -602,12 +553,11 @@ def apidoc(
 ) -> None:
     """Serve the OpenAPI schema for a Tesseract."""
     project_id = None
-
+    docker_wrapper = None
     try:
-        project_id = engine.serve([image_name])
-        container = engine.project_containers(project_id)[0]
-        host_port = _get_container_host_port(container)
-        url = f"http://localhost:{host_port}/docs"
+        project_id, docker_wrapper = engine.serve([image_name])
+        container = docker_wrapper.get_projects()[project_id][0]
+        url = f"http://localhost:{container.host_port}/docs"
         logger.info(f"Serving OpenAPI docs for Tesseract {image_name} at {url}")
         logger.info("  Press Ctrl+C to stop")
         if browser:
@@ -619,27 +569,28 @@ def apidoc(
             return
     finally:
         if project_id is not None:
-            engine.teardown(project_id)
+            engine.teardown(project_id, docker_wrapper=docker_wrapper)
 
 
-def _display_container_meta(
-    containers: list[docker.models.containers.Container],
-) -> None:
-    """Display container metadata."""
-    for container in containers:
+def _display_project_meta(project_id: str, docker_wrapper: DockerWrapper) -> list:
+    """Display project metadata.
+
+    Returns a list of dictionaries {name: container_name, port: host_port}.
+    """
+    container_ports = []
+    projects = docker_wrapper.get_projects()
+    containers = projects[project_id]
+    for container_id in containers:
+        container = docker_wrapper.get_container(container_id)
         logger.info(f"Container ID: {container.id}")
         logger.info(f"Name: {container.name}")
         entrypoint = container.attrs["Config"]["Entrypoint"]
         logger.info(f"Entrypoint: {entrypoint}")
-        port_key = next(iter(container.ports))
-        host_port = container.ports[port_key][0]["HostPort"]
+        host_port = container.host_port
         logger.info(f"View Tesseract: http://localhost:{host_port}/docs")
+        container_ports.append({"name": container.name, "port": host_port})
 
-
-def _get_container_host_port(container: docker.models.containers.Container):
-    port_key = next(iter(container.ports))
-    host_port = container.ports[port_key][0]["HostPort"]
-    return host_port
+    return container_ports
 
 
 @app.command("teardown")
@@ -672,27 +623,19 @@ def teardown(
             "Either project IDs or --all flag must be provided, but not both",
             param_hint="project_ids",
         )
-    if tear_all:
-        project_ids = []
-        docker_compose_projects = _docker_compose_projects()
-        for project, _ in docker_compose_projects.items():
-            if "tesseract-" in project:
-                project_ids.append(project)
 
-    for project_id in project_ids:
-        try:
-            engine.teardown(project_id)
-        except ValueError as ex:
-            raise UserError(
-                f"Input error occurred while tearing down Tesseracts: {ex}"
-            ) from ex
-        except RuntimeError as ex:
-            raise UserError(
-                f"Internal Docker error occurred while tearing down Tesseracts: {ex}"
-            ) from ex
-        logger.info(
-            f"Tesseracts are shutdown for Docker Compose project ID: {project_id}"
-        )
+    try:
+        if not project_ids:
+            project_ids = []  # Pass in empty list if no project_ids are provided.
+        engine.teardown(project_ids, tear_all=tear_all)
+    except ValueError as ex:
+        raise UserError(
+            f"Input error occurred while tearing down Tesseracts: {ex}"
+        ) from ex
+    except RuntimeError as ex:
+        raise UserError(
+            f"Internal Docker error occurred while tearing down Tesseracts: {ex}"
+        ) from ex
 
 
 def _sanitize_error_output(error_output: str, tesseract_image: str) -> str:
@@ -810,16 +753,13 @@ def run_container(
             tesseract_image, cmd, args, volumes=volume, gpus=gpus
         )
 
-    except docker.errors.ImageNotFound as e:
-        raise UserError(
-            "Tesseract image not found. "
-            f"Are you sure your tesseract image name is {tesseract_image}?\n\n{e}"
-        ) from e
+    except RuntimeError as e:
+        if "repository" in str(e) or "Repository" in str(e):
+            raise UserError(
+                "Tesseract image not found. "
+                f"Are you sure your tesseract image name is {tesseract_image}?\n\n{e}"
+            ) from e
 
-    except (
-        docker.errors.APIError,
-        docker.errors.ContainerError,
-    ) as e:
         if "No such command" in str(e):
             error_string = f"Error running Tesseract '{tesseract_image}' \n\n Error: Unimplemented command '{cmd}'.  "
         else:
