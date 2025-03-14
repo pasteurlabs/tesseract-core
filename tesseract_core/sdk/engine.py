@@ -273,8 +273,8 @@ def create_dockerfile(
 
 
 def tesseract_requirements_hook(src_dir, build_dir, template_dir, reqstxt):
-    build_script = template_dir / "build_python_venv.sh"
-    copy(build_script, build_dir / "__tesseract_source__" / "build_python_venv.sh")
+    build_script = template_dir / "build_pip_venv.sh"
+    copy(build_script, build_dir / "__tesseract_source__" / "build_pip_venv.sh")
 
     if reqstxt.exists():
         local_dependencies, remote_dependencies = parse_requirements(reqstxt)

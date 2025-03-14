@@ -3,7 +3,7 @@
 
 import ast
 from pathlib import Path
-from typing import Annotated, Literal, NamedTuple
+from typing import Annotated, Literal, NamedTuple, Union
 
 import yaml
 from pydantic import (
@@ -46,12 +46,21 @@ RelativePath = Annotated[str, AfterValidator(assert_relative_path)]
 StrictStr = Annotated[str, Strict()]
 
 
-class PythonRequirements(BaseModel):
-    provider: Literal["python-pip", "conda"] = "python-pip"
-    file: Literal["tesseract_requirements.txt", "tesseract_environment.yaml"] = (
-        "tesseract_requirements.txt"
-    )
+class PipRequirements(BaseModel):
+    provider: Literal["python-pip"]
+    file: Literal["tesseract_requirements.txt"]
+    build_script: Literal["build_pip_venv.sh"]
 
+
+class CondaRequirements(BaseModel):
+    provider: Literal["conda"]
+    file: Literal["tesseract_environment.yaml"]
+    build_script: Literal["build_conda_venv.sh"]
+
+
+PythonRequirements = Union[
+    PipRequirements, CondaRequirements
+]
 
 class TesseractBuildConfig(BaseModel):
     """Configuration options for building a Tesseract."""

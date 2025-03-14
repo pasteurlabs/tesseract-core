@@ -27,10 +27,10 @@ RUN mkdir -p -m 0700 ~/.ssh && ssh-keyscan github.com >> ~/.ssh/known_hosts
 WORKDIR /tmp/build
 COPY {{ tesseract_runtime_location }} ./tesseract_runtime/
 COPY {{ tesseract_source_directory }}/{{ config.build_config.requirements.file }}* ./
-COPY {{ tesseract_source_directory }}/build_python_venv.sh* ./
+COPY {{ tesseract_source_directory }}/{{ config.build_config.requirements.build_script }} ./
 COPY local_requirements* ./local_requirements
 
-RUN {% if use_ssh_mount %}--mount=type=ssh{% endif %} bash build_python_venv.sh
+RUN {% if use_ssh_mount %}--mount=type=ssh{% endif %} bash {{ config.build_config.requirements.build_script }}
 ENV PATH="/python-env/bin:$PATH"
 
 # Stage 2: Set up runtime environment
