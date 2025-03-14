@@ -22,7 +22,9 @@ from pydantic import (
     ConfigDict,
     Field,
     RootModel,
+    ValidationInfo,
     create_model,
+    field_validator,
 )
 
 from .schema_types import (
@@ -34,6 +36,7 @@ from .schema_types import (
     is_differentiable,
     safe_issubclass,
 )
+from .tree_transforms import get_at_path
 
 # Constants to mark sequence and dict indexing in pytree paths
 SEQ_INDEX_SENTINEL = object()
@@ -320,10 +323,10 @@ def _path_to_pattern(path: Sequence[Union[str, object]]) -> str:
     for part in path:
         if part is SEQ_INDEX_SENTINEL:
             is_literal = False
-            part = r"\[\d+\]"
+            part = r"\[-?\d+\]"
         elif part is DICT_INDEX_SENTINEL:
             is_literal = False
-            part = r"\{.*?\}"
+            part = r"\{[\w \-]+\}"
         final_path.append(part)
 
     if is_literal:
@@ -336,13 +339,24 @@ def _pattern_to_type(pattern: str) -> type:
     """Convert a string pattern (which may be a literal or regex) to a type that can be used for validation."""
     if _is_regex_pattern(pattern):
         return Annotated[str, Field(pattern=pattern)]
-
-    return Literal[pattern]
+    else:
+        return Literal[pattern]
 
 
 def _is_regex_pattern(pattern: str) -> bool:
     # Poor man's regex detection, but it should work for our purposes
     return "\\" in pattern
+
+
+def input_path_validator(path: str, info: ValidationInfo) -> str:
+    if "[" in path or "{" in path:
+        try:
+            get_at_path(info.data["inputs"], path)
+        except (LookupError, AttributeError) as exc:
+            raise ValueError(
+                f"Could not find {info.field_name} path {path} in inputs."
+            ) from exc
+    return path
 
 
 def create_autodiff_schema(
@@ -390,7 +404,7 @@ def create_autodiff_schema(
     )
 
     def result_validator(
-        result: dict[str, Any],
+        result: dict[str, Any], info: ValidationInfo
     ) -> dict[str, Any]:
         """Validate the result of a Jacobian computation.
 
@@ -398,7 +412,19 @@ def create_autodiff_schema(
         to ensure they match what's expected from the schema.
         """
         if ad_flavor == "jacobian":
+            if set(info.context["output_keys"]) != set(result.keys()):
+                raise ValueError(
+                    "Error when validating output of jacobian:\n"
+                    f"Expected keys {info.context['output_keys']} in output; got {set(result.keys())}"
+                )
             for output_path, subout in result.items():
+                if set(info.context["input_keys"]) != set(subout.keys()):
+                    raise ValueError(
+                        "Error when validating output of jacobian:\n"
+                        "Expected output with structure "
+                        f"{{{tuple(info.context['output_keys'])}: {{{tuple(info.context['input_keys'])}: ...}}}}, "
+                        f"got {set(subout.keys())} for output key {output_path}."
+                    )
                 output_shape = _find_shape_from_path(diffable_outputs, output_path)
                 for input_path, arr in subout.items():
                     input_shape = _find_shape_from_path(diffable_inputs, input_path)
@@ -442,6 +468,10 @@ def create_autodiff_schema(
                         )
 
         elif ad_flavor == "jvp":
+            if set(info.context["output_keys"]) != set(result.keys()):
+                raise ValueError(
+                    f"Expected keys {info.context['output_keys']} in output; got {set(result.keys())}"
+                )
             for output_path, arr in result.items():
                 output_shape = _find_shape_from_path(diffable_outputs, output_path)
                 if output_shape is Ellipsis:
@@ -465,6 +495,10 @@ def create_autodiff_schema(
                     )
 
         elif ad_flavor == "vjp":
+            if set(info.context["input_keys"]) != set(result.keys()):
+                raise ValueError(
+                    f"Expected keys {info.context['input_keys']} in output; got {set(result.keys())}"
+                )
             for input_path, arr in result.items():
                 input_shape = _find_shape_from_path(diffable_inputs, input_path)
                 if input_shape is Ellipsis:
@@ -498,7 +532,9 @@ def create_autodiff_schema(
             inputs: InputSchema = Field(
                 ..., description="The input data to compute the Jacobian at."
             )
-            jac_inputs: set[diffable_input_type] = Field(
+            jac_inputs: set[
+                Annotated[diffable_input_type, AfterValidator(input_path_validator)]
+            ] = Field(
                 ...,
                 description="The set of differentiable inputs to compute the Jacobian with respect to.",
                 min_length=1,
@@ -535,7 +571,9 @@ def create_autodiff_schema(
             inputs: InputSchema = Field(
                 ..., description="The input data to compute the JVP at."
             )
-            jvp_inputs: set[diffable_input_type] = Field(
+            jvp_inputs: set[
+                Annotated[diffable_input_type, AfterValidator(input_path_validator)]
+            ] = Field(
                 ...,
                 description="The set of differentiable inputs to compute the JVP with respect to.",
                 min_length=1,
@@ -553,7 +591,27 @@ def create_autodiff_schema(
                     "The shape of each array is the same as the shape of the corresponding input array."
                 ),
             )
+
             model_config = ConfigDict(extra="forbid")
+
+            @field_validator("tangent_vector", mode="after")
+            @classmethod
+            def validate_tangent_vector(
+                cls, tangent_vector: dict, info: ValidationInfo
+            ) -> dict:
+                """Raise an exception if the input of an autodiff function does not conform to given input keys."""
+                # Cotangent vector needs same keys as output_keys
+                try:
+                    if set(tangent_vector.keys()) != info.data["jvp_inputs"]:
+                        raise ValueError(
+                            f"Expected tangent vector with keys conforming to jvp_inputs: {info.data['jvp_inputs']}, "
+                            f"got {set(tangent_vector.keys())}."
+                        )
+                except KeyError as e:
+                    raise ValueError(
+                        "Unable to validate tangent vector as jvp_inputs either missing or invalid"
+                    ) from e
+                return tangent_vector
 
         class JVPOutputSchema(RootModel):
             root: Annotated[
@@ -577,7 +635,9 @@ def create_autodiff_schema(
             inputs: InputSchema = Field(
                 ..., description="The input data to compute the VJP at."
             )
-            vjp_inputs: set[diffable_input_type] = Field(
+            vjp_inputs: set[
+                Annotated[diffable_input_type, AfterValidator(input_path_validator)]
+            ] = Field(
                 ...,
                 description="The set of differentiable inputs to compute the VJP with respect to.",
                 min_length=1,
@@ -597,6 +657,24 @@ def create_autodiff_schema(
             )
 
             model_config = ConfigDict(extra="forbid")
+
+            @field_validator("cotangent_vector", mode="after")
+            @classmethod
+            def validate_cotangent_vector(
+                cls, cotangent_vector: dict, info: ValidationInfo
+            ) -> dict:
+                """Raise an exception if cotangent vector keys are not identical to vjp_outputs."""
+                try:
+                    if set(cotangent_vector.keys()) != info.data["vjp_outputs"]:
+                        raise ValueError(
+                            "Expected cotangent vector with keys conforming to vjp_outputs:",
+                            f"{info.data['vjp_outputs']}, got {set(cotangent_vector.keys())}.",
+                        )
+                except KeyError as e:
+                    raise ValueError(
+                        "Unable to validate cotangent vector as vjp_outputs either missing or invalid"
+                    ) from e
+                return cotangent_vector
 
         class VJPOutputSchema(RootModel):
             root: Annotated[
