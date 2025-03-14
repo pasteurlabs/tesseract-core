@@ -5,8 +5,7 @@
                 1.0,
                 2.0,
                 3.0
-            ],
-            "s": 2.0
+            ]
         },
         "b": {
             "v": [
@@ -14,21 +13,23 @@
                 5.0,
                 6.0
             ],
-            "s": 3.0
-        }
+           "s": 3.0
+       }
     },
-    "jac_inputs": [
-        "a.v"
+    "jvp_inputs": [
+        "a.v",
+        "a.s"
     ],
-    "jac_outputs": [
+    "jvp_outputs": [
         "vector_add.result",
-        "vector_min.normed_result"
+        "vector_add.normed_result"
     ],
     "tangent_vector": {
         "a.v": [
-            0.0,
-            5.0,
-            2.0
-        ]
+                0.0,
+                5.0,
+                2.0
+            ],
+        "a.s": 1.0
     }
 }
