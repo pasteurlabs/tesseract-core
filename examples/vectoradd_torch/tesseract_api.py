@@ -165,9 +165,8 @@ def jacobian_vector_product(
     # create a positional function that accepts a list of values
     filtered_pos_eval = filter_pos_func(evaluate, tensor_inputs, jvp_outputs, treedef)
 
-    tangent = torch.func.jvp(filtered_pos_eval, tuple(pos_inputs), tuple(pos_tangent))
-
-    return tangent[1]
+    _, jvp = torch.func.jvp(filtered_pos_eval, tuple(pos_inputs), tuple(pos_tangent))
+    return jvp
 
 
 def vector_jacobian_product(
