@@ -210,7 +210,7 @@ def test_diffable_paths_endpoint(testmodule):
     assert diffable_paths_endpoint.__name__ == "diffable_paths"
 
     result = diffable_paths_endpoint()
-    assert result.keys == {"inputs", "outputs"}
+    assert result.keys() == {"inputs", "outputs"}
 
 
 @pytest.mark.parametrize(
