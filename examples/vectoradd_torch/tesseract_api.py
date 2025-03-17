@@ -94,7 +94,7 @@ def apply(inputs: InputSchema) -> OutputSchema:
     # should be safe)
 
     # Convert to pytorch tensors to enable torch.jit
-    tensor_inputs = tree_map(convert_to_tensors, inputs.model_dump())
+    tensor_inputs = tree_map(map_lambda, inputs.model_dump())
     out = evaluate(tensor_inputs)
 
     # Optional: Insert any post-processing that doesn't require tracing
@@ -114,31 +114,26 @@ def jacobian(
     jac_outputs: set[str],
 ):
     # convert all numbers and arrays to torch tensors
-    tensor_inputs = tree_map(convert_to_tensors, inputs.model_dump())
+    tensor_inputs = tree_map(map_lambda, inputs.model_dump())
 
-    # flatten the dictionaries such that they can be accessed by paths
-    path_inputs = flatten_with_paths(tensor_inputs, jac_inputs)
-
-    # transform the dictionaries into a list of values for a positional function
-    pos_inputs = path_inputs.values()
-    keys = path_inputs.keys()
+    # flatten the dict such that they can be accessed by paths and obtain the values
+    pos_inputs = flatten_with_paths(tensor_inputs, jac_inputs).values()
 
     # create a positional function that accepts a list of values and returns a set of tuples
     filtered_pos_eval = filter_pos_func(
-        evaluate, tensor_inputs, jac_outputs, keys, output_to_tuple=True
+        evaluate, tensor_inputs, jac_inputs, jac_outputs, True
     )
 
     # calculate the jacobian
     jacobian = torch.autograd.functional.jacobian(filtered_pos_eval, tuple(pos_inputs))
 
     # rebuild the dictionary from the list of results
-    res_dict = {}
-    for dy, dys in zip(jac_outputs, jacobian):
-        res_dict[dy] = {}
-        for dx, dxs in zip(jac_inputs, dys):
-            res_dict[dy][dx] = dxs
 
-    return res_dict
+    jac_dict = {}
+    for _, jac_row in zip(jac_outputs, jacobian):
+        jac_dict = dict(zip(jac_inputs, jac_row))
+
+    return jac_dict
 
 
 def jacobian_vector_product(
@@ -148,26 +143,18 @@ def jacobian_vector_product(
     tangent: dict[str, Any],
 ):
     # convert all numbers and arrays to torch tensors
-    tensor_inputs = tree_map(convert_to_tensors, inputs.model_dump())
-    tensor_tangent = tree_map(convert_to_tensors, tangent)
+    tensor_inputs = tree_map(map_lambda, inputs.model_dump())
+    pos_tangent = tree_map(map_lambda, tangent).values()
 
     # flatten the dictionaries such that they can be accessed by paths
-    path_inputs = flatten_with_paths(tensor_inputs, jvp_inputs)
-
-    # transform the dictionaries into a list of values for a positional function
-    pos_inputs = path_inputs.values()
-    keys_inputs = path_inputs.keys()
-
-    pos_tangent = tensor_tangent.values()
+    pos_inputs = flatten_with_paths(tensor_inputs, jvp_inputs).values()
 
     # create a positional function that accepts a list of values
     filtered_pos_eval = filter_pos_func(
-        evaluate, tensor_inputs, jvp_outputs, keys_inputs
+        evaluate, tensor_inputs, jvp_inputs, jvp_outputs
     )
 
-    tangent = torch.func.jvp(filtered_pos_eval, tuple(pos_inputs), tuple(pos_tangent))
-
-    return tangent[1]
+    return torch.func.jvp(filtered_pos_eval, tuple(pos_inputs), tuple(pos_tangent))[1]
 
 
 def vector_jacobian_product(
@@ -181,19 +168,15 @@ def vector_jacobian_product(
     cotangent_vector = {key: cotangent_vector[key] for key in vjp_outputs}
 
     # convert all numbers and arrays to torch tensors
-    tensor_inputs = tree_map(convert_to_tensors, inputs.model_dump())
-    tensor_cotangent = tree_map(convert_to_tensors, cotangent_vector)
+    tensor_inputs = tree_map(map_lambda, inputs.model_dump())
+    tensor_cotangent = tree_map(map_lambda, cotangent_vector)
 
     # flatten the dictionaries such that they can be accessed by paths
-    path_inputs = flatten_with_paths(tensor_inputs, vjp_inputs)
-
-    # transform the dictionaries into a list of values for a positional function
-    pos_inputs = path_inputs.values()
-    keys_inputs = path_inputs.keys()
+    pos_inputs = flatten_with_paths(tensor_inputs, vjp_inputs).values()
 
     # create a positional function that accepts a list of values
     filtered_pos_func = filter_pos_func(
-        evaluate, tensor_inputs, vjp_outputs, keys_inputs
+        evaluate, tensor_inputs, vjp_inputs, vjp_outputs
     )
 
     _, vjp_func = torch.func.vjp(filtered_pos_func, *pos_inputs)
@@ -208,15 +191,4 @@ def vector_jacobian_product(
     return res_dict
 
 
-def convert_to_tensors(data):
-    """Convert all numbers and arrays to torch tensors."""
-    if isinstance(data, np.ndarray):
-        return torch.from_numpy(data.copy())
-    elif isinstance(data, (np.floating, float)):
-        return torch.tensor(data)
-    elif isinstance(data, (np.integer, int)):
-        return torch.tensor(data)
-    elif isinstance(data, (np.bool_, bool)):
-        return torch.tensor(data)
-    else:
-        raise TypeError(f"Unsupported data type: {type(data)}")
+map_lambda = lambda x: torch.tensor(x) if isinstance(x, np.generic | np.ndarray) else x

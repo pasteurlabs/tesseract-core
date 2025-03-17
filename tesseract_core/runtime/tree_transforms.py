@@ -138,8 +138,8 @@ def filter_func(
 def filter_pos_func(
     func: Callable[[dict], dict],
     default_inputs: dict,
+    input_paths: set[str],
     output_paths: set[str],
-    keys: list[str],
     output_to_tuple: bool = False,
 ) -> Callable:
     """Returns a reduced func with default inputs that operates on positional arguments.
@@ -153,7 +153,7 @@ def filter_pos_func(
     # function that accepts positional arguments
     def filtered_pos_func(*args):
         # convert back to dictionary
-        new_inputs = dict(zip(keys, args))
+        new_inputs = dict(zip(input_paths, args))
 
         # partially update the default inputs with the new values
         updated_inputs = set_at_path(default_inputs, new_inputs)
