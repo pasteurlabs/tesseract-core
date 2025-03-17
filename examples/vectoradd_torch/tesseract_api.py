@@ -181,14 +181,8 @@ def vector_jacobian_product(
 
     _, vjp_func = torch.func.vjp(filtered_pos_func, *pos_inputs)
 
-    res = vjp_func(tensor_cotangent)
-
-    # rebuild the dictionary from the list of results
-    res_dict = {}
-    for key, value in zip(vjp_inputs, res):
-        res_dict[key] = value
-
-    return res_dict
+    vjp_vals = vjp_func(tensor_cotangent)
+    return dict(zip(vjp_inputs, vjp_vals))
 
 
 map_lambda = lambda x: torch.tensor(x) if isinstance(x, np.generic | np.ndarray) else x
