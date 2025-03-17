@@ -141,7 +141,7 @@ def _recurse_pytree(pytree, func):
 def _find_endpoint(endpoint_list, endpoint_name):
     for endpoint in endpoint_list:
         if endpoint.__name__ == endpoint_name:
-            if hasattr(endpoint.__annotations__, "payload"):
+            if "payload" in endpoint.__annotations__:
                 schema = endpoint.__annotations__["payload"]
             else:
                 schema = None
