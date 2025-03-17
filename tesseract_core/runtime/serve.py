@@ -15,11 +15,7 @@ from .core import create_endpoints
 from .file_interactions import SUPPORTED_FORMATS, output_to_bytes
 
 # Endpoints that should use GET instead of POST
-GET_ENDPOINTS = {
-    "input_schema",
-    "output_schema",
-    "health",
-}
+GET_ENDPOINTS = {"input_schema", "output_schema", "health", "diffable_paths"}
 
 # TODO: make this configurable via environment variable
 DEFAULT_ACCEPT = "application/json"
