@@ -241,3 +241,58 @@ attribute:
 ```
 :::
 ::::
+
+## Differentiable paths
+
+In order to know which outputs can be differentiated with respect to which inputs, you can
+call the diffable-paths endpoint:
+
+::::{tab-set}
+:::{tab-item} CLI
+:sync: cli
+```bash
+$ tesseract run vectoradd diffable-paths
+```
+:::
+:::{tab-item} REST API
+:sync: http
+```bash
+$ curl <tesseract-address>:<port>/diffable_paths
+```
+:::
+:::{tab-item} Python
+:sync: python
+```python
+>>> from tesseract_core import Tesseract
+>>> with Tesseract(image="vectoradd") as vectoradd:
+>>>     vectoradd.diffable_paths
+```
+
+This will return a dictionary containing the paths of all inputs and outputs which are
+marked as `Differentiable`. In the specific case of `vectoradd`, this would be:
+```json
+{
+  "inputs": {
+    "a": {
+      "shape": [null],
+      "dtype": "float32"
+    },
+    "b": {
+      "shape": [null],
+      "dtype": "float32"
+    },
+    "s": {
+      "shape": [],
+      "dtype": "float32"
+    }
+  },
+  "outputs": {
+    "result": {
+      "shape": [
+        null
+      ],
+      "dtype": "float64"
+    }
+  }
+}
+```
