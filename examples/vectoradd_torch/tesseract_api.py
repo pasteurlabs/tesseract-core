@@ -128,12 +128,13 @@ def jacobian(
     jacobian = torch.autograd.functional.jacobian(filtered_pos_eval, tuple(pos_inputs))
 
     # rebuild the dictionary from the list of results
+    jax_dict = {}
+    for dy, dys in zip(jac_outputs, jacobian):
+        jax_dict[dy] = {}
+        for dx, dxs in zip(jac_inputs, dys):
+            jax_dict[dy][dx] = dxs
 
-    jac_dict = {}
-    for _, jac_row in zip(jac_outputs, jacobian):
-        jac_dict = dict(zip(jac_inputs, jac_row))
-
-    return jac_dict
+    return jax_dict
 
 
 def jacobian_vector_product(
@@ -142,6 +143,9 @@ def jacobian_vector_product(
     jvp_outputs: set[str],
     tangent: dict[str, Any],
 ):
+    # Make ordering of tangent identical to jvp_inputs
+    tangent = {key: tangent[key] for key in jvp_inputs}
+
     # convert all numbers and arrays to torch tensors
     tensor_inputs = tree_map(map_lambda, inputs.model_dump())
     pos_tangent = tree_map(map_lambda, tangent).values()
@@ -163,8 +167,7 @@ def vector_jacobian_product(
     vjp_outputs: set[str],
     cotangent_vector: dict[str, Any],
 ):
-    # Make ordering of vjp in and output args deterministic
-    # Necessacy as torch.vjp function requires inputs and outputs to be in the same order
+    # Make ordering of cotangent_vector identical to vjp_inputs
     cotangent_vector = {key: cotangent_vector[key] for key in vjp_outputs}
 
     # convert all numbers and arrays to torch tensors
