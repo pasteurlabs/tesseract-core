@@ -236,9 +236,9 @@ def _serialize_diffable_arrays(
         # into something like array_seq.[]
         sanitized_parts = []
         for part in key.split("."):
-            if "[" in part:
+            if part.startswith("\\["):
                 sanitized_parts.append("[]")
-            elif "{" in part:
+            elif part.startswith("\\{"):
                 sanitized_parts.append("{}")
             else:
                 sanitized_parts.append(part.replace("\\", ""))
