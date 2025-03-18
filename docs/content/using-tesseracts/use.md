@@ -208,6 +208,30 @@ The schemas returned by the command above are the ones of the `/apply` endpoint.
 for differential endpoints, like `jacobian`, are derived from it -- see the
 [page on Autodiff](tr-autodiff) for more details.
 
+The Input and output schemas contain a `diffable` field in their root that contains a mapping between
+leaves marked as `Differentiable` to their shapes and dtypes. For example, in the input schema
+of `vectoradd`, the `diffable` field would be:
+```json
+{
+  "a": {
+    "dtype": "float32",
+    "shape": [
+      null
+    ]
+  },
+  "b": {
+    "dtype": "float32",
+    "shape": [
+      null
+    ]
+  },
+  "s": {
+    "dtype": "float32",
+    "shape": []
+  }
+}
+```
+
 You can also get the OpenAPI schema for the whole API of each Tesseract via:
 
 ::::{tab-set}
@@ -241,58 +265,3 @@ attribute:
 ```
 :::
 ::::
-
-## Differentiable paths
-
-In order to know which outputs can be differentiated with respect to which inputs, you can
-call the diffable-paths endpoint:
-
-::::{tab-set}
-:::{tab-item} CLI
-:sync: cli
-```bash
-$ tesseract run vectoradd diffable-paths
-```
-:::
-:::{tab-item} REST API
-:sync: http
-```bash
-$ curl <tesseract-address>:<port>/diffable_paths
-```
-:::
-:::{tab-item} Python
-:sync: python
-```python
->>> from tesseract_core import Tesseract
->>> with Tesseract(image="vectoradd") as vectoradd:
->>>     vectoradd.diffable_paths
-```
-
-This will return a dictionary containing the paths of all inputs and outputs which are
-marked as `Differentiable`. In the specific case of `vectoradd`, this would be:
-```json
-{
-  "inputs": {
-    "a": {
-      "shape": [null],
-      "dtype": "float32"
-    },
-    "b": {
-      "shape": [null],
-      "dtype": "float32"
-    },
-    "s": {
-      "shape": [],
-      "dtype": "float32"
-    }
-  },
-  "outputs": {
-    "result": {
-      "shape": [
-        null
-      ],
-      "dtype": "float64"
-    }
-  }
-}
-```
