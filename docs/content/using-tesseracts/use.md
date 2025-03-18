@@ -208,30 +208,6 @@ The schemas returned by the command above are the ones of the `/apply` endpoint.
 for differential endpoints, like `jacobian`, are derived from it -- see the
 [page on Autodiff](tr-autodiff) for more details.
 
-The Input and output schemas contain a `diffable` field in their root that contains a mapping between
-leaves marked as `Differentiable` to their shapes and dtypes. For example, in the input schema
-of `vectoradd`, the `diffable` field would be:
-```json
-{
-  "a": {
-    "dtype": "float32",
-    "shape": [
-      null
-    ]
-  },
-  "b": {
-    "dtype": "float32",
-    "shape": [
-      null
-    ]
-  },
-  "s": {
-    "dtype": "float32",
-    "shape": []
-  }
-}
-```
-
 You can also get the OpenAPI schema for the whole API of each Tesseract via:
 
 ::::{tab-set}
