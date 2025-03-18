@@ -37,7 +37,6 @@ from pip._internal.req.req_file import (
 )
 
 from .api_parse import (
-    PipRequirements,
     PythonRequirements,
     TesseractConfig,
     get_config,
@@ -278,10 +277,10 @@ def build_image(
     image_name: str,
     dockerfile: str | Path,
     build_dir: str | Path,
+    requirements: PythonRequirements,
     inject_ssh: bool = False,
     keep_build_cache: bool = False,
     generate_only: bool = False,
-    requirements: PythonRequirements = PipRequirements(provider="python-pip"),
 ) -> docker.models.images.Image | None:
     """Build the image from a Dockerfile.
 

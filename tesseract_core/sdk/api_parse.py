@@ -50,12 +50,14 @@ class PipRequirements(BaseModel):
     provider: Literal["python-pip"]
     _filename: Literal["tesseract_requirements.txt"] = "tesseract_requirements.txt"
     _build_script: Literal["build_pip_venv.sh"] = "build_pip_venv.sh"
+    model_config: ConfigDict = ConfigDict(extra="forbid")
 
 
 class CondaRequirements(BaseModel):
     provider: Literal["conda"]
     _filename: Literal["tesseract_environment.yaml"] = "tesseract_environment.yaml"
     _build_script: Literal["build_conda_venv.sh"] = "build_conda_venv.sh"
+    model_config: ConfigDict = ConfigDict(extra="forbid")
 
 
 PythonRequirements = Union[PipRequirements, CondaRequirements]
