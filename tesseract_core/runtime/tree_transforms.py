@@ -159,7 +159,13 @@ def filter_func(
 
     def filtered_func(new_inputs: dict) -> dict:
         updated_inputs = set_at_path(default_inputs, new_inputs)
-        return flatten_with_paths(func(updated_inputs), output_paths)
+
+        path_outputs = flatten_with_paths(func(updated_inputs), output_paths)
+
+        if output_to_tuple:
+            return tuple(path_outputs.values())
+
+        return path_outputs
 
     if positional:
         return filtered_pos_func
