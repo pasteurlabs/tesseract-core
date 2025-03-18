@@ -2,7 +2,6 @@ from types import ModuleType
 
 import numpy as np
 import pytest
-import typeguard
 from pydantic import BaseModel
 
 from tesseract_core.runtime import Array, Differentiable, Float32
@@ -11,7 +10,9 @@ from tesseract_core.runtime.tree_transforms import get_at_path
 
 
 class DummyModule(ModuleType):
-    correct_gradients = True
+    def __init__(self, *args, correct_gradients: bool = True, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.correct_gradients = correct_gradients
 
     class InputSchema(BaseModel):
         in_data: Differentiable[Array[(None, 3), Float32]]
@@ -25,7 +26,7 @@ class DummyModule(ModuleType):
         out_scalar: Differentiable[Float32]
         out_aux: str
 
-    def apply(inputs: InputSchema) -> OutputSchema:
+    def apply(self, inputs: InputSchema) -> OutputSchema:
         return {
             "out_data": np.zeros_like(inputs.in_data),
             "out_dict": {
@@ -36,12 +37,13 @@ class DummyModule(ModuleType):
         }
 
     def jacobian(
+        self,
         inputs: InputSchema,
         jac_inputs: set[str],
         jac_outputs: set[str],
     ):
-        outputs = DummyModule.apply(inputs)
-        if DummyModule.correct_gradients:
+        outputs = self.apply(inputs)
+        if self.correct_gradients:
             make_array = np.zeros
         else:
             make_array = np.ones
@@ -60,13 +62,14 @@ class DummyModule(ModuleType):
         }
 
     def jacobian_vector_product(
+        self,
         inputs: InputSchema,
         jac_inputs: set[str],
         jac_outputs: set[str],
         vector: Array[(None,), Float32],
     ):
-        outputs = DummyModule.apply(inputs)
-        if DummyModule.correct_gradients:
+        outputs = self.apply(inputs)
+        if self.correct_gradients:
             make_array = np.zeros
         else:
             make_array = np.ones
@@ -76,12 +79,13 @@ class DummyModule(ModuleType):
         }
 
     def vector_jacobian_product(
+        self,
         inputs: InputSchema,
         jac_inputs: set[str],
         jac_outputs: set[str],
         vector: Array[(None,), Float32],
     ):
-        if DummyModule.correct_gradients:
+        if self.correct_gradients:
             make_array = np.zeros
         else:
             make_array = np.ones
@@ -104,42 +108,42 @@ input_data = {
 @pytest.mark.parametrize("output_paths", [None, ["out_data", "out_dict.{key}"]])
 @pytest.mark.parametrize("endpoints", [None, ["jacobian"]])
 def test_check_gradients(input_paths, output_paths, endpoints):
-    with typeguard.suppress_type_checks():
-        DummyModule.correct_gradients = False
-        result_iter = check_gradients(
-            DummyModule,
-            {"inputs": input_data},
-            base_dir=None,
-            input_paths=input_paths,
-            output_paths=output_paths,
-            endpoints=endpoints,
-            max_evals=10,
-        )
+    dummy_module_bad = DummyModule("dummy_module", correct_gradients=False)
 
-        run_endpoints = []
-        for endpoint, failures, num_evals in result_iter:
-            run_endpoints.append(endpoint)
+    result_iter = check_gradients(
+        dummy_module_bad,
+        {"inputs": input_data},
+        base_dir=None,
+        input_paths=input_paths,
+        output_paths=output_paths,
+        endpoints=endpoints,
+        max_evals=10,
+    )
 
-            # everything should fail (all gradients are wrong)
-            assert len(failures) == num_evals
+    run_endpoints = []
+    for endpoint, failures, num_evals in result_iter:
+        run_endpoints.append(endpoint)
 
-            for failure in failures:
-                assert not failure.exception
+        # everything should fail (all gradients are wrong)
+        assert len(failures) == num_evals
 
-        # Now try again with correct gradients
-        DummyModule.correct_gradients = True
-        result_iter = check_gradients(
-            DummyModule,
-            {"inputs": input_data},
-            base_dir=None,
-            input_paths=input_paths,
-            output_paths=output_paths,
-            endpoints=endpoints,
-            max_evals=10,
-        )
+        for failure in failures:
+            assert not failure.exception
 
-        for _, failures, _ in result_iter:
-            assert not failures
+    # Now try again with correct gradients
+    dummy_module_good = DummyModule("dummy_module", correct_gradients=True)
+    result_iter = check_gradients(
+        dummy_module_good,
+        {"inputs": input_data},
+        base_dir=None,
+        input_paths=input_paths,
+        output_paths=output_paths,
+        endpoints=endpoints,
+        max_evals=10,
+    )
+
+    for _, failures, _ in result_iter:
+        assert not failures
 
     if endpoints is not None:
         assert run_endpoints == endpoints

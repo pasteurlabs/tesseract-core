@@ -19,6 +19,7 @@ from typing import (
 )
 
 import numpy as np
+from numpy.typing import ArrayLike
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
 from rich.progress import Progress
@@ -35,8 +36,8 @@ class GradientCheckResult(NamedTuple):
     in_path: str
     out_path: str
     idx: tuple[int, ...]
-    grad_val: Optional[np.ndarray]
-    ref_val: Optional[np.ndarray]
+    grad_val: Optional[ArrayLike]
+    ref_val: Optional[ArrayLike]
     exception: Optional[str]
 
 
@@ -57,7 +58,7 @@ def expand_regex_path(path_pattern: str, inputs: dict[str, Any]) -> list[str]:
         parts = path_pattern.split("\\.")
 
     def _handle_part(
-        parts: tuple[str], current_inputs: Any, current_path: list[str]
+        parts: Sequence[str], current_inputs: Any, current_path: list[str]
     ) -> list[str]:
         """Recursively expand each part separately."""
         if not parts:
@@ -198,7 +199,7 @@ def _jacobian_via_apply(
     output_path: Sequence[str],
     arr_idx: tuple[int, ...],
     eps: float = 1e-4,
-) -> np.ndarray:
+) -> ArrayLike:
     """Compute a Jacobian row using central finite differences."""
     apply_fn = endpoints_func["apply"]
     ApplySchema = get_input_schema(apply_fn)
@@ -232,7 +233,7 @@ def _jacobian_via_jacobian(
     input_path: Sequence[str],
     output_path: Sequence[str],
     arr_idx: tuple[int, ...],
-) -> np.ndarray:
+) -> ArrayLike:
     """Compute a Jacobian row using the jacobian endpoint."""
     jac_fn = endpoints_func["jacobian"]
 
@@ -261,7 +262,7 @@ def _jacobian_via_jvp(
     input_path: Sequence[str],
     output_path: Sequence[str],
     arr_idx: tuple[int, ...],
-) -> np.ndarray:
+) -> ArrayLike:
     """Compute a Jacobian row using the jacobian_vector_product endpoint."""
     jvp_fn = endpoints_func["jacobian_vector_product"]
     JvpSchema = get_input_schema(jvp_fn)
@@ -288,7 +289,7 @@ def _jacobian_via_vjp(
     input_path: Sequence[str],
     output_path: Sequence[str],
     arr_idx: tuple[int, ...],
-) -> np.ndarray:
+) -> ArrayLike:
     """Compute a Jacobian row using the vector_jacobian_product endpoint."""
     apply_fn = endpoints_func["apply"]
     ApplySchema = get_input_schema(apply_fn)
@@ -351,7 +352,7 @@ def _sample_indices(
 
 def check_endpoint_gradients(
     endpoint_functions: dict[str, Callable],
-    inputs: BaseModel,
+    inputs: dict[str, Any],
     endpoint: str,
     *,
     diff_inputs: list[str],
@@ -450,7 +451,7 @@ def check_gradients(
     *,
     input_paths: Optional[Sequence[str]] = None,
     output_paths: Optional[Sequence[str]] = None,
-    base_dir: Path,
+    base_dir: Optional[Path] = None,
     endpoints: Optional[Sequence[ADEndpointName]] = None,
     max_evals: int = 1000,
     eps: float = 1e-4,
