@@ -119,27 +119,11 @@ def flatten_with_paths(
 
 
 def filter_func(
-    func: Callable[[dict], dict], default_inputs: dict, output_paths: set[str]
-) -> Callable[[dict], dict]:
-    """Returns a reduced func with default inputs that operates on {path: value} dicts.
-
-    The returned function will accept a dictionary `{input_path: value}` and will update the default inputs
-    with the new values at each path. It will then call the original function with the updated inputs
-    and return a dictionary `{output_path: value}`.
-    """
-
-    def filtered_func(new_inputs: dict) -> dict:
-        updated_inputs = set_at_path(default_inputs, new_inputs)
-        return flatten_with_paths(func(updated_inputs), output_paths)
-
-    return filtered_func
-
-
-def filter_pos_func(
     func: Callable[[dict], dict],
     default_inputs: dict,
     input_paths: set[str],
     output_paths: set[str],
+    positional: bool = False,
     output_to_tuple: bool = False,
 ) -> Callable:
     """Returns a reduced func with default inputs that operates on positional arguments.
@@ -148,6 +132,14 @@ def filter_pos_func(
     convert them back to a dictionary and update the default inputs
     with the new values at each path. It will then call the original function with the updated inputs
     and return a dictionary `{output_path: value}`.
+
+    Args:
+        func: The original function that accepts a dictionary of inputs
+        default_inputs: The default inputs to the function
+        input_paths: The paths of the inputs that the function accepts
+        output_paths: The paths of the outputs that the function returns
+        positional: If True, the returned function will accept positional arguments
+        output_to_tuple: If True, the returned function will return a tuple of outputs
     """
 
     # function that accepts positional arguments
@@ -165,4 +157,11 @@ def filter_pos_func(
 
         return path_outputs
 
-    return filtered_pos_func
+    def filtered_func(new_inputs: dict) -> dict:
+        updated_inputs = set_at_path(default_inputs, new_inputs)
+        return flatten_with_paths(func(updated_inputs), output_paths)
+
+    if positional:
+        return filtered_pos_func
+    else:
+        return filtered_func

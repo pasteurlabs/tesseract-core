@@ -1,4 +1,4 @@
-# Vectoradd (with jax)
+# Vectoradd (with torch)
 
 This tesseract is similar to `vectoradd`, but returns a nested dictionary
 with an entry for the vectors added and one for the vectors subtracted.

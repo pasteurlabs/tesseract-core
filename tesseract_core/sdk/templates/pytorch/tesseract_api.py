@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from torch.utils._pytree import tree_map
 
 from tesseract_core.runtime import Differentiable, Float32
-from tesseract_core.runtime.tree_transforms import filter_pos_func, flatten_with_paths
+from tesseract_core.runtime.tree_transforms import filter_func, flatten_with_paths
 
 #
 # Schemata
@@ -52,8 +52,8 @@ def apply(inputs: InputSchema) -> OutputSchema:
     # differentiable outputs in a nonlinear way (a constant shift
     # should be safe)
 
-    # Convert to pytorch tensors to enable torch.jit
-    tensor_inputs = tree_map(map_lambda, inputs.model_dump())
+    # Convert to pytorch tensors
+    tensor_inputs = tree_map(to_tensor, inputs.model_dump())
     out = evaluate(tensor_inputs)
 
     # Optional: Insert any post-processing that doesn't require tracing
@@ -73,27 +73,32 @@ def jacobian(
     jac_outputs: set[str],
 ):
     # convert all numbers and arrays to torch tensors
-    tensor_inputs = tree_map(map_lambda, inputs.model_dump())
+    tensor_inputs = tree_map(to_tensor, inputs.model_dump())
 
     # flatten the dict such that they can be accessed by paths and obtain the values
     pos_inputs = flatten_with_paths(tensor_inputs, jac_inputs).values()
 
     # create a positional function that accepts a list of values and returns a set of tuples
-    filtered_pos_eval = filter_pos_func(
-        evaluate, tensor_inputs, jac_inputs, jac_outputs, True
+    filtered_pos_eval = filter_func(
+        evaluate,
+        tensor_inputs,
+        jac_inputs,
+        jac_outputs,
+        output_to_tuple=True,
+        positional=True,
     )
 
     # calculate the jacobian
     jacobian = torch.autograd.functional.jacobian(filtered_pos_eval, tuple(pos_inputs))
 
     # rebuild the dictionary from the list of results
-    jax_dict = {}
+    jac_dict = {}
     for dy, dys in zip(jac_outputs, jacobian):
-        jax_dict[dy] = {}
+        jac_dict[dy] = {}
         for dx, dxs in zip(jac_inputs, dys):
-            jax_dict[dy][dx] = dxs
+            jac_dict[dy][dx] = dxs
 
-    return jax_dict
+    return jac_dict
 
 
 def jacobian_vector_product(
@@ -106,15 +111,15 @@ def jacobian_vector_product(
     tangent = {key: tangent[key] for key in jvp_inputs}
 
     # convert all numbers and arrays to torch tensors
-    tensor_inputs = tree_map(map_lambda, inputs.model_dump())
-    pos_tangent = tree_map(map_lambda, tangent).values()
+    tensor_inputs = tree_map(to_tensor, inputs.model_dump())
+    pos_tangent = tree_map(to_tensor, tangent).values()
 
     # flatten the dictionaries such that they can be accessed by paths
     pos_inputs = flatten_with_paths(tensor_inputs, jvp_inputs).values()
 
     # create a positional function that accepts a list of values
-    filtered_pos_eval = filter_pos_func(
-        evaluate, tensor_inputs, jvp_inputs, jvp_outputs
+    filtered_pos_eval = filter_func(
+        evaluate, tensor_inputs, jvp_inputs, jvp_outputs, positional=True
     )
 
     return torch.func.jvp(filtered_pos_eval, tuple(pos_inputs), tuple(pos_tangent))[1]
@@ -130,15 +135,15 @@ def vector_jacobian_product(
     cotangent_vector = {key: cotangent_vector[key] for key in vjp_outputs}
 
     # convert all numbers and arrays to torch tensors
-    tensor_inputs = tree_map(map_lambda, inputs.model_dump())
-    tensor_cotangent = tree_map(map_lambda, cotangent_vector)
+    tensor_inputs = tree_map(to_tensor, inputs.model_dump())
+    tensor_cotangent = tree_map(to_tensor, cotangent_vector)
 
     # flatten the dictionaries such that they can be accessed by paths
     pos_inputs = flatten_with_paths(tensor_inputs, vjp_inputs).values()
 
     # create a positional function that accepts a list of values
-    filtered_pos_func = filter_pos_func(
-        evaluate, tensor_inputs, vjp_inputs, vjp_outputs
+    filtered_pos_func = filter_func(
+        evaluate, tensor_inputs, vjp_inputs, vjp_outputs, positional=True
     )
 
     _, vjp_func = torch.func.vjp(filtered_pos_func, *pos_inputs)
@@ -147,4 +152,4 @@ def vector_jacobian_product(
     return dict(zip(vjp_inputs, vjp_vals))
 
 
-map_lambda = lambda x: torch.tensor(x) if isinstance(x, np.generic | np.ndarray) else x
+to_tensor = lambda x: torch.tensor(x) if isinstance(x, np.generic | np.ndarray) else x
