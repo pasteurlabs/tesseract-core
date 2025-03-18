@@ -630,7 +630,7 @@ def test_unit_tesseract_endtoend(
                 img_name,
                 *extra_args,
                 "apply",
-                json.dumps({"inputs": random_input}),
+                json.dumps(random_input),
             ],
             catch_exceptions=False,
         )
