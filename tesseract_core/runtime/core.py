@@ -180,7 +180,7 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
 
     def input_schema() -> dict[str, Any]:
         """Get input schema for tesseract apply function."""
-        return ApplyOutputSchema.model_json_schema()
+        return ApplyInputSchema.model_json_schema()
 
     endpoints.append(input_schema)
 
