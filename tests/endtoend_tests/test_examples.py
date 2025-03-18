@@ -501,7 +501,7 @@ TEST_CASES = {
             SampleRequest(
                 endpoint="apply",
                 payload={"inputs": {"message": "Hey!"}},
-                output_contains_pattern=['"{"cowsays":"  ____\n| Hey! |\n  ====\n"'],
+                output_contains_pattern=[r'{"cowsays":"  ____\n| Hey! |\n  ====\n'],
             )
         ],
     ),
