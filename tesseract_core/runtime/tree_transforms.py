@@ -4,7 +4,7 @@
 import re
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
-from typing import Any, Union
+from typing import Any, Optional, Union
 
 from pydantic import BaseModel
 
@@ -121,24 +121,24 @@ def flatten_with_paths(
 def filter_func(
     func: Callable[[dict], dict],
     default_inputs: dict,
-    input_paths: set[str],
     output_paths: set[str],
-    positional: bool = False,
+    input_paths: Optional[set[str]] = None,
     output_to_tuple: bool = False,
 ) -> Callable:
-    """Returns a reduced func with default inputs that operates on positional arguments.
+    """Returns a reduced func with default inputs that operates on positional args or {path: value} dicts.
 
-    The returned function will accept a tuple of positional arguments,
-    convert them back to a dictionary and update the default inputs
-    with the new values at each path. It will then call the original function with the updated inputs
-    and return a dictionary `{output_path: value}`.
+    The returned function accepts either a dictionary `{input_path: value}` if `input_paths` is None or
+    positional arguments in the same order as input_paths.
+    The function will update the default inputs with the new values.
+    It will then call the original function with the updated inputs and return a dictionary
+    `{output_path: value}` or a tuple of values if `output_to_tuple` is True.
 
     Args:
         func: The original function that accepts a dictionary of inputs
         default_inputs: The default inputs to the function
-        input_paths: The paths of the inputs that the function accepts
         output_paths: The paths of the outputs that the function returns
-        positional: If True, the returned function will accept positional arguments
+        input_paths: The keys to reconstruct positional to dictionaries.
+            If None, the returned function accepts a dictionary arguments.
         output_to_tuple: If True, the returned function will return a tuple of outputs
     """
 
@@ -167,7 +167,7 @@ def filter_func(
 
         return path_outputs
 
-    if positional:
+    if input_paths:
         return filtered_pos_func
     else:
         return filtered_func
