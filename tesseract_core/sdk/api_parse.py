@@ -48,14 +48,14 @@ StrictStr = Annotated[str, Strict()]
 
 class PipRequirements(BaseModel):
     provider: Literal["python-pip"]
-    file: Literal["tesseract_requirements.txt"] = "tesseract_requirements.txt"
-    build_script: Literal["build_pip_venv.sh"] = "build_pip_venv.sh"
+    _filename: Literal["tesseract_requirements.txt"] = "tesseract_requirements.txt"
+    _build_script: Literal["build_pip_venv.sh"] = "build_pip_venv.sh"
 
 
 class CondaRequirements(BaseModel):
     provider: Literal["conda"]
-    file: Literal["tesseract_environment.yaml"] = "tesseract_environment.yaml"
-    build_script: Literal["build_conda_venv.sh"] = "build_conda_venv.sh"
+    _filename: Literal["tesseract_environment.yaml"] = "tesseract_environment.yaml"
+    _build_script: Literal["build_conda_venv.sh"] = "build_conda_venv.sh"
 
 
 PythonRequirements = Union[PipRequirements, CondaRequirements]

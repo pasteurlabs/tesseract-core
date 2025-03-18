@@ -305,8 +305,8 @@ def build_image(
     template_dir = Path(sdk.__file__).parent / "templates"
 
     copy(
-        template_dir / requirements.build_script,
-        build_dir / "__tesseract_source__" / requirements.build_script,
+        template_dir / requirements._build_script,
+        build_dir / "__tesseract_source__" / requirements._build_script,
     )
 
     if requirements.provider == "python-pip":

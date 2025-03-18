@@ -1,4 +1,4 @@
-name: template
+name: helloworld-conda
 channels:
   - defaults
   - https://repo.anaconda.com/pkgs/main
@@ -34,4 +34,3 @@ dependencies:
       - more-itertools==10.6.0
       - requests==2.32.3
       - urllib3==2.3.0
-prefix: /Users/niklas/miniconda3/envs/template
