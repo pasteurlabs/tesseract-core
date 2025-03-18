@@ -251,6 +251,10 @@ def check_gradients(
     Warning:
         Finite differences are not exact and the comparison is done with a tolerance. This means
         that the check may fail even if the gradients are correct, and vice versa.
+
+    Finite difference approximations are sensitive to numerical precision. When finite differences
+    are reported incorrectly as 0.0, it is likely that the chosen `eps` is too small, especially for
+    inputs that do not use float64 precision.
     """
     api_module = get_tesseract_api()
     inputs, base_dir = payload
