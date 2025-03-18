@@ -3,9 +3,8 @@
 httpx==0.28.1
 pre-commit==4.1.0
 pytest-cov==6.0.0
-pytest==8.3.4
+pytest==8.3.5
 pytest-mock==3.14.0
 jsf==0.11.2
 typeguard==4.4.2
-moto[server]==5.1.0
-detect-secrets[gibberish]==1.5.0
+moto[server]==5.1.1

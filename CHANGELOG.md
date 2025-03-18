@@ -2,6 +2,37 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.3] - 2025-03-13
+
+### Features
+
+- Raise proper error (`ValidationError`) for invalid inputs (#67)
+- Add `abstract_eval` method to `tesseract_core.Tesseract` (#76)
+
+### Bug Fixes
+
+- Jax template now uses equinox `filter_jit` to allow non-array inputs (#56)
+- Added pip as dependency (#58)
+- Buggy `is_leaf` check in the `abstract_eval` of jax recipe and vectoradd_jax (#75)
+
+### Documentation
+
+- Updated comments in jax recipe and docs on Differentiable flag (#65)
+
+## [0.7.2] - 2025-02-27
+
+### Bug Fixes
+
+- Validate ShapeDType in abstract-eval schemas (#40)
+- Resolve paths before passing volumes to docker (#48)
+- Dangling Tesseracts in e2e tests (#51)
+- Sanitize error output (#52)
+
+### Documentation
+
+- Python API for Julia example (#37)
+- Fix links again (#49)
+
 ## [0.7.1] - 2025-02-26
 
 ### Bug Fixes

@@ -11,6 +11,8 @@ from urllib.parse import urlparse, urlunparse
 
 import numpy as np
 import requests
+from pydantic import ValidationError
+from pydantic_core import InitErrorDetails
 
 from . import engine
 
@@ -144,6 +146,18 @@ class Tesseract:
         """
         payload = {"inputs": inputs}
         return self._run_tesseract("apply", payload)
+
+    def abstract_eval(self, inputs: dict) -> dict:
+        """Run abstract eval endpoint.
+
+        Args:
+            inputs: a dictionary with the (abstract) inputs.
+
+        Returns:
+            dictionary with the results.
+        """
+        payload = {"inputs": inputs}
+        return self._run_tesseract("abstract_eval", payload)
 
     def jacobian(
         self, inputs: dict, jac_inputs: list[str], jac_outputs: list[str]
@@ -313,9 +327,23 @@ class HTTPClient:
             encoded_payload = None
 
         response = requests.request(method=method, url=url, json=encoded_payload)
-        response.raise_for_status()
-
         data = response.json()
+
+        if (
+            response.status_code == requests.codes.unprocessable_entity
+            and "detail" in data
+        ):
+            errors = [
+                InitErrorDetails(
+                    type=e["type"],
+                    loc=tuple(e["loc"]),
+                    input=e.get("input"),
+                )
+                for e in data["detail"]
+            ]
+            raise ValidationError.from_exception_data(f"endpoint {endpoint}", errors)
+        else:
+            response.raise_for_status()
 
         if endpoint in [
             "apply",
