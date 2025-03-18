@@ -82,10 +82,9 @@ def jacobian(
     filtered_pos_eval = filter_func(
         evaluate,
         tensor_inputs,
-        jac_inputs,
         jac_outputs,
+        input_paths=jac_inputs,
         output_to_tuple=True,
-        positional=True,
     )
 
     # calculate the jacobian
@@ -119,7 +118,7 @@ def jacobian_vector_product(
 
     # create a positional function that accepts a list of values
     filtered_pos_eval = filter_func(
-        evaluate, tensor_inputs, jvp_inputs, jvp_outputs, positional=True
+        evaluate, tensor_inputs, jvp_outputs, input_paths=jvp_inputs
     )
 
     return torch.func.jvp(filtered_pos_eval, tuple(pos_inputs), tuple(pos_tangent))[1]
@@ -143,7 +142,7 @@ def vector_jacobian_product(
 
     # create a positional function that accepts a list of values
     filtered_pos_func = filter_func(
-        evaluate, tensor_inputs, vjp_inputs, vjp_outputs, positional=True
+        evaluate, tensor_inputs, vjp_outputs, input_paths=vjp_inputs
     )
 
     _, vjp_func = torch.func.vjp(filtered_pos_func, *pos_inputs)
