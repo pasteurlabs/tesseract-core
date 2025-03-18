@@ -103,7 +103,6 @@ class SampleRequest:
     output_contains_pattern: str | list[str] | None = None
     output_contains_array: npt.ArrayLike | None = None
     output_format: str = "json+base64"
-    extra_cli_args: tuple[str] = ()
 
 
 @dataclass
@@ -729,7 +728,6 @@ def test_unit_tesseract_endtoend(
                     img_name,
                     cli_cmd,
                     json.dumps(request.payload),
-                    *request.extra_cli_args,
                 ]
             else:
                 args = [
@@ -740,7 +738,6 @@ def test_unit_tesseract_endtoend(
                     json.dumps(request.payload),
                     "--output-format",
                     request.output_format,
-                    *request.extra_cli_args,
                 ]
 
             result = cli_runner.invoke(app, args)

@@ -307,7 +307,7 @@ def _get_diffable_arrays(schema: type[BaseModel]) -> dict[str, Any]:
     def add_to_dict_if_diffable(obj: T, path: tuple) -> T:
         if is_differentiable(obj):
             # TODO: Store these paths somewhere for later use
-            # (e.g. in finite_differences.get_differentiale_paths)
+            # (e.g. in finite_differences.get_differentiable_paths)
             pattern = _path_to_pattern(path)
             diffable_paths[pattern] = obj
         return obj

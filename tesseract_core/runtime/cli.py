@@ -281,8 +281,9 @@ def check_gradients(
             typer.echo(
                 f"⚠️ Gradient check for {endpoint} failed ⚠️ ({len(failures)} failures / {num_evals} checks)"
             )
-            typer.echo(f"First {max_failures} failures:")
-            for failure in failures[:max_failures]:
+            printed_failures = min(len(failures), max_failures)
+            typer.echo(f"First {printed_failures} failures:")
+            for failure in failures[:printed_failures]:
                 typer.echo(
                     f"  Input path: '{failure.in_path}', Output path: '{failure.out_path}', Index: {failure.idx}"
                 )

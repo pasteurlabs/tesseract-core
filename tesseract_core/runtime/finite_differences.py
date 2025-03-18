@@ -90,13 +90,13 @@ def expand_regex_path(path_pattern: str, inputs: dict[str, Any]) -> list[str]:
     return _handle_part(parts, inputs, [])
 
 
-def get_differentiale_paths(
+def get_differentiable_paths(
     endpoint_function: Callable, inputs: dict[str, Any], outputs: dict[str, Any]
 ) -> tuple[list[str], list[str]]:
-    """Get the differentiale paths of an endpoint function.
+    """Get the differentiable paths of an endpoint function.
 
     Since we don't know which endpoint function we are dealing with / is available, we need to
-    check the endpoint name to determine the differentiale paths.
+    check the endpoint name to determine the differentiable paths.
     """
     endpoint_name = endpoint_function.__name__
     InputSchema = get_input_schema(endpoint_function)
@@ -435,7 +435,7 @@ def check_endpoint_gradients(
                 progress.update(subtask, advance=1)
 
     except BaseException as e:
-        # Somtimes, Pydantic re-raises exceptions as Pydantic<...>Exception so we check the string representation
+        # Sometimes, Pydantic re-raises exceptions as Pydantic<...>Exception so we check the string representation
         is_interrupt = isinstance(e, KeyboardInterrupt) or "KeyboardInterrupt" in str(e)
         if not is_interrupt:
             raise
@@ -507,8 +507,8 @@ def check_gradients(
         InputSchema.model_validate({"inputs": inputs})
     ).model_dump()
 
-    # Get differentiale paths
-    diff_inputs, diff_outputs = get_differentiale_paths(
+    # Get differentiable paths
+    diff_inputs, diff_outputs = get_differentiable_paths(
         endpoint_functions[endpoints[0]],
         inputs,
         outputs,
