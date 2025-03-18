@@ -37,6 +37,7 @@ from pip._internal.req.req_file import (
 )
 
 from .api_parse import (
+    PipRequirements,
     PythonRequirements,
     TesseractConfig,
     get_config,
@@ -272,36 +273,6 @@ def create_dockerfile(
     return template.render(template_values)
 
 
-def tesseract_requirements_hook(src_dir, build_dir, template_dir, reqstxt):
-    build_script = template_dir / "build_pip_venv.sh"
-    copy(build_script, build_dir / "__tesseract_source__" / "build_pip_venv.sh")
-
-    if reqstxt.exists():
-        local_dependencies, remote_dependencies = parse_requirements(reqstxt)
-    else:
-        local_dependencies, remote_dependencies = [], []
-
-    if local_dependencies:
-        local_requirements_path = build_dir / "local_requirements"
-        Path.mkdir(local_requirements_path)
-        for dependency in local_dependencies:
-            src = src_dir / dependency
-            dest = build_dir / "local_requirements" / src.name
-            if src.is_file():
-                copy(src, dest)
-            else:
-                copytree(src, dest)
-
-    # We need to write a new requirements file in the build dir, where we explicitly
-    # removed the local dependencies
-    requirements_file_path = (
-        build_dir / "__tesseract_source__" / "tesseract_requirements.txt"
-    )
-    with requirements_file_path.open("w", encoding="utf-8") as f:
-        for dependency in remote_dependencies:
-            f.write(f"{dependency}\n")
-
-
 def build_image(
     src_dir: str | Path,
     image_name: str,
@@ -310,7 +281,7 @@ def build_image(
     inject_ssh: bool = False,
     keep_build_cache: bool = False,
     generate_only: bool = False,
-    requirements: PythonRequirements = PythonRequirements(),
+    requirements: PythonRequirements = PipRequirements(provider="python-pip"),
 ) -> docker.models.images.Image | None:
     """Build the image from a Dockerfile.
 
@@ -333,10 +304,37 @@ def build_image(
 
     template_dir = Path(sdk.__file__).parent / "templates"
 
+    copy(
+        template_dir / requirements.build_script,
+        build_dir / "__tesseract_source__" / requirements.build_script,
+    )
+
     if requirements.provider == "python-pip":
-        tesseract_requirements_hook(
-            src_dir, build_dir, template_dir, src_dir / requirements.file
+        reqstxt = src_dir / requirements.file
+        if reqstxt.exists():
+            local_dependencies, remote_dependencies = parse_requirements(reqstxt)
+        else:
+            local_dependencies, remote_dependencies = [], []
+
+        if local_dependencies:
+            local_requirements_path = build_dir / "local_requirements"
+            Path.mkdir(local_requirements_path)
+            for dependency in local_dependencies:
+                src = src_dir / dependency
+                dest = build_dir / "local_requirements" / src.name
+                if src.is_file():
+                    copy(src, dest)
+                else:
+                    copytree(src, dest)
+
+        # We need to write a new requirements file in the build dir, where we explicitly
+        # removed the local dependencies
+        requirements_file_path = (
+            build_dir / "__tesseract_source__" / "tesseract_requirements.txt"
         )
+        with requirements_file_path.open("w", encoding="utf-8") as f:
+            for dependency in remote_dependencies:
+                f.write(f"{dependency}\n")
 
     def _ignore_pycache(_, names: list[str]) -> list[str]:
         ignore = []

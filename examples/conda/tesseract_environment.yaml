@@ -10,7 +10,7 @@ dependencies:
   - libcxx=14.0.6
   - libffi=3.4.4
   - ncurses=6.4
-  - openssl=3.0.15
+  - openssl=3.0.16
   - pip=25.0
   - python=3.12.9
   - readline=8.2
@@ -25,18 +25,13 @@ dependencies:
       - artifacts-keyring==0.4.0
       - certifi==2025.1.31
       - charset-normalizer==3.4.1
+      - cowsay==6.1
       - idna==3.10
       - jaraco-classes==3.4.0
       - jaraco-context==6.0.1
       - jaraco-functools==4.1.0
-      - jax==0.5.1
-      - jaxlib==0.5.1
       - keyring==25.6.0
-      - ml-dtypes==0.5.1
       - more-itertools==10.6.0
-      - numpy==2.2.3
-      - opt-einsum==3.4.0
       - requests==2.32.3
-      - scipy==1.15.2
       - urllib3==2.3.0
 prefix: /Users/niklas/miniconda3/envs/template

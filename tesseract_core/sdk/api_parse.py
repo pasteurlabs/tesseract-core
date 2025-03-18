@@ -48,19 +48,18 @@ StrictStr = Annotated[str, Strict()]
 
 class PipRequirements(BaseModel):
     provider: Literal["python-pip"]
-    file: Literal["tesseract_requirements.txt"]
-    build_script: Literal["build_pip_venv.sh"]
+    file: Literal["tesseract_requirements.txt"] = "tesseract_requirements.txt"
+    build_script: Literal["build_pip_venv.sh"] = "build_pip_venv.sh"
 
 
 class CondaRequirements(BaseModel):
     provider: Literal["conda"]
-    file: Literal["tesseract_environment.yaml"]
-    build_script: Literal["build_conda_venv.sh"]
+    file: Literal["tesseract_environment.yaml"] = "tesseract_environment.yaml"
+    build_script: Literal["build_conda_venv.sh"] = "build_conda_venv.sh"
 
 
-PythonRequirements = Union[
-    PipRequirements, CondaRequirements
-]
+PythonRequirements = Union[PipRequirements, CondaRequirements]
+
 
 class TesseractBuildConfig(BaseModel):
     """Configuration options for building a Tesseract."""
@@ -95,9 +94,7 @@ class TesseractBuildConfig(BaseModel):
         ),
     )
 
-    requirements: PythonRequirements = PythonRequirements(
-        provide="python-pip", file="tesseract_requirements.txt"
-    )
+    requirements: PythonRequirements = PipRequirements(provider="python-pip")
 
     model_config = ConfigDict(extra="forbid")
 

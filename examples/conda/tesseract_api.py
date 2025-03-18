@@ -1,18 +1,18 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-import jax
+import cowsay
 from pydantic import BaseModel, Field
 
 
 class InputSchema(BaseModel):
-    name: str = Field(description="Name of the person you want to greet.")
+    message: str = Field(description="A message for cowsay.")
 
 
 class OutputSchema(BaseModel):
-    greeting: str = Field(description="A greeting!")
+    cowsays: str = Field(description="The cowsay output string.")
 
 
 def apply(inputs: InputSchema) -> OutputSchema:
     """Greet a person whose name is given as input."""
-    return OutputSchema(greeting=f"Hello from a conda tesseract! {jax} is installed!")
+    return OutputSchema(cowsays=cowsay.get_output_string("cow", inputs.message))
