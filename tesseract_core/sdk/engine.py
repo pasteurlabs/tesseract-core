@@ -309,7 +309,7 @@ def build_image(
     )
 
     if requirements.provider == "python-pip":
-        reqstxt = src_dir / requirements.file
+        reqstxt = src_dir / requirements._filename
         if reqstxt.exists():
             local_dependencies, remote_dependencies = parse_requirements(reqstxt)
         else:
