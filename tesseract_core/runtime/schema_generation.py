@@ -231,7 +231,19 @@ def _serialize_diffable_arrays(
             if isinstance(shape, tuple)
             else shape
         )
-        serialized[key] = {
+
+        # Switch key from a regexp like array_seq\\.\\[-?\\d+\\]
+        # into something like array_seq.[]
+        sanitized_parts = []
+        for part in key.split("."):
+            if "[" in part:
+                sanitized_parts.append("[]")
+            elif "{" in part:
+                sanitized_parts.append("{}")
+            else:
+                sanitized_parts.append(part.replace("\\", ""))
+
+        serialized[".".join(sanitized_parts)] = {
             "shape": shape,
             "dtype": dtype,
         }
