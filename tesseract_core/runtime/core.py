@@ -9,7 +9,6 @@ from typing import Any, Union
 
 from .config import get_config
 from .schema_generation import (
-    _get_diffable_arrays,
     create_abstract_eval_schema,
     create_apply_schema,
     create_autodiff_schema,
@@ -181,72 +180,15 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
 
     def input_schema() -> dict[str, Any]:
         """Get input schema for tesseract apply function."""
-        return api_module.InputSchema.model_json_schema()
+        return ApplyOutputSchema.model_json_schema()
 
     endpoints.append(input_schema)
 
     def output_schema() -> dict[str, Any]:
         """Get output schema for tesseract apply function."""
-        return api_module.OutputSchema.model_json_schema()
+        return ApplyOutputSchema.model_json_schema()
 
     endpoints.append(output_schema)
-
-    def diffable_paths() -> dict[str, dict[str, Any]]:
-        """Get diffable paths for tesseract apply function.
-
-        The output is like:
-        ```
-        {
-            "input": {
-                "path.to.diffable.input": {
-                    "shape": [3, 3],
-                    "dtype": "float32",
-                },
-                ...
-            },
-            "output": {
-                "path.to.diffable.output": {
-                    "shape": [3, 3],
-                    "dtype": "float32",
-                },
-               ...
-             }
-        }
-        ```
-
-        Returns:
-            A mapping from input and output diffable paths to their shapes and dtypes.
-
-        """
-        diffable_inputs = _get_diffable_arrays(api_module.InputSchema)
-        diffable_outputs = _get_diffable_arrays(api_module.OutputSchema)
-
-        def _serialize_diffable_arrays(
-            obj: dict[str, Any],
-        ) -> dict[str, dict[str, Any]]:
-            serialized = {}
-            for key, value in obj.items():
-                shape = value.__metadata__[0].expected_shape
-                dtype = value.__metadata__[0].expected_dtype
-                # Ensure shape is JSON serializable
-                shape = (
-                    tuple(None if dim is None else dim for dim in shape)
-                    if isinstance(shape, tuple)
-                    else shape
-                )
-                serialized[key] = {
-                    "shape": shape,
-                    "dtype": dtype,
-                }
-
-            return serialized
-
-        return {
-            "inputs": _serialize_diffable_arrays(diffable_inputs),
-            "outputs": _serialize_diffable_arrays(diffable_outputs),
-        }
-
-    endpoints.append(diffable_paths)
 
     if "abstract_eval" in supported_functions:
         AbstractEvalInputSchema, AbstractEvalOutputSchema = create_abstract_eval_schema(

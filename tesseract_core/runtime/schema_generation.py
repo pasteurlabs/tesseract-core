@@ -218,10 +218,34 @@ def apply_function_to_model_tree(
     return _recurse_over_model_tree(Schema, [])
 
 
+def _serialize_diffable_arrays(
+    obj: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    serialized = {}
+    for key, value in obj.items():
+        shape = value.__metadata__[0].expected_shape
+        dtype = value.__metadata__[0].expected_dtype
+        # Ensure shape is JSON serializable
+        shape = (
+            tuple(None if dim is None else dim for dim in shape)
+            if isinstance(shape, tuple)
+            else shape
+        )
+        serialized[key] = {
+            "shape": shape,
+            "dtype": dtype,
+        }
+
+    return serialized
+
+
 def create_apply_schema(
     InputSchema: type[BaseModel], OutputSchema: type[BaseModel]
 ) -> tuple[type[BaseModel], type[BaseModel]]:
     """Create the input / output schemas for the /apply endpoint."""
+    diffable_inputs = _get_diffable_arrays(InputSchema)
+    diffable_outputs = _get_diffable_arrays(OutputSchema)
+
     InputSchema = apply_function_to_model_tree(
         InputSchema,
         lambda x, _: x,
@@ -240,11 +264,18 @@ def create_apply_schema(
             ..., description="The input data to apply the Tesseract to."
         )
 
-        model_config = ConfigDict(extra="forbid")
+        model_config = ConfigDict(
+            extra="forbid",
+            json_schema_extra={"diffable": _serialize_diffable_arrays(diffable_inputs)},
+        )
 
     class ApplyOutputSchema(RootModel):
         root: OutputSchema = Field(
             ..., description="The output data from applying the Tesseract."
+        )
+
+        model_config = ConfigDict(
+            json_schema_extra={"diffable": _serialize_diffable_arrays(diffable_outputs)}
         )
 
     return ApplyInputSchema, ApplyOutputSchema
