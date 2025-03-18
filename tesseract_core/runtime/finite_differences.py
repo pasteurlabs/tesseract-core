@@ -251,6 +251,8 @@ def _jacobian_via_jacobian(
 
     output = _jacobian(inputs)
     output_val = output[output_path][input_path]
+    # Jacobian output has shape (*output_shape, *input_shape), where we slice into input_shape
+    # while passing through output_shape.
     jac_slice = (slice(None),) * (output_val.ndim - len(arr_idx)) + tuple(arr_idx)
     return output_val[jac_slice]
 
