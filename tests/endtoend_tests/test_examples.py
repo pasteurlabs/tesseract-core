@@ -720,7 +720,7 @@ def test_unit_tesseract_endtoend(
                 img_name,
                 *extra_args,
                 "apply",
-                json.dumps({"inputs": random_input}),
+                json.dumps(random_input),
             ],
             catch_exceptions=False,
         )
@@ -816,7 +816,7 @@ def test_unit_tesseract_endtoend(
             return
 
         if unit_tesseract_config.test_with_random_inputs:
-            payload_from_schema = {"inputs": example_from_json_schema(out_input_schema)}
+            payload_from_schema = example_from_json_schema(out_input_schema)
             response = requests.post(
                 f"http://localhost:{free_port}/apply", json=payload_from_schema
             )
