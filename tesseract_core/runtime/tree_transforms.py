@@ -135,10 +135,10 @@ def filter_func(
     Args:
         func: The original function that accepts a single pytree as input and returns a single pytree as output.
         default_inputs: The default input pytree to the function. Also used to determine the structure of the inputs.
-        output_paths: The subset of paths of the outputs that the function returns.
+        output_paths: The subset of paths of the outputs that the modified function returns.
             If None, the full output is returned unmodified.
         input_paths: The paths that positional arguments correspond to.
-            If None, a single dictionary argument is expected.
+            If None, a single dictionary argument is expected by the modified function.
     """
 
     def filtered_func(*args: Any) -> dict:
