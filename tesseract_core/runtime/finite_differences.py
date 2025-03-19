@@ -7,21 +7,17 @@ from functools import wraps
 from pathlib import Path
 from types import ModuleType
 from typing import (
-    Annotated,
     Any,
     Callable,
     Literal,
     NamedTuple,
     Optional,
-    Union,
     get_args,
-    get_origin,
 )
 
 import numpy as np
 from numpy.typing import ArrayLike
 from pydantic import BaseModel
-from pydantic.fields import FieldInfo
 from rich.progress import Progress
 
 from .core import create_endpoints
@@ -49,13 +45,21 @@ def get_input_schema(endpoint_function: Callable) -> type[BaseModel]:
     return schema
 
 
-def expand_regex_path(path_pattern: str, inputs: dict[str, Any]) -> list[str]:
-    """Expand a regex path pattern to a list of all matching paths."""
-    is_regex = "\\" in path_pattern
-    if not is_regex:
-        parts = path_pattern.split(".")
-    else:
-        parts = path_pattern.split("\\.")
+def get_output_schema(endpoint_function: Callable) -> type[BaseModel]:
+    """Get the output schema of an endpoint function."""
+    schema = endpoint_function.__annotations__["return"]
+    if not issubclass(schema, BaseModel):
+        raise AssertionError(f"Expected BaseModel, got {schema}")
+    return schema
+
+
+def expand_path_pattern(path_pattern: str, inputs: dict[str, Any]) -> list[str]:
+    """Expand a path pattern to a list of all matching paths in the given pytree.
+
+    For example, given the path pattern `a.[].{}`, and the inputs `{"a": [{"b": 1}, {"c": 2}]}`,
+    this function would return `["a.[0].{b}", "a.[1].{c}"]`.
+    """
+    parts = path_pattern.split(".")
 
     def _handle_part(
         parts: Sequence[str], current_inputs: Any, current_path: list[str]
@@ -67,14 +71,14 @@ def expand_regex_path(path_pattern: str, inputs: dict[str, Any]) -> list[str]:
         paths = []
         part = parts[0]
 
-        if part.startswith("\\["):
+        if part == "[]":
             # sequence access
             for i, _ in enumerate(current_inputs):
                 subpaths = _handle_part(
                     parts[1:], current_inputs[i], [*current_path, f"[{i}]"]
                 )
                 paths.extend(subpaths)
-        elif part.startswith("\\{"):
+        elif part == "{}":
             # dictionary access
             for key in current_inputs:
                 subpaths = _handle_part(
@@ -92,80 +96,22 @@ def expand_regex_path(path_pattern: str, inputs: dict[str, Any]) -> list[str]:
 
 
 def get_differentiable_paths(
-    endpoint_function: Callable, inputs: dict[str, Any], outputs: dict[str, Any]
+    apply_endpoint_fn: Callable, inputs: dict[str, Any], outputs: dict[str, Any]
 ) -> tuple[list[str], list[str]]:
-    """Get the differentiable paths of an endpoint function.
+    """Get the paths of all differentiable leaves present in the given inputs and outputs."""
+    InputSchema = get_input_schema(apply_endpoint_fn)
+    OutputSchema = get_output_schema(apply_endpoint_fn)
 
-    Since we don't know which endpoint function we are dealing with / is available, we need to
-    check the endpoint name to determine the differentiable paths.
-    """
-    endpoint_name = endpoint_function.__name__
-    InputSchema = get_input_schema(endpoint_function)
-
-    if endpoint_name == "jacobian":
-        ad_inputs_field = "jac_inputs"
-        ad_outputs_field = "jac_outputs"
-    elif endpoint_name == "jacobian_vector_product":
-        ad_inputs_field = "jvp_inputs"
-        ad_outputs_field = "jvp_outputs"
-    elif endpoint_name == "vector_jacobian_product":
-        ad_inputs_field = "vjp_inputs"
-        ad_outputs_field = "vjp_outputs"
-    else:
-        raise AssertionError(f"Unknown endpoint {endpoint_name}")
-
-    ad_inputs = InputSchema.model_fields[ad_inputs_field].annotation
-    ad_outputs = InputSchema.model_fields[ad_outputs_field].annotation
-
-    def _annotation_to_paths(ann: Any) -> list[str]:
-        # Annotations are of the form:
-        #  inputs:
-        #    Set[Annotated[Union[Literal[...], Annotated[str, FieldInfo]]], AfterValidator]
-        #  outputs:
-        #    Set[Union[Literal[...], Annotated[str, FieldInfo]]]
-        # Where the Union may be missing in the case of a single path.
-        # We're after the Literal values and regex patterns of FieldInfo.
-
-        # Peel off Set
-        unpacked = get_args(ann)[0]
-
-        # Peel off Annotated
-        if get_origin(unpacked) is Annotated:
-            unpacked, *other = get_args(unpacked)
-            for item in other:
-                if isinstance(item, FieldInfo):
-                    return [item.metadata[0].pattern]
-
-        # Peel off Union
-        if get_origin(unpacked) is Union:
-            unpacked = get_args(unpacked)
-        else:
-            unpacked = [unpacked]
-
-        # Iterate over the unpacked types and extract the paths
-        out = []
-        for item in unpacked:
-            if get_origin(item) is Literal:
-                # Is a Literal
-                out.append(get_args(item)[0])
-            elif get_origin(item) is Annotated:
-                # Is a Field with regex path
-                field_info = get_args(item)[1]
-                out.append(field_info.metadata[0].pattern)
-            else:
-                raise AssertionError(f"Unexpected type {get_origin(item)}")
-        return out
-
-    input_patterns = _annotation_to_paths(ad_inputs)
-    output_patterns = _annotation_to_paths(ad_outputs)
+    diffable_input_paths = InputSchema.differentiable_arrays
+    diffable_output_paths = OutputSchema.differentiable_arrays
 
     ad_inputs = []
-    for pattern in input_patterns:
-        ad_inputs.extend(expand_regex_path(pattern, inputs))
+    for pattern in diffable_input_paths:
+        ad_inputs.extend(expand_path_pattern(pattern, inputs))
 
     ad_outputs = []
-    for pattern in output_patterns:
-        ad_outputs.extend(expand_regex_path(pattern, outputs))
+    for pattern in diffable_output_paths:
+        ad_outputs.extend(expand_path_pattern(pattern, outputs))
 
     return ad_inputs, ad_outputs
 
@@ -501,18 +447,15 @@ def check_gradients(
         if endpoint not in available_endpoints:
             raise ValueError(f"Endpoint {endpoint} not found in {api_module.__name__}")
 
-    # Load inputs and dump as dict to ensure validation has been done
+    # Load + dump inputs to ensure they are valid + normalized
     InputSchema = get_input_schema(endpoint_functions["apply"])
-    inputs = InputSchema.model_validate(
-        inputs, context={"base_dir": base_dir}
-    ).inputs.model_dump()
-    outputs = endpoint_functions["apply"](
-        InputSchema.model_validate({"inputs": inputs})
-    ).model_dump()
+    loaded_inputs = InputSchema.model_validate(inputs, context={"base_dir": base_dir})
+    inputs = loaded_inputs.inputs.model_dump()
+    outputs = endpoint_functions["apply"](loaded_inputs).model_dump()
 
     # Get differentiable paths
     diff_inputs, diff_outputs = get_differentiable_paths(
-        endpoint_functions[endpoints[0]],
+        endpoint_functions["apply"],
         inputs,
         outputs,
     )
