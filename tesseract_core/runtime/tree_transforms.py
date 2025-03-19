@@ -141,33 +141,28 @@ def filter_func(
             If None, the returned function accepts a dictionary arguments.
         output_to_tuple: If True, the returned function will return a tuple of outputs
     """
-
-    # function that accepts positional arguments
-    def filtered_pos_func(*args):
-        # convert back to dictionary
-        new_inputs = dict(zip(input_paths, args))
-
-        # partially update the default inputs with the new values
-        updated_inputs = set_at_path(default_inputs, new_inputs)
-
-        path_outputs = flatten_with_paths(func(updated_inputs), output_paths)
-
-        if output_to_tuple:
-            return tuple(path_outputs.values())
-
-        return path_outputs
-
-    def filtered_func(new_inputs: dict) -> dict:
-        updated_inputs = set_at_path(default_inputs, new_inputs)
-
-        path_outputs = flatten_with_paths(func(updated_inputs), output_paths)
-
-        if output_to_tuple:
-            return tuple(path_outputs.values())
-
-        return path_outputs
-
     if input_paths:
+        # function that accepts positional arguments
+        def filtered_pos_func(*args):
+            # convert back to dictionary
+            new_inputs = dict(zip(input_paths, args))
+
+            # partially update the default inputs with the new values
+            updated_inputs = set_at_path(default_inputs, new_inputs)
+
+            path_outputs = flatten_with_paths(func(updated_inputs), output_paths)
+
+            return tuple(path_outputs.values()) if output_to_tuple else path_outputs
+
         return filtered_pos_func
+
     else:
+
+        def filtered_func(new_inputs: dict) -> dict:
+            updated_inputs = set_at_path(default_inputs, new_inputs)
+
+            path_outputs = flatten_with_paths(func(updated_inputs), output_paths)
+
+            return tuple(path_outputs.values()) if output_to_tuple else path_outputs
+
         return filtered_func
