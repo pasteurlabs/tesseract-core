@@ -9,6 +9,7 @@ from copy import copy
 from typing import (
     Annotated,
     Any,
+    ClassVar,
     Literal,
     TypeVar,
     Union,
@@ -276,18 +277,23 @@ def create_apply_schema(
             ..., description="The input data to apply the Tesseract to."
         )
 
+        diffable_leaves: ClassVar[dict[str, dict[str, Any]]] = (
+            _serialize_diffable_arrays(diffable_inputs)
+        )
+
         model_config = ConfigDict(
-            extra="forbid",
-            json_schema_extra={"diffable": _serialize_diffable_arrays(diffable_inputs)},
+            extra="forbid", json_schema_extra={"diffable_leaves": diffable_leaves}
         )
 
     class ApplyOutputSchema(RootModel):
         root: OutputSchema = Field(
             ..., description="The output data from applying the Tesseract."
         )
-
+        diffable_leaves: ClassVar[dict[str, dict[str, Any]]] = (
+            _serialize_diffable_arrays(diffable_outputs)
+        )
         model_config = ConfigDict(
-            json_schema_extra={"diffable": _serialize_diffable_arrays(diffable_outputs)}
+            json_schema_extra={"diffable_leaves": diffable_leaves}
         )
 
     return ApplyInputSchema, ApplyOutputSchema
@@ -301,6 +307,8 @@ def create_abstract_eval_schema(
     The returned schemas will have the same structure as the input schemas, but with array
     fields replaced by ShapeDType objects.
     """
+    diffable_inputs = _get_diffable_arrays(InputSchema)
+    diffable_outputs = _get_diffable_arrays(OutputSchema)
 
     def replace_array_with_shapedtype(obj: T, _: Any) -> Union[T, type[ShapeDType]]:
         if is_array_annotation(obj):
@@ -329,7 +337,13 @@ def create_abstract_eval_schema(
                 "but with array fields replaced by ShapeDType."
             ),
         )
-        model_config = ConfigDict(extra="forbid")
+
+        diffable_leaves: ClassVar[dict[str, dict[str, Any]]] = (
+            _serialize_diffable_arrays(diffable_inputs)
+        )
+        model_config = ConfigDict(
+            extra="forbid", json_schema_extra={"diffable_leaves": diffable_leaves}
+        )
 
     class AbstractOutputSchema(RootModel):
         root: GeneratedOutputSchema = Field(
@@ -338,6 +352,12 @@ def create_abstract_eval_schema(
                 "Abstract outputs with the same structure as OutputSchema, but with array fields "
                 "replaced by ShapeDType."
             ),
+        )
+        diffable_leaves: ClassVar[dict[str, dict[str, Any]]] = (
+            _serialize_diffable_arrays(diffable_outputs)
+        )
+        model_config = ConfigDict(
+            json_schema_extra={"diffable_leaves": diffable_leaves}
         )
 
     return AbstractInputSchema, AbstractOutputSchema
@@ -588,7 +608,13 @@ def create_autodiff_schema(
                 min_length=1,
             )
 
-            model_config = ConfigDict(extra="forbid")
+            diffable_leaves: ClassVar[dict[str, dict[str, Any]]] = (
+                _serialize_diffable_arrays(diffable_inputs)
+            )
+
+            model_config = ConfigDict(
+                extra="forbid", json_schema_extra={"diffable_leaves": diffable_leaves}
+            )
 
         class JacobianOutputSchema(RootModel):
             root: Annotated[
@@ -603,6 +629,14 @@ def create_autodiff_schema(
                     "The shape of each array is the concatenation of the shapes of the output and input arrays, "
                     "i.e. ``(*output_array.shape, *input_array.shape)``."
                 ),
+            )
+
+            diffable_leaves: ClassVar[dict[str, dict[str, Any]]] = (
+                _serialize_diffable_arrays(diffable_outputs)
+            )
+
+            model_config = ConfigDict(
+                json_schema_extra={"diffable_leaves": diffable_leaves}
             )
 
         InputSchema = JacobianInputSchema
@@ -634,8 +668,13 @@ def create_autodiff_schema(
                     "The shape of each array is the same as the shape of the corresponding input array."
                 ),
             )
+            diffable_leaves: ClassVar[dict[str, dict[str, Any]]] = (
+                _serialize_diffable_arrays(diffable_inputs)
+            )
 
-            model_config = ConfigDict(extra="forbid")
+            model_config = ConfigDict(
+                extra="forbid", json_schema_extra={"diffable_leaves": diffable_leaves}
+            )
 
             @field_validator("tangent_vector", mode="after")
             @classmethod
@@ -669,6 +708,14 @@ def create_autodiff_schema(
                 ),
             )
 
+            diffable_leaves: ClassVar[dict[str, dict[str, Any]]] = (
+                _serialize_diffable_arrays(diffable_outputs)
+            )
+
+            model_config = ConfigDict(
+                json_schema_extra={"diffable_leaves": diffable_leaves}
+            )
+
         InputSchema = JVPInputSchema
         OutputSchema = JVPOutputSchema
 
@@ -698,8 +745,13 @@ def create_autodiff_schema(
                     "The shape of each array is the same as the shape of the corresponding output array."
                 ),
             )
+            diffable_leaves: ClassVar[dict[str, dict[str, Any]]] = (
+                _serialize_diffable_arrays(diffable_inputs)
+            )
 
-            model_config = ConfigDict(extra="forbid")
+            model_config = ConfigDict(
+                extra="forbid", json_schema_extra={"diffable_leaves": diffable_leaves}
+            )
 
             @field_validator("cotangent_vector", mode="after")
             @classmethod
@@ -730,6 +782,13 @@ def create_autodiff_schema(
                     "The result is a mapping with structure ``{vjp_inputs: array}``. "
                     "The shape of each array is the same as the shape of the corresponding input array."
                 ),
+            )
+            diffable_leaves: ClassVar[dict[str, dict[str, Any]]] = (
+                _serialize_diffable_arrays(diffable_outputs)
+            )
+
+            model_config = ConfigDict(
+                json_schema_extra={"diffable_leaves": diffable_leaves}
             )
 
         InputSchema = VJPInputSchema
