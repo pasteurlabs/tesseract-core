@@ -208,13 +208,17 @@ def test_schemas_contain_diffable_paths_extra(testmodule):
     input_schema_endpoint, _ = _find_endpoint(endpoints, "input_schema")
 
     result = input_schema_endpoint()
-    assert "diffable" in result
-    assert result["diffable"].keys() == {"array_dict.{}", "array_seq.[]", "scalar_diff"}
+    assert "diffable_leaves" in result
+    assert result["diffable_leaves"].keys() == {
+        "array_dict.{}",
+        "array_seq.[]",
+        "scalar_diff",
+    }
 
     output_schema_endpoint, _ = _find_endpoint(endpoints, "output_schema")
     result = output_schema_endpoint()
-    assert "diffable" in result
-    assert result["diffable"].keys() == {"result_seq.[]"}
+    assert "diffable_leaves" in result
+    assert result["diffable_leaves"].keys() == {"result_seq.[]"}
 
 
 @pytest.mark.parametrize(
