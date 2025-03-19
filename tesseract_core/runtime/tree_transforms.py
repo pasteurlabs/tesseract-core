@@ -4,7 +4,7 @@
 import re
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
-from typing import Any, Union
+from typing import Any, Optional, Union
 
 from pydantic import BaseModel
 
@@ -119,17 +119,40 @@ def flatten_with_paths(
 
 
 def filter_func(
-    func: Callable[[dict], dict], default_inputs: dict, output_paths: set[str]
-) -> Callable[[dict], dict]:
-    """Returns a reduced func with default inputs that operates on {path: value} dicts.
+    func: Callable[[dict], dict],
+    default_inputs: dict,
+    output_paths: Optional[set[str]] = None,
+    input_paths: Optional[set[str]] = None,
+) -> Callable:
+    """Modifies a function that operates on pytrees to operate on flat {path: value} or positional args instead.
 
-    The returned function will accept a dictionary `{input_path: value}` and will update the default inputs
-    with the new values at each path. It will then call the original function with the updated inputs
-    and return a dictionary `{output_path: value}`.
+    The returned function accepts either a dictionary `{input_path: value}` if `input_paths` is None or
+    positional arguments in the same order as input_paths.
+    The function will update the default inputs with the new values.
+    It will then call the original function with the updated inputs and return a dictionary
+    `{output_path: value}` if output_paths is not None, or the full unmodified output otherwise.
+
+    Args:
+        func: The original function that accepts a single pytree as input and returns a single pytree as output.
+        default_inputs: The default input pytree to the function. Also used to determine the structure of the inputs.
+        output_paths: The subset of paths of the outputs that the modified function returns.
+            If None, the full output is returned unmodified.
+        input_paths: The paths that positional arguments correspond to.
+            If None, a single dictionary argument is expected by the modified function.
     """
 
-    def filtered_func(new_inputs: dict) -> dict:
+    def filtered_func(*args: Any) -> dict:
+        if input_paths:
+            new_inputs = dict(zip(input_paths, args, strict=True))
+        else:
+            if len(args) != 1:
+                raise ValueError("Expected a single dictionary argument")
+            new_inputs = args[0]
+
         updated_inputs = set_at_path(default_inputs, new_inputs)
-        return flatten_with_paths(func(updated_inputs), output_paths)
+        outputs = func(updated_inputs)
+        if output_paths:
+            outputs = flatten_with_paths(outputs, output_paths)
+        return outputs
 
     return filtered_func
