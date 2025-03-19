@@ -161,7 +161,7 @@ structures are N-dimensional arrays. For these, you should use
 the `tesseract_core.runtime.Array` type annotation:
 
 ```python
-from tesseract_core.runtime import Array, Float64
+from tesseract_core.runtime import Array, Float32
 
 class InputSchema(BaseModel):
     x: Array[(3,), Float32] = Field(
@@ -192,7 +192,7 @@ we show in [the Differentiability section](tr-create-diff).
 ## Nested schemas
 
 As both `InputSchema` and `OutputSchema` are pydantic `BaseModel`s,
-they support nesting other `BaseModels` within them. This can be useful
+they support nesting other `BaseModel`s within them. This can be useful
 to create data structures that are convenient to work with:
 
 ```python

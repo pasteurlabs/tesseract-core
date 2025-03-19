@@ -3,7 +3,7 @@
 ## Basic installation
 
 ```{note}
-Before proceeding, make sure you have a [working installation of Docker](https://docs.docker.com/engine/install/) and a modern Python installation (Python 3.10+).
+Before proceeding, make sure you have a [working installation of Docker](https://docs.docker.com/engine/install/) and a modern Python installation (Python 3.10+), ideally in a [virtual environment](https://packaging.python.org/en/latest/guides/installing-using-pip-and-virtual-environments/).
 ```
 
 The simplest way to install Tesseract Core is via `pip`:
@@ -36,25 +36,11 @@ Some shells use `[` and `]` as special characters, and might error out on the `p
 
 ### Windows support
 
-Windows and WSL users can encounter an issue while trying to build a Tesseract:
-
-```bash
-$ tesseract build examples/vectoradd/ vectoradd
-
-Uncaught error: [Errno 20] Not a directory: ...
-# similarly
-NotADirectoryError: [WinError 267] The directory name is invalid: ...
-```
-
-This error is caused by the fact that Tesseract uses symlinks, which are not properly supported by Git for Windows. See [this SuperUser thread](https://superuser.com/questions/1713099/symbolic-link-does-not-work-in-git-over-windows) for more information.
-
-We are looking to improve support for Windows users, but in meantime consider one of the following workarounds:
-* Instead of using a Windows-side Git client, use a Unix-based Git client when cloning `tesseract`, and clone to a Unix filesystem. Simply put, clone from your WSL shell.
-* Git clone with `git clone -c core.symlinks=true <repository_url>`, as suggested [here](https://www.scivision.dev/git-windows-symlink/).
+Tesseract is fully supported on Windows via the Windows Subsystem for Linux (WSL). For guidance, please refer to the [official documentation](https://docs.microsoft.com/en-us/windows/wsl/).
 
 ### Conflicting executables
 
-"Tesseract" is widely known term, and other software projects adopted it too. This sometimes can lead to multiple executables with the same name, as can happen if you also have [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) installed. In that case, you may encounter following error:
+This is not the only software called "Tesseract". Sometimes, this leads to multiple executables with the same name, for example if you also have [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) installed. In that case, you may encounter the following error:
 
 ```
 $ tesseract build examples/vectoradd/ vectoradd
@@ -64,7 +50,7 @@ Error in findFileFormatStream: failed to read first 12 bytes of file
 Error during processing.
 ```
 
-To avoid it, we always recommend to use Tesseract in a separate Python virtual environment. Nevertheless, this error can still happen if you are a `zsh` shell user due to its way of caching paths to executables. If that's the case, consider refreshing the shell's hash with
+To avoid it, we always recommend to use Tesseract in a separate Python virtual environment. Nevertheless, this error can still happen if you are a `zsh` shell user due to its way of caching paths to executables. If that's the case, consider refreshing the shell's executable cache with
 
 ```bash
 $ hash -r
