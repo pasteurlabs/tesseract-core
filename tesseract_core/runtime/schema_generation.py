@@ -255,6 +255,10 @@ def create_apply_schema(
     InputSchema: type[BaseModel], OutputSchema: type[BaseModel]
 ) -> tuple[type[BaseModel], type[BaseModel]]:
     """Create the input / output schemas for the /apply endpoint."""
+    # We add metadata to the input and output schemas to indicate which fields are differentiable,
+    # what their paths are, and which expected shape / dtype they have.
+    # This is used internally and by some official clients, but not advertised as part of the public API,
+    # so people should not rely on it.
     diffable_input_paths = _get_diffable_arrays(InputSchema)
     diffable_output_paths = _get_diffable_arrays(OutputSchema)
 
@@ -334,10 +338,7 @@ def create_abstract_eval_schema(
                 "but with array fields replaced by ShapeDType."
             ),
         )
-
-        model_config = ConfigDict(
-            extra="forbid",
-        )
+        model_config = ConfigDict(extra="forbid")
 
     class AbstractOutputSchema(RootModel):
         root: GeneratedOutputSchema = Field(
@@ -608,9 +609,7 @@ def create_autodiff_schema(
                 min_length=1,
             )
 
-            model_config = ConfigDict(
-                extra="forbid",
-            )
+            model_config = ConfigDict(extra="forbid")
 
         class JacobianOutputSchema(RootModel):
             root: Annotated[
@@ -656,9 +655,7 @@ def create_autodiff_schema(
                     "The shape of each array is the same as the shape of the corresponding input array."
                 ),
             )
-            model_config = ConfigDict(
-                extra="forbid",
-            )
+            model_config = ConfigDict(extra="forbid")
 
             @field_validator("tangent_vector", mode="after")
             @classmethod
@@ -721,9 +718,7 @@ def create_autodiff_schema(
                     "The shape of each array is the same as the shape of the corresponding output array."
                 ),
             )
-            model_config = ConfigDict(
-                extra="forbid",
-            )
+            model_config = ConfigDict(extra="forbid")
 
             @field_validator("cotangent_vector", mode="after")
             @classmethod
