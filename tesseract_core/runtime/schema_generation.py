@@ -222,6 +222,11 @@ def apply_function_to_model_tree(
 def _serialize_diffable_arrays(
     obj: dict[tuple, Any],
 ) -> dict[str, dict[str, Any]]:
+    """Convert a dict {path_tuple: array_type} to a dict {path_str: {shape, dtype}}.
+
+    path_str is a string representation of the path, with SEQ_INDEX_SENTINEL and DICT_INDEX_SENTINEL
+    replaced by indexing syntax (e.g. `foo.[].{}`).
+    """
     serialized = {}
     for pathtuple, value in obj.items():
         shape = value.__metadata__[0].expected_shape
