@@ -16,9 +16,7 @@ import time
 import traceback
 from dataclasses import dataclass
 from pathlib import Path
-from textwrap import indent
 
-import docker
 import numpy as np
 import numpy.typing as npt
 import pytest
@@ -604,11 +602,11 @@ def unit_tesseract_config(unit_tesseract_names, unit_tesseract_path):
     return TEST_CASES[unit_tesseract_path.name]
 
 
-def image_exists(client, image_name):
+def image_exists(docker_wrapper, image_name):
     # Docker images may be prefixed with the registry URL
     return any(
         tag.split("/")[-1] == image_name
-        for img in client.images.list()
+        for img in docker_wrapper.get_all_images()
         for tag in img.tags
     )
 
@@ -667,7 +665,7 @@ def example_from_json_schema(schema):
 
 
 def test_unit_tesseract_endtoend(
-    docker_client,
+    docker_wrapper,
     dummy_image_name,
     unit_tesseract_path,
     unit_tesseract_config,
@@ -676,15 +674,16 @@ def test_unit_tesseract_endtoend(
     """Test that unit Tesseract images can be built and used to serve REST API."""
     from tesseract_core.sdk.cli import app
 
-    cli_runner = CliRunner()
+    cli_runner = CliRunner(mix_stderr=False)
 
     # Stage 1: Build
     img_name = build_tesseract(
+        docker_wrapper,
         unit_tesseract_path,
         dummy_image_name,
         tag="sometag",
     )
-    assert image_exists(docker_client, img_name)
+    assert image_exists(docker_wrapper, img_name)
 
     # Stage 2: Test CLI usage
     result = cli_runner.invoke(
@@ -773,15 +772,23 @@ def test_unit_tesseract_endtoend(
         return
 
     try:
-        server_container = docker_client.containers.run(
-            img_name,
-            "serve",
-            detach=True,
-            remove=False,
-            ports={"8000": free_port},
+        result = cli_runner.invoke(
+            app,
+            [
+                "serve",
+                img_name,
+                "--port",
+                free_port,
+            ],
+            catch_exceptions=False,
         )
-    except docker.errors.ContainerError as e:
-        print(e.stderr.decode())
+        assert result.exit_code == 0, result.stderr
+        assert result.stdout
+
+        project_meta = json.loads(result.stdout)
+        project_id = project_meta["project_id"]
+    except RuntimeError as e:
+        print(e)
         raise
 
     try:
@@ -810,10 +817,6 @@ def test_unit_tesseract_endtoend(
         assert response.status_code == 200
         out_input_schema = response.json()
         assert "properties" in out_input_schema
-
-        if unit_tesseract_config.volume_mounts is not None:
-            # TODO: Mounts are not supported in HTTP mode yet, skip rest of the test for now
-            return
 
         if unit_tesseract_config.test_with_random_inputs:
             payload_from_schema = example_from_json_schema(out_input_schema)
@@ -849,14 +852,16 @@ def test_unit_tesseract_endtoend(
                 assert_contains_array_allclose(output_json, array)
 
     except Exception as e:
-        logs = server_container.logs().decode()
-        print(f"Server logs:\n{indent(logs, ' > ')}")
         raise e
 
     finally:
-        try:
-            server_container.kill()
-        except docker.errors.APIError:
-            # Container may have already stopped
-            pass
-        server_container.remove(v=True, link=False, force=True)
+        # Teardown.
+        run_res = cli_runner.invoke(
+            app,
+            [
+                "teardown",
+                project_id,
+            ],
+            catch_exceptions=False,
+        )
+        assert run_res.exit_code == 0, run_res.stderr

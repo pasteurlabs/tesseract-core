@@ -16,17 +16,19 @@ from tesseract_core.sdk.cli import AVAILABLE_RECIPES, app
 
 
 @pytest.fixture(scope="module")
-def built_image_name(docker_client, shared_dummy_image_name, dummy_tesseract_location):
+def built_image_name(docker_wrapper, shared_dummy_image_name, dummy_tesseract_location):
     """Build the dummy Tesseract image for the tests."""
-    image_name = build_tesseract(dummy_tesseract_location, shared_dummy_image_name)
-    assert image_exists(docker_client, image_name)
+    image_name = build_tesseract(
+        docker_wrapper, dummy_tesseract_location, shared_dummy_image_name
+    )
+    assert image_exists(docker_wrapper, image_name)
     yield image_name
 
 
 @pytest.mark.parametrize("tag", [True, False])
 @pytest.mark.parametrize("recipe", [None, *AVAILABLE_RECIPES])
 def test_build_from_init_endtoend(
-    docker_client, dummy_image_name, tmp_path, tag, recipe
+    docker_wrapper, dummy_image_name, tmp_path, tag, recipe
 ):
     """Test that a trivial (empty) Tesseract image can be built from init."""
     cli_runner = CliRunner(mix_stderr=False)
@@ -42,8 +44,10 @@ def test_build_from_init_endtoend(
         assert yaml.safe_load(config_yaml)["name"] == dummy_image_name
 
     img_tag = "foo" if tag else None
-    image_name = build_tesseract(tmp_path, dummy_image_name, tag=img_tag)
-    assert image_exists(docker_client, image_name)
+    image_name = build_tesseract(
+        docker_wrapper, tmp_path, dummy_image_name, tag=img_tag
+    )
+    assert image_exists(docker_wrapper, image_name)
 
     # Test that the image can be run and that --help is forwarded correctly
     result = cli_runner.invoke(
@@ -128,9 +132,10 @@ def test_tesseract_run_stdout(built_image_name):
             raise
 
 
-def test_tesseract_serve_pipeline(docker_client, built_image_name):
+def test_tesseract_serve_pipeline(docker_wrapper, built_image_name):
     cli_runner = CliRunner(mix_stderr=False)
     try:
+        # Serve
         run_res = cli_runner.invoke(
             app,
             [
@@ -139,24 +144,20 @@ def test_tesseract_serve_pipeline(docker_client, built_image_name):
             ],
             catch_exceptions=False,
         )
-
         assert run_res.exit_code == 0, run_res.stderr
         assert run_res.stdout
 
         project_meta = json.loads(run_res.stdout)
 
         project_id = project_meta["project_id"]
-        project_containers = [
-            c for c in docker_client.containers.list() if project_id in c.name
-        ]
+        project_containers = docker_wrapper.get_projects().get(project_id, None)
         if not project_containers:
             raise ValueError(f"Could not find container for project '{project_id}'")
 
-        project_container = project_containers[0]
+        project_container = docker_wrapper.get_container(project_containers[0])
         assert project_container.name == project_meta["containers"][0]["name"]
 
-        port_key = next(iter(project_container.ports))
-        port = project_container.ports[port_key][0]["HostPort"]
+        port = project_container.host_port
         assert port == project_meta["containers"][0]["port"]
 
         # Ensure served Tesseract is usable
@@ -174,7 +175,9 @@ def test_tesseract_serve_pipeline(docker_client, built_image_name):
         assert project_id in run_res.stdout
         assert port in run_res.stdout
         assert project_container.short_id in run_res.stdout
+
     finally:
+        # Teardown
         run_res = cli_runner.invoke(
             app,
             [
@@ -357,7 +360,7 @@ def test_tesseract_serve_ports(built_image_name, port):
         assert run_res.exit_code == 0, run_res.stderr
 
 
-def test_tesseract_serve_with_volumes(built_image_name, tmp_path, docker_client):
+def test_tesseract_serve_with_volumes(built_image_name, tmp_path, docker_wrapper):
     """Try to serve multiple Tesseracts with volume mounting."""
     cli_runner = CliRunner(mix_stderr=False)
 
@@ -367,6 +370,7 @@ def test_tesseract_serve_with_volumes(built_image_name, tmp_path, docker_client)
     tmp_path.chmod(0o0707)
 
     dest = Path("/foo/")
+
     try:
         run_res = cli_runner.invoke(
             app,
@@ -381,33 +385,39 @@ def test_tesseract_serve_with_volumes(built_image_name, tmp_path, docker_client)
         )
         assert run_res.exit_code == 0, run_res.stderr
         assert run_res.stdout
-
         project_meta = json.loads(run_res.stdout)
         project_id = project_meta["project_id"]
         tesseract0_id = project_meta["containers"][0]["name"]
-        tesseract0 = docker_client.containers.get(tesseract0_id)
+        tesseract0 = docker_wrapper.get_container(tesseract0_id)
+        assert tesseract0 is not None
         tesseract1_id = project_meta["containers"][1]["name"]
-        tesseract1 = docker_client.containers.get(tesseract1_id)
-
+        tesseract1 = docker_wrapper.get_container(tesseract1_id)
+        assert tesseract1 is not None
         # Create file outside the containers and check it from inside the container
         tmpfile = Path(tmp_path) / "hi"
         with open(tmpfile, "w") as hello:
             hello.write("world")
             hello.flush()
-
-        exit_code, output = tesseract0.exec_run(["cat", f"{dest}/hi"])
+        exit_code, output = docker_wrapper.exec_run(
+            tesseract0.name, ["cat", f"{dest}/hi"]
+        )
         assert exit_code == 0
-        assert output.decode() == "world"
+        assert output == "world"
 
         # Create file inside a container and check it from the other
         bar_file = dest / "bar"
-        exit_code, output = tesseract0.exec_run(["touch", f"{bar_file}"])
+        exit_code, output = docker_wrapper.exec_run(
+            tesseract0.name, ["touch", f"{bar_file}"]
+        )
         assert exit_code == 0
-        exit_code, output = tesseract1.exec_run(["cat", f"{bar_file}"])
+        exit_code, output = docker_wrapper.exec_run(
+            tesseract1.name, ["cat", f"{bar_file}"]
+        )
         assert exit_code == 0
 
         # The file should exist outside the container
         assert (tmp_path / "bar").exists()
+
     finally:
         run_res = cli_runner.invoke(
             app,

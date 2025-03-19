@@ -3,15 +3,12 @@
 
 """Engine to power Tesseract commands."""
 
-import contextlib
 import datetime
-import json
 import linecache
 import logging
 import optparse
 import os
 import random
-import shlex
 import string
 import subprocess
 import tempfile
@@ -21,12 +18,6 @@ from pathlib import Path
 from shutil import copy, copytree, rmtree
 from typing import Any
 
-import docker
-import docker.errors
-import docker.models
-import docker.models.containers
-import docker.models.images
-from docker.types import DeviceRequest
 from jinja2 import Environment, PackageLoader, StrictUndefined
 from pip._internal.index.package_finder import PackageFinder
 from pip._internal.network.session import PipSession
@@ -37,6 +28,7 @@ from pip._internal.req.req_file import (
 )
 
 from .api_parse import TesseractConfig, get_config, validate_tesseract_api
+from .docker_cli_wrapper import DockerWrapper
 
 logger = logging.getLogger("tesseract")
 
@@ -104,12 +96,9 @@ def needs_docker(func: Callable) -> Callable:
     @functools.wraps(func)
     def wrapper_needs_docker(*args: Any, **kwargs: Any) -> None:
         try:
-            docker.from_env().info()
-        except (
-            FileNotFoundError,
-            docker.errors.APIError,
-            docker.errors.DockerException,
-        ) as ex:
+            docker_wrapper = DockerWrapper()
+            docker_wrapper.docker_info()
+        except RuntimeError as ex:
             message = "Could not reach Docker daemon, check if it is running."
             logger.error(f"{message} Details: {ex}")
             raise RuntimeError(f"{message} See logs for details.") from None
@@ -157,80 +146,6 @@ def parse_requirements(
     return local_dependencies, remote_dependencies
 
 
-def docker_buildx(
-    path: str | Path,
-    tag: str,
-    dockerfile: str | Path,
-    inject_ssh: bool = False,
-    keep_build_cache: bool = False,
-    print_and_exit: bool = False,
-) -> docker.models.images.Image | None:
-    """Build a Docker image from a Dockerfile using BuildKit."""
-    # Build the Docker image
-    # docker-py does not support BuildKit, so we shell out to the Docker CLI
-    # see https://github.com/docker/docker-py/issues/2230
-    build_cmd = [
-        "docker",
-        "buildx",
-        "build",
-        "--load",
-        "--tag",
-        tag,
-        "--file",
-        str(dockerfile),
-        str(path),
-    ]
-
-    if inject_ssh:
-        ssh_sock = os.environ.get("SSH_AUTH_SOCK")
-        if ssh_sock is None:
-            raise ValueError(
-                "SSH_AUTH_SOCK environment variable not set (try running `ssh-agent`)"
-            )
-
-        ssh_keys = subprocess.run(["ssh-add", "-L"], capture_output=True)
-        if ssh_keys.returncode != 0 or not ssh_keys.stdout:
-            raise ValueError("No SSH keys found in SSH agent (try running `ssh-add`)")
-
-        build_cmd += ["--ssh", f"default={ssh_sock}"]
-
-    if print_and_exit:
-        logger.info(
-            f"To build the Docker image manually, run:\n    $ {shlex.join(build_cmd)}"
-        )
-        return None
-
-    # Record start time for cache pruning -- this isn't perfect, but should be good enough
-    # (might prune too much if multiple builds are running at the same time, but that's fine)
-    start = datetime.datetime.now()
-
-    out_pipe = LogPipe(logging.DEBUG)
-    with out_pipe as out_pipe_fd:
-        proc = subprocess.run(build_cmd, stdout=out_pipe_fd, stderr=out_pipe_fd)
-
-    logs = out_pipe.captured_lines
-    return_code = proc.returncode
-
-    # NOTE: Do this before error checking to ensure we always prune the cache
-    if not keep_build_cache:
-        try:
-            with contextlib.closing(docker.APIClient()) as api_client:
-                api_client.prune_builds(all=True, filters={"until": start.isoformat()})
-        except docker.errors.DockerException:
-            logger.warning(
-                "Docker build cache could not be cleared; consider doing so manually."
-            )
-
-    if return_code != 0:
-        raise docker.errors.BuildError("Error while building Docker image", logs)
-
-    # Get image object
-    with contextlib.closing(docker.from_env()) as client:
-        image = client.images.get(tag)
-
-    return image
-
-
 def get_runtime_dir() -> Path:
     """Get the source directory for the Tesseract runtime as a context manager."""
     import tesseract_core
@@ -271,7 +186,7 @@ def build_image(
     inject_ssh: bool = False,
     keep_build_cache: bool = False,
     generate_only: bool = False,
-) -> docker.models.images.Image | None:
+) -> DockerWrapper.Image | None:
     """Build the image from a Dockerfile.
 
     Returns:
@@ -333,7 +248,8 @@ def build_image(
         logger.info("Building image ...")
 
     try:
-        image = docker_buildx(
+        docker_wrapper = DockerWrapper()
+        image = docker_wrapper.docker_buildx(
             path=build_dir.as_posix(),
             tag=image_name,
             dockerfile=dockerfile_path,
@@ -342,10 +258,10 @@ def build_image(
             print_and_exit=generate_only,
         )
 
-    except docker.errors.BuildError as e:
+    except RuntimeError as e:
         logger.warning("Build failed with logs:")
-        for line in e.build_log:
-            logger.warning(line)
+        # TODO(ako): Not sure if I'm handling this correctly compared to before
+        # with the printing of the build
         raise e
     else:
         if image is not None:
@@ -415,7 +331,7 @@ def build_tesseract(
     config_override: tuple[tuple[list[str], str], ...] = (),
     keep_build_cache: bool = False,
     generate_only: bool = False,
-) -> docker.models.images.Image | Path:
+) -> DockerWrapper.Image | Path:
     """Build a new Tesseract from a context directory.
 
     Args:
@@ -431,7 +347,7 @@ def build_tesseract(
         generate_only: only generate the build context but do not build the image.
 
     Returns:
-        docker.models.images.Image representing the built Tesseract image,
+        DockerWrapper.Image representing the built Tesseract image,
         or path to build directory if `generate_only` is True.
     """
     validate_tesseract_api(src_dir)
@@ -487,62 +403,64 @@ def build_tesseract(
     return out
 
 
-def teardown(project_id: str) -> None:
+def teardown(
+    project_ids: list, tear_all: bool = False, docker_wrapper: DockerWrapper = None
+) -> None:
     """Teardown Tesseract image(s) running in a Docker Compose project.
 
     Args:
-        project_id: Docker Compose project ID to teardown.
+        project_ids: List of Docker Compose project IDs to teardown.
+        tear_all: boolean flag to teardown all Tesseract projects.
+        docker_wrapper: DockerWrapper instance to use for teardown.
     """
-    if not project_id:
+    docker_wrapper = DockerWrapper() if docker_wrapper is None else docker_wrapper
+
+    if tear_all:
+        # Get copy of keys to iterate over since the dictionary will change as we are
+        # tearing down projects.
+        project_ids = list(docker_wrapper.get_projects())
+        if not project_ids:
+            logger.info("No Tesseract projects to teardown")
+            return
+
+    if not project_ids:
         raise ValueError("Docker Compose project ID is empty or None, cannot teardown")
-    if not _docker_compose_project_exists(project_id):
-        raise ValueError(
-            f"A Docker Compose project with ID {project_id} cannot be found, use `docker compose ls` to find project ID"
+
+    if isinstance(project_ids, str):
+        # Single string project_id passes the typecheck but gets parsed one letter at a time
+        # in the following for loop, so we need to wrap it in a list.
+        project_ids = [project_ids]
+
+    for project_id in project_ids:
+        if not docker_wrapper.docker_compose_project_exists(project_id):
+            raise ValueError(
+                f"A Docker Compose project with ID {project_id} cannot be found, use `tesseract ps` to find project ID"
+            )
+
+        if not docker_wrapper.docker_compose_down(project_id):
+            raise RuntimeError(
+                f"Cannot teardown Docker Compose project with ID: {project_id}"
+            )
+
+        logger.info(
+            f"Tesseracts are shutdown for Docker Compose project ID: {project_id}"
         )
 
-    if not _docker_compose_down(project_id):
-        raise RuntimeError(
-            f"Cannot teardown Docker Compose project with ID: {project_id}"
-        )
 
-
-def get_tesseract_containers() -> list[docker.models.containers.Container]:
+def get_tesseract_containers() -> list[DockerWrapper.Container]:
     """Get Tesseract containers."""
-    return list(
-        filter(
-            lambda container: _is_tesseract(container),
-            docker.from_env().containers.list(),
-        )
-    )
+    docker_wrapper = DockerWrapper()
+    return docker_wrapper.get_all_containers()
 
 
-def get_tesseract_images() -> list[docker.models.images.Image]:
+def get_tesseract_images() -> list[DockerWrapper.Image]:
     """Get Tesseract images."""
-    return list(filter(lambda img: _is_tesseract(img), docker.from_env().images.list()))
-
-
-def _get_docker_image(image_name: str) -> docker.models.images.Image:
-    """Get Docker image object."""
-    try:
-        return docker.from_env().images.get(image_name)
-    except docker.errors.ImageNotFound:
-        logger.error(f"No Docker image found with name: {image_name}")
-        return None
-
-
-def _is_tesseract(
-    docker_asset: docker.models.images.Image | docker.models.containers.Container,
-) -> bool:
-    """Check if an image is Tesseract."""
-    if not any(
-        "TESSERACT_NAME" in env_val for env_val in docker_asset.attrs["Config"]["Env"]
-    ):
-        return False
-    return True
+    docker_wrapper = DockerWrapper()
+    return docker_wrapper.get_all_images()
 
 
 def serve(
-    images: list[str | docker.models.images.Image],
+    images: list[str],
     port: str = "",
     volumes: list[str] | None = None,
     gpus: list[str] | None = None,
@@ -552,8 +470,7 @@ def serve(
     Start the Tesseracts listening on an available ports on the host.
 
     Args:
-        images: a list of Tesseract image IDs as strings or `docker`'s
-                Image object.
+        images: a list of Tesseract image IDs as strings.
         port: port or port range to serve the tesseract on.
         volumes: list of paths to mount in the Tesseract container.
         gpus: IDs of host Nvidia GPUs to make available to the Tesseracts.
@@ -561,23 +478,17 @@ def serve(
     Returns:
         A string representing the Tesseract Project ID.
     """
-    if not images or not all(
-        (isinstance(item, str) or isinstance(item, docker.models.images.Image))
-        for item in images
-    ):
+    if not images or not all(isinstance(item, str) for item in images):
         raise ValueError("One or more Tesseract image IDs must be provided")
+
+    docker_wrapper = DockerWrapper()
 
     image_ids = []
     for image_ in images:
-        if isinstance(image_, docker.models.images.Image):
-            image = image_
-        else:  # str
-            image = _get_docker_image(image_)
+        image = docker_wrapper.get_image(image_)
 
         if not image:
             raise ValueError(f"Image ID {image_} is not a valid Docker image")
-        if not _is_tesseract(image):
-            raise ValueError(f"Input ID {image.id} is not a valid Tesseract")
         image_ids.append(image.id)
 
     template = _create_docker_compose_template(image_ids, port, volumes, gpus)
@@ -591,69 +502,8 @@ def serve(
         compose_file.flush()
 
         project_name = _create_compose_proj_id()
-        if not _docker_compose_up(compose_file.name, project_name):
-            raise RuntimeError("Cannot serve Tesseracts")
-        return project_name
-
-
-def _docker_compose_project_exists(project_id: str) -> bool:
-    """Check if Docker Compose project exists."""
-    try:
-        result = subprocess.run(
-            ["docker", "compose", "ls", "-a", "--format", "json"],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        if not any(
-            project["Name"] == project_id for project in json.loads(result.stdout)
-        ):
-            logger.error(f"Docker Compose project with ID {project_id} does not exist")
-            return False
-        return True
-    except (subprocess.CalledProcessError, json.JSONDecodeError) as ex:
-        logger.error(str(ex))
-        return False
-
-
-def _docker_compose_down(project_id: str) -> bool:
-    """Stop and remove containers and networks associated to a project."""
-    try:
-        __ = subprocess.run(
-            ["docker", "compose", "-p", project_id, "down"],
-            check=True,
-            capture_output=True,
-        )
-        return True
-    except subprocess.CalledProcessError as ex:
-        logger.error(str(ex))
-        return False
-
-
-def _docker_compose_up(compose_fpath: str, project_name: str) -> bool:
-    """Start containers using Docker Compose template."""
-    logger.info("Waiting for Tesseract containers to start ...")
-    try:
-        _ = subprocess.run(
-            [
-                "docker",
-                "compose",
-                "-f",
-                compose_fpath,
-                "-p",
-                project_name,
-                "up",
-                "-d",
-                "--wait",
-            ],
-            check=True,
-            capture_output=True,
-        )
-        return True
-    except subprocess.CalledProcessError as ex:
-        logger.error(str(ex))
-        logger.error(ex.stderr.decode())
-        return False
+        project_id = docker_wrapper.docker_compose_up(compose_file.name, project_name)
+        return project_id, docker_wrapper
 
 
 def _create_docker_compose_template(
@@ -740,7 +590,7 @@ def _parse_volumes(options: list[str]) -> dict[str, dict[str, str]]:
 
 
 def run_tesseract(
-    image: str | docker.models.images.Image,
+    image: str,
     command: str,
     args: list[str],
     volumes: list[str] | None = None,
@@ -749,7 +599,7 @@ def run_tesseract(
     """Start a Tesseract and execute a given command.
 
     Args:
-        image: string or docker.models.images.Image object of the Tesseract to run.
+        image: string of the Tesseract to run.
         command: Tesseract command to run, e.g. apply.
         args: arguments for the command.
         volumes: list of paths to mount in the Tesseract container.
@@ -758,8 +608,6 @@ def run_tesseract(
     Returns:
         Tuple with the stdout and stderr of the Tesseract.
     """
-    client = docker.from_env()
-
     # Args that require rw access to the mounted volume
     output_args = {"-o", "--output-path"}
 
@@ -770,11 +618,6 @@ def run_tesseract(
         parsed_volumes = {}
     else:
         parsed_volumes = _parse_volumes(volumes)
-
-    if gpus is None:
-        device_requests = None
-    else:
-        device_requests = [DeviceRequest(device_ids=gpus, capabilities=[["gpu"]])]
 
     for arg in args:
         if arg.startswith("-"):
@@ -820,34 +663,11 @@ def run_tesseract(
         cmd.append(arg)
 
     # Run the container
-    if isinstance(image, docker.models.images.Image):
-        image_id = image.short_id
-    else:
-        image_id = image
-    container = None
-    try:
-        container = client.containers.run(
-            image=image_id,
-            command=cmd,
-            volumes=parsed_volumes,
-            detach=True,
-            device_requests=device_requests,
-        )
-        result = container.wait()
-        stdout = container.logs(stdout=True, stderr=False)
-        stderr = container.logs(stdout=False, stderr=True)
+    image_id = image
 
-        exit_code = result["StatusCode"]
-        if exit_code != 0:
-            stderr = f"\n{stderr.decode('utf-8')}"
-            raise docker.errors.ContainerError(
-                container, exit_code, shlex.join(cmd), image_id, stderr
-            )
-    finally:
-        if container is not None:
-            container.remove(v=True, force=True)
+    docker_wrapper = DockerWrapper()
 
-    return stdout.decode("utf-8"), stderr.decode("utf-8")
+    return docker_wrapper.run_container(image_id, cmd, parsed_volumes, gpus)
 
 
 def exec_tesseract(
@@ -877,18 +697,3 @@ def exec_tesseract(
         return result.stdout, result.stderr
     except subprocess.CalledProcessError as e:
         return e.stdout, e.stderr
-
-
-def project_containers(
-    project_id: str,
-) -> list[docker.models.containers.Container]:
-    """Find containers associated with a Docker Compose Project ID.
-
-    Args:
-        project_id: the Docker Compose project ID.
-
-    Returns:
-        A list of Docker Images.
-    """
-    client = docker.from_env()
-    return list(filter(lambda x: project_id in x.name, client.containers.list()))
