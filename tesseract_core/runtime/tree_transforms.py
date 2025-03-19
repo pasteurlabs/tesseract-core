@@ -121,44 +121,38 @@ def flatten_with_paths(
 def filter_func(
     func: Callable[[dict], dict],
     default_inputs: dict,
-    output_paths: set[str],
+    output_paths: Optional[set[str]] = None,
     input_paths: Optional[set[str]] = None,
-    output_to_tuple: bool = False,
 ) -> Callable:
-    """Returns a reduced func with default inputs that operates on positional args or {path: value} dicts.
+    """Modifies a function that operates on pytrees to operate on flat {path: value} or positional args instead.
 
     The returned function accepts either a dictionary `{input_path: value}` if `input_paths` is None or
     positional arguments in the same order as input_paths.
     The function will update the default inputs with the new values.
     It will then call the original function with the updated inputs and return a dictionary
-    `{output_path: value}` or a tuple of values if `output_to_tuple` is True.
+    `{output_path: value}` if output_paths is not None, or the full unmodified output otherwise.
 
     Args:
-        func: The original function that accepts a dictionary of inputs
-        default_inputs: The default inputs to the function
-        output_paths: The paths of the outputs that the function returns
-        input_paths: The keys to reconstruct positional to dictionaries.
-            If None, the returned function accepts a dictionary arguments.
-        output_to_tuple: If True, the returned function will return a tuple of outputs
+        func: The original function that accepts a single pytree as input and returns a single pytree as output.
+        default_inputs: The default input pytree to the function. Also used to determine the structure of the inputs.
+        output_paths: The subset of paths of the outputs that the function returns.
+            If None, the full output is returned unmodified.
+        input_paths: The paths that positional arguments correspond to.
+            If None, a single dictionary argument is expected.
     """
 
-    def filtered_func(new_inputs: dict) -> dict:
+    def filtered_func(*args: Any) -> dict:
+        if input_paths:
+            new_inputs = dict(zip(input_paths, args, strict=True))
+        else:
+            if len(args) != 1:
+                raise ValueError("Expected a single dictionary argument")
+            new_inputs = args[0]
+
         updated_inputs = set_at_path(default_inputs, new_inputs)
+        outputs = func(updated_inputs)
+        if output_paths:
+            outputs = flatten_with_paths(outputs, output_paths)
+        return outputs
 
-        path_outputs = flatten_with_paths(func(updated_inputs), output_paths)
-
-        return tuple(path_outputs.values()) if output_to_tuple else path_outputs
-
-    if not input_paths:
-        return filtered_func
-
-    else:
-        # function that accepts positional arguments
-        def filtered_pos_func(*args):
-            # convert back to dictionary
-            new_inputs = dict(zip(input_paths, args))
-
-            # call the filtered function that accepts dictionaries
-            return filtered_func(new_inputs)
-
-        return filtered_pos_func
+    return filtered_func

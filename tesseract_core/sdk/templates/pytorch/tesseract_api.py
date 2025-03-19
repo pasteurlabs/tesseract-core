@@ -78,23 +78,28 @@ def jacobian(
     # flatten the dict such that they can be accessed by paths and obtain the values
     pos_inputs = flatten_with_paths(tensor_inputs, jac_inputs).values()
 
-    # create a positional function that accepts a list of values and returns a set of tuples
+    # create a positional function that accepts a flat sequence of values and returns a tuple
     filtered_pos_eval = filter_func(
         evaluate,
         tensor_inputs,
         jac_outputs,
         input_paths=jac_inputs,
-        output_to_tuple=True,
     )
 
+    def filtered_pos_eval_flat(*args):
+        res = filtered_pos_eval(*args)
+        return tuple(res[k] for k in jac_outputs)
+
     # calculate the jacobian
-    jacobian = torch.autograd.functional.jacobian(filtered_pos_eval, tuple(pos_inputs))
+    jacobian = torch.autograd.functional.jacobian(
+        filtered_pos_eval_flat, tuple(pos_inputs)
+    )
 
     # rebuild the dictionary from the list of results
     jac_dict = {}
-    for dy, dys in zip(jac_outputs, jacobian):
+    for dy, dys in zip(jac_outputs, jacobian, strict=True):
         jac_dict[dy] = {}
-        for dx, dxs in zip(jac_inputs, dys):
+        for dx, dxs in zip(jac_inputs, dys, strict=True):
             jac_dict[dy][dx] = dxs
 
     return jac_dict
@@ -148,7 +153,7 @@ def vector_jacobian_product(
     _, vjp_func = torch.func.vjp(filtered_pos_func, *pos_inputs)
 
     vjp_vals = vjp_func(tensor_cotangent)
-    return dict(zip(vjp_inputs, vjp_vals))
+    return dict(zip(vjp_inputs, vjp_vals, strict=True))
 
 
 to_tensor = lambda x: torch.tensor(x) if isinstance(x, np.generic | np.ndarray) else x
