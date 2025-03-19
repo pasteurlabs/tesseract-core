@@ -123,15 +123,6 @@ class Tesseract:
         """
         return self._client._run_tesseract("output_schema")
 
-    @cached_property
-    def diffable_paths(self) -> dict:
-        """Get the inputs and outputs marked as differentiable of this Tessseract.
-
-        Returns:
-             dictionary with the diffable paths.
-        """
-        return self._client._run_tesseract("diffable_paths")
-
     @property
     def available_endpoints(self) -> list[str]:
         """Get the list of available endpoints.
@@ -372,7 +363,6 @@ class HTTPClient:
         if endpoint in [
             "input_schema",
             "output_schema",
-            "diffable_paths",
             "openapi_schema",
             "health",
         ]:
