@@ -19,7 +19,11 @@ from jinja2.exceptions import TemplateNotFound
 from typeguard import suppress_type_checks
 
 from tesseract_core.sdk import engine
-from tesseract_core.sdk.api_parse import TesseractConfig, validate_tesseract_api
+from tesseract_core.sdk.api_parse import (
+    PipRequirements,
+    TesseractConfig,
+    validate_tesseract_api,
+)
 from tesseract_core.sdk.cli import AVAILABLE_RECIPES
 
 
@@ -42,6 +46,7 @@ def test_build_image(
         got = engine.build_image(
             src_dir=src_dir,
             image_name=image_name,
+            requirements=PipRequirements(provider="python-pip"),
             dockerfile=dockerfile,
             build_dir=Path(tmpdir),
             generate_only=generate_only,
