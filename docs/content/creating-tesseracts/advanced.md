@@ -93,7 +93,7 @@ various circumstances:
  for example: `--config-override build_config.target_platform=linux/arm64`
 - `tesseract build` relies on a `docker build` command to create the Tesseract image. By
  default, the build context is a temporary folder to which all necessary files to build a Tesseract
- are copied to. The option `--docker-build-dir <directory>` allows you to specify a different
+ are copied to. The option `--build-dir <directory>` allows you to specify a different
  directory where to do this operations. This might be useful to debug issues which
  arise while building a Tesseract, as in `directory` you will see all the context available to
  `docker build` and nothing else.
@@ -158,16 +158,16 @@ After that is done, you will be able to use the `tesseract_runtime` command in y
 This is the exact same command that is launched inside Tesseract containers to run their
 various endpoints, and its syntax mirrors the one of `tesseract run`.
 
-For instance, to call the `apply` function, rather than first building a `helloworld` image
-and then running
+For instance, to call the `apply` function, rather than first building a `helloworld` image and running this command:
 
 ```bash
 $ tesseract run helloworld apply '{"inputs": {"name": "Tessie"}}'
 ```
 
-you can just call in your environment the following:
-```
-tesseract-runtime apply '{"inputs": {"name": "Tessie"}}'
+You can use:
+
+```bash
+$ tesseract-runtime apply '{"inputs": {"name": "Tessie"}}'
 ```
 
 More info on usage is contained in `tesseract-runtime --help` (and in its subcommands,
