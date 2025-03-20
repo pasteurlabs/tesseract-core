@@ -313,6 +313,7 @@ def build_image(
         # output is the built image
         image = build_out
         logger.info(f"Built image {image.short_id}, {image.tags}")
+        typer.echo(json.dumps(image.tags))
 
 
 @app.command("init")
