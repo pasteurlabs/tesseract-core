@@ -360,7 +360,12 @@ class HTTPClient:
         return data
 
     def _run_tesseract(self, endpoint: str, payload: dict | None = None) -> dict:
-        if endpoint in ["input_schema", "openapi_schema", "health"]:
+        if endpoint in [
+            "input_schema",
+            "output_schema",
+            "openapi_schema",
+            "health",
+        ]:
             method = "GET"
         else:
             method = "POST"
