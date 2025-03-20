@@ -272,6 +272,9 @@ def build_image(
 
     The passed directory must contain the files `tesseract_api.py` and `tesseract_config.yaml`
     (can be created via `tesseract init`).
+
+    Prints the built images as JSON array to stdout, for example: `["mytesseract:latest"]`.
+    If `--generate-only` is set, the path to the build context is printed instead.
     """
     if config_override is None:
         config_override = []
