@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [unreleased]
+
+### Features
+
+- Friendlier error messages when input validation fails (#71)
+- Pytorch initialize template (#53)
+- Add `diffable` field to input/output json schemas (#82)
+- Add stdout output for tesseract build (#87)
+
+### Documentation
+
+- Various docs nits + UX fixes (#85)
+
 ## [0.7.3] - 2025-03-13
 
 ### Features
@@ -13,7 +26,7 @@ All notable changes to this project will be documented in this file.
 
 - Jax template now uses equinox `filter_jit` to allow non-array inputs (#56)
 - Added pip as dependency (#58)
-- Buggy `is_leaf` check in the `abstract_eval` of jax recipe and vectoradd_jax (#75)
+- Issue #74 (#75)
 
 ### Documentation
 
