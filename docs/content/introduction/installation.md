@@ -1,5 +1,15 @@
 # Installation
 
+## Dependencies
+
+Tesseract Core depends on Docker.
+If you are on macOS, installing Docker Desktop includes several plugins for extended functionality needed by Tesseract Core.
+If you are on Linux and / or prefer to work via CLIs, you will need to install these plugin packages in addition to `docker`.
+These are 
+
+1. [`docker-buildx`](https://github.com/docker/buildx)
+2. [`docker-compose`](https://github.com/docker/compose)
+
 ## Basic installation
 
 ```{note}
@@ -61,6 +71,28 @@ You can always confirm what executable the command `tesseract` corresponds with
 ```bash
 $ which tesseract
 ```
+
+### User privileges
+
+If you are on Linux and not a regular Docker user, or are used to running Docker via the command line using `sudo`, you may find that `tesseract build` results in the following exception
+
+```
+$ tesseract build examples/helloworld
+RuntimeError: Could not reach Docker daemon, check if it is running. See logs for details.
+```
+
+Your natural inclination may be to run this with elevated privileges, however if you do this it's possible that your system will ignore the `tesseract` command in your virtual environment, and instead execute [Tesseract OCR](https://github.com/tesseract-ocr/tesseract)
+
+```
+$ sudo tesseract build examples/helloworld
+Error opening data file /usr/share/tessdata/eng.traineddata
+Please make sure the TESSDATA_PREFIX environment variable is set to your "tessdata" directory.
+Failed loading language 'eng'
+...
+```
+
+You can resolve this by omitting the `sudo` command, and instead adding your user to the `docker` group.
+See [Linux post-installation steps for Docker Engine > Manage Docker as a non-root user](https://docs.docker.com/engine/install/linux-postinstall/#manage-docker-as-a-non-root-user).
 
 (installation-dev)=
 ## Development installation
