@@ -19,6 +19,9 @@ class CLIDockerClient:
 
     def __init__(self) -> None:
         self.project_container_map = {}  # Mapping from project ID to list of container ids
+        self.containers = self.Containers()
+        self.images = self.Images()
+        self.compose = self.Compose(self)
 
     class Images:
         """Class to interface with docker images."""
@@ -52,7 +55,7 @@ class CLIDockerClient:
             for image_obj in images:
                 if image_obj.id == image or image_obj.name == image:
                     return image_obj
-            raise ValueError(f"Image {image} not found.")
+            raise CLIDockerClient.Errors.ImageNotFound(f"Image {image} not found.")
 
         def list(self) -> list[Image]:
             """Returns the current list of images."""
@@ -71,7 +74,9 @@ class CLIDockerClient:
                 self._update_images()
 
             except subprocess.CalledProcessError as ex:
-                raise RuntimeError(f"Cannot remove image {image_id}: {ex}") from ex
+                raise CLIDockerClient.Errors.ImageNotFound(
+                    f"Cannot remove image {image_id}: {ex}"
+                ) from ex
 
         def buildx(
             self,
@@ -127,9 +132,7 @@ class CLIDockerClient:
             return_code = proc.returncode
 
             if return_code != 0:
-                for line in logs:
-                    logger.debug(line)
-                raise RuntimeError("Error while building Docker image")
+                raise CLIDockerClient.Errors.BuildError(logs)
 
             # Update self.images
             self._update_images()
@@ -168,15 +171,15 @@ class CLIDockerClient:
                     self.images.append(image)
 
             except subprocess.CalledProcessError as ex:
-                raise RuntimeError(f"Cannot list Docker images: {ex}") from ex
+                raise CLIDockerClient.Errors.APIError(
+                    f"Cannot list Docker images: {ex}"
+                ) from ex
 
     class Containers:
         """Class to interface with docker containers."""
 
-        def __init__(self, docker_cli) -> None:
+        def __init__(self) -> None:
             self.containers = {}
-            # Save outer class for access to docker_metadata function
-            self.docker_cli = docker_cli
 
         class Container:
             """Container class to wrap Docker container details."""
@@ -216,7 +219,7 @@ class CLIDockerClient:
                     )
                     return result.returncode, result.stdout
                 except subprocess.CalledProcessError as ex:
-                    raise RuntimeError(
+                    raise CLIDockerClient.Errors.ContainerError(
                         f"Cannot run command in container {self.id}: {ex}"
                     ) from ex
 
@@ -290,12 +293,12 @@ class CLIDockerClient:
                 )
 
                 if result.returncode != 0:
-                    raise RuntimeError(f"{result.stderr}")
+                    raise CLIDockerClient.Errors.APIError(f"{result.stderr}")
 
                 return result.stdout, result.stderr
 
             except subprocess.CalledProcessError as ex:
-                raise RuntimeError(
+                raise CLIDockerClient.Errors.APIError(
                     f"Error running command: `{' '.join(cmd_list)}`. \n\n{ex.stderr}"
                 ) from ex
 
@@ -330,7 +333,9 @@ class CLIDockerClient:
                     self.containers[container_id] = container
 
             except subprocess.CalledProcessError as ex:
-                raise RuntimeError(f"Cannot list Docker containers: {ex}") from ex
+                raise CLIDockerClient.Errors.APIError(
+                    f"Cannot list Docker containers: {ex}"
+                ) from ex
 
     class Compose:
         """Class to interface with docker projects."""
@@ -369,7 +374,9 @@ class CLIDockerClient:
             except subprocess.CalledProcessError as ex:
                 logger.error(str(ex))
                 logger.error(ex.stderr.decode())
-                raise RuntimeError("Failed to start Tesseract containers.") from ex
+                raise CLIDockerClient.Errors.ContainerError(
+                    "Failed to start Tesseract containers."
+                ) from ex
 
         def down(self, project_id: str) -> bool:
             """Stop and remove containers and networks associated to a project."""
@@ -455,7 +462,36 @@ class CLIDockerClient:
             )
             return result.stdout, result.stderr
         except subprocess.CalledProcessError as ex:
-            raise RuntimeError() from ex
+            raise CLIDockerClient.Errors.APIError() from ex
+
+    class Errors:
+        """Errors that can be raised by the Docker CLI."""
+
+        class DockerException(Exception):
+            """Base class for Docker CLI exceptions."""
+
+            pass
+
+        class BuildError(DockerException):
+            """Raised when a build fails."""
+
+            def __init__(self, build_log):
+                self.build_log = build_log
+
+        class ContainerError(DockerException):
+            """Raised when a container has error."""
+
+            pass
+
+        class APIError(DockerException):
+            """Raised when a Docker API error occurs."""
+
+            pass
+
+        class ImageNotFound(DockerException):
+            """Raised when an image is not found."""
+
+            pass
 
 
 def get_docker_metadata(docker_asset_ids: list[str], is_image: bool = False) -> dict:
@@ -484,7 +520,7 @@ def get_docker_metadata(docker_asset_ids: list[str], is_image: bool = False) -> 
             if f"No such image: {asset_id}" in error_message:
                 print(f"Image {asset_id} is not a valid image.")
         if "No such object" in error_message:
-            raise RuntimeError(
+            raise CLIDockerClient.Errors.ContainerError(
                 "Unhealthy container found. Please restart docker."
             ) from e
 
