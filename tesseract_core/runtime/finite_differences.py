@@ -117,13 +117,13 @@ def get_differentiable_paths(
 
 
 def _cached_jacobian(fn: Callable) -> Callable:
-    """Cache the result of the jacobian computation based on input_path, output_path, and arr_idx."""
+    """Cache the result of the jacobian computation based on input_path, output_path, and input_idx."""
     cache = {}
 
     @wraps(fn)
     def _wrapper(*args: Any, **kwargs: Any) -> Any:
-        _, _, input_path, output_path, arr_idx, *_ = args
-        key = (input_path, output_path, tuple(arr_idx))
+        _, _, input_path, output_path, input_idx, *_ = args
+        key = (input_path, output_path, tuple(input_idx))
         if key not in cache:
             try:
                 cache[key] = fn(*args, **kwargs)
@@ -143,7 +143,7 @@ def _jacobian_via_apply(
     inputs: dict[str, Any],
     input_path: Sequence[str],
     output_path: Sequence[str],
-    arr_idx: tuple[int, ...],
+    input_idx: tuple[int, ...],
     eps: float = 1e-4,
 ) -> ArrayLike:
     """Compute a Jacobian row using central finite differences."""
@@ -152,9 +152,9 @@ def _jacobian_via_apply(
 
     def _perturbed_apply(inputs, eps):
         input_val = get_at_path(inputs, input_path).copy()
-        if arr_idx:
+        if input_idx:
             # array
-            input_val[arr_idx] += eps
+            input_val[input_idx] += eps
         else:
             # scalar
             input_val += eps
@@ -178,7 +178,7 @@ def _jacobian_via_jacobian(
     inputs: dict[str, Any],
     input_path: Sequence[str],
     output_path: Sequence[str],
-    arr_idx: tuple[int, ...],
+    input_idx: tuple[int, ...],
 ) -> ArrayLike:
     """Compute a Jacobian row using the jacobian endpoint."""
     jac_fn = endpoints_func["jacobian"]
@@ -199,7 +199,7 @@ def _jacobian_via_jacobian(
     output_val = output[output_path][input_path]
     # Jacobian output has shape (*output_shape, *input_shape), where we slice into input_shape
     # while passing through output_shape.
-    jac_slice = (slice(None),) * (output_val.ndim - len(arr_idx)) + tuple(arr_idx)
+    jac_slice = (slice(None),) * (output_val.ndim - len(input_idx)) + tuple(input_idx)
     return output_val[jac_slice]
 
 
@@ -209,14 +209,14 @@ def _jacobian_via_jvp(
     inputs: dict[str, Any],
     input_path: Sequence[str],
     output_path: Sequence[str],
-    arr_idx: tuple[int, ...],
+    input_idx: tuple[int, ...],
 ) -> ArrayLike:
     """Compute a Jacobian row using the jacobian_vector_product endpoint."""
     jvp_fn = endpoints_func["jacobian_vector_product"]
     JvpSchema = get_input_schema(jvp_fn)
 
     tangent = np.zeros_like(get_at_path(inputs, input_path))
-    tangent[arr_idx] = 1
+    tangent[input_idx] = 1
     jvp = jvp_fn(
         JvpSchema.model_validate(
             {
@@ -236,7 +236,7 @@ def _jacobian_via_vjp(
     inputs: dict[str, Any],
     input_path: Sequence[str],
     output_path: Sequence[str],
-    arr_idx: tuple[int, ...],
+    input_idx: tuple[int, ...],
 ) -> ArrayLike:
     """Compute a Jacobian row using the vector_jacobian_product endpoint."""
     apply_fn = endpoints_func["apply"]
@@ -260,7 +260,7 @@ def _jacobian_via_vjp(
                 }
             )
         ).model_dump()
-        jac_row[col_idx] = vjp[input_path][arr_idx]
+        jac_row[col_idx] = vjp[input_path][input_idx]
 
     return jac_row
 
