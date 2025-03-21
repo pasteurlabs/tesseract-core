@@ -9,7 +9,7 @@ from tesseract_core.runtime import Array, Differentiable, Float32, Float64
 
 class InputSchema(BaseModel):
     a: Differentiable[Array[(None,), Float32]] = Field(
-        description="An arbitrary vector normalized according to [...]"
+        description="An arbitrary vector."
     )
     b: Differentiable[Array[(None,), Float32]] = Field(
         description="An arbitrary vector. Needs to have the same dimensions as a."

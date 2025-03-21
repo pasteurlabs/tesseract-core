@@ -26,6 +26,9 @@ from tesseract_core.runtime.file_interactions import (
     read_from_path,
     write_to_path,
 )
+from tesseract_core.runtime.finite_differences import (
+    check_gradients as check_gradients_,
+)
 from tesseract_core.runtime.serve import create_rest_api
 from tesseract_core.runtime.serve import serve as serve_
 
@@ -150,6 +153,154 @@ def check() -> None:
     # raises an exception if the API cannot be imported
     get_tesseract_api()
     typer.echo("✅ Tesseract API check successful ✅")
+
+
+@tesseract_runtime.command()
+@click.argument(
+    "payload",
+    type=click.STRING,
+    required=True,
+    metavar="JSON_PAYLOAD",
+    callback=_parse_arg_callback,
+)
+@click.option(
+    "--endpoints",
+    type=click.STRING,
+    required=False,
+    multiple=True,
+    help="Endpoints to check gradients for (default: check all).",
+)
+@click.option(
+    "--input-paths",
+    type=click.STRING,
+    required=False,
+    multiple=True,
+    help="Paths to differentiable inputs to check gradients for (default: check all).",
+)
+@click.option(
+    "--output-paths",
+    type=click.STRING,
+    required=False,
+    multiple=True,
+    help="Paths to differentiable outputs to check gradients for (default: check all).",
+)
+@click.option(
+    "--eps",
+    type=click.FLOAT,
+    required=False,
+    help="Step size for finite differences.",
+    default=1e-4,
+    show_default=True,
+)
+@click.option(
+    "--rtol",
+    type=click.FLOAT,
+    required=False,
+    help="Relative tolerance when comparing finite differences to gradients.",
+    default=0.1,
+    show_default=True,
+)
+@click.option(
+    "--max-evals",
+    type=click.INT,
+    required=False,
+    help="Maximum number of evaluations per input.",
+    default=1000,
+    show_default=True,
+)
+@click.option(
+    "--max-failures",
+    type=click.INT,
+    required=False,
+    help="Maximum number of failures to report per endpoint.",
+    default=10,
+    show_default=True,
+)
+@click.option(
+    "--seed",
+    type=click.INT,
+    required=False,
+    help="Seed for random number generator. If not set, a random seed is used.",
+    default=None,
+)
+@click.option(
+    "--show-progress",
+    is_flag=True,
+    default=True,
+    help="Show progress bar.",
+)
+def check_gradients(
+    payload,
+    input_paths,
+    output_paths,
+    endpoints,
+    eps,
+    rtol,
+    max_evals,
+    max_failures,
+    seed,
+    show_progress,
+) -> None:
+    """Check gradients of endpoints against a finite difference approximation.
+
+    This is an automated way to check the correctness of the gradients of the different AD endpoints
+    (jacobian, jacobian_vector_product, vector_jacobian_product) of a ``tesseract_api.py`` module.
+    It will sample random indices and compare the gradients computed by the AD endpoints with the
+    finite difference approximation.
+
+    Warning:
+        Finite differences are not exact and the comparison is done with a tolerance. This means
+        that the check may fail even if the gradients are correct, and vice versa.
+
+    Finite difference approximations are sensitive to numerical precision. When finite differences
+    are reported incorrectly as 0.0, it is likely that the chosen `eps` is too small, especially for
+    inputs that do not use float64 precision.
+    """
+    api_module = get_tesseract_api()
+    inputs, base_dir = payload
+
+    result_iter = check_gradients_(
+        api_module,
+        inputs,
+        base_dir=base_dir,
+        input_paths=input_paths,
+        output_paths=output_paths,
+        endpoints=endpoints,
+        max_evals=max_evals,
+        eps=eps,
+        rtol=rtol,
+        seed=seed,
+        show_progress=show_progress,
+    )
+
+    failed = False
+    for endpoint, failures, num_evals in result_iter:
+        if not failures:
+            typer.echo(
+                f"✅ Gradient check for {endpoint} passed ✅ ({len(failures)} failures / {num_evals} checks)"
+            )
+        else:
+            failed = True
+            typer.echo()
+            typer.echo(
+                f"⚠️ Gradient check for {endpoint} failed ⚠️ ({len(failures)} failures / {num_evals} checks)"
+            )
+            printed_failures = min(len(failures), max_failures)
+            typer.echo(f"First {printed_failures} failures:")
+            for failure in failures[:printed_failures]:
+                typer.echo(
+                    f"  Input path: '{failure.in_path}', Output path: '{failure.out_path}', Index: {failure.idx}"
+                )
+                if failure.exception:
+                    typer.echo(f"  Encountered exception: {failure.exception}")
+                else:
+                    typer.echo(f"  {endpoint} value: {failure.grad_val}")
+                    typer.echo(f"  Finite difference value: {failure.ref_val}")
+                typer.echo()
+
+    if failed:
+        typer.echo("❌ Some gradient checks failed ❌")
+        sys.exit(1)
 
 
 @tesseract_runtime.command()

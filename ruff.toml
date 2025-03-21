@@ -46,10 +46,10 @@ ignore = [
 
 [lint.extend-per-file-ignores]
 # Ignore missing docstrings and type annotations for selected directories
-"./*.py" = ["D101", "D102", "D103", "ANN"]
-"tests/*" = ["D101", "D102", "D103", "ANN"]
-"examples/**/*" = ["D101", "D102", "D103", "ANN"]
-"tesseract_core/sdk/templates/*" = ["D101", "D102", "D103", "ANN"]
+"./*.py" = ["D101", "D102", "D103", "D106", "ANN"]
+"tests/*" = ["D101", "D102", "D103", "D106", "ANN"]
+"examples/**/*" = ["D101", "D102", "D103", "D106", "ANN"]
+"tesseract_core/sdk/templates/*" = ["D101", "D102", "D103", "D106", "ANN"]
 
 [lint.pydocstyle]
 convention = "google"
