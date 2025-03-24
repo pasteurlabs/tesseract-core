@@ -5,7 +5,7 @@
 Tesseract Core depends on Docker.
 If you are on macOS, installing Docker Desktop includes several plugins for extended functionality needed by Tesseract Core.
 If you are on Linux and / or prefer to work via CLIs, you will need to install these plugin packages in addition to `docker`.
-These are 
+These are
 
 1. [`docker-buildx`](https://github.com/docker/buildx)
 2. [`docker-compose`](https://github.com/docker/compose)
