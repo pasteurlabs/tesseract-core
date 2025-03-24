@@ -21,17 +21,42 @@ class _ApiObject(NamedTuple):
     name: str
     expected_type: type
     num_args: int | None = None
+    arg_names: tuple[str, ...] | None = None
     optional: bool = False
 
 
 EXPECTED_OBJECTS = (
-    _ApiObject("apply", ast.FunctionDef, 1),
+    _ApiObject("apply", ast.FunctionDef, 1, arg_names=("inputs",)),
     _ApiObject("InputSchema", ast.ClassDef),
     _ApiObject("OutputSchema", ast.ClassDef),
-    _ApiObject("jacobian", ast.FunctionDef, 3, optional=True),
-    _ApiObject("jacobian_vector_product", ast.FunctionDef, 4, optional=True),
-    _ApiObject("vector_jacobian_product", ast.FunctionDef, 4, optional=True),
-    _ApiObject("abstract_eval", ast.FunctionDef, 1, optional=True),
+    _ApiObject(
+        "jacobian",
+        ast.FunctionDef,
+        3,
+        arg_names=("inputs", "jac_inputs", "jac_outputs"),
+        optional=True,
+    ),
+    _ApiObject(
+        "jacobian_vector_product",
+        ast.FunctionDef,
+        4,
+        arg_names=("inputs", "jvp_inputs", "jvp_outputs", "tangent_vector"),
+        optional=True,
+    ),
+    _ApiObject(
+        "vector_jacobian_product",
+        ast.FunctionDef,
+        4,
+        arg_names=("inputs", "vjp_inputs", "vjp_outputs", "cotangent_vector"),
+        optional=True,
+    ),
+    _ApiObject(
+        "abstract_eval",
+        ast.FunctionDef,
+        1,
+        arg_names=("abstract_inputs",),
+        optional=True,
+    ),
 )
 
 
@@ -191,7 +216,11 @@ def validate_tesseract_api(src_dir: Path) -> None:
 
         if obj.num_args is not None:
             if _get_func_argnums(toplevel_objects[obj.name]) != obj.num_args:
-                raise ValidationError(f"{obj.name} must have {obj.num_args} arguments")
+                raise ValidationError(
+                    f"{obj.name} must have {obj.num_args} arguments: {obj.arg_names}.\n"
+                    f"However, {tesseract_api_location} specifies {len(toplevel_objects[obj.name].args.args)}  "
+                    f"arguments: {tuple(a.arg for a in toplevel_objects[obj.name].args.args)}."
+                )
 
     # Check InputSchema and OutputSchema are pydantic BaseModels
     for schema in ("InputSchema", "OutputSchema"):

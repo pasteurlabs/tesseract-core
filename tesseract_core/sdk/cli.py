@@ -33,6 +33,7 @@ from .api_parse import (
     EXPECTED_OBJECTS,
     TesseractBuildConfig,
     TesseractConfig,
+    ValidationError,
     get_non_base_fields_in_tesseract_config,
 )
 from .exceptions import UserError
@@ -307,6 +308,8 @@ def build_image(
         raise UserError(f"Input error building Tesseract: {e}") from e
     except PermissionError as e:
         raise UserError(f"Permission denied: {e}") from e
+    except ValidationError as e:
+        raise UserError(f"Error validating tesseract_api.py: {e}") from e
 
     if generate_only:
         # output is the path to the build context
