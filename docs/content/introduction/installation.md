@@ -1,8 +1,26 @@
 # Installation
 
-## Dependencies
+## Basic installation
 
-Tesseract Core depends on Python 3.10+ (ideally installed within a [virtual environment](https://packaging.python.org/en/latest/guides/installing-using-pip-and-virtual-environments/)) and Docker.
+```{note}
+Before proceeding, make sure you have a [working installation of Docker](https://www.docker.com/products/docker-desktop/) and a modern Python installation (Python 3.10+), ideally in a [virtual environment](https://packaging.python.org/en/latest/guides/installing-using-pip-and-virtual-environments/).
+```
+
+The simplest way to install Tesseract Core is via `pip`:
+
+```bash
+$ pip install tesseract-core
+```
+
+Then, verify everything is working as intended:
+
+```bash
+$ tesseract list
+```
+
+## Dependencies for minimal installation of Docker Engine CLI
+
+Tesseract Core depends on Python 3.10+ and Docker.
 
 [Docker Desktop](https://www.docker.com/products/docker-desktop/) makes it easy to get up and running with `docker`.
 It's available for macOS, and ships with several `docker` plugins needed by Tesseract Core.
@@ -16,19 +34,6 @@ These are
 
 though their names may differ between package manager repositories.
 
-## Basic installation
-
-The simplest way to install Tesseract Core is via `pip`:
-
-```bash
-$ pip install tesseract-core
-```
-
-Then, verify everything is working as intended:
-
-```bash
-$ tesseract list
-```
 
 (installation-runtime)=
 ## Runtime installation
