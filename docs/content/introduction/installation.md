@@ -55,6 +55,7 @@ Some shells use `[` and `]` as special characters, and might error out on the `p
 
 Tesseract is fully supported on Windows via the Windows Subsystem for Linux (WSL). For guidance, please refer to the [official documentation](https://docs.microsoft.com/en-us/windows/wsl/).
 
+(exe-conflicts)=
 ### Conflicting executables
 
 This is not the only software called "Tesseract". Sometimes, this leads to multiple executables with the same name, for example if you also have [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) installed. In that case, you may encounter the following error:
