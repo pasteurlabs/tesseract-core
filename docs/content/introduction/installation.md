@@ -2,19 +2,21 @@
 
 ## Dependencies
 
-Tesseract Core depends on Docker.
-If you are on macOS, installing Docker Desktop includes several plugins for extended functionality needed by Tesseract Core.
-If you are on Linux and / or prefer to work via CLIs, you will need to install these plugin packages in addition to `docker`.
+Tesseract Core depends on Python 3.10+ (ideally installed within a [virtual environment](https://packaging.python.org/en/latest/guides/installing-using-pip-and-virtual-environments/)) and Docker.
+
+[Docker Desktop](https://www.docker.com/products/docker-desktop/) makes it easy to get up and running with `docker`.
+It's available for macOS, and ships with several `docker` plugins needed by Tesseract Core.
+
+Docker Desktop is available on Linux for Debian and Fedora based distros.
+If you are on any other distribution of Linux, or prefer to minimally install the [`docker` engine CLI](https://docs.docker.com/engine/install/) via your package manager, you will need to install the plugins in addition to `docker`.
 These are
 
 1. [`docker-buildx`](https://github.com/docker/buildx)
 2. [`docker-compose`](https://github.com/docker/compose)
 
-## Basic installation
+though their names may differ between package manager repositories.
 
-```{note}
-Before proceeding, make sure you have a [working installation of Docker](https://docs.docker.com/engine/install/) and a modern Python installation (Python 3.10+), ideally in a [virtual environment](https://packaging.python.org/en/latest/guides/installing-using-pip-and-virtual-environments/).
-```
+## Basic installation
 
 The simplest way to install Tesseract Core is via `pip`:
 
@@ -81,7 +83,9 @@ $ tesseract build examples/helloworld
 RuntimeError: Could not reach Docker daemon, check if it is running. See logs for details.
 ```
 
-Your natural inclination may be to run this with elevated privileges, however if you do this it's possible that your system will ignore the `tesseract` command in your virtual environment, and instead execute [Tesseract OCR](https://github.com/tesseract-ocr/tesseract)
+Your natural inclination may be to run this with elevated privileges.
+If you do this, your system may resolve the path to the `tesseract` command differently, and instead execute the [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) command.
+This can occur even if you have installed Tesseract Core in an active virtual environment.
 
 ```
 $ sudo tesseract build examples/helloworld
