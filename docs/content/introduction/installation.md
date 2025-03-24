@@ -82,16 +82,15 @@ $ which tesseract
 
 ### User privileges
 
-If you are on Linux and not a regular Docker user, or are used to running Docker via the command line using `sudo`, you may find that `tesseract build` results in the following exception
+If your user needs to run `docker` commands with `sudo`, running `tesseract build` without it will result in the following exception.
 
 ```
 $ tesseract build examples/helloworld
 RuntimeError: Could not reach Docker daemon, check if it is running. See logs for details.
 ```
 
-Your natural inclination may be to run this with elevated privileges.
-If you do this, your system may resolve the path to the `tesseract` command differently, and instead execute the [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) command.
-This can occur even if you have installed Tesseract Core in an active virtual environment.
+However, prepending this with `sudo` does not solve the problem.
+Instead, running with `sudo` bypasses active virtual environments, so the `tesseract` command may [not be resolved correctly](exe-conflicts).
 
 ```
 $ sudo tesseract build examples/helloworld
