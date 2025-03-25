@@ -30,6 +30,20 @@ class MyModel(BaseModel):
     scalar_int: Differentiable[Int32]
 
 
+class MyIntModel(BaseModel):
+    array_int: Array[(2, 3), Int64]
+    array_float: Array[(None, 3), Int64]
+    array_bool: Array[..., Bool]
+    scalar_int: Differentiable[Int32]
+
+
+class MyFloatModel(BaseModel):
+    array_int: Array[(2, 3), Float64]
+    array_float: Differentiable[Array[(None, 3), Float64]]
+    array_bool: Array[..., Bool]
+    scalar_int: Differentiable[Int32]
+
+
 arr_int = np.array([[1, 2, 3], [4, 5, 6]])
 arr_float = np.array([[1.0, 2.0, 3.0]])
 arr_bool = np.array([True, False, True]).reshape(1, 1, 3)
@@ -101,6 +115,23 @@ def test_model_creation_from_pyobj():
     assert np.array_equal(model.array_bool, arr_bool)
     assert model.scalar_int == scalar_int
 
+    # test casting from int to float
+    model = MyModel(
+        array_int=arr_int.tolist(),
+        array_float=arr_float.astype(int, casting="unsafe").tolist(),
+        array_bool=arr_bool.tolist(),
+        scalar_int=int(scalar_int),
+    )
+
+    # test casting from float to int
+    with pytest.raises(ValidationError, match="cannot be cast"):
+        model = MyModel(
+            array_int=arr_int.astype(float).tolist(),
+            array_float=arr_float.tolist(),
+            array_bool=arr_bool.tolist(),
+            scalar_int=int(scalar_int),
+        )
+
 
 def test_json_base64_rountrip():
     model = MyModel(
@@ -122,6 +153,27 @@ def test_json_base64_rountrip():
 
     for field in model.model_fields:
         assert np.array_equal(getattr(roundtrip, field), getattr(model, field))
+
+    # test casting from int to float
+    model = MyIntModel(
+        array_int=arr_int,
+        array_float=arr_float.astype(int, casting="unsafe"),
+        array_bool=arr_bool,
+        scalar_int=scalar_int,
+    )
+    serialized = model.model_dump_json(context={"array_encoding": "base64"})
+    roundtrip = MyModel.model_validate_json(serialized)
+
+    # test casting from float to int
+    model = MyFloatModel(
+        array_int=arr_int.astype(float),
+        array_float=arr_float,
+        array_bool=arr_bool,
+        scalar_int=scalar_int,
+    )
+    serialized = model.model_dump_json(context={"array_encoding": "base64"})
+    with pytest.raises(ValidationError, match="dtype"):
+        MyModel.model_validate_json(serialized)
 
 
 def test_json_binref_roundtrip(tmpdir):
@@ -169,6 +221,31 @@ def test_json_binref_roundtrip(tmpdir):
     with pytest.raises(ValueError, match="base_dir"):
         model.model_dump_json(context={"array_encoding": "binref"})
 
+    # test casting from int to float
+    model = MyIntModel(
+        array_int=arr_int,
+        array_float=arr_float.astype(int, casting="unsafe"),
+        array_bool=arr_bool,
+        scalar_int=scalar_int,
+    )
+    serialized = model.model_dump_json(
+        context={"array_encoding": "binref", "base_dir": dumpdir, "max_file_size": 40}
+    )
+    roundtrip = MyModel.model_validate_json(serialized, context={"base_dir": dumpdir})
+
+    # test casting from float to int
+    model = MyFloatModel(
+        array_int=arr_int.astype(float),
+        array_float=arr_float,
+        array_bool=arr_bool,
+        scalar_int=scalar_int,
+    )
+    serialized = model.model_dump_json(
+        context={"array_encoding": "binref", "base_dir": dumpdir, "max_file_size": 40}
+    )
+    with pytest.raises(ValidationError, match="dtype"):
+        MyModel.model_validate_json(serialized, context={"base_dir": dumpdir})
+
 
 def test_python_dump_array_encoding():
     model = MyModel(
@@ -194,6 +271,15 @@ def test_python_roundtrip():
 
     for field in model.model_fields:
         assert np.array_equal(getattr(roundtrip, field), getattr(model, field))
+
+    # Check casting from int to float
+    MyModel.model_validate(
+        serialized | {"array_float": arr_float.astype(int, casting="unsafe")}
+    )
+
+    # Check casting from float to int
+    with pytest.raises(ValidationError, match="cannot be cast"):
+        MyModel.model_validate(serialized | {"array_int": arr_int.astype(float)})
 
 
 def test_model_from_json(tmpdir):
