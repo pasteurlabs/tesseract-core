@@ -381,7 +381,7 @@ def decode_array(
 
         # keep checking for "raw" for backwards compat
         elif val.data.encoding in {"json", "raw"}:
-            data = np.asarray(val.data.buffer, dtype=val.dtype).reshape(val.shape)
+            data = np.asarray(val.data.buffer, dtype=None).reshape(val.shape)
 
         else:
             # Unreachable
