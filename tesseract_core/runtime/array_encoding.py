@@ -357,7 +357,7 @@ def python_to_array(
 ) -> ArrayLike:
     """Convert a Python object to a NumPy array."""
     try:
-        arr = np.asarray(val, dtype=expected_dtype, order="C")
+        arr = np.asarray(val, dtype=None, order="C")
     except TypeError as exc:
         raise ValueError(f"Could not convert {val} to NumPy array") from exc
     return _coerce_shape_dtype(arr, expected_shape, expected_dtype)
