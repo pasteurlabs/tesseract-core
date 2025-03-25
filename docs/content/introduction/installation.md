@@ -82,7 +82,7 @@ $ which tesseract
 
 ### User privileges
 
-If your user needs to run `docker` commands with `sudo`, running `tesseract build` without it will result in the following exception.
+If you need to run `docker` commands with `sudo`, running `tesseract build` without it will result in the following exception.
 
 ```
 $ tesseract build examples/helloworld
