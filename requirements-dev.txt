@@ -1,7 +1,7 @@
 -r ./requirements.txt
 -r tesseract_core/runtime/meta/requirements.txt
 httpx==0.28.1
-pre-commit==4.1.0
+pre-commit==4.2.0
 pytest-cov==6.0.0
 pytest==8.3.5
 pytest-mock==3.14.0
