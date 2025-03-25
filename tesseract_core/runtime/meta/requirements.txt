@@ -1,5 +1,5 @@
 pydantic==2.10.6
-fastapi==0.115.11
+fastapi==0.115.12
 requests==2.32.3
 uvicorn==0.34.0
 click==8.1.8

@@ -20,8 +20,8 @@ class VolumetricMeshData(BaseModel):
     num_points_per_cell: Array[(None,), Float32]  # should have length == n_cells
     cell_connectivity: Array[(None,), Int32]  # length == sum(num_points_per_cell)
 
-    cell_data: dict[str, Differentiable[Array[(None, None), Float32]]]
-    point_data: dict[str, Differentiable[Array[(None, None), Float32]]]
+    cell_data: dict[str, Array[(None, None), Float32]]
+    point_data: dict[str, Array[(None, None), Float32]]
 
     @model_validator(mode="after")
     def validate_num_points_per_cell(self):

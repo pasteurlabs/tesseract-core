@@ -84,7 +84,7 @@ POSSIBLE_CMDS = set(
     re.sub(r"([a-z])([A-Z])", r"\1-\2", object.name).replace("_", "-").lower()
     for object in EXPECTED_OBJECTS
 )
-POSSIBLE_CMDS.update({"health", "openapi-schema", "check"})
+POSSIBLE_CMDS.update({"health", "openapi-schema", "check", "check-gradients"})
 
 # All fields in TesseractConfig and TesseractBuildConfig for config override
 POSSIBLE_KEYPATHS = TesseractConfig.model_fields.keys()
