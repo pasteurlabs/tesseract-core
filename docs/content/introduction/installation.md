@@ -24,7 +24,7 @@ $ tesseract list
 [Docker Desktop](https://www.docker.com/products/docker-desktop/) ships with everything you need to run Tesseract Core, including the Docker Engine CLI, Docker Compose, and Docker Buildx. It also includes a GUI for managing containers and images.
 It is available for Windows, macOS, and Linux for Debian and Fedora based distros.
 
-If your system is not supported by Docker Desktop, or you prefer a more minimal setup, you can install the [`docker` engine CLI](https://docs.docker.com/engine/install/) together with some required plugins:
+If your system is not supported by Docker Desktop, or you prefer a more minimal setup, you will need to install the [`docker` engine CLI](https://docs.docker.com/engine/install/) together with some required plugins:
 
 1. [`docker-buildx`](https://github.com/docker/buildx)
 2. [`docker-compose`](https://github.com/docker/compose)
