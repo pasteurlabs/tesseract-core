@@ -3,7 +3,7 @@
 ## Basic installation
 
 ```{note}
-Before proceeding, make sure you have a [working installation of Docker](https://www.docker.com/products/docker-desktop/) and a modern Python installation (Python 3.10+), ideally in a [virtual environment](https://packaging.python.org/en/latest/guides/installing-using-pip-and-virtual-environments/).
+Before proceeding, make sure you have a working installation of Docker ([Docker Desktop](https://www.docker.com/products/docker-desktop/) or [Docker Engine](#installation-docker)) and a modern Python installation (Python 3.10+), ideally in a [virtual environment](https://packaging.python.org/en/latest/guides/installing-using-pip-and-virtual-environments/).
 ```
 
 The simplest way to install Tesseract Core is via `pip`:
@@ -18,22 +18,28 @@ Then, verify everything is working as intended:
 $ tesseract list
 ```
 
-## Dependencies for minimal installation of Docker Engine CLI
+(installation-docker)=
+## Installing Docker
 
-Tesseract Core depends on Python 3.10+ and Docker.
+[Docker Desktop](https://www.docker.com/products/docker-desktop/) ships with everything you need to run Tesseract Core, including the Docker Engine CLI, Docker Compose, and Docker Buildx and includes a GUI for managing containers and images.
+It is available for Windows, macOS, and Linux for Debian and Fedora based distros.
 
-[Docker Desktop](https://www.docker.com/products/docker-desktop/) makes it easy to get up and running with `docker`.
-It's available for macOS, and ships with several `docker` plugins needed by Tesseract Core.
-
-Docker Desktop is available on Linux for Debian and Fedora based distros.
-If you are on any other distribution of Linux, or prefer to minimally install the [`docker` engine CLI](https://docs.docker.com/engine/install/) via your package manager, you will need to install the plugins in addition to `docker`.
-These are
+If your system is not supported by Docker Desktop, or prefer a more minimal setup, you will need to install the [`docker` engine CLI](https://docs.docker.com/engine/install/) together with some required plugins:
 
 1. [`docker-buildx`](https://github.com/docker/buildx)
 2. [`docker-compose`](https://github.com/docker/compose)
 
-though their names may differ between package manager repositories.
+To use Tesseract without `sudo`, you will need to add your user to the `docker` group. See [Linux post-installation steps for Docker Engine > Manage Docker as a non-root user](https://docs.docker.com/engine/install/linux-postinstall/#manage-docker-as-a-non-root-user), or run:
 
+```bash
+$ sudo usermod -aG docker $USER
+```
+
+Then, log out and back in to apply the changes.
+
+```{warning}
+Using `sudo tesseract` may bypass active virtual environments and shadow the `tesseract` command with [conflicting executables](#exe-conflicts). To avoid this, make sure you're using the correct `tesseract` executable, or add your user to the `docker` group (and omit `sudo`).
+```
 
 (installation-runtime)=
 ## Runtime installation
@@ -80,28 +86,23 @@ You can always confirm what executable the command `tesseract` corresponds with
 $ which tesseract
 ```
 
-### User privileges
+### Missing user privileges
 
-If you need to run `docker` commands with `sudo`, running `tesseract build` without it will result in the following exception.
+If you lack permissions to access the Docker daemon, running e.g. `tesseract build` will result in the following exception:
 
-```
+```bash
 $ tesseract build examples/helloworld
 RuntimeError: Could not reach Docker daemon, check if it is running. See logs for details.
 ```
 
-However, prepending this with `sudo` does not solve the problem.
-Instead, running with `sudo` bypasses active virtual environments, so the `tesseract` command may [not be resolved correctly](exe-conflicts).
+You can resolve this by adding your user to the `docker` group.
+See [Linux post-installation steps for Docker Engine > Manage Docker as a non-root user](https://docs.docker.com/engine/install/linux-postinstall/#manage-docker-as-a-non-root-user), or run:
 
-```
-$ sudo tesseract build examples/helloworld
-Error opening data file /usr/share/tessdata/eng.traineddata
-Please make sure the TESSDATA_PREFIX environment variable is set to your "tessdata" directory.
-Failed loading language 'eng'
-...
+```bash
+$ sudo usermod -aG docker $USER
 ```
 
-You can resolve this by omitting the `sudo` command, and instead adding your user to the `docker` group.
-See [Linux post-installation steps for Docker Engine > Manage Docker as a non-root user](https://docs.docker.com/engine/install/linux-postinstall/#manage-docker-as-a-non-root-user).
+Then, log out and back in to apply the changes.
 
 (installation-dev)=
 ## Development installation
