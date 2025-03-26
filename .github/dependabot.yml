@@ -1,25 +1,11 @@
 version: 2
 
 updates:
-- package-ecosystem: pip
-  directory: "/"
-  schedule:
-    interval: "weekly"
-    timezone: "America/New_York"
-  open-pull-requests-limit: 10
-
-  groups:
-    deps:
-      patterns:
-          - "*"
-
-  commit-message:
-    prefix: chore
-
 - package-ecosystem: github-actions
   directory: "/"
   schedule:
     interval: "weekly"
+    day: "monday"
     timezone: "America/New_York"
   open-pull-requests-limit: 10
 
@@ -27,6 +13,3 @@ updates:
     actions:
       patterns:
       - "*"
-
-  commit-message:
-    prefix: ci
