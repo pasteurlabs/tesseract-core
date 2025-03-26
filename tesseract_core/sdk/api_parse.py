@@ -25,6 +25,8 @@ class _ApiObject(NamedTuple):
     optional: bool = False
 
 
+ORDINALS = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth"]
+
 EXPECTED_OBJECTS = (
     _ApiObject("apply", ast.FunctionDef, 1, arg_names=("inputs",)),
     _ApiObject("InputSchema", ast.ClassDef),
@@ -137,8 +139,8 @@ class ValidationError(Exception):
     pass
 
 
-def _get_func_argnums(func: ast.FunctionDef) -> int:
-    """Get the number of the arguments of a function node.
+def _get_func_argnames(func: ast.FunctionDef) -> tuple[str, ...]:
+    """Get the names of the arguments of a function node.
 
     See:
     https://docs.python.org/3/library/ast.html#ast.FunctionDef
@@ -153,7 +155,7 @@ def _get_func_argnums(func: ast.FunctionDef) -> int:
         raise ValidationError(
             f"Function {func.name} must not have positional-only arguments"
         )
-    return len(func_args.args)
+    return tuple(arg.arg for arg in func.args.args)
 
 
 def validate_tesseract_api(src_dir: Path) -> None:
@@ -215,12 +217,26 @@ def validate_tesseract_api(src_dir: Path) -> None:
             )
 
         if obj.num_args is not None:
-            if _get_func_argnums(toplevel_objects[obj.name]) != obj.num_args:
+            func_argnames = _get_func_argnames(toplevel_objects[obj.name])
+            func_argnums = len(func_argnames)
+            if func_argnums != obj.num_args:
                 raise ValidationError(
-                    f"{obj.name} must have {obj.num_args} arguments: {obj.arg_names}.\n"
-                    f"However, {tesseract_api_location} specifies {len(toplevel_objects[obj.name].args.args)}  "
-                    f"arguments: {tuple(a.arg for a in toplevel_objects[obj.name].args.args)}."
+                    f"{obj.name} must have {obj.num_args} arguments: {', '.join(obj.arg_names)}.\n"
+                    f"However, {tesseract_api_location} specifies {func_argnums} "
+                    f"arguments: {', '.join(func_argnames)}."
                 )
+            else:
+                msgs = []
+                for i in range(obj.num_args):
+                    if func_argnames[i] != obj.arg_names[i]:
+                        print(func_argnames[i], obj.arg_names[i])
+                        print(func_argnames[i] == obj.arg_names[i])
+                        msgs.append(
+                            f"The {ORDINALS[i]} argument of {obj.name} must be named {obj.arg_names[i]}, "
+                            f"but {tesseract_api_location} has named it {func_argnames[i]}."
+                        )
+                if msgs:
+                    raise ValidationError("\n".join(msgs))
 
     # Check InputSchema and OutputSchema are pydantic BaseModels
     for schema in ("InputSchema", "OutputSchema"):
