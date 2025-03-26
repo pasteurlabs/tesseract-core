@@ -1,9 +1,9 @@
-# 
+#
 
 ## API documentation
 
 ```{eval-rst}
-.. automodule:: 
+.. automodule::
    :members:
    :undoc-members:
 ```
