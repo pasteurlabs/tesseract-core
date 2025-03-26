@@ -1,53 +1,53 @@
 [project]
-name = "tesseract-core"
-description = "A toolkit for re-usable, autodiff-native software components."
+name = ""
+# TODO: add a short description here (same as in GitHub UI)
+description = ""
 readme = "README.md"
 authors = [
-    {name = "The Tesseract team @ Pasteur Labs + OSS contributors", email = "info@simulation.science"},
+    {name = "The  team @ Pasteur Labs", email = "info@simulation.science"},
 ]
-license = { text = "Apache-2.0" }
-requires-python = ">=3.10"
-dependencies = [
-    "docker",
-    "jinja2",
-    "rich",
-    "typer",
-    "pyyaml",
-    "pydantic",
-    "numpy",
-    "requests",
-    "pip",
-]
-dynamic = [
-    # Injected via hatch-vcs
-    "version",
-    # Injected via inject_runtime_pyproject.py
-    "optional-dependencies",
-    "scripts",
-]
+requires-python = ">=3.10,<3.14"
+# TODO: add your dependencies here
+dependencies = []
+dynamic = ["version"]
 
 [project.urls]
-Homepage = "https://github.com/pasteurlabs/tesseract-core"
-Documentation = "https://docs.pasteurlabs.ai/projects/tesseract-core/latest"
+Homepage = "https://github.com/pasteurlabs/"
+
+[project.optional-dependencies]
+docs = [
+    "sphinx",
+    "sphinx_autodoc_typehints",
+    "furo",
+    "myst-parser",
+]
+dev = [
+    "pre-commit",
+    "pytest",
+    "pytest-cov",
+    "typeguard",
+    # Add other extras here, too
+    "[docs]",
+]
 
 [build-system]
-requires = ["hatchling", "hatch-vcs", "toml"]
-build-backend = "hatchling.build"
+requires = ["setuptools", "versioneer[toml]==0.29"]
+build-backend = "setuptools.build_meta"
 
-[tool.hatch.version]
-source = "vcs"
+[tool.setuptools.packages.find]
+include = ["", ".*"]
 
-[tool.hatch.build.hooks.vcs]
-version-file = "tesseract_core/_version.py"
-
-[tool.hatch.build.targets.wheel]
-packages = ["tesseract_core"]
-
-[tool.hatch.metadata.hooks.custom]
-path = "inject_runtime_pyproject.py"
+[tool.versioneer]
+VCS = "git"
+style = "pep440"
+versionfile_source = "/_version.py"
+versionfile_build = "/_version.py"
+tag_prefix = "v"
+parentdir_prefix = "-"
 
 [tool.pytest.ini_options]
-addopts = ["--typeguard-packages=tesseract_core"]
+# Test type hints via typeguard - disabled by default
+# addopts = ["--typeguard-packages="]
 testpaths = ["tests"]
 filterwarnings = [
     "error",
@@ -64,7 +64,7 @@ filterwarnings = [
 
 [tool.coverage.run]
 branch = true
-source = ["tesseract_core"]
+source = [""]
 
 [tool.coverage.report]
 exclude_lines = [
@@ -75,5 +75,5 @@ exclude_lines = [
 ]
 ignore_errors = true
 omit = [
-    "tesseract_core/_version.py",
+    "/_version.py",
 ]
