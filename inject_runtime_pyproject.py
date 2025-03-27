@@ -21,6 +21,7 @@ BASE_OPTIONAL_DEPS = {
         "sphinx_design",
         "sphinx_copybutton",
         "sphinxext_opengraph",
+        "tesseract-core[runtime]",
     ],
     "dev": [
         "fastapi",
