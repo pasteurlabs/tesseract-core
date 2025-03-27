@@ -115,14 +115,12 @@ def test_get_input_schema(mock_client):
     response = mock_client.get("/input_schema")
 
     assert response.status_code == 200, response.text
-    assert "properties" in response.json()
 
 
 def test_get_output_schema(mock_client):
     response = mock_client.get("/output_schema")
 
     assert response.status_code == 200, response.text
-    assert "properties" in response.json()
 
 
 def test_post_abstract_eval(mock_client):
@@ -164,7 +162,8 @@ def test_threading_sanity(tmpdir, free_port):
 
     This is important so we don't require users to be aware of threading issues.
     """
-    TESSERACT_API = dedent("""
+    TESSERACT_API = dedent(
+        """
     import threading
     from pydantic import BaseModel
 
@@ -180,9 +179,10 @@ def test_threading_sanity(tmpdir, free_port):
         assert threading.current_thread() == threading.main_thread()
         return OutputSchema()
 
-    def abstract_eval(inputs: dict) -> dict:
+    def abstract_eval(abstract_inputs: dict) -> dict:
         pass
-    """)
+    """
+    )
 
     api_file = tmpdir / "tesseract_api.py"
 

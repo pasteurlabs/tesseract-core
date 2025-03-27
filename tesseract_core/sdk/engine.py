@@ -37,6 +37,7 @@ from pip._internal.req.req_file import (
 )
 
 from .api_parse import TesseractConfig, get_config, validate_tesseract_api
+from .exceptions import UserError
 
 logger = logging.getLogger("tesseract")
 
@@ -110,9 +111,9 @@ def needs_docker(func: Callable) -> Callable:
             docker.errors.APIError,
             docker.errors.DockerException,
         ) as ex:
-            message = "Could not reach Docker daemon, check if it is running."
-            logger.error(f"{message} Details: {ex}")
-            raise RuntimeError(f"{message} See logs for details.") from None
+            raise UserError(
+                "Could not reach Docker daemon, check if it is running."
+            ) from ex
 
         return func(*args, **kwargs)
 

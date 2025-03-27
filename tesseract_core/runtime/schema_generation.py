@@ -9,6 +9,7 @@ from copy import copy
 from typing import (
     Annotated,
     Any,
+    ClassVar,
     Literal,
     TypeVar,
     Union,
@@ -218,10 +219,54 @@ def apply_function_to_model_tree(
     return _recurse_over_model_tree(Schema, [])
 
 
+def _serialize_diffable_arrays(
+    obj: dict[tuple, Any],
+) -> dict[str, dict[str, Any]]:
+    """Convert a dict {path_tuple: array_type} to a dict {path_str: {shape, dtype}}.
+
+    path_str is a string representation of the path, with SEQ_INDEX_SENTINEL and DICT_INDEX_SENTINEL
+    replaced by indexing syntax (e.g. `foo.[].{}`).
+    """
+    serialized = {}
+    for pathtuple, value in obj.items():
+        shape = value.__metadata__[0].expected_shape
+        dtype = value.__metadata__[0].expected_dtype
+
+        # Ensure shape is JSON serializable
+        if shape is Ellipsis:
+            shape = None
+        else:
+            shape = tuple(shape)
+
+        # Replace sentinel values with indexing syntax
+        str_parts = []
+        for part in pathtuple:
+            if part is SEQ_INDEX_SENTINEL:
+                str_parts.append("[]")
+            elif part is DICT_INDEX_SENTINEL:
+                str_parts.append("{}")
+            else:
+                str_parts.append(part)
+
+        serialized[".".join(str_parts)] = {
+            "shape": shape,
+            "dtype": dtype,
+        }
+
+    return serialized
+
+
 def create_apply_schema(
     InputSchema: type[BaseModel], OutputSchema: type[BaseModel]
 ) -> tuple[type[BaseModel], type[BaseModel]]:
     """Create the input / output schemas for the /apply endpoint."""
+    # We add metadata to the input and output schemas to indicate which fields are differentiable,
+    # what their paths are, and which expected shape / dtype they have.
+    # This is used internally and by some official clients, but not advertised as part of the public API,
+    # so people should not rely on it.
+    diffable_input_paths = _get_diffable_arrays(InputSchema)
+    diffable_output_paths = _get_diffable_arrays(OutputSchema)
+
     InputSchema = apply_function_to_model_tree(
         InputSchema,
         lambda x, _: x,
@@ -240,11 +285,23 @@ def create_apply_schema(
             ..., description="The input data to apply the Tesseract to."
         )
 
-        model_config = ConfigDict(extra="forbid")
+        differentiable_arrays: ClassVar[dict[str, dict[str, Any]]] = (
+            _serialize_diffable_arrays(diffable_input_paths)
+        )
+        model_config = ConfigDict(
+            extra="forbid",
+            json_schema_extra={"differentiable_arrays": differentiable_arrays},
+        )
 
     class ApplyOutputSchema(RootModel):
         root: OutputSchema = Field(
             ..., description="The output data from applying the Tesseract."
+        )
+        differentiable_arrays: ClassVar[dict[str, dict[str, Any]]] = (
+            _serialize_diffable_arrays(diffable_output_paths)
+        )
+        model_config = ConfigDict(
+            json_schema_extra={"differentiable_arrays": differentiable_arrays}
         )
 
     return ApplyInputSchema, ApplyOutputSchema
@@ -300,14 +357,13 @@ def create_abstract_eval_schema(
     return AbstractInputSchema, AbstractOutputSchema
 
 
-def _get_diffable_arrays(schema: type[BaseModel]) -> dict[str, Any]:
+def _get_diffable_arrays(schema: type[BaseModel]) -> dict[tuple, Any]:
     """Return a dictionary mapping path patterns of differentiable arrays to their types."""
     diffable_paths = {}
 
     def add_to_dict_if_diffable(obj: T, path: tuple) -> T:
         if is_differentiable(obj):
-            pattern = _path_to_pattern(path)
-            diffable_paths[pattern] = obj
+            diffable_paths[path] = obj
         return obj
 
     apply_function_to_model_tree(schema, add_to_dict_if_diffable)
@@ -368,24 +424,31 @@ def create_autodiff_schema(
 
     Returns a tuple (InputSchema, OutputSchema) with the generated schemas.
     """
-    diffable_inputs = _get_diffable_arrays(InputSchema)
-    diffable_outputs = _get_diffable_arrays(OutputSchema)
+    diffable_input_paths = _get_diffable_arrays(InputSchema)
+    diffable_output_paths = _get_diffable_arrays(OutputSchema)
 
-    if not diffable_inputs:
+    if not diffable_input_paths:
         raise RuntimeError("No differentiable inputs found in the input schema")
 
-    if not diffable_outputs:
+    if not diffable_output_paths:
         raise RuntimeError("No differentiable outputs found in the output schema")
 
+    diffable_input_patterns = {
+        _path_to_pattern(path): obj for path, obj in diffable_input_paths.items()
+    }
+    diffable_output_patterns = {
+        _path_to_pattern(path): obj for path, obj in diffable_output_paths.items()
+    }
+
     diffable_input_type = Union[
-        tuple(_pattern_to_type(p) for p in diffable_inputs.keys())
+        tuple(_pattern_to_type(p) for p in diffable_input_patterns)
     ]
     diffable_output_type = Union[
-        tuple(_pattern_to_type(p) for p in diffable_outputs.keys())
+        tuple(_pattern_to_type(p) for p in diffable_output_patterns)
     ]
 
-    def _find_shape_from_path(container: dict, concrete_path: str) -> tuple:
-        for path_pattern, array_type in container.items():
+    def _find_shape_from_path(path_patterns: dict, concrete_path: str) -> tuple:
+        for path_pattern, array_type in path_patterns.items():
             if _is_regex_pattern(path_pattern):
                 path_matches = bool(re.match(path_pattern, concrete_path))
             else:
@@ -425,9 +488,13 @@ def create_autodiff_schema(
                         f"{{{tuple(info.context['output_keys'])}: {{{tuple(info.context['input_keys'])}: ...}}}}, "
                         f"got {set(subout.keys())} for output key {output_path}."
                     )
-                output_shape = _find_shape_from_path(diffable_outputs, output_path)
+                output_shape = _find_shape_from_path(
+                    diffable_output_patterns, output_path
+                )
                 for input_path, arr in subout.items():
-                    input_shape = _find_shape_from_path(diffable_inputs, input_path)
+                    input_shape = _find_shape_from_path(
+                        diffable_input_patterns, input_path
+                    )
 
                     if output_shape is Ellipsis and input_shape is Ellipsis:
                         # Everything goes
@@ -473,7 +540,9 @@ def create_autodiff_schema(
                     f"Expected keys {info.context['output_keys']} in output; got {set(result.keys())}"
                 )
             for output_path, arr in result.items():
-                output_shape = _find_shape_from_path(diffable_outputs, output_path)
+                output_shape = _find_shape_from_path(
+                    diffable_output_patterns, output_path
+                )
                 if output_shape is Ellipsis:
                     # Everything goes
                     continue
@@ -500,7 +569,7 @@ def create_autodiff_schema(
                     f"Expected keys {info.context['input_keys']} in output; got {set(result.keys())}"
                 )
             for input_path, arr in result.items():
-                input_shape = _find_shape_from_path(diffable_inputs, input_path)
+                input_shape = _find_shape_from_path(diffable_input_patterns, input_path)
                 if input_shape is Ellipsis:
                     # Everything goes
                     continue
@@ -591,7 +660,6 @@ def create_autodiff_schema(
                     "The shape of each array is the same as the shape of the corresponding input array."
                 ),
             )
-
             model_config = ConfigDict(extra="forbid")
 
             @field_validator("tangent_vector", mode="after")
@@ -655,7 +723,6 @@ def create_autodiff_schema(
                     "The shape of each array is the same as the shape of the corresponding output array."
                 ),
             )
-
             model_config = ConfigDict(extra="forbid")
 
             @field_validator("cotangent_vector", mode="after")
