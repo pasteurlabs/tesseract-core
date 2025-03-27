@@ -231,12 +231,12 @@ def _serialize_diffable_arrays(
     for pathtuple, value in obj.items():
         shape = value.__metadata__[0].expected_shape
         dtype = value.__metadata__[0].expected_dtype
+
         # Ensure shape is JSON serializable
-        shape = (
-            tuple(None if dim is None else dim for dim in shape)
-            if isinstance(shape, tuple)
-            else shape
-        )
+        if shape is Ellipsis:
+            shape = None
+        else:
+            shape = tuple(shape)
 
         # Replace sentinel values with indexing syntax
         str_parts = []

@@ -21,17 +21,44 @@ class _ApiObject(NamedTuple):
     name: str
     expected_type: type
     num_args: int | None = None
+    arg_names: tuple[str, ...] | None = None
     optional: bool = False
 
 
+ORDINALS = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth"]
+
 EXPECTED_OBJECTS = (
-    _ApiObject("apply", ast.FunctionDef, 1),
+    _ApiObject("apply", ast.FunctionDef, 1, arg_names=("inputs",)),
     _ApiObject("InputSchema", ast.ClassDef),
     _ApiObject("OutputSchema", ast.ClassDef),
-    _ApiObject("jacobian", ast.FunctionDef, 3, optional=True),
-    _ApiObject("jacobian_vector_product", ast.FunctionDef, 4, optional=True),
-    _ApiObject("vector_jacobian_product", ast.FunctionDef, 4, optional=True),
-    _ApiObject("abstract_eval", ast.FunctionDef, 1, optional=True),
+    _ApiObject(
+        "jacobian",
+        ast.FunctionDef,
+        3,
+        arg_names=("inputs", "jac_inputs", "jac_outputs"),
+        optional=True,
+    ),
+    _ApiObject(
+        "jacobian_vector_product",
+        ast.FunctionDef,
+        4,
+        arg_names=("inputs", "jvp_inputs", "jvp_outputs", "tangent_vector"),
+        optional=True,
+    ),
+    _ApiObject(
+        "vector_jacobian_product",
+        ast.FunctionDef,
+        4,
+        arg_names=("inputs", "vjp_inputs", "vjp_outputs", "cotangent_vector"),
+        optional=True,
+    ),
+    _ApiObject(
+        "abstract_eval",
+        ast.FunctionDef,
+        1,
+        arg_names=("abstract_inputs",),
+        optional=True,
+    ),
 )
 
 
@@ -112,8 +139,8 @@ class ValidationError(Exception):
     pass
 
 
-def _get_func_argnums(func: ast.FunctionDef) -> int:
-    """Get the number of the arguments of a function node.
+def _get_func_argnames(func: ast.FunctionDef) -> tuple[str, ...]:
+    """Get the names of the arguments of a function node.
 
     See:
     https://docs.python.org/3/library/ast.html#ast.FunctionDef
@@ -128,7 +155,7 @@ def _get_func_argnums(func: ast.FunctionDef) -> int:
         raise ValidationError(
             f"Function {func.name} must not have positional-only arguments"
         )
-    return len(func_args.args)
+    return tuple(arg.arg for arg in func_args.args)
 
 
 def validate_tesseract_api(src_dir: Path) -> None:
@@ -190,8 +217,23 @@ def validate_tesseract_api(src_dir: Path) -> None:
             )
 
         if obj.num_args is not None:
-            if _get_func_argnums(toplevel_objects[obj.name]) != obj.num_args:
-                raise ValidationError(f"{obj.name} must have {obj.num_args} arguments")
+            func_argnames = _get_func_argnames(toplevel_objects[obj.name])
+            func_argnums = len(func_argnames)
+            if func_argnums != obj.num_args:
+                raise ValidationError(
+                    f"{obj.name} must have {obj.num_args} arguments: {', '.join(obj.arg_names)}.\n"
+                    f"However, {tesseract_api_location} specifies {func_argnums} "
+                    f"arguments: {', '.join(func_argnames)}."
+                )
+            msgs = []
+            for i in range(obj.num_args):
+                if func_argnames[i] != obj.arg_names[i]:
+                    msgs.append(
+                        f"The {ORDINALS[i]} argument (argument {i}) of {obj.name} must be named {obj.arg_names[i]}, "
+                        f"but {tesseract_api_location} has named it {func_argnames[i]}."
+                    )
+            if msgs:
+                raise ValidationError("\n".join(msgs))
 
     # Check InputSchema and OutputSchema are pydantic BaseModels
     for schema in ("InputSchema", "OutputSchema"):

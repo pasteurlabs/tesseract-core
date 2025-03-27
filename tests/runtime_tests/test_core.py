@@ -105,7 +105,7 @@ def testmodule():
 
             return out
 
-        def abstract_eval(self, inputs):
+        def abstract_eval(self, abstract_inputs):
             return {
                 "result_seq": [{"shape": (10,), "dtype": "float32"}] * 3,
                 "result_arr": {"shape": (5,), "dtype": "float32"},

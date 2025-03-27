@@ -179,7 +179,7 @@ def test_threading_sanity(tmpdir, free_port):
         assert threading.current_thread() == threading.main_thread()
         return OutputSchema()
 
-    def abstract_eval(inputs: dict) -> dict:
+    def abstract_eval(abstract_inputs: dict) -> dict:
         pass
     """
     )

@@ -1,6 +1,7 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import json
 from collections.abc import Iterable
 from copy import deepcopy
 from typing import Annotated, Optional
@@ -664,3 +665,26 @@ def test_fancy_pydantic_model(endpoint):
                     "jac_outputs": ["myarray"],
                 }
             )
+
+
+@pytest.mark.parametrize(
+    "endpoint", ["apply", "abstract_eval", "jacobian", "jvp", "vjp"]
+)
+def test_json_schema(endpoint):
+    if endpoint == "apply":
+        InputSchema, OutputSchema = create_apply_schema(NestedModel, NestedModel)
+    elif endpoint == "abstract_eval":
+        InputSchema, OutputSchema = create_abstract_eval_schema(
+            NestedModel, NestedModel
+        )
+    else:
+        InputSchema, OutputSchema = create_autodiff_schema(
+            NestedModel, NestedModel, endpoint
+        )
+
+    schema_inputs = InputSchema.model_json_schema()
+    schema_outputs = OutputSchema.model_json_schema()
+
+    # Test that the JSON schema is valid JSON
+    json.dumps(schema_inputs)
+    json.dumps(schema_outputs)
