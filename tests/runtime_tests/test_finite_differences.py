@@ -64,9 +64,9 @@ class DummyModule(ModuleType):
     def jacobian_vector_product(
         self,
         inputs: InputSchema,
-        jac_inputs: set[str],
-        jac_outputs: set[str],
-        vector: Array[(None,), Float32],
+        jvp_inputs: set[str],
+        jvp_outputs: set[str],
+        tangent_vector: Array[(None,), Float32],
     ):
         outputs = self.apply(inputs)
         if self.correct_gradients:
@@ -75,15 +75,15 @@ class DummyModule(ModuleType):
             make_array = np.ones
         return {
             key_out: make_array(get_at_path(outputs, key_out).shape)
-            for key_out in jac_outputs
+            for key_out in jvp_outputs
         }
 
     def vector_jacobian_product(
         self,
         inputs: InputSchema,
-        jac_inputs: set[str],
-        jac_outputs: set[str],
-        vector: Array[(None,), Float32],
+        vjp_inputs: set[str],
+        vjp_outputs: set[str],
+        cotangent_vector: Array[(None,), Float32],
     ):
         if self.correct_gradients:
             make_array = np.zeros
@@ -91,7 +91,7 @@ class DummyModule(ModuleType):
             make_array = np.ones
         return {
             key_in: make_array(get_at_path(inputs, key_in).shape)
-            for key_in in jac_inputs
+            for key_in in vjp_inputs
         }
 
 
