@@ -96,6 +96,7 @@ jobs:
         run: |
           export PATH="$HOME/venv/bin:$PATH"
 
+          pip install uv
           uv sync --extra dev --frozen
 
           if [ "${{ matrix.runtime-deps }}" == "oldest" ]; then
@@ -196,14 +197,42 @@ jobs:
           auto-update-conda: true
           python-version: ${{ matrix.python-version }}
 
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Restore UV environment
+        run: cp production.uv.lock uv.lock
+
       - name: Install package
         run: |
-          pip install .[dev] -r requirements-dev.txt
+          uv sync --extra dev --frozen
 
       - name: Run test suite
         run: |
           if [ "${{ matrix.unit-tesseract }}" == "base" ]; then
-            pytest --always-run-endtoend tests/endtoend_tests -k "not test_examples"
+            uv run --no-sync pytest \
+              --always-run-endtoend \
+              --cov-report=term-missing:skip-covered \
+              --cov-report=xml:coverage.xml \
+              --cov=tesseract_core \
+              tests/endtoend_tests \
+              -k "not test_examples"
           else
-            pytest --always-run-endtoend tests/endtoend_tests/test_examples.py -k "[${{ matrix.unit-tesseract }}]"
+            uv run --no-sync pytest \
+            --always-run-endtoend \
+            --cov-report=term-missing:skip-covered \
+            --cov-report=xml:coverage.xml \
+            --cov=tesseract_core \
+            tests/endtoend_tests/test_examples.py \
+            -k "[${{ matrix.unit-tesseract }}]"
           fi
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v5.4.0
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: pasteurlabs/tesseract-core
+          files: coverage*.xml
+          fail_ci_if_error: true
