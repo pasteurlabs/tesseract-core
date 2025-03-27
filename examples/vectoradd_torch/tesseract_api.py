@@ -150,14 +150,14 @@ def jacobian_vector_product(
     inputs: InputSchema,
     jvp_inputs: set[str],
     jvp_outputs: set[str],
-    tangent: dict[str, Any],
+    tangent_vector: dict[str, Any],
 ):
-    # Make ordering of tangent identical to jvp_inputs
-    tangent = {key: tangent[key] for key in jvp_inputs}
+    # Make ordering of tangent_vector identical to jvp_inputs
+    tangent_vector = {key: tangent_vector[key] for key in jvp_inputs}
 
     # convert all numbers and arrays to torch tensors
     tensor_inputs = tree_map(to_tensor, inputs.model_dump())
-    pos_tangent = tree_map(to_tensor, tangent).values()
+    pos_tangent = tree_map(to_tensor, tangent_vector).values()
 
     # flatten the dictionaries such that they can be accessed by paths
     pos_inputs = flatten_with_paths(tensor_inputs, jvp_inputs).values()
