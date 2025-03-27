@@ -54,13 +54,9 @@ repos:
     language: python
     entry: |
       bash -c ' \
-        if [ -z "$DOWNLOAD_TOKEN" ]; then \
-          DOWNLOAD_TOKEN="VssSessionToken"; \
-          uv tool install keyring --with artifacts-keyring; \
-        fi; \
         cp uv.lock uv.lock.bak; \
         cp production.uv.lock uv.lock; \
-        uv lock --index https://$DOWNLOAD_TOKEN@pkgs.dev.azure.com/pasteur-labs/d89796ea-4a5b-48aa-9930-4cebcdc9d64a/_packaging/internal/pypi/simple/ --keyring-provider subprocess; \
+        uv lock --refresh; \
         rc=$?; \
         cp uv.lock production.uv.lock; \
         mv uv.lock.bak uv.lock; \
