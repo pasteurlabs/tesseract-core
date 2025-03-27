@@ -408,7 +408,7 @@ def test_ad_endpoint_bad_tangent(testmodule, endpoint_name, failure_mode):
             msg = "String should match pattern"
         elif failure_mode == "invalid":
             tangent_vector = {k: "ahoy" for k in ad_inp}
-            msg = "Got invalid dtype"
+            msg = "Could not convert object"
 
         inputs = {
             "inputs": test_input,
@@ -427,7 +427,7 @@ def test_ad_endpoint_bad_tangent(testmodule, endpoint_name, failure_mode):
             msg = "String should match pattern"
         elif failure_mode == "invalid":
             cotangent_vector = {k: "ahoy" for k in ad_out}
-            msg = "Got invalid dtype"
+            msg = "Could not convert object"
 
         inputs = {
             "inputs": test_input,
@@ -436,8 +436,6 @@ def test_ad_endpoint_bad_tangent(testmodule, endpoint_name, failure_mode):
             "cotangent_vector": cotangent_vector,
         }
 
-    with pytest.raises(ValidationError) as excinfo:
+    with pytest.raises(ValidationError, match=msg):
         inputs = EndpointSchema.model_validate(inputs)
         endpoint_func(inputs)
-
-    assert msg in str(excinfo.value)

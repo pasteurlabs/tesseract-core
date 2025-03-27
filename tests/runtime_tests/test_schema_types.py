@@ -447,3 +447,75 @@ def test_lazy_sequence_json_schema():
     assert len(allowed_types) == 2
     assert allowed_types[0]["type"] == "array"
     assert allowed_types[1]["type"] == "string"
+
+
+def test_dtype_casting():
+    json_payload_str = MyModel(
+        array_int=arr_int,
+        array_float=arr_float,
+        array_bool=arr_bool,
+        scalar_int=scalar_int,
+    ).model_dump_json()
+
+    # Base case: proper int data (should work fine)
+    json_payload = json.loads(json_payload_str)
+    json_payload["array_int"]["data"] = {
+        "buffer": arr_int.flatten().tolist(),
+        "encoding": "json",
+    }
+    res = MyModel.model_validate(json_payload)
+    assert np.array_equal(res.array_int, arr_int)
+
+    # Case 1: floats in JSON array w/o fractional parts (should work fine)
+    json_payload = json.loads(json_payload_str)
+    json_payload["array_int"]["data"] = {
+        "buffer": arr_int.astype(float).flatten().tolist(),
+        "encoding": "json",
+    }
+    res = MyModel.model_validate(json_payload)
+    assert np.array_equal(res.array_int, arr_int)
+
+    # Case 2: floats in JSON array w/ fractional parts (should raise)
+    json_payload = json.loads(json_payload_str)
+    json_payload["array_int"]["data"] = {
+        "buffer": (arr_int.astype(float) + 1e-6).flatten().tolist(),
+        "encoding": "json",
+    }
+    with pytest.raises(ValidationError, match="Expected integer data"):
+        MyModel.model_validate(json_payload)
+
+    # Case 3: pass NumPy array directly (should work fine)
+    json_payload = json.loads(json_payload_str)
+    json_payload["array_int"] = arr_int
+    res = MyModel.model_validate(json_payload)
+    assert np.array_equal(res.array_int, arr_int)
+
+    # Case 4: pass NumPy array with incompatible dtype (should raise)
+    json_payload = json.loads(json_payload_str)
+    json_payload["array_int"] = arr_int.astype(np.float32)
+    with pytest.raises(ValidationError, match="cannot be cast"):
+        MyModel.model_validate(json_payload)
+
+    # Case 5: pass JSON data directly (should work fine)
+    json_payload = json.loads(json_payload_str)
+    json_payload["array_int"] = arr_int.tolist()
+    res = MyModel.model_validate(json_payload)
+    assert np.array_equal(res.array_int, arr_int)
+
+    # Case 6: pass JSON data with incompatible dtype (should raise)
+    json_payload = json.loads(json_payload_str)
+    json_payload["array_int"] = arr_int.astype(np.float32).tolist()
+    with pytest.raises(ValidationError, match="cannot be cast"):
+        MyModel.model_validate(json_payload)
+
+    # Case 7: Pass non-numeric data (should raise)
+    json_payload = json.loads(json_payload_str)
+    json_payload["array_int"] = ["a", "b", "c"]
+    with pytest.raises(ValidationError, match="Could not convert object"):
+        MyModel.model_validate(json_payload)
+
+    # Case 8: Pass non-numeric Python object (should raise)
+    json_payload = json.loads(json_payload_str)
+    json_payload["array_int"] = object()
+    with pytest.raises(ValidationError, match="Could not convert object"):
+        MyModel.model_validate(json_payload)
