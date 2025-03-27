@@ -16,6 +16,11 @@ BASE_OPTIONAL_DEPS = {
         "sphinx_autodoc_typehints",
         "furo",
         "myst-parser",
+        "sphinx_click",
+        "autodoc_pydantic",
+        "sphinx_design",
+        "sphinx_copybutton",
+        "sphinxext_opengraph",
     ],
     "dev": [
         "fastapi",
