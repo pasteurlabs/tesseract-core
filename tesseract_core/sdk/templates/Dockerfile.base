@@ -54,7 +54,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 {% endif %}
 
 # Drop to a non-root user
-RUN useradd --create-home -s /bin/bash tesseractor
+RUN groupadd -g 5000 tesseractor && \
+    useradd -u 5000 -g 5000 --create-home -s /bin/bash tesseractor
 WORKDIR /tesseract
 RUN chown tesseractor:tesseractor /tesseract
 USER tesseractor
