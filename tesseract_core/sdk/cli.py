@@ -753,13 +753,16 @@ def run_container(
             tesseract_image, cmd, args, volumes=volume, gpus=gpus
         )
 
-    except RuntimeError as e:
-        if "repository" in str(e) or "Repository" in str(e):
-            raise UserError(
-                "Tesseract image not found. "
-                f"Are you sure your tesseract image name is {tesseract_image}?\n\n{e}"
-            ) from e
+    except CLIDockerClient.Errors.ImageNotFound as e:
+        raise UserError(
+            "Tesseract image not found. "
+            f"Are you sure your tesseract image name is {tesseract_image}?\n\n{e}"
+        ) from e
 
+    except (
+        CLIDockerClient.Errors.APIError,
+        CLIDockerClient.Errors.ContainerError,
+    ) as e:
         if "No such command" in str(e):
             error_string = f"Error running Tesseract '{tesseract_image}' \n\n Error: Unimplemented command '{cmd}'.  "
         else:

@@ -130,6 +130,7 @@ def test_tesseract_run_stdout(built_image_name):
 
 def test_tesseract_serve_pipeline(docker_client, built_image_name):
     cli_runner = CliRunner(mix_stderr=False)
+    project_id = None
     try:
         run_res = cli_runner.invoke(
             app,
@@ -146,21 +147,16 @@ def test_tesseract_serve_pipeline(docker_client, built_image_name):
         project_meta = json.loads(run_res.stdout)
 
         project_id = project_meta["project_id"]
-        project_containers = [
-            c for c in docker_client.containers.list() if project_id in c.name
-        ]
+        project_containers = project_meta["containers"][0]["name"]
         if not project_containers:
             raise ValueError(f"Could not find container for project '{project_id}'")
 
-        project_container = project_containers[0]
+        project_container = docker_client.containers.get(project_containers)
         assert project_container.name == project_meta["containers"][0]["name"]
-
-        port_key = next(iter(project_container.ports))
-        port = project_container.ports[port_key][0]["HostPort"]
-        assert port == project_meta["containers"][0]["port"]
+        assert project_container.host_port == project_meta["containers"][0]["port"]
 
         # Ensure served Tesseract is usable
-        res = requests.get(f"http://localhost:{port}/health")
+        res = requests.get(f"http://localhost:{project_container.host_port}/health")
         assert res.status_code == 200, res.text
 
         # Ensure project id is shown in `tesseract ps`
@@ -172,18 +168,19 @@ def test_tesseract_serve_pipeline(docker_client, built_image_name):
         )
         assert run_res.exit_code == 0, run_res.stderr
         assert project_id in run_res.stdout
-        assert port in run_res.stdout
+        assert project_container.host_port in run_res.stdout
         assert project_container.short_id in run_res.stdout
     finally:
-        run_res = cli_runner.invoke(
-            app,
-            [
-                "teardown",
-                project_id,
-            ],
-            catch_exceptions=False,
-        )
-        assert run_res.exit_code == 0, run_res.stderr
+        if project_id:
+            run_res = cli_runner.invoke(
+                app,
+                [
+                    "teardown",
+                    project_id,
+                ],
+                catch_exceptions=False,
+            )
+            assert run_res.exit_code == 0, run_res.stderr
 
 
 @pytest.mark.parametrize("tear_all", [True, False])

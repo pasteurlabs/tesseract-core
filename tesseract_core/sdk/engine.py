@@ -9,6 +9,7 @@ import logging
 import optparse
 import os
 import random
+import shlex
 import string
 import subprocess
 import tempfile
@@ -99,11 +100,10 @@ def needs_docker(func: Callable) -> Callable:
     def wrapper_needs_docker(*args: Any, **kwargs: Any) -> None:
         try:
             docker_client.info()
-        except RuntimeError as ex:
-            message = "Could not reach Docker daemon, check if it is running."
-            logger.error(f"{message} Details: {ex}")
-            raise RuntimeError(f"{message} See logs for details.") from None
-
+        except (CLIDockerClient.Errors.APIError, RuntimeError) as ex:
+            raise UserError(
+                "Could not reach Docker daemon, check if it is running."
+            ) from ex
         return func(*args, **kwargs)
 
     return wrapper_needs_docker
@@ -249,7 +249,7 @@ def build_image(
         logger.info("Building image ...")
 
     try:
-        image = docker_client.images.buildx(
+        image_name = docker_client.images.buildx(
             path=build_dir.as_posix(),
             tag=image_name,
             dockerfile=dockerfile_path,
@@ -257,9 +257,15 @@ def build_image(
             keep_build_cache=keep_build_cache,
             print_and_exit=generate_only,
         )
+        if generate_only:
+            return None
+        image = docker_client.images.get(image_name)
 
     except CLIDockerClient.Errors.BuildError as e:
-        raise UserError(f"Error building Tesseract: {e}") from e
+        logger.warning("Build failed with logs:")
+        for line in e.build_log:
+            logger.warning(line)
+        raise UserError("Image build failure. See above logs for details.") from e
     except CLIDockerClient.Errors.APIError as e:
         raise UserError(f"Docker server error: {e}") from e
     except TypeError as e:
@@ -657,8 +663,27 @@ def run_tesseract(
 
     # Run the container
     image_id = image
+    container = None
+    try:
+        container = docker_client.containers.run(
+            image=image_id,
+            command=cmd,
+            volumes=parsed_volumes,
+            detach=True,
+            device_requests=gpus,
+        )
+        result = container.wait()
+        stdout, stderr = container.logs(stdout=True, stderr=True)
+        exit_code = result["StatusCode"]
+        if exit_code != 0:
+            raise CLIDockerClient.Errors.ContainerError(
+                container, exit_code, shlex.join(cmd), image_id, stderr
+            )
+    finally:
+        if container is not None:
+            container.remove(v=True, force=True)
 
-    return docker_client.container.run(image_id, cmd, parsed_volumes, gpus)
+    return stdout, stderr
 
 
 def exec_tesseract(

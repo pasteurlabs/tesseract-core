@@ -144,7 +144,7 @@ def test_run_gpu(mocked_docker):
     )
 
     res = json.loads(res_out)
-    assert res["device_requests"][0]["DeviceIDs"] == ["all"]
+    assert res["device_requests"] == ["all"]
 
 
 def test_run_tesseract_file_input(mocked_docker, tmpdir):
@@ -216,14 +216,14 @@ def test_get_tesseract_containers(mocked_docker):
 def test_serve_tesseracts(mocked_docker):
     """Test multi-tesseract serve."""
     # Serve valid
-    project_name_single_tesseract, _ = engine.serve(["vectoradd"])
+    project_name_single_tesseract = engine.serve(["vectoradd"])
     assert project_name_single_tesseract
 
     # Teardown valid
     engine.teardown(project_name_single_tesseract)
 
     # Multi-serve valid
-    project_name_multi_tesseract, _ = engine.serve(["vectoradd", "vectoradd"])
+    project_name_multi_tesseract = engine.serve(["vectoradd", "vectoradd"])
     assert project_name_multi_tesseract
 
     # Multi-teardown valid
@@ -248,7 +248,7 @@ def test_needs_docker(mocked_docker, mocker):
 
     # Sad case
     docker_info = mocker.patch(
-        "tesseract_core.sdk.docker_cli_wrapper.CLIDockerClient.docker_info"
+        "tesseract_core.sdk.docker_cli_wrapper.CLIDockerClient.info"
     )
     docker_info.side_effect = RuntimeError("No Docker")
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 import json
 import logging
 import os
@@ -51,6 +52,10 @@ class CLIDockerClient:
             # have id or name matching the image str
 
             # Use getter func to make sure it's updated
+            if not image:
+                raise CLIDockerClient.Errors.DockerException(
+                    "Image name cannot be empty."
+                )
             if ":" not in image:
                 image = image + ":latest"
             images = self.list()
@@ -64,7 +69,7 @@ class CLIDockerClient:
             self._update_images()
             return self.images
 
-        def remove_image(self, image_id: str) -> None:
+        def remove(self, image_id: str) -> None:
             """Remove an image from the local Docker registry."""
             try:
                 _ = subprocess.run(
@@ -80,8 +85,8 @@ class CLIDockerClient:
                     f"Cannot remove image {image_id}: {ex}"
                 ) from ex
 
+        @staticmethod
         def buildx(
-            self,
             path: str | Path,
             tag: str,
             dockerfile: str | Path,
@@ -92,14 +97,18 @@ class CLIDockerClient:
             """Build a Docker image from a Dockerfile using BuildKit."""
             from tesseract_core.sdk.engine import LogPipe
 
+            # Use start time to create a unique label for pruning build cache
+            start = datetime.datetime.now()
+            label = f"tesseract.{tag}.buildx.{start.strftime('%Y-%m-%dT%H:%M:%S')}"
             build_cmd = [
                 "docker",
                 "buildx",
                 "build",
                 "--load",
-                *(["--no-cache"] if not keep_build_cache else []),
                 "--tag",
                 tag,
+                "--label",
+                label,
                 "--file",
                 str(dockerfile),
                 str(path),
@@ -133,14 +142,34 @@ class CLIDockerClient:
             logs = out_pipe.captured_lines
             return_code = proc.returncode
 
+            # NOTE: Do this before error checking to ensure we always prune the cache
+            if not keep_build_cache:
+                try:
+                    prune_cmd = [
+                        "docker",
+                        "builder",
+                        "prune",
+                        "-a",
+                        "-f",
+                        "--filter",
+                        f"label={label}",
+                    ]
+                    # Use docker builder prune to remove build cache for everything with label
+                    prune_res = subprocess.run(
+                        prune_cmd, check=True, text=True, capture_output=True
+                    )
+                    logger.debug("Pruning build cache: %s", prune_cmd)
+                    logger.debug(prune_res.stdout)
+                except subprocess.CalledProcessError as ex:
+                    logger.warning(
+                        "Docker build cache could not be cleared; consider doing so manually."
+                    )
+                    logger.debug(ex.stderr)
+
             if return_code != 0:
                 raise CLIDockerClient.Errors.BuildError(logs)
 
-            # Update self.images
-            self._update_images()
-            # Get image object
-            image = self.get(tag)
-            return image
+            return tag
 
         def _update_images(self) -> None:
             """Updates the list of images by querying Docker CLI."""
@@ -201,6 +230,7 @@ class CLIDockerClient:
                 else:
                     self.host_port = None
                 self.attrs = json_dict
+                self.image = json_dict.get("Image", None)
                 self.project_id = json_dict.get("Config", None)
                 if self.project_id:
                     self.project_id = self.project_id["Labels"].get(
@@ -217,13 +247,73 @@ class CLIDockerClient:
                         ["docker", "exec", self.id, *command],
                         check=True,
                         capture_output=True,
-                        text=True,
                     )
                     return result.returncode, result.stdout
                 except subprocess.CalledProcessError as ex:
                     raise CLIDockerClient.Errors.ContainerError(
                         f"Cannot run command in container {self.id}: {ex}"
                     ) from ex
+
+            def logs(self, stdout: bool = True, stderr: bool = True) -> str | tuple:
+                """Get the logs for this container."""
+                try:
+                    result = subprocess.run(
+                        ["docker", "logs", self.id],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                    )
+
+                    if stdout and stderr:
+                        return result.stdout, result.stderr
+                    if stdout:
+                        return result.stdout
+                    if stderr:
+                        return result.stderr
+                except subprocess.CalledProcessError as ex:
+                    raise CLIDockerClient.Errors.ContainerError(
+                        f"Cannot get logs for container {self.id}: {ex}"
+                    ) from ex
+
+            def wait(self) -> dict:
+                """Wait for container to finish running."""
+                try:
+                    result = subprocess.run(
+                        ["docker", "wait", self.id],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                    )
+                    # Container's exit code is printed by the wait command
+                    return {"StatusCode": int(result.stdout)}
+                except subprocess.CalledProcessError as ex:
+                    raise CLIDockerClient.Errors.ContainerError(
+                        f"Cannot wait for container {self.id}: {ex}"
+                    ) from ex
+
+            def remove(self, v: bool = False, link: bool = False, force: bool = False):
+                """Remove the container."""
+                try:
+                    result = subprocess.run(
+                        [
+                            "docker",
+                            "rm",
+                            *(["-f"] if force else []),
+                            *(["-v"] if v else []),
+                            *(["-l"] if link else []),
+                            self.id,
+                        ],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                    )
+                    return result.stdout
+                except subprocess.CalledProcessError as ex:
+                    if "docker" in ex.stderr:
+                        raise CLIDockerClient.Errors.ContainerError(
+                            f"Cannot remove container {self.id}: {ex}"
+                        ) from ex
+                    raise ex
 
             def __str__(self) -> str:
                 string = (
@@ -251,64 +341,87 @@ class CLIDockerClient:
 
         def run(
             self,
-            image_id: str,
+            image: str,
             command: list[str],
-            parsed_volumes: dict,
-            gpus: list[int | str] | None = None,
-        ) -> bool:
-            """Run a command in a container from an image."""
-            from tesseract_core.sdk.engine import LogPipe
+            volumes: dict | None = None,
+            device_requests: list[int | str] | None = None,
+            detach: bool = False,
+            remove: bool = False,
+        ) -> tuple | Container:
+            """Run a command in a container from an image.
 
+            Returns Container object if detach is True, otherwise returns list of stdout and stderr.
+            """
             # Convert the parsed_volumes into a list of strings in proper argument format,
             # `-v host_path:container_path:mode`.
-            if not parsed_volumes:
+            # If command is a type string and not list, make list
+            if isinstance(command, str):
+                command = [command]
+            logger.debug(f"Running command: {command}")
+
+            if not volumes:
                 volume_args = []
             else:
                 volume_args = []
-                for host_path, volume_info in parsed_volumes.items():
+                for host_path, volume_info in volumes.items():
                     volume_args.append("-v")
                     volume_args.append(
                         f"{host_path}:{volume_info['bind']}:{volume_info['mode']}"
                     )
 
-            if gpus:
-                gpus_str = ",".join(gpus)
+            if device_requests:
+                gpus_str = ",".join(device_requests)
                 gpus_option = f'--gpus "device={gpus_str}"'
             else:
                 gpus_option = ""
 
-            # Remove the container after usage so we do not need to update self.containers.
+            # Remove and detached cannot both be set to true
+            if remove and detach:
+                raise CLIDockerClient.Errors.ContainerError(
+                    "Cannot set both remove and detach to True when running a container."
+                )
+
+            # Run with detached to get the container id of the running container.
             cmd_list = [
                 "docker",
                 "run",
-                "--rm",
+                *(["-d"] if detach else []),
+                *(["--rm"] if remove else []),
                 *volume_args,
                 *([gpus_option] if gpus_option else []),
-                image_id,
+                image,
                 *command,
             ]
 
             try:
-                out_pipe = LogPipe(logging.DEBUG)
-                with out_pipe as out_pipe_fd:
-                    proc = subprocess.run(
-                        cmd_list,
-                        stdout=out_pipe_fd,
-                        stderr=out_pipe_fd,
+                result = subprocess.run(
+                    cmd_list,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+
+                if detach:
+                    container_id = result.stdout.strip()
+                    self._update_containers()
+                    container_obj = self.get(container_id)
+                    return container_obj
+
+                if result.returncode != 0:
+                    raise CLIDockerClient.Errors.ContainerError(
+                        "Error running container command."
                     )
 
-                logs = out_pipe.captured_lines
-                return_code = proc.returncode
-
-                if return_code != 0:
-                    raise CLIDockerClient.Errors.APIError(logs)
-
-                return logs
+                return result.stdout, result.stderr
 
             except subprocess.CalledProcessError as ex:
-                raise CLIDockerClient.Errors.APIError(
-                    f"Error running command: `{' '.join(cmd_list)}`. \n\n{ex.stderr}"
-                ) from ex
+                if "repository" in ex.stderr:
+                    raise CLIDockerClient.Errors.ImageNotFound() from ex
+                if "docker" in ex.stderr:
+                    raise CLIDockerClient.Errors.ContainerError(
+                        f"Error running container command: `{' '.join(cmd_list)}`. \n\n{ex.stderr}"
+                    ) from ex
+                raise ex
 
         def _update_containers(self) -> None:
             """Update self.containers."""
@@ -354,8 +467,6 @@ class CLIDockerClient:
 
         def list(self) -> dict:
             """Returns the current list of projects."""
-            # Check if containers is updated
-            self.containers.list()
             self._update_projects()
             return self.project_container_map
 
@@ -403,56 +514,10 @@ class CLIDockerClient:
             """Check if Docker Compose project exists."""
             return project_id in self.list()
 
-        def _project_containers(
-            self,
-            project_id: str,
-        ) -> list[str]:
-            """Find containers associated with a Docker Compose Project ID.
-
-            Args:
-                project_id: the Docker Compose project ID.
-
-            Returns:
-                A list of Docker container ids.
-            """
-            # Calling self.get_projects will update containers and projects map
-            if project_id in self.get_projects():
-                return self.project_container_map[project_id]
-            try:
-                # Run the docker ps command to list containers
-                result = subprocess.run(
-                    [
-                        "docker",
-                        "ps",
-                        "--format",
-                        "{{.ID}} {{.Names}}",
-                    ],  # Get container ID and name
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                )
-                # Filter containers by project_id (matching the project_id in container names)
-                containers = [
-                    line.split()[
-                        0
-                    ]  # Container id is the second element in the output line
-                    for line in result.stdout.splitlines()
-                    if project_id in line.split()[1]
-                ]
-                # Update the project_container_map with the list of containers associated
-                # with the project_id
-                self.project_container_map[project_id] = containers
-                return containers
-
-            except subprocess.CalledProcessError as e:
-                # Handle errors (e.g., if docker ps fails)
-                print(f"Error running docker ps: {e.stderr}")
-                return []
-
         def _update_projects(self) -> None:
             """Updates the list of projects by going through containers."""
             self.project_container_map = {}
-            for container_id, container in self.containers.items():
+            for container_id, container in self.containers.list().items():
                 if container.project_id:
                     if container.project_id not in self.project_container_map:
                         self.project_container_map[container.project_id] = []
@@ -460,7 +525,8 @@ class CLIDockerClient:
                         container_id
                     )
 
-    def info(self) -> tuple:
+    @staticmethod
+    def info() -> tuple:
         """Wrapper around docker info call."""
         try:
             result = subprocess.run(

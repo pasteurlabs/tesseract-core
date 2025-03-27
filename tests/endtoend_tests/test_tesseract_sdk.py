@@ -9,12 +9,10 @@ from tesseract_core import Tesseract
 
 
 @pytest.fixture(scope="module")
-def built_image_name(docker_wrapper, shared_dummy_image_name, dummy_tesseract_location):
+def built_image_name(docker_client, shared_dummy_image_name, dummy_tesseract_location):
     """Build the dummy Tesseract image for the tests."""
-    image_name = build_tesseract(
-        docker_wrapper, dummy_tesseract_location, shared_dummy_image_name
-    )
-    assert image_exists(docker_wrapper, image_name)
+    image_name = build_tesseract(dummy_tesseract_location, shared_dummy_image_name)
+    assert image_exists(docker_client, image_name)
     yield image_name
 
 

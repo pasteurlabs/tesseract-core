@@ -16,9 +16,7 @@ import time
 import traceback
 from dataclasses import dataclass
 from pathlib import Path
-from textwrap import indent
 
-import docker
 import numpy as np
 import numpy.typing as npt
 import pytest
@@ -756,7 +754,7 @@ def test_unit_tesseract_endtoend(
     """Test that unit Tesseract images can be built and used to serve REST API."""
     from tesseract_core.sdk.cli import app
 
-    cli_runner = CliRunner()
+    cli_runner = CliRunner(mix_stderr=False)
 
     # Stage 1: Build
     img_name = build_tesseract(
@@ -866,19 +864,28 @@ def test_unit_tesseract_endtoend(
         # TODO: Mounts are not supported in HTTP mode yet, skip rest of the test for now
         return
 
+    # Cannot mix stderr if we want to load the json
+    cli_runner = CliRunner(mix_stderr=False)
     try:
-        server_container = docker_client.containers.run(
-            img_name,
-            "serve",
-            detach=True,
-            remove=False,
-            ports={"8000": free_port},
-        )
-    except docker.errors.ContainerError as e:
-        print(e.stderr.decode())
-        raise
+        project_id = None
 
-    try:
+        run_res = cli_runner.invoke(
+            app,
+            [
+                "serve",
+                img_name,
+                "-p",
+                free_port,
+            ],
+            catch_exceptions=False,
+        )
+
+        assert run_res.exit_code == 0, run_res.stderr
+        assert run_res.stdout
+
+        project_meta = json.loads(run_res.stdout)
+        project_id = project_meta["project_id"]
+
         # Give server some time to start up
         timeout = 10
         interval = 0.1
@@ -946,15 +953,14 @@ def test_unit_tesseract_endtoend(
                 output_json = json.loads(output)
                 assert_contains_array_allclose(output_json, array)
 
-    except Exception as e:
-        logs = server_container.logs().decode()
-        print(f"Server logs:\n{indent(logs, ' > ')}")
-        raise e
-
     finally:
-        try:
-            server_container.kill()
-        except docker.errors.APIError:
-            # Container may have already stopped
-            pass
-        server_container.remove(v=True, link=False, force=True)
+        if project_id:
+            run_res = cli_runner.invoke(
+                app,
+                [
+                    "teardown",
+                    project_id,
+                ],
+                catch_exceptions=False,
+            )
+            assert run_res.exit_code == 0, run_res.output
