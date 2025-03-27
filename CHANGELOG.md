@@ -14,6 +14,7 @@ All notable changes to this project will be documented in this file.
 - OpenAPI schema failure for differentiable arrays with unknown shape (#100)
 - Prevent silent conversion of float array to int (#96)
 - Use fixed uid/gid 5000:5000 for all tesseracts (#102)
+- Use uid 1000 instead of 5000 (#104)
 
 ### Refactor
 
