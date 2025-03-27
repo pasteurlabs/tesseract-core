@@ -138,6 +138,9 @@ dmypy.json
 .idea/
 .vscode/
 
+# setuptools_scm version file
+_version.py
+
 # Ignore UV dev environments
 uv.lock
 uv.lock.bak

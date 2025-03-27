@@ -1,8 +1,4 @@
 # Include all files here that should be part of source distributions
 include requirements.txt
 include README.md
-
-# Include Cython source files, and exclude generated C files
-# (required to build Cython extensions during wheel creation)
-recursive-include  *.pyx *.pxd
-recursive-exclude  *.c
+recursive-include examples *

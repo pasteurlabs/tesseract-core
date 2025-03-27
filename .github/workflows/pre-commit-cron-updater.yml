@@ -62,7 +62,7 @@ jobs:
       with:
           token: ${{ secrets.GITHUB_TOKEN }}
           commit-message: Update pre-commit hooks
-          title: ✅ Update pre-commit hooks
+          title: "chore: ✅ Update pre-commit hooks"
           branch: _bot/update-precommit
           draft: false
           body: |
@@ -74,7 +74,7 @@ jobs:
       with:
           token: ${{ secrets.GITHUB_TOKEN }}
           commit-message: Update pre-commit hooks
-          title: ⚠️ Update pre-commit hooks [review required]
+          title: "chore: ⚠️ Update pre-commit hooks [review required]"
           branch: _bot/update-precommit
           draft: true
           body: |
