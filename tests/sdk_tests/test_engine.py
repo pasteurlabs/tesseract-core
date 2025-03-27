@@ -248,7 +248,7 @@ def test_needs_docker(mocked_docker, mocker):
 
     # Sad case
     docker_info = mocker.patch(
-        "tesseract_core.sdk.docker_cli_wrapper.CLIDockerClient.docker_info"
+        "tesseract_core.sdk.docker_cli_wrapper.CLIDockerClient.info"
     )
     docker_info.side_effect = RuntimeError("No Docker")
 

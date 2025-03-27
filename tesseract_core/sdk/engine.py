@@ -249,7 +249,7 @@ def build_image(
         logger.info("Building image ...")
 
     try:
-        image = docker_client.images.buildx(
+        image_name = docker_client.images.buildx(
             path=build_dir.as_posix(),
             tag=image_name,
             dockerfile=dockerfile_path,
@@ -257,6 +257,9 @@ def build_image(
             keep_build_cache=keep_build_cache,
             print_and_exit=generate_only,
         )
+        if generate_only:
+            return None
+        image = docker_client.images.get(image_name)
 
     except CLIDockerClient.Errors.BuildError as e:
         raise UserError(f"Error building Tesseract: {e}") from e
@@ -658,7 +661,7 @@ def run_tesseract(
     # Run the container
     image_id = image
 
-    return docker_client.container.run(image_id, cmd, parsed_volumes, gpus)
+    return docker_client.containers.run(image_id, cmd, parsed_volumes, gpus)
 
 
 def exec_tesseract(

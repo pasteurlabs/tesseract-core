@@ -80,8 +80,8 @@ class CLIDockerClient:
                     f"Cannot remove image {image_id}: {ex}"
                 ) from ex
 
+        @staticmethod
         def buildx(
-            self,
             path: str | Path,
             tag: str,
             dockerfile: str | Path,
@@ -136,11 +136,7 @@ class CLIDockerClient:
             if return_code != 0:
                 raise CLIDockerClient.Errors.BuildError(logs)
 
-            # Update self.images
-            self._update_images()
-            # Get image object
-            image = self.get(tag)
-            return image
+            return tag
 
         def _update_images(self) -> None:
             """Updates the list of images by querying Docker CLI."""
@@ -201,11 +197,14 @@ class CLIDockerClient:
                 else:
                     self.host_port = None
                 self.attrs = json_dict
+                self.image = json_dict.get("Image", None)
                 self.project_id = json_dict.get("Config", None)
                 if self.project_id:
                     self.project_id = self.project_id["Labels"].get(
                         "com.docker.compose.project", None
                     )
+                # TODO: Populate logs with LogPipe?
+                self.logs = None
 
             def exec_run(self, command: str) -> tuple:
                 """Run a command in this container.
@@ -249,13 +248,13 @@ class CLIDockerClient:
                         return container_obj
             return container_obj
 
+        @staticmethod
         def run(
-            self,
             image_id: str,
             command: list[str],
             parsed_volumes: dict,
             gpus: list[int | str] | None = None,
-        ) -> bool:
+        ) -> str:
             """Run a command in a container from an image."""
             from tesseract_core.sdk.engine import LogPipe
 
