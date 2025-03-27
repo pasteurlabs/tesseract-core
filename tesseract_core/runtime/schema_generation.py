@@ -234,9 +234,9 @@ def _serialize_diffable_arrays(
 
         # Ensure shape is JSON serializable
         if shape is Ellipsis:
-            json_shape = None
+            shape = None
         else:
-            json_shape = tuple(shape)
+            shape = tuple(shape)
 
         # Replace sentinel values with indexing syntax
         str_parts = []
@@ -249,7 +249,7 @@ def _serialize_diffable_arrays(
                 str_parts.append(part)
 
         serialized[".".join(str_parts)] = {
-            "shape": json_shape,
+            "shape": shape,
             "dtype": dtype,
         }
 
