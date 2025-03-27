@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.0] - 2025-03-27
+
+### Features
+
+- Implement check_gradients runtime command (#72)
+- [**breaking**] Validate endpoint argument names before building (#95)
+
+### Bug Fixes
+
+- OpenAPI schema failure for differentiable arrays with unknown shape (#100)
+- Prevent silent conversion of float array to int (#96)
+- Use fixed uid/gid 5000:5000 for all tesseracts (#102)
+
+### Refactor
+
+- Unpack endpoint payload (#80)
+
+### Documentation
+
+- Dependencies and user privileges (#91)
+
 ## [0.7.4] - 2025-03-20
 
 ### Features
