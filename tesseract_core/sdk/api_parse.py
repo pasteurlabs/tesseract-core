@@ -155,7 +155,7 @@ def _get_func_argnames(func: ast.FunctionDef) -> tuple[str, ...]:
         raise ValidationError(
             f"Function {func.name} must not have positional-only arguments"
         )
-    return tuple(arg.arg for arg in func.args.args)
+    return tuple(arg.arg for arg in func_args.args)
 
 
 def validate_tesseract_api(src_dir: Path) -> None:
@@ -225,16 +225,15 @@ def validate_tesseract_api(src_dir: Path) -> None:
                     f"However, {tesseract_api_location} specifies {func_argnums} "
                     f"arguments: {', '.join(func_argnames)}."
                 )
-            else:
-                msgs = []
-                for i in range(obj.num_args):
-                    if func_argnames[i] != obj.arg_names[i]:
-                        msgs.append(
-                            f"The {ORDINALS[i]} argument of {obj.name} must be named {obj.arg_names[i]}, "
-                            f"but {tesseract_api_location} has named it {func_argnames[i]}."
-                        )
-                if msgs:
-                    raise ValidationError("\n".join(msgs))
+            msgs = []
+            for i in range(obj.num_args):
+                if func_argnames[i] != obj.arg_names[i]:
+                    msgs.append(
+                        f"The {ORDINALS[i]} argument (argument {i}) of {obj.name} must be named {obj.arg_names[i]}, "
+                        f"but {tesseract_api_location} has named it {func_argnames[i]}."
+                    )
+            if msgs:
+                raise ValidationError("\n".join(msgs))
 
     # Check InputSchema and OutputSchema are pydantic BaseModels
     for schema in ("InputSchema", "OutputSchema"):
