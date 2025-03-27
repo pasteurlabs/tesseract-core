@@ -11,6 +11,12 @@ from hatchling.metadata.plugin.interface import MetadataHookInterface
 RUNTIME_PYPROJECT_PATH = "tesseract_core/runtime/meta/pyproject.toml"
 
 BASE_OPTIONAL_DEPS = {
+    "docs": [
+        "sphinx",
+        "sphinx_autodoc_typehints",
+        "furo",
+        "myst-parser",
+    ],
     "dev": [
         "fastapi",
         "httpx",  # required by fastapi test client
@@ -24,9 +30,9 @@ BASE_OPTIONAL_DEPS = {
         "moto[server]",
         "aiobotocore>=2.19.0",  # without this pip dependency resolution fails
         "typeguard",
-        "detect-secrets[gibberish]",
         # also add all other extras here
         "tesseract-core[runtime]",
+        "tesseract-core[docs]",
     ],
     "runtime": [],
 }

@@ -25,18 +25,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y pandoc
 
-      - name: Azure Login
-        uses: azure/login@v2
-        with:
-            # https://github.com/azure/login/tree/v2/?tab=readme-ov-file#creds
-            creds: |
-              {
-                "clientId": "${{ secrets.PL_INTERNAL_TOOLS_AZ_CLIENT_ID }}",
-                "clientSecret": "${{ secrets.PL_INTERNAL_TOOLS_AZ_CLIENT_SECRET }}",
-                "subscriptionId": "${{ vars.PL_INTERNAL_TOOLS_AZ_CLIENT_SUB_ID }}",
-                "tenantId": "${{ secrets.PL_INTERNAL_TOOLS_AZ_TENANT_ID }}"
-              }
-
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
@@ -47,26 +35,15 @@ jobs:
         with:
           python-version-file: "pyproject.toml"
 
-      - name: Get Download Token
-        run: echo "DOWNLOAD_TOKEN=$(az account get-access-token --query accessToken -o tsv)" >> $GITHUB_ENV
-
       - name: Restore UV environment
         run: cp production.uv.lock uv.lock
 
       - name: Install doc requirements
         run: |
-          uv sync --extra docs --frozen --index https://$DOWNLOAD_TOKEN@${{vars.PL_INTERNAL_PYPI_PULL_URL_NO_PROTOCOL}}
+          uv sync --extra docs --frozen
 
       - name: Build docs
         working-directory: docs
         run: |
           export SPHINXOPTS="-W"  # treat warnings as errors
           uv run --no-sync make html
-
-      - name: Upload HTML files
-        uses: actions/upload-artifact@v4
-        if: ${{ inputs.artifact_name }}
-        with:
-          name: ${{ inputs.artifact_name }}
-          path: docs/build/html
-          if-no-files-found: error

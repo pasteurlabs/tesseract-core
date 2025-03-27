@@ -8,8 +8,8 @@ on:
       - published
 
 jobs:
-  release:
-    name: "Release"
+  build:
+    name: "Build distribution"
     runs-on: '${{ matrix.os }}'
     strategy:
       matrix:
@@ -22,6 +22,7 @@ jobs:
           # - "3.11"
           # - "3.12"
           - "3.13"
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -41,31 +42,38 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Azure Login
-        uses: azure/login@v2
-        with:
-          # https://github.com/azure/login/tree/v2/?tab=readme-ov-file#creds
-          creds: |
-            {
-              "clientId": "${{ secrets.PL_INTERNAL_TOOLS_AZ_CLIENT_ID }}",
-              "clientSecret": "${{ secrets.PL_INTERNAL_TOOLS_AZ_CLIENT_SECRET }}",
-              "subscriptionId": "${{ vars.PL_INTERNAL_TOOLS_AZ_CLIENT_SUB_ID }}",
-              "tenantId": "${{ secrets.PL_INTERNAL_TOOLS_AZ_TENANT_ID }}"
-            }
-
-      - name: Get Azure token
-        run: echo "AZ_TOKEN=$(az account get-access-token --query accessToken -o tsv)" >> $GITHUB_ENV
-
       - name: Restore UV environment
         run: cp production.uv.lock uv.lock
 
       - name: Build Package
         run: |
-          uv build --index https://$AZ_TOKEN@${{vars.PL_INTERNAL_PYPI_PULL_URL_NO_PROTOCOL}}
+          uv build
 
-      - name: Upload
-        run: |
-          uv publish dist/* \
-            -u token_user \
-            -p $AZ_TOKEN \
-            --publish-url ${{vars.PL_INTERNAL_PYPI_PUSH_URL}}
+      - name: Store the distribution packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+
+  publish:
+    name: "Publish distribution"
+    if: startsWith(github.ref, 'refs/tags/')  # only publish to PyPI on tag pushes
+    runs-on: ubuntu-latest
+    needs: build
+
+    environment:
+      name: pypi
+      url: https://pypi.org/p/tesseract-core
+
+    permissions:
+      id-token: write
+
+    steps:
+      - name: Download all the dists
+        uses: actions/download-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+
+      - name: Publish distribution to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

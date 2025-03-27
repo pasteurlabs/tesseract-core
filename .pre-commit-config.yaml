@@ -16,6 +16,7 @@ repos:
 
   - id: check-yaml
     additional_dependencies: [--isolated]
+    exclude: "^.*templates/.*[yaml|yml]$"
 
   - id: detect-private-key
     additional_dependencies: [--isolated]
