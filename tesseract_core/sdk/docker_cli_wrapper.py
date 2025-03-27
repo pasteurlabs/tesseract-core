@@ -203,8 +203,6 @@ class CLIDockerClient:
                     self.project_id = self.project_id["Labels"].get(
                         "com.docker.compose.project", None
                     )
-                # TODO: Populate logs with LogPipe?
-                self.logs = None
 
             def exec_run(self, command: str) -> tuple:
                 """Run a command in this container.
@@ -222,6 +220,21 @@ class CLIDockerClient:
                 except subprocess.CalledProcessError as ex:
                     raise CLIDockerClient.Errors.ContainerError(
                         f"Cannot run command in container {self.id}: {ex}"
+                    ) from ex
+
+            def logs(self) -> tuple:
+                """Get the logs for this container."""
+                try:
+                    result = subprocess.run(
+                        ["docker", "logs", self.id],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                    )
+                    return result.stdout
+                except subprocess.CalledProcessError as ex:
+                    raise CLIDockerClient.Errors.ContainerError(
+                        f"Cannot get logs for container {self.id}: {ex}"
                     ) from ex
 
             def __str__(self) -> str:
@@ -250,28 +263,26 @@ class CLIDockerClient:
 
         @staticmethod
         def run(
-            image_id: str,
+            image: str,
             command: list[str],
-            parsed_volumes: dict,
-            gpus: list[int | str] | None = None,
+            volumes: dict,
+            device_requests: list[int | str] | None = None,
         ) -> str:
             """Run a command in a container from an image."""
-            from tesseract_core.sdk.engine import LogPipe
-
             # Convert the parsed_volumes into a list of strings in proper argument format,
             # `-v host_path:container_path:mode`.
-            if not parsed_volumes:
+            if not volumes:
                 volume_args = []
             else:
                 volume_args = []
-                for host_path, volume_info in parsed_volumes.items():
+                for host_path, volume_info in volumes.items():
                     volume_args.append("-v")
                     volume_args.append(
                         f"{host_path}:{volume_info['bind']}:{volume_info['mode']}"
                     )
 
-            if gpus:
-                gpus_str = ",".join(gpus)
+            if device_requests:
+                gpus_str = ",".join(device_requests)
                 gpus_option = f'--gpus "device={gpus_str}"'
             else:
                 gpus_option = ""
@@ -283,26 +294,19 @@ class CLIDockerClient:
                 "--rm",
                 *volume_args,
                 *([gpus_option] if gpus_option else []),
-                image_id,
+                image,
                 *command,
             ]
 
             try:
-                out_pipe = LogPipe(logging.DEBUG)
-                with out_pipe as out_pipe_fd:
-                    proc = subprocess.run(
-                        cmd_list,
-                        stdout=out_pipe_fd,
-                        stderr=out_pipe_fd,
-                    )
+                result = subprocess.run(
+                    cmd_list,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
 
-                logs = out_pipe.captured_lines
-                return_code = proc.returncode
-
-                if return_code != 0:
-                    raise CLIDockerClient.Errors.APIError(logs)
-
-                return logs
+                return result.stdout, result.stderr
 
             except subprocess.CalledProcessError as ex:
                 raise CLIDockerClient.Errors.APIError(
@@ -451,7 +455,7 @@ class CLIDockerClient:
         def _update_projects(self) -> None:
             """Updates the list of projects by going through containers."""
             self.project_container_map = {}
-            for container_id, container in self.containers.items():
+            for container_id, container in self.containers.list().items():
                 if container.project_id:
                     if container.project_id not in self.project_container_map:
                         self.project_container_map[container.project_id] = []
@@ -459,7 +463,8 @@ class CLIDockerClient:
                         container_id
                     )
 
-    def info(self) -> tuple:
+    @staticmethod
+    def info() -> tuple:
         """Wrapper around docker info call."""
         try:
             result = subprocess.run(

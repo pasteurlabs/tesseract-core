@@ -661,7 +661,12 @@ def run_tesseract(
     # Run the container
     image_id = image
 
-    return docker_client.containers.run(image_id, cmd, parsed_volumes, gpus)
+    return docker_client.containers.run(
+        image=image_id,
+        command=cmd,
+        volumes=parsed_volumes,
+        device_requests=gpus,
+    )
 
 
 def exec_tesseract(

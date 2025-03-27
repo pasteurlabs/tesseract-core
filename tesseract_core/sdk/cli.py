@@ -746,9 +746,11 @@ def run_container(
         raise typer.BadParameter(error_string, param_hint="cmd")
 
     try:
-        result_out, result_err = engine.run_tesseract(
+        container = engine.run_tesseract(
             tesseract_image, cmd, args, volumes=volume, gpus=gpus
         )
+        result_out = container.logs(stdout=True, stderr=False)
+        result_err = container.logs(stdout=False, stderr=True)
 
     except RuntimeError as e:
         if "repository" in str(e) or "Repository" in str(e):

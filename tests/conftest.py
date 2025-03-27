@@ -8,7 +8,7 @@ import string
 import subprocess
 from pathlib import Path
 from shutil import copytree
-from typing import Any, ClassVar
+from typing import Any
 
 import pytest
 
@@ -212,13 +212,16 @@ def mocked_docker(monkeypatch):
     """Mock Docker Wrapper class."""
     from tesseract_core.sdk import engine
 
-    created_ids = set()
-
     class MockedContainer(docker_cli_wrapper.CLIDockerClient.Containers.Container):
         """Mock Container class."""
 
         def __init__(self, return_args: dict):
+            print("AKOAKO return args", return_args)
             self.return_args = return_args
+
+        def wait(self, **kwargs: Any):
+            """Mock wait method for Container."""
+            return {"StatusCode": 0, "Error": None}
 
         @property
         def attrs(self):
@@ -227,6 +230,7 @@ def mocked_docker(monkeypatch):
 
         def logs(self, stderr=False, stdout=False, **kwargs: Any):
             """Mock logs method for Container."""
+            print("AKOAKO logs")
             out = []
             if stdout:
                 out.append(json.dumps(self.return_args).encode("utf-8"))
@@ -234,26 +238,30 @@ def mocked_docker(monkeypatch):
                 out.append(b"hello tesseract")
             return b"\n".join(out)
 
-    class MockedDocker(docker_cli_wrapper.CLIDockerClient):
-        """Mock CLIDockerClient class."""
+    created_ids = set()
 
-        def info(self):
+    class MockedDocker(docker_cli_wrapper.CLIDockerClient):
+        """Mock DockerWrapper class."""
+
+        @staticmethod
+        def info():
             """Mock info method for DockerClient."""
             pass
 
         class images:
-            """Mock images subclass."""
+            """Mock of DockerWrapper.images."""
 
             @staticmethod
-            def get(image_id: str):
-                """Mock get method for images."""
+            def get(name: str) -> None:
+                """Mock of DockerWrapper.images.pull."""
                 return MockedDocker.images.list()[0]
 
             @staticmethod
             def list() -> list[docker_cli_wrapper.CLIDockerClient.Images.Image]:
+                """Mock of DockerWrapper.get_all_images."""
                 return [
                     docker_cli_wrapper.CLIDockerClient.Images.Image(
-                        attrs={
+                        {
                             "Id": "sha256:123456789abcdef",
                             "RepoTags": ["vectoradd:latest"],
                             "Size": 123456789,
@@ -261,7 +269,7 @@ def mocked_docker(monkeypatch):
                         },
                     ),
                     docker_cli_wrapper.CLIDockerClient.Images.Image(
-                        attrs={
+                        {
                             "Id": "sha256:48932484029303",
                             "RepoTags": ["hello-world:latest"],
                             "Size": 43829489032,
@@ -271,57 +279,53 @@ def mocked_docker(monkeypatch):
                 ]
 
             @staticmethod
-            def buildx(**kwargs: Any) -> str:
-                """Mock buildx method for images."""
-                return "sha256:123456789abcdef"
+            def buildx(*args, **kwargs) -> str:
+                return docker_cli_wrapper.CLIDockerClient.Images.buildx(*args, **kwargs)
 
         class containers:
-            """Mock containers subclass."""
+            @staticmethod
+            def get(name: str) -> MockedContainer:
+                """Mock of DockerWrapper.get_container."""
+                return MockedDocker.containers.list()[0]
 
             @staticmethod
-            def run(**kwargs: Any) -> bytes:
-                """Mock run method for containers."""
-                container = MockedContainer(kwargs)
-                if kwargs.get("detach", False):
-                    return container
-                return container.logs()
-
-            @staticmethod
-            def list(**kwargs: Any) -> list[MockedContainer]:
+            def list() -> list[MockedContainer]:
+                """Mock of DockerWrapper.get_all_containers."""
                 return [MockedContainer({"TESSERACT_NAME": "vectoradd"})]
 
-        class compose:
-            """Mock of compose subclass."""
+            @staticmethod
+            def run(**kwargs) -> str:
+                return docker_cli_wrapper.CLIDockerClient.Containers.run(**kwargs)
 
-            created_ids: ClassVar[set[str]] = set()
+        class compose:
+            @staticmethod
+            def list() -> dict:
+                """Return ids of all created tesseracts projects."""
+                return created_ids
 
             @staticmethod
             def up(compose_fpath: str, project_name: str) -> str:
-                """Mock of CLIDockerClient.Compose.up."""
+                """Mock of CLIDockerClient.docker_compose_up."""
                 created_ids.add(project_name)
                 return project_name
 
             @staticmethod
             def down(project_id: str) -> bool:
-                """Mock of CLIDockerClient.Compose.down."""
+                """Mock of CLIDockerClient.docker_compose_down."""
                 created_ids.remove(project_id)
                 return True
 
             @staticmethod
             def exists(project_id: str) -> bool:
-                """Mock of CLIDockerClient.Compose.exists."""
+                """Mock of CLIDockerClient.docker_compose_project_exists."""
                 return project_id in created_ids
-
-            @staticmethod
-            def list() -> dict:
-                """Return ids of all created tesseracts projects."""
-                return created_ids
 
     def mocked_subprocess_run(*args, **kwargs):
         """Mock subprocess.run."""
         if "run" in args[0]:
             # Return args to `docker run` as json.
             args = args[0]
+
             return_dict = {"volumes": {}, "device_requests": None}
             volume_arg = args[3]
             while "-v" in volume_arg:
@@ -357,6 +361,6 @@ def mocked_docker(monkeypatch):
 
     mock_instance = MockedDocker()
     monkeypatch.setattr(docker_cli_wrapper.subprocess, "run", mocked_subprocess_run)
-    monkeypatch.setattr(engine, "CLIDockerClient", MockedDocker)
+    monkeypatch.setattr(engine, "docker_client", MockedDocker)
 
     yield mock_instance
