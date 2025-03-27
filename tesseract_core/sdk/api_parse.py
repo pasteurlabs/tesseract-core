@@ -229,8 +229,6 @@ def validate_tesseract_api(src_dir: Path) -> None:
                 msgs = []
                 for i in range(obj.num_args):
                     if func_argnames[i] != obj.arg_names[i]:
-                        print(func_argnames[i], obj.arg_names[i])
-                        print(func_argnames[i] == obj.arg_names[i])
                         msgs.append(
                             f"The {ORDINALS[i]} argument of {obj.name} must be named {obj.arg_names[i]}, "
                             f"but {tesseract_api_location} has named it {func_argnames[i]}."
