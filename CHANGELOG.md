@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.1] - 2025-03-28
+
+### Bug Fixes
+
+- Pydantic 2.11.0 compatibility (hotfix) (#106)
+
 ## [0.8.0] - 2025-03-27
 
 ### Features
