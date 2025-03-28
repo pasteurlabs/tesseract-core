@@ -69,6 +69,7 @@ ENV TESSERACT_NAME="{{ config.name }}" \
 # Copy only necessary files
 COPY --from=build_stage /python-env /python-env
 COPY "{{ tesseract_source_directory }}/tesseract_api.py" ${TESSERACT_API_PATH}
+RUN chown tesseractor:tesseractor ${TESSERACT_API_PATH}
 
 ENV PATH="/python-env/bin:$PATH"
 
