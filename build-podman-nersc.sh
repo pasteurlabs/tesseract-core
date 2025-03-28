@@ -1,5 +1,7 @@
 #!/bin/bash
 
+systemctl --user enable --now podman.socket
+
 source $SCRATCH/.venv/bin/activate
 export DOCKER_HOST=$(podman info --format '{{.Host.RemoteSocket.Path}}')
 
