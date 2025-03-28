@@ -51,6 +51,10 @@ class CLIDockerClient:
             # have id or name matching the image str
 
             # Use getter func to make sure it's updated
+            if not image:
+                raise CLIDockerClient.Errors.DockerException(
+                    "Image name cannot be empty."
+                )
             if ":" not in image:
                 image = image + ":latest"
             images = self.list()
@@ -419,7 +423,7 @@ class CLIDockerClient:
                 A list of Docker container ids.
             """
             # Calling self.get_projects will update containers and projects map
-            if project_id in self.get_projects():
+            if project_id in self.list():
                 return self.project_container_map[project_id]
             try:
                 # Run the docker ps command to list containers

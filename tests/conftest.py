@@ -230,7 +230,6 @@ def mocked_docker(monkeypatch):
 
         def logs(self, stderr=False, stdout=False, **kwargs: Any):
             """Mock logs method for Container."""
-            print("AKOAKO logs")
             out = []
             if stdout:
                 out.append(json.dumps(self.return_args).encode("utf-8"))
@@ -240,25 +239,26 @@ def mocked_docker(monkeypatch):
 
     created_ids = set()
 
-    class MockedDocker(docker_cli_wrapper.CLIDockerClient):
-        """Mock DockerWrapper class."""
+    class MockedDocker:
+        """Mock CLIDockerClient class."""
 
         @staticmethod
         def info():
             """Mock info method for DockerClient."""
-            pass
+            return docker_cli_wrapper.CLIDockerClient.info()
 
         class images:
-            """Mock of DockerWrapper.images."""
+            """Mock of CLIDockerClient.images."""
 
             @staticmethod
             def get(name: str) -> None:
-                """Mock of DockerWrapper.images.pull."""
+                """Mock of CLIDockerClient.Images.get."""
+                print("AKOAKO GET FUNCTION")
                 return MockedDocker.images.list()[0]
 
             @staticmethod
             def list() -> list[docker_cli_wrapper.CLIDockerClient.Images.Image]:
-                """Mock of DockerWrapper.get_all_images."""
+                """Mock of CLIDockerClient.Images.list."""
                 return [
                     docker_cli_wrapper.CLIDockerClient.Images.Image(
                         {
@@ -285,12 +285,12 @@ def mocked_docker(monkeypatch):
         class containers:
             @staticmethod
             def get(name: str) -> MockedContainer:
-                """Mock of DockerWrapper.get_container."""
+                """Mock of CLIDockerClient.Containers.get."""
                 return MockedDocker.containers.list()[0]
 
             @staticmethod
             def list() -> list[MockedContainer]:
-                """Mock of DockerWrapper.get_all_containers."""
+                """Mock of CLIDockerClient.Containers.list."""
                 return [MockedContainer({"TESSERACT_NAME": "vectoradd"})]
 
             @staticmethod
@@ -305,19 +305,19 @@ def mocked_docker(monkeypatch):
 
             @staticmethod
             def up(compose_fpath: str, project_name: str) -> str:
-                """Mock of CLIDockerClient.docker_compose_up."""
+                """Mock of CLIDockerClient.Compose.up."""
                 created_ids.add(project_name)
                 return project_name
 
             @staticmethod
             def down(project_id: str) -> bool:
-                """Mock of CLIDockerClient.docker_compose_down."""
+                """Mock of CLIDockerClient.Compose.down."""
                 created_ids.remove(project_id)
                 return True
 
             @staticmethod
             def exists(project_id: str) -> bool:
-                """Mock of CLIDockerClient.docker_compose_project_exists."""
+                """Mock of CLIDockerClient.Compose.exists."""
                 return project_id in created_ids
 
     def mocked_subprocess_run(*args, **kwargs):

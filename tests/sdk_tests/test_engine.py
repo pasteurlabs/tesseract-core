@@ -250,7 +250,7 @@ def test_needs_docker(mocked_docker, mocker):
     docker_info = mocker.patch(
         "tesseract_core.sdk.docker_cli_wrapper.CLIDockerClient.info"
     )
-    docker_info.side_effect = UserError("No Docker")
+    docker_info.side_effect = RuntimeError("No Docker")
 
     with pytest.raises(UserError):
         run_something_with_docker()

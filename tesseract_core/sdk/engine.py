@@ -99,11 +99,10 @@ def needs_docker(func: Callable) -> Callable:
     def wrapper_needs_docker(*args: Any, **kwargs: Any) -> None:
         try:
             docker_client.info()
-        except RuntimeError as ex:
-            message = "Could not reach Docker daemon, check if it is running."
-            logger.error(f"{message} Details: {ex}")
-            raise RuntimeError(f"{message} See logs for details.") from None
-
+        except (CLIDockerClient.Errors.APIError, RuntimeError) as ex:
+            raise UserError(
+                "Could not reach Docker daemon, check if it is running."
+            ) from ex
         return func(*args, **kwargs)
 
     return wrapper_needs_docker
