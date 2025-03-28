@@ -16,3 +16,6 @@ echo
 echo
 echo "The python error is no big deal, we should have successfully built the image:"
 podman-hpc images
+
+# Migrate the image to the scratch partition
+podman-hpc migrate vectoradd:0.1.0
