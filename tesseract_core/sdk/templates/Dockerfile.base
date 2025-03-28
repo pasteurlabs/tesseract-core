@@ -57,8 +57,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN groupadd -g 1000 tesseractor && \
     useradd -u 1000 -g 1000 --create-home -s /bin/bash tesseractor
 WORKDIR /tesseract
-RUN chown tesseractor:tesseractor /tesseract
-USER tesseractor
 
 # Set environment variables
 ENV TESSERACT_NAME="{{ config.name }}" \
@@ -69,6 +67,9 @@ ENV TESSERACT_NAME="{{ config.name }}" \
 # Copy only necessary files
 COPY --from=build_stage /python-env /python-env
 COPY "{{ tesseract_source_directory }}/tesseract_api.py" ${TESSERACT_API_PATH}
+
+RUN chown -R tesseractor:tesseractor /tesseract
+USER tesseractor
 
 ENV PATH="/python-env/bin:$PATH"
 
