@@ -10,12 +10,9 @@ from tesseract_core.sdk.cli import app
 
 
 def image_exists(client, image_name):
-    # Docker images may be prefixed with the registry URL
-    return any(
-        tag.split("/")[-1] == image_name
-        for img in client.images.list()
-        for tag in img.tags
-    )
+    images = client.images.list()
+    # If any image.name starts with image_name, we consider it exists
+    return any(image_name in image.name for image in images)
 
 
 def print_debug_info(result):

@@ -6,13 +6,13 @@ import os
 import random
 import string
 import subprocess
-from contextlib import closing
 from pathlib import Path
 from shutil import copytree
 from typing import Any
 
-import docker
 import pytest
+
+from tesseract_core.sdk import docker_cli_wrapper
 
 here = Path(__file__).parent
 
@@ -49,7 +49,8 @@ def pytest_collection_modifyitems(config, items):
     # or if Docker is not available
     def has_docker():
         try:
-            docker.from_env().close()
+            docker = docker_cli_wrapper.CLIDockerClient()
+            docker.info()
             return True
         except Exception:
             return False
@@ -163,8 +164,7 @@ def free_port():
 
 @pytest.fixture(scope="session")
 def docker_client():
-    with closing(docker.from_env()) as client:
-        yield client
+    return docker_cli_wrapper.CLIDockerClient()
 
 
 @pytest.fixture
@@ -180,9 +180,11 @@ def dummy_image_name(docker_client):
             "true",
         ):
             try:
-                docker_client.images.remove(image_name, noprune=False, force=True)
-            except (docker.errors.ImageNotFound, docker.errors.NotFound):
-                pass
+                docker_client.images.remove(image_name)
+            except RuntimeError as ex:
+                # If image is not found is in the exception error string, pass
+                if "Cannot remove image" in str(ex).lower():
+                    pass
 
 
 @pytest.fixture(scope="module")
@@ -198,20 +200,23 @@ def shared_dummy_image_name(docker_client):
             "true",
         ):
             try:
-                docker_client.images.remove(image_name, noprune=False, force=True)
-            except (docker.errors.ImageNotFound, docker.errors.NotFound):
-                pass
+                docker_client.images.remove(image_name)
+            except RuntimeError as ex:
+                # If image is not found is in the exception error string, pass
+                if "Cannot remove image" in str(ex).lower():
+                    pass
 
 
 @pytest.fixture
 def mocked_docker(monkeypatch):
-    """Mock docker client."""
+    """Mock Docker Wrapper class."""
     from tesseract_core.sdk import engine
 
-    class MockedContainer(docker.models.containers.Container):
+    class MockedContainer(docker_cli_wrapper.CLIDockerClient.Containers.Container):
         """Mock Container class."""
 
         def __init__(self, return_args: dict):
+            print("AKOAKO return args", return_args)
             self.return_args = return_args
 
         def wait(self, **kwargs: Any):
@@ -232,42 +237,39 @@ def mocked_docker(monkeypatch):
                 out.append(b"hello tesseract")
             return b"\n".join(out)
 
-        def remove(self, **kwargs: Any):
-            """Mock remove method for Container."""
-            pass
+    created_ids = set()
 
     class MockedDocker:
-        """Mock DockerClient class."""
+        """Mock CLIDockerClient class."""
 
-        def close(self):
-            """Mock close method for DockerClient."""
-            pass
-
-        def info(self):
+        @staticmethod
+        def info():
             """Mock info method for DockerClient."""
-            pass
+            return docker_cli_wrapper.CLIDockerClient.info()
 
         class images:
-            """Mock images subclass."""
+            """Mock of CLIDockerClient.images."""
 
             @staticmethod
-            def get(image_id: str):
-                """Mock get method for images."""
+            def get(name: str) -> None:
+                """Mock of CLIDockerClient.Images.get."""
+                print("AKOAKO GET FUNCTION")
                 return MockedDocker.images.list()[0]
 
             @staticmethod
-            def list() -> list[docker.models.images.Image]:
+            def list() -> list[docker_cli_wrapper.CLIDockerClient.Images.Image]:
+                """Mock of CLIDockerClient.Images.list."""
                 return [
-                    docker.models.images.Image(
-                        attrs={
+                    docker_cli_wrapper.CLIDockerClient.Images.Image(
+                        {
                             "Id": "sha256:123456789abcdef",
                             "RepoTags": ["vectoradd:latest"],
                             "Size": 123456789,
                             "Config": {"Env": ["TESSERACT_NAME=vectoradd"]},
                         },
                     ),
-                    docker.models.images.Image(
-                        attrs={
+                    docker_cli_wrapper.CLIDockerClient.Images.Image(
+                        {
                             "Id": "sha256:48932484029303",
                             "RepoTags": ["hello-world:latest"],
                             "Size": 43829489032,
@@ -276,67 +278,89 @@ def mocked_docker(monkeypatch):
                     ),
                 ]
 
+            @staticmethod
+            def buildx(*args, **kwargs) -> str:
+                return docker_cli_wrapper.CLIDockerClient.Images.buildx(*args, **kwargs)
+
         class containers:
-            """Mock containers subclass."""
+            @staticmethod
+            def get(name: str) -> MockedContainer:
+                """Mock of CLIDockerClient.Containers.get."""
+                return MockedDocker.containers.list()[0]
 
             @staticmethod
-            def run(**kwargs: Any) -> bytes:
-                """Mock run method for containers."""
-                container = MockedContainer(kwargs)
-                if kwargs.get("detach", False):
-                    return container
-                return container.logs()
-
-            @staticmethod
-            def list(**kwargs: Any) -> list[MockedContainer]:
+            def list() -> list[MockedContainer]:
+                """Mock of CLIDockerClient.Containers.list."""
                 return [MockedContainer({"TESSERACT_NAME": "vectoradd"})]
 
-    class MockedAPIClient:
-        """Mock APIClient class."""
+            @staticmethod
+            def run(**kwargs) -> str:
+                return docker_cli_wrapper.CLIDockerClient.Containers.run(**kwargs)
 
-        def close(self):
-            """Mock close method for APIClient."""
-            pass
+        class compose:
+            @staticmethod
+            def list() -> dict:
+                """Return ids of all created tesseracts projects."""
+                return created_ids
 
-        def prune_builds(self, all: bool, filters: dict):
-            """Mock prune_builds method for APIClient."""
-            pass
+            @staticmethod
+            def up(compose_fpath: str, project_name: str) -> str:
+                """Mock of CLIDockerClient.Compose.up."""
+                created_ids.add(project_name)
+                return project_name
 
-    created_ids = set()
+            @staticmethod
+            def down(project_id: str) -> bool:
+                """Mock of CLIDockerClient.Compose.down."""
+                created_ids.remove(project_id)
+                return True
+
+            @staticmethod
+            def exists(project_id: str) -> bool:
+                """Mock of CLIDockerClient.Compose.exists."""
+                return project_id in created_ids
 
     def mocked_subprocess_run(*args, **kwargs):
         """Mock subprocess.run."""
-        if "compose" in args[0] and "up" in args[0]:
-            # Extract the tesseract id from the command and store it
-            for arg in args[0]:
-                if "tesseract-" in arg:
-                    created_ids.add(arg)
+        if "run" in args[0]:
+            # Return args to `docker run` as json.
+            args = args[0]
 
-        if "compose" in args[0] and "ls" in args[0]:
-            # Return the list of created tesseract ids
+            return_dict = {"volumes": {}, "device_requests": None}
+            volume_arg = args[3]
+            while "-v" in volume_arg:
+                # Add all the volumes and remove them from arg list.
+                volume = args[4].split(":")
+                return_dict["volumes"].update(
+                    {volume[0]: {"bind": volume[1], "mode": volume[2]}}
+                )
+                # Remove this argument to fix indexing for none volume cases.
+                args.pop(4)
+                args.pop(3)
+                volume_arg = args[3]
+
+            string_args = "\t".join(args)
+            if "--gpu" in string_args:
+                return_dict["device_requests"] = [
+                    {"DeviceIDs": [args[3].split("=")[1].split('"')[0]]}
+                ]
+                # Remove this argument to fix indexing for none gpu cases.
+                args.pop(3)
+
+            return_dict.update({"command": args[4:], "image": args[3]})
             return subprocess.CompletedProcess(
                 args=args,
                 returncode=0,
-                stderr=b"",
-                stdout=str.encode(json.dumps([{"Name": pid} for pid in created_ids])),
+                stderr="hello tesseract",
+                stdout=json.dumps(return_dict).encode("utf-8"),
             )
-
-        if "compose" in args[0] and "down" in args[0]:
-            # Remove the tesseract id from the list of created tesseracts
-            for arg in args[0]:
-                if "tesseract-" in arg:
-                    created_ids.remove(arg)
 
         return subprocess.CompletedProcess(
             args=args, returncode=0, stderr=b"", stdout=b""
         )
 
-    def mock_from_env(*args, **kwargs):
-        return mock_instance
-
     mock_instance = MockedDocker()
-    monkeypatch.setattr(docker, "from_env", mock_from_env)
-    monkeypatch.setattr(docker, "APIClient", MockedAPIClient)
-    monkeypatch.setattr(engine.subprocess, "run", mocked_subprocess_run)
+    monkeypatch.setattr(docker_cli_wrapper.subprocess, "run", mocked_subprocess_run)
+    monkeypatch.setattr(engine, "docker_client", MockedDocker)
 
     yield mock_instance
