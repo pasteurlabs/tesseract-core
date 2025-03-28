@@ -68,7 +68,7 @@ ENV TESSERACT_NAME="{{ config.name }}" \
 COPY --from=build_stage /python-env /python-env
 COPY "{{ tesseract_source_directory }}/tesseract_api.py" ${TESSERACT_API_PATH}
 
-RUN chown tesseractor:tesseractor /tesseract
+RUN chown -R tesseractor:tesseractor /tesseract
 USER tesseractor
 
 ENV PATH="/python-env/bin:$PATH"
