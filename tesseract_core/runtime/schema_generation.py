@@ -271,13 +271,13 @@ def create_apply_schema(
         InputSchema,
         lambda x, _: x,
         model_prefix="Apply_",
-        model_kwargs={"model_config": ConfigDict(extra="forbid")},
+        model_kwargs={"model_config": (ConfigDict, ConfigDict(extra="forbid"))},
     )
     OutputSchema = apply_function_to_model_tree(
         OutputSchema,
         lambda x, _: x,
         model_prefix="Apply_",
-        model_kwargs={"model_config": ConfigDict(extra="forbid")},
+        model_kwargs={"model_config": (ConfigDict, ConfigDict(extra="forbid"))},
     )
 
     class ApplyInputSchema(BaseModel):
@@ -325,14 +325,14 @@ def create_abstract_eval_schema(
         InputSchema,
         replace_array_with_shapedtype,
         model_prefix="AbstractEval_",
-        model_kwargs={"model_config": ConfigDict(extra="forbid")},
+        model_kwargs={"model_config": (ConfigDict, ConfigDict(extra="forbid"))},
     )
 
     GeneratedOutputSchema = apply_function_to_model_tree(
         OutputSchema,
         replace_array_with_shapedtype,
         model_prefix="AbstractEval_",
-        model_kwargs={"model_config": ConfigDict(extra="forbid")},
+        model_kwargs={"model_config": (ConfigDict, ConfigDict(extra="forbid"))},
     )
 
     class AbstractInputSchema(BaseModel):
@@ -463,7 +463,7 @@ def create_autodiff_schema(
         InputSchema,
         lambda x, _: x,
         model_prefix=f"{ad_flavor.title()}_",
-        model_kwargs={"model_config": ConfigDict(extra="forbid")},
+        model_kwargs={"model_config": (ConfigDict, ConfigDict(extra="forbid"))},
     )
 
     def result_validator(
