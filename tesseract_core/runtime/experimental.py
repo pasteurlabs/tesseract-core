@@ -138,7 +138,8 @@ class PydanticLazySequenceAnnotation:
             This is not an encouraged use case, but it is supported for completeness.
             """
             materialized_sequence = list(obj)
-            serializer = SchemaSerializer(sequence_of_item_schema)
+            serializer = SchemaSerializer(sequence_schema)
+
             return serializer.to_python(materialized_sequence, **__info.__dict__)
 
         origin = get_origin(_source_type)
@@ -153,13 +154,11 @@ class PydanticLazySequenceAnnotation:
         assert len(args) == 1
 
         # Wrap in TypeAdapter so we don't need conditional logic for Python types vs. Pydantic models
-        _source_type = TypeAdapter(args[0])
-
-        item_schema = _source_type.core_schema
-        sequence_of_item_schema = core_schema.list_schema(item_schema)
+        item_schema = TypeAdapter(args[0]).core_schema
+        sequence_schema = _handler(_source_type)
 
         obj_or_path = core_schema.union_schema(
-            [sequence_of_item_schema, core_schema.str_schema(pattern="^@")]
+            [sequence_schema, core_schema.str_schema(pattern="^@")]
         )
         load_schema = core_schema.chain_schema(
             # first load data, then validate it with the wrapped schema
@@ -170,7 +169,7 @@ class PydanticLazySequenceAnnotation:
                     serialization=core_schema.plain_serializer_function_ser_schema(
                         serialize,
                         info_arg=True,
-                        return_schema=sequence_of_item_schema,
+                        return_schema=sequence_schema,
                     ),
                 ),
             ]
