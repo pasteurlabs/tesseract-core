@@ -1,0 +1,28 @@
+name: "helloworld-cuda12"
+version: "1.0.0"
+description: "A sample Python app"
+
+build_config:
+  # Base image to use for the container, must be Ubuntu or Debian-based
+  # with Python 3.9 or later
+  base_image: "nvidia/cuda:12.8.1-cudnn-devel-ubuntu24.04" 
+
+  # Platform to build the container for. In general, images can only be executed
+  # on the platform they were built for.
+  # target_platform: "native"
+
+  # Additional packages to install in the container (via apt-get)
+  extra_packages:
+   - libbz2-dev
+   - uuid-dev
+   - python3-venv
+   - wget
+
+  # Data to copy into the container, relative to the project root
+  # package_data:
+  #  - [path/to/source, path/to/destination]
+
+  # Additional Dockerfile commands to run during the build process
+  # custom_build_steps:
+  #  - |
+  #   RUN echo "Hello, World!"
