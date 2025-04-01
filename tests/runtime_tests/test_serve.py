@@ -43,8 +43,8 @@ def model_to_json(model):
 
 
 @pytest.fixture
-def mock_client(dummy_tesseract_module):
-    """Mock an http client."""
+def http_client(dummy_tesseract_module):
+    """A test HTTP client."""
     rest_api = create_rest_api(dummy_tesseract_module)
     return TestClient(rest_api)
 
@@ -58,11 +58,11 @@ def mock_client(dummy_tesseract_module):
         "msgpack",
     ],
 )
-def test_create_rest_api_apply_endpoint(mock_client, dummy_tesseract_module, format):
+def test_create_rest_api_apply_endpoint(http_client, dummy_tesseract_module, format):
     """Test we can get an Apply endpoint from generated API."""
     test_inputs = dummy_tesseract_module.InputSchema.model_validate(test_input)
 
-    response = mock_client.post(
+    response = http_client.post(
         "/apply",
         json={"inputs": model_to_json(test_inputs)},
         headers={"Accept": f"application/{format}"},
@@ -82,11 +82,11 @@ def test_create_rest_api_apply_endpoint(mock_client, dummy_tesseract_module, for
         raise NotImplementedError()
 
 
-def test_create_rest_api_jacobian_endpoint(mock_client, dummy_tesseract_module):
+def test_create_rest_api_jacobian_endpoint(http_client, dummy_tesseract_module):
     """Test we can get a Jacobian endpoint from generated API."""
     test_inputs = dummy_tesseract_module.InputSchema.model_validate(test_input)
 
-    response = mock_client.post(
+    response = http_client.post(
         "/jacobian",
         json={
             "inputs": model_to_json(test_inputs),
@@ -105,25 +105,25 @@ def test_create_rest_api_jacobian_endpoint(mock_client, dummy_tesseract_module):
     )
 
 
-def test_create_rest_api_generates_health_endpoint(mock_client):
+def test_create_rest_api_generates_health_endpoint(http_client):
     """Test we can get health endpoint from generated API."""
-    response = mock_client.get("/health")
+    response = http_client.get("/health")
     assert response.json() == {"status": "ok"}
 
 
-def test_get_input_schema(mock_client):
-    response = mock_client.get("/input_schema")
+def test_get_input_schema(http_client):
+    response = http_client.get("/input_schema")
 
     assert response.status_code == 200, response.text
 
 
-def test_get_output_schema(mock_client):
-    response = mock_client.get("/output_schema")
+def test_get_output_schema(http_client):
+    response = http_client.get("/output_schema")
 
     assert response.status_code == 200, response.text
 
 
-def test_post_abstract_eval(mock_client):
+def test_post_abstract_eval(http_client):
     payload = {
         "inputs": {
             "a": {"dtype": "float64", "shape": [4]},
@@ -132,14 +132,14 @@ def test_post_abstract_eval(mock_client):
             "normalize": False,
         }
     }
-    response = mock_client.post("/abstract_eval", json=payload)
+    response = http_client.post("/abstract_eval", json=payload)
 
     assert response.status_code == 200, response.text
     assert response.json() == {"result": {"shape": [4], "dtype": "float64"}}
 
 
-def test_post_abstract_eval_throws_validation_errors(mock_client):
-    response = mock_client.post("/abstract_eval", json={"what": {"is": "this"}})
+def test_post_abstract_eval_throws_validation_errors(http_client):
+    response = http_client.post("/abstract_eval", json={"what": {"is": "this"}})
 
     assert response.status_code == 422, response.text
     errors = response.json()["detail"]
@@ -149,8 +149,8 @@ def test_post_abstract_eval_throws_validation_errors(mock_client):
     assert "extra_forbidden" in error_types
 
 
-def test_get_openapi_schema(mock_client):
-    response = mock_client.get("/openapi.json")
+def test_get_openapi_schema(http_client):
+    response = http_client.get("/openapi.json")
 
     assert response.status_code == 200, response.text
     assert response.json()["info"]["title"] == "Tesseract"
@@ -232,3 +232,53 @@ def test_threading_sanity(tmpdir, free_port):
         print(stdout.decode())
         print(stderr.decode())
         proc.wait(timeout=5)
+
+
+def test_debug_mode(dummy_tesseract_module, monkeypatch):
+    import tesseract_core.runtime.config
+    from tesseract_core.runtime.config import update_config
+
+    def apply_that_raises(inputs):
+        raise ValueError("This is a test error")
+
+    orig_config = tesseract_core.runtime.config._current_config
+
+    monkeypatch.setattr(dummy_tesseract_module, "apply", apply_that_raises)
+
+    try:
+        update_config(debug=False, tesseract_api_path=dummy_tesseract_module.__file__)
+        rest_api = create_rest_api(dummy_tesseract_module)
+        http_client = TestClient(rest_api, raise_server_exceptions=False)
+
+        response = http_client.post(
+            "/apply",
+            json={
+                "inputs": model_to_json(
+                    dummy_tesseract_module.InputSchema.model_validate(test_input)
+                )
+            },
+        )
+        assert response.status_code == 500, response.text
+        assert response.text == "Internal Server Error"
+        assert "This is a test error" not in response.text
+    finally:
+        tesseract_core.runtime.config._current_config = orig_config
+
+    try:
+        update_config(debug=True, tesseract_api_path=dummy_tesseract_module.__file__)
+        rest_api = create_rest_api(dummy_tesseract_module)
+        http_client = TestClient(rest_api, raise_server_exceptions=False)
+
+        response = http_client.post(
+            "/apply",
+            json={
+                "inputs": model_to_json(
+                    dummy_tesseract_module.InputSchema.model_validate(test_input)
+                )
+            },
+        )
+        assert response.status_code == 500, response.text
+        assert "This is a test error" in response.text
+        assert "Traceback" in response.text
+    finally:
+        tesseract_core.runtime.config._current_config = orig_config

@@ -31,10 +31,21 @@ def test_available_endpoints(built_image_name):
 
 
 def test_apply(built_image_name):
-    input = {"a": [1, 2], "b": [3, 4], "s": 1}
+    inputs = {"a": [1, 2], "b": [3, 4], "s": 1}
 
     with Tesseract.from_image(built_image_name) as vecadd:
-        out = vecadd.apply(input)
+        out = vecadd.apply(inputs)
 
     np.testing.assert_array_equal(out["result"], np.array([4.0, 6.0]))
     assert set(out.keys()) == {"result"}
+
+
+def test_apply_with_error(built_image_name):
+    # pass two inputs with different shapes, which raises an error
+    inputs = {"a": [1, 2, 3], "b": [3, 4], "s": 1}
+
+    with Tesseract.from_image(built_image_name) as vecadd:
+        with pytest.raises(RuntimeError) as excinfo:
+            vecadd.apply(inputs)
+
+    assert "assert a.shape == b.shape" in str(excinfo.value)
