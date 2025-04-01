@@ -68,17 +68,17 @@ ENV TESSERACT_NAME="{{ config.name }}" \
 COPY --from=build_stage /python-env /python-env
 COPY "{{ tesseract_source_directory }}/tesseract_api.py" ${TESSERACT_API_PATH}
 
-RUN chown -R tesseractor:tesseractor /tesseract
-USER tesseractor
-
-ENV PATH="/python-env/bin:$PATH"
-
-{% if config.build_config.package_data %}
 # Copy package data to image
+{% if config.build_config.package_data %}
 {% for source_path, target_path in config.build_config.package_data %}
 COPY ["{{ tesseract_source_directory }}/{{ source_path }}", "{{ target_path }}"]
 {% endfor %}
 {% endif %}
+
+RUN chown -R tesseractor:tesseractor /tesseract
+USER tesseractor
+
+ENV PATH="/python-env/bin:$PATH"
 
 {% if config.build_config.custom_build_steps %}
 # Custom build steps
