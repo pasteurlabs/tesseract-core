@@ -4,14 +4,6 @@ on:
   # run on PRs for validation
   pull_request:
 
-  # this is used by deploy_pages.yml to do docs build on main
-  workflow_call:
-    inputs:
-      artifact_name:
-        description: "Name of the artifact to upload"
-        required: false
-        type: string
-
 jobs:
   test-docs:
     runs-on: ubuntu-latest
