@@ -62,7 +62,7 @@ repos:
         mv uv.lock.bak uv.lock; \
         exit $rc;
       '
-    additional_dependencies: [uv,--isolated]
+    additional_dependencies: [uv==0.6.11,--isolated]
 
   # Update requirements.txt after production.uv.lock changes
   - id: update-requirements
@@ -80,4 +80,4 @@ repos:
         mv uv.lock.bak uv.lock; \
         exit $rc;
       '
-    additional_dependencies: [uv,--isolated]
+    additional_dependencies: [uv==0.6.11,--isolated]
