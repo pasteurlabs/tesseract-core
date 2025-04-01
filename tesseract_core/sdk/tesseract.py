@@ -9,6 +9,7 @@ from collections.abc import Mapping, Sequence
 from functools import cached_property
 from urllib.parse import urlparse, urlunparse
 
+import docker
 import numpy as np
 import requests
 from pydantic import ValidationError
@@ -31,6 +32,7 @@ class Tesseract:
     image: str
     volumes: list[str] | None
     gpus: list[str] | None
+    debug: bool
 
     _client: HTTPClient
     project_id: str | None = None
@@ -52,30 +54,54 @@ class Tesseract:
         obj.image = image
         obj.volumes = volumes
         obj.gpus = gpus
+        obj.debug = True
 
         return obj
 
+    def __getatattr__(self, name: str):
+        if name == "_client" and getattr(self, "_client", None) is None:
+            raise RuntimeError(
+                f"{self.cls.__name__} must be used as a context manager when created via `from_image`."
+            )
+        return super().__getattr__(name)
+
     def __enter__(self):
-        url = self._serve(volumes=self.volumes, gpus=self.gpus)
+        url = self._serve(volumes=self.volumes, gpus=self.gpus, debug=self.debug)
         self._client = HTTPClient(url)
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
         engine.teardown(self.project_id)
+        self._client = None
         self.project_id = None
         self.container_id = None
+
+    def server_logs(self):
+        """Get the logs of the Tesseract server.
+
+        Returns:
+            logs of the Tesseract server.
+        """
+        if not self.container_id:
+            raise RuntimeError("Tesseract is not running.")
+        client = docker.from_env()
+        container = client.containers.get(self.container_id)
+        return container.logs().decode("utf-8")
 
     def _serve(
         self,
         port: str = "",
         volumes: list[str] | None = None,
         gpus: list[str] | None = None,
+        debug: bool = False,
     ) -> str:
         if self.container_id:
             raise RuntimeError(
                 "Client already attached to the Tesseract container {self.container_id}"
             )
-        project_id = engine.serve([self.image], port=port, volumes=volumes, gpus=gpus)
+        project_id = engine.serve(
+            [self.image], port=port, volumes=volumes, gpus=gpus, debug=debug
+        )
 
         command = ["docker", "compose", "-p", project_id, "ps", "--format", "json"]
         result = subprocess.run(command, capture_output=True, text=True)
@@ -327,7 +353,11 @@ class HTTPClient:
             encoded_payload = None
 
         response = requests.request(method=method, url=url, json=encoded_payload)
-        data = response.json()
+
+        try:
+            data = response.json()
+        except requests.JSONDecodeError:
+            data = {}
 
         if (
             response.status_code == requests.codes.unprocessable_entity
@@ -342,8 +372,11 @@ class HTTPClient:
                 for e in data["detail"]
             ]
             raise ValidationError.from_exception_data(f"endpoint {endpoint}", errors)
-        else:
-            response.raise_for_status()
+
+        if not response.ok:
+            raise RuntimeError(
+                f"Error {response.status_code} from Tesseract: {response.text}"
+            )
 
         if endpoint in [
             "apply",
