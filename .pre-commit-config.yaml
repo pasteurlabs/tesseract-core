@@ -49,7 +49,7 @@ repos:
   # Update production.uv.lock after pyproject.toml changes
   - id: update-uv-env
     name: update-uv-env
-    files: ^pyproject.toml$
+    files: pyproject.toml$
     stages: [pre-commit]
     language: python
     entry: |
