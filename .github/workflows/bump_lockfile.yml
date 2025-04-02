@@ -1,0 +1,59 @@
+name: Bump UV lockfile
+
+on:
+  workflow_dispatch:  # Allows manual trigger
+
+  schedule:
+    - cron:  '0 0 * * 1'  # 12AM only on Mondays
+
+jobs:
+  bump-lockfile:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up Git repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: "pyproject.toml"
+
+      - name: Update lockfile
+        run: |
+          mv production.uv.lock uv.lock
+          uv lock --upgrade
+          mv uv.lock production.uv.lock
+
+      - name: Generate new requirements.txt
+        run : |
+          pip install pre-commit
+          pre-commit run update-requirements --all-files || true
+
+      - name: Detect if changes were made
+        id: git-diff
+        run: |
+          changes=false
+          git diff --exit-code || changes=true
+          echo "update_done=$changes" >> $GITHUB_OUTPUT
+
+      - name: Create Pull Request
+        if: steps.git-diff.outputs.update_done == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+            token: ${{ secrets.GITHUB_TOKEN }}
+            commit-message: Update dependencies
+            title: 📦 Update dependencies
+            branch: _bot/update-deps
+            draft: false
+            base: main
+            body: |
+              This PR updates the lockfile to the latest versions of the dependencies.
+              Please review the changes and merge when ready.
+
+              To trigger CI checks, please close and reopen this PR.

@@ -205,7 +205,7 @@ def test_threading_sanity(tmpdir, free_port):
         )
 
         # wait for server to start
-        timeout = 10.0
+        timeout = 30.0
         while True:
             try:
                 response = requests.get(f"http://localhost:{free_port}/health")

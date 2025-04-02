@@ -5,7 +5,7 @@ requires-python = ">=3.9"
 dependencies = [
     "pydantic>=2.10,<=2.11.0",
     "fastapi>=0.115,<=0.115.12",
-    "requests>=2.32,<=2.32.3",
+    "requests>=2.31,<=2.32.3",
     "uvicorn>=0.34,<=0.34.0",
     "click>=8.1,<=8.1.8",
     "typer>=0.15,<=0.15.2",

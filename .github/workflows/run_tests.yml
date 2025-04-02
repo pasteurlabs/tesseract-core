@@ -69,17 +69,25 @@ jobs:
           export PATH="$HOME/venv/bin:$PATH"
           python -m pip install --upgrade pip
 
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Restore UV environment
+        run: cp production.uv.lock uv.lock
+
       - name: Install package
         if: runner.os != 'Windows'
         run: |
-          pip install .[dev] -r requirements-dev.txt
+          uv sync --extra dev --frozen
 
           if [ "${{ matrix.runtime-deps }}" == "oldest" ]; then
             # replace >= with == in pyproject.toml to install oldest runtime deps
             sed -i 's/>=/==/g' ./tesseract_core/runtime/meta/pyproject.toml
             # roll back changes to requires-python
             sed -i 's/requires-python\s*=\s*\"==/requires-python = \">=/g' ./tesseract_core/runtime/meta/pyproject.toml
-            pip install .[runtime]
+            uv pip install .[runtime]
           fi
 
       - name: Install package (Windows)
@@ -88,27 +96,44 @@ jobs:
         run: |
           export PATH="$HOME/venv/bin:$PATH"
 
-          pip install .[dev] -r requirements-dev.txt
+          pip install uv
+          uv sync --extra dev --frozen
 
           if [ "${{ matrix.runtime-deps }}" == "oldest" ]; then
             # replace >= with == in pyproject.toml to install oldest runtime deps
             sed -i 's/>=/==/g' ./tesseract_core/runtime/meta/pyproject.toml
             # roll back changes to requires-python
             sed -i 's/requires-python\s*=\s*\"==/requires-python = \">=/g' ./tesseract_core/runtime/meta/pyproject.toml
-            pip install .[runtime]
+            uv pip install .[runtime]
           fi
 
       - name: Run test suite
         if: runner.os != 'Windows'
         run: |
-          pytest --skip-endtoend
+          uv run --no-sync pytest \
+            --skip-endtoend \
+            --cov-report=term-missing:skip-covered \
+            --cov-report=xml:coverage.xml \
+            --cov=tesseract_core
 
       - name: Run test suite (Windows)
         if: runner.os == 'Windows'
         shell: wsl-bash {0}
         run: |
           export PATH="$HOME/venv/bin:$PATH"
-          pytest --skip-endtoend
+          uv run --no-sync pytest \
+            --skip-endtoend \
+            --cov-report=term-missing:skip-covered \
+            --cov-report=xml:coverage.xml \
+            --cov=tesseract_core
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v5.4.0
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: pasteurlabs/tesseract-core
+          files: coverage*.xml
+          fail_ci_if_error: true
 
   get-e2e-matrix:
     runs-on: ubuntu-latest
@@ -172,14 +197,42 @@ jobs:
           auto-update-conda: true
           python-version: ${{ matrix.python-version }}
 
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Restore UV environment
+        run: cp production.uv.lock uv.lock
+
       - name: Install package
         run: |
-          pip install .[dev] -r requirements-dev.txt
+          uv sync --extra dev --frozen
 
       - name: Run test suite
         run: |
           if [ "${{ matrix.unit-tesseract }}" == "base" ]; then
-            pytest --always-run-endtoend tests/endtoend_tests -k "not test_examples"
+            uv run --no-sync pytest \
+              --always-run-endtoend \
+              --cov-report=term-missing:skip-covered \
+              --cov-report=xml:coverage.xml \
+              --cov=tesseract_core \
+              tests/endtoend_tests \
+              -k "not test_examples"
           else
-            pytest --always-run-endtoend tests/endtoend_tests/test_examples.py -k "[${{ matrix.unit-tesseract }}]"
+            uv run --no-sync pytest \
+            --always-run-endtoend \
+            --cov-report=term-missing:skip-covered \
+            --cov-report=xml:coverage.xml \
+            --cov=tesseract_core \
+            tests/endtoend_tests/test_examples.py \
+            -k "[${{ matrix.unit-tesseract }}]"
           fi
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v5.4.0
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: pasteurlabs/tesseract-core
+          files: coverage*.xml
+          fail_ci_if_error: true
