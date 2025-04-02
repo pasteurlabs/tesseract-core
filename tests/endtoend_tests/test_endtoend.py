@@ -23,15 +23,23 @@ def built_image_name(docker_client, shared_dummy_image_name, dummy_tesseract_loc
     yield image_name
 
 
-@pytest.mark.parametrize("tag", [True, False])
-@pytest.mark.parametrize("recipe", [None, *AVAILABLE_RECIPES])
+build_matrix = [
+    {"tag": True},
+    *[{"recipe": r} for r in AVAILABLE_RECIPES],
+    # TODO: Add more common base images like conda, CUDA, ...
+    *[{"base_image": img} for img in ("ubuntu:24.04",)],
+]
+
+
+@pytest.mark.parametrize("build_config", build_matrix)
 def test_build_from_init_endtoend(
-    docker_client, dummy_image_name, tmp_path, tag, recipe
+    docker_client, dummy_image_name, tmp_path, build_config
 ):
     """Test that a trivial (empty) Tesseract image can be built from init."""
     cli_runner = CliRunner(mix_stderr=False)
 
     init_args = ["init", "--target-dir", str(tmp_path), "--name", dummy_image_name]
+    recipe = build_config.get("recipe")
     if recipe:
         init_args.extend(["--recipe", recipe])
 
@@ -41,8 +49,17 @@ def test_build_from_init_endtoend(
     with open(tmp_path / "tesseract_config.yaml") as config_yaml:
         assert yaml.safe_load(config_yaml)["name"] == dummy_image_name
 
+    tag = build_config.get("tag")
     img_tag = "foo" if tag else None
-    image_name = build_tesseract(tmp_path, dummy_image_name, tag=img_tag)
+
+    config_override = {}
+    base_image = build_config.get("base_image")
+    if base_image is not None:
+        config_override["build_config.base_image"] = base_image
+
+    image_name = build_tesseract(
+        tmp_path, dummy_image_name, config_override=config_override, tag=img_tag
+    )
     assert image_exists(docker_client, image_name)
 
     # Test that the image can be run and that --help is forwarded correctly
