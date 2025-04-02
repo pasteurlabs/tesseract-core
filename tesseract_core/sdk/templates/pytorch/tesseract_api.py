@@ -36,7 +36,6 @@ class OutputSchema(BaseModel):
 # take/return a single pytree as an input/output conforming respectively
 # to Input/OutputSchema
 def evaluate(inputs: Any) -> Any:
-    print(inputs)
     return {
         "example": inputs["example"] + inputs["b"],
         "c": inputs["example"] * inputs["b"],

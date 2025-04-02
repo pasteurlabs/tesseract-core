@@ -584,7 +584,6 @@ def serve(
         image_ids.append(image.id)
 
     template = _create_docker_compose_template(image_ids, port, volumes, gpus, debug)
-    print(template)
     compose_fname = _create_compose_fname()
 
     with tempfile.NamedTemporaryFile(

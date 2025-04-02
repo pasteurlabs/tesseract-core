@@ -367,23 +367,24 @@ def test_tesseract_serve_with_volumes(built_image_name, tmp_path, docker_client)
     tmp_path.chmod(0o0707)
 
     dest = Path("/foo/")
-    try:
-        run_res = cli_runner.invoke(
-            app,
-            [
-                "serve",
-                "--volume",
-                f"{tmp_path}:{dest}",
-                built_image_name,
-                built_image_name,
-            ],
-            catch_exceptions=False,
-        )
-        assert run_res.exit_code == 0, run_res.stderr
-        assert run_res.stdout
+    run_res = cli_runner.invoke(
+        app,
+        [
+            "serve",
+            "--volume",
+            f"{tmp_path}:{dest}",
+            built_image_name,
+            built_image_name,
+        ],
+        catch_exceptions=False,
+    )
+    assert run_res.exit_code == 0, run_res.stderr
+    assert run_res.stdout
 
-        project_meta = json.loads(run_res.stdout)
-        project_id = project_meta["project_id"]
+    project_meta = json.loads(run_res.stdout)
+    project_id = project_meta["project_id"]
+
+    try:
         tesseract0_id = project_meta["containers"][0]["name"]
         tesseract0 = docker_client.containers.get(tesseract0_id)
         tesseract1_id = project_meta["containers"][1]["name"]
