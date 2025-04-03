@@ -7,7 +7,7 @@ import json
 import subprocess
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from functools import cached_property
+from functools import cached_property, wraps
 from urllib.parse import urlparse, urlunparse
 
 import numpy as np
@@ -38,6 +38,7 @@ class SpawnConfig:
 def requires_client(func):
     """Decorator to require a client for a Tesseract instance."""
 
+    @wraps(func)
     def wrapper(self, *args, **kwargs):
         if not self._client:
             raise RuntimeError(
