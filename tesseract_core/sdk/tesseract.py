@@ -68,9 +68,11 @@ class Tesseract:
     def __enter__(self):
         url = self._serve(volumes=self.volumes, gpus=self.gpus, debug=self.debug)
         self._client = HTTPClient(url)
+        self._lastlog = None
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
+        self._lastlog = self.server_logs()
         engine.teardown(self.project_id)
         self._client = None
         self.project_id = None
@@ -82,8 +84,10 @@ class Tesseract:
         Returns:
             logs of the Tesseract server.
         """
+        if not self.image:
+            raise RuntimeError("Cannot retrieve logs for a remote Tesseract.")
         if not self.container_id:
-            raise RuntimeError("Tesseract is not running.")
+            return self._lastlog
         client = docker.from_env()
         container = client.containers.get(self.container_id)
         return container.logs().decode("utf-8")

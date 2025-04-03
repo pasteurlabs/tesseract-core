@@ -49,3 +49,7 @@ def test_apply_with_error(built_image_name):
             vecadd.apply(inputs)
 
     assert "assert a.shape == b.shape" in str(excinfo.value)
+
+    # get logs
+    logs = vecadd.server_logs()
+    assert "assert a.shape == b.shape" in logs
