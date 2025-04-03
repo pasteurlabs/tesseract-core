@@ -469,9 +469,8 @@ def build_tesseract(
 
     if generate_only:
         logger.info(f"Build directory generated at {build_dir}, skipping build")
-        return build_dir
-
-    logger.info("Building image ...")
+    else:
+        logger.info("Building image ...")
 
     try:
         image = docker_buildx(
@@ -501,6 +500,9 @@ def build_tesseract(
                     f"Could not remove temporary build directory {build_dir}: {exc}"
                 )
                 pass
+
+    if generate_only:
+        return build_dir
 
     return image
 
