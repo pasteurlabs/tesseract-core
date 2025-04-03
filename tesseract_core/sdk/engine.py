@@ -258,6 +258,21 @@ def prepare_build_context(
 ) -> Path:
     """Populate the build context for a Tesseract.
 
+    Generated folder structure:
+    ├── Dockerfile
+    ├── __tesseract_source__
+    │   ├── tesseract_api.py
+    │   ├── tesseract_config.yaml
+    │   ├── tesseract_requirements.txt
+    │   └── ... any other files in the source directory ...
+    └── __tesseract_runtime__
+        ├── pyproject.toml
+        ├── ... any other files in the tesseract_core/runtime/meta directory ...
+        └── tesseract_core
+            └── runtime
+                ├── __init__.py
+                └── ... runtime module files ...
+
     Args:
         src_dir: The source directory where the Tesseract project is located.
         context_dir: The directory where the build context will be created.
@@ -851,35 +866,6 @@ def run_tesseract(
             container.remove(v=True, force=True)
 
     return stdout.decode("utf-8"), stderr.decode("utf-8")
-
-
-def exec_tesseract(
-    container_id: str,
-    command: str,
-    args: list[str],
-) -> tuple[str, str]:
-    """Execute a given command on an existing Tesseract container.
-
-    See `run_tesseract` for the equivalent command that operates on Tesseract images.
-
-    Args:
-        container_id: id of the target Tesseract container.
-        command: Tesseract command to run, e.g. apply.
-        args: arguments for the command.
-
-    Returns:
-        Tuple with the stdout and stderr of the Tesseract.
-    """
-    try:
-        result = subprocess.run(
-            ["docker", "exec", container_id, "tesseract-runtime", command, *args],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        return result.stdout, result.stderr
-    except subprocess.CalledProcessError as e:
-        return e.stdout, e.stderr
 
 
 def project_containers(
