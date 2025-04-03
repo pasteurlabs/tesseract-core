@@ -6,16 +6,46 @@ import base64
 import json
 import subprocess
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from functools import cached_property
 from urllib.parse import urlparse, urlunparse
 
-import docker
 import numpy as np
 import requests
 from pydantic import ValidationError
 from pydantic_core import InitErrorDetails
 
 from . import engine
+
+
+@dataclass
+class SpawnConfig:
+    """Configuration for spawning a Tesseract.
+
+    Attributes:
+        image: The image to use.
+        volumes: List of volumes to mount.
+        gpus: List of GPUs to use.
+        debug: Whether to run in debug mode.
+    """
+
+    image: str
+    volumes: list[str] | None
+    gpus: list[str] | None
+    debug: bool
+
+
+def requires_client(func):
+    """Decorator to require a client for a Tesseract instance."""
+
+    def wrapper(self, *args, **kwargs):
+        if not self._client:
+            raise RuntimeError(
+                f"{self.__class__.__name__} must be used as a context manager when created via `from_image`."
+            )
+        return func(self, *args, **kwargs)
+
+    return wrapper
 
 
 class Tesseract:
@@ -29,16 +59,11 @@ class Tesseract:
     instances spawned when instantiating the class).
     """
 
-    image: str
-    volumes: list[str] | None
-    gpus: list[str] | None
-    debug: bool
-
-    _client: HTTPClient
-    project_id: str | None = None
-    container_id: str | None = None
-
     def __init__(self, url: str) -> None:
+        self._spawn_config = None
+        self._project_id = None
+        self._container_id = None
+        self._lastlog = None
         self._client = HTTPClient(url)
 
     @classmethod
@@ -50,33 +75,35 @@ class Tesseract:
         gpus: list[str] | None = None,
     ):
         obj = cls.__new__(cls)
-
-        obj.image = image
-        obj.volumes = volumes
-        obj.gpus = gpus
-        obj.debug = True
-
+        obj._spawn_config = SpawnConfig(
+            image=image,
+            volumes=volumes,
+            gpus=gpus,
+            debug=True,
+        )
+        obj._project_id = None
+        obj._container_id = None
+        obj._lastlog = None
+        obj._client = None
         return obj
 
-    def __getatattr__(self, name: str):
-        if name == "_client" and getattr(self, "_client", None) is None:
-            raise RuntimeError(
-                f"{self.cls.__name__} must be used as a context manager when created via `from_image`."
-            )
-        return super().__getattr__(name)
-
     def __enter__(self):
-        url = self._serve(volumes=self.volumes, gpus=self.gpus, debug=self.debug)
+        if self._client is not None:
+            raise RuntimeError("Cannot nest `with Tesseract ...` context managers. ")
+        project_id, container_id, port = self._serve(**self._spawn_config.__dict__)
+        url = f"http://localhost:{port}"
         self._client = HTTPClient(url)
+        self._project_id = project_id
+        self._container_id = container_id
         self._lastlog = None
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
         self._lastlog = self.server_logs()
-        engine.teardown(self.project_id)
+        engine.teardown(self._project_id)
         self._client = None
-        self.project_id = None
-        self.container_id = None
+        self._project_id = None
+        self._container_id = None
 
     def server_logs(self):
         """Get the logs of the Tesseract server.
@@ -84,27 +111,22 @@ class Tesseract:
         Returns:
             logs of the Tesseract server.
         """
-        if not self.image:
+        if self._spawn_config is None:
             raise RuntimeError("Cannot retrieve logs for a remote Tesseract.")
-        if not self.container_id:
+        if self._container_id is None:
             return self._lastlog
-        client = docker.from_env()
-        container = client.containers.get(self.container_id)
-        return container.logs().decode("utf-8")
+        return engine.logs(self._container_id)
 
+    @staticmethod
     def _serve(
-        self,
+        image: str,
         port: str = "",
         volumes: list[str] | None = None,
         gpus: list[str] | None = None,
         debug: bool = False,
-    ) -> str:
-        if self.container_id:
-            raise RuntimeError(
-                "Client already attached to the Tesseract container {self.container_id}"
-            )
+    ) -> tuple[str, str, int]:
         project_id = engine.serve(
-            [self.image], port=port, volumes=volumes, gpus=gpus, debug=debug
+            [image], port=port, volumes=volumes, gpus=gpus, debug=debug
         )
 
         command = ["docker", "compose", "-p", project_id, "ps", "--format", "json"]
@@ -122,11 +144,10 @@ class Tesseract:
         else:
             raise RuntimeError("No containers found.")
 
-        self.project_id = project_id
-        self.container_id = first_container_id
-        return f"http://localhost:{first_container_port}"
+        return project_id, first_container_id, first_container_port
 
     @cached_property
+    @requires_client
     def openapi_schema(self) -> dict:
         """Get the OpenAPI schema of this Tessseract.
 
@@ -136,6 +157,7 @@ class Tesseract:
         return self._client._run_tesseract("openapi_schema")
 
     @cached_property
+    @requires_client
     def input_schema(self) -> dict:
         """Get the input schema of this Tessseract.
 
@@ -145,6 +167,7 @@ class Tesseract:
         return self._client._run_tesseract("input_schema")
 
     @cached_property
+    @requires_client
     def output_schema(self) -> dict:
         """Get the output schema of this Tessseract.
 
@@ -154,6 +177,7 @@ class Tesseract:
         return self._client._run_tesseract("output_schema")
 
     @property
+    @requires_client
     def available_endpoints(self) -> list[str]:
         """Get the list of available endpoints.
 
@@ -165,6 +189,7 @@ class Tesseract:
     def _run_tesseract(self, endpoint: str, payload: dict | None = None) -> dict:
         return self._client._run_tesseract(endpoint, payload)
 
+    @requires_client
     def apply(self, inputs: dict) -> dict:
         """Run apply endpoint.
 
@@ -177,6 +202,7 @@ class Tesseract:
         payload = {"inputs": inputs}
         return self._run_tesseract("apply", payload)
 
+    @requires_client
     def abstract_eval(self, inputs: dict) -> dict:
         """Run abstract eval endpoint.
 
@@ -189,6 +215,7 @@ class Tesseract:
         payload = {"inputs": inputs}
         return self._run_tesseract("abstract_eval", payload)
 
+    @requires_client
     def jacobian(
         self, inputs: dict, jac_inputs: list[str], jac_outputs: list[str]
     ) -> dict:
@@ -212,6 +239,7 @@ class Tesseract:
         }
         return self._run_tesseract("jacobian", payload)
 
+    @requires_client
     def jacobian_vector_product(
         self,
         inputs: dict,
@@ -243,6 +271,7 @@ class Tesseract:
         }
         return self._run_tesseract("jacobian_vector_product", payload)
 
+    @requires_client
     def vector_jacobian_product(
         self,
         inputs: dict,

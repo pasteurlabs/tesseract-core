@@ -899,3 +899,17 @@ def project_containers(
     """
     client = docker.from_env()
     return list(filter(lambda x: project_id in x.name, client.containers.list()))
+
+
+def logs(container_id: str) -> str:
+    """Get logs from a container.
+
+    Args:
+        container_id: the ID of the container.
+
+    Returns:
+        The logs of the container.
+    """
+    client = docker.from_env()
+    container = client.containers.get(container_id)
+    return container.logs().decode("utf-8")

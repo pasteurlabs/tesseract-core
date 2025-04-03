@@ -22,10 +22,12 @@ def mock_serving(mocker):
     )
 
     teardown_mock = mocker.patch("tesseract_core.sdk.engine.teardown")
+    logs_mock = mocker.patch("tesseract_core.sdk.engine.logs")
     return {
         "serve_mock": serve_mock,
         "subprocess_run_mock": subprocess_run_mock,
         "teardown_mock": teardown_mock,
+        "logs_mock": logs_mock,
     }
 
 
@@ -38,22 +40,24 @@ def test_Tesseract_init():
     # Instantiate with a url
     t = Tesseract(url="localhost")
 
-    # The attributes for local Tesseracts should not be set
-    assert not hasattr(t, "image")
-    assert not hasattr(t, "gpus")
-    assert not hasattr(t, "volumes")
+    # Using it as a context manager should raise
+    with pytest.raises(RuntimeError):
+        with t:
+            pass
 
 
-def test_Tesseract_from_image():
+def test_Tesseract_from_image(mock_serving, mock_clients):
     # Object is built and has the correct attributes set
     t = Tesseract.from_image("sometesseract:0.2.3", volumes=["/my/files"], gpus=["all"])
 
-    assert t.image == "sometesseract:0.2.3"
-    assert t.gpus == ["all"]
-    assert t.volumes == ["/my/files"]
+    # Now we can use it as a context manager
+    # NOTE: we invoke available_endpoints because it requires an active client and is not cached
+    with t:
+        _ = t.available_endpoints
 
-    # Let's also check that stuff we don't expect there is not there
-    assert not hasattr(t, "url")
+    # Trying to use methods from outside the context manager should raise
+    with pytest.raises(RuntimeError):
+        _ = t.available_endpoints
 
 
 def test_Tesseract_schema_methods(mocker, mock_serving):
