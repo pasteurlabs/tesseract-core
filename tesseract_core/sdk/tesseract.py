@@ -204,17 +204,26 @@ class Tesseract:
         return self._run_tesseract("apply", payload)
 
     @requires_client
-    def abstract_eval(self, inputs: dict) -> dict:
+    def abstract_eval(self, abstract_inputs: dict) -> dict:
         """Run abstract eval endpoint.
 
         Args:
-            inputs: a dictionary with the (abstract) inputs.
+            abstract_inputs: a dictionary with the (abstract) inputs.
 
         Returns:
             dictionary with the results.
         """
-        payload = {"inputs": inputs}
+        payload = {"inputs": abstract_inputs}
         return self._run_tesseract("abstract_eval", payload)
+
+    @requires_client
+    def health(self) -> dict:
+        """Check the health of the Tesseract.
+
+        Returns:
+            dictionary with the health status.
+        """
+        return self._run_tesseract("health")
 
     @requires_client
     def jacobian(

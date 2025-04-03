@@ -1,12 +1,25 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import socket
+
 import numpy as np
 import pytest
 from common import build_tesseract, image_exists
 
 from tesseract_core import Tesseract
 from tesseract_core.sdk import engine
+
+expected_endpoints = {
+    "apply",
+    "jacobian",
+    "health",
+    "input_schema",
+    "output_schema",
+    "abstract_eval",
+    "jacobian_vector_product",
+    "vector_jacobian_product",
+}
 
 
 @pytest.fixture(scope="module")
@@ -19,16 +32,7 @@ def built_image_name(docker_client, shared_dummy_image_name, dummy_tesseract_loc
 
 def test_available_endpoints(built_image_name):
     with Tesseract.from_image(built_image_name) as vecadd:
-        assert set(vecadd.available_endpoints) == {
-            "apply",
-            "jacobian",
-            "health",
-            "input_schema",
-            "output_schema",
-            "abstract_eval",
-            "jacobian_vector_product",
-            "vector_jacobian_product",
-        }
+        assert set(vecadd.available_endpoints) == expected_endpoints
 
 
 def test_apply(built_image_name, free_port):
@@ -67,3 +71,74 @@ def test_apply_with_error(built_image_name):
     # get logs
     logs = vecadd.server_logs()
     assert "assert a.shape == b.shape" in logs
+
+
+@pytest.fixture(scope="module")
+def served_tesseract_remote(built_image_name):
+    """Serve the Tesseract image."""
+    # Find a free port
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(("", 0))
+    free_port = sock.getsockname()[1]
+    sock.close()
+    # Serve the Tesseract image
+    tesseract_url = f"http://localhost:{free_port}"
+    served_tesseract = engine.serve([built_image_name], port=str(free_port))
+    try:
+        yield tesseract_url
+    finally:
+        engine.teardown(served_tesseract)
+
+
+@pytest.fixture(scope="module")
+def served_tesseract_local(built_image_name):
+    """Serve the Tesseract image."""
+    with Tesseract.from_image(built_image_name) as vecadd:
+        yield vecadd
+
+
+@pytest.mark.parametrize(
+    "endpoint_name", sorted(expected_endpoints | {"openapi_schema"})
+)
+def test_all_endpoints(endpoint_name, served_tesseract_local, served_tesseract_remote):
+    """Test that all endpoints can be invoked without errors."""
+    inputs = {"a": [1, 2], "b": [3, 4], "s": 1}
+
+    if endpoint_name == "apply":
+        inputs = {"inputs": inputs}
+    elif endpoint_name == "jacobian":
+        inputs = {"inputs": inputs, "jac_inputs": ["a"], "jac_outputs": ["result"]}
+    elif endpoint_name == "jacobian_vector_product":
+        inputs = {
+            "inputs": inputs,
+            "jvp_inputs": ["a"],
+            "jvp_outputs": ["result"],
+            "tangent_vector": {"a": np.array([1.0, 1.0])},
+        }
+    elif endpoint_name == "vector_jacobian_product":
+        inputs = {
+            "inputs": inputs,
+            "vjp_inputs": ["a"],
+            "vjp_outputs": ["result"],
+            "cotangent_vector": {"result": np.array([1.0, 1.0])},
+        }
+    elif endpoint_name == "abstract_eval":
+        inputs = {
+            "abstract_inputs": {
+                "a": {"shape": [2], "dtype": "float32"},
+                "b": {"shape": [2], "dtype": "float32"},
+            }
+        }
+    else:
+        inputs = {}
+
+    # # Test from_image
+    out = getattr(served_tesseract_local, endpoint_name)
+    if callable(out):
+        out(**inputs)
+
+    # Test URL access
+    vecadd = Tesseract(served_tesseract_remote)
+    out = getattr(vecadd, endpoint_name)
+    if callable(out):
+        out(**inputs)
