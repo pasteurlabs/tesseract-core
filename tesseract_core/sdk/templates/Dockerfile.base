@@ -82,7 +82,7 @@ ENV TESSERACT_NAME="{{ config.name }}" \
 
 # Copy only necessary files
 COPY --from=build_stage /python-env /python-env
-COPY "{{ tesseract_source_directory }}/tesseract_api.py" ${TESSERACT_API_PATH}
+COPY --chown=1000:1000 "{{ tesseract_source_directory }}/tesseract_api.py" ${TESSERACT_API_PATH}
 
 ENV PATH="/python-env/bin:$PATH"
 
