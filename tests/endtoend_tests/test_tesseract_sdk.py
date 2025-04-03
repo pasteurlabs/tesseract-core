@@ -6,6 +6,7 @@ import pytest
 from common import build_tesseract, image_exists
 
 from tesseract_core import Tesseract
+from tesseract_core.sdk import engine
 
 
 @pytest.fixture(scope="module")
@@ -30,18 +31,31 @@ def test_available_endpoints(built_image_name):
         }
 
 
-def test_apply(built_image_name):
+def test_apply(built_image_name, free_port):
     inputs = {"a": [1, 2], "b": [3, 4], "s": 1}
 
+    # Test URL access
+    tesseract_url = f"http://localhost:{free_port}"
+    served_tesseract = engine.serve([built_image_name], port=str(free_port))
+    try:
+        vecadd = Tesseract(tesseract_url)
+        out = vecadd.apply(inputs)
+    finally:
+        engine.teardown(served_tesseract)
+
+    assert set(out.keys()) == {"result"}
+    np.testing.assert_array_equal(out["result"], np.array([4.0, 6.0]))
+
+    # Test from_image
     with Tesseract.from_image(built_image_name) as vecadd:
         out = vecadd.apply(inputs)
 
-    np.testing.assert_array_equal(out["result"], np.array([4.0, 6.0]))
     assert set(out.keys()) == {"result"}
+    np.testing.assert_array_equal(out["result"], np.array([4.0, 6.0]))
 
 
 def test_apply_with_error(built_image_name):
-    # pass two inputs with different shapes, which raises an error
+    # pass two inputs with different shapes, which raises an internal error
     inputs = {"a": [1, 2, 3], "b": [3, 4], "s": 1}
 
     with Tesseract.from_image(built_image_name) as vecadd:
