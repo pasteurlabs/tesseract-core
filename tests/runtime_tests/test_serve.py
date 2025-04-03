@@ -97,7 +97,7 @@ def test_create_rest_api_jacobian_endpoint(http_client, dummy_tesseract_module):
 
     assert response.status_code == 200, response.text
     result = response.json()
-    expected = dummy_tesseract_module.jacobian(test_inputs, ["a", "b"], ["result"])
+    expected = dummy_tesseract_module.jacobian(test_inputs, {"a", "b"}, {"result"})
 
     assert result.keys() == expected.keys()
     assert np.array_equal(
