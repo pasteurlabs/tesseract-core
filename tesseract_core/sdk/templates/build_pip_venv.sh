@@ -2,18 +2,17 @@
 
 set -e  # Exit immediately if a command exits with a non-zero status
 
-if [[ -f tesseract_requirements.txt ]]; then
-    python3 -m venv /python-env
+python3 -m venv /python-env
 
-    # Collect dependencies
-    TESSERACT_DEPS=$(find ./local_requirements/ -mindepth 1 -maxdepth 1 2>/dev/null || true)
+# Activate virtual environment
+source /python-env/bin/activate
 
-    # Append requirements file
-    TESSERACT_DEPS+=" -r tesseract_requirements.txt"
+# Collect dependencies
+TESSERACT_DEPS=$(find ./local_requirements/ -mindepth 1 -maxdepth 1 2>/dev/null || true)
 
-    # Activate virtual environment
-    source /python-env/bin/activate
+# Append requirements file
+TESSERACT_DEPS+=" -r tesseract_requirements.txt"
 
-    # Install dependencies
-    pip install ./tesseract_runtime $TESSERACT_DEPS
-fi
+# Install dependencies
+pip install $TESSERACT_DEPS
+pip install ./tesseract_runtime
