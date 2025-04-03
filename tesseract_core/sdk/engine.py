@@ -293,9 +293,10 @@ def build_image(
         remote_dependencies = []
         local_dependencies = []
 
+    local_requirements_path = build_dir / "local_requirements"
+    Path.mkdir(local_requirements_path, parents=True, exist_ok=True)
+
     if local_dependencies:
-        local_requirements_path = build_dir / "local_requirements"
-        Path.mkdir(local_requirements_path)
         for dependency in local_dependencies:
             src = Path(src_dir) / dependency
             dest = build_dir / "local_requirements" / src.name

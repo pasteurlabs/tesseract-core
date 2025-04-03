@@ -77,7 +77,7 @@ class TesseractBuildConfig(BaseModel):
     """Configuration options for building a Tesseract."""
 
     base_image: StrictStr = Field(
-        "python:3.12-slim-bookworm",
+        "debian:bookworm-slim",
         description="Base Docker image for the build. Must be Debian-based.",
     )
     target_platform: StrictStr = Field(
