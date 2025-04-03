@@ -105,7 +105,7 @@ def testmodule():
 
             return out
 
-        def abstract_eval(self, inputs):
+        def abstract_eval(self, abstract_inputs):
             return {
                 "result_seq": [{"shape": (10,), "dtype": "float32"}] * 3,
                 "result_arr": {"shape": (5,), "dtype": "float32"},
@@ -141,7 +141,10 @@ def _recurse_pytree(pytree, func):
 def _find_endpoint(endpoint_list, endpoint_name):
     for endpoint in endpoint_list:
         if endpoint.__name__ == endpoint_name:
-            schema = endpoint.__annotations__["payload"]
+            if "payload" in endpoint.__annotations__:
+                schema = endpoint.__annotations__["payload"]
+            else:
+                schema = None
             return endpoint, schema
     raise ValueError(f"Endpoint {endpoint_name} not found.")
 
@@ -198,6 +201,24 @@ def test_abstract_eval_endpoint(testmodule):
         failing_inputs_shapedtype = inputs_shapedtype.copy()
         failing_inputs_shapedtype["scalar"]["shape"] = (1, 2, 3)
         inputs = EndpointSchema.model_validate({"inputs": failing_inputs_shapedtype})
+
+
+def test_schemas_contain_diffable_paths_extra(testmodule):
+    endpoints = create_endpoints(testmodule)
+    input_schema_endpoint, _ = _find_endpoint(endpoints, "input_schema")
+
+    result = input_schema_endpoint()
+    assert "differentiable_arrays" in result
+    assert result["differentiable_arrays"].keys() == {
+        "array_dict.{}",
+        "array_seq.[]",
+        "scalar_diff",
+    }
+
+    output_schema_endpoint, _ = _find_endpoint(endpoints, "output_schema")
+    result = output_schema_endpoint()
+    assert "differentiable_arrays" in result
+    assert result["differentiable_arrays"].keys() == {"result_seq.[]"}
 
 
 @pytest.mark.parametrize(
@@ -387,7 +408,7 @@ def test_ad_endpoint_bad_tangent(testmodule, endpoint_name, failure_mode):
             msg = "String should match pattern"
         elif failure_mode == "invalid":
             tangent_vector = {k: "ahoy" for k in ad_inp}
-            msg = "Got invalid dtype"
+            msg = "Could not convert object"
 
         inputs = {
             "inputs": test_input,
@@ -406,7 +427,7 @@ def test_ad_endpoint_bad_tangent(testmodule, endpoint_name, failure_mode):
             msg = "String should match pattern"
         elif failure_mode == "invalid":
             cotangent_vector = {k: "ahoy" for k in ad_out}
-            msg = "Got invalid dtype"
+            msg = "Could not convert object"
 
         inputs = {
             "inputs": test_input,
@@ -415,8 +436,6 @@ def test_ad_endpoint_bad_tangent(testmodule, endpoint_name, failure_mode):
             "cotangent_vector": cotangent_vector,
         }
 
-    with pytest.raises(ValidationError) as excinfo:
+    with pytest.raises(ValidationError, match=msg):
         inputs = EndpointSchema.model_validate(inputs)
         endpoint_func(inputs)
-
-    assert msg in str(excinfo.value)

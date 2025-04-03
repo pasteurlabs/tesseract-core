@@ -170,9 +170,13 @@ class PydanticArrayAnnotation(metaclass=ArrayAnnotationType):
         Does most of the heavy lifting for validation and serialization.
         """
         # Create a Pydantic model for the encoded array, for easier validation
-        array_schema = get_array_model(
-            cls.expected_shape, cls.expected_dtype, [flag.name for flag in cls.flags]
-        ).__get_pydantic_core_schema__(_source_type, _handler)
+        array_schema = _handler(
+            get_array_model(
+                cls.expected_shape,
+                cls.expected_dtype,
+                [flag.name for flag in cls.flags],
+            )
+        )
 
         python_to_array_ = partial(
             python_to_array,

@@ -2,6 +2,7 @@ name: Auto update pre-commit hooks
 
 on:
   workflow_dispatch:  # Allows manual trigger
+
   schedule:
     - cron:  '0 0 * * 1'  # 12AM only on Mondays
 
@@ -14,8 +15,7 @@ jobs:
 
     - uses: actions/setup-python@v5
       with:
-          python-version: '3.12'
-          cache: 'pip'
+          python-version-file: "pyproject.toml"
 
     - name: Install pre-commit
       run: pip install pre-commit
@@ -62,7 +62,7 @@ jobs:
       with:
           token: ${{ secrets.GITHUB_TOKEN }}
           commit-message: Update pre-commit hooks
-          title: "chore: update pre-commit hooks"
+          title: "chore: ✅ Update pre-commit hooks"
           branch: _bot/update-precommit
           draft: false
           body: |
@@ -74,7 +74,7 @@ jobs:
       with:
           token: ${{ secrets.GITHUB_TOKEN }}
           commit-message: Update pre-commit hooks
-          title: "chore: update pre-commit hooks [review required]"
+          title: "chore: ⚠️ Update pre-commit hooks [review required]"
           branch: _bot/update-precommit
           draft: true
           body: |

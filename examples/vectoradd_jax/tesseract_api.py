@@ -19,8 +19,6 @@ class Vector_and_Scalar(BaseModel):
     )
     s: Differentiable[Float32] = Field(description="A scalar", default=1.0)
 
-    # we lose the ability to use methods such as this when using model_dump
-    # unless we reconstruct nested models
     def scale(self) -> Differentiable[Array[(None,), Float32]]:
         return self.s * self.v
 

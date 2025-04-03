@@ -4,17 +4,26 @@ repos:
   hooks:
   - id: check-added-large-files
     additional_dependencies: [--isolated]
+    args: ["--maxkb=2000"]
+    # Add exceptions here, as a regex
+    exclude: ""
+
   - id: check-json
     additional_dependencies: [--isolated]
+
   - id: check-toml
     additional_dependencies: [--isolated]
+
   - id: check-yaml
     additional_dependencies: [--isolated]
     exclude: "^.*templates/.*[yaml|yml]$"
+
   - id: detect-private-key
     additional_dependencies: [--isolated]
+
   - id: end-of-file-fixer
     additional_dependencies: [--isolated]
+
   - id: trailing-whitespace
     additional_dependencies: [--isolated]
 
@@ -34,3 +43,41 @@ repos:
   - id: ruff-format
     types_or: [pyi, python, jupyter]
     additional_dependencies: [--isolated]
+
+- repo: local
+  hooks:
+  # Update production.uv.lock after pyproject.toml changes
+  - id: update-uv-env
+    name: update-uv-env
+    files: pyproject.toml$
+    stages: [pre-commit]
+    language: python
+    entry: |
+      bash -c ' \
+        cp uv.lock uv.lock.bak; \
+        cp production.uv.lock uv.lock; \
+        uv lock --refresh; \
+        rc=$?; \
+        cp uv.lock production.uv.lock; \
+        mv uv.lock.bak uv.lock; \
+        exit $rc;
+      '
+    additional_dependencies: [uv==0.6.11,--isolated]
+
+  # Update requirements.txt after production.uv.lock changes
+  - id: update-requirements
+    name: update-requirements
+    files: ^production.uv.lock$
+    stages: [pre-commit]
+    language: python
+    entry: |
+      bash -c ' \
+        cp uv.lock uv.lock.bak; \
+        cp production.uv.lock uv.lock; \
+        uv export --frozen --color never --no-emit-project --no-hashes > requirements.txt; \
+        rc=$?; \
+        cp uv.lock production.uv.lock; \
+        mv uv.lock.bak uv.lock; \
+        exit $rc;
+      '
+    additional_dependencies: [uv==0.6.11,--isolated]

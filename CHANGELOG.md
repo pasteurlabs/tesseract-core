@@ -2,6 +2,47 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.1] - 2025-03-28
+
+### Bug Fixes
+
+- Pydantic 2.11.0 compatibility (hotfix) (#106)
+
+## [0.8.0] - 2025-03-27
+
+### Features
+
+- Implement check_gradients runtime command (#72)
+- [**breaking**] Validate endpoint argument names before building (#95)
+
+### Bug Fixes
+
+- OpenAPI schema failure for differentiable arrays with unknown shape (#100)
+- Prevent silent conversion of float array to int (#96)
+- Use fixed uid/gid 5000:5000 for all tesseracts (#102)
+- Use uid 1000 instead of 5000 (#104)
+
+### Refactor
+
+- Unpack endpoint payload (#80)
+
+### Documentation
+
+- Dependencies and user privileges (#91)
+
+## [0.7.4] - 2025-03-20
+
+### Features
+
+- Friendlier error messages when input validation fails (#71)
+- Pytorch initialize template (#53)
+- Add `diffable` field to input/output json schemas (#82)
+- Add stdout output for tesseract build (#87)
+
+### Documentation
+
+- Various docs nits + UX fixes (#85)
+
 ## [0.7.3] - 2025-03-13
 
 ### Features
@@ -13,7 +54,7 @@ All notable changes to this project will be documented in this file.
 
 - Jax template now uses equinox `filter_jit` to allow non-array inputs (#56)
 - Added pip as dependency (#58)
-- Buggy `is_leaf` check in the `abstract_eval` of jax recipe and vectoradd_jax (#75)
+- Issue #74 (#75)
 
 ### Documentation
 

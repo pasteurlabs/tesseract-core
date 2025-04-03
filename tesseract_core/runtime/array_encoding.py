@@ -356,11 +356,14 @@ def python_to_array(
     val: Any, expected_shape: ShapeType, expected_dtype: Optional[str]
 ) -> ArrayLike:
     """Convert a Python object to a NumPy array."""
-    try:
-        arr = np.asarray(val, dtype=expected_dtype, order="C")
-    except TypeError as exc:
-        raise ValueError(f"Could not convert {val} to NumPy array") from exc
-    return _coerce_shape_dtype(arr, expected_shape, expected_dtype)
+    val = np.asarray(val, order="C")
+    if not np.issubdtype(val.dtype, np.number) and not np.issubdtype(
+        val.dtype, np.bool_
+    ):
+        raise ValueError(
+            f"Could not convert object to numeric NumPy array (got dtype: {val.dtype})"
+        )
+    return _coerce_shape_dtype(val, expected_shape, expected_dtype)
 
 
 def decode_array(
@@ -381,7 +384,15 @@ def decode_array(
 
         # keep checking for "raw" for backwards compat
         elif val.data.encoding in {"json", "raw"}:
-            data = np.asarray(val.data.buffer, dtype=val.dtype).reshape(val.shape)
+            data = np.asarray(val.data.buffer).reshape(val.shape)
+            if np.issubdtype(data.dtype, np.floating) and np.issubdtype(
+                val.dtype, np.integer
+            ):
+                if np.any(data % 1):
+                    raise ValueError(
+                        f"Expected integer data, but got floating point data: {data}"
+                    )
+            data = data.astype(val.dtype, casting="unsafe")
 
         else:
             # Unreachable

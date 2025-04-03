@@ -111,9 +111,7 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
 
             Differentiates ``jac_outputs`` with respect to ``jac_inputs``, at the point ``inputs``.
             """
-            out = api_module.jacobian(
-                payload.inputs, payload.jac_inputs, payload.jac_outputs
-            )
+            out = api_module.jacobian(**dict(payload))
             return JacobianOutputSchema.model_validate(
                 out,
                 context={
@@ -136,12 +134,7 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
             Evaluates the Jacobian vector product between the Jacobian given by ``jvp_outputs``
             with respect to ``jvp_inputs`` at the point ``inputs`` and the given tangent vector.
             """
-            out = api_module.jacobian_vector_product(
-                payload.inputs,
-                payload.jvp_inputs,
-                payload.jvp_outputs,
-                payload.tangent_vector,
-            )
+            out = api_module.jacobian_vector_product(**dict(payload))
             return JVPOutputSchema.model_validate(
                 out, context={"output_keys": payload.jvp_outputs}
             )
@@ -160,12 +153,7 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
             Computes the vector Jacobian product between the Jacobian given by ``vjp_outputs``
             with respect to ``vjp_inputs`` at the point ``inputs`` and the given cotangent vector.
             """
-            out = api_module.vector_jacobian_product(
-                payload.inputs,
-                payload.vjp_inputs,
-                payload.vjp_outputs,
-                payload.cotangent_vector,
-            )
+            out = api_module.vector_jacobian_product(**dict(payload))
             return VJPOutputSchema.model_validate(
                 out, context={"input_keys": payload.vjp_inputs}
             )
@@ -180,13 +168,13 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
 
     def input_schema() -> dict[str, Any]:
         """Get input schema for tesseract apply function."""
-        return api_module.InputSchema.model_json_schema()
+        return ApplyInputSchema.model_json_schema()
 
     endpoints.append(input_schema)
 
     def output_schema() -> dict[str, Any]:
         """Get output schema for tesseract apply function."""
-        return api_module.OutputSchema.model_json_schema()
+        return ApplyOutputSchema.model_json_schema()
 
     endpoints.append(output_schema)
 

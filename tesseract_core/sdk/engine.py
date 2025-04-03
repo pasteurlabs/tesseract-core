@@ -37,11 +37,11 @@ from pip._internal.req.req_file import (
 )
 
 from .api_parse import (
-    PythonRequirements,
     TesseractConfig,
     get_config,
     validate_tesseract_api,
 )
+from .exceptions import UserError
 
 logger = logging.getLogger("tesseract")
 
@@ -115,9 +115,9 @@ def needs_docker(func: Callable) -> Callable:
             docker.errors.APIError,
             docker.errors.DockerException,
         ) as ex:
-            message = "Could not reach Docker daemon, check if it is running."
-            logger.error(f"{message} Details: {ex}")
-            raise RuntimeError(f"{message} See logs for details.") from None
+            raise UserError(
+                "Could not reach Docker daemon, check if it is running."
+            ) from ex
 
         return func(*args, **kwargs)
 
@@ -237,26 +237,41 @@ def docker_buildx(
 
 
 def get_runtime_dir() -> Path:
-    """Get the source directory for the Tesseract runtime as a context manager."""
+    """Get the source directory for the Tesseract runtime."""
     import tesseract_core
 
     return Path(tesseract_core.__file__).parent / "runtime"
 
 
-def create_dockerfile(
+def get_template_dir():
+    """Get the template directory for the Tesseract runtime."""
+    import tesseract_core
+
+    return Path(tesseract_core.__file__).parent / "sdk" / "templates"
+
+
+def prepare_build_context(
+    src_dir: str | Path,
+    context_dir: str | Path,
     user_config: TesseractConfig,
     use_ssh_mount: bool = False,
-) -> str:
-    """Create the Dockerfile for the package.
+) -> Path:
+    """Populate the build context for a Tesseract.
 
     Args:
+        src_dir: The source directory where the Tesseract project is located.
+        context_dir: The directory where the build context will be created.
         user_config: The Tesseract configuration object.
         use_ssh_mount: Whether to use SSH mount to install dependencies (prevents caching).
-        python_environment: Python environment file to use in build_python_venv.sh
 
     Returns:
-        A string with the Dockerfile content.
+        The path to the build context directory.
     """
+    context_dir = Path(context_dir)
+    context_dir.mkdir(parents=True, exist_ok=True)
+
+    copytree(src_dir, context_dir / "__tesseract_source__")
+
     template_name = "Dockerfile.base"
     template = ENV.get_template(template_name)
 
@@ -268,59 +283,35 @@ def create_dockerfile(
     }
 
     logger.debug(f"Generating Dockerfile from template: {template_name}")
+    dockerfile_content = template.render(template_values)
+    dockerfile_path = context_dir / "Dockerfile"
 
-    return template.render(template_values)
+    logger.debug(f"Writing Dockerfile to {dockerfile_path}")
 
-
-def build_image(
-    src_dir: str | Path,
-    image_name: str,
-    dockerfile: str | Path,
-    build_dir: str | Path,
-    requirements: PythonRequirements,
-    inject_ssh: bool = False,
-    keep_build_cache: bool = False,
-    generate_only: bool = False,
-) -> docker.models.images.Image | None:
-    """Build the image from a Dockerfile.
-
-    Returns:
-        An Image object representing an image on the local machine.
-    """
-    if not isinstance(src_dir, Path):
-        src_dir = Path(src_dir)
-    if not isinstance(build_dir, Path):
-        build_dir = Path(build_dir)
-
-    dockerfile_path = build_dir / "Dockerfile"
     with open(dockerfile_path, "w") as f:
-        logger.debug(f"Writing Dockerfile to {dockerfile_path}")
-        f.write(dockerfile)
+        f.write(dockerfile_content)
 
-    copytree(src_dir, build_dir / "__tesseract_source__")
+    template_dir = get_template_dir()
 
-    from tesseract_core import sdk
-
-    template_dir = Path(sdk.__file__).parent / "templates"
-
+    requirement_config = user_config.build_config.requirements
     copy(
-        template_dir / requirements._build_script,
-        build_dir / "__tesseract_source__" / requirements._build_script,
+        template_dir / requirement_config._build_script,
+        context_dir / "__tesseract_source__" / requirement_config._build_script,
     )
 
-    if requirements.provider == "python-pip":
-        reqstxt = src_dir / requirements._filename
+    if requirement_config.provider == "python-pip":
+        reqstxt = src_dir / requirement_config._filename
         if reqstxt.exists():
             local_dependencies, remote_dependencies = parse_requirements(reqstxt)
         else:
             local_dependencies, remote_dependencies = [], []
 
         if local_dependencies:
-            local_requirements_path = build_dir / "local_requirements"
+            local_requirements_path = context_dir / "local_requirements"
             Path.mkdir(local_requirements_path)
             for dependency in local_dependencies:
                 src = src_dir / dependency
-                dest = build_dir / "local_requirements" / src.name
+                dest = context_dir / "local_requirements" / src.name
                 if src.is_file():
                     copy(src, dest)
                 else:
@@ -329,7 +320,7 @@ def build_image(
         # We need to write a new requirements file in the build dir, where we explicitly
         # removed the local dependencies
         requirements_file_path = (
-            build_dir / "__tesseract_source__" / "tesseract_requirements.txt"
+            context_dir / "__tesseract_source__" / "tesseract_requirements.txt"
         )
         with requirements_file_path.open("w", encoding="utf-8") as f:
             for dependency in remote_dependencies:
@@ -344,37 +335,13 @@ def build_image(
     runtime_source_dir = get_runtime_dir()
     copytree(
         runtime_source_dir,
-        build_dir / "__tesseract_runtime__" / "tesseract_core" / "runtime",
+        context_dir / "__tesseract_runtime__" / "tesseract_core" / "runtime",
         ignore=_ignore_pycache,
     )
     for metafile in (runtime_source_dir / "meta").glob("*"):
-        copy(metafile, build_dir / "__tesseract_runtime__")
+        copy(metafile, context_dir / "__tesseract_runtime__")
 
-    if generate_only:
-        logger.info(f"Build directory generated at {build_dir}, skipping build")
-    else:
-        logger.info("Building image ...")
-
-    try:
-        image = docker_buildx(
-            path=build_dir.as_posix(),
-            tag=image_name,
-            dockerfile=dockerfile_path,
-            inject_ssh=inject_ssh,
-            keep_build_cache=keep_build_cache,
-            print_and_exit=generate_only,
-        )
-
-    except docker.errors.BuildError as e:
-        logger.warning("Build failed with logs:")
-        for line in e.build_log:
-            logger.warning(line)
-        raise e
-    else:
-        if image is not None:
-            logger.debug("Build successful")
-
-    return image
+    return context_dir
 
 
 def _write_template_file(
@@ -481,19 +448,34 @@ def build_tesseract(
         build_dir.mkdir(exist_ok=True)
         keep_build_dir = True
 
-    dockerfile = create_dockerfile(config, use_ssh_mount=inject_ssh)
+    context_dir = prepare_build_context(
+        src_dir, build_dir, config, use_ssh_mount=inject_ssh
+    )
+
+    if generate_only:
+        logger.info(f"Build directory generated at {build_dir}, skipping build")
+        return build_dir
+
+    logger.info("Building image ...")
 
     try:
-        out = build_image(
-            src_dir,
-            image_name,
-            dockerfile,
-            build_dir=build_dir,
+        image = docker_buildx(
+            path=context_dir.as_posix(),
+            tag=image_name,
+            dockerfile=context_dir / "Dockerfile",
             inject_ssh=inject_ssh,
             keep_build_cache=keep_build_cache,
-            generate_only=generate_only,
-            requirements=config.build_config.requirements,
+            print_and_exit=generate_only,
         )
+
+    except docker.errors.BuildError as e:
+        logger.warning("Build failed with logs:")
+        for line in e.build_log:
+            logger.warning(line)
+        raise e
+    else:
+        if image is not None:
+            logger.debug("Build successful")
     finally:
         if not keep_build_dir:
             try:
@@ -505,10 +487,7 @@ def build_tesseract(
                 )
                 pass
 
-    if generate_only:
-        return build_dir
-
-    return out
+    return image
 
 
 def teardown(project_id: str) -> None:

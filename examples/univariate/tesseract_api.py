@@ -4,7 +4,7 @@
 import jax
 from pydantic import BaseModel, Field
 
-from tesseract_core.runtime import Differentiable, Float64, ShapeDType
+from tesseract_core.runtime import Differentiable, Float32, ShapeDType
 
 
 def rosenbrock(x: float, y: float, a: float = 1.0, b: float = 100.0) -> float:
@@ -17,14 +17,14 @@ def rosenbrock(x: float, y: float, a: float = 1.0, b: float = 100.0) -> float:
 
 
 class InputSchema(BaseModel):
-    x: Differentiable[Float64] = Field(description="Scalar value x.", default=0.0)
-    y: Differentiable[Float64] = Field(description="Scalar value y.", default=0.0)
-    a: Float64 = Field(description="Scalar parameter a.", default=1.0)
-    b: Float64 = Field(description="Scalar parameter b.", default=100.0)
+    x: Differentiable[Float32] = Field(description="Scalar value x.", default=0.0)
+    y: Differentiable[Float32] = Field(description="Scalar value y.", default=0.0)
+    a: Float32 = Field(description="Scalar parameter a.", default=1.0)
+    b: Float32 = Field(description="Scalar parameter b.", default=100.0)
 
 
 class OutputSchema(BaseModel):
-    result: Differentiable[Float64] = Field(
+    result: Differentiable[Float32] = Field(
         description="Result of Rosenbrock function evaluation."
     )
 
@@ -91,4 +91,4 @@ def vector_jacobian_product(
 
 def abstract_eval(abstract_inputs):
     """Calculate output shape of apply from the shape of its inputs."""
-    return {"result": ShapeDType(shape=(), dtype="float64")}
+    return {"result": ShapeDType(shape=(), dtype="Float32")}

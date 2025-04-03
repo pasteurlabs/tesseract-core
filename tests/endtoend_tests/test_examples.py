@@ -194,6 +194,15 @@ TEST_CASES = {
                 expected_status_code=422,
                 output_contains_pattern="Input should be",
             ),
+            SampleRequest(
+                endpoint="check-gradients",
+                payload={
+                    "inputs": {
+                        "a": encode_array([1, 2, 3]),
+                        "b": encode_array([4, 5, 6]),
+                    },
+                },
+            ),
         ],
     ),
     "vectoradd_jax": Config(
@@ -223,6 +232,105 @@ TEST_CASES = {
                         },
                     }
                 },
+            ),
+            SampleRequest(
+                endpoint="apply",
+                payload={"inputs": {}},
+                expected_status_code=422,
+                output_contains_pattern="missing",
+            ),
+            SampleRequest(
+                endpoint="jacobian",
+                payload={
+                    "inputs": {
+                        "a": {"v": encode_array([1, 2, 3]), "s": 2},
+                        "b": {"v": encode_array([4, 5, 6]), "s": 1},
+                    },
+                    "jac_inputs": ["a.s", "a.v"],
+                    "jac_outputs": ["vector_add.result"],
+                },
+                output_contains_pattern=['"a.s":', '"a.v":'],
+                output_contains_array=np.array([[1, 2, 3]], dtype="float32"),
+            ),
+            SampleRequest(
+                endpoint="jacobian_vector_product",
+                payload={
+                    "inputs": {
+                        "a": {"v": encode_array([1, 2, 3]), "s": 2},
+                        "b": {"v": encode_array([4, 5, 6]), "s": 1},
+                    },
+                    "jvp_inputs": ["a.v"],
+                    "jvp_outputs": ["vector_add.result"],
+                    "tangent_vector": {"a.v": encode_array([0.1, 0.2, 0.3])},
+                },
+                output_contains_array=np.array([0.2, 0.4, 0.6], dtype="float32"),
+            ),
+            SampleRequest(
+                endpoint="jacobian_vector_product",
+                payload={
+                    "inputs": {
+                        "a": {"v": encode_array([1, 2, 3]), "s": 2},
+                        "b": {"v": encode_array([4, 5, 6]), "s": 1},
+                    },
+                    "jvp_inputs": ["a.s"],
+                    "jvp_outputs": ["vector_add.result"],
+                    "tangent_vector": {"a.s": 0.5},
+                },
+                output_contains_array=np.array([0.5, 1.0, 1.5], dtype="float32"),
+            ),
+            SampleRequest(
+                endpoint="vector_jacobian_product",
+                payload={
+                    "inputs": {
+                        "a": {"v": encode_array([1.0, 2.0, 3.0]), "s": 2},
+                        "b": {"v": encode_array([4.0, 5.0, 6.0]), "s": 1},
+                    },
+                    "vjp_inputs": ["a.v"],
+                    "vjp_outputs": ["vector_add.result"],
+                    "cotangent_vector": {
+                        "vector_add.result": encode_array([0.1, 0.2, 0.3]),
+                    },
+                },
+                output_contains_array=np.array([0.2, 0.4, 0.6], dtype="float32"),
+            ),
+            SampleRequest(
+                endpoint="vector_jacobian_product",
+                payload={
+                    "inputs": {
+                        "a": {"v": encode_array([1.0, 2.0, 3.0]), "s": 2},
+                        "b": {"v": encode_array([4.0, 5.0, 6.0]), "s": 1},
+                    },
+                    "vjp_inputs": ["a.s"],
+                    "vjp_outputs": ["vector_add.result"],
+                    "cotangent_vector": {
+                        "vector_add.result": encode_array([0.1, 0.2, 0.3]),
+                    },
+                },
+                output_contains_array=np.array([1.4], dtype="float32"),
+            ),
+            SampleRequest(
+                endpoint="check-gradients",
+                payload={
+                    "inputs": {
+                        "a": {"v": encode_array([1, 2, 3]), "s": 2},
+                        "b": {"v": encode_array([4, 5, 6]), "s": 1},
+                    },
+                },
+            ),
+        ],
+    ),
+    "vectoradd_torch": Config(
+        test_with_random_inputs=True,
+        sample_requests=[
+            SampleRequest(
+                endpoint="apply",
+                payload={
+                    "inputs": {
+                        "a": {"v": encode_array([1, 2, 3]), "s": 3},
+                        "b": {"v": encode_array([4, 5, 6]), "s": 1},
+                    },
+                },
+                output_contains_array=np.array([7.0, 11.0, 15.0], dtype="float32"),
             ),
             SampleRequest(
                 endpoint="apply",
@@ -366,6 +474,12 @@ TEST_CASES = {
                     f'"y":{encode_array(np.float32(0.0), as_json=True)}',
                 ],
             ),
+            SampleRequest(
+                endpoint="check-gradients",
+                payload={
+                    "inputs": {"x": 0.0, "y": 0.0},
+                },
+            ),
         ],
     ),
     "package_data": Config(
@@ -476,6 +590,54 @@ TEST_CASES = {
                 },
                 output_contains_pattern='"shape":[3,5,3]',
             ),
+            SampleRequest(
+                endpoint="check-gradients",
+                payload={
+                    "inputs": {
+                        "mesh": {
+                            "n_points": 5,
+                            "n_cells": 2,
+                            "points": encode_array(
+                                [
+                                    [0.0, 2.0, 0.0],
+                                    [1.0, 0.0, 0.0],
+                                    [0.0, 1.0, 0.0],
+                                    [1.0, 1.0, 0.0],
+                                    [0.5, 0.5, 1.0],
+                                ]
+                            ),
+                            "num_points_per_cell": encode_array([4, 4]),
+                            "cell_connectivity": encode_array([0, 1, 2, 3, 1, 2, 3, 4]),
+                            "cell_data": {
+                                "temperature": encode_array(
+                                    [[100.0, 105.0], [110.0, 115.0]]
+                                ),
+                                "pressure": encode_array([[1.0, 1.2], [1.1, 1.3]]),
+                            },
+                            "point_data": {
+                                "displacement": encode_array(
+                                    [
+                                        [0.0, 0.1, 0.2],
+                                        [0.1, 0.0, 0.2],
+                                        [0.2, 0.1, 0.0],
+                                        [0.1, 0.2, 0.1],
+                                        [0.2, 0.1, 0.1],
+                                    ]
+                                ),
+                                "velocity": encode_array(
+                                    [
+                                        [0.0, 0.0, 0.0],
+                                        [0.1, 0.0, 0.0],
+                                        [0.0, 0.1, 0.0],
+                                        [0.0, 0.0, 0.1],
+                                        [0.1, 0.1, 0.1],
+                                    ]
+                                ),
+                            },
+                        }
+                    },
+                },
+            ),
         ],
     ),
     "dataloader": Config(
@@ -491,6 +653,14 @@ TEST_CASES = {
                 output_contains_pattern=[
                     '{"data":[{"object_type":"array","shape":[3,3],"dtype":"float32","data":{"buffer":',
                 ],
+            ),
+            SampleRequest(
+                endpoint="check-gradients",
+                payload={
+                    "inputs": {
+                        "data": "@/mnt/data/sample_*.json",
+                    },
+                },
             ),
         ],
         volume_mounts=["testdata:/mnt/data:ro"],
@@ -619,7 +789,8 @@ def test_unit_tesseract_endtoend(
     assert result.exit_code == 0, result.output
     input_schema = result.output
 
-    extra_args = []
+    mount_args = []
+
     if unit_tesseract_config.volume_mounts:
         for mnt in unit_tesseract_config.volume_mounts:
             # Assume that the mount is relative to the Tesseract path
@@ -628,7 +799,7 @@ def test_unit_tesseract_endtoend(
             if not local_path.is_absolute():
                 local_path = unit_tesseract_path / local_path
             mnt = ":".join([str(local_path), *other])
-            extra_args.extend(["--volume", mnt])
+            mount_args.extend(["--volume", mnt])
 
     if unit_tesseract_config.test_with_random_inputs:
         random_input = example_from_json_schema(json.loads(input_schema))
@@ -638,9 +809,9 @@ def test_unit_tesseract_endtoend(
             [
                 "run",
                 img_name,
-                *extra_args,
+                *mount_args,
                 "apply",
-                json.dumps({"inputs": random_input}),
+                json.dumps(random_input),
             ],
             catch_exceptions=False,
         )
@@ -650,22 +821,35 @@ def test_unit_tesseract_endtoend(
         for request in unit_tesseract_config.sample_requests:
             print(f"Running request: {request}")
             cli_cmd = request.endpoint.replace("_", "-")
-            args = [
-                "run",
-                img_name,
-                *extra_args,
-                cli_cmd,
-                json.dumps(request.payload),
-                "--output-format",
-                request.output_format,
-            ]
+
+            if cli_cmd == "check-gradients":
+                args = [
+                    "run",
+                    img_name,
+                    cli_cmd,
+                    json.dumps(request.payload),
+                ]
+            else:
+                args = [
+                    "run",
+                    img_name,
+                    *mount_args,
+                    cli_cmd,
+                    json.dumps(request.payload),
+                    "--output-format",
+                    request.output_format,
+                ]
 
             result = cli_runner.invoke(app, args)
             if request.expected_status_code == 200:
                 print_debug_info(result)
                 assert result.exit_code == 0, result.exception
-                # Result is JSON output
-                output = json_normalize(result.output)
+                if cli_cmd in ("check-gradients",):
+                    # Result is text
+                    output = result.output
+                else:
+                    # Result is JSON output
+                    output = json_normalize(result.output)
             else:
                 assert result.exit_code != 0
                 # Result is an error message
@@ -736,7 +920,7 @@ def test_unit_tesseract_endtoend(
             return
 
         if unit_tesseract_config.test_with_random_inputs:
-            payload_from_schema = {"inputs": example_from_json_schema(out_input_schema)}
+            payload_from_schema = example_from_json_schema(out_input_schema)
             response = requests.post(
                 f"http://localhost:{free_port}/apply", json=payload_from_schema
             )
@@ -744,6 +928,10 @@ def test_unit_tesseract_endtoend(
 
         sample_requests = unit_tesseract_config.sample_requests or []
         for request in sample_requests:
+            if request.endpoint in ("check-gradients",):
+                # Not supported in HTTP mode
+                continue
+
             headers = {
                 "Accept": f"application/{request.output_format}",
             }

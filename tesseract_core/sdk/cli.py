@@ -33,6 +33,7 @@ from .api_parse import (
     EXPECTED_OBJECTS,
     TesseractBuildConfig,
     TesseractConfig,
+    ValidationError,
     get_non_base_fields_in_tesseract_config,
 )
 from .exceptions import UserError
@@ -84,7 +85,7 @@ POSSIBLE_CMDS = set(
     re.sub(r"([a-z])([A-Z])", r"\1-\2", object.name).replace("_", "-").lower()
     for object in EXPECTED_OBJECTS
 )
-POSSIBLE_CMDS.update({"health", "openapi-schema", "check"})
+POSSIBLE_CMDS.update({"health", "openapi-schema", "check", "check-gradients"})
 
 # All fields in TesseractConfig and TesseractBuildConfig for config override
 POSSIBLE_KEYPATHS = TesseractConfig.model_fields.keys()
@@ -272,6 +273,9 @@ def build_image(
 
     The passed directory must contain the files `tesseract_api.py` and `tesseract_config.yaml`
     (can be created via `tesseract init`).
+
+    Prints the built images as JSON array to stdout, for example: `["mytesseract:latest"]`.
+    If `--generate-only` is set, the path to the build context is printed instead.
     """
     if config_override is None:
         config_override = []
@@ -304,6 +308,8 @@ def build_image(
         raise UserError(f"Input error building Tesseract: {e}") from e
     except PermissionError as e:
         raise UserError(f"Permission denied: {e}") from e
+    except ValidationError as e:
+        raise UserError(f"Error validating tesseract_api.py: {e}") from e
 
     if generate_only:
         # output is the path to the build context
@@ -313,6 +319,7 @@ def build_image(
         # output is the built image
         image = build_out
         logger.info(f"Built image {image.short_id}, {image.tags}")
+        typer.echo(json.dumps(image.tags))
 
 
 @app.command("init")

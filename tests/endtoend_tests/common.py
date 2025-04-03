@@ -1,6 +1,7 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import json
 import traceback
 
 from typer.testing import CliRunner
@@ -27,7 +28,7 @@ def print_debug_info(result):
 
 
 def build_tesseract(sourcedir, image_name, tag=None, build_retries=3):
-    cli_runner = CliRunner()
+    cli_runner = CliRunner(mix_stderr=False)
 
     build_args = [
         "--loglevel",
@@ -58,4 +59,7 @@ def build_tesseract(sourcedir, image_name, tag=None, build_retries=3):
 
     print_debug_info(result)
     assert result.exit_code == 0, result.exception
-    return image_name
+
+    image_tags = json.loads(result.stdout.strip())
+    assert image_name in image_tags
+    return image_tags[0]

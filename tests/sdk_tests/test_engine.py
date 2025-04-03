@@ -25,6 +25,7 @@ from tesseract_core.sdk.api_parse import (
     validate_tesseract_api,
 )
 from tesseract_core.sdk.cli import AVAILABLE_RECIPES
+from tesseract_core.sdk.exceptions import UserError
 
 
 def test_create_dockerfile():
@@ -256,7 +257,7 @@ def test_needs_docker(mocked_docker):
 
     mocked_docker.info = Mock(side_effect=docker.errors.APIError(""))
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(UserError):
         run_something_with_docker()
 
 
