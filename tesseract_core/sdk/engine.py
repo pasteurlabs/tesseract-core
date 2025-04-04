@@ -570,6 +570,7 @@ def serve(
     port: str = "",
     volumes: list[str] | None = None,
     gpus: list[str] | None = None,
+    debug: bool = False,
 ) -> str:
     """Serve one or more Tesseract images.
 
@@ -581,6 +582,7 @@ def serve(
         port: port or port range to serve the tesseract on.
         volumes: list of paths to mount in the Tesseract container.
         gpus: IDs of host Nvidia GPUs to make available to the Tesseracts.
+        debug: whether to enable debug mode.
 
     Returns:
         A string representing the Tesseract Project ID.
@@ -604,7 +606,7 @@ def serve(
             raise ValueError(f"Input ID {image.id} is not a valid Tesseract")
         image_ids.append(image.id)
 
-    template = _create_docker_compose_template(image_ids, port, volumes, gpus)
+    template = _create_docker_compose_template(image_ids, port, volumes, gpus, debug)
     compose_fname = _create_compose_fname()
 
     with tempfile.NamedTemporaryFile(
@@ -685,6 +687,7 @@ def _create_docker_compose_template(
     port: str = "",
     volumes: list[str] | None = None,
     gpus: list[str] | None = None,
+    debug: bool = False,
 ) -> str:
     """Create Docker Compose template."""
     services = []
@@ -707,6 +710,9 @@ def _create_docker_compose_template(
             "port": port,
             "volumes": volumes,
             "gpus": gpu_settings,
+            "environment": {
+                "DEBUG": "1" if debug else "0",
+            },
         }
 
         services.append(service)
@@ -887,3 +893,17 @@ def project_containers(
     """
     client = docker.from_env()
     return list(filter(lambda x: project_id in x.name, client.containers.list()))
+
+
+def logs(container_id: str) -> str:
+    """Get logs from a container.
+
+    Args:
+        container_id: the ID of the container.
+
+    Returns:
+        The logs of the container.
+    """
+    client = docker.from_env()
+    container = client.containers.get(container_id)
+    return container.logs().decode("utf-8")
