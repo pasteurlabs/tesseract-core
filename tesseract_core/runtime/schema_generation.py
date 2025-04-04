@@ -134,6 +134,9 @@ def apply_function_to_model_tree(
             # We only forbid encountering the same model twice if it is within the same subtree
             seen_models.remove(id(treeobj))
 
+            if len(treeobj.model_config):
+                model_kwargs["model_config"] = (ConfigDict, ConfigDict(**treeobj.model_config))
+
             return create_model(
                 f"{model_prefix}{treeobj.__name__}",
                 **new_fields,
