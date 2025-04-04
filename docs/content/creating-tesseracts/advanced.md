@@ -111,7 +111,7 @@ various circumstances:
 There are several steps in the process of building a Tesseract image
 which can be configured via the `tesseract_config.yaml` file, in particular the `build_config` section.
 For example:
-  - By default the base image is `python:3.12-slim-bookworm`.
+  - By default the base image is `debian:bookworm-slim`.
     Depending on your specific needs (different python version,
     preinstalled dependencies, ...), it might be beneficial to
     specify a different one in `base_image`.
