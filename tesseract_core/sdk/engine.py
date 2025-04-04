@@ -501,8 +501,9 @@ def serve(
         compose_file.flush()
 
         project_name = _create_compose_proj_id()
-        project_id = docker_client.compose.up(compose_file.name, project_name)
-        return project_id
+        if not docker_client.compose.up(compose_file.name, project_name):
+            raise RuntimeError("Cannot serve Tesseracts")
+        return project_name
 
 
 def _create_docker_compose_template(

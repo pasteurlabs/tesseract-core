@@ -296,10 +296,9 @@ def build_image(
                 keep_build_cache=keep_build_cache,
                 generate_only=generate_only,
             )
-    except RuntimeError as e:
-        # If "build" in error message:
-        if "build" in str(e):
-            raise UserError(f"Error building Tesseract: {e}") from e
+    except CLIDockerClient.Errors.BuildError as e:
+        raise UserError(f"Error building Tesseract: {e}") from e
+    except CLIDockerClient.Errors.APIError as e:
         raise UserError(f"Docker server error: {e}") from e
     except TypeError as e:
         raise UserError(f"Input error building Tesseract: {e}") from e

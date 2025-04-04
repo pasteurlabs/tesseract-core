@@ -225,7 +225,7 @@ def shared_dummy_image_name(docker_client):
 
 @pytest.fixture
 def mocked_docker(monkeypatch):
-    """Mock Docker Wrapper class."""
+    """Mock CLIDockerClient class."""
     from tesseract_core.sdk import engine
 
     class MockedContainer(docker_cli_wrapper.CLIDockerClient.Containers.Container):

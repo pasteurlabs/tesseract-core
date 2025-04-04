@@ -14,10 +14,10 @@ logger = logging.getLogger("tesseract")
 
 
 class CLIDockerClient:
-    """Wrapper around Docker CLI to manage Docker containers and images.
+    """Wrapper around Docker CLI to manage Docker containers, images, and projects.
 
     Initializes a new instance of the current Docker state from the
-    perspective of Tesseracts. Loads in a previous state if one exists.
+    perspective of Tesseracts.
     """
 
     def __init__(self) -> None:
@@ -27,7 +27,7 @@ class CLIDockerClient:
         self.compose = self.Compose(self)
 
     class Images:
-        """Class to interface with docker images."""
+        """Class to interface with Tesseract docker images."""
 
         def __init__(self) -> None:
             self.images = []  # List of Image objects
@@ -48,17 +48,15 @@ class CLIDockerClient:
 
         def get(self, image: str) -> Image:
             """Returns the metadata for a specific image."""
-            # Iterate through all the images and see if any of them
-            # have id or name matching the image str
-
-            # Use getter func to make sure it's updated
             if not image:
                 raise CLIDockerClient.Errors.DockerException(
                     "Image name cannot be empty."
                 )
             if ":" not in image:
                 image = image + ":latest"
+            # Use getter func to make sure self.images is updated
             images = self.list()
+            # Check for both name and id to find the image
             for image_obj in images:
                 if image_obj.id == image or image_obj.name == image:
                     return image_obj
