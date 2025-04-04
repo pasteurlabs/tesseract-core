@@ -26,6 +26,10 @@ class OutputSchema(BaseModel):
 
 
 def apply(inputs: InputSchema) -> OutputSchema:
+    """Assert that CUDA is available."""
+    import shutil
+
+    assert shutil.which("nvcc") is not None, "CUDA is not available on this system."
     return OutputSchema()
 
 
