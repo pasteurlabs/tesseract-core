@@ -7,8 +7,7 @@ description: ""
 
 build_config:
   # Base image to use for the container, must be Ubuntu or Debian-based
-  # with Python 3.9 or later
-  # base_image: "python:3.12-slim-bookworm"
+  # base_image: "debian:bookworm-slim"
 
   # Platform to build the container for. In general, images can only be executed
   # on the platform they were built for.

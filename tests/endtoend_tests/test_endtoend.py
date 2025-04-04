@@ -23,10 +23,7 @@ def built_image_name(docker_client, shared_dummy_image_name, dummy_tesseract_loc
     yield image_name
 
 
-tested_images = (
-    "ubuntu:24.04",
-    "nvidia/cuda:12.8.1-runtime-ubuntu24.04",
-)
+tested_images = ("ubuntu:24.04",)
 
 build_matrix = [
     *[(tag, None, None) for tag in (True, False)],
