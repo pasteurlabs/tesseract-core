@@ -30,6 +30,8 @@ COPY {{ tesseract_source_directory }}/{{ config.build_config.requirements._filen
 COPY {{ tesseract_source_directory }}/{{ config.build_config.requirements._build_script }} ./
 COPY local_requirements* ./local_requirements
 
+# Build a python venv from python provider build scripts.
+# The build script has to create a venv at /python-env
 RUN {% if use_ssh_mount %}--mount=type=ssh{% endif %} bash {{ config.build_config.requirements._build_script }}
 ENV PATH="/python-env/bin:$PATH"
 

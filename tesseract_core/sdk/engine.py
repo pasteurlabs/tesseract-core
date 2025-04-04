@@ -314,6 +314,9 @@ def prepare_build_context(
         context_dir / "__tesseract_source__" / requirement_config._build_script,
     )
 
+    # When building from a requirements.txt we support local dependencies.
+    # We separate local dep. lines from the requirements.txt and copy the
+    # corresponding files into the build directory.
     if requirement_config.provider == "python-pip":
         reqstxt = src_dir / requirement_config._filename
         if reqstxt.exists():
