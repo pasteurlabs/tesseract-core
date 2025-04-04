@@ -308,28 +308,6 @@ def prepare_build_context(
 
     template_dir = get_template_dir()
 
-    if (Path(src_dir) / "tesseract_requirements.txt").exists():
-        local_dependencies, remote_dependencies = parse_requirements(
-            Path(src_dir) / "tesseract_requirements.txt"
-        )
-    else:
-        remote_dependencies = []
-        local_dependencies = []
-
-    local_requirements_path = context_dir / "local_requirements"
-    Path.mkdir(local_requirements_path, parents=True, exist_ok=True)
-
-    if local_dependencies:
-        for dependency in local_dependencies:
-            src = Path(src_dir) / dependency
-            dest = context_dir / "local_requirements" / src.name
-            if src.is_file():
-                copy(src, dest)
-            else:
-                copytree(src, dest)
-
-    # We need to write a new requirements file in the build dir, where we explicitly
-    # removed the local dependencies
     requirement_config = user_config.build_config.requirements
     copy(
         template_dir / requirement_config._build_script,
@@ -339,6 +317,9 @@ def prepare_build_context(
     # When building from a requirements.txt we support local dependencies.
     # We separate local dep. lines from the requirements.txt and copy the
     # corresponding files into the build directory.
+    local_requirements_path = context_dir / "local_requirements"
+    Path.mkdir(local_requirements_path, parents=True, exist_ok=True)
+
     if requirement_config.provider == "python-pip":
         reqstxt = src_dir / requirement_config._filename
         if reqstxt.exists():
@@ -347,8 +328,6 @@ def prepare_build_context(
             local_dependencies, remote_dependencies = [], []
 
         if local_dependencies:
-            local_requirements_path = context_dir / "local_requirements"
-            Path.mkdir(local_requirements_path)
             for dependency in local_dependencies:
                 src = src_dir / dependency
                 dest = context_dir / "local_requirements" / src.name
