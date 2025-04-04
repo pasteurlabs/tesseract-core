@@ -50,8 +50,11 @@ def test_build_image(
     if generate_only:
         # Check stdout if it contains the correct docker build command
         assert got is None
-        command = f"docker buildx build --load --no-cache --tag {image_name} --file {dockerfile_path} {tmpdir}"
-        assert command in caplog.text
+        # Split into 2 parts because label is timestamp based
+        command1 = f"docker buildx build --load --tag {image_name} --label"
+        command2 = f"--file {dockerfile_path} {tmpdir}"
+        assert command1 in caplog.text
+        assert command2 in caplog.text
     else:
         assert got.attrs == mocked_docker.images.get(image_name).attrs
 

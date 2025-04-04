@@ -83,6 +83,22 @@ def unit_tesseract_path(request) -> Path:
     return UNIT_TESSERACT_PATH / request.param
 
 
+@pytest.fixture()
+def dummy_docker_file(tmpdir):
+    """Create a dummy Dockerfile for testing."""
+    dockerfile_path = tmpdir / "Dockerfile"
+    dockerfile_content = """
+        FROM alpine
+        CMD echo "Hello, Tesseract!" && sleep infinity
+
+        # Set environment variables
+        ENV TESSERACT_NAME="dummy-tesseract" \
+        """
+    with open(dockerfile_path, "w") as f:
+        f.write(dockerfile_content)
+    return dockerfile_path
+
+
 @pytest.fixture(scope="session")
 def dummy_tesseract_location():
     """Return the dummy tesseract location."""

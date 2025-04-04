@@ -78,8 +78,6 @@ class CLIDockerClient:
                     capture_output=True,
                 )
 
-                self._update_images()
-
             except subprocess.CalledProcessError as ex:
                 raise CLIDockerClient.Errors.ImageNotFound(
                     f"Cannot remove image {image_id}: {ex}"
@@ -136,6 +134,7 @@ class CLIDockerClient:
                 return None
 
             out_pipe = LogPipe(logging.DEBUG)
+
             with out_pipe as out_pipe_fd:
                 proc = subprocess.run(build_cmd, stdout=out_pipe_fd, stderr=out_pipe_fd)
 
@@ -174,6 +173,8 @@ class CLIDockerClient:
         def _update_images(self) -> None:
             """Updates the list of images by querying Docker CLI."""
             try:
+                # Reset self.images completely
+                self.images = []
                 image_ids = subprocess.run(
                     ["docker", "images", "-q"],  # List only image IDs
                     capture_output=True,
@@ -182,20 +183,11 @@ class CLIDockerClient:
                 )
                 if not image_ids.stdout:
                     images = []
-                else:
-                    images = image_ids.stdout.strip().split("\n")
+                    return
 
-                # Clean up deleted images.
-                for image in self.images:
-                    if image.id not in images:
-                        self.images.remove(image)
-
-                # Filter list to exclude image ids that are already in self.images.
-                images = [
-                    image_id
-                    for image_id in images
-                    if image_id not in self.images and image_id
-                ]
+                images = image_ids.stdout.strip().split("\n")
+                # Filter list to exclude empty strings.
+                images = [image_id for image_id in images if image_id]
                 json_dicts = get_docker_metadata(images, is_image=True)
                 for _, json_dict in json_dicts.items():
                     image = self.Image(json_dict)
@@ -337,6 +329,11 @@ class CLIDockerClient:
                 for _, container_obj in self.list().items():
                     if container_obj.name == container:
                         return container_obj
+
+            if container_obj is None:
+                raise CLIDockerClient.Errors.ContainerError(
+                    f"Container {container} not found."
+                )
             return container_obj
 
         def run(
@@ -426,6 +423,8 @@ class CLIDockerClient:
         def _update_containers(self) -> None:
             """Update self.containers."""
             try:
+                # Reset self.containers completely
+                self.containers = {}
                 result = subprocess.run(
                     ["docker", "ps", "-q"],  # List only container IDs
                     capture_output=True,
@@ -434,19 +433,13 @@ class CLIDockerClient:
                 )
                 if not result.stdout:
                     container_ids = []
-                else:
-                    container_ids = result.stdout.strip().split("\n")
+                    return
 
-                # Check if theres any cleaned up containers.
-                for container_id in list(self.containers.keys()):
-                    if container_id not in container_ids:
-                        del self.containers[container_id]
-                # Filter list to exclude container ids that are already in self.containers
-                # also exclude empty strings.
+                container_ids = result.stdout.strip().split("\n")
+
+                # Filter list to  exclude empty strings.
                 container_ids = [
-                    container_id
-                    for container_id in container_ids
-                    if container_id not in self.containers and container_id
+                    container_id for container_id in container_ids if container_id
                 ]
                 json_dicts = get_docker_metadata(container_ids)
                 for container_id, json_dict in json_dicts.items():
