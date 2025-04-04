@@ -397,29 +397,32 @@ class HTTPClient:
 
         response = requests.request(method=method, url=url, json=encoded_payload)
 
-        try:
-            data = response.json()
-        except requests.JSONDecodeError:
-            data = {}
-
-        if (
-            response.status_code == requests.codes.unprocessable_entity
-            and "detail" in data
-        ):
-            errors = [
-                InitErrorDetails(
-                    type=e["type"],
-                    loc=tuple(e["loc"]),
-                    input=e.get("input"),
+        if response.status_code == requests.codes.unprocessable_entity:
+            # Try and raise a more helpful error if the response is a Pydantic error
+            try:
+                data = response.json()
+            except requests.JSONDecodeError:
+                # Is not a Pydantic error
+                data = {}
+            if "detail" in data:
+                errors = [
+                    InitErrorDetails(
+                        type=e["type"],
+                        loc=tuple(e["loc"]),
+                        input=e.get("input"),
+                    )
+                    for e in data["detail"]
+                ]
+                raise ValidationError.from_exception_data(
+                    f"endpoint {endpoint}", errors
                 )
-                for e in data["detail"]
-            ]
-            raise ValidationError.from_exception_data(f"endpoint {endpoint}", errors)
 
         if not response.ok:
             raise RuntimeError(
                 f"Error {response.status_code} from Tesseract: {response.text}"
             )
+
+        data = response.json()
 
         if endpoint in [
             "apply",
@@ -429,7 +432,7 @@ class HTTPClient:
         ]:
             data = _tree_map(
                 _decode_array,
-                response.json(),
+                data,
                 is_leaf=lambda x: type(x) is dict and "shape" in x,
             )
 
