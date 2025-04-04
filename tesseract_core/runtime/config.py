@@ -14,6 +14,7 @@ class RuntimeConfig(BaseModel):
     tesseract_api_path: FilePath = Path("tesseract_api.py")
     tesseract_name: str = "Tesseract"
     tesseract_version: str = "0+unknown"
+    debug: bool = False
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
