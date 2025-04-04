@@ -19,49 +19,53 @@ from jinja2.exceptions import TemplateNotFound
 from typeguard import suppress_type_checks
 
 from tesseract_core.sdk import engine
-from tesseract_core.sdk.api_parse import TesseractConfig, validate_tesseract_api
+from tesseract_core.sdk.api_parse import (
+    TesseractConfig,
+    validate_tesseract_api,
+)
 from tesseract_core.sdk.cli import AVAILABLE_RECIPES
 from tesseract_core.sdk.exceptions import UserError
 
 
-def test_create_dockerfile():
+def test_prepare_build_context(tmp_path_factory):
     """Test we can create a dockerfile."""
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "foo").touch()
+    build_dir = tmp_path_factory.mktemp("build")
     default_config = TesseractConfig(name="foobar")
-    engine.create_dockerfile(default_config)
+    engine.prepare_build_context(src_dir, build_dir, default_config)
+    assert (build_dir / "__tesseract_source__" / "foo").exists()
+    assert (build_dir / "__tesseract_runtime__").exists()
+    assert (build_dir / "Dockerfile").exists()
 
 
 @pytest.mark.parametrize("generate_only", [True, False])
-def test_build_image(
-    dummy_tesseract_package, tmpdir, mocked_docker, generate_only, caplog
-):
+def test_build_tesseract(dummy_tesseract_package, mocked_docker, generate_only, caplog):
     """Test we can build an image for a package and keep build directory."""
     src_dir = dummy_tesseract_package
-    image_name = "foo.bar/baz:42"
-    dockerfile = "FROM tesseract"
+    image_name = "unit_vectoradd"
+    image_tag = "42"
 
     with caplog.at_level(logging.INFO):
-        got = engine.build_image(
-            src_dir=src_dir,
-            image_name=image_name,
-            dockerfile=dockerfile,
-            build_dir=Path(tmpdir),
+        out = engine.build_tesseract(
+            src_dir,
+            image_tag,
             generate_only=generate_only,
         )
 
-    # Check if Dockerfile is there
-    dockerfile_path = tmpdir / "Dockerfile"
-    assert dockerfile_path.exists()
-
     if generate_only:
+        assert isinstance(out, Path)
+
+        # Check if Dockerfile is there
+        dockerfile_path = out / "Dockerfile"
+        assert dockerfile_path.exists()
+
         # Check stdout if it contains the correct docker build command
-        assert got is None
-        command = f"docker buildx build --load --tag {image_name} --file {dockerfile_path} {tmpdir}"
+        command = f"docker buildx build --load --tag {image_name}:{image_tag} --file {dockerfile_path}"
         assert command in caplog.text
     else:
-        assert got.attrs == mocked_docker.images.get(image_name).attrs
-
-    with open(dockerfile_path) as got_dockerfile:
-        assert got_dockerfile.read() == dockerfile
+        assert isinstance(out, docker.models.images.Image)
+        assert out.attrs == mocked_docker.images.get(image_name).attrs
 
 
 @pytest.mark.parametrize("recipe", [None, *AVAILABLE_RECIPES])
