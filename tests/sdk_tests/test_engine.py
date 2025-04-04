@@ -7,12 +7,7 @@ import os
 import random
 import time
 from pathlib import Path
-from unittest.mock import Mock
 
-import docker
-import docker.models
-import docker.models.containers
-import docker.models.images
 import pytest
 import yaml
 from jinja2.exceptions import TemplateNotFound
@@ -55,8 +50,11 @@ def test_build_image(
     if generate_only:
         # Check stdout if it contains the correct docker build command
         assert got is None
-        command = f"docker buildx build --load --tag {image_name} --file {dockerfile_path} {tmpdir}"
-        assert command in caplog.text
+        # Split into 2 parts because label is timestamp based
+        command1 = f"docker buildx build --load --tag {image_name} --label"
+        command2 = f"--file {dockerfile_path} {tmpdir}"
+        assert command1 in caplog.text
+        assert command2 in caplog.text
     else:
         assert got.attrs == mocked_docker.images.get(image_name).attrs
 
@@ -83,7 +81,8 @@ def test_init(tmpdir, recipe):
 
     # Ensure the name in the config is correct
     with open(tmpdir / "test_dir/tesseract_config.yaml") as config_yaml:
-        assert yaml.safe_load(config_yaml)["name"] == "foo"
+        test = yaml.safe_load(config_yaml)
+        assert test["name"] == "foo"
 
     # Ensure template passes validation
     validate_tesseract_api(api_path.parent)
@@ -148,7 +147,7 @@ def test_run_gpu(mocked_docker):
     )
 
     res = json.loads(res_out)
-    assert res["device_requests"][0]["DeviceIDs"] == ["all"]
+    assert res["device_requests"] == ["all"]
 
 
 def test_run_tesseract_file_input(mocked_docker, tmpdir):
@@ -209,7 +208,7 @@ def test_serve_tesseracts_invalid_input_args():
 
 def test_get_tesseract_images(mocked_docker):
     tesseract_images = engine.get_tesseract_images()
-    assert len(tesseract_images) == 1
+    assert len(tesseract_images) == 2
 
 
 def test_get_tesseract_containers(mocked_docker):
@@ -242,7 +241,7 @@ def test_serve_tesseracts(mocked_docker):
     assert project_name_multi_tesseract
 
 
-def test_needs_docker(mocked_docker):
+def test_needs_docker(mocked_docker, mocker):
     @engine.needs_docker
     def run_something_with_docker():
         pass
@@ -250,7 +249,11 @@ def test_needs_docker(mocked_docker):
     # Happy case
     run_something_with_docker()
 
-    mocked_docker.info = Mock(side_effect=docker.errors.APIError(""))
+    # Sad case
+    docker_info = mocker.patch(
+        "tesseract_core.sdk.docker_cli_wrapper.CLIDockerClient.info"
+    )
+    docker_info.side_effect = RuntimeError("No Docker")
 
     with pytest.raises(UserError):
         run_something_with_docker()
