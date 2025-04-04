@@ -665,6 +665,16 @@ TEST_CASES = {
         ],
         volume_mounts=["testdata:/mnt/data:ro"],
     ),
+    "conda": Config(
+        test_with_random_inputs=False,
+        sample_requests=[
+            SampleRequest(
+                endpoint="apply",
+                payload={"inputs": {"message": "Hey!"}},
+                output_contains_pattern=[r'{"cowsays":"  ____\n| Hey! |\n  ====\n'],
+            )
+        ],
+    ),
 }
 
 

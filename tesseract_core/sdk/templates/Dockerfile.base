@@ -18,10 +18,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 {% endif %}
 
-# Create virtual environment
-RUN python3 -m venv /python-env
-ENV PATH="/python-env/bin:$PATH"
-
 {% if use_ssh_mount %}
 # Set up SSH config
 RUN mkdir -p -m 0700 ~/.ssh && ssh-keyscan github.com >> ~/.ssh/known_hosts
@@ -30,14 +26,14 @@ RUN mkdir -p -m 0700 ~/.ssh && ssh-keyscan github.com >> ~/.ssh/known_hosts
 # Copy all dependencies, for both the specific Tesseract and the runtime
 WORKDIR /tmp/build
 COPY {{ tesseract_runtime_location }} ./tesseract_runtime/
-COPY {{ tesseract_source_directory }}/tesseract_requirements.txt* ./
+COPY {{ tesseract_source_directory }}/{{ config.build_config.requirements._filename }}* ./
+COPY {{ tesseract_source_directory }}/{{ config.build_config.requirements._build_script }} ./
 COPY local_requirements* ./local_requirements
 
-# Install all dependencies
-RUN {% if use_ssh_mount %}--mount=type=ssh{% endif %} \
-    TESSERACT_DEPS=$(find ./local_requirements/ -mindepth 1 -maxdepth 1 2>/dev/null || echo "") && \
-    if [ -f tesseract_requirements.txt ]; then TESSERACT_DEPS="$TESSERACT_DEPS -r tesseract_requirements.txt"; fi && \
-    pip install ./tesseract_runtime $TESSERACT_DEPS
+# Build a python venv from python provider build scripts.
+# The build script has to create a venv at /python-env
+RUN {% if use_ssh_mount %}--mount=type=ssh{% endif %} bash {{ config.build_config.requirements._build_script }}
+ENV PATH="/python-env/bin:$PATH"
 
 # Stage 2: Set up runtime environment
 {% if config.build_config.target_platform.strip() == "native" %}
