@@ -27,9 +27,10 @@ class OutputSchema(BaseModel):
 
 def apply(inputs: InputSchema) -> OutputSchema:
     """Assert that CUDA is available."""
-    import shutil
+    from ctypes.util import find_library
 
-    assert shutil.which("nvcc") is not None, "CUDA is not available on this system."
+    cudart = find_library("cudart")
+    assert cudart is not None, "CUDA runtime library not found"
     return OutputSchema()
 
 
