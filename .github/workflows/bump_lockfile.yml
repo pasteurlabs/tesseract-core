@@ -48,7 +48,7 @@ jobs:
         with:
             token: ${{ secrets.GITHUB_TOKEN }}
             commit-message: Update dependencies
-            title: 📦 Update dependencies
+            title: "chore: 📦 Update dependencies"
             branch: _bot/update-deps
             draft: false
             base: main
