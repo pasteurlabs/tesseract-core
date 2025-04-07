@@ -134,13 +134,26 @@ def apply_function_to_model_tree(
             # We only forbid encountering the same model twice if it is within the same subtree
             seen_models.remove(id(treeobj))
 
+            # only override model_config if it is not already present
+            # the model
             if len(treeobj.model_config):
-                model_kwargs["model_config"] = (ConfigDict, ConfigDict(**treeobj.model_config))
+                model_config = (
+                    ConfigDict,
+                    ConfigDict(**treeobj.model_config),
+                )
+            else:
+                model_config = model_kwargs.get(
+                    "model_config", (ConfigDict, ConfigDict())
+                )
 
+            model_kwargs_without_config = {
+                k: v for k, v in model_kwargs.items() if k != "model_config"
+            }
             return create_model(
                 f"{model_prefix}{treeobj.__name__}",
+                model_config=model_config,
                 **new_fields,
-                **model_kwargs,
+                **model_kwargs_without_config,
                 __base__=treeobj,
             )
 
