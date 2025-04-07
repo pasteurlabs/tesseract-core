@@ -134,8 +134,8 @@ def apply_function_to_model_tree(
             # We only forbid encountering the same model twice if it is within the same subtree
             seen_models.remove(id(treeobj))
 
-            # only override model_config if it is not already present
-            # the model
+            # Only override model_config if it is not already present
+            # in the pydantic model definition
             if len(treeobj.model_config):
                 model_config = (
                     ConfigDict,
