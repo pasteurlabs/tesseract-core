@@ -6,10 +6,11 @@ from pydantic import BaseModel, Field, model_validator
 
 from tesseract_core.runtime import Array, Differentiable, Float32, Int32, ShapeDType
 
-
 #
 # Schemas
 #
+
+
 class VolumetricMeshData(BaseModel):
     """Mock mesh schema; shapes not validated."""
 
@@ -25,12 +26,16 @@ class VolumetricMeshData(BaseModel):
 
     @model_validator(mode="after")
     def validate_num_points_per_cell(self):
+        if not isinstance(self.num_points_per_cell, np.ndarray):
+            return self
         if len(self.num_points_per_cell) != self.n_cells:
             raise ValueError(f"Length of num_points_per_cell must be {self.n_cells}")
         return self
 
     @model_validator(mode="after")
     def validate_cell_connectivity(self):
+        if not isinstance(self.cell_connectivity, np.ndarray):
+            return self
         expected_len = sum(self.num_points_per_cell)
         if len(self.cell_connectivity) != expected_len:
             raise ValueError(f"Length of cell_connectivity must be {expected_len}")
@@ -59,6 +64,8 @@ class OutputSchema(BaseModel):
 #
 # Required endpoints
 #
+
+
 def apply(inputs: InputSchema) -> OutputSchema:
     points = inputs.mesh.points
 
@@ -76,15 +83,15 @@ def apply(inputs: InputSchema) -> OutputSchema:
 
 
 def abstract_eval(abstract_inputs):
-    input_points_shapedtype = abstract_inputs["mesh"]["points"]
+    input_points_shapedtype = abstract_inputs.mesh.points
 
     # get dimension of vector space points live in from input
-    dim = input_points_shapedtype[1]
+    dim = input_points_shapedtype.shape[1]
     dtype = input_points_shapedtype.dtype
     return {
         "statistics": {
             "first_point_coordinates": ShapeDType(shape=(dim,), dtype=dtype),
-            "barycenter": ShapeDType(shape=(dim,), dtype="float"),
+            "barycenter": ShapeDType(shape=(dim,), dtype="float32"),
         }
     }
 
