@@ -243,7 +243,7 @@ def test_serve_tesseracts(mocked_docker):
     assert project_name_multi_tesseract
 
 
-def test_needs_docker(mocked_docker, mocker):
+def test_needs_docker(mocker):
     @engine.needs_docker
     def run_something_with_docker():
         pass
