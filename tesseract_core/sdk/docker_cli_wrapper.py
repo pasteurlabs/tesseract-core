@@ -81,8 +81,8 @@ class CLIDockerClient:
                     f"Cannot remove image {image_id}: {ex}"
                 ) from ex
 
-        @staticmethod
         def buildx(
+            self,
             path: str | Path,
             tag: str,
             dockerfile: str | Path,
@@ -166,7 +166,7 @@ class CLIDockerClient:
             if return_code != 0:
                 raise CLIDockerClient.Errors.BuildError(logs)
 
-            return tag
+            return self.get(tag)
 
         def _update_images(self) -> None:
             """Updates the list of images by querying Docker CLI."""
