@@ -29,7 +29,7 @@ from .api_parse import (
     ValidationError,
     get_non_base_fields_in_tesseract_config,
 )
-from .docker_cli_wrapper import CLIDockerClient
+from .docker_client import CLIDockerClient
 from .exceptions import UserError
 from .logs import DEFAULT_CONSOLE, set_logger
 

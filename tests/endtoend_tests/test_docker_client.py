@@ -1,8 +1,11 @@
+# Copyright 2025 Pasteur Labs. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 """End to end tests for docker cli wrapper."""
 
 from common import image_exists
 
-from tesseract_core.sdk.docker_cli_wrapper import CLIDockerClient
+from tesseract_core.sdk.docker_client import CLIDockerClient
 
 
 def test_create_image(docker_client, dummy_tesseract_location, dummy_docker_file):

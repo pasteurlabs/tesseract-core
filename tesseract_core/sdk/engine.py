@@ -28,7 +28,7 @@ from pip._internal.req.req_file import (
 )
 
 from .api_parse import TesseractConfig, get_config, validate_tesseract_api
-from .docker_cli_wrapper import CLIDockerClient
+from .docker_client import CLIDockerClient
 from .exceptions import UserError
 
 logger = logging.getLogger("tesseract")

@@ -19,7 +19,7 @@ from tesseract_core.sdk.api_parse import (
     validate_tesseract_api,
 )
 from tesseract_core.sdk.cli import AVAILABLE_RECIPES
-from tesseract_core.sdk.docker_cli_wrapper import CLIDockerClient
+from tesseract_core.sdk.docker_client import CLIDockerClient
 from tesseract_core.sdk.exceptions import UserError
 
 
@@ -60,7 +60,7 @@ def test_build_tesseract(dummy_tesseract_package, mocked_docker, generate_only, 
         assert "docker buildx build" in caplog.text
         assert str(out) in caplog.text
     else:
-        assert isinstance(out, CLIDockerClient.images.Image)
+        assert isinstance(out, CLIDockerClient.Images.Image)
         assert out.attrs == mocked_docker.images.get(image_name).attrs
 
 
@@ -252,9 +252,7 @@ def test_needs_docker(mocked_docker, mocker):
     run_something_with_docker()
 
     # Sad case
-    docker_info = mocker.patch(
-        "tesseract_core.sdk.docker_cli_wrapper.CLIDockerClient.info"
-    )
+    docker_info = mocker.patch("tesseract_core.sdk.docker_client.CLIDockerClient.info")
     docker_info.side_effect = RuntimeError("No Docker")
 
     with pytest.raises(UserError):

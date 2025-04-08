@@ -1,4 +1,7 @@
-"""Docker for Tesseract usage."""
+# Copyright 2025 Pasteur Labs. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""Docker client for Tesseract usage."""
 
 from __future__ import annotations
 
