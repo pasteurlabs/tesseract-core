@@ -40,6 +40,7 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
         version=config.tesseract_version,
         docs_url=None,
         redoc_url="/docs",
+        debug=config.debug,
     )
     tesseract_endpoints = create_endpoints(api_module)
 

@@ -11,7 +11,6 @@ import os
 import random
 import shlex
 import string
-import subprocess
 import tempfile
 import threading
 from collections.abc import Callable, Sequence
@@ -148,22 +147,56 @@ def parse_requirements(
 
 
 def get_runtime_dir() -> Path:
-    """Get the source directory for the Tesseract runtime as a context manager."""
+    """Get the source directory for the Tesseract runtime."""
     import tesseract_core
 
     return Path(tesseract_core.__file__).parent / "runtime"
 
 
-def create_dockerfile(user_config: TesseractConfig, use_ssh_mount: bool = False) -> str:
-    """Create the Dockerfile for the package.
+def get_template_dir():
+    """Get the template directory for the Tesseract runtime."""
+    import tesseract_core
+
+    return Path(tesseract_core.__file__).parent / "sdk" / "templates"
+
+
+def prepare_build_context(
+    src_dir: str | Path,
+    context_dir: str | Path,
+    user_config: TesseractConfig,
+    use_ssh_mount: bool = False,
+) -> Path:
+    """Populate the build context for a Tesseract.
+
+    Generated folder structure:
+    ├── Dockerfile
+    ├── __tesseract_source__
+    │   ├── tesseract_api.py
+    │   ├── tesseract_config.yaml
+    │   ├── tesseract_requirements.txt
+    │   └── ... any other files in the source directory ...
+    └── __tesseract_runtime__
+        ├── pyproject.toml
+        ├── ... any other files in the tesseract_core/runtime/meta directory ...
+        └── tesseract_core
+            └── runtime
+                ├── __init__.py
+                └── ... runtime module files ...
 
     Args:
+        src_dir: The source directory where the Tesseract project is located.
+        context_dir: The directory where the build context will be created.
         user_config: The Tesseract configuration object.
         use_ssh_mount: Whether to use SSH mount to install dependencies (prevents caching).
 
     Returns:
-        A string with the Dockerfile content.
+        The path to the build context directory.
     """
+    context_dir = Path(context_dir)
+    context_dir.mkdir(parents=True, exist_ok=True)
+
+    copytree(src_dir, context_dir / "__tesseract_source__")
+
     template_name = "Dockerfile.base"
     template = ENV.get_template(template_name)
 
@@ -175,58 +208,52 @@ def create_dockerfile(user_config: TesseractConfig, use_ssh_mount: bool = False)
     }
 
     logger.debug(f"Generating Dockerfile from template: {template_name}")
+    dockerfile_content = template.render(template_values)
+    dockerfile_path = context_dir / "Dockerfile"
 
-    return template.render(template_values)
+    logger.debug(f"Writing Dockerfile to {dockerfile_path}")
 
-
-def build_image(
-    src_dir: str | Path,
-    image_name: str,
-    dockerfile: str | Path,
-    build_dir: str | Path,
-    inject_ssh: bool = False,
-    keep_build_cache: bool = False,
-    generate_only: bool = False,
-) -> CLIDockerClient.Images.Image | None:
-    """Build the image from a Dockerfile.
-
-    Returns:
-        An Image object representing an image on the local machine.
-    """
-    dockerfile_path = build_dir / "Dockerfile"
     with open(dockerfile_path, "w") as f:
-        logger.debug(f"Writing Dockerfile to {dockerfile_path}")
-        f.write(dockerfile)
+        f.write(dockerfile_content)
 
-    copytree(src_dir, build_dir / "__tesseract_source__")
+    template_dir = get_template_dir()
 
-    if (Path(src_dir) / "tesseract_requirements.txt").exists():
-        local_dependencies, remote_dependencies = parse_requirements(
-            Path(src_dir) / "tesseract_requirements.txt"
-        )
-    else:
-        remote_dependencies = []
-        local_dependencies = []
-
-    if local_dependencies:
-        local_requirements_path = build_dir / "local_requirements"
-        Path.mkdir(local_requirements_path)
-        for dependency in local_dependencies:
-            src = Path(src_dir) / dependency
-            dest = build_dir / "local_requirements" / src.name
-            if src.is_file():
-                copy(src, dest)
-            else:
-                copytree(src, dest)
-
-    # We need to write a new requirements file in the build dir, where we explicitly
-    # removed the local dependencies
-    requirements_file_path = (
-        Path(build_dir) / "__tesseract_source__" / "tesseract_requirements.txt"
+    requirement_config = user_config.build_config.requirements
+    copy(
+        template_dir / requirement_config._build_script,
+        context_dir / "__tesseract_source__" / requirement_config._build_script,
     )
-    with requirements_file_path.open("w", encoding="utf-8") as f:
-        for dependency in remote_dependencies:
-            f.write(f"{dependency}\n")
+
+    # When building from a requirements.txt we support local dependencies.
+    # We separate local dep. lines from the requirements.txt and copy the
+    # corresponding files into the build directory.
+    local_requirements_path = context_dir / "local_requirements"
+    Path.mkdir(local_requirements_path, parents=True, exist_ok=True)
+
+    if requirement_config.provider == "python-pip":
+        reqstxt = src_dir / requirement_config._filename
+        if reqstxt.exists():
+            local_dependencies, remote_dependencies = parse_requirements(reqstxt)
+        else:
+            local_dependencies, remote_dependencies = [], []
+
+        if local_dependencies:
+            for dependency in local_dependencies:
+                src = src_dir / dependency
+                dest = context_dir / "local_requirements" / src.name
+                if src.is_file():
+                    copy(src, dest)
+                else:
+                    copytree(src, dest)
+
+        # We need to write a new requirements file in the build dir, where we explicitly
+        # removed the local dependencies
+        requirements_file_path = (
+            context_dir / "__tesseract_source__" / "tesseract_requirements.txt"
+        )
+        with requirements_file_path.open("w", encoding="utf-8") as f:
+            for dependency in remote_dependencies:
+                f.write(f"{dependency}\n")
 
     def _ignore_pycache(_, names: list[str]) -> list[str]:
         ignore = []
@@ -237,45 +264,13 @@ def build_image(
     runtime_source_dir = get_runtime_dir()
     copytree(
         runtime_source_dir,
-        build_dir / "__tesseract_runtime__" / "tesseract_core" / "runtime",
+        context_dir / "__tesseract_runtime__" / "tesseract_core" / "runtime",
         ignore=_ignore_pycache,
     )
     for metafile in (runtime_source_dir / "meta").glob("*"):
-        copy(metafile, build_dir / "__tesseract_runtime__")
+        copy(metafile, context_dir / "__tesseract_runtime__")
 
-    if generate_only:
-        logger.info(f"Build directory generated at {build_dir}, skipping build")
-    else:
-        logger.info("Building image ...")
-
-    try:
-        image_name = docker_client.images.buildx(
-            path=build_dir.as_posix(),
-            tag=image_name,
-            dockerfile=dockerfile_path,
-            inject_ssh=inject_ssh,
-            keep_build_cache=keep_build_cache,
-            print_and_exit=generate_only,
-        )
-        if generate_only:
-            return None
-        image = docker_client.images.get(image_name)
-
-    except CLIDockerClient.Errors.BuildError as e:
-        logger.warning("Build failed with logs:")
-        for line in e.build_log:
-            logger.warning(line)
-        raise UserError("Image build failure. See above logs for details.") from e
-    except CLIDockerClient.Errors.APIError as e:
-        raise UserError(f"Docker server error: {e}") from e
-    except TypeError as e:
-        raise UserError(f"Input error building Tesseract: {e}") from e
-
-    else:
-        if image is not None:
-            logger.debug("Build successful")
-
-    return image
+    return context_dir
 
 
 def _write_template_file(
@@ -382,18 +377,36 @@ def build_tesseract(
         build_dir.mkdir(exist_ok=True)
         keep_build_dir = True
 
-    dockerfile = create_dockerfile(config, use_ssh_mount=inject_ssh)
+    context_dir = prepare_build_context(
+        src_dir, build_dir, config, use_ssh_mount=inject_ssh
+    )
+
+    if generate_only:
+        logger.info(f"Build directory generated at {build_dir}, skipping build")
+    else:
+        logger.info("Building image ...")
 
     try:
-        out = build_image(
-            src_dir,
-            image_name,
-            dockerfile,
-            build_dir=build_dir,
+        image = docker_client.images.buildx(
+            path=context_dir.as_posix(),
+            tag=image_name,
+            dockerfile=context_dir / "Dockerfile",
             inject_ssh=inject_ssh,
             keep_build_cache=keep_build_cache,
-            generate_only=generate_only,
+            print_and_exit=generate_only,
         )
+    except CLIDockerClient.Errors.BuildError as e:
+        logger.warning("Build failed with logs:")
+        for line in e.build_log:
+            logger.warning(line)
+        raise UserError("Image build failure. See above logs for details.") from e
+    except CLIDockerClient.Errors.APIError as e:
+        raise UserError(f"Docker server error: {e}") from e
+    except TypeError as e:
+        raise UserError(f"Input error building Tesseract: {e}") from e
+    else:
+        if image is not None:
+            logger.debug("Build successful")
     finally:
         if not keep_build_dir:
             try:
@@ -408,7 +421,7 @@ def build_tesseract(
     if generate_only:
         return build_dir
 
-    return out
+    return image
 
 
 def teardown(project_ids: list, tear_all: bool = False) -> None:
@@ -465,6 +478,7 @@ def serve(
     port: str = "",
     volumes: list[str] | None = None,
     gpus: list[str] | None = None,
+    debug: bool = False,
 ) -> str:
     """Serve one or more Tesseract images.
 
@@ -475,6 +489,7 @@ def serve(
         port: port or port range to serve the tesseract on.
         volumes: list of paths to mount in the Tesseract container.
         gpus: IDs of host Nvidia GPUs to make available to the Tesseracts.
+        debug: whether to enable debug mode.
 
     Returns:
         A string representing the Tesseract Project ID.
@@ -490,7 +505,7 @@ def serve(
             raise ValueError(f"Image ID {image_} is not a valid Docker image")
         image_ids.append(image.id)
 
-    template = _create_docker_compose_template(image_ids, port, volumes, gpus)
+    template = _create_docker_compose_template(image_ids, port, volumes, gpus, debug)
     compose_fname = _create_compose_fname()
 
     with tempfile.NamedTemporaryFile(
@@ -511,6 +526,7 @@ def _create_docker_compose_template(
     port: str = "",
     volumes: list[str] | None = None,
     gpus: list[str] | None = None,
+    debug: bool = False,
 ) -> str:
     """Create Docker Compose template."""
     services = []
@@ -533,6 +549,9 @@ def _create_docker_compose_template(
             "port": port,
             "volumes": volumes,
             "gpus": gpu_settings,
+            "environment": {
+                "DEBUG": "1" if debug else "0",
+            },
         }
 
         services.append(service)
@@ -687,30 +706,14 @@ def run_tesseract(
     return stdout, stderr
 
 
-def exec_tesseract(
-    container_id: str,
-    command: str,
-    args: list[str],
-) -> tuple[str, str]:
-    """Execute a given command on an existing Tesseract container.
-
-    See `run_tesseract` for the equivalent command that operates on Tesseract images.
+def logs(container_id: str) -> str:
+    """Get logs from a container.
 
     Args:
-        container_id: id of the target Tesseract container.
-        command: Tesseract command to run, e.g. apply.
-        args: arguments for the command.
+        container_id: the ID of the container.
 
     Returns:
-        Tuple with the stdout and stderr of the Tesseract.
+        The logs of the container.
     """
-    try:
-        result = subprocess.run(
-            ["docker", "exec", container_id, "tesseract-runtime", command, *args],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        return result.stdout, result.stderr
-    except subprocess.CalledProcessError as e:
-        return e.stdout, e.stderr
+    container = docker_client.containers.get(container_id)
+    return container.logs().decode("utf-8")

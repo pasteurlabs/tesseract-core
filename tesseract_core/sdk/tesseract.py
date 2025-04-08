@@ -6,7 +6,8 @@ import base64
 import json
 import subprocess
 from collections.abc import Mapping, Sequence
-from functools import cached_property
+from dataclasses import dataclass
+from functools import cached_property, wraps
 from urllib.parse import urlparse, urlunparse
 
 import numpy as np
@@ -15,6 +16,37 @@ from pydantic import ValidationError
 from pydantic_core import InitErrorDetails
 
 from . import engine
+
+
+@dataclass
+class SpawnConfig:
+    """Configuration for spawning a Tesseract.
+
+    Attributes:
+        image: The image to use.
+        volumes: List of volumes to mount.
+        gpus: List of GPUs to use.
+        debug: Whether to run in debug mode.
+    """
+
+    image: str
+    volumes: list[str] | None
+    gpus: list[str] | None
+    debug: bool
+
+
+def requires_client(func):
+    """Decorator to require a client for a Tesseract instance."""
+
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        if not self._client:
+            raise RuntimeError(
+                f"{self.__class__.__name__} must be used as a context manager when created via `from_image`."
+            )
+        return func(self, *args, **kwargs)
+
+    return wrapper
 
 
 class Tesseract:
@@ -28,15 +60,11 @@ class Tesseract:
     instances spawned when instantiating the class).
     """
 
-    image: str
-    volumes: list[str] | None
-    gpus: list[str] | None
-
-    _client: HTTPClient
-    project_id: str | None = None
-    container_id: str | None = None
-
     def __init__(self, url: str) -> None:
+        self._spawn_config = None
+        self._project_id = None
+        self._container_id = None
+        self._lastlog = None
         self._client = HTTPClient(url)
 
     @classmethod
@@ -48,34 +76,59 @@ class Tesseract:
         gpus: list[str] | None = None,
     ):
         obj = cls.__new__(cls)
-
-        obj.image = image
-        obj.volumes = volumes
-        obj.gpus = gpus
-
+        obj._spawn_config = SpawnConfig(
+            image=image,
+            volumes=volumes,
+            gpus=gpus,
+            debug=True,
+        )
+        obj._project_id = None
+        obj._container_id = None
+        obj._lastlog = None
+        obj._client = None
         return obj
 
     def __enter__(self):
-        url = self._serve(volumes=self.volumes, gpus=self.gpus)
+        if self._client is not None:
+            raise RuntimeError("Cannot nest `with Tesseract ...` context managers. ")
+        project_id, container_id, port = self._serve(**self._spawn_config.__dict__)
+        url = f"http://localhost:{port}"
         self._client = HTTPClient(url)
+        self._project_id = project_id
+        self._container_id = container_id
+        self._lastlog = None
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        engine.teardown(self.project_id)
-        self.project_id = None
-        self.container_id = None
+        self._lastlog = self.server_logs()
+        engine.teardown(self._project_id)
+        self._client = None
+        self._project_id = None
+        self._container_id = None
 
+    def server_logs(self):
+        """Get the logs of the Tesseract server.
+
+        Returns:
+            logs of the Tesseract server.
+        """
+        if self._spawn_config is None:
+            raise RuntimeError("Cannot retrieve logs for a remote Tesseract.")
+        if self._container_id is None:
+            return self._lastlog
+        return engine.logs(self._container_id)
+
+    @staticmethod
     def _serve(
-        self,
+        image: str,
         port: str = "",
         volumes: list[str] | None = None,
         gpus: list[str] | None = None,
-    ) -> str:
-        if self.container_id:
-            raise RuntimeError(
-                "Client already attached to the Tesseract container {self.container_id}"
-            )
-        project_id = engine.serve([self.image], port=port, volumes=volumes, gpus=gpus)
+        debug: bool = False,
+    ) -> tuple[str, str, int]:
+        project_id = engine.serve(
+            [image], port=port, volumes=volumes, gpus=gpus, debug=debug
+        )
 
         command = ["docker", "compose", "-p", project_id, "ps", "--format", "json"]
         result = subprocess.run(command, capture_output=True, text=True)
@@ -92,11 +145,10 @@ class Tesseract:
         else:
             raise RuntimeError("No containers found.")
 
-        self.project_id = project_id
-        self.container_id = first_container_id
-        return f"http://localhost:{first_container_port}"
+        return project_id, first_container_id, first_container_port
 
     @cached_property
+    @requires_client
     def openapi_schema(self) -> dict:
         """Get the OpenAPI schema of this Tessseract.
 
@@ -106,6 +158,7 @@ class Tesseract:
         return self._client._run_tesseract("openapi_schema")
 
     @cached_property
+    @requires_client
     def input_schema(self) -> dict:
         """Get the input schema of this Tessseract.
 
@@ -115,6 +168,7 @@ class Tesseract:
         return self._client._run_tesseract("input_schema")
 
     @cached_property
+    @requires_client
     def output_schema(self) -> dict:
         """Get the output schema of this Tessseract.
 
@@ -124,6 +178,7 @@ class Tesseract:
         return self._client._run_tesseract("output_schema")
 
     @property
+    @requires_client
     def available_endpoints(self) -> list[str]:
         """Get the list of available endpoints.
 
@@ -135,6 +190,7 @@ class Tesseract:
     def _run_tesseract(self, endpoint: str, payload: dict | None = None) -> dict:
         return self._client._run_tesseract(endpoint, payload)
 
+    @requires_client
     def apply(self, inputs: dict) -> dict:
         """Run apply endpoint.
 
@@ -147,18 +203,29 @@ class Tesseract:
         payload = {"inputs": inputs}
         return self._run_tesseract("apply", payload)
 
-    def abstract_eval(self, inputs: dict) -> dict:
+    @requires_client
+    def abstract_eval(self, abstract_inputs: dict) -> dict:
         """Run abstract eval endpoint.
 
         Args:
-            inputs: a dictionary with the (abstract) inputs.
+            abstract_inputs: a dictionary with the (abstract) inputs.
 
         Returns:
             dictionary with the results.
         """
-        payload = {"inputs": inputs}
+        payload = {"inputs": abstract_inputs}
         return self._run_tesseract("abstract_eval", payload)
 
+    @requires_client
+    def health(self) -> dict:
+        """Check the health of the Tesseract.
+
+        Returns:
+            dictionary with the health status.
+        """
+        return self._run_tesseract("health")
+
+    @requires_client
     def jacobian(
         self, inputs: dict, jac_inputs: list[str], jac_outputs: list[str]
     ) -> dict:
@@ -182,6 +249,7 @@ class Tesseract:
         }
         return self._run_tesseract("jacobian", payload)
 
+    @requires_client
     def jacobian_vector_product(
         self,
         inputs: dict,
@@ -213,6 +281,7 @@ class Tesseract:
         }
         return self._run_tesseract("jacobian_vector_product", payload)
 
+    @requires_client
     def vector_jacobian_product(
         self,
         inputs: dict,
@@ -327,23 +396,33 @@ class HTTPClient:
             encoded_payload = None
 
         response = requests.request(method=method, url=url, json=encoded_payload)
-        data = response.json()
 
-        if (
-            response.status_code == requests.codes.unprocessable_entity
-            and "detail" in data
-        ):
-            errors = [
-                InitErrorDetails(
-                    type=e["type"],
-                    loc=tuple(e["loc"]),
-                    input=e.get("input"),
+        if response.status_code == requests.codes.unprocessable_entity:
+            # Try and raise a more helpful error if the response is a Pydantic error
+            try:
+                data = response.json()
+            except requests.JSONDecodeError:
+                # Is not a Pydantic error
+                data = {}
+            if "detail" in data:
+                errors = [
+                    InitErrorDetails(
+                        type=e["type"],
+                        loc=tuple(e["loc"]),
+                        input=e.get("input"),
+                    )
+                    for e in data["detail"]
+                ]
+                raise ValidationError.from_exception_data(
+                    f"endpoint {endpoint}", errors
                 )
-                for e in data["detail"]
-            ]
-            raise ValidationError.from_exception_data(f"endpoint {endpoint}", errors)
-        else:
-            response.raise_for_status()
+
+        if not response.ok:
+            raise RuntimeError(
+                f"Error {response.status_code} from Tesseract: {response.text}"
+            )
+
+        data = response.json()
 
         if endpoint in [
             "apply",
@@ -353,7 +432,7 @@ class HTTPClient:
         ]:
             data = _tree_map(
                 _decode_array,
-                response.json(),
+                data,
                 is_leaf=lambda x: type(x) is dict and "shape" in x,
             )
 

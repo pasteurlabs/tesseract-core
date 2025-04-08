@@ -5,10 +5,18 @@ FROM {{ config.build_config.base_image }} AS build_stage
 FROM --platform={{ config.build_config.target_platform }} {{ config.build_config.base_image }} AS build_stage
 {% endif %}
 
+# Install Python if necessary
+RUN if [ ! -x "$(command -v python3)" ]; then \
+    apt-get update && apt-get install -y --no-install-recommends \
+        python3-dev \
+        python3-pip \
+        python3-venv \
+    && rm -rf /var/lib/apt/lists/*; \
+fi
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    git \
-    ssh \
+        git \
+        ssh \
     && rm -rf /var/lib/apt/lists/*
 
 {% if config.build_config.extra_packages %}
@@ -18,10 +26,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 {% endif %}
 
-# Create virtual environment
-RUN python3 -m venv /python-env
-ENV PATH="/python-env/bin:$PATH"
-
 {% if use_ssh_mount %}
 # Set up SSH config
 RUN mkdir -p -m 0700 ~/.ssh && ssh-keyscan github.com >> ~/.ssh/known_hosts
@@ -30,14 +34,14 @@ RUN mkdir -p -m 0700 ~/.ssh && ssh-keyscan github.com >> ~/.ssh/known_hosts
 # Copy all dependencies, for both the specific Tesseract and the runtime
 WORKDIR /tmp/build
 COPY {{ tesseract_runtime_location }} ./tesseract_runtime/
-COPY {{ tesseract_source_directory }}/tesseract_requirements.txt* ./
-COPY local_requirements* ./local_requirements
+COPY {{ tesseract_source_directory }}/{{ config.build_config.requirements._filename }} ./
+COPY {{ tesseract_source_directory }}/{{ config.build_config.requirements._build_script }} ./
+COPY local_requirements/ ./local_requirements
 
-# Install all dependencies
-RUN {% if use_ssh_mount %}--mount=type=ssh{% endif %} \
-    TESSERACT_DEPS=$(find ./local_requirements/ -mindepth 1 -maxdepth 1 2>/dev/null || echo "") && \
-    if [ -f tesseract_requirements.txt ]; then TESSERACT_DEPS="$TESSERACT_DEPS -r tesseract_requirements.txt"; fi && \
-    pip install ./tesseract_runtime $TESSERACT_DEPS
+# Build a python venv from python provider build scripts.
+# The build script has to create a venv at /python-env
+RUN {% if use_ssh_mount %}--mount=type=ssh{% endif %} bash {{ config.build_config.requirements._build_script }}
+ENV PATH="/python-env/bin:$PATH"
 
 # Stage 2: Set up runtime environment
 {% if config.build_config.target_platform.strip() == "native" %}
@@ -45,6 +49,12 @@ FROM {{ config.build_config.base_image }} AS run_stage
 {% else %}
 FROM --platform={{ config.build_config.target_platform }} {{ config.build_config.base_image }} AS run_stage
 {% endif %}
+
+RUN if [ ! -x "$(command -v python3)" ]; then \
+    apt-get update && apt-get install -y --no-install-recommends \
+        python3 \
+        && rm -rf /var/lib/apt/lists/*; \
+    fi
 
 {% if config.build_config.extra_packages %}
 # Install extra packages again since they may include runtime dependencies
@@ -54,8 +64,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 {% endif %}
 
 # Drop to a non-root user
-RUN groupadd -g 1000 tesseractor && \
-    useradd -u 1000 -g 1000 --create-home -s /bin/bash tesseractor
+RUN groupadd -o -g 1000 tesseractor && \
+    useradd -o -u 1000 -g 1000 --create-home -s /bin/bash tesseractor
 WORKDIR /tesseract
 RUN chown tesseractor:tesseractor /tesseract
 USER tesseractor
@@ -68,7 +78,7 @@ ENV TESSERACT_NAME="{{ config.name }}" \
 
 # Copy only necessary files
 COPY --from=build_stage /python-env /python-env
-COPY "{{ tesseract_source_directory }}/tesseract_api.py" ${TESSERACT_API_PATH}
+COPY --chown=1000:1000 "{{ tesseract_source_directory }}/tesseract_api.py" ${TESSERACT_API_PATH}
 
 ENV PATH="/python-env/bin:$PATH"
 

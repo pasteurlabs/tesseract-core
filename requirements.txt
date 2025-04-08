@@ -26,9 +26,9 @@ numpy==2.2.4
     # via tesseract-core
 pip==25.0.1
     # via tesseract-core
-pydantic==2.10.6
+pydantic==2.11.0
     # via tesseract-core
-pydantic-core==2.27.2
+pydantic-core==2.33.0
     # via pydantic
 pygments==2.19.1
     # via rich
@@ -40,7 +40,7 @@ requests==2.32.3
     # via
     #   docker
     #   tesseract-core
-rich==13.9.4
+rich==14.0.0
     # via
     #   tesseract-core
     #   typer
@@ -48,12 +48,15 @@ shellingham==1.5.4
     # via typer
 typer==0.15.2
     # via tesseract-core
-typing-extensions==4.13.0
+typing-extensions==4.13.1
     # via
     #   pydantic
     #   pydantic-core
     #   rich
     #   typer
+    #   typing-inspection
+typing-inspection==0.4.0
+    # via pydantic
 urllib3==2.3.0
     # via
     #   docker

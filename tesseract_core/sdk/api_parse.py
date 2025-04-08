@@ -3,7 +3,7 @@
 
 import ast
 from pathlib import Path
-from typing import Annotated, NamedTuple
+from typing import Annotated, Literal, NamedTuple, Union
 
 import yaml
 from pydantic import (
@@ -73,11 +73,28 @@ RelativePath = Annotated[str, AfterValidator(assert_relative_path)]
 StrictStr = Annotated[str, Strict()]
 
 
+class PipRequirements(BaseModel):
+    provider: Literal["python-pip"]
+    _filename: Literal["tesseract_requirements.txt"] = "tesseract_requirements.txt"
+    _build_script: Literal["build_pip_venv.sh"] = "build_pip_venv.sh"
+    model_config: ConfigDict = ConfigDict(extra="forbid")
+
+
+class CondaRequirements(BaseModel):
+    provider: Literal["conda"]
+    _filename: Literal["tesseract_environment.yaml"] = "tesseract_environment.yaml"
+    _build_script: Literal["build_conda_venv.sh"] = "build_conda_venv.sh"
+    model_config: ConfigDict = ConfigDict(extra="forbid")
+
+
+PythonRequirements = Union[PipRequirements, CondaRequirements]
+
+
 class TesseractBuildConfig(BaseModel):
     """Configuration options for building a Tesseract."""
 
     base_image: StrictStr = Field(
-        "python:3.12-slim-bookworm",
+        "debian:bookworm-slim",
         description="Base Docker image for the build. Must be Debian-based.",
     )
     target_platform: StrictStr = Field(
@@ -105,6 +122,8 @@ class TesseractBuildConfig(BaseModel):
             "Example: ``[\"RUN echo 'Hello, world!'\"]``"
         ),
     )
+
+    requirements: PythonRequirements = PipRequirements(provider="python-pip")
 
     model_config = ConfigDict(extra="forbid")
 

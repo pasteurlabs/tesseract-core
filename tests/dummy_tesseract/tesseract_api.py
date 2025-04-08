@@ -27,14 +27,6 @@ class OutputSchema(BaseModel):
     )
 
 
-def abstract_eval(abstract_inputs):
-    """Calculate output shape of apply from the shape of its inputs."""
-    result_shape = abstract_inputs.a
-    assert result_shape is not None
-
-    return {"result": result_shape}
-
-
 def apply(inputs: InputSchema) -> OutputSchema:
     """Multiplies a vector `a` by `s`, and sums the result to `b`."""
     a = inputs.a
@@ -52,46 +44,56 @@ def apply(inputs: InputSchema) -> OutputSchema:
     return OutputSchema(result=result)
 
 
+# Optional endpoints, do not remove (are used to generate complete API for docs)
+
+
+def abstract_eval(abstract_inputs):
+    """Calculate output shape of apply from the shape of its inputs."""
+    result_shape = abstract_inputs.a
+    assert result_shape is not None
+
+    return {"result": result_shape}
+
+
 def jacobian(
     inputs: InputSchema,
     jac_inputs: set[str],
     jac_outputs: set[str],
 ):
-    a = inputs.a
-    b = inputs.b
-    s = inputs.s
-
-    assert a.ndim == 1
-    assert a.shape == b.shape
-
+    assert jac_outputs == {"result"}
     n = len(inputs.a)
 
     partials = {}
-    partials["a"] = np.eye(n) * s
+    partials["a"] = np.eye(n) * inputs.s
     partials["b"] = np.eye(n)
-    partials["s"] = a.reshape(1, 3)
+    partials["s"] = inputs.a
 
     if inputs.normalize:
-        result = a * s + b
+        result = inputs.a * inputs.s + inputs.b
         norm = np.linalg.norm(result, ord=2)
-        partials["a"] = partials["a"] / norm - np.outer(result, (a + s * b)) / norm**3
-        partials["b"] = partials["b"] / norm - np.outer(result, (s * a + b)) / norm**3
-        partials["s"] = partials["s"] - (a + s * b) / norm**3 * (s * a * a + 2 * a * b)
+        partials["a"] = (
+            partials["a"] / norm
+            - np.outer(result, (inputs.a + inputs.s * inputs.b)) / norm**3
+        )
+        partials["b"] = (
+            partials["b"] / norm
+            - np.outer(result, (inputs.s * inputs.a + inputs.b)) / norm**3
+        )
+        partials["s"] = partials["s"] - (inputs.a + inputs.s * inputs.b) / norm**3 * (
+            inputs.s * inputs.a * inputs.a + 2 * inputs.a * inputs.b
+        )
 
     jacobian = {"result": {v: partials[v] for v in jac_inputs}}
     return jacobian
 
 
-# Optional endpoints, do not remove (are used to generate complete API for docs)
-
-
 def jacobian_vector_product(
     inputs: InputSchema, jvp_inputs: set[str], jvp_outputs: set[str], tangent_vector
 ):
-    return {}
+    return {"result": np.zeros_like(inputs.a)}
 
 
 def vector_jacobian_product(
     inputs: InputSchema, vjp_inputs: set[str], vjp_outputs: set[str], cotangent_vector
 ):
-    return {}
+    return {inp: np.zeros_like(inputs.a) for inp in vjp_inputs}

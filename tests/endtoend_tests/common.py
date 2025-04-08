@@ -24,7 +24,9 @@ def print_debug_info(result):
         traceback.print_exception(*result.exc_info)
 
 
-def build_tesseract(sourcedir, image_name, tag=None, build_retries=3):
+def build_tesseract(
+    sourcedir, image_name, config_override=None, tag=None, build_retries=3
+):
     cli_runner = CliRunner(mix_stderr=False)
 
     build_args = [
@@ -35,6 +37,10 @@ def build_tesseract(sourcedir, image_name, tag=None, build_retries=3):
         "--config-override",
         f"name={image_name}",
     ]
+
+    if config_override is not None:
+        for key, val in config_override.items():
+            build_args.extend(["--config-override", f"{key}={val}"])
 
     if tag is not None:
         build_args.extend(["--tag", tag])
