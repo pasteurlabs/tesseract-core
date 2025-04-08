@@ -485,6 +485,9 @@ TEST_CASES = {
     "package_data": Config(
         test_with_random_inputs=True,
     ),
+    "cuda": Config(
+        test_with_random_inputs=True,
+    ),
     "meshstats": Config(
         test_with_random_inputs=False,
         sample_requests=[

@@ -23,10 +23,18 @@ def built_image_name(docker_client, shared_dummy_image_name, dummy_tesseract_loc
     yield image_name
 
 
-@pytest.mark.parametrize("tag", [True, False])
-@pytest.mark.parametrize("recipe", [None, *AVAILABLE_RECIPES])
+tested_images = ("ubuntu:24.04",)
+
+build_matrix = [
+    *[(tag, None, None) for tag in (True, False)],
+    *[(False, r, None) for r in AVAILABLE_RECIPES],
+    *[(False, None, img) for img in tested_images],
+]
+
+
+@pytest.mark.parametrize("tag,recipe,base_image", build_matrix)
 def test_build_from_init_endtoend(
-    docker_client, dummy_image_name, tmp_path, tag, recipe
+    docker_client, dummy_image_name, tmp_path, tag, recipe, base_image
 ):
     """Test that a trivial (empty) Tesseract image can be built from init."""
     cli_runner = CliRunner(mix_stderr=False)
@@ -42,7 +50,14 @@ def test_build_from_init_endtoend(
         assert yaml.safe_load(config_yaml)["name"] == dummy_image_name
 
     img_tag = "foo" if tag else None
-    image_name = build_tesseract(tmp_path, dummy_image_name, tag=img_tag)
+
+    config_override = {}
+    if base_image is not None:
+        config_override["build_config.base_image"] = base_image
+
+    image_name = build_tesseract(
+        tmp_path, dummy_image_name, config_override=config_override, tag=img_tag
+    )
     assert image_exists(docker_client, image_name)
 
     # Test that the image can be run and that --help is forwarded correctly
@@ -367,23 +382,24 @@ def test_tesseract_serve_with_volumes(built_image_name, tmp_path, docker_client)
     tmp_path.chmod(0o0707)
 
     dest = Path("/foo/")
-    try:
-        run_res = cli_runner.invoke(
-            app,
-            [
-                "serve",
-                "--volume",
-                f"{tmp_path}:{dest}",
-                built_image_name,
-                built_image_name,
-            ],
-            catch_exceptions=False,
-        )
-        assert run_res.exit_code == 0, run_res.stderr
-        assert run_res.stdout
+    run_res = cli_runner.invoke(
+        app,
+        [
+            "serve",
+            "--volume",
+            f"{tmp_path}:{dest}",
+            built_image_name,
+            built_image_name,
+        ],
+        catch_exceptions=False,
+    )
+    assert run_res.exit_code == 0, run_res.stderr
+    assert run_res.stdout
 
-        project_meta = json.loads(run_res.stdout)
-        project_id = project_meta["project_id"]
+    project_meta = json.loads(run_res.stdout)
+    project_id = project_meta["project_id"]
+
+    try:
         tesseract0_id = project_meta["containers"][0]["name"]
         tesseract0 = docker_client.containers.get(tesseract0_id)
         tesseract1_id = project_meta["containers"][1]["name"]
