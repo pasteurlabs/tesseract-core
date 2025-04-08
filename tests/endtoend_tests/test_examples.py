@@ -584,7 +584,7 @@ TEST_CASES = {
                         }
                     },
                 },
-                output_contains_pattern='"shape":[5,3],"dtype":"float32"',
+                output_contains_pattern='"shape":[3],"dtype":"float32"',
             ),
             SampleRequest(
                 endpoint="jacobian",
