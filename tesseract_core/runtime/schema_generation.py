@@ -11,6 +11,7 @@ from typing import (
     Any,
     ClassVar,
     Literal,
+    Optional,
     TypeVar,
     Union,
     get_args,
@@ -65,7 +66,7 @@ def apply_function_to_model_tree(
     Schema: type[BaseModel],
     func: Callable[[type, tuple], type],
     model_prefix: str = "",
-    model_kwargs: Any = None,
+    default_model_config: Optional[dict[str, Any]] = None,
 ) -> type[BaseModel]:
     """Apply a function to all leaves of a Pydantic model, recursing into containers + nested models.
 
@@ -87,8 +88,8 @@ def apply_function_to_model_tree(
     # Annotation types that should be treated as leaves and not recursed into
     annotated_types_as_leaves = (PydanticArrayAnnotation,)
 
-    if model_kwargs is None:
-        model_kwargs = {}
+    if default_model_config is None:
+        default_model_config = {}
 
     seen_models = set()
 
@@ -134,10 +135,15 @@ def apply_function_to_model_tree(
             # We only forbid encountering the same model twice if it is within the same subtree
             seen_models.remove(id(treeobj))
 
+            # Only override model_config if it is not already present
+            # in the pydantic model definition
+            model_config = ConfigDict(**default_model_config)
+            model_config.update(treeobj.model_config)
+
             return create_model(
                 f"{model_prefix}{treeobj.__name__}",
                 **new_fields,
-                **model_kwargs,
+                model_config=(ConfigDict, model_config),
                 __base__=treeobj,
             )
 
@@ -271,13 +277,13 @@ def create_apply_schema(
         InputSchema,
         lambda x, _: x,
         model_prefix="Apply_",
-        model_kwargs={"model_config": (ConfigDict, ConfigDict(extra="forbid"))},
+        default_model_config=dict(extra="forbid"),
     )
     OutputSchema = apply_function_to_model_tree(
         OutputSchema,
         lambda x, _: x,
         model_prefix="Apply_",
-        model_kwargs={"model_config": (ConfigDict, ConfigDict(extra="forbid"))},
+        default_model_config=dict(extra="forbid"),
     )
 
     class ApplyInputSchema(BaseModel):
@@ -325,14 +331,14 @@ def create_abstract_eval_schema(
         InputSchema,
         replace_array_with_shapedtype,
         model_prefix="AbstractEval_",
-        model_kwargs={"model_config": (ConfigDict, ConfigDict(extra="forbid"))},
+        default_model_config=dict(extra="forbid"),
     )
 
     GeneratedOutputSchema = apply_function_to_model_tree(
         OutputSchema,
         replace_array_with_shapedtype,
         model_prefix="AbstractEval_",
-        model_kwargs={"model_config": (ConfigDict, ConfigDict(extra="forbid"))},
+        default_model_config=dict(extra="forbid"),
     )
 
     class AbstractInputSchema(BaseModel):
@@ -463,7 +469,7 @@ def create_autodiff_schema(
         InputSchema,
         lambda x, _: x,
         model_prefix=f"{ad_flavor.title()}_",
-        model_kwargs={"model_config": (ConfigDict, ConfigDict(extra="forbid"))},
+        default_model_config=dict(extra="forbid"),
     )
 
     def result_validator(
