@@ -702,8 +702,14 @@ def test_model_config_extra_forbid():
     ApplyParent = apply_function_to_model_tree(
         Parent,
         lambda x, y: x,
-        model_kwargs={"model_config": (ConfigDict, ConfigDict(extra="forbid"))},
+        default_model_config=dict(extra="forbid"),
     )
     ApplyChild = ApplyParent.model_fields["child"].annotation
     assert ApplyChild.model_config["extra"] == "allow"
     assert ApplyParent.model_config["extra"] == "forbid"
+
+    ApplyParent.model_validate({"child": {"x": "foo"}})
+    ApplyParent.model_validate({"child": {"x": "foo", "extra": 1}})
+
+    with pytest.raises(ValidationError):
+        ApplyParent.model_validate({"child": {"x": "foo"}, "extra": 1})
