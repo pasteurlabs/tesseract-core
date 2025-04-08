@@ -543,6 +543,49 @@ TEST_CASES = {
                 ),
             ),
             SampleRequest(
+                endpoint="abstract_eval",
+                payload={
+                    "inputs": {
+                        "mesh": {
+                            "n_points": 5,
+                            "n_cells": 8,
+                            "points": {
+                                "shape": [5, 3],
+                                "dtype": "float32",
+                            },
+                            "num_points_per_cell": {
+                                "shape": [2],
+                                "dtype": "int32",
+                            },
+                            "cell_connectivity": {
+                                "shape": [8],
+                                "dtype": "int32",
+                            },
+                            "cell_data": {
+                                "temperature": {
+                                    "shape": [2, 2],
+                                    "dtype": "float32",
+                                },
+                                "pressure": {
+                                    "shape": [2, 2],
+                                    "dtype": "float32",
+                                },
+                            },
+                            "point_data": {
+                                "displacement": {
+                                    "shape": [5, 3],
+                                    "dtype": "float32",
+                                },
+                                "velocity": {
+                                    "shape": [5, 3],
+                                    "dtype": "float32",
+                                },
+                            },
+                        }
+                    },
+                },
+            ),
+            SampleRequest(
                 endpoint="jacobian",
                 payload={
                     "jac_inputs": ["mesh.points"],
