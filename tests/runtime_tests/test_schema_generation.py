@@ -8,11 +8,12 @@ from typing import Annotated, Optional
 
 import numpy as np
 import pytest
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from tesseract_core.runtime import Array, Differentiable, Float32, Float64, Int64, UInt8
 from tesseract_core.runtime.experimental import LazySequence
 from tesseract_core.runtime.schema_generation import (
+    apply_function_to_model_tree,
     create_abstract_eval_schema,
     create_apply_schema,
     create_autodiff_schema,
@@ -688,3 +689,27 @@ def test_json_schema(endpoint):
     # Test that the JSON schema is valid JSON
     json.dumps(schema_inputs)
     json.dumps(schema_outputs)
+
+
+def test_model_config_extra_forbid():
+    class Child(BaseModel):
+        x: str
+        model_config: ConfigDict = ConfigDict(extra="allow")
+
+    class Parent(BaseModel):
+        child: Child
+
+    ApplyParent = apply_function_to_model_tree(
+        Parent,
+        lambda x, y: x,
+        default_model_config=dict(extra="forbid"),
+    )
+    ApplyChild = ApplyParent.model_fields["child"].annotation
+    assert ApplyChild.model_config["extra"] == "allow"
+    assert ApplyParent.model_config["extra"] == "forbid"
+
+    ApplyParent.model_validate({"child": {"x": "foo"}})
+    ApplyParent.model_validate({"child": {"x": "foo", "extra": 1}})
+
+    with pytest.raises(ValidationError):
+        ApplyParent.model_validate({"child": {"x": "foo"}, "extra": 1})
