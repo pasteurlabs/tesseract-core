@@ -317,21 +317,24 @@ class CLIDockerClient:
             self._update_containers()
             return self.containers
 
-        def get(self, container: str) -> Container:
+        def get(self, id_or_name: str) -> Container:
             """Returns the metadata for a specific container."""
             # Use the get_all_containers() function to make sure it's updated
-            # First check if we can find the container by id
-            container_obj = self.list().get(container, None)
-            if not container_obj:
-                # Check for container names if id does not work
-                for _, container_obj in self.list().items():
-                    if container_obj.name == container:
-                        return container_obj
+            container_list = self.list()
 
-            if container_obj is None:
-                raise CLIDockerClient.Errors.ContainerError(
-                    f"Container {container} not found."
+            for container_obj in container_list.values():
+                got_container = (
+                    container_obj.id == id_or_name
+                    or container_obj.short_id == id_or_name
+                    or container_obj.name == id_or_name
                 )
+                if got_container:
+                    break
+            else:
+                raise CLIDockerClient.Errors.ContainerError(
+                    f"Container {id_or_name} not found."
+                )
+
             return container_obj
 
         def run(
@@ -424,7 +427,7 @@ class CLIDockerClient:
                 # Reset self.containers completely
                 self.containers = {}
                 result = subprocess.run(
-                    ["docker", "ps", "-q"],  # List only container IDs
+                    ["docker", "ps", "-q", "--all"],  # List only container IDs
                     capture_output=True,
                     text=True,
                     check=True,

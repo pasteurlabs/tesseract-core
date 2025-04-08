@@ -62,11 +62,12 @@ def test_create_container(docker_client, dummy_tesseract_location, dummy_docker_
         assert image is not None
         assert image.name == image_name
 
-        container = docker_client.containers.run(image_name, [], detach=True)
+        container = docker_client.containers.run(
+            image_name, ['echo "Hello, Tesseract!"'], detach=True
+        )
         assert container is not None
-        container_id = container.id
 
-        container_get = docker_client.containers.get(container_id)
+        container_get = docker_client.containers.get(container.id)
         assert container_get is not None
         assert container_get.id == container.id
 

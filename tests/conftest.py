@@ -89,10 +89,11 @@ def dummy_docker_file(tmpdir):
     dockerfile_path = tmpdir / "Dockerfile"
     dockerfile_content = """
         FROM alpine
-        CMD echo "Hello, Tesseract!" && sleep infinity
+
+        ENTRYPOINT ["/bin/sh", "-c"]
 
         # Set environment variables
-        ENV TESSERACT_NAME="dummy-tesseract" \
+        ENV TESSERACT_NAME="dummy-tesseract"
         """
     with open(dockerfile_path, "w") as f:
         f.write(dockerfile_content)
