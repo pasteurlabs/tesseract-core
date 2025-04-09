@@ -171,7 +171,7 @@ class CLIDockerClient:
             return self.get(tag)
 
         @staticmethod
-        def _get_images() -> None:
+        def _get_images() -> list[Image]:
             """Gets the list of images by querying Docker CLI."""
             images = []
             try:
@@ -187,8 +187,7 @@ class CLIDockerClient:
                 ) from ex
 
             if not image_ids.stdout:
-                images = []
-                return
+                return []
 
             image_ids = image_ids.stdout.strip().split("\n")
             # Filter list to exclude empty strings.
@@ -420,7 +419,7 @@ class CLIDockerClient:
                 raise ex
 
         @staticmethod
-        def _get_containers(include_stopped: bool = False) -> None:
+        def _get_containers(include_stopped: bool = False) -> dict[str, Container]:
             containers = {}
 
             cmd = ["docker", "ps", "-q"]
@@ -440,8 +439,7 @@ class CLIDockerClient:
                 ) from ex
 
             if not result.stdout:
-                container_ids = []
-                return
+                return {}
 
             container_ids = result.stdout.strip().split("\n")
 
@@ -451,7 +449,7 @@ class CLIDockerClient:
             ]
             json_dicts = get_docker_metadata(container_ids)
             for container_id, json_dict in json_dicts.items():
-                container = CLIDockerClient.Container(json_dict)
+                container = CLIDockerClient.Containers.Container(json_dict)
                 containers[container_id] = container
 
             return containers
