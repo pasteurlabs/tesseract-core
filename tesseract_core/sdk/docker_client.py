@@ -67,8 +67,7 @@ class CLIDockerClient:
 
         def list(self) -> list[Image]:
             """Returns the current list of images."""
-            self._update_images()
-            return self.images
+            return self._get_images()
 
         def remove(self, image_id: str) -> None:
             """Remove an image from the local Docker registry."""
@@ -171,39 +170,38 @@ class CLIDockerClient:
 
             return self.get(tag)
 
-        def _update_images(self) -> None:
-            """Updates the list of images by querying Docker CLI."""
+        @staticmethod
+        def _get_images() -> None:
+            """Gets the list of images by querying Docker CLI."""
+            images = []
             try:
-                # Reset self.images completely
-                self.images = []
                 image_ids = subprocess.run(
                     ["docker", "images", "-q"],  # List only image IDs
                     capture_output=True,
                     text=True,
                     check=True,
                 )
-                if not image_ids.stdout:
-                    images = []
-                    return
-
-                images = image_ids.stdout.strip().split("\n")
-                # Filter list to exclude empty strings.
-                images = [image_id for image_id in images if image_id]
-                json_dicts = get_docker_metadata(images, is_image=True)
-                for _, json_dict in json_dicts.items():
-                    image = self.Image(json_dict)
-                    self.images.append(image)
-
             except subprocess.CalledProcessError as ex:
                 raise CLIDockerClient.Errors.APIError(
                     f"Cannot list Docker images: {ex}"
                 ) from ex
 
+            if not image_ids.stdout:
+                images = []
+                return
+
+            image_ids = image_ids.stdout.strip().split("\n")
+            # Filter list to exclude empty strings.
+            image_ids = [image_id for image_id in image_ids if image_id]
+            json_dicts = get_docker_metadata(image_ids, is_image=True)
+            for _, json_dict in json_dicts.items():
+                image = CLIDockerClient.Images.Image(json_dict)
+                images.append(image)
+
+            return images
+
     class Containers:
         """Class to interface with docker containers."""
-
-        def __init__(self) -> None:
-            self.containers = {}
 
         class Container:
             """Container class to wrap Docker container details."""
@@ -315,15 +313,13 @@ class CLIDockerClient:
                 )
                 return string
 
-        def list(self) -> dict:
+        def list(self, all: bool = False) -> dict:
             """Returns the current list of containers."""
-            self._update_containers()
-            return self.containers
+            return self._get_containers(include_stopped=all)
 
         def get(self, id_or_name: str) -> Container:
             """Returns the metadata for a specific container."""
-            # Use the get_all_containers() function to make sure it's updated
-            container_list = self.list()
+            container_list = self.list(all=True)
 
             for container_obj in container_list.values():
                 got_container = (
@@ -404,7 +400,6 @@ class CLIDockerClient:
 
                 if detach:
                     container_id = result.stdout.strip()
-                    self._update_containers()
                     container_obj = self.get(container_id)
                     return container_obj
 
@@ -424,36 +419,42 @@ class CLIDockerClient:
                     ) from ex
                 raise ex
 
-        def _update_containers(self) -> None:
-            """Update self.containers."""
+        @staticmethod
+        def _get_containers(include_stopped: bool = False) -> None:
+            containers = {}
+
+            cmd = ["docker", "ps", "-q"]
+            if include_stopped:
+                cmd.append("--all")
+
             try:
-                # Reset self.containers completely
-                self.containers = {}
                 result = subprocess.run(
-                    ["docker", "ps", "-q", "--all"],  # List only container IDs
+                    cmd,
                     capture_output=True,
                     text=True,
                     check=True,
                 )
-                if not result.stdout:
-                    container_ids = []
-                    return
-
-                container_ids = result.stdout.strip().split("\n")
-
-                # Filter list to  exclude empty strings.
-                container_ids = [
-                    container_id for container_id in container_ids if container_id
-                ]
-                json_dicts = get_docker_metadata(container_ids)
-                for container_id, json_dict in json_dicts.items():
-                    container = self.Container(json_dict)
-                    self.containers[container_id] = container
-
             except subprocess.CalledProcessError as ex:
                 raise CLIDockerClient.Errors.APIError(
                     f"Cannot list Docker containers: {ex}"
                 ) from ex
+
+            if not result.stdout:
+                container_ids = []
+                return
+
+            container_ids = result.stdout.strip().split("\n")
+
+            # Filter list to  exclude empty strings.
+            container_ids = [
+                container_id for container_id in container_ids if container_id
+            ]
+            json_dicts = get_docker_metadata(container_ids)
+            for container_id, json_dict in json_dicts.items():
+                container = CLIDockerClient.Container(json_dict)
+                containers[container_id] = container
+
+            return containers
 
     class Compose:
         """Class to interface with docker projects."""
