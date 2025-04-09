@@ -244,12 +244,12 @@ def mocked_docker(monkeypatch):
             """Mock attrs method for Container."""
             return {"Config": {"Env": ["TESSERACT_NAME=vectoradd"]}}
 
-        def logs(self, stderr=False, stdout=False, **kwargs: Any):
+        def logs(self, stderr=False, stdout=False, **kwargs: Any) -> bytes:
             """Mock logs method for Container."""
             res_stdout = json.dumps(self.return_args).encode("utf-8")
-            res_stderr = "hello tesseract"
+            res_stderr = b"hello tesseract"
             if stdout and stderr:
-                return res_stdout, res_stderr
+                return res_stdout + res_stderr
             if stdout:
                 return res_stdout
             return res_stderr

@@ -693,7 +693,8 @@ def run_tesseract(
             device_requests=gpus,
         )
         result = container.wait()
-        stdout, stderr = container.logs(stdout=True, stderr=True)
+        stdout = container.logs(stdout=True, stderr=False).decode("utf-8")
+        stderr = container.logs(stdout=False, stderr=True).decode("utf-8")
         exit_code = result["StatusCode"]
         if exit_code != 0:
             raise CLIDockerClient.Errors.ContainerError(

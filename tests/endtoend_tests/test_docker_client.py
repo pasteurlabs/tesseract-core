@@ -74,8 +74,10 @@ def test_create_container(docker_client, dummy_tesseract_location, dummy_docker_
         assert container_get is not None
         assert container_get.id == container.id
 
-        logs = container.logs()
-        assert logs == ("Hello, Tesseract!\n", "")
+        stdout = container.logs(stdout=True, stderr=False)
+        stderr = container.logs(stdout=False, stderr=True)
+        assert stdout == b"Hello, Tesseract!\n"
+        assert stderr == b""
 
     finally:
         try:
