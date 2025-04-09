@@ -244,26 +244,24 @@ class CLIDockerClient:
                         f"Cannot run command in container {self.id}: {ex}"
                     ) from ex
 
-            def logs(self, stdout: bool = True, stderr: bool = True) -> str | tuple:
+            def logs(self, stdout: bool = True, stderr: bool = True) -> bytes:
                 """Get the logs for this container."""
+                if not stdout and not stderr:
+                    raise ValueError("At least one of stdout or stderr must be True.")
+
                 try:
                     result = subprocess.run(
                         ["docker", "logs", self.id],
                         check=True,
-                        capture_output=True,
-                        text=True,
+                        stdout=subprocess.PIPE if stdout else subprocess.DEVNULL,
+                        stderr=subprocess.STDOUT if stderr else subprocess.DEVNULL,
                     )
-
-                    if stdout and stderr:
-                        return result.stdout, result.stderr
-                    if stdout:
-                        return result.stdout
-                    if stderr:
-                        return result.stderr
                 except subprocess.CalledProcessError as ex:
                     raise CLIDockerClient.Errors.ContainerError(
                         f"Cannot get logs for container {self.id}: {ex}"
                     ) from ex
+
+                return result.stdout
 
             def wait(self) -> dict:
                 """Wait for container to finish running."""
