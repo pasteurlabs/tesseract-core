@@ -263,6 +263,7 @@ def mocked_docker(monkeypatch):
     class MockedDocker:
         """Mock CLIDockerClient class."""
 
+        @staticmethod
         def info() -> tuple:
             """Mock info method for DockerClient."""
             return "", ""
@@ -358,6 +359,6 @@ def mocked_docker(monkeypatch):
 
     mock_instance = MockedDocker()
     monkeypatch.setattr(docker_client_module.subprocess, "run", mocked_subprocess_run)
-    monkeypatch.setattr(engine, "docker_client", MockedDocker)
+    monkeypatch.setattr(engine, "docker_client", mock_instance)
 
     yield mock_instance

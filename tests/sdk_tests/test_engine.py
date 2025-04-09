@@ -243,7 +243,7 @@ def test_serve_tesseracts(mocked_docker):
     assert project_name_multi_tesseract
 
 
-def test_needs_docker(mocker):
+def test_needs_docker(mocked_docker, monkeypatch):
     @engine.needs_docker
     def run_something_with_docker():
         pass
@@ -252,8 +252,10 @@ def test_needs_docker(mocker):
     run_something_with_docker()
 
     # Sad case
-    docker_info = mocker.patch("tesseract_core.sdk.docker_client.CLIDockerClient.info")
-    docker_info.side_effect = RuntimeError("No Docker")
+    def raise_docker_error(*args, **kwargs):
+        raise RuntimeError("No Docker")
+
+    monkeypatch.setattr(mocked_docker, "info", raise_docker_error)
 
     with pytest.raises(UserError):
         run_something_with_docker()
