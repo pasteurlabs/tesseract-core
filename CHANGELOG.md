@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.2] - 2025-04-10
+
+### Features
+
+- Add requirement provider config to build Tesseracts from conda env specs (#54)
+- Introduce debug mode for served Tesseracts to propagate tracebacks to clients (#111)
+
+### Bug Fixes
+
+- Ensure Ubuntu-based base images work as expected; change default to vanilla Debian (#115)
+- Enable users to opt-in to allowing extra fields in Tesseract schemas by setting `extra="allow"` (#117)
+- Meshstats `abstract_eval` (#120)
+
 ## [0.8.1] - 2025-03-28
 
 ### Bug Fixes
