@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import datetime
 import json
 import logging
 import os
@@ -20,7 +19,12 @@ class CLIDockerClient:
     """Wrapper around Docker CLI to manage Docker containers, images, and projects.
 
     Initializes a new instance of the current Docker state from the
-    perspective of Tesseracts.
+    perspective of Tesseracts, while mimicking the interface of Docker-Py.
+
+    Most calls to CLIDockerClient could be replaced by official Docker-Py Client. However,
+    CLIDockerClient only sees Tesseract relevant images, containers, and projects.
+    CLIDockerClient also has an additional `compose` class for project management that
+    Docker-Py does not have due to the Tesseract use case.
     """
 
     def __init__(self) -> None:
@@ -95,9 +99,6 @@ class CLIDockerClient:
             """Build a Docker image from a Dockerfile using BuildKit."""
             from tesseract_core.sdk.engine import LogPipe
 
-            # Use start time to create a unique label for pruning build cache
-            start = datetime.datetime.now()
-            label = f"tesseract.{tag}.buildx.{start.strftime('%Y-%m-%dT%H:%M:%S')}"
             build_cmd = [
                 "docker",
                 "buildx",
@@ -105,8 +106,6 @@ class CLIDockerClient:
                 "--load",
                 "--tag",
                 tag,
-                "--label",
-                label,
                 "--file",
                 str(dockerfile),
                 str(path),
@@ -142,6 +141,8 @@ class CLIDockerClient:
             return_code = proc.returncode
 
             # NOTE: Do this before error checking to ensure we always prune the cache
+            # Prune all until docker builder prune filter is fixed for timestamp or label specification
+            # (might prune too much, but that's fine)
             if not keep_build_cache:
                 try:
                     prune_cmd = [
@@ -150,10 +151,8 @@ class CLIDockerClient:
                         "prune",
                         "-a",
                         "-f",
-                        "--filter",
-                        f"label={label}",
                     ]
-                    # Use docker builder prune to remove build cache for everything with label
+                    # Use docker builder prune to remove build cache
                     prune_res = subprocess.run(
                         prune_cmd, check=True, text=True, capture_output=True
                     )
@@ -245,7 +244,11 @@ class CLIDockerClient:
                     ) from ex
 
             def logs(self, stdout: bool = True, stderr: bool = True) -> bytes:
-                """Get the logs for this container."""
+                """Get the logs for this container.
+
+                Logs needs to be called if container is running in a detached state,
+                and we wish to retried the logs from the comman executing in the container.
+                """
                 if stdout and stderr:
                     # use subprocess.STDOUT to combine stdout and stderr into one stream
                     # with the correct order of output
@@ -410,6 +413,7 @@ class CLIDockerClient:
                 )
 
                 if detach:
+                    # If detach is True, stdout prints out the container ID of the running container
                     container_id = result.stdout.strip()
                     container_obj = self.get(container_id)
                     return container_obj

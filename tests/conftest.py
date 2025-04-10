@@ -198,10 +198,8 @@ def dummy_image_name(docker_client):
         ):
             try:
                 docker_client.images.remove(image_name)
-            except RuntimeError as ex:
-                # If image is not found is in the exception error string, pass
-                if "Cannot remove image" in str(ex).lower():
-                    pass
+            except docker_client_module.CLIDockerClient.Errors.ImageNotFound:
+                pass
 
 
 @pytest.fixture(scope="module")
@@ -218,10 +216,8 @@ def shared_dummy_image_name(docker_client):
         ):
             try:
                 docker_client.images.remove(image_name)
-            except RuntimeError as ex:
-                # If image is not found is in the exception error string, pass
-                if "Cannot remove image" in str(ex).lower():
-                    pass
+            except docker_client_module.CLIDockerClient.Errors.ImageNotFound:
+                pass
 
 
 @pytest.fixture
