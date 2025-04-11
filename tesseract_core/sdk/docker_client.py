@@ -20,7 +20,8 @@ class CLIDockerClient:
     """Wrapper around Docker CLI to manage Docker containers, images, and projects.
 
     Initializes a new instance of the current Docker state from the
-    perspective of Tesseracts, while mimicking the interface of Docker-Py.
+    perspective of Tesseracts, while mimicking the interface of Docker-Py, with additional
+    features for the convenience of Tesseract usage.
 
     Most calls to CLIDockerClient could be replaced by official Docker-Py Client. However,
     CLIDockerClient only sees Tesseract relevant images, containers, and projects.
@@ -41,7 +42,11 @@ class CLIDockerClient:
             self.images = []  # List of Image objects
 
         class Image:
-            """Image class to wrap Docker image details."""
+            """Image class to wrap Docker image details.
+
+            Image class has additional field `name` to store the image name that docker-py does not have.
+            Every unique `image_name` will have its own image object.
+            """
 
             def __init__(self, json_dict: dict, repo_tag_idx: int = 0) -> None:
                 self.id = json_dict.get("Id", None)
@@ -237,7 +242,11 @@ class CLIDockerClient:
         """Class to interface with docker containers."""
 
         class Container:
-            """Container class to wrap Docker container details."""
+            """Container class to wrap Docker container details.
+
+            Container class has additional member variable `host_port` that docker-py
+            does not have. This is because Tesseract requires frequent access to the host port.
+            """
 
             def __init__(self, json_dict: dict) -> None:
                 self.id = json_dict.get("Id", None)
@@ -282,7 +291,7 @@ class CLIDockerClient:
                 """Get the logs for this container.
 
                 Logs needs to be called if container is running in a detached state,
-                and we wish to retried the logs from the comman executing in the container.
+                and we wish to retrieve the logs from the command executing in the container.
                 """
                 if stdout and stderr:
                     # use subprocess.STDOUT to combine stdout and stderr into one stream
@@ -397,6 +406,14 @@ class CLIDockerClient:
             """Run a command in a container from an image.
 
             Returns Container object if detach is True, otherwise returns list of stdout and stderr.
+
+            Detach must be set to True if we wish to retrieve the container id of the running container,
+            and if detach is true, we must wait on the container to finish running and retrieve the logs
+            of the container manually.
+
+            If remove is set to True, the container will automatically remove itself after it finishes executing
+            the command. This means that we cannot set both detach and remove simulataneously to True or else there
+            would be no way of retrieving the logs from the removed container.
             """
             # Convert the parsed_volumes into a list of strings in proper argument format,
             # `-v host_path:container_path:mode`.
