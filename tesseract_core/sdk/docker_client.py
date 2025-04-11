@@ -72,19 +72,19 @@ class CLIDockerClient:
                 # Check if string is image name or id so we can append tag
                 return bool(re.fullmatch(r"(sha256:)?[a-fA-F0-9]{12,64}", s))
 
-            logger.debug("AKOAKO looking for image ", image_id_or_name)
+            logger.debug(f"AKOAKO looking for image {image_id_or_name}")
             if ":" not in image_id_or_name:
                 is_image_id = is_image_id(image_id_or_name)
-                logger.debug("AKOAKO checking if image is id or name: ", is_image_id)
+                logger.debug(f"AKOAKO checking if image is id or name: {is_image_id}")
                 if not is_image_id:
                     image_id_or_name = image_id_or_name + ":latest"
 
-            logger.debug("AKOAKO  looking for image [UPDATED]", image_id_or_name)
+            logger.debug(f"AKOAKO  looking for image [UPDATED] {image_id_or_name}")
             # Use getter func to make sure self.images is updated
             images = self.list()
             # Check for both name and id to find the image
             for image_obj in images:
-                logger.debug("AKOAKO checking if image matches", image_obj.name)
+                logger.debug(f"AKOAKO checking if image matches {image_obj.name}")
                 if (
                     image_obj.id == image_id_or_name
                     or image_obj.name == image_id_or_name
