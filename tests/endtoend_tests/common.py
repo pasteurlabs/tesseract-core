@@ -9,13 +9,14 @@ from typer.testing import CliRunner
 from tesseract_core.sdk.cli import app
 
 
-def image_exists(client, image_name):
-    # Docker images may be prefixed with the registry URL
-    return any(
-        tag.split("/")[-1] == image_name
-        for img in client.images.list()
-        for tag in img.tags
-    )
+def image_exists(client, image_name_or_id):
+    """Checks if images exists."""
+    try:
+        client.images.get(image_name_or_id)
+        return True
+    except client.Errors.ImageNotFound:
+        print("AKOAKO image not found", image_name_or_id)
+        return False
 
 
 def print_debug_info(result):
