@@ -477,9 +477,9 @@ class CLIDockerClient:
             self.project_container_map = {}  # Mapping from project ID to list of container ids
             self.containers = docker_cli.Containers()
 
-        def list(self) -> dict:
+        def list(self, include_stopped: bool = False) -> dict:
             """Returns the current list of projects."""
-            self._update_projects()
+            self._update_projects(include_stopped)
             return self.project_container_map
 
         def up(self, compose_fpath: str, project_name: str) -> bool:
@@ -503,10 +503,21 @@ class CLIDockerClient:
                 )
                 return project_name
             except subprocess.CalledProcessError as ex:
+                # If the project successfully started, try to get the logs from the containers
+                project_containers = self.list(include_stopped=True).get(
+                    project_name, None
+                )
+                if project_containers:
+                    container = self.containers.get(project_containers[0])
+                    stderr = container.logs(stderr=True)
+                    raise CLIDockerClient.Errors.ContainerError(
+                        f"Failed to start Tesseract container: {container.name}, logs: ",
+                        stderr,
+                    ) from ex
                 logger.error(str(ex))
                 logger.error(ex.stderr.decode())
                 raise CLIDockerClient.Errors.ContainerError(
-                    "Failed to start Tesseract containers."
+                    "Failed to start Tesseract containers.", ex.stderr
                 ) from ex
 
         def down(self, project_id: str) -> bool:
@@ -526,10 +537,12 @@ class CLIDockerClient:
             """Check if Docker Compose project exists."""
             return project_id in self.list()
 
-        def _update_projects(self) -> None:
+        def _update_projects(self, include_stopped: bool = False) -> None:
             """Updates the list of projects by going through containers."""
             self.project_container_map = {}
-            for container_id, container in self.containers.list().items():
+            for container_id, container in self.containers.list(
+                include_stopped
+            ).items():
                 if container.project_id:
                     if container.project_id not in self.project_container_map:
                         self.project_container_map[container.project_id] = []
