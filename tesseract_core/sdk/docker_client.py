@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shlex
 import subprocess
 from pathlib import Path
@@ -42,49 +43,64 @@ class CLIDockerClient:
         class Image:
             """Image class to wrap Docker image details."""
 
-            def __init__(self, json_dict: dict) -> None:
+            def __init__(self, json_dict: dict, repo_tag_idx: int = 0) -> None:
                 self.id = json_dict.get("Id", None)
-                self.short_id = self.id[:12] if self.id else None
+                self.short_id = self.id[7:19] if self.id else None  # Trim off sha:256
                 self.attrs = json_dict
                 self.tags = json_dict.get("RepoTags", None)
-                # Docker images may be prefixed with the registry URL
-                self.name = self.tags[0].split("/")[-1] if self.tags else None
+                # Docker images may be prefixed with the registry URL and may have multiple repo tags
+                self.name = (
+                    self.tags[repo_tag_idx].split("/")[-1] if self.tags else None
+                )
 
             def __str__(self) -> str:
                 return f"Image id: {self.id}, name: {self.name}, tags: {self.tags}, attrs: {self.attrs}"
 
-        def get(self, image: str) -> Image:
+        def get(self, image_id_or_name: str) -> Image:
             """Returns the metadata for a specific image."""
-            if not image:
+            if not image_id_or_name:
                 raise CLIDockerClient.Errors.DockerException(
                     "Image name cannot be empty."
                 )
-            if ":" not in image:
-                image = image + ":latest"
+
+            def is_image_id(s: str) -> bool:
+                # Check if string is image name or id so we can append tag
+                return bool(re.fullmatch(r"(sha256:)?[a-fA-F0-9]{12,64}", s))
+
+            if ":" not in image_id_or_name:
+                if not is_image_id(image_id_or_name):
+                    image_id_or_name = image_id_or_name + ":latest"
+
             # Use getter func to make sure self.images is updated
             images = self.list()
             # Check for both name and id to find the image
             for image_obj in images:
-                if image_obj.id == image or image_obj.name == image:
+                if (
+                    image_obj.id == image_id_or_name
+                    or image_obj.name == image_id_or_name
+                    or image_obj.short_id == image_id_or_name
+                ):
                     return image_obj
-            raise CLIDockerClient.Errors.ImageNotFound(f"Image {image} not found.")
+            raise CLIDockerClient.Errors.ImageNotFound(
+                f"Image {image_id_or_name} not found."
+            )
 
         def list(self) -> list[Image]:
             """Returns the current list of images."""
             return self._get_images()
 
-        def remove(self, image_id: str) -> None:
-            """Remove an image from the local Docker registry."""
+        def remove(self, image: str) -> None:
+            """Remove an image (name or id) from the local Docker registry."""
             try:
                 _ = subprocess.run(
-                    ["docker", "rmi", image_id, "--force"],
+                    ["docker", "rmi", image, "--force"],
                     check=True,
                     capture_output=True,
+                    text=True,
                 )
-
             except subprocess.CalledProcessError as ex:
                 raise CLIDockerClient.Errors.ImageNotFound(
-                    f"Cannot remove image {image_id}: {ex}"
+                    f"Cannot remove image {image}: {ex}"
                 ) from ex
 
         def buildx(
@@ -191,10 +207,29 @@ class CLIDockerClient:
             image_ids = image_ids.stdout.strip().split("\n")
             # Filter list to exclude empty strings.
             image_ids = [image_id for image_id in image_ids if image_id]
+
+            # If image shows up multiple times, that means it is tagged multiple times
+            # So we need to make multiple copies of the image with different names
+            image_counts = {}
+            for image_id in image_ids:
+                image_counts[image_id] = image_counts.get(image_id, 0) + 1
+
             json_dicts = get_docker_metadata(image_ids, is_image=True)
             for _, json_dict in json_dicts.items():
-                image = CLIDockerClient.Images.Image(json_dict)
-                images.append(image)
+                # Get short id since that's what is stored in image_counts
+                image_id = json_dict.get("Id", None)[7:19]
+                if not image_id:
+                    continue
+                # Set the repotag index to the # of image id - 1 to make sure we create
+                # copies of image for each tag (aka unique image name for each)
+                idx = image_counts.get(image_id)
+                while idx >= 1:
+                    image = CLIDockerClient.Images.Image(
+                        json_dict, repo_tag_idx=image_counts.get(image_id) - 1
+                    )
+                    image_counts[image_id] = image_counts.get(image_id, 0) - 1
+                    images.append(image)
+                    idx = image_counts.get(image_id, 0)
 
             return images
 

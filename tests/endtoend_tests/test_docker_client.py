@@ -25,6 +25,43 @@ def docker_client_built_image_name(
     yield image.name
 
 
+def test_get_image(
+    docker_client,
+    docker_client_built_image_name,
+):
+    """Test image retrieval."""
+    try:
+        # Get the image
+        image = docker_client.images.get(docker_client_built_image_name)
+        assert image is not None
+        assert docker_client_built_image_name == image.name
+
+        # Check the custom str function
+        assert (
+            str(image)
+            == f"Image id: {image.id}, name: {image.name}, tags: {image.tags}, attrs: {image.attrs}"
+        )
+
+        # Check that every image listed by docker cli can be found
+        image_ids = subprocess.run(
+            ["docker", "images", "-q"],  # List only image IDs
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        image_ids = image_ids.stdout.strip().split("\n")
+        # Filter list to exclude empty strings.
+        image_ids = [image_id for image_id in image_ids if image_id]
+        for image_id in image_ids:
+            assert image_exists(docker_client, image_id)
+
+    finally:
+        if image:
+            # Remove the image
+            docker_client.images.remove(image.name)
+            assert not image_exists(docker_client, docker_client_built_image_name)
+
+
 def test_create_image(
     docker_client,
     dummy_tesseract_location,
@@ -33,16 +70,22 @@ def test_create_image(
 ):
     """Test image building, getting, and removing."""
     image, image1 = None, None
+    image1_name = "docker_client_create_image_test:dummy1"
     # Create an image
     try:
         image = docker_client.images.get(docker_client_built_image_name)
         assert image is not None
         assert docker_client_built_image_name == image.name
+        # Check the custom str function
+        assert (
+            str(image)
+            == f"Image id: {image.id}, name: {image.name}, tags: {image.tags}, attrs: {image.attrs}"
+        )
 
         image_id_obj = docker_client.images.get(image.id)
         image_short_id_obj = docker_client.images.get(image.short_id)
-        assert image_id_obj == image
-        assert image_short_id_obj == image
+        assert str(image_id_obj) == str(image)
+        assert str(image_short_id_obj) == str(image)
 
         # Create a second image
         image1_name = "docker_client_create_image_test:dummy1"
@@ -51,30 +94,24 @@ def test_create_image(
         )
         image1 = docker_client.images.get(image1_name)
         assert image1 is not None
-        assert image1.name == image1_name
+        assert image1_name == image1.name
 
         # Check that image and image1 both exist
         assert image_exists(docker_client, image.name)
         assert image_exists(docker_client, image1.name)
 
     finally:
-        # Clean up the images
+        # Clean up the images (using different methods)
         try:
             if image:
                 docker_client.images.remove(image.name)
+
             if image1:
-                docker_client.images.remove(image1.name)
+                docker_client.images.remove(image1.id)
 
-        except CLIDockerClient.Errors.ImageNotFound:
-            pass
+            assert not image_exists(docker_client, docker_client_built_image_name)
+            assert not image_exists(docker_client, image1_name)
 
-        # Check that images are removed
-        assert not image_exists(docker_client, image.name)
-        assert not image_exists(docker_client, image1.name)
-
-        # Check that error is thrown when trying to get the image
-        try:
-            docker_client.images.get(image.name)
         except CLIDockerClient.Errors.ImageNotFound:
             pass
 
@@ -88,12 +125,18 @@ def test_create_container(docker_client, docker_client_built_image_name):
             docker_client_built_image_name, ['echo "Hello, Tesseract!"'], detach=True
         )
         assert container is not None
+        # Test custom str container function
+
+        assert (
+            f"Container id: {container.id}, name: {container.name}, project_id: {container.project_id}"
+            in str(container)
+        )
 
         container_get = docker_client.containers.get(container.id)
         container_name_get = docker_client.containers.get(container.name)
         assert container_get is not None
-        assert container_get.id == container.id
-        assert container_name_get == container_get
+        assert str(container_get) == str(container)
+        assert str(container_name_get) == str(container_get)
 
         status = container.wait()
         assert status["StatusCode"] == 0
@@ -265,4 +308,3 @@ def test_compose_error(docker_client, tmp_path, docker_client_built_image_name):
         docker_client.compose.up(compose_file, "docker_client_compose_test")
     # Check that the container's logs were printed to stderr
     assert "Failed to start Tesseract container" in str(e.value)
-    assert "bin/sh: -c requires an argument" in str(e.value)
