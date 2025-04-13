@@ -33,17 +33,16 @@ def mock_serving(mocker):
 
 @pytest.fixture
 def mock_clients(mocker):
-    mocker.patch("tesseract_core.sdk.tesseract.HTTPClient._run_tesseract")
+    mocker.patch("tesseract_core.sdk.tesseract.HTTPClient.run_tesseract")
 
 
 def test_Tesseract_init():
     # Instantiate with a url
     t = Tesseract(url="localhost")
 
-    # Using it as a context manager should raise
-    with pytest.raises(RuntimeError):
-        with t:
-            pass
+    # Using it as a context manager should be a no-op
+    with t:
+        pass
 
 
 def test_Tesseract_from_image(mock_serving, mock_clients):
@@ -59,9 +58,16 @@ def test_Tesseract_from_image(mock_serving, mock_clients):
     with pytest.raises(RuntimeError):
         _ = t.available_endpoints
 
+    # Works if we serve first
+    try:
+        t.serve()
+        _ = t.available_endpoints
+    finally:
+        t.teardown()
+
 
 def test_Tesseract_schema_methods(mocker, mock_serving):
-    mocked_run = mocker.patch("tesseract_core.sdk.tesseract.HTTPClient._run_tesseract")
+    mocked_run = mocker.patch("tesseract_core.sdk.tesseract.HTTPClient.run_tesseract")
     mocked_run.return_value = {"#defs": {"some": "stuff"}}
 
     with Tesseract.from_image("sometesseract:0.2.3") as t:
@@ -103,7 +109,7 @@ def test_HTTPClient_run_tesseract(mocker):
 
     client = HTTPClient("somehost")
 
-    out = client._run_tesseract("apply", {"inputs": {"a": 1}})
+    out = client.run_tesseract("apply", {"inputs": {"a": 1}})
 
     assert out == {"result": [4, 4, 4]}
     mocked_request.assert_called_with(
@@ -113,7 +119,7 @@ def test_HTTPClient_run_tesseract(mocker):
     )
 
 
-def test_HTTPClient__run_tesseract_raises_validation_error(mocker):
+def test_HTTPClient_run_tesseract_raises_validation_error(mocker):
     mock_response = mocker.Mock()
     mock_response.json.return_value = {
         "detail": [
@@ -147,7 +153,7 @@ def test_HTTPClient__run_tesseract_raises_validation_error(mocker):
     client = HTTPClient("somehost")
 
     with pytest.raises(ValidationError):
-        client._run_tesseract("apply", {"inputs": {"whoops": "whatever"}})
+        client.run_tesseract("apply", {"inputs": {"whoops": "whatever"}})
 
 
 @pytest.mark.parametrize(
