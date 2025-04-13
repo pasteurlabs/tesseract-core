@@ -355,9 +355,10 @@ def _decode_array(encoded_arr: dict):
             data = base64.b64decode(encoded_arr["data"]["buffer"])
             arr = np.frombuffer(data, dtype=encoded_arr["dtype"])
         else:
-            arr = np.array(encoded_arr["data"]["buffer"])
+            arr = np.array(encoded_arr["data"]["buffer"], dtype=encoded_arr["dtype"])
+            arr = arr.reshape(encoded_arr["shape"])
     else:
-        arr = encoded_arr
+        raise ValueError("Encoded array does not contain 'data' key. Cannot decode.")
     return arr
 
 
@@ -410,6 +411,7 @@ class HTTPClient:
                         type=e["type"],
                         loc=tuple(e["loc"]),
                         input=e.get("input"),
+                        ctx=e.get("ctx", {}),
                     )
                     for e in data["detail"]
                 ]
