@@ -35,7 +35,7 @@ def test_available_endpoints(built_image_name):
         assert set(vecadd.available_endpoints) == expected_endpoints
 
 
-def test_apply(built_image_name, free_port):
+def test_apply(built_image_name, dummy_tesseract_location, free_port):
     inputs = {"a": [1, 2], "b": [3, 4], "s": 1}
 
     # Test URL access
@@ -52,6 +52,15 @@ def test_apply(built_image_name, free_port):
 
     # Test from_image
     with Tesseract.from_image(built_image_name) as vecadd:
+        out = vecadd.apply(inputs)
+
+    assert set(out.keys()) == {"result"}
+    np.testing.assert_array_equal(out["result"], np.array([4.0, 6.0]))
+
+    # Test from_tesseract_api
+    with Tesseract.from_tesseract_api(
+        dummy_tesseract_location / "tesseract_api.py"
+    ) as vecadd:
         out = vecadd.apply(inputs)
 
     assert set(out.keys()) == {"result"}
