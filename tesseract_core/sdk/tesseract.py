@@ -13,7 +13,7 @@ from urllib.parse import urlparse, urlunparse
 
 import numpy as np
 import requests
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 from pydantic_core import InitErrorDetails
 
 from . import engine
@@ -68,13 +68,19 @@ class Tesseract:
         self._client = HTTPClient(url)
 
     @classmethod
+    def from_url(cls, url: str) -> Tesseract:
+        obj = cls.__new__(cls)
+        obj.__init__(url)
+        return obj
+
+    @classmethod
     def from_image(
         cls,
         image: str,
         *,
         volumes: list[str] | None = None,
         gpus: list[str] | None = None,
-    ):
+    ) -> Tesseract:
         obj = cls.__new__(cls)
         obj._spawn_config = SpawnConfig(
             image=image,
@@ -91,7 +97,7 @@ class Tesseract:
     def from_tesseract_api(
         cls,
         tesseract_api_path: str | Path,
-    ):
+    ) -> Tesseract:
         """Create a Tesseract instance from a tesseract API path.
 
         Warning: This does not use a containerized Tesseract, but rather
@@ -117,29 +123,17 @@ class Tesseract:
             raise RuntimeError("Cannot nest `with Tesseract ...` context managers. ")
 
         if self._client is not None:
-            # Tesseract is already ready to use -> no-op
+            # Tesseract is already being served -> no-op
             return self
 
-        project_id, container_id, port = self._serve(**self._spawn_config.__dict__)
-        url = f"http://localhost:{port}"
-        self._client = HTTPClient(url)
-        self._serve_context = dict(
-            project_id=project_id,
-            container_id=container_id,
-            port=port,
-        )
-        self._lastlog = None
+        self.serve()
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
         if self._serve_context is None:
             # This can happen if __enter__ short-cirtuits
             return
-
-        self._lastlog = self.server_logs()
-        engine.teardown(self._serve_context["project_id"])
-        self._client = None
-        self._serve_context = None
+        self.teardown()
 
     def server_logs(self):
         """Get the logs of the Tesseract server.
@@ -154,6 +148,47 @@ class Tesseract:
         if self._serve_context is None:
             return self._lastlog
         return engine.logs(self._serve_context["container_id"])
+
+    def serve(self, port: str = "") -> None:
+        """Serve the Tesseract.
+
+        Args:
+            port: Port to serve the Tesseract on.
+        """
+        if self._spawn_config is None:
+            raise RuntimeError("Can only serve a Tesseract created via from_image.")
+        if self._serve_context is not None:
+            raise RuntimeError("Tesseract is already being served.")
+        project_id, container_id, served_port = self._serve(
+            self._spawn_config.image,
+            port=port,
+            volumes=self._spawn_config.volumes,
+            gpus=self._spawn_config.gpus,
+            debug=self._spawn_config.debug,
+        )
+        self._serve_context = dict(
+            project_id=project_id,
+            container_id=container_id,
+            port=served_port,
+        )
+        self._lastlog = None
+        self._client = HTTPClient(f"http://localhost:{served_port}")
+
+    def teardown(self) -> None:
+        """Teardown the Tesseract.
+
+        This will stop and remove the Tesseract container.
+        """
+        if self._serve_context is None:
+            raise RuntimeError("Tesseract is not being served.")
+        self._lastlog = self.server_logs()
+        engine.teardown(self._serve_context["project_id"])
+        self._client = None
+        self._serve_context = None
+
+    def __del__(self):
+        if self._serve_context is not None:
+            self.teardown()
 
     @staticmethod
     def _serve(
@@ -526,11 +561,25 @@ class LocalClient:
         if endpoint not in self._endpoints:
             raise RuntimeError(f"Endpoint {endpoint} not found in Tesseract API.")
 
-        if payload is None:
-            payload = {}
+        func = self._endpoints[endpoint]
+        InputSchema = func.__annotations__.get("payload", None)
+        OutputSchema = func.__annotations__.get("return", None)
+
+        if InputSchema is not None:
+            parsed_payload = InputSchema.model_validate(payload)
+        else:
+            parsed_payload = None
+
         try:
-            result = self._endpoints[endpoint](payload)
+            if parsed_payload is not None:
+                result = self._endpoints[endpoint](parsed_payload)
+            else:
+                result = self._endpoints[endpoint]()
         except Exception as ex:
             raise RuntimeError(f"Error running Tesseract API {endpoint}.") from ex
+
+        if OutputSchema is not None and issubclass(OutputSchema, BaseModel):
+            # Validate via schema, then dump to stay consistent with other clients
+            result = OutputSchema.model_validate(result).model_dump()
 
         return result
