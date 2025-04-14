@@ -411,6 +411,7 @@ def _is_regex_pattern(pattern: str) -> bool:
 
 
 def input_path_validator(path: str, info: ValidationInfo) -> str:
+    """Validate that the given path points to a valid input key."""
     if "[" in path or "{" in path:
         try:
             get_at_path(info.data["inputs"], path)

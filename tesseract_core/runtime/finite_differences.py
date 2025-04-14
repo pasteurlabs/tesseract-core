@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import traceback
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from functools import wraps
 from pathlib import Path
 from types import ModuleType
@@ -29,6 +29,17 @@ ADEndpointName = Literal[
 
 
 class GradientCheckResult(NamedTuple):
+    """Result of a gradient check (Jacobian row).
+
+    Attributes:
+        in_path: The input path of the gradient check.
+        out_path: The output path of the gradient check.
+        idx: The row index of the gradient check.
+        grad_val: The value of the gradient at the given index.
+        ref_val: The value of the reference gradient at the given index.
+        exception: The exception raised during the gradient check, if any.
+    """
+
     in_path: str
     out_path: str
     idx: tuple[int, ...]
@@ -150,7 +161,7 @@ def _jacobian_via_apply(
     apply_fn = endpoints_func["apply"]
     ApplySchema = get_input_schema(apply_fn)
 
-    def _perturbed_apply(inputs, eps):
+    def _perturbed_apply(inputs: dict[str, Any], eps: float) -> dict[str, Any]:
         input_val = get_at_path(inputs, input_path).copy()
         if input_idx:
             # array
@@ -183,7 +194,7 @@ def _jacobian_via_jacobian(
     """Compute a Jacobian row using the jacobian endpoint."""
     jac_fn = endpoints_func["jacobian"]
 
-    def _jacobian(inputs):
+    def _jacobian(inputs: dict[str, Any]) -> dict[str, Any]:
         JacSchema = get_input_schema(jac_fn)
         return jac_fn(
             JacSchema.model_validate(
@@ -406,7 +417,7 @@ def check_gradients(
     rtol: float = 0.1,
     seed: Optional[int] = None,
     show_progress: bool = True,
-):
+) -> Iterator[tuple[str, list[GradientCheckResult], int]]:
     """Check gradients of endpoints against a finite difference approximation.
 
     Args:
