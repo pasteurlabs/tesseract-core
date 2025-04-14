@@ -9,13 +9,12 @@ from typer.testing import CliRunner
 from tesseract_core.sdk.cli import app
 
 
-def image_exists(client, image_name_or_id):
+def image_exists(client, image_name_or_id, tesseract_only: bool = True):
     """Checks if images exists."""
     try:
-        client.images.get(image_name_or_id)
+        client.images.get(image_name_or_id, tesseract_only)
         return True
     except client.Errors.ImageNotFound:
-        print("AKOAKO image not found", image_name_or_id)
         return False
 
 

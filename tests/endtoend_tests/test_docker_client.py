@@ -53,8 +53,7 @@ def test_get_image(
         # Filter list to exclude empty strings.
         image_ids = [image_id for image_id in image_ids if image_id]
         for image_id in image_ids:
-            print("AKOAKO checking if image exists", image_id)
-            assert image_exists(docker_client, image_id)
+            assert image_exists(docker_client, image_id, tesseract_only=False)
 
     finally:
         if image:

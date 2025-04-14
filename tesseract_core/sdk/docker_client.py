@@ -24,7 +24,8 @@ class CLIDockerClient:
     features for the convenience of Tesseract usage.
 
     Most calls to CLIDockerClient could be replaced by official Docker-Py Client. However,
-    CLIDockerClient only sees Tesseract relevant images, containers, and projects.
+    CLIDockerClient by default only sees Tesseract relevant images, containers, and projects;
+    the flag `tesseract_only` must be set to False to see non-Tesseract images, containers, and projects.
     CLIDockerClient also has an additional `compose` class for project management that
     Docker-Py does not have due to the Tesseract use case.
     """
@@ -61,7 +62,7 @@ class CLIDockerClient:
             def __str__(self) -> str:
                 return f"Image id: {self.id}, name: {self.name}, tags: {self.tags}, attrs: {self.attrs}"
 
-        def get(self, image_id_or_name: str) -> Image:
+        def get(self, image_id_or_name: str, tesseract_only: bool = True) -> Image:
             """Returns the metadata for a specific image."""
             if not image_id_or_name:
                 raise CLIDockerClient.Errors.DockerException(
@@ -72,19 +73,15 @@ class CLIDockerClient:
                 # Check if string is image name or id so we can append tag
                 return bool(re.fullmatch(r"(sha256:)?[a-fA-F0-9]{12,64}", s))
 
-            logger.debug(f"AKOAKO looking for image {image_id_or_name}")
             if ":" not in image_id_or_name:
                 is_image_id = is_image_id(image_id_or_name)
-                logger.debug(f"AKOAKO checking if image is id or name: {is_image_id}")
                 if not is_image_id:
                     image_id_or_name = image_id_or_name + ":latest"
 
-            logger.debug(f"AKOAKO  looking for image [UPDATED] {image_id_or_name}")
             # Use getter func to make sure self.images is updated
-            images = self.list()
+            images = self.list(tesseract_only=tesseract_only)
             # Check for both name and id to find the image
             for image_obj in images:
-                logger.debug(f"AKOAKO checking if image matches {image_obj.name}")
                 if (
                     image_obj.id == image_id_or_name
                     or image_obj.name == image_id_or_name
@@ -95,9 +92,9 @@ class CLIDockerClient:
                 f"Image {image_id_or_name} not found."
             )
 
-        def list(self) -> list[Image]:
+        def list(self, tesseract_only: bool = True) -> list[Image]:
             """Returns the current list of images."""
-            return self._get_images()
+            return self._get_images(tesseract_only=tesseract_only)
 
         def remove(self, image: str) -> None:
             """Remove an image (name or id) from the local Docker registry."""
@@ -196,7 +193,7 @@ class CLIDockerClient:
             return self.get(tag)
 
         @staticmethod
-        def _get_images() -> list[Image]:
+        def _get_images(tesseract_only: bool = True) -> list[Image]:
             """Gets the list of images by querying Docker CLI."""
             images = []
             try:
@@ -224,7 +221,9 @@ class CLIDockerClient:
             for image_id in image_ids:
                 image_counts[image_id] = image_counts.get(image_id, 0) + 1
 
-            json_dicts = get_docker_metadata(image_ids, is_image=True)
+            json_dicts = get_docker_metadata(
+                image_ids, is_image=True, tesseract_only=tesseract_only
+            )
             for _, json_dict in json_dicts.items():
                 # Get short id since that's what is stored in image_counts
                 image_id = json_dict.get("Id", None)[7:19]
@@ -376,13 +375,15 @@ class CLIDockerClient:
                 )
                 return string
 
-        def list(self, all: bool = False) -> dict:
+        def list(self, all: bool = False, tesseract_only: bool = True) -> dict:
             """Returns the current list of containers."""
-            return self._get_containers(include_stopped=all)
+            return self._get_containers(
+                include_stopped=all, tesseract_only=tesseract_only
+            )
 
-        def get(self, id_or_name: str) -> Container:
+        def get(self, id_or_name: str, tesseract_only: bool = True) -> Container:
             """Returns the metadata for a specific container."""
-            container_list = self.list(all=True)
+            container_list = self.list(all=True, tesseract_only=tesseract_only)
 
             for container_obj in container_list.values():
                 got_container = (
@@ -492,7 +493,9 @@ class CLIDockerClient:
                 raise ex
 
         @staticmethod
-        def _get_containers(include_stopped: bool = False) -> dict[str, Container]:
+        def _get_containers(
+            include_stopped: bool = False, tesseract_only: bool = True
+        ) -> dict[str, Container]:
             containers = {}
 
             cmd = ["docker", "ps", "-q"]
@@ -520,7 +523,9 @@ class CLIDockerClient:
             container_ids = [
                 container_id for container_id in container_ids if container_id
             ]
-            json_dicts = get_docker_metadata(container_ids)
+            json_dicts = get_docker_metadata(
+                container_ids, tesseract_only=tesseract_only
+            )
             for container_id, json_dict in json_dicts.items():
                 container = CLIDockerClient.Containers.Container(json_dict)
                 containers[container_id] = container
@@ -650,7 +655,9 @@ class CLIDockerClient:
             pass
 
 
-def get_docker_metadata(docker_asset_ids: list[str], is_image: bool = False) -> dict:
+def get_docker_metadata(
+    docker_asset_ids: list[str], is_image: bool = False, tesseract_only=True
+) -> dict:
     """Get metadata for Docker images/containers.
 
     Returns a dict mapping asset ids to their metadata.
@@ -688,7 +695,9 @@ def get_docker_metadata(docker_asset_ids: list[str], is_image: bool = False) -> 
     # with the id as the key for easy parsing, and the metadata as the value.
     for asset in metadata:
         env_vars = asset["Config"]["Env"]
-        if not any("TESSERACT_NAME" in env_var for env_var in env_vars):
+        if tesseract_only and (
+            not any("TESSERACT_NAME" in env_var for env_var in env_vars)
+        ):
             # Do not add items if there is no "TESSERACT_NAME" in env vars.
             continue
         if is_image:

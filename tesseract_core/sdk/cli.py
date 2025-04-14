@@ -483,16 +483,14 @@ def _display_tesseract_image_meta() -> None:
     table = RichTable("ID", "Tags", "Name", "Version", "Description")
     images = docker_client.images.list()
     for image in images:
-        logger.debug(f"AKOAKO listing image {image}")
         tesseract_vals = _get_tesseract_env_vals(image)
-        logger.debug(f"AKOAKO listing vals {tesseract_vals}")
         if tesseract_vals:
             table.add_row(
                 # Checksum Type + First 12 Chars of ID
                 image.id[:19],
                 image.name,
                 tesseract_vals["TESSERACT_NAME"],
-                tesseract_vals["TESSERACT_VERSION"],
+                tesseract_vals.get("TESSERACT_VERSION", ""),
                 tesseract_vals.get("TESSERACT_DESCRIPTION", "").replace("\n", " "),
             )
     RichConsole().print(table)
