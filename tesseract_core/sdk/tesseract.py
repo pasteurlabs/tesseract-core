@@ -120,7 +120,9 @@ class Tesseract:
 
     def __enter__(self):
         if self._serve_context is not None:
-            raise RuntimeError("Cannot nest `with Tesseract ...` context managers. ")
+            raise RuntimeError(
+                "Cannot nest the same `with Tesseract ...` context manager."
+            )
 
         if self._client is not None:
             # Tesseract is already being served -> no-op
