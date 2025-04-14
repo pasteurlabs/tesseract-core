@@ -43,8 +43,15 @@ def test_get_image(
         )
 
         # Check that every image listed by docker cli can be found
+        # Dangling images are not listed by the client
         image_ids = subprocess.run(
-            ["docker", "images", "-q"],  # List only image IDs
+            [
+                "docker",
+                "images",
+                "--filter",
+                "dangling=false",
+                "-q",
+            ],  # List only image IDs
             capture_output=True,
             text=True,
             check=True,
@@ -87,14 +94,20 @@ def test_create_image(
         assert str(image_id_obj) == str(image)
         assert str(image_short_id_obj) == str(image)
 
-        # Create a second image
-        image1_name = "docker_client_create_image_test:dummy1"
+        # Create a second image with no label
+        # Check that :latest gets added automatically
+        image1_name = "docker_client_create_image_test"
         docker_client.images.buildx(
             dummy_tesseract_location, image1_name, dummy_docker_file
         )
         image1 = docker_client.images.get(image1_name)
+        image1_get_name, image1_get_tag = (
+            image1.name.split(":")[0],
+            image1.name.split(":")[1],
+        )
         assert image1 is not None
-        assert image1_name == image1.name
+        assert image1_name == image1_get_name
+        assert image1_get_tag == "latest"
 
         # Check that image and image1 both exist
         assert image_exists(docker_client, image.name)
