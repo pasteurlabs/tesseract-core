@@ -48,7 +48,7 @@ shellingham==1.5.4
     # via typer
 typer==0.15.2
     # via tesseract-core
-typing-extensions==4.13.1
+typing-extensions==4.13.2
     # via
     #   pydantic
     #   pydantic-core
@@ -57,7 +57,7 @@ typing-extensions==4.13.1
     #   typing-inspection
 typing-inspection==0.4.0
     # via pydantic
-urllib3==2.3.0
+urllib3==2.4.0
     # via
     #   docker
     #   requests

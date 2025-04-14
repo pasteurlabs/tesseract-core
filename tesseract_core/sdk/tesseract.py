@@ -430,9 +430,9 @@ def _decode_array(encoded_arr: dict):
             arr = np.frombuffer(data, dtype=encoded_arr["dtype"])
         else:
             arr = np.array(encoded_arr["data"]["buffer"], dtype=encoded_arr["dtype"])
-            arr = arr.reshape(encoded_arr["shape"])
     else:
-        arr = encoded_arr
+        raise ValueError("Encoded array does not contain 'data' key. Cannot decode.")
+    arr = arr.reshape(encoded_arr["shape"])
     return arr
 
 
