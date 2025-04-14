@@ -199,7 +199,7 @@ def test_container_volume_mounts(
         bar_file = dest / "hello.txt"
         stdout, _ = docker_client.containers.run(
             docker_client_built_image_name,
-            [f"touch {bar_file} && echo hello"],
+            [f"touch {bar_file} && chmod 777 {bar_file} && echo hello"],
             detach=False,
             volumes={tmp_path: {"bind": dest, "mode": "rw"}},
             remove=True,
