@@ -95,12 +95,11 @@ class Tesseract:
 
         When using this method, the Tesseract will be spawned in a Docker
         container, serving the Tesseract API via HTTP. To use the Tesseract,
-        you need to call the `serve` method or use it as a context manager:
+        you need to call the `serve` method or use it as a context manager.
 
-        ```python
-        with Tesseract.from_image("my_tesseract") as t:
-            # Use tesseract here
-        ```
+        Example:
+            >>> with Tesseract.from_image("my_tesseract") as t:
+            ...    # Use tesseract here
 
         This will automatically teardown the Tesseract when exiting the
         context manager.
