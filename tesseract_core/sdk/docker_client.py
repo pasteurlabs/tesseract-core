@@ -223,6 +223,8 @@ class CLIDockerClient:
             if return_code != 0:
                 raise CLIDockerClient.Errors.BuildError(logs)
 
+            # Tag may be prefixed by repository url
+            tag = tag.split("/")[-1]
             return self.get(tag)
 
         @staticmethod

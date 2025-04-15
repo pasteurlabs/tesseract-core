@@ -76,8 +76,7 @@ def test_create_image(
     docker_client_built_image_name,
 ):
     """Test image building, getting, and removing."""
-    image, image1 = None, None
-    image1_name = "docker_client_create_image_test:dummy1"
+    image, image1, image2 = None, None, None
     # Create an image
     try:
         image = docker_client.images.get(docker_client_built_image_name)
@@ -109,21 +108,41 @@ def test_create_image(
         assert image1_name == image1_get_name
         assert image1_get_tag == "latest"
 
+        # Create a third image with prefixed with repo url
+        # Check that name gets handled properly
+        repo_url = "local_host/foo/bar/"
+        image2_name = "docker_client_create_image_url_test"
+        docker_client.images.buildx(
+            dummy_tesseract_location, repo_url + image2_name, dummy_docker_file
+        )
+        image2 = docker_client.images.get(image2_name)
+        image2_get_name, image2_get_tag = (
+            image2.name.split(":")[0],
+            image2.name.split(":")[1],
+        )
+        assert image2 is not None
+        assert image2_name == image2_get_name
+        assert image2_get_tag == "latest"
+
         # Check that image and image1 both exist
         assert image_exists(docker_client, image.name)
         assert image_exists(docker_client, image1.name)
+        assert image_exists(docker_client, image2.name)
 
     finally:
         # Clean up the images (using different methods)
         try:
             if image:
                 docker_client.images.remove(image.name)
+                assert not image_exists(docker_client, docker_client_built_image_name)
 
             if image1:
                 docker_client.images.remove(image1.id)
+                assert not image_exists(docker_client, image1_name)
 
-            assert not image_exists(docker_client, docker_client_built_image_name)
-            assert not image_exists(docker_client, image1_name)
+            if image2:
+                docker_client.images.remove(image2.id)
+                assert not image_exists(docker_client, image2_name)
 
         except CLIDockerClient.Errors.ImageNotFound:
             pass
