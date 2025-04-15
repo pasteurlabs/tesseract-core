@@ -49,9 +49,12 @@ BASE_SCRIPTS = {
 
 
 class RuntimeDepenencyHook(MetadataHookInterface):
+    """Injects runtime dependencies and scripts from a separate pyproject.toml file."""
+
     PLUGIN_NAME = "runtime-deps"
 
-    def update(self, metadata):
+    def update(self, metadata: dict) -> dict:
+        """Update the metadata with runtime dependencies and scripts."""
         runtime_metadata = toml.load(Path(self.root) / RUNTIME_PYPROJECT_PATH)
         metadata["optional-dependencies"] = {
             **BASE_OPTIONAL_DEPS,

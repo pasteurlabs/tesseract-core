@@ -8,11 +8,13 @@ import subprocess
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from functools import cached_property, wraps
+from pathlib import Path
+from typing import Any, Callable
 from urllib.parse import urlparse, urlunparse
 
 import numpy as np
 import requests
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 from pydantic_core import InitErrorDetails
 
 from . import engine
@@ -35,11 +37,11 @@ class SpawnConfig:
     debug: bool
 
 
-def requires_client(func):
+def requires_client(func: callable) -> callable:
     """Decorator to require a client for a Tesseract instance."""
 
     @wraps(func)
-    def wrapper(self, *args, **kwargs):
+    def wrapper(self: Tesseract, *args: Any, **kwargs: Any) -> Any:
         if not self._client:
             raise RuntimeError(
                 f"{self.__class__.__name__} must be used as a context manager when created via `from_image`."
@@ -56,16 +58,30 @@ class Tesseract:
     and provides methods to run commands on it and retrieve results.
 
     Communication between a Tesseract and this class is done either via
-    HTTP requests or `docker exec` invocations (only possible for local
-    instances spawned when instantiating the class).
+    HTTP requests or directly via Python calls to the Tesseract API.
     """
 
     def __init__(self, url: str) -> None:
         self._spawn_config = None
-        self._project_id = None
-        self._container_id = None
+        self._serve_context = None
         self._lastlog = None
         self._client = HTTPClient(url)
+
+    @classmethod
+    def from_url(cls, url: str) -> Tesseract:
+        """Create a Tesseract instance from a URL.
+
+        This is useful for connecting to a remote Tesseract instance.
+
+        Args:
+            url: The URL of the Tesseract instance.
+
+        Returns:
+            A Tesseract instance.
+        """
+        obj = cls.__new__(cls)
+        obj.__init__(url)
+        return obj
 
     @classmethod
     def from_image(
@@ -74,7 +90,28 @@ class Tesseract:
         *,
         volumes: list[str] | None = None,
         gpus: list[str] | None = None,
-    ):
+    ) -> Tesseract:
+        """Create a Tesseract instance from a Docker image.
+
+        When using this method, the Tesseract will be spawned in a Docker
+        container, serving the Tesseract API via HTTP. To use the Tesseract,
+        you need to call the `serve` method or use it as a context manager.
+
+        Example:
+            >>> with Tesseract.from_image("my_tesseract") as t:
+            ...    # Use tesseract here
+
+        This will automatically teardown the Tesseract when exiting the
+        context manager.
+
+        Args:
+            image: The Docker image to use.
+            volumes: List of volumes to mount.
+            gpus: List of GPUs to use.
+
+        Returns:
+            A Tesseract instance.
+        """
         obj = cls.__new__(cls)
         obj._spawn_config = SpawnConfig(
             image=image,
@@ -82,41 +119,121 @@ class Tesseract:
             gpus=gpus,
             debug=True,
         )
-        obj._project_id = None
-        obj._container_id = None
+        obj._serve_context = None
         obj._lastlog = None
         obj._client = None
         return obj
 
-    def __enter__(self):
+    @classmethod
+    def from_tesseract_api(
+        cls,
+        tesseract_api_path: str | Path,
+    ) -> Tesseract:
+        """Create a Tesseract instance from a Tesseract API path.
+
+        Warning: This does not use a containerized Tesseract, but rather
+        imports the Tesseract API directly. This is useful for debugging,
+        but requires a matching runtime environment + all dependencies to be
+        installed locally.
+
+        Args:
+            tesseract_api_path: Path to the `tesseract_api.py` file.
+
+        Returns:
+            A Tesseract instance.
+        """
+        obj = cls.__new__(cls)
+        obj._spawn_config = None
+        obj._serve_context = None
+        obj._lastlog = None
+        obj._client = LocalClient(tesseract_api_path)
+        return obj
+
+    def __enter__(self) -> Tesseract:
+        """Enter the Tesseract context.
+
+        This will start the Tesseract server if it is not already running.
+        """
+        if self._serve_context is not None:
+            raise RuntimeError(
+                "Cannot nest the same `with Tesseract ...` context manager."
+            )
+
         if self._client is not None:
-            raise RuntimeError("Cannot nest `with Tesseract ...` context managers. ")
-        project_id, container_id, port = self._serve(**self._spawn_config.__dict__)
-        url = f"http://localhost:{port}"
-        self._client = HTTPClient(url)
-        self._project_id = project_id
-        self._container_id = container_id
-        self._lastlog = None
+            # Tesseract is already being served -> no-op
+            return self
+
+        self.serve()
         return self
 
-    def __exit__(self, exc_type, exc_value, traceback):
-        self._lastlog = self.server_logs()
-        engine.teardown(self._project_id)
-        self._client = None
-        self._project_id = None
-        self._container_id = None
+    def __exit__(self, *args: Any) -> None:
+        """Exit the Tesseract context.
 
-    def server_logs(self):
+        This will stop the Tesseract server if it is running.
+        """
+        if self._serve_context is None:
+            # This can happen if __enter__ short-cirtuits
+            return
+        self.teardown()
+
+    def server_logs(self) -> str:
         """Get the logs of the Tesseract server.
 
         Returns:
             logs of the Tesseract server.
         """
         if self._spawn_config is None:
-            raise RuntimeError("Cannot retrieve logs for a remote Tesseract.")
-        if self._container_id is None:
+            raise RuntimeError(
+                "Can only retrieve logs for a Tesseract created via from_image."
+            )
+        if self._serve_context is None:
             return self._lastlog
-        return engine.logs(self._container_id)
+        return engine.logs(self._serve_context["container_id"])
+
+    def serve(self, port: str = "") -> None:
+        """Serve the Tesseract.
+
+        Args:
+            port: Port to serve the Tesseract on.
+        """
+        if self._spawn_config is None:
+            raise RuntimeError("Can only serve a Tesseract created via from_image.")
+        if self._serve_context is not None:
+            raise RuntimeError("Tesseract is already being served.")
+        project_id, container_id, served_port = self._serve(
+            self._spawn_config.image,
+            port=port,
+            volumes=self._spawn_config.volumes,
+            gpus=self._spawn_config.gpus,
+            debug=self._spawn_config.debug,
+        )
+        self._serve_context = dict(
+            project_id=project_id,
+            container_id=container_id,
+            port=served_port,
+        )
+        self._lastlog = None
+        self._client = HTTPClient(f"http://localhost:{served_port}")
+
+    def teardown(self) -> None:
+        """Teardown the Tesseract.
+
+        This will stop and remove the Tesseract container.
+        """
+        if self._serve_context is None:
+            raise RuntimeError("Tesseract is not being served.")
+        self._lastlog = self.server_logs()
+        engine.teardown(self._serve_context["project_id"])
+        self._client = None
+        self._serve_context = None
+
+    def __del__(self) -> None:
+        """Destructor for the Tesseract class.
+
+        This will teardown the Tesseract if it is being served.
+        """
+        if self._serve_context is not None:
+            self.teardown()
 
     @staticmethod
     def _serve(
@@ -155,7 +272,7 @@ class Tesseract:
         Returns:
             dictionary with the OpenAPI Schema.
         """
-        return self._client._run_tesseract("openapi_schema")
+        return self._client.run_tesseract("openapi_schema")
 
     @cached_property
     @requires_client
@@ -165,7 +282,7 @@ class Tesseract:
         Returns:
              dictionary with the input schema.
         """
-        return self._client._run_tesseract("input_schema")
+        return self._client.run_tesseract("input_schema")
 
     @cached_property
     @requires_client
@@ -175,7 +292,7 @@ class Tesseract:
         Returns:
              dictionary with the output schema.
         """
-        return self._client._run_tesseract("output_schema")
+        return self._client.run_tesseract("output_schema")
 
     @property
     @requires_client
@@ -186,9 +303,6 @@ class Tesseract:
             a list with all available endpoints for this Tesseract.
         """
         return [endpoint.lstrip("/") for endpoint in self.openapi_schema["paths"]]
-
-    def _run_tesseract(self, endpoint: str, payload: dict | None = None) -> dict:
-        return self._client._run_tesseract(endpoint, payload)
 
     @requires_client
     def apply(self, inputs: dict) -> dict:
@@ -201,7 +315,7 @@ class Tesseract:
             dictionary with the results.
         """
         payload = {"inputs": inputs}
-        return self._run_tesseract("apply", payload)
+        return self._client.run_tesseract("apply", payload)
 
     @requires_client
     def abstract_eval(self, abstract_inputs: dict) -> dict:
@@ -214,7 +328,7 @@ class Tesseract:
             dictionary with the results.
         """
         payload = {"inputs": abstract_inputs}
-        return self._run_tesseract("abstract_eval", payload)
+        return self._client.run_tesseract("abstract_eval", payload)
 
     @requires_client
     def health(self) -> dict:
@@ -223,7 +337,7 @@ class Tesseract:
         Returns:
             dictionary with the health status.
         """
-        return self._run_tesseract("health")
+        return self._client.run_tesseract("health")
 
     @requires_client
     def jacobian(
@@ -247,7 +361,7 @@ class Tesseract:
             "jac_inputs": jac_inputs,
             "jac_outputs": jac_outputs,
         }
-        return self._run_tesseract("jacobian", payload)
+        return self._client.run_tesseract("jacobian", payload)
 
     @requires_client
     def jacobian_vector_product(
@@ -279,7 +393,7 @@ class Tesseract:
             "jvp_outputs": jvp_outputs,
             "tangent_vector": tangent_vector,
         }
-        return self._run_tesseract("jacobian_vector_product", payload)
+        return self._client.run_tesseract("jacobian_vector_product", payload)
 
     @requires_client
     def vector_jacobian_product(
@@ -312,10 +426,11 @@ class Tesseract:
             "vjp_outputs": vjp_outputs,
             "cotangent_vector": cotangent_vector,
         }
-        return self._run_tesseract("vector_jacobian_product", payload)
+        return self._client.run_tesseract("vector_jacobian_product", payload)
 
 
-def _tree_map(func, tree, is_leaf=None):
+def _tree_map(func: Callable, tree: Any, is_leaf: Callable | None = None) -> Any:
+    """Recursively apply a function to all leaves of a tree-like structure."""
     if is_leaf is not None and is_leaf(tree):
         return func(tree)
     if isinstance(tree, Mapping):  # Dictionary-like structure
@@ -330,7 +445,7 @@ def _tree_map(func, tree, is_leaf=None):
     return tree
 
 
-def _encode_array(arr: np.ndarray, b64: bool = True):
+def _encode_array(arr: np.ndarray, b64: bool = True) -> dict:
     if b64:
         data = {
             "buffer": base64.b64encode(arr.tobytes()).decode(),
@@ -349,7 +464,7 @@ def _encode_array(arr: np.ndarray, b64: bool = True):
     }
 
 
-def _decode_array(encoded_arr: dict):
+def _decode_array(encoded_arr: dict) -> np.ndarray:
     if "data" in encoded_arr:
         if encoded_arr["data"]["encoding"] == "base64":
             data = base64.b64decode(encoded_arr["data"]["buffer"])
@@ -440,7 +555,16 @@ class HTTPClient:
 
         return data
 
-    def _run_tesseract(self, endpoint: str, payload: dict | None = None) -> dict:
+    def run_tesseract(self, endpoint: str, payload: dict | None = None) -> dict:
+        """Run a Tesseract endpoint.
+
+        Args:
+            endpoint: The endpoint to run.
+            payload: The payload to send to the endpoint.
+
+        Returns:
+            The loaded JSON response from the endpoint, with decoded arrays.
+        """
         if endpoint in [
             "input_schema",
             "output_schema",
@@ -455,3 +579,68 @@ class HTTPClient:
             endpoint = "openapi.json"
 
         return self._request(endpoint, method, payload)
+
+
+class LocalClient:
+    """Local Client for Tesseracts."""
+
+    def __init__(self, tesseract_api_path: str | Path) -> None:
+        from tesseract_core.runtime.core import create_endpoints, load_module_from_path
+        from tesseract_core.runtime.serve import create_rest_api
+
+        tesseract_api_path = Path(tesseract_api_path).resolve(strict=True)
+        if not tesseract_api_path.is_file():
+            raise RuntimeError(
+                f"Tesseract API path {tesseract_api_path} is not a file."
+            )
+
+        try:
+            tesseract_api = load_module_from_path(tesseract_api_path)
+        except ImportError as ex:
+            raise RuntimeError(
+                f"Cannot load Tesseract API from {tesseract_api_path}"
+            ) from ex
+
+        self._endpoints = {
+            func.__name__: func for func in create_endpoints(tesseract_api)
+        }
+        self._openapi_schema = create_rest_api(tesseract_api).openapi()
+
+    def run_tesseract(self, endpoint: str, payload: dict | None = None) -> dict:
+        """Run a Tesseract endpoint.
+
+        Args:
+            endpoint: The endpoint to run.
+            payload: The payload to send to the endpoint.
+
+        Returns:
+            The loaded JSON response from the endpoint, with decoded arrays.
+        """
+        if endpoint == "openapi_schema":
+            return self._openapi_schema
+
+        if endpoint not in self._endpoints:
+            raise RuntimeError(f"Endpoint {endpoint} not found in Tesseract API.")
+
+        func = self._endpoints[endpoint]
+        InputSchema = func.__annotations__.get("payload", None)
+        OutputSchema = func.__annotations__.get("return", None)
+
+        if InputSchema is not None:
+            parsed_payload = InputSchema.model_validate(payload)
+        else:
+            parsed_payload = None
+
+        try:
+            if parsed_payload is not None:
+                result = self._endpoints[endpoint](parsed_payload)
+            else:
+                result = self._endpoints[endpoint]()
+        except Exception as ex:
+            raise RuntimeError(f"Error running Tesseract API {endpoint}.") from ex
+
+        if OutputSchema is not None and issubclass(OutputSchema, BaseModel):
+            # Validate via schema, then dump to stay consistent with other clients
+            result = OutputSchema.model_validate(result).model_dump()
+
+        return result

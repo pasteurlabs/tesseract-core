@@ -243,7 +243,7 @@ def get_runtime_dir() -> Path:
     return Path(tesseract_core.__file__).parent / "runtime"
 
 
-def get_template_dir():
+def get_template_dir() -> Path:
     """Get the template directory for the Tesseract runtime."""
     import tesseract_core
 
@@ -345,7 +345,7 @@ def prepare_build_context(
             for dependency in remote_dependencies:
                 f.write(f"{dependency}\n")
 
-    def _ignore_pycache(_, names: list[str]) -> list[str]:
+    def _ignore_pycache(_: Any, names: list[str]) -> list[str]:
         ignore = []
         if "__pycache__" in names:
             ignore.append("__pycache__")

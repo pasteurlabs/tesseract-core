@@ -230,16 +230,16 @@ def check() -> None:
     help="Show progress bar.",
 )
 def check_gradients(
-    payload,
-    input_paths,
-    output_paths,
-    endpoints,
-    eps,
-    rtol,
-    max_evals,
-    max_failures,
-    seed,
-    show_progress,
+    payload: tuple[dict[str, Any], Optional[Path]],
+    input_paths: list[str],
+    output_paths: list[str],
+    endpoints: list[str],
+    eps: float,
+    rtol: float,
+    max_evals: int,
+    max_failures: int,
+    seed: Optional[int],
+    show_progress: bool,
 ) -> None:
     """Check gradients of endpoints against a finite difference approximation.
 
