@@ -35,7 +35,7 @@ def test_available_endpoints(built_image_name):
         assert set(vecadd.available_endpoints) == expected_endpoints
 
 
-def test_apply(built_image_name, free_port):
+def test_apply(built_image_name, dummy_tesseract_location, free_port):
     inputs = {"a": [1, 2], "b": [3, 4], "s": 1}
 
     # Test URL access
@@ -50,8 +50,28 @@ def test_apply(built_image_name, free_port):
     assert set(out.keys()) == {"result"}
     np.testing.assert_array_equal(out["result"], np.array([4.0, 6.0]))
 
-    # Test from_image
+    # Test from_image (context manager)
     with Tesseract.from_image(built_image_name) as vecadd:
+        out = vecadd.apply(inputs)
+
+    assert set(out.keys()) == {"result"}
+    np.testing.assert_array_equal(out["result"], np.array([4.0, 6.0]))
+
+    # Test from_image (serve + teardown)
+    vecadd = Tesseract.from_image(built_image_name)
+    try:
+        vecadd.serve()
+        out = vecadd.apply(inputs)
+    finally:
+        vecadd.teardown()
+
+    assert set(out.keys()) == {"result"}
+    np.testing.assert_array_equal(out["result"], np.array([4.0, 6.0]))
+
+    # Test from_tesseract_api
+    with Tesseract.from_tesseract_api(
+        dummy_tesseract_location / "tesseract_api.py"
+    ) as vecadd:
         out = vecadd.apply(inputs)
 
     assert set(out.keys()) == {"result"}
@@ -75,7 +95,6 @@ def test_apply_with_error(built_image_name):
 
 @pytest.fixture(scope="module")
 def served_tesseract_remote(built_image_name):
-    """Serve the Tesseract image."""
     # Find a free port
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.bind(("", 0))
@@ -91,16 +110,26 @@ def served_tesseract_remote(built_image_name):
 
 
 @pytest.fixture(scope="module")
-def served_tesseract_local(built_image_name):
-    """Serve the Tesseract image."""
+def served_tesseract_from_image(built_image_name):
     with Tesseract.from_image(built_image_name) as vecadd:
         yield vecadd
+
+
+@pytest.fixture(scope="module")
+def served_tesseract_module(dummy_tesseract_location):
+    vecadd = Tesseract.from_tesseract_api(dummy_tesseract_location / "tesseract_api.py")
+    yield vecadd
 
 
 @pytest.mark.parametrize(
     "endpoint_name", sorted(expected_endpoints | {"openapi_schema"})
 )
-def test_all_endpoints(endpoint_name, served_tesseract_local, served_tesseract_remote):
+def test_all_endpoints(
+    endpoint_name,
+    served_tesseract_module,
+    served_tesseract_from_image,
+    served_tesseract_remote,
+):
     """Test that all endpoints can be invoked without errors."""
     inputs = {"a": [1, 2], "b": [3, 4], "s": 1}
 
@@ -132,8 +161,13 @@ def test_all_endpoints(endpoint_name, served_tesseract_local, served_tesseract_r
     else:
         inputs = {}
 
-    # # Test from_image
-    out = getattr(served_tesseract_local, endpoint_name)
+    # Test from_tesseract_api
+    out = getattr(served_tesseract_module, endpoint_name)
+    if callable(out):
+        out(**inputs)
+
+    # Test from_image
+    out = getattr(served_tesseract_from_image, endpoint_name)
     if callable(out):
         out(**inputs)
 

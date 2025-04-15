@@ -74,6 +74,8 @@ StrictStr = Annotated[str, Strict()]
 
 
 class PipRequirements(BaseModel):
+    """Configuration options for Python environments built via pip."""
+
     provider: Literal["python-pip"]
     _filename: Literal["tesseract_requirements.txt"] = "tesseract_requirements.txt"
     _build_script: Literal["build_pip_venv.sh"] = "build_pip_venv.sh"
@@ -81,6 +83,8 @@ class PipRequirements(BaseModel):
 
 
 class CondaRequirements(BaseModel):
+    """Configuration options for Python environments built via conda."""
+
     provider: Literal["conda"]
     _filename: Literal["tesseract_environment.yaml"] = "tesseract_environment.yaml"
     _build_script: Literal["build_conda_venv.sh"] = "build_conda_venv.sh"
