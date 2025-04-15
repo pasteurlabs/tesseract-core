@@ -47,6 +47,8 @@ class CLIDockerClient:
 
             Image class has additional field `name` to store the image name that docker-py does not have.
             Every unique `image_name` will have its own image object.
+
+            Dangling images are not included in the list of images.
             """
 
             def __init__(self, json_dict: dict, repo_tag_idx: int = 0) -> None:
@@ -63,19 +65,27 @@ class CLIDockerClient:
                 return f"Image id: {self.id}, name: {self.name}, tags: {self.tags}, attrs: {self.attrs}"
 
         def get(self, image_id_or_name: str, tesseract_only: bool = True) -> Image:
-            """Returns the metadata for a specific image."""
+            """Returns the metadata for a specific image.
+
+            Params:
+                image_id_or_name: The image name or id to get.
+                tesseract_only: If True, only retrieves Tesseract images.
+
+            Returns:
+                Image object.
+            """
             if not image_id_or_name:
                 raise CLIDockerClient.Errors.DockerException(
                     "Image name cannot be empty."
                 )
 
             def is_image_id(s: str) -> bool:
-                # Check if string is image name or id so we can append tag
+                """Check if string is image name or id by checking if it's sha256 format."""
                 return bool(re.fullmatch(r"(sha256:)?[a-fA-F0-9]{12,64}", s))
 
             if ":" not in image_id_or_name:
-                is_image_id = is_image_id(image_id_or_name)
-                if not is_image_id:
+                # Check if image param is a name or id so we can append latest tag if needed
+                if not is_image_id(image_id_or_name):
                     image_id_or_name = image_id_or_name + ":latest"
 
             # Use getter func to make sure self.images is updated
@@ -93,11 +103,22 @@ class CLIDockerClient:
             )
 
         def list(self, tesseract_only: bool = True) -> list[Image]:
-            """Returns the current list of images."""
+            """Returns the current list of images.
+
+            Params:
+                tesseract_only: If True, only return Tesseract images.
+
+            Returns:
+                List of Image objects.
+            """
             return self._get_images(tesseract_only=tesseract_only)
 
         def remove(self, image: str) -> None:
-            """Remove an image (name or id) from the local Docker registry."""
+            """Remove an image (name or id) from the local Docker registry.
+
+            Params:
+                image: The image name or id to remove.
+            """
             try:
                 _ = subprocess.run(
                     ["docker", "rmi", image, "--force"],
@@ -119,7 +140,19 @@ class CLIDockerClient:
             keep_build_cache: bool = False,
             print_and_exit: bool = False,
         ) -> Image | None:
-            """Build a Docker image from a Dockerfile using BuildKit."""
+            """Build a Docker image from a Dockerfile using BuildKit.
+
+            Params:
+                path:  Path to the directory containing the Dockerfile.
+                tag:   The name of the image to build.
+                dockerfile: path within the build context to the Dockerfile.
+                inject_ssh: If True, inject SSH keys into the build.
+                keep_build_cache: If True, keep the build cache.
+                print_and_exit: If True, print the build command and exit without building.
+
+            Returns:
+                Image object if the build was successful, None otherwise.
+            """
             from tesseract_core.sdk.engine import LogPipe
 
             build_cmd = [
@@ -194,7 +227,14 @@ class CLIDockerClient:
 
         @staticmethod
         def _get_images(tesseract_only: bool = True) -> list[Image]:
-            """Gets the list of images by querying Docker CLI."""
+            """Gets the list of images by querying Docker CLI.
+
+            Params:
+                tesseract_only: If True, only return Tesseract images.
+
+            Returns:
+                List of (non-dangling) Image objects.
+            """
             images = []
             try:
                 image_ids = subprocess.run(
@@ -296,6 +336,10 @@ class CLIDockerClient:
 
                 Logs needs to be called if container is running in a detached state,
                 and we wish to retrieve the logs from the command executing in the container.
+
+                Params:
+                    stdout: If True, return stdout.
+                    stderr: If True, return stderr.
                 """
                 if stdout and stderr:
                     # use subprocess.STDOUT to combine stdout and stderr into one stream
@@ -329,7 +373,11 @@ class CLIDockerClient:
                 return getattr(result, output_attr)
 
             def wait(self) -> dict:
-                """Wait for container to finish running."""
+                """Wait for container to finish running.
+
+                Returns:
+                    A dict with the exit code of the container.
+                """
                 try:
                     result = subprocess.run(
                         ["docker", "wait", self.id],
@@ -344,8 +392,19 @@ class CLIDockerClient:
                         f"Cannot wait for container {self.id}: {ex}"
                     ) from ex
 
-            def remove(self, v: bool = False, link: bool = False, force: bool = False):
-                """Remove the container."""
+            def remove(
+                self, v: bool = False, link: bool = False, force: bool = False
+            ) -> str:
+                """Remove the container.
+
+                Params:
+                    v: If True, remove volumes associated with the container.
+                    link: If True, remove links to the container.
+                    force: If True, force remove the container.
+
+                Returns:
+                    The output of the remove command.
+                """
                 try:
                     result = subprocess.run(
                         [
@@ -376,13 +435,29 @@ class CLIDockerClient:
                 return string
 
         def list(self, all: bool = False, tesseract_only: bool = True) -> dict:
-            """Returns the current list of containers."""
+            """Returns the current list of containers.
+
+            Params:
+                all: If True, include stopped containers.
+                tesseract_only: If True, only return Tesseract containers.
+
+            Returns:
+                Dict of Container objects, with the container id as the key.
+            """
             return self._get_containers(
                 include_stopped=all, tesseract_only=tesseract_only
             )
 
         def get(self, id_or_name: str, tesseract_only: bool = True) -> Container:
-            """Returns the metadata for a specific container."""
+            """Returns the metadata for a specific container.
+
+            Params:
+                id_or_name: The container name or id to get.
+                tesseract_only: If True, only retrieves Tesseract containers.
+
+            Returns:
+                Container object.
+            """
             container_list = self.list(all=True, tesseract_only=tesseract_only)
 
             for container_obj in container_list.values():
@@ -411,23 +486,31 @@ class CLIDockerClient:
         ) -> tuple | Container:
             """Run a command in a container from an image.
 
-            Returns Container object if detach is True, otherwise returns list of stdout and stderr.
+            Params:
+                image: The image name or id to run the command in.
+                command: The command to run in the container.
+                volumes: A dict of volumes to mount in the container.
+                device_requests: A list of device requests for the container.
+                detach: If True, run the container in detached mode. Detach must be set to
+                        True if we wish to retrieve the container id of the running container,
+                        and if detach is true, we must wait on the container to finish
+                        running and retrieve the logs of the container manually.
+                remove: If remove is set to True, the container will automatically remove itself
+                        after it finishes executing the command. This means that we cannot set
+                        both detach and remove simulataneously to True or else there
+                        would be no way of retrieving the logs from the removed container.
 
-            Detach must be set to True if we wish to retrieve the container id of the running container,
-            and if detach is true, we must wait on the container to finish running and retrieve the logs
-            of the container manually.
+            Returns:
+              Container object if detach is True, otherwise returns list of stdout and stderr.
 
-            If remove is set to True, the container will automatically remove itself after it finishes executing
-            the command. This means that we cannot set both detach and remove simulataneously to True or else there
-            would be no way of retrieving the logs from the removed container.
             """
-            # Convert the parsed_volumes into a list of strings in proper argument format,
-            # `-v host_path:container_path:mode`.
             # If command is a type string and not list, make list
             if isinstance(command, str):
                 command = [command]
             logger.debug(f"Running command: {command}")
 
+            # Convert the parsed_volumes into a list of strings in proper argument format,
+            # `-v host_path:container_path:mode`.
             if not volumes:
                 volume_args = []
             else:
@@ -496,6 +579,15 @@ class CLIDockerClient:
         def _get_containers(
             include_stopped: bool = False, tesseract_only: bool = True
         ) -> dict[str, Container]:
+            """Updates and retrieves the list of containers by querying Docker CLI.
+
+            Params:
+                include_stopped: If True, include stopped containers.
+                tesseract_only: If True, only return Tesseract containers.
+
+            Returns:
+                Dict of Container objects, with the container id as the key.
+            """
             containers = {}
 
             cmd = ["docker", "ps", "-q"]
@@ -540,12 +632,27 @@ class CLIDockerClient:
             self.containers = docker_cli.Containers()
 
         def list(self, include_stopped: bool = False) -> dict:
-            """Returns the current list of projects."""
+            """Returns the current list of projects.
+
+            Params:
+                include_stopped: If True, include stopped projects.
+
+            Returns:
+                Dict of projects, with the project name as the key and a list of container ids as the value.
+            """
             self._update_projects(include_stopped)
             return self.project_container_map
 
-        def up(self, compose_fpath: str, project_name: str) -> bool:
-            """Start containers using Docker Compose template."""
+        def up(self, compose_fpath: str, project_name: str) -> str:
+            """Start containers using Docker Compose template.
+
+            Params:
+                compose_fpath: Path to the Docker Compose template.
+                project_name: Name of the project.
+
+            Returns:
+                The project name.
+            """
             logger.info("Waiting for Tesseract containers to start ...")
             try:
                 _ = subprocess.run(
@@ -583,7 +690,14 @@ class CLIDockerClient:
                 ) from ex
 
         def down(self, project_id: str) -> bool:
-            """Stop and remove containers and networks associated to a project."""
+            """Stop and remove containers and networks associated to a project.
+
+            Params:
+                project_id: The project name to stop.
+
+            Returns:
+                True if the project was stopped successfully, False otherwise.
+            """
             try:
                 __ = subprocess.run(
                     ["docker", "compose", "-p", project_id, "down"],
@@ -596,7 +710,14 @@ class CLIDockerClient:
                 return False
 
         def exists(self, project_id: str) -> bool:
-            """Check if Docker Compose project exists."""
+            """Check if Docker Compose project exists.
+
+            Params:
+                project_id: The project name to check.
+
+            Returns:
+                True if the project exists, False otherwise.
+            """
             return project_id in self.list()
 
         def _update_projects(self, include_stopped: bool = False) -> None:
@@ -660,7 +781,13 @@ def get_docker_metadata(
 ) -> dict:
     """Get metadata for Docker images/containers.
 
-    Returns a dict mapping asset ids to their metadata.
+    Params:
+        docker_asset_ids: List of image/container ids to get metadata for.
+        is_image: If True, get metadata for images. If False, get metadata for containers.
+        tesseract_only: If True, only get metadata for Tesseract images/containers.
+
+    Returns:
+        A dict mapping asset ids to their metadata.
     """
     if not docker_asset_ids:
         return {}

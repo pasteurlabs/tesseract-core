@@ -193,7 +193,7 @@ def test_container_volume_mounts(
         # Pytest creates the tmp_path fixture with drwx------ mode, we need others
         # to be able to read and execute the path so the Docker volume is readable
         # from within the container
-        tmp_path.chmod(0o750)
+        tmp_path.chmod(0o0707)
 
         dest = Path("/foo/")
         bar_file = dest / "hello.txt"
