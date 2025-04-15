@@ -629,7 +629,7 @@ class CLIDockerClient:
     class Compose:
         """Class to interface with docker projects."""
 
-        def __init__(self, docker_cli):
+        def __init__(self, docker_cli: CLIDockerClient) -> None:
             self.project_container_map = {}  # Mapping from project ID to list of container ids
             self.containers = docker_cli.Containers()
 
@@ -759,7 +759,7 @@ class CLIDockerClient:
         class BuildError(DockerException):
             """Raised when a build fails."""
 
-            def __init__(self, build_log):
+            def __init__(self, build_log: list) -> None:
                 self.build_log = build_log
 
         class ContainerError(DockerException):
@@ -779,7 +779,7 @@ class CLIDockerClient:
 
 
 def get_docker_metadata(
-    docker_asset_ids: list[str], is_image: bool = False, tesseract_only=True
+    docker_asset_ids: list[str], is_image: bool = False, tesseract_only: bool = True
 ) -> dict:
     """Get metadata for Docker images/containers.
 
