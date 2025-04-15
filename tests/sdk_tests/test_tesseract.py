@@ -176,21 +176,21 @@ def test_encode_array(b64, expected_data):
                 "dtype": "float32",
                 "data": {"buffer": [1.0, 2.0, 3.0], "encoding": "raw"},
             },
-            [1.0, 2.0, 3.0],
+            np.array([1.0, 2.0, 3.0], dtype="float32"),
         ),
         (
             {
-                "shape": (3,),
+                "shape": (1, 3),
                 "dtype": "float32",
                 "data": {"buffer": "AACAPwAAAEAAAEBA", "encoding": "base64"},
             },
-            [1.0, 2.0, 3.0],
+            np.array([[1.0, 2.0, 3.0]], dtype="float32"),
         ),
     ],
 )
 def test_decode_array(encoded, expected):
     decoded = _decode_array(encoded)
-    assert np.all(decoded == expected)
+    np.testing.assert_array_equal(decoded, expected, strict=True)
 
 
 def test_tree_map():
