@@ -187,36 +187,58 @@ def docker_client():
     return docker_client_module.CLIDockerClient()
 
 
-@pytest.fixture
-def dummy_image_name(docker_client):
-    """Create a dummy image name, and clean up after the test."""
-    from tesseract_core.sdk.docker_client import ImageNotFound
+@pytest.fixture(scope="module")
+def cleanup(docker_client, request):
+    """Clean up all tesseracts created by the tests."""
+    # Shared object to track what objects need to be cleaned up in each test
+    context = {"images": [], "project_ids": [], "containers": []}
 
+    def cleanup_func():
+        # Teardown projects first
+        for project_id in context["project_ids"]:
+            if docker_client.compose.exists(project_id):
+                docker_client.compose.down(project_id)
+
+        # Remove containers
+        for container in context["containers"]:
+            try:
+                container_obj = docker_client.containers.get(container)
+            except docker_client.Errors.ContainerError:
+                continue
+            container_obj.remove(v=True, force=True)
+
+        # Remove images
+        if os.environ.get("TESSERACT_KEEP_BUILD_CACHE", "0").lower() not in (
+            "1",
+            "true",
+        ):
+            for image in context["images"]:
+                try:
+                    docker_client.images.get(image)
+                    docker_client.images.remove(image)
+                except docker_client.Errors.ImageNotFound:
+                    continue
+
+    request.addfinalizer(cleanup_func)
+    return context
+
+
+@pytest.fixture
+def dummy_image_name(cleanup):
+    """Create a dummy image name, and clean up after the test."""
     image_id = "".join(random.choices(string.ascii_lowercase + string.digits, k=16))
     image_name = f"tmp_tesseract_image_{image_id}"
-    try:
-        yield image_name
-    finally:
-        try:
-            docker_client.images.remove(image_name)
-        except ImageNotFound:
-            pass
+    cleanup["images"].append(image_name)
+    yield image_name
 
 
 @pytest.fixture(scope="module")
-def shared_dummy_image_name(docker_client):
+def shared_dummy_image_name(cleanup):
     """Create a dummy image name, and clean up after all tests."""
-    from tesseract_core.sdk.docker_client import ImageNotFound
-
     image_id = "".join(random.choices(string.ascii_lowercase + string.digits, k=16))
     image_name = f"tmp_tesseract_image_{image_id}"
-    try:
-        yield image_name
-    finally:
-        try:
-            docker_client.images.remove(image_name)
-        except ImageNotFound:
-            pass
+    cleanup["images"].append(image_name)
+    yield image_name
 
 
 @pytest.fixture

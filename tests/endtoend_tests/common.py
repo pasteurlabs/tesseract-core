@@ -25,6 +25,15 @@ def image_exists(client, image_name, tesseract_only: bool = True):
         return False
 
 
+def container_exists(client, container_name_or_id, tesseract_only: bool = True):
+    """Checks if containers exists."""
+    try:
+        client.containers.get(container_name_or_id, tesseract_only)
+        return True
+    except client.Errors.ContainerError:
+        return False
+
+
 def print_debug_info(result):
     """Print debug info from result of a CLI command if it failed."""
     if result.exit_code == 0:

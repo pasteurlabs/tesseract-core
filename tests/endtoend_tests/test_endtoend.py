@@ -143,59 +143,48 @@ def test_tesseract_run_stdout(built_image_name):
             raise
 
 
-def test_tesseract_serve_pipeline(docker_client, built_image_name):
+def test_tesseract_serve_pipeline(docker_client, built_image_name, cleanup):
     cli_runner = CliRunner(mix_stderr=False)
     project_id = None
-    try:
-        run_res = cli_runner.invoke(
-            app,
-            [
-                "serve",
-                built_image_name,
-            ],
-            catch_exceptions=False,
-        )
+    run_res = cli_runner.invoke(
+        app,
+        [
+            "serve",
+            built_image_name,
+        ],
+        catch_exceptions=False,
+    )
 
-        assert run_res.exit_code == 0, run_res.stderr
-        assert run_res.stdout
+    assert run_res.exit_code == 0, run_res.stderr
+    assert run_res.stdout
 
-        project_meta = json.loads(run_res.stdout)
+    project_meta = json.loads(run_res.stdout)
 
-        project_id = project_meta["project_id"]
-        project_containers = project_meta["containers"][0]["name"]
-        if not project_containers:
-            raise ValueError(f"Could not find container for project '{project_id}'")
+    project_id = project_meta["project_id"]
+    cleanup["project_ids"].append(project_id)
+    project_containers = project_meta["containers"][0]["name"]
+    if not project_containers:
+        raise ValueError(f"Could not find container for project '{project_id}'")
 
-        project_container = docker_client.containers.get(project_containers)
-        assert project_container.name == project_meta["containers"][0]["name"]
-        assert project_container.host_port == project_meta["containers"][0]["port"]
+    project_container = docker_client.containers.get(project_containers)
+    assert project_container.name == project_meta["containers"][0]["name"]
+    assert project_container.host_port == project_meta["containers"][0]["port"]
 
-        # Ensure served Tesseract is usable
-        res = requests.get(f"http://localhost:{project_container.host_port}/health")
-        assert res.status_code == 200, res.text
+    # Ensure served Tesseract is usable
+    res = requests.get(f"http://localhost:{project_container.host_port}/health")
+    assert res.status_code == 200, res.text
 
-        # Ensure project id is shown in `tesseract ps`
-        run_res = cli_runner.invoke(
-            app,
-            ["ps"],
-            env={"COLUMNS": "1000"},
-            catch_exceptions=False,
-        )
-        assert run_res.exit_code == 0, run_res.stderr
-        assert project_id in run_res.stdout
-        assert project_container.host_port in run_res.stdout
-        assert project_container.short_id in run_res.stdout
-    finally:
-        if project_id:
-            run_res = cli_runner.invoke(
-                app,
-                [
-                    "teardown",
-                    project_id,
-                ],
-                catch_exceptions=False,
-            )
-            assert run_res.exit_code == 0, run_res.stderr
+    # Ensure project id is shown in `tesseract ps`
+    run_res = cli_runner.invoke(
+        app,
+        ["ps"],
+        env={"COLUMNS": "1000"},
+        catch_exceptions=False,
+    )
+    assert run_res.exit_code == 0, run_res.stderr
+    assert project_id in run_res.stdout
+    assert project_container.host_port in run_res.stdout
+    assert project_container.short_id in run_res.stdout
 
 
 @pytest.mark.parametrize("tear_all", [True, False])
@@ -320,7 +309,7 @@ def test_tesseract_serve_ports_error(built_image_name):
 
 
 @pytest.mark.parametrize("port", ["34567", "34567-34569"])
-def test_tesseract_serve_ports(built_image_name, port):
+def test_tesseract_serve_ports(built_image_name, port, cleanup):
     """Try to serve multiple Tesseracts on multiple ports."""
     cli_runner = CliRunner(mix_stderr=False)
     project_id = None
@@ -336,39 +325,27 @@ def test_tesseract_serve_ports(built_image_name, port):
 
     project_meta = json.loads(run_res.stdout)
     project_id = project_meta["project_id"]
+    cleanup["project_ids"].append(project_id)
 
-    # Wrap test in try-finally to ensure teardown of served Tesseract.
-    try:
-        # Ensure that actual used ports are in the specified port range.
-        test_ports = port.split("-")
-        start_port = int(test_ports[0])
-        end_port = int(test_ports[1]) if len(test_ports) > 1 else start_port
+    # Ensure that actual used ports are in the specified port range.
+    test_ports = port.split("-")
+    start_port = int(test_ports[0])
+    end_port = int(test_ports[1]) if len(test_ports) > 1 else start_port
 
-        port = int(project_meta["containers"][0]["port"])
-        assert port in range(start_port, end_port + 1)
+    port = int(project_meta["containers"][0]["port"])
+    assert port in range(start_port, end_port + 1)
 
-        # Ensure specified ports are in `tesseract ps` and served Tesseracts are usable.
-        run_res = cli_runner.invoke(
-            app,
-            ["ps"],
-            env={"COLUMNS": "1000"},
-            catch_exceptions=False,
-        )
+    # Ensure specified ports are in `tesseract ps` and served Tesseracts are usable.
+    run_res = cli_runner.invoke(
+        app,
+        ["ps"],
+        env={"COLUMNS": "1000"},
+        catch_exceptions=False,
+    )
 
-        res = requests.get(f"http://localhost:{port}/health")
-        assert res.status_code == 200, res.text
-        assert str(port) in run_res.stdout
-    finally:
-        if project_id:
-            run_res = cli_runner.invoke(
-                app,
-                [
-                    "teardown",
-                    project_id,
-                ],
-                catch_exceptions=False,
-            )
-            assert run_res.exit_code == 0, run_res.stderr
+    res = requests.get(f"http://localhost:{port}/health")
+    assert res.status_code == 200, res.text
+    assert str(port) in run_res.stdout
 
 
 def test_tesseract_serve_with_volumes(built_image_name, tmp_path, docker_client):
