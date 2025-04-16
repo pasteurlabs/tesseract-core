@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from tesseract_core.sdk import docker_client as docker_client_module
+# NOTE: Do NOT import tesseract_core here, as it will cause typeguard to fail
 
 here = Path(__file__).parent
 
@@ -48,6 +48,8 @@ def pytest_collection_modifyitems(config, items):
     # Add skip marker to endtoend tests if not explicitly enabled
     # or if Docker is not available
     def has_docker():
+        from tesseract_core.sdk import docker_client as docker_client_module
+
         try:
             docker = docker_client_module.CLIDockerClient()
             docker.info()
@@ -181,6 +183,8 @@ def free_port():
 
 @pytest.fixture(scope="session")
 def docker_client():
+    from tesseract_core.sdk import docker_client as docker_client_module
+
     return docker_client_module.CLIDockerClient()
 
 
@@ -198,7 +202,7 @@ def dummy_image_name(docker_client):
         ):
             try:
                 docker_client.images.remove(image_name)
-            except docker_client_module.CLIDockerClient.Errors.ImageNotFound:
+            except docker_client.Errors.ImageNotFound:
                 pass
 
 
@@ -216,13 +220,14 @@ def shared_dummy_image_name(docker_client):
         ):
             try:
                 docker_client.images.remove(image_name)
-            except docker_client_module.CLIDockerClient.Errors.ImageNotFound:
+            except docker_client.Errors.ImageNotFound:
                 pass
 
 
 @pytest.fixture
 def mocked_docker(monkeypatch):
     """Mock CLIDockerClient class."""
+    from tesseract_core.sdk import docker_client as docker_client_module
     from tesseract_core.sdk import engine
 
     class MockedContainer(docker_client_module.CLIDockerClient.Containers.Container):
