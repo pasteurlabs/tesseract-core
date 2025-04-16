@@ -64,7 +64,9 @@ class CLIDockerClient:
             def __str__(self) -> str:
                 return f"Image id: {self.id}, name: {self.name}, tags: {self.tags}, attrs: {self.attrs}"
 
-        def get(self, image_id_or_name: str, tesseract_only: bool = True) -> Image:
+        def get(
+            self, image_id_or_name: str, tesseract_only: bool = True
+        ) -> CLIDockerClient.Images.Image:
             """Returns the metadata for a specific image.
 
             Params:
@@ -102,7 +104,9 @@ class CLIDockerClient:
                 f"Image {image_id_or_name} not found."
             )
 
-        def list(self, tesseract_only: bool = True) -> list[Image]:
+        def list(
+            self, tesseract_only: bool = True
+        ) -> list[CLIDockerClient.Images.Image]:
             """Returns the current list of images.
 
             Params:
@@ -139,7 +143,7 @@ class CLIDockerClient:
             inject_ssh: bool = False,
             keep_build_cache: bool = False,
             print_and_exit: bool = False,
-        ) -> Image | None:
+        ) -> CLIDockerClient.Images.Image | None:
             """Build a Docker image from a Dockerfile using BuildKit.
 
             Params:
@@ -228,7 +232,9 @@ class CLIDockerClient:
             return self.get(tag)
 
         @staticmethod
-        def _get_images(tesseract_only: bool = True) -> list[Image]:
+        def _get_images(
+            tesseract_only: bool = True,
+        ) -> list[CLIDockerClient.Images.Image]:
             """Gets the list of images by querying Docker CLI.
 
             Params:

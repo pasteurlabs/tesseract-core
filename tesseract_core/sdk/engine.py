@@ -424,7 +424,7 @@ def build_tesseract(
     return image
 
 
-def teardown(project_ids: list, tear_all: bool = False) -> None:
+def teardown(project_ids: list | str, tear_all: bool = False) -> None:
     """Teardown Tesseract image(s) running in a Docker Compose project.
 
     Args:
