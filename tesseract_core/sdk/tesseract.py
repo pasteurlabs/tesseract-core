@@ -9,6 +9,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from functools import cached_property, wraps
 from pathlib import Path
+from types import ModuleType
 from typing import Any, Callable
 from urllib.parse import urlparse, urlunparse
 
@@ -127,9 +128,9 @@ class Tesseract:
     @classmethod
     def from_tesseract_api(
         cls,
-        tesseract_api_path: str | Path,
+        tesseract_api: str | Path | ModuleType,
     ) -> Tesseract:
-        """Create a Tesseract instance from a Tesseract API path.
+        """Create a Tesseract instance from a Tesseract API module.
 
         Warning: This does not use a containerized Tesseract, but rather
         imports the Tesseract API directly. This is useful for debugging,
@@ -137,16 +138,33 @@ class Tesseract:
         installed locally.
 
         Args:
-            tesseract_api_path: Path to the `tesseract_api.py` file.
+            tesseract_api: Path to the `tesseract_api.py` file, or an
+                already imported Tesseract API module.
 
         Returns:
             A Tesseract instance.
         """
+        if isinstance(tesseract_api, str | Path):
+            from tesseract_core.runtime.core import load_module_from_path
+
+            tesseract_api_path = Path(tesseract_api).resolve(strict=True)
+            if not tesseract_api_path.is_file():
+                raise RuntimeError(
+                    f"Tesseract API path {tesseract_api_path} is not a file."
+                )
+
+            try:
+                tesseract_api = load_module_from_path(tesseract_api_path)
+            except ImportError as ex:
+                raise RuntimeError(
+                    f"Cannot load Tesseract API from {tesseract_api_path}"
+                ) from ex
+
         obj = cls.__new__(cls)
         obj._spawn_config = None
         obj._serve_context = None
         obj._lastlog = None
-        obj._client = LocalClient(tesseract_api_path)
+        obj._client = LocalClient(tesseract_api)
         return obj
 
     def __enter__(self) -> Tesseract:
@@ -584,22 +602,9 @@ class HTTPClient:
 class LocalClient:
     """Local Client for Tesseracts."""
 
-    def __init__(self, tesseract_api_path: str | Path) -> None:
-        from tesseract_core.runtime.core import create_endpoints, load_module_from_path
+    def __init__(self, tesseract_api: ModuleType) -> None:
+        from tesseract_core.runtime.core import create_endpoints
         from tesseract_core.runtime.serve import create_rest_api
-
-        tesseract_api_path = Path(tesseract_api_path).resolve(strict=True)
-        if not tesseract_api_path.is_file():
-            raise RuntimeError(
-                f"Tesseract API path {tesseract_api_path} is not a file."
-            )
-
-        try:
-            tesseract_api = load_module_from_path(tesseract_api_path)
-        except ImportError as ex:
-            raise RuntimeError(
-                f"Cannot load Tesseract API from {tesseract_api_path}"
-            ) from ex
 
         self._endpoints = {
             func.__name__: func for func in create_endpoints(tesseract_api)
