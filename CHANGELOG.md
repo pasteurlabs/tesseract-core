@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.4] - 2025-04-17
+
+### Features
+
+- Allow creating tesseract objects from python modules (#122)
+- Also allow passing an imported module to Tesseract.from_tesseract_api (#130)
+
 ## [0.8.3] - 2025-04-14
 
 ### Bug Fixes
