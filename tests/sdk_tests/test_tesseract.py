@@ -45,6 +45,28 @@ def test_Tesseract_init():
         pass
 
 
+def test_Tesseract_from_tesseract_api(dummy_tesseract_location, dummy_tesseract_module):
+    all_endpoints = [
+        "apply",
+        "jacobian",
+        "jacobian_vector_product",
+        "vector_jacobian_product",
+        "health",
+        "input_schema",
+        "output_schema",
+        "abstract_eval",
+    ]
+
+    t = Tesseract.from_tesseract_api(dummy_tesseract_location / "tesseract_api.py")
+    endpoints = t.available_endpoints
+    assert endpoints == all_endpoints
+
+    # should also work when importing the module
+    t = Tesseract.from_tesseract_api(dummy_tesseract_module)
+    endpoints = t.available_endpoints
+    assert endpoints == all_endpoints
+
+
 def test_Tesseract_from_image(mock_serving, mock_clients):
     # Object is built and has the correct attributes set
     t = Tesseract.from_image("sometesseract:0.2.3", volumes=["/my/files"], gpus=["all"])
