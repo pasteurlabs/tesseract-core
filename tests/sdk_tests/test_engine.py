@@ -19,7 +19,7 @@ from tesseract_core.sdk.api_parse import (
     validate_tesseract_api,
 )
 from tesseract_core.sdk.cli import AVAILABLE_RECIPES
-from tesseract_core.sdk.docker_client import CLIDockerClient
+from tesseract_core.sdk.docker_client import Image
 from tesseract_core.sdk.exceptions import UserError
 
 
@@ -60,7 +60,7 @@ def test_build_tesseract(dummy_tesseract_package, mocked_docker, generate_only, 
         assert "docker buildx build" in caplog.text
         assert str(out) in caplog.text
     else:
-        assert isinstance(out, CLIDockerClient.Images.Image)
+        assert isinstance(out, Image)
         assert out.attrs == mocked_docker.images.get(image_name).attrs
 
 

@@ -86,9 +86,9 @@ def unit_tesseract_path(request) -> Path:
 
 
 @pytest.fixture()
-def dummy_docker_file(tmpdir):
+def dummy_docker_file(tmp_path):
     """Create a dummy Dockerfile for testing."""
-    dockerfile_path = tmpdir / "Dockerfile"
+    dockerfile_path = tmp_path / "Dockerfile"
     dockerfile_content = """
         FROM alpine
 
@@ -191,6 +191,8 @@ def docker_client():
 @pytest.fixture
 def dummy_image_name(docker_client):
     """Create a dummy image name, and clean up after the test."""
+    from tesseract_core.sdk.docker_client import ImageNotFound
+
     image_id = "".join(random.choices(string.ascii_lowercase + string.digits, k=16))
     image_name = f"tmp_tesseract_image_{image_id}"
     try:
@@ -202,13 +204,15 @@ def dummy_image_name(docker_client):
         ):
             try:
                 docker_client.images.remove(image_name)
-            except docker_client.Errors.ImageNotFound:
+            except ImageNotFound:
                 pass
 
 
 @pytest.fixture(scope="module")
 def shared_dummy_image_name(docker_client):
     """Create a dummy image name, and clean up after all tests."""
+    from tesseract_core.sdk.docker_client import ImageNotFound
+
     image_id = "".join(random.choices(string.ascii_lowercase + string.digits, k=16))
     image_name = f"tmp_tesseract_image_{image_id}"
     try:
@@ -220,17 +224,18 @@ def shared_dummy_image_name(docker_client):
         ):
             try:
                 docker_client.images.remove(image_name)
-            except docker_client.Errors.ImageNotFound:
+            except ImageNotFound:
                 pass
 
 
 @pytest.fixture
 def mocked_docker(monkeypatch):
     """Mock CLIDockerClient class."""
-    from tesseract_core.sdk import docker_client as docker_client_module
+    import tesseract_core.sdk.docker_client
     from tesseract_core.sdk import engine
+    from tesseract_core.sdk.docker_client import CLIDockerClient, Container, Image
 
-    class MockedContainer(docker_client_module.CLIDockerClient.Containers.Container):
+    class MockedContainer(Container):
         """Mock Container class."""
 
         def __init__(self, return_args: dict):
@@ -274,14 +279,14 @@ def mocked_docker(monkeypatch):
 
             @staticmethod
             def get(name: str) -> None:
-                """Mock of CLIDockerClient.Images.get."""
+                """Mock of CLIDockerClient.images.get."""
                 return MockedDocker.images.list()[0]
 
             @staticmethod
-            def list() -> list[docker_client_module.CLIDockerClient.Images.Image]:
-                """Mock of CLIDockerClient.Images.list."""
+            def list() -> list[Image]:
+                """Mock of CLIDockerClient.images.list."""
                 return [
-                    docker_client_module.CLIDockerClient.Images.Image(
+                    Image(
                         {
                             "Id": "sha256:123456789abcdef",
                             "RepoTags": ["vectoradd:latest"],
@@ -289,7 +294,7 @@ def mocked_docker(monkeypatch):
                             "Config": {"Env": ["TESSERACT_NAME=vectoradd"]},
                         },
                     ),
-                    docker_client_module.CLIDockerClient.Images.Image(
+                    Image(
                         {
                             "Id": "sha256:48932484029303",
                             "RepoTags": ["hello-world:latest"],
@@ -300,11 +305,9 @@ def mocked_docker(monkeypatch):
                 ]
 
             @staticmethod
-            def buildx(
-                *args, print_and_exit=False, **kwargs
-            ) -> docker_client_module.CLIDockerClient.Images:
+            def buildx(*args, print_and_exit=False, **kwargs) -> Image:
                 if print_and_exit:
-                    client = docker_client_module.CLIDockerClient()
+                    client = CLIDockerClient()
                     return client.images.buildx(
                         *args, print_and_exit=print_and_exit, **kwargs
                     )
@@ -313,12 +316,12 @@ def mocked_docker(monkeypatch):
         class containers:
             @staticmethod
             def get(name: str) -> MockedContainer:
-                """Mock of CLIDockerClient.Containers.get."""
+                """Mock of CLIDockerClient.containers.get."""
                 return MockedDocker.containers.list()[0]
 
             @staticmethod
             def list() -> list[MockedContainer]:
-                """Mock of CLIDockerClient.Containers.list."""
+                """Mock of CLIDockerClient.containers.list."""
                 return [MockedContainer({"TESSERACT_NAME": "vectoradd"})]
 
             @staticmethod
@@ -337,19 +340,19 @@ def mocked_docker(monkeypatch):
 
             @staticmethod
             def up(compose_fpath: str, project_name: str) -> str:
-                """Mock of CLIDockerClient.Compose.up."""
+                """Mock of CLIDockerClient.compose.up."""
                 created_ids.add(project_name)
                 return project_name
 
             @staticmethod
             def down(project_id: str) -> bool:
-                """Mock of CLIDockerClient.Compose.down."""
+                """Mock of CLIDockerClient.compose.down."""
                 created_ids.remove(project_id)
                 return True
 
             @staticmethod
             def exists(project_id: str) -> bool:
-                """Mock of CLIDockerClient.Compose.exists."""
+                """Mock of CLIDockerClient.compose.exists."""
                 return project_id in created_ids
 
     def mocked_subprocess_run(*args, **kwargs):
@@ -359,7 +362,9 @@ def mocked_docker(monkeypatch):
         )
 
     mock_instance = MockedDocker()
-    monkeypatch.setattr(docker_client_module.subprocess, "run", mocked_subprocess_run)
+    monkeypatch.setattr(
+        tesseract_core.sdk.docker_client.subprocess, "run", mocked_subprocess_run
+    )
     monkeypatch.setattr(engine, "docker_client", mock_instance)
 
     yield mock_instance

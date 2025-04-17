@@ -29,7 +29,15 @@ from .api_parse import (
     ValidationError,
     get_non_base_fields_in_tesseract_config,
 )
-from .docker_client import CLIDockerClient
+from .docker_client import (
+    APIError,
+    BuildError,
+    CLIDockerClient,
+    Container,
+    ContainerError,
+    Image,
+    ImageNotFound,
+)
 from .exceptions import UserError
 from .logs import DEFAULT_CONSOLE, set_logger
 
@@ -296,9 +304,9 @@ def build_image(
                 keep_build_cache=keep_build_cache,
                 generate_only=generate_only,
             )
-    except CLIDockerClient.Errors.BuildError as e:
+    except BuildError as e:
         raise UserError(f"Error building Tesseract: {e}") from e
-    except CLIDockerClient.Errors.APIError as e:
+    except APIError as e:
         raise UserError(f"Docker server error: {e}") from e
     except TypeError as e:
         raise UserError(f"Input error building Tesseract: {e}") from e
@@ -516,7 +524,7 @@ def _display_tesseract_containers_meta() -> None:
 
 
 def _get_tesseract_env_vals(
-    docker_asset: CLIDockerClient.Images.Image | CLIDockerClient.Containers.Container,
+    docker_asset: Image | Container,
 ) -> dict:
     """Convert Tesseract environment variables from list to dictionary."""
     env_vals = [s for s in docker_asset.attrs["Config"]["Env"] if "TESSERACT_" in s]
@@ -524,7 +532,7 @@ def _get_tesseract_env_vals(
 
 
 def _find_tesseract_project(
-    tesseract: CLIDockerClient.Containers.Container,
+    tesseract: Container,
 ) -> str:
     """Find the Tesseract Project ID for a given tesseract."""
     if tesseract.project_id is not None:
@@ -752,15 +760,15 @@ def run_container(
             tesseract_image, cmd, args, volumes=volume, gpus=gpus
         )
 
-    except CLIDockerClient.Errors.ImageNotFound as e:
+    except ImageNotFound as e:
         raise UserError(
             "Tesseract image not found. "
             f"Are you sure your tesseract image name is {tesseract_image}?\n\n{e}"
         ) from e
 
     except (
-        CLIDockerClient.Errors.APIError,
-        CLIDockerClient.Errors.ContainerError,
+        APIError,
+        ContainerError,
     ) as e:
         if "No such command" in str(e):
             error_string = f"Error running Tesseract '{tesseract_image}' \n\n Error: Unimplemented command '{cmd}'.  "

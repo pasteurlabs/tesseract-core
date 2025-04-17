@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from common import image_exists
 
-from tesseract_core.sdk.docker_client import CLIDockerClient
+from tesseract_core.sdk.docker_client import ContainerError, ImageNotFound
 
 
 @pytest.fixture()
@@ -20,9 +20,19 @@ def docker_client_built_image_name(
     """Build the dummy image for the tests."""
     image_name = "docker_client_create_image_test:dummy"
 
-    docker_client.images.buildx(dummy_tesseract_location, image_name, dummy_docker_file)
+    docker_client.images.buildx(
+        dummy_tesseract_location, image_name, dummy_docker_file, keep_build_cache=True
+    )
     image = docker_client.images.get(image_name)
-    yield image.name
+
+    try:
+        yield image.name
+    finally:
+        try:
+            docker_client.images.remove(image.name)
+        except ImageNotFound:
+            # already removed
+            pass
 
 
 def test_get_image(
@@ -30,43 +40,36 @@ def test_get_image(
     docker_client_built_image_name,
 ):
     """Test image retrieval."""
-    try:
-        # Get the image
-        image = docker_client.images.get(docker_client_built_image_name)
-        assert image is not None
-        assert docker_client_built_image_name == image.name
+    # Get the image
+    image = docker_client.images.get(docker_client_built_image_name)
+    assert image is not None
+    assert docker_client_built_image_name == image.name
 
-        # Check the custom str function
-        assert (
-            str(image)
-            == f"Image id: {image.id}, name: {image.name}, tags: {image.tags}, attrs: {image.attrs}"
-        )
+    # Check the custom str function
+    assert (
+        str(image)
+        == f"Image id: {image.id}, name: {image.name}, tags: {image.tags}, attrs: {image.attrs}"
+    )
 
-        # Check that every image listed by docker cli can be found
-        # Dangling images are not listed by the client
-        image_ids = subprocess.run(
-            [
-                "docker",
-                "images",
-                "--filter",
-                "dangling=false",
-                "-q",
-            ],  # List only image IDs
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        image_ids = image_ids.stdout.strip().split("\n")
-        # Filter list to exclude empty strings.
-        image_ids = [image_id for image_id in image_ids if image_id]
-        for image_id in image_ids:
-            assert image_exists(docker_client, image_id, tesseract_only=False)
-
-    finally:
-        if image:
-            # Remove the image
-            docker_client.images.remove(image.name)
-            assert not image_exists(docker_client, docker_client_built_image_name)
+    # Check that every image listed by docker cli can be found
+    # Dangling images are not listed by the client
+    image_ids = subprocess.run(
+        [
+            "docker",
+            "images",
+            "--filter",
+            "dangling=false",
+            "-q",
+        ],  # List only image IDs
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    image_ids = image_ids.stdout.strip().split("\n")
+    # Filter list to exclude empty strings.
+    image_ids = [image_id for image_id in image_ids if image_id]
+    for image_id in image_ids:
+        assert image_exists(docker_client, image_id, tesseract_only=False)
 
 
 def test_create_image(
@@ -131,21 +134,13 @@ def test_create_image(
 
     finally:
         # Clean up the images (using different methods)
-        try:
-            if image:
-                docker_client.images.remove(image.name)
-                assert not image_exists(docker_client, docker_client_built_image_name)
+        if image1:
+            docker_client.images.remove(image1.id)
+            assert not image_exists(docker_client, image1_name)
 
-            if image1:
-                docker_client.images.remove(image1.id)
-                assert not image_exists(docker_client, image1_name)
-
-            if image2:
-                docker_client.images.remove(image2.id)
-                assert not image_exists(docker_client, image2_name)
-
-        except CLIDockerClient.Errors.ImageNotFound:
-            pass
+        if image2:
+            docker_client.images.remove(image2.id)
+            assert not image_exists(docker_client, image2_name)
 
 
 def test_create_container(docker_client, docker_client_built_image_name):
@@ -184,22 +179,22 @@ def test_create_container(docker_client, docker_client_built_image_name):
             if container:
                 container.remove(v=True, force=True)
 
-            # Check that the container is removed
-            containers = docker_client.containers.list()
-            assert container.id not in containers.keys()
-        except CLIDockerClient.Errors.ContainerError:
+                # Check that the container is removed
+                containers = docker_client.containers.list()
+                assert container.id not in containers.keys()
+        except ContainerError:
             pass
 
         # Image has to be removed after container is removed
         try:
             if docker_client_built_image_name:
                 docker_client.images.remove(docker_client_built_image_name)
-        except CLIDockerClient.Errors.ImageNotFound:
+        except ImageNotFound:
             pass
 
         try:
             docker_client.containers.get(container.id)
-        except CLIDockerClient.Errors.ContainerError:
+        except ContainerError:
             pass
 
 
@@ -262,14 +257,14 @@ def test_container_volume_mounts(
         try:
             if docker_client_built_image_name:
                 docker_client.images.remove(docker_client_built_image_name)
-        except CLIDockerClient.Errors.ImageNotFound:
+        except ImageNotFound:
             pass
 
         try:
             # Clean up the container
             if container1:
                 container1.remove(v=True, force=True)
-        except CLIDockerClient.Errors.ContainerError:
+        except ContainerError:
             pass
 
 
@@ -288,7 +283,7 @@ def test_compose_up_down(docker_client, tmp_path, docker_client_built_image_name
         compose_file.write_text(compose_content)
         # Run docker-compose up
         project_name = docker_client.compose.up(
-            compose_file, "docker_client_compose_test"
+            str(compose_file), "docker_client_compose_test"
         )
         assert project_name == "docker_client_compose_test"
 
@@ -306,7 +301,7 @@ def test_compose_up_down(docker_client, tmp_path, docker_client_built_image_name
 
         # Create a second project
         project_name1 = docker_client.compose.up(
-            compose_file, "docker_client_compose_test_1"
+            str(compose_file), "docker_client_compose_test_1"
         )
         # Check both projects exist
         assert docker_client.compose.exists(project_name)
@@ -336,7 +331,7 @@ def test_compose_error(docker_client, tmp_path, docker_client_built_image_name):
             image: {docker_client_built_image_name}
     """)
     compose_file.write_text(compose_content)
-    with pytest.raises(CLIDockerClient.Errors.ContainerError) as e:
-        docker_client.compose.up(compose_file, "docker_client_compose_test")
+    with pytest.raises(ContainerError) as e:
+        docker_client.compose.up(str(compose_file), "docker_client_compose_test")
     # Check that the container's logs were printed to stderr
     assert "Failed to start Tesseract container" in str(e.value)

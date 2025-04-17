@@ -7,6 +7,7 @@ import traceback
 from typer.testing import CliRunner
 
 from tesseract_core.sdk.cli import app
+from tesseract_core.sdk.docker_client import ImageNotFound
 
 
 def image_exists(client, image_name_or_id, tesseract_only: bool = True):
@@ -14,7 +15,7 @@ def image_exists(client, image_name_or_id, tesseract_only: bool = True):
     try:
         client.images.get(image_name_or_id, tesseract_only)
         return True
-    except client.Errors.ImageNotFound:
+    except ImageNotFound:
         return False
 
 

@@ -28,7 +28,14 @@ from pip._internal.req.req_file import (
 )
 
 from .api_parse import TesseractConfig, get_config, validate_tesseract_api
-from .docker_client import CLIDockerClient
+from .docker_client import (
+    APIError,
+    BuildError,
+    CLIDockerClient,
+    Container,
+    ContainerError,
+    Image,
+)
 from .exceptions import UserError
 
 logger = logging.getLogger("tesseract")
@@ -99,7 +106,7 @@ def needs_docker(func: Callable) -> Callable:
     def wrapper_needs_docker(*args: Any, **kwargs: Any) -> None:
         try:
             docker_client.info()
-        except (CLIDockerClient.Errors.APIError, RuntimeError) as ex:
+        except (APIError, RuntimeError) as ex:
             raise UserError(
                 "Could not reach Docker daemon, check if it is running."
             ) from ex
@@ -334,7 +341,7 @@ def build_tesseract(
     config_override: tuple[tuple[list[str], str], ...] = (),
     keep_build_cache: bool = False,
     generate_only: bool = False,
-) -> CLIDockerClient.Images.Image | Path:
+) -> Image | Path:
     """Build a new Tesseract from a context directory.
 
     Args:
@@ -350,7 +357,7 @@ def build_tesseract(
         generate_only: only generate the build context but do not build the image.
 
     Returns:
-        CLIDockerClient.Images.Image representing the built Tesseract image,
+        Image object representing the built Tesseract image,
         or path to build directory if `generate_only` is True.
     """
     validate_tesseract_api(src_dir)
@@ -395,12 +402,12 @@ def build_tesseract(
             keep_build_cache=keep_build_cache,
             print_and_exit=generate_only,
         )
-    except CLIDockerClient.Errors.BuildError as e:
+    except BuildError as e:
         logger.warning("Build failed with logs:")
         for line in e.build_log:
             logger.warning(line)
         raise UserError("Image build failure. See above logs for details.") from e
-    except CLIDockerClient.Errors.APIError as e:
+    except APIError as e:
         raise UserError(f"Docker server error: {e}") from e
     except TypeError as e:
         raise UserError(f"Input error building Tesseract: {e}") from e
@@ -424,7 +431,7 @@ def build_tesseract(
     return image
 
 
-def teardown(project_ids: list, tear_all: bool = False) -> None:
+def teardown(project_ids: Sequence[str] | None = None, tear_all: bool = False) -> None:
     """Teardown Tesseract image(s) running in a Docker Compose project.
 
     Args:
@@ -463,12 +470,12 @@ def teardown(project_ids: list, tear_all: bool = False) -> None:
         )
 
 
-def get_tesseract_containers() -> list[CLIDockerClient.Containers.Container]:
+def get_tesseract_containers() -> list[Container]:
     """Get Tesseract containers."""
     return docker_client.containers.list()
 
 
-def get_tesseract_images() -> list[CLIDockerClient.Images.Image]:
+def get_tesseract_images() -> list[Image]:
     """Get Tesseract images."""
     return docker_client.images.list()
 
@@ -697,7 +704,7 @@ def run_tesseract(
         stderr = container.logs(stdout=False, stderr=True).decode("utf-8")
         exit_code = result["StatusCode"]
         if exit_code != 0:
-            raise CLIDockerClient.Errors.ContainerError(
+            raise ContainerError(
                 container, exit_code, shlex.join(cmd), image_id, stderr
             )
     finally:
