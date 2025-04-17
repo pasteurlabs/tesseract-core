@@ -564,7 +564,7 @@ class Compose:
         return project_id in Compose.list()
 
     @staticmethod
-    def _update_projects(include_stopped: bool = False) -> dict[str, list[str]]:
+    def _update_projects(include_stopped: bool = False) -> dict[str, list_[str]]:
         """Updates the list of projects by going through containers."""
         project_container_map = {}
         for container_id, container in Containers.list(include_stopped).items():
