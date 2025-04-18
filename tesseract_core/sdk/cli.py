@@ -496,7 +496,7 @@ def _display_tesseract_image_meta() -> None:
             table.add_row(
                 # Checksum Type + First 12 Chars of ID
                 image.id[:19],
-                image.name,
+                image.tags,
                 tesseract_vals["TESSERACT_NAME"],
                 tesseract_vals.get("TESSERACT_VERSION", ""),
                 tesseract_vals.get("TESSERACT_DESCRIPTION", "").replace("\n", " "),
@@ -508,7 +508,7 @@ def _display_tesseract_containers_meta() -> None:
     """Display Tesseract containers metadata."""
     table = RichTable("ID", "Name", "Version", "Host Port", "Project ID", "Description")
     containers = docker_client.containers.list()
-    for _, container in containers.items():
+    for container in containers:
         tesseract_vals = _get_tesseract_env_vals(container)
         if tesseract_vals:
             tesseract_project = _find_tesseract_project(container)

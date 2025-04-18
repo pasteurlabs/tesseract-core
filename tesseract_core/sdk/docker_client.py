@@ -19,29 +19,23 @@ list_ = list
 
 
 class Image:
-    """Image class to wrap Docker image details.
+    """Image class to wrap Docker image details."""
 
-    Image class has additional field `name` to store the image name that docker-py does not have.
-    Every unique `image_name` will have its own image object.
-    """
-
-    def __init__(self, json_dict: dict, repo_tag_idx: int = 0) -> None:
+    def __init__(self, json_dict: dict) -> None:
         self.id = json_dict.get("Id", None)
-        self.short_id = self.id[7:19] if self.id else None  # Trim off sha:256
+        self.short_id = self.id[:19] if self.id else None
         self.attrs = json_dict
         self.tags = json_dict.get("RepoTags", None)
-        # Docker images may be prefixed with the registry URL and may have multiple repo tags
-        self.name = self.tags[repo_tag_idx].split("/")[-1] if self.tags else None
 
     def __str__(self) -> str:
-        return f"Image id: {self.id}, name: {self.name}, tags: {self.tags}, attrs: {self.attrs}"
+        return f"Image id: {self.id}, tags: {self.tags}, attrs: {self.attrs}"
 
 
 class Images:
     """Namespace for functions to interface with Tesseract docker images."""
 
     @staticmethod
-    def get(image_id_or_name: str, tesseract_only: bool = True) -> Image:
+    def get(image_id_or_name: str | bytes, tesseract_only: bool = True) -> Image:
         """Returns the metadata for a specific image."""
         if not image_id_or_name:
             raise ValueError("Image name cannot be empty.")
@@ -53,16 +47,24 @@ class Images:
         if ":" not in image_id_or_name:
             if not is_image_id(image_id_or_name):
                 image_id_or_name = image_id_or_name + ":latest"
-
+            else:
+                # If image_id_or_name is an image id, we need to get the full id
+                # by prepending sha256
+                image_id_or_name = "sha256:" + image_id_or_name
         images = Images.list(tesseract_only=tesseract_only)
 
         # Check for both name and id to find the image
+        # Tags may be prefixed by repository url
         for image_obj in images:
             if (
                 image_obj.id == image_id_or_name
                 or image_obj.short_id == image_id_or_name
-                or image_obj.name == image_id_or_name
                 or image_id_or_name in image_obj.tags
+                or (
+                    any(
+                        tag.split("/")[-1] == image_id_or_name for tag in image_obj.tags
+                    )
+                )
             ):
                 return image_obj
 
@@ -76,10 +78,10 @@ class Images:
     @staticmethod
     def remove(image: str) -> None:
         """Remove an image (name or id) from the local Docker registry."""
-        image_obj = Images.get(image)
+        # Use the getter to make sure urls are handled properly
         try:
             res = subprocess.run(
-                ["docker", "rmi", image_obj.name, "--force"],
+                ["docker", "rmi", image, "--force"],
                 check=True,
                 capture_output=True,
                 text=True,
@@ -203,18 +205,8 @@ class Images:
             image_ids, is_image=True, tesseract_only=tesseract_only
         )
         for _, json_dict in json_dicts.items():
-            # Get short id since that's what is stored in image_counts
-            image_id = json_dict.get("Id", None)[7:19]
-            if not image_id:
-                continue
-            # Set the repotag index to the # of image id - 1 to make sure we create
-            # copies of image for each tag (aka unique image name for each)
-            idx = image_counts.get(image_id)
-            while idx >= 1:
-                image = Image(json_dict, repo_tag_idx=image_counts.get(image_id) - 1)
-                image_counts[image_id] = image_counts.get(image_id, 0) - 1
-                images.append(image)
-                idx = image_counts.get(image_id, 0)
+            image = Image(json_dict)
+            images.append(image)
 
         return images
 
@@ -229,7 +221,7 @@ class Container:
     def __init__(self, json_dict: dict) -> None:
         self.id = json_dict.get("Id", None)
         self.short_id = self.id[:12] if self.id else None
-        self.name = json_dict.get("Name", None)
+        self.name = json_dict.get("Name", None).lstrip("/")
         ports = json_dict.get("NetworkSettings", None)
         if ports and ports.get("Ports", None):
             ports = ports["Ports"]
@@ -239,14 +231,21 @@ class Container:
         else:
             self.host_port = None
         self.attrs = json_dict
-        self.image = json_dict.get("Image", None)
         self.project_id = json_dict.get("Config", None)
         if self.project_id:
             self.project_id = self.project_id["Labels"].get(
                 "com.docker.compose.project", None
             )
 
-    def exec_run(self, command: str) -> tuple:
+    @property
+    def image(self) -> Image:
+        """Gets the image ID of the container."""
+        image_id = self.attrs.get("ImageID", self.attrs["Image"])
+        if image_id is None:
+            return None
+        return Images.get(image_id.split(":")[1])
+
+    def exec_run(self, command: list) -> tuple:
         """Run a command in this container.
 
         Return exit code and stdout.
@@ -348,7 +347,7 @@ class Containers:
     """Namespace to interface with docker containers."""
 
     @staticmethod
-    def list(all: bool = False, tesseract_only: bool = True) -> dict:
+    def list(all: bool = False, tesseract_only: bool = True) -> list:
         """Returns the current list of containers."""
         return Containers._get_containers(
             include_stopped=all, tesseract_only=tesseract_only
@@ -359,7 +358,7 @@ class Containers:
         """Returns the metadata for a specific container."""
         container_list = Containers.list(all=True, tesseract_only=tesseract_only)
 
-        for container_obj in container_list.values():
+        for container_obj in container_list:
             got_container = (
                 container_obj.id == id_or_name
                 or container_obj.short_id == id_or_name
@@ -380,7 +379,9 @@ class Containers:
         device_requests: list_[int | str] | None = None,
         detach: bool = False,
         remove: bool = False,
-    ) -> tuple | Container:
+        stdout: bool = True,
+        stderr: bool = False,
+    ) -> tuple | Container | str:
         """Run a command in a container from an image.
 
         Returns Container object if detach is True, otherwise returns list of stdout and stderr.
@@ -451,7 +452,11 @@ class Containers:
             if result.returncode != 0:
                 raise ContainerError("Error running container command.")
 
-            return result.stdout, result.stderr
+            if stdout and stderr:
+                return result.stdout, result.stderr
+            if stderr:
+                return result.stderr
+            return result.stdout
 
         except subprocess.CalledProcessError as ex:
             if "repository" in ex.stderr:
@@ -465,8 +470,8 @@ class Containers:
     @staticmethod
     def _get_containers(
         include_stopped: bool = False, tesseract_only: bool = True
-    ) -> dict[str, Container]:
-        containers = {}
+    ) -> list:
+        containers = []
 
         cmd = ["docker", "ps", "-q"]
         if include_stopped:
@@ -490,9 +495,9 @@ class Containers:
         # Filter list to  exclude empty strings.
         container_ids = [container_id for container_id in container_ids if container_id]
         json_dicts = get_docker_metadata(container_ids, tesseract_only=tesseract_only)
-        for container_id, json_dict in json_dicts.items():
+        for _, json_dict in json_dicts.items():
             container = Container(json_dict)
-            containers[container_id] = container
+            containers.append(container)
 
         return containers
 

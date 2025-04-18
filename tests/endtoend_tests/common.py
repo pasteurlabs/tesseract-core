@@ -4,18 +4,24 @@
 import json
 import traceback
 
+import docker.errors
 from typer.testing import CliRunner
 
 from tesseract_core.sdk.cli import app
-from tesseract_core.sdk.docker_client import ImageNotFound
+from tesseract_core.sdk.docker_client import CLIDockerClient, ImageNotFound
 
 
-def image_exists(client, image_name_or_id, tesseract_only: bool = True):
-    """Checks if images exists."""
+def image_exists(client, image_name, tesseract_only: bool = True):
+    """Checks if image name exists."""
+    # Docker images may be prefixed with the registry URL
+    kwargs = {}
+    if isinstance(client, CLIDockerClient):
+        kwargs["tesseract_only"] = tesseract_only
+
     try:
-        client.images.get(image_name_or_id, tesseract_only)
+        client.images.get(image_name, **kwargs)
         return True
-    except ImageNotFound:
+    except (ImageNotFound, docker.errors.ImageNotFound):
         return False
 
 
