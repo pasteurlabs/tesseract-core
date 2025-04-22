@@ -222,13 +222,13 @@ def test_create_container(
 
         stdout = container.logs(stdout=True, stderr=False)
         stderr = container.logs(stdout=False, stderr=True)
-        assert stdout == "Hello, Tesseract!\n"
-        assert stderr == ""
+        assert stdout == b"Hello, Tesseract!\n"
+        assert stderr == b""
 
         stdout_py = container_py.logs(stdout=True, stderr=False)
         stderr_py = container_py.logs(stdout=False, stderr=True)
-        assert stdout_py.decode("utf-8") == stdout
-        assert stderr_py.decode("utf-8") == stderr
+        assert stdout_py == stdout
+        assert stderr_py == stderr
 
     finally:
         try:
@@ -339,7 +339,7 @@ def test_container_volume_mounts(
         status = container1_py.wait()
         assert status["StatusCode"] == 0
         stdout_py = container1_py.logs(stdout=True, stderr=False)
-        assert stdout == stdout_py.decode("utf-8")
+        assert stdout == stdout_py
 
     finally:
         try:
