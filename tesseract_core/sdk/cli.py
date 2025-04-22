@@ -496,7 +496,7 @@ def _display_tesseract_image_meta() -> None:
             table.add_row(
                 # Checksum Type + First 12 Chars of ID
                 image.id[:19],
-                image.tags,
+                str(image.tags),
                 tesseract_vals["TESSERACT_NAME"],
                 tesseract_vals.get("TESSERACT_VERSION", ""),
                 tesseract_vals.get("TESSERACT_DESCRIPTION", "").replace("\n", " "),
@@ -540,7 +540,7 @@ def _find_tesseract_project(
 
     tesseract_id = tesseract.id[:12]
 
-    for project, containers in docker_client.get_projects.items():
+    for project, containers in docker_client.compose.list():
         if tesseract_id in containers:
             return project
 

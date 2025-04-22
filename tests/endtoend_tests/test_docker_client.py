@@ -222,8 +222,8 @@ def test_create_container(
 
         stdout = container.logs(stdout=True, stderr=False)
         stderr = container.logs(stdout=False, stderr=True)
-        assert stdout == b"Hello, Tesseract!\n"
-        assert stderr == b""
+        assert stdout == "Hello, Tesseract!\n"
+        assert stderr == ""
 
         stdout_py = container_py.logs(stdout=True, stderr=False)
         stderr_py = container_py.logs(stdout=False, stderr=True)
@@ -334,7 +334,7 @@ def test_container_volume_mounts(
             docker_client_built_image_name,
             [f"cat {dest}/hello.txt"],
             detach=True,
-            volumes={tmp_path: {"bind": dest, "mode": "rw"}},
+            volumes={str(tmp_path): {"bind": str(dest), "mode": "rw"}},
         )
         status = container1_py.wait()
         assert status["StatusCode"] == 0
