@@ -488,7 +488,7 @@ class Containers:
             raise APIError(f"Cannot list Docker containers: {ex}") from ex
 
         if not result.stdout:
-            return {}
+            return []
 
         container_ids = result.stdout.strip().split("\n")
 
@@ -572,11 +572,11 @@ class Compose:
     def _update_projects(include_stopped: bool = False) -> dict[str, list_[str]]:
         """Updates the list of projects by going through containers."""
         project_container_map = {}
-        for container_id, container in Containers.list(include_stopped).items():
+        for container in Containers.list(include_stopped):
             if container.project_id:
                 if container.project_id not in project_container_map:
                     project_container_map[container.project_id] = []
-                project_container_map[container.project_id].append(container_id)
+                project_container_map[container.project_id].append(container.id)
         return project_container_map
 
 

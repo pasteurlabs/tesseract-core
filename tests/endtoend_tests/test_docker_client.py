@@ -210,6 +210,7 @@ def test_create_container(
         assert str(container_get) == str(container)
         assert str(container_name_get) == str(container_get)
         assert container_get.id == container_py_get.id
+        assert container_get.short_id == container_py_get.short_id
         assert container_name_get.id == container_py_get.id
         assert container_get.name == container_py_get.name
         assert container_name_get.name == container_py_name_get.name

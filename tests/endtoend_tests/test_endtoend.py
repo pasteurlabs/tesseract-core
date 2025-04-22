@@ -231,6 +231,10 @@ def test_tesseract_teardown_multiple(built_image_name, tear_all):
         else:
             args.extend(project_ids)
 
+        if len(args) < 2:
+            # No projects to teardown
+            pass
+
         run_res = cli_runner.invoke(
             app,
             args,
@@ -323,6 +327,7 @@ def test_tesseract_serve_ports_error(built_image_name):
 def test_tesseract_serve_ports(built_image_name, port):
     """Try to serve multiple Tesseracts on multiple ports."""
     cli_runner = CliRunner(mix_stderr=False)
+    project_id = None
 
     # Serve tesseract on specified ports.
     run_res = cli_runner.invoke(
@@ -358,21 +363,22 @@ def test_tesseract_serve_ports(built_image_name, port):
         assert res.status_code == 200, res.text
         assert str(port) in run_res.stdout
     finally:
-        run_res = cli_runner.invoke(
-            app,
-            [
-                "teardown",
-                project_id,
-            ],
-            catch_exceptions=False,
-        )
-        assert run_res.exit_code == 0, run_res.stderr
+        if project_id:
+            run_res = cli_runner.invoke(
+                app,
+                [
+                    "teardown",
+                    project_id,
+                ],
+                catch_exceptions=False,
+            )
+            assert run_res.exit_code == 0, run_res.stderr
 
 
 def test_tesseract_serve_with_volumes(built_image_name, tmp_path, docker_client):
     """Try to serve multiple Tesseracts with volume mounting."""
     cli_runner = CliRunner(mix_stderr=False)
-
+    project_id = None
     # Pytest creates the tmp_path fixture with drwx------ mode, we need others
     # to be able to read and execute the path so the Docker volume is readable
     # from within the container
@@ -422,15 +428,16 @@ def test_tesseract_serve_with_volumes(built_image_name, tmp_path, docker_client)
         # The file should exist outside the container
         assert (tmp_path / "bar").exists()
     finally:
-        run_res = cli_runner.invoke(
-            app,
-            [
-                "teardown",
-                project_id,
-            ],
-            catch_exceptions=False,
-        )
-        assert run_res.exit_code == 0, run_res.stderr
+        if project_id:
+            run_res = cli_runner.invoke(
+                app,
+                [
+                    "teardown",
+                    project_id,
+                ],
+                catch_exceptions=False,
+            )
+            assert run_res.exit_code == 0, run_res.stderr
 
 
 def test_tesseract_cli_options_parsing(built_image_name, tmpdir):
