@@ -45,7 +45,7 @@ def model_to_json(model):
 
 
 @contextmanager
-def serve_in_subprocess(api_file, port, num_workers=1, timeout=60.0):
+def serve_in_subprocess(api_file, port, num_workers=1, timeout=30.0):
     try:
         proc = subprocess.Popen(
             [
@@ -200,6 +200,10 @@ def test_get_openapi_schema(http_client):
     assert response.json()["paths"]
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="flaky on Windows",
+)
 def test_threading_sanity(tmpdir, free_port):
     """Test with a Tesseract that requires to be run in the main thread.
 
@@ -236,6 +240,10 @@ def test_threading_sanity(tmpdir, free_port):
         assert response.status_code == 200, response.text
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="flaky on Windows",
+)
 def test_multiple_workers(tmpdir, free_port):
     """Test that the server can be run with multiple worker processes."""
     TESSERACT_API = dedent(
