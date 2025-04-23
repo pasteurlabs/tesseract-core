@@ -244,13 +244,13 @@ class Tesseract:
         engine.teardown(self._serve_context["project_id"])
         self._client = None
         self._serve_context = None
+        atexit.unregister(self.teardown)
 
     def __del__(self) -> None:
         """Destructor for the Tesseract class.
 
         This will teardown the Tesseract if it is being served.
         """
-        atexit.unregister(self.teardown)
         if self._serve_context is not None:
             self.teardown()
 

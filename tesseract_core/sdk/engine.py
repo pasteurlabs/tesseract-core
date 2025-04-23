@@ -704,7 +704,7 @@ def _create_docker_compose_template(
     """Create Docker Compose template."""
     services = []
     if not port:
-        port = get_free_port()
+        port = str(get_free_port())
 
     gpu_settings = None
     if gpus:
