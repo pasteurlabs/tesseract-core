@@ -2,7 +2,7 @@ services:
 {% for service in services %}
   {{ service.name }}:
     image: {{ service.image }}
-    restart: always
+    restart: unless-stopped
     entrypoint: tesseract-runtime serve
     ports:
       - {{ service.port }}
