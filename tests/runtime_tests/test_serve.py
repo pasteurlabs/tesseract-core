@@ -45,7 +45,7 @@ def model_to_json(model):
 
 
 @contextmanager
-def serve_in_subprocess(api_file, port, num_workers=1):
+def serve_in_subprocess(api_file, port, num_workers=1, timeout=30.0):
     try:
         proc = subprocess.Popen(
             [
@@ -60,7 +60,6 @@ def serve_in_subprocess(api_file, port, num_workers=1):
         )
 
         # wait for server to start
-        timeout = 30.0
         while True:
             try:
                 response = requests.get(f"http://localhost:{port}/health")
@@ -252,8 +251,6 @@ def test_multiple_workers(tmpdir, free_port):
         pid: int
 
     def apply(input: InputSchema) -> OutputSchema:
-        # Add sleep to avoid concurrent requests being handled by the same worker
-        time.sleep(1)
         return OutputSchema(pid=multiprocessing.current_process().pid)
     """
     )
@@ -266,18 +263,21 @@ def test_multiple_workers(tmpdir, free_port):
     with serve_in_subprocess(api_file, free_port, num_workers=2) as url:
         # Fire back-to-back requests to the server and check that they are handled
         # by different workers (i.e. different PIDs)
-        post_request = lambda: requests.post(
-            f"{url}/apply", json={"inputs": {}}, stream=True
-        )
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            future_1 = executor.submit(post_request)
-            future_2 = executor.submit(post_request)
-            response_1 = future_1.result()
-            response_2 = future_2.result()
+        post_request = lambda _: requests.post(f"{url}/apply", json={"inputs": {}})
 
-        assert response_1.status_code == 200, response_1.text
-        assert response_2.status_code == 200, response_2.text
-        assert response_1.json()["pid"] != response_2.json()["pid"]
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            # Fire a lot of requests in parallel
+            futures = executor.map(post_request, range(100))
+            responses = list(futures)
+
+        # Check that all responses are 200
+        for response in responses:
+            assert response.status_code == 200, response.text
+
+        # Check that not all pids are the same
+        # (i.e. the requests were handled by different workers)
+        pids = set(response.json()["pid"] for response in responses)
+        assert len(pids) > 1, "All requests were handled by the same worker"
 
 
 def test_debug_mode(dummy_tesseract_module, monkeypatch):
