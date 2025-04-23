@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
+import atexit
 import base64
 import json
 import subprocess
@@ -230,6 +231,7 @@ class Tesseract:
         )
         self._lastlog = None
         self._client = HTTPClient(f"http://localhost:{served_port}")
+        atexit.register(self.teardown)
 
     def teardown(self) -> None:
         """Teardown the Tesseract.
@@ -248,6 +250,7 @@ class Tesseract:
 
         This will teardown the Tesseract if it is being served.
         """
+        atexit.unregister(self.teardown)
         if self._serve_context is not None:
             self.teardown()
 
