@@ -107,7 +107,12 @@ def test_serve_lifecycle(mock_serving, mock_clients):
         pass
 
     mock_serving["serve_mock"].assert_called_with(
-        ["sometesseract:0.2.3"], port="", volumes=None, gpus=None, debug=True
+        ["sometesseract:0.2.3"],
+        port="",
+        volumes=None,
+        gpus=None,
+        debug=True,
+        num_workers=1,
     )
 
     mock_serving["teardown_mock"].assert_called_with("proj-id-123")

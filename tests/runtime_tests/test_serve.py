@@ -222,9 +222,6 @@ def test_threading_sanity(tmpdir, free_port):
     def apply(input: InputSchema) -> OutputSchema:
         assert threading.current_thread() == threading.main_thread()
         return OutputSchema()
-
-    def abstract_eval(abstract_inputs: dict) -> dict:
-        pass
     """
     )
 
@@ -238,6 +235,49 @@ def test_threading_sanity(tmpdir, free_port):
     with serve_in_subprocess(api_file, free_port) as url:
         response = requests.post(f"{url}/apply", json={"inputs": {}})
         assert response.status_code == 200, response.text
+
+
+def test_multiple_workers(tmpdir, free_port):
+    """Test that the server can be run with multiple worker processes."""
+    TESSERACT_API = dedent(
+        """
+    import time
+    import multiprocessing
+    from pydantic import BaseModel
+
+    class InputSchema(BaseModel):
+        pass
+
+    class OutputSchema(BaseModel):
+        pid: int
+
+    def apply(input: InputSchema) -> OutputSchema:
+        # Add sleep to avoid concurrent requests being handled by the same worker
+        time.sleep(1)
+        return OutputSchema(pid=multiprocessing.current_process().pid)
+    """
+    )
+
+    api_file = tmpdir / "tesseract_api.py"
+
+    with open(api_file, "w") as f:
+        f.write(TESSERACT_API)
+
+    with serve_in_subprocess(api_file, free_port, num_workers=2) as url:
+        # Fire back-to-back requests to the server and check that they are handled
+        # by different workers (i.e. different PIDs)
+        post_request = lambda: requests.post(
+            f"{url}/apply", json={"inputs": {}}, stream=True
+        )
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            future_1 = executor.submit(post_request)
+            future_2 = executor.submit(post_request)
+            response_1 = future_1.result()
+            response_2 = future_2.result()
+
+        assert response_1.status_code == 200, response_1.text
+        assert response_2.status_code == 200, response_2.text
+        assert response_1.json()["pid"] != response_2.json()["pid"]
 
 
 def test_debug_mode(dummy_tesseract_module, monkeypatch):
@@ -288,49 +328,3 @@ def test_debug_mode(dummy_tesseract_module, monkeypatch):
         assert "Traceback" in response.text
     finally:
         tesseract_core.runtime.config._current_config = orig_config
-
-
-def test_multiple_workers(tmpdir, free_port):
-    """Test that the server can be run with multiple worker processes."""
-    TESSERACT_API = dedent(
-        """
-    import time
-    import multiprocessing
-    from pydantic import BaseModel
-
-    class InputSchema(BaseModel):
-        pass
-
-    class OutputSchema(BaseModel):
-        pid: int
-
-    def apply(input: InputSchema) -> OutputSchema:
-        # Add sleep to avoid concurrent requests being handled by the same worker
-        time.sleep(0.1)
-        return OutputSchema(pid=multiprocessing.current_process().pid)
-
-    def abstract_eval(abstract_inputs: dict) -> dict:
-        pass
-    """
-    )
-
-    api_file = tmpdir / "tesseract_api.py"
-
-    with open(api_file, "w") as f:
-        f.write(TESSERACT_API)
-
-    with serve_in_subprocess(api_file, free_port, num_workers=2) as url:
-        # Fire back-to-back requests to the server and check that they are handled
-        # by different workers (i.e. different PIDs)
-        post_request = lambda: requests.post(
-            f"{url}/apply", json={"inputs": {}}, stream=True
-        )
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            future_1 = executor.submit(post_request)
-            future_2 = executor.submit(post_request)
-            response_1 = future_1.result()
-            response_2 = future_2.result()
-
-        assert response_1.status_code == 200, response_1.text
-        assert response_2.status_code == 200, response_2.text
-        assert response_1.json()["pid"] != response_2.json()["pid"]
