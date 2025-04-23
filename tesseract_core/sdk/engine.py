@@ -571,6 +571,7 @@ def serve(
     volumes: list[str] | None = None,
     gpus: list[str] | None = None,
     debug: bool = False,
+    num_workers: int = 1,
 ) -> str:
     """Serve one or more Tesseract images.
 
@@ -583,6 +584,7 @@ def serve(
         volumes: list of paths to mount in the Tesseract container.
         gpus: IDs of host Nvidia GPUs to make available to the Tesseracts.
         debug: whether to enable debug mode.
+        num_workers: number of workers to use for serving the Tesseracts.
 
     Returns:
         A string representing the Tesseract Project ID.
@@ -606,7 +608,9 @@ def serve(
             raise ValueError(f"Input ID {image.id} is not a valid Tesseract")
         image_ids.append(image.id)
 
-    template = _create_docker_compose_template(image_ids, port, volumes, gpus, debug)
+    template = _create_docker_compose_template(
+        image_ids, port, volumes, gpus, num_workers, debug
+    )
     compose_fname = _create_compose_fname()
 
     with tempfile.NamedTemporaryFile(
@@ -687,6 +691,7 @@ def _create_docker_compose_template(
     port: str = "",
     volumes: list[str] | None = None,
     gpus: list[str] | None = None,
+    num_workers: int = 1,
     debug: bool = False,
 ) -> str:
     """Create Docker Compose template."""
@@ -717,7 +722,7 @@ def _create_docker_compose_template(
 
         services.append(service)
     template = ENV.get_template("docker-compose.yml")
-    return template.render(services=services)
+    return template.render(services=services, num_workers=num_workers)
 
 
 def _create_compose_service_id(image_id: str) -> str:

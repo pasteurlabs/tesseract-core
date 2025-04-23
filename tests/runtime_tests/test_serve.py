@@ -7,6 +7,8 @@ import os
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from textwrap import dedent
 
 import numpy as np
@@ -40,6 +42,48 @@ def array_from_json(json_data):
 
 def model_to_json(model):
     return json.loads(model.model_dump_json())
+
+
+@contextmanager
+def serve_in_subprocess(api_file, port, num_workers=1):
+    try:
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                "from tesseract_core.runtime.serve import serve; "
+                f"serve(host='localhost', port={port}, num_workers={num_workers})",
+            ],
+            env=dict(os.environ, TESSERACT_API_PATH=api_file),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        # wait for server to start
+        timeout = 30.0
+        while True:
+            try:
+                response = requests.get(f"http://localhost:{port}/health")
+            except requests.exceptions.ConnectionError:
+                pass
+            else:
+                if response.status_code == 200:
+                    break
+
+            time.sleep(0.1)
+            timeout -= 0.1
+
+            if timeout < 0:
+                raise TimeoutError("Server did not start in time")
+
+        yield f"http://localhost:{port}"
+
+    finally:
+        proc.terminate()
+        stdout, stderr = proc.communicate()
+        print(stdout.decode())
+        print(stderr.decode())
+        proc.wait(timeout=5)
 
 
 @pytest.fixture
@@ -191,47 +235,9 @@ def test_threading_sanity(tmpdir, free_port):
 
     # We can't run the server in the same process because it will use threading under the hood
     # so we need to spawn a new process instead
-    try:
-        proc = subprocess.Popen(
-            [
-                sys.executable,
-                "-c",
-                "from tesseract_core.runtime.serve import serve; "
-                f"serve(host='localhost', port={free_port}, num_workers=1)",
-            ],
-            env=dict(os.environ, TESSERACT_API_PATH=api_file),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-
-        # wait for server to start
-        timeout = 30.0
-        while True:
-            try:
-                response = requests.get(f"http://localhost:{free_port}/health")
-            except requests.exceptions.ConnectionError:
-                pass
-            else:
-                if response.status_code == 200:
-                    break
-
-            time.sleep(0.1)
-            timeout -= 0.1
-
-            if timeout < 0:
-                raise TimeoutError("Server did not start in time")
-
-        response = requests.post(
-            f"http://localhost:{free_port}/apply", json={"inputs": {}}
-        )
+    with serve_in_subprocess(api_file, free_port) as url:
+        response = requests.post(f"{url}/apply", json={"inputs": {}})
         assert response.status_code == 200, response.text
-
-    finally:
-        proc.terminate()
-        stdout, stderr = proc.communicate()
-        print(stdout.decode())
-        print(stderr.decode())
-        proc.wait(timeout=5)
 
 
 def test_debug_mode(dummy_tesseract_module, monkeypatch):
@@ -282,3 +288,49 @@ def test_debug_mode(dummy_tesseract_module, monkeypatch):
         assert "Traceback" in response.text
     finally:
         tesseract_core.runtime.config._current_config = orig_config
+
+
+def test_multiple_workers(tmpdir, free_port):
+    """Test that the server can be run with multiple worker processes."""
+    TESSERACT_API = dedent(
+        """
+    import time
+    import multiprocessing
+    from pydantic import BaseModel
+
+    class InputSchema(BaseModel):
+        pass
+
+    class OutputSchema(BaseModel):
+        pid: int
+
+    def apply(input: InputSchema) -> OutputSchema:
+        # Add sleep to avoid concurrent requests being handled by the same worker
+        time.sleep(0.1)
+        return OutputSchema(pid=multiprocessing.current_process().pid)
+
+    def abstract_eval(abstract_inputs: dict) -> dict:
+        pass
+    """
+    )
+
+    api_file = tmpdir / "tesseract_api.py"
+
+    with open(api_file, "w") as f:
+        f.write(TESSERACT_API)
+
+    with serve_in_subprocess(api_file, free_port, num_workers=2) as url:
+        # Fire back-to-back requests to the server and check that they are handled
+        # by different workers (i.e. different PIDs)
+        post_request = lambda: requests.post(
+            f"{url}/apply", json={"inputs": {}}, stream=True
+        )
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            future_1 = executor.submit(post_request)
+            future_2 = executor.submit(post_request)
+            response_1 = future_1.result()
+            response_2 = future_2.result()
+
+        assert response_1.status_code == 200, response_1.text
+        assert response_2.status_code == 200, response_2.text
+        assert response_1.json()["pid"] != response_2.json()["pid"]

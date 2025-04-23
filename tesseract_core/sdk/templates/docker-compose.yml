@@ -3,7 +3,7 @@ services:
   {{ service.name }}:
     image: {{ service.image }}
     restart: always
-    entrypoint: tesseract-runtime serve
+    command: ["serve", "--num-workers", "{{ num_workers }}"]
     ports:
       - {{ service.port }}
     {%- if service.volumes %}
