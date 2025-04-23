@@ -201,7 +201,7 @@ def test_get_openapi_schema(http_client):
 
 
 @pytest.mark.skipif(
-    sys.platform == "win32",
+    os.name == "nt",
     reason="flaky on Windows",
 )
 def test_threading_sanity(tmpdir, free_port):
@@ -241,7 +241,7 @@ def test_threading_sanity(tmpdir, free_port):
 
 
 @pytest.mark.skipif(
-    sys.platform == "win32",
+    os.name == "nt",
     reason="flaky on Windows",
 )
 def test_multiple_workers(tmpdir, free_port):
