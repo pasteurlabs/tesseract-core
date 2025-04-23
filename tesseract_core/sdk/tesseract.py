@@ -207,7 +207,7 @@ class Tesseract:
             return self._lastlog
         return engine.logs(self._serve_context["container_id"])
 
-    def serve(self, port: str = "") -> None:
+    def serve(self, port: str | None = None) -> None:
         """Serve the Tesseract.
 
         Args:
@@ -263,10 +263,12 @@ class Tesseract:
         debug: bool = False,
     ) -> tuple[str, str, int]:
         if port is not None:
-            port = [port]
+            ports = [port]
+        else:
+            ports = None
 
         project_id = engine.serve(
-            [image], ports=port, volumes=volumes, gpus=gpus, debug=debug
+            [image], ports=ports, volumes=volumes, gpus=gpus, debug=debug
         )
 
         command = ["docker", "compose", "-p", project_id, "ps", "--format", "json"]
