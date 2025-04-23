@@ -22,7 +22,7 @@ from tesseract_core.runtime.tree_transforms import filter_func, flatten_with_pat
 # inputs/outputs as static. As Tesseract scalar objects (e.g. Float32) are
 # essentially just wrappers around numpy 0D arrays, they will be considered to
 # be dynamic and will be traced by JAX.
-# If you want to treat numerical values as scalar you will need to use
+# If you want to treat scalar numerical values as static you will need to use
 # built-in Python types (e.g. float, int) instead of Float32.
 
 
