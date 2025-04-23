@@ -124,6 +124,16 @@ def needs_docker(func: Callable) -> Callable:
     return wrapper_needs_docker
 
 
+def get_free_port() -> int:
+    """Find a free port to use for HTTP."""
+    import socket
+    from contextlib import closing
+
+    with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
+        s.bind(("localhost", 0))
+        return s.getsockname()[1]
+
+
 def parse_requirements(
     filename: str | Path,
     session: PipSession | None = None,
@@ -417,7 +427,7 @@ def init_api(
 
 
 def build_tesseract(
-    src_dir: Path,
+    src_dir: str | Path,
     image_tag: str | None,
     build_dir: Path | None = None,
     inject_ssh: bool = False,
@@ -443,6 +453,8 @@ def build_tesseract(
         docker.models.images.Image representing the built Tesseract image,
         or path to build directory if `generate_only` is True.
     """
+    src_dir = Path(src_dir)
+
     validate_tesseract_api(src_dir)
     config = get_config(src_dir)
 
@@ -692,9 +704,7 @@ def _create_docker_compose_template(
     """Create Docker Compose template."""
     services = []
     if not port:
-        port = "8000"
-    else:
-        port = f"{port}:8000"
+        port = get_free_port()
 
     gpu_settings = None
     if gpus:
@@ -707,7 +717,7 @@ def _create_docker_compose_template(
         service = {
             "name": _create_compose_service_id(image_id),
             "image": image_id,
-            "port": port,
+            "port": f"{port}:8000",
             "volumes": volumes,
             "gpus": gpu_settings,
             "environment": {

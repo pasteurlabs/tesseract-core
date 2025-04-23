@@ -173,9 +173,7 @@ class Tesseract:
         This will start the Tesseract server if it is not already running.
         """
         if self._serve_context is not None:
-            raise RuntimeError(
-                "Cannot nest the same `with Tesseract ...` context manager."
-            )
+            raise RuntimeError("Cannot serve the same Tesseract multiple times.")
 
         if self._client is not None:
             # Tesseract is already being served -> no-op

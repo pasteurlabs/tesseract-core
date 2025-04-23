@@ -14,8 +14,8 @@ services:
     {% endif %}
     healthcheck:
       test: python -c "import requests; requests.get('http://localhost:8000/health').raise_for_status()" || exit 1
-      interval: 3s
-      retries: 10
+      interval: 0.1s
+      retries: 300
       start_period: 1s
     networks:
       - multi-tesseract-network
