@@ -116,7 +116,7 @@ def abstract_eval(abstract_inputs):
         is_leaf=is_shapedtype_dict,
     )
     dynamic_inputs, static_inputs = eqx.partition(
-        jaxified_inputs, firter_spec=is_shapedtype_struct
+        jaxified_inputs, filter_spec=is_shapedtype_struct
     )
 
     def wrapped_apply(dynamic_inputs):
