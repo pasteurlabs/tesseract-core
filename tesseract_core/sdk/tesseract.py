@@ -257,13 +257,16 @@ class Tesseract:
     @staticmethod
     def _serve(
         image: str,
-        port: str = "",
+        port: str | None = None,
         volumes: list[str] | None = None,
         gpus: list[str] | None = None,
         debug: bool = False,
     ) -> tuple[str, str, int]:
+        if port is not None:
+            port = [port]
+
         project_id = engine.serve(
-            [image], port=port, volumes=volumes, gpus=gpus, debug=debug
+            [image], ports=port, volumes=volumes, gpus=gpus, debug=debug
         )
 
         command = ["docker", "compose", "-p", project_id, "ps", "--format", "json"]

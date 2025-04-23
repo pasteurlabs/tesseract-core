@@ -579,7 +579,7 @@ def _is_tesseract(
 
 def serve(
     images: list[str | docker.models.images.Image],
-    port: str = "",
+    ports: list[str] | None = None,
     volumes: list[str] | None = None,
     gpus: list[str] | None = None,
     debug: bool = False,
@@ -591,7 +591,7 @@ def serve(
     Args:
         images: a list of Tesseract image IDs as strings or `docker`'s
                 Image object.
-        port: port or port range to serve the tesseract on.
+        ports: port or port range to serve each Tesseract on.
         volumes: list of paths to mount in the Tesseract container.
         gpus: IDs of host Nvidia GPUs to make available to the Tesseracts.
         debug: whether to enable debug mode.
@@ -618,7 +618,12 @@ def serve(
             raise ValueError(f"Input ID {image.id} is not a valid Tesseract")
         image_ids.append(image.id)
 
-    template = _create_docker_compose_template(image_ids, port, volumes, gpus, debug)
+    if ports is not None and len(ports) != len(image_ids):
+        raise ValueError(
+            f"Number of ports ({len(ports)}) must match number of images ({len(image_ids)})"
+        )
+
+    template = _create_docker_compose_template(image_ids, ports, volumes, gpus, debug)
     compose_fname = _create_compose_fname()
 
     with tempfile.NamedTemporaryFile(
@@ -696,15 +701,15 @@ def _docker_compose_up(compose_fpath: str, project_name: str) -> bool:
 
 def _create_docker_compose_template(
     image_ids: list[str],
-    port: str = "",
+    ports: list[str] | None = None,
     volumes: list[str] | None = None,
     gpus: list[str] | None = None,
     debug: bool = False,
 ) -> str:
     """Create Docker Compose template."""
     services = []
-    if not port:
-        port = str(get_free_port())
+    if ports is None:
+        ports = [str(get_free_port()) for _ in range(len(image_ids))]
 
     gpu_settings = None
     if gpus:
@@ -713,7 +718,7 @@ def _create_docker_compose_template(
         else:
             gpu_settings = f"device_ids: {gpus}"
 
-    for image_id in image_ids:
+    for image_id, port in zip(image_ids, ports, strict=True):
         service = {
             "name": _create_compose_service_id(image_id),
             "image": image_id,
