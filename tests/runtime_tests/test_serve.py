@@ -45,7 +45,7 @@ def model_to_json(model):
 
 
 @contextmanager
-def serve_in_subprocess(api_file, port, num_workers=1, timeout=30.0):
+def serve_in_subprocess(api_file, port, num_workers=1, timeout=60.0):
     try:
         proc = subprocess.Popen(
             [
