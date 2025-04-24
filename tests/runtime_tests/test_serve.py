@@ -4,6 +4,7 @@
 import base64
 import json
 import os
+import platform
 import subprocess
 import sys
 import time
@@ -23,6 +24,12 @@ test_input = {
     "b": [1, 1, 1],
     "s": 2.5,
 }
+
+
+def is_wsl():
+    """Check if the current environment is WSL."""
+    kernel = platform.uname().release
+    return "Microsoft" in kernel or "WSL" in kernel
 
 
 def array_from_json(json_data):
@@ -201,7 +208,7 @@ def test_get_openapi_schema(http_client):
 
 
 @pytest.mark.skipif(
-    os.name == "nt",
+    is_wsl(),
     reason="flaky on Windows",
 )
 def test_threading_sanity(tmpdir, free_port):
@@ -241,7 +248,7 @@ def test_threading_sanity(tmpdir, free_port):
 
 
 @pytest.mark.skipif(
-    os.name == "nt",
+    is_wsl(),
     reason="flaky on Windows",
 )
 def test_multiple_workers(tmpdir, free_port):
