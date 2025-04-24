@@ -40,7 +40,7 @@ def test_apply(built_image_name, dummy_tesseract_location, free_port):
 
     # Test URL access
     tesseract_url = f"http://localhost:{free_port}"
-    served_tesseract = engine.serve([built_image_name], port=str(free_port))
+    served_tesseract = engine.serve([built_image_name], ports=[str(free_port)])
     try:
         vecadd = Tesseract(tesseract_url)
         out = vecadd.apply(inputs)
@@ -102,7 +102,7 @@ def served_tesseract_remote(built_image_name):
     sock.close()
     # Serve the Tesseract image
     tesseract_url = f"http://localhost:{free_port}"
-    served_tesseract = engine.serve([built_image_name], port=str(free_port))
+    served_tesseract = engine.serve([built_image_name], ports=[str(free_port)])
     try:
         yield tesseract_url
     finally:

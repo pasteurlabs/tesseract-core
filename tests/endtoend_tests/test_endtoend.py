@@ -272,7 +272,7 @@ def test_tesseract_serve_ports_error(built_image_name):
     )
     assert run_res.exit_code
     assert (
-        "Port specification only works if 1 Tesseract is being served."
+        "Port specification only works if exactly one Tesseract is being served."
         in run_res.stderr
     )
 
