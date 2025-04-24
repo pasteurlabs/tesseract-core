@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
+import atexit
 import base64
 import json
 import subprocess
@@ -172,9 +173,7 @@ class Tesseract:
         This will start the Tesseract server if it is not already running.
         """
         if self._serve_context is not None:
-            raise RuntimeError(
-                "Cannot nest the same `with Tesseract ...` context manager."
-            )
+            raise RuntimeError("Cannot serve the same Tesseract multiple times.")
 
         if self._client is not None:
             # Tesseract is already being served -> no-op
@@ -207,7 +206,7 @@ class Tesseract:
             return self._lastlog
         return engine.logs(self._serve_context["container_id"])
 
-    def serve(self, port: str = "") -> None:
+    def serve(self, port: str | None = None) -> None:
         """Serve the Tesseract.
 
         Args:
@@ -232,6 +231,7 @@ class Tesseract:
         )
         self._lastlog = None
         self._client = HTTPClient(f"http://localhost:{served_port}")
+        atexit.register(self.teardown)
 
     def teardown(self) -> None:
         """Teardown the Tesseract.
@@ -244,6 +244,7 @@ class Tesseract:
         engine.teardown(self._serve_context["project_id"])
         self._client = None
         self._serve_context = None
+        atexit.unregister(self.teardown)
 
     def __del__(self) -> None:
         """Destructor for the Tesseract class.
@@ -256,15 +257,20 @@ class Tesseract:
     @staticmethod
     def _serve(
         image: str,
-        port: str = "",
+        port: str | None = None,
         volumes: list[str] | None = None,
         gpus: list[str] | None = None,
         debug: bool = False,
         num_workers: int = 1,
     ) -> tuple[str, str, int]:
+        if port is not None:
+            ports = [port]
+        else:
+            ports = None
+
         project_id = engine.serve(
             [image],
-            port=port,
+            ports=ports,
             volumes=volumes,
             gpus=gpus,
             debug=debug,
