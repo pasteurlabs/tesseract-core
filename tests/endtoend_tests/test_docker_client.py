@@ -204,8 +204,11 @@ def test_create_container(
         assert container_py_get
         assert container_py_name_get
 
-        assert container_get == container
         assert container_name_get == container_get
+        # Only compare the key fields of the original container and the ones from get
+        # in case container attrs have been updated since creation
+        assert container.id == container_get.id
+        assert container.name == container_get.name
         # Compare the docker-py container fields vs docker client fields
         assert container_get.id == container_py_get.id
         assert container_get.short_id == container_py_get.short_id
