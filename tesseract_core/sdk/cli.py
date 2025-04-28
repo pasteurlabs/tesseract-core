@@ -360,10 +360,10 @@ def init(
     engine.init_api(target_dir, name, recipe=recipe)
 
 
-def _validate_port(port: str | None) -> str:
+def _validate_port(port: str | None) -> str | None:
     """Validate port input."""
     if port is None:
-        return ""
+        return None
 
     port = port.strip()
     if "-" in port:
@@ -442,19 +442,23 @@ def serve(
     command, as well as a list of all containers spawned and their respective
     ports.
     """
-    if port and len(image_names) > 1:
-        # TODO: Docker compose with multiple ports is not supported until
-        # docker/compose#7188 is resolved.
-        raise typer.BadParameter(
-            (
-                "Port specification only works if 1 Tesseract is being served."
-                f"Currently serving `{len(image_names)}` Tesseracts."
-            ),
-            param_hint="image_names",
-        )
+    if port is not None:
+        if len(image_names) > 1:
+            # TODO: Docker compose with multiple ports is not supported until
+            # docker/compose#7188 is resolved.
+            raise typer.BadParameter(
+                (
+                    "Port specification only works if exactly one Tesseract is being served. "
+                    f"Currently serving `{len(image_names)}` Tesseracts."
+                ),
+                param_hint="image_names",
+            )
+        ports = [port]
+    else:
+        ports = None
 
     try:
-        project_id = engine.serve(image_names, port, volume, gpus)
+        project_id = engine.serve(image_names, ports, volume, gpus)
         container_ports = _display_project_meta(project_id)
         logger.info(
             f"Docker Compose Project ID, use it with 'tesseract teardown' command: {project_id}"

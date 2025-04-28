@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.5] - 2025-04-24
+
+### Bug Fixes
+
+- Fixed typos in jax recipe (#134)
+- *(sdk)* Various improvements to SDK UX (#136)
+
 ## [0.8.4] - 2025-04-17
 
 ### Features
