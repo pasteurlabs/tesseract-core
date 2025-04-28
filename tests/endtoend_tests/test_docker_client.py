@@ -65,9 +65,10 @@ def test_get_image(docker_client, docker_client_built_image_name, docker_py_clie
     assert image.short_id == docker_py_image.short_id
     assert image.tags == docker_py_image.tags
     assert docker_image_short.id == docker_image_non_sha.id
-    # Check the custom str function
+    # Check the repr function
     assert (
-        str(image) == f"Image id: {image.id}, tags: {image.tags}, attrs: {image.attrs}"
+        str(image)
+        == f"Image(id='{image.id}', short_id='{image.short_id}', tags={image.tags}, attrs={image.attrs})"
     )
 
     # Check that every image listed by docker cli can be found
@@ -118,16 +119,11 @@ def test_create_image(
         image = docker_client.images.get(docker_client_built_image_name)
         assert image is not None
         assert docker_client_built_image_name in image.tags
-        # Check the custom str function
-        assert (
-            str(image)
-            == f"Image id: {image.id}, tags: {image.tags}, attrs: {image.attrs}"
-        )
 
         image_id_obj = docker_client.images.get(image.id)
         image_short_id_obj = docker_client.images.get(image.short_id)
-        assert str(image_id_obj) == str(image)
-        assert str(image_short_id_obj) == str(image)
+        assert image == image_id_obj
+        assert image_short_id_obj == image
         assert image_exists(docker_client, docker_client_built_image_name)
         assert image_exists(docker_py_client, docker_client_built_image_name)
 
@@ -194,26 +190,27 @@ def test_create_container(
             docker_client_built_image_name, ['echo "Hello, Tesseract!"'], detach=True
         )
         assert container_py is not None
-        # Test custom str container function
-        assert (
-            f"Container id: {container.id}, name: {container.name}, project_id: {container.project_id}"
-            in str(container)
-        )
-
+        # Check property fields
+        assert container.project_id is None
+        assert container.host_port is None
         assert container_py.image.id == container.image.id
 
         container_get = docker_client.containers.get(container.id)
         container_name_get = docker_client.containers.get(container.name)
         container_py_get = docker_py_client.containers.get(container.id)
         container_py_name_get = docker_py_client.containers.get(container.name)
-        assert container_get is not None
-        assert str(container_get) == str(container)
-        assert str(container_name_get) == str(container_get)
+        assert container_get
+        assert container_name_get
+        assert container_py_get
+        assert container_py_name_get
+
+        assert container_get == container
+        assert container_name_get == container_get
+        # Compare the docker-py container fields vs docker client fields
         assert container_get.id == container_py_get.id
         assert container_get.short_id == container_py_get.short_id
-        assert container_name_get.id == container_py_get.id
         assert container_get.name == container_py_get.name
-        assert container_name_get.name == container_py_name_get.name
+        assert container_get.id == container_py_name_get.id
 
         status = container.wait()
         status_py = container_py.wait()
@@ -356,7 +353,9 @@ def test_container_volume_mounts(
             pass
 
 
-def test_compose_up_down(docker_client, tmp_path, docker_client_built_image_name):
+def test_compose_up_down(
+    docker_client, docker_py_client, tmp_path, docker_client_built_image_name
+):
     """Test docker-compose up and down."""
     project_name, project_name1 = None, None
     try:
@@ -386,6 +385,12 @@ def test_compose_up_down(docker_client, tmp_path, docker_client_built_image_name
         assert container is not None
         stdout = container.logs(stdout=True, stderr=False)
         assert stdout == b"Hello Tesseract\n"
+
+        # Get container from docker-py
+        container_py = docker_py_client.containers.get(containers[0])
+        assert container_py is not None
+        stdout_py = container_py.logs(stdout=True, stderr=False)
+        assert stdout_py == stdout
 
         # Create a second project
         project_name1 = docker_client.compose.up(

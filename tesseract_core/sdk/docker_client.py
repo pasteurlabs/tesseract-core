@@ -9,6 +9,7 @@ import os
 import re
 import shlex
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 logger = logging.getLogger("tesseract")
@@ -18,17 +19,24 @@ logger = logging.getLogger("tesseract")
 list_ = list
 
 
+@dataclass
 class Image:
     """Image class to wrap Docker image details."""
 
-    def __init__(self, json_dict: dict) -> None:
-        self.id = json_dict.get("Id", None)
-        self.short_id = self.id[:19] if self.id else None
-        self.attrs = json_dict
-        self.tags = json_dict.get("RepoTags", None)
+    id: str
+    short_id: str
+    tags: list[str] | None
+    attrs: dict
 
-    def __str__(self) -> str:
-        return f"Image id: {self.id}, tags: {self.tags}, attrs: {self.attrs}"
+    @classmethod
+    def from_dict(cls, json_dict: dict) -> "Image":
+        """Create an Image object from a json dictionary."""
+        return cls(
+            id=json_dict.get("Id", None),
+            short_id=json_dict.get("Id", [])[:19],
+            tags=json_dict.get("RepoTags", None),
+            attrs=json_dict,
+        )
 
 
 class Images:
@@ -133,6 +141,8 @@ class Images:
         Returns:
             Image object if the build was successful, None otherwise.
         """
+        # TODO: Refactor this to a build_tesseract function and add a much simpler buildx
+        # staticmethod that's used under the hood.
         from tesseract_core.sdk.engine import LogPipe
 
         build_cmd = [
@@ -243,12 +253,13 @@ class Images:
             image_ids, is_image=True, tesseract_only=tesseract_only
         )
         for _, json_dict in json_dicts.items():
-            image = Image(json_dict)
+            image = Image.from_dict(json_dict)
             images.append(image)
 
         return images
 
 
+@dataclass
 class Container:
     """Container class to wrap Docker container details.
 
@@ -256,32 +267,47 @@ class Container:
     does not have. This is because Tesseract requires frequent access to the host port.
     """
 
-    def __init__(self, json_dict: dict) -> None:
-        self.id = json_dict.get("Id", None)
-        self.short_id = self.id[:12] if self.id else None
-        self.name = json_dict.get("Name", None).lstrip("/")
-        ports = json_dict.get("NetworkSettings", None)
-        if ports and ports.get("Ports", None):
-            ports = ports["Ports"]
-            port_key = next(iter(ports))  # Get the first port key
-            if ports[port_key]:
-                self.host_port = ports[port_key][0].get("HostPort")
-        else:
-            self.host_port = None
-        self.attrs = json_dict
-        self.project_id = json_dict.get("Config", None)
-        if self.project_id:
-            self.project_id = self.project_id["Labels"].get(
-                "com.docker.compose.project", None
-            )
+    id: str
+    short_id: str
+    name: str
+    attrs: dict
+
+    @classmethod
+    def from_dict(cls, json_dict: dict) -> "Container":
+        """Create a Container object from a json dictionary."""
+        return cls(
+            id=json_dict.get("Id", None),
+            short_id=json_dict.get("Id", [])[:12],
+            name=json_dict.get("Name", None).lstrip("/"),
+            attrs=json_dict,
+        )
 
     @property
-    def image(self) -> Image:
+    def image(self) -> Image | None:
         """Gets the image ID of the container."""
         image_id = self.attrs.get("ImageID", self.attrs["Image"])
         if image_id is None:
             return None
         return Images.get(image_id.split(":")[1])
+
+    @property
+    def host_port(self) -> str | None:
+        """Gets the host port of the container."""
+        if self.attrs.get("NetworkSettings", None):
+            ports = self.attrs["NetworkSettings"].get("Ports", None)
+            if ports:
+                port_key = next(iter(ports))  # Get the first port key
+                if ports[port_key]:
+                    return ports[port_key][0].get("HostPort")
+        return None
+
+    @property
+    def project_id(self) -> str | None:
+        """Gets the project ID of the container."""
+        project_id = self.attrs.get("Config", None)
+        if project_id:
+            project_id = project_id["Labels"].get("com.docker.compose.project", None)
+        return project_id
 
     def exec_run(self, command: list) -> tuple:
         """Run a command in this container.
@@ -390,13 +416,6 @@ class Container:
                 raise ContainerError(f"Cannot remove container {self.id}: {ex}") from ex
             raise ex
 
-    def __str__(self) -> str:
-        string = (
-            f"Container id: {self.id}, name: {self.name}, project_id: {self.project_id},"
-            "ports: {self.host_port}, attrs: {self.attrs}"
-        )
-        return string
-
 
 class Containers:
     """Namespace to interface with docker containers."""
@@ -468,6 +487,8 @@ class Containers:
                     after it finishes executing the command. This means that we cannot set
                     both detach and remove simulataneously to True or else there
                     would be no way of retrieving the logs from the removed container.
+            stdout: If True, return stdout.
+            stderr: If True, return stderr.
 
         Returns:
             Container object if detach is True, otherwise returns list of stdout and stderr.
@@ -583,14 +604,19 @@ class Containers:
         container_ids = [container_id for container_id in container_ids if container_id]
         json_dicts = get_docker_metadata(container_ids, tesseract_only=tesseract_only)
         for _, json_dict in json_dicts.items():
-            container = Container(json_dict)
+            container = Container.from_dict(json_dict)
             containers.append(container)
 
         return containers
 
 
 class Compose:
-    """Namespace to interface with docker compose projects."""
+    """Custom namespace to interface with docker compose projects.
+
+    There is no equivalent for this class in docker-py; however, we frequently
+    interact with docker compose projects in Tesseract and this namespace makes
+    such interactions easier.
+    """
 
     @staticmethod
     def list(include_stopped: bool = False) -> dict:

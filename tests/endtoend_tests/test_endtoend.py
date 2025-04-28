@@ -231,10 +231,6 @@ def test_tesseract_teardown_multiple(built_image_name, tear_all):
         else:
             args.extend(project_ids)
 
-        if len(args) < 2:
-            # No projects to teardown
-            pass
-
         run_res = cli_runner.invoke(
             app,
             args,

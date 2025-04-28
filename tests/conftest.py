@@ -286,7 +286,7 @@ def mocked_docker(monkeypatch):
             def list() -> list[Image]:
                 """Mock of CLIDockerClient.images.list."""
                 return [
-                    Image(
+                    Image.from_dict(
                         {
                             "Id": "sha256:123456789abcdef",
                             "RepoTags": ["vectoradd:latest"],
@@ -294,7 +294,7 @@ def mocked_docker(monkeypatch):
                             "Config": {"Env": ["TESSERACT_NAME=vectoradd"]},
                         },
                     ),
-                    Image(
+                    Image.from_dict(
                         {
                             "Id": "sha256:48932484029303",
                             "RepoTags": ["hello-world:latest"],
