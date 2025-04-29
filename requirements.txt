@@ -2,7 +2,7 @@
 #    uv export --frozen --color never --no-emit-project --no-hashes
 annotated-types==0.7.0
     # via pydantic
-certifi==2025.1.31
+certifi==2025.4.26
     # via requests
 charset-normalizer==3.4.1
     # via requests
@@ -10,8 +10,6 @@ click==8.1.8
     # via typer
 colorama==0.4.6 ; sys_platform == 'win32'
     # via click
-docker==7.1.0
-    # via tesseract-core
 idna==3.10
     # via requests
 jinja2==3.1.6
@@ -24,7 +22,7 @@ mdurl==0.1.2
     # via markdown-it-py
 numpy==2.2.4
     # via tesseract-core
-pip==25.0.1
+pip==25.1
     # via tesseract-core
 pydantic==2.11.0
     # via tesseract-core
@@ -32,14 +30,10 @@ pydantic-core==2.33.0
     # via pydantic
 pygments==2.19.1
     # via rich
-pywin32==310 ; sys_platform == 'win32'
-    # via docker
 pyyaml==6.0.2
     # via tesseract-core
 requests==2.32.3
-    # via
-    #   docker
-    #   tesseract-core
+    # via tesseract-core
 rich==14.0.0
     # via
     #   tesseract-core
@@ -58,6 +52,4 @@ typing-extensions==4.13.2
 typing-inspection==0.4.0
     # via pydantic
 urllib3==2.4.0
-    # via
-    #   docker
-    #   requests
+    # via requests
