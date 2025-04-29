@@ -8,7 +8,6 @@ authors = [
 license = { text = "Apache-2.0" }
 requires-python = ">=3.10"
 dependencies = [
-    "docker",
     "jinja2",
     "rich",
     "typer",
