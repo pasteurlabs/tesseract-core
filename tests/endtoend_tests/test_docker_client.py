@@ -376,8 +376,7 @@ def test_compose_up_down(
 def test_compose_error(docker_client, tmp_path, docker_client_built_image_name):
     """Test docker-compose error handling."""
     compose_file = tmp_path / "docker-compose.yml"
-    # Use tail -f /dev/null to keep the container running
-    # Override the image's command otherwise it immediately exits
+    # Write a malformed compose file
     compose_content = textwrap.dedent(f"""
         services:
             test:
