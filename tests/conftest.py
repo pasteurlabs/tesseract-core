@@ -5,7 +5,6 @@ import json
 import os
 import random
 import string
-import subprocess
 from pathlib import Path
 from shutil import copytree
 from typing import Any
@@ -342,16 +341,10 @@ def mocked_docker(monkeypatch):
                 """Mock of CLIDockerClient.compose.exists."""
                 return project_id in created_ids
 
-    def mocked_subprocess_run(*args, **kwargs):
-        """Mock subprocess.run."""
-        return subprocess.CompletedProcess(
-            args=args, returncode=0, stderr=b"", stdout=b""
-        )
-
     mock_instance = MockedDocker()
-    monkeypatch.setattr(
-        tesseract_core.sdk.docker_client.subprocess, "run", mocked_subprocess_run
-    )
     monkeypatch.setattr(engine, "docker_client", mock_instance)
+    monkeypatch.setattr(
+        tesseract_core.sdk.docker_client, "CLIDockerClient", MockedDocker
+    )
 
     yield mock_instance

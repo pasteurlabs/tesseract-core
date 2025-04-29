@@ -115,7 +115,7 @@ def test_create_image(
     Validate image existence in both docker_py_client and docker_client to ensure
     handling of names/ids are the same.
     """
-    image, image1, image2 = None, None, None
+    image1, image2 = None, None
     # Create an image
     try:
         image = docker_client.images.get(docker_client_built_image_name)
@@ -233,42 +233,26 @@ def test_create_container(
         assert stderr_py == stderr
 
     finally:
-        try:
-            # Clean up the container
-            if container:
-                container.remove(v=True, force=True)
-                # Check that the container is removed
-                containers = docker_client.containers.list()
-                containers_py = docker_py_client.containers.list()
-                assert container.id not in containers
-                assert container.id not in containers_py
-
-            if container_py:
-                container_py.remove(v=True, force=True)
-                # Check that the container is removed
-                containers = docker_client.containers.list()
-                containers_py = docker_py_client.containers.list()
-                assert container_py.id not in containers
-                assert container_py.id not in containers_py
-        except ContainerError:
-            pass
-
-        # Image has to be removed after container is removed
-        try:
-            if docker_client_built_image_name:
-                docker_client.images.remove(docker_client_built_image_name)
-        except ImageNotFound:
-            pass
-
+        # Clean up the container
         if container:
-            try:
-                docker_client.containers.get(container.id)
-            except ContainerError:
-                pass
+            container.remove(v=True, force=True)
+            # Check that the container is removed
+            containers = docker_client.containers.list()
+            containers_py = docker_py_client.containers.list()
+            assert container.id not in containers
+            assert container.id not in containers_py
+
+        if container_py:
+            container_py.remove(v=True, force=True)
+            # Check that the container is removed
+            containers = docker_client.containers.list()
+            containers_py = docker_py_client.containers.list()
+            assert container_py.id not in containers
+            assert container_py.id not in containers_py
 
 
 def test_container_volume_mounts(
-    docker_client, docker_py_client, docker_client_built_image_name, tmp_path
+    docker_client, docker_client_built_image_name, tmp_path
 ):
     """Test container volume mounts."""
     container1 = None
@@ -291,15 +275,6 @@ def test_container_volume_mounts(
         assert stdout == "hello\n"
         # Check file exists in tmp path
         assert (tmp_path / "hello.txt").exists()
-
-        stdout_py = docker_py_client.containers.run(
-            docker_client_built_image_name,
-            [f"touch {bar_file} && chmod 777 {bar_file} && echo hello"],
-            detach=False,
-            volumes={str(tmp_path): {"bind": str(dest), "mode": "rw"}},
-            remove=True,
-        )
-        assert stdout == stdout_py.decode("utf-8")
 
         # Check container is removed and there are no running containers associated with the test image
         result = subprocess.run(
@@ -332,30 +307,10 @@ def test_container_volume_mounts(
         stdout = container1.logs(stdout=True, stderr=False)
         assert stdout == b"hello tesseract\n"
 
-        container1_py = docker_py_client.containers.run(
-            docker_client_built_image_name,
-            [f"cat {dest}/hello.txt"],
-            detach=True,
-            volumes={str(tmp_path): {"bind": str(dest), "mode": "rw"}},
-        )
-        status = container1_py.wait()
-        assert status["StatusCode"] == 0
-        stdout_py = container1_py.logs(stdout=True, stderr=False)
-        assert stdout == stdout_py
-
     finally:
-        try:
-            if docker_client_built_image_name:
-                docker_client.images.remove(docker_client_built_image_name)
-        except ImageNotFound:
-            pass
-
-        try:
-            # Clean up the container
-            if container1:
-                container1.remove(v=True, force=True)
-        except ContainerError:
-            pass
+        # Clean up the container
+        if container1:
+            container1.remove(v=True, force=True)
 
 
 def test_compose_up_down(

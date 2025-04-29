@@ -849,6 +849,8 @@ def build_docker_image(
     Returns:
         Built Image object if print_and_exit is False, otherwise None.
     """
+    # use an instantiated client here, which may be mocked in tests
+    client = CLIDockerClient()
     build_args = dict(path=path, tag=tag, dockerfile=dockerfile)
 
     if inject_ssh:
@@ -871,4 +873,4 @@ def build_docker_image(
         )
         return None
 
-    return Images.buildx(**build_args)
+    return client.images.buildx(**build_args)
