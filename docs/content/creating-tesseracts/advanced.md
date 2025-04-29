@@ -82,13 +82,6 @@ various circumstances:
  only be printed if something fails; this means that your shell might appear unresponsive
  during this process. If you want more detailed information on what's going on during your
  build, and see updates about it in real-time, use `--loglevel debug`.
-- By default `tesseract build` does not cache the various steps of building a Tesseract[^1].  This is a good choice once your Tesseract is mature enough (i.e., once you are not re-building frequently). While you are still implementing new features in the Tesseract and rebuilding it
- often, we recommend to use `--keep-build-cache` flag to keep your build steps in the cache,
- so that the next `tesseract build` runs faster.
- ```{note}
- A single `tesseract build` command without
- the `--keep-build-cache` option will invalidate the cache.
- ```
 - `--config-override` can be used to manually override options specified in the `tesseract_config.yaml`,
  for example: `--config-override build_config.target_platform=linux/arm64`
 - `tesseract build` relies on a `docker build` command to create the Tesseract image. By
@@ -100,11 +93,11 @@ various circumstances:
 
 ## Building Tesseracts with private dependencies
 
-- In case you have some dependencies in `tesseract_requirements.txt` for which you need to
- ssh into a server (e.g., private repositories which you specify via "git+ssh://..."),
- you can make your ssh agent available to `tesseract build` with the option
- `--forward-ssh-agent`. Alternatively you can use `pip download` to download a dependency
- to the machine that builds the Tesseract.
+In case you have some dependencies in `tesseract_requirements.txt` for which you need to
+ssh into a server (e.g., private repositories which you specify via "git+ssh://..."),
+you can make your ssh agent available to `tesseract build` with the option
+`--forward-ssh-agent`. Alternatively you can use `pip download` to download a dependency
+to the machine that builds the Tesseract.
 
 ## Customizing the build process
 
@@ -140,10 +133,9 @@ For example:
 ## Tesseracts without containerization
 
 While developing a Tesseract, the process of building and rebuilding the
-tesseract image for quick local tests can be very time-consuming. Using
-`--keep-build-cache` ameliorates this issue, but the fastest and most
-convenient way to speed this up is to just run the code you are developing
-in your virtual environment.
+tesseract image for quick local tests can be very time-consuming. The fastest and most
+convenient way to speed this up is to just run the code you are developing directly
+in your virtual Python environment.
 
 In order to do so, you should:
   - Make sure you have a development installation of Tesseract (see <project:#installation-dev>).
