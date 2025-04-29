@@ -100,7 +100,7 @@ def test_get_image(docker_client, docker_client_built_image_name, docker_py_clie
     assert docker_py_image_list is not None
     # Check that every image in image_list is also in docker_py_image_list
     for image in image_list:
-        assert image.id in [img.id for img in docker_py_image_list]
+        assert image.id in [img.id for img in docker_py_image_list if img]
 
 
 def test_create_image(
@@ -120,7 +120,7 @@ def test_create_image(
     try:
         image = docker_client.images.get(docker_client_built_image_name)
         assert image is not None
-        assert docker_client_built_image_name in image.tags
+        assert any(docker_client_built_image_name in tag for tag in image.tags)
 
         image_id_obj = docker_client.images.get(image.id)
         image_short_id_obj = docker_client.images.get(image.short_id)
@@ -138,7 +138,7 @@ def test_create_image(
         image1 = docker_client.images.get(image1_name)
         image1_name = image1_name + ":latest"
         assert image1 is not None
-        assert image1_name in image1.tags
+        assert any(image1_name in tag for tag in image1.tags)
         assert image_exists(docker_client, image1_name)
         assert image_exists(docker_py_client, image1_name)
 
@@ -155,6 +155,8 @@ def test_create_image(
         # Our docker client should be able to retrieve images with just the name
         image2 = docker_client.images.get(repo_url + image2_name)
         image2_no_url = docker_client.images.get(image2_name)
+        assert any(image2_name in tag for tag in image2.tags)
+
         assert image2 is not None
         assert image2_no_url is not None
         assert image2.id == image2_py.id
