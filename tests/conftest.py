@@ -198,14 +198,10 @@ def dummy_image_name(docker_client):
     try:
         yield image_name
     finally:
-        if os.environ.get("TESSERACT_KEEP_BUILD_CACHE", "0").lower() not in (
-            "1",
-            "true",
-        ):
-            try:
-                docker_client.images.remove(image_name)
-            except ImageNotFound:
-                pass
+        try:
+            docker_client.images.remove(image_name)
+        except ImageNotFound:
+            pass
 
 
 @pytest.fixture(scope="module")
@@ -218,14 +214,10 @@ def shared_dummy_image_name(docker_client):
     try:
         yield image_name
     finally:
-        if os.environ.get("TESSERACT_KEEP_BUILD_CACHE", "0").lower() not in (
-            "1",
-            "true",
-        ):
-            try:
-                docker_client.images.remove(image_name)
-            except ImageNotFound:
-                pass
+        try:
+            docker_client.images.remove(image_name)
+        except ImageNotFound:
+            pass
 
 
 @pytest.fixture
@@ -233,7 +225,7 @@ def mocked_docker(monkeypatch):
     """Mock CLIDockerClient class."""
     import tesseract_core.sdk.docker_client
     from tesseract_core.sdk import engine
-    from tesseract_core.sdk.docker_client import CLIDockerClient, Container, Image
+    from tesseract_core.sdk.docker_client import Container, Image
 
     class MockedContainer(Container):
         """Mock Container class."""
@@ -305,12 +297,7 @@ def mocked_docker(monkeypatch):
                 ]
 
             @staticmethod
-            def buildx(*args, print_and_exit=False, **kwargs) -> Image:
-                if print_and_exit:
-                    client = CLIDockerClient()
-                    return client.images.buildx(
-                        *args, print_and_exit=print_and_exit, **kwargs
-                    )
+            def buildx(*args, **kwargs) -> Image:
                 return MockedDocker.images.list()[0]
 
         class containers:

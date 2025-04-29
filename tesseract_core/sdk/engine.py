@@ -35,6 +35,7 @@ from .docker_client import (
     Container,
     ContainerError,
     Image,
+    build_docker_image,
 )
 from .exceptions import UserError
 
@@ -349,7 +350,6 @@ def build_tesseract(
     build_dir: Path | None = None,
     inject_ssh: bool = False,
     config_override: tuple[tuple[list[str], str], ...] = (),
-    keep_build_cache: bool = False,
     generate_only: bool = False,
 ) -> Image | Path:
     """Build a new Tesseract from a context directory.
@@ -363,7 +363,6 @@ def build_tesseract(
           If not provided, a temporary directory will be created.
         inject_ssh: whether or not to forward SSH agent when building the image.
         config_override: overrides for configuration options in the Tesseract.
-        keep_build_cache: whether or not to keep the Docker build cache.
         generate_only: only generate the build context but do not build the image.
 
     Returns:
@@ -406,12 +405,11 @@ def build_tesseract(
         logger.info("Building image ...")
 
     try:
-        image = docker_client.images.buildx(
+        image = build_docker_image(
             path=context_dir.as_posix(),
             tag=image_name,
             dockerfile=context_dir / "Dockerfile",
             inject_ssh=inject_ssh,
-            keep_build_cache=keep_build_cache,
             print_and_exit=generate_only,
         )
     except BuildError as e:

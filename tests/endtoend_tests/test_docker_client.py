@@ -12,7 +12,11 @@ import docker
 import pytest
 from common import image_exists
 
-from tesseract_core.sdk.docker_client import ContainerError, ImageNotFound
+from tesseract_core.sdk.docker_client import (
+    ContainerError,
+    ImageNotFound,
+    build_docker_image,
+)
 
 
 @pytest.fixture(scope="module")
@@ -32,9 +36,7 @@ def docker_client_built_image_name(
     """Build the dummy image for the tests."""
     image_name = "docker_client_create_image_test:dummy"
 
-    docker_client.images.buildx(
-        dummy_tesseract_location, image_name, dummy_docker_file, keep_build_cache=True
-    )
+    build_docker_image(dummy_tesseract_location, image_name, dummy_docker_file)
     try:
         yield image_name
     finally:

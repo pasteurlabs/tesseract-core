@@ -120,31 +120,17 @@ class Images:
             raise ImageNotFound(f"Cannot remove image {image}: {res.stderr}")
 
     @staticmethod
-    def buildx(
+    def _get_buildx_command(
         path: str | Path,
         tag: str,
         dockerfile: str | Path,
-        inject_ssh: bool = False,
-        keep_build_cache: bool = False,
-        print_and_exit: bool = False,
-    ) -> Image | None:
-        """Build a Docker image from a Dockerfile using BuildKit.
-
-        Params:
-            path:  Path to the directory containing the Dockerfile.
-            tag:   The name of the image to build.
-            dockerfile: path within the build context to the Dockerfile.
-            inject_ssh: If True, inject SSH keys into the build.
-            keep_build_cache: If True, keep the build cache.
-            print_and_exit: If True, print the build command and exit without building.
+        ssh: str | None = None,
+    ) -> list_[str]:
+        """Get the buildx command for building Docker images.
 
         Returns:
-            Image object if the build was successful, None otherwise.
+            The buildx command as a list of strings.
         """
-        # TODO: Refactor this to a build_tesseract function and add a much simpler buildx
-        # staticmethod that's used under the hood.
-        from tesseract_core.sdk.engine import LogPipe
-
         build_cmd = [
             "docker",
             "buildx",
@@ -157,26 +143,37 @@ class Images:
             str(path),
         ]
 
-        if inject_ssh:
-            ssh_sock = os.environ.get("SSH_AUTH_SOCK")
-            if ssh_sock is None:
-                raise ValueError(
-                    "SSH_AUTH_SOCK environment variable not set (try running `ssh-agent`)"
-                )
+        if ssh is not None:
+            build_cmd.extend(["--ssh", ssh])
 
-            ssh_keys = subprocess.run(["ssh-add", "-L"], capture_output=True)
-            if ssh_keys.returncode != 0 or not ssh_keys.stdout:
-                raise ValueError(
-                    "No SSH keys found in SSH agent (try running `ssh-add`)"
-                )
+        return build_cmd
 
-            build_cmd += ["--ssh", f"default={ssh_sock}"]
+    @staticmethod
+    def buildx(
+        path: str | Path,
+        tag: str,
+        dockerfile: str | Path,
+        ssh: str | None = None,
+    ) -> Image:
+        """Build a Docker image from a Dockerfile using BuildKit.
 
-        if print_and_exit:
-            logger.info(
-                f"To build the Docker image manually, run:\n    $ {shlex.join(build_cmd)}"
-            )
-            return None
+        Params:
+            path: Path to the directory containing the Dockerfile.
+            tag: The name of the image to build.
+            dockerfile: path within the build context to the Dockerfile.
+            ssh: If not None, pass given argument to buildx --ssh command.
+
+        Returns:
+            Built Image object.
+        """
+        from tesseract_core.sdk.engine import LogPipe
+
+        build_cmd = Images._get_buildx_command(
+            path=path,
+            tag=tag,
+            dockerfile=dockerfile,
+            ssh=ssh,
+        )
 
         out_pipe = LogPipe(logging.DEBUG)
 
@@ -185,30 +182,6 @@ class Images:
 
         logs = out_pipe.captured_lines
         return_code = proc.returncode
-
-        # NOTE: Do this before error checking to ensure we always prune the cache
-        # Prune all until docker builder prune filter is fixed for timestamp or label specification
-        # (might prune too much, but that's fine)
-        if not keep_build_cache:
-            try:
-                prune_cmd = [
-                    "docker",
-                    "builder",
-                    "prune",
-                    "-a",
-                    "-f",
-                ]
-                # Use docker builder prune to remove build cache
-                prune_res = subprocess.run(
-                    prune_cmd, check=True, text=True, capture_output=True
-                )
-                logger.debug("Pruning build cache: %s", prune_cmd)
-                logger.debug(prune_res.stdout)
-            except subprocess.CalledProcessError as ex:
-                logger.warning(
-                    "Docker build cache could not be cleared; consider doing so manually."
-                )
-                logger.debug(ex.stderr)
 
         if return_code != 0:
             raise BuildError(logs)
@@ -855,3 +828,47 @@ def get_docker_metadata(
             dict_key = asset["Id"][:12]
         asset_meta_dict[dict_key] = asset
     return asset_meta_dict
+
+
+def build_docker_image(
+    path: str | Path,
+    tag: str,
+    dockerfile: str | Path,
+    inject_ssh: bool = False,
+    print_and_exit: bool = False,
+) -> Image | None:
+    """Build a Docker image from a Dockerfile using BuildKit.
+
+    Params:
+        path: Path to the directory containing the Dockerfile.
+        tag: The name of the image to build.
+        dockerfile: path within the build context to the Dockerfile.
+        inject_ssh: If True, inject SSH keys into the build.
+        print_and_exit: If True, log the build command and exit without building.
+
+    Returns:
+        Built Image object if print_and_exit is False, otherwise None.
+    """
+    build_args = dict(path=path, tag=tag, dockerfile=dockerfile)
+
+    if inject_ssh:
+        ssh_sock = os.environ.get("SSH_AUTH_SOCK")
+        if ssh_sock is None:
+            raise ValueError(
+                "SSH_AUTH_SOCK environment variable not set (try running `ssh-agent`)"
+            )
+
+        ssh_keys = subprocess.run(["ssh-add", "-L"], capture_output=True)
+        if ssh_keys.returncode != 0 or not ssh_keys.stdout:
+            raise ValueError("No SSH keys found in SSH agent (try running `ssh-add`)")
+        build_args["ssh"] = f"default={ssh_sock}"
+
+    build_cmd = Images._get_buildx_command(**build_args)
+
+    if print_and_exit:
+        logger.info(
+            f"To build the Docker image manually, run:\n    $ {shlex.join(build_cmd)}"
+        )
+        return None
+
+    return Images.buildx(**build_args)

@@ -259,13 +259,6 @@ def build_image(
             metavar="KEYPATH=VALUE",
         ),
     ] = None,
-    keep_build_cache: Annotated[
-        bool,
-        typer.Option(
-            help="Keep the Docker build cache (useful for debugging).",
-            envvar="TESSERACT_KEEP_BUILD_CACHE",
-        ),
-    ] = False,
     generate_only: Annotated[
         bool,
         typer.Option(
@@ -301,7 +294,6 @@ def build_image(
                 build_dir=build_dir,
                 inject_ssh=forward_ssh_agent,
                 config_override=parsed_config_override,
-                keep_build_cache=keep_build_cache,
                 generate_only=generate_only,
             )
     except BuildError as e:
