@@ -173,9 +173,3 @@ Python package. In order to do so, you can run `tesseract init` in the root fold
 your package (i.e., where `setup.py` and `requirements.txt` would be). Import your package
 as needed in `tesseract_api.py`, and specify the dependencies you need at runtime in
 `tesseract_requirements.py`.
-
-[^1]: There are several reasons for this. We wanted to make Tesseracts friendly to
-people unfamiliar with Docker, and this default reduces the chance of them accidentally filling their
-hard drives with data. Also, in a typical SciML setting, cache gets
-invalidated quite fast, so a lot of the data which would be saved to the disk
-would not really help with build times.
