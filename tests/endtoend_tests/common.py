@@ -74,5 +74,5 @@ def build_tesseract(
     assert result.exit_code == 0, result.exception
 
     image_tags = json.loads(result.stdout.strip())
-    assert image_name in image_tags
+    assert [image_name in tag for tag in image_tags]
     return image_tags[0]
