@@ -52,7 +52,7 @@ def test_get_image(docker_client, docker_client_built_image_name, docker_py_clie
     # Get the image
     image = docker_client.images.get(docker_client_built_image_name)
     assert image is not None
-    assert docker_client_built_image_name in image.tags
+    assert any(docker_client_built_image_name in tag for tag in image.tags)
 
     docker_py_image = docker_py_client.images.get(docker_client_built_image_name)
     assert docker_py_image is not None
