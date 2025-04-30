@@ -79,7 +79,7 @@ class Images:
                 or image_id_or_name in image_obj.tags
                 or (
                     any(
-                        tag.split("/")[-1] == image_id_or_name for tag in image_obj.tags
+                        tag.split("/")[-1] in image_id_or_name for tag in image_obj.tags
                     )
                 )
             ):
