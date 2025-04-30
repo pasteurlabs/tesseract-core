@@ -59,7 +59,11 @@ def test_build_from_init_endtoend(
         config_override["build_config.base_image"] = base_image
 
     image_name = build_tesseract(
-        tmp_path, dummy_image_name, config_override=config_override, tag=img_tag
+        docker_client,
+        tmp_path,
+        dummy_image_name,
+        config_override=config_override,
+        tag=img_tag,
     )
     assert image_exists(docker_client, image_name)
 
