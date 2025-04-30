@@ -4,6 +4,7 @@
 """End-to-end tests for Tesseract workflows."""
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -324,6 +325,14 @@ def test_tesseract_serve_ports(built_image_name, port):
     """Try to serve multiple Tesseracts on multiple ports."""
     cli_runner = CliRunner(mix_stderr=False)
     project_id = None
+
+    docker_host = os.environ.get("DOCKER_HOST", "")
+
+    if "-" in port and "podman" in docker_host:
+        pytest.skip(
+            "Podman does not support port ranges in compose."
+            "See https://github.com/containers/podman/issues/15111"
+        )
 
     # Serve tesseract on specified ports.
     run_res = cli_runner.invoke(
