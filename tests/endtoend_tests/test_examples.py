@@ -806,6 +806,7 @@ def test_unit_tesseract_endtoend(
 
     # Stage 1: Build
     img_name = build_tesseract(
+        docker_client,
         unit_tesseract_path,
         dummy_image_name,
         tag="sometag",
@@ -914,9 +915,8 @@ def test_unit_tesseract_endtoend(
 
     # Cannot mix stderr if we want to load the json
     cli_runner = CliRunner(mix_stderr=False)
+    project_id = None
     try:
-        project_id = None
-
         run_res = cli_runner.invoke(
             app,
             [
