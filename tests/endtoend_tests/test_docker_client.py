@@ -3,6 +3,7 @@
 
 """End to end tests for docker cli wrapper."""
 
+import os
 import subprocess
 import textwrap
 from contextlib import closing
@@ -165,14 +166,24 @@ def test_create_image(
         assert image2_no_url.id == image2_py.id
 
         # Check we are not overmatching but we are getting all possible cases
+        docker_host = os.environ.get("DOCKER_HOST", "")
+
+        podman = False
+        if "podman" in docker_host:
+            podman = True
+
         for client in [docker_client, docker_py_client]:
             assert not image_exists(client, "create_image")
-            assert image_exists(client, image2_name)
-            assert image_exists(client, f"/{image2_name}")
-            assert image_exists(client, f"bar/{image2_name}")
-            assert image_exists(client, f"bar/{image2_name}:latest")
-            assert not image_exists(client, f"ar/{image2_name}")
-            assert image_exists(client, f"foo/bar/{image2_name}")
+
+            if podman and client == docker_py_client:
+                # Docker-py does not support partial string matching
+                assert image_exists(client, image2_name)
+                assert image_exists(client, f"/{image2_name}")
+                assert image_exists(client, f"bar/{image2_name}")
+                assert image_exists(client, f"bar/{image2_name}:latest")
+                assert not image_exists(client, f"ar/{image2_name}")
+                assert image_exists(client, f"foo/bar/{image2_name}")
+
             assert image_exists(client, repo_url + image2_name)
 
     finally:

@@ -74,6 +74,16 @@ class Images:
     def get(image_id_or_name: str | bytes, tesseract_only: bool = True) -> Image:
         """Returns the metadata for a specific image.
 
+        In docker-py, there is no substring matching and the image name is the
+        last tag in the list of tags, so if an image has multiple tags, only
+        one of the tags would be able to find the image.
+
+        However, in podman, this is not the case. Podman has substring matching
+        by "/" segments to handle repository urls and returns images even if
+        partial name is specified, or if image has multiple tags.
+
+        We chose to support podman's largest string matching functionality here.
+
         Params:
             image_id_or_name: The image name or id to get.
             tesseract_only: If True, only retrieves Tesseract images.
