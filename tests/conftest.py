@@ -190,6 +190,8 @@ def docker_client():
 @pytest.fixture(scope="module")
 def cleanup(docker_client, request):
     """Clean up all tesseracts created by the tests."""
+    from tesseract_core.sdk.docker_client import ImageNotFound
+
     # Shared object to track what objects need to be cleaned up in each test
     context = {"images": [], "project_ids": [], "containers": []}
 
@@ -216,7 +218,7 @@ def cleanup(docker_client, request):
                 try:
                     docker_client.images.get(image)
                     docker_client.images.remove(image)
-                except docker_client.Errors.ImageNotFound:
+                except ImageNotFound:
                     continue
 
     request.addfinalizer(cleanup_func)

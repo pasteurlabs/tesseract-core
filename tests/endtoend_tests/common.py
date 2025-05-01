@@ -84,4 +84,5 @@ def build_tesseract(
 
     image_tags = json.loads(result.stdout.strip())
     assert image_name in image_tags
+
     return image_tags[0]

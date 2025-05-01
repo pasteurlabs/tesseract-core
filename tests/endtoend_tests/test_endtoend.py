@@ -16,10 +16,13 @@ from tesseract_core.sdk.cli import AVAILABLE_RECIPES, app
 
 
 @pytest.fixture(scope="module")
-def built_image_name(docker_client, shared_dummy_image_name, dummy_tesseract_location):
+def built_image_name(
+    docker_client, cleanup, shared_dummy_image_name, dummy_tesseract_location
+):
     """Build the dummy Tesseract image for the tests."""
     image_name = build_tesseract(dummy_tesseract_location, shared_dummy_image_name)
     assert image_exists(docker_client, image_name)
+    cleanup["images"].append(image_name)
     yield image_name
 
 
@@ -34,7 +37,7 @@ build_matrix = [
 
 @pytest.mark.parametrize("tag,recipe,base_image", build_matrix)
 def test_build_from_init_endtoend(
-    docker_client, dummy_image_name, tmp_path, tag, recipe, base_image
+    docker_client, cleanup, dummy_image_name, tmp_path, tag, recipe, base_image
 ):
     """Test that a trivial (empty) Tesseract image can be built from init."""
     cli_runner = CliRunner(mix_stderr=False)
@@ -59,6 +62,7 @@ def test_build_from_init_endtoend(
         tmp_path, dummy_image_name, config_override=config_override, tag=img_tag
     )
     assert image_exists(docker_client, image_name)
+    cleanup["images"].append(image_name)
 
     # Test that the image can be run and that --help is forwarded correctly
     result = cli_runner.invoke(
