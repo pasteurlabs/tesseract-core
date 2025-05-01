@@ -36,7 +36,8 @@ Tesseracts provide built-in support for [differentiable programming](https://doc
 2. Build an example Tesseract:
 
    ```bash
-   $ tesseract build examples/vectoradd --tag 0.1.0
+   $ git clone https://github.com/pasteurlabs/tesseract-core
+   $ tesseract build tesseract-core/examples/vectoradd --tag 0.1.0
    ```
 
 3. Display its API documentation:
