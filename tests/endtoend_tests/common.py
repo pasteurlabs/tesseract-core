@@ -8,7 +8,11 @@ import docker.errors
 from typer.testing import CliRunner
 
 from tesseract_core.sdk.cli import app
-from tesseract_core.sdk.docker_client import CLIDockerClient, ImageNotFound
+from tesseract_core.sdk.docker_client import (
+    CLIDockerClient,
+    ContainerError,
+    ImageNotFound,
+)
 
 
 def image_exists(client, image_name, tesseract_only: bool = True):
@@ -30,7 +34,7 @@ def container_exists(client, container_name_or_id, tesseract_only: bool = True):
     try:
         client.containers.get(container_name_or_id, tesseract_only)
         return True
-    except client.Errors.ContainerError:
+    except ContainerError:
         return False
 
 
