@@ -290,6 +290,7 @@ jobs:
       - name: Set up Podman
         run: |
           systemctl start --user podman.socket
+          systemctl status --user podman.socket
 
       - name: Run test suite
         run: |
