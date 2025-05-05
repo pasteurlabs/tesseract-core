@@ -362,6 +362,14 @@ jobs:
           podman -v
           cat /etc/os-release
 
+      - name: Build vectoradd via `podman`
+        run: |
+          path=$(uv run tesseract build --generate-only examples/vectoradd)
+
+          podman buildx build --load --tag vectoradd --file "${path}/Dockerfile" "${path}"
+
+          podman image ls
+
       - name: Build vectoradd via `docker`
         run: |
           path=$(uv run tesseract build --generate-only examples/vectoradd)
@@ -371,11 +379,3 @@ jobs:
 
           DOCKER_HOST=unix:///run/user/1001/podman/podman.sock \
           docker image ls
-
-      - name: Build vectoradd via `podman`
-        run: |
-          path=$(tesseract build --generate-only examples/vectoradd)
-
-          podman buildx build --load --tag vectoradd --file "${path}/Dockerfile" "${path}"
-
-          podman image ls
