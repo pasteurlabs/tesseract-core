@@ -9,7 +9,7 @@ Here are some YAML-based configuration examples.
 :hidden:
 
 arm64
-test
+localdependency
 ```
 
 
@@ -21,9 +21,9 @@ test
 
       A guide on how to set up `tesseract_config` for pyvista on arm64.
    :::
-   :::{grid-item-card} Example 2
-      :link: test.html
+   :::{grid-item-card} Local Dependencies
+      :link: localdependency.html
 
-      A YAML config for Example 2
+      A guide on installing local dependencies (`cowsay`) into a Tesseract.
    :::
 ::::
