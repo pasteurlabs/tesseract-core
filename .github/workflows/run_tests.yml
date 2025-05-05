@@ -364,10 +364,10 @@ jobs:
 
       - name: Build vectoradd via `docker`
         run: |
-          path=$(tesseract build --generate-only examples/vectoradd)
+          path=$(uv run tesseract build --generate-only examples/vectoradd)
 
           DOCKER_HOST=unix:///run/user/1001/podman/podman.sock \
-          docker buildx build --load --tag vectoradd --file "${path}/Dockerfile" "{path}"
+          docker buildx build --load --tag vectoradd --file "${path}/Dockerfile" "${path}"
 
           DOCKER_HOST=unix:///run/user/1001/podman/podman.sock \
           docker image ls
@@ -376,6 +376,6 @@ jobs:
         run: |
           path=$(tesseract build --generate-only examples/vectoradd)
 
-          podman buildx build --load --tag vectoradd --file "${path}/Dockerfile" "{path}"
+          podman buildx build --load --tag vectoradd --file "${path}/Dockerfile" "${path}"
 
           podman image ls
