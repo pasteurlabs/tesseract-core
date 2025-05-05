@@ -1,12 +1,3 @@
-# -*- coding: utf-8 -*-
-# """
-# My YAML Example
-# =================
-#
-# This example demonstrates a basic YAML configuration.
-# It won't be executed, but will be rendered as a gallery example.
-# """
-
 name: "helloworld"
 version: "1.0.0"
 description: "A sample Python app"
