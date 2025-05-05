@@ -131,7 +131,7 @@ TEST_CASES = {
             ),
         ],
     ),
-    "cowsay": Config(
+    "pyvista-arm64": Config(
         test_with_random_inputs=True,
         sample_requests=[
             SampleRequest(
