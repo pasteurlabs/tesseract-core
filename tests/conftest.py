@@ -210,15 +210,11 @@ def docker_cleanup(docker_client, request):
             container_obj.remove(v=True, force=True)
 
         # Remove images
-        if os.environ.get("TESSERACT_KEEP_BUILD_CACHE", "0").lower() not in (
-            "1",
-            "true",
-        ):
-            for image in context["images"]:
-                try:
-                    docker_client.images.remove(image)
-                except ImageNotFound:
-                    continue
+        for image in context["images"]:
+            try:
+                docker_client.images.remove(image)
+            except ImageNotFound:
+                continue
 
     request.addfinalizer(cleanup_func)
     return context

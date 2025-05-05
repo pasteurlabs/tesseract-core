@@ -807,7 +807,7 @@ def test_unit_tesseract_endtoend(
     unit_tesseract_path,
     unit_tesseract_config,
     free_port,
-    cleanup,
+    docker_cleanup,
 ):
     """Test that unit Tesseract images can be built and used to serve REST API."""
     from tesseract_core.sdk.cli import app
@@ -821,7 +821,7 @@ def test_unit_tesseract_endtoend(
         tag="sometag",
     )
     assert image_exists(docker_client, img_name)
-    cleanup["images"].append(img_name)
+    docker_cleanup["images"].append(img_name)
 
     # Stage 2: Test CLI usage
     result = cli_runner.invoke(
@@ -943,7 +943,7 @@ def test_unit_tesseract_endtoend(
 
     project_meta = json.loads(run_res.stdout)
     project_id = project_meta["project_id"]
-    cleanup["project_ids"].append(project_id)
+    docker_cleanup["project_ids"].append(project_id)
 
     # Give server some time to start up
     timeout = 10

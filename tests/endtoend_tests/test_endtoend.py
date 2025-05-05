@@ -17,12 +17,12 @@ from tesseract_core.sdk.cli import AVAILABLE_RECIPES, app
 
 @pytest.fixture(scope="module")
 def built_image_name(
-    docker_client, cleanup, shared_dummy_image_name, dummy_tesseract_location
+    docker_client, docker_cleanup, shared_dummy_image_name, dummy_tesseract_location
 ):
     """Build the dummy Tesseract image for the tests."""
     image_name = build_tesseract(dummy_tesseract_location, shared_dummy_image_name)
     assert image_exists(docker_client, image_name)
-    cleanup["images"].append(image_name)
+    docker_cleanup["images"].append(image_name)
     yield image_name
 
 
@@ -37,7 +37,7 @@ build_matrix = [
 
 @pytest.mark.parametrize("tag,recipe,base_image", build_matrix)
 def test_build_from_init_endtoend(
-    docker_client, cleanup, dummy_image_name, tmp_path, tag, recipe, base_image
+    docker_client, docker_cleanup, dummy_image_name, tmp_path, tag, recipe, base_image
 ):
     """Test that a trivial (empty) Tesseract image can be built from init."""
     cli_runner = CliRunner(mix_stderr=False)
@@ -62,7 +62,7 @@ def test_build_from_init_endtoend(
         tmp_path, dummy_image_name, config_override=config_override, tag=img_tag
     )
     assert image_exists(docker_client, image_name)
-    cleanup["images"].append(image_name)
+    docker_cleanup["images"].append(image_name)
 
     # Test that the image can be run and that --help is forwarded correctly
     result = cli_runner.invoke(
@@ -147,7 +147,7 @@ def test_tesseract_run_stdout(built_image_name):
             raise
 
 
-def test_tesseract_serve_pipeline(docker_client, built_image_name, cleanup):
+def test_tesseract_serve_pipeline(docker_client, built_image_name, docker_cleanup):
     cli_runner = CliRunner(mix_stderr=False)
     project_id = None
     run_res = cli_runner.invoke(
@@ -165,7 +165,7 @@ def test_tesseract_serve_pipeline(docker_client, built_image_name, cleanup):
     project_meta = json.loads(run_res.stdout)
 
     project_id = project_meta["project_id"]
-    cleanup["project_ids"].append(project_id)
+    docker_cleanup["project_ids"].append(project_id)
     project_containers = project_meta["containers"][0]["name"]
     if not project_containers:
         raise ValueError(f"Could not find container for project '{project_id}'")
@@ -313,7 +313,7 @@ def test_tesseract_serve_ports_error(built_image_name):
 
 
 @pytest.mark.parametrize("port", ["34567", "34567-34569"])
-def test_tesseract_serve_ports(built_image_name, port, cleanup):
+def test_tesseract_serve_ports(built_image_name, port, docker_cleanup):
     """Try to serve multiple Tesseracts on multiple ports."""
     cli_runner = CliRunner(mix_stderr=False)
     project_id = None
@@ -329,7 +329,7 @@ def test_tesseract_serve_ports(built_image_name, port, cleanup):
 
     project_meta = json.loads(run_res.stdout)
     project_id = project_meta["project_id"]
-    cleanup["project_ids"].append(project_id)
+    docker_cleanup["project_ids"].append(project_id)
 
     # Ensure that actual used ports are in the specified port range.
     test_ports = port.split("-")
