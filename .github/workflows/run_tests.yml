@@ -292,6 +292,9 @@ jobs:
           systemctl start --user podman.socket
           systemctl status --user podman.socket
 
+          podman -v
+          cat /etc/os-release
+
       - name: Run test suite
         run: |
           if [ "${{ matrix.unit-tesseract }}" == "base" ]; then
@@ -321,3 +324,55 @@ jobs:
           slug: pasteurlabs/tesseract-core
           files: coverage*.xml
           fail_ci_if_error: true
+
+
+  test-podman:
+    runs-on: [ubuntu-22.04, ubuntu-24.04]
+
+    steps:
+      - name: Set up Git repository
+        uses: actions/checkout@v4
+
+      # Use Conda to install Python (setup-python action doesn't support ARM)
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-update-conda: true
+          python-version: ${{ matrix.python-version }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Restore UV environment
+        run: cp production.uv.lock uv.lock
+
+      - name: Install package
+        run: |
+          uv sync --extra dev --frozen
+
+      - name: Set up Podman
+        run: |
+          systemctl start --user podman.socket
+          systemctl status --user podman.socket
+
+          podman -v
+          cat /etc/os-release
+
+      - name: Build vectoradd via `docker`
+        run: |
+          path=$(tesseract build --generate-only examples/vectoradd)
+
+          DOCKER_HOST=unix:///run/user/1001/podman/podman.sock \
+          docker buildx build --load --tag vectoradd --file "${path}/Dockerfile" "{path}"
+
+          DOCKER_HOST=unix:///run/user/1001/podman/podman.sock \
+          docker image ls
+
+      - name: Build vectoradd via `podman`
+        run: |
+          path=$(tesseract build --generate-only examples/vectoradd)
+
+          podman buildx build --load --tag vectoradd --file "${path}/Dockerfile" "{path}"
+
+          podman image ls
