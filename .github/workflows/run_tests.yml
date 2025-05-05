@@ -327,7 +327,10 @@ jobs:
 
 
   test-podman:
-    runs-on: [ubuntu-22.04, ubuntu-24.04]
+    strategy:
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
 
     steps:
       - name: Set up Git repository
