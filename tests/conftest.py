@@ -16,7 +16,14 @@ import pytest
 here = Path(__file__).parent
 
 UNIT_TESSERACT_PATH = here / ".." / "examples"
-UNIT_TESSERACTS = [Path(tr).stem for tr in UNIT_TESSERACT_PATH.glob("*/")]
+UNIT_TESSERACTS = [
+    Path(tr).stem
+    for tr in UNIT_TESSERACT_PATH.glob("*/")
+    if Path(tr).stem != "howto-examples"
+]
+
+HOWTO_TESSERACT_PATH = here / ".." / "examples" / "howto-examples"
+HOWTO_TESSERACTS = [Path(tr).stem for tr in UNIT_TESSERACT_PATH.glob("*/")]
 
 
 def pytest_addoption(parser):
