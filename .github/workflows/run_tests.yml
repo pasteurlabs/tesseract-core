@@ -218,7 +218,7 @@ jobs:
           uv sync --extra dev --frozen
 
       - name: Set up Podman
-        if: ${{ matrix.docker_engine }} == "podman"
+        if: matrix.docker_engine == 'podman'
         run: |
           systemctl start --user podman.socket
           systemctl status --user podman.socket
@@ -226,7 +226,7 @@ jobs:
           podman --version
 
           export DOCKER_HOST=unix:///run/user/1001/podman/podman.sock
-          echo "${DOCKER_HOST}" >> $GITHUB_ENV
+          echo "DOCKER_HOST=${DOCKER_HOST}" >> $GITHUB_ENV
 
       - name: Run test suite
         run: |
