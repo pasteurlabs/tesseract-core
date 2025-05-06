@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.0] - 2025-05-02
+
+### Features
+
+- [**breaking**] Remove docker_py usage in favor of custom client that uses Docker CLI (#33)
+- *(sdk)* Allow users to serve Tesseracts using multiple worker processes (#135)
+
+### Documentation
+
+- Update quickstart (#144)
+
 ## [0.8.5] - 2025-04-24
 
 ### Bug Fixes

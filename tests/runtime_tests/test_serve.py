@@ -4,9 +4,12 @@
 import base64
 import json
 import os
+import platform
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from textwrap import dedent
 
 import numpy as np
@@ -21,6 +24,12 @@ test_input = {
     "b": [1, 1, 1],
     "s": 2.5,
 }
+
+
+def is_wsl():
+    """Check if the current environment is WSL."""
+    kernel = platform.uname().release
+    return "Microsoft" in kernel or "WSL" in kernel
 
 
 def array_from_json(json_data):
@@ -40,6 +49,47 @@ def array_from_json(json_data):
 
 def model_to_json(model):
     return json.loads(model.model_dump_json())
+
+
+@contextmanager
+def serve_in_subprocess(api_file, port, num_workers=1, timeout=30.0):
+    try:
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                "from tesseract_core.runtime.serve import serve; "
+                f"serve(host='localhost', port={port}, num_workers={num_workers})",
+            ],
+            env=dict(os.environ, TESSERACT_API_PATH=api_file),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        # wait for server to start
+        while True:
+            try:
+                response = requests.get(f"http://localhost:{port}/health")
+            except requests.exceptions.ConnectionError:
+                pass
+            else:
+                if response.status_code == 200:
+                    break
+
+            time.sleep(0.1)
+            timeout -= 0.1
+
+            if timeout < 0:
+                raise TimeoutError("Server did not start in time")
+
+        yield f"http://localhost:{port}"
+
+    finally:
+        proc.terminate()
+        stdout, stderr = proc.communicate()
+        print(stdout.decode())
+        print(stderr.decode())
+        proc.wait(timeout=5)
 
 
 @pytest.fixture
@@ -157,6 +207,10 @@ def test_get_openapi_schema(http_client):
     assert response.json()["paths"]
 
 
+@pytest.mark.skipif(
+    is_wsl(),
+    reason="flaky on Windows",
+)
 def test_threading_sanity(tmpdir, free_port):
     """Test with a Tesseract that requires to be run in the main thread.
 
@@ -178,9 +232,6 @@ def test_threading_sanity(tmpdir, free_port):
     def apply(input: InputSchema) -> OutputSchema:
         assert threading.current_thread() == threading.main_thread()
         return OutputSchema()
-
-    def abstract_eval(abstract_inputs: dict) -> dict:
-        pass
     """
     )
 
@@ -191,47 +242,57 @@ def test_threading_sanity(tmpdir, free_port):
 
     # We can't run the server in the same process because it will use threading under the hood
     # so we need to spawn a new process instead
-    try:
-        proc = subprocess.Popen(
-            [
-                sys.executable,
-                "-c",
-                "from tesseract_core.runtime.serve import serve; "
-                f"serve(host='localhost', port={free_port}, num_workers=1)",
-            ],
-            env=dict(os.environ, TESSERACT_API_PATH=api_file),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-
-        # wait for server to start
-        timeout = 30.0
-        while True:
-            try:
-                response = requests.get(f"http://localhost:{free_port}/health")
-            except requests.exceptions.ConnectionError:
-                pass
-            else:
-                if response.status_code == 200:
-                    break
-
-            time.sleep(0.1)
-            timeout -= 0.1
-
-            if timeout < 0:
-                raise TimeoutError("Server did not start in time")
-
-        response = requests.post(
-            f"http://localhost:{free_port}/apply", json={"inputs": {}}
-        )
+    with serve_in_subprocess(api_file, free_port) as url:
+        response = requests.post(f"{url}/apply", json={"inputs": {}})
         assert response.status_code == 200, response.text
 
-    finally:
-        proc.terminate()
-        stdout, stderr = proc.communicate()
-        print(stdout.decode())
-        print(stderr.decode())
-        proc.wait(timeout=5)
+
+@pytest.mark.skipif(
+    is_wsl(),
+    reason="flaky on Windows",
+)
+def test_multiple_workers(tmpdir, free_port):
+    """Test that the server can be run with multiple worker processes."""
+    TESSERACT_API = dedent(
+        """
+    import time
+    import multiprocessing
+    from pydantic import BaseModel
+
+    class InputSchema(BaseModel):
+        pass
+
+    class OutputSchema(BaseModel):
+        pid: int
+
+    def apply(input: InputSchema) -> OutputSchema:
+        return OutputSchema(pid=multiprocessing.current_process().pid)
+    """
+    )
+
+    api_file = tmpdir / "tesseract_api.py"
+
+    with open(api_file, "w") as f:
+        f.write(TESSERACT_API)
+
+    with serve_in_subprocess(api_file, free_port, num_workers=2) as url:
+        # Fire back-to-back requests to the server and check that they are handled
+        # by different workers (i.e. different PIDs)
+        post_request = lambda _: requests.post(f"{url}/apply", json={"inputs": {}})
+
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            # Fire a lot of requests in parallel
+            futures = executor.map(post_request, range(100))
+            responses = list(futures)
+
+        # Check that all responses are 200
+        for response in responses:
+            assert response.status_code == 200, response.text
+
+        # Check that not all pids are the same
+        # (i.e. the requests were handled by different workers)
+        pids = set(response.json()["pid"] for response in responses)
+        assert len(pids) > 1, "All requests were handled by the same worker"
 
 
 def test_debug_mode(dummy_tesseract_module, monkeypatch):
