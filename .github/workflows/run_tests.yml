@@ -218,7 +218,7 @@ jobs:
           uv sync --extra dev --frozen
 
       - name: Set up Podman
-        if: matrix.docker-engine == "podman"
+        if: ${{matrix.docker-engine}} == "podman"
         run: |
           systemctl start --user podman.socket
           systemctl status --user podman.socket
