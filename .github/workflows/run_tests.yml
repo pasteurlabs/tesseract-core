@@ -185,7 +185,7 @@ jobs:
             python-version: "3.12"
             arch: "x64"
             docker_engine: "podman"
-            unit-tesseract: "base"
+            unit-tesseract: ${{ fromJson(needs.get-e2e-matrix.outputs.matrix) }}
 
       fail-fast: false
 
@@ -230,7 +230,7 @@ jobs:
 
       - name: Run test suite
         run: |
-          env | grep DOCKER_HOST
+          env | grep DOCKER_HOST || true
 
           if [ "${{ matrix.unit-tesseract }}" == "base" ]; then
             uv run --no-sync pytest \
