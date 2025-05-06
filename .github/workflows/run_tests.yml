@@ -168,7 +168,7 @@ jobs:
         python-version: ["3.12"]
 
         arch: ["x64"]
-        docker-engine: ["docker"]
+        docker_engine: ["docker"]
 
         unit-tesseract: ${{ fromJson(needs.get-e2e-matrix.outputs.matrix) }}
 
@@ -178,13 +178,13 @@ jobs:
           - os: "ubuntu-22.04"
             python-version: "3.12"
             arch: "arm"
-            docker-engine: "docker"
+            docker_engine: "docker"
             unit-tesseract: "base"
           # Run tests using Podman
           - os: "ubuntu-24.04"
             python-version: "3.12"
             arch: "x64"
-            docker-engine: "podman"
+            docker_engine: "podman"
             unit-tesseract: "base"
 
       fail-fast: false
@@ -218,7 +218,7 @@ jobs:
           uv sync --extra dev --frozen
 
       - name: Set up Podman
-        if: ${{ matrix.docker-engine }} == "podman"
+        if: ${{ matrix.docker_engine }} == "podman"
         run: |
           systemctl start --user podman.socket
           systemctl status --user podman.socket
