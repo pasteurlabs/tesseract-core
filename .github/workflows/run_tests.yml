@@ -185,7 +185,6 @@ jobs:
             python-version: "3.12"
             arch: "x64"
             docker_engine: "podman"
-            unit-tesseract: ${{ fromJson(needs.get-e2e-matrix.outputs.matrix) }}
 
       fail-fast: false
 
