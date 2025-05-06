@@ -159,7 +159,7 @@ jobs:
           subjobs=$(echo "$subjobs" | jq -c -r '. + ["base"]')
           printf 'matrix=%s' "$subjobs" >> $GITHUB_OUTPUT
 
-  tests-e2e-docker:
+  tests-e2e:
     needs: get-e2e-matrix
 
     strategy:
@@ -168,6 +168,7 @@ jobs:
         python-version: ["3.12"]
 
         arch: ["x64"]
+        docker-engine: ["docker"]
 
         unit-tesseract: ${{ fromJson(needs.get-e2e-matrix.outputs.matrix) }}
 
@@ -177,6 +178,13 @@ jobs:
           - os: "ubuntu-22.04"
             python-version: "3.12"
             arch: "arm"
+            docker-engine: "docker"
+            unit-tesseract: "base"
+          # Run tests using Podman
+          - os: "ubuntu-24.04"
+            python-version: "3.12"
+            arch: "x64"
+            docker-engine: "podman"
             unit-tesseract: "base"
 
       fail-fast: false
@@ -209,8 +217,21 @@ jobs:
         run: |
           uv sync --extra dev --frozen
 
+      - name: Set up Podman
+        if: matrix.docker-engine == "podman"
+        run: |
+          systemctl start --user podman.socket
+          systemctl status --user podman.socket
+
+          podman --version
+
+          export DOCKER_HOST=unix:///run/user/1001/podman/podman.sock
+          echo "${DOCKER_HOST}" >> $GITHUB_ENV
+
       - name: Run test suite
         run: |
+          env | grep DOCKER_HOST
+
           if [ "${{ matrix.unit-tesseract }}" == "base" ]; then
             uv run --no-sync pytest \
               --always-run-endtoend \
@@ -236,146 +257,3 @@ jobs:
           slug: pasteurlabs/tesseract-core
           files: coverage*.xml
           fail_ci_if_error: true
-
-  tests-e2e-podman:
-    needs: get-e2e-matrix
-
-    strategy:
-      matrix:
-        os: [ubuntu-24.04]
-        python-version: ["3.12"]
-
-        arch: ["x64"]
-
-        unit-tesseract: ${{ fromJson(needs.get-e2e-matrix.outputs.matrix) }}
-
-        include:
-          # Test on arm to ensure compatibility with Apple M1 chips
-          # (OSX runners don't have access to Docker so we use Linux ARM runners instead)
-          - os: "ubuntu-22.04"
-            python-version: "3.12"
-            arch: "arm"
-            unit-tesseract: "base"
-
-      fail-fast: false
-
-    runs-on: ${{ matrix.arch == 'x64' && matrix.os == 'ubuntu-24.04' && 'ubuntu-24.04' || matrix.arch == 'arm' && matrix.os == 'ubuntu-24.04' && 'linux-arm64-ubuntu2204' }}
-
-    defaults:
-      run:
-        shell: bash -el {0}
-
-    steps:
-      - name: Set up Git repository
-        uses: actions/checkout@v4
-
-      # Use Conda to install Python (setup-python action doesn't support ARM)
-      - uses: conda-incubator/setup-miniconda@v3
-        with:
-          auto-update-conda: true
-          python-version: ${{ matrix.python-version }}
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: true
-
-      - name: Restore UV environment
-        run: cp production.uv.lock uv.lock
-
-      - name: Install package
-        run: |
-          uv sync --extra dev --frozen
-
-      - name: Set up Podman
-        run: |
-          systemctl start --user podman.socket
-          systemctl status --user podman.socket
-
-          podman -v
-          cat /etc/os-release
-
-      - name: Run test suite
-        run: |
-          if [ "${{ matrix.unit-tesseract }}" == "base" ]; then
-            DOCKER_HOST=unix:///run/user/1001/podman/podman.sock \
-            uv run --no-sync pytest \
-              --always-run-endtoend \
-              --cov-report=term-missing:skip-covered \
-              --cov-report=xml:coverage.xml \
-              --cov=tesseract_core \
-              tests/endtoend_tests \
-              -k "not test_examples"
-          else
-            DOCKER_HOST=unix:///run/user/1001/podman/podman.sock \
-            uv run --no-sync pytest \
-            --always-run-endtoend \
-            --cov-report=term-missing:skip-covered \
-            --cov-report=xml:coverage.xml \
-            --cov=tesseract_core \
-            tests/endtoend_tests/test_examples.py \
-            -k "[${{ matrix.unit-tesseract }}]"
-          fi
-
-      - name: Upload coverage reports to Codecov
-        uses: codecov/codecov-action@v5.4.2
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          slug: pasteurlabs/tesseract-core
-          files: coverage*.xml
-          fail_ci_if_error: true
-
-
-  test-podman:
-    strategy:
-      matrix:
-        os: [ubuntu-22.04, ubuntu-24.04]
-    runs-on: ${{ matrix.os }}
-
-    steps:
-      - name: Set up Git repository
-        uses: actions/checkout@v4
-
-      # Use Conda to install Python (setup-python action doesn't support ARM)
-      - uses: conda-incubator/setup-miniconda@v3
-        with:
-          auto-update-conda: true
-          python-version: ${{ matrix.python-version }}
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: true
-
-      - name: Restore UV environment
-        run: cp production.uv.lock uv.lock
-
-      - name: Install package
-        run: |
-          uv sync --extra dev --frozen
-
-      - name: Set up Podman
-        run: |
-          systemctl start --user podman.socket
-          systemctl status --user podman.socket
-
-          podman -v
-          cat /etc/os-release
-
-      - name: Build vectoradd via `podman`
-        run: |
-          path=$(uv run tesseract build --generate-only examples/vectoradd)
-
-          podman buildx build --load --tag vectoradd --file "${path}/Dockerfile" "${path}"
-
-          podman image ls
-
-      - name: Build vectoradd via `docker`
-        run: |
-          path=$(uv run tesseract build --generate-only examples/vectoradd)
-
-          DOCKER_HOST=unix:///run/user/1001/podman/podman.sock \
-          docker buildx build --load --tag vectoradd --file "${path}/Dockerfile" "${path}"
-
-          DOCKER_HOST=unix:///run/user/1001/podman/podman.sock \
-          docker image ls
