@@ -16,15 +16,15 @@ Tesseracts provide built-in support for propagating [gradient information](conte
 
 ```{figure} img/tesseract-interfaces.png
 :alt: Tesseract interfaces
-:width: 220px
+:width: 250px
 :align: right
 
-<small>Internal and external user interfaces.</small>
+<small>Internal and external interfaces of a Tesseract.</small>
 ```
 
 Every Tesseract has a single entrypoint, `apply`, which wraps a software functionality of the tesseractor's choice. All other [endpoints](content/api/endpoints.md) that a Tesseract exposes are in relation to this entrypoint. For example, `input_schema` returns its input types, `jacobian` its derivative, ...
 
-There are several ways inwhich users interact with Tesseracts, for example:
+There are several ways in which users interact with Tesseracts, for example:
 
 1. When defining entrypoints - `tesseract_api.py`.
 2. When building a container – `tesseract build`.
