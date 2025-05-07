@@ -43,7 +43,7 @@ class Images:
     """Namespace for functions to interface with Tesseract docker images."""
 
     @staticmethod
-    def tag_exists(image_name: str, tags: list_) -> bool:
+    def _tag_exists(image_name: str, tags: list_) -> bool:
         """Helper function to check if image name exists in the list of tags.
 
         Specially handling has to be done to achieve unfuzzy substring matching, i.e.
@@ -115,7 +115,7 @@ class Images:
                 image_obj.id == image_id_or_name
                 or image_obj.short_id == image_id_or_name
                 or image_id_or_name in image_obj.tags
-                or Images.tag_exists(image_id_or_name, image_obj.tags)
+                or Images._tag_exists(image_id_or_name, image_obj.tags)
             ):
                 return image_obj
 
