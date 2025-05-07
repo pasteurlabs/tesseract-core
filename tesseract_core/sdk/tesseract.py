@@ -551,17 +551,26 @@ class HTTPClient:
                 # Is not a Pydantic error
                 data = {}
             if "detail" in data:
-                errors = [
-                    InitErrorDetails(
+                errors = []
+                for e in data["detail"]:
+                    ctx = e.get("ctx", {})
+                    if not ctx.get("error") and e.get("msg"):
+                        # Hacky, but msg contains info like "Value error, ...",
+                        # which will be prepended to the message anyway by pydantic.
+                        # This way, we remove whatever is before the first comma.
+                        msg = e["msg"].partition(", ")[2]
+                        ctx["error"] = msg
+
+                    error = InitErrorDetails(
                         type=e["type"],
                         loc=tuple(e["loc"]),
                         input=e.get("input"),
-                        ctx=e.get("ctx", {}),
+                        ctx=ctx,
                     )
-                    for e in data["detail"]
-                ]
+                    errors.append(error)
+
                 raise ValidationError.from_exception_data(
-                    f"endpoint {endpoint}", errors
+                    f"endpoint {endpoint}", line_errors=errors
                 )
 
         if not response.ok:
