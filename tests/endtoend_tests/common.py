@@ -87,6 +87,7 @@ def build_tesseract(
     assert result.exit_code == 0, result.exception
 
     image_tags = json.loads(result.stdout.strip())
+    assert any(image_name in tag for tag in image_tags)
 
     assert client.images._tag_exists(image_name, image_tags)
 
