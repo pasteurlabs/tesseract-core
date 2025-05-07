@@ -745,7 +745,7 @@ class DockerException(Exception):
 class BuildError(DockerException):
     """Raised when a build fails."""
 
-    def __init__(self, build_log: list_) -> None:
+    def __init__(self, build_log: list_[str]) -> None:
         self.build_log = build_log
 
 
