@@ -6,12 +6,12 @@ import atexit
 import base64
 import json
 import subprocess
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from functools import cached_property, wraps
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Callable
+from typing import Any
 from urllib.parse import urlparse, urlunparse
 
 import numpy as np
@@ -33,7 +33,7 @@ class SpawnConfig:
     debug: bool
 
 
-def requires_client(func: callable) -> callable:
+def requires_client(func: Callable) -> Callable:
     """Decorator to require a client for a Tesseract instance."""
 
     @wraps(func)
