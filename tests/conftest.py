@@ -190,7 +190,18 @@ def docker_client():
 
 
 @pytest.fixture(scope="module")
+def docker_cleanup_module(docker_client, request):
+    """Clean up all tesseracts created by the tests after the module exits."""
+    return _docker_cleanup(docker_client, request)
+
+
+@pytest.fixture
 def docker_cleanup(docker_client, request):
+    """Clean up all tesseracts created by the tests after the test exits."""
+    return _docker_cleanup(docker_client, request)
+
+
+def _docker_cleanup(docker_client, request):
     """Clean up all tesseracts created by the tests."""
     # Shared object to track what objects need to be cleaned up in each test
     context = {"images": [], "project_ids": [], "containers": []}
