@@ -233,11 +233,11 @@ jobs:
           export DOCKER_HOST=unix:///run/user/1001/podman/podman.sock
           echo "DOCKER_HOST=${DOCKER_HOST}" >> $GITHUB_ENV
 
-      - name: Free some disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-                      /usr/local/share/powershell \
-                      /usr/share/swift /usr/local/.ghcup /usr/lib/jvm
+      # - name: Free some disk space
+      #   run: |
+      #     sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+      #                 /usr/local/share/powershell \
+      #                 /usr/share/swift /usr/local/.ghcup /usr/lib/jvm
 
       - name: Run test suite
         run: |
@@ -253,12 +253,12 @@ jobs:
               -k "not test_examples"
           else
             uv run --no-sync pytest \
-            --always-run-endtoend \
-            --cov-report=term-missing:skip-covered \
-            --cov-report=xml:coverage.xml \
-            --cov=tesseract_core \
-            tests/endtoend_tests/test_examples.py \
-            -k "[${{ matrix.unit-tesseract }}]"
+              --always-run-endtoend \
+              --cov-report=term-missing:skip-covered \
+              --cov-report=xml:coverage.xml \
+              --cov=tesseract_core \
+              tests/endtoend_tests/test_examples.py \
+              -k "[${{ matrix.unit-tesseract }}]"
           fi
 
       - name: Upload coverage reports to Codecov
