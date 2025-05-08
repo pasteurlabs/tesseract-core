@@ -274,65 +274,60 @@ def test_create_container(
 
 
 def test_container_volume_mounts(
-    docker_client, docker_client_built_image_name, tmp_path
+    docker_client, docker_cleanup, docker_client_built_image_name, tmp_path
 ):
     """Test container volume mounts."""
     container1 = None
-    try:
-        # Pytest creates the tmp_path fixture with drwx------ mode, we need others
-        # to be able to read and execute the path so the Docker volume is readable
-        # from within the container
-        tmp_path.chmod(0o0707)
+    # Pytest creates the tmp_path fixture with drwx------ mode, we need others
+    # to be able to read and execute the path so the Docker volume is readable
+    # from within the container
+    tmp_path.chmod(0o0707)
 
-        dest = Path("/foo/")
-        bar_file = dest / "hello.txt"
-        stdout = docker_client.containers.run(
-            docker_client_built_image_name,
-            [f"touch {bar_file} && chmod 777 {bar_file} && echo hello"],
-            detach=False,
-            volumes={tmp_path: {"bind": dest, "mode": "rw"}},
-            remove=True,
-        )
+    dest = Path("/foo/")
+    bar_file = dest / "hello.txt"
+    stdout = docker_client.containers.run(
+        docker_client_built_image_name,
+        [f"touch {bar_file} && chmod 777 {bar_file} && echo hello"],
+        detach=False,
+        volumes={tmp_path: {"bind": dest, "mode": "rw"}},
+        remove=True,
+    )
 
-        assert stdout == "hello\n"
-        # Check file exists in tmp path
-        assert (tmp_path / "hello.txt").exists()
+    assert stdout == "hello\n"
+    # Check file exists in tmp path
+    assert (tmp_path / "hello.txt").exists()
 
-        # Check container is removed and there are no running containers associated with the test image
-        result = subprocess.run(
-            [
-                "docker",
-                "ps",
-                "--filter",
-                f"ancestor={docker_client_built_image_name}",
-                "-q",
-            ],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        assert result.stdout == ""
+    # Check container is removed and there are no running containers associated with the test image
+    result = subprocess.run(
+        [
+            "docker",
+            "ps",
+            "--filter",
+            f"ancestor={docker_client_built_image_name}",
+            "-q",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout == ""
 
-        # Open tmp_path/hello.txt in write mode
-        with open(tmp_path / "hello.txt", "w") as f:
-            f.write("hello tesseract\n")
+    # Open tmp_path/hello.txt in write mode
+    with open(tmp_path / "hello.txt", "w") as f:
+        f.write("hello tesseract\n")
 
-        # Check we can read it in another container
-        container1 = docker_client.containers.run(
-            docker_client_built_image_name,
-            [f"cat {dest}/hello.txt"],
-            detach=True,
-            volumes={tmp_path: {"bind": dest, "mode": "rw"}},
-        )
-        status = container1.wait()
-        assert status["StatusCode"] == 0
-        stdout = container1.logs(stdout=True, stderr=False)
-        assert stdout == b"hello tesseract\n"
-
-    finally:
-        # Clean up the container
-        if container1:
-            container1.remove(v=True, force=True)
+    # Check we can read it in another container
+    container1 = docker_client.containers.run(
+        docker_client_built_image_name,
+        [f"cat {dest}/hello.txt"],
+        detach=True,
+        volumes={tmp_path: {"bind": dest, "mode": "rw"}},
+    )
+    docker_cleanup["containers"].append(container1)
+    status = container1.wait()
+    assert status["StatusCode"] == 0
+    stdout = container1.logs(stdout=True, stderr=False)
+    assert stdout == b"hello tesseract\n"
 
 
 def test_compose_up_down(

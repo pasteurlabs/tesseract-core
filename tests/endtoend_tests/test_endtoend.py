@@ -69,7 +69,7 @@ def test_build_from_init_endtoend(
         tag=img_tag,
     )
     assert image_exists(docker_client, image_name)
-    docker_cleanup["images"].append(image_name)
+    docker_cleanup["images"].append(image_name + ":" + img_tag if img_tag else "")
 
     # Test that the image can be run and that --help is forwarded correctly
     result = cli_runner.invoke(
