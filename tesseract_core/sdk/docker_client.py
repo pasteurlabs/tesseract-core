@@ -114,7 +114,6 @@ class Images:
             if (
                 image_obj.id == image_id_or_name
                 or image_obj.short_id == image_id_or_name
-                or image_id_or_name in image_obj.tags
                 or Images._tag_exists(image_id_or_name, image_obj.tags)
             ):
                 return image_obj
