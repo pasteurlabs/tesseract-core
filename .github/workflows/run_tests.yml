@@ -186,15 +186,10 @@ jobs:
             arch: "x64"
             docker-engine: "podman"
             unit-tesseract: "base"
-          - os: "ubuntu-24.04"
-            python-version: "3.12"
-            arch: "x64"
-            docker-engine: "podman"
-            unit-tesseract: "vectoradd_jax"
 
       fail-fast: false
 
-    runs-on: ${{ matrix.arch == 'x64' && matrix.os == 'ubuntu-24.04' && 'ubuntu-24.04' || matrix.arch == 'arm' && matrix.os == 'ubuntu-24.04' && 'linux-arm64-ubuntu2404' ||  matrix.arch == 'x64' && matrix.os == 'ubuntu-24.04' && 'ubuntu-24.04'}}
+    runs-on: ${{ matrix.arch == 'x64' && matrix.os == 'ubuntu-24.04' && 'ubuntu-24.04' || matrix.arch == 'arm' && matrix.os == 'ubuntu-24.04' && 'linux-arm64-ubuntu2404'}}
 
     defaults:
       run:
@@ -233,16 +228,8 @@ jobs:
           export DOCKER_HOST=unix:///run/user/1001/podman/podman.sock
           echo "DOCKER_HOST=${DOCKER_HOST}" >> $GITHUB_ENV
 
-      # - name: Free some disk space
-      #   run: |
-      #     sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-      #                 /usr/local/share/powershell \
-      #                 /usr/share/swift /usr/local/.ghcup /usr/lib/jvm
-
       - name: Run test suite
         run: |
-          env | grep DOCKER_HOST || true
-
           if [ "${{ matrix.unit-tesseract }}" == "base" ]; then
             uv run --no-sync pytest \
               --always-run-endtoend \

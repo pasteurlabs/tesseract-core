@@ -175,7 +175,7 @@ def test_create_image(
         for client in [docker_client, docker_py_client]:
             assert not image_exists(client, "create_image")
 
-            if podman and client == docker_py_client:
+            if (podman and client == docker_py_client) or client == docker_client:
                 # Docker-py does not support partial string matching
                 assert image_exists(client, image2_name)
                 assert image_exists(client, f"/{image2_name}")
