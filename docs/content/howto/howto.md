@@ -10,6 +10,7 @@ Here are some YAML-based configuration examples.
 
 arm64
 localdependency
+packagedata
 ```
 
 
@@ -26,4 +27,10 @@ localdependency
 
       A guide on installing local dependencies (`cowsay`) into a Tesseract.
    :::
+   :::{grid-item-card} Package Data
+      :link: packagedata.html
+
+      A guide on including local data into Tesseract package.
+   :::
+
 ::::

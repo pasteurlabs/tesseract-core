@@ -25,7 +25,7 @@ $ tesseract init --name cowsay
 
 This Tesseract will accept a message like "Hello, world!" as an input and return
 ```{literalinclude} ../../../examples/localdependency/expected_output.txt
-:language: python
+:language: text
 ```
 
 but in order to do so, it will need the dependency `cowsay` installed. We could just

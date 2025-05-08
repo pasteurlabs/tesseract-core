@@ -40,6 +40,21 @@ def pytest_addoption(parser):
         dest="run_endtoend",
         help="Skip end-to-end tests",
     )
+    parser.addoption(
+        "--tesseract-dir",
+        action="store",
+        default=".",
+        dest="tesseract_dir",
+        help="Directory of your tesseract api",
+    )
+
+
+@pytest.fixture
+def tesseract_dir(request):
+    """Return the tesseract directory."""
+    # This is used to set the tesseract_dir fixture
+    # in the pytest_generate_tests function above.
+    return Path(request.config.getoption("tesseract_dir"))
 
 
 def pytest_collection_modifyitems(config, items):

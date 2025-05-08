@@ -111,7 +111,7 @@ examples/helloworld
 ```
 
 These files are all that's needed to define a Tesseract.
-
+(tesseract_api) =
 ### `tesseract_api.py`
 
  The `tesseract_api.py` file defines the Tesseract's input and output schemas, and the functions that are being called when we invoke `tesseract run <funcname>`. These are,
