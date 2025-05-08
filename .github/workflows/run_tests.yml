@@ -236,3 +236,23 @@ jobs:
           slug: pasteurlabs/tesseract-core
           files: coverage*.xml
           fail_ci_if_error: true
+
+  all-ok:
+    needs: [tests-base, tests-e2e]
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check for errors
+        run: |
+          if [ "${{ needs.tests-base.result }}" != "success" ]; then
+            echo "Base tests failed"
+            exit 1
+          fi
+
+          if [ "${{ needs.tests-e2e.result }}" != "success" ]; then
+            echo "E2E tests failed"
+            exit 1
+          fi
+
+          echo "All tests passed!"
