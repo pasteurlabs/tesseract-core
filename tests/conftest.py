@@ -7,6 +7,8 @@ import random
 import string
 from pathlib import Path
 from shutil import copytree
+from textwrap import indent
+from traceback import format_exception
 from typing import Any
 
 import pytest
@@ -190,51 +192,76 @@ def docker_client():
 @pytest.fixture(scope="module")
 def docker_cleanup(docker_client, request):
     """Clean up all tesseracts created by the tests."""
-    from tesseract_core.sdk.docker_client import ContainerError, ImageNotFound
-
     # Shared object to track what objects need to be cleaned up in each test
     context = {"images": [], "project_ids": [], "containers": []}
 
+    def pprint_exc(e: BaseException) -> str:
+        """Pretty print exception."""
+        return "".join(
+            indent(line, "  ") for line in format_exception(type(e), e, e.__traceback__)
+        )
+
     def cleanup_func():
+        failures = []
+
         # Teardown projects first
         for project_id in context["project_ids"]:
-            if docker_client.compose.exists(project_id):
+            try:
                 docker_client.compose.down(project_id)
+            except Exception as e:
+                failures.append(
+                    f"Failed to tear down project {project_id}: {pprint_exc(e)}"
+                )
 
         # Remove containers
         for container in context["containers"]:
             try:
-                container_obj = docker_client.containers.get(container)
-            except ContainerError:
-                continue
-            container_obj.remove(v=True, force=True)
+                if isinstance(container, str):
+                    container_obj = docker_client.containers.get(container.id)
+                else:
+                    container_obj = container
+
+                container_obj.remove(v=True, force=True)
+            except Exception as e:
+                failures.append(
+                    f"Failed to remove container {container}: {pprint_exc(e)}"
+                )
 
         # Remove images
         for image in context["images"]:
             try:
-                docker_client.images.remove(image)
-            except ImageNotFound:
-                continue
+                if isinstance(image, str):
+                    image_obj = docker_client.images.get(image)
+                else:
+                    image_obj = image
+
+                docker_client.images.remove(image_obj.id)
+            except Exception as e:
+                failures.append(f"Failed to remove image {image}: {pprint_exc(e)}")
+
+        if failures:
+            raise RuntimeError(
+                "Failed to clean up some Docker objects during test teardown:\n"
+                + "\n".join(failures)
+            )
 
     request.addfinalizer(cleanup_func)
     return context
 
 
 @pytest.fixture
-def dummy_image_name(docker_cleanup):
+def dummy_image_name():
     """Create a dummy image name, and clean up after the test."""
     image_id = "".join(random.choices(string.ascii_lowercase + string.digits, k=16))
     image_name = f"tmp_tesseract_image_{image_id}"
-    docker_cleanup["images"].append(image_name)
     yield image_name
 
 
 @pytest.fixture(scope="module")
-def shared_dummy_image_name(docker_cleanup):
+def shared_dummy_image_name():
     """Create a dummy image name, and clean up after all tests."""
     image_id = "".join(random.choices(string.ascii_lowercase + string.digits, k=16))
     image_name = f"tmp_tesseract_image_{image_id}"
-    docker_cleanup["images"].append(image_name)
     yield image_name
 
 

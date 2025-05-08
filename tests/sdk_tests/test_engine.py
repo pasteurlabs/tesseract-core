@@ -36,9 +36,7 @@ def test_prepare_build_context(tmp_path_factory):
 
 
 @pytest.mark.parametrize("generate_only", [True, False])
-def test_build_tesseract(
-    dummy_tesseract_package, mocked_docker, docker_cleanup, generate_only, caplog
-):
+def test_build_tesseract(dummy_tesseract_package, mocked_docker, generate_only, caplog):
     """Test we can build an image for a package and keep build directory."""
     src_dir = dummy_tesseract_package
     image_name = "unit_vectoradd"
@@ -50,7 +48,6 @@ def test_build_tesseract(
             image_tag,
             generate_only=generate_only,
         )
-        docker_cleanup["images"].append(image_name + ":" + image_tag)
 
     if generate_only:
         assert isinstance(out, Path)
