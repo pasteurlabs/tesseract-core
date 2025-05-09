@@ -45,6 +45,17 @@ def test_01a_tesseract_schema(tesseract_dir: Path) -> None:
     """
     validate_tesseract_api(tesseract_dir)
 
+    run_res = cli_runner.invoke(
+        app,
+        [
+            "build",
+            tesseract_dir,
+        ],
+        catch_exceptions=False,
+    )
+    assert run_res.exit_code == 0, run_res.stderr
+    assert run_res.stdout
+
     test_commands = ("input-schema", "output-schema")
     for command in test_commands:
         run_res = cli_runner.invoke(
@@ -65,11 +76,22 @@ def test_01a_tesseract_schema(tesseract_dir: Path) -> None:
             assert '"type":"string"' in run_res.stdout
 
 
-def test_01b_tesseract_apply() -> None:
+def test_01b_tesseract_apply(tesseract_dir: Path) -> None:
     """Test for step 2 of the bootcamp tutorial.
 
     Validate that the apply function is correctly implemented.
     """
+    run_res = cli_runner.invoke(
+        app,
+        [
+            "build",
+            tesseract_dir,
+        ],
+        catch_exceptions=False,
+    )
+    assert run_res.exit_code == 0, run_res.stderr
+    assert run_res.stdout
+
     # Check that the apply function is implemented
     # Convert numbers to words
     data_dir = Path(__file__).parent / "example_data"
