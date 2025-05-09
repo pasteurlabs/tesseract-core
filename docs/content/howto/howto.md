@@ -32,5 +32,10 @@ packagedata
 
       A guide on including local data into Tesseract package.
    :::
+   :::{grid-item-card} Hello World
+      :link: helloworld.html
+
+      A simple hello world Tesseract.
+   :::
 
 ::::
