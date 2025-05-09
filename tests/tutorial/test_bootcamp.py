@@ -38,7 +38,7 @@ def test_00_tesseract_init(tesseract_dir: Path) -> None:
         assert run_res.stdout
 
 
-def test_01a_tesseract_schema(tesseract_dir: Path) -> None:
+def test_01a_tesseract_schema(tesseract_dir: Path, docker_cleanup) -> None:
     """Test for step 1 of the bootcamp tutorial.
 
     Validate the input and output schema of the Tesseract.
@@ -55,6 +55,7 @@ def test_01a_tesseract_schema(tesseract_dir: Path) -> None:
     )
     assert run_res.exit_code == 0, run_res.stderr
     assert run_res.stdout
+    docker_cleanup["images"].append(BOOTCAMP_IMAGE_NAME)
 
     test_commands = ("input-schema", "output-schema")
     for command in test_commands:
@@ -76,7 +77,7 @@ def test_01a_tesseract_schema(tesseract_dir: Path) -> None:
             assert '"type":"string"' in run_res.stdout
 
 
-def test_01b_tesseract_apply(tesseract_dir: Path) -> None:
+def test_01b_tesseract_apply(tesseract_dir: Path, docker_cleanup) -> None:
     """Test for step 2 of the bootcamp tutorial.
 
     Validate that the apply function is correctly implemented.
@@ -91,6 +92,7 @@ def test_01b_tesseract_apply(tesseract_dir: Path) -> None:
     )
     assert run_res.exit_code == 0, run_res.stderr
     assert run_res.stdout
+    docker_cleanup["images"].append(BOOTCAMP_IMAGE_NAME)
 
     # Check that the apply function is implemented
     # Convert numbers to words
@@ -106,12 +108,24 @@ def test_01b_tesseract_apply(tesseract_dir: Path) -> None:
     assert "hello tesseract" in run_res.stdout
 
 
-def test_02_tesseract_packagedata() -> None:
+def test_02_tesseract_packagedata(tesseract_dir: Path, docker_cleanup) -> None:
     """Test for step 3 of the bootcamp tutorial.
 
     Call the apply function on secret_message.json and check that
     the output is correct.
     """
+    run_res = cli_runner.invoke(
+        app,
+        [
+            "build",
+            tesseract_dir,
+        ],
+        catch_exceptions=False,
+    )
+    assert run_res.exit_code == 0, run_res.stderr
+    assert run_res.stdout
+    docker_cleanup["images"].append(BOOTCAMP_IMAGE_NAME)
+
     data_dir = Path(__file__).parent / "example_data"
     run_res = cli_runner.invoke(
         app,
