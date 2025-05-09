@@ -1,4 +1,3 @@
-(package_data) =
 # Passing in local data into a Tesseract
 
 ## Context

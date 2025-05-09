@@ -27,6 +27,8 @@ Help us figure out what this message means -- in a Tesseract way.
 
 ```
 
+# Tesseract Bootcamp
+
 ## Step 0: Initializing Your First Tesseract
 
 Create your own Tesseract named `bootcamp` by running the command `tesseract init --name bootcamp --target-dir bootcamp`.
@@ -61,7 +63,7 @@ Learn how to define your own input/output schema and write your first apply func
 
 Now, in your generated tesseract, there should be a semi-populated `tesseract_api.py` file.
 
-Populate it by following the instructions here: [Get Started - tesseract_api.py](tesseract_api).
+Populate it by following the instructions here: [Get Started - tesseract_api.py](../../introduction/get-started.md#let-s-peek-under-the-hood).
 
 For our `bootcamp` Tesseract, we want to be able to decode this encoded message that is a numpy array of random integers into a hidden string message.
 
@@ -126,7 +128,7 @@ It turns out, the janitor found a secret key stashed in the bathroom stall last 
 ```
 :::
 
-Create a file named `message_key.json` and follow the instructions in the [Package Data example](package_data) to read the message key into our apply function, and add the key to our input array before decoding to figure out the true message.
+Create a file named `message_key.json` and follow the instructions in the [Package Data example](../../howto/packagedata.md) to read the message key into our apply function, and add the key to our input array before decoding to figure out the true message.
 
 :::{dropdown} Unit Test
 :color: secondary
@@ -137,7 +139,7 @@ Create a file named `message_key.json` and follow the instructions in the [Packa
 
 And now we can finally reveal the secret message! Do you know what that's from?
 
-# Bonus (TODO)
+##  Bonus (TODO)
 ## Step 2a: Try out vectoradd
 
 Try daisy-chaining 2 Tesseracts together in python using vector-add and bootcamp tesseract.
