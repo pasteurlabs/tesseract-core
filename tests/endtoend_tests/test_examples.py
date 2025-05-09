@@ -21,7 +21,7 @@ import numpy as np
 import numpy.typing as npt
 import pytest
 import requests
-from common import build_tesseract
+from common import build_tesseract, image_exists
 from typer.testing import CliRunner
 
 
@@ -759,15 +759,6 @@ def unit_tesseract_config(unit_tesseract_names, unit_tesseract_path):
     return TEST_CASES[unit_tesseract_path.name]
 
 
-def image_exists(client, image_name):
-    # Docker images may be prefixed with the registry URL
-    return any(
-        tag.split("/")[-1] == image_name
-        for img in client.images.list()
-        for tag in img.tags
-    )
-
-
 def print_debug_info(result):
     """Print debug info from result of a CLI command if it failed."""
     if result.exit_code == 0:
@@ -827,6 +818,7 @@ def test_unit_tesseract_endtoend(
     unit_tesseract_path,
     unit_tesseract_config,
     free_port,
+    docker_cleanup,
 ):
     """Test that unit Tesseract images can be built and used to serve REST API."""
     from tesseract_core.sdk.cli import app
@@ -835,11 +827,13 @@ def test_unit_tesseract_endtoend(
 
     # Stage 1: Build
     img_name = build_tesseract(
+        docker_client,
         unit_tesseract_path,
         dummy_image_name,
         tag="sometag",
     )
     assert image_exists(docker_client, img_name)
+    docker_cleanup["images"].append(img_name)
 
     # Stage 2: Test CLI usage
     result = cli_runner.invoke(
@@ -943,101 +937,89 @@ def test_unit_tesseract_endtoend(
 
     # Cannot mix stderr if we want to load the json
     cli_runner = CliRunner(mix_stderr=False)
-    try:
-        project_id = None
+    project_id = None
 
-        run_res = cli_runner.invoke(
-            app,
-            [
-                "serve",
-                img_name,
-                "-p",
-                free_port,
-            ],
-            catch_exceptions=False,
+    run_res = cli_runner.invoke(
+        app,
+        [
+            "serve",
+            img_name,
+            "-p",
+            free_port,
+        ],
+        catch_exceptions=False,
+    )
+
+    assert run_res.exit_code == 0, run_res.stderr
+    assert run_res.stdout
+
+    project_meta = json.loads(run_res.stdout)
+    project_id = project_meta["project_id"]
+    docker_cleanup["project_ids"].append(project_id)
+
+    # Give server some time to start up
+    timeout = 10
+    interval = 0.1
+    while True:
+        try:
+            is_alive = requests.get(f"http://localhost:{free_port}/health")
+        except requests.exceptions.ConnectionError:
+            pass
+        else:
+            assert is_alive.status_code == 200
+            break
+
+        if timeout <= 0:
+            raise TimeoutError("Container did not start in time")
+        time.sleep(interval)
+        timeout -= interval
+
+    # Now test server (send requests and validate outputs)
+    response = requests.get(f"http://localhost:{free_port}/openapi.json")
+    assert response.status_code == 200
+
+    response = requests.get(f"http://localhost:{free_port}/input_schema")
+    assert response.status_code == 200
+    out_input_schema = response.json()
+    assert "properties" in out_input_schema
+
+    if unit_tesseract_config.volume_mounts is not None:
+        # TODO: Mounts are not supported in HTTP mode yet, skip rest of the test for now
+        return
+
+    if unit_tesseract_config.test_with_random_inputs:
+        payload_from_schema = example_from_json_schema(out_input_schema)
+        response = requests.post(
+            f"http://localhost:{free_port}/apply", json=payload_from_schema
         )
+        assert response.status_code == 200, response.text
 
-        assert run_res.exit_code == 0, run_res.stderr
-        assert run_res.stdout
+    sample_requests = unit_tesseract_config.sample_requests or []
+    for request in sample_requests:
+        if request.endpoint in ("check-gradients",):
+            # Not supported in HTTP mode
+            continue
 
-        project_meta = json.loads(run_res.stdout)
-        project_id = project_meta["project_id"]
+        headers = {
+            "Accept": f"application/{request.output_format}",
+        }
+        response = requests.post(
+            f"http://localhost:{free_port}/{request.endpoint}",
+            json=request.payload,
+            headers=headers,
+        )
+        output = response.text
+        assert response.status_code == request.expected_status_code, output
 
-        # Give server some time to start up
-        timeout = 10
-        interval = 0.1
-        while True:
-            try:
-                is_alive = requests.get(f"http://localhost:{free_port}/health")
-            except requests.exceptions.ConnectionError:
-                pass
-            else:
-                assert is_alive.status_code == 200
-                break
+        if request.output_contains_pattern is not None:
+            patterns = request.output_contains_pattern
+            if isinstance(patterns, str):
+                patterns = [patterns]
 
-            if timeout <= 0:
-                raise TimeoutError("Container did not start in time")
-            time.sleep(interval)
-            timeout -= interval
+            for pattern in patterns:
+                assert pattern in output
 
-        # Now test server (send requests and validate outputs)
-        response = requests.get(f"http://localhost:{free_port}/openapi.json")
-        assert response.status_code == 200
-
-        response = requests.get(f"http://localhost:{free_port}/input_schema")
-        assert response.status_code == 200
-        out_input_schema = response.json()
-        assert "properties" in out_input_schema
-
-        if unit_tesseract_config.volume_mounts is not None:
-            # TODO: Mounts are not supported in HTTP mode yet, skip rest of the test for now
-            return
-
-        if unit_tesseract_config.test_with_random_inputs:
-            payload_from_schema = example_from_json_schema(out_input_schema)
-            response = requests.post(
-                f"http://localhost:{free_port}/apply", json=payload_from_schema
-            )
-            assert response.status_code == 200, response.text
-
-        sample_requests = unit_tesseract_config.sample_requests or []
-        for request in sample_requests:
-            if request.endpoint in ("check-gradients",):
-                # Not supported in HTTP mode
-                continue
-
-            headers = {
-                "Accept": f"application/{request.output_format}",
-            }
-            response = requests.post(
-                f"http://localhost:{free_port}/{request.endpoint}",
-                json=request.payload,
-                headers=headers,
-            )
-            output = response.text
-            assert response.status_code == request.expected_status_code, output
-
-            if request.output_contains_pattern is not None:
-                patterns = request.output_contains_pattern
-                if isinstance(patterns, str):
-                    patterns = [patterns]
-
-                for pattern in patterns:
-                    assert pattern in output
-
-            if request.output_contains_array is not None:
-                array = request.output_contains_array
-                output_json = json.loads(output)
-                assert_contains_array_allclose(output_json, array)
-
-    finally:
-        if project_id:
-            run_res = cli_runner.invoke(
-                app,
-                [
-                    "teardown",
-                    project_id,
-                ],
-                catch_exceptions=False,
-            )
-            assert run_res.exit_code == 0, run_res.output
+        if request.output_contains_array is not None:
+            array = request.output_contains_array
+            output_json = json.loads(output)
+            assert_contains_array_allclose(output_json, array)

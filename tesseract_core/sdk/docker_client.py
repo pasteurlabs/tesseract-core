@@ -43,8 +43,46 @@ class Images:
     """Namespace for functions to interface with Tesseract docker images."""
 
     @staticmethod
+    def _tag_exists(image_name: str, tags: list_) -> bool:
+        """Helper function to check if image name exists in the list of tags.
+
+        Specially handling has to be done to achieve unfuzzy substring matching, i.e.
+        if image tag is foo/bar/image, we need to return true for foo/bar/image, bar/image,
+        and image, but not ar/image.
+
+        There is no equivalent in docker-py.
+
+        Params:
+            image_name: The image name to check.
+            tags: The list of tags to check against.
+
+        Returns:
+            True if the image name exists in the list of tags, False otherwise.
+        """
+        if ":" not in image_name:
+            image_name += ":latest"
+
+        image_name_parts = image_name.strip("/").split("/")
+        for tag in tags:
+            tag_parts = tag.strip("/").split("/")
+            # Check if the last parts of the tag matches the subportion that image name specifies
+            if tag_parts[-len(image_name_parts) :] == image_name_parts:
+                return True
+        return False
+
+    @staticmethod
     def get(image_id_or_name: str | bytes, tesseract_only: bool = True) -> Image:
         """Returns the metadata for a specific image.
+
+        In docker-py, there is no substring matching and the image name is the
+        last tag in the list of tags, so if an image has multiple tags, only
+        one of the tags would be able to find the image.
+
+        However, in podman, this is not the case. Podman has substring matching
+        by "/" segments to handle repository urls and returns images even if
+        partial name is specified, or if image has multiple tags.
+
+        We chose to support podman's largest string matching functionality here.
 
         Params:
             image_id_or_name: The image name or id to get.
@@ -76,12 +114,7 @@ class Images:
             if (
                 image_obj.id == image_id_or_name
                 or image_obj.short_id == image_id_or_name
-                or image_id_or_name in image_obj.tags
-                or (
-                    any(
-                        tag.split("/")[-1] == image_id_or_name for tag in image_obj.tags
-                    )
-                )
+                or Images._tag_exists(image_id_or_name, image_obj.tags)
             ):
                 return image_obj
 
@@ -711,7 +744,7 @@ class DockerException(Exception):
 class BuildError(DockerException):
     """Raised when a build fails."""
 
-    def __init__(self, build_log: str) -> None:
+    def __init__(self, build_log: list_[str]) -> None:
         self.build_log = build_log
 
 

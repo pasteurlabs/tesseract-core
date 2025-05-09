@@ -10,10 +10,12 @@ import optparse
 import os
 import random
 import shlex
+import socket
 import string
 import tempfile
 import threading
 from collections.abc import Callable, Sequence
+from contextlib import closing
 from pathlib import Path
 from shutil import copy, copytree, rmtree
 from typing import Any
@@ -116,14 +118,31 @@ def needs_docker(func: Callable) -> Callable:
     return wrapper_needs_docker
 
 
-def get_free_port() -> int:
-    """Find a free port to use for HTTP."""
-    import socket
-    from contextlib import closing
+def get_free_port(within_range: tuple[int, int] | None = None) -> int:
+    """Find a random free port to use for HTTP."""
+    if within_range is None:
+        # Let OS pick a random free port
+        with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
+            s.bind(("localhost", 0))
+            return s.getsockname()[1]
 
-    with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
-        s.bind(("localhost", 0))
-        return s.getsockname()[1]
+    start, end = within_range
+    if start < 0 or end > 65535 or start >= end:
+        raise ValueError("Invalid port range")
+
+    # Try random ports in the given range
+    portlist = list(range(start, end))
+    random.shuffle(portlist)
+    for port in portlist:
+        with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
+            try:
+                s.bind(("localhost", port))
+            except OSError:
+                # Port is already in use
+                continue
+            else:
+                return port
+    raise RuntimeError(f"No free ports found in range {start}-{end}")
 
 
 def parse_requirements(
@@ -496,6 +515,7 @@ def serve(
     volumes: list[str] | None = None,
     gpus: list[str] | None = None,
     debug: bool = False,
+    num_workers: int = 1,
 ) -> str:
     """Serve one or more Tesseract images.
 
@@ -507,6 +527,7 @@ def serve(
         volumes: list of paths to mount in the Tesseract container.
         gpus: IDs of host Nvidia GPUs to make available to the Tesseracts.
         debug: whether to enable debug mode.
+        num_workers: number of workers to use for serving the Tesseracts.
 
     Returns:
         A string representing the Tesseract Project ID.
@@ -527,7 +548,9 @@ def serve(
             f"Number of ports ({len(ports)}) must match number of images ({len(image_ids)})"
         )
 
-    template = _create_docker_compose_template(image_ids, ports, volumes, gpus, debug)
+    template = _create_docker_compose_template(
+        image_ids, ports, volumes, gpus, num_workers, debug
+    )
     compose_fname = _create_compose_fname()
 
     with tempfile.NamedTemporaryFile(
@@ -548,12 +571,19 @@ def _create_docker_compose_template(
     ports: list[str] | None = None,
     volumes: list[str] | None = None,
     gpus: list[str] | None = None,
+    num_workers: int = 1,
     debug: bool = False,
 ) -> str:
     """Create Docker Compose template."""
     services = []
     if ports is None:
         ports = [str(get_free_port()) for _ in range(len(image_ids))]
+
+    # Convert port ranges to fixed ports
+    for i, port in enumerate(ports):
+        if "-" in port:
+            port_start, port_end = port.split("-")
+            ports[i] = str(get_free_port(within_range=(int(port_start), int(port_end))))
 
     gpu_settings = None
     if gpus:
@@ -576,7 +606,7 @@ def _create_docker_compose_template(
 
         services.append(service)
     template = ENV.get_template("docker-compose.yml")
-    return template.render(services=services)
+    return template.render(services=services, num_workers=num_workers)
 
 
 def _create_compose_service_id(image_id: str) -> str:

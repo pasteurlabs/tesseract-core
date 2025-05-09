@@ -6,12 +6,12 @@ import atexit
 import base64
 import json
 import subprocess
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from functools import cached_property, wraps
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Callable
+from typing import Any
 from urllib.parse import urlparse, urlunparse
 
 import numpy as np
@@ -24,22 +24,16 @@ from . import engine
 
 @dataclass
 class SpawnConfig:
-    """Configuration for spawning a Tesseract.
-
-    Attributes:
-        image: The image to use.
-        volumes: List of volumes to mount.
-        gpus: List of GPUs to use.
-        debug: Whether to run in debug mode.
-    """
+    """Configuration for spawning a Tesseract."""
 
     image: str
     volumes: list[str] | None
     gpus: list[str] | None
+    num_workers: int
     debug: bool
 
 
-def requires_client(func: callable) -> callable:
+def requires_client(func: Callable) -> Callable:
     """Decorator to require a client for a Tesseract instance."""
 
     @wraps(func)
@@ -92,6 +86,7 @@ class Tesseract:
         *,
         volumes: list[str] | None = None,
         gpus: list[str] | None = None,
+        num_workers: int = 1,
     ) -> Tesseract:
         """Create a Tesseract instance from a Docker image.
 
@@ -108,8 +103,11 @@ class Tesseract:
 
         Args:
             image: The Docker image to use.
-            volumes: List of volumes to mount.
-            gpus: List of GPUs to use.
+            volumes: List of volumes to mount, e.g. ["/path/on/host:/path/in/container"].
+            gpus: List of GPUs to use, e.g. ["0", "1"]. (default: no GPUs)
+            num_workers: Number of worker processes to use. This determines how
+                many requests can be handled in parallel. Higher values
+                will increase throughput, but also increase resource usage.
 
         Returns:
             A Tesseract instance.
@@ -119,6 +117,7 @@ class Tesseract:
             image=image,
             volumes=volumes,
             gpus=gpus,
+            num_workers=num_workers,
             debug=True,
         )
         obj._serve_context = None
@@ -222,6 +221,7 @@ class Tesseract:
             port=port,
             volumes=self._spawn_config.volumes,
             gpus=self._spawn_config.gpus,
+            num_workers=self._spawn_config.num_workers,
             debug=self._spawn_config.debug,
         )
         self._serve_context = dict(
@@ -261,6 +261,7 @@ class Tesseract:
         volumes: list[str] | None = None,
         gpus: list[str] | None = None,
         debug: bool = False,
+        num_workers: int = 1,
     ) -> tuple[str, str, int]:
         if port is not None:
             ports = [port]
@@ -268,7 +269,12 @@ class Tesseract:
             ports = None
 
         project_id = engine.serve(
-            [image], ports=ports, volumes=volumes, gpus=gpus, debug=debug
+            [image],
+            ports=ports,
+            volumes=volumes,
+            gpus=gpus,
+            debug=debug,
+            num_workers=num_workers,
         )
 
         command = ["docker", "compose", "-p", project_id, "ps", "--format", "json"]
@@ -545,17 +551,26 @@ class HTTPClient:
                 # Is not a Pydantic error
                 data = {}
             if "detail" in data:
-                errors = [
-                    InitErrorDetails(
+                errors = []
+                for e in data["detail"]:
+                    ctx = e.get("ctx", {})
+                    if not ctx.get("error") and e.get("msg"):
+                        # Hacky, but msg contains info like "Value error, ...",
+                        # which will be prepended to the message anyway by pydantic.
+                        # This way, we remove whatever is before the first comma.
+                        msg = e["msg"].partition(", ")[2]
+                        ctx["error"] = msg
+
+                    error = InitErrorDetails(
                         type=e["type"],
                         loc=tuple(e["loc"]),
                         input=e.get("input"),
-                        ctx=e.get("ctx", {}),
+                        ctx=ctx,
                     )
-                    for e in data["detail"]
-                ]
+                    errors.append(error)
+
                 raise ValidationError.from_exception_data(
-                    f"endpoint {endpoint}", errors
+                    f"endpoint {endpoint}", line_errors=errors
                 )
 
         if not response.ok:

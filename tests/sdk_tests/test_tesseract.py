@@ -107,7 +107,12 @@ def test_serve_lifecycle(mock_serving, mock_clients):
         pass
 
     mock_serving["serve_mock"].assert_called_with(
-        ["sometesseract:0.2.3"], ports=None, volumes=None, gpus=None, debug=True
+        ["sometesseract:0.2.3"],
+        ports=None,
+        volumes=None,
+        gpus=None,
+        debug=True,
+        num_workers=1,
     )
 
     mock_serving["teardown_mock"].assert_called_with("proj-id-123")
@@ -163,6 +168,13 @@ def test_HTTPClient_run_tesseract_raises_validation_error(mocker):
                 "msg": "Extra inputs are not permitted",
                 "input": "whatever",
             },
+            {
+                "type": "value_error",
+                "loc": ["body", "inputs", "bar"],
+                "msg": "Value error, Dimensionality mismatch: 2D array cannot be cast to 1D",
+                "input": [[1.0, 2.0], [2.0, 3.0], [3.0, 4.0]],
+                "error": {},
+            },
         ]
     }
     mock_response.status_code = 422
@@ -174,8 +186,14 @@ def test_HTTPClient_run_tesseract_raises_validation_error(mocker):
 
     client = HTTPClient("somehost")
 
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError) as excinfo:
         client.run_tesseract("apply", {"inputs": {"whoops": "whatever"}})
+
+    # This checks as well that no duplicate "Value error" is in msg
+    assert (
+        excinfo.value.errors()[3]["msg"]
+        == "Value error, Dimensionality mismatch: 2D array cannot be cast to 1D"
+    )
 
 
 @pytest.mark.parametrize(
