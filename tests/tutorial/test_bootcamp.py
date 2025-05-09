@@ -14,7 +14,7 @@ cli_runner = CliRunner(mix_stderr=False)
 BOOTCAMP_IMAGE_NAME = "bootcamp"
 
 
-def test_00_tesseract_init(tesseract_dir: Path) -> None:
+def test_00_tesseract_init(tesseract_dir: Path, docker_cleanup) -> None:
     """Test for step 0 of the bootcamp tutorial."""
     # Check that the Tesseract named "bootcamp" exists
     # and can be run
@@ -22,6 +22,18 @@ def test_00_tesseract_init(tesseract_dir: Path) -> None:
     assert (tesseract_dir / "tesseract_api.py").exists()
     with open(tesseract_dir / "tesseract_config.yaml") as config_yaml:
         assert yaml.safe_load(config_yaml)["name"] == "bootcamp"
+
+    run_res = cli_runner.invoke(
+        app,
+        [
+            "build",
+            str(tesseract_dir),
+        ],
+        catch_exceptions=False,
+    )
+    assert run_res.exit_code == 0, run_res.stderr
+    assert run_res.stdout
+    docker_cleanup["images"].append(BOOTCAMP_IMAGE_NAME)
 
     test_commands = ("input-schema", "output-schema", "openapi-schema", "health")
     for command in test_commands:
@@ -49,7 +61,7 @@ def test_01a_tesseract_schema(tesseract_dir: Path, docker_cleanup) -> None:
         app,
         [
             "build",
-            tesseract_dir,
+            str(tesseract_dir),
         ],
         catch_exceptions=False,
     )
@@ -86,7 +98,7 @@ def test_01b_tesseract_apply(tesseract_dir: Path, docker_cleanup) -> None:
         app,
         [
             "build",
-            tesseract_dir,
+            str(tesseract_dir),
         ],
         catch_exceptions=False,
     )
@@ -118,7 +130,7 @@ def test_02_tesseract_packagedata(tesseract_dir: Path, docker_cleanup) -> None:
         app,
         [
             "build",
-            tesseract_dir,
+            str(tesseract_dir),
         ],
         catch_exceptions=False,
     )

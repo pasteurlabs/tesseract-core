@@ -8,6 +8,7 @@
 import json
 import os
 
+import numpy as np
 from pydantic import BaseModel, Field
 
 from tesseract_core.runtime import Array, Int32
@@ -42,14 +43,11 @@ def apply(inputs: InputSchema) -> OutputSchema:
         with open(message_key) as file:
             # If key is same length as array, use it:
             key = json.load(file)
-            if len(key["key"]) == len(array):
-                array += key["key"]
-            else:
-                raise ValueError(
-                    f"Key length {len(key['key'])} does not match ciphertext length {len(array)}."
-                )
 
-    chars = [chr(n + 96) if n > 0 else " " for n in array]
+            if len(key["key"]) == len(array):
+                array = np.add(np.array(array), np.array(key["key"]))
+
+    chars = [chr(n + 96) for n in array]
     return OutputSchema(message="".join(chars))
 
 

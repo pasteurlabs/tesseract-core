@@ -83,7 +83,7 @@ Test using the next unit test to validate we can decode some basic messages.
 :color: secondary
 :icon: check-circle
 
-`pytest tests/tutorial/test_bootcamp.py -k test_01b_tesseract_apply`
+`pytest tests/tutorial/test_bootcamp.py --tesseract-dir [path to bootcamp directory] -k test_01b_tesseract_apply`
 
 You can also test this locally by running
 ```
@@ -122,7 +122,7 @@ Create a file named `message_key.json` and follow the instructions in the [Packa
 :color: secondary
 :icon: check-circle
 
-`pytest tutorial/test_bootcamp -k test_02a_tesseract_packagedata`
+`pytest tests/tutorial/test_bootcamp.py --tesseract-dir [path to bootcamp directory] -k test_02_tesseract_packagedata`
 ::::
 
 And now we can finally reveal the secret message! Do you know what that's from?
