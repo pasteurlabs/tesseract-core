@@ -3,6 +3,7 @@
 ## Context
 You may need to include local files into your Tesseract. This guide will demonstrate how.
 
+(package-data)=
 ## Example Tesseract (examples/package_data)
 
 In this example, we want to include and process `parameters.json` file in our Tesseract.

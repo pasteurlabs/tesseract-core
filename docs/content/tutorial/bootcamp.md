@@ -51,7 +51,7 @@ Learn how to define your own input/output schema and write your first apply func
 
 Now, in your generated tesseract, there should be a semi-populated `tesseract_api.py` file.
 
-Populate it by following the instructions here: [Get Started - tesseract_api.py](../../introduction/get-started.md#let-s-peek-under-the-hood).
+Populate it by following the instructions here: [Get Started - tesseract_api.py](#getting-started).
 
 For our `bootcamp` Tesseract, we want to be able to decode this encoded message that is a numpy array of random integers into a hidden string message.
 
@@ -116,7 +116,7 @@ It turns out, the janitor found a secret key stashed in the bathroom stall last 
 ```
 :::
 
-Create a file named `message_key.json` and follow the instructions in the [Package Data example](../../howto/packagedata.md) to read the message key into our apply function, and add the key to our input array before decoding to figure out the true message.
+Create a file named `message_key.json` and follow the instructions in the [Package Data example](#package-data) to read the message key into our apply function, and add the key to our input array before decoding to figure out the true message.
 
 :::{dropdown} Unit Test
 :color: secondary
