@@ -15,7 +15,7 @@ message hidden in our lounge room.
 :::
 
 
-Help us figure out what this message means -- in a Tesseract way.
+Help us figure out what this ciphertext means -- in a Tesseract way.
 
 ## Step 0: Initializing Your First Tesseract
 
@@ -53,9 +53,9 @@ Now, in your generated tesseract, there should be a semi-populated `tesseract_ap
 
 Populate it by following the instructions here: [Get Started - tesseract_api.py](#getting-started).
 
-For our `bootcamp` Tesseract, we want to be able to decode this encoded message that is a numpy array of random integers into a hidden string message.
+For our `bootcamp` Tesseract, we want to be able to decode the ciphertext that is a numpy array of random integers into a hidden string message.
 
-**Populate the `input schema` and `output schema` fields** so we can achieve this, then make sure we pass the next test. You can reference the examples in `helloworld` and `vectoradd` of different ways to define the schema types. Also take note of how secret message is structured when defining your input types.
+**Populate the `input schema` and `output schema` fields** so we can achieve this, then make sure we pass the next test. The available schema types are defined in [tesseract-runtime-api](#tr-runtime-api), and you can also reference the examples in the [example-gallery](#example-gallery) for some inspiration. Also take note of how secret message is structured when defining your input types.
 
 Make sure you rebuild the bootcamp Tesseract before proceeding to the testing phase.
 
@@ -70,7 +70,7 @@ example:
 
 ::::
 
-Now that the schemas are populated, we need to fill out the apply function. We believe that the message is encoded using a basic *letter number cipher (A1Z26)*. **Write the apply function so that we can pass in our message and get the decoded result back.**
+Now that the schemas are populated, we need to fill out the apply function. We believe that the ciphertext is encoded using a basic *letter number cipher (A1Z26)*. **Write the apply function so that we can pass in our ciphertext and get the decoded message back.**
 
 ```{tip}
 Use examples/vectoradd and examples/helloworld as inspo.

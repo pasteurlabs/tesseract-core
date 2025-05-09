@@ -10,7 +10,7 @@ import os
 
 from pydantic import BaseModel, Field
 
-from tesseract_core.runtime import Array, Differentiable, Int32
+from tesseract_core.runtime import Array, Int32
 
 #
 # Schemas
@@ -18,13 +18,11 @@ from tesseract_core.runtime import Array, Differentiable, Int32
 
 
 class InputSchema(BaseModel):
-    message: Differentiable[Array[(None,), Int32]] = Field(
-        description="An arbitrary array."
-    )
+    ciphertext: Array[(None,), Int32] = Field(description="The ciphered message.")
 
 
 class OutputSchema(BaseModel):
-    decoded_message: str = Field(description="Decoded Message.")
+    message: str = Field(description="Decoded Message")
 
 
 #
@@ -33,7 +31,7 @@ class OutputSchema(BaseModel):
 
 
 def apply(inputs: InputSchema) -> OutputSchema:
-    array = inputs.message
+    array = inputs.ciphertext
 
     dirname = os.path.dirname(__file__)
     message_key = os.path.join(dirname, "message_key.json")
@@ -42,11 +40,17 @@ def apply(inputs: InputSchema) -> OutputSchema:
     if os.path.exists(message_key):
         # check parameters
         with open(message_key) as file:
+            # If key is same length as array, use it:
             key = json.load(file)
-            array += key["key"]
+            if len(key["key"]) == len(array):
+                array += key["key"]
+            else:
+                raise ValueError(
+                    f"Key length {len(key['key'])} does not match ciphertext length {len(array)}."
+                )
 
     chars = [chr(n + 96) if n > 0 else " " for n in array]
-    return OutputSchema(decoded_message="".join(chars))
+    return OutputSchema(message="".join(chars))
 
 
 #

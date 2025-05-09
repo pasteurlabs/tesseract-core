@@ -2,6 +2,7 @@ Example Gallery
 ====================
 
 ```{toctree}
+:name: example-gallery
 :caption: Example Gallery
 :maxdepth: 2
 :hidden:
