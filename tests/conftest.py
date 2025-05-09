@@ -45,7 +45,7 @@ def pytest_addoption(parser):
     parser.addoption(
         "--tesseract-dir",
         action="store",
-        default=".",
+        default=None,
         dest="tesseract_dir",
         help="Directory of your tesseract api",
     )
@@ -56,7 +56,10 @@ def tesseract_dir(request):
     """Return the tesseract directory."""
     # This is used to set the tesseract_dir fixture
     # in the pytest_generate_tests function above.
-    return Path(request.config.getoption("tesseract_dir"))
+    tesseract_dir = request.config.getoption("tesseract_dir")
+    if tesseract_dir:
+        return Path(tesseract_dir)
+    return None
 
 
 def pytest_collection_modifyitems(config, items):
