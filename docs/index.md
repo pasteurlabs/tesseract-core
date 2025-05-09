@@ -101,8 +101,8 @@ content/using-tesseracts/advanced.md
 
 Expert showcase <https://si-tesseract.discourse.group/c/showcase/expert-showcase/12>
 How-to Guides <https://si-tesseract.discourse.group/c/support/how-to-guides/10>
-content/howto/howto
-content/tutorial/bootcamp/bootcamp
+content/examples/example_gallery
+content/tutorial/bootcamp
 ```
 
 ```{toctree}

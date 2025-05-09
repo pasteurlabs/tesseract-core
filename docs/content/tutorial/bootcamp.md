@@ -9,25 +9,13 @@ We at the Tesseract team have recently received a mysteriously encoded
 message hidden in our lounge room.
 
 :::{dropdown} Secret Message
-```{literalinclude} ../../../../tests/tutorial/example_data/secret_message.json
+```{literalinclude} ../../../tests/tutorial/example_data/secret_message.json
 :language: json
 ```
 :::
 
 
 Help us figure out what this message means -- in a Tesseract way.
-
-
-
-
-```{toctree}
-:caption: Tesseract Bootcamp
-:maxdepth: 2
-:hidden:
-
-```
-
-# Tesseract Bootcamp
 
 ## Step 0: Initializing Your First Tesseract
 
@@ -123,7 +111,7 @@ Oh what's that? A bunch of gibberish? It seems that the decoder isn't quite corr
 It turns out, the janitor found a secret key stashed in the bathroom stall last night and we have reason to suspect that this key may help with the decoding.
 
 :::{dropdown} Possible Key???
-```{literalinclude} ../../../../tests/tutorial/example_data/message_key.json
+```{literalinclude} ../../../tests/tutorial/example_data/message_key.json
 :language: json
 ```
 :::
@@ -140,12 +128,12 @@ Create a file named `message_key.json` and follow the instructions in the [Packa
 And now we can finally reveal the secret message! Do you know what that's from?
 
 ##  Bonus (TODO)
-## Step 2a: Try out vectoradd
+### Step 2a: Try out vectoradd
 
 Try daisy-chaining 2 Tesseracts together in python using vector-add and bootcamp tesseract.
 
-## Step 3: Local Package
+### Step 3: Local Package
 
 Convert the python script you just wrote using the Tesseracts into a local package.
 
-## Step 4: ...
+### Step 4: ...
