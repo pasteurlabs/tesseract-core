@@ -114,7 +114,20 @@ jobs:
             --skip-endtoend \
             --cov-report=term-missing:skip-covered \
             --cov-report=xml:coverage.xml \
-            --cov=tesseract_core
+            --cov=tesseract_core \
+            --cov-omit=tests/tutorial/*
+
+      - name: Run tutorial tests
+        if: runner.os != 'Windows'
+        run: |
+          uv run --no-sync pytest \
+            --skip-endtoend \
+            --cov-report=term-missing:skip-covered \
+            --cov-report=xml:coverage.xml \
+            --cov=tesseract_core \
+             tests/tutorial \
+              --tesseract-dir \
+              tests/tutorial/example_data/bootcamp
 
       - name: Run test suite (Windows)
         if: runner.os == 'Windows'
@@ -125,7 +138,23 @@ jobs:
             --skip-endtoend \
             --cov-report=term-missing:skip-covered \
             --cov-report=xml:coverage.xml \
-            --cov=tesseract_core
+            --cov=tesseract_core \
+            --cov-omit=tests/tutorial/*
+
+      - name: Run tutorial tests (Windows)
+        if: runner.os == 'Windows'
+        shell: wsl-bash {0}
+        run: |
+          export PATH="$HOME/venv/bin:$PATH"
+          uv run --no-sync pytest \
+            --skip-endtoend \
+            --cov-report=term-missing:skip-covered \
+            --cov-report=xml:coverage.xml \
+            --cov=tesseract_core \
+             tests/tutorial \
+              --tesseract-dir \
+              tests/tutorial/example_data/bootcamp
+
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v5.4.2

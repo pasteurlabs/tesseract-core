@@ -13,6 +13,7 @@ packagedata
 helloworld
 dataloader
 meshstats
+vectoradd
 ```
 
 
@@ -49,5 +50,11 @@ meshstats
 
      Tesseract using dataloader.
    :::
+   :::{grid-item-card} Vector Add
+      :link: vectoradd.html
+
+     Tesseract doing vector add.
+   :::
+
 
 ::::
