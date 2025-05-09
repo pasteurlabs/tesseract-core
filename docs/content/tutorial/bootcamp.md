@@ -73,7 +73,7 @@ example:
 Now that the schemas are populated, we need to fill out the apply function. We believe that the ciphertext is encoded using a basic *letter number cipher (A1Z26)*. **Write the apply function so that we can pass in our ciphertext and get the decoded message back.**
 
 ```{tip}
-Use examples/vectoradd and examples/helloworld as inspo.
+Use examples/vectoradd and examples/helloworld as inspiration.
 ```
 
 Test using the next unit test to validate we can decode some basic messages.
@@ -134,6 +134,7 @@ Try daisy-chaining 2 Tesseracts together in python using vector-add and bootcamp
 
 ### Step 3: Local Package
 
-Convert the python script you just wrote using the Tesseracts into a local package.
+Provide a python package (maybe i make it or user does) that encrypts the message in the same manner using the same key and
+use that python package in your Tesseract to write a message back.
 
 ### Step 4: ...
