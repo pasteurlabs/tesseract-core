@@ -21,7 +21,7 @@ import numpy as np
 import numpy.typing as npt
 import pytest
 import requests
-from common import build_tesseract
+from common import build_tesseract, image_exists
 from typer.testing import CliRunner
 
 
@@ -739,15 +739,6 @@ def unit_tesseract_config(unit_tesseract_names, unit_tesseract_path):
     return TEST_CASES[unit_tesseract_path.name]
 
 
-def image_exists(client, image_name):
-    # Docker images may be prefixed with the registry URL
-    return any(
-        tag.split("/")[-1] == image_name
-        for img in client.images.list()
-        for tag in img.tags
-    )
-
-
 def print_debug_info(result):
     """Print debug info from result of a CLI command if it failed."""
     if result.exit_code == 0:
@@ -816,6 +807,7 @@ def test_unit_tesseract_endtoend(
 
     # Stage 1: Build
     img_name = build_tesseract(
+        docker_client,
         unit_tesseract_path,
         dummy_image_name,
         tag="sometag",

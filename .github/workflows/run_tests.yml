@@ -164,24 +164,32 @@ jobs:
 
     strategy:
       matrix:
-        os: [ubuntu-22.04]
+        os: [ubuntu-24.04]
         python-version: ["3.12"]
 
         arch: ["x64"]
+        docker-engine: ["docker"]
 
         unit-tesseract: ${{ fromJson(needs.get-e2e-matrix.outputs.matrix) }}
 
         include:
           # Test on arm to ensure compatibility with Apple M1 chips
           # (OSX runners don't have access to Docker so we use Linux ARM runners instead)
-          - os: "ubuntu-22.04"
+          - os: "ubuntu-24.04"
             python-version: "3.12"
             arch: "arm"
+            docker-engine: "docker"
+            unit-tesseract: "base"
+          # Run tests using Podman
+          - os: "ubuntu-24.04"
+            python-version: "3.12"
+            arch: "x64"
+            docker-engine: "podman"
             unit-tesseract: "base"
 
       fail-fast: false
 
-    runs-on: ${{ matrix.arch == 'x64' && matrix.os == 'ubuntu-22.04' && 'ubuntu-22.04' || matrix.arch == 'arm' && matrix.os == 'ubuntu-22.04' && 'linux-arm64-ubuntu2204' }}
+    runs-on: ${{ matrix.arch == 'x64' && matrix.os == 'ubuntu-24.04' && 'ubuntu-24.04' || matrix.arch == 'arm' && matrix.os == 'ubuntu-24.04' && 'linux-arm64-ubuntu2404'}}
 
     defaults:
       run:
@@ -209,6 +217,17 @@ jobs:
         run: |
           uv sync --extra dev --frozen
 
+      - name: Set up Podman
+        if: matrix.docker-engine == 'podman'
+        run: |
+          systemctl start --user podman.socket
+          systemctl status --user podman.socket
+
+          podman --version
+
+          export DOCKER_HOST=unix:///run/user/1001/podman/podman.sock
+          echo "DOCKER_HOST=${DOCKER_HOST}" >> $GITHUB_ENV
+
       - name: Run test suite
         run: |
           if [ "${{ matrix.unit-tesseract }}" == "base" ]; then
@@ -221,12 +240,12 @@ jobs:
               -k "not test_examples"
           else
             uv run --no-sync pytest \
-            --always-run-endtoend \
-            --cov-report=term-missing:skip-covered \
-            --cov-report=xml:coverage.xml \
-            --cov=tesseract_core \
-            tests/endtoend_tests/test_examples.py \
-            -k "[${{ matrix.unit-tesseract }}]"
+              --always-run-endtoend \
+              --cov-report=term-missing:skip-covered \
+              --cov-report=xml:coverage.xml \
+              --cov=tesseract_core \
+              tests/endtoend_tests/test_examples.py \
+              -k "[${{ matrix.unit-tesseract }}]"
           fi
 
       - name: Upload coverage reports to Codecov

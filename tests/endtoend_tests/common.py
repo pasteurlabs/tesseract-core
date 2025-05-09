@@ -48,7 +48,7 @@ def print_debug_info(result):
 
 
 def build_tesseract(
-    sourcedir, image_name, config_override=None, tag=None, build_retries=3
+    client, sourcedir, image_name, config_override=None, tag=None, build_retries=3
 ):
     cli_runner = CliRunner(mix_stderr=False)
 
@@ -87,6 +87,7 @@ def build_tesseract(
     assert result.exit_code == 0, result.exception
 
     image_tags = json.loads(result.stdout.strip())
-    assert image_name in image_tags
+
+    assert client.images._tag_exists(image_name, image_tags)
 
     return image_tags[0]

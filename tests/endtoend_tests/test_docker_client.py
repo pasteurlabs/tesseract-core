@@ -3,6 +3,7 @@
 
 """End to end tests for docker cli wrapper."""
 
+import os
 import subprocess
 import textwrap
 from contextlib import closing
@@ -52,7 +53,7 @@ def test_get_image(docker_client, docker_client_built_image_name, docker_py_clie
     # Get the image
     image = docker_client.images.get(docker_client_built_image_name)
     assert image is not None
-    assert docker_client_built_image_name in image.tags
+    assert docker_client.images._tag_exists(docker_client_built_image_name, image.tags)
 
     docker_py_image = docker_py_client.images.get(docker_client_built_image_name)
     assert docker_py_image is not None
@@ -100,7 +101,7 @@ def test_get_image(docker_client, docker_client_built_image_name, docker_py_clie
     assert docker_py_image_list is not None
     # Check that every image in image_list is also in docker_py_image_list
     for image in image_list:
-        assert image.id in [img.id for img in docker_py_image_list]
+        assert image.id in [img.id for img in docker_py_image_list if img]
 
 
 def test_create_image(
@@ -120,7 +121,9 @@ def test_create_image(
     try:
         image = docker_client.images.get(docker_client_built_image_name)
         assert image is not None
-        assert docker_client_built_image_name in image.tags
+        assert docker_client.images._tag_exists(
+            docker_client_built_image_name, image.tags
+        )
 
         image_id_obj = docker_client.images.get(image.id)
         image_short_id_obj = docker_client.images.get(image.short_id)
@@ -138,7 +141,7 @@ def test_create_image(
         image1 = docker_client.images.get(image1_name)
         image1_name = image1_name + ":latest"
         assert image1 is not None
-        assert image1_name in image1.tags
+        assert docker_client.images._tag_exists(image1_name, image1.tags)
         assert image_exists(docker_client, image1_name)
         assert image_exists(docker_py_client, image1_name)
 
@@ -155,14 +158,33 @@ def test_create_image(
         # Our docker client should be able to retrieve images with just the name
         image2 = docker_client.images.get(repo_url + image2_name)
         image2_no_url = docker_client.images.get(image2_name)
+        assert docker_client.images._tag_exists(image2_name, image2.tags)
+
         assert image2 is not None
         assert image2_no_url is not None
         assert image2.id == image2_py.id
         assert image2_no_url.id == image2_py.id
 
-        assert image_exists(docker_client, image2_name)
-        assert image_exists(docker_client, repo_url + image2_name)
-        assert image_exists(docker_py_client, repo_url + image2_name)
+        # Check we are not overmatching but we are getting all possible cases
+        docker_host = os.environ.get("DOCKER_HOST", "")
+
+        podman = False
+        if "podman" in docker_host:
+            podman = True
+
+        for client in [docker_client, docker_py_client]:
+            assert not image_exists(client, "create_image")
+
+            if (podman and client == docker_py_client) or client == docker_client:
+                # Docker-py does not support partial string matching
+                assert image_exists(client, image2_name)
+                assert image_exists(client, f"/{image2_name}")
+                assert image_exists(client, f"bar/{image2_name}")
+                assert image_exists(client, f"bar/{image2_name}:latest")
+                assert not image_exists(client, f"ar/{image2_name}")
+                assert image_exists(client, f"foo/bar/{image2_name}")
+
+            assert image_exists(client, repo_url + image2_name)
 
     finally:
         # Clean up the images
@@ -252,65 +274,60 @@ def test_create_container(
 
 
 def test_container_volume_mounts(
-    docker_client, docker_client_built_image_name, tmp_path
+    docker_client, docker_cleanup, docker_client_built_image_name, tmp_path
 ):
     """Test container volume mounts."""
     container1 = None
-    try:
-        # Pytest creates the tmp_path fixture with drwx------ mode, we need others
-        # to be able to read and execute the path so the Docker volume is readable
-        # from within the container
-        tmp_path.chmod(0o0707)
+    # Pytest creates the tmp_path fixture with drwx------ mode, we need others
+    # to be able to read and execute the path so the Docker volume is readable
+    # from within the container
+    tmp_path.chmod(0o0707)
 
-        dest = Path("/foo/")
-        bar_file = dest / "hello.txt"
-        stdout = docker_client.containers.run(
-            docker_client_built_image_name,
-            [f"touch {bar_file} && chmod 777 {bar_file} && echo hello"],
-            detach=False,
-            volumes={tmp_path: {"bind": dest, "mode": "rw"}},
-            remove=True,
-        )
+    dest = Path("/foo/")
+    bar_file = dest / "hello.txt"
+    stdout = docker_client.containers.run(
+        docker_client_built_image_name,
+        [f"touch {bar_file} && chmod 777 {bar_file} && echo hello"],
+        detach=False,
+        volumes={tmp_path: {"bind": dest, "mode": "rw"}},
+        remove=True,
+    )
 
-        assert stdout == "hello\n"
-        # Check file exists in tmp path
-        assert (tmp_path / "hello.txt").exists()
+    assert stdout == "hello\n"
+    # Check file exists in tmp path
+    assert (tmp_path / "hello.txt").exists()
 
-        # Check container is removed and there are no running containers associated with the test image
-        result = subprocess.run(
-            [
-                "docker",
-                "ps",
-                "--filter",
-                f"ancestor={docker_client_built_image_name}",
-                "-q",
-            ],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        assert result.stdout == ""
+    # Check container is removed and there are no running containers associated with the test image
+    result = subprocess.run(
+        [
+            "docker",
+            "ps",
+            "--filter",
+            f"ancestor={docker_client_built_image_name}",
+            "-q",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout == ""
 
-        # Open tmp_path/hello.txt in write mode
-        with open(tmp_path / "hello.txt", "w") as f:
-            f.write("hello tesseract\n")
+    # Open tmp_path/hello.txt in write mode
+    with open(tmp_path / "hello.txt", "w") as f:
+        f.write("hello tesseract\n")
 
-        # Check we can read it in another container
-        container1 = docker_client.containers.run(
-            docker_client_built_image_name,
-            [f"cat {dest}/hello.txt"],
-            detach=True,
-            volumes={tmp_path: {"bind": dest, "mode": "rw"}},
-        )
-        status = container1.wait()
-        assert status["StatusCode"] == 0
-        stdout = container1.logs(stdout=True, stderr=False)
-        assert stdout == b"hello tesseract\n"
-
-    finally:
-        # Clean up the container
-        if container1:
-            container1.remove(v=True, force=True)
+    # Check we can read it in another container
+    container1 = docker_client.containers.run(
+        docker_client_built_image_name,
+        [f"cat {dest}/hello.txt"],
+        detach=True,
+        volumes={tmp_path: {"bind": dest, "mode": "rw"}},
+    )
+    docker_cleanup["containers"].append(container1)
+    status = container1.wait()
+    assert status["StatusCode"] == 0
+    stdout = container1.logs(stdout=True, stderr=False)
+    assert stdout == b"hello tesseract\n"
 
 
 def test_compose_up_down(
