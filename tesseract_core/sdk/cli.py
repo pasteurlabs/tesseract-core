@@ -500,18 +500,25 @@ def serve(
             args.extend(["--num-workers", str(num_workers)])
         if propagate_tracebacks:
             args.append("--debug")
-        
+
         logger.info(f"Serving Tesseract at http://localhost:{port}")
         logger.info(f"View Tesseract: http://localhost:{port}/docs")
         logger.info("Press Ctrl+C to stop")
 
         engine.run_tesseract(
-            image_names[0], "serve", args, volumes=volume, gpus=gpus, ports={port: container_port}
+            image_names[0],
+            "serve",
+            args,
+            volumes=volume,
+            gpus=gpus,
+            ports={port: container_port},
         )
         return
 
     try:
-        project_id = engine.serve(image_names, ports, volume, gpus, propagate_tracebacks, num_workers)
+        project_id = engine.serve(
+            image_names, ports, volume, gpus, propagate_tracebacks, num_workers
+        )
         container_ports = _display_project_meta(project_id)
         logger.info(
             f"Docker Compose Project ID, use it with 'tesseract teardown' command: {project_id}"

@@ -26,6 +26,7 @@ EXECUTABLES = {
     "docker-compose": ["docker", "compose"],
 }
 
+
 def get_executable(program: Literal["docker", "docker-compose"]) -> str:
     """Get the path to the requested program."""
     exe = EXECUTABLES[program]
@@ -33,13 +34,13 @@ def get_executable(program: Literal["docker", "docker-compose"]) -> str:
         exe = shutil.which(program)
     if exe is None:
         raise FileNotFoundError(f"{program} executable not found.")
-    
+
     exe_path = Path(exe)
     if not exe_path.is_file():
         raise FileNotFoundError(f"{program} executable {exe} is not a file.")
     if not os.access(exe_path, os.X_OK):
         raise PermissionError(f"{program} executable {exe} is not executable.")
-    
+
     return exe_path.resolve()
 
 
@@ -49,7 +50,7 @@ def set_executable(program: Literal["docker", "docker-compose"], path: str) -> N
         raise FileNotFoundError(f"{path} is not a file.")
     if not os.access(path, os.X_OK):
         raise PermissionError(f"{path} is not executable.")
-    
+
     EXECUTABLES[program] = path
 
 
@@ -578,7 +579,7 @@ class Containers:
             optional_args.append("--detach")
         if remove:
             optional_args.append("--rm")
-                
+
         if ports:
             for host_port, container_port in ports.items():
                 optional_args.extend(["-p", f"{host_port}:{container_port}"])
