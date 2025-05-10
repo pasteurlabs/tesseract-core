@@ -664,6 +664,7 @@ def run_tesseract(
     args: list[str],
     volumes: list[str] | None = None,
     gpus: list[int | str] | None = None,
+    ports: dict[str, str] | None = None,
 ) -> tuple[str, str]:
     """Start a Tesseract and execute a given command.
 
@@ -673,6 +674,8 @@ def run_tesseract(
         args: arguments for the command.
         volumes: list of paths to mount in the Tesseract container.
         gpus: list of GPUs, as indices or names, to passthrough the container.
+        ports: dictionary of ports to bind to the host. Key is the host port,
+            value is the container port.
 
     Returns:
         Tuple with the stdout and stderr of the Tesseract.
@@ -741,6 +744,7 @@ def run_tesseract(
             volumes=parsed_volumes,
             detach=True,
             device_requests=gpus,
+            ports=ports,
         )
         result = container.wait()
         stdout = container.logs(stdout=True, stderr=False).decode("utf-8")

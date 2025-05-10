@@ -426,6 +426,35 @@ def serve(
             ),
         ),
     ] = None,
+    num_workers: Annotated[
+        int,
+        typer.Option(
+            "--num-workers",
+            help="Number of worker processes to use when serving the Tesseract.",
+            show_default=True,
+        ),
+    ] = 1,
+    propagate_tracebacks: Annotated[
+        bool,
+        typer.Option(
+            "--propagate-tracebacks",
+            help=(
+                "Enable debug mode. This will propagate full tracebacks to the client. "
+                "WARNING: This may expose sensitive information, use with caution (and never in production)."
+            ),
+        ),
+    ] = False,
+    no_compose: Annotated[
+        bool,
+        typer.Option(
+            "--no-compose",
+            help=(
+                "Do not use Docker Compose to serve the Tesseract. "
+                "Instead, the command will block until interrupted. "
+                "This is useful for cases in which docker-compose is not available."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Serve one or more Tesseract images.
 
@@ -449,8 +478,40 @@ def serve(
     else:
         ports = None
 
+    if no_compose:
+        if len(image_names) > 1:
+            raise typer.BadParameter(
+                (
+                    "Docker Compose is required to serve multiple Tesseracts. "
+                    f"Currently serving `{len(image_names)}` Tesseracts."
+                ),
+                param_hint="image_names",
+            )
+        args = []
+        container_port = "8000"
+        args.extend(["--port", container_port])
+
+        if ports:
+            port = ports[0]
+        else:
+            port = str(engine.get_free_port())
+
+        if num_workers > 1:
+            args.extend(["--num-workers", str(num_workers)])
+        if propagate_tracebacks:
+            args.append("--debug")
+        
+        logger.info(f"Serving Tesseract at http://localhost:{port}")
+        logger.info(f"View Tesseract: http://localhost:{port}/docs")
+        logger.info("Press Ctrl+C to stop")
+
+        engine.run_tesseract(
+            image_names[0], "serve", args, volumes=volume, gpus=gpus, ports={port: container_port}
+        )
+        return
+
     try:
-        project_id = engine.serve(image_names, ports, volume, gpus)
+        project_id = engine.serve(image_names, ports, volume, gpus, propagate_tracebacks, num_workers)
         container_ports = _display_project_meta(project_id)
         logger.info(
             f"Docker Compose Project ID, use it with 'tesseract teardown' command: {project_id}"
