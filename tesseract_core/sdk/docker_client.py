@@ -12,6 +12,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from textwrap import indent
 from typing import Literal
 
 logger = logging.getLogger("tesseract")
@@ -22,16 +23,15 @@ list_ = list
 
 
 EXECUTABLES = {
-    "docker": ["docker"],
-    "docker-compose": ["docker", "compose"],
+    "docker": "docker",
+    "docker-compose": "docker compose",
 }
 
 
-def get_executable(program: Literal["docker", "docker-compose"]) -> str:
+def get_executable(program: Literal["docker", "docker-compose"]) -> list[str]:
     """Get the path to the requested program."""
-    exe = EXECUTABLES[program]
-    if exe is None:
-        exe = shutil.which(program)
+    exe, *args = shlex.split(EXECUTABLES[program])
+    exe = shutil.which(exe)
     if exe is None:
         raise FileNotFoundError(f"{program} executable not found.")
 
@@ -41,7 +41,7 @@ def get_executable(program: Literal["docker", "docker-compose"]) -> str:
     if not os.access(exe_path, os.X_OK):
         raise PermissionError(f"{program} executable {exe} is not executable.")
 
-    return exe_path.resolve()
+    return [str(exe_path.resolve()), *args]
 
 
 def set_executable(program: Literal["docker", "docker-compose"], path: str) -> None:
@@ -177,7 +177,7 @@ class Images:
         docker = get_executable("docker")
         try:
             res = subprocess.run(
-                [docker, "rmi", image, "--force"],
+                [*docker, "rmi", image, "--force"],
                 check=True,
                 capture_output=True,
                 text=True,
@@ -202,7 +202,7 @@ class Images:
         """
         docker = get_executable("docker")
         build_cmd = [
-            docker,
+            *docker,
             "buildx",
             "build",
             "--load",
@@ -272,7 +272,7 @@ class Images:
         images = []
         try:
             image_ids = subprocess.run(
-                [docker, "images", "-q"],  # List only image IDs
+                [*docker, "images", "-q"],  # List only image IDs
                 capture_output=True,
                 text=True,
                 check=True,
@@ -361,7 +361,7 @@ class Container:
         docker = get_executable("docker")
         try:
             result = subprocess.run(
-                [docker, "exec", self.id, *command],
+                [*docker, "exec", self.id, *command],
                 check=True,
                 capture_output=True,
             )
@@ -402,7 +402,7 @@ class Container:
 
         try:
             result = subprocess.run(
-                [docker, "logs", self.id],
+                [*docker, "logs", self.id],
                 check=True,
                 stdout=stdout_pipe,
                 stderr=stderr_pipe,
@@ -424,7 +424,7 @@ class Container:
 
         try:
             result = subprocess.run(
-                [docker, "wait", self.id],
+                [*docker, "wait", self.id],
                 check=True,
                 capture_output=True,
                 text=True,
@@ -449,7 +449,7 @@ class Container:
         try:
             result = subprocess.run(
                 [
-                    docker,
+                    *docker,
                     "rm",
                     *(["-f"] if force else []),
                     *(["-v"] if v else []),
@@ -586,7 +586,7 @@ class Containers:
 
         # Run with detached to get the container id of the running container.
         full_cmd = [
-            docker,
+            *docker,
             "run",
             *optional_args,
             image,
@@ -641,7 +641,7 @@ class Containers:
         docker = get_executable("docker")
         containers = []
 
-        cmd = [docker, "ps", "-q"]
+        cmd = [*docker, "ps", "-q"]
         if include_stopped:
             cmd.append("--all")
 
@@ -701,13 +701,12 @@ class Compose:
         Returns:
             The project name.
         """
-        docker = get_executable("docker")
+        docker_compose = get_executable("docker-compose")
         logger.info("Waiting for Tesseract containers to start ...")
         try:
             _ = subprocess.run(
                 [
-                    docker,
-                    "compose",
+                    *docker_compose,
                     "-f",
                     compose_fpath,
                     "-p",
@@ -721,22 +720,17 @@ class Compose:
             )
             return project_name
         except subprocess.CalledProcessError as ex:
-            # If the project successfully started, try to get the logs from the containers
-            project_containers = Compose.list(include_stopped=True).get(
-                project_name, None
-            )
-            if project_containers:
-                container = Containers.get(project_containers[0])
-                stderr = container.logs(stderr=True)
-                raise ContainerError(
-                    f"Failed to start Tesseract container: {container.name}, logs: ",
-                    stderr,
-                ) from ex
             logger.error(str(ex))
             logger.error(ex.stderr.decode())
-            raise ContainerError(
-                "Failed to start Tesseract containers.", ex.stderr
-            ) from ex
+            # If the project successfully started, try to get the logs from the containers
+            project_containers = Compose.list(include_stopped=True).get(
+                project_name, ()
+            )
+            for container_name in project_containers:
+                container = Containers.get(container_name)
+                logger.error(f"Container {container_name} logs:")
+                logger.error(indent(container.logs(stderr=True).decode(), " > "))
+            raise ContainerError("Failed to start Tesseract containers.") from ex
 
     @staticmethod
     def down(project_id: str) -> bool:
@@ -748,10 +742,10 @@ class Compose:
         Returns:
             True if the project was stopped successfully, False otherwise.
         """
-        docker = get_executable("docker")
+        docker_compose = get_executable("docker-compose")
         try:
             __ = subprocess.run(
-                [docker, "compose", "-p", project_id, "down"],
+                [*docker_compose, "-p", project_id, "down"],
                 check=True,
                 capture_output=True,
             )
@@ -847,7 +841,7 @@ class CLIDockerClient:
         docker = get_executable("docker")
         try:
             result = subprocess.run(
-                [docker, "info"],
+                [*docker, "info"],
                 check=True,
                 capture_output=True,
             )
@@ -877,7 +871,7 @@ def get_docker_metadata(
     metadata = None
     try:
         result = subprocess.run(
-            [docker, "inspect", *docker_asset_ids],
+            [*docker, "inspect", *docker_asset_ids],
             check=True,
             capture_output=True,
             text=True,

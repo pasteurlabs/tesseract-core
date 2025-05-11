@@ -14,7 +14,7 @@ import socket
 import string
 import tempfile
 import threading
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from contextlib import closing
 from pathlib import Path
 from shutil import copy, copytree, rmtree
@@ -118,11 +118,21 @@ def needs_docker(func: Callable) -> Callable:
     return wrapper_needs_docker
 
 
-def get_free_port(within_range: tuple[int, int] | None = None) -> int:
+def get_free_port(
+    within_range: tuple[int, int] | None = None, exclude: Iterable[int | str] = ()
+) -> int:
     """Find a random free port to use for HTTP."""
+    exclude = set(int(port) for port in exclude)
+
     if within_range is None:
         # Let OS pick a random free port
         with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
+            for port in exclude:
+                try:
+                    s.bind(("localhost", port))
+                except OSError:
+                    # Port is already in use
+                    continue
             s.bind(("localhost", 0))
             return s.getsockname()[1]
 
@@ -134,6 +144,9 @@ def get_free_port(within_range: tuple[int, int] | None = None) -> int:
     portlist = list(range(start, end))
     random.shuffle(portlist)
     for port in portlist:
+        if port in exclude:
+            continue
+        # Check if the port is free
         with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
             try:
                 s.bind(("localhost", port))
@@ -576,14 +589,22 @@ def _create_docker_compose_template(
 ) -> str:
     """Create Docker Compose template."""
     services = []
+
+    # Get random unique ports for each image if not provided
     if ports is None:
-        ports = [str(get_free_port()) for _ in range(len(image_ids))]
+        ports = []
+        for _ in image_ids:
+            ports.append(str(get_free_port(exclude=ports)))
 
     # Convert port ranges to fixed ports
     for i, port in enumerate(ports):
         if "-" in port:
             port_start, port_end = port.split("-")
-            ports[i] = str(get_free_port(within_range=(int(port_start), int(port_end))))
+            ports[i] = str(
+                get_free_port(
+                    within_range=(int(port_start), int(port_end)), exclude=ports
+                )
+            )
 
     gpu_settings = None
     if gpus:

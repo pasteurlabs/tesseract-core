@@ -322,16 +322,23 @@ def test_tesseract_serve_ports_error(built_image_name):
     assert "Start port '8000' must be less than or equal to end" in run_res.stderr
 
 
-@pytest.mark.parametrize("port", ["34567", "34567-34569"])
-def test_tesseract_serve_ports(built_image_name, port, docker_cleanup):
+@pytest.mark.parametrize("port", ["fixed", "range"])
+def test_tesseract_serve_ports(built_image_name, port, docker_cleanup, free_port):
     """Try to serve multiple Tesseracts on multiple ports."""
     cli_runner = CliRunner(mix_stderr=False)
     project_id = None
 
+    if port == "fixed":
+        port_arg = str(free_port)
+    elif port == "range":
+        port_arg = f"{free_port}-{free_port + 1}"
+    else:
+        raise ValueError(f"Unknown port type: {port}")
+
     # Serve tesseract on specified ports.
     run_res = cli_runner.invoke(
         app,
-        ["serve", built_image_name, "-p", port],
+        ["serve", built_image_name, "-p", port_arg],
         catch_exceptions=False,
     )
     assert run_res.exit_code == 0, run_res.stderr
@@ -342,12 +349,12 @@ def test_tesseract_serve_ports(built_image_name, port, docker_cleanup):
     docker_cleanup["project_ids"].append(project_id)
 
     # Ensure that actual used ports are in the specified port range.
-    test_ports = port.split("-")
+    test_ports = port_arg.split("-")
     start_port = int(test_ports[0])
     end_port = int(test_ports[1]) if len(test_ports) > 1 else start_port
 
-    port = int(project_meta["containers"][0]["port"])
-    assert port in range(start_port, end_port + 1)
+    actual_port = int(project_meta["containers"][0]["port"])
+    assert actual_port in range(start_port, end_port + 1)
 
     # Ensure specified ports are in `tesseract ps` and served Tesseracts are usable.
     run_res = cli_runner.invoke(
@@ -357,9 +364,9 @@ def test_tesseract_serve_ports(built_image_name, port, docker_cleanup):
         catch_exceptions=False,
     )
 
-    res = requests.get(f"http://localhost:{port}/health")
+    res = requests.get(f"http://localhost:{actual_port}/health")
     assert res.status_code == 200, res.text
-    assert str(port) in run_res.stdout
+    assert str(actual_port) in run_res.stdout
 
 
 def test_tesseract_serve_with_volumes(built_image_name, tmp_path, docker_client):
