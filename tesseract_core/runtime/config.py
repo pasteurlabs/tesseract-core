@@ -11,9 +11,9 @@ from pydantic import BaseModel, ConfigDict, FilePath
 class RuntimeConfig(BaseModel):
     """Available runtime configuration."""
 
-    tesseract_api_path: FilePath = Path("tesseract_api.py")
-    tesseract_name: str = "Tesseract"
-    tesseract_version: str = "0+unknown"
+    api_path: FilePath = Path("tesseract_api.py")
+    name: str = "Tesseract"
+    version: str = "0+unknown"
     debug: bool = False
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -28,7 +28,7 @@ def update_config(**kwargs: Any) -> None:
 
     conf_settings = {}
     for field in RuntimeConfig.model_fields.keys():
-        env_key = field.upper()
+        env_key = f"TESSERACT_{field.upper()}"
         if env_key in os.environ:
             conf_settings[field] = os.environ[env_key]
 

@@ -528,8 +528,8 @@ def serve(
         json_info = json.dumps(project_meta)
         typer.echo(json_info, nl=False)
 
-    except ValueError as ex:
-        raise typer.BadParameter(f"{ex}", param_hint="image_names") from ex
+    # except ValueError as ex:
+    #     raise typer.BadParameter(f"{ex}", param_hint="image_names") from ex
     except RuntimeError as ex:
         raise UserError(
             f"Internal Docker error occurred while serving Tesseracts: {ex}"

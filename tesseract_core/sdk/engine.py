@@ -119,22 +119,11 @@ def needs_docker(func: Callable) -> Callable:
 
 
 def get_free_port(
-    within_range: tuple[int, int] | None = None, exclude: Iterable[int | str] = ()
+    within_range: tuple[int, int] | None = (1024, 65535),
+    exclude: Iterable[int | str] = (),
 ) -> int:
     """Find a random free port to use for HTTP."""
     exclude = set(int(port) for port in exclude)
-
-    if within_range is None:
-        # Let OS pick a random free port
-        with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
-            for port in exclude:
-                try:
-                    s.bind(("localhost", port))
-                except OSError:
-                    # Port is already in use
-                    continue
-            s.bind(("localhost", 0))
-            return s.getsockname()[1]
 
     start, end = within_range
     if start < 0 or end > 65535 or start >= end:
@@ -602,7 +591,7 @@ def _create_docker_compose_template(
             port_start, port_end = port.split("-")
             ports[i] = str(
                 get_free_port(
-                    within_range=(int(port_start), int(port_end)), exclude=ports
+                    within_range=(int(port_start), int(port_end)), exclude=ports[:i]
                 )
             )
 
@@ -621,7 +610,7 @@ def _create_docker_compose_template(
             "volumes": volumes,
             "gpus": gpu_settings,
             "environment": {
-                "DEBUG": "1" if debug else "0",
+                "TESSERACT_DEBUG": "1" if debug else "0",
             },
         }
 
