@@ -41,13 +41,15 @@ def maybe_split_args(value: str | Sequence[str]) -> tuple[str, ...]:
 class RuntimeConfig(BaseModel):
     """Available runtime configuration."""
 
-    docker_executable: Annotated[tuple[str], BeforeValidator(validate_executable)] = (
-        "docker",
-    )
+    docker_executable: Annotated[
+        tuple[str, ...], BeforeValidator(validate_executable)
+    ] = ("docker",)
     docker_compose_executable: Annotated[
-        tuple[str], BeforeValidator(validate_executable)
+        tuple[str, ...], BeforeValidator(validate_executable)
     ] = ("docker", "compose")
-    docker_build_args: Annotated[tuple[str], BeforeValidator(maybe_split_args)] = ()
+    docker_build_args: Annotated[
+        tuple[str, ...], BeforeValidator(maybe_split_args)
+    ] = ()
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
