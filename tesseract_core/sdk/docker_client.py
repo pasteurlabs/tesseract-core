@@ -190,7 +190,6 @@ class Images:
             "--file",
             str(dockerfile),
             *extra_args,
-            "--",
             str(path),
         ]
 
