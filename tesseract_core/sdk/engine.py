@@ -600,7 +600,7 @@ def _create_docker_compose_template(
             "volumes": volumes,
             "gpus": gpu_settings,
             "environment": {
-                "DEBUG": "1" if debug else "0",
+                "TESSERACT_DEBUG": "1" if debug else "0",
             },
         }
 

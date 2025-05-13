@@ -11,12 +11,24 @@ import shlex
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
+
+from tesseract_core.sdk.config import get_config
 
 logger = logging.getLogger("tesseract")
 
 
 # store a reference to list, which is shadowed by some function names below
 list_ = list
+
+
+def _get_executable(program: Literal["docker", "docker-compose"]) -> tuple[str, ...]:
+    config = get_config()
+    if program == "docker":
+        return config.docker_executable
+    if program == "docker-compose":
+        return config.docker_compose_executable
+    raise ValueError(f"Unknown program: {program}")
 
 
 @dataclass
@@ -139,9 +151,10 @@ class Images:
         Params:
             image: The image name or id to remove.
         """
+        docker = _get_executable("docker")
         try:
             res = subprocess.run(
-                ["docker", "rmi", image, "--force"],
+                [*docker, "rmi", image, "--force"],
                 check=True,
                 capture_output=True,
                 text=True,
@@ -164,8 +177,10 @@ class Images:
         Returns:
             The buildx command as a list of strings.
         """
+        docker = _get_executable("docker")
+        extra_args = get_config().docker_build_args
         build_cmd = [
-            "docker",
+            *docker,
             "buildx",
             "build",
             "--load",
@@ -173,6 +188,8 @@ class Images:
             tag,
             "--file",
             str(dockerfile),
+            *extra_args,
+            "--",
             str(path),
         ]
 
@@ -231,10 +248,11 @@ class Images:
         Returns:
             List of (non-dangling) Image objects.
         """
+        docker = _get_executable("docker")
         images = []
         try:
             image_ids = subprocess.run(
-                ["docker", "images", "-q"],  # List only image IDs
+                [*docker, "images", "-q"],  # List only image IDs
                 capture_output=True,
                 text=True,
                 check=True,
@@ -320,9 +338,10 @@ class Container:
 
         Return exit code and stdout.
         """
+        docker = _get_executable("docker")
         try:
             result = subprocess.run(
-                ["docker", "exec", self.id, *command],
+                [*docker, "exec", self.id, *command],
                 check=True,
                 capture_output=True,
             )
@@ -342,6 +361,8 @@ class Container:
             stdout: If True, return stdout.
             stderr: If True, return stderr.
         """
+        docker = _get_executable("docker")
+
         if stdout and stderr:
             # use subprocess.STDOUT to combine stdout and stderr into one stream
             # with the correct order of output
@@ -361,7 +382,7 @@ class Container:
 
         try:
             result = subprocess.run(
-                ["docker", "logs", self.id],
+                [*docker, "logs", self.id],
                 check=True,
                 stdout=stdout_pipe,
                 stderr=stderr_pipe,
@@ -379,9 +400,11 @@ class Container:
         Returns:
             A dict with the exit code of the container.
         """
+        docker = _get_executable("docker")
+
         try:
             result = subprocess.run(
-                ["docker", "wait", self.id],
+                [*docker, "wait", self.id],
                 check=True,
                 capture_output=True,
                 text=True,
@@ -402,10 +425,11 @@ class Container:
         Returns:
             The output of the remove command.
         """
+        docker = _get_executable("docker")
         try:
             result = subprocess.run(
                 [
-                    "docker",
+                    *docker,
                     "rm",
                     *(["-f"] if force else []),
                     *(["-v"] if v else []),
@@ -499,6 +523,8 @@ class Containers:
         Returns:
             Container object if detach is True, otherwise returns list of stdout and stderr.
         """
+        docker = _get_executable("docker")
+
         # If command is a type string and not list, make list
         if isinstance(command, str):
             command = [command]
@@ -529,8 +555,8 @@ class Containers:
             )
 
         # Run with detached to get the container id of the running container.
-        cmd_list = [
-            "docker",
+        full_cmd = [
+            *docker,
             "run",
             *(["-d"] if detach else []),
             *(["--rm"] if remove else []),
@@ -542,7 +568,7 @@ class Containers:
 
         try:
             result = subprocess.run(
-                cmd_list,
+                full_cmd,
                 capture_output=True,
                 text=True,
                 check=True,
@@ -568,7 +594,7 @@ class Containers:
                 raise ImageNotFound() from ex
             if "docker" in ex.stderr:
                 raise ContainerError(
-                    f"Error running container command: `{' '.join(cmd_list)}`. \n\n{ex.stderr}"
+                    f"Error running container command: `{' '.join(full_cmd)}`. \n\n{ex.stderr}"
                 ) from ex
             raise ex
 
@@ -585,9 +611,10 @@ class Containers:
         Returns:
             List of Container objects.
         """
+        docker = _get_executable("docker")
         containers = []
 
-        cmd = ["docker", "ps", "-q"]
+        cmd = [*docker, "ps", "-q"]
         if include_stopped:
             cmd.append("--all")
 
@@ -647,12 +674,12 @@ class Compose:
         Returns:
             The project name.
         """
+        docker_compose = _get_executable("docker-compose")
         logger.info("Waiting for Tesseract containers to start ...")
         try:
             _ = subprocess.run(
                 [
-                    "docker",
-                    "compose",
+                    *docker_compose,
                     "-f",
                     compose_fpath,
                     "-p",
@@ -693,9 +720,10 @@ class Compose:
         Returns:
             True if the project was stopped successfully, False otherwise.
         """
+        docker_compose = _get_executable("docker-compose")
         try:
             __ = subprocess.run(
-                ["docker", "compose", "-p", project_id, "down"],
+                [*docker_compose, "-p", project_id, "down"],
                 check=True,
                 capture_output=True,
             )
@@ -788,9 +816,10 @@ class CLIDockerClient:
     @staticmethod
     def info() -> tuple:
         """Wrapper around docker info call."""
+        docker = _get_executable("docker")
         try:
             result = subprocess.run(
-                ["docker", "info"],
+                [*docker, "info"],
                 check=True,
                 capture_output=True,
             )
@@ -812,6 +841,7 @@ def get_docker_metadata(
     Returns:
         A dict mapping asset ids to their metadata.
     """
+    docker = _get_executable("docker")
     if not docker_asset_ids:
         return {}
 
@@ -819,7 +849,7 @@ def get_docker_metadata(
     metadata = None
     try:
         result = subprocess.run(
-            ["docker", "inspect", *docker_asset_ids],
+            [*docker, "inspect", *docker_asset_ids],
             check=True,
             capture_output=True,
             text=True,

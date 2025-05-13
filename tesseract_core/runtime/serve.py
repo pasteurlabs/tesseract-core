@@ -36,8 +36,8 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
     """Create the Tesseract REST API."""
     config = get_config()
     app = FastAPI(
-        title=config.tesseract_name,
-        version=config.tesseract_version,
+        title=config.name,
+        version=config.version,
         docs_url=None,
         redoc_url="/docs",
         debug=config.debug,
