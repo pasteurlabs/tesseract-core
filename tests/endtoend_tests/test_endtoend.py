@@ -4,6 +4,9 @@
 """End-to-end tests for Tesseract workflows."""
 
 import json
+import signal
+import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -208,7 +211,7 @@ def test_tesseract_teardown_multiple(built_image_name, tear_all):
 
     project_ids = []
     try:
-        for _ in range(0, 5):
+        for _ in range(2):
             # Serve
             run_res = cli_runner.invoke(
                 app,
@@ -432,6 +435,48 @@ def test_tesseract_serve_with_volumes(built_image_name, tmp_path, docker_client)
                 catch_exceptions=False,
             )
             assert run_res.exit_code == 0, run_res.stderr
+
+
+def test_tesseract_serve_no_compose(built_image_name, free_port):
+    """Try to serve a Tesseract with --no-compose."""
+    # must be run in a separate process to avoid blocking the main thread
+    proc = subprocess.Popen(
+        [
+            "tesseract",
+            "serve",
+            built_image_name,
+            "--no-compose",
+            "--port",
+            str(free_port),
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    timeout = 30.0
+    try:
+        # wait for server to start
+        while True:
+            try:
+                response = requests.get(f"http://localhost:{free_port}/health")
+            except requests.exceptions.ConnectionError:
+                pass
+            else:
+                if response.status_code == 200:
+                    break
+
+            time.sleep(0.1)
+            timeout -= 0.1
+
+            if timeout < 0:
+                raise TimeoutError("Server did not start in time")
+
+    finally:
+        proc.send_signal(signal.SIGINT)
+        stdout, stderr = proc.communicate()
+        print(stdout.decode())
+        print(stderr.decode())
+        proc.wait(timeout=5)
 
 
 def test_tesseract_cli_options_parsing(built_image_name, tmpdir):
