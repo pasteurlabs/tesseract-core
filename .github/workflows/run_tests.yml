@@ -230,7 +230,7 @@ jobs:
 
           export DOCKER_HOST=unix:///run/user/1001/podman/podman.sock
           echo "DOCKER_HOST=${DOCKER_HOST}" >> $GITHUB_ENV
-          echo "TESSERACT_DOCKER_EXECUTABLE=podman" >> $GITHUB_ENV
+          # echo "TESSERACT_DOCKER_EXECUTABLE=podman" >> $GITHUB_ENV
           # Podman doesn't support --cache-from
           echo "TESSERACT_DOCKER_BUILD_ARGS=" >> $GITHUB_ENV
 
