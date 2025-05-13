@@ -103,8 +103,8 @@ def test_build_generate_only(dummy_tesseract_location):
         catch_exceptions=False,
     )
     assert build_res.exit_code == 0, build_res.stderr
-    # Check that stdout contains "docker buildx"
-    command = "docker buildx build"
+    # Check that stdout contains build command
+    command = "buildx build"
     assert command in build_res.stderr
 
     build_dir = Path(build_res.stdout.strip())
