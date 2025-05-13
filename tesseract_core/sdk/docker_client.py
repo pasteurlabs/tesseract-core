@@ -11,6 +11,7 @@ import shlex
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from textwrap import indent
 
 logger = logging.getLogger("tesseract")
 
@@ -475,6 +476,7 @@ class Containers:
         device_requests: list_[int | str] | None = None,
         detach: bool = False,
         remove: bool = False,
+        ports: dict | None = None,
         stdout: bool = True,
         stderr: bool = False,
     ) -> tuple | Container | str:
@@ -493,6 +495,8 @@ class Containers:
                     after it finishes executing the command. This means that we cannot set
                     both detach and remove simulataneously to True or else there
                     would be no way of retrieving the logs from the removed container.
+            ports: A dict of ports to expose in the container. The keys are the host ports
+                   and the values are the container ports.
             stdout: If True, return stdout.
             stderr: If True, return stderr.
 
@@ -504,38 +508,42 @@ class Containers:
             command = [command]
         logger.debug(f"Running command: {command}")
 
+        optional_args = []
+
         # Convert the parsed_volumes into a list of strings in proper argument format,
         # `-v host_path:container_path:mode`.
-        if not volumes:
-            volume_args = []
-        else:
+        if volumes:
             volume_args = []
             for host_path, volume_info in volumes.items():
                 volume_args.append("-v")
                 volume_args.append(
                     f"{host_path}:{volume_info['bind']}:{volume_info['mode']}"
                 )
+            optional_args.extend(volume_args)
 
         if device_requests:
             gpus_str = ",".join(device_requests)
-            gpus_option = f'--gpus "device={gpus_str}"'
-        else:
-            gpus_option = ""
+            optional_args.extend(["--gpus", f'"device={gpus_str}"'])
 
         # Remove and detached cannot both be set to true
         if remove and detach:
             raise ContainerError(
                 "Cannot set both remove and detach to True when running a container."
             )
+        if detach:
+            optional_args.append("--detach")
+        if remove:
+            optional_args.append("--rm")
+
+        if ports:
+            for host_port, container_port in ports.items():
+                optional_args.extend(["-p", f"{host_port}:{container_port}"])
 
         # Run with detached to get the container id of the running container.
         cmd_list = [
             "docker",
             "run",
-            *(["-d"] if detach else []),
-            *(["--rm"] if remove else []),
-            *volume_args,
-            *([gpus_option] if gpus_option else []),
+            *optional_args,
             image,
             *command,
         ]
@@ -666,22 +674,17 @@ class Compose:
             )
             return project_name
         except subprocess.CalledProcessError as ex:
-            # If the project successfully started, try to get the logs from the containers
-            project_containers = Compose.list(include_stopped=True).get(
-                project_name, None
-            )
-            if project_containers:
-                container = Containers.get(project_containers[0])
-                stderr = container.logs(stderr=True)
-                raise ContainerError(
-                    f"Failed to start Tesseract container: {container.name}, logs: ",
-                    stderr,
-                ) from ex
             logger.error(str(ex))
             logger.error(ex.stderr.decode())
-            raise ContainerError(
-                "Failed to start Tesseract containers.", ex.stderr
-            ) from ex
+            # If the project successfully started, try to get the logs from the containers
+            project_containers = Compose.list(include_stopped=True).get(
+                project_name, ()
+            )
+            for container_name in project_containers:
+                container = Containers.get(container_name)
+                logger.error(f"Container {container_name} logs:")
+                logger.error(indent(container.logs(stderr=True).decode(), " > "))
+            raise ContainerError("Failed to start Tesseract containers.") from ex
 
     @staticmethod
     def down(project_id: str) -> bool:

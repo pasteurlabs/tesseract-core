@@ -14,7 +14,7 @@ import socket
 import string
 import tempfile
 import threading
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from contextlib import closing
 from pathlib import Path
 from shutil import copy, copytree, rmtree
@@ -118,13 +118,12 @@ def needs_docker(func: Callable) -> Callable:
     return wrapper_needs_docker
 
 
-def get_free_port(within_range: tuple[int, int] | None = None) -> int:
+def get_free_port(
+    within_range: tuple[int, int] | None = (1024, 65535),
+    exclude: Iterable[int | str] = (),
+) -> int:
     """Find a random free port to use for HTTP."""
-    if within_range is None:
-        # Let OS pick a random free port
-        with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
-            s.bind(("localhost", 0))
-            return s.getsockname()[1]
+    exclude = set(int(port) for port in exclude)
 
     start, end = within_range
     if start < 0 or end > 65535 or start >= end:
@@ -134,6 +133,9 @@ def get_free_port(within_range: tuple[int, int] | None = None) -> int:
     portlist = list(range(start, end))
     random.shuffle(portlist)
     for port in portlist:
+        if port in exclude:
+            continue
+        # Check if the port is free
         with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
             try:
                 s.bind(("localhost", port))
@@ -576,14 +578,22 @@ def _create_docker_compose_template(
 ) -> str:
     """Create Docker Compose template."""
     services = []
+
+    # Get random unique ports for each image if not provided
     if ports is None:
-        ports = [str(get_free_port()) for _ in range(len(image_ids))]
+        ports = []
+        for _ in image_ids:
+            ports.append(str(get_free_port(exclude=ports)))
 
     # Convert port ranges to fixed ports
     for i, port in enumerate(ports):
         if "-" in port:
             port_start, port_end = port.split("-")
-            ports[i] = str(get_free_port(within_range=(int(port_start), int(port_end))))
+            ports[i] = str(
+                get_free_port(
+                    within_range=(int(port_start), int(port_end)), exclude=ports[:i]
+                )
+            )
 
     gpu_settings = None
     if gpus:
@@ -664,6 +674,7 @@ def run_tesseract(
     args: list[str],
     volumes: list[str] | None = None,
     gpus: list[int | str] | None = None,
+    ports: dict[str, str] | None = None,
 ) -> tuple[str, str]:
     """Start a Tesseract and execute a given command.
 
@@ -673,6 +684,8 @@ def run_tesseract(
         args: arguments for the command.
         volumes: list of paths to mount in the Tesseract container.
         gpus: list of GPUs, as indices or names, to passthrough the container.
+        ports: dictionary of ports to bind to the host. Key is the host port,
+            value is the container port.
 
     Returns:
         Tuple with the stdout and stderr of the Tesseract.
@@ -741,6 +754,7 @@ def run_tesseract(
             volumes=parsed_volumes,
             detach=True,
             device_requests=gpus,
+            ports=ports,
         )
         result = container.wait()
         stdout = container.logs(stdout=True, stderr=False).decode("utf-8")
