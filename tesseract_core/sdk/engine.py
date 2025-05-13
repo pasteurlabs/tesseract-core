@@ -14,7 +14,7 @@ import socket
 import string
 import tempfile
 import threading
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Sequence
 from contextlib import closing
 from pathlib import Path
 from shutil import copy, copytree, rmtree
@@ -120,11 +120,9 @@ def needs_docker(func: Callable) -> Callable:
 
 def get_free_port(
     within_range: tuple[int, int] | None = (1024, 65535),
-    exclude: Iterable[int | str] = (),
+    exclude: Sequence[int] = (),
 ) -> int:
     """Find a random free port to use for HTTP."""
-    exclude = set(int(port) for port in exclude)
-
     start, end = within_range
     if start < 0 or end > 65535 or start >= end:
         raise ValueError("Invalid port range")
@@ -583,15 +581,17 @@ def _create_docker_compose_template(
     if ports is None:
         ports = []
         for _ in image_ids:
-            ports.append(str(get_free_port(exclude=ports)))
+            taken_ports = [int(p) for p in ports if "-" not in p]
+            ports.append(str(get_free_port(exclude=taken_ports)))
 
     # Convert port ranges to fixed ports
     for i, port in enumerate(ports):
         if "-" in port:
             port_start, port_end = port.split("-")
+            taken_ports = [int(p) for p in ports if "-" not in p]
             ports[i] = str(
                 get_free_port(
-                    within_range=(int(port_start), int(port_end)), exclude=ports[:i]
+                    within_range=(int(port_start), int(port_end)), exclude=taken_ports
                 )
             )
 
