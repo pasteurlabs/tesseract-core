@@ -108,7 +108,7 @@ class Images:
         def _sanitize_image_id(image_id: str) -> str:
             """Sanitize image id by removing sha256 prefix."""
             if image_id.startswith("sha256:"):
-                return image_id[7:]
+                return image_id[len("sha256:") :]
             return image_id
 
         image_id_or_name = _sanitize_image_id(image_id_or_name)
