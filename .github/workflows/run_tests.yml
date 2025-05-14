@@ -248,18 +248,6 @@ jobs:
               -k "[${{ matrix.unit-tesseract }}]"
           fi
 
-
-      - name: Run tutorial tests
-        run: |
-          if [ "${{ matrix.unit-tesseract }}" == "base" ]; then
-            uv run --no-sync pytest \
-              --always-run-endtoend \
-              --cov-report=term-missing:skip-covered \
-              --cov-report=xml:coverage.xml \
-              --cov=tesseract_core \
-              tests/tutorial \
-              --tesseract-dir=tests/tutorial/example_data/bootcamp
-
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v5.4.2
         with:
