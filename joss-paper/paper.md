@@ -14,9 +14,9 @@ authors:
   - name: Dion Häfner
     orcid: 0000-0002-4465-7317
     corresponding: true
-    affiliation: "1" # (Multiple affiliations must be quoted)
+    affiliation: "1"
   - name: Alexander Lavin
-    orcid: 0000-0000-0000-0000
+    orcid: 0000-0003-3422-7820
     affiliation: "1"
 affiliations:
  - name: Pasteur Labs, Brooklyn, NY, USA
