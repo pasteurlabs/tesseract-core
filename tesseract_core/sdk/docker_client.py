@@ -42,9 +42,13 @@ class Image:
     @classmethod
     def from_dict(cls, json_dict: dict) -> "Image":
         """Create an Image object from a json dictionary."""
+        image_id = json_dict.get("Id", None)
+        if image_id and not image_id.startswith("sha256:"):
+            # Some container engines (e.g., Podman) do not prefix the ID with sha256:
+            image_id = f"sha256:{image_id}"
         return cls(
-            id=json_dict.get("Id", None),
-            short_id=json_dict.get("Id", [])[:19],
+            id=image_id,
+            short_id=image_id[:19] if image_id else None,
             tags=json_dict.get("RepoTags", None),
             attrs=json_dict,
         )
@@ -306,7 +310,7 @@ class Container:
         image_id = self.attrs.get("ImageID", self.attrs["Image"])
         if image_id is None:
             return None
-        return Images.get(image_id.split(":")[1])
+        return Images.get(image_id)
 
     @property
     def host_port(self) -> str | None:
