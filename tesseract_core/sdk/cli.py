@@ -470,7 +470,7 @@ def serve(
             raise typer.BadParameter(
                 (
                     "Port specification only works if exactly one Tesseract is being served. "
-                    f"Currently serving `{len(image_names)}` Tesseracts."
+                    f"Currently attempting to serve `{len(image_names)}` Tesseracts."
                 ),
                 param_hint="image_names",
             )
@@ -478,62 +478,34 @@ def serve(
     else:
         ports = None
 
-    if no_compose:
-        if len(image_names) > 1:
-            raise typer.BadParameter(
-                (
-                    "Docker Compose is required to serve multiple Tesseracts. "
-                    f"Currently serving `{len(image_names)}` Tesseracts."
-                ),
-                param_hint="image_names",
-            )
-        args = []
-        container_port = "8000"
-        args.extend(["--port", container_port])
-
-        if ports:
-            port = ports[0]
-        else:
-            port = str(engine.get_free_port())
-
-        if num_workers > 1:
-            args.extend(["--num-workers", str(num_workers)])
-        if propagate_tracebacks:
-            args.append("--debug")
-
-        logger.info(f"Serving Tesseract at http://localhost:{port}")
-        logger.info(f"View Tesseract: http://localhost:{port}/docs")
-        logger.info("Press Ctrl+C to stop")
-
-        engine.run_tesseract(
-            image_names[0],
-            "serve",
-            args,
-            volumes=volume,
-            gpus=gpus,
-            ports={port: container_port},
-        )
-        return
-
     try:
         project_id = engine.serve(
-            image_names, ports, volume, gpus, propagate_tracebacks, num_workers
+            image_names,
+            ports,
+            volume,
+            gpus,
+            propagate_tracebacks,
+            num_workers,
+            no_compose,
         )
-        container_ports = _display_project_meta(project_id)
-        logger.info(
-            f"Docker Compose Project ID, use it with 'tesseract teardown' command: {project_id}"
-        )
-
-        project_meta = {"project_id": project_id, "containers": container_ports}
-        json_info = json.dumps(project_meta)
-        typer.echo(json_info, nl=False)
-
     except ValueError as ex:
         raise typer.BadParameter(f"{ex}", param_hint="image_names") from ex
     except RuntimeError as ex:
         raise UserError(
             f"Internal Docker error occurred while serving Tesseracts: {ex}"
         ) from ex
+
+    if not no_compose:
+        container_ports = _display_project_meta(project_id)
+    else:
+        container = docker_client.containers.get(project_id)
+        container_ports = [{"name": container.name, "port": container.host_port}]
+    logger.info(
+        f"Tesseract project ID, use it with 'tesseract teardown' command: {project_id}"
+    )
+    project_meta = {"project_id": project_id, "containers": container_ports}
+    json_info = json.dumps(project_meta)
+    typer.echo(json_info, nl=False)
 
 
 @app.command("list")
@@ -604,11 +576,11 @@ def _find_tesseract_project(
 
     tesseract_id = tesseract.id[:12]
 
-    for project, containers in docker_client.compose.list():
+    for project, containers in docker_client.compose.list().items():
         if tesseract_id in containers:
             return project
 
-    return "Unknown"
+    return tesseract.name
 
 
 @app.command("apidoc")
@@ -624,10 +596,9 @@ def apidoc(
     ] = True,
 ) -> None:
     """Serve the OpenAPI schema for a Tesseract."""
-    project_id = None
+    project_id = engine.serve([image_name], no_compose=True)
     try:
-        project_id = engine.serve([image_name])
-        container = docker_client.compose.list()[project_id][0]
+        container = docker_client.containers.get(project_id)
         url = f"http://localhost:{container.host_port}/docs"
         logger.info(f"Serving OpenAPI docs for Tesseract {image_name} at {url}")
         logger.info("  Press Ctrl+C to stop")
@@ -639,8 +610,7 @@ def apidoc(
         except KeyboardInterrupt:
             return
     finally:
-        if project_id is not None:
-            engine.teardown(project_id)
+        engine.teardown(project_id)
 
 
 def _display_project_meta(project_id: str) -> list:

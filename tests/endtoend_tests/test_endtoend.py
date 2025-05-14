@@ -4,9 +4,6 @@
 """End-to-end tests for Tesseract workflows."""
 
 import json
-import signal
-import subprocess
-import time
 from pathlib import Path
 
 import pytest
@@ -160,7 +157,10 @@ def test_tesseract_run_stdout(built_image_name):
             raise
 
 
-def test_tesseract_serve_pipeline(docker_client, built_image_name, docker_cleanup):
+@pytest.mark.parametrize("no_compose", [True, False])
+def test_tesseract_serve_pipeline(
+    docker_client, built_image_name, no_compose, docker_cleanup
+):
     cli_runner = CliRunner(mix_stderr=False)
     project_id = None
     run_res = cli_runner.invoke(
@@ -168,6 +168,7 @@ def test_tesseract_serve_pipeline(docker_client, built_image_name, docker_cleanu
         [
             "serve",
             built_image_name,
+            *(["--no-compose"] if no_compose else []),
         ],
         catch_exceptions=False,
     )
@@ -178,12 +179,17 @@ def test_tesseract_serve_pipeline(docker_client, built_image_name, docker_cleanu
     project_meta = json.loads(run_res.stdout)
 
     project_id = project_meta["project_id"]
-    docker_cleanup["project_ids"].append(project_id)
-    project_containers = project_meta["containers"][0]["name"]
-    if not project_containers:
-        raise ValueError(f"Could not find container for project '{project_id}'")
+    if no_compose:
+        project_container = docker_client.containers.get(project_id)
+        docker_cleanup["containers"].append(project_container)
+    else:
+        docker_cleanup["project_ids"].append(project_id)
+        project_containers = project_meta["containers"][0]["name"]
+        if not project_containers:
+            raise ValueError(f"Could not find container for project '{project_id}'")
 
-    project_container = docker_client.containers.get(project_containers)
+        project_container = docker_client.containers.get(project_containers)
+
     assert project_container.name == project_meta["containers"][0]["name"]
     assert project_container.host_port == project_meta["containers"][0]["port"]
 
@@ -205,7 +211,8 @@ def test_tesseract_serve_pipeline(docker_client, built_image_name, docker_cleanu
 
 
 @pytest.mark.parametrize("tear_all", [True, False])
-def test_tesseract_teardown_multiple(built_image_name, tear_all):
+@pytest.mark.parametrize("no_compose", [True, False])
+def test_tesseract_teardown_multiple(built_image_name, tear_all, no_compose):
     """Teardown multiple projects."""
     cli_runner = CliRunner(mix_stderr=False)
 
@@ -218,6 +225,7 @@ def test_tesseract_teardown_multiple(built_image_name, tear_all):
                 [
                     "serve",
                     built_image_name,
+                    *(["--no-compose"] if no_compose else []),
                 ],
                 catch_exceptions=False,
             )
@@ -435,48 +443,6 @@ def test_tesseract_serve_with_volumes(built_image_name, tmp_path, docker_client)
                 catch_exceptions=False,
             )
             assert run_res.exit_code == 0, run_res.stderr
-
-
-def test_tesseract_serve_no_compose(built_image_name, free_port):
-    """Try to serve a Tesseract with --no-compose."""
-    # must be run in a separate process to avoid blocking the main thread
-    proc = subprocess.Popen(
-        [
-            "tesseract",
-            "serve",
-            built_image_name,
-            "--no-compose",
-            "--port",
-            str(free_port),
-        ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-
-    timeout = 30.0
-    try:
-        # wait for server to start
-        while True:
-            try:
-                response = requests.get(f"http://localhost:{free_port}/health")
-            except requests.exceptions.ConnectionError:
-                pass
-            else:
-                if response.status_code == 200:
-                    break
-
-            time.sleep(0.1)
-            timeout -= 0.1
-
-            if timeout < 0:
-                raise TimeoutError("Server did not start in time")
-
-    finally:
-        proc.send_signal(signal.SIGINT)
-        stdout, stderr = proc.communicate()
-        print(stdout.decode())
-        print(stderr.decode())
-        proc.wait(timeout=5)
 
 
 def test_tesseract_cli_options_parsing(built_image_name, tmpdir):
