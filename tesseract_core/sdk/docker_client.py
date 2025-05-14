@@ -581,22 +581,6 @@ class Containers:
             raise ex
 
     @staticmethod
-    def stop(container_id: str) -> None:
-        """Stop a running container.
-
-        Params:
-            container_id: The id of the container to stop.
-        """
-        try:
-            subprocess.run(
-                ["docker", "stop", container_id],
-                check=True,
-                capture_output=True,
-            )
-        except subprocess.CalledProcessError as ex:
-            raise ContainerError(f"Cannot stop container {container_id}: {ex}") from ex
-
-    @staticmethod
     def _get_containers(
         include_stopped: bool = False, tesseract_only: bool = True
     ) -> list:

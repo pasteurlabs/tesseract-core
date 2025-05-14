@@ -470,23 +470,27 @@ def teardown(project_ids: Sequence[str] | None = None, tear_all: bool = False) -
         tear_all: boolean flag to teardown all Tesseract projects.
     """
     if tear_all:
-        # Get copy of keys to iterate over since the dictionary will change as we are
-        # tearing down projects.
+        # Identify all Tesseract projects to tear down, whether they're running in
+        # Docker Compose or as standalone containers
         compose_projects = docker_client.compose.list()
-        compose_containers = set(compose_projects.values())
+        compose_containers = set()
+        for project_containers in compose_projects.values():
+            compose_containers.update(project_containers)
         other_containers = set(
-            container.id for container in docker_client.containers.list()
+            container.id
+            for container in docker_client.containers.list()
+            if container.id not in compose_containers
         )
         project_ids = [
             *compose_projects.keys(),
-            *(other_containers - compose_containers),
+            *other_containers,
         ]
         if not project_ids:
             logger.info("No Tesseract projects to teardown")
             return
 
     if not project_ids:
-        raise ValueError("Docker Compose project ID is empty or None, cannot teardown")
+        raise ValueError("project_ids must be provided if tear_all is False")
 
     if isinstance(project_ids, str):
         project_ids = [project_ids]
@@ -508,11 +512,13 @@ def teardown(project_ids: Sequence[str] | None = None, tear_all: bool = False) -
                 f"Tesseracts are shutdown for Docker Compose project ID: {project_id}"
             )
         elif _is_container_id(project_id):
-            docker_client.containers.stop(project_id)
+            container = docker_client.containers.get(project_id)
+            container.remove(force=True)
             logger.info(f"Tesseract is shutdown for Docker container ID: {project_id}")
         else:
             raise ValueError(
-                f"A Docker Compose project with ID {project_id} cannot be found, use `tesseract ps` to find project ID"
+                f"A Docker Compose project with ID {project_id} cannot be found, "
+                "use `tesseract ps` to find project ID"
             )
 
 
