@@ -6,7 +6,6 @@
 import json
 import logging
 import os
-import re
 import shlex
 import subprocess
 from dataclasses import dataclass
@@ -106,26 +105,21 @@ class Images:
         if not image_id_or_name:
             raise ValueError("Image name cannot be empty.")
 
-        def is_image_id(s: str) -> bool:
-            """Check if string is image name or id by checking if it's sha256 format."""
-            return bool(re.fullmatch(r"(sha256:)?[a-fA-F0-9]{12,64}", s))
+        def _sanitize_image_id(image_id: str) -> str:
+            """Sanitize image id by removing sha256 prefix."""
+            if image_id.startswith("sha256:"):
+                return image_id[7:]
+            return image_id
 
-        if ":" not in image_id_or_name:
-            # Check if image param is a name or id so we can append latest tag if needed
-            if not is_image_id(image_id_or_name):
-                image_id_or_name = image_id_or_name + ":latest"
-            else:
-                # If image_id_or_name is an image id, we need to get the full id
-                # by prepending sha256
-                image_id_or_name = "sha256:" + image_id_or_name
+        image_id_or_name = _sanitize_image_id(image_id_or_name)
         images = Images.list(tesseract_only=tesseract_only)
 
         # Check for both name and id to find the image
         # Tags may be prefixed by repository url
         for image_obj in images:
             if (
-                image_obj.id == image_id_or_name
-                or image_obj.short_id == image_id_or_name
+                _sanitize_image_id(image_obj.id) == image_id_or_name
+                or _sanitize_image_id(image_obj.short_id) == image_id_or_name
                 or Images._tag_exists(image_id_or_name, image_obj.tags)
             ):
                 return image_obj
