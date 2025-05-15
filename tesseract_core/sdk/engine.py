@@ -121,13 +121,13 @@ def needs_docker(func: Callable) -> Callable:
 
 
 def get_free_port(
-    within_range: tuple[int, int] | None = (1024, 65535),
+    within_range: tuple[int, int] | None = (49152, 65535),
     exclude: Sequence[int] = (),
 ) -> int:
     """Find a random free port to use for HTTP."""
     start, end = within_range
-    if start < 0 or end > 65535 or start >= end:
-        raise ValueError("Invalid port range")
+    if start < 1024 or end > 65535 or start >= end:
+        raise ValueError("Invalid port range, must be between 1024 and 65535")
 
     # Try random ports in the given range
     portlist = list(range(start, end))
