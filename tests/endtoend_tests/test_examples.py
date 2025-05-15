@@ -131,6 +131,28 @@ TEST_CASES = {
             ),
         ],
     ),
+    "pyvista-arm64": Config(
+        test_with_random_inputs=True,
+        sample_requests=[
+            SampleRequest(
+                endpoint="apply",
+                payload={
+                    "inputs": {
+                        "vertices": encode_array(
+                            [
+                                [0.0, 666.0, 0.0],
+                                [1.0, 0.0, 0.0],
+                                [0.0, 1.0, 0.0],
+                                [1.0, 1.0, 0.0],
+                                [0.5, 0.5, 1.0],
+                            ]
+                        )
+                    },
+                },
+                output_contains_pattern="pv_mesh",
+            ),
+        ],
+    ),
     "localpackage": Config(
         test_with_random_inputs=True,
         sample_requests=[
@@ -711,6 +733,16 @@ TEST_CASES = {
         volume_mounts=["testdata:/mnt/data:ro"],
     ),
     "conda": Config(
+        test_with_random_inputs=False,
+        sample_requests=[
+            SampleRequest(
+                endpoint="apply",
+                payload={"inputs": {"message": "Hey!"}},
+                output_contains_pattern=[r'{"cowsays":"  ____\n| Hey! |\n  ====\n'],
+            )
+        ],
+    ),
+    "localdependency": Config(
         test_with_random_inputs=False,
         sample_requests=[
             SampleRequest(
