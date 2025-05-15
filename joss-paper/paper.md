@@ -29,7 +29,7 @@ bibliography: paper.bib
 
 Tesseracts are universal software components for scientific computing, simulation, and machine learning (ML), summarized as "simulation intelligence" (SI) [@lavin-si]. Specifically, Tesseracts enable and expedite the transition from experimental, research-grade software to production environments. This includes native support for automatic differentiation between heterogeneous software artifacts in distributed and cloud contexts, which enables end-to-end differentiable programming, hybrid ML and simulation systems, and more for SI at scale.
 
-Tesseract Core is a Python library that serves as the reference implementation for defining, containerizing, executing, and deploying Tesseract components. It provides user entrypoints to wrap existing software artifacts such as Python functions, Julia code, C++ libraries, or remote services into Tesseract components. By unambiguously defining allowed inputs and outputs of each Tesseract via Pydantic models [@pydantic], Tesseract Core enables external data validation and auto-generation of machine-readable API schemas. This allows users to explore the capabilities of Tesseract components without interacting with code, including their inputs, outputs, and available operations. Similarly, it allows workflow engines to compose them into larger, self-validating pipelines that are, by the virtue of implementing Tesseracts, end-to-end differentiable. Tesseract components are built to by deployed in distributed contexts, including support for containerization and remote procedure calls (RPC) via a REST API.
+Tesseract Core is a Python library that serves as the reference implementation for defining, containerizing, executing, and deploying Tesseract components. It provides user entrypoints to wrap existing software artifacts such as Python functions, Julia code, C++ libraries, or remote services into Tesseract components. By unambiguously defining allowed inputs and outputs of each Tesseract via Pydantic models [@pydantic], Tesseract Core enables external data validation and auto-generation of machine-readable API schemas. This allows users to explore the capabilities of Tesseract components without interacting with code, and enables workflow engines to compose them into larger, self-validating pipelines that are, by the virtue of implementing Tesseracts, end-to-end differentiable. Tesseract components are built to be deployed in distributed contexts, including support for containerization and remote procedure calls (RPC) via network.
 
 # Statement of need
 
@@ -39,35 +39,35 @@ These software bottlenecks translate to significant untapped potential of differ
 
 Tesseract Core remediates these bottlenecks and elevates integration possibilities by acting as glue between several user groups (\autoref{fig:user-groups}):
 
-![Creating, deploying, and using Tesseracts through the lens of various user groups.\label{fig:user-groups}](tesseract-user-interactions.png){ width=80% }
+![Creating, deploying, and using Tesseracts through the lens of various user groups.\label{fig:user-groups}](tesseract-user-interactions.png){ width=90% }
 
 1. **Researchers** building multi-component systems and experiment pipelines: Tesseract Core provides consistent interfaces to interact with any Tesseract component in the same way. This allows users to discover and download existing Tesseract containers, lowering the bar for researchers to experiment with many different components when developing *systems* rather than single *operations*.
 
 2. **R&D software engineers** building research tools and packaging them: Tesseracts are defined via a Python-based interface with minimal configuration. Users specify input/output schemas for each Tesseract, enabling transparent I/O validation, automatic differentiation, and remote execution behind a unified interface. Tesseract Core provides the tools to validate and build Docker containers from Tesseract definitions.
 
-3. **Platform + HPC engineers** building SI workloads at scale: Tesseracts are runtime-agnostic, meaning that they can be executed in any environment that supports the Tesseract runtime. This allows them to be embedded into virtually any orchestration framework, such as Kubernetes, and executed on bare metal, in the cloud, or on compute clusters. Tesseracts expose their input/output schemas according to the machine-readable OpenAPI format, facilitating automated integration into external workflows engines.
+3. **Platform + HPC engineers** building SI workloads at scale: Tesseracts can be executed in any environment that supports the Tesseract runtime. This allows them to be embedded into virtually any orchestration framework and executed on bare metal, in the cloud, or on compute clusters. Tesseracts expose their input/output schemas according to the machine-readable OpenAPI format, facilitating automated integration into external workflows engines.
 
-Concretely, Tesseract Core addresses many of the fundamental questions that arise when building real-world SI systems, including:
+Concretely, Tesseract Core addresses many of the fundamental issues that arise when building real-world SI systems; including but not limited to:
 
-- How do I make my research-grade simulation code available to other users who are not familiar with the codebase?
-- How can I ensure that my simulation code is executed in a consistent and reproducible manner, regardless of the environment?
-- How can I experiment with different simulators, differentiable meshing routines, or ML models without having to install all their dependencies?
-- How do I resolve conflicts between different software or hardware requirements of components working together in a pipeline?
-- How do I execute my SciML software on a cloud VM, and query it from my local machine?
-- How do I discover at a glance which parameters of a software branded as "differentiable simulator" are differentiable and which are not?
-- How do I propagate gradients end-to-end through complex pipelines mixing torch, JAX, and Julia code?
+- **Code sharing** -- How do I make my research-grade simulation code available to other users who are not familiar with the codebase?
+- **Reproducibility** -- How can I ensure that my simulation code is executed in a consistent and reproducible manner, regardless of the environment?
+- **Streamlined experimentation** -- How can I experiment with different 3rd party simulators, differentiable meshing routines, or ML models without having to install all their dependencies or study their documentation in depth?
+- **Dependency management** -- How do I resolve conflicts between different software or hardware requirements of components working together in a pipeline?
+- **Remote execution** -- How do I execute my SciML software on a cloud VM and query it from my local machine?
+- **Explicit interfaces** -- How do I discover at a glance which parameters of a software branded as "differentiable simulator" are differentiable and which are not?
+- **Distributed differentiable programming** -- How do I propagate gradients end-to-end through complex pipelines mixing torch, JAX, and Julia code?
 
 # Software design
 
-![The make-up of a Tesseract highlighting its external and internal interfaces.\label{fig:tess-interfaces}](what-makes-a-tesseract.png){ width=40% }
+![The make-up of a Tesseract highlighting its external and internal interfaces.\label{fig:tess-interfaces}](what-makes-a-tesseract.png){ width=50% }
 
-A Tesseract is any object that is served behind the Tesseract runtime, which bundles a command line interface (CLI), Python API, and REST API. Each of these external interfaces maps to the same internal code path, which ultimately invokes a `tesseract_api.py` Python module, provided by the Tesseract creator (\autoref{fig:tess-interfaces}).
+A Tesseract is any object that is served behind the Tesseract runtime, which ships with Tesseract Core and bundles a command line interface (CLI), Python API, and REST API. Each of these external interfaces maps to the same internal code path, which ultimately invokes a `tesseract_api.py` Python module, provided by the Tesseract creator (\autoref{fig:tess-interfaces}).
 
 The structure of `tesseract_api.py` (and thus the Tesseract interface itself) is centered around a functional programming style without internal state. Specifically, this means that each Tesseract is assumed to wrap a single operation (`apply`) that takes a set of (arbitrarily nested) inputs and produces a set of outputs. All other Tesseract endpoints like `jacobian`, `abstract_eval`, or `vector_jacobian_product` represent transformations of the `apply` function. This is strongly inspired by JAX primitives [@jax2018github], and enables the efficient use of automatic differentiation (AD) techniques such as reverse-mode AD and forward-mode AD [@autodiff], invoked manually or through existing AD engines (\autoref{fig:tess-pipeline}).
 
-![Example data flow through a Tesseract-driven compute pipeline, both during forward application and reverse-mode AD. When using a Tesseract-aware AD engine, implementation details of Tesseract endpoints (such as `apply` vs. `vector_jacobian_product`) are hidden from the user.\label{fig:tess-pipeline}](tesseract-dataflow.png){ width=75% }
+![Example data flow through a Tesseract-driven compute pipeline, both during forward application and reverse-mode AD. When using a Tesseract-aware AD engine, implementation details of Tesseract endpoints (such as `apply` vs. `vector_jacobian_product`) are hidden from the user.\label{fig:tess-pipeline}](tesseract-dataflow.png){ width=85% }
 
-These methods and the myriad scenarios in which they can be applied, combined, and iterated-on are extensively verified in Tesseract Core, and continue to be real-world validated in diverse scientific experiment, engineering physics, and industrial simulation environments. Progress in these areas and more can be found in the Tesseract open-source community, at https://si-tesseract.discourse.group.
+These methods and the myriad scenarios in which they can be applied continue to be real-world validated in diverse scientific experiment, engineering physics, and industrial simulation environments. Progress in these areas and more can be found in the Tesseract open-source community, at [https://si-tesseract.discourse.group](https://si-tesseract.discourse.group).
 
 <!--
 # Mathematics
