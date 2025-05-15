@@ -495,11 +495,7 @@ def serve(
             f"Internal Docker error occurred while serving Tesseracts: {ex}"
         ) from ex
 
-    if not no_compose:
-        container_ports = _display_project_meta(project_id)
-    else:
-        container = docker_client.containers.get(project_id)
-        container_ports = [{"name": container.name, "port": container.host_port}]
+    container_ports = _display_project_meta(project_id)
     logger.info(
         f"Tesseract project ID, use it with 'tesseract teardown' command: {project_id}"
     )
@@ -619,8 +615,13 @@ def _display_project_meta(project_id: str) -> list:
     Returns a list of dictionaries {name: container_name, port: host_port}.
     """
     container_ports = []
-    projects = docker_client.compose.list()
-    containers = projects[project_id]
+
+    compose_projects = docker_client.compose.list()
+    if project_id in compose_projects:
+        containers = compose_projects[project_id]
+    else:
+        containers = [project_id]
+
     for container_id in containers:
         container = docker_client.containers.get(container_id)
         logger.info(f"Container ID: {container.id}")
