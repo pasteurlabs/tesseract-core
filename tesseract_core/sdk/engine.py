@@ -532,6 +532,22 @@ def get_tesseract_images() -> list[Image]:
     return docker_client.images.list()
 
 
+def get_project_containers(project_id: str) -> list[Container]:
+    """Get containers for a given Tesseract project ID."""
+    if docker_client.compose.exists(project_id):
+        containers = docker_client.compose.list()[project_id]
+        return [docker_client.containers.get(c) for c in containers]
+
+    try:
+        container = docker_client.containers.get(project_id)
+        return [container]
+    except ContainerError as exc:
+        raise ValueError(
+            f"A Tesseract project with ID {project_id} cannot be found, "
+            "use `tesseract ps` to find project ID"
+        ) from exc
+
+
 def serve(
     images: list[str],
     ports: list[str] | None = None,
@@ -627,7 +643,7 @@ def serve(
     template = _create_docker_compose_template(
         image_ids, ports, volumes, gpus, num_workers, debug=propagate_tracebacks
     )
-    compose_fname = _create_compose_fname()
+    compose_fname = f"docker-compose-{_id_generator()}.yml"
 
     with tempfile.NamedTemporaryFile(
         mode="w+",
@@ -636,7 +652,7 @@ def serve(
         compose_file.write(template)
         compose_file.flush()
 
-        project_name = _create_compose_proj_id()
+        project_name = f"tesseract-{_id_generator()}"
         if not docker_client.compose.up(compose_file.name, project_name):
             raise RuntimeError("Cannot serve Tesseracts")
         return project_name
@@ -680,7 +696,7 @@ def _create_docker_compose_template(
 
     for image_id, port in zip(image_ids, ports, strict=True):
         service = {
-            "name": _create_compose_service_id(image_id),
+            "name": f"{image_id.split(':')[0]}-{_id_generator()}",
             "image": image_id,
             "port": f"{port}:8000",
             "volumes": volumes,
@@ -695,26 +711,10 @@ def _create_docker_compose_template(
     return template.render(services=services, num_workers=num_workers)
 
 
-def _create_compose_service_id(image_id: str) -> str:
-    """Create Docker Compose service ID."""
-    image_id = image_id.split(":")[0]
-    return f"{image_id}-{_id_generator()}"
-
-
-def _create_compose_proj_id() -> str:
-    """Create Docker Compose project ID."""
-    return f"tesseract-{_id_generator()}"
-
-
-def _create_compose_fname() -> str:
-    """Create Docker Compose project file name."""
-    return f"docker-compose-{_id_generator()}.yml"
-
-
 def _id_generator(
     size: int = 12, chars: Sequence[str] = string.ascii_lowercase + string.digits
 ) -> str:
-    """Generate ID."""
+    """Generate a random ID."""
     return "".join(random.choice(chars) for _ in range(size))
 
 

@@ -428,7 +428,7 @@ class Containers:
     """Namespace to interface with docker containers."""
 
     @staticmethod
-    def list(all: bool = False, tesseract_only: bool = True) -> list:
+    def list(all: bool = False, tesseract_only: bool = True) -> list_[Container]:
         """Returns the current list of containers.
 
         Params:
@@ -633,7 +633,7 @@ class Compose:
     """
 
     @staticmethod
-    def list(include_stopped: bool = False) -> dict:
+    def list(include_stopped: bool = False) -> dict[str, list_[str]]:
         """Returns the current list of projects.
 
         Params:
