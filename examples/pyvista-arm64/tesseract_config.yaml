@@ -1,24 +1,27 @@
-name: "helloworld"
+name: "pyvista-arm64"
 version: "1.0.0"
 description: "A sample Python app"
 
 build_config:
-  base_image: "debian:trixie"
+  # base_image: "debian:trixie" # Base image with VTK 9.2 installed
 
-  target_platform: "linux/arm64"
+  # target_platform: "linux/arm64"
 
   extra_packages:
-   - python3-vtk9
-   - python3-venv
+    - python3-dev
+    - python3.12-venv
 
-  custom_build_steps:
-    - |
-      USER root
-      # Symlink the VTK Python bindings into the Python site-packages directory
-      RUN python_site=$(python -c "import site; print(site.getsitepackages()[0])") && \
-          ln -s /usr/lib/python3/dist-packages/vtk* $python_site && \
-          ls -l $python_site/vtk* && \
-          python -c "import vtk"
-      # Must install pyvista with --no-deps to avoid installing vtk (which we copied from the system)
-      RUN pip install matplotlib numpy pillow pooch scooby && pip install --no-deps pyvista==0.44.1
-      USER tesseractor
+  base_image: "ubuntu:24.04"
+  target_platform: "linux/x86_64"
+
+  # custom_build_steps:
+  #   - |
+  #     USER root
+  #     # Python bindings into the Python site-packages directory
+  #     RUN python_site=$(python -c "import site; print(site.getsitepackages()[0])") && \
+  #         ln -s /usr/lib/python3/dist-packages/vtk* $python_site && \
+  #         ls -l $python_site/vtk* && \
+  #         python -c "import vtk"
+  #     # Must install pyvista with --no-deps to avoid installing vtk (which we copied from the system)
+  #     RUN pip install matplotlib numpy pillow pooch scooby && pip install --no-deps pyvista==0.44.1
+  #     USER tesseractor

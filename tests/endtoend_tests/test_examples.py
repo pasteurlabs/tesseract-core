@@ -136,8 +136,20 @@ TEST_CASES = {
         sample_requests=[
             SampleRequest(
                 endpoint="apply",
-                payload={"inputs": {"name": "Ozzy"}},
-                output_contains_pattern="Hello Ozzy!",
+                payload={
+                    "inputs": {
+                        "vertices": encode_array(
+                            [
+                                [0.0, 666.0, 0.0],
+                                [1.0, 0.0, 0.0],
+                                [0.0, 1.0, 0.0],
+                                [1.0, 1.0, 0.0],
+                                [0.5, 0.5, 1.0],
+                            ]
+                        )
+                    },
+                },
+                output_contains_pattern="pv_mesh",
             ),
         ],
     ),

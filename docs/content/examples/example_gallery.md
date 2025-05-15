@@ -30,6 +30,11 @@ vectoradd
 
       A guide on including local data into Tesseract package.
    :::
+   :::{grid-item-card} Vector Add
+      :link: vectoradd.html
+
+     Tesseract doing vector add.
+   :::
    :::{grid-item-card} Pyvista on Arm64
       :link: arm64.html
 
@@ -40,21 +45,12 @@ vectoradd
 
       A guide on installing local dependencies (`cowsay`) into a Tesseract.
    :::
-   :::{grid-item-card} Mesh Stats
-      :link: meshstats.html
-
-      Tesseract using mesh stats.
-   :::
    :::{grid-item-card} Data Loader
       :link: dataloader.html
 
-     Tesseract using dataloader.
+     Tesseract that loads in data samples from a folder.
    :::
-   :::{grid-item-card} Vector Add
-      :link: vectoradd.html
 
-     Tesseract doing vector add.
-   :::
 
 
 ::::
