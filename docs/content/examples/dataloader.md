@@ -22,7 +22,6 @@ The inputted data may be processed as such in an apply function
 You can then pass in data into this Tesseract by mounting the directory where the data samples are stored using the tesseract flag `--volume`
 
 ```{literalinclude} ../../../examples/dataloader/test-tesseract.sh
-:start-after: # tesseract-run-label-begin
-#end-before: # tesseract-run-label-end
+:lines: 10-12
 :language: bash
 ```

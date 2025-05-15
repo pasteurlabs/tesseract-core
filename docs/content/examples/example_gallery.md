@@ -12,7 +12,6 @@ localdependency
 packagedata
 helloworld
 dataloader
-meshstats
 vectoradd
 ```
 
@@ -50,7 +49,5 @@ vectoradd
 
      Tesseract that loads in data samples from a folder.
    :::
-
-
 
 ::::
