@@ -276,7 +276,7 @@ def prepare_build_context(
 
         if local_dependencies:
             for dependency in local_dependencies:
-                src = src_dir / dependency
+                src = src_dir.resolve() / dependency
                 dest = context_dir / "local_requirements" / src.name
                 if src.is_file():
                     copy(src, dest)
