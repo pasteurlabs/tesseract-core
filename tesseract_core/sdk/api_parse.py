@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import ast
+import logging
 from pathlib import Path
 from typing import Annotated, Literal, NamedTuple, Union
 
@@ -15,6 +16,8 @@ from pydantic import (
     Strict,
 )
 from pydantic import ValidationError as PydanticValidationError
+
+logger = logging.getLogger("tesseract")
 
 
 class _ApiObject(NamedTuple):
@@ -265,10 +268,9 @@ def validate_tesseract_api(src_dir: Path) -> None:
             subclass = None
         else:
             subclass = obj.bases[0].id
-
         if subclass != "BaseModel":
-            raise ValidationError(
-                f"{schema} must be a subclass of pydantic.BaseModel (got: {subclass})"
+            logger.warning(
+                f"{schema} does not directly derive from pydantic.BaseModel (got: {subclass})"
             )
 
 
