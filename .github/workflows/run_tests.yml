@@ -191,6 +191,9 @@ jobs:
 
     runs-on: ${{ matrix.arch == 'x64' && matrix.os == 'ubuntu-24.04' && 'ubuntu-24.04' || matrix.arch == 'arm' && matrix.os == 'ubuntu-24.04' && 'linux-arm64-ubuntu2404'}}
 
+    env:
+      TESSERACT_DOCKER_BUILD_ARGS: "--cache-from type=gha --cache-to type=gha,mode=max"
+
     defaults:
       run:
         shell: bash -el {0}
@@ -227,6 +230,9 @@ jobs:
 
           export DOCKER_HOST=unix:///run/user/1001/podman/podman.sock
           echo "DOCKER_HOST=${DOCKER_HOST}" >> $GITHUB_ENV
+          echo "TESSERACT_DOCKER_EXECUTABLE=podman" >> $GITHUB_ENV
+          # Podman doesn't support --cache-from
+          echo "TESSERACT_DOCKER_BUILD_ARGS=" >> $GITHUB_ENV
 
       - name: Run test suite
         run: |

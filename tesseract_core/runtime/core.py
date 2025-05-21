@@ -52,7 +52,7 @@ def get_supported_endpoints(api_module: ModuleType) -> tuple[str, ...]:
 
 def get_tesseract_api() -> ModuleType:
     """Import tesseract_api.py file."""
-    return load_module_from_path(get_config().tesseract_api_path)
+    return load_module_from_path(get_config().api_path)
 
 
 def create_endpoints(api_module: ModuleType) -> list[Callable]:
