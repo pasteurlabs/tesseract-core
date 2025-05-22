@@ -281,7 +281,7 @@ def mocked_docker(monkeypatch):
     """Mock CLIDockerClient class."""
     import tesseract_core.sdk.docker_client
     from tesseract_core.sdk import engine
-    from tesseract_core.sdk.docker_client import Container, Image
+    from tesseract_core.sdk.docker_client import Container, ContainerError, Image
 
     class MockedContainer(Container):
         """Mock Container class."""
@@ -360,7 +360,9 @@ def mocked_docker(monkeypatch):
             @staticmethod
             def get(name: str) -> MockedContainer:
                 """Mock of CLIDockerClient.containers.get."""
-                return MockedDocker.containers.list()[0]
+                if name == "vectoradd":
+                    return MockedContainer({"TESSERACT_NAME": "vectoradd"})
+                raise ContainerError(f"Container {name} not found")
 
             @staticmethod
             def list() -> list[MockedContainer]:
