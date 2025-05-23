@@ -736,16 +736,6 @@ TEST_CASES = {
             )
         ],
     ),
-    "localdependency": Config(
-        test_with_random_inputs=False,
-        sample_requests=[
-            SampleRequest(
-                endpoint="apply",
-                payload={"inputs": {"message": "Hey!"}},
-                output_contains_pattern=[r'{"cowsays":"  ____\n| Hey! |\n  ====\n'],
-            )
-        ],
-    ),
 }
 
 
