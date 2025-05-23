@@ -131,6 +131,22 @@ TEST_CASES = {
             ),
         ],
     ),
+    "pyvista-arm64": Config(
+        test_with_random_inputs=True,
+        sample_requests=[
+            SampleRequest(
+                endpoint="apply",
+                payload={
+                    "inputs": {
+                        "vertices": encode_array(
+                            [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]]
+                        )
+                    }
+                },
+                output_contains_pattern="pv_mesh",
+            ),
+        ],
+    ),
     "localpackage": Config(
         test_with_random_inputs=True,
         sample_requests=[
