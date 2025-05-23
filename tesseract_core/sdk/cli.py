@@ -559,7 +559,8 @@ def apidoc(
     project_id = None
     try:
         project_id = engine.serve([image_name])
-        container = docker_client.compose.list()[project_id][0]
+        container_id = docker_client.compose.list()[project_id][0]
+        container = docker_client.containers.get(container_id)
         url = f"http://localhost:{container.host_port}/docs"
         logger.info(f"Serving OpenAPI docs for Tesseract {image_name} at {url}")
         logger.info("  Press Ctrl+C to stop")
