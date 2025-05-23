@@ -1,7 +1,7 @@
 # Passing in local data into a Tesseract
 
 ## Context
-You may need to include local files into your Tesseract. This guide will demonstrate how.
+You may need to include local files into your Tesseract, e.g. if we want to load in pretrained model weights, or artifacts that we may need access to. This guide will demonstrate how.
 
 (package-data)=
 ## Example Tesseract (examples/package_data)
