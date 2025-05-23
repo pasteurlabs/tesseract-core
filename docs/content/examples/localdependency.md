@@ -18,13 +18,13 @@ $ tesseract init --name cowsay
 
  And let's then edit the `tesseract_api.py` file to read
 
-```{literalinclude} ../../../examples/localdependency/tesseract_api.py
+```{literalinclude} ../../../examples/conda/tesseract_api.py
 :language: python
 ```
 
 
 This Tesseract will accept a message like "Hello, world!" as an input and return
-```{literalinclude} ../../../examples/localdependency/expected_output.txt
+```{literalinclude} ../../../examples/conda/expected_output.txt
 :language: text
 ```
 
@@ -43,8 +43,8 @@ Successfully downloaded cowsay
 ```
 
 We can then specify it as a local dependency in `tesseract_requirements.txt` by adding the following line:
-```{literalinclude} ../../../examples/localdependency/tesseract_requirements.txt
-:language: python
+```
+./cowsay-6.1-py3-none-any.whl
 ```
 
 Finally, let's build the Tesseract, and verify it works
