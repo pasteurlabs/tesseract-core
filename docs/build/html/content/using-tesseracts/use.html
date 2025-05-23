@@ -1,0 +1,682 @@
+<!doctype html>
+<html class="no-js" lang="en" data-content_root="../../">
+  <head><meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width,initial-scale=1"/>
+    <meta name="color-scheme" content="light dark"><meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta property="og:title" content="Interacting with Tesseracts" />
+<meta property="og:type" content="website" />
+<meta property="og:url" content="content/using-tesseracts/use.html" />
+<meta property="og:site_name" content="Tesseract" />
+<meta property="og:description" content="Viewing Running Tesseracts: In order to view all Tesseracts that are running, you can run the following command: The output will be a table of Tesseracts containers with their ID, name, version, ho..." />
+<meta name="description" content="Viewing Running Tesseracts: In order to view all Tesseracts that are running, you can run the following command: The output will be a table of Tesseracts containers with their ID, name, version, ho..." />
+<link rel="index" title="Index" href="../../genindex.html" /><link rel="search" title="Search" href="../../search.html" /><link rel="next" title="Array encodings" href="array-encodings.html" /><link rel="prev" title="Deploying Tesseracts" href="../creating-tesseracts/deploy.html" />
+
+    <!-- Generated with Sphinx 8.2.3 and Furo 2024.08.06 -->
+        <title>Interacting with Tesseracts - Tesseract 0.9.1.dev18+gc1fb613 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="../../_static/styles/furo.css?v=354aac6f" />
+    <link rel="stylesheet" type="text/css" href="../../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../../_static/autodoc_pydantic.css" />
+    <link rel="stylesheet" type="text/css" href="../../_static/sphinx-design.min.css?v=95c83b7e" />
+    <link rel="stylesheet" type="text/css" href="../../_static/styles/furo-extensions.css?v=302659d7" />
+    <link rel="stylesheet" type="text/css" href="../../_static/custom.css?v=3560ba21" />
+
+
+
+
+<style>
+  body {
+    --color-code-background: #f8f8f8;
+  --color-code-foreground: black;
+
+  }
+  @media not print {
+    body[data-theme="dark"] {
+      --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+
+    }
+    @media (prefers-color-scheme: dark) {
+      body:not([data-theme="light"]) {
+        --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+
+      }
+    }
+  }
+</style></head>
+  <body>
+
+    <script>
+      document.body.dataset.theme = localStorage.getItem("theme") || "auto";
+    </script>
+
+
+<svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
+  <symbol id="svg-toc" viewBox="0 0 24 24">
+    <title>Contents</title>
+    <svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 1024 1024">
+      <path d="M408 442h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8zm-8 204c0 4.4 3.6 8 8 8h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56zm504-486H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zm0 632H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zM115.4 518.9L271.7 642c5.8 4.6 14.4.5 14.4-6.9V388.9c0-7.4-8.5-11.5-14.4-6.9L115.4 505.1a8.74 8.74 0 0 0 0 13.8z"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-menu" viewBox="0 0 24 24">
+    <title>Menu</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-menu">
+      <line x1="3" y1="12" x2="21" y2="12"></line>
+      <line x1="3" y1="6" x2="21" y2="6"></line>
+      <line x1="3" y1="18" x2="21" y2="18"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-arrow-right" viewBox="0 0 24 24">
+    <title>Expand</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-chevron-right">
+      <polyline points="9 18 15 12 9 6"></polyline>
+    </svg>
+  </symbol>
+  <symbol id="svg-sun" viewBox="0 0 24 24">
+    <title>Light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="feather-sun">
+      <circle cx="12" cy="12" r="5"></circle>
+      <line x1="12" y1="1" x2="12" y2="3"></line>
+      <line x1="12" y1="21" x2="12" y2="23"></line>
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+      <line x1="1" y1="12" x2="3" y2="12"></line>
+      <line x1="21" y1="12" x2="23" y2="12"></line>
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon" viewBox="0 0 24 24">
+    <title>Dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-moon">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z" />
+    </svg>
+  </symbol>
+  <symbol id="svg-sun-with-moon" viewBox="0 0 24 24">
+    <title>Auto light/dark, in light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path style="opacity: 50%" d="M 5.411 14.504 C 5.471 14.504 5.532 14.504 5.591 14.504 C 3.639 16.319 4.383 19.569 6.931 20.352 C 7.693 20.586 8.512 20.551 9.25 20.252 C 8.023 23.207 4.056 23.725 2.11 21.184 C 0.166 18.642 1.702 14.949 4.874 14.536 C 5.051 14.512 5.231 14.5 5.411 14.5 L 5.411 14.504 Z"/>
+      <line x1="14.5" y1="3.25" x2="14.5" y2="1.25"/>
+      <line x1="14.5" y1="15.85" x2="14.5" y2="17.85"/>
+      <line x1="10.044" y1="5.094" x2="8.63" y2="3.68"/>
+      <line x1="19" y1="14.05" x2="20.414" y2="15.464"/>
+      <line x1="8.2" y1="9.55" x2="6.2" y2="9.55"/>
+      <line x1="20.8" y1="9.55" x2="22.8" y2="9.55"/>
+      <line x1="10.044" y1="14.006" x2="8.63" y2="15.42"/>
+      <line x1="19" y1="5.05" x2="20.414" y2="3.636"/>
+      <circle cx="14.5" cy="9.55" r="3.6"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon-with-sun" viewBox="0 0 24 24">
+    <title>Auto light/dark, in dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round"
+      class="icon-custom-derived-from-feather-sun-and-tabler-moon">
+      <path d="M 8.282 7.007 C 8.385 7.007 8.494 7.007 8.595 7.007 C 5.18 10.184 6.481 15.869 10.942 17.24 C 12.275 17.648 13.706 17.589 15 17.066 C 12.851 22.236 5.91 23.143 2.505 18.696 C -0.897 14.249 1.791 7.786 7.342 7.063 C 7.652 7.021 7.965 7 8.282 7 L 8.282 7.007 Z"/>
+      <line style="opacity: 50%" x1="18" y1="3.705" x2="18" y2="2.5"/>
+      <line style="opacity: 50%" x1="18" y1="11.295" x2="18" y2="12.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="4.816" x2="14.464" y2="3.964"/>
+      <line style="opacity: 50%" x1="20.711" y1="10.212" x2="21.563" y2="11.063"/>
+      <line style="opacity: 50%" x1="14.205" y1="7.5" x2="13.001" y2="7.5"/>
+      <line style="opacity: 50%" x1="21.795" y1="7.5" x2="23" y2="7.5"/>
+      <line style="opacity: 50%" x1="15.316" y1="10.184" x2="14.464" y2="11.036"/>
+      <line style="opacity: 50%" x1="20.711" y1="4.789" x2="21.563" y2="3.937"/>
+      <circle style="opacity: 50%" cx="18" cy="7.5" r="2.169"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-pencil" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-pencil-code">
+      <path d="M4 20h4l10.5 -10.5a2.828 2.828 0 1 0 -4 -4l-10.5 10.5v4" />
+      <path d="M13.5 6.5l4 4" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+  <symbol id="svg-eye" viewBox="0 0 24 24">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-eye-code">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M10 12a2 2 0 1 0 4 0a2 2 0 0 0 -4 0" />
+      <path
+        d="M11.11 17.958c-3.209 -.307 -5.91 -2.293 -8.11 -5.958c2.4 -4 5.4 -6 9 -6c3.6 0 6.6 2 9 6c-.21 .352 -.427 .688 -.647 1.008" />
+      <path d="M20 21l2 -2l-2 -2" />
+      <path d="M17 17l-2 2l2 2" />
+    </svg>
+  </symbol>
+</svg>
+
+<input type="checkbox" class="sidebar-toggle" name="__navigation" id="__navigation">
+<input type="checkbox" class="sidebar-toggle" name="__toc" id="__toc">
+<label class="overlay sidebar-overlay" for="__navigation">
+  <div class="visually-hidden">Hide navigation sidebar</div>
+</label>
+<label class="overlay toc-overlay" for="__toc">
+  <div class="visually-hidden">Hide table of contents sidebar</div>
+</label>
+
+<a class="skip-to-content muted-link" href="#furo-main-content">Skip to content</a>
+
+
+
+<div class="page">
+  <header class="mobile-header">
+    <div class="header-left">
+      <label class="nav-overlay-icon" for="__navigation">
+        <div class="visually-hidden">Toggle site navigation sidebar</div>
+        <i class="icon"><svg><use href="#svg-menu"></use></svg></i>
+      </label>
+    </div>
+    <div class="header-center">
+      <a href="../../index.html"><div class="brand">Tesseract 0.9.1.dev18+gc1fb613 documentation</div></a>
+    </div>
+    <div class="header-right">
+      <div class="theme-toggle-container theme-toggle-header">
+        <button class="theme-toggle">
+          <div class="visually-hidden">Toggle Light / Dark / Auto color theme</div>
+          <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+          <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+          <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+          <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+        </button>
+      </div>
+      <label class="toc-overlay-icon toc-header-icon" for="__toc">
+        <div class="visually-hidden">Toggle table of contents sidebar</div>
+        <i class="icon"><svg><use href="#svg-toc"></use></svg></i>
+      </label>
+    </div>
+  </header>
+  <aside class="sidebar-drawer">
+    <div class="sidebar-container">
+
+      <div class="sidebar-sticky"><a class="sidebar-brand" href="../../index.html">
+
+  <div class="sidebar-logo-container">
+    <img class="sidebar-logo only-light" src="../../_static/logo-light.png" alt="Light Logo"/>
+    <img class="sidebar-logo only-dark" src="../../_static/logo-dark.png" alt="Dark Logo"/>
+  </div>
+
+
+</a><form class="sidebar-search-container" method="get" action="../../search.html" role="search">
+  <input class="sidebar-search" placeholder="Search" name="q" aria-label="Search">
+  <input type="hidden" name="check_keywords" value="yes">
+  <input type="hidden" name="area" value="default">
+</form>
+<div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
+  <p class="caption" role="heading"><span class="caption-text">Introduction</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../introduction/installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../introduction/get-started.html">Get started</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../introduction/differentiable-programming.html">Differentiable Programming basics</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://si-tesseract.discourse.group/">Tesseract User Forums</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Creating Tesseracts</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../creating-tesseracts/create.html">Creating Tesseracts</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../creating-tesseracts/advanced.html">Tips for defining Tesseract APIs</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../creating-tesseracts/deploy.html">Deploying Tesseracts</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Using Tesseracts</span></p>
+<ul class="current">
+<li class="toctree-l1 current current-page"><a class="current reference internal" href="#">Interacting with Tesseracts</a></li>
+<li class="toctree-l1"><a class="reference internal" href="array-encodings.html">Array encodings</a></li>
+<li class="toctree-l1"><a class="reference internal" href="advanced.html">Advanced usage</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Tutorials</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference external" href="https://si-tesseract.discourse.group/c/showcase/expert-showcase/12">Expert showcase</a></li>
+<li class="toctree-l1"><a class="reference external" href="https://si-tesseract.discourse.group/c/support/how-to-guides/10">How-to Guides</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="../examples/example_gallery.html">Example Gallery</a><input class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" role="switch" type="checkbox"/><label for="toctree-checkbox-1"><div class="visually-hidden">Toggle navigation of Example Gallery</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l2"><a class="reference internal" href="../examples/arm64.html">Custom build steps: PyVista on ARM64 example</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples/localdependency.html">Installing local dependencies into a Tesseract</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples/packagedata.html">Passing in local data into a Tesseract</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples/helloworld.html">Hello World</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples/dataloader.html">Dataloader</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples/meshstats.html">Mes Stats</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../examples/vectoradd.html">Vector Add</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../tutorial/bootcamp.html">Tesseract Bootcamp</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Misc</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../misc/faq.html">Frequently Asked Questions</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../api/config.html">Configuration via <code class="docutils literal notranslate"><span class="pre">tesseract_config.yaml</span></code></a></li>
+<li class="toctree-l1"><a class="reference internal" href="../api/endpoints.html">Tesseract endpoints</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../api/tesseract-cli.html"><code class="docutils literal notranslate"><span class="pre">tesseract</span></code> command line application</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../api/tesseract-api.html"><code class="docutils literal notranslate"><span class="pre">tesseract</span></code> Python API</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../api/tesseract-runtime-cli.html"><code class="docutils literal notranslate"><span class="pre">tesseract-runtime</span></code> command line application</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../api/tesseract-runtime-api.html"><code class="docutils literal notranslate"><span class="pre">tesseract_runtime</span></code> Python API</a></li>
+</ul>
+
+</div>
+</div>
+
+      </div>
+
+    </div>
+  </aside>
+  <div class="main">
+    <div class="content">
+      <div class="article-container">
+        <a href="#" class="back-to-top muted-link">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+            <path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8v12z"></path>
+          </svg>
+          <span>Back to top</span>
+        </a>
+        <div class="content-icon-container">
+          <div class="view-this-page">
+  <a class="muted-link" href="../../_sources/content/using-tesseracts/use.md.txt" title="View this page">
+    <svg><use href="#svg-eye"></use></svg>
+    <span class="visually-hidden">View this page</span>
+  </a>
+</div>
+<div class="theme-toggle-container theme-toggle-content">
+            <button class="theme-toggle">
+              <div class="visually-hidden">Toggle Light / Dark / Auto color theme</div>
+              <svg class="theme-icon-when-auto-light"><use href="#svg-sun-with-moon"></use></svg>
+              <svg class="theme-icon-when-auto-dark"><use href="#svg-moon-with-sun"></use></svg>
+              <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+              <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+            </button>
+          </div>
+          <label class="toc-overlay-icon toc-content-icon" for="__toc">
+            <div class="visually-hidden">Toggle table of contents sidebar</div>
+            <i class="icon"><svg><use href="#svg-toc"></use></svg></i>
+          </label>
+        </div>
+        <article role="main" id="furo-main-content">
+          <section class="tex2jax_ignore mathjax_ignore" id="interacting-with-tesseracts">
+<h1>Interacting with Tesseracts<a class="headerlink" href="#interacting-with-tesseracts" title="Link to this heading">¶</a></h1>
+<section id="viewing-running-tesseracts">
+<h2>Viewing Running Tesseracts<a class="headerlink" href="#viewing-running-tesseracts" title="Link to this heading">¶</a></h2>
+<p>In order to view all Tesseracts that are running, you can run the following command:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>$<span class="w"> </span>tesseract<span class="w"> </span>ps
+</pre></div>
+</div>
+<p>The output will be a table of Tesseracts containers with their ID, name, version, host port, project id, and description:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>┏━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃<span class="w"> </span>ID<span class="w">           </span>┃<span class="w"> </span>Name<span class="w">      </span>┃<span class="w"> </span>Version<span class="w"> </span>┃<span class="w"> </span>Host<span class="w"> </span>Port<span class="w"> </span>┃<span class="w"> </span>Project<span class="w"> </span>ID<span class="w">             </span>┃<span class="w"> </span>Description<span class="w">                               </span>┃
+┡━━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│<span class="w"> </span>997fca92ea37<span class="w"> </span>│<span class="w"> </span>vectoradd<span class="w"> </span>│<span class="w"> </span><span class="m">1</span>.2.3<span class="w">   </span>│<span class="w"> </span><span class="m">56434</span><span class="w">     </span>│<span class="w"> </span>tesseract-afn60xa27hih<span class="w"> </span>│<span class="w"> </span>Simple<span class="w"> </span>tesseract<span class="w"> </span>that<span class="w"> </span>adds<span class="w"> </span>two<span class="w"> </span>vectors.<span class="se">\n</span><span class="w"> </span>│
+└──────────────┴───────────┴─────────┴───────────┴────────────────────────┴───────────────────────────────────────────┘
+</pre></div>
+</div>
+<p>The <code class="docutils literal notranslate"><span class="pre">host</span> <span class="pre">port</span></code> is the port used in the Tesseract address to interact with the different endpoints of the hosted Tesseract.
+The <code class="docutils literal notranslate"><span class="pre">project</span> <span class="pre">id</span></code> is what is used in the <code class="docutils literal notranslate"><span class="pre">tesseract</span> <span class="pre">teardown</span></code> command and will kill all Tesseracts associated with that project id.</p>
+</section>
+<section id="invoking-a-tesseract">
+<h2>Invoking a Tesseract<a class="headerlink" href="#invoking-a-tesseract" title="Link to this heading">¶</a></h2>
+<p>The main operation which a Tesseract implements is called <code class="docutils literal notranslate"><span class="pre">apply</span></code>. This could be
+a forward pass of a neural network applied to some input data,
+a simulation of a quantity of interest which accepts its initial conditions as input,
+and so on.</p>
+<div class="sd-tab-set docutils">
+<input checked="checked" id="sd-tab-item-0" name="sd-tab-set-0" type="radio">
+<label class="sd-tab-label" data-sync-group="tab" data-sync-id="cli" for="sd-tab-item-0">
+CLI</label><div class="sd-tab-content docutils">
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>$<span class="w"> </span>tesseract<span class="w"> </span>run<span class="w"> </span>vectoradd<span class="w"> </span>apply<span class="w"> </span>@examples/vectoradd/example_inputs.json
+<span class="o">{</span><span class="s2">&quot;result&quot;</span>:<span class="o">{</span><span class="s2">&quot;object_type&quot;</span>:<span class="s2">&quot;array&quot;</span>,<span class="s2">&quot;shape&quot;</span>:<span class="o">[</span><span class="m">3</span><span class="o">]</span>,<span class="s2">&quot;dtype&quot;</span>:<span class="s2">&quot;float64&quot;</span>,<span class="s2">&quot;data&quot;</span>:<span class="o">{</span><span class="s2">&quot;buffer&quot;</span>:<span class="o">[</span><span class="m">5</span>.0,7.0,9.0<span class="o">]</span>,<span class="s2">&quot;encoding&quot;</span>:<span class="s2">&quot;json&quot;</span><span class="o">}}}</span>
+</pre></div>
+</div>
+<p>Where the <code class="docutils literal notranslate"><span class="pre">example_inputs.json</span></code> passed as input just contains the following:</p>
+<div class="literal-block-wrapper docutils container" id="id1">
+<div class="code-block-caption"><span class="caption-text">example_inputs.json</span><a class="headerlink" href="#id1" title="Link to this code">¶</a></div>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
+   <span class="s2">&quot;inputs&quot;</span><span class="p">:</span> <span class="p">{</span>
+       <span class="s2">&quot;a&quot;</span><span class="p">:{</span>
+          <span class="s2">&quot;object_type&quot;</span><span class="p">:</span><span class="s2">&quot;array&quot;</span><span class="p">,</span>
+          <span class="s2">&quot;shape&quot;</span><span class="p">:[</span><span class="mi">3</span><span class="p">],</span>
+          <span class="s2">&quot;dtype&quot;</span><span class="p">:</span><span class="s2">&quot;int64&quot;</span><span class="p">,</span>
+          <span class="s2">&quot;data&quot;</span><span class="p">:{</span>
+             <span class="s2">&quot;buffer&quot;</span><span class="p">:[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">],</span>
+             <span class="s2">&quot;encoding&quot;</span><span class="p">:</span><span class="s2">&quot;json&quot;</span>
+          <span class="p">}</span>
+       <span class="p">},</span>
+       <span class="s2">&quot;b&quot;</span><span class="p">:{</span>
+           <span class="s2">&quot;object_type&quot;</span><span class="p">:</span><span class="s2">&quot;array&quot;</span><span class="p">,</span>
+           <span class="s2">&quot;shape&quot;</span><span class="p">:[</span><span class="mi">3</span><span class="p">],</span>
+           <span class="s2">&quot;dtype&quot;</span><span class="p">:</span><span class="s2">&quot;int64&quot;</span><span class="p">,</span>
+           <span class="s2">&quot;data&quot;</span><span class="p">:{</span>
+              <span class="s2">&quot;buffer&quot;</span><span class="p">:[</span><span class="mi">4</span><span class="p">,</span> <span class="mi">5</span><span class="p">,</span> <span class="mi">6</span><span class="p">],</span>
+              <span class="s2">&quot;encoding&quot;</span><span class="p">:</span><span class="s2">&quot;json&quot;</span>
+           <span class="p">}</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+</div>
+<p>Notice the <code class="docutils literal notranslate"><span class="pre">&#64;</span></code> before the filename in the command payload. This tells the CLI to read the file and
+use it as input to the Tesseract. You can also provide a JSON string in place of this:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>$<span class="w"> </span>tesseract<span class="w"> </span>run<span class="w"> </span>vectoradd<span class="w"> </span>apply<span class="w"> </span><span class="s1">&#39;{&quot;inputs&quot;: {&quot;a&quot;: ..., &quot;b&quot;: ...}}&#39;</span>
+</pre></div>
+</div>
+<p>This can be useful for small input payloads, but it can become quite cumbersome very quickly.</p>
+</div>
+<input id="sd-tab-item-1" name="sd-tab-set-0" type="radio">
+<label class="sd-tab-label" data-sync-group="tab" data-sync-id="http" for="sd-tab-item-1">
+REST API</label><div class="sd-tab-content docutils">
+<p>Make sure that the Tesseract is running as a service (<code class="docutils literal notranslate"><span class="pre">docker</span> <span class="pre">ps</span></code>). Otherwise, launch
+it via <code class="docutils literal notranslate"><span class="pre">tesseract</span> <span class="pre">serve</span> <span class="pre">vectoradd</span></code>.</p>
+<p>You can then simply curl its <code class="docutils literal notranslate"><span class="pre">/apply</span></code> endpoint</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>$<span class="w"> </span>curl<span class="w"> </span>http://&lt;tesseract-address&gt;:&lt;port&gt;/apply<span class="w"> </span><span class="se">\ </span><span class="c1"># Replace with actual address</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Content-Type: application/json&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span>@examples/vectoradd/example_inputs.json
+<span class="o">{</span><span class="s2">&quot;result&quot;</span>:<span class="o">{</span><span class="s2">&quot;object_type&quot;</span>:<span class="s2">&quot;array&quot;</span>,<span class="s2">&quot;shape&quot;</span>:<span class="o">[</span><span class="m">3</span><span class="o">]</span>,<span class="s2">&quot;dtype&quot;</span>:<span class="s2">&quot;float64&quot;</span>,<span class="s2">&quot;data&quot;</span>:<span class="o">{</span><span class="s2">&quot;buffer&quot;</span>:<span class="o">[</span><span class="m">5</span>.0,7.0,9.0<span class="o">]</span>,<span class="s2">&quot;encoding&quot;</span>:<span class="s2">&quot;json&quot;</span><span class="o">}}}</span>
+</pre></div>
+</div>
+<p>Where the payload <code class="docutils literal notranslate"><span class="pre">example_inputs.json</span></code> we POST to the <code class="docutils literal notranslate"><span class="pre">/apply</span></code> endpoint is the following:</p>
+<div class="literal-block-wrapper docutils container" id="id2">
+<div class="code-block-caption"><span class="caption-text">example_inputs.json</span><a class="headerlink" href="#id2" title="Link to this code">¶</a></div>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
+   <span class="s2">&quot;inputs&quot;</span><span class="p">:</span> <span class="p">{</span>
+       <span class="s2">&quot;a&quot;</span><span class="p">:{</span>
+          <span class="s2">&quot;object_type&quot;</span><span class="p">:</span><span class="s2">&quot;array&quot;</span><span class="p">,</span>
+          <span class="s2">&quot;shape&quot;</span><span class="p">:[</span><span class="mi">3</span><span class="p">],</span>
+          <span class="s2">&quot;dtype&quot;</span><span class="p">:</span><span class="s2">&quot;int64&quot;</span><span class="p">,</span>
+          <span class="s2">&quot;data&quot;</span><span class="p">:{</span>
+             <span class="s2">&quot;buffer&quot;</span><span class="p">:[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">],</span>
+             <span class="s2">&quot;encoding&quot;</span><span class="p">:</span><span class="s2">&quot;json&quot;</span>
+          <span class="p">}</span>
+       <span class="p">},</span>
+       <span class="s2">&quot;b&quot;</span><span class="p">:{</span>
+           <span class="s2">&quot;object_type&quot;</span><span class="p">:</span><span class="s2">&quot;array&quot;</span><span class="p">,</span>
+           <span class="s2">&quot;shape&quot;</span><span class="p">:[</span><span class="mi">3</span><span class="p">],</span>
+           <span class="s2">&quot;dtype&quot;</span><span class="p">:</span><span class="s2">&quot;int64&quot;</span><span class="p">,</span>
+           <span class="s2">&quot;data&quot;</span><span class="p">:{</span>
+              <span class="s2">&quot;buffer&quot;</span><span class="p">:[</span><span class="mi">4</span><span class="p">,</span> <span class="mi">5</span><span class="p">,</span> <span class="mi">6</span><span class="p">],</span>
+              <span class="s2">&quot;encoding&quot;</span><span class="p">:</span><span class="s2">&quot;json&quot;</span>
+           <span class="p">}</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+</div>
+</div>
+<input id="sd-tab-item-2" name="sd-tab-set-0" type="radio">
+<label class="sd-tab-label" data-sync-group="tab" data-sync-id="python" for="sd-tab-item-2">
+Python</label><div class="sd-tab-content docutils">
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span><span class="w"> </span><span class="nn">tesseract_core</span><span class="w"> </span><span class="kn">import</span> <span class="n">Tesseract</span>
+<span class="gp">&gt;&gt;&gt;</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">a</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">,</span> <span class="mf">3.0</span><span class="p">])</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">b</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">4.0</span><span class="p">,</span> <span class="mf">5.0</span><span class="p">,</span> <span class="mf">6.0</span><span class="p">])</span>
+<span class="gp">&gt;&gt;&gt;</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="k">with</span> <span class="n">Tesseract</span><span class="o">.</span><span class="n">from_image</span><span class="p">(</span><span class="n">image</span><span class="o">=</span><span class="s2">&quot;vectoradd&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">vectoradd</span><span class="p">:</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="n">vectoradd</span><span class="o">.</span><span class="n">apply</span><span class="p">({</span><span class="s2">&quot;a&quot;</span><span class="p">:</span> <span class="n">a</span><span class="p">,</span> <span class="s2">&quot;b&quot;</span><span class="p">:</span> <span class="n">b</span><span class="p">})</span>
+<span class="go">{&#39;result&#39;: array([5., 7., 9.])}</span>
+</pre></div>
+</div>
+<p>The <a class="reference internal" href="../api/tesseract-api.html#tesseract_core.Tesseract" title="tesseract_core.Tesseract"><span class="xref myst py py-class">Tesseract</span></a> context manager will spin up
+a Tesseract locally, and tear it down once the context is exited.</p>
+<div class="admonition tip">
+<p class="admonition-title">Tip</p>
+<p>You can also instantiate a Tesseract object which connects to
+a remote Tesseract via <code class="docutils literal notranslate"><span class="pre">Tesseract(url=...)</span></code>.```</p>
+</div>
+</div>
+</div>
+<p>This Tesseract, which accepts two vectors, is returning an object which has the vector sum
+<code class="docutils literal notranslate"><span class="pre">a</span> <span class="pre">+</span> <span class="pre">b</span></code> in the <code class="docutils literal notranslate"><span class="pre">result</span></code> output field.</p>
+<p>If the Tesseract you are using is differentiable, the endpoints which return derivatives can be called in a similar
+fashion; for instance, here is how one would calculate the Jacobian of the <code class="docutils literal notranslate"><span class="pre">result</span></code> output field, partial only
+on the <code class="docutils literal notranslate"><span class="pre">a</span></code> vector, at <span class="math notranslate nohighlight">\(a = (1,2,3)\)</span>, <span class="math notranslate nohighlight">\(b = (4,5,6)\)</span>:</p>
+<div class="sd-tab-set docutils">
+<input checked="checked" id="sd-tab-item-3" name="sd-tab-set-1" type="radio">
+<label class="sd-tab-label" data-sync-group="tab" data-sync-id="cli" for="sd-tab-item-3">
+CLI</label><div class="sd-tab-content docutils">
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>$<span class="w"> </span>tesseract<span class="w"> </span>run<span class="w"> </span>vectoradd<span class="w"> </span>jacobian<span class="w"> </span>@examples/vectoradd/example_jacobian_inputs.json
+<span class="o">{</span><span class="s2">&quot;result&quot;</span>:<span class="o">{</span><span class="s2">&quot;a&quot;</span>:<span class="o">{</span><span class="s2">&quot;object_type&quot;</span>:<span class="s2">&quot;array&quot;</span>,<span class="s2">&quot;shape&quot;</span>:<span class="o">[</span><span class="m">3</span>,3<span class="o">]</span>,<span class="s2">&quot;dtype&quot;</span>:<span class="s2">&quot;float64&quot;</span>,<span class="s2">&quot;data&quot;</span>:<span class="o">{</span><span class="s2">&quot;buffer&quot;</span>:<span class="o">[[</span><span class="m">3</span>.0,0.0,0.0<span class="o">]</span>,<span class="o">[</span><span class="m">0</span>.0,3.0,0.0<span class="o">]</span>,<span class="o">[</span><span class="m">0</span>.0,0.0,3.0<span class="o">]]</span>,<span class="s2">&quot;encoding&quot;</span>:<span class="s2">&quot;json&quot;</span><span class="o">}}}}</span>
+</pre></div>
+</div>
+</div>
+<input id="sd-tab-item-4" name="sd-tab-set-1" type="radio">
+<label class="sd-tab-label" data-sync-group="tab" data-sync-id="http" for="sd-tab-item-4">
+REST API</label><div class="sd-tab-content docutils">
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>$<span class="w"> </span>curl<span class="w"> </span>-d<span class="w"> </span>@examples/vectoradd/example_jacobian_inputs.json<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Content-Type: application/json&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>http://&lt;tesseract-address&gt;:&lt;port&gt;/jacobian
+<span class="o">{</span><span class="s2">&quot;result&quot;</span>:<span class="o">{</span><span class="s2">&quot;a&quot;</span>:<span class="o">{</span><span class="s2">&quot;object_type&quot;</span>:<span class="s2">&quot;array&quot;</span>,<span class="s2">&quot;shape&quot;</span>:<span class="o">[</span><span class="m">3</span>,3<span class="o">]</span>,<span class="s2">&quot;dtype&quot;</span>:<span class="s2">&quot;float64&quot;</span>,<span class="s2">&quot;data&quot;</span>:<span class="o">{</span><span class="s2">&quot;buffer&quot;</span>:<span class="o">[[</span><span class="m">1</span>.0,0.0,0.0<span class="o">]</span>,<span class="o">[</span><span class="m">0</span>.0,1.0,0.0<span class="o">]</span>,<span class="o">[</span><span class="m">0</span>.0,0.0,1.0<span class="o">]]</span>,<span class="s2">&quot;encoding&quot;</span>:<span class="s2">&quot;json&quot;</span><span class="o">}}}}</span>
+</pre></div>
+</div>
+<p>Notice that the payload we posted contains information about which inputs and outputs we want to consider
+when computing derivatives:</p>
+<div class="literal-block-wrapper docutils container" id="id3">
+<div class="code-block-caption"><span class="caption-text">example_jacobian_inputs.json</span><a class="headerlink" href="#id3" title="Link to this code">¶</a></div>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
+   <span class="s2">&quot;inputs&quot;</span><span class="p">:</span> <span class="p">{</span>
+       <span class="s2">&quot;a&quot;</span><span class="p">:{</span>
+          <span class="s2">&quot;object_type&quot;</span><span class="p">:</span> <span class="s2">&quot;array&quot;</span><span class="p">,</span>
+          <span class="s2">&quot;shape&quot;</span><span class="p">:[</span><span class="mi">3</span><span class="p">],</span>
+          <span class="s2">&quot;dtype&quot;</span><span class="p">:</span><span class="s2">&quot;int64&quot;</span><span class="p">,</span>
+          <span class="s2">&quot;data&quot;</span><span class="p">:{</span>
+             <span class="s2">&quot;buffer&quot;</span><span class="p">:[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">],</span>
+             <span class="s2">&quot;encoding&quot;</span><span class="p">:</span><span class="s2">&quot;json&quot;</span>
+          <span class="p">}</span>
+       <span class="p">},</span>
+       <span class="s2">&quot;b&quot;</span><span class="p">:{</span>
+           <span class="s2">&quot;object_type&quot;</span><span class="p">:</span><span class="s2">&quot;array&quot;</span><span class="p">,</span>
+           <span class="s2">&quot;shape&quot;</span><span class="p">:[</span><span class="mi">3</span><span class="p">],</span>
+           <span class="s2">&quot;dtype&quot;</span><span class="p">:</span><span class="s2">&quot;int64&quot;</span><span class="p">,</span>
+           <span class="s2">&quot;data&quot;</span><span class="p">:{</span>
+              <span class="s2">&quot;buffer&quot;</span><span class="p">:[</span><span class="mi">4</span><span class="p">,</span> <span class="mi">5</span><span class="p">,</span> <span class="mi">6</span><span class="p">],</span>
+              <span class="s2">&quot;encoding&quot;</span><span class="p">:</span><span class="s2">&quot;json&quot;</span>
+           <span class="p">}</span>
+        <span class="p">}</span>
+    <span class="p">},</span>
+   <span class="s2">&quot;jac_inputs&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;a&quot;</span><span class="p">],</span>
+   <span class="s2">&quot;jac_outputs&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;result&quot;</span><span class="p">]</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+</div>
+</div>
+<input id="sd-tab-item-5" name="sd-tab-set-1" type="radio">
+<label class="sd-tab-label" data-sync-group="tab" data-sync-id="python" for="sd-tab-item-5">
+Python</label><div class="sd-tab-content docutils">
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span><span class="w"> </span><span class="nn">tesseract_core</span><span class="w"> </span><span class="kn">import</span> <span class="n">Tesseract</span>
+<span class="gp">&gt;&gt;&gt;</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">a</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">1.0</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">,</span> <span class="mf">3.0</span><span class="p">])</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">b</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mf">4.0</span><span class="p">,</span> <span class="mf">5.0</span><span class="p">,</span> <span class="mf">6.0</span><span class="p">])</span>
+<span class="gp">&gt;&gt;&gt;</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="k">with</span> <span class="n">Tesseract</span><span class="o">.</span><span class="n">from_image</span><span class="p">(</span><span class="s2">&quot;vectoradd&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">vectoradd</span><span class="p">:</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="n">vectoradd</span><span class="o">.</span><span class="n">jacobian</span><span class="p">({</span><span class="s2">&quot;a&quot;</span><span class="p">:</span> <span class="n">a</span><span class="p">,</span> <span class="s2">&quot;b&quot;</span><span class="p">:</span> <span class="n">b</span><span class="p">},</span> <span class="n">jac_inputs</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;a&quot;</span><span class="p">],</span> <span class="n">jac_outputs</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;result&quot;</span><span class="p">])</span>
+<span class="go">{&#39;result&#39;: {&#39;a&#39;: array([[1., 0., 0.],</span>
+<span class="go">       [0., 1., 0.],</span>
+<span class="go">       [0., 0., 1.]])}}</span>
+</pre></div>
+</div>
+</div>
+</div>
+<p>Now the output is a 3x3 matrix, as expected.</p>
+<p>To know which endpoints among <code class="docutils literal notranslate"><span class="pre">jacobian</span></code>, <code class="docutils literal notranslate"><span class="pre">jacobian_vector_product</span></code>, or <code class="docutils literal notranslate"><span class="pre">vector_jacobian_product</span></code> are
+available in a given Tesseract, you can check which commands appear in <code class="docutils literal notranslate"><span class="pre">tesseract</span> <span class="pre">run</span> <span class="pre">&lt;tesseract-name&gt;[:tag]</span> <span class="pre">--help</span></code>, or
+look at the docs at the <code class="docutils literal notranslate"><span class="pre">/docs</span></code> endpoint of a running Tesseract service (or use <code class="docutils literal notranslate"><span class="pre">tesseract</span> <span class="pre">apidoc</span></code>).</p>
+</section>
+<section id="input-and-output-schemas">
+<h2>Input and output schemas<a class="headerlink" href="#input-and-output-schemas" title="Link to this heading">¶</a></h2>
+<p>As they wrap arbitrary computation, each Tesseract has a unique input/output signature.
+To make it easier to programmatically know each specific Tesseract’s input and output schema,
+you can use the following:</p>
+<div class="sd-tab-set docutils">
+<input checked="checked" id="sd-tab-item-6" name="sd-tab-set-2" type="radio">
+<label class="sd-tab-label" data-sync-group="tab" data-sync-id="cli" for="sd-tab-item-6">
+CLI</label><div class="sd-tab-content docutils">
+<p>For the input schema:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>$<span class="w"> </span>tesseract<span class="w"> </span>run<span class="w"> </span>vectoradd<span class="w"> </span>input-schema
+</pre></div>
+</div>
+<p>For the output schema:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>$<span class="w"> </span>tesseract<span class="w"> </span>run<span class="w"> </span>vectoradd<span class="w"> </span>output-schema
+</pre></div>
+</div>
+</div>
+<input id="sd-tab-item-7" name="sd-tab-set-2" type="radio">
+<label class="sd-tab-label" data-sync-group="tab" data-sync-id="http" for="sd-tab-item-7">
+REST API</label><div class="sd-tab-content docutils">
+<p>For the input schema:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>$<span class="w"> </span>curl<span class="w"> </span>&lt;tesseract-address&gt;:&lt;port&gt;/input_schema
+</pre></div>
+</div>
+<p>For the output schema:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>$<span class="w"> </span>curl<span class="w"> </span>&lt;tesseract-address&gt;:&lt;port&gt;/output_schema
+</pre></div>
+</div>
+</div>
+<input id="sd-tab-item-8" name="sd-tab-set-2" type="radio">
+<label class="sd-tab-label" data-sync-group="tab" data-sync-id="python" for="sd-tab-item-8">
+Python</label><div class="sd-tab-content docutils">
+<p>For the input schema:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span><span class="w"> </span><span class="nn">tesseract_core</span><span class="w"> </span><span class="kn">import</span> <span class="n">Tesseract</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="k">with</span> <span class="n">Tesseract</span><span class="p">(</span><span class="n">image</span><span class="o">=</span><span class="s2">&quot;vectoradd&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">vectoradd</span><span class="p">:</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="n">vectoradd</span><span class="o">.</span><span class="n">input_schema</span>
+</pre></div>
+</div>
+<p>For the output schema:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span><span class="w"> </span><span class="nn">tesseract_core</span><span class="w"> </span><span class="kn">import</span> <span class="n">Tesseract</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="k">with</span> <span class="n">Tesseract</span><span class="p">(</span><span class="n">image</span><span class="o">=</span><span class="s2">&quot;vectoradd&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">vectoradd</span><span class="p">:</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="n">vectoradd</span><span class="o">.</span><span class="n">output_schema</span>
+</pre></div>
+</div>
+</div>
+</div>
+<p>Schemas are returned in the <a class="reference external" href="https://json-schema.org/">JSON Schema</a> format,
+which is intended for programmatic parsing rather than human
+readability. If you want a more human-readable version of the schema,
+your best option is instead to look at the docs in the <code class="docutils literal notranslate"><span class="pre">/docs</span></code> endpoint of a Tesseract
+service.</p>
+<p>The schemas returned by the command above are the ones of the <code class="docutils literal notranslate"><span class="pre">/apply</span></code> endpoint. The schema
+for differential endpoints, like <code class="docutils literal notranslate"><span class="pre">jacobian</span></code>, are derived from it – see the
+<a class="reference internal" href="../introduction/differentiable-programming.html#tr-autodiff"><span class="std std-ref">page on Autodiff</span></a> for more details.</p>
+<p>You can also get the OpenAPI schema for the whole API of each Tesseract via:</p>
+<div class="sd-tab-set docutils">
+<input checked="checked" id="sd-tab-item-9" name="sd-tab-set-3" type="radio">
+<label class="sd-tab-label" data-sync-group="tab" data-sync-id="cli" for="sd-tab-item-9">
+CLI</label><div class="sd-tab-content docutils">
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>$<span class="w"> </span>tesseract<span class="w"> </span>run<span class="w"> </span>vectoradd<span class="w"> </span>openapi-schema
+</pre></div>
+</div>
+</div>
+<input id="sd-tab-item-10" name="sd-tab-set-3" type="radio">
+<label class="sd-tab-label" data-sync-group="tab" data-sync-id="http" for="sd-tab-item-10">
+REST API</label><div class="sd-tab-content docutils">
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>$<span class="w"> </span>curl<span class="w"> </span>&lt;tesseract-address&gt;:&lt;port&gt;/openapi.json
+</pre></div>
+</div>
+</div>
+<input id="sd-tab-item-11" name="sd-tab-set-3" type="radio">
+<label class="sd-tab-label" data-sync-group="tab" data-sync-id="python" for="sd-tab-item-11">
+Python</label><div class="sd-tab-content docutils">
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="kn">from</span><span class="w"> </span><span class="nn">tesseract_core</span><span class="w"> </span><span class="kn">import</span> <span class="n">Tesseract</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="k">with</span> <span class="n">Tesseract</span><span class="p">(</span><span class="n">image</span><span class="o">=</span><span class="s2">&quot;vectoradd&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">vectoradd</span><span class="p">:</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="n">vectoradd</span><span class="o">.</span><span class="n">openapi_schema</span>
+</pre></div>
+</div>
+<p>If you only care about which endpoints are available, you can use the <a class="reference internal" href="../api/tesseract-api.html#tesseract_core.Tesseract.available_endpoints" title="tesseract_core.Tesseract.available_endpoints"><span class="xref myst py py-attr">available_endpoints</span></a>
+attribute:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="k">with</span> <span class="n">Tesseract</span><span class="p">(</span><span class="n">image</span><span class="o">=</span><span class="s2">&quot;vectoradd&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">vectoradd</span><span class="p">:</span>
+<span class="gp">&gt;&gt;&gt; </span>    <span class="n">vectoradd</span><span class="o">.</span><span class="n">available_endpoints</span>
+<span class="go">[&#39;apply&#39;, &#39;jacobian&#39;, &#39;health&#39;, &#39;input_schema&#39;, &#39;output_schema&#39;, &#39;abstract_eval&#39;]</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+</section>
+
+        </article>
+      </div>
+      <footer>
+
+        <div class="related-pages">
+          <a class="next-page" href="array-encodings.html">
+              <div class="page-info">
+                <div class="context">
+                  <span>Next</span>
+                </div>
+                <div class="title">Array encodings</div>
+              </div>
+              <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
+            </a>
+          <a class="prev-page" href="../creating-tesseracts/deploy.html">
+              <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
+              <div class="page-info">
+                <div class="context">
+                  <span>Previous</span>
+                </div>
+
+                <div class="title">Deploying Tesseracts</div>
+
+              </div>
+            </a>
+        </div>
+        <div class="bottom-of-page">
+          <div class="left-details">
+            <div class="copyright">
+                Copyright &#169; 2025, Pasteur Labs
+            </div>
+            Made with <a href="https://www.sphinx-doc.org/">Sphinx</a> and <a class="muted-link" href="https://pradyunsg.me">@pradyunsg</a>'s
+
+            <a href="https://github.com/pradyunsg/furo">Furo</a>
+
+          </div>
+          <div class="right-details">
+
+          </div>
+        </div>
+
+      </footer>
+    </div>
+    <aside class="toc-drawer">
+
+
+      <div class="toc-sticky toc-scroll">
+        <div class="toc-title-container">
+          <span class="toc-title">
+            On this page
+          </span>
+        </div>
+        <div class="toc-tree-container">
+          <div class="toc-tree">
+            <ul>
+<li><a class="reference internal" href="#">Interacting with Tesseracts</a><ul>
+<li><a class="reference internal" href="#viewing-running-tesseracts">Viewing Running Tesseracts</a></li>
+<li><a class="reference internal" href="#invoking-a-tesseract">Invoking a Tesseract</a></li>
+<li><a class="reference internal" href="#input-and-output-schemas">Input and output schemas</a></li>
+</ul>
+</li>
+</ul>
+
+          </div>
+        </div>
+      </div>
+
+
+    </aside>
+  </div>
+</div><script src="../../_static/documentation_options.js?v=7ef312bd"></script>
+    <script src="../../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../_static/scripts/furo.js?v=5fa4622c"></script>
+    <script src="../../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../../_static/copybutton.js?v=f281be69"></script>
+    <script src="../../_static/design-tabs.js?v=f930bc37"></script>
+    <script>window.MathJax = {"options": {"processHtmlClass": "tex2jax_process|mathjax_process|math|output_area"}}</script>
+    <script defer="defer" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    </body>
+</html>
