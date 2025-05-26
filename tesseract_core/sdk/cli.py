@@ -488,11 +488,6 @@ def serve(
             num_workers,
             no_compose,
         )
-
-        project_meta = {"project_id": project_id, "containers": container_ports}
-        json_info = json.dumps(project_meta)
-        typer.echo(json_info, nl=False)
-
     except RuntimeError as ex:
         raise UserError(
             f"Internal Docker error occurred while serving Tesseracts: {ex}"

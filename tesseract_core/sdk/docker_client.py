@@ -10,6 +10,7 @@ import shlex
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from textwrap import indent
 from typing import Literal
 
 from tesseract_core.sdk.config import get_config
