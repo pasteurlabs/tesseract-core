@@ -190,6 +190,11 @@ jobs:
             arch: "x64"
             docker-engine: "podman"
             unit-tesseract: "base"
+          - os: "ubuntu-24.04"
+            python-version: "3.12"
+            arch: "arm"
+            docker-engine: "docker"
+            unit-tesseract: "pyvista-arm64"
 
       fail-fast: false
 
