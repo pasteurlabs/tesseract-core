@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: "CLA Assistant"
-        if: (github.event.comment.body == 'recheck' || github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA') || github.event_name == 'pull_request_target')
+        if: (github.event.comment.body == 'recheck' || github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA') || github.event_name == 'pull_request_target'
         uses: contributor-assistant/github-action@v2.6.1
         env:
           PERSONAL_ACCESS_TOKEN: ${{ secrets.CLA_PAT }}
@@ -26,7 +26,7 @@ jobs:
           path-to-document: 'https://github.com/pasteurlabs/pasteur-oss-cla/blob/main/README.md'
           # Branch should not be protected
           branch: 'main'
-          allowlist:
+          allowlist: dependabot[bot]
 
           remote-organization-name: 'pasteurlabs'
           remote-repository-name: 'pasteur-oss-cla-signatures'
