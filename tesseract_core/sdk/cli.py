@@ -488,8 +488,6 @@ def serve(
             num_workers,
             no_compose,
         )
-    except ValueError as ex:
-        raise typer.BadParameter(f"{ex}", param_hint="image_names") from ex
     except RuntimeError as ex:
         raise UserError(
             f"Internal Docker error occurred while serving Tesseracts: {ex}"

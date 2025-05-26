@@ -464,7 +464,7 @@ def main() -> None:
     # Redirect stdout to stderr to avoid mixing any output with the JSON response.
     with stdout_to_stderr() as orig_stdout:
         # Fail as fast as possible if the Tesseract API path is not set
-        api_path = get_config().tesseract_api_path
+        api_path = get_config().api_path
         if not api_path.is_file():
             print(
                 f"Tesseract API file '{api_path}' does not exist. "
