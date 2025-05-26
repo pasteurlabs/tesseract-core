@@ -566,7 +566,10 @@ def _get_tesseract_env_vals(
 def _find_tesseract_project(
     tesseract: Container,
 ) -> str:
-    """Find the Tesseract Project ID for a given tesseract."""
+    """Find the Tesseract Project ID for a given tesseract.
+
+    A Tesseract Project ID is either a Docker Compose ID or a container name.
+    """
     if tesseract.project_id is not None:
         return tesseract.project_id
 
