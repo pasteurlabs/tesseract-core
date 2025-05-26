@@ -380,9 +380,9 @@ def _validate_port(port: str | None) -> str | None:
             param_hint="port",
         )
 
-    if not (1025 <= start <= 65535) or not (1025 <= end <= 65535):
+    if not (0 <= start <= 65535) or not (0 <= end <= 65535):
         raise typer.BadParameter(
-            f"Ports '{port}' must be between 1025 and 65535.",
+            f"Ports '{port}' must be between 0 and 65535.",
             param_hint="port",
         )
     return port
@@ -426,6 +426,35 @@ def serve(
             ),
         ),
     ] = None,
+    num_workers: Annotated[
+        int,
+        typer.Option(
+            "--num-workers",
+            help="Number of worker processes to use when serving the Tesseract.",
+            show_default=True,
+        ),
+    ] = 1,
+    propagate_tracebacks: Annotated[
+        bool,
+        typer.Option(
+            "--propagate-tracebacks",
+            help=(
+                "Enable debug mode. This will propagate full tracebacks to the client. "
+                "WARNING: This may expose sensitive information, use with caution (and never in production)."
+            ),
+        ),
+    ] = False,
+    no_compose: Annotated[
+        bool,
+        typer.Option(
+            "--no-compose",
+            help=(
+                "Do not use Docker Compose to serve the Tesseract. "
+                "Instead, the command will block until interrupted. "
+                "This is useful for cases in which docker-compose is not available."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Serve one or more Tesseract images.
 
@@ -441,7 +470,7 @@ def serve(
             raise typer.BadParameter(
                 (
                     "Port specification only works if exactly one Tesseract is being served. "
-                    f"Currently serving `{len(image_names)}` Tesseracts."
+                    f"Currently attempting to serve `{len(image_names)}` Tesseracts."
                 ),
                 param_hint="image_names",
             )
@@ -450,22 +479,29 @@ def serve(
         ports = None
 
     try:
-        project_id = engine.serve(image_names, ports, volume, gpus)
-        container_ports = _display_project_meta(project_id)
-        logger.info(
-            f"Docker Compose Project ID, use it with 'tesseract teardown' command: {project_id}"
+        project_id = engine.serve(
+            image_names,
+            ports,
+            volume,
+            gpus,
+            propagate_tracebacks,
+            num_workers,
+            no_compose,
         )
-
-        project_meta = {"project_id": project_id, "containers": container_ports}
-        json_info = json.dumps(project_meta)
-        typer.echo(json_info, nl=False)
-
     except ValueError as ex:
         raise typer.BadParameter(f"{ex}", param_hint="image_names") from ex
     except RuntimeError as ex:
         raise UserError(
             f"Internal Docker error occurred while serving Tesseracts: {ex}"
         ) from ex
+
+    container_ports = _display_project_meta(project_id)
+    logger.info(
+        f"Tesseract project ID, use it with 'tesseract teardown' command: {project_id}"
+    )
+    project_meta = {"project_id": project_id, "containers": container_ports}
+    json_info = json.dumps(project_meta)
+    typer.echo(json_info, nl=False)
 
 
 @app.command("list")
@@ -530,17 +566,20 @@ def _get_tesseract_env_vals(
 def _find_tesseract_project(
     tesseract: Container,
 ) -> str:
-    """Find the Tesseract Project ID for a given tesseract."""
+    """Find the Tesseract Project ID for a given tesseract.
+
+    A Tesseract Project ID is either a Docker Compose ID or a container name.
+    """
     if tesseract.project_id is not None:
         return tesseract.project_id
 
     tesseract_id = tesseract.id[:12]
 
-    for project, containers in docker_client.compose.list():
+    for project, containers in docker_client.compose.list().items():
         if tesseract_id in containers:
             return project
 
-    return "Unknown"
+    return tesseract.name
 
 
 @app.command("apidoc")
@@ -556,10 +595,9 @@ def apidoc(
     ] = True,
 ) -> None:
     """Serve the OpenAPI schema for a Tesseract."""
-    project_id = None
+    project_id = engine.serve([image_name], no_compose=True)
     try:
-        project_id = engine.serve([image_name])
-        container = docker_client.compose.list()[project_id][0]
+        container = docker_client.containers.get(project_id)
         url = f"http://localhost:{container.host_port}/docs"
         logger.info(f"Serving OpenAPI docs for Tesseract {image_name} at {url}")
         logger.info("  Press Ctrl+C to stop")
@@ -571,8 +609,7 @@ def apidoc(
         except KeyboardInterrupt:
             return
     finally:
-        if project_id is not None:
-            engine.teardown(project_id)
+        engine.teardown(project_id)
 
 
 def _display_project_meta(project_id: str) -> list:
@@ -581,8 +618,13 @@ def _display_project_meta(project_id: str) -> list:
     Returns a list of dictionaries {name: container_name, port: host_port}.
     """
     container_ports = []
-    projects = docker_client.compose.list()
-    containers = projects[project_id]
+
+    compose_projects = docker_client.compose.list()
+    if project_id in compose_projects:
+        containers = compose_projects[project_id]
+    else:
+        containers = [project_id]
+
     for container_id in containers:
         container = docker_client.containers.get(container_id)
         logger.info(f"Container ID: {container.id}")
