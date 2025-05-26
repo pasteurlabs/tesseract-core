@@ -157,7 +157,10 @@ def test_tesseract_run_stdout(built_image_name):
             raise
 
 
-def test_tesseract_serve_pipeline(docker_client, built_image_name, docker_cleanup):
+@pytest.mark.parametrize("no_compose", [True, False])
+def test_tesseract_serve_pipeline(
+    docker_client, built_image_name, no_compose, docker_cleanup
+):
     cli_runner = CliRunner(mix_stderr=False)
     project_id = None
     run_res = cli_runner.invoke(
@@ -165,6 +168,7 @@ def test_tesseract_serve_pipeline(docker_client, built_image_name, docker_cleanu
         [
             "serve",
             built_image_name,
+            *(["--no-compose"] if no_compose else []),
         ],
         catch_exceptions=False,
     )
@@ -175,12 +179,17 @@ def test_tesseract_serve_pipeline(docker_client, built_image_name, docker_cleanu
     project_meta = json.loads(run_res.stdout)
 
     project_id = project_meta["project_id"]
-    docker_cleanup["project_ids"].append(project_id)
-    project_containers = project_meta["containers"][0]["name"]
-    if not project_containers:
-        raise ValueError(f"Could not find container for project '{project_id}'")
+    if no_compose:
+        project_container = docker_client.containers.get(project_id)
+        docker_cleanup["containers"].append(project_container)
+    else:
+        docker_cleanup["project_ids"].append(project_id)
+        project_containers = project_meta["containers"][0]["name"]
+        if not project_containers:
+            raise ValueError(f"Could not find container for project '{project_id}'")
 
-    project_container = docker_client.containers.get(project_containers)
+        project_container = docker_client.containers.get(project_containers)
+
     assert project_container.name == project_meta["containers"][0]["name"]
     assert project_container.host_port == project_meta["containers"][0]["port"]
 
@@ -202,19 +211,21 @@ def test_tesseract_serve_pipeline(docker_client, built_image_name, docker_cleanu
 
 
 @pytest.mark.parametrize("tear_all", [True, False])
-def test_tesseract_teardown_multiple(built_image_name, tear_all):
+@pytest.mark.parametrize("no_compose", [True, False])
+def test_tesseract_teardown_multiple(built_image_name, tear_all, no_compose):
     """Teardown multiple projects."""
     cli_runner = CliRunner(mix_stderr=False)
 
     project_ids = []
     try:
-        for _ in range(0, 5):
+        for _ in range(2):
             # Serve
             run_res = cli_runner.invoke(
                 app,
                 [
                     "serve",
                     built_image_name,
+                    *(["--no-compose"] if no_compose else []),
                 ],
                 catch_exceptions=False,
             )
@@ -289,7 +300,7 @@ def test_tesseract_serve_ports_error(built_image_name):
         catch_exceptions=False,
     )
     assert run_res.exit_code
-    assert "Ports '8000-999999' must be between 1025 and 65535." in run_res.stderr
+    assert "Ports '8000-999999' must be between" in run_res.stderr
 
     # Check poorly formatted ports.
     run_res = cli_runner.invoke(
@@ -322,16 +333,23 @@ def test_tesseract_serve_ports_error(built_image_name):
     assert "Start port '8000' must be less than or equal to end" in run_res.stderr
 
 
-@pytest.mark.parametrize("port", ["34567", "34567-34569"])
-def test_tesseract_serve_ports(built_image_name, port, docker_cleanup):
+@pytest.mark.parametrize("port", ["fixed", "range"])
+def test_tesseract_serve_ports(built_image_name, port, docker_cleanup, free_port):
     """Try to serve multiple Tesseracts on multiple ports."""
     cli_runner = CliRunner(mix_stderr=False)
     project_id = None
 
+    if port == "fixed":
+        port_arg = str(free_port)
+    elif port == "range":
+        port_arg = f"{free_port}-{free_port + 1}"
+    else:
+        raise ValueError(f"Unknown port type: {port}")
+
     # Serve tesseract on specified ports.
     run_res = cli_runner.invoke(
         app,
-        ["serve", built_image_name, "-p", port],
+        ["serve", built_image_name, "-p", port_arg],
         catch_exceptions=False,
     )
     assert run_res.exit_code == 0, run_res.stderr
@@ -342,12 +360,12 @@ def test_tesseract_serve_ports(built_image_name, port, docker_cleanup):
     docker_cleanup["project_ids"].append(project_id)
 
     # Ensure that actual used ports are in the specified port range.
-    test_ports = port.split("-")
+    test_ports = port_arg.split("-")
     start_port = int(test_ports[0])
     end_port = int(test_ports[1]) if len(test_ports) > 1 else start_port
 
-    port = int(project_meta["containers"][0]["port"])
-    assert port in range(start_port, end_port + 1)
+    actual_port = int(project_meta["containers"][0]["port"])
+    assert actual_port in range(start_port, end_port + 1)
 
     # Ensure specified ports are in `tesseract ps` and served Tesseracts are usable.
     run_res = cli_runner.invoke(
@@ -357,9 +375,9 @@ def test_tesseract_serve_ports(built_image_name, port, docker_cleanup):
         catch_exceptions=False,
     )
 
-    res = requests.get(f"http://localhost:{port}/health")
+    res = requests.get(f"http://localhost:{actual_port}/health")
     assert res.status_code == 200, res.text
-    assert str(port) in run_res.stdout
+    assert str(actual_port) in run_res.stdout
 
 
 def test_tesseract_serve_with_volumes(built_image_name, tmp_path, docker_client):

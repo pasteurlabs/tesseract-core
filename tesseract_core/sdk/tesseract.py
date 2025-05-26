@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import atexit
 import base64
-import json
-import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from functools import cached_property, wraps
@@ -273,26 +271,12 @@ class Tesseract:
             ports=ports,
             volumes=volumes,
             gpus=gpus,
-            debug=debug,
+            propagate_tracebacks=debug,
             num_workers=num_workers,
         )
 
-        command = ["docker", "compose", "-p", project_id, "ps", "--format", "json"]
-        result = subprocess.run(command, capture_output=True, text=True)
-
-        # This relies on the fact that result.stdout from docker compose ps
-        # contains multiple json dicts, one for each container, separated by newlines,
-        # but json.loads will only parse the first one.
-        # The first_container dict contains useful info like container id, ports, etc.
-        first_container = json.loads(result.stdout)
-
-        if first_container:
-            first_container_id = first_container["ID"]
-            first_container_port = first_container["Publishers"][0]["PublishedPort"]
-        else:
-            raise RuntimeError("No containers found.")
-
-        return project_id, first_container_id, first_container_port
+        first_container = engine.get_project_containers(project_id)[0]
+        return project_id, first_container.id, int(first_container.host_port)
 
     @cached_property
     @requires_client

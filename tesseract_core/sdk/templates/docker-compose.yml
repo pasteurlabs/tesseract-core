@@ -38,4 +38,3 @@ services:
 
 networks:
   multi-tesseract-network:
-    name: multi-tesseract-network
