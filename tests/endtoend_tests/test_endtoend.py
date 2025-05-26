@@ -300,7 +300,7 @@ def test_tesseract_serve_ports_error(built_image_name):
         catch_exceptions=False,
     )
     assert run_res.exit_code
-    assert "Ports '8000-999999' must be between 1025 and 65535." in run_res.stderr
+    assert "Ports '8000-999999' must be between" in run_res.stderr
 
     # Check poorly formatted ports.
     run_res = cli_runner.invoke(

@@ -127,7 +127,7 @@ def get_free_port(
     """Find a random free port to use for HTTP."""
     start, end = within_range
     if start < 0 or end > 65535 or start > end:
-        raise ValueError("Invalid port range, must be between 1024 and 65535")
+        raise ValueError("Invalid port range, must be between 0 and 65535")
 
     # Try random ports in the given range
     portlist = list(range(start, end))
