@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 from pydantic import ValidationError
@@ -16,16 +18,20 @@ def mock_serving(mocker):
     serve_mock = mocker.patch("tesseract_core.sdk.engine.serve")
     serve_mock.return_value = "proj-id-123"
 
-    subprocess_run_mock = mocker.patch("subprocess.run")
-    subprocess_run_mock.return_value.stdout = (
-        '{"ID": "abc1234", "Publishers":[{"PublishedPort": 54321}]}'
+    fake_container = SimpleNamespace()
+    fake_container.host_port = 1234
+    fake_container.id = "container-id-123"
+
+    get_project_containers_mock = mocker.patch(
+        "tesseract_core.sdk.engine.get_project_containers"
     )
+    get_project_containers_mock.return_value = [fake_container]
 
     teardown_mock = mocker.patch("tesseract_core.sdk.engine.teardown")
     logs_mock = mocker.patch("tesseract_core.sdk.engine.logs")
     return {
         "serve_mock": serve_mock,
-        "subprocess_run_mock": subprocess_run_mock,
+        "get_project_containers_mock": get_project_containers_mock,
         "teardown_mock": teardown_mock,
         "logs_mock": logs_mock,
     }
@@ -111,7 +117,7 @@ def test_serve_lifecycle(mock_serving, mock_clients):
         ports=None,
         volumes=None,
         gpus=None,
-        debug=True,
+        propagate_tracebacks=True,
         num_workers=1,
     )
 
