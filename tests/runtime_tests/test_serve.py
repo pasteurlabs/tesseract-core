@@ -308,7 +308,7 @@ def test_debug_mode(dummy_tesseract_module, monkeypatch):
     monkeypatch.setattr(dummy_tesseract_module, "apply", apply_that_raises)
 
     try:
-        update_config(debug=False, tesseract_api_path=dummy_tesseract_module.__file__)
+        update_config(debug=False, api_path=dummy_tesseract_module.__file__)
         rest_api = create_rest_api(dummy_tesseract_module)
         http_client = TestClient(rest_api, raise_server_exceptions=False)
 
@@ -327,7 +327,7 @@ def test_debug_mode(dummy_tesseract_module, monkeypatch):
         tesseract_core.runtime.config._current_config = orig_config
 
     try:
-        update_config(debug=True, tesseract_api_path=dummy_tesseract_module.__file__)
+        update_config(debug=True, api_path=dummy_tesseract_module.__file__)
         rest_api = create_rest_api(dummy_tesseract_module)
         http_client = TestClient(rest_api, raise_server_exceptions=False)
 

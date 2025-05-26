@@ -509,7 +509,7 @@ def test_check(cli, cli_runner, dummy_tesseract_package):
     from tesseract_core.runtime.config import update_config
 
     tesseract_api_file = Path(dummy_tesseract_package) / "tesseract_api.py"
-    update_config(tesseract_api_path=tesseract_api_file)
+    update_config(api_path=tesseract_api_file)
     result = cli_runner.invoke(cli, ["check"], catch_exceptions=True)
     assert result.exit_code == 0, result.stderr
     assert "check successful" in result.stdout
@@ -518,7 +518,7 @@ def test_check(cli, cli_runner, dummy_tesseract_package):
     with open(api_file_bad_syntax, "w") as f:
         f.write("bad-syntax=1")
 
-    update_config(tesseract_api_path=api_file_bad_syntax)
+    update_config(api_path=api_file_bad_syntax)
     result = cli_runner.invoke(cli, ["check"], catch_exceptions=True)
     assert result.exit_code == 1, result.stderr
     assert "Could not load module" in result.exception.args[0]
@@ -530,7 +530,7 @@ def test_check(cli, cli_runner, dummy_tesseract_package):
     with open(api_file_bad_import, "w") as f:
         f.write("import non_existent_module")
 
-    update_config(tesseract_api_path=api_file_bad_import)
+    update_config(api_path=api_file_bad_import)
     result = cli_runner.invoke(cli, ["check"], catch_exceptions=True)
     assert result.exit_code == 1, result.stderr
     assert "Could not load module" in result.exception.args[0]
@@ -550,7 +550,7 @@ def test_check(cli, cli_runner, dummy_tesseract_package):
         )
         with open(api_file_bad_parent_class, "w") as f:
             f.write(invalid_code)
-        update_config(tesseract_api_path=api_file_bad_parent_class)
+        update_config(api_path=api_file_bad_parent_class)
         result = cli_runner.invoke(cli, ["check"], catch_exceptions=True)
         assert result.exit_code == 1, result.stderr
         full_traceback = "".join(traceback.format_exception(*result.exc_info))

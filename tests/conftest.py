@@ -130,7 +130,7 @@ def dummy_tesseract(dummy_tesseract_package):
     from tesseract_core.runtime.config import get_config, update_config
 
     orig_config_kwargs = {}
-    orig_path = get_config().tesseract_api_path
+    orig_path = get_config().api_path
     # default may have been used and tesseract_api.py is not guaranteed to exist
     # therefore, we only pass the original path in cleanup if not equal to default
     if orig_path != Path("tesseract_api.py"):
@@ -155,7 +155,7 @@ def dummy_tesseract_noenv(dummy_tesseract_package):
     """Use without tesseract_api_path to test handling of this."""
     from tesseract_core.runtime.config import get_config, update_config
 
-    orig_api_path = get_config().tesseract_api_path
+    orig_api_path = get_config().api_path
     orig_cwd = os.getcwd()
 
     # Ensure TESSERACT_API_PATH is not set with python os
@@ -167,7 +167,7 @@ def dummy_tesseract_noenv(dummy_tesseract_package):
         update_config()
         yield
     finally:
-        update_config(tesseract_api_path=orig_api_path)
+        update_config(api_path=orig_api_path)
         os.chdir(orig_cwd)
 
 
