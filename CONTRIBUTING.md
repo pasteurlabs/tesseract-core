@@ -60,7 +60,9 @@ those posted elsewhere already) are best highlighted and celebrated in the
 
 Tesseract is developed under the [Apache 2.0](LICENSE) license. By contributing
 to the Tesseract project you agree that your code contributions are governed by
-this license.
+this license. We require you to sign our [Contributor License
+Agreement](https://github.com/pasteurlabs/pasteur-oss-cla/blob/main/README.md)
+to state so.
 
 
 ### Local development setup
