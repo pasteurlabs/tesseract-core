@@ -380,9 +380,9 @@ def _validate_port(port: str | None) -> str | None:
             param_hint="port",
         )
 
-    if not (1025 <= start <= 65535) or not (1025 <= end <= 65535):
+    if not (0 <= start <= 65535) or not (0 <= end <= 65535):
         raise typer.BadParameter(
-            f"Ports '{port}' must be between 1025 and 65535.",
+            f"Ports '{port}' must be between 0 and 65535.",
             param_hint="port",
         )
     return port
