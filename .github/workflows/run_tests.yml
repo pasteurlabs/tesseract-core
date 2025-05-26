@@ -191,9 +191,9 @@ jobs:
 
     runs-on: ${{ matrix.arch == 'x64' && matrix.os == 'ubuntu-24.04' && 'ubuntu-24.04' || matrix.arch == 'arm' && matrix.os == 'ubuntu-24.04' && 'linux-arm64-ubuntu2404'}}
 
-    defaults:
-      run:
-        shell: bash -el {0}
+    # defaults:
+    #   run:
+    #     shell: bash -el {0}
 
     steps:
       - name: Set up Git repository
