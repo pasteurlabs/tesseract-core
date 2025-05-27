@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import ast
-import logging
 from pathlib import Path
 from typing import Annotated, Literal, NamedTuple, Union
 
@@ -16,8 +15,6 @@ from pydantic import (
     Strict,
 )
 from pydantic import ValidationError as PydanticValidationError
-
-logger = logging.getLogger("tesseract")
 
 
 class _ApiObject(NamedTuple):
@@ -265,7 +262,7 @@ def validate_tesseract_api(src_dir: Path) -> None:
     for schema in ("InputSchema", "OutputSchema"):
         obj = toplevel_objects[schema]
         if not obj.bases:
-            raise ValidationError(f"{schema} must define a parent class")
+            raise ValidationError(f"{schema} must inherit from pydantic.BaseModel")
 
 
 def get_config(src_dir: Path) -> TesseractConfig:

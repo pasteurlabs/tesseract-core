@@ -181,7 +181,6 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
             Computes the vector Jacobian product between the Jacobian given by ``vjp_outputs``
             with respect to ``vjp_inputs`` at the point ``inputs`` and the given cotangent vector.
             """
-            print(api_module)
             out = api_module.vector_jacobian_product(**dict(payload))
             return VJPOutputSchema.model_validate(
                 out, context={"input_keys": payload.vjp_inputs}
