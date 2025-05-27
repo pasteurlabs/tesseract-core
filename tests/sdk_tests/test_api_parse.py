@@ -1,6 +1,7 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import logging
 from pathlib import Path
 from textwrap import dedent
 
@@ -8,6 +9,8 @@ import pytest
 import yaml
 
 from tesseract_core.sdk.api_parse import ValidationError, validate_tesseract_api
+
+LOGGER = logging.getLogger(__name__)
 
 
 @pytest.fixture
@@ -174,9 +177,12 @@ def test_optional_signature_check(
 def test_schema_parent_class_is_checked(
     tmp_path, valid_tesseract_api, valid_tesseract_config
 ):
-    tesseract_api = valid_tesseract_api.replace("(BaseModel)", "")
-    _write_tesseract_api_to_file(tesseract_api, tmp_path)
-    _write_tesseract_config_to_file(valid_tesseract_config, tmp_path)
+    for schema in ("InputSchema", "OutputSchema"):
+        tesseract_api = valid_tesseract_api.replace(f"{schema}(BaseModel)", schema)
+        _write_tesseract_api_to_file(tesseract_api, tmp_path)
+        _write_tesseract_config_to_file(valid_tesseract_config, tmp_path)
 
-    with pytest.raises(ValidationError, match="subclass of pydantic.BaseModel"):
-        validate_tesseract_api(tmp_path)
+        with pytest.raises(
+            ValidationError, match=f"{schema} must inherit from pydantic.BaseModel"
+        ):
+            validate_tesseract_api(tmp_path)

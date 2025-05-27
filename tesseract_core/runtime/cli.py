@@ -17,7 +17,11 @@ import typer
 from pydantic import ValidationError
 
 from tesseract_core.runtime.config import get_config
-from tesseract_core.runtime.core import create_endpoints, get_tesseract_api
+from tesseract_core.runtime.core import (
+    check_tesseract_api,
+    create_endpoints,
+    get_tesseract_api,
+)
 from tesseract_core.runtime.file_interactions import (
     SUPPORTED_FORMATS,
     guess_format_from_path,
@@ -149,9 +153,9 @@ def _schema_to_docstring(schema: Any, current_indent: int = 0) -> str:
 
 @tesseract_runtime.command()
 def check() -> None:
-    """Check whether the Tesseract API can be imported."""
-    # raises an exception if the API cannot be imported
-    get_tesseract_api()
+    """Check whether the Tesseract API is valid."""
+    api_module = get_tesseract_api()
+    check_tesseract_api(api_module)
     typer.echo("✅ Tesseract API check successful ✅")
 
 
