@@ -265,13 +265,7 @@ def validate_tesseract_api(src_dir: Path) -> None:
     for schema in ("InputSchema", "OutputSchema"):
         obj = toplevel_objects[schema]
         if not obj.bases:
-            subclass = None
-        else:
-            subclass = obj.bases[0].id
-        if subclass != "BaseModel":
-            logger.warning(
-                f"{schema} does not directly derive from pydantic.BaseModel (got: {subclass})"
-            )
+            raise ValidationError(f"{schema} must define a parent class")
 
 
 def get_config(src_dir: Path) -> TesseractConfig:

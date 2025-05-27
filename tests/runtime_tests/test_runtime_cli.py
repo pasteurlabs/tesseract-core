@@ -540,9 +540,30 @@ def test_check(cli, cli_runner, dummy_tesseract_package):
     with open(tesseract_api_file) as f:
         tesseract_api_code = f.read()
 
-    for schema_name in ["InputSchema", "OutputSchema"]:
+    # check if error is raised if schemas or required endpoints are missing
+    for schema_or_endpoint in ("InputSchema", "OutputSchema", "apply", "abstract_eval"):
         invalid_code = tesseract_api_code.replace(
-            f"{schema_name}(BaseModel)", schema_name
+            f"{schema_or_endpoint}", f"{schema_or_endpoint}_hide"
+        )
+        api_file_missing_schema_or_endpoint = (
+            Path(dummy_tesseract_package)
+            / f"tesseract_api_missing_{schema_or_endpoint.lower()}.py"
+        )
+        with open(api_file_missing_schema_or_endpoint, "w") as f:
+            f.write(invalid_code)
+        update_config(api_path=api_file_missing_schema_or_endpoint)
+        result = cli_runner.invoke(cli, ["check"], catch_exceptions=True)
+        assert result.exit_code == 1, result.stderr
+        full_traceback = "".join(traceback.format_exception(*result.exc_info))
+        assert (
+            f"{schema_or_endpoint} is not defined in Tesseract API module"
+            in result.exception.args[0]
+        )
+
+    # check if error is raised for schemas with unsupported parent class
+    for schema_name in ("InputSchema", "OutputSchema"):
+        invalid_code = tesseract_api_code.replace(
+            f"{schema_name}(BaseModel)", f"{schema_name}(tuple)"
         )
         api_file_bad_parent_class = (
             Path(dummy_tesseract_package)

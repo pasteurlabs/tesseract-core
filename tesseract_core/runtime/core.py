@@ -7,6 +7,8 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, Union
 
+from pydantic import BaseModel
+
 from .config import get_config
 from .schema_generation import (
     create_abstract_eval_schema,
@@ -53,6 +55,32 @@ def get_supported_endpoints(api_module: ModuleType) -> tuple[str, ...]:
 def get_tesseract_api() -> ModuleType:
     """Import tesseract_api.py file."""
     return load_module_from_path(get_config().api_path)
+
+
+def check_tesseract_api(api_module: ModuleType) -> None:
+    """Performs basic checks on the Tesseract API module."""
+    required_schemas = ("InputSchema", "OutputSchema")
+    required_endpoints = ("apply", "abstract_eval")
+
+    for schema_name in required_schemas:
+        try:
+            schema = getattr(api_module, schema_name)
+            if not issubclass(schema, BaseModel):
+                raise TypeError(
+                    f"{schema_name} is not a subclass of pydantic.BaseModel",
+                )
+        except AttributeError as err:
+            raise TypeError(
+                f"{schema_name} is not defined in Tesseract API module {api_module.__name__}",
+            ) from err
+
+    for endpoint_name in required_endpoints:
+        try:
+            _ = getattr(api_module, endpoint_name)
+        except AttributeError as err:
+            raise TypeError(
+                f"{endpoint_name} is not defined in Tesseract API module {api_module.__name__}",
+            ) from err
 
 
 def create_endpoints(api_module: ModuleType) -> list[Callable]:
@@ -153,6 +181,7 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
             Computes the vector Jacobian product between the Jacobian given by ``vjp_outputs``
             with respect to ``vjp_inputs`` at the point ``inputs`` and the given cotangent vector.
             """
+            print(api_module)
             out = api_module.vector_jacobian_product(**dict(payload))
             return VJPOutputSchema.model_validate(
                 out, context={"input_keys": payload.vjp_inputs}
