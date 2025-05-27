@@ -60,7 +60,7 @@ def get_tesseract_api() -> ModuleType:
 def check_tesseract_api(api_module: ModuleType) -> None:
     """Performs basic checks on the Tesseract API module."""
     required_schemas = ("InputSchema", "OutputSchema")
-    required_endpoints = ("apply", "abstract_eval")
+    required_endpoints = ("apply",)
 
     for schema_name in required_schemas:
         try:
