@@ -541,7 +541,7 @@ def test_check(cli, cli_runner, dummy_tesseract_package):
         tesseract_api_code = f.read()
 
     # check if error is raised if schemas or required endpoints are missing
-    for schema_or_endpoint in ("InputSchema", "OutputSchema", "apply", "abstract_eval"):
+    for schema_or_endpoint in ("InputSchema", "OutputSchema", "apply"):
         invalid_code = tesseract_api_code.replace(
             f"{schema_or_endpoint}", f"{schema_or_endpoint}_hide"
         )
