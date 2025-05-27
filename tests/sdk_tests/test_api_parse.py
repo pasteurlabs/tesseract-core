@@ -183,6 +183,6 @@ def test_schema_parent_class_is_checked(
         _write_tesseract_config_to_file(valid_tesseract_config, tmp_path)
 
         with pytest.raises(
-            ValidationError, match=f"{schema} must define a parent class"
+            ValidationError, match=f"{schema} must inherit from pydantic.BaseModel"
         ):
             validate_tesseract_api(tmp_path)
