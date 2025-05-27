@@ -57,6 +57,8 @@ Concretely, Tesseract Core addresses many of the fundamental issues that arise w
 - **Explicit interfaces** -- How do I discover at a glance which parameters of a software branded as "differentiable simulator" are differentiable and which are not?
 - **Distributed differentiable programming** -- How do I propagate gradients end-to-end through complex pipelines mixing torch, JAX, and Julia code?
 
+Specific end-to-end examples that leverage the Tesseract ecosystem to address these issues in research and engineering settings are highlighted and continuously published in the [Tesseract community showcase](https://si-tesseract.discourse.group/c/showcase).
+
 # Software design
 
 ![The make-up of a Tesseract highlighting its external and internal interfaces.\label{fig:tess-interfaces}](what-makes-a-tesseract.png){ width=50% }
