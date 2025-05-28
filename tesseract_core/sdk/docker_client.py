@@ -110,26 +110,26 @@ class Images:
         if not image_id_or_name:
             raise ValueError("Image name cannot be empty.")
 
-        def _sanitize_image_id(image_id: str) -> str:
-            """Sanitize image id by removing sha256 prefix."""
-            if image_id.startswith("sha256:"):
-                return image_id[len("sha256:") :]
-            return image_id
+        docker = _get_executable("docker")
+        try:
+            result = subprocess.run(
+                [*docker, "inspect", image_id_or_name, "--type", "image"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            json_dict = json.loads(result.stdout)
+        except subprocess.CalledProcessError as ex:
+            raise ImageNotFound(f"Image {image_id_or_name} not found.") from ex
+        if not json_dict:
+            raise ImageNotFound(f"Image {image_id_or_name} not found.")
 
-        image_id_or_name = _sanitize_image_id(image_id_or_name)
-        images = Images.list(tesseract_only=tesseract_only)
-
-        # Check for both name and id to find the image
-        # Tags may be prefixed by repository url
-        for image_obj in images:
-            if (
-                _sanitize_image_id(image_obj.id) == image_id_or_name
-                or _sanitize_image_id(image_obj.short_id) == image_id_or_name
-                or Images._tag_exists(image_id_or_name, image_obj.tags)
-            ):
-                return image_obj
-
-        raise ImageNotFound(f"Image {image_id_or_name} not found.")
+        if tesseract_only and not any(
+            "TESSERACT_NAME" in env_var for env_var in json_dict[0]["Config"]["Env"]
+        ):
+            raise ImageNotFound(f"Image {image_id_or_name} is not a Tesseract image.")
+        image_obj = Image.from_dict(json_dict[0])
+        return image_obj
 
     @staticmethod
     def list(tesseract_only: bool = True) -> list_[Image]:
@@ -475,19 +475,29 @@ class Containers:
         Returns:
             Container object.
         """
-        container_list = Containers.list(all=True, tesseract_only=tesseract_only)
+        docker = _get_executable("docker")
 
-        for container_obj in container_list:
-            got_container = (
-                container_obj.id == id_or_name
-                or container_obj.short_id == id_or_name
-                or container_obj.name == id_or_name
+        try:
+            result = subprocess.run(
+                [*docker, "inspect", id_or_name, "--type", "container"],
+                check=True,
+                capture_output=True,
+                text=True,
             )
-            if got_container:
-                break
-        else:
-            raise ContainerError(f"Container {id_or_name} not found.")
+            json_dict = json.loads(result.stdout)
+        except subprocess.CalledProcessError as ex:
+            raise ContainerError(f"Container {id_or_name} not found.") from ex
 
+        if not json_dict:
+            raise ContainerError(f"Container {id_or_name} not found.")
+        if tesseract_only and not any(
+            "TESSERACT_NAME" in env_var for env_var in json_dict[0]["Config"]["Env"]
+        ):
+            raise ContainerError(
+                f"Container {id_or_name} is not a Tesseract container."
+            )
+
+        container_obj = Container.from_dict(json_dict[0])
         return container_obj
 
     @staticmethod
