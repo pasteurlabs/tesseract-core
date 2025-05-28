@@ -262,14 +262,7 @@ def validate_tesseract_api(src_dir: Path) -> None:
     for schema in ("InputSchema", "OutputSchema"):
         obj = toplevel_objects[schema]
         if not obj.bases:
-            subclass = None
-        else:
-            subclass = obj.bases[0].id
-
-        if subclass != "BaseModel":
-            raise ValidationError(
-                f"{schema} must be a subclass of pydantic.BaseModel (got: {subclass})"
-            )
+            raise ValidationError(f"{schema} must inherit from pydantic.BaseModel")
 
 
 def get_config(src_dir: Path) -> TesseractConfig:

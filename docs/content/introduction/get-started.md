@@ -97,7 +97,7 @@ $ tesseract apidoc helloworld
 
 The OpenAPI docs for the `vectoradd` Tesseract, documenting its endpoints and valid inputs / outputs.
 ```
-
+(getting-started)=
 ## Let's peek under the hood
 
 The folder passed to `tesseract build` contains the files needed to build and run the Tesseract:

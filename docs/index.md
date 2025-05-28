@@ -100,7 +100,7 @@ content/using-tesseracts/advanced.md
 :hidden:
 
 Expert showcase <https://si-tesseract.discourse.group/c/showcase/expert-showcase/12>
-How-to Guides <https://si-tesseract.discourse.group/c/support/how-to-guides/10>
+content/examples/example_gallery
 ```
 
 ```{toctree}
