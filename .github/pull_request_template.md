@@ -1,6 +1,6 @@
 <!--
 Please use a PR title that conforms to *conventional commits*: "<commit_type>: Describe your change"; for example: "fix: prevent race condition". Some other commit types are: fix, feat, ci, doc, refactor...
-For a full list of commit types visit https://www.conventionalcommits.org/en/v1.0.0-beta.2/
+For a full list of commit types visit https://www.conventionalcommits.org/en/v1.0.0/
 -->
 
 #### Relevant issue or PR
@@ -11,7 +11,3 @@ For a full list of commit types visit https://www.conventionalcommits.org/en/v1.
 
 #### Testing done
 <!-- Describe how the changes were tested; e.g., "CI passes", "Tested manually in stagingrepo#123", screenshots of a terminal session that verify the changes, or any other evidence of testing the changes. -->
-
-#### License
-
-- [ ] By submitting this pull request, I confirm that my contribution is made under the terms of the [Apache 2.0 license](https://pasteurlabs.github.io/tesseract/LICENSE).
