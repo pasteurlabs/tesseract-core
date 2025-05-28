@@ -44,12 +44,14 @@ class Image:
     def from_dict(cls, json_dict: dict) -> "Image":
         """Create an Image object from a json dictionary."""
         image_id = json_dict.get("Id", None)
-        if image_id and not image_id.startswith("sha256:"):
-            # Some container engines (e.g., Podman) do not prefix the ID with sha256:
-            image_id = f"sha256:{image_id}"
+        if image_id and image_id.startswith("sha256:"):
+            short_id = image_id[:19]
+        else:
+            # Some container engines (e.g., Podman) do not prefix IDs with sha256
+            short_id = image_id[:12] if image_id else None
         return cls(
             id=image_id,
-            short_id=image_id[:19] if image_id else None,
+            short_id=short_id,
             tags=json_dict.get("RepoTags", None),
             attrs=json_dict,
         )
@@ -57,34 +59,6 @@ class Image:
 
 class Images:
     """Namespace for functions to interface with Tesseract docker images."""
-
-    @staticmethod
-    def _tag_exists(image_name: str, tags: list_) -> bool:
-        """Helper function to check if image name exists in the list of tags.
-
-        Specially handling has to be done to achieve unfuzzy substring matching, i.e.
-        if image tag is foo/bar/image, we need to return true for foo/bar/image, bar/image,
-        and image, but not ar/image.
-
-        There is no equivalent in docker-py.
-
-        Params:
-            image_name: The image name to check.
-            tags: The list of tags to check against.
-
-        Returns:
-            True if the image name exists in the list of tags, False otherwise.
-        """
-        if ":" not in image_name:
-            image_name += ":latest"
-
-        image_name_parts = image_name.strip("/").split("/")
-        for tag in tags:
-            tag_parts = tag.strip("/").split("/")
-            # Check if the last parts of the tag matches the subportion that image name specifies
-            if tag_parts[-len(image_name_parts) :] == image_name_parts:
-                return True
-        return False
 
     @staticmethod
     def get(image_id_or_name: str | bytes, tesseract_only: bool = True) -> Image:
