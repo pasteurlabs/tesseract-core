@@ -34,7 +34,6 @@ from .docker_client import (
     BuildError,
     CLIDockerClient,
     Container,
-    ContainerError,
     Image,
     ImageNotFound,
 )

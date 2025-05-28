@@ -312,17 +312,20 @@ class Container:
         Return exit code and stdout.
         """
         docker = _get_executable("docker")
-        try:
-            result = subprocess.run(
-                [*docker, "exec", self.id, *command],
-                check=True,
-                capture_output=True,
-            )
-            return result.returncode, result.stdout
-        except subprocess.CalledProcessError as ex:
+        result = subprocess.run(
+            [*docker, "exec", self.id, *command],
+            check=False,
+            capture_output=True,
+        )
+        if result.returncode != 0:
             raise ContainerError(
-                f"Cannot run command in container {self.id}: {ex}"
-            ) from ex
+                self.id,
+                result.returncode,
+                command,
+                self.image.id if self.image else "unknown",
+                result.stderr.decode("utf-8", errors="replace"),
+            )
+        return result.returncode, result.stdout
 
     def logs(self, stdout: bool = True, stderr: bool = True) -> bytes:
         """Get the logs for this container.
@@ -361,7 +364,7 @@ class Container:
                 stderr=stderr_pipe,
             )
         except subprocess.CalledProcessError as ex:
-            raise ContainerError(
+            raise APIError(
                 f"Cannot get logs for container {self.id}: {ex}"
             ) from ex
 
@@ -385,7 +388,7 @@ class Container:
             # Container's exit code is printed by the wait command
             return {"StatusCode": int(result.stdout)}
         except subprocess.CalledProcessError as ex:
-            raise ContainerError(f"Cannot wait for container {self.id}: {ex}") from ex
+            raise APIError(f"Cannot wait for container {self.id}: {ex}") from ex
 
     def remove(self, v: bool = False, link: bool = False, force: bool = False) -> str:
         """Remove the container.
@@ -416,7 +419,7 @@ class Container:
             return result.stdout
         except subprocess.CalledProcessError as ex:
             if "docker" in ex.stderr:
-                raise ContainerError(f"Cannot remove container {self.id}: {ex}") from ex
+                raise APIError(f"Cannot remove container {self.id}: {ex}") from ex
             raise ex
 
 
@@ -460,14 +463,14 @@ class Containers:
             )
             json_dict = json.loads(result.stdout)
         except subprocess.CalledProcessError as ex:
-            raise ContainerError(f"Container {id_or_name} not found.") from ex
+            raise NotFound(f"Container {id_or_name} not found.") from ex
 
         if not json_dict:
-            raise ContainerError(f"Container {id_or_name} not found.")
+            raise NotFound(f"Container {id_or_name} not found.")
         if tesseract_only and not any(
             "TESSERACT_NAME" in env_var for env_var in json_dict[0]["Config"]["Env"]
         ):
-            raise ContainerError(
+            raise NotFound(
                 f"Container {id_or_name} is not a Tesseract container."
             )
 
@@ -535,7 +538,7 @@ class Containers:
 
         # Remove and detached cannot both be set to true
         if remove and detach:
-            raise ContainerError(
+            raise ValueError(
                 "Cannot set both remove and detach to True when running a container."
             )
         if detach:
@@ -556,37 +559,35 @@ class Containers:
             *command,
         ]
 
-        try:
-            result = subprocess.run(
+        result = subprocess.run(
+            full_cmd,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        if result.returncode != 0:
+            if "repository" in result.stderr:
+                raise ImageNotFound()
+            raise ContainerError(
+                None,
+                result.returncode,
                 full_cmd,
-                capture_output=True,
-                text=True,
-                check=True,
+                image,
+                result.stderr.strip(),
             )
 
-            if detach:
-                # If detach is True, stdout prints out the container ID of the running container
-                container_id = result.stdout.strip()
-                container_obj = Containers.get(container_id)
-                return container_obj
+        if detach:
+            # If detach is True, stdout prints out the container ID of the running container
+            container_id = result.stdout.strip()
+            container_obj = Containers.get(container_id)
+            return container_obj
 
-            if result.returncode != 0:
-                raise ContainerError("Error running container command.")
-
-            if stdout and stderr:
-                return result.stdout, result.stderr
-            if stderr:
-                return result.stderr
-            return result.stdout
-
-        except subprocess.CalledProcessError as ex:
-            if "repository" in ex.stderr:
-                raise ImageNotFound() from ex
-            if "docker" in ex.stderr:
-                raise ContainerError(
-                    f"Error running container command: `{' '.join(full_cmd)}`. \n\n{ex.stderr}"
-                ) from ex
-            raise ex
+        if stdout and stderr:
+            return result.stdout, result.stderr
+        if stderr:
+            return result.stderr
+        return result.stdout
 
     @staticmethod
     def _get_containers(
@@ -693,7 +694,7 @@ class Compose:
                 container = Containers.get(container_name)
                 logger.error(f"Container {container_name} logs:")
                 logger.error(indent(container.logs(stderr=True).decode(), " > "))
-            raise ContainerError("Failed to start Tesseract containers.") from ex
+            raise APIError("Failed to start Tesseract containers.") from ex
 
     @staticmethod
     def down(project_id: str) -> bool:
@@ -762,9 +763,15 @@ class BuildError(DockerException):
 
 
 class ContainerError(DockerException):
-    """Raised when a container has error."""
+    """Raised when a container encounters an error."""
 
-    pass
+    def __init__(self, container: str | None, exit_status: int, command: list[str], image: str, stderr: str) -> None:
+        self.container = container
+        self.exit_status = exit_status
+        self.command = command
+        self.image = image
+        self.stderr = stderr
+
 
 
 class APIError(DockerException):
@@ -773,7 +780,13 @@ class APIError(DockerException):
     pass
 
 
-class ImageNotFound(DockerException):
+class NotFound(DockerException):
+    """Raised when a Docker resource is not found."""
+
+    pass
+
+
+class ImageNotFound(NotFound):
     """Raised when an image is not found."""
 
     pass
@@ -848,7 +861,7 @@ def get_docker_metadata(
             if f"No such image: {asset_id}" in error_message:
                 logger.error(f"Image {asset_id} is not a valid image.")
         if "No such object" in error_message:
-            raise ContainerError(
+            raise APIError(
                 "Unhealthy container found. Please restart docker."
             ) from e
 
