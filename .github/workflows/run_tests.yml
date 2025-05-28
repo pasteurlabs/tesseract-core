@@ -172,6 +172,10 @@ jobs:
 
         unit-tesseract: ${{ fromJson(needs.get-e2e-matrix.outputs.matrix) }}
 
+        exclude:
+        - arch: x64
+          unit-tesseract: "pyvista-arm64"
+
         include:
           # Test on arm to ensure compatibility with Apple M1 chips
           # (OSX runners don't have access to Docker so we use Linux ARM runners instead)
@@ -186,6 +190,11 @@ jobs:
             arch: "x64"
             docker-engine: "podman"
             unit-tesseract: "base"
+          - os: "ubuntu-24.04"
+            python-version: "3.12"
+            arch: "arm"
+            docker-engine: "docker"
+            unit-tesseract: "pyvista-arm64"
 
       fail-fast: false
 

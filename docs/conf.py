@@ -57,6 +57,7 @@ extensions = [
     "sphinxcontrib.autodoc_pydantic",
 ]
 
+
 myst_enable_extensions = [
     "dollarmath",
     "colon_fence",

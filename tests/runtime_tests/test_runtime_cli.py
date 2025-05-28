@@ -514,23 +514,68 @@ def test_check(cli, cli_runner, dummy_tesseract_package):
     assert result.exit_code == 0, result.stderr
     assert "check successful" in result.stdout
 
-    corrupted_api_file = Path(dummy_tesseract_package) / "tesseract_api_corrupted.py"
-    with open(corrupted_api_file, "w") as f:
+    api_file_bad_syntax = Path(dummy_tesseract_package) / "tesseract_api_bad_syntax.py"
+    with open(api_file_bad_syntax, "w") as f:
         f.write("bad-syntax=1")
 
-    update_config(api_path=corrupted_api_file)
+    update_config(api_path=api_file_bad_syntax)
     result = cli_runner.invoke(cli, ["check"], catch_exceptions=True)
     assert result.exit_code == 1, result.stderr
     assert "Could not load module" in result.exception.args[0]
     full_traceback = "".join(traceback.format_exception(*result.exc_info))
     assert "SyntaxError" in full_traceback
 
-    with open(tesseract_api_file, "w") as f:
+    # Write new file for each case instead of overwriting same file to avoid caching issues
+    api_file_bad_import = Path(dummy_tesseract_package) / "tesseract_api_bad_import.py"
+    with open(api_file_bad_import, "w") as f:
         f.write("import non_existent_module")
 
-    update_config(api_path=tesseract_api_file)
+    update_config(api_path=api_file_bad_import)
     result = cli_runner.invoke(cli, ["check"], catch_exceptions=True)
     assert result.exit_code == 1, result.stderr
     assert "Could not load module" in result.exception.args[0]
     full_traceback = "".join(traceback.format_exception(*result.exc_info))
     assert "ModuleNotFoundError" in full_traceback
+
+    with open(tesseract_api_file) as f:
+        tesseract_api_code = f.read()
+
+    # check if error is raised if schemas or required endpoints are missing
+    for schema_or_endpoint in ("InputSchema", "OutputSchema", "apply"):
+        invalid_code = tesseract_api_code.replace(
+            f"{schema_or_endpoint}", f"{schema_or_endpoint}_hide"
+        )
+        api_file_missing_schema_or_endpoint = (
+            Path(dummy_tesseract_package)
+            / f"tesseract_api_missing_{schema_or_endpoint.lower()}.py"
+        )
+        with open(api_file_missing_schema_or_endpoint, "w") as f:
+            f.write(invalid_code)
+        update_config(api_path=api_file_missing_schema_or_endpoint)
+        result = cli_runner.invoke(cli, ["check"], catch_exceptions=True)
+        assert result.exit_code == 1, result.stderr
+        full_traceback = "".join(traceback.format_exception(*result.exc_info))
+        assert (
+            f"{schema_or_endpoint} is not defined in Tesseract API module"
+            in result.exception.args[0]
+        )
+
+    # check if error is raised for schemas with unsupported parent class
+    for schema_name in ("InputSchema", "OutputSchema"):
+        invalid_code = tesseract_api_code.replace(
+            f"{schema_name}(BaseModel)", f"{schema_name}(tuple)"
+        )
+        api_file_bad_parent_class = (
+            Path(dummy_tesseract_package)
+            / f"tesseract_api_bad_{schema_name.lower()}_parent_class.py"
+        )
+        with open(api_file_bad_parent_class, "w") as f:
+            f.write(invalid_code)
+        update_config(api_path=api_file_bad_parent_class)
+        result = cli_runner.invoke(cli, ["check"], catch_exceptions=True)
+        assert result.exit_code == 1, result.stderr
+        full_traceback = "".join(traceback.format_exception(*result.exc_info))
+        assert (
+            f"{schema_name} is not a subclass of pydantic.BaseModel"
+            in result.exception.args[0]
+        )
