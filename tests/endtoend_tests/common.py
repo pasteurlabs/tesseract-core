@@ -89,5 +89,5 @@ def build_tesseract(
     image_tag = json.loads(result.stdout.strip())[0]
 
     # This raise an error if the image does not exist
-    client.images.get(image_name, image_tag)
+    client.images.get(image_tag)
     return image_tag
