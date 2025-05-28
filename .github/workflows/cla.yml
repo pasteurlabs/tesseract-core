@@ -6,18 +6,12 @@ on:
   pull_request_target:
     types: [opened,closed,synchronize]
 
-permissions:
-  actions: write
-  contents: read
-  pull-requests: write
-  statuses: write
-
 jobs:
-  CLAAssistant:
+  cla-assistant:
     runs-on: ubuntu-latest
     steps:
       - name: "CLA Assistant"
-        if: (github.event.comment.body == 'recheck' || github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA') || github.event_name == 'pull_request_target'
+        if: startsWith(github.event.comment.body, '@PasteurBot') || github.event_name == 'pull_request_target'
         uses: contributor-assistant/github-action@v2.6.1
         env:
           GITHUB_TOKEN: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
@@ -27,8 +21,16 @@ jobs:
           path-to-document: 'https://github.com/pasteurlabs/pasteur-oss-cla/blob/main/README.md'
           # Branch should not be protected
           branch: 'main'
-          allowlist: "PasteurBot"
+          allowlist: 'dependabot[bot],PasteurBot'
           remote-organization-name: 'pasteurlabs'
           remote-repository-name: 'pasteur-oss-cla-signatures'
           create-file-commit-message: 'Creating file for storing CLA Signatures for tesseract-core'
           signed-commit-message: '$contributorName has signed the CLA in $owner/$repo#$pullRequestNo'
+          custom-notsigned-prcomment: |
+            Thank you for your contribution!
+            Like many open-source projects, we ask that you sign our Contributor License Agreement before we can accept your contribution.
+            You can do so by commenting `@PasteurBot I have read the CLA Document and I hereby sign the CLA` on this PR.
+          custom-allsigned-prcomment: |
+            All contributors have signed the CLA! Your contribution is now eligible for merging.
+          custom-pr-sign-comment: |
+            @PasteurBot I have read the CLA Document and I hereby sign the CLA
