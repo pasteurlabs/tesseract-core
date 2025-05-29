@@ -27,13 +27,16 @@ jobs:
           create-file-commit-message: 'Creating file for storing CLA Signatures for tesseract-core'
           signed-commit-message: '$contributorName has signed the CLA in $owner/$repo#$pullRequestNo'
           custom-notsigned-prcomment: >
-            Thank you for your PR!
+            ### ⚠️ CLA signature required ⚠️
+
+            Thank you for your PR, we really appreciate it!
             Like many open-source projects, we ask that you sign our
             [Contributor License Agreement](https://github.com/pasteurlabs/pasteur-oss-cla/blob/main/README.md)
             before we can accept your contribution.
-
             You can do so by commenting the following on this pull request:
-          custom-allsigned-prcomment: |
-            ✅ All contributors have signed the CLA! Your contribution is now eligible for merging.
+          custom-allsigned-prcomment: >
+            ### 🎉 CLA signatures confirmed 🎉
+
+            All contributors have signed the [Contributor License Agreement](https://github.com/pasteurlabs/pasteur-oss-cla/blob/main/README.md).
           custom-pr-sign-comment: |
             @PasteurBot I have read the CLA Document and I hereby sign the CLA
