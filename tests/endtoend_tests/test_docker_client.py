@@ -149,35 +149,8 @@ def test_create_image(
         image2_py = docker_py_client.images.get(repo_url + image2_name)
         assert image2_py is not None
 
-        # Our docker client should be able to retrieve images with just the name
         image2 = docker_client.images.get(repo_url + image2_name)
-        # image2_no_url = docker_client.images.get(image2_name)
-
         assert image2 is not None
-        # assert image2_no_url is not None
-        assert image2.id == image2_py.id
-        # assert image2_no_url.id == image2_py.id
-
-        # Check we are not overmatching but we are getting all possible cases
-        # docker_host = os.environ.get("DOCKER_HOST", "")
-
-        # podman = False
-        # if "podman" in docker_host:
-        #     podman = True
-
-        # for client in [docker_client, docker_py_client]:
-        #     assert not image_exists(client, "create_image")
-
-        #     if (podman and client == docker_py_client) or client == docker_client:
-        #         # Docker-py does not support partial string matching
-        #         assert image_exists(client, image2_name)
-        #         assert image_exists(client, f"/{image2_name}")
-        #         assert image_exists(client, f"bar/{image2_name}")
-        #         assert image_exists(client, f"bar/{image2_name}:latest")
-        #         assert not image_exists(client, f"ar/{image2_name}")
-        #         assert image_exists(client, f"foo/bar/{image2_name}")
-
-        #     assert image_exists(client, repo_url + image2_name)
 
     finally:
         # Clean up the images
