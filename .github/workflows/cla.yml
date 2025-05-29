@@ -3,7 +3,7 @@ name: "CLA Assistant"
 on:
   issue_comment:
     types: [created]
-  pull_request_target:
+  pull_request:
     types: [opened,closed,synchronize]
 
 jobs:
@@ -11,28 +11,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: "CLA Assistant"
-        if: startsWith(github.event.comment.body, '@PasteurBot') || github.event.comment.body == 'recheck' || github.event_name == 'pull_request_target'
+        if: startsWith(github.event.comment.body, '@PasteurBot') || github.event.comment.body == 'recheck' || github.event_name == 'pull_request'
         uses: contributor-assistant/github-action@v2.6.1
         env:
           GITHUB_TOKEN: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
           PERSONAL_ACCESS_TOKEN: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
         with:
-          allowlist: 'dependabot[bot],PasteurBot,github-actions[bot]'
+          allowlist: 'PasteurBot,dependabot[bot],github-actions[bot]'
 
           remote-organization-name: 'pasteurlabs'
           remote-repository-name: 'pasteur-oss-cla-signatures'
           path-to-signatures: 'signatures/version1/cla.json'
           branch: 'main'
 
-          create-file-commit-message: 'Creating file for storing CLA Signatures for tesseract-core'
-          signed-commit-message: '$contributorName has signed the CLA in $owner/$repo#$pullRequestNo'
+          create-file-commit-message: 'Creating file for storing CLA Signatures'
+          signed-commit-message: '$contributorName has signed the CLA in $owner/$repo'
           custom-notsigned-prcomment: >
-            #### ⚠️ CLA signature required ⚠️
+            #### ✍️ CLA signatures required ✍️
 
             Thank you for your PR, we really appreciate it!
-            Like many open-source projects, we ask that you sign our
+            Like many open-source projects, we ask that all contributors sign our
             [Contributor License Agreement](https://github.com/pasteurlabs/pasteur-oss-cla/blob/main/README.md)
-            before we can accept your contribution.
+            before we can accept your contribution. This only needs to be done once per contributor.
             You can do so by commenting the following on this pull request:
           custom-allsigned-prcomment: >
             #### 🎉 CLA signatures confirmed 🎉
