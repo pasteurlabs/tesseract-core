@@ -1,3 +1,7 @@
+---
+orphan: true
+---
+
 # Hello World
 
 ## Context
@@ -7,6 +11,6 @@ for more details on this Tesseract.
 ## Example Tesseract (examples/helloworld)
 
 
-```{literalinclude} ../../../examples/helloworld/tesseract_api.py
+```{literalinclude} ../../../../examples/helloworld/tesseract_api.py
 :language: python
 ```
