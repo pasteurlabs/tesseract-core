@@ -3,14 +3,10 @@ from typing import Optional
 import juliacall
 import numpy as np
 from pydantic import BaseModel, Field
-from tesseract_runtime import Array, Differentiable, Float64, ShapeDType
 
-#
-# Schemata
-#
+from tesseract_core.runtime import Array, Differentiable, Float64, ShapeDType
 
-# initialize julia environment
-# NOTE: this will product julia console output about activating the environment
+# Initialize julia environment
 
 jl = juliacall.newmodule("julia_surrogate")
 jl.seval("using Pkg")
@@ -20,6 +16,10 @@ jl.seval("using StressSurrogate")
 # warm up julia functions
 jl.StressSurrogate.eval_forward(np.array([0.5, 0.5, 0.15, 45.0]))
 jl.StressSurrogate.eval_gradient(np.array([0.5, 0.5, 0.15, 45.0]))
+
+#
+# Schemata
+#
 
 
 class InputSchema(BaseModel):
@@ -49,9 +49,9 @@ class OutputSchema(BaseModel):
     mean_stress: Differentiable[Float64] = Field(
         description="The maximum stress along the (x=1,y=1) boundaries."
     )
-    fx: Optional[Array[(2601,), " float64"]] = Field(description="Force x component.")
-    fy: Optional[Array[(2601,), " float64"]] = Field(description="Force y component.")
-    s: Optional[Array[(2601,), " float64"]] = Field(description="Von-mises stress.")
+    fx: Optional[Array[(2601,), Float64]] = Field(description="Force x component.")
+    fy: Optional[Array[(2601,), Float64]] = Field(description="Force y component.")
+    s: Optional[Array[(2601,), Float64]] = Field(description="Von-mises stress.")
 
 
 #
@@ -100,8 +100,3 @@ def jacobian(inputs: InputSchema, jac_inputs: set[str], jac_outputs: set[str]):
         "axis_x": {"mean_stress": grad[2]},
         "theta": {"mean_stress": grad[3]},
     }
-
-
-# TODO
-# def hessian(inputs: InputSchema, hess_inputs: set[str], hess_outputs: set[str]):
-#     return {}
