@@ -736,6 +736,36 @@ TEST_CASES = {
             )
         ],
     ),
+    "julia_mlp_ellipse_stress": Config(
+        test_with_random_inputs=False,
+        sample_requests=[
+            SampleRequest(
+                endpoint="apply",
+                payload={
+                    "inputs": {
+                        "xc": 0.5,
+                        "yc": 0.5,
+                        "axis_x": 0.15,
+                        "theta": 45.0,
+                    }
+                },
+            ),
+            SampleRequest(
+                endpoint="jacobian",
+                payload={
+                    "inputs": {
+                        "xc": 0.5,
+                        "yc": 0.5,
+                        "axis_x": 0.15,
+                        "theta": 45.0,
+                    },
+                    "jac_inputs": ["xc", "yc", "axis_x", "theta"],
+                    "jac_outputs": ["mean_stress"],
+                },
+                output_contains_pattern=['"xc":'],
+            ),
+        ],
+    ),
 }
 
 

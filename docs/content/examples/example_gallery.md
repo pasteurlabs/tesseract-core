@@ -16,6 +16,10 @@ vectoradd
 ```
 
 
+## Building Blocks Tesseracts
+
+This is a gallery of some extremely basic features of Tesseracts that can act as building blocks for your own Tesseract.
+
 ::::{grid} 2
    :gutter: 2
 
@@ -48,6 +52,26 @@ vectoradd
       :link: dataloader.html
 
      Tesseract that loads in data samples from a folder.
+   :::
+
+::::
+
+## Advanced Tesseracts
+
+Some more advanced Tesseracts that showcase the true capabilities of a Tesseract.
+
+::::{grid} 2
+   :gutter: 2
+
+   :::{grid-item-card} Interoperable Autodiff Engines, aka Tesseracted Surrogates
+      :link: https://legendary-adventure-z4k3rek.pages.github.io/content/tutorials/tesseracting_surrogates/tesseract_linear_ellipse.html
+
+      Packaging any trained differentiable ROM or ML surrogate in a standardized, universal container with standardized deployment.
+   :::
+   :::{grid-item-card} Package Design Optimization with Tesseracts
+      :link: https://legendary-adventure-z4k3rek.pages.github.io/content/tutorials/optimization_with_surrogates/linear_ellipse_optimization.html
+
+      Using any differentiable ROM or ML surrogate within an optimization framework without worrying about the actual emulator-optimizer interactions
    :::
 
 ::::

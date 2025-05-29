@@ -1,0 +1,10 @@
+name = "StressSurrogate"
+uuid = "bec25428-481e-436c-81fe-54f80a008ad1"
+authors = ["jalving <jhjalving@gmail.com>"]
+version = "0.1.0"
+
+[deps]
+CodecZlib = "944b1d66-785c-5afd-91f1-9de20f533193"
+ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
+JLD2 = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
+Lux = "b2108857-7c20-44ae-9111-449ecde12c47"

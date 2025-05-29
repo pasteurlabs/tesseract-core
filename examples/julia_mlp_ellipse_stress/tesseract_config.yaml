@@ -1,0 +1,38 @@
+name: "julia_mlp_ellipse_stress"
+version: "0.1.0"
+
+build_config:
+    target_platform: linux/amd64
+
+    package_data:
+    - [StressSurrogate, StressSurrogate]
+
+    extra_packages:
+    - curl
+
+    custom_build_steps:
+    # download julia
+    - RUN curl -fsSL https://julialang-s3.julialang.org/bin/linux/x64/1.10/julia-1.10.0-linux-x86_64.tar.gz -o julia.tar.gz
+
+    # unpack into folder called julia; delete the tar file
+    - RUN mkdir julia && tar -xzf julia.tar.gz -C julia --strip-components=1 && rm julia.tar.gz
+
+    # add julia to PATH
+    - ENV PATH=${PATH}:"/tesseract/julia/bin"
+
+    # Make sure the image can be used on any x86_64 machine by setting JULIA_CPU_TARGET
+    # to the same value used by the generic julia binaries, see
+    # https://github.com/JuliaCI/julia-buildkite/blob/4b6932992f7985af71fc3f73af77abf4d25bd146/utilities/build_envs.sh#L23-L31
+    - ENV JULIA_CPU_TARGET="generic;sandybridge,-xsaveopt,clone_all;haswell,-rdrnd,base(1)"
+
+    # check julia version
+    - RUN julia --version
+
+    # setup julia environment we copied over
+    - RUN julia --project="StressSurrogate" -e "import Pkg; Pkg.instantiate(); Pkg.precompile()"
+
+    # set juliacall environment location
+    - ENV PYTHON_JULIAPKG_PROJECT="/tesseract"
+
+    # import juliacall to setup environment
+    - RUN python -c "import juliacall"
