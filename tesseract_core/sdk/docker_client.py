@@ -306,7 +306,7 @@ class Container:
             project_id = project_id["Labels"].get("com.docker.compose.project", None)
         return project_id
 
-    def exec_run(self, command: list) -> tuple:
+    def exec_run(self, command: list) -> tuple[int, bytes]:
         """Run a command in this container.
 
         Return exit code and stdout.
@@ -316,14 +316,15 @@ class Container:
             [*docker, "exec", self.id, *command],
             check=False,
             capture_output=True,
+            text=False,
         )
         if result.returncode != 0:
             raise ContainerError(
                 self.id,
                 result.returncode,
-                command,
+                shlex.join(command),
                 self.image.id if self.image else "unknown",
-                result.stderr.decode("utf-8", errors="replace"),
+                result.stderr,
             )
         return result.returncode, result.stdout
 
@@ -364,9 +365,7 @@ class Container:
                 stderr=stderr_pipe,
             )
         except subprocess.CalledProcessError as ex:
-            raise APIError(
-                f"Cannot get logs for container {self.id}: {ex}"
-            ) from ex
+            raise APIError(f"Cannot get logs for container {self.id}: {ex}") from ex
 
         return getattr(result, output_attr)
 
@@ -470,9 +469,7 @@ class Containers:
         if tesseract_only and not any(
             "TESSERACT_NAME" in env_var for env_var in json_dict[0]["Config"]["Env"]
         ):
-            raise NotFound(
-                f"Container {id_or_name} is not a Tesseract container."
-            )
+            raise NotFound(f"Container {id_or_name} is not a Tesseract container.")
 
         container_obj = Container.from_dict(json_dict[0])
         return container_obj
@@ -488,7 +485,7 @@ class Containers:
         ports: dict | None = None,
         stdout: bool = True,
         stderr: bool = False,
-    ) -> tuple | Container | str:
+    ) -> Container | tuple[bytes, bytes] | bytes:
         """Run a command in a container from an image.
 
         Params:
@@ -562,24 +559,25 @@ class Containers:
         result = subprocess.run(
             full_cmd,
             capture_output=True,
-            text=True,
+            text=False,
             check=False,
         )
 
         if result.returncode != 0:
-            if "repository" in result.stderr:
-                raise ImageNotFound()
+            stderr_str = result.stderr.decode("utf-8", errors="ignore")
+            if "repository" in stderr_str:
+                raise ImageNotFound(stderr_str)
             raise ContainerError(
                 None,
                 result.returncode,
-                full_cmd,
+                shlex.join(full_cmd),
                 image,
-                result.stderr.strip(),
+                result.stderr,
             )
 
         if detach:
             # If detach is True, stdout prints out the container ID of the running container
-            container_id = result.stdout.strip()
+            container_id = result.stdout.decode("utf-8", errors="ignore").strip()
             container_obj = Containers.get(container_id)
             return container_obj
 
@@ -592,7 +590,7 @@ class Containers:
     @staticmethod
     def _get_containers(
         include_stopped: bool = False, tesseract_only: bool = True
-    ) -> list:
+    ) -> list_[Container]:
         """Updates and retrieves the list of containers by querying Docker CLI.
 
         Params:
@@ -761,17 +759,29 @@ class BuildError(DockerException):
     def __init__(self, build_log: list_[str]) -> None:
         self.build_log = build_log
 
+    def __str__(self) -> str:
+        return (
+            "Docker build failed. Please check the build log for details:\n"
+            + "\n".join(self.build_log)
+        )
+
 
 class ContainerError(DockerException):
     """Raised when a container encounters an error."""
 
-    def __init__(self, container: str | None, exit_status: int, command: list[str], image: str, stderr: str) -> None:
+    def __init__(
+        self,
+        container: str | None,
+        exit_status: int,
+        command: str,
+        image: str,
+        stderr: bytes,
+    ) -> None:
         self.container = container
         self.exit_status = exit_status
         self.command = command
         self.image = image
         self.stderr = stderr
-
 
 
 class APIError(DockerException):
@@ -861,9 +871,7 @@ def get_docker_metadata(
             if f"No such image: {asset_id}" in error_message:
                 logger.error(f"Image {asset_id} is not a valid image.")
         if "No such object" in error_message:
-            raise APIError(
-                "Unhealthy container found. Please restart docker."
-            ) from e
+            raise APIError("Unhealthy container found. Please restart docker.") from e
 
     if not metadata:
         return {}

@@ -13,7 +13,7 @@ import pytest
 from common import image_exists
 
 from tesseract_core.sdk.docker_client import (
-    ContainerError,
+    APIError,
     ImageNotFound,
     build_docker_image,
 )
@@ -286,7 +286,7 @@ def test_container_volume_mounts(
         remove=True,
     )
 
-    assert stdout == "hello\n"
+    assert stdout == b"hello\n"
     # Check file exists in tmp path
     assert (tmp_path / "hello.txt").exists()
 
@@ -393,7 +393,7 @@ def test_compose_error(docker_client, tmp_path, docker_client_built_image_name):
             image: {docker_client_built_image_name}
     """)
     compose_file.write_text(compose_content)
-    with pytest.raises(ContainerError) as e:
+    with pytest.raises(APIError) as e:
         docker_client.compose.up(str(compose_file), "docker_client_compose_test")
     # Check that the container's logs were printed to stderr
     assert "Failed to start Tesseract container" in str(e.value)

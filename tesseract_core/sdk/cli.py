@@ -34,6 +34,7 @@ from .docker_client import (
     BuildError,
     CLIDockerClient,
     Container,
+    ContainerError,
     Image,
     ImageNotFound,
 )
@@ -296,7 +297,7 @@ def build_image(
                 generate_only=generate_only,
             )
     except BuildError as e:
-        raise UserError(f"Error building Tesseract: {e}") from e
+        raise UserError(f"Error building Tesseract: {e}") from None
     except APIError as e:
         raise UserError(f"Docker server error: {e}") from e
     except TypeError as e:
@@ -801,15 +802,13 @@ def run_container(
             f"Are you sure your tesseract image name is {tesseract_image}?\n\n{e}"
         ) from e
 
-    except (
-        APIError,
-        ContainerError,
-    ) as e:
-        if "No such command" in str(e):
+    except ContainerError as e:
+        msg = e.stderr.decode("utf-8").strip()
+        if "No such command" in msg:
             error_string = f"Error running Tesseract '{tesseract_image}' \n\n Error: Unimplemented command '{cmd}'.  "
         else:
             error_string = _sanitize_error_output(
-                f"Error running Tesseract. \n\n{e}", tesseract_image
+                f"Error running Tesseract. \n\n{msg}", tesseract_image
             )
 
         raise UserError(error_string) from e
@@ -826,10 +825,14 @@ def entrypoint() -> NoReturn:
     try:
         result = app()
     except UserError as e:
-        logger.error(f"{e}", exc_info=state.print_user_error_tracebacks)
+        if state.print_user_error_tracebacks:
+            # Do not print the exception here since it's part of the traceback
+            logger.error("UserError occurred, traceback:", exc_info=True)
+        else:
+            logger.error(str(e), exc_info=False)
         result = 1
-    except Exception as e:
-        logger.critical(f"Uncaught error: {e}", exc_info=True)
+    except Exception:
+        logger.critical("Uncaught error", exc_info=True)
         result = 2
 
     if result > 0:
