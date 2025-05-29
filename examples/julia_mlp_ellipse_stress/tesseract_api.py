@@ -91,12 +91,13 @@ def abstract_eval(abstract_inputs):
 
 
 def jacobian(inputs: InputSchema, jac_inputs: set[str], jac_outputs: set[str]):
-    assert set(jac_inputs) == set(["xc", "yc", "axis_x", "theta"])
+    assert jac_outputs == {"mean_stress"}, "Only mean_stress is supported for jacobian."
     x = np.array([inputs.xc, inputs.yc, inputs.axis_x, inputs.theta])
     grad = jl.StressSurrogate.eval_gradient(x)
-    return {
-        "xc": {"mean_stress": grad[0]},
-        "yc": {"mean_stress": grad[1]},
-        "axis_x": {"mean_stress": grad[2]},
-        "theta": {"mean_stress": grad[3]},
-    }
+
+    grad_dict = {}
+    for i, key in enumerate(["xc", "yc", "axis_x", "theta"]):
+        if key in jac_inputs:
+            grad_dict[key] = grad[i]
+
+    return {"mean_stress": grad_dict}

@@ -9,10 +9,11 @@ build_config:
 
     extra_packages:
     - curl
+    - ca-certificates
 
     custom_build_steps:
     # download julia
-    - RUN curl -kfsSL https://julialang-s3.julialang.org/bin/linux/x64/1.10/julia-1.10.0-linux-x86_64.tar.gz -o julia.tar.gz
+    - RUN curl -fsSL https://julialang-s3.julialang.org/bin/linux/x64/1.10/julia-1.10.0-linux-x86_64.tar.gz -o julia.tar.gz
 
     # unpack into folder called julia; delete the tar file
     - RUN mkdir julia && tar -xzf julia.tar.gz -C julia --strip-components=1 && rm julia.tar.gz
