@@ -49,6 +49,13 @@ def docker_client_built_image_name(
 
 def test_get_image(docker_client, docker_client_built_image_name, docker_py_client):
     """Test image retrieval."""
+
+    def _strip_image_prefix(image_name):
+        """Strip the 'sha256:' prefix from the image name if it exists."""
+        if image_name.startswith("sha256:"):
+            return image_name.split(":")[1]
+        return image_name
+
     # Get the image
     image = docker_client.images.get(docker_client_built_image_name)
     assert image is not None
@@ -56,8 +63,8 @@ def test_get_image(docker_client, docker_client_built_image_name, docker_py_clie
     docker_py_image = docker_py_client.images.get(docker_client_built_image_name)
     assert docker_py_image is not None
 
-    docker_image_short = docker_client.images.get(docker_py_image.short_id)
-    assert docker_image_short is not None
+    docker_image_short = docker_client.images.get(image.short_id)
+    assert docker_image_short == image
 
     # Whether images start with sha256: depends on the used Docker implementation (e.g. Podman vs. Docker)
     if docker_py_image.short_id.startswith("sha256:"):
@@ -66,8 +73,10 @@ def test_get_image(docker_client, docker_client_built_image_name, docker_py_clie
         assert docker_image_non_sha is not None
         assert docker_image_short.id == docker_image_non_sha.id
 
-    assert image.id == docker_py_image.id
-    assert image.short_id == docker_py_image.short_id
+    assert _strip_image_prefix(image.id) == _strip_image_prefix(docker_py_image.id)
+    assert _strip_image_prefix(image.short_id) == _strip_image_prefix(
+        docker_py_image.short_id
+    )
     assert image.tags == docker_py_image.tags
     # Check the repr function
     assert (
@@ -98,11 +107,16 @@ def test_get_image(docker_client, docker_client_built_image_name, docker_py_clie
     image_list = docker_client.images.list(tesseract_only=False)
     assert image_list is not None
     assert len(image_list) > 0
+
     docker_py_image_list = docker_py_client.images.list()
     assert docker_py_image_list is not None
+
     # Check that every image in image_list is also in docker_py_image_list
+    docker_py_image_ids = set(
+        _strip_image_prefix(img.id) for img in docker_py_image_list if img
+    )
     for image in image_list:
-        assert image.id in [img.id for img in docker_py_image_list if img]
+        assert _strip_image_prefix(image.id) in docker_py_image_ids
 
 
 def test_create_image(
