@@ -9,7 +9,6 @@ import logging
 import optparse
 import os
 import random
-import shlex
 import socket
 import string
 import tempfile
@@ -34,7 +33,6 @@ from pip._internal.req.req_file import (
 from .api_parse import TesseractConfig, get_config, validate_tesseract_api
 from .docker_client import (
     APIError,
-    BuildError,
     CLIDockerClient,
     Container,
     ContainerError,
@@ -433,18 +431,6 @@ def build_tesseract(
             inject_ssh=inject_ssh,
             print_and_exit=generate_only,
         )
-    except BuildError as e:
-        logger.warning("Build failed with logs:")
-        for line in e.build_log:
-            logger.warning(line)
-        raise UserError("Image build failure. See above logs for details.") from e
-    except APIError as e:
-        raise UserError(f"Docker server error: {e}") from e
-    except TypeError as e:
-        raise UserError(f"Input error building Tesseract: {e}") from e
-    else:
-        if image is not None:
-            logger.debug("Build successful")
     finally:
         if not keep_build_dir:
             try:
@@ -454,11 +440,12 @@ def build_tesseract(
                 logger.info(
                     f"Could not remove temporary build directory {build_dir}: {exc}"
                 )
-                pass
 
     if generate_only:
         return build_dir
 
+    logger.debug("Build successful")
+    assert image is not None
     return image
 
 
@@ -821,29 +808,18 @@ def run_tesseract(
         cmd.append(arg)
 
     # Run the container
-    image_id = image
-    container = None
-    try:
-        container = docker_client.containers.run(
-            image=image_id,
-            command=cmd,
-            volumes=parsed_volumes,
-            detach=True,
-            device_requests=gpus,
-            ports=ports,
-        )
-        result = container.wait()
-        stdout = container.logs(stdout=True, stderr=False).decode("utf-8")
-        stderr = container.logs(stdout=False, stderr=True).decode("utf-8")
-        exit_code = result["StatusCode"]
-        if exit_code != 0:
-            raise ContainerError(
-                container, exit_code, shlex.join(cmd), image_id, stderr
-            )
-    finally:
-        if container is not None:
-            container.remove(v=True, force=True)
-
+    stdout, stderr = docker_client.containers.run(
+        image=image,
+        command=cmd,
+        volumes=parsed_volumes,
+        device_requests=gpus,
+        ports=ports,
+        detach=False,
+        remove=True,
+        stderr=True,
+    )
+    stdout = stdout.decode("utf-8")
+    stderr = stderr.decode("utf-8")
     return stdout, stderr
 
 

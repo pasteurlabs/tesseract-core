@@ -299,7 +299,7 @@ def mocked_docker(monkeypatch):
     """Mock CLIDockerClient class."""
     import tesseract_core.sdk.docker_client
     from tesseract_core.sdk import engine
-    from tesseract_core.sdk.docker_client import Container, ContainerError, Image
+    from tesseract_core.sdk.docker_client import Container, Image, NotFound
 
     class MockedContainer(Container):
         """Mock Container class."""
@@ -344,7 +344,7 @@ def mocked_docker(monkeypatch):
             """Mock of CLIDockerClient.images."""
 
             @staticmethod
-            def get(name: str) -> None:
+            def get(name: str) -> Image:
                 """Mock of CLIDockerClient.images.get."""
                 return MockedDocker.images.list()[0]
 
@@ -380,7 +380,7 @@ def mocked_docker(monkeypatch):
                 """Mock of CLIDockerClient.containers.get."""
                 if name == "vectoradd":
                     return MockedContainer({"TESSERACT_NAME": "vectoradd"})
-                raise ContainerError(f"Container {name} not found")
+                raise NotFound(f"Container {name} not found")
 
             @staticmethod
             def list() -> list[MockedContainer]:
@@ -388,16 +388,19 @@ def mocked_docker(monkeypatch):
                 return [MockedContainer({"TESSERACT_NAME": "vectoradd"})]
 
             @staticmethod
-            def run(**kwargs: Any) -> bytes:
+            def run(**kwargs: Any) -> MockedContainer | tuple[bytes, bytes]:
                 """Mock run method for containers."""
                 container = MockedContainer(kwargs)
                 if kwargs.get("detach", False):
                     return container
-                return container.logs(stdout=True, stderr=True)
+                return (
+                    container.logs(stdout=True, stderr=False),
+                    container.logs(stdout=False, stderr=True),
+                )
 
         class compose:
             @staticmethod
-            def list() -> dict:
+            def list() -> set:
                 """Return ids of all created tesseracts projects."""
                 return created_ids
 
