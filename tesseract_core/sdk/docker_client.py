@@ -35,8 +35,8 @@ def _get_executable(program: Literal["docker", "docker-compose"]) -> tuple[str, 
 class Image:
     """Image class to wrap Docker image details."""
 
-    id: str
-    short_id: str
+    id: str | None
+    short_id: str | None
     tags: list[str] | None
     attrs: dict
 
@@ -44,11 +44,14 @@ class Image:
     def from_dict(cls, json_dict: dict) -> "Image":
         """Create an Image object from a json dictionary."""
         image_id = json_dict.get("Id", None)
-        if image_id and image_id.startswith("sha256:"):
-            short_id = image_id[:19]
-        else:
-            # Some container engines (e.g., Podman) do not prefix IDs with sha256
-            short_id = image_id[:12] if image_id else None
+        short_id = None
+        if image_id:
+            if image_id.startswith("sha256:"):
+                short_id = image_id[:19]
+            else:
+                # Some container engines (e.g., Podman) do not prefix IDs with sha256
+                short_id = image_id[:12]
+
         return cls(
             id=image_id,
             short_id=short_id,
