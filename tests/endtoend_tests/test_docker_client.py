@@ -56,16 +56,19 @@ def test_get_image(docker_client, docker_client_built_image_name, docker_py_clie
     docker_py_image = docker_py_client.images.get(docker_client_built_image_name)
     assert docker_py_image is not None
 
-    non_sha_id = docker_py_image.short_id.split(":")[1]
     docker_image_short = docker_client.images.get(docker_py_image.short_id)
-    docker_image_non_sha = docker_client.images.get(non_sha_id)
     assert docker_image_short is not None
-    assert docker_image_non_sha is not None
+
+    # Whether images start with sha256: depends on the used Docker implementation (e.g. Podman vs. Docker)
+    if docker_py_image.short_id.startswith("sha256:"):
+        non_sha_id = docker_py_image.short_id.split(":")[1]
+        docker_image_non_sha = docker_client.images.get(non_sha_id)
+        assert docker_image_non_sha is not None
+        assert docker_image_short.id == docker_image_non_sha.id
 
     assert image.id == docker_py_image.id
     assert image.short_id == docker_py_image.short_id
     assert image.tags == docker_py_image.tags
-    assert docker_image_short.id == docker_image_non_sha.id
     # Check the repr function
     assert (
         str(image)
@@ -169,6 +172,13 @@ def test_create_container(
     docker_client, docker_py_client, docker_client_built_image_name
 ):
     """Test container creation, run, logs, and remove."""
+
+    def _strip_image_prefix(image_name):
+        """Strip the 'sha256:' prefix from the image name if it exists."""
+        if image_name.startswith("sha256:"):
+            return image_name.split(":")[1]
+        return image_name
+
     # Create a container
     container, container_py = None, None
     try:
@@ -183,7 +193,9 @@ def test_create_container(
         # Check property fields
         assert container.project_id is None
         assert container.host_port is None
-        assert container_py.image.id == container.image.id
+        assert _strip_image_prefix(container_py.image.id) == _strip_image_prefix(
+            container.image.id
+        )
 
         container_get = docker_client.containers.get(container.id)
         container_name_get = docker_client.containers.get(container.name)
