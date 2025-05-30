@@ -27,7 +27,7 @@ jobs:
           create-file-commit-message: 'Creating file for storing CLA Signatures'
           signed-commit-message: '$contributorName has signed the CLA in $owner/$repo'
           custom-notsigned-prcomment: >
-            #### ✍️ CLA signatures required ✍️
+            #### CLA signatures required
 
             Thank you for your PR, we really appreciate it!
             Like many open-source projects, we ask that all contributors sign our
@@ -35,7 +35,7 @@ jobs:
             before we can accept your contribution. This only needs to be done once per contributor.
             You can do so by commenting the following on this pull request:
           custom-allsigned-prcomment: >
-            #### 🎉 CLA signatures confirmed 🎉
+            #### CLA signatures confirmed
 
             All contributors have signed the [Contributor License Agreement](https://github.com/pasteurlabs/pasteur-oss-cla/blob/main/README.md).
           custom-pr-sign-comment: |
