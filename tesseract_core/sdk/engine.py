@@ -703,7 +703,7 @@ def _create_docker_compose_template(
         else:
             gpu_settings = f"device_ids: {gpus}"
 
-    for image_id, port in zip(image_ids, ports, strict=True):
+    for i, (image_id, port) in enumerate(zip(image_ids, ports, strict=True)):
         service = {
             "name": f"{image_id.split(':')[0]}-{_id_generator()}",
             "image": image_id,
@@ -714,6 +714,7 @@ def _create_docker_compose_template(
                 "TESSERACT_DEBUG": "1" if debug else "0",
             },
             "num_workers": num_workers,
+            "debugpy_port": 5678 + i,
         }
 
         services.append(service)
