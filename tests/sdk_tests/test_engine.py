@@ -19,7 +19,7 @@ from tesseract_core.sdk.api_parse import (
     validate_tesseract_api,
 )
 from tesseract_core.sdk.cli import AVAILABLE_RECIPES
-from tesseract_core.sdk.docker_client import Image
+from tesseract_core.sdk.docker_client import Image, NotFound
 from tesseract_core.sdk.exceptions import UserError
 
 
@@ -235,7 +235,7 @@ def test_serve_tesseracts(mocked_docker):
     engine.teardown(project_name_multi_tesseract)
 
     # Tear down invalid
-    with pytest.raises(ValueError):
+    with pytest.raises(NotFound):
         engine.teardown("invalid_project_name")
 
     # Serve with gpus

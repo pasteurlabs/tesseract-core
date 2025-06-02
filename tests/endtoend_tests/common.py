@@ -10,8 +10,8 @@ from typer.testing import CliRunner
 from tesseract_core.sdk.cli import app
 from tesseract_core.sdk.docker_client import (
     CLIDockerClient,
-    ContainerError,
     ImageNotFound,
+    NotFound,
 )
 
 
@@ -34,7 +34,7 @@ def container_exists(client, container_name_or_id, tesseract_only: bool = True):
     try:
         client.containers.get(container_name_or_id, tesseract_only)
         return True
-    except ContainerError:
+    except NotFound:
         return False
 
 
@@ -86,8 +86,8 @@ def build_tesseract(
     print_debug_info(result)
     assert result.exit_code == 0, result.exception
 
-    image_tags = json.loads(result.stdout.strip())
+    image_tag = json.loads(result.stdout.strip())[0]
 
-    assert client.images._tag_exists(image_name, image_tags)
-
-    return image_tags[0]
+    # This raise an error if the image does not exist
+    client.images.get(image_tag)
+    return image_tag
