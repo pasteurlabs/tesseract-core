@@ -297,6 +297,8 @@ def build_image(
                 generate_only=generate_only,
             )
     except BuildError as e:
+        # raise from None to Avoid overly long tracebacks,
+        # all the information is in the printed logs / exception str already
         raise UserError(f"Error building Tesseract: {e}") from None
     except APIError as e:
         raise UserError(f"Docker server error: {e}") from e
@@ -829,6 +831,7 @@ def entrypoint() -> NoReturn:
             # Do not print the exception here since it's part of the traceback
             logger.error("UserError occurred, traceback:", exc_info=True)
         else:
+            # Prints only the error message without traceback
             logger.error(str(e), exc_info=False)
         result = 1
     except Exception:
