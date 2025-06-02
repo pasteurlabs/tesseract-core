@@ -6,6 +6,7 @@ services:
     command: ["serve", "--num-workers", "{{ num_workers }}"]
     ports:
       - {{ service.port }}
+      - "{{ service.debugpy_port }}:5678"
     {%- if service.volumes %}
     volumes:
     {%- for volume in service.volumes %}
