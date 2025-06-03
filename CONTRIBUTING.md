@@ -166,11 +166,9 @@ Releases are done via GitHub Actions, which automatically build the release
 artifacts and publish them to the [GitHub Releases](https://github.com/pasteurlabs/tesseract-core/releases) page. To create a new release, follow these steps:
 
 1. Make sure the code is in a good state, all tests pass, and the documentation is up to date.
-2. Trigger a new release action through the GitHub UI: []() # TODO!
-   This opens a new pull request with the release notes and the version number.
-3. Add any additional release notes to the pull request.
-4. In the meantime, you can add more commits to `main` which will automatically
-   be included in the release.
+2. Trigger a new release action through the [GitHub UI](https://github.com/pasteurlabs/tesseract-core/actions/workflows/release.yml). This opens a new pull request with the release notes and the version number.
+3. Add any additional release notes to the pull request message. They will automatically be included at the top of the release notes.
+4. In the meantime, you can add more commits to `main` (and update the release branch) which will trigger re-generation of the changelog and release notes.
 5. Once the pull request is ready, merge it into `main`.
-
-That's it! GitHub Actions will automatically release the new version.
+6. GitHub Actions will then automatically release the new version. Verify that the release artifacts are correctly built and published.
+7. Make an announcement in the [Discourse Forum](https://si-tesseract.discourse.group/) and on social media, if applicable.
