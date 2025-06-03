@@ -4,15 +4,11 @@ on:
   # Case 1: manual trigger -> initiate release process
   workflow_dispatch:
 
-  # Case 2: release PR is being updated -> update changelog
-  pull_request:
-    types: [opened, reopened, synchronize]  # Trigger on PR events
-    branches:
-      - main
-
-  # Case 3: release PR is merged -> create a new release
   push:
     branches:
+      # Case 2: release PR is being updated -> update changelog
+      - 'bot/release/*'
+      # Case 3: release PR is merged -> create a new release
       - main
 
 
@@ -64,7 +60,7 @@ jobs:
 
   update-pr:
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'refs/heads/bot/release/')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/bot/release/')
 
     steps:
       - name: Checkout code
@@ -125,7 +121,8 @@ jobs:
         id: release_notes
         run: |
           changelog=$(git cliff --bump --latest --strip all)
-          custom_notes=$(gh pr view ${{ github.event.pull_request.number }} --json body --jq '.body')
+
+          custom_notes="${{ github.event.head_commit.message }}"
           custom_notes=$(echo "$custom_notes" | awk '/<!-- release-notes -->/{flag=1;next} flag')
 
           touch /tmp/notes.md
