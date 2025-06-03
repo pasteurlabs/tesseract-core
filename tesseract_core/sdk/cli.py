@@ -494,6 +494,7 @@ def serve(
     try:
         project_id = engine.serve(
             image_names,
+            host_ip,
             ports,
             volume,
             gpus,
