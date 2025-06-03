@@ -691,6 +691,9 @@ def _create_docker_compose_template(
                 )
             )
 
+    # Prepend host IP to ports
+    ports = [f"{host_ip}:{port}" for port in ports]
+
     gpu_settings = None
     if gpus:
         if (len(gpus) == 1) and (gpus[0] == "all"):
@@ -708,11 +711,12 @@ def _create_docker_compose_template(
             "environment": {
                 "TESSERACT_DEBUG": "1" if debug else "0",
             },
+            "num_workers": num_workers,
         }
 
         services.append(service)
     template = ENV.get_template("docker-compose.yml")
-    return template.render(services=services, num_workers=num_workers, host_ip=host_ip)
+    return template.render(services=services)
 
 
 def _id_generator(

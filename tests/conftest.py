@@ -246,7 +246,7 @@ def _docker_cleanup(docker_client, request):
         for container in context["containers"]:
             try:
                 if isinstance(container, str):
-                    container_obj = docker_client.containers.get(container.id)
+                    container_obj = docker_client.containers.get(container)
                 else:
                     container_obj = container
 
