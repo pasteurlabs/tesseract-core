@@ -417,6 +417,17 @@ def serve(
             callback=_validate_port,
         ),
     ] = None,
+    host_ip: Annotated[
+        str,
+        typer.Option(
+            "--host-ip",
+            help=(
+                "IP address of the host to bind the Tesseract to. "
+                "Defaults to 127.0.0.1 (localhost). To bind to all interfaces, use '0.0.0.0'. "
+                "WARNING: This may expose Tesseract to all local networks, use with caution."
+            ),
+        ),
+    ] = "127.0.0.1",
     gpus: Annotated[
         list[str] | None,
         typer.Option(

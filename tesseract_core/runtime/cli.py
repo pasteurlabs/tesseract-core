@@ -309,7 +309,7 @@ def check_gradients(
 
 @tesseract_runtime.command()
 @click.option("-p", "--port", default=8000, help="Port number")
-@click.option("-h", "--host", default="0.0.0.0", help="Host IP address")
+@click.option("-h", "--host", default="127.0.0.1", help="Host IP address")
 @click.option("-w", "--num-workers", default=1, help="Number of worker processes")
 def serve(host: str, port: int, num_workers: int) -> None:
     """Start running this Tesseract's web server."""

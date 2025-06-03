@@ -3,7 +3,7 @@ services:
   {{ service.name }}:
     image: {{ service.image }}
     restart: unless-stopped
-    command: ["serve", "--num-workers", "{{ num_workers }}"]
+    command: ["serve", "--host", "0.0.0.0", "--num-workers", "{{ num_workers }}"]
     ports:
       - {{ service.port }}
     {%- if service.volumes %}
@@ -38,3 +38,6 @@ services:
 
 networks:
   multi-tesseract-network:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.host_binding_ipv4: "{{ host_ip }}"
