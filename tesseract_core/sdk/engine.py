@@ -119,7 +119,7 @@ def needs_docker(func: Callable) -> Callable:
 
 
 def get_free_port(
-    within_range: tuple[int, int] | None = (49152, 65535),
+    within_range: tuple[int, int] = (49152, 65535),
     exclude: Sequence[int] = (),
 ) -> int:
     """Find a random free port to use for HTTP."""
@@ -136,7 +136,7 @@ def get_free_port(
         # Check if the port is free
         with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
             try:
-                s.bind(("localhost", port))
+                s.bind(("127.0.0.1", port))
             except OSError:
                 # Port is already in use
                 continue
