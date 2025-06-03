@@ -6,29 +6,37 @@ on:
   pull_request_target:
     types: [opened,closed,synchronize]
 
-permissions:
-  actions: write
-  contents: read
-  pull-requests: write
-  statuses: write
-
 jobs:
-  CLAAssistant:
+  cla-assistant:
     runs-on: ubuntu-latest
     steps:
       - name: "CLA Assistant"
-        if: (github.event.comment.body == 'recheck' || github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA') || github.event_name == 'pull_request_target'
+        if: startsWith(github.event.comment.body, '@PasteurBot') || github.event.comment.body == 'recheck' || github.event_name == 'pull_request_target'
         uses: contributor-assistant/github-action@v2.6.1
         env:
           GITHUB_TOKEN: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
-          PERSONAL_ACCESS_TOKEN: ${{ secrets.CLA_PAT }}
+          PERSONAL_ACCESS_TOKEN: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
         with:
-          path-to-signatures: 'signatures/version1/cla.json'
-          path-to-document: 'https://github.com/pasteurlabs/pasteur-oss-cla/blob/main/README.md'
-          # Branch should not be protected
-          branch: 'main'
-          allowlist: "PasteurBot"
+          allowlist: 'PasteurBot,dependabot[bot],github-actions[bot]'
+
           remote-organization-name: 'pasteurlabs'
           remote-repository-name: 'pasteur-oss-cla-signatures'
-          create-file-commit-message: 'Creating file for storing CLA Signatures for tesseract-core'
-          signed-commit-message: '$contributorName has signed the CLA in $owner/$repo#$pullRequestNo'
+          path-to-signatures: 'signatures/version1/cla.json'
+          branch: 'main'
+
+          create-file-commit-message: 'Creating file for storing CLA Signatures'
+          signed-commit-message: '$contributorName has signed the CLA in $owner/$repo'
+          custom-notsigned-prcomment: >
+            #### CLA signatures required
+
+            Thank you for your PR, we really appreciate it!
+            Like many open-source projects, we ask that all contributors sign our
+            [Contributor License Agreement](https://github.com/pasteurlabs/pasteur-oss-cla/blob/main/README.md)
+            before we can accept your contribution. This only needs to be done once per contributor.
+            You can do so by commenting the following on this pull request:
+          custom-allsigned-prcomment: >
+            #### CLA signatures confirmed
+
+            All contributors have signed the [Contributor License Agreement](https://github.com/pasteurlabs/pasteur-oss-cla/blob/main/README.md).
+          custom-pr-sign-comment: |
+            @PasteurBot I have read the CLA Document and I hereby sign the CLA
