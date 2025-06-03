@@ -161,6 +161,7 @@ The Tesseract project follows [semantic versioning](https://semver.org).
 
 
 ## Release process
+(code owners only)
 
 Releases are done via GitHub Actions, which automatically build the release
 artifacts and publish them to the [GitHub Releases](https://github.com/pasteurlabs/tesseract-core/releases) page. To create a new release, follow these steps:
