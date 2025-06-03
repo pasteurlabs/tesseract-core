@@ -663,6 +663,7 @@ def serve(
 
 def _create_docker_compose_template(
     image_ids: list[str],
+    host_ip: str = "127.0.0.1",
     ports: list[str] | None = None,
     volumes: list[str] | None = None,
     gpus: list[str] | None = None,
@@ -711,7 +712,7 @@ def _create_docker_compose_template(
 
         services.append(service)
     template = ENV.get_template("docker-compose.yml")
-    return template.render(services=services, num_workers=num_workers)
+    return template.render(services=services, num_workers=num_workers, host_ip=host_ip)
 
 
 def _id_generator(
