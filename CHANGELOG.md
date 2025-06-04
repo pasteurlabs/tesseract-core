@@ -18,6 +18,7 @@ All notable changes to this project will be documented in this file.
 - Podman compatibility and testing (#142)
 - Apidoc CLI call used container ID in place of container object to retrieve host port (#172)
 - Overhaul docker client for better podman compatibility and better error handling (#178)
+- Sanitize all config fields passed as envvars to dockerfile (#187)
 
 ### Documentation
 
