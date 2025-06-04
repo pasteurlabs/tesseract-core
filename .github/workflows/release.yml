@@ -1,5 +1,12 @@
 name: Handle release process
 
+# This workflow automates the release process.
+# Only safe to use if the following conditions are met:
+# 1. `main` is protected and requires a PR to merge.
+# 2. Only squash-merging is allowed.
+# 3. PRs are required to be up-to-date with `main` before merging.
+# 4. Everyone is forbidden from creating releases manually.
+
 on:
   # Case 1: manual trigger -> initiate release process
   workflow_dispatch:
@@ -11,6 +18,8 @@ on:
       # Case 3: release PR is merged -> create a new release
       - main
 
+env:
+  GH_TOKEN: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
 
 jobs:
   trigger-pr:
