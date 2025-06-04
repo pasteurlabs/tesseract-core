@@ -160,7 +160,9 @@ jobs:
           changelog=$(printf "%s" "$changelog" | sed '1d')
 
           # Get custom notes from the PR body
-          custom_notes=$(read -r -d '' <<< "${{ github.event.pull_request.body }}")
+          read -r -d '' custom_notes <<EOF
+          ${{ github.event.pull_request.body }}
+          EOF
           # Keep only the part after the first '---' line
           custom_notes=$(echo "$custom_notes" | sed -n '/^---$/,$p' | sed '1d')
           echo $custom_notes
