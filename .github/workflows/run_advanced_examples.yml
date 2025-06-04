@@ -1,4 +1,4 @@
-name: Run example notebooks
+name: Run notebooks in advanced examples category
 
 on:
   push:
