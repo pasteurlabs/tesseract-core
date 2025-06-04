@@ -73,6 +73,7 @@ jobs:
           gh pr create \
             --title "chore: release ${{ steps.generate_changelog.outputs.new_version }}" \
             --body "$pr_body" \
+            --head "bot/release/${{ steps.generate_changelog.outputs.new_version }}" \
             --base "main"
 
   update-pr:
