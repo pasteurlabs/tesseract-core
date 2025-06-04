@@ -1,9 +1,13 @@
-name: Run notebooks in advanced examples category
+name: Run example notebooks
 
 on:
   push:
     branches:
       - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   tests:
