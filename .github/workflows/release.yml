@@ -18,8 +18,8 @@ on:
 
   # Case 3: release PR is merged -> create a new release
   pull_request:
-    types:
-      - closed
+    # types:
+    #   - closed
     branches:
       - main
 
@@ -126,7 +126,7 @@ jobs:
 
   release:
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request' && github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'bot/release/')
+    # if: github.event_name == 'pull_request' && github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'bot/release/')
 
     steps:
       - name: Checkout code
@@ -179,11 +179,11 @@ jobs:
 
           echo "release_note_file=/tmp/notes.md" >> $GITHUB_OUTPUT
 
-      - name: Create new release
-        run: |
-          gh release create "${{ steps.get_version.outputs.new_version }}" \
-            --title "${{ steps.get_version.outputs.new_version }}" \
-            --notes-file "${{ steps.release_notes.outputs.release_note_file }}" \
-            --draft \
-            --target ${{ github.event.pull_request.merge_commit_sha }} \
-            --latest
+      # - name: Create new release
+      #   run: |
+      #     gh release create "${{ steps.get_version.outputs.new_version }}" \
+      #       --title "${{ steps.get_version.outputs.new_version }}" \
+      #       --notes-file "${{ steps.release_notes.outputs.release_note_file }}" \
+      #       --draft \
+      #       --target ${{ github.event.pull_request.merge_commit_sha }} \
+      #       --latest
