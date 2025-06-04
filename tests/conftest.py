@@ -196,7 +196,7 @@ def free_port():
     from contextlib import closing
 
     with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
-        s.bind(("localhost", 0))
+        s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
 
 
@@ -246,7 +246,7 @@ def _docker_cleanup(docker_client, request):
         for container in context["containers"]:
             try:
                 if isinstance(container, str):
-                    container_obj = docker_client.containers.get(container.id)
+                    container_obj = docker_client.containers.get(container)
                 else:
                     container_obj = container
 
