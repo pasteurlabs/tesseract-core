@@ -282,8 +282,7 @@ jobs:
         python-version: ["3.10"]
 
         example:
-          - simple
-          - cfd
+          - lorenz
 
       fail-fast: false
 
