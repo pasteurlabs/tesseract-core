@@ -154,13 +154,15 @@ jobs:
 
       - name: Assemble release notes
         id: release_notes
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
         run: |
           changelog=$(git cliff --unreleased --bump --latest --strip all)
           # strip off first line (which is the version number)
           changelog=$(printf "%s" "$changelog" | sed '1d')
 
           # Get custom notes from the PR body
-          custom_notes="${{ github.event.pull_request.body }}"
+          custom_notes="$PR_BODY"
           echo "$custom_notes"
           # Keep only the part after the first '---' line
           custom_notes=$(echo "$custom_notes" | sed -n '/^---$/,$p' | sed '1d')
