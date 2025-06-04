@@ -2,30 +2,6 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.9.1] - 2025-06-04
-
-### Features
-
-- *(cli)* Add serve --no-compose and other missing cli options (#161)
-- *(sdk)* Make docker executable and build args configurable (#162)
-- More comprehensive validation of input and output schema during `tesseract-runtime check` (#170)
-- Add ability to configure host IP during `tesseract serve` (#185)
-
-### Bug Fixes
-
-- Add new cleanup fixture to track docker assets that need to be cleaned up (#129)
-- Some validation errors do not get piped through the python client (#152)
-- Podman compatibility and testing (#142)
-- Apidoc CLI call used container ID in place of container object to retrieve host port (#172)
-- Overhaul docker client for better podman compatibility and better error handling (#178)
-- Sanitize all config fields passed as envvars to dockerfile (#187)
-
-### Documentation
-
-- Updated diagram on tesseract interfaces (#150)
-- Tesseract Example Gallery (#149)
-- Remove how-to guides froms sidebar (#177)
-
 ## [0.9.0] - 2025-05-02
 
 ### Features
