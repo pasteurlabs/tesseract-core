@@ -163,7 +163,7 @@ jobs:
           custom_notes="${{ github.event.pull_request.body }}"
           echo $custom_notes
           # Keep only the part after the first '---' line
-          custom_notes=$(printf "%s" "$custom_notes" | awk '/^---$/ {found=1; next} found && !/^---$/ {print}')
+          custom_notes=$(echo "$custom_notes" | sed -n '/^---$/,$p' | sed '1d')
           echo $custom_notes
           # Strip leading / trailing whitespace
           custom_notes=$(printf "%s" "$custom_notes" | sed 's/^[ \t]*//;s/[ \t]*$//')
