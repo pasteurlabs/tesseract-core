@@ -456,10 +456,12 @@ def test_serve_nonstandard_host_ip(
     """Test serving Tesseract with a non-standard host IP."""
 
     def _get_host_ip():
+        """Get a network interface IP address that is not localhost."""
         import socket
         from contextlib import closing
 
         with closing(socket.socket(socket.AF_INET, socket.SOCK_DGRAM)) as s:
+            # We ping to the Google DNS server to get a valid external IP address
             s.connect(("8.8.8.8", 80))
             return s.getsockname()[0]
 
@@ -468,7 +470,7 @@ def test_serve_nonstandard_host_ip(
 
     # Use a non-standard host IP
     host_ip = _get_host_ip()
-    assert host_ip not in ("", "127.0.0.1", "localhost")
+    assert host_ip not in ("", "127.0.0.1", "localhost")  # sanity check
 
     run_res = cli_runner.invoke(
         app,
