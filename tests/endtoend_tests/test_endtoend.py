@@ -192,9 +192,12 @@ def test_tesseract_serve_pipeline(
 
     assert project_container.name == project_meta["containers"][0]["name"]
     assert project_container.host_port == project_meta["containers"][0]["port"]
+    assert project_container.host_ip == project_meta["containers"][0]["ip"]
 
     # Ensure served Tesseract is usable
-    res = requests.get(f"http://localhost:{project_container.host_port}/health")
+    res = requests.get(
+        f"http://{project_container.host_ip}:{project_container.host_port}/health"
+    )
     assert res.status_code == 200, res.text
 
     # Ensure project id is shown in `tesseract ps`
@@ -207,6 +210,7 @@ def test_tesseract_serve_pipeline(
     assert run_res.exit_code == 0, run_res.stderr
     assert project_id in run_res.stdout
     assert project_container.host_port in run_res.stdout
+    assert project_container.host_ip in run_res.stdout
     assert project_container.short_id in run_res.stdout
 
 
@@ -443,6 +447,65 @@ def test_tesseract_serve_with_volumes(built_image_name, tmp_path, docker_client)
                 catch_exceptions=False,
             )
             assert run_res.exit_code == 0, run_res.stderr
+
+
+@pytest.mark.parametrize("no_compose", [True, False])
+def test_serve_nonstandard_host_ip(
+    docker_client, built_image_name, docker_cleanup, free_port, no_compose
+):
+    """Test serving Tesseract with a non-standard host IP."""
+
+    def _get_host_ip():
+        """Get a network interface IP address that is not localhost."""
+        import socket
+        from contextlib import closing
+
+        with closing(socket.socket(socket.AF_INET, socket.SOCK_DGRAM)) as s:
+            # We ping to the Google DNS server to get a valid external IP address
+            s.connect(("8.8.8.8", 80))
+            return s.getsockname()[0]
+
+    cli_runner = CliRunner(mix_stderr=False)
+    project_id = None
+
+    # Use a non-standard host IP
+    host_ip = _get_host_ip()
+    assert host_ip not in ("", "127.0.0.1", "localhost")  # sanity check
+
+    run_res = cli_runner.invoke(
+        app,
+        [
+            "serve",
+            built_image_name,
+            "-p",
+            str(free_port),
+            "--host-ip",
+            host_ip,
+            *(["--no-compose"] if no_compose else []),
+        ],
+        catch_exceptions=False,
+    )
+    assert run_res.exit_code == 0, run_res.stderr
+    assert run_res.stdout
+    project_meta = json.loads(run_res.stdout)
+    project_id = project_meta["project_id"]
+
+    if no_compose:
+        docker_cleanup["containers"].append(project_id)
+    else:
+        docker_cleanup["project_ids"].append(project_id)
+
+    project_container = docker_client.containers.get(
+        project_meta["containers"][0]["name"]
+    )
+    assert project_container.host_ip == host_ip
+
+    res = requests.get(f"http://{host_ip}:{project_container.host_port}/health")
+    assert res.status_code == 200, res.text
+
+    with pytest.raises(requests.ConnectionError):
+        # Ensure that the Tesseract is not accessible from localhost
+        requests.get(f"http://localhost:{project_container.host_port}/health")
 
 
 def test_tesseract_cli_options_parsing(built_image_name, tmpdir):

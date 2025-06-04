@@ -119,7 +119,7 @@ def needs_docker(func: Callable) -> Callable:
 
 
 def get_free_port(
-    within_range: tuple[int, int] | None = (49152, 65535),
+    within_range: tuple[int, int] = (49152, 65535),
     exclude: Sequence[int] = (),
 ) -> int:
     """Find a random free port to use for HTTP."""
@@ -136,7 +136,7 @@ def get_free_port(
         # Check if the port is free
         with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
             try:
-                s.bind(("localhost", port))
+                s.bind(("127.0.0.1", port))
             except OSError:
                 # Port is already in use
                 continue
@@ -537,6 +537,7 @@ def get_project_containers(project_id: str) -> list[Container]:
 
 def serve(
     images: list[str],
+    host_ip: str = "127.0.0.1",
     ports: list[str] | None = None,
     volumes: list[str] | None = None,
     gpus: list[str] | None = None,
@@ -550,6 +551,7 @@ def serve(
 
     Args:
         images: a list of Tesseract image IDs as strings.
+        host_ip: IP address to bind the Tesseracts to.
         ports: port or port range to serve each Tesseract on.
         volumes: list of paths to mount in the Tesseract container.
         gpus: IDs of host Nvidia GPUs to make available to the Tesseracts.
@@ -597,14 +599,22 @@ def serve(
         if propagate_tracebacks:
             args.append("--debug")
 
-        logger.info(f"Serving Tesseract at http://localhost:{port}")
-        logger.info(f"View Tesseract: http://localhost:{port}/docs")
+        # Always bind to all interfaces inside the container
+        args.extend(["--host", "0.0.0.0"])
+
+        if host_ip == "0.0.0.0":
+            ping_ip = "127.0.0.1"
+        else:
+            ping_ip = host_ip
+
+        logger.info(f"Serving Tesseract at http://{ping_ip}:{port}")
+        logger.info(f"View Tesseract: http://{ping_ip}:{port}/docs")
 
         container = docker_client.containers.run(
             image=image_ids[0],
             command=["serve", *args],
             device_requests=gpus,
-            ports={f"{port}": "8000"},
+            ports={f"{host_ip}:{port}": container_port},
             detach=True,
             volumes=volumes,
         )
@@ -612,7 +622,7 @@ def serve(
         timeout = 30
         while True:
             try:
-                response = requests.get(f"http://localhost:{port}/health")
+                response = requests.get(f"http://{ping_ip}:{port}/health")
             except requests.exceptions.ConnectionError:
                 pass
             else:
@@ -628,7 +638,13 @@ def serve(
         return container.name
 
     template = _create_docker_compose_template(
-        image_ids, ports, volumes, gpus, num_workers, debug=propagate_tracebacks
+        image_ids,
+        host_ip,
+        ports,
+        volumes,
+        gpus,
+        num_workers,
+        debug=propagate_tracebacks,
     )
     compose_fname = f"docker-compose-{_id_generator()}.yml"
 
@@ -647,6 +663,7 @@ def serve(
 
 def _create_docker_compose_template(
     image_ids: list[str],
+    host_ip: str = "127.0.0.1",
     ports: list[str] | None = None,
     volumes: list[str] | None = None,
     gpus: list[str] | None = None,
@@ -674,6 +691,9 @@ def _create_docker_compose_template(
                 )
             )
 
+    # Prepend host IP to ports
+    ports = [f"{host_ip}:{port}" for port in ports]
+
     gpu_settings = None
     if gpus:
         if (len(gpus) == 1) and (gpus[0] == "all"):
@@ -691,11 +711,12 @@ def _create_docker_compose_template(
             "environment": {
                 "TESSERACT_DEBUG": "1" if debug else "0",
             },
+            "num_workers": num_workers,
         }
 
         services.append(service)
     template = ENV.get_template("docker-compose.yml")
-    return template.render(services=services, num_workers=num_workers)
+    return template.render(services=services)
 
 
 def _id_generator(

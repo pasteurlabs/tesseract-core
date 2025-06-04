@@ -417,6 +417,17 @@ def serve(
             callback=_validate_port,
         ),
     ] = None,
+    host_ip: Annotated[
+        str,
+        typer.Option(
+            "--host-ip",
+            help=(
+                "IP address of the host to bind the Tesseract to. "
+                "Defaults to 127.0.0.1 (localhost). To bind to all interfaces, use '0.0.0.0'. "
+                "WARNING: This may expose Tesseract to all local networks, use with caution."
+            ),
+        ),
+    ] = "127.0.0.1",
     gpus: Annotated[
         list[str] | None,
         typer.Option(
@@ -483,6 +494,7 @@ def serve(
     try:
         project_id = engine.serve(
             image_names,
+            host_ip,
             ports,
             volume,
             gpus,
@@ -538,7 +550,9 @@ def _display_tesseract_image_meta() -> None:
 
 def _display_tesseract_containers_meta() -> None:
     """Display Tesseract containers metadata."""
-    table = RichTable("ID", "Name", "Version", "Host Port", "Project ID", "Description")
+    table = RichTable(
+        "ID", "Name", "Version", "Host Address", "Project ID", "Description"
+    )
     containers = docker_client.containers.list()
     for container in containers:
         tesseract_vals = _get_tesseract_env_vals(container)
@@ -548,7 +562,7 @@ def _display_tesseract_containers_meta() -> None:
                 container.id[:12],
                 tesseract_vals["TESSERACT_NAME"],
                 tesseract_vals["TESSERACT_VERSION"],
-                container.host_port,
+                f"{container.host_ip}:{container.host_port}",
                 tesseract_project,
                 tesseract_vals.get("TESSERACT_DESCRIPTION", "").replace("\\n", " "),
             )
@@ -595,10 +609,11 @@ def apidoc(
     ] = True,
 ) -> None:
     """Serve the OpenAPI schema for a Tesseract."""
-    project_id = engine.serve([image_name], no_compose=True)
+    host_ip = "127.0.0.1"
+    project_id = engine.serve([image_name], no_compose=True, host_ip=host_ip)
     try:
         container = docker_client.containers.get(project_id)
-        url = f"http://localhost:{container.host_port}/docs"
+        url = f"http://{host_ip}:{container.host_port}/docs"
         logger.info(f"Serving OpenAPI docs for Tesseract {image_name} at {url}")
         logger.info("  Press Ctrl+C to stop")
         if browser:
@@ -632,8 +647,11 @@ def _display_project_meta(project_id: str) -> list:
         entrypoint = container.attrs["Config"]["Entrypoint"]
         logger.info(f"Entrypoint: {entrypoint}")
         host_port = container.host_port
-        logger.info(f"View Tesseract: http://localhost:{host_port}/docs")
-        container_ports.append({"name": container.name, "port": host_port})
+        host_ip = container.host_ip
+        logger.info(f"View Tesseract: http://{host_ip}:{host_port}/docs")
+        container_ports.append(
+            {"name": container.name, "port": host_port, "ip": host_ip}
+        )
 
     return container_ports
 
