@@ -204,11 +204,12 @@ class Tesseract:
             return self._lastlog
         return engine.logs(self._serve_context["container_id"])
 
-    def serve(self, port: str | None = None) -> None:
+    def serve(self, port: str | None = None, host_ip: str = "127.0.0.1") -> None:
         """Serve the Tesseract.
 
         Args:
             port: Port to serve the Tesseract on.
+            host_ip: IP address of the host to bind the Tesseract to.
         """
         if self._spawn_config is None:
             raise RuntimeError("Can only serve a Tesseract created via from_image.")
@@ -221,6 +222,7 @@ class Tesseract:
             gpus=self._spawn_config.gpus,
             num_workers=self._spawn_config.num_workers,
             debug=self._spawn_config.debug,
+            host_ip=host_ip,
         )
         self._serve_context = dict(
             project_id=project_id,
@@ -228,7 +230,7 @@ class Tesseract:
             port=served_port,
         )
         self._lastlog = None
-        self._client = HTTPClient(f"http://localhost:{served_port}")
+        self._client = HTTPClient(f"http://{host_ip}:{served_port}")
         atexit.register(self.teardown)
 
     def teardown(self) -> None:
@@ -256,6 +258,7 @@ class Tesseract:
     def _serve(
         image: str,
         port: str | None = None,
+        host_ip: str = "127.0.0.1",
         volumes: list[str] | None = None,
         gpus: list[str] | None = None,
         debug: bool = False,
@@ -273,6 +276,7 @@ class Tesseract:
             gpus=gpus,
             propagate_tracebacks=debug,
             num_workers=num_workers,
+            host_ip=host_ip,
         )
 
         first_container = engine.get_project_containers(project_id)[0]

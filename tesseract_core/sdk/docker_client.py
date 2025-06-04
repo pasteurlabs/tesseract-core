@@ -263,8 +263,9 @@ class Images:
 class Container:
     """Container class to wrap Docker container details.
 
-    Container class has additional member variable `host_port` that docker-py
-    does not have. This is because Tesseract requires frequent access to the host port.
+    Container class has additional member variables `host_port` and `host_ip` that
+    docker-py does not have. This is because Tesseract requires frequent access to the host
+    port mappings.
     """
 
     id: str
@@ -299,6 +300,17 @@ class Container:
                 port_key = next(iter(ports))  # Get the first port key
                 if ports[port_key]:
                     return ports[port_key][0].get("HostPort")
+        return None
+
+    @property
+    def host_ip(self) -> str | None:
+        """Gets the host IP of the container."""
+        if self.attrs.get("NetworkSettings", None):
+            ports = self.attrs["NetworkSettings"].get("Ports", None)
+            if ports:
+                port_key = next(iter(ports))  # Get the first port key
+                if ports[port_key]:
+                    return ports[port_key][0].get("HostIp")
         return None
 
     @property
