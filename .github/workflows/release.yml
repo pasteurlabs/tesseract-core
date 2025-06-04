@@ -133,16 +133,9 @@ jobs:
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
-          ref: ${{ github.event.pull_request.base.ref }}
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
           fetch-depth: 0
           fetch-tags: true
-
-      - name: Ensure we're on the correct commit
-        run: |
-          if [ "$(git rev-parse HEAD)" != "${{ github.event.pull_request.merge_commit_sha }}" ]; then
-            echo "Error: The current commit does not match the merge commit SHA."
-            exit 1
-          fi
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -162,11 +155,13 @@ jobs:
       - name: Assemble release notes
         id: release_notes
         run: |
-          changelog=$(git cliff --latest --strip all)
+          changelog=$(git cliff --unreleased --bump --latest --strip all)
           # strip off first line (which is the version number)
           changelog=$(printf "%s" "$changelog" | sed '1d')
 
+          # Get custom notes from the PR body
           custom_notes="${{ github.event.pull_request.body }}"
+          echo $custom_notes
           # Keep only the part after the first '---' line
           custom_notes=$(printf "%s" "$custom_notes" | awk '/^---$/ {found=1; next} found && !/^---$/ {print}')
           # Strip leading / trailing whitespace
@@ -175,7 +170,7 @@ jobs:
           # Create the release notes file
           touch /tmp/notes.md
           echo "# Release ${{ steps.get_version.outputs.new_version }}" > /tmp/notes.md
-          if [ ! -z "$custom_notes" ]; then
+          if [[ -n "$custom_notes" ]]; then
             printf "%s\n\n" "$custom_notes" >> /tmp/notes.md
           fi
           printf "## Changes\n%s\n" "$changelog" >> /tmp/notes.md
