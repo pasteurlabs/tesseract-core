@@ -164,13 +164,16 @@ jobs:
           echo $custom_notes
           # Keep only the part after the first '---' line
           custom_notes=$(printf "%s" "$custom_notes" | awk '/^---$/ {found=1; next} found && !/^---$/ {print}')
+          echo $custom_notes
           # Strip leading / trailing whitespace
           custom_notes=$(printf "%s" "$custom_notes" | sed 's/^[ \t]*//;s/[ \t]*$//')
+          echo $custom_notes
 
           # Create the release notes file
           touch /tmp/notes.md
           echo "# Release ${{ steps.get_version.outputs.new_version }}" > /tmp/notes.md
           if [[ -n "$custom_notes" ]]; then
+            echo "not empty"
             printf "%s\n\n" "$custom_notes" >> /tmp/notes.md
           fi
           printf "## Changes\n%s\n" "$changelog" >> /tmp/notes.md
