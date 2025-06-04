@@ -58,6 +58,7 @@ jobs:
           git checkout -b "bot/release/${{ steps.generate_changelog.outputs.new_version }}"
           git add CHANGELOG.md
           git commit -m "chore: update changelog"
+          git push origin "bot/release/${{ steps.generate_changelog.outputs.new_version }}"
 
           pr_body=$(cat <<EOF
           This PR contains the generated changelog for the release ${{ steps.generate_changelog.outputs.new_version }}.
