@@ -119,6 +119,7 @@ def test_serve_lifecycle(mock_serving, mock_clients):
         gpus=None,
         propagate_tracebacks=True,
         num_workers=1,
+        host_ip="127.0.0.1",
     )
 
     mock_serving["teardown_mock"].assert_called_with("proj-id-123")

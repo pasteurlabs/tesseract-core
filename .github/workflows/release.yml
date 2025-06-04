@@ -1,5 +1,12 @@
 name: Handle release process
 
+# This workflow automates the release process.
+# Only safe to use if the following conditions are met:
+# 1. `main` is protected and requires a PR to merge.
+# 2. Only squash-merging is allowed.
+# 3. PRs are required to be up-to-date with `main` before merging.
+# 4. Everyone is forbidden from creating releases manually.
+
 on:
   # Case 1: manual trigger -> initiate release process
   workflow_dispatch:
@@ -11,6 +18,8 @@ on:
       # Case 3: release PR is merged -> create a new release
       - main
 
+env:
+  GH_TOKEN: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
 
 jobs:
   trigger-pr:
@@ -19,7 +28,11 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -38,25 +51,31 @@ jobs:
           echo "new_version=$new_version" >> $GITHUB_OUTPUT
 
       - name: Trigger release PR
-        uses: peter-evans/create-pull-request@v3
-        with:
-          title: "Release Changelog"
-          body: >
-            This PR contains the generated changelog for the release
-            ${{ steps.generate_changelog.outputs.new_version }}.
+        run: |
+          git config --global user.name "PasteurBot"
+          git config --global user.email "hello@simulation.science"
 
-            ⚠️ **Merging this PR will immediately trigger a new release**. ⚠️
+          git checkout -b "bot/release/${{ steps.generate_changelog.outputs.new_version }}"
+          git add CHANGELOG.md
+          git commit -m "chore: update changelog"
+          git push origin "bot/release/${{ steps.generate_changelog.outputs.new_version }}"
 
-            To specify additional release notes, please edit this comment after the
-            following line.
+          pr_body=$(cat <<EOF
+          This PR contains the generated changelog for the release ${{ steps.generate_changelog.outputs.new_version }}.
 
-            ---
+          ⚠️ **Merging this PR will immediately trigger a new release**. ⚠️
 
-            <!-- release-notes -->
-          commit-message: "chore: update changelog"
-          branch: "bot/release/${{ steps.generate_changelog.outputs.new_version }}"
-          base: "main"
-          token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
+          To specify additional release notes, please edit this comment after the following line.
+
+          ---
+          EOF
+          )
+
+          gh pr create \
+            --title "chore: release ${{ steps.generate_changelog.outputs.new_version }}" \
+            --body "$pr_body" \
+            --head "bot/release/${{ steps.generate_changelog.outputs.new_version }}" \
+            --base "main"
 
   update-pr:
     runs-on: ubuntu-latest
@@ -64,9 +83,11 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
           token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -86,11 +107,17 @@ jobs:
 
       - name: Update PR with changelog
         run: |
-          git add CHANGELOG.md
           git config --global user.name "PasteurBot"
           git config --global user.email "hello@simulation.science"
-          git commit -m "chore: update changelog before release"
-          git push origin HEAD:${{ github.head_ref }}
+
+          git add CHANGELOG.md
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "chore: update changelog before release"
+            git push origin HEAD:${{ github.ref }}
+          fi
 
   release:
     runs-on: ubuntu-latest
@@ -98,9 +125,11 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
           token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -123,7 +152,7 @@ jobs:
           changelog=$(git cliff --bump --latest --strip all)
 
           custom_notes="${{ github.event.head_commit.message }}"
-          custom_notes=$(echo "$custom_notes" | awk '/<!-- release-notes -->/{flag=1;next} flag')
+          custom_notes=$(echo "$custom_notes" | awk '/^---$/,/^---$/ {next} {print}')
 
           touch /tmp/notes.md
           echo "# Release Notes for v${{ steps.get_version.outputs.new_version }}" > /tmp/notes.md
@@ -138,5 +167,4 @@ jobs:
             --notes-file "${{ steps.release_notes.outputs.release_note_file }}" \
             --draft \
             --target ${{ github.sha }} \
-            --repo ${{ github.repository }} \
             --latest

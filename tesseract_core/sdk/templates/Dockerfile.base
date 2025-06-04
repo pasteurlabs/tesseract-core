@@ -71,8 +71,8 @@ RUN chown tesseractor:tesseractor /tesseract
 USER tesseractor
 
 # Set environment variables
-ENV TESSERACT_NAME="{{ config.name }}" \
-    TESSERACT_VERSION="{{ config.version }}" \
+ENV TESSERACT_NAME="{{ config.name | replace('"', '\\"') | replace('\n', '\\n') }}" \
+    TESSERACT_VERSION="{{ config.version | replace('"', '\\"') | replace('\n', '\\n') }}" \
     TESSERACT_DESCRIPTION="{{ config.description | replace('"', '\\"') | replace('\n', '\\n') }}" \
     TESSERACT_API_PATH="/tesseract/tesseract_api.py"
 
