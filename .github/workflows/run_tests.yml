@@ -1,292 +1,292 @@
-# name: Run test suite
+name: Run test suite
 
-# on:
-#   pull_request:
+on:
+  pull_request:
 
-#   push:
-#     branches:
-#       - main
+  push:
+    branches:
+      - main
 
-# concurrency:
-#   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-#   cancel-in-progress: true
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
-# jobs:
-#   tests-base:
-#     strategy:
-#       matrix:
-#         os: [ubuntu-latest, windows-latest, macos-latest]
+jobs:
+  tests-base:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
 
-#         # test with oldest and latest supported Python versions
-#         # NOTE: If bumping the minimum Python version here, also do it in
-#         # ruff.toml, setup.py and other CI files as well.
-#         python-version: ["3.10", "3.12"]
-#         runtime-deps: ["latest"]
+        # test with oldest and latest supported Python versions
+        # NOTE: If bumping the minimum Python version here, also do it in
+        # ruff.toml, setup.py and other CI files as well.
+        python-version: ["3.10", "3.12"]
+        runtime-deps: ["latest"]
 
-#         include:
-#           - os: ubuntu-latest
-#             python-version: "3.12"
-#             runtime-deps: "oldest"
+        include:
+          - os: ubuntu-latest
+            python-version: "3.12"
+            runtime-deps: "oldest"
 
-#       fail-fast: false
+      fail-fast: false
 
-#     runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
 
-#     steps:
-#       - name: Set up Git repository
-#         uses: actions/checkout@v4
+    steps:
+      - name: Set up Git repository
+        uses: actions/checkout@v4
 
-#       - name: Set up WSL (Windows)
-#         uses: Vampire/setup-wsl@v5
-#         if: runner.os == 'Windows'
-#         with:
-#           distribution: Ubuntu-24.04
+      - name: Set up WSL (Windows)
+        uses: Vampire/setup-wsl@v5
+        if: runner.os == 'Windows'
+        with:
+          distribution: Ubuntu-24.04
 
-#       - name: Set up Python
-#         if: runner.os != 'Windows'
-#         uses: actions/setup-python@v5
-#         with:
-#           python-version: ${{ matrix.python-version }}
+      - name: Set up Python
+        if: runner.os != 'Windows'
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
 
-#       - name: Set up Python (Windows)
-#         if: runner.os == 'Windows'
-#         shell: wsl-bash {0}
-#         run: |
-#           python_version=${{ matrix.python-version }}
-#           if [ $python_version == "3.12" ]; then
-#             # Python 3.12 is the default `python3` in Ubuntu 24.04
-#             python_version="3"
-#           fi
+      - name: Set up Python (Windows)
+        if: runner.os == 'Windows'
+        shell: wsl-bash {0}
+        run: |
+          python_version=${{ matrix.python-version }}
+          if [ $python_version == "3.12" ]; then
+            # Python 3.12 is the default `python3` in Ubuntu 24.04
+            python_version="3"
+          fi
 
-#           export DEBIAN_FRONTEND=noninteractive
-#           sudo apt-get update
-#           sudo apt-get install -y software-properties-common gnupg2
-#           sudo add-apt-repository ppa:deadsnakes/ppa
-#           sudo apt-get install -y python3-pip python${python_version} python${python_version}-venv
+          export DEBIAN_FRONTEND=noninteractive
+          sudo apt-get update
+          sudo apt-get install -y software-properties-common gnupg2
+          sudo add-apt-repository ppa:deadsnakes/ppa
+          sudo apt-get install -y python3-pip python${python_version} python${python_version}-venv
 
-#           python${python_version} -m venv ~/venv
+          python${python_version} -m venv ~/venv
 
-#           export PATH="$HOME/venv/bin:$PATH"
-#           python -m pip install --upgrade pip
+          export PATH="$HOME/venv/bin:$PATH"
+          python -m pip install --upgrade pip
 
-#       - name: Set up uv
-#         uses: astral-sh/setup-uv@v6
-#         with:
-#           enable-cache: true
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
 
-#       - name: Restore UV environment
-#         run: cp production.uv.lock uv.lock
+      - name: Restore UV environment
+        run: cp production.uv.lock uv.lock
 
-#       - name: Install package
-#         if: runner.os != 'Windows'
-#         run: |
-#           uv sync --extra dev --frozen
+      - name: Install package
+        if: runner.os != 'Windows'
+        run: |
+          uv sync --extra dev --frozen
 
-#           if [ "${{ matrix.runtime-deps }}" == "oldest" ]; then
-#             # replace >= with == in pyproject.toml to install oldest runtime deps
-#             sed -i 's/>=/==/g' ./tesseract_core/runtime/meta/pyproject.toml
-#             # roll back changes to requires-python
-#             sed -i 's/requires-python\s*=\s*\"==/requires-python = \">=/g' ./tesseract_core/runtime/meta/pyproject.toml
-#             uv pip install .[runtime]
-#           fi
+          if [ "${{ matrix.runtime-deps }}" == "oldest" ]; then
+            # replace >= with == in pyproject.toml to install oldest runtime deps
+            sed -i 's/>=/==/g' ./tesseract_core/runtime/meta/pyproject.toml
+            # roll back changes to requires-python
+            sed -i 's/requires-python\s*=\s*\"==/requires-python = \">=/g' ./tesseract_core/runtime/meta/pyproject.toml
+            uv pip install .[runtime]
+          fi
 
-#       - name: Install package (Windows)
-#         if: runner.os == 'Windows'
-#         shell: wsl-bash {0}
-#         run: |
-#           export PATH="$HOME/venv/bin:$PATH"
+      - name: Install package (Windows)
+        if: runner.os == 'Windows'
+        shell: wsl-bash {0}
+        run: |
+          export PATH="$HOME/venv/bin:$PATH"
 
-#           pip install uv
-#           uv sync --extra dev --frozen
+          pip install uv
+          uv sync --extra dev --frozen
 
-#           if [ "${{ matrix.runtime-deps }}" == "oldest" ]; then
-#             # replace >= with == in pyproject.toml to install oldest runtime deps
-#             sed -i 's/>=/==/g' ./tesseract_core/runtime/meta/pyproject.toml
-#             # roll back changes to requires-python
-#             sed -i 's/requires-python\s*=\s*\"==/requires-python = \">=/g' ./tesseract_core/runtime/meta/pyproject.toml
-#             uv pip install .[runtime]
-#           fi
+          if [ "${{ matrix.runtime-deps }}" == "oldest" ]; then
+            # replace >= with == in pyproject.toml to install oldest runtime deps
+            sed -i 's/>=/==/g' ./tesseract_core/runtime/meta/pyproject.toml
+            # roll back changes to requires-python
+            sed -i 's/requires-python\s*=\s*\"==/requires-python = \">=/g' ./tesseract_core/runtime/meta/pyproject.toml
+            uv pip install .[runtime]
+          fi
 
-#       - name: Run test suite
-#         if: runner.os != 'Windows'
-#         run: |
-#           uv run --no-sync pytest \
-#             --skip-endtoend \
-#             --cov-report=term-missing:skip-covered \
-#             --cov-report=xml:coverage.xml \
-#             --cov=tesseract_core
+      - name: Run test suite
+        if: runner.os != 'Windows'
+        run: |
+          uv run --no-sync pytest \
+            --skip-endtoend \
+            --cov-report=term-missing:skip-covered \
+            --cov-report=xml:coverage.xml \
+            --cov=tesseract_core
 
-#       - name: Run test suite (Windows)
-#         if: runner.os == 'Windows'
-#         shell: wsl-bash {0}
-#         run: |
-#           export PATH="$HOME/venv/bin:$PATH"
-#           uv run --no-sync pytest \
-#             --skip-endtoend \
-#             --cov-report=term-missing:skip-covered \
-#             --cov-report=xml:coverage.xml \
-#             --cov=tesseract_core
+      - name: Run test suite (Windows)
+        if: runner.os == 'Windows'
+        shell: wsl-bash {0}
+        run: |
+          export PATH="$HOME/venv/bin:$PATH"
+          uv run --no-sync pytest \
+            --skip-endtoend \
+            --cov-report=term-missing:skip-covered \
+            --cov-report=xml:coverage.xml \
+            --cov=tesseract_core
 
-#       - name: Upload coverage reports to Codecov
-#         uses: codecov/codecov-action@v5.4.3
-#         with:
-#           token: ${{ secrets.CODECOV_TOKEN }}
-#           slug: pasteurlabs/tesseract-core
-#           files: coverage*.xml
-#           fail_ci_if_error: true
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v5.4.3
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: pasteurlabs/tesseract-core
+          files: coverage*.xml
+          fail_ci_if_error: true
 
-#   get-e2e-matrix:
-#     runs-on: ubuntu-latest
+  get-e2e-matrix:
+    runs-on: ubuntu-latest
 
-#     outputs:
-#       matrix: ${{ steps.get-matrix.outputs.matrix }}
+    outputs:
+      matrix: ${{ steps.get-matrix.outputs.matrix }}
 
-#     steps:
-#       - name: Set up Git repository
-#         uses: actions/checkout@v4
+    steps:
+      - name: Set up Git repository
+        uses: actions/checkout@v4
 
-#       - name: Get available unit Tesseracts
-#         id: get-matrix
-#         env:
-#           E2E_TEST_DIR: examples
-#         run: |
-#           # get JSON array of directories in E2E_TEST_DIR
-#           subjobs=$(
-#             find "${{ env.E2E_TEST_DIR }}" -type d -maxdepth 1 -mindepth 1 -exec basename {} \; \
-#             | jq -R -s -c 'split("\n")[:-1]'
-#           )
-#           # add "base" to subjobs
-#           subjobs=$(echo "$subjobs" | jq -c -r '. + ["base"]')
-#           printf 'matrix=%s' "$subjobs" >> $GITHUB_OUTPUT
+      - name: Get available unit Tesseracts
+        id: get-matrix
+        env:
+          E2E_TEST_DIR: examples
+        run: |
+          # get JSON array of directories in E2E_TEST_DIR
+          subjobs=$(
+            find "${{ env.E2E_TEST_DIR }}" -type d -maxdepth 1 -mindepth 1 -exec basename {} \; \
+            | jq -R -s -c 'split("\n")[:-1]'
+          )
+          # add "base" to subjobs
+          subjobs=$(echo "$subjobs" | jq -c -r '. + ["base"]')
+          printf 'matrix=%s' "$subjobs" >> $GITHUB_OUTPUT
 
-#   tests-e2e:
-#     needs: get-e2e-matrix
+  tests-e2e:
+    needs: get-e2e-matrix
 
-#     strategy:
-#       matrix:
-#         os: [ubuntu-24.04]
-#         python-version: ["3.12"]
+    strategy:
+      matrix:
+        os: [ubuntu-24.04]
+        python-version: ["3.12"]
 
-#         arch: ["x64"]
-#         docker-engine: ["docker"]
+        arch: ["x64"]
+        docker-engine: ["docker"]
 
-#         unit-tesseract: ${{ fromJson(needs.get-e2e-matrix.outputs.matrix) }}
+        unit-tesseract: ${{ fromJson(needs.get-e2e-matrix.outputs.matrix) }}
 
-#         exclude:
-#         - arch: x64
-#           unit-tesseract: "pyvista-arm64"
+        exclude:
+        - arch: x64
+          unit-tesseract: "pyvista-arm64"
 
-#         include:
-#           # Test on arm to ensure compatibility with Apple M1 chips
-#           # (OSX runners don't have access to Docker so we use Linux ARM runners instead)
-#           - os: "ubuntu-24.04"
-#             python-version: "3.12"
-#             arch: "arm"
-#             docker-engine: "docker"
-#             unit-tesseract: "base"
-#           # Run tests using Podman
-#           - os: "ubuntu-24.04"
-#             python-version: "3.12"
-#             arch: "x64"
-#             docker-engine: "podman"
-#             unit-tesseract: "base"
-#           - os: "ubuntu-24.04"
-#             python-version: "3.12"
-#             arch: "arm"
-#             docker-engine: "docker"
-#             unit-tesseract: "pyvista-arm64"
+        include:
+          # Test on arm to ensure compatibility with Apple M1 chips
+          # (OSX runners don't have access to Docker so we use Linux ARM runners instead)
+          - os: "ubuntu-24.04"
+            python-version: "3.12"
+            arch: "arm"
+            docker-engine: "docker"
+            unit-tesseract: "base"
+          # Run tests using Podman
+          - os: "ubuntu-24.04"
+            python-version: "3.12"
+            arch: "x64"
+            docker-engine: "podman"
+            unit-tesseract: "base"
+          - os: "ubuntu-24.04"
+            python-version: "3.12"
+            arch: "arm"
+            docker-engine: "docker"
+            unit-tesseract: "pyvista-arm64"
 
-#       fail-fast: false
+      fail-fast: false
 
-#     runs-on: ${{ matrix.arch == 'x64' && matrix.os == 'ubuntu-24.04' && 'ubuntu-24.04' || matrix.arch == 'arm' && matrix.os == 'ubuntu-24.04' && 'linux-arm64-ubuntu2404'}}
+    runs-on: ${{ matrix.arch == 'x64' && matrix.os == 'ubuntu-24.04' && 'ubuntu-24.04' || matrix.arch == 'arm' && matrix.os == 'ubuntu-24.04' && 'linux-arm64-ubuntu2404'}}
 
-#     env:
-#       TESSERACT_DOCKER_BUILD_ARGS: "--cache-from type=gha --cache-to type=gha,mode=max"
+    env:
+      TESSERACT_DOCKER_BUILD_ARGS: "--cache-from type=gha --cache-to type=gha,mode=max"
 
-#     defaults:
-#       run:
-#         shell: bash -el {0}
+    defaults:
+      run:
+        shell: bash -el {0}
 
-#     steps:
-#       - name: Set up Git repository
-#         uses: actions/checkout@v4
+    steps:
+      - name: Set up Git repository
+        uses: actions/checkout@v4
 
-#       # Use Conda to install Python (setup-python action doesn't support ARM)
-#       - uses: conda-incubator/setup-miniconda@v3
-#         with:
-#           auto-update-conda: true
-#           python-version: ${{ matrix.python-version }}
+      # Use Conda to install Python (setup-python action doesn't support ARM)
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-update-conda: true
+          python-version: ${{ matrix.python-version }}
 
-#       - name: Set up uv
-#         uses: astral-sh/setup-uv@v6
-#         with:
-#           enable-cache: true
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
 
-#       - name: Restore UV environment
-#         run: cp production.uv.lock uv.lock
+      - name: Restore UV environment
+        run: cp production.uv.lock uv.lock
 
-#       - name: Install package
-#         run: |
-#           uv sync --extra dev --frozen
+      - name: Install package
+        run: |
+          uv sync --extra dev --frozen
 
-#       - name: Set up Podman
-#         if: matrix.docker-engine == 'podman'
-#         run: |
-#           systemctl start --user podman.socket
-#           systemctl status --user podman.socket
+      - name: Set up Podman
+        if: matrix.docker-engine == 'podman'
+        run: |
+          systemctl start --user podman.socket
+          systemctl status --user podman.socket
 
-#           podman --version
+          podman --version
 
-#           export DOCKER_HOST=unix:///run/user/1001/podman/podman.sock
-#           echo "DOCKER_HOST=${DOCKER_HOST}" >> $GITHUB_ENV
-#           echo "TESSERACT_DOCKER_EXECUTABLE=podman" >> $GITHUB_ENV
-#           # Podman doesn't support --cache-from
-#           echo "TESSERACT_DOCKER_BUILD_ARGS=" >> $GITHUB_ENV
+          export DOCKER_HOST=unix:///run/user/1001/podman/podman.sock
+          echo "DOCKER_HOST=${DOCKER_HOST}" >> $GITHUB_ENV
+          echo "TESSERACT_DOCKER_EXECUTABLE=podman" >> $GITHUB_ENV
+          # Podman doesn't support --cache-from
+          echo "TESSERACT_DOCKER_BUILD_ARGS=" >> $GITHUB_ENV
 
-#       - name: Run test suite
-#         run: |
-#           if [ "${{ matrix.unit-tesseract }}" == "base" ]; then
-#             uv run --no-sync pytest \
-#               --always-run-endtoend \
-#               --cov-report=term-missing:skip-covered \
-#               --cov-report=xml:coverage.xml \
-#               --cov=tesseract_core \
-#               tests/endtoend_tests \
-#               -k "not test_examples"
-#           else
-#             uv run --no-sync pytest \
-#               --always-run-endtoend \
-#               --cov-report=term-missing:skip-covered \
-#               --cov-report=xml:coverage.xml \
-#               --cov=tesseract_core \
-#               tests/endtoend_tests/test_examples.py \
-#               -k "[${{ matrix.unit-tesseract }}]"
-#           fi
+      - name: Run test suite
+        run: |
+          if [ "${{ matrix.unit-tesseract }}" == "base" ]; then
+            uv run --no-sync pytest \
+              --always-run-endtoend \
+              --cov-report=term-missing:skip-covered \
+              --cov-report=xml:coverage.xml \
+              --cov=tesseract_core \
+              tests/endtoend_tests \
+              -k "not test_examples"
+          else
+            uv run --no-sync pytest \
+              --always-run-endtoend \
+              --cov-report=term-missing:skip-covered \
+              --cov-report=xml:coverage.xml \
+              --cov=tesseract_core \
+              tests/endtoend_tests/test_examples.py \
+              -k "[${{ matrix.unit-tesseract }}]"
+          fi
 
-#       - name: Upload coverage reports to Codecov
-#         uses: codecov/codecov-action@v5.4.3
-#         with:
-#           token: ${{ secrets.CODECOV_TOKEN }}
-#           slug: pasteurlabs/tesseract-core
-#           files: coverage*.xml
-#           fail_ci_if_error: true
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v5.4.3
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: pasteurlabs/tesseract-core
+          files: coverage*.xml
+          fail_ci_if_error: true
 
-#   all-ok:
-#     needs: [tests-base, tests-e2e]
+  all-ok:
+    needs: [tests-base, tests-e2e]
 
-#     runs-on: ubuntu-latest
+    runs-on: ubuntu-latest
 
-#     steps:
-#       - name: Check for errors
-#         run: |
-#           if [ "${{ needs.tests-base.result }}" != "success" ]; then
-#             echo "Base tests failed"
-#             exit 1
-#           fi
+    steps:
+      - name: Check for errors
+        run: |
+          if [ "${{ needs.tests-base.result }}" != "success" ]; then
+            echo "Base tests failed"
+            exit 1
+          fi
 
-#           if [ "${{ needs.tests-e2e.result }}" != "success" ]; then
-#             echo "E2E tests failed"
-#             exit 1
-#           fi
+          if [ "${{ needs.tests-e2e.result }}" != "success" ]; then
+            echo "E2E tests failed"
+            exit 1
+          fi
 
-#           echo "All tests passed!"
+          echo "All tests passed!"
