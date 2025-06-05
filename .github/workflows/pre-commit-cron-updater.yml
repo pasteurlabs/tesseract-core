@@ -13,13 +13,6 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-      with:
-          token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
-
-    - name: Set committer to PasteurBot
-      run: |
-        git config --global user.name "PasteurBot"
-        git config --global user.email "hello@simulation.science"
 
     - uses: actions/setup-python@v5
       with:
@@ -70,6 +63,8 @@ jobs:
       uses: peter-evans/create-pull-request@v7
       with:
           token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
+          committer: PasteurBot <hello@simulation.science>
+          author: PasteurBot <hello@simulation.science>
           commit-message: Update pre-commit hooks
           title: "chore: ✅ Update pre-commit hooks"
           branch: _bot/update-precommit
@@ -90,6 +85,8 @@ jobs:
       uses: peter-evans/create-pull-request@v7
       with:
           token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
+          committer: PasteurBot <hello@simulation.science>
+          author: PasteurBot <hello@simulation.science>
           commit-message: Update pre-commit hooks
           title: "chore: ⚠️ Update pre-commit hooks [review required]"
           branch: _bot/update-precommit

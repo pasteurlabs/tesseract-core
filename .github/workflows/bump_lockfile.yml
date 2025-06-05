@@ -13,13 +13,6 @@ jobs:
     steps:
       - name: Set up Git repository
         uses: actions/checkout@v4
-        with:
-            token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
-
-      - name: Set committer to PasteurBot
-        run: |
-          git config --global user.name "PasteurBot"
-          git config --global user.email "hello@simulation.science"
 
       - name: Install uv
         uses: astral-sh/setup-uv@v6
@@ -54,6 +47,8 @@ jobs:
         uses: peter-evans/create-pull-request@v7
         with:
             token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
+            committer: PasteurBot <hello@simulation.science>
+            author: PasteurBot <hello@simulation.science>
             commit-message: Update dependencies
             title: "chore: 📦 Update dependencies"
             branch: _bot/update-deps
