@@ -164,8 +164,9 @@ jobs:
           # Get custom notes from the PR body
           custom_notes="$PR_BODY"
           # Fix line endings
-          custom_notes=$(printf "%s" "$custom_notes" | sed 's/\r\n/\n/g')
+          custom_notes=$(printf "%s" "$custom_notes" | tr -d '\r')
           echo "$custom_notes"
+          echo "$custom_notes" | hexdump -C
           # Keep only the part after the first '---' line
           custom_notes=$(echo "$custom_notes" | sed -n '/^---$/,$p' | sed '1d')
           echo "$custom_notes"
