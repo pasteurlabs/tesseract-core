@@ -165,33 +165,26 @@ jobs:
           custom_notes="$PR_BODY"
           # Fix line endings
           custom_notes=$(printf "%s" "$custom_notes" | tr -d '\r')
-          echo "$custom_notes"
-          echo "$custom_notes" | hexdump -C
           # Keep only the part after the first '---' line
           custom_notes=$(echo "$custom_notes" | sed -n '/^---$/,$p' | sed '1d')
-          echo "$custom_notes"
           # Strip leading / trailing whitespace
           custom_notes=$(printf "%s" "$custom_notes" | sed 's/^[ \t]*//;s/[ \t]*$//')
-          echo "$custom_notes"
 
           # Create the release notes file
           touch /tmp/notes.md
           echo "# Release ${{ steps.get_version.outputs.new_version }}" > /tmp/notes.md
           if [[ -n "$custom_notes" ]]; then
-            echo "not empty"
             printf "%s\n\n" "$custom_notes" >> /tmp/notes.md
           fi
           printf "## Changes\n%s\n" "$changelog" >> /tmp/notes.md
 
-          cat /tmp/notes.md
-
           echo "release_note_file=/tmp/notes.md" >> $GITHUB_OUTPUT
 
-      # - name: Create new release
-      #   run: |
-      #     gh release create "${{ steps.get_version.outputs.new_version }}" \
-      #       --title "${{ steps.get_version.outputs.new_version }}" \
-      #       --notes-file "${{ steps.release_notes.outputs.release_note_file }}" \
-      #       --draft \
-      #       --target ${{ github.event.pull_request.merge_commit_sha }} \
-      #       --latest
+      - name: Create new release
+        run: |
+          gh release create "${{ steps.get_version.outputs.new_version }}" \
+            --title "${{ steps.get_version.outputs.new_version }}" \
+            --notes-file "${{ steps.release_notes.outputs.release_note_file }}" \
+            --draft \
+            --target ${{ github.event.pull_request.merge_commit_sha }} \
+            --latest
