@@ -163,6 +163,8 @@ jobs:
 
           # Get custom notes from the PR body
           custom_notes="$PR_BODY"
+          # Fix line endings
+          custom_notes=$(printf "%s" "$custom_notes" | sed 's/\r\n/\n/g')
           echo "$custom_notes"
           # Keep only the part after the first '---' line
           custom_notes=$(echo "$custom_notes" | sed -n '/^---$/,$p' | sed '1d')
