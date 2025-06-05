@@ -271,14 +271,14 @@ jobs:
           files: coverage*.xml
           fail_ci_if_error: true
 
-  tests-advanced-examples:
+  tests-demos:
     strategy:
       matrix:
         os: [ubuntu-latest]
         # test with oldest supported Python version only (for slow tests)
         python-version: ["3.10"]
 
-        example:
+        demo:
           - data-assimilation-4dvar
 
       fail-fast: false
@@ -306,15 +306,15 @@ jobs:
         run: |
           uv sync --extra dev --frozen
 
-      - name: Run examples
-        working-directory: demo/${{matrix.example}}
+      - name: Run demos
+        working-directory: demo/${{matrix.demo}}
         run: |
           uv pip install jupyter
           uv run --no-sync jupyter nbconvert --to notebook --execute demo.ipynb
 
 
   all-ok:
-    needs: [tests-base, tests-e2e, tests-advanced-examples]
+    needs: [tests-base, tests-e2e, tests-demos]
 
     runs-on: ubuntu-latest
 
@@ -331,8 +331,8 @@ jobs:
             exit 1
           fi
 
-          if [ "${{ needs.tests-advanced-examples.result }}" != "success" ]; then
-            echo "Advanced examples tests failed"
+          if [ "${{ needs.tests-demos.result }}" != "success" ]; then
+            echo "Demo tests failed"
             exit 1
           fi
 
