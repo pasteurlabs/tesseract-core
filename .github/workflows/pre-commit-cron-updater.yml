@@ -16,6 +16,11 @@ jobs:
       with:
           token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
 
+    - name: Set committer to PasteurBot
+      run: |
+        git config --global user.name "PasteurBot"
+        git config --global user.email "hello@simulation.science"
+
     - uses: actions/setup-python@v5
       with:
           python-version-file: "pyproject.toml"

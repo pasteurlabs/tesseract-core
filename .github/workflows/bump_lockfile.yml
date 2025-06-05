@@ -16,6 +16,11 @@ jobs:
         with:
             token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
 
+      - name: Set committer to PasteurBot
+        run: |
+          git config --global user.name "PasteurBot"
+          git config --global user.email "hello@simulation.science"
+
       - name: Install uv
         uses: astral-sh/setup-uv@v6
         with:
