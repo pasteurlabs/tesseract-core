@@ -46,7 +46,9 @@ jobs:
         if: steps.git-diff.outputs.update_done == 'true'
         uses: peter-evans/create-pull-request@v7
         with:
-            token: ${{ secrets.GITHUB_TOKEN }}
+            token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
+            committer: PasteurBot <hello@simulation.science>
+            author: PasteurBot <hello@simulation.science>
             commit-message: Update dependencies
             title: "chore: 📦 Update dependencies"
             branch: _bot/update-deps
@@ -55,5 +57,3 @@ jobs:
             body: |
               This PR updates the lockfile to the latest versions of the dependencies.
               Please review the changes and merge when ready.
-
-              To trigger CI checks, please close and reopen this PR.
