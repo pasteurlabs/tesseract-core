@@ -1,8 +1,4 @@
----
-orphan: true
----
-
-# Vector Add
+# VectorAdd
 
 ## Context
 Example using vector add with differentiable inputs and jacobians.

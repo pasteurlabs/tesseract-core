@@ -1,8 +1,4 @@
----
-orphan: true
----
-
-# Custom build steps: PyVista on ARM64 example
+# Custom build steps: PyVista on ARM64
 
 ## Context
 

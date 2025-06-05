@@ -61,7 +61,7 @@ def lorenz96_multi_step(
 ) -> jnp.ndarray:
     """Perform multiple steps of Lorenz 96 integration using scan."""
 
-    def step_fn(state: jnp.ndarray, _: any) -> tuple:
+    def step_fn(state: jnp.ndarray, _: Any) -> tuple:
         return lorenz96_step(state, F, dt), state
 
     _, trajectory = jax.lax.scan(step_fn, state, None, length=n_steps)

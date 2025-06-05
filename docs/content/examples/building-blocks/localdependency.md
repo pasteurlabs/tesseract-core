@@ -1,7 +1,3 @@
----
-orphan: true
----
-
 # Installing local dependencies into a Tesseract
 
 ## Context

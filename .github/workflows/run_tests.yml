@@ -275,14 +275,11 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest]
-        # NOTE: If bumping the minimum Python version here, also do it in
-        # ruff.toml, setup.py and other CI files as well.
-
         # test with oldest supported Python version only (for slow tests)
         python-version: ["3.10"]
 
         example:
-          - lorenz
+          - data-assimilation-4dvar
 
       fail-fast: false
 
@@ -310,7 +307,7 @@ jobs:
           uv sync --extra dev --frozen
 
       - name: Run examples
-        working-directory: advanced_examples/${{matrix.example}}
+        working-directory: demo/${{matrix.example}}
         run: |
           uv pip install jupyter
           uv run --no-sync jupyter nbconvert --to notebook --execute demo.ipynb

@@ -116,9 +116,7 @@ def setup(app) -> None:
 nb_execution_mode = "off"
 
 # Copy example notebooks to auto_examples folder on every build
-for example_notebook in Path("../advanced_examples").glob("*/demo.ipynb"):
+for example_notebook in Path("../demo").glob("*/demo.ipynb"):
     # Copy the example notebook to the docs folder
-    dest = (
-        Path("content/examples/superb-tutorials") / example_notebook.parent.name
-    ).with_suffix(".ipynb")
+    dest = (Path("content/demo") / example_notebook.parent.name).with_suffix(".ipynb")
     shutil.copyfile(example_notebook, dest)
