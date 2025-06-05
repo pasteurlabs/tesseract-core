@@ -55,32 +55,26 @@ jobs:
           new_version=$(git-cliff --bumped-version)
           echo "new_version=$new_version" >> $GITHUB_OUTPUT
 
-      - name: Trigger release PR
-        run: |
-          git config --global user.name "PasteurBot"
-          git config --global user.email "hello@simulation.science"
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v7
+        with:
+            token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
+            committer: PasteurBot <hello@simulation.science>
+            author: PasteurBot <hello@simulation.science>
+            commit-message: "chore: update changelog"
+            title: "chore: 🚢 release ${{ steps.generate_changelog.outputs.new_version }}"
+            branch: bot/release/${{ steps.generate_changelog.outputs.new_version }}
+            draft: false
+            base: main
+            add-paths: CHANGELOG.md
+            body: |
+              This PR contains the generated changelog for the release ${{ steps.generate_changelog.outputs.new_version }}.
 
-          git checkout -b "bot/release/${{ steps.generate_changelog.outputs.new_version }}"
-          git add CHANGELOG.md
-          git commit -m "chore: update changelog"
-          git push origin "bot/release/${{ steps.generate_changelog.outputs.new_version }}"
+              ⚠️ **Merging this PR will immediately trigger a new release**. ⚠️
 
-          pr_body=$(cat <<EOF
-          This PR contains the generated changelog for the release ${{ steps.generate_changelog.outputs.new_version }}.
+              To specify additional release notes, please edit this comment after the following line.
 
-          ⚠️ **Merging this PR will immediately trigger a new release**. ⚠️
-
-          To specify additional release notes, please edit this comment after the following line.
-
-          ---
-          EOF
-          )
-
-          gh pr create \
-            --title "chore: release ${{ steps.generate_changelog.outputs.new_version }}" \
-            --body "$pr_body" \
-            --head "bot/release/${{ steps.generate_changelog.outputs.new_version }}" \
-            --base "main"
+              ---
 
   update-pr:
     runs-on: ubuntu-latest
