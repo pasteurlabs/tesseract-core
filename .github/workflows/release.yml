@@ -164,7 +164,6 @@ jobs:
           changelog=$(printf "%s" "$changelog" | sed '1d')
 
           # Get custom notes from the PR body
-          # custom_notes="${{ env.PR_BODY }}"
           # Fix line endings
           custom_notes=$(printf "%s" "$PR_BODY" | tr -d '\r')
           printf "%s" "$custom_notes"
