@@ -544,6 +544,7 @@ def serve(
     propagate_tracebacks: bool = False,
     num_workers: int = 1,
     no_compose: bool = False,
+    service_names: list[str] | None = None,
 ) -> str:
     """Serve one or more Tesseract images.
 
@@ -559,6 +560,7 @@ def serve(
             WARNING: This may expose sensitive information, use with caution (and never in production).
         num_workers: number of workers to use for serving the Tesseracts.
         no_compose: if True, do not use Docker Compose to serve the Tesseracts.
+        service_names: list of service names under which to expose each Tesseract container on the shared network.
 
     Returns:
         A string representing the Tesseract project ID.
@@ -579,11 +581,20 @@ def serve(
             f"Number of ports ({len(ports)}) must match number of images ({len(image_ids)})"
         )
 
+    if service_names is not None and len(service_names) != len(image_ids):
+        raise ValueError(
+            f"Number of service names ({len(service_names)}) must match number of images ({len(image_ids)})"
+        )
+
     if no_compose:
         if len(images) > 1:
             raise ValueError(
                 "Docker Compose is required to serve multiple Tesseracts. "
                 f"Currently attempting to serve `{len(images)}` Tesseracts."
+            )
+        if service_names is not None:
+            raise ValueError(
+                "Tesseract service names are only meaningful with Docker Compose."
             )
         args = []
         container_port = "8000"
@@ -640,6 +651,7 @@ def serve(
     template = _create_docker_compose_template(
         image_ids,
         host_ip,
+        service_names,
         ports,
         volumes,
         gpus,
@@ -664,6 +676,7 @@ def serve(
 def _create_docker_compose_template(
     image_ids: list[str],
     host_ip: str = "127.0.0.1",
+    service_names: list[str] | None = None,
     ports: list[str] | None = None,
     volumes: list[str] | None = None,
     gpus: list[str] | None = None,
@@ -672,6 +685,12 @@ def _create_docker_compose_template(
 ) -> str:
     """Create Docker Compose template."""
     services = []
+
+    # Generate random service names for each image if not provided
+    if service_names is None:
+        service_names = []
+        for image_id in image_ids:
+            service_names.append(f"{image_id.split(':')[0]}-{_id_generator()}")
 
     # Get random unique ports for each image if not provided
     if ports is None:
@@ -701,9 +720,9 @@ def _create_docker_compose_template(
         else:
             gpu_settings = f"device_ids: {gpus}"
 
-    for image_id, port in zip(image_ids, ports, strict=True):
+    for service_name, image_id, port in zip(service_names, image_ids, ports, strict=True):
         service = {
-            "name": f"{image_id.split(':')[0]}-{_id_generator()}",
+            "name": service_name,
             "image": image_id,
             "port": f"{port}:8000",
             "volumes": volumes,
