@@ -179,7 +179,7 @@ jobs:
           printf "## What's Changed\n%s\n" "$changelog" >> /tmp/notes.md
 
           # Append link to full diff
-          echo "**Full diff**: https://github.com/${{ github.repository_owner }}/${{ github.repository }}/compare/${{ steps.get_version.outputs.current_version }}...${{ steps.get_version.outputs.new_version }}" >> /tmp/notes.md
+          echo "\n**Full diff**: https://github.com/${{ github.repository_owner }}/${{ github.repository }}/compare/${{ steps.get_version.outputs.current_version }}...${{ steps.get_version.outputs.new_version }}" >> /tmp/notes.md
 
           cat /tmp/notes.md
           echo "release_note_file=/tmp/notes.md" >> $GITHUB_OUTPUT
