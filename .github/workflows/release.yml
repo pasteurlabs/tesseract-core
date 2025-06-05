@@ -165,6 +165,7 @@ jobs:
 
           # Get custom notes from the PR body
           # Fix line endings
+          printf "%s" "$PR_BODY"
           custom_notes=$(printf "%s" "$PR_BODY" | tr -d '\r')
           printf "%s" "$custom_notes"
           # Keep only the part after the first '---' line
