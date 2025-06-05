@@ -151,6 +151,7 @@ jobs:
         run: |
           current_version=$(gh release view --json tagName --jq '.tagName' || echo "v0.0.0")
           echo "current_version=$current_version" >> $GITHUB_OUTPUT
+
           new_version=$(git-cliff --bumped-version)
           echo "new_version=$new_version" >> $GITHUB_OUTPUT
 
@@ -159,19 +160,18 @@ jobs:
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
-          changelog=$(git cliff --unreleased --bump --latest --strip all)
+          changelog=$(git-cliff --unreleased --bump --latest --strip all)
           # strip off first line (which is the version number)
           changelog=$(printf "%s" "$changelog" | sed '1d')
 
           # Get custom notes from the PR body
           custom_notes="$PR_BODY"
           # Fix line endings
-          custom_notes=$(printf "%s" "$custom_notes" | tr -d '\r')
-          printf "%s" "$custom_notes"
+          custom_notes=$(echo "$custom_notes" | tr -d '\r')
           # Keep only the part after the first '---' line
           custom_notes=$(echo "$custom_notes" | sed -n '/^---$/,$p' | sed '1d')
           # Strip leading / trailing whitespace
-          custom_notes=$(printf "%s" "$custom_notes" | sed 's/^[ \t]*//;s/[ \t]*$//')
+          custom_notes=$(echo "$custom_notes" | sed 's/^[ \t]*//;s/[ \t]*$//')
 
           # Create the release notes file
           touch /tmp/notes.md
@@ -182,7 +182,7 @@ jobs:
           printf "## What's Changed\n%s\n" "$changelog" >> /tmp/notes.md
 
           # Append link to full diff
-          echo "\n**Full diff**: https://github.com/${{ github.repository_owner }}/${{ github.repository }}/compare/${{ steps.get_version.outputs.current_version }}...${{ steps.get_version.outputs.new_version }}" >> /tmp/notes.md
+          echo -e "\n**Full diff**: https://github.com/${{ github.repository_owner }}/${{ github.repository }}/compare/${{ steps.get_version.outputs.current_version }}...${{ steps.get_version.outputs.new_version }}" >> /tmp/notes.md
 
           cat /tmp/notes.md
           echo "release_note_file=/tmp/notes.md" >> $GITHUB_OUTPUT
