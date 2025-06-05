@@ -55,32 +55,26 @@ jobs:
           new_version=$(git-cliff --bumped-version)
           echo "new_version=$new_version" >> $GITHUB_OUTPUT
 
-      - name: Trigger release PR
-        run: |
-          git config --global user.name "PasteurBot"
-          git config --global user.email "hello@simulation.science"
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v7
+        with:
+            token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
+            committer: PasteurBot <hello@simulation.science>
+            author: PasteurBot <hello@simulation.science>
+            commit-message: "chore: update changelog"
+            title: "chore: 🚢 release ${{ steps.generate_changelog.outputs.new_version }}"
+            branch: bot/release/${{ steps.generate_changelog.outputs.new_version }}
+            draft: false
+            base: main
+            add-paths: CHANGELOG.md
+            body: |
+              This PR contains the generated changelog for the release ${{ steps.generate_changelog.outputs.new_version }}.
 
-          git checkout -b "bot/release/${{ steps.generate_changelog.outputs.new_version }}"
-          git add CHANGELOG.md
-          git commit -m "chore: update changelog"
-          git push origin "bot/release/${{ steps.generate_changelog.outputs.new_version }}"
+              ⚠️ **Merging this PR will immediately trigger a new release**. ⚠️
 
-          pr_body=$(cat <<EOF
-          This PR contains the generated changelog for the release ${{ steps.generate_changelog.outputs.new_version }}.
+              To specify additional release notes, please edit this comment after the following line.
 
-          ⚠️ **Merging this PR will immediately trigger a new release**. ⚠️
-
-          To specify additional release notes, please edit this comment after the following line.
-
-          ---
-          EOF
-          )
-
-          gh pr create \
-            --title "chore: release ${{ steps.generate_changelog.outputs.new_version }}" \
-            --body "$pr_body" \
-            --head "bot/release/${{ steps.generate_changelog.outputs.new_version }}" \
-            --base "main"
+              ---
 
   update-pr:
     runs-on: ubuntu-latest
@@ -146,26 +140,32 @@ jobs:
         run: |
           pip install git-cliff
 
-      - name: Get new version
+      - name: Get version numbers
         id: get_version
         run: |
+          current_version=$(gh release view --json tagName --jq '.tagName' || echo "v0.0.0")
+          echo "current_version=$current_version" >> $GITHUB_OUTPUT
+
           new_version=$(git-cliff --bumped-version)
           echo "new_version=$new_version" >> $GITHUB_OUTPUT
 
       - name: Assemble release notes
         id: release_notes
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
         run: |
-          changelog=$(git cliff --unreleased --bump --latest --strip all)
-          # strip off first line (which is the version number)
+          changelog=$(git-cliff --unreleased --bump --latest --strip all)
+          # Strip off first line (which is the version number)
           changelog=$(printf "%s" "$changelog" | sed '1d')
 
           # Get custom notes from the PR body
-          custom_notes="${{ github.event.pull_request.body }}"
-          echo $custom_notes
+          custom_notes="$PR_BODY"
+          # Fix line endings
+          custom_notes=$(echo "$custom_notes" | tr -d '\r')
           # Keep only the part after the first '---' line
-          custom_notes=$(printf "%s" "$custom_notes" | awk '/^---$/ {found=1; next} found && !/^---$/ {print}')
+          custom_notes=$(echo "$custom_notes" | sed -n '/^---$/,$p' | sed '1d')
           # Strip leading / trailing whitespace
-          custom_notes=$(printf "%s" "$custom_notes" | sed 's/^[ \t]*//;s/[ \t]*$//')
+          custom_notes=$(echo "$custom_notes" | sed 's/^[ \t]*//;s/[ \t]*$//')
 
           # Create the release notes file
           touch /tmp/notes.md
@@ -173,9 +173,10 @@ jobs:
           if [[ -n "$custom_notes" ]]; then
             printf "%s\n\n" "$custom_notes" >> /tmp/notes.md
           fi
-          printf "## Changes\n%s\n" "$changelog" >> /tmp/notes.md
+          printf "## What's Changed\n%s\n" "$changelog" >> /tmp/notes.md
 
-          cat /tmp/notes.md
+          # Append link to full diff
+          echo -e "\n**Full diff**: https://github.com/${{ github.repository }}/compare/${{ steps.get_version.outputs.current_version }}...${{ steps.get_version.outputs.new_version }}" >> /tmp/notes.md
 
           echo "release_note_file=/tmp/notes.md" >> $GITHUB_OUTPUT
 
@@ -184,6 +185,5 @@ jobs:
           gh release create "${{ steps.get_version.outputs.new_version }}" \
             --title "${{ steps.get_version.outputs.new_version }}" \
             --notes-file "${{ steps.release_notes.outputs.release_note_file }}" \
-            --draft \
             --target ${{ github.event.pull_request.merge_commit_sha }} \
             --latest
