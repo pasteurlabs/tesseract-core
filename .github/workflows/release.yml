@@ -18,8 +18,8 @@ on:
 
   # Case 3: release PR is merged -> create a new release
   pull_request:
-    types:
-      - closed
+    # types:
+    #   - closed
     branches:
       - main
 
@@ -126,7 +126,7 @@ jobs:
 
   release:
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request' && github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'bot/release/')
+    # if: github.event_name == 'pull_request' && github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'bot/release/')
 
     steps:
       - name: Checkout code
@@ -146,23 +146,23 @@ jobs:
         run: |
           pip install git-cliff
 
-      - name: Get new version
+      - name: Get version numbers
         id: get_version
         run: |
+          current_version=$(gh release view --json tagName --jq '.tagName' || echo "v0.0.0")
+          echo "current_version=$current_version" >> $GITHUB_OUTPUT
           new_version=$(git-cliff --bumped-version)
           echo "new_version=$new_version" >> $GITHUB_OUTPUT
 
       - name: Assemble release notes
         id: release_notes
-        env:
-          PR_BODY: ${{ github.event.pull_request.body }}
         run: |
           changelog=$(git cliff --unreleased --bump --latest --strip all)
           # strip off first line (which is the version number)
           changelog=$(printf "%s" "$changelog" | sed '1d')
 
           # Get custom notes from the PR body
-          custom_notes="$PR_BODY"
+          custom_notes="${{ github.event.pull_request.body }}"
           # Fix line endings
           custom_notes=$(printf "%s" "$custom_notes" | tr -d '\r')
           # Keep only the part after the first '---' line
@@ -176,14 +176,18 @@ jobs:
           if [[ -n "$custom_notes" ]]; then
             printf "%s\n\n" "$custom_notes" >> /tmp/notes.md
           fi
-          printf "## Changes\n%s\n" "$changelog" >> /tmp/notes.md
+          printf "## What's Changed\n%s\n" "$changelog" >> /tmp/notes.md
 
+          # Append link to full diff
+          echo "**Full diff**: https://github.com/${{ github.repository_owner }}/${{ github.repository }}/compare/${{ steps.get_version.outputs.current_version }}...${{ steps.get_version.outputs.new_version }}" >> /tmp/notes.md
+
+          cat /tmp/notes.md
           echo "release_note_file=/tmp/notes.md" >> $GITHUB_OUTPUT
 
-      - name: Create new release
-        run: |
-          gh release create "${{ steps.get_version.outputs.new_version }}" \
-            --title "${{ steps.get_version.outputs.new_version }}" \
-            --notes-file "${{ steps.release_notes.outputs.release_note_file }}" \
-            --target ${{ github.event.pull_request.merge_commit_sha }} \
-            --latest
+      # - name: Create new release
+      #   run: |
+      #     gh release create "${{ steps.get_version.outputs.new_version }}" \
+      #       --title "${{ steps.get_version.outputs.new_version }}" \
+      #       --notes-file "${{ steps.release_notes.outputs.release_note_file }}" \
+      #       --target ${{ github.event.pull_request.merge_commit_sha }} \
+      #       --latest
