@@ -486,6 +486,17 @@ def serve(
             ),
         ),
     ] = False,
+    service_names: Annotated[
+        str | None,
+        typer.Option(
+            "--service-names",
+            help=(
+                "Comma-separated list of service names by which each tesseract should be exposed "
+                "in the shared network. "
+                "Tesseracts are reachable from one another at http://{service_name}:8000"
+            ),
+        ),
+    ] = None
 ) -> None:
     """Serve one or more Tesseract images.
 
@@ -509,6 +520,11 @@ def serve(
     else:
         ports = None
 
+    if service_names is not None:
+        service_names_list = service_names.split(',')
+    else:
+        service_names_list = None
+
     try:
         project_id = engine.serve(
             image_names,
@@ -519,6 +535,7 @@ def serve(
             debug,
             num_workers,
             no_compose,
+            service_names_list,
         )
     except RuntimeError as ex:
         raise UserError(
