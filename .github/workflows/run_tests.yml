@@ -6,6 +6,11 @@ on:
   push:
     branches:
       - main
+    paths:
+      - "tesseract_core/**"
+      - "tests/**"
+      - "demo/**"
+      - "examples/**"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -324,7 +329,7 @@ jobs:
           if [ "${{ needs.tests-base.result }}" != "success" ]; then
             echo "Base tests failed"
             exit 1
-          fi
+          fiß
 
           if [ "${{ needs.tests-e2e.result }}" != "success" ]; then
             echo "E2E tests failed"
