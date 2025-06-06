@@ -334,7 +334,7 @@ jobs:
           if [ "${{ needs.tests-base.result }}" != "success" ]; then
             echo "Base tests failed"
             exit 1
-          fiß
+          fi
 
           if [ "${{ needs.tests-e2e.result }}" != "success" ]; then
             echo "E2E tests failed"
