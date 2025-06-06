@@ -14,4 +14,7 @@ class OutputSchema(BaseModel):
 
 def apply(inputs: InputSchema) -> OutputSchema:
     """Greet a person whose name is given as input."""
+    import time
+
+    time.sleep(5)
     return OutputSchema(greeting=f"Hello {inputs.name}!")
