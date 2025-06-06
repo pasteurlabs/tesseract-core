@@ -7,7 +7,7 @@ from animate import make_animation
 
 from tesseract_core import Tesseract
 
-# In this example, we use the tessearct to call and differentiate through the qpax solver.
+# In this example, we use the tesseract to call and differentiate through the qpax solver.
 # github: https://github.com/kevin-tracy/qpax/tree/main
 # paper: https://arxiv.org/abs/2406.11749
 
@@ -23,7 +23,6 @@ from tesseract_core import Tesseract
 
 # we want to minimize the decision error
 def decision_error(x_pred, x_true):
-    """Compute the decision error between predicted and true values."""
     return jnp.dot(x_pred - x_true, x_pred - x_true)
 decision_grad_fn = jax.grad(decision_error, argnums=0)
 
