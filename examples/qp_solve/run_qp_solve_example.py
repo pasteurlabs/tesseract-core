@@ -1,3 +1,5 @@
+import os
+
 import jax
 import jax.numpy as jnp
 import matplotlib.animation as animation
@@ -100,7 +102,8 @@ print("Final loss:", losses[-1])
 print("Final x*:", sols[-1])
 writergif = animation.PillowWriter(fps=30)
 anim = make_animation(constraints, sols, x_true, Q, q)
-anim.save("plots/qp_solve_animation.gif", writer=writergif)
+this_dir = os.path.dirname(os.path.abspath(__file__))
+anim.save(f"{this_dir}/plots/qp_solve_animation.gif", writer=writergif)
 
 
 

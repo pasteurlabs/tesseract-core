@@ -90,7 +90,7 @@ class OutputSchema(BaseModel):
         description="Optimal solution vector x for the quadratic program."
     )
     objective_value: Float32 = Field(
-        description="Optimal objective value for the quadratic program." 
+        description="Optimal objective value for the quadratic program."
     )
 
 jit_solve_qp_primal = jax.jit(qpax.solve_qp_primal, static_argnames=("solver_tol", "target_kappa"))
