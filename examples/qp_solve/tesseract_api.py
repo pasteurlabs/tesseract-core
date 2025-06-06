@@ -59,15 +59,15 @@ class InputSchema(BaseModel):
         n = self.Q.shape[0]
         # set missing arguments to 'empty' arrays expected by qpax
         if self.q is None:
-            self.q = jax.numpy.zeros((n,), dtype=self.Q.dtype)
+            self.q = jnp.zeros((n,), dtype=self.Q.dtype)
         if self.A is None:
-            self.A = jax.numpy.zeros((0, n), dtype=self.Q.dtype)
+            self.A = jnp.zeros((0, n), dtype=self.Q.dtype)
         if self.b is None:
-            self.b = jax.numpy.zeros((0,), dtype=self.Q.dtype)
+            self.b = jnp.zeros((0,), dtype=self.Q.dtype)
         if self.G is None:
-            self.G = jax.numpy.zeros((0, n), dtype=self.Q.dtype)
+            self.G = jnp.zeros((0, n), dtype=self.Q.dtype)
         if self.h is None:
-            self.h = jax.numpy.zeros((0,), dtype=self.Q.dtype)
+            self.h = jnp.zeros((0,), dtype=self.Q.dtype)
         # check shapes of inputs
         if self.Q.shape[0] != self.q.shape[0]:
             raise ValueError("Q and q must have compatible shapes.")
@@ -110,7 +110,7 @@ def apply(inputs: InputSchema) -> OutputSchema:
         solver_tol=inputs.solver_tol,
         target_kappa=inputs.target_kappa,
     )
-    obj = jax.numpy.dot(inputs.q, x) + 0.5 * jax.numpy.dot(x, inputs.Q @ x)
+    obj = jnp.dot(inputs.q, x) + 0.5 * jnp.dot(x, inputs.Q @ x)
     return OutputSchema(
         x=x,
         objective_value=obj,
