@@ -484,7 +484,6 @@ def test_tesseract_serve_interop(built_image_name, docker_client):
     except Exception as e:
         assert False, e
     finally:
-        return
         if project_id:
             run_res = cli_runner.invoke(
                 app,
