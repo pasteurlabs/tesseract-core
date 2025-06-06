@@ -9,6 +9,7 @@ import logging
 import optparse
 import os
 import random
+import re
 import socket
 import string
 import tempfile
@@ -584,10 +585,12 @@ def serve(
             f"Number of ports ({len(ports)}) must match number of images ({len(image_ids)})"
         )
 
-    if service_names is not None and len(service_names) != len(image_ids):
-        raise ValueError(
-            f"Number of service names ({len(service_names)}) must match number of images ({len(image_ids)})"
-        )
+    if service_names is not None: 
+        if len(service_names) != len(image_ids):
+            raise ValueError(
+                f"Number of service names ({len(service_names)}) must match number of images ({len(image_ids)})"
+            )
+        _validate_service_names(service_names)
 
     if no_compose:
         if len(images) > 1:
@@ -787,6 +790,23 @@ def _parse_volumes(options: list[str]) -> dict[str, dict[str, str]]:
         return source, {"bind": target, "mode": mode}
 
     return dict(_parse_option(opt) for opt in options)
+
+
+def _validate_service_names(service_names: list[str]) -> None:
+    if len(set(service_names)) != len(service_names):
+        raise ValueError("Service names must be unique")
+
+    print(service_names)
+    invalid_names = []
+    for name in service_names:
+        print(name)
+        if not re.match(r'^[A-Za-z0-9][A-Za-z0-9-]*$', name):
+            invalid_names.append(name)
+    if len(invalid_names) != 0:
+        raise ValueError(
+            "Service names must contain only alphanumeric characters and hyphens, and must "
+            f"not begin with a hyphen. Found invalid names: f{invalid_names}."
+        )
 
 
 def run_tesseract(

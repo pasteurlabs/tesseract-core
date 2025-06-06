@@ -216,6 +216,16 @@ def test_serve_tesseracts_invalid_input_args():
         with pytest.raises(ValueError):
             engine.serve(["vectoradd", "vectoradd"], no_compose=True, service_names=["VA1", "VA2"])
 
+        with pytest.raises(ValueError):
+            engine.serve(["vectoradd", "vectoradd"], service_names=["dupe", "dupe"])
+
+        with pytest.raises(ValueError):
+            engine.serve(["vectoradd"], service_names=["inval$id-domain-name"])
+
+        with pytest.raises(ValueError):
+            engine.serve(["vectoradd"], service_names=["-invalid-name"])
+
+
 
 def test_get_tesseract_images(mocked_docker):
     tesseract_images = engine.get_tesseract_images()
