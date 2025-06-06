@@ -15,7 +15,7 @@ BASE_OPTIONAL_DEPS = {
         "sphinx",
         "sphinx_autodoc_typehints",
         "furo",
-        "myst-parser",
+        "myst-nb",
         "sphinx_click",
         "autodoc_pydantic",
         "sphinx_design",
