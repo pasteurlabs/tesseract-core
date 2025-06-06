@@ -16,6 +16,10 @@ on:
       - "tests/**"
       - "demo/**"
       - "examples/**"
+      - ".github/workflows/run_tests.yml"
+      - "production.uv.lock"
+      - "requirements.txt"
+      - "pyproject.toml"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
