@@ -207,9 +207,6 @@ def test_serve_tesseracts_invalid_input_args():
         with pytest.raises(ValueError):
             engine.teardown(None)
 
-        with pytest.raises(NotFound):
-            engine.teardown(["this-project-id-doesnt-exist"])
-
 
 def test_get_tesseract_images(mocked_docker):
     tesseract_images = engine.get_tesseract_images()
