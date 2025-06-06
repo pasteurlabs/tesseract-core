@@ -37,6 +37,7 @@ from .docker_client import (
     ContainerError,
     Image,
     ImageNotFound,
+    NotFound,
 )
 from .exceptions import UserError
 from .logs import DEFAULT_CONSOLE, set_logger
@@ -699,6 +700,8 @@ def teardown(
         raise UserError(
             f"Internal Docker error occurred while tearing down Tesseracts: {ex}"
         ) from ex
+    except NotFound as ex:
+        raise UserError(f"Tesseract Project ID not found: {ex}") from ex
 
 
 def _sanitize_error_output(error_output: str, tesseract_image: str) -> str:
