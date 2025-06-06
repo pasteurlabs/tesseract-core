@@ -9,6 +9,7 @@ import logging
 import optparse
 import os
 import random
+import re
 import socket
 import string
 import tempfile
@@ -544,6 +545,7 @@ def serve(
     propagate_tracebacks: bool = False,
     num_workers: int = 1,
     no_compose: bool = False,
+    service_names: list[str] | None = None,
 ) -> str:
     """Serve one or more Tesseract images.
 
@@ -559,6 +561,7 @@ def serve(
             WARNING: This may expose sensitive information, use with caution (and never in production).
         num_workers: number of workers to use for serving the Tesseracts.
         no_compose: if True, do not use Docker Compose to serve the Tesseracts.
+        service_names: list of service names under which to expose each Tesseract container on the shared network.
 
     Returns:
         A string representing the Tesseract project ID.
@@ -579,11 +582,22 @@ def serve(
             f"Number of ports ({len(ports)}) must match number of images ({len(image_ids)})"
         )
 
+    if service_names is not None: 
+        if len(service_names) != len(image_ids):
+            raise ValueError(
+                f"Number of service names ({len(service_names)}) must match number of images ({len(image_ids)})"
+            )
+        _validate_service_names(service_names)
+
     if no_compose:
         if len(images) > 1:
             raise ValueError(
                 "Docker Compose is required to serve multiple Tesseracts. "
                 f"Currently attempting to serve `{len(images)}` Tesseracts."
+            )
+        if service_names is not None:
+            raise ValueError(
+                "Tesseract service names are only meaningful with Docker Compose."
             )
         args = []
         container_port = "8000"
@@ -640,6 +654,7 @@ def serve(
     template = _create_docker_compose_template(
         image_ids,
         host_ip,
+        service_names,
         ports,
         volumes,
         gpus,
@@ -664,6 +679,7 @@ def serve(
 def _create_docker_compose_template(
     image_ids: list[str],
     host_ip: str = "127.0.0.1",
+    service_names: list[str] | None = None,
     ports: list[str] | None = None,
     volumes: list[str] | None = None,
     gpus: list[str] | None = None,
@@ -672,6 +688,12 @@ def _create_docker_compose_template(
 ) -> str:
     """Create Docker Compose template."""
     services = []
+
+    # Generate random service names for each image if not provided
+    if service_names is None:
+        service_names = []
+        for image_id in image_ids:
+            service_names.append(f"{image_id.split(':')[0]}-{_id_generator()}")
 
     # Get random unique ports for each image if not provided
     if ports is None:
@@ -701,9 +723,9 @@ def _create_docker_compose_template(
         else:
             gpu_settings = f"device_ids: {gpus}"
 
-    for image_id, port in zip(image_ids, ports, strict=True):
+    for service_name, image_id, port in zip(service_names, image_ids, ports, strict=True):
         service = {
-            "name": f"{image_id.split(':')[0]}-{_id_generator()}",
+            "name": service_name,
             "image": image_id,
             "port": f"{port}:8000",
             "volumes": volumes,
@@ -750,6 +772,23 @@ def _parse_volumes(options: list[str]) -> dict[str, dict[str, str]]:
         return source, {"bind": target, "mode": mode}
 
     return dict(_parse_option(opt) for opt in options)
+
+
+def _validate_service_names(service_names: list[str]) -> None:
+    if len(set(service_names)) != len(service_names):
+        raise ValueError("Service names must be unique")
+
+    print(service_names)
+    invalid_names = []
+    for name in service_names:
+        print(name)
+        if not re.match(r'^[A-Za-z0-9][A-Za-z0-9-]*$', name):
+            invalid_names.append(name)
+    if len(invalid_names) != 0:
+        raise ValueError(
+            "Service names must contain only alphanumeric characters and hyphens, and must "
+            f"not begin with a hyphen. Found invalid names: f{invalid_names}."
+        )
 
 
 def run_tesseract(
