@@ -2,6 +2,11 @@ name: Run test suite
 
 on:
   pull_request:
+    paths:
+      - "tesseract_core/**"
+      - "tests/**"
+      - "demo/**"
+      - "examples/**"
 
   push:
     branches:
