@@ -1,0 +1,2 @@
+# Notebooks are copied on demand by conf.py
+*.ipynb

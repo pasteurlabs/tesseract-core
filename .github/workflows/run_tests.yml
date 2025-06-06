@@ -271,8 +271,50 @@ jobs:
           files: coverage*.xml
           fail_ci_if_error: true
 
+  tests-demos:
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+        # test with oldest supported Python version only (for slow tests)
+        python-version: ["3.10"]
+
+        demo:
+          - data-assimilation-4dvar
+
+      fail-fast: false
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Set up Git repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Restore UV environment
+        run: cp production.uv.lock uv.lock
+
+      - name: Install dev requirements
+        run: |
+          uv sync --extra dev --frozen
+
+      - name: Run demos
+        working-directory: demo/${{matrix.demo}}
+        run: |
+          uv pip install jupyter
+          uv run --no-sync jupyter nbconvert --to notebook --execute demo.ipynb
+
+
   all-ok:
-    needs: [tests-base, tests-e2e]
+    needs: [tests-base, tests-e2e, tests-demos]
 
     runs-on: ubuntu-latest
 
@@ -286,6 +328,11 @@ jobs:
 
           if [ "${{ needs.tests-e2e.result }}" != "success" ]; then
             echo "E2E tests failed"
+            exit 1
+          fi
+
+          if [ "${{ needs.tests-demos.result }}" != "success" ]; then
+            echo "Demo tests failed"
             exit 1
           fi
 

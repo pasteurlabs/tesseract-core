@@ -11,6 +11,8 @@
 
 import os
 import re
+import shutil
+from pathlib import Path
 
 from tesseract_core import __version__
 
@@ -40,7 +42,7 @@ release = __version__
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
 extensions = [
-    "myst_parser",
+    "myst_nb",
     "sphinx.ext.intersphinx",
     "sphinx.ext.autodoc",
     "sphinx.ext.napoleon",
@@ -106,3 +108,15 @@ def setup(app) -> None:
     """Sphinx setup function. Used to register custom stuff."""
     # HACK: We zip the examples folder here so that it can be downloaded
     zip_examples_folder()
+
+
+# -- Handle Jupyter notebooks ------------------------------------------------
+
+# Do not execute notebooks during build (just take existing output)
+nb_execution_mode = "off"
+
+# Copy example notebooks to auto_examples folder on every build
+for example_notebook in Path("../demo").glob("*/demo.ipynb"):
+    # Copy the example notebook to the docs folder
+    dest = (Path("content/demo") / example_notebook.parent.name).with_suffix(".ipynb")
+    shutil.copyfile(example_notebook, dest)
