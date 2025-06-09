@@ -63,8 +63,8 @@ jobs:
       uses: peter-evans/create-pull-request@v7
       with:
           token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
-          committer: PasteurBot <hello@simulation.science>
-          author: PasteurBot <hello@simulation.science>
+          committer: PasteurBot <${{ vars.PL_PASTEURBOT_EMAIL }}>
+          author: PasteurBot <${{ vars.PL_PASTEURBOT_EMAIL }}>
           commit-message: Update pre-commit hooks
           title: "chore: ✅ Update pre-commit hooks"
           branch: _bot/update-precommit
@@ -85,8 +85,8 @@ jobs:
       uses: peter-evans/create-pull-request@v7
       with:
           token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
-          committer: PasteurBot <hello@simulation.science>
-          author: PasteurBot <hello@simulation.science>
+          committer: PasteurBot <${{ vars.PL_PASTEURBOT_EMAIL }}>
+          author: PasteurBot <${{ vars.PL_PASTEURBOT_EMAIL }}>
           commit-message: Update pre-commit hooks
           title: "chore: ⚠️ Update pre-commit hooks [review required]"
           branch: _bot/update-precommit
