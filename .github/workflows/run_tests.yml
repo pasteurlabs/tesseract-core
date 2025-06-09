@@ -87,7 +87,7 @@ jobs:
             sed -i 's/>=/==/g' ./tesseract_core/runtime/meta/pyproject.toml
             # roll back changes to requires-python
             sed -i 's/requires-python\s*=\s*\"==/requires-python = \">=/g' ./tesseract_core/runtime/meta/pyproject.toml
-            uv pip install .[runtime]
+            uv pip install -e .[runtime]
           fi
 
       - name: Install package (Windows)
@@ -104,7 +104,7 @@ jobs:
             sed -i 's/>=/==/g' ./tesseract_core/runtime/meta/pyproject.toml
             # roll back changes to requires-python
             sed -i 's/requires-python\s*=\s*\"==/requires-python = \">=/g' ./tesseract_core/runtime/meta/pyproject.toml
-            uv pip install .[runtime]
+            uv pip install -e .[runtime]
           fi
 
       - name: Run test suite
