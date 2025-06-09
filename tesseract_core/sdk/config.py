@@ -20,7 +20,7 @@ def validate_executable(value: str | Sequence[str]) -> tuple[str, ...]:
 
     exe = shutil.which(exe)
     if exe is None:
-        raise FileNotFoundError(f"{exe} executable not found.")
+        raise FileNotFoundError(f"{value} executable not found.")
 
     exe_path = Path(exe)
     if not exe_path.is_file():
@@ -69,7 +69,11 @@ def update_config(**kwargs: Any) -> None:
 
     conf_settings.update(kwargs)
 
-    config = RuntimeConfig(**conf_settings)
+    try:
+        config = RuntimeConfig(**conf_settings)
+    except FileNotFoundError as ex:
+        print(f"{ex}")
+        exit(1)
     _current_config = config
 
 
