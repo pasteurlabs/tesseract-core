@@ -13,13 +13,11 @@ on:
       - main
     paths:
       - "tesseract_core/**"
-      - "tests/**"
+      - "tests/endtoend_tests/**"
       - "demo/**"
       - "examples/**"
-      - ".github/workflows/run_tests.yml"
       - "production.uv.lock"
-      - "requirements.txt"
-      - "pyproject.toml"
+      - ".github/workflows/run_tests.yml"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
