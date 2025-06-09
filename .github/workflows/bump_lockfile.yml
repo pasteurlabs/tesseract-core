@@ -47,8 +47,8 @@ jobs:
         uses: peter-evans/create-pull-request@v7
         with:
             token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
-            committer: PasteurBot <hello@simulation.science>
-            author: PasteurBot <hello@simulation.science>
+            committer: PasteurBot <${{ vars.PL_PASTEURBOT_EMAIL }}>
+            author: PasteurBot <${{ vars.PL_PASTEURBOT_EMAIL }}>
             commit-message: Update dependencies
             title: "chore: 📦 Update dependencies"
             branch: _bot/update-deps

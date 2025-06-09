@@ -59,8 +59,8 @@ jobs:
         uses: peter-evans/create-pull-request@v7
         with:
             token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
-            committer: PasteurBot <hello@simulation.science>
-            author: PasteurBot <hello@simulation.science>
+            committer: PasteurBot <${{ vars.PL_PASTEURBOT_EMAIL }}>
+            author: PasteurBot <${{ vars.PL_PASTEURBOT_EMAIL }}>
             commit-message: "chore: update changelog"
             title: "chore: 🚢 release ${{ steps.generate_changelog.outputs.new_version }}"
             branch: bot/release/${{ steps.generate_changelog.outputs.new_version }}
@@ -107,7 +107,7 @@ jobs:
       - name: Update PR with changelog
         run: |
           git config --global user.name "PasteurBot"
-          git config --global user.email "hello@simulation.science"
+          git config --global user.email "${{ vars.PL_PASTEURBOT_EMAIL }}"
 
           git add CHANGELOG.md
 
