@@ -209,6 +209,12 @@ jobs:
         shell: bash -el {0}
 
     steps:
+      - name: Set up Git repository
+        uses: actions/checkout@v4
+        with:
+          # Assume PRs are less than 50 commits
+          fetch-depth: 50
+
       - name: Get all changed files
         id: changed-files
         uses: tj-actions/changed-files@ed68ef82c095e0d48ec87eccea555d944a631a4c # v46
@@ -221,9 +227,7 @@ jobs:
             production.uv.lock
             .github/workflows/run_tests.yml
 
-      - name: Set up Git repository
-        if: steps.changed-files.outputs.only_changed != 'true'
-        uses: actions/checkout@v4
+
 
       # Use Conda to install Python (setup-python action doesn't support ARM)
       - uses: conda-incubator/setup-miniconda@v3
@@ -305,6 +309,12 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
+      - name: Set up Git repository
+        uses: actions/checkout@v4
+        with:
+          # Assume PRs are less than 50 commits
+          fetch-depth: 50
+
       - name: Get all changed files
         id: changed-files
         uses: tj-actions/changed-files@ed68ef82c095e0d48ec87eccea555d944a631a4c # v46
@@ -316,10 +326,6 @@ jobs:
             examples/**
             production.uv.lock
             .github/workflows/run_tests.yml
-
-      - name: Set up Git repository
-        if: steps.changed-files.outputs.only_changed != 'true'
-        uses: actions/checkout@v4
 
       - name: Install uv
         if: steps.changed-files.outputs.only_changed != 'true'
