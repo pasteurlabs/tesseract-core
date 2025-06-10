@@ -2,22 +2,11 @@ name: Run test suite
 
 on:
   pull_request:
-    paths:
-      - "tesseract_core/**"
-      - "tests/**"
-      - "demo/**"
-      - "examples/**"
 
   push:
     branches:
       - main
-    paths:
-      - "tesseract_core/**"
-      - "tests/endtoend_tests/**"
-      - "demo/**"
-      - "examples/**"
-      - "production.uv.lock"
-      - ".github/workflows/run_tests.yml"
+
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
