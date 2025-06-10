@@ -227,8 +227,6 @@ jobs:
             production.uv.lock
             .github/workflows/run_tests.yml
 
-
-
       # Use Conda to install Python (setup-python action doesn't support ARM)
       - uses: conda-incubator/setup-miniconda@v3
         with:
@@ -236,22 +234,22 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Set up uv
-        if: steps.changed-files.outputs.only_changed != 'true'
+        if: steps.changed-files.outputs.any_changed == 'true'
         uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
 
       - name: Restore UV environment
-        if: steps.changed-files.outputs.only_changed != 'true'
+        if: steps.changed-files.outputs.any_changed == 'true'
         run: cp production.uv.lock uv.lock
 
       - name: Install package
-        if: steps.changed-files.outputs.only_changed != 'true'
+        if: steps.changed-files.outputs.any_changed == 'true'
         run: |
           uv sync --extra dev --frozen
 
       - name: Set up Podman
-        if: steps.changed-files.outputs.only_changed != 'true' && matrix.docker-engine == 'podman'
+        if: steps.changed-files.outputs.any_changed == 'true' && matrix.docker-engine == 'podman'
         run: |
           systemctl start --user podman.socket
           systemctl status --user podman.socket
@@ -265,7 +263,7 @@ jobs:
           echo "TESSERACT_DOCKER_BUILD_ARGS=" >> $GITHUB_ENV
 
       - name: Run test suite
-        if: steps.changed-files.outputs.only_changed != 'true'
+        if: steps.changed-files.outputs.any_changed == 'true'
         run: |
           if [ "${{ matrix.unit-tesseract }}" == "base" ]; then
             uv run --no-sync pytest \
@@ -286,7 +284,7 @@ jobs:
           fi
 
       - name: Upload coverage reports to Codecov
-        if: steps.changed-files.outputs.only_changed != 'true'
+        if: steps.changed-files.outputs.any_changed == 'true'
         uses: codecov/codecov-action@v5.4.3
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -328,28 +326,28 @@ jobs:
             .github/workflows/run_tests.yml
 
       - name: Install uv
-        if: steps.changed-files.outputs.only_changed != 'true'
+        if: steps.changed-files.outputs.any_changed == 'true'
         uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
 
       - name: Set up Python
-        if: steps.changed-files.outputs.only_changed != 'true'
+        if: steps.changed-files.outputs.any_changed == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
 
       - name: Restore UV environment
-        if: steps.changed-files.outputs.only_changed != 'true'
+        if: steps.changed-files.outputs.any_changed == 'true'
         run: cp production.uv.lock uv.lock
 
       - name: Install dev requirements
-        if: steps.changed-files.outputs.only_changed != 'true'
+        if: steps.changed-files.outputs.any_changed == 'true'
         run: |
           uv sync --extra dev --frozen
 
       - name: Run demos
-        if: steps.changed-files.outputs.only_changed != 'true'
+        if: steps.changed-files.outputs.any_changed == 'true'
         working-directory: demo/${{matrix.demo}}
         run: |
           uv pip install jupyter
