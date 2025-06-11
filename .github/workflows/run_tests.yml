@@ -140,27 +140,57 @@ jobs:
 
     outputs:
       matrix: ${{ steps.get-matrix.outputs.matrix }}
+      demos: ${{ steps.get-matrix.outputs.demos }}
 
     steps:
       - name: Set up Git repository
         uses: actions/checkout@v4
 
-      - name: Get available unit Tesseracts
+      - name: Get all changed files
+        id: changed-files
+        uses: tj-actions/changed-files@ed68ef82c095e0d48ec87eccea555d944a631a4c # v46
+        with:
+          files: |
+            tesseract_core/**
+            tests/endtoend_tests/**
+            demo/**
+            examples/**
+            production.uv.lock
+            .github/workflows/run_tests.yml
+
+      - name: Get available test matrix
         id: get-matrix
         env:
-          E2E_TEST_DIR: examples
+          EXAMPLES_DIR: examples
+          DEMO_DIR: demo
         run: |
-          # get JSON array of directories in E2E_TEST_DIR
+          # if no changed files in the current PR, skip E2E tests
+          if [[ "${{ steps.changed-files.outputs.any_changed }}" != "true" && ${{ github.event_name == 'pull_request' }} ]]; then
+            echo "No changed files detected, skipping E2E tests."
+            echo "matrix=[]" >> $GITHUB_OUTPUT
+            echo "demos=[]" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          # get JSON array of directories in EXAMPLES_DIR
           subjobs=$(
-            find "${{ env.E2E_TEST_DIR }}" -type d -maxdepth 1 -mindepth 1 -exec basename {} \; \
+            find "${{ env.EXAMPLES_DIR }}" -type d -maxdepth 1 -mindepth 1 -exec basename {} \; \
             | jq -R -s -c 'split("\n")[:-1]'
           )
           # add "base" to subjobs
           subjobs=$(echo "$subjobs" | jq -c -r '. + ["base"]')
-          printf 'matrix=%s' "$subjobs" >> $GITHUB_OUTPUT
+          printf 'matrix=%s\n' "$subjobs" >> $GITHUB_OUTPUT
+
+          # get JSON array of directories in DEMO_DIR
+          demos=$(
+            find "${{ env.DEMO_DIR }}" -type d -maxdepth 1 -mindepth 1 -exec basename {} \; \
+            | jq -R -s -c 'split("\n")[:-1]'
+          )
+          printf 'demos=%s\n' "$demos" >> $GITHUB_OUTPUT
 
   tests-e2e:
-    needs: get-e2e-matrix
+    needs: [get-e2e-matrix]
+
+    if: needs.get-e2e-matrix.outputs.matrix != '[]'
 
     strategy:
       matrix:
@@ -184,17 +214,17 @@ jobs:
             arch: "arm"
             docker-engine: "docker"
             unit-tesseract: "base"
+          - os: "ubuntu-24.04"
+            python-version: "3.12"
+            arch: "arm"
+            docker-engine: "docker"
+            unit-tesseract: "pyvista-arm64"
           # Run tests using Podman
           - os: "ubuntu-24.04"
             python-version: "3.12"
             arch: "x64"
             docker-engine: "podman"
             unit-tesseract: "base"
-          - os: "ubuntu-24.04"
-            python-version: "3.12"
-            arch: "arm"
-            docker-engine: "docker"
-            unit-tesseract: "pyvista-arm64"
 
       fail-fast: false
 
@@ -216,6 +246,7 @@ jobs:
         with:
           auto-update-conda: true
           python-version: ${{ matrix.python-version }}
+          channels: defaults
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v6
@@ -272,14 +303,17 @@ jobs:
           fail_ci_if_error: true
 
   tests-demos:
+    needs: [get-e2e-matrix]
+
+    if: needs.get-e2e-matrix.outputs.demos != '[]'
+
     strategy:
       matrix:
         os: [ubuntu-latest]
         # test with oldest supported Python version only (for slow tests)
         python-version: ["3.10"]
 
-        demo:
-          - data-assimilation-4dvar
+        demo: ${{ fromJson(needs.get-e2e-matrix.outputs.demos) }}
 
       fail-fast: false
 
@@ -314,6 +348,7 @@ jobs:
 
 
   all-ok:
+    if: always()
     needs: [tests-base, tests-e2e, tests-demos]
 
     runs-on: ubuntu-latest
@@ -321,17 +356,17 @@ jobs:
     steps:
       - name: Check for errors
         run: |
-          if [ "${{ needs.tests-base.result }}" != "success" ]; then
+          if [[ "${{ needs.tests-base.result }}" != "success" && "${{ needs.tests-base.result }}" != "skipped" ]]; then
             echo "Base tests failed"
             exit 1
           fi
 
-          if [ "${{ needs.tests-e2e.result }}" != "success" ]; then
+          if [[ "${{ needs.tests-e2e.result }}" != "success" && "${{ needs.tests-e2e.result }}" != "skipped" ]]; then
             echo "E2E tests failed"
             exit 1
           fi
 
-          if [ "${{ needs.tests-demos.result }}" != "success" ]; then
+          if [[ "${{ needs.tests-demos.result }}" != "success" && "${{ needs.tests-demos.result }}" != "skipped" ]]; then
             echo "Demo tests failed"
             exit 1
           fi
