@@ -135,16 +135,16 @@ jobs:
           files: coverage*.xml
           fail_ci_if_error: true
 
-  changed-files:
-    name: Get changed files
+  get-e2e-matrix:
     runs-on: ubuntu-latest
+
     outputs:
-      changed-files: ${{ steps.changed-files.outputs.any_changed == 'true'}}
+      matrix: ${{ steps.get-matrix.outputs.matrix }}
+      demos: ${{ steps.get-matrix.outputs.demos }}
+
     steps:
       - name: Set up Git repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Get all changed files
         id: changed-files
@@ -158,36 +158,36 @@ jobs:
             production.uv.lock
             .github/workflows/run_tests.yml
 
-
-  get-e2e-matrix:
-    needs: [ changed-files ]
-    if: needs.changed-files.outputs.changed-files == 'true'
-    runs-on: ubuntu-latest
-
-    outputs:
-      matrix: ${{ steps.get-matrix.outputs.matrix }}
-
-    steps:
-      - name: Set up Git repository
-        uses: actions/checkout@v4
-
-      - name: Get available unit Tesseracts
+      - name: Get available test matrix
         id: get-matrix
         env:
-          E2E_TEST_DIR: examples
+          EXAMPLES_DIR: examples
+          DEMO_DIR: demo
         run: |
-          # get JSON array of directories in E2E_TEST_DIR
+          if [ "${{ steps.changed-files.outputs.any_changed }}" != "true" && ${{ github.event_name != 'push' }} ]; then
+            echo "No changed files detected, skipping E2E tests."
+            echo "matrix=[]" >> $GITHUB_OUTPUT
+            echo "demos=[]" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          # get JSON array of directories in EXAMPLES_DIR
           subjobs=$(
-            find "${{ env.E2E_TEST_DIR }}" -type d -maxdepth 1 -mindepth 1 -exec basename {} \; \
+            find "${{ env.EXAMPLES_DIR }}" -type d -maxdepth 1 -mindepth 1 -exec basename {} \; \
             | jq -R -s -c 'split("\n")[:-1]'
           )
           # add "base" to subjobs
           subjobs=$(echo "$subjobs" | jq -c -r '. + ["base"]')
           printf 'matrix=%s' "$subjobs" >> $GITHUB_OUTPUT
 
+          # get JSON array of directories in DEMO_DIR
+          demos=$(
+            find "${{ env.DEMO_DIR }}" -type d -maxdepth 1 -mindepth 1 -exec basename {} \; \
+            | jq -R -s -c 'split("\n")[:-1]'
+          )
+          printf 'demos=%s' "$demos" >> $GITHUB_OUTPUT
+
   tests-e2e:
-    needs: [get-e2e-matrix, changed-files]
-    if: needs.changed-files.outputs.changed-files == 'true'
+    needs: [get-e2e-matrix]
 
     strategy:
       matrix:
@@ -299,8 +299,7 @@ jobs:
           fail_ci_if_error: true
 
   tests-demos:
-    needs: [changed-files]
-    if: needs.changed-files.outputs.changed-files == 'true'
+    needs: [get-e2e-matrix]
 
     strategy:
       matrix:
@@ -308,8 +307,7 @@ jobs:
         # test with oldest supported Python version only (for slow tests)
         python-version: ["3.10"]
 
-        demo:
-          - data-assimilation-4dvar
+        demo: ${{ fromJson(needs.get-e2e-matrix.outputs.demos) }}
 
       fail-fast: false
 
