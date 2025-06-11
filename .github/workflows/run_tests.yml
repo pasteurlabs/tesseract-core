@@ -189,6 +189,8 @@ jobs:
   tests-e2e:
     needs: [get-e2e-matrix]
 
+    if: needs.get-e2e-matrix.outputs.matrix != '[]'
+
     strategy:
       matrix:
         os: [ubuntu-24.04]
@@ -300,6 +302,8 @@ jobs:
 
   tests-demos:
     needs: [get-e2e-matrix]
+
+    if: needs.get-e2e-matrix.outputs.demos != '[]'
 
     strategy:
       matrix:
