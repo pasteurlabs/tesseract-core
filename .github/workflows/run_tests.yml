@@ -136,7 +136,33 @@ jobs:
           files: coverage*.xml
           fail_ci_if_error: true
 
+  changed-files:
+    name: Get changed files
+    runs-on: ubuntu-latest
+    outputs:
+      changed-files: ${{ steps.changed-files.outputs.any_changed == 'true'}}
+    steps:
+      - name: Set up Git repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get all changed files
+        id: changed-files
+        uses: tj-actions/changed-files@ed68ef82c095e0d48ec87eccea555d944a631a4c # v46
+        with:
+          files: |
+            tesseract_core/**
+            tests/endtoend_tests/**
+            demo/**
+            examples/**
+            production.uv.lock
+            .github/workflows/run_tests.yml
+
+
   get-e2e-matrix:
+    needs: [ changed-files ]
+    if: needs.changed-files.outputs.changed-files == 'true'
     runs-on: ubuntu-latest
 
     outputs:
@@ -161,7 +187,8 @@ jobs:
           printf 'matrix=%s' "$subjobs" >> $GITHUB_OUTPUT
 
   tests-e2e:
-    needs: get-e2e-matrix
+    needs: [get-e2e-matrix, changed-files]
+    if: needs.changed-files.outputs.changed-files == 'true'
 
     strategy:
       matrix:
@@ -293,6 +320,9 @@ jobs:
           fail_ci_if_error: true
 
   tests-demos:
+    needs: [changed-files]
+    if: needs.changed-files.outputs.changed-files == 'true'
+
     strategy:
       matrix:
         os: [ubuntu-latest]
