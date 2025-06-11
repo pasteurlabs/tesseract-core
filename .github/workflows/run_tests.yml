@@ -342,6 +342,7 @@ jobs:
 
 
   all-ok:
+    if: always()
     needs: [tests-base, tests-e2e, tests-demos]
 
     runs-on: ubuntu-latest
@@ -349,17 +350,17 @@ jobs:
     steps:
       - name: Check for errors
         run: |
-          if [ "${{ needs.tests-base.result }}" != "success" ]; then
+          if [[ "${{ needs.tests-base.result }}" != "success" && "${{ needs.tests-base.result }}" != "skipped" ]]; then
             echo "Base tests failed"
             exit 1
           fi
 
-          if [ "${{ needs.tests-e2e.result }}" != "success" ]; then
+          if [[ "${{ needs.tests-e2e.result }}" != "success" && "${{ needs.tests-e2e.result }}" != "skipped" ]]; then
             echo "E2E tests failed"
             exit 1
           fi
 
-          if [ "${{ needs.tests-demos.result }}" != "success" ]; then
+          if [[ "${{ needs.tests-demos.result }}" != "success" && "${{ needs.tests-demos.result }}" != "skipped" ]]; then
             echo "Demo tests failed"
             exit 1
           fi
