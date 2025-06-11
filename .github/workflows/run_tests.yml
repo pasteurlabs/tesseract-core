@@ -156,7 +156,7 @@ jobs:
             demo/**
             examples/**
             production.uv.lock
-            .github/workflows/run_tests.yml
+          # .github/workflows/run_tests.yml
 
       - name: Get available test matrix
         id: get-matrix
@@ -164,7 +164,7 @@ jobs:
           EXAMPLES_DIR: examples
           DEMO_DIR: demo
         run: |
-          if [ "${{ steps.changed-files.outputs.any_changed }}" != "true" && ${{ github.event_name != 'push' }} ]; then
+          if [[ "${{ steps.changed-files.outputs.any_changed }}" != "true" && ${{ github.event_name != 'push' }} ]]; then
             echo "No changed files detected, skipping E2E tests."
             echo "matrix=[]" >> $GITHUB_OUTPUT
             echo "demos=[]" >> $GITHUB_OUTPUT
