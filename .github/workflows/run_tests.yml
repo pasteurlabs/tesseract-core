@@ -178,14 +178,14 @@ jobs:
           )
           # add "base" to subjobs
           subjobs=$(echo "$subjobs" | jq -c -r '. + ["base"]')
-          printf 'matrix=%s' "$subjobs" >> $GITHUB_OUTPUT
+          printf 'matrix=%s\n' "$subjobs" >> $GITHUB_OUTPUT
 
           # get JSON array of directories in DEMO_DIR
           demos=$(
             find "${{ env.DEMO_DIR }}" -type d -maxdepth 1 -mindepth 1 -exec basename {} \; \
             | jq -R -s -c 'split("\n")[:-1]'
           )
-          printf 'demos=%s' "$demos" >> $GITHUB_OUTPUT
+          printf 'demos=%s\n' "$demos" >> $GITHUB_OUTPUT
           cat $GITHUB_OUTPUT
 
   tests-e2e:
