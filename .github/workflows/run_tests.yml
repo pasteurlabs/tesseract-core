@@ -186,7 +186,7 @@ jobs:
             | jq -R -s -c 'split("\n")[:-1]'
           )
           printf 'demos=%s' "$demos" >> $GITHUB_OUTPUT
-          echo $GITHUB_OUTPUT
+          cat $GITHUB_OUTPUT
 
   tests-e2e:
     needs: [get-e2e-matrix]
