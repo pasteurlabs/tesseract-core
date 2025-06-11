@@ -113,6 +113,8 @@ def needs_docker(func: Callable) -> Callable:
             raise UserError(
                 "Could not reach Docker daemon, check if it is running."
             ) from ex
+        except FileNotFoundError as ex:
+            raise UserError("Docker not found, check if it is installed.") from ex
         return func(*args, **kwargs)
 
     return wrapper_needs_docker
