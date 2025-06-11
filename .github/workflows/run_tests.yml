@@ -185,9 +185,8 @@ jobs:
             find "${{ env.DEMO_DIR }}" -type d -maxdepth 1 -mindepth 1 -exec basename {} \; \
             | jq -R -s -c 'split("\n")[:-1]'
           )
-          echo "Found the following demos: $demos"
           printf 'demos=%s' "$demos" >> $GITHUB_OUTPUT
-          exit 1
+          echo $GITHUB_OUTPUT
 
   tests-e2e:
     needs: [get-e2e-matrix]
