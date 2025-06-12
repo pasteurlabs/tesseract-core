@@ -588,8 +588,10 @@ def serve(
                 f"Currently attempting to serve `{len(images)}` Tesseracts."
             )
         args = []
-        container_port = "8000"
-        args.extend(["--port", container_port])
+        container_api_port = "8000"
+        container_debugpy_port = "5678"
+
+        args.extend(["--port", container_api_port])
 
         if ports:
             port = ports[0]
@@ -612,11 +614,16 @@ def serve(
         logger.info(f"Serving Tesseract at http://{ping_ip}:{port}")
         logger.info(f"View Tesseract: http://{ping_ip}:{port}/docs")
 
+        ports = {f"{host_ip}:{port}": container_api_port}
+        if propagate_tracebacks:
+            debugpy_port = str(get_free_port())
+            ports[f"{host_ip}:{debugpy_port}"] = container_debugpy_port
+
         container = docker_client.containers.run(
             image=image_ids[0],
             command=["serve", *args],
             device_requests=gpus,
-            ports={f"{host_ip}:{port}": container_port},
+            ports=ports,
             detach=True,
             volumes=volumes,
         )
