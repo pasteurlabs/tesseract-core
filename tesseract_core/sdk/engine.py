@@ -798,13 +798,14 @@ def _validate_service_names(service_names: list[str]) -> None:
 
     invalid_names = []
     for name in service_names:
-        print(name)
         if not re.match(r'^[A-Za-z0-9][A-Za-z0-9-]*$', name):
+            invalid_names.append(name)
+        if name[-1] == '-':
             invalid_names.append(name)
     if len(invalid_names) != 0:
         raise ValueError(
             "Service names must contain only alphanumeric characters and hyphens, and must "
-            f"not begin with a hyphen. Found invalid names: f{invalid_names}."
+            f"not begin or end with a hyphen. Found invalid names: f{invalid_names}."
         )
 
 

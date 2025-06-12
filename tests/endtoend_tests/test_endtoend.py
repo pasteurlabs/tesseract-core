@@ -452,6 +452,7 @@ def test_tesseract_serve_with_volumes(built_image_name, tmp_path, docker_client)
 def test_tesseract_serve_interop(built_image_name, docker_client):
     cli_runner = CliRunner(mix_stderr=False)
 
+    s = 'a' + '-'*128 + 'a'
     run_res = cli_runner.invoke(
         app,
         [
@@ -459,7 +460,7 @@ def test_tesseract_serve_interop(built_image_name, docker_client):
             built_image_name,
             built_image_name,
             "--service-names",
-            "T1,T2",
+            f"T1,{s}",
         ],
         env={"COLUMNS": "1000"},
         catch_exceptions=False,
@@ -476,7 +477,7 @@ def test_tesseract_serve_interop(built_image_name, docker_client):
         returncode, stdout = T1.exec_run([
             "python", 
             "-c",  
-            "import requests; requests.get(\"http://T2:8000/health\").raise_for_status()"
+            f"import requests; requests.get(\"http://{s}:8000/health\").raise_for_status()"
             # I get a "tesseract_core has no attribute Tesseract" error from this??
             #"import tesseract_core; tesseract_core.Tesseract.from_url(\"http://t-9000:8000\").health()"
         ])
