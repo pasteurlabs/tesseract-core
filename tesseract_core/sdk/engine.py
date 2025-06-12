@@ -543,7 +543,7 @@ def serve(
     ports: list[str] | None = None,
     volumes: list[str] | None = None,
     gpus: list[str] | None = None,
-    propagate_tracebacks: bool = False,
+    debug: bool = False,
     num_workers: int = 1,
     no_compose: bool = False,
 ) -> str:
@@ -557,7 +557,7 @@ def serve(
         ports: port or port range to serve each Tesseract on.
         volumes: list of paths to mount in the Tesseract container.
         gpus: IDs of host Nvidia GPUs to make available to the Tesseracts.
-        propagate_tracebacks: Enable debug mode. This will propagate full tracebacks to the client
+        debug: Enable debug mode. This will propagate full tracebacks to the client
             and start a debugpy server in the Tesseract.
             WARNING: This may expose sensitive information, use with caution (and never in production).
         num_workers: number of workers to use for serving the Tesseracts.
@@ -603,7 +603,7 @@ def serve(
             args.extend(["--num-workers", str(num_workers)])
 
         # BUG (?): verify with @dionhaefner: tesseract-runtime serve doesn't seem to have this arg
-        # if propagate_tracebacks:
+        # if debug:
         #     args.append("--debug")
 
         # Always bind to all interfaces inside the container
@@ -615,13 +615,13 @@ def serve(
             ping_ip = host_ip
 
         ports = {f"{host_ip}:{port}": container_api_port}
-        if propagate_tracebacks:
+        if debug:
             debugpy_port = str(get_free_port())
             ports[f"{host_ip}:{debugpy_port}"] = container_debugpy_port
 
         logger.info(f"Serving Tesseract at http://{ping_ip}:{port}")
         logger.info(f"View Tesseract: http://{ping_ip}:{port}/docs")
-        if propagate_tracebacks:
+        if debug:
             logger.info(f"Debugpy server listening at http://{ping_ip}:{debugpy_port}")
 
         container = docker_client.containers.run(
@@ -658,7 +658,7 @@ def serve(
         volumes,
         gpus,
         num_workers,
-        debug=propagate_tracebacks,
+        debug=debug,
     )
     compose_fname = f"docker-compose-{_id_generator()}.yml"
 

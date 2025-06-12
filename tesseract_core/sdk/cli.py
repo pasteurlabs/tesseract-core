@@ -448,7 +448,7 @@ def serve(
             show_default=True,
         ),
     ] = 1,
-    propagate_tracebacks: Annotated[
+    debug: Annotated[
         bool,
         typer.Option(
             "--propagate-tracebacks",
@@ -500,7 +500,7 @@ def serve(
             ports,
             volume,
             gpus,
-            propagate_tracebacks,
+            debug,
             num_workers,
             no_compose,
         )
