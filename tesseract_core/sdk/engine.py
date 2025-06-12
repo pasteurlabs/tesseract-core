@@ -611,13 +611,15 @@ def serve(
         else:
             ping_ip = host_ip
 
-        logger.info(f"Serving Tesseract at http://{ping_ip}:{port}")
-        logger.info(f"View Tesseract: http://{ping_ip}:{port}/docs")
-
         ports = {f"{host_ip}:{port}": container_api_port}
         if propagate_tracebacks:
             debugpy_port = str(get_free_port())
             ports[f"{host_ip}:{debugpy_port}"] = container_debugpy_port
+
+        logger.info(f"Serving Tesseract at http://{ping_ip}:{port}")
+        logger.info(f"View Tesseract: http://{ping_ip}:{port}/docs")
+        if propagate_tracebacks:
+            logger.info(f"Debugpy server listening at http://{ping_ip}:{debugpy_port}")
 
         container = docker_client.containers.run(
             image=image_ids[0],
