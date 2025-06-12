@@ -682,6 +682,11 @@ def _create_docker_compose_template(
             taken_ports = [int(p) for p in ports if "-" not in p]
             ports.append(str(get_free_port(exclude=taken_ports)))
 
+    # Get random unique ports for debugpy if debug mode is active
+    debugpy_ports = []
+    for _ in image_ids:
+        debugpy_ports.append(str(get_free_port(exclude=taken_ports)))
+
     # Convert port ranges to fixed ports
     for i, port in enumerate(ports):
         if "-" in port:
@@ -703,18 +708,18 @@ def _create_docker_compose_template(
         else:
             gpu_settings = f"device_ids: {gpus}"
 
-    for i, (image_id, port) in enumerate(zip(image_ids, ports, strict=True)):
+    for i, image_id in enumerate(image_ids):
         service = {
             "name": f"{image_id.split(':')[0]}-{_id_generator()}",
             "image": image_id,
-            "port": f"{port}:8000",
+            "port": f"{ports[i]}:8000",
             "volumes": volumes,
             "gpus": gpu_settings,
             "environment": {
                 "TESSERACT_DEBUG": "1" if debug else "0",
             },
             "num_workers": num_workers,
-            "debugpy_port": 5678 + i,
+            "debugpy_port": debugpy_ports[i],
         }
 
         services.append(service)
