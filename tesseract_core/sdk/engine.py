@@ -557,7 +557,8 @@ def serve(
         ports: port or port range to serve each Tesseract on.
         volumes: list of paths to mount in the Tesseract container.
         gpus: IDs of host Nvidia GPUs to make available to the Tesseracts.
-        propagate_tracebacks: Enable debug mode. This will propagate full tracebacks to the client.
+        propagate_tracebacks: Enable debug mode. This will propagate full tracebacks to the client
+            and start a debugpy server in the Tesseract.
             WARNING: This may expose sensitive information, use with caution (and never in production).
         num_workers: number of workers to use for serving the Tesseracts.
         no_compose: if True, do not use Docker Compose to serve the Tesseracts.

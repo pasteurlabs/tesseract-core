@@ -453,7 +453,8 @@ def serve(
         typer.Option(
             "--propagate-tracebacks",
             help=(
-                "Enable debug mode. This will propagate full tracebacks to the client. "
+                "Enable debug mode. This will propagate full tracebacks to the client "
+                "and start a debugpy server in the Tesseract. "
                 "WARNING: This may expose sensitive information, use with caution (and never in production)."
             ),
         ),
