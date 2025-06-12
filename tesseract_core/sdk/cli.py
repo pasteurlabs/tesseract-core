@@ -653,6 +653,14 @@ def _display_project_meta(project_id: str) -> list:
         container_ports.append(
             {"name": container.name, "port": host_port, "ip": host_ip}
         )
+        if container.debugpy_port:
+            logger.info(
+                f"Debugpy server listening at http://{host_ip}:{container.debugpy_port}"
+            )
+            # TODO: maybe we should add an api/debugpy/... flag to these ports?
+            container_ports.append(
+                {"name": container.name, "port": container.debugpy_port, "ip": host_ip}
+            )
 
     return container_ports
 
