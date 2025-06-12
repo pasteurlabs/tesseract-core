@@ -7,7 +7,7 @@ Tesseracts natively support DP and autodiff as an optional feature – as long a
 
 ## Autodiff flavors
 
-There are several ways to compute the derivative of a pipeline of functions with respect to their inputs, and each has its own trade-offs. Tesseracts support both forward-mode and reverse-mode autodiff, as well as the computation of the full Jacobian and Hessian matrices.
+There are several ways to compute the derivative of a pipeline of functions with respect to their inputs, and each has its own trade-offs. Tesseracts support both forward-mode and reverse-mode autodiff, as well as the computation of the full Jacobian matrix.
 
 ```{figure} /img/autodiff-flavors.png
 :alt: Autodiff flavors
