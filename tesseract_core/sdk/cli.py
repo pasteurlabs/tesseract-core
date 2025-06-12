@@ -29,6 +29,7 @@ from .api_parse import (
     ValidationError,
     get_non_base_fields_in_tesseract_config,
 )
+from .config import update_config
 from .docker_client import (
     APIError,
     BuildError,
@@ -173,6 +174,11 @@ def main_callback(
     app.pretty_exceptions_show_locals = verbose_tracebacks
 
     set_logger(loglevel, catch_warnings=True, rich_format=True)
+
+    try:
+        update_config()
+    except FileNotFoundError as e:
+        raise UserError(f"{e}") from None
 
 
 def _parse_config_override(
