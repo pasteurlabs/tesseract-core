@@ -43,4 +43,5 @@ def test_bad_docker_executable_env_var(cli_runner):
     os.environ["TESSERACT_DOCKER_EXECUTABLE"] = "not-a-docker"
 
     result = cli_runner.invoke(cli, ["ps"])
-    assert result.exit_code == 1, result.stderr
+    assert result.exit_code == 1
+    assert "not found" in result.stderr
