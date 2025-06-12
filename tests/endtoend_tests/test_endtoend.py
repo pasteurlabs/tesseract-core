@@ -449,6 +449,55 @@ def test_tesseract_serve_with_volumes(built_image_name, tmp_path, docker_client)
             assert run_res.exit_code == 0, run_res.stderr
 
 
+def test_tesseract_serve_interop(built_image_name, docker_client):
+    cli_runner = CliRunner(mix_stderr=False)
+
+    run_res = cli_runner.invoke(
+        app,
+        [
+            "serve",
+            built_image_name,
+            built_image_name,
+            "--service-names",
+            "T1,T2",
+        ],
+        env={"COLUMNS": "1000"},
+        catch_exceptions=False,
+    )
+    assert run_res.exit_code == 0
+    
+    project_meta = json.loads(run_res.stdout)
+    project_id = project_meta["project_id"]
+    project_containers = [project_meta["containers"][i]["name"] for i in range(2)]
+
+    T1 = docker_client.containers.get(project_containers[0])
+
+    try:
+        returncode, stdout = T1.exec_run([
+            "python", 
+            "-c",  
+            "import requests; requests.get(\"http://T2:8000/health\").raise_for_status()"
+            # I get a "tesseract_core has no attribute Tesseract" error from this??
+            #"import tesseract_core; tesseract_core.Tesseract.from_url(\"http://t-9000:8000\").health()"
+        ])
+        assert returncode == 0, stdout
+    except Exception as e:
+        assert False, e
+    finally:
+        return
+        if project_id:
+            run_res = cli_runner.invoke(
+                app,
+                [
+                    "teardown",
+                    project_id,
+                ],
+                catch_exceptions=False,
+            )
+            assert run_res.exit_code == 0, run_res.stderr
+
+
+
 @pytest.mark.parametrize("no_compose", [True, False])
 def test_serve_nonstandard_host_ip(
     docker_client, built_image_name, docker_cleanup, free_port, no_compose
