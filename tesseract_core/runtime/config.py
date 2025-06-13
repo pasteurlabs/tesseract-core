@@ -27,6 +27,7 @@ def update_config(**kwargs: Any) -> None:
     global _current_config
 
     conf_settings = {}
+
     for field in RuntimeConfig.model_fields.keys():
         env_key = f"TESSERACT_{field.upper()}"
         if env_key in os.environ:
@@ -44,4 +45,7 @@ update_config()
 
 def get_config() -> RuntimeConfig:
     """Return the current runtime configuration."""
+    if _current_config is None:
+        update_config()
+
     return _current_config

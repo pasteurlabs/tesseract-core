@@ -6,6 +6,8 @@
 (Those go in endtoend_tests/test_endtoend.py.)
 """
 
+import subprocess
+
 import pytest
 from typer.testing import CliRunner
 
@@ -35,3 +37,11 @@ def test_version(cli_runner):
     result = cli_runner.invoke(cli, ["--version"])
     assert result.exit_code == 0, result.stdout
     assert __version__ in result.stdout
+
+
+def test_bad_docker_executable_env_var(monkeypatch):
+    monkeypatch.setenv("TESSERACT_DOCKER_EXECUTABLE", "not-a-docker")
+
+    with pytest.raises(subprocess.CalledProcessError):
+        result = subprocess.run(["tesseract", "ps"], check=True, capture_output=True)
+        assert "Executable not found" in result.stderr
