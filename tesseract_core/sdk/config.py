@@ -80,4 +80,8 @@ _current_config = None
 
 def get_config() -> RuntimeConfig:
     """Return the current runtime configuration."""
+    global _current_config
+
+    if _current_config is None:
+        update_config()
     return _current_config
