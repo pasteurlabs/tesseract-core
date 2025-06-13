@@ -75,8 +75,10 @@ def update_config(**kwargs: Any) -> None:
 
     try:
         config = RuntimeConfig(**conf_settings)
-    except (PydanticValidationError, FileNotFoundError) as err:
+    except PydanticValidationError as err:
         raise ValidationError(f"Invalid configuration: {err}") from err
+    except (FileNotFoundError, PermissionError) as err:
+        raise ValidationError(f"Executable not found or not executable: {err}") from err
     _current_config = config
 
 
