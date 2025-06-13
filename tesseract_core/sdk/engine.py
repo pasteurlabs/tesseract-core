@@ -614,10 +614,10 @@ def serve(
         else:
             ping_ip = host_ip
 
-        ports = {f"{host_ip}:{port}": container_api_port}
+        port_mappings = {f"{host_ip}:{port}": container_api_port}
         if debug:
             debugpy_port = str(get_free_port())
-            ports[f"{host_ip}:{debugpy_port}"] = container_debugpy_port
+            port_mappings[f"{host_ip}:{debugpy_port}"] = container_debugpy_port
 
         logger.info(f"Serving Tesseract at http://{ping_ip}:{port}")
         logger.info(f"View Tesseract: http://{ping_ip}:{port}/docs")
@@ -628,7 +628,7 @@ def serve(
             image=image_ids[0],
             command=["serve", *args],
             device_requests=gpus,
-            ports=ports,
+            ports=port_mappings,
             detach=True,
             volumes=volumes,
         )
