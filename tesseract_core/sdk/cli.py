@@ -86,12 +86,6 @@ app = typer.Typer(
 state = SimpleNamespace()
 state.print_user_error_tracebacks = False
 
-try:
-    get_config()
-except ValidationError as e:
-    raise UserError(f"{e}") from None
-
-
 # Create a list of possible commands based on the ones in api_parse (kebab-cased)
 POSSIBLE_CMDS = set(
     re.sub(r"([a-z])([A-Z])", r"\1-\2", object.name).replace("_", "-").lower()
@@ -180,6 +174,11 @@ def main_callback(
     app.pretty_exceptions_show_locals = verbose_tracebacks
 
     set_logger(loglevel, catch_warnings=True, rich_format=True)
+
+    try:
+        get_config()
+    except ValidationError as e:
+        raise UserError(f"{e}") from None
 
 
 def _parse_config_override(
