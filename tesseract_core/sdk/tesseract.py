@@ -29,6 +29,7 @@ class SpawnConfig:
     gpus: list[str] | None
     num_workers: int
     debug: bool
+    no_compose: bool
 
 
 def requires_client(func: Callable) -> Callable:
@@ -85,6 +86,7 @@ class Tesseract:
         volumes: list[str] | None = None,
         gpus: list[str] | None = None,
         num_workers: int = 1,
+        no_compose: bool = False,
     ) -> Tesseract:
         """Create a Tesseract instance from a Docker image.
 
@@ -106,6 +108,7 @@ class Tesseract:
             num_workers: Number of worker processes to use. This determines how
                 many requests can be handled in parallel. Higher values
                 will increase throughput, but also increase resource usage.
+            no_compose: if True, do not use Docker Compose to serve the Tesseracts.
 
         Returns:
             A Tesseract instance.
@@ -117,6 +120,7 @@ class Tesseract:
             gpus=gpus,
             num_workers=num_workers,
             debug=True,
+            no_compose=no_compose,
         )
         obj._serve_context = None
         obj._lastlog = None
@@ -222,6 +226,7 @@ class Tesseract:
             gpus=self._spawn_config.gpus,
             num_workers=self._spawn_config.num_workers,
             debug=self._spawn_config.debug,
+            no_compose=self._spawn_config.no_compose,
             host_ip=host_ip,
         )
         self._serve_context = dict(
@@ -263,6 +268,7 @@ class Tesseract:
         gpus: list[str] | None = None,
         debug: bool = False,
         num_workers: int = 1,
+        no_compose: bool = False,
     ) -> tuple[str, str, int]:
         if port is not None:
             ports = [port]
@@ -277,6 +283,7 @@ class Tesseract:
             propagate_tracebacks=debug,
             num_workers=num_workers,
             host_ip=host_ip,
+            no_compose=no_compose,
         )
 
         first_container = engine.get_project_containers(project_id)[0]
