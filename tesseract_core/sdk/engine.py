@@ -696,8 +696,10 @@ def _create_docker_compose_template(
 
     # Get random unique ports for debugpy if debug mode is active
     debugpy_ports = []
-    for _ in image_ids:
-        debugpy_ports.append(str(get_free_port(exclude=taken_ports)))
+    if debug:
+        for _ in image_ids:
+            taken_ports = [int(p) for p in ports if "-" not in p]
+            debugpy_ports.append(str(get_free_port(exclude=taken_ports)))
 
     # Convert port ranges to fixed ports
     for i, port in enumerate(ports):
@@ -731,7 +733,7 @@ def _create_docker_compose_template(
                 "TESSERACT_DEBUG": "1" if debug else "0",
             },
             "num_workers": num_workers,
-            "debugpy_port": debugpy_ports[i],
+            "debugpy_port": debugpy_ports[i] if debug else None,
         }
 
         services.append(service)
