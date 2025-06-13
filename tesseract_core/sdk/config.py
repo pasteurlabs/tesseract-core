@@ -8,7 +8,8 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Annotated, Any
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, PydanticValidationError
+from pydantic import BaseModel, BeforeValidator, ConfigDict
+from pydantic import ValidationError as PydanticValidationError
 
 from .api_parse import ValidationError
 
@@ -77,6 +78,9 @@ def update_config(**kwargs: Any) -> None:
     except (PydanticValidationError, FileNotFoundError) as err:
         raise ValidationError(f"Invalid configuration: {err}") from err
     _current_config = config
+
+
+_current_config = None
 
 
 def get_config() -> RuntimeConfig:
