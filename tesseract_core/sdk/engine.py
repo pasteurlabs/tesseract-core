@@ -602,10 +602,6 @@ def serve(
         if num_workers > 1:
             args.extend(["--num-workers", str(num_workers)])
 
-        # BUG (?): verify with @dionhaefner: tesseract-runtime serve doesn't seem to have this arg
-        # if debug:
-        #     args.append("--debug")
-
         # Always bind to all interfaces inside the container
         args.extend(["--host", "0.0.0.0"])
 
