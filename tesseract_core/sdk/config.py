@@ -8,7 +8,9 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Annotated, Any
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict
+from pydantic import BaseModel, BeforeValidator, ConfigDict, PydanticValidationError
+
+from .api_parse import ValidationError
 
 
 def validate_executable(value: str | Sequence[str]) -> tuple[str, ...]:
@@ -63,19 +65,18 @@ def update_config(**kwargs: Any) -> None:
 
     conf_settings = {}
 
-    if _current_config is None:
-        for field in RuntimeConfig.model_fields.keys():
-            env_key = f"TESSERACT_{field.upper()}"
-            if env_key in os.environ:
-                conf_settings[field] = os.environ[env_key]
+    for field in RuntimeConfig.model_fields.keys():
+        env_key = f"TESSERACT_{field.upper()}"
+        if env_key in os.environ:
+            conf_settings[field] = os.environ[env_key]
 
     conf_settings.update(kwargs)
 
-    config = RuntimeConfig(**conf_settings)
+    try:
+        config = RuntimeConfig(**conf_settings)
+    except (PydanticValidationError, FileNotFoundError) as err:
+        raise ValidationError(f"Invalid configuration: {err}") from err
     _current_config = config
-
-
-_current_config = None
 
 
 def get_config() -> RuntimeConfig:

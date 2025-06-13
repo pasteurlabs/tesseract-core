@@ -29,7 +29,7 @@ from .api_parse import (
     ValidationError,
     get_non_base_fields_in_tesseract_config,
 )
-from .config import update_config
+from .config import get_config
 from .docker_client import (
     APIError,
     BuildError,
@@ -176,8 +176,8 @@ def main_callback(
     set_logger(loglevel, catch_warnings=True, rich_format=True)
 
     try:
-        update_config()
-    except FileNotFoundError as e:
+        get_config()
+    except ValidationError as e:
         raise UserError(f"{e}") from None
 
 
