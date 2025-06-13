@@ -274,7 +274,7 @@ class Tesseract:
             ports=ports,
             volumes=volumes,
             gpus=gpus,
-            propagate_tracebacks=debug,
+            debug=debug,
             num_workers=num_workers,
             host_ip=host_ip,
         )
