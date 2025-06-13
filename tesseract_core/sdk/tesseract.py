@@ -108,7 +108,7 @@ class Tesseract:
             num_workers: Number of worker processes to use. This determines how
                 many requests can be handled in parallel. Higher values
                 will increase throughput, but also increase resource usage.
-            no_compose: if True, do not use $TESSERACT_DOCKER_CMD Compose to serve the Tesseracts.
+            no_compose: if True, do not use Docker Compose to serve the Tesseracts.
 
         Returns:
             A Tesseract instance.
