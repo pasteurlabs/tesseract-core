@@ -560,7 +560,7 @@ def serve(
         propagate_tracebacks: Enable debug mode. This will propagate full tracebacks to the client.
             WARNING: This may expose sensitive information, use with caution (and never in production).
         num_workers: number of workers to use for serving the Tesseracts.
-        no_compose: if True, do not use Docker Compose to serve the Tesseracts.
+        no_compose: if True, do not use $TESSERACT_DOCKER_CMD Compose to serve the Tesseracts.
 
     Returns:
         A string representing the Tesseract project ID.
