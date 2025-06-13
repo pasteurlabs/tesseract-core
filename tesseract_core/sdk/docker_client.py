@@ -309,7 +309,7 @@ class Container:
             ports = self.attrs["NetworkSettings"].get("Ports", None)
             if ports:
                 debugpy_port_key = "5678/tcp"
-                if ports[debugpy_port_key]:
+                if debugpy_port_key in ports:
                     return ports[debugpy_port_key][0].get("HostPort")
         return None
 
