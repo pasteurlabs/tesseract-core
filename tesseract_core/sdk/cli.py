@@ -451,7 +451,7 @@ def serve(
     debug: Annotated[
         bool,
         typer.Option(
-            "--propagate-tracebacks",
+            "--debug",
             help=(
                 "Enable debug mode. This will propagate full tracebacks to the client "
                 "and start a debugpy server in the Tesseract. "
