@@ -89,4 +89,8 @@ def get_config() -> RuntimeConfig:
     """Return the current runtime configuration."""
     if _current_config is None:
         update_config()
+<<<<<<< ako/testexit
+=======
+
+>>>>>>> heitor/fix-docker-not-found
     return _current_config
