@@ -303,7 +303,7 @@ class Container:
         return None
 
     @property
-    def debugpy_port(self) -> str | None:
+    def host_debugpy_port(self) -> str | None:
         """Gets the host port which maps to debugpy server in the container."""
         if self.attrs.get("NetworkSettings", None):
             ports = self.attrs["NetworkSettings"].get("Ports", None)
