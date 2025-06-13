@@ -49,7 +49,7 @@ The GPUs are indexed starting at zero with the same convention as `nvidia-smi`.
      is displayed in the cli when spinning up a tesseract via `tesseract serve`. This allows you to perform
      remote debugging sessions.
 
-In particular, if you are using vscode , here is a sample launch config to attach to a running Tesseract in
+In particular, if you are using VScode, here is a sample launch config to attach to a running Tesseract in
 debug mode:
 ```json
         {
@@ -68,4 +68,10 @@ debug mode:
             ],
         },
 ```
-(make sure to fill in with the actual port number).
+(make sure to fill in with the actual port number). After inserting this into the `configurations`
+field of your `launch.json` file, you should be able to attach to the Tesseract being served by clicking on the
+green "play" button at the top left corner of the "Run and Debug" tab.
+
+![Starting remote debug session in VScode](./remote_debug.png)
+
+For more information on the VSCode debugger, see [this guide](https://code.visualstudio.com/docs/debugtest/debugging).
