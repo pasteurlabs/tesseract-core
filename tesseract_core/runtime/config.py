@@ -41,9 +41,11 @@ def update_config(**kwargs: Any) -> None:
 
 
 _current_config = None
-update_config()
 
 
 def get_config() -> RuntimeConfig:
     """Return the current runtime configuration."""
+    if _current_config is None:
+        update_config()
+
     return _current_config
