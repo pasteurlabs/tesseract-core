@@ -6,8 +6,6 @@
 (Those go in endtoend_tests/test_endtoend.py.)
 """
 
-import os
-
 import pytest
 from typer.testing import CliRunner
 
@@ -39,8 +37,8 @@ def test_version(cli_runner):
     assert __version__ in result.stdout
 
 
-def test_bad_docker_executable_env_var(cli_runner):
-    os.environ["TESSERACT_DOCKER_EXECUTABLE"] = "not-a-docker"
+def test_bad_docker_executable_env_var(cli_runner, monkeypatch):
+    monkeypatch.setenv("TESSERACT_DOCKER_EXECUTABLE", "not-a-docker")
 
     result = cli_runner.invoke(cli, ["ps"])
     assert result.exit_code == 1
