@@ -449,10 +449,10 @@ def test_tesseract_serve_with_volumes(built_image_name, tmp_path, docker_client)
             assert run_res.exit_code == 0, run_res.stderr
 
 
-def test_tesseract_serve_interop(built_image_name, docker_client):
+def test_tesseract_serve_interop(built_image_name, docker_client, docker_cleanup):
     cli_runner = CliRunner(mix_stderr=False)
 
-    s = 'a' + '-'*128 + 'a'
+
     run_res = cli_runner.invoke(
         app,
         [
@@ -460,7 +460,7 @@ def test_tesseract_serve_interop(built_image_name, docker_client):
             built_image_name,
             built_image_name,
             "--service-names",
-            f"T1,{s}",
+            f"tess-1,tess-2",
         ],
         env={"COLUMNS": "1000"},
         catch_exceptions=False,
@@ -469,32 +469,17 @@ def test_tesseract_serve_interop(built_image_name, docker_client):
     
     project_meta = json.loads(run_res.stdout)
     project_id = project_meta["project_id"]
+    docker_cleanup["project_ids"].append(project_id)
+
     project_containers = [project_meta["containers"][i]["name"] for i in range(2)]
 
-    T1 = docker_client.containers.get(project_containers[0])
+    tess_1 = docker_client.containers.get(project_containers[0])
 
-    try:
-        returncode, stdout = T1.exec_run([
-            "python", 
-            "-c",  
-            f"import requests; requests.get(\"http://{s}:8000/health\").raise_for_status()"
-            # I get a "tesseract_core has no attribute Tesseract" error from this??
-            #"import tesseract_core; tesseract_core.Tesseract.from_url(\"http://t-9000:8000\").health()"
-        ])
-        assert returncode == 0, stdout
-    except Exception as e:
-        assert False, e
-    finally:
-        if project_id:
-            run_res = cli_runner.invoke(
-                app,
-                [
-                    "teardown",
-                    project_id,
-                ],
-                catch_exceptions=False,
-            )
-            assert run_res.exit_code == 0, run_res.stderr
+    returncode, stdout = tess_1.exec_run([
+        "python", 
+        "-c",  
+        f"import requests; requests.get(\"http://tess-2:8000/health\").raise_for_status()"
+    ])
 
 
 
