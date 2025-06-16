@@ -13,6 +13,7 @@ dependencies = [
     "msgpack>=1.1,<=1.1.0",
     "pybase64>=1.4,<=1.4.1",
     "numpy>=1.26,<=2.2.4",
+    "debugpy>=1.8.14,<=1.8.14",
 ]
 
 [project.scripts]
