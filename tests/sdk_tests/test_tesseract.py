@@ -120,6 +120,7 @@ def test_serve_lifecycle(mock_serving, mock_clients):
         debug=True,
         num_workers=1,
         host_ip="127.0.0.1",
+        no_compose=False,
     )
 
     mock_serving["teardown_mock"].assert_called_with("proj-id-123")
