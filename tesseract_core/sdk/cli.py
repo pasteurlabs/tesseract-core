@@ -448,12 +448,13 @@ def serve(
             show_default=True,
         ),
     ] = 1,
-    propagate_tracebacks: Annotated[
+    debug: Annotated[
         bool,
         typer.Option(
-            "--propagate-tracebacks",
+            "--debug",
             help=(
-                "Enable debug mode. This will propagate full tracebacks to the client. "
+                "Enable debug mode. This will propagate full tracebacks to the client "
+                "and start a debugpy server in the Tesseract. "
                 "WARNING: This may expose sensitive information, use with caution (and never in production)."
             ),
         ),
@@ -499,7 +500,7 @@ def serve(
             ports,
             volume,
             gpus,
-            propagate_tracebacks,
+            debug,
             num_workers,
             no_compose,
         )
@@ -653,6 +654,10 @@ def _display_project_meta(project_id: str) -> list:
         container_ports.append(
             {"name": container.name, "port": host_port, "ip": host_ip}
         )
+        if container.host_debugpy_port:
+            logger.info(
+                f"Debugpy server listening at http://{host_ip}:{container.host_debugpy_port}"
+            )
 
     return container_ports
 
