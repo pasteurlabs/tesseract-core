@@ -44,4 +44,5 @@ def test_bad_docker_executable_env_var(monkeypatch):
 
     with pytest.raises(subprocess.CalledProcessError):
         result = subprocess.run(["tesseract", "ps"], check=True, capture_output=True)
-        assert "Executable not found" in result.stderr
+        assert result.returncode == 1
+        assert "Executable `not-a-docker` not found" in result.stderr.decode()

@@ -9,9 +9,6 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict
-from pydantic import ValidationError as PydanticValidationError
-
-from .api_parse import ValidationError
 
 
 def validate_executable(value: str | Sequence[str]) -> tuple[str, ...]:
@@ -66,19 +63,15 @@ def update_config(**kwargs: Any) -> None:
 
     conf_settings = {}
 
-    for field in RuntimeConfig.model_fields.keys():
-        env_key = f"TESSERACT_{field.upper()}"
-        if env_key in os.environ:
-            conf_settings[field] = os.environ[env_key]
+    if _current_config is None:
+        for field in RuntimeConfig.model_fields.keys():
+            env_key = f"TESSERACT_{field.upper()}"
+            if env_key in os.environ:
+                conf_settings[field] = os.environ[env_key]
 
     conf_settings.update(kwargs)
 
-    try:
-        config = RuntimeConfig(**conf_settings)
-    except PydanticValidationError as err:
-        raise ValidationError(f"Invalid configuration: {err}") from err
-    except (FileNotFoundError, PermissionError) as err:
-        raise ValidationError(f"Executable not found or not executable: {err}") from err
+    config = RuntimeConfig(**conf_settings)
     _current_config = config
 
 

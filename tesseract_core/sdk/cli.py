@@ -18,6 +18,7 @@ from typing import Annotated, Any, NoReturn
 import click
 import typer
 from jinja2 import Environment, PackageLoader, StrictUndefined
+from pydantic import ValidationError as PydanticValidationError
 from rich.console import Console as RichConsole
 from rich.table import Table as RichTable
 
@@ -177,8 +178,8 @@ def main_callback(
 
     try:
         get_config()
-    except ValidationError as e:
-        raise UserError(f"{e}") from None
+    except (FileNotFoundError, PermissionError, PydanticValidationError) as err:
+        raise UserError(f"{err}") from None
 
 
 def _parse_config_override(
@@ -186,7 +187,7 @@ def _parse_config_override(
 ) -> tuple[tuple[list[str], str], ...]:
     """Parse `["path1.path2.path3=value"]` into `[(["path1", "path2", "path3"], "value")]`."""
     if options is None:
-        return []
+        return ()
 
     def _parse_option(option: str):
         bad_param = typer.BadParameter(
