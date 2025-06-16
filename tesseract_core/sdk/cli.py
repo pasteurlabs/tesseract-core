@@ -527,6 +527,8 @@ def serve(
                 (
                     "Service name specification only works with Docker Compose."
                 ),
+                param_hint="service_names",
+            )
 
         service_names_list = service_names.split(',')
     else:
