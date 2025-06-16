@@ -802,10 +802,10 @@ def _validate_service_names(service_names: list[str]) -> None:
             invalid_names.append(name)
         if name[-1] == '-':
             invalid_names.append(name)
-    if len(invalid_names) != 0:
+    if invalid_names:
         raise ValueError(
             "Service names must contain only alphanumeric characters and hyphens, and must "
-            f"not begin or end with a hyphen. Found invalid names: f{invalid_names}."
+            f"not begin or end with a hyphen. Found invalid names: {invalid_names}."
         )
 
 
