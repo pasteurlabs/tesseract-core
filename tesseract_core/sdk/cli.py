@@ -522,6 +522,12 @@ def serve(
         ports = None
 
     if service_names is not None:
+        if no_compose:
+            raise typer.BadParameter(
+                (
+                    "Service name specification only works with Docker Compose."
+                ),
+
         service_names_list = service_names.split(',')
     else:
         service_names_list = None
