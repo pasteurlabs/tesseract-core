@@ -14,7 +14,7 @@ from urllib.parse import urlparse, urlunparse
 
 import numpy as np
 import requests
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 from pydantic_core import InitErrorDetails
 
 from . import engine
@@ -660,8 +660,11 @@ class LocalClient:
         except Exception as ex:
             raise RuntimeError(f"Error running Tesseract API {endpoint}.") from ex
 
-        if OutputSchema is not None and issubclass(OutputSchema, BaseModel):
+        if OutputSchema is not None:
             # Validate via schema, then dump to stay consistent with other clients
-            result = OutputSchema.model_validate(result).model_dump()
+            if isinstance(OutputSchema, type) and issubclass(OutputSchema, BaseModel):
+                result = OutputSchema.model_validate(result).model_dump()
+            else:
+                result = TypeAdapter(OutputSchema).validate_python(result)
 
         return result
