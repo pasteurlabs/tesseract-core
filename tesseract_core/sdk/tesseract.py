@@ -517,20 +517,7 @@ class HTTPClient:
         """(Sanitized) URL to connect to."""
         return self._url
 
-    def _request(
-        self, endpoint: str, method: str = "GET", payload: dict | None = None
-    ) -> dict:
-        url = f"{self.url}/{endpoint.lstrip('/')}"
-
-        if payload:
-            encoded_payload = _tree_map(
-                _encode_array, payload, is_leaf=lambda x: hasattr(x, "shape")
-            )
-        else:
-            encoded_payload = None
-
-        response = requests.request(method=method, url=url, json=encoded_payload)
-
+    def _throw_error_if_response_bad(self, response: requests.Response) -> None:
         if response.status_code == requests.codes.unprocessable_entity:
             # Try and raise a more helpful error if the response is a Pydantic error
             try:
@@ -558,13 +545,50 @@ class HTTPClient:
                     errors.append(error)
 
                 raise ValidationError.from_exception_data(
-                    f"endpoint {endpoint}", line_errors=errors
+                    "Malformed data!", line_errors=errors
                 )
 
         if not response.ok:
             raise RuntimeError(
                 f"Error {response.status_code} from Tesseract: {response.text}"
             )
+
+    def _request(
+        self, endpoint: str, method: str = "GET", payload: dict | None = None
+    ) -> dict:
+        url = f"{self.url}/{endpoint.lstrip('/')}"
+
+        if payload:
+            encoded_payload = _tree_map(
+                _encode_array, payload, is_leaf=lambda x: hasattr(x, "shape")
+            )
+        else:
+            encoded_payload = None
+
+        if endpoint in [
+            "apply",
+            "jacobian",
+            "jacobian_vector_product",
+            "vector_jacobian_product",
+        ]:
+            response = requests.request(
+                method=method, url=f"{url}/async_start", json=encoded_payload
+            )
+            self._throw_error_if_response_bad(response)
+
+            data = response.json()
+            task_id = data["task_id"]
+
+            while True:
+                response = requests.post(
+                    f"{url}/async_retrieve", json={"task_id": task_id}
+                )
+                if response.status_code != requests.codes.accepted:
+                    break
+        else:
+            response = requests.request(method=method, url=url, json=encoded_payload)
+
+        self._throw_error_if_response_bad(response)
 
         data = response.json()
 

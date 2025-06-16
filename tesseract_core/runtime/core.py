@@ -126,6 +126,8 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
             out = out.model_dump()
         return ApplyOutputSchema.model_validate(out)
 
+    apply.input_schema = ApplyInputSchema
+    apply.output_schema = ApplyOutputSchema
     endpoints.append(apply)
 
     if "jacobian" in supported_functions:
@@ -148,6 +150,8 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
                 },
             )
 
+        jacobian.input_schema = JacobianInputSchema
+        jacobian.output_schema = JacobianOutputSchema
         endpoints.append(jacobian)
 
     if "jacobian_vector_product" in supported_functions:
@@ -167,6 +171,8 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
                 out, context={"output_keys": payload.jvp_outputs}
             )
 
+        jacobian_vector_product.input_schema = JVPInputSchema
+        jacobian_vector_product.output_schema = JVPOutputSchema
         endpoints.append(jacobian_vector_product)
 
     if "vector_jacobian_product" in supported_functions:
@@ -186,6 +192,8 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
                 out, context={"input_keys": payload.vjp_inputs}
             )
 
+        vector_jacobian_product.input_schema = VJPInputSchema
+        vector_jacobian_product.output_schema = VJPOutputSchema
         endpoints.append(vector_jacobian_product)
 
     def health() -> dict[str, Any]:

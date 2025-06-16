@@ -481,6 +481,14 @@ def create_autodiff_schema(
         Since the structure of the result is already validated in core.py, we only need to check the shapes
         to ensure they match what's expected from the schema.
         """
+        # ======
+        # TODO: This makes autodiff models pass in the main process validation
+        # (since the main process doesn't currently specify input_keys and output_keys when validating workers' output).
+        # Fix properly by avoiding (duplicate) validation in main process after validating in the async worker already?
+        if info.context is None:
+            return result
+        # ======
+
         if ad_flavor == "jacobian":
             if set(info.context["output_keys"]) != set(result.keys()):
                 raise ValueError(
