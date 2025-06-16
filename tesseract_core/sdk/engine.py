@@ -796,7 +796,6 @@ def _validate_service_names(service_names: list[str]) -> None:
     if len(set(service_names)) != len(service_names):
         raise ValueError("Service names must be unique")
 
-    print(service_names)
     invalid_names = []
     for name in service_names:
         print(name)
