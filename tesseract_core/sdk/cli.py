@@ -491,9 +491,10 @@ def serve(
         typer.Option(
             "--service-names",
             help=(
-                "Comma-separated list of service names by which each tesseract should be exposed "
+                "Comma-separated list of service names by which each Tesseract should be exposed "
                 "in the shared network. "
-                "Tesseracts are reachable from one another at http://{service_name}:8000"
+                "Tesseracts are reachable from one another at http://{service_name}:8000. "
+                "Not supported when using --no-compose."
             ),
         ),
     ] = None

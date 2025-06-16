@@ -600,7 +600,7 @@ def serve(
             )
         if service_names is not None:
             raise ValueError(
-                "Tesseract service names are only meaningful with Docker Compose."
+                "Tesseract service names can only be set when using Docker Compose."
             )
         args = []
         container_api_port = "8000"
