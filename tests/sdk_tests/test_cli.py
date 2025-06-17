@@ -6,6 +6,7 @@
 (Those go in endtoend_tests/test_endtoend.py.)
 """
 
+import os
 import subprocess
 
 import pytest
@@ -40,9 +41,15 @@ def test_version(cli_runner):
 
 
 def test_bad_docker_executable_env_var(monkeypatch):
-    monkeypatch.setenv("TESSERACT_DOCKER_EXECUTABLE", "not-a-docker")
-
     with pytest.raises(subprocess.CalledProcessError):
-        result = subprocess.run(["tesseract", "ps"], check=True, capture_output=True)
+        env = os.environ
+        env.update({"TESSERACT_DOCKER_EXECUTABLE": "not-a-docker"})
+
+        result = subprocess.run(
+            ["tesseract", "ps"],
+            env=env,
+            check=True,
+            capture_output=True,
+        )
         assert result.returncode == 1
         assert "Executable `not-a-docker` not found" in result.stderr.decode()
