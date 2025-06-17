@@ -38,7 +38,7 @@ def update_config(**kwargs: Any) -> None:
     conf_settings.update(kwargs)
     config = RuntimeConfig(**conf_settings)
 
-    _config_overrides.update(set(kwargs.keys()))
+    _config_overrides.update(set(conf_settings.keys()))
     _current_config = config
 
 
