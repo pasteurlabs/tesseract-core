@@ -40,7 +40,7 @@ def test_version(cli_runner):
     assert __version__ in result.stdout
 
 
-def test_bad_docker_executable_env_var(monkeypatch):
+def test_bad_docker_executable_env_var():
     env = os.environ.copy()
     env.update({"TESSERACT_DOCKER_EXECUTABLE": "not-a-docker"})
 
