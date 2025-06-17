@@ -178,7 +178,7 @@ def main_callback(
 
     try:
         get_config()
-    except (FileNotFoundError, PermissionError, PydanticValidationError) as err:
+    except (FileNotFoundError, PydanticValidationError) as err:
         raise UserError(f"{err}") from None
 
 

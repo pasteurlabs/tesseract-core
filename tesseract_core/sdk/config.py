@@ -25,8 +25,6 @@ def validate_executable(value: str | Sequence[str]) -> tuple[str, ...]:
     exe_path = Path(exe)
     if not exe_path.is_file():
         raise FileNotFoundError(f"{exe} is not a file.")
-    if not os.access(exe_path, os.X_OK):
-        raise PermissionError(f"{exe} is not executable.")
 
     return (str(exe_path.resolve()), *args)
 
