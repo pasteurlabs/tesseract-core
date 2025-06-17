@@ -778,6 +778,24 @@ def run_container(
             ),
         ),
     ] = None,
+    env: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--env",
+            "-e",
+            help="Set environment variables in the Tesseract container, in Docker format: key=value.",
+            metavar="key=value",
+            show_default=False,
+        ),
+    ] = None,
+    network: Annotated[
+        str | None,
+        typer.Option(
+            "--network",
+            help="Network to use for the Tesseract container.",
+            show_default=False,
+        ),
+    ] = None,
 ) -> None:
     """Execute a command in a Tesseract.
 
@@ -821,7 +839,13 @@ def run_container(
 
     try:
         result_out, result_err = engine.run_tesseract(
-            tesseract_image, cmd, args, volumes=volume, gpus=gpus
+            tesseract_image,
+            cmd,
+            args,
+            volumes=volume,
+            gpus=gpus,
+            environment=env,
+            network=network,
         )
 
     except ImageNotFound as e:

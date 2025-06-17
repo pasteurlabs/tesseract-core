@@ -569,6 +569,8 @@ def serve(
     if not images or not all(isinstance(item, str) for item in images):
         raise ValueError("One or more Tesseract image IDs must be provided")
 
+    _serve_mlflow_compose()
+
     image_ids = []
     for image_ in images:
         image = docker_client.images.get(image_)
@@ -671,6 +673,12 @@ def serve(
         return project_name
 
 
+def _serve_mlflow_compose():
+    mlflow_compose_file = get_template_dir() / "docker-compose-mlflow.yml"
+    if not docker_client.compose.up(mlflow_compose_file, "mlflow-server"):
+        raise RuntimeError("Cannot serve MLflow")
+
+
 def _create_docker_compose_template(
     image_ids: list[str],
     host_ip: str = "127.0.0.1",
@@ -727,6 +735,7 @@ def _create_docker_compose_template(
             "gpus": gpu_settings,
             "environment": {
                 "TESSERACT_DEBUG": "1" if debug else "0",
+                "MLFLOW_TRACKING_URI": "http://mlflow-server:5000",
             },
             "num_workers": num_workers,
             "debugpy_port": debugpy_ports[i] if debug else None,
@@ -777,6 +786,8 @@ def run_tesseract(
     volumes: list[str] | None = None,
     gpus: list[int | str] | None = None,
     ports: dict[str, str] | None = None,
+    environment: list[str] | None = None,
+    network: str | None = None,
 ) -> tuple[str, str]:
     """Start a Tesseract and execute a given command.
 
@@ -788,6 +799,9 @@ def run_tesseract(
         gpus: list of GPUs, as indices or names, to passthrough the container.
         ports: dictionary of ports to bind to the host. Key is the host port,
             value is the container port.
+        environment: list of environment variables to set in the container,
+            in Docker format: key=value.
+        network: name of the Docker network to connect the container to.
 
     Returns:
         Tuple with the stdout and stderr of the Tesseract.
@@ -852,6 +866,8 @@ def run_tesseract(
         command=cmd,
         volumes=parsed_volumes,
         device_requests=gpus,
+        environment=environment,
+        network=network,
         ports=ports,
         detach=False,
         remove=True,
