@@ -452,7 +452,6 @@ def test_tesseract_serve_with_volumes(built_image_name, tmp_path, docker_client)
 def test_tesseract_serve_interop(built_image_name, docker_client, docker_cleanup):
     cli_runner = CliRunner(mix_stderr=False)
 
-
     run_res = cli_runner.invoke(
         app,
         [
@@ -475,12 +474,13 @@ def test_tesseract_serve_interop(built_image_name, docker_client, docker_cleanup
 
     tess_1 = docker_client.containers.get(project_containers[0])
 
-    returncode, stdout = tess_1.exec_run([
-        "python",
-        "-c",
-        "import requests; requests.get(\"http://tess-2:8000/health\").raise_for_status()"
-    ])
-
+    returncode, stdout = tess_1.exec_run(
+        [
+            "python",
+            "-c",
+            'import requests; requests.get("http://tess-2:8000/health").raise_for_status()',
+        ]
+    )
 
 
 @pytest.mark.parametrize("no_compose", [True, False])

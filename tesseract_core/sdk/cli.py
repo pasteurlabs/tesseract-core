@@ -497,7 +497,7 @@ def serve(
                 "Not supported when using --no-compose."
             ),
         ),
-    ] = None
+    ] = None,
 ) -> None:
     """Serve one or more Tesseract images.
 
@@ -524,13 +524,11 @@ def serve(
     if service_names is not None:
         if no_compose:
             raise typer.BadParameter(
-                (
-                    "Service name specification only works with Docker Compose."
-                ),
+                ("Service name specification only works with Docker Compose."),
                 param_hint="service_names",
             )
 
-        service_names_list = service_names.split(',')
+        service_names_list = service_names.split(",")
     else:
         service_names_list = None
 
