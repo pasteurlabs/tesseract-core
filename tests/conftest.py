@@ -158,7 +158,7 @@ def dummy_tesseract(dummy_tesseract_package):
     try:
         # Configure via envvar so we also propagate it to subprocesses
         os.environ["TESSERACT_API_PATH"] = str(api_path)
-        update_config()
+        update_config(api_path=api_path)
         yield
     finally:
         # As this is used by an auto-use fixture, cleanup may happen
