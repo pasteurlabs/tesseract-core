@@ -41,15 +41,14 @@ def test_version(cli_runner):
 
 
 def test_bad_docker_executable_env_var(monkeypatch):
-    with pytest.raises(subprocess.CalledProcessError):
-        env = os.environ
-        env.update({"TESSERACT_DOCKER_EXECUTABLE": "not-a-docker"})
+    env = os.environ.copy()
+    env.update({"TESSERACT_DOCKER_EXECUTABLE": "not-a-docker"})
 
-        result = subprocess.run(
-            ["tesseract", "ps"],
-            env=env,
-            check=True,
-            capture_output=True,
-        )
-        assert result.returncode == 1
-        assert "Executable `not-a-docker` not found" in result.stderr.decode()
+    result = subprocess.run(
+        ["tesseract", "ps"],
+        env=env,
+        check=False,
+        capture_output=True,
+    )
+    assert result.returncode == 1
+    assert "Executable `not-a-docker` not found" in result.stderr.decode()
