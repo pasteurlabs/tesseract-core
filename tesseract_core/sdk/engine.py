@@ -585,7 +585,7 @@ def serve(
             f"Number of ports ({len(ports)}) must match number of images ({len(image_ids)})"
         )
 
-    if service_names is not None: 
+    if service_names is not None:
         if len(service_names) != len(image_ids):
             raise ValueError(
                 f"Number of service names ({len(service_names)}) must match number of images ({len(image_ids)})"

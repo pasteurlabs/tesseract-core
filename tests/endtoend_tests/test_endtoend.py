@@ -460,13 +460,13 @@ def test_tesseract_serve_interop(built_image_name, docker_client, docker_cleanup
             built_image_name,
             built_image_name,
             "--service-names",
-            f"tess-1,tess-2",
+            "tess-1,tess-2",
         ],
         env={"COLUMNS": "1000"},
         catch_exceptions=False,
     )
     assert run_res.exit_code == 0
-    
+
     project_meta = json.loads(run_res.stdout)
     project_id = project_meta["project_id"]
     docker_cleanup["project_ids"].append(project_id)
@@ -476,9 +476,9 @@ def test_tesseract_serve_interop(built_image_name, docker_client, docker_cleanup
     tess_1 = docker_client.containers.get(project_containers[0])
 
     returncode, stdout = tess_1.exec_run([
-        "python", 
-        "-c",  
-        f"import requests; requests.get(\"http://tess-2:8000/health\").raise_for_status()"
+        "python",
+        "-c",
+        "import requests; requests.get(\"http://tess-2:8000/health\").raise_for_status()"
     ])
 
 
@@ -585,7 +585,7 @@ def test_tarball_install(dummy_tesseract_package):
     class InputSchema(BaseModel):
         message: str = "Hello, Tesseractor!"
 
-    class OutputSchema(BaseModel):
+        class OutputSchema(BaseModel):
         out: str
 
     def apply(inputs: InputSchema) -> OutputSchema:
