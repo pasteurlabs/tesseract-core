@@ -178,8 +178,17 @@ def main_callback(
 
     try:
         get_config()
-    except (FileNotFoundError, PydanticValidationError) as err:
-        raise UserError(f"{err}") from None
+    except PydanticValidationError as err:
+        message = [
+            "Error while parsing Tesseract configuration. "
+            "Please check your environment variables.",
+            "Errors found:",
+        ]
+        for error in err.errors():
+            message.append(
+                f' - TESSERACT_{str(error["loc"][0]).upper()}="{error["input"]}": {error["msg"]}'
+            )
+        raise UserError("\n".join(message)) from None
 
 
 def _parse_config_override(

@@ -20,11 +20,13 @@ def validate_executable(value: str | Sequence[str]) -> tuple[str, ...]:
 
     exe = shutil.which(exe)
     if exe is None:
-        raise FileNotFoundError(f"Executable `{value}` not found.")
+        raise ValueError(f"Executable `{value}` not found.")
 
     exe_path = Path(exe)
     if not exe_path.is_file():
-        raise FileNotFoundError(f"{exe} is not a file.")
+        raise ValueError(f"{exe} is not a file.")
+    if not os.access(exe_path, os.X_OK):
+        raise ValueError(f"{exe} is not executable.")
 
     return (str(exe_path.resolve()), *args)
 
