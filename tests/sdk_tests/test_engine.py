@@ -192,7 +192,7 @@ def test_run_tesseract_file_input(mocked_docker, tmpdir):
     }
 
 
-def test_serve_tesseracts_invalid_input_args():
+def test_serve_tesseracts_invalid_input_args(mocked_docker):
     """Test input validation logic for multi-tesseract serve."""
     with suppress_type_checks():
         with pytest.raises(ValueError):
