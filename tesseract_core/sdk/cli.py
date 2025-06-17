@@ -18,6 +18,7 @@ from typing import Annotated, Any, NoReturn
 import click
 import typer
 from jinja2 import Environment, PackageLoader, StrictUndefined
+from pydantic import ValidationError as PydanticValidationError
 from rich.console import Console as RichConsole
 from rich.table import Table as RichTable
 
@@ -29,6 +30,7 @@ from .api_parse import (
     ValidationError,
     get_non_base_fields_in_tesseract_config,
 )
+from .config import get_config
 from .docker_client import (
     APIError,
     BuildError,
@@ -174,13 +176,27 @@ def main_callback(
 
     set_logger(loglevel, catch_warnings=True, rich_format=True)
 
+    try:
+        get_config()
+    except PydanticValidationError as err:
+        message = [
+            "Error while parsing Tesseract configuration. "
+            "Please check your environment variables.",
+            "Errors found:",
+        ]
+        for error in err.errors():
+            message.append(
+                f' - TESSERACT_{str(error["loc"][0]).upper()}="{error["input"]}": {error["msg"]}'
+            )
+        raise UserError("\n".join(message)) from None
+
 
 def _parse_config_override(
     options: list[str] | None,
 ) -> tuple[tuple[list[str], str], ...]:
     """Parse `["path1.path2.path3=value"]` into `[(["path1", "path2", "path3"], "value")]`."""
     if options is None:
-        return []
+        return ()
 
     def _parse_option(option: str):
         bad_param = typer.BadParameter(
