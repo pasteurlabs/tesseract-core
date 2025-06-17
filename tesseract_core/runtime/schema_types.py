@@ -85,7 +85,7 @@ class ShapeDType(BaseModel):
                 shape = shapedtype.shape
                 if expected_shape is Ellipsis:
                     return shapedtype
-                for actual, expected in zip(shape, expected_shape, strict=True):
+                for actual, expected in zip(shape, expected_shape):
                     if expected is not None and actual != expected:
                         raise ValueError(
                             f"Expected shape: {expected_shape}. Found: {shape}."

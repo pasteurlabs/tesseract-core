@@ -143,7 +143,7 @@ def filter_func(
 
     def filtered_func(*args: Any) -> dict:
         if input_paths:
-            new_inputs = dict(zip(input_paths, args, strict=True))
+            new_inputs = dict(zip(input_paths, args))
         else:
             if len(args) != 1:
                 raise ValueError("Expected a single dictionary argument")
