@@ -481,6 +481,7 @@ def test_tesseract_serve_interop(built_image_name, docker_client, docker_cleanup
             'import requests; requests.get("http://tess-2:8000/health").raise_for_status()',
         ]
     )
+    assert returncode == 0, stdout.decode()
 
 
 @pytest.mark.parametrize("no_compose", [True, False])
@@ -585,7 +586,7 @@ def test_tarball_install(dummy_tesseract_package):
     class InputSchema(BaseModel):
         message: str = "Hello, Tesseractor!"
 
-        class OutputSchema(BaseModel):
+    class OutputSchema(BaseModel):
         out: str
 
     def apply(inputs: InputSchema) -> OutputSchema:
