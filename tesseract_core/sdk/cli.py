@@ -524,7 +524,7 @@ def serve(
     if service_names is not None:
         if no_compose:
             raise typer.BadParameter(
-                ("Service name specification only works with Docker Compose."),
+                "Service name specification only works with Docker Compose.",
                 param_hint="service_names",
             )
 
