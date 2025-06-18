@@ -574,7 +574,7 @@ def test_tesseract_cli_options_parsing(built_image_name, tmpdir):
             assert ".bin:0" in results
 
 
-def test_tarball_install(dummy_tesseract_package):
+def test_tarball_install(dummy_tesseract_package, docker_cleanup):
     import subprocess
     from textwrap import dedent
 
@@ -611,3 +611,6 @@ def test_tarball_install(dummy_tesseract_package):
         catch_exceptions=False,
     )
     assert result.exit_code == 0, result.stderr
+
+    img_tag = json.loads(result.stdout)[0]
+    docker_cleanup["images"].append(img_tag)
