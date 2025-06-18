@@ -192,7 +192,7 @@ def test_run_tesseract_file_input(mocked_docker, tmpdir):
     }
 
 
-def test_serve_tesseracts_invalid_input_args():
+def test_serve_tesseracts_invalid_input_args(mocked_docker):
     """Test input validation logic for multi-tesseract serve."""
     with suppress_type_checks():
         with pytest.raises(ValueError):
@@ -206,6 +206,28 @@ def test_serve_tesseracts_invalid_input_args():
 
         with pytest.raises(ValueError):
             engine.teardown(None)
+
+        with pytest.raises(ValueError):
+            engine.serve(["vectoradd"], ports=["8080", "8081"])
+
+        with pytest.raises(ValueError):
+            engine.serve(["vectoradd"], service_names=["A", "B"])
+
+        with pytest.raises(ValueError):
+            engine.serve(
+                ["vectoradd", "vectoradd"],
+                no_compose=True,
+                service_names=["VA1", "VA2"],
+            )
+
+        with pytest.raises(ValueError):
+            engine.serve(["vectoradd", "vectoradd"], service_names=["dupe", "dupe"])
+
+        with pytest.raises(ValueError):
+            engine.serve(["vectoradd"], service_names=["inval$id-domain-name"])
+
+        with pytest.raises(ValueError):
+            engine.serve(["vectoradd"], service_names=["-invalid-name"])
 
 
 def test_get_tesseract_images(mocked_docker):
@@ -240,6 +262,12 @@ def test_serve_tesseracts(mocked_docker):
 
     # Serve with gpus
     project_name_multi_tesseract = engine.serve(["vectoradd"], gpus=["1", "3"])
+    assert project_name_multi_tesseract
+
+    # Serve and specify tesseract service names
+    project_name_multi_tesseract = engine.serve(
+        ["vectoradd", "vectoradd"], service_names=["VA1", "VA2"]
+    )
     assert project_name_multi_tesseract
 
 
