@@ -155,6 +155,10 @@ class Images:
         """
         docker = _get_executable("docker")
         extra_args = get_config().docker_build_args
+
+        if ssh is not None:
+            extra_args = ("--ssh", ssh, *extra_args)
+
         build_cmd = [
             *docker,
             "buildx",
@@ -168,9 +172,6 @@ class Images:
             "--",
             str(path),
         ]
-
-        if ssh is not None:
-            build_cmd.extend(["--ssh", ssh])
 
         return build_cmd
 
