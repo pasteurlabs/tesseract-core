@@ -1,5 +1,5 @@
 ---
-title: 'Tesseract Core: Autodiff-native, self-documenting software components for Simulation Intelligence'
+title: 'Tesseract Core: Universal, autodiff-native software components for Simulation Intelligence'
 tags:
   - automatic-differentiation
   - differentiable-programming
