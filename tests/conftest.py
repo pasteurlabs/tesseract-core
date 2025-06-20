@@ -152,13 +152,13 @@ def dummy_tesseract(dummy_tesseract_package):
     # default may have been used and tesseract_api.py is not guaranteed to exist
     # therefore, we only pass the original path in cleanup if not equal to default
     if orig_path != Path("tesseract_api.py"):
-        orig_config_kwargs |= {"tesseract_api_path": orig_path}
+        orig_config_kwargs |= {"api_path": orig_path}
     api_path = Path(dummy_tesseract_package / "tesseract_api.py").resolve()
 
     try:
         # Configure via envvar so we also propagate it to subprocesses
         os.environ["TESSERACT_API_PATH"] = str(api_path)
-        update_config()
+        update_config(api_path=api_path)
         yield
     finally:
         # As this is used by an auto-use fixture, cleanup may happen
