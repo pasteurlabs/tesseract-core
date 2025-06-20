@@ -41,3 +41,4 @@ services:
 
 networks:
   multi-tesseract-network:
+    external: true

@@ -14,6 +14,7 @@ dependencies = [
     "pybase64>=1.4,<=1.4.1",
     "numpy>=1.26,<=2.2.4",
     "debugpy>=1.8.14,<=1.8.14",
+    "mlflow>=3.1.0,<=3.1.0",
 ]
 
 [project.scripts]

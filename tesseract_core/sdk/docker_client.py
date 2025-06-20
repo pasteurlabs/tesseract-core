@@ -506,6 +506,8 @@ class Containers:
         image: str,
         command: list_[str],
         volumes: dict | None = None,
+        environment: list_[str] | None = None,
+        network: str | None = None,
         device_requests: list_[int | str] | None = None,
         detach: bool = False,
         remove: bool = False,
@@ -555,6 +557,20 @@ class Containers:
                     f"{host_path}:{volume_info['bind']}:{volume_info['mode']}"
                 )
             optional_args.extend(volume_args)
+
+        if environment:
+            env_args = []
+            for env_var in environment:
+                if "=" not in env_var:
+                    raise ValueError(
+                        f"Invalid environment variable format: {env_var}. "
+                        "Use key=value format."
+                    )
+                env_args.extend(["-e", env_var])
+            optional_args.extend(env_args)
+
+        if network:
+            optional_args.extend(["--network", network])
 
         if device_requests:
             gpus_str = ",".join(device_requests)
@@ -691,7 +707,7 @@ class Compose:
             The project name.
         """
         docker_compose = _get_executable("docker-compose")
-        logger.info("Waiting for Tesseract containers to start ...")
+        logger.info(f"Waiting for {project_name} containers to start ...")
         try:
             _ = subprocess.run(
                 [
