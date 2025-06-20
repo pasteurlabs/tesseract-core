@@ -373,6 +373,7 @@ def build_tesseract(
     inject_ssh: bool = False,
     config_override: tuple[tuple[list[str], str], ...] = (),
     generate_only: bool = False,
+    skip_checks: bool = False,
 ) -> Image | Path:
     """Build a new Tesseract from a context directory.
 
@@ -386,6 +387,8 @@ def build_tesseract(
         inject_ssh: whether or not to forward SSH agent when building the image.
         config_override: overrides for configuration options in the Tesseract.
         generate_only: only generate the build context but do not build the image.
+        skip_checks: if True, skip pre-build validation of the Tesseract API and
+          runtime checks. Runtime behaviour may be overridden by config_override.
 
     Returns:
         Image object representing the built Tesseract image,
@@ -393,7 +396,9 @@ def build_tesseract(
     """
     src_dir = Path(src_dir)
 
-    validate_tesseract_api(src_dir)
+    if not skip_checks:
+        validate_tesseract_api(src_dir)
+
     config = get_config(src_dir)
 
     # Apply config overrides

@@ -94,7 +94,7 @@ class CondaRequirements(BaseModel):
 PythonRequirements = Union[PipRequirements, CondaRequirements]
 
 
-class TesseractBuildConfig(BaseModel):
+class TesseractBuildConfig(BaseModel, validate_assignment=True):
     """Configuration options for building a Tesseract."""
 
     base_image: StrictStr = Field(
@@ -139,7 +139,7 @@ OptionalBuildConfig = Annotated[
 ]
 
 
-class TesseractConfig(BaseModel):
+class TesseractConfig(BaseModel, validate_assignment=True):
     """Configuration options for Tesseracts. Defines valid options in ``tesseract_config.yaml``."""
 
     name: StrictStr = Field(..., description="Name of the Tesseract.")
@@ -154,6 +154,14 @@ class TesseractConfig(BaseModel):
     )
 
     model_config = ConfigDict(extra="forbid")
+
+    skip_checks: bool = Field(
+        False,
+        description=(
+            "If True, skip runtime checks of Tesseract API module. "
+            "This can be useful for development, but may lead to runtime errors if the API is not valid."
+        ),
+    )
 
 
 class ValidationError(Exception):
