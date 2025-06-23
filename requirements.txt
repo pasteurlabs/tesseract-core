@@ -32,7 +32,7 @@ pygments==2.19.2
     # via rich
 pyyaml==6.0.2
     # via tesseract-core
-requests==2.32.3
+requests==2.32.4
     # via tesseract-core
 rich==14.0.0
     # via
