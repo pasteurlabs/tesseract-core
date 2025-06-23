@@ -4,6 +4,7 @@
 """End-to-end tests for Tesseract workflows."""
 
 import json
+import traceback
 from pathlib import Path
 
 import pytest
@@ -111,6 +112,48 @@ def test_build_generate_only(dummy_tesseract_location):
     assert build_dir.exists()
     dockerfile_path = build_dir / "Dockerfile"
     assert dockerfile_path.exists()
+
+
+@pytest.mark.parametrize("skip_checks", [True, False])
+def test_build_skip_checks(
+    docker_cleanup, dummy_tesseract_location, tmp_path, skip_checks
+):
+    """Test output of build with --config-override='build_config.skip_checks=True' flag."""
+    with open(dummy_tesseract_location / "tesseract_api.py") as f:
+        tesseract_api_code = f.read()
+    bad_api_code = tesseract_api_code.replace(
+        "InputSchema(BaseModel)", "InputSchema(tuple)"
+    )
+    with open(dummy_tesseract_location / "tesseract_api.py", "w") as f:
+        f.write(bad_api_code)
+
+    cli_runner = CliRunner(mix_stderr=False)
+    build_res = cli_runner.invoke(
+        app,
+        [
+            "build",
+            str(dummy_tesseract_location),
+            *(
+                ("--config-override=build_config.skip_checks=True",)
+                if skip_checks
+                else ()
+            ),
+        ],
+        # Ensure that the output is not truncated
+        env={"COLUMNS": "1000"},
+        catch_exceptions=True,
+    )
+
+    if skip_checks:
+        image_name = json.loads(build_res.stdout)[0]
+        docker_cleanup["images"].append(image_name)
+        assert build_res.exit_code == 0, build_res.stderr
+    else:
+        full_traceback = "".join(traceback.format_exception(*build_res.exc_info))
+        assert (
+            'failed to solve: process "tesseract-runtime check" did not complete successfully'
+            in full_traceback
+        )
 
 
 def test_tesseract_list(built_image_name):
