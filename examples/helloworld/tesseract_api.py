@@ -4,7 +4,7 @@
 from pydantic import BaseModel, Field
 
 
-class InputSchema(Field):
+class InputSchema(BaseModel):
     name: str = Field(description="Name of the person you want to greet.")
 
 
