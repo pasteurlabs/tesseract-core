@@ -131,6 +131,11 @@ class TesseractBuildConfig(BaseModel, validate_assignment=True):
 
     model_config = ConfigDict(extra="forbid")
 
+    skip_checks: bool = Field(
+        False,
+        description=("If True, skip runtime checks of Tesseract API module."),
+    )
+
 
 # Allow None to be passed as a valid value for build_config, for example in YAML that comments out all options.
 OptionalBuildConfig = Annotated[
@@ -154,11 +159,6 @@ class TesseractConfig(BaseModel, validate_assignment=True):
     )
 
     model_config = ConfigDict(extra="forbid")
-
-    skip_checks: bool = Field(
-        False,
-        description=("If True, skip runtime checks of Tesseract API module."),
-    )
 
 
 class ValidationError(Exception):

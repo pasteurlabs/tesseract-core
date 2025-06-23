@@ -95,7 +95,7 @@ COPY ["{{ tesseract_source_directory }}/{{ source_path }}", "{{ target_path }}"]
 {% endif %}
 
 # Final sanity check to ensure the runtime is installed and tesseract_api.py is valid
-{% if not config.skip_checks %}
+{% if not config.build_config.skip_checks %}
 RUN ["tesseract-runtime", "check"]
 {% endif %}
 
