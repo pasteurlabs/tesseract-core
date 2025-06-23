@@ -33,6 +33,7 @@ except ModuleNotFoundError as e:
 from .schema_types import (
     Array,
     Differentiable,
+    FileReference,
     Float16,
     Float32,
     Float64,
@@ -50,6 +51,7 @@ from .schema_types import (
 __all__ = [
     "Array",
     "Differentiable",
+    "FileReference",
     "Float16",
     "Float32",
     "Float64",
