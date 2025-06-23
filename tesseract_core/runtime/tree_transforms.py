@@ -143,7 +143,12 @@ def filter_func(
 
     def filtered_func(*args: Any) -> dict:
         if input_paths:
-            new_inputs = dict(zip(input_paths, args, strict=True))
+            # TODO: replace this check with `zip(... strict=True)`
+            # once we stop supporting 3.9
+            assert len(input_paths) == len(args), (
+                f"Mismatch between number of given paths {len(input_paths)} and args {len(args)}."
+            )
+            new_inputs = dict(zip(input_paths, args))
         else:
             if len(args) != 1:
                 raise ValueError("Expected a single dictionary argument")
