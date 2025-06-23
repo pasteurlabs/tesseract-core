@@ -282,16 +282,6 @@ def build_image(
             help="Only generate the build context and do not actually build the image."
         ),
     ] = False,
-    skip_checks: Annotated[
-        bool,
-        typer.Option(
-            "--skip-checks",
-            help=(
-                "If True, skip pre-build validation and post-build runtime checks of Tesseract API module."
-                "This can be useful for development, but may lead to runtime errors if the API is not valid."
-            ),
-        ),
-    ] = False,
 ) -> None:
     """Build a new Tesseract from a context directory.
 
@@ -303,13 +293,7 @@ def build_image(
     """
     if config_override is None:
         config_override = []
-    # Explicit config override for skip_checks take precedence over skip_checks flag.
-    # Note that skip_checks=True skips skips the pre-build validation Teseract API validation
-    # even if config_override contains `build_config.skip_checks=False`.
-    if skip_checks and not [
-        co for co in config_override if co.startswith("skip_checks")
-    ]:
-        config_override.append("skip_checks=True")
+
     parsed_config_override = _parse_config_override(config_override)
 
     if generate_only:
@@ -328,7 +312,6 @@ def build_image(
                 inject_ssh=forward_ssh_agent,
                 config_override=parsed_config_override,
                 generate_only=generate_only,
-                skip_checks=skip_checks,
             )
     except BuildError as e:
         # raise from None to Avoid overly long tracebacks,

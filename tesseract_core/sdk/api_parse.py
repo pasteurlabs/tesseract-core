@@ -157,10 +157,7 @@ class TesseractConfig(BaseModel, validate_assignment=True):
 
     skip_checks: bool = Field(
         False,
-        description=(
-            "If True, skip runtime checks of Tesseract API module. "
-            "This can be useful for development, but may lead to runtime errors if the API is not valid."
-        ),
+        description=("If True, skip runtime checks of Tesseract API module."),
     )
 
 
