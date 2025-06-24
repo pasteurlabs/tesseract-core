@@ -133,7 +133,11 @@ class TesseractBuildConfig(BaseModel, validate_assignment=True):
 
     skip_checks: bool = Field(
         False,
-        description=("If True, skip runtime checks of Tesseract API module."),
+        description=(
+            "If True, skip build-time checks of Tesseract API module. "
+            "This can be useful when such a check cannot succeed (e.g. when building for a "
+            "different platform), but may lead to runtime errors if the Tesseract API is not valid."
+        ),
     )
 
 
