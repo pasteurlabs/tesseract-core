@@ -18,6 +18,8 @@ class OutputSchema(BaseModel):
 
 def apply(inputs: InputSchema) -> OutputSchema:
     """Greet a person whose name is given as input."""
+    print(f"Received input: {inputs}")
+    print(f"Dumped input: {inputs.model_dump()}")
     # read the file to demonstrate usage of FileReference
     with inputs.input_file.open() as f:
         file_content = f.read()

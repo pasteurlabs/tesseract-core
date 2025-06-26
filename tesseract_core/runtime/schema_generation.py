@@ -140,6 +140,11 @@ def apply_function_to_model_tree(
             model_config = ConfigDict(**default_model_config)
             model_config.update(treeobj.model_config)
 
+            # If the model is a RootModel, we need to skip extra="forbid"
+            is_root_model = issubclass(treeobj, RootModel)
+            if is_root_model:
+                model_config.pop("extra", None)
+
             return create_model(
                 f"{model_prefix}{treeobj.__name__}",
                 **new_fields,
