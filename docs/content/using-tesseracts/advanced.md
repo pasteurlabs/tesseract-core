@@ -16,6 +16,24 @@ target path:
 $ tesseract run vectoradd apply --output-path /tmp/output @inputs.json
 ```
 
+## Logging metrics
+
+Tesseracts may log metrics and artifacts (e.g. iteration numbers, VTK files, ...) using MLflow, following the [MLflow example](examples/mlflow/).
+
+When serving a Tesseract via `tesseract-serve`, an MLflow server is automatically spun up.
+
+```bash
+$ tesseract serve mlflow
+```
+
+You can view logged items at `http://localhost:5000`.
+
+Alternatively, you can point your Tesseract to an existing MLflow server:
+
+```bash
+$ tesseract run mlflow apply --network=host --env=MLFLOW_TRACKING_URI="..."
+```
+
 ## Using GPUs
 
 To leverage GPU support in your Tesseract environment, you can specify which NVIDIA GPU(s) to make available

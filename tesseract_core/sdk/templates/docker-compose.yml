@@ -9,8 +9,9 @@ services:
     {% if service.environment.TESSERACT_DEBUG == "1" %}
       - "{{ service.debugpy_port }}:5678"
     {% endif %}
-    {%- if service.volumes %}
     volumes:
+      - mlflow-data:/mlflow-data
+    {%- if service.volumes %}
     {%- for volume in service.volumes %}
       - {{ volume }}
     {% endfor -%}
@@ -38,6 +39,11 @@ services:
             {{ service.gpus }}
     {% endif %}
 {% endfor %}
+
+volumes:
+  mlflow-data:
+    external: true
+    name: mlflow-server_mlflow-data
 
 networks:
   multi-tesseract-network:
