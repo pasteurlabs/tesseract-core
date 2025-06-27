@@ -439,7 +439,7 @@ def test_volume_permissions(
     assert "Permission denied" in str(e)
 
     # Try to write to the folder as UID 1000
-    write_cmd = "echo hello > /bar/hello_1000.txt"
+    write_cmd = "echo hello > /bar/hello_1000.txt && cat /bar/hello_1000.txt"
     with pytest.raises(ContainerError) as e:
         _ = run_tesseract_with_volume(write_cmd, user="1000:1000")
     assert "Permission denied" in str(e)
@@ -453,7 +453,6 @@ def test_volume_permissions(
     assert stdout == b"hello\n"
 
     # Try to write to the folder as UID 1000 again
-    write_cmd = "echo hello > /bar/hello_1000.tx && cat /bar/hello_1000.txt"
     stdout = run_tesseract_with_volume(write_cmd, user="1000:1000")
     assert stdout == b"hello\n"
 
