@@ -464,12 +464,12 @@ def test_volume_permissions(
         docker_volume.name: {"bind": "/from", "mode": "rw"},
         volume_777.name: {"bind": "/to", "mode": "rw"},
     }
-    cmd = "chmod 700 /from && cp /from/hello.txt /to/hello_777.txt && cat /to/hello_777.txt"
+    cmd = "chmod 700 /from && cp /from/hello.txt /to/hello.txt && cat /to/hello.txt"
     stdout = run_tesseract_with_volume(cmd, volume=volume_args)
     assert stdout == b"hello\n"
 
     # Try to access files as UID1000
-    cmd = "cat /to/hello_777.txt"
+    cmd = "cat /to/hello.txt"
     stdout = run_tesseract_with_volume(cmd, user="1000:1000", volume=volume_args)
     assert stdout == b"hello\n"
 
@@ -478,3 +478,9 @@ def test_volume_permissions(
             "cat /from/hello_777.txt", user="1000:1000", volume=volume_args
         )
     assert "Permission denied" in str(e)
+
+    cmd = (
+        "adduser -D testuser && chmod 777 /from && su - testuser && cat /from/hello.txt"
+    )
+    stdout = run_tesseract_with_volume(cmd, volume=volume_args)
+    assert stdout == b"hello\n"
