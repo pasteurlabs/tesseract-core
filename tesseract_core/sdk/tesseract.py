@@ -14,7 +14,7 @@ from urllib.parse import urlparse, urlunparse
 
 import numpy as np
 import requests
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 from pydantic_core import InitErrorDetails
 
 from . import engine
@@ -29,6 +29,7 @@ class SpawnConfig:
     gpus: list[str] | None
     num_workers: int
     debug: bool
+    no_compose: bool
 
 
 def requires_client(func: Callable) -> Callable:
@@ -85,6 +86,7 @@ class Tesseract:
         volumes: list[str] | None = None,
         gpus: list[str] | None = None,
         num_workers: int = 1,
+        no_compose: bool = False,
     ) -> Tesseract:
         """Create a Tesseract instance from a Docker image.
 
@@ -106,6 +108,7 @@ class Tesseract:
             num_workers: Number of worker processes to use. This determines how
                 many requests can be handled in parallel. Higher values
                 will increase throughput, but also increase resource usage.
+            no_compose: if True, do not use Docker Compose to serve the Tesseracts.
 
         Returns:
             A Tesseract instance.
@@ -117,6 +120,7 @@ class Tesseract:
             gpus=gpus,
             num_workers=num_workers,
             debug=True,
+            no_compose=no_compose,
         )
         obj._serve_context = None
         obj._lastlog = None
@@ -222,6 +226,7 @@ class Tesseract:
             gpus=self._spawn_config.gpus,
             num_workers=self._spawn_config.num_workers,
             debug=self._spawn_config.debug,
+            no_compose=self._spawn_config.no_compose,
             host_ip=host_ip,
         )
         self._serve_context = dict(
@@ -263,6 +268,7 @@ class Tesseract:
         gpus: list[str] | None = None,
         debug: bool = False,
         num_workers: int = 1,
+        no_compose: bool = False,
     ) -> tuple[str, str, int]:
         if port is not None:
             ports = [port]
@@ -274,9 +280,10 @@ class Tesseract:
             ports=ports,
             volumes=volumes,
             gpus=gpus,
-            propagate_tracebacks=debug,
+            debug=debug,
             num_workers=num_workers,
             host_ip=host_ip,
+            no_compose=no_compose,
         )
 
         first_container = engine.get_project_containers(project_id)[0]
@@ -677,8 +684,11 @@ class LocalClient:
         except Exception as ex:
             raise RuntimeError(f"Error running Tesseract API {endpoint}.") from ex
 
-        if OutputSchema is not None and issubclass(OutputSchema, BaseModel):
+        if OutputSchema is not None:
             # Validate via schema, then dump to stay consistent with other clients
-            result = OutputSchema.model_validate(result).model_dump()
+            if isinstance(OutputSchema, type) and issubclass(OutputSchema, BaseModel):
+                result = OutputSchema.model_validate(result).model_dump()
+            else:
+                result = TypeAdapter(OutputSchema).validate_python(result)
 
         return result

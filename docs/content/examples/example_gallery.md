@@ -1,53 +1,60 @@
-Example Gallery
-====================
+# Building Blocks
 
 ```{toctree}
 :name: example-gallery
 :caption: Example Gallery
 :maxdepth: 2
 :hidden:
+:glob:
+building-blocks/helloworld.md
+building-blocks/vectoradd.md
+building-blocks/packagedata.md
+building-blocks/arm64.md
+building-blocks/localdependency.md
+building-blocks/dataloader.md
+```
 
-arm64
-localdependency
-packagedata
-helloworld
-dataloader
-vectoradd
+This is a gallery of Tesseract examples that end at the `build` stage of the Tesseract lifecycle, and that can act as starting points to define and build your own Tesseracts.
+
+You can also find these Tesseracts in the `examples` directory of the [code repository](https://github.com/pasteurlabs/tesseract-core).
+
+```{important}
+**Beyond the Build**: The real magic happens long after building a Tesseract. For some example applications that *use* Tesseracts in workflows, check out the [Demo](../demo/demo.md) and [Community Showcase](https://si-tesseract.discourse.group/c/showcase/11).
 ```
 
 
 ::::{grid} 2
    :gutter: 2
 
-   :::{grid-item-card} Hello World
-      :link: helloworld.html
+   :::{grid-item-card} HelloWorld
+      :link: building-blocks/helloworld.html
 
-      A simple hello world Tesseract.
+      A simple "hello world" Tesseract.
+   :::
+   :::{grid-item-card} VectorAdd
+      :link: building-blocks/vectoradd.html
+
+     Tesseract performing vector addition. Highlighting simple array operations and how to use the Tesseract Python API.
    :::
    :::{grid-item-card} Package Data
-      :link: packagedata.html
+      :link: building-blocks/packagedata.html
 
-      A guide on including local data into Tesseract package.
+      A guide on including local files into a built Tesseract.
    :::
-   :::{grid-item-card} Vector Add
-      :link: vectoradd.html
+   :::{grid-item-card} Pyvista on ARM64
+      :link: building-blocks/arm64.html
 
-     Tesseract doing vector add.
-   :::
-   :::{grid-item-card} Pyvista on Arm64
-      :link: arm64.html
-
-      A guide on how to set up `tesseract_config` for pyvista on arm64.
+      A guide showcasing how to use custom build steps to install pyvista within an ARM64 Tesseract.
    :::
    :::{grid-item-card} Local Dependencies
-      :link: localdependency.html
+      :link: building-blocks/localdependency.html
 
-      A guide on installing local dependencies (`cowsay`) into a Tesseract.
+      A guide on installing local Python packages into a Tesseract.
    :::
    :::{grid-item-card} Data Loader
-      :link: dataloader.html
+      :link: building-blocks/dataloader.html
 
-     Tesseract that loads in data samples from a folder.
+     Tesseract that loads in data samples from a folder without loading them into memory.
    :::
 
 ::::

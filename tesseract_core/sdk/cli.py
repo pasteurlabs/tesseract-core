@@ -18,6 +18,7 @@ from typing import Annotated, Any, NoReturn
 import click
 import typer
 from jinja2 import Environment, PackageLoader, StrictUndefined
+from pydantic import ValidationError as PydanticValidationError
 from rich.console import Console as RichConsole
 from rich.table import Table as RichTable
 
@@ -29,6 +30,7 @@ from .api_parse import (
     ValidationError,
     get_non_base_fields_in_tesseract_config,
 )
+from .config import get_config
 from .docker_client import (
     APIError,
     BuildError,
@@ -37,6 +39,7 @@ from .docker_client import (
     ContainerError,
     Image,
     ImageNotFound,
+    NotFound,
 )
 from .exceptions import UserError
 from .logs import DEFAULT_CONSOLE, set_logger
@@ -173,13 +176,27 @@ def main_callback(
 
     set_logger(loglevel, catch_warnings=True, rich_format=True)
 
+    try:
+        get_config()
+    except PydanticValidationError as err:
+        message = [
+            "Error while parsing Tesseract configuration. "
+            "Please check your environment variables.",
+            "Errors found:",
+        ]
+        for error in err.errors():
+            message.append(
+                f' - TESSERACT_{str(error["loc"][0]).upper()}="{error["input"]}": {error["msg"]}'
+            )
+        raise UserError("\n".join(message)) from None
+
 
 def _parse_config_override(
     options: list[str] | None,
 ) -> tuple[tuple[list[str], str], ...]:
     """Parse `["path1.path2.path3=value"]` into `[(["path1", "path2", "path3"], "value")]`."""
     if options is None:
-        return []
+        return ()
 
     def _parse_option(option: str):
         bad_param = typer.BadParameter(
@@ -447,12 +464,13 @@ def serve(
             show_default=True,
         ),
     ] = 1,
-    propagate_tracebacks: Annotated[
+    debug: Annotated[
         bool,
         typer.Option(
-            "--propagate-tracebacks",
+            "--debug",
             help=(
-                "Enable debug mode. This will propagate full tracebacks to the client. "
+                "Enable debug mode. This will propagate full tracebacks to the client "
+                "and start a debugpy server in the Tesseract. "
                 "WARNING: This may expose sensitive information, use with caution (and never in production)."
             ),
         ),
@@ -468,6 +486,18 @@ def serve(
             ),
         ),
     ] = False,
+    service_names: Annotated[
+        str | None,
+        typer.Option(
+            "--service-names",
+            help=(
+                "Comma-separated list of service names by which each Tesseract should be exposed "
+                "in the shared network. "
+                "Tesseracts are reachable from one another at http://{service_name}:8000. "
+                "Not supported when using --no-compose."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Serve one or more Tesseract images.
 
@@ -491,6 +521,17 @@ def serve(
     else:
         ports = None
 
+    if service_names is not None:
+        if no_compose:
+            raise typer.BadParameter(
+                "Service name specification only works with Docker Compose.",
+                param_hint="service_names",
+            )
+
+        service_names_list = service_names.split(",")
+    else:
+        service_names_list = None
+
     try:
         project_id = engine.serve(
             image_names,
@@ -498,9 +539,10 @@ def serve(
             ports,
             volume,
             gpus,
-            propagate_tracebacks,
+            debug,
             num_workers,
             no_compose,
+            service_names_list,
         )
     except RuntimeError as ex:
         raise UserError(
@@ -652,6 +694,10 @@ def _display_project_meta(project_id: str) -> list:
         container_ports.append(
             {"name": container.name, "port": host_port, "ip": host_ip}
         )
+        if container.host_debugpy_port:
+            logger.info(
+                f"Debugpy server listening at http://{host_ip}:{container.host_debugpy_port}"
+            )
 
     return container_ports
 
@@ -699,6 +745,8 @@ def teardown(
         raise UserError(
             f"Internal Docker error occurred while tearing down Tesseracts: {ex}"
         ) from ex
+    except NotFound as ex:
+        raise UserError(f"Tesseract Project ID not found: {ex}") from ex
 
 
 def _sanitize_error_output(error_output: str, tesseract_image: str) -> str:

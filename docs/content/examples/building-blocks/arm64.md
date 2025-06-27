@@ -1,4 +1,4 @@
-# Custom build steps: PyVista on ARM64 example
+# Custom build steps: PyVista on ARM64
 
 ## Context
 
@@ -8,7 +8,7 @@ Tesseracts use by default an official Python docker image as the base image. Alt
 Via `tesseract_config.yaml`, it is possible to somewhat flexibly alter the build process to accomodate different needs. As a concrete example, here's what we had to do internally in order to to build an arm64 Tesseract with PyVista installed as a dependency:
 
 
-```{literalinclude} ../../../examples/pyvista-arm64/tesseract_config.yaml
+```{literalinclude} ../../../../examples/pyvista-arm64/tesseract_config.yaml
 :language: yaml
 ```
 

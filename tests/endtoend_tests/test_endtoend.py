@@ -88,7 +88,8 @@ def test_build_from_init_endtoend(
     assert f"Usage: tesseract run {image_name} apply" in result.stderr
 
 
-def test_build_generate_only(dummy_tesseract_location):
+@pytest.mark.parametrize("skip_checks", [True, False])
+def test_build_generate_only(dummy_tesseract_location, skip_checks):
     """Test output of build with --generate_only flag."""
     cli_runner = CliRunner(mix_stderr=False)
     build_res = cli_runner.invoke(
@@ -97,6 +98,11 @@ def test_build_generate_only(dummy_tesseract_location):
             "build",
             str(dummy_tesseract_location),
             "--generate-only",
+            *(
+                ("--config-override=build_config.skip_checks=True",)
+                if skip_checks
+                else ()
+            ),
         ],
         # Ensure that the output is not truncated
         env={"COLUMNS": "1000"},
@@ -111,6 +117,13 @@ def test_build_generate_only(dummy_tesseract_location):
     assert build_dir.exists()
     dockerfile_path = build_dir / "Dockerfile"
     assert dockerfile_path.exists()
+
+    with open(build_dir / "Dockerfile") as f:
+        docker_file_contents = f.read()
+        if skip_checks:
+            assert 'RUN ["tesseract-runtime", "check"]' not in docker_file_contents
+        else:
+            assert 'RUN ["tesseract-runtime", "check"]' in docker_file_contents
 
 
 def test_tesseract_list(built_image_name):
@@ -449,6 +462,41 @@ def test_tesseract_serve_with_volumes(built_image_name, tmp_path, docker_client)
             assert run_res.exit_code == 0, run_res.stderr
 
 
+def test_tesseract_serve_interop(built_image_name, docker_client, docker_cleanup):
+    cli_runner = CliRunner(mix_stderr=False)
+
+    run_res = cli_runner.invoke(
+        app,
+        [
+            "serve",
+            built_image_name,
+            built_image_name,
+            "--service-names",
+            "tess-1,tess-2",
+        ],
+        env={"COLUMNS": "1000"},
+        catch_exceptions=False,
+    )
+    assert run_res.exit_code == 0
+
+    project_meta = json.loads(run_res.stdout)
+    project_id = project_meta["project_id"]
+    docker_cleanup["project_ids"].append(project_id)
+
+    project_containers = [project_meta["containers"][i]["name"] for i in range(2)]
+
+    tess_1 = docker_client.containers.get(project_containers[0])
+
+    returncode, stdout = tess_1.exec_run(
+        [
+            "python",
+            "-c",
+            'import requests; requests.get("http://tess-2:8000/health").raise_for_status()',
+        ]
+    )
+    assert returncode == 0, stdout.decode()
+
+
 @pytest.mark.parametrize("no_compose", [True, False])
 def test_serve_nonstandard_host_ip(
     docker_client, built_image_name, docker_cleanup, free_port, no_compose
@@ -539,7 +587,7 @@ def test_tesseract_cli_options_parsing(built_image_name, tmpdir):
             assert ".bin:0" in results
 
 
-def test_tarball_install(dummy_tesseract_package):
+def test_tarball_install(dummy_tesseract_package, docker_cleanup):
     import subprocess
     from textwrap import dedent
 
@@ -576,3 +624,6 @@ def test_tarball_install(dummy_tesseract_package):
         catch_exceptions=False,
     )
     assert result.exit_code == 0, result.stderr
+
+    img_tag = json.loads(result.stdout)[0]
+    docker_cleanup["images"].append(img_tag)

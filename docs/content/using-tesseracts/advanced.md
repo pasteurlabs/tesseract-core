@@ -38,3 +38,40 @@ $ tesseract run --gpus 0 --gpus 1 helloworld apply '{"inputs": {"name": "Osborne
 ```
 
 The GPUs are indexed starting at zero with the same convention as `nvidia-smi`.
+
+## Debug mode
+
+`tesseract serve` supports a `--debug` flag; this has two effects:
+  *  Tracebacks from execution are returned in the response body, instead of a generic 500 error.
+     This is useful for debugging and testing, but unsafe for production environments.
+  *  Aside from listening to the usual Tesseract requests, a debugpy server is also started in
+     the container, and the port it's listening to is forwarded to some free port on the host which
+     is displayed in the cli when spinning up a tesseract via `tesseract serve`. This allows you to perform
+     remote debugging sessions.
+
+In particular, if you are using VScode, here is a sample launch config to attach to a running Tesseract in
+debug mode:
+```json
+        {
+            "name": "Tesseract: Remote debugger",
+            "type": "debugpy",
+            "request": "attach",
+            "connect": {
+                "host": "localhost",
+                "port": "PORT_NUMBER_HERE"
+            },
+            "pathMappings": [
+                {
+                    "localRoot": "${workspaceFolder}/examples/helloworld",
+                    "remoteRoot": "/tesseract"
+                }
+            ],
+        },
+```
+(make sure to fill in with the actual port number). After inserting this into the `configurations`
+field of your `launch.json` file, you should be able to attach to the Tesseract being served by clicking on the
+green "play" button at the top left corner of the "Run and Debug" tab.
+
+![Starting remote debug session in VScode](./remote_debug.png)
+
+For more information on the VSCode debugger, see [this guide](https://code.visualstudio.com/docs/debugtest/debugging).

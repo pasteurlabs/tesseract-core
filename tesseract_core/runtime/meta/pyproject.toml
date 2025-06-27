@@ -5,7 +5,7 @@ requires-python = ">=3.9"
 dependencies = [
     "pydantic>=2.10,<=2.11.0",
     "fastapi>=0.115,<=0.115.12",
-    "requests>=2.31,<=2.32.3",
+    "requests>=2.32.4,<=2.32.4",
     "uvicorn>=0.34,<=0.34.0",
     "click>=8.1,<=8.1.8",
     "typer>=0.15,<=0.15.2",
@@ -13,6 +13,7 @@ dependencies = [
     "msgpack>=1.1,<=1.1.0",
     "pybase64>=1.4,<=1.4.1",
     "numpy>=1.26,<=2.2.4",
+    "debugpy>=1.8.14,<=1.8.14",
 ]
 
 [project.scripts]

@@ -155,6 +155,10 @@ class Images:
         """
         docker = _get_executable("docker")
         extra_args = get_config().docker_build_args
+
+        if ssh is not None:
+            extra_args = ("--ssh", ssh, *extra_args)
+
         build_cmd = [
             *docker,
             "buildx",
@@ -168,9 +172,6 @@ class Images:
             "--",
             str(path),
         ]
-
-        if ssh is not None:
-            build_cmd.extend(["--ssh", ssh])
 
         return build_cmd
 
@@ -297,9 +298,20 @@ class Container:
         if self.attrs.get("NetworkSettings", None):
             ports = self.attrs["NetworkSettings"].get("Ports", None)
             if ports:
-                port_key = next(iter(ports))  # Get the first port key
-                if ports[port_key]:
-                    return ports[port_key][0].get("HostPort")
+                api_port_key = "8000/tcp"
+                if ports[api_port_key]:
+                    return ports[api_port_key][0].get("HostPort")
+        return None
+
+    @property
+    def host_debugpy_port(self) -> str | None:
+        """Gets the host port which maps to debugpy server in the container."""
+        if self.attrs.get("NetworkSettings", None):
+            ports = self.attrs["NetworkSettings"].get("Ports", None)
+            if ports:
+                debugpy_port_key = "5678/tcp"
+                if debugpy_port_key in ports:
+                    return ports[debugpy_port_key][0].get("HostPort")
         return None
 
     @property
@@ -308,9 +320,9 @@ class Container:
         if self.attrs.get("NetworkSettings", None):
             ports = self.attrs["NetworkSettings"].get("Ports", None)
             if ports:
-                port_key = next(iter(ports))  # Get the first port key
-                if ports[port_key]:
-                    return ports[port_key][0].get("HostIp")
+                api_port_key = "8000/tcp"
+                if ports[api_port_key]:
+                    return ports[api_port_key][0].get("HostIp")
         return None
 
     @property

@@ -9,6 +9,7 @@ import logging
 import optparse
 import os
 import random
+import re
 import socket
 import string
 import tempfile
@@ -113,6 +114,8 @@ def needs_docker(func: Callable) -> Callable:
             raise UserError(
                 "Could not reach Docker daemon, check if it is running."
             ) from ex
+        except FileNotFoundError as ex:
+            raise UserError("Docker not found, check if it is installed.") from ex
         return func(*args, **kwargs)
 
     return wrapper_needs_docker
@@ -541,9 +544,10 @@ def serve(
     ports: list[str] | None = None,
     volumes: list[str] | None = None,
     gpus: list[str] | None = None,
-    propagate_tracebacks: bool = False,
+    debug: bool = False,
     num_workers: int = 1,
     no_compose: bool = False,
+    service_names: list[str] | None = None,
 ) -> str:
     """Serve one or more Tesseract images.
 
@@ -555,10 +559,12 @@ def serve(
         ports: port or port range to serve each Tesseract on.
         volumes: list of paths to mount in the Tesseract container.
         gpus: IDs of host Nvidia GPUs to make available to the Tesseracts.
-        propagate_tracebacks: Enable debug mode. This will propagate full tracebacks to the client.
+        debug: Enable debug mode. This will propagate full tracebacks to the client
+            and start a debugpy server in the Tesseract.
             WARNING: This may expose sensitive information, use with caution (and never in production).
         num_workers: number of workers to use for serving the Tesseracts.
         no_compose: if True, do not use Docker Compose to serve the Tesseracts.
+        service_names: list of service names under which to expose each Tesseract container on the shared network.
 
     Returns:
         A string representing the Tesseract project ID.
@@ -579,15 +585,28 @@ def serve(
             f"Number of ports ({len(ports)}) must match number of images ({len(image_ids)})"
         )
 
+    if service_names is not None:
+        if len(service_names) != len(image_ids):
+            raise ValueError(
+                f"Number of service names ({len(service_names)}) must match number of images ({len(image_ids)})"
+            )
+        _validate_service_names(service_names)
+
     if no_compose:
         if len(images) > 1:
             raise ValueError(
                 "Docker Compose is required to serve multiple Tesseracts. "
                 f"Currently attempting to serve `{len(images)}` Tesseracts."
             )
+        if service_names is not None:
+            raise ValueError(
+                "Tesseract service names can only be set when using Docker Compose."
+            )
         args = []
-        container_port = "8000"
-        args.extend(["--port", container_port])
+        container_api_port = "8000"
+        container_debugpy_port = "5678"
+
+        args.extend(["--port", container_api_port])
 
         if ports:
             port = ports[0]
@@ -596,8 +615,6 @@ def serve(
 
         if num_workers > 1:
             args.extend(["--num-workers", str(num_workers)])
-        if propagate_tracebacks:
-            args.append("--debug")
 
         # Always bind to all interfaces inside the container
         args.extend(["--host", "0.0.0.0"])
@@ -607,14 +624,21 @@ def serve(
         else:
             ping_ip = host_ip
 
+        port_mappings = {f"{host_ip}:{port}": container_api_port}
+        if debug:
+            debugpy_port = str(get_free_port())
+            port_mappings[f"{host_ip}:{debugpy_port}"] = container_debugpy_port
+
         logger.info(f"Serving Tesseract at http://{ping_ip}:{port}")
         logger.info(f"View Tesseract: http://{ping_ip}:{port}/docs")
+        if debug:
+            logger.info(f"Debugpy server listening at http://{ping_ip}:{debugpy_port}")
 
         container = docker_client.containers.run(
             image=image_ids[0],
             command=["serve", *args],
             device_requests=gpus,
-            ports={f"{host_ip}:{port}": container_port},
+            ports=port_mappings,
             detach=True,
             volumes=volumes,
         )
@@ -640,11 +664,12 @@ def serve(
     template = _create_docker_compose_template(
         image_ids,
         host_ip,
+        service_names,
         ports,
         volumes,
         gpus,
         num_workers,
-        debug=propagate_tracebacks,
+        debug=debug,
     )
     compose_fname = f"docker-compose-{_id_generator()}.yml"
 
@@ -664,6 +689,7 @@ def serve(
 def _create_docker_compose_template(
     image_ids: list[str],
     host_ip: str = "127.0.0.1",
+    service_names: list[str] | None = None,
     ports: list[str] | None = None,
     volumes: list[str] | None = None,
     gpus: list[str] | None = None,
@@ -673,12 +699,25 @@ def _create_docker_compose_template(
     """Create Docker Compose template."""
     services = []
 
+    # Generate random service names for each image if not provided
+    if service_names is None:
+        service_names = []
+        for image_id in image_ids:
+            service_names.append(f"{image_id.split(':')[0]}-{_id_generator()}")
+
     # Get random unique ports for each image if not provided
     if ports is None:
         ports = []
         for _ in image_ids:
             taken_ports = [int(p) for p in ports if "-" not in p]
             ports.append(str(get_free_port(exclude=taken_ports)))
+
+    # Get random unique ports for debugpy if debug mode is active
+    debugpy_ports = []
+    if debug:
+        for _ in image_ids:
+            taken_ports = [int(p) for p in ports if "-" not in p]
+            debugpy_ports.append(str(get_free_port(exclude=taken_ports)))
 
     # Convert port ranges to fixed ports
     for i, port in enumerate(ports):
@@ -701,17 +740,18 @@ def _create_docker_compose_template(
         else:
             gpu_settings = f"device_ids: {gpus}"
 
-    for image_id, port in zip(image_ids, ports, strict=True):
+    for i, image_id in enumerate(image_ids):
         service = {
-            "name": f"{image_id.split(':')[0]}-{_id_generator()}",
+            "name": service_names[i],
             "image": image_id,
-            "port": f"{port}:8000",
+            "port": f"{ports[i]}:8000",
             "volumes": volumes,
             "gpus": gpu_settings,
             "environment": {
                 "TESSERACT_DEBUG": "1" if debug else "0",
             },
             "num_workers": num_workers,
+            "debugpy_port": debugpy_ports[i] if debug else None,
         }
 
         services.append(service)
@@ -750,6 +790,23 @@ def _parse_volumes(options: list[str]) -> dict[str, dict[str, str]]:
         return source, {"bind": target, "mode": mode}
 
     return dict(_parse_option(opt) for opt in options)
+
+
+def _validate_service_names(service_names: list[str]) -> None:
+    if len(set(service_names)) != len(service_names):
+        raise ValueError("Service names must be unique")
+
+    invalid_names = []
+    for name in service_names:
+        if not re.match(r"^[A-Za-z0-9][A-Za-z0-9-]*$", name):
+            invalid_names.append(name)
+        if name[-1] == "-":
+            invalid_names.append(name)
+    if invalid_names:
+        raise ValueError(
+            "Service names must contain only alphanumeric characters and hyphens, and must "
+            f"not begin or end with a hyphen. Found invalid names: {invalid_names}."
+        )
 
 
 def run_tesseract(

@@ -18,13 +18,13 @@ $ tesseract init --name cowsay
 
  And let's then edit the `tesseract_api.py` file to read
 
-```{literalinclude} ../../../examples/conda/tesseract_api.py
+```{literalinclude} ../../../../examples/conda/tesseract_api.py
 :language: python
 ```
 
 
 This Tesseract will accept a message like "Hello, world!" as an input and return
-```{literalinclude} ../../../examples/conda/expected_output.txt
+```{literalinclude} ../../../../examples/conda/expected_output.txt
 :language: text
 ```
 
