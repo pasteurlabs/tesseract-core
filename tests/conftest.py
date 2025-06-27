@@ -222,7 +222,7 @@ def docker_cleanup(docker_client, request):
 def _docker_cleanup(docker_client, request):
     """Clean up all tesseracts created by the tests."""
     # Shared object to track what objects need to be cleaned up in each test
-    context = {"images": [], "project_ids": [], "containers": []}
+    context = {"images": [], "project_ids": [], "containers": [], "volumes": []}
 
     def pprint_exc(e: BaseException) -> str:
         """Pretty print exception."""
@@ -267,6 +267,18 @@ def _docker_cleanup(docker_client, request):
                 docker_client.images.remove(image_obj.id)
             except Exception as e:
                 failures.append(f"Failed to remove image {image}: {pprint_exc(e)}")
+
+        # Remove volumes
+        for volume in context["volumes"]:
+            try:
+                if isinstance(volume, str):
+                    volume_obj = docker_client.volumes.get(volume)
+                else:
+                    volume_obj = volume
+
+                volume_obj.remove(force=True)
+            except Exception as e:
+                failures.append(f"Failed to remove volume {volume}: {pprint_exc(e)}")
 
         if failures:
             raise RuntimeError(
