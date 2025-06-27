@@ -88,7 +88,8 @@ def test_build_from_init_endtoend(
     assert f"Usage: tesseract run {image_name} apply" in result.stderr
 
 
-def test_build_generate_only(dummy_tesseract_location):
+@pytest.mark.parametrize("skip_checks", [True, False])
+def test_build_generate_only(dummy_tesseract_location, skip_checks):
     """Test output of build with --generate_only flag."""
     cli_runner = CliRunner(mix_stderr=False)
     build_res = cli_runner.invoke(
@@ -97,6 +98,11 @@ def test_build_generate_only(dummy_tesseract_location):
             "build",
             str(dummy_tesseract_location),
             "--generate-only",
+            *(
+                ("--config-override=build_config.skip_checks=True",)
+                if skip_checks
+                else ()
+            ),
         ],
         # Ensure that the output is not truncated
         env={"COLUMNS": "1000"},
@@ -111,6 +117,13 @@ def test_build_generate_only(dummy_tesseract_location):
     assert build_dir.exists()
     dockerfile_path = build_dir / "Dockerfile"
     assert dockerfile_path.exists()
+
+    with open(build_dir / "Dockerfile") as f:
+        docker_file_contents = f.read()
+        if skip_checks:
+            assert 'RUN ["tesseract-runtime", "check"]' not in docker_file_contents
+        else:
+            assert 'RUN ["tesseract-runtime", "check"]' in docker_file_contents
 
 
 def test_tesseract_list(built_image_name):
