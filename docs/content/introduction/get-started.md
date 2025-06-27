@@ -115,7 +115,7 @@ These files are all that's needed to define a Tesseract.
 ### `tesseract_api.py`
 
  The `tesseract_api.py` file defines the Tesseract's input and output schemas, and the functions that are being called when we invoke `tesseract run <funcname>`. These are,
- `apply`, `jacobian`, `jacobian_vector_product`, and `vector_jacobian_product`. Out of all of the endpoints you
+ `apply`, `abstract_eval`, `jacobian`, `jacobian_vector_product`, and `vector_jacobian_product` (see [endpoints](../api/endpoints.md)). Out of all of the endpoints you
  can implement, only `apply` is required for a Tesseract to work.
 
 ```{literalinclude} ../../../examples/helloworld/tesseract_api.py
@@ -128,6 +128,10 @@ These files are all that's needed to define a Tesseract.
 
 ```{literalinclude} ../../../examples/helloworld/tesseract_api.py
 :pyobject: apply
+```
+
+```{tip}
+For a Tesseract that has all optional endpoints implemented, check out the [Univariate example](../examples/building-blocks/univariate.md).
 ```
 
 (quickstart-tr-config)=

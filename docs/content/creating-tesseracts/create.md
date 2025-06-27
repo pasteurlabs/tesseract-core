@@ -105,6 +105,10 @@ The last section in `tesseract_api.py` contains templates for optional endpoints
 You can leave it untouched for this example, as the operation we are
 implementing is not differentiable.
 
+```{tip}
+For a Tesseract that has all optional endpoints implemented, check out the [Univariate example](../examples/building-blocks/univariate.md).
+```
+
 Finally, we can set the name of this Tesseract and its version in
 `tesseract_config.yaml`.
 

@@ -44,7 +44,6 @@ addition to the project itself, then run `make html`:
 ```console
 $ . venv/bin/activate
 $ pip install -e .[dev]
-$ pip install -r docs/requirements.txt
 $ cd docs
 $ make html
 ```
@@ -73,7 +72,7 @@ clone the repository, install the dependencies, and setup pre-commit hooks:
 
 ```console
 $ git clone git@github.com:pasteurlabs/tesseract-core.git
-$ cd tesseract
+$ cd tesseract-core
 $ python -m venv venv
 $ . venv/bin/activate
 $ pip install -e .[dev]
