@@ -408,6 +408,14 @@ def serve(
             show_default=False,
         ),
     ] = None,
+    environment: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--env",
+            "-e",
+            help="Set environment variables in the Tesseract containers, in Docker format: key=value.",
+        ),
+    ] = None,
     port: Annotated[
         str | None,
         typer.Option(
@@ -493,12 +501,23 @@ def serve(
     else:
         ports = None
 
+    # Parse environment variables from list to dict
+    if environment is not None:
+        try:
+            environment = {env.split("=")[0]: env.split("=")[1] for env in environment}
+        except Exception as ex:
+            raise typer.BadParameter(
+                "Environment variables must be in the format 'key=value'.",
+                param_hint="environment",
+            ) from ex
+
     try:
         project_id = engine.serve(
             image_names,
             host_ip,
             ports,
             volume,
+            environment,
             gpus,
             debug,
             num_workers,
@@ -836,6 +855,16 @@ def run_container(
             error_string + f"\nPossible commands are: {', '.join(POSSIBLE_CMDS)}"
         )
         raise typer.BadParameter(error_string, param_hint="cmd")
+
+    # Check if environment variables are provided and follow Docker format
+    if env is not None:
+        try:
+            env = {item.split("=")[0]: item.split("=")[1] for item in env}
+        except Exception as ex:
+            raise typer.BadParameter(
+                "Environment variables must be in the format 'key=value'.",
+                param_hint="env",
+            ) from ex
 
     try:
         result_out, result_err = engine.run_tesseract(

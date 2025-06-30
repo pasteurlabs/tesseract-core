@@ -505,7 +505,7 @@ class Containers:
         image: str,
         command: list_[str],
         volumes: dict | None = None,
-        environment: list_[str] | None = None,
+        environment: dict[str, str] | None = None,
         network: str | None = None,
         device_requests: list_[int | str] | None = None,
         detach: bool = False,
@@ -559,13 +559,8 @@ class Containers:
 
         if environment:
             env_args = []
-            for env_var in environment:
-                if "=" not in env_var:
-                    raise ValueError(
-                        f"Invalid environment variable format: {env_var}. "
-                        "Use key=value format."
-                    )
-                env_args.extend(["-e", env_var])
+            for env_var, value in environment.items():
+                env_args.extend(["-e", f"{env_var}={value}"])
             optional_args.extend(env_args)
 
         if network:

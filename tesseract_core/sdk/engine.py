@@ -542,6 +542,7 @@ def serve(
     host_ip: str = "127.0.0.1",
     ports: list[str] | None = None,
     volumes: list[str] | None = None,
+    environment: dict[str, str] | None = None,
     gpus: list[str] | None = None,
     debug: bool = False,
     num_workers: int = 1,
@@ -556,6 +557,11 @@ def serve(
         host_ip: IP address to bind the Tesseracts to.
         ports: port or port range to serve each Tesseract on.
         volumes: list of paths to mount in the Tesseract container.
+        environment: environment variables to set in the Tesseract container.
+            This can be used to set the `MLFLOW_TRACKING_URI` for example.
+            If not provided, the default is to set `MLFLOW_TRACKING_URI` to
+            `http://mlflow-server:5000`, which is the default MLflow server
+            provided by Tesseract.
         gpus: IDs of host Nvidia GPUs to make available to the Tesseracts.
         debug: Enable debug mode. This will propagate full tracebacks to the client
             and start a debugpy server in the Tesseract.
@@ -568,8 +574,6 @@ def serve(
     """
     if not images or not all(isinstance(item, str) for item in images):
         raise ValueError("One or more Tesseract image IDs must be provided")
-
-    _serve_mlflow_compose()
 
     image_ids = []
     for image_ in images:
@@ -649,11 +653,14 @@ def serve(
 
         return container.name
 
+    _serve_mlflow_compose()
+
     template = _create_docker_compose_template(
         image_ids,
         host_ip,
         ports,
         volumes,
+        environment,
         gpus,
         num_workers,
         debug=debug,
@@ -684,6 +691,7 @@ def _create_docker_compose_template(
     host_ip: str = "127.0.0.1",
     ports: list[str] | None = None,
     volumes: list[str] | None = None,
+    environment: dict[str, str] | None = None,
     gpus: list[str] | None = None,
     num_workers: int = 1,
     debug: bool = False,
@@ -736,7 +744,8 @@ def _create_docker_compose_template(
             "environment": {
                 "TESSERACT_DEBUG": "1" if debug else "0",
                 "MLFLOW_TRACKING_URI": "http://mlflow-server:5000",
-            },
+            }
+            | (environment or {}),
             "num_workers": num_workers,
             "debugpy_port": debugpy_ports[i] if debug else None,
         }
@@ -786,7 +795,7 @@ def run_tesseract(
     volumes: list[str] | None = None,
     gpus: list[int | str] | None = None,
     ports: dict[str, str] | None = None,
-    environment: list[str] | None = None,
+    environment: dict[str, str] | None = None,
     network: str | None = None,
 ) -> tuple[str, str]:
     """Start a Tesseract and execute a given command.
