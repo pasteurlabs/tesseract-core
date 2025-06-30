@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import importlib
+import os
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
@@ -54,6 +55,8 @@ def get_supported_endpoints(api_module: ModuleType) -> tuple[str, ...]:
 
 def get_tesseract_api() -> ModuleType:
     """Import tesseract_api.py file."""
+    # Suppress MLflow warnings in case git is not present
+    os.environ["GIT_PYTHON_REFRESH"] = "quiet"
     return load_module_from_path(get_config().api_path)
 
 
