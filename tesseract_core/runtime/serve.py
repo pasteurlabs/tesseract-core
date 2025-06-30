@@ -12,7 +12,9 @@ import uvicorn
 from fastapi import FastAPI, Header, Response
 from pydantic import BaseModel
 
-from .config import get_config
+from tesseract_core.runtime.config import RuntimeConfig
+
+from .config import get_config, update_config
 from .core import create_endpoints
 from .file_interactions import SUPPORTED_FORMATS, output_to_bytes
 
@@ -25,12 +27,15 @@ DEFAULT_ACCEPT = "application/json"
 
 # This function needs to be in global scope, so that it can be offloaded to a separate worker process.
 def _run_api_function_within_worker(
-    func_name: str, picklable_payload_dict: dict
+    func_name: str, config: RuntimeConfig, picklable_payload_dict: dict
 ) -> dict:
     # Need to load the user-supplied api module and retrieve API endpoints here,
     # since the worker doesn't inherit local (in the Python sense) definitions from the main process!
     from tesseract_core.runtime.core import get_tesseract_api
 
+    update_config(
+        **config.model_dump()
+    )  # update config in worker to reflect global config
     api_module = get_tesseract_api()
     endpoints = create_endpoints(api_module)
 
@@ -106,13 +111,14 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
                     executor.submit(
                         _run_api_function_within_worker,
                         endpoint_func.__name__,
+                        config,
                         picklable_payload_dict=picklable_payload_dict,
                     ),
                 )
 
                 return Response(
                     status_code=202,
-                    content=f'{{"task_id": "{new_task_id}"}}',
+                    content=f'{{"task_id": "{new_task_id}", "status": "starting task"}}',
                     media_type="application/json",
                 )
             else:
@@ -164,56 +170,74 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
             f"/{endpoint_name}/async_start", wrapped_endpoint_async, methods=["POST"]
         )
 
-        class TaskRequest(BaseModel):
-            task_id: str
+        # We cannot use endpoint_func as a default argument in async_retrieve because it is not JSON serializable
+        # and would cause issues with FastAPI's route handling and OpenAPI generation. Instead, we use a closure
+        # (mk_async_retrieve) to bind endpoint_func at definition time, ensuring the correct function (from the
+        # enclosing scope) can be bound within async_retrieve at runtime.
+        def mk_async_retrieve(endpoint_func: Callable = endpoint_func):
+            # Class definition needs to be inside closure so async_retieve binds correct class
+            class TaskRequest(BaseModel):
+                task_id: str
 
-        async def async_retrieve(
-            data: TaskRequest,
-            endpoint_name: str = endpoint_name,
-            endpoint_func: Any = endpoint_func,
-        ):
-            task_id = data.task_id
-            if task_id not in open_tasks:
-                return Response(
-                    status_code=404,
-                    content=f'{{"task_id": "{task_id}", "status": "bad request", "message": "Task ID not found"}}',
-                    media_type="application/json",
-                )
+            async def async_retrieve(
+                data: TaskRequest,
+                endpoint_name: str = endpoint_name,  # noqa: B023 -- okay to ignore, bound in closure
+                async_endpoint_func: Any | None = None,
+            ):
+                if async_endpoint_func is None:
+                    async_endpoint_func = endpoint_func
 
-            task_endpoint, accept, task = open_tasks[task_id]
-            if (
-                task_endpoint != endpoint_name
-            ):  # Ensure the request is for the endpoint the task was created for
-                return Response(
-                    status_code=400,
-                    content=(
-                        f'{{"task_id": "{task_id}", "status": "bad request", '
-                        f'"message": "Task ID does not match the endpoint"}}'
-                    ),
-                    media_type="application/json",
-                )
-            if not task.done():
-                try:
-                    await asyncio.wait_for(asyncio.wrap_future(task), timeout=10)
-                except asyncio.TimeoutError:
+                task_id = data.task_id
+                if task_id not in open_tasks:
                     return Response(
-                        status_code=202,
-                        content=f'{{"task_id": "{task_id}", "status": "in progress"}}',
+                        status_code=404,
+                        content=f'{{"task_id": "{task_id}", "status": "bad request", "message": "Task ID not found"}}',
                         media_type="application/json",
                     )
 
-            output = task.result()
+                task_endpoint, accept, task = open_tasks[task_id]
+                if (
+                    task_endpoint != endpoint_name  # noqa: B023 -- okay to ignore, bound in closure
+                ):  # Ensure the request is for the endpoint the task was created for
+                    return Response(
+                        status_code=400,
+                        content=(
+                            f'{{"task_id": "{task_id}", "status": "bad request", '
+                            f'"message": "Task ID does not match the endpoint"}}'
+                        ),
+                        media_type="application/json",
+                    )
+                if not task.done():
+                    try:
+                        await asyncio.wait_for(asyncio.wrap_future(task), timeout=10)
+                    except asyncio.TimeoutError:
+                        return Response(
+                            status_code=202,
+                            content=f'{{"task_id": "{task_id}", "status": "in progress"}}',
+                            media_type="application/json",
+                        )
+                # If the task failed an exeption will be raised when retrieving the result
+                try:
+                    output = task.result()
+                except Exception as exc:
+                    del open_tasks[task_id]
+                    return Response(
+                        status_code=500,
+                        content=f'{{"task_id": "{task_id}", "status": "error", "message": "{exc!s}"}}',
+                        media_type="application/json",
+                    )
+                output_model = async_endpoint_func.output_schema.model_validate(
+                    output
+                )  # TODO: Avoid re-validation here?
+                # # Use model_construct to avoid re-validation
+                del open_tasks[task_id]
+                return create_response(output_model, accept)
 
-            output_model = endpoint_func.output_schema.model_validate(
-                output
-            )  # TODO: Avoid re-validation here?
-            # # Use model_construct to avoid re-validation
-            del open_tasks[task_id]
-            return create_response(output_model, accept)
+            return async_retrieve
 
         app.add_api_route(
             f"/{endpoint_name}/async_retrieve",
-            async_retrieve,
+            mk_async_retrieve(endpoint_func),
             methods=["POST"],
         )
 
