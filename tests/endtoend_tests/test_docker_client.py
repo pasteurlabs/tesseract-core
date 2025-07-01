@@ -410,8 +410,8 @@ def test_volume_uid_permissions(
             docker_client_built_image_name,
             [cmd],
             remove=True,
-            user=user,
             volumes=volume,
+            user=user,
         )
 
     cmd = "mkdir -p /bar && echo hello > /bar/hello.txt && chmod 700 /bar"

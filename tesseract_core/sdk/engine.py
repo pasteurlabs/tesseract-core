@@ -566,7 +566,7 @@ def serve(
         num_workers: number of workers to use for serving the Tesseracts.
         no_compose: if True, do not use Docker Compose to serve the Tesseracts.
         service_names: list of service names under which to expose each Tesseract container on the shared network.
-        user: user to run the Tesseracts as.
+        user: user to run the Tesseracts as, e.g. '1000' or '1000:1000' (uid:gid).
 
     Returns:
         A string representing the Tesseract project ID.
@@ -841,6 +841,7 @@ def run_tesseract(
     volumes: list[str] | None = None,
     gpus: list[int | str] | None = None,
     ports: dict[str, str] | None = None,
+    user: str | None = None,
 ) -> tuple[str, str]:
     """Start a Tesseract and execute a given command.
 
@@ -852,6 +853,7 @@ def run_tesseract(
         gpus: list of GPUs, as indices or names, to passthrough the container.
         ports: dictionary of ports to bind to the host. Key is the host port,
             value is the container port.
+        user: user to run the Tesseract as, e.g. '1000' or '1000:1000' (uid:gid).
 
     Returns:
         Tuple with the stdout and stderr of the Tesseract.
@@ -920,6 +922,7 @@ def run_tesseract(
         detach=False,
         remove=True,
         stderr=True,
+        user=user,
     )
     stdout = stdout.decode("utf-8")
     stderr = stderr.decode("utf-8")

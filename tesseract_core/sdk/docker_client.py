@@ -506,13 +506,13 @@ class Containers:
         image: str,
         command: list_[str],
         volumes: dict | None = None,
-        user: str | None = None,
         device_requests: list_[int | str] | None = None,
         detach: bool = False,
         remove: bool = False,
         ports: dict | None = None,
         stdout: bool = True,
         stderr: bool = False,
+        user: str | None = None,
     ) -> Container | tuple[bytes, bytes] | bytes:
         """Run a command in a container from an image.
 
