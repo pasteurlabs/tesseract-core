@@ -763,22 +763,23 @@ def _create_docker_compose_template(
         services.append(service)
 
     docker_volumes = {}  # Dictionary of volume names mapped to whether or not they already exist
-    for volume in volumes:
-        source = volume.split(":")[0]
-        # Check if source exists to determine if specified volume is a docker volume
-        if not Path(source).exists():
-            # Check if volume exists
-            if not docker_client.volumes.get(source):
-                if "/" not in source:
-                    docker_volumes[source] = False
+    if volumes:
+        for volume in volumes:
+            source = volume.split(":")[0]
+            # Check if source exists to determine if specified volume is a docker volume
+            if not Path(source).exists():
+                # Check if volume exists
+                if not docker_client.volumes.get(source):
+                    if "/" not in source:
+                        docker_volumes[source] = False
+                    else:
+                        raise ValueError(
+                            f"Volume/Path {source} does not already exist, "
+                            "and new volume cannot be created due to '/' in name."
+                        )
                 else:
-                    raise ValueError(
-                        f"Volume/Path {source} does not already exist, "
-                        "and new volume cannot be created due to '/' in name."
-                    )
-            else:
-                # Docker volume is external
-                docker_volumes[source] = True
+                    # Docker volume is external
+                    docker_volumes[source] = True
 
     template = ENV.get_template("docker-compose.yml")
     return template.render(services=services, docker_volumes=docker_volumes)

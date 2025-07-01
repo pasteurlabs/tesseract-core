@@ -401,7 +401,7 @@ def test_tesseract_serve_with_volumes(built_image_name, tmp_path, docker_client)
         [
             "serve",
             "--volume",
-            f"tmp_path:{dest}",
+            f"{tmp_path}:{dest}",
             built_image_name,
             built_image_name,
         ],
