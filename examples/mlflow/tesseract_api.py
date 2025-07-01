@@ -15,7 +15,7 @@ class OutputSchema(BaseModel):
 
 def apply(inputs: InputSchema) -> OutputSchema:
     """This demonstrates logging metrics to MLflow."""
-    print(f"MLflow tracking URI: {mlflow.get_tracking_uri()}")
+    print(f"MLflow logging to URI: {mlflow.get_tracking_uri()}")
 
     # Marking the start of an MLflow.
     with mlflow.start_run():
