@@ -55,7 +55,7 @@ def get_supported_endpoints(api_module: ModuleType) -> tuple[str, ...]:
 
 def get_tesseract_api() -> ModuleType:
     """Import tesseract_api.py file."""
-    # Suppress MLflow warnings in case git is not present
+    # Suppress MLflow warnings on import in case git is not present
     os.environ["GIT_PYTHON_REFRESH"] = "quiet"
     return load_module_from_path(get_config().api_path)
 
