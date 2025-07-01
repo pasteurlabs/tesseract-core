@@ -48,21 +48,6 @@ def docker_client_built_image_name(
             pass
 
 
-@pytest.fixture(scope="module")
-def docker_volume(docker_client):
-    # Create the Docker volume
-    volume = docker_client.volumes.create(name="docker_client_test_volume")
-    try:
-        yield volume
-    finally:
-        pass
-        # try:
-        #     volume.remove()
-        # except NotFound:
-        #     # already removed
-        #     pass
-
-
 def test_get_image(docker_client, docker_client_built_image_name, docker_py_client):
     """Test image retrieval."""
 
@@ -414,7 +399,7 @@ def test_compose_error(docker_client, tmp_path, docker_client_built_image_name):
     assert "Failed to start Tesseract container" in str(e.value)
 
 
-def test_volume_permissions(
+def test_volume_uid_permissions(
     docker_client, docker_client_built_image_name, docker_volume, docker_cleanup
 ):
     # Set up root only directory

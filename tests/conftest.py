@@ -207,6 +207,20 @@ def docker_client():
     return docker_client_module.CLIDockerClient()
 
 
+@pytest.fixture
+def docker_volume(docker_client):
+    # Create the Docker volume
+    volume = docker_client.volumes.create(name="docker_client_test_volume")
+    try:
+        yield volume
+    finally:
+        try:
+            volume.remove()
+        except Exception:
+            # already removed
+            pass
+
+
 @pytest.fixture(scope="module")
 def docker_cleanup_module(docker_client, request):
     """Clean up all tesseracts created by the tests after the module exits."""
