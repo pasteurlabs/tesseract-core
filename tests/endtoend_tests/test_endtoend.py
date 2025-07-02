@@ -4,6 +4,7 @@
 """End-to-end tests for Tesseract workflows."""
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -494,7 +495,9 @@ def test_tesseract_serve_docker_volume(
         tesseract0 = docker_client.containers.get(tesseract0_id)
         tesseract1_id = project_meta["containers"][1]["name"]
         tesseract1 = docker_client.containers.get(tesseract1_id)
-        if user == "root":
+        # Podman does UID remapping by default to avoid permission issues
+        docker_host = os.environ.get("DOCKER_HOST", "")
+        if user == "root" or "podman" in docker_host:
             volume_read_write()
         else:
             with pytest.raises(ContainerError) as e:
