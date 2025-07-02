@@ -209,7 +209,9 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
                     )
                 if not task.done():
                     try:
-                        await asyncio.wait_for(asyncio.wrap_future(task), timeout=10)
+                        await asyncio.wait_for(
+                            asyncio.wrap_future(task), timeout=config.request_timeout
+                        )
                     except asyncio.TimeoutError:
                         return Response(
                             status_code=202,
