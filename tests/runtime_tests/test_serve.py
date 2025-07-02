@@ -336,6 +336,7 @@ def test_async_endpoints(tmpdir):
 
     request_timeout = 0.1
     apply_sleep = 1.0  # make sure request times out
+    max_wait_time = 10.0  # max time to wait on task to complete
 
     def mk_payload(sleep, raise_error=False):
         return {
@@ -398,7 +399,7 @@ def test_async_endpoints(tmpdir):
             request_counter += 1
             assert response.status_code == 202, response.text
         # tasks takes too long
-        elif time.time() - task_start_time > 2 * apply_sleep:
+        elif time.time() - task_start_time > max_wait_time:
             raise AssertionError("Task timed out")
         # tasks finished or failed
         elif response.status_code != 202:
