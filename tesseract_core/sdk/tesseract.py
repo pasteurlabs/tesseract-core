@@ -132,6 +132,7 @@ class Tesseract:
         cls,
         tesseract_api: str | Path | ModuleType,
         input_path: Path | None = None,
+        output_path: Path | None = None,
     ) -> Tesseract:
         """Create a Tesseract instance from a Tesseract API module.
 
@@ -148,8 +149,14 @@ class Tesseract:
             A Tesseract instance.
         """
         if input_path is not None:
-            from tesseract_core.runtime import file_interactions
-            file_interactions.INPUT_PATH = Path(input_path).resolve(strict=True)
+            from tesseract_core.runtime.file_interactions import set_input_path
+
+            set_input_path(input_path)
+
+        if output_path is not None:
+            from tesseract_core.runtime.file_interactions import set_output_path
+
+            set_output_path(output_path)
 
         if isinstance(tesseract_api, str | Path):
             from tesseract_core.runtime.core import load_module_from_path

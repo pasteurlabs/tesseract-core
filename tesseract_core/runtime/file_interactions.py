@@ -24,6 +24,17 @@ INPUT_PATH: Path = Path("/tesseract/input") if running_in_docker() else Path("."
 OUTPUT_PATH: Path = Path("/tesseract/output") if running_in_docker() else Path(".")
 
 
+def set_input_path(path: PathLike) -> None:
+    global INPUT_PATH
+    INPUT_PATH = Path(path).resolve()
+
+
+def set_output_path(path: PathLike) -> None:
+    global OUTPUT_PATH
+    OUTPUT_PATH = Path(path).resolve()
+    OUTPUT_PATH.mkdir(parents=True, exist_ok=True)
+
+
 def guess_format_from_path(path: PathLike) -> supported_format_type:
     """Guess the format from the given path.
 

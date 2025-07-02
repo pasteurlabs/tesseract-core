@@ -1,8 +1,12 @@
 from pathlib import Path
 
+from rich import print
+
 from tesseract_core import Tesseract
 
+here = Path(__file__).parent.resolve()
 input_path = "./testdata"
+output_path = "./output"
 
 # these are relative to input_path
 data = [
@@ -18,5 +22,22 @@ data = [
     "sample_8.json",
 ]
 
-with Tesseract.from_tesseract_api("tesseract_api.py", input_path=input_path) as tess:
-    tess.apply({"data": data})
+with Tesseract.from_tesseract_api(
+    "tesseract_api.py", input_path=input_path, output_path=output_path
+) as tess:
+    result = tess.apply({"data": data})
+    print(result)
+    assert all(p.exists() for p in result["data"])
+
+
+with Tesseract.from_image(
+    "dataloader-filereference",
+    # FIXME: to be replaced with input_path and output_path args
+    volumes=[
+        f"{here.as_posix()}/testdata:/tesseract/input/:ro",
+        f"{here.as_posix()}/output:/tesseract/output/:rw",
+    ],
+) as tess:
+    result = tess.apply({"data": data})
+    print(result)
+    assert all(Path(p).exists() for p in result["data"])
