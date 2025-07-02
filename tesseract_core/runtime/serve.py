@@ -5,7 +5,7 @@ import asyncio
 import inspect
 from functools import wraps
 from types import ModuleType
-from typing import Any, Callable, Union
+from typing import Any, Callable, Optional, Union
 from uuid import uuid4
 
 import uvicorn
@@ -182,7 +182,9 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
             async def async_retrieve(
                 data: TaskRequest,
                 endpoint_name: str = endpoint_name,  # noqa: B023 -- okay to ignore, bound in closure
-                async_endpoint_func: Any | None = None,
+                async_endpoint_func: Optional[
+                    Any
+                ] = None,  # py3.9: use "Optional[Any]"" instead of "Any | None"
             ):
                 if async_endpoint_func is None:
                     async_endpoint_func = endpoint_func
