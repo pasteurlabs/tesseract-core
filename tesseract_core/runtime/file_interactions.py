@@ -15,6 +15,15 @@ supported_format_type = Literal["json", "msgpack", "json+base64", "json+binref"]
 SUPPORTED_FORMATS = get_args(supported_format_type)
 
 
+def running_in_docker() -> bool:
+    """Check if tesseract-runtime is running inside a Docker container."""
+    return Path("/.dockerenv").exists()
+
+
+INPUT_PATH: Path = Path("/tesseract/input") if running_in_docker() else Path(".")
+OUTPUT_PATH: Path = Path("/tesseract/output") if running_in_docker() else Path(".")
+
+
 def guess_format_from_path(path: PathLike) -> supported_format_type:
     """Guess the format from the given path.
 
@@ -108,7 +117,7 @@ def write_to_path(buffer: bytes, path: PathLike, append: bool = False) -> None:
         f.write(buffer)
 
 
-def expand_glob(pattern: str) -> list[str]:
+def expand_glob(pattern: PathLike) -> list[str]:
     """Expand the given glob pattern.
 
     Path may be anything supported by fsspec.

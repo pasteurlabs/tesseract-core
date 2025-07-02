@@ -121,7 +121,9 @@ class PydanticLazySequenceAnnotation:
             )
 
             maybe_path = maybe_path[1:]
-            items = expand_glob(maybe_path)
+            from tesseract_core.runtime.file_interactions import INPUT_PATH
+
+            items = expand_glob(INPUT_PATH / maybe_path)
 
             def load_item(key: str) -> Any:
                 buffer = read_from_path(key)
