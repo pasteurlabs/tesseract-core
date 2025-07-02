@@ -1,0 +1,8 @@
+name: dataloader
+version: "1.0.0"
+description: |
+  Tesseract that loads data from a folder.
+
+build_config:
+  package_data: []
+  custom_build_steps: []
