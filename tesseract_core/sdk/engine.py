@@ -850,6 +850,7 @@ def run_tesseract(
     ports: dict[str, str] | None = None,
     environment: dict[str, str] | None = None,
     user: str | None = None,
+    input_path: str | None = None,
 ) -> tuple[str, str]:
     """Start a Tesseract and execute a given command.
 
@@ -864,6 +865,7 @@ def run_tesseract(
         environment: list of environment variables to set in the container,
             in Docker format: key=value.
         user: user to run the Tesseract as, e.g. '1000' or '1000:1000' (uid:gid).
+        input_path: Input path to read input files from, such as local directory or S3 URI.
 
     Returns:
         Tuple with the stdout and stderr of the Tesseract.
@@ -874,7 +876,13 @@ def run_tesseract(
     cmd = [command]
     current_cmd = None
 
-    if volumes is None:
+    if input_path:
+        if volumes is None:
+            volumes = []
+        volumes.append(f"{input_path}:/tesseract/input_data")
+        os.environ["TESSERACT_INPUT_PATH"] = "/tesseract/input_data"
+
+    if not volumes:
         parsed_volumes = {}
     else:
         parsed_volumes = _parse_volumes(volumes)
@@ -907,7 +915,7 @@ def run_tesseract(
             parsed_volumes[str(local_path)] = {"bind": path_in_container, "mode": "rw"}
 
         # Mount local input files marked by @ into Docker container as a volume
-        elif arg.startswith("@") and "://" not in arg:
+        elif arg.startswith("@") and "://" not in arg and not input_path:
             local_path = Path(arg.lstrip("@")).resolve()
 
             if not local_path.is_file():
