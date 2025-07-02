@@ -527,6 +527,17 @@ def serve(
             ),
         ),
     ] = None,
+    input_path: Annotated[
+        str | None,
+        typer.Option(
+            "--input-path",
+            help=(
+                "Input path to read input files from, such as local directory or S3 URI "
+                "(may be anything supported by fsspec)."
+            ),
+            hidden=True,
+        ),
+    ] = None,
 ) -> None:
     """Serve one or more Tesseract images.
 
@@ -587,6 +598,7 @@ def serve(
             no_compose,
             service_names_list,
             user,
+            input_path=input_path,
         )
     except RuntimeError as ex:
         raise UserError(
@@ -879,6 +891,15 @@ def run_container(
             help=("User to run the Tesseract as e.g. '1000' or '1000:1000' (uid:gid)."),
         ),
     ] = None,
+    input_path: Annotated[
+        str | None,
+        typer.Option(
+            "--input-path",
+            help="Input path to read input files from, such as local directory or S3 URI "
+            "(may be anything supported by fsspec).",
+            hidden=True,
+        ),
+    ] = None,
 ) -> None:
     """Execute a command in a Tesseract.
 
@@ -940,6 +961,7 @@ def run_container(
             gpus=gpus,
             environment=environment,
             user=user,
+            input_path=input_path,
         )
 
     except ImageNotFound as e:

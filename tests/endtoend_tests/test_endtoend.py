@@ -434,7 +434,10 @@ def test_tesseract_serve_ports(built_image_name, port, docker_cleanup, free_port
     assert str(actual_port) in run_res.stdout
 
 
-def test_tesseract_serve_with_volumes(built_image_name, tmp_path, docker_client):
+@pytest.mark.parametrize("use_input_path", [True, False])
+def test_tesseract_serve_with_volumes(
+    built_image_name, tmp_path, docker_client, use_input_path
+):
     """Try to serve multiple Tesseracts with volume mounting."""
     cli_runner = CliRunner(mix_stderr=False)
     project_id = None
@@ -444,13 +447,19 @@ def test_tesseract_serve_with_volumes(built_image_name, tmp_path, docker_client)
     # from within the container
     tmp_path.chmod(0o0707)
 
-    dest = Path("/foo/")
+    volume_args = []
+    if use_input_path:
+        dest = Path("/tesseract/input_data")
+        volume_args = ["--input-path", f"{tmp_path}"]
+    else:
+        dest = Path("/foo/")
+        volume_args = ["--volume", f"{tmp_path}:{dest}"]
+
     run_res = cli_runner.invoke(
         app,
         [
             "serve",
-            "--volume",
-            f"{tmp_path}:{dest}",
+            *volume_args,
             built_image_name,
             built_image_name,
         ],
@@ -478,15 +487,16 @@ def test_tesseract_serve_with_volumes(built_image_name, tmp_path, docker_client)
         assert exit_code == 0
         assert output.decode() == "world"
 
-        # Create file inside a container and check it from the other
-        bar_file = dest / "bar"
-        exit_code, output = tesseract0.exec_run(["touch", f"{bar_file}"])
-        assert exit_code == 0
-        exit_code, output = tesseract1.exec_run(["cat", f"{bar_file}"])
-        assert exit_code == 0
-
-        # The file should exist outside the container
-        assert (tmp_path / "bar").exists()
+        # Input path is mounted as read only volume
+        if not use_input_path:
+            # Create file inside a container and check it from the other
+            bar_file = dest / "bar"
+            exit_code, output = tesseract0.exec_run(["touch", f"{bar_file}"])
+            assert exit_code == 0
+            exit_code, output = tesseract1.exec_run(["cat", f"{bar_file}"])
+            assert exit_code == 0
+            # The file should exist outside the container
+            assert (tmp_path / "bar").exists()
     finally:
         if project_id:
             run_res = cli_runner.invoke(
@@ -658,13 +668,20 @@ def test_serve_nonstandard_host_ip(
         requests.get(f"http://localhost:{project_container.host_port}/health")
 
 
-def test_tesseract_cli_options_parsing(built_image_name, tmpdir):
+@pytest.mark.parametrize("use_input_path", [True, False])
+def test_tesseract_cli_options_parsing(built_image_name, tmpdir, use_input_path):
     cli_runner = CliRunner(mix_stderr=False)
 
     tmpdir.chmod(0o0707)
 
     examples_dir = Path(__file__).parent.parent.parent / "examples"
     example_inputs = examples_dir / "vectoradd" / "example_inputs.json"
+
+    if use_input_path:
+        additional_options = ["--input-path", str(examples_dir)]
+        example_inputs = "vectoradd/example_inputs.json"
+    else:
+        additional_options = []
 
     test_commands = (
         ["apply", "-f", "json+binref", "-o", str(tmpdir), f"@{example_inputs}"],
@@ -678,6 +695,7 @@ def test_tesseract_cli_options_parsing(built_image_name, tmpdir):
             [
                 "run",
                 built_image_name,
+                *additional_options,
                 *args,
             ],
             catch_exceptions=False,
