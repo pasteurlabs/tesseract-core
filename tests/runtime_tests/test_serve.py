@@ -3,14 +3,9 @@
 
 import base64
 import json
-import os
 import platform
-import signal
-import subprocess
-import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
 from pathlib import Path
 from textwrap import dedent
 
@@ -52,47 +47,6 @@ def array_from_json(json_data):
 
 def model_to_json(model):
     return json.loads(model.model_dump_json())
-
-
-@contextmanager
-def serve_in_subprocess(api_file, port, num_workers=1, timeout=30.0):
-    try:
-        proc = subprocess.Popen(
-            [
-                sys.executable,
-                "-c",
-                "from tesseract_core.runtime.serve import serve; "
-                f"serve(host='localhost', port={port}, num_workers={num_workers})",
-            ],
-            env=dict(os.environ, TESSERACT_API_PATH=api_file),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-
-        # wait for server to start
-        while True:
-            try:
-                response = requests.get(f"http://localhost:{port}/health")
-            except requests.exceptions.ConnectionError:
-                pass
-            else:
-                if response.status_code == 200:
-                    break
-
-            time.sleep(0.1)
-            timeout -= 0.1
-
-            if timeout < 0:
-                raise TimeoutError("Server did not start in time")
-
-        yield f"http://localhost:{port}"
-
-    finally:
-        proc.send_signal(signal.SIGINT)
-        stdout, stderr = proc.communicate()
-        print(stdout.decode())
-        print(stderr.decode())
-        proc.wait(timeout=5)
 
 
 @pytest.fixture
@@ -214,7 +168,7 @@ def test_get_openapi_schema(http_client):
     is_wsl(),
     reason="flaky on Windows",
 )
-def test_threading_sanity(tmpdir, free_port):
+def test_threading_sanity(tmpdir, free_port, serve_in_subprocess):
     """Test with a Tesseract that requires to be run in the main thread.
 
     This is important so we don't require users to be aware of threading issues.
@@ -254,7 +208,7 @@ def test_threading_sanity(tmpdir, free_port):
     is_wsl(),
     reason="flaky on Windows",
 )
-def test_multiple_workers(tmpdir, free_port):
+def test_multiple_workers(serve_in_subprocess, tmpdir, free_port):
     """Test that the server can be run with multiple worker processes."""
     TESSERACT_API = dedent(
         """
@@ -347,8 +301,9 @@ def test_debug_mode(dummy_tesseract_module, monkeypatch):
         tesseract_core.runtime.config._current_config = orig_config
 
 
-@pytest.fixture
-def file_based_dummy_tesseract_module(tmpdir):
+def test_async_endpoints(tmpdir):
+    from tesseract_core.runtime.config import update_config
+
     TESSERACT_API = dedent(
         """
         import asyncio
@@ -378,12 +333,6 @@ def file_based_dummy_tesseract_module(tmpdir):
     with open(api_path, "w") as f:
         f.write(TESSERACT_API)
     api_module = load_module_from_path(api_path)
-    return api_module
-
-
-# @pytest.mark.asyncio
-def test_async_endpoints(file_based_dummy_tesseract_module):
-    from tesseract_core.runtime.config import update_config
 
     request_timeout = 0.1
     apply_sleep = 1.0  # make sure request times out
@@ -391,7 +340,7 @@ def test_async_endpoints(file_based_dummy_tesseract_module):
     def mk_payload(sleep, raise_error=False):
         return {
             "inputs": model_to_json(
-                file_based_dummy_tesseract_module.InputSchema.model_validate(
+                api_module.InputSchema.model_validate(
                     {
                         "x": [1.0, 2.0, 3.0],
                         "sleep": sleep,
@@ -403,11 +352,11 @@ def test_async_endpoints(file_based_dummy_tesseract_module):
 
     update_config(
         debug=False,
-        api_path=file_based_dummy_tesseract_module.__file__,
+        api_path=api_module.__file__,
         request_timeout=request_timeout,
     )
 
-    rest_api = create_rest_api(file_based_dummy_tesseract_module)
+    rest_api = create_rest_api(api_module)
     http_client = TestClient(rest_api, raise_server_exceptions=False)
 
     # start task with apply function that sleeps for apply_sleep seconds
