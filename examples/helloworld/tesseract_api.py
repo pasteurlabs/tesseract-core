@@ -13,5 +13,7 @@ class OutputSchema(BaseModel):
 
 
 def apply(inputs: InputSchema) -> OutputSchema:
-    """Greet a person whose name is given as input."""
+    """Required `apply` endpoint for every Tesseract: Greet a person whose name is given as input.
+    Note the templates for optional endpoints below have been removed -- see userdocs for details.
+    """
     return OutputSchema(greeting=f"Hello {inputs.name}!")
