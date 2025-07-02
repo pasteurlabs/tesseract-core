@@ -552,6 +552,7 @@ def serve(
     no_compose: bool = False,
     service_names: list[str] | None = None,
     user: str | None = None,
+    input_path: str | Path | None = None,
 ) -> str:
     """Serve one or more Tesseract images.
 
@@ -571,7 +572,8 @@ def serve(
         no_compose: if True, do not use Docker Compose to serve the Tesseracts.
         service_names: list of service names under which to expose each Tesseract container on the shared network.
         user: user to run the Tesseracts as, e.g. '1000' or '1000:1000' (uid:gid).
-            Defaults to the current user.
+              Defaults to the current user.
+        input_path: Input path to read input files from, such as local directory or S3 URI.
 
     Returns:
         A string representing the Tesseract project ID.
@@ -602,6 +604,16 @@ def serve(
     if user is None:
         # Use the current user if not specified
         user = f"{os.getuid()}:{os.getgid()}" if os.name != "nt" else None
+
+    if input_path:
+        if environment is None:
+            environment = {}
+        environment["TESSERACT_INPUT_PATH"] = "/tesseract/input_data"
+        if volumes is None:
+            volumes = []
+        if "://" not in input_path:
+            input_path = Path(input_path).resolve()
+            volumes.append(f"{input_path}:/tesseract/input_data:ro")
 
     if no_compose:
         if len(images) > 1:
@@ -875,6 +887,7 @@ def run_tesseract(
     ports: dict[str, str] | None = None,
     environment: dict[str, str] | None = None,
     user: str | None = None,
+    input_path: str | Path | None = None,
 ) -> tuple[str, str]:
     """Start a Tesseract and execute a given command.
 
@@ -889,7 +902,8 @@ def run_tesseract(
         environment: list of environment variables to set in the container,
             in Docker format: key=value.
         user: user to run the Tesseract as, e.g. '1000' or '1000:1000' (uid:gid).
-            Defaults to the current user.
+              Defaults to the current user.
+        input_path: Input path to read input files from, such as local directory or S3 URI.
 
     Returns:
         Tuple with the stdout and stderr of the Tesseract.
@@ -900,7 +914,17 @@ def run_tesseract(
     cmd = [command]
     current_cmd = None
 
-    if volumes is None:
+    if input_path:
+        if volumes is None:
+            volumes = []
+        if "://" not in input_path:
+            volumes.append(f"{input_path}:/tesseract/input_data")
+
+        if environment is None:
+            environment = {}
+        environment["TESSERACT_INPUT_PATH"] = "/tesseract/input_data"
+
+    if not volumes:
         parsed_volumes = {}
     else:
         parsed_volumes = _parse_volumes(volumes)
