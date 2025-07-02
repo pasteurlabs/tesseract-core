@@ -835,7 +835,7 @@ class Volumes:
         docker = _get_executable("docker")
         try:
             _ = subprocess.run(
-                [*docker, "volume", "create", "--name", name],
+                [*docker, "volume", "create", name],
                 check=True,
                 capture_output=True,
                 text=True,
