@@ -175,7 +175,7 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
         # (mk_async_retrieve) to bind endpoint_func at definition time, ensuring the correct function (from the
         # enclosing scope) can be bound within async_retrieve at runtime.
         def mk_async_retrieve(endpoint_func: Callable = endpoint_func):
-            # Class definition needs to be inside closure so async_retieve binds correct class
+            # Class definition needs to be inside closure so async_retrieve binds correct class
             class TaskRequest(BaseModel):
                 task_id: str
 
@@ -218,21 +218,30 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
                             content=f'{{"task_id": "{task_id}", "status": "in progress"}}',
                             media_type="application/json",
                         )
-                # If the task failed an exeption will be raised when retrieving the result
+                    # captures non-user code exceptions other than timeouts
+                    except Exception as exc:
+                        del open_tasks[task_id]
+                        return Response(
+                            status_code=500,
+                            content=f'{{"task_id": "{task_id}", "status": "infra error", "message": "{exc!s}"}}',
+                            media_type="application/json",
+                        )
+
+                del open_tasks[task_id]
+                # exceptions that occurred inside the apply function are raised when retrieving result
                 try:
                     output = task.result()
+                    # TODO: Avoid re-validation here?
+                    # Use model_construct to avoid re-validation
+                    output_model = async_endpoint_func.output_schema.model_validate(
+                        output
+                    )
                 except Exception as exc:
-                    del open_tasks[task_id]
                     return Response(
                         status_code=500,
                         content=f'{{"task_id": "{task_id}", "status": "error", "message": "{exc!s}"}}',
                         media_type="application/json",
                     )
-                output_model = async_endpoint_func.output_schema.model_validate(
-                    output
-                )  # TODO: Avoid re-validation here?
-                # # Use model_construct to avoid re-validation
-                del open_tasks[task_id]
                 return create_response(output_model, accept)
 
             return async_retrieve

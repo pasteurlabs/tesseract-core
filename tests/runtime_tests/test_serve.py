@@ -11,6 +11,7 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
+from pathlib import Path
 from textwrap import dedent
 
 import numpy as np
@@ -18,6 +19,7 @@ import pytest
 import requests
 from fastapi.testclient import TestClient
 
+from tesseract_core.runtime.core import load_module_from_path
 from tesseract_core.runtime.serve import create_rest_api
 
 test_input = {
@@ -304,7 +306,6 @@ def test_debug_mode(dummy_tesseract_module, monkeypatch):
         raise ValueError("This is a test error")
 
     orig_config = tesseract_core.runtime.config._current_config
-
     monkeypatch.setattr(dummy_tesseract_module, "apply", apply_that_raises)
 
     try:
@@ -344,3 +345,150 @@ def test_debug_mode(dummy_tesseract_module, monkeypatch):
         assert "Traceback" in response.text
     finally:
         tesseract_core.runtime.config._current_config = orig_config
+
+
+@pytest.fixture
+def file_based_dummy_tesseract_module(tmpdir):
+    TESSERACT_API = dedent(
+        """
+        import asyncio
+        import time
+        from pydantic import BaseModel
+        from tesseract_core.runtime import Array, Differentiable, Float32
+
+        class InputSchema(BaseModel):
+            x: Differentiable[Array[..., Float32]]
+            sleep: float
+            raise_error: bool
+
+        class OutputSchema(BaseModel):
+            y: Differentiable[Array[..., Float32]]
+
+        def apply(inputs: InputSchema) -> OutputSchema:
+            if inputs.raise_error:
+                raise ValueError("Apply failed")
+            time.sleep(inputs.sleep)
+            return OutputSchema(y=inputs.x**2)
+
+        def jacobian(inputs: InputSchema) -> OutputSchema:
+            return OutputSchema(something=inputs.x)
+        """
+    )
+    api_path = Path(tmpdir / "tesseract_api.py")
+    with open(api_path, "w") as f:
+        f.write(TESSERACT_API)
+    api_module = load_module_from_path(api_path)
+    return api_module
+
+
+# @pytest.mark.asyncio
+def test_async_endpoints(file_based_dummy_tesseract_module):
+    from tesseract_core.runtime.config import update_config
+
+    request_timeout = 0.1
+    apply_sleep = 1.0  # make sure request times out
+
+    def mk_payload(sleep, raise_error=False):
+        return {
+            "inputs": model_to_json(
+                file_based_dummy_tesseract_module.InputSchema.model_validate(
+                    {
+                        "x": [1.0, 2.0, 3.0],
+                        "sleep": sleep,
+                        "raise_error": raise_error,
+                    }
+                )
+            )
+        }
+
+    update_config(
+        debug=False,
+        api_path=file_based_dummy_tesseract_module.__file__,
+        request_timeout=request_timeout,
+    )
+
+    rest_api = create_rest_api(file_based_dummy_tesseract_module)
+    http_client = TestClient(rest_api, raise_server_exceptions=False)
+
+    # start task with apply function that sleeps for apply_sleep seconds
+    task_start_time = time.time()
+    response = http_client.post(
+        "/apply/async_start",
+        json=mk_payload(sleep=apply_sleep),
+        headers={"Accept": "application/json"},
+    )
+    task_id = response.json()["task_id"]
+    assert response.status_code == 202, response.text
+
+    # test response when trying to retrieve results with task_id
+    response = http_client.post(
+        "/apply/async_retrieve",
+        json={"task_id": "bad_task_id"},
+        headers={"Accept": "application/json"},
+    )
+    assert response.status_code == 404, response.text
+
+    # test response when trying to retrieve results with valid task_id but wrong endpoint
+    response = http_client.post(
+        "/jacobian/async_retrieve",
+        json={"task_id": task_id},
+        headers={"Accept": "application/json"},
+    )
+    assert response.status_code == 400, response.text
+
+    # keep testing responses with correct task_id and endpoint until task completes
+    request_counter = 0
+    while True:
+        response = http_client.post(
+            "/apply/async_retrieve",
+            json={"task_id": task_id},
+            headers={"Accept": "application/json"},
+        )
+        # taks definitely not finished yet
+        if time.time() - task_start_time < apply_sleep:
+            request_counter += 1
+            assert response.status_code == 202, response.text
+        # tasks takes too long
+        elif time.time() - task_start_time > 2 * apply_sleep:
+            raise AssertionError("Task timed out")
+        # tasks finished or failed
+        elif response.status_code != 202:
+            break
+    assert response.status_code == 200, response.text
+    # we want to hit at least one 202 check in while loop
+    assert request_counter > 1
+
+    # test that completed task was removed from open tasks dict
+    response = http_client.post(
+        "/apply/async_retrieve",
+        json={"task_id": task_id},
+        headers={"Accept": "application/json"},
+    )
+    assert response.status_code == 404, response.text
+
+    # start new task with apply function that raises an error
+    response = http_client.post(
+        "/apply/async_start",
+        json=mk_payload(sleep=apply_sleep, raise_error=True),
+        headers={"Accept": "application/json"},
+    )
+    task_id = response.json()["task_id"]
+    assert response.status_code == 202, response.text
+
+    # test that response shows error
+    time.sleep(1)  # wait for task to fail
+    response = http_client.post(
+        "/apply/async_retrieve",
+        json={"task_id": task_id},
+        headers={"Accept": "application/json"},
+    )
+    assert response.status_code == 500, response.text
+    assert response.json()["message"] == "Apply failed"
+
+    # test that failed task was removed from open tasks dict
+    response = http_client.post(
+        "/apply/async_retrieve",
+        json={"task_id": task_id},
+        headers={"Accept": "application/json"},
+    )
+    assert response.status_code == 404, response.text
