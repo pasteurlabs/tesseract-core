@@ -843,6 +843,7 @@ def run_tesseract(
     gpus: list[int | str] | None = None,
     ports: dict[str, str] | None = None,
     user: str | None = None,
+    input_path: str | None = None,
 ) -> tuple[str, str]:
     """Start a Tesseract and execute a given command.
 
@@ -865,6 +866,8 @@ def run_tesseract(
     cmd = [command]
     current_cmd = None
 
+    if input_path:
+        volumes.append(f"{input_path}:/tesseract_input")
     if volumes is None:
         parsed_volumes = {}
     else:

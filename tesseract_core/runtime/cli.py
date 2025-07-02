@@ -482,6 +482,7 @@ def main() -> None:
                 file=sys.stderr,
             )
             sys.exit(1)
+
         cli = _add_user_commands_to_cli(tesseract_runtime, out_stream=orig_stdout)
         cli(auto_envvar_prefix="TESSERACT_RUNTIME")
 
