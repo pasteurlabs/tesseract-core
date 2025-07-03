@@ -16,7 +16,7 @@ import click
 import typer
 from pydantic import ValidationError
 
-from tesseract_core.runtime.config import get_config
+from tesseract_core.runtime.config import check_required_files, get_config
 from tesseract_core.runtime.core import (
     check_tesseract_api,
     create_endpoints,
@@ -87,14 +87,26 @@ def _parse_arg_callback(
         if not os.access(TESSERACT_INPUT, os.R_OK):
             raise ValueError("Mounted --input-dir is not readable by the container.")
 
+        try:
+            check_required_files(get_config(), TESSERACT_INPUT)
+        except FileNotFoundError as e:
+            raise click.BadParameter(
+                f"Required input files not found in {TESSERACT_INPUT}. "
+                "Please ensure that the required files are present."
+            ) from e
+    elif get_config().required_input_files:
+        raise click.BadParameter(
+            "Required input files are specified in the Tesseract configuration, "
+            "but no input directory is mounted. Please mount the input directory "
+            "using --input-dir."
+        )
+
     # If input dir is specified, read JSON_PAYLOAD arg as relative path to /tesseract-inputs
-    if value.startswith("@") or TESSERACT_INPUT.is_dir():
-        if value.startswith("@") and TESSERACT_INPUT.is_dir():
+    # LL: need to enable use of json input directly even if input dir is specified (to use required_files only)
+    if value.startswith("@"):
+        if TESSERACT_INPUT.is_dir():
             raise click.BadParameter("--input-dir should not be used along with @")
-        elif value.startswith("@"):
-            value = value[1:]
-        else:
-            value = os.path.join(TESSERACT_INPUT, value)
+        value = value[1:]
         base_dir = Path(value).parent
         value_format = guess_format_from_path(value)
         try:
@@ -102,9 +114,21 @@ def _parse_arg_callback(
         except Exception as e:
             raise click.BadParameter(f"Could not read data from path {value}") from e
     else:
-        # Data given directly via the CLI is always in JSON format
-        value_format = "json"
-        value_bytes = value.encode()
+        _, ext = os.path.splitext(value)
+        if ext:
+            value = os.path.join(TESSERACT_INPUT, value)
+            base_dir = Path(value).parent
+            value_format = guess_format_from_path(value)
+            try:
+                value_bytes = read_from_path(value)
+            except Exception as e:
+                raise click.BadParameter(
+                    f"Could not read data from path {value}"
+                ) from e
+        else:
+            # If no extension, assume the value is a JSON string
+            value_format = "json"
+            value_bytes = value.encode()
 
     try:
         decoded_value = load_bytes(value_bytes, value_format)
