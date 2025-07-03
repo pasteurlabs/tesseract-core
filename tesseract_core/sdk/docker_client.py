@@ -512,6 +512,7 @@ class Containers:
         ports: dict | None = None,
         stdout: bool = True,
         stderr: bool = False,
+        user: str | None = None,
     ) -> Container | tuple[bytes, bytes] | bytes:
         """Run a command in a container from an image.
 
@@ -519,6 +520,7 @@ class Containers:
             image: The image name or id to run the command in.
             command: The command to run in the container.
             volumes: A dict of volumes to mount in the container.
+            user: String of user information to run command as in the format "uid:(optional)gid".
             device_requests: A list of device requests for the container.
             detach: If True, run the container in detached mode. Detach must be set to
                     True if we wish to retrieve the container id of the running container,
@@ -555,6 +557,9 @@ class Containers:
                     f"{host_path}:{volume_info['bind']}:{volume_info['mode']}"
                 )
             optional_args.extend(volume_args)
+
+        if user:
+            optional_args.extend(["-u", user])
 
         if device_requests:
             gpus_str = ",".join(device_requests)
@@ -774,6 +779,116 @@ class Compose:
         return project_container_map
 
 
+@dataclass
+class Volume:
+    """Volume class to wrap Docker volumes."""
+
+    name: str
+    attrs: dict
+
+    @classmethod
+    def from_dict(cls, json_dict: dict) -> "Volume":
+        """Create an Image object from a json dictionary.
+
+        Params:
+            json_dict: The json dictionary to create the object from.
+
+        Returns:
+            The created volume object.
+        """
+        return cls(
+            name=json_dict.get("Name", None),
+            attrs=json_dict,
+        )
+
+    def remove(self, force: bool = False) -> None:
+        """Remove a Docker volume.
+
+        Params:
+            force: If True, force the removal of the volume.
+        """
+        docker = _get_executable("docker")
+        try:
+            _ = subprocess.run(
+                [*docker, "volume", "rm", "--force" if force else "", self.name],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except subprocess.CalledProcessError as ex:
+            raise NotFound(f"Error removing volume {self.name}: {ex}") from ex
+
+
+class Volumes:
+    """Volume class to wrap Docker volumes."""
+
+    @staticmethod
+    def create(name: str) -> Volume:
+        """Create a Docker volume.
+
+        Params:
+            name: The name of the volume to create.
+
+        Returns:
+            The created volume object.
+        """
+        docker = _get_executable("docker")
+        try:
+            _ = subprocess.run(
+                [*docker, "volume", "create", name],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            return Volumes.get(name)
+        except subprocess.CalledProcessError as ex:
+            raise NotFound(f"Error creating volume {name}: {ex}") from ex
+
+    @staticmethod
+    def get(name: str) -> Volume:
+        """Get a Docker volume.
+
+        Params:
+            name: The name of the volume to get.
+
+        Returns:
+            The volume object.
+        """
+        docker = _get_executable("docker")
+        try:
+            result = subprocess.run(
+                [*docker, "volume", "inspect", name],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            json_dict = json.loads(result.stdout)
+        except subprocess.CalledProcessError as ex:
+            raise NotFound(f"Volume {name} not found: {ex}") from ex
+        if not json_dict:
+            raise NotFound(f"Volume {name} not found.")
+        return Volume.from_dict(json_dict[0])
+
+    @staticmethod
+    def list() -> list[str]:
+        """List all Docker volumes.
+
+        Returns:
+            List of volume names.
+        """
+        docker = _get_executable("docker")
+        try:
+            result = subprocess.run(
+                [*docker, "volume", "ls", "-q"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except subprocess.CalledProcessError as ex:
+            raise APIError(f"Error listing volumes: {ex}") from ex
+        return result.stdout.strip().split("\n")
+
+
 class DockerException(Exception):
     """Base class for Docker CLI exceptions."""
 
@@ -847,6 +962,7 @@ class CLIDockerClient:
         self.containers = Containers()
         self.images = Images()
         self.compose = Compose()
+        self.volumes = Volumes()
 
     @staticmethod
     def info() -> tuple:
