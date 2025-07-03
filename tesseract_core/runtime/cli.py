@@ -58,6 +58,7 @@ class SpellcheckedTyperGroup(typer.core.TyperGroup):
 
 
 app = typer.Typer(name="tesseract-runtime", cls=SpellcheckedTyperGroup)
+TESSERACT_INPUT = Path("/tesseract-input")
 
 
 def _prettify_docstring(docstr: str) -> str:
@@ -81,11 +82,23 @@ def _parse_arg_callback(
         # Passthrough, probably a default value
         return value, base_dir
 
-    if value.startswith("@"):
-        base_dir = Path(value[1:]).parent
-        value_format = guess_format_from_path(value[1:])
+    if TESSERACT_INPUT.is_dir():
+        # Check if we have read permissions if `tesseract-input` has been mounted
+        if not os.access(TESSERACT_INPUT, os.R_OK):
+            raise ValueError("Mounted --input-dir is not readable by the container.")
+
+    # If input dir is specified, read JSON_PAYLOAD arg as relative path to /tesseract-inputs
+    if value.startswith("@") or TESSERACT_INPUT.is_dir():
+        if value.startswith("@") and TESSERACT_INPUT.is_dir():
+            raise click.BadParameter("--input-dir should not be used along with @")
+        elif value.startswith("@"):
+            value = value[1:]
+        else:
+            value = os.path.join(TESSERACT_INPUT, value)
+        base_dir = Path(value).parent
+        value_format = guess_format_from_path(value)
         try:
-            value_bytes = read_from_path(value[1:])
+            value_bytes = read_from_path(value)
         except Exception as e:
             raise click.BadParameter(f"Could not read data from path {value}") from e
     else:

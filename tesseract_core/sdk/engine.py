@@ -843,7 +843,7 @@ def run_tesseract(
     gpus: list[int | str] | None = None,
     ports: dict[str, str] | None = None,
     user: str | None = None,
-    input_path: str | None = None,
+    input_dir: str | None = None,
 ) -> tuple[str, str]:
     """Start a Tesseract and execute a given command.
 
@@ -856,6 +856,7 @@ def run_tesseract(
         ports: dictionary of ports to bind to the host. Key is the host port,
             value is the container port.
         user: user to run the Tesseract as, e.g. '1000' or '1000:1000' (uid:gid).
+        input_dir: Path to the directory where input files are stored to be mounted on to the Tesseract.
 
     Returns:
         Tuple with the stdout and stderr of the Tesseract.
@@ -866,9 +867,11 @@ def run_tesseract(
     cmd = [command]
     current_cmd = None
 
-    if input_path:
-        volumes.append(f"{input_path}:/tesseract_input")
-    if volumes is None:
+    if input_dir:
+        if volumes is None:
+            volumes = []
+        volumes.append(f"{input_dir}:/tesseract_input")
+    if not volumes:
         parsed_volumes = {}
     else:
         parsed_volumes = _parse_volumes(volumes)

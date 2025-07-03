@@ -191,6 +191,20 @@ def test_run_tesseract_file_input(mocked_docker, tmpdir):
         "bind": "/path/in/container",
     }
 
+    # Test the same but with --input_dir
+    res, _ = engine.run_tesseract(
+        "foobar",
+        "apply",
+        [f"@{infile}", "--output-path", str(outdir)],
+        input_dir=tmpdir,
+    )
+    res = json.loads(res)
+    assert res["volumes"].keys() == {str(infile), str(outdir), str(tmpdir)}
+    assert res["volumes"][str(tmpdir)] == {
+        "mode": "ro",
+        "bind": "/tesseract-input",
+    }
+
 
 def test_serve_tesseracts_invalid_input_args(mocked_docker):
     """Test input validation logic for multi-tesseract serve."""

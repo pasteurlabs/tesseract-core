@@ -835,11 +835,11 @@ def run_container(
             help=("User to run the Tesseract as e.g. '1000' or '1000:1000' (uid:gid)."),
         ),
     ] = None,
-    input_path: Annotated[
-        str,
+    input_dir: Annotated[
+        str | None,
         typer.Option(
-            "--input-path",
-            help="Path to the input file.",
+            "--input-dir",
+            help="Path to the directory where input files are stored to be mounted on to the Tesseract.",
         ),
     ] = None,
 ) -> None:
@@ -891,7 +891,7 @@ def run_container(
             volumes=volume,
             gpus=gpus,
             user=user,
-            input_path=input_path,
+            input_dir=input_dir,
         )
 
     except ImageNotFound as e:
