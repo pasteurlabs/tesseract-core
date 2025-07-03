@@ -870,7 +870,7 @@ def run_tesseract(
     if input_dir:
         if volumes is None:
             volumes = []
-        volumes.append(f"{input_dir}:/tesseract_input")
+        volumes.append(f"{input_dir}:/tesseract-input")
     if not volumes:
         parsed_volumes = {}
     else:
