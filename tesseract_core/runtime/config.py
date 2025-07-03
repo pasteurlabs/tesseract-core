@@ -12,6 +12,7 @@ class RuntimeConfig(BaseModel):
     """Available runtime configuration."""
 
     api_path: FilePath = Path("tesseract_api.py")
+    required_input_files: str = ""
     name: str = "Tesseract"
     version: str = "0+unknown"
     debug: bool = False
@@ -52,3 +53,16 @@ def get_config() -> RuntimeConfig:
         update_config()
     assert _current_config is not None
     return _current_config
+
+
+def check_required_files(config: RuntimeConfig, path: Path) -> None:
+    """Check if all required input files are present at path."""
+    reqd_input_files = config.required_input_files.split(":")
+    for file in reqd_input_files:
+        file_path = path / file
+        if not file_path.exists():
+            # TODO: raise a different error here?
+            raise FileNotFoundError(
+                f"Required input file '{file}' not found in '{path}'. "
+                "Please ensure that the required files are present."
+            )

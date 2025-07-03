@@ -89,6 +89,12 @@ COPY ["{{ tesseract_source_directory }}/{{ source_path }}", "{{ target_path }}"]
 {% endfor %}
 {% endif %}
 
+{% if config.build_config.required_input_files %}
+ENV TESSERACT_REQUIRED_INPUT_FILES="{{ config.build_config.required_input_files | join(':') }}"
+{% else %}
+ENV TESSERACT_REQUIRED_INPUT_FILES=""
+{% endif %}
+
 {% if config.build_config.custom_build_steps %}
 # Custom build steps
 {{ config.build_config.custom_build_steps | join("\n") }}

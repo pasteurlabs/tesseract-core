@@ -69,7 +69,17 @@ def assert_relative_path(value: str) -> str:
     return value
 
 
+def assert_relative_filepath(value: str) -> str:
+    """Assert that a string encodes a relative file path."""
+    if Path(value).is_absolute():
+        raise ValueError(f"value must be a relative file path (got {value})")
+    if not Path(value).suffix:
+        raise ValueError(f"value must be a file (got {value})")
+    return value
+
+
 RelativePath = Annotated[str, AfterValidator(assert_relative_path)]
+RelativeFilePath = Annotated[str, AfterValidator(assert_relative_filepath)]
 StrictStr = Annotated[str, Strict()]
 
 
@@ -94,7 +104,7 @@ class CondaRequirements(BaseModel):
 PythonRequirements = Union[PipRequirements, CondaRequirements]
 
 
-class TesseractBuildConfig(BaseModel):
+class TesseractBuildConfig(BaseModel, validate_assignment=True):
     """Configuration options for building a Tesseract."""
 
     base_image: StrictStr = Field(
@@ -119,6 +129,10 @@ class TesseractBuildConfig(BaseModel):
             "Source paths are relative to the Tesseract directory."
         ),
     )
+    required_input_files: tuple[RelativeFilePath, ...] | None = Field(
+        (),
+        description=("List of input files that are required to be present at runtime."),
+    )
     custom_build_steps: tuple[StrictStr, ...] | None = Field(
         (),
         description=(
@@ -131,6 +145,15 @@ class TesseractBuildConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    skip_checks: bool = Field(
+        False,
+        description=(
+            "If True, skip build-time checks of Tesseract API module. "
+            "This can be useful when such a check cannot succeed (e.g. when building for a "
+            "different platform), but may lead to runtime errors if the Tesseract API is not valid."
+        ),
+    )
+
 
 # Allow None to be passed as a valid value for build_config, for example in YAML that comments out all options.
 OptionalBuildConfig = Annotated[
@@ -139,7 +162,7 @@ OptionalBuildConfig = Annotated[
 ]
 
 
-class TesseractConfig(BaseModel):
+class TesseractConfig(BaseModel, validate_assignment=True):
     """Configuration options for Tesseracts. Defines valid options in ``tesseract_config.yaml``."""
 
     name: StrictStr = Field(..., description="Name of the Tesseract.")
