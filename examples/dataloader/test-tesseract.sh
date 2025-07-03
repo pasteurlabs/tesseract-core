@@ -8,10 +8,10 @@ cd $here
 
 # tesseract-run-label-begin
 tesseract run dataloader \
-    --volume $here/testdata:/mnt/testdata:ro \
-    apply '{"inputs": {"data": "@/mnt/testdata/*.json"}}' | jq
+    --volume $here/testdata:/tesseract/input/testdata:ro \
+    apply '{"inputs": {"data": "@testdata/*.json"}}' | jq
 # tesseract-run-label-end
 
-tesseract run dataloader \
-    --volume $here/testdata:/mnt/testdata:ro \
-    jacobian '{"inputs": {"data": "@/mnt/testdata/*.json"}, "jac_inputs": ["data.[0]"], "jac_outputs": ["data_sum"]}' | jq
+# tesseract run dataloader \
+#     --volume $here/testdata:/tesseract/input/testdata:ro \
+#     jacobian '{"inputs": {"data": "@testdata/*.json"}, "jac_inputs": ["data.[0]"], "jac_outputs": ["data_sum"]}' | jq
