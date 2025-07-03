@@ -610,7 +610,8 @@ def test_serve_nonstandard_host_ip(
         requests.get(f"http://localhost:{project_container.host_port}/health")
 
 
-def test_tesseract_cli_options_parsing(built_image_name, tmpdir):
+@pytest.mark.parametrize("use_input_dir", [True, False])
+def test_tesseract_cli_options_parsing(built_image_name, tmpdir, use_input_dir):
     cli_runner = CliRunner(mix_stderr=False)
 
     tmpdir.chmod(0o0707)
@@ -624,12 +625,18 @@ def test_tesseract_cli_options_parsing(built_image_name, tmpdir):
         ["apply", "-o", str(tmpdir), f"@{example_inputs}", "-f", "json+binref"],
     )
 
+    if use_input_dir:
+        additional_options = ["--input-dir", str(example_inputs.parent)]
+    else:
+        additional_options = []
+
     for args in test_commands:
         run_res = cli_runner.invoke(
             app,
             [
                 "run",
                 built_image_name,
+                *additional_options,
                 *args,
             ],
             catch_exceptions=False,
