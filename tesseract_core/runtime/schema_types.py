@@ -4,6 +4,7 @@
 from abc import ABCMeta
 from enum import IntEnum
 from functools import partial
+from pathlib import Path
 from typing import (
     Annotated,
     Any,
@@ -354,6 +355,61 @@ def is_differentiable(obj: Any) -> bool:
         return ArrayFlags.DIFFERENTIABLE in obj.__metadata__[0].flags
 
     return False
+
+
+class FileReference:
+    """Type annotation for a file path that must be relative and exist on the filesystem."""
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls,
+        _source_type: Any,
+        _handler: GetCoreSchemaHandler,
+    ) -> core_schema.CoreSchema:
+        """Get the core schema for the FileReference type."""
+        return core_schema.chain_schema(
+            [
+                core_schema.union_schema(
+                    [
+                        core_schema.str_schema(),
+                        core_schema.is_instance_schema(Path),
+                    ]
+                ),
+                core_schema.with_info_plain_validator_function(cls.validate),
+            ],
+            serialization=core_schema.plain_serializer_function_ser_schema(
+                lambda v, _info: str(v) if isinstance(v, (str, Path)) else v,
+                info_arg=True,
+            ),
+        )
+
+    @classmethod
+    def validate(cls, value: Any, _info: Any) -> Path:
+        """Validate that the value is a relative path and exists."""
+        path = Path(value).resolve()
+        # Turn into a relative path wrt the current working directory (if possible)
+        if path.is_relative_to(Path.cwd()):
+            path = path.relative_to(Path.cwd())
+        else:
+            raise ValueError(
+                f"FileReference path must be relative to the current working directory: {path}"
+            )
+        if not path.exists():
+            raise ValueError(f"FileReference path does not exist: {path}")
+        if not path.is_file():
+            raise ValueError(f"FileReference path is not a file: {path}")
+        return path
+
+    @classmethod
+    def __get_pydantic_json_schema__(
+        cls, core_schema: core_schema.CoreSchema, handler: Any
+    ) -> JsonSchemaValue:
+        # Base it on string type and add a custom description
+        return {
+            "type": "string",
+            "format": "relative-path",
+            "description": "A relative filesystem path (must not be absolute)",
+        }
 
 
 # Export concrete scalar types
