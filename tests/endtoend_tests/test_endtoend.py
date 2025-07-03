@@ -619,16 +619,18 @@ def test_tesseract_cli_options_parsing(built_image_name, tmpdir, use_input_dir):
     examples_dir = Path(__file__).parent.parent.parent / "examples"
     example_inputs = examples_dir / "vectoradd" / "example_inputs.json"
 
-    test_commands = (
-        ["apply", "-f", "json+binref", "-o", str(tmpdir), f"@{example_inputs}"],
-        ["apply", f"@{example_inputs}", "-f", "json+binref", "-o", str(tmpdir)],
-        ["apply", "-o", str(tmpdir), f"@{example_inputs}", "-f", "json+binref"],
-    )
-
     if use_input_dir:
         additional_options = ["--input-dir", str(example_inputs.parent)]
+        test_commands = [
+            ["apply", "-o", str(tmpdir), f"{example_inputs}", "-f", "json+binref"]
+        ]
     else:
         additional_options = []
+        test_commands = (
+            ["apply", "-f", "json+binref", "-o", str(tmpdir), f"@{example_inputs}"],
+            ["apply", f"@{example_inputs}", "-f", "json+binref", "-o", str(tmpdir)],
+            ["apply", "-o", str(tmpdir), f"@{example_inputs}", "-f", "json+binref"],
+        )
 
     for args in test_commands:
         run_res = cli_runner.invoke(

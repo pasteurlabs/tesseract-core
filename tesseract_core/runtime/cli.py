@@ -58,7 +58,7 @@ class SpellcheckedTyperGroup(typer.core.TyperGroup):
 
 
 app = typer.Typer(name="tesseract-runtime", cls=SpellcheckedTyperGroup)
-TESSERACT_INPUT = Path("/tesseract-input")
+TESSERACT_INPUT = Path("/tesseract_input")
 
 
 def _prettify_docstring(docstr: str) -> str:
