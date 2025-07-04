@@ -893,7 +893,6 @@ def run_container(
 
     if environment is not None:
         try:
-            print("env: ", environment)
             environment = {
                 item.split("=", maxsplit=1)[0]: item.split("=", maxsplit=1)[1]
                 for item in environment
