@@ -132,26 +132,20 @@ def test_serve_lifecycle(mock_serving, mock_clients):
                 pass
 
 
-def test_HTTPClient_run_tesseract(mocker):
-    mock_response = mocker.Mock()
-    mock_response.json.return_value = {"result": [4, 4, 4]}
-    mock_response.raise_for_status = mocker.Mock()
-
-    mocked_request = mocker.patch(
-        "requests.request",
-        return_value=mock_response,
-    )
-
-    client = HTTPClient("somehost")
-
-    out = client.run_tesseract("apply", {"inputs": {"a": 1}})
-
-    assert out == {"result": [4, 4, 4]}
-    mocked_request.assert_called_with(
-        method="POST",
-        url="http://somehost/apply",
-        json={"inputs": {"a": 1}},
-    )
+def test_Tesseract_apply_with_HTTPClient(
+    serve_in_subprocess, dummy_tesseract_location, free_port
+):
+    test_input = {
+        "a": [1.0, 2.0, 3.0],
+        "b": [1, 1, 1],
+        "s": 2.5,
+    }
+    with serve_in_subprocess(
+        dummy_tesseract_location / "tesseract_api.py", free_port
+    ) as url:
+        client = Tesseract.from_url(url)
+        out = client.apply(inputs=test_input)
+    assert np.array_equal(out["result"], np.array([3.5, 6.0, 8.5]))
 
 
 def test_HTTPClient_run_tesseract_raises_validation_error(mocker):

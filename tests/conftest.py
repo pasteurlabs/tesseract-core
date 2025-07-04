@@ -4,7 +4,12 @@
 import json
 import os
 import random
+import signal
 import string
+import subprocess
+import sys
+import time
+from contextlib import contextmanager
 from pathlib import Path
 from shutil import copytree
 from textwrap import indent
@@ -12,6 +17,7 @@ from traceback import format_exception
 from typing import Any
 
 import pytest
+import requests
 
 # NOTE: Do NOT import tesseract_core here, as it will cause typeguard to fail
 
@@ -428,3 +434,49 @@ def mocked_docker(monkeypatch):
     )
 
     yield mock_instance
+
+
+@pytest.fixture
+def serve_in_subprocess():
+    return _serve_in_subprocess
+
+
+@contextmanager
+def _serve_in_subprocess(api_file, port, num_workers=1, timeout=30.0):
+    try:
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                "from tesseract_core.runtime.serve import serve; "
+                f"serve(host='localhost', port={port}, num_workers={num_workers})",
+            ],
+            env=dict(os.environ, TESSERACT_API_PATH=api_file),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        # wait for server to start
+        while True:
+            try:
+                response = requests.get(f"http://localhost:{port}/health")
+            except requests.exceptions.ConnectionError:
+                pass
+            else:
+                if response.status_code == 200:
+                    break
+
+            time.sleep(0.1)
+            timeout -= 0.1
+
+            if timeout < 0:
+                raise TimeoutError("Server did not start in time")
+
+        yield f"http://localhost:{port}"
+
+    finally:
+        proc.send_signal(signal.SIGINT)
+        stdout, stderr = proc.communicate()
+        print(stdout.decode())
+        print(stderr.decode())
+        proc.wait(timeout=5)
