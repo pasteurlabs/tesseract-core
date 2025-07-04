@@ -322,12 +322,16 @@ class Tesseract:
     @property
     @requires_client
     def available_endpoints(self) -> list[str]:
-        """Get the list of available endpoints.
+        """Get the list of available endpoints. Async endpoints are not exposed as they cannot be called directly.
 
         Returns:
             a list with all available endpoints for this Tesseract.
         """
-        return [endpoint.lstrip("/") for endpoint in self.openapi_schema["paths"]]
+        return [
+            endpoint.lstrip("/")
+            for endpoint in self.openapi_schema["paths"]
+            if "async" not in endpoint
+        ]
 
     @requires_client
     def apply(self, inputs: dict) -> dict:

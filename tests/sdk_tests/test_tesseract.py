@@ -54,17 +54,9 @@ def test_Tesseract_init():
 def test_Tesseract_from_tesseract_api(dummy_tesseract_location, dummy_tesseract_module):
     all_endpoints = [
         "apply",
-        "apply/async_start",
-        "apply/async_retrieve",
         "jacobian",
-        "jacobian/async_start",
-        "jacobian/async_retrieve",
         "jacobian_vector_product",
-        "jacobian_vector_product/async_start",
-        "jacobian_vector_product/async_retrieve",
         "vector_jacobian_product",
-        "vector_jacobian_product/async_start",
-        "vector_jacobian_product/async_retrieve",
         "health",
         "input_schema",
         "output_schema",
