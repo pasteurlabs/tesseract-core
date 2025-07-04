@@ -223,11 +223,7 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
                     # captures non-user code exceptions other than timeouts
                     except Exception as exc:
                         del open_tasks[task_id]
-                        return Response(
-                            status_code=500,
-                            content=f'{{"task_id": "{task_id}", "status": "infra error", "message": "{exc!s}"}}',
-                            media_type="application/json",
-                        )
+                        raise exc
 
                 del open_tasks[task_id]
                 # exceptions that occurred inside the apply function are raised when retrieving result
@@ -241,7 +237,7 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
                 except Exception as exc:
                     return Response(
                         status_code=500,
-                        content=f'{{"task_id": "{task_id}", "status": "error", "message": "{exc!s}"}}',
+                        content=f'{{"task_id": "{task_id}", "status": "apply error", "message": "{exc!s}"}}',
                         media_type="application/json",
                     )
                 return create_response(output_model, accept)
