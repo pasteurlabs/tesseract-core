@@ -47,10 +47,14 @@ def _run_api_function_within_worker(
     )
 
     payload_model = endpoint_func.input_schema.model_validate(
-        picklable_payload_dict
-    )  # TODO: Maybe somehow skip the actual validation here, since it was already done in the main process?
-
-    return endpoint_func(payload=payload_model).model_dump()
+        picklable_payload_dict,
+        context={
+            "defer_validation": True
+        },  # Inputs have already been evaluated by main process
+    )
+    return endpoint_func(
+        payload=payload_model
+    ).model_dump()  # Validate outputs here, and skip in main process
 
 
 def create_response(model: BaseModel, accept: str) -> Response:
@@ -229,10 +233,11 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
                 # exceptions that occurred inside the apply function are raised when retrieving result
                 try:
                     output = task.result()
-                    # TODO: Avoid re-validation here?
-                    # Use model_construct to avoid re-validation
                     output_model = async_endpoint_func.output_schema.model_validate(
-                        output
+                        output,
+                        context={
+                            "defer_validation": True
+                        },  # Outputs have already been evaluated by worker process
                     )
                 except Exception as exc:
                     return Response(

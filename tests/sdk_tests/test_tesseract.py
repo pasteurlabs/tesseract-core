@@ -132,7 +132,7 @@ def test_serve_lifecycle(mock_serving, mock_clients):
                 pass
 
 
-def test_Tesseract_apply_with_HTTPClient(
+def test_Tesseract_with_HTTPClient(
     serve_in_subprocess, dummy_tesseract_location, free_port
 ):
     test_input = {
@@ -143,9 +143,32 @@ def test_Tesseract_apply_with_HTTPClient(
     with serve_in_subprocess(
         dummy_tesseract_location / "tesseract_api.py", free_port
     ) as url:
-        client = Tesseract.from_url(url)
-        out = client.apply(inputs=test_input)
-    assert np.array_equal(out["result"], np.array([3.5, 6.0, 8.5]))
+        with Tesseract.from_url(url) as client:
+            # test apply
+            out = client.apply(inputs=test_input)
+            assert np.array_equal(out["result"], np.array([3.5, 6.0, 8.5]))
+            # test jacobian
+            out = client.jacobian(
+                inputs=test_input, jac_inputs=["a"], jac_outputs=["result"]
+            )
+            n = len(test_input["a"])
+            assert np.array_equal(out["result"]["a"], np.eye(n) * test_input["s"])
+            # test jacobian_vector_product
+            out = client.jacobian_vector_product(
+                inputs=test_input,
+                jvp_inputs=["a"],
+                jvp_outputs=["result"],
+                tangent_vector={"a": np.ones(n)[None, ...]},
+            )
+            assert np.array_equal(out["result"], np.zeros(n))
+            # test vector_jacobian_product
+            out = client.vector_jacobian_product(
+                inputs=test_input,
+                vjp_inputs=["a"],
+                vjp_outputs=["result"],
+                cotangent_vector={"result": np.ones(n)},
+            )
+            assert np.array_equal(out["a"], np.zeros(n))
 
 
 def test_HTTPClient_run_tesseract_raises_validation_error(mocker):

@@ -301,23 +301,23 @@ def test_debug_mode(dummy_tesseract_module, monkeypatch):
         tesseract_core.runtime.config._current_config = orig_config
 
 
-def test_async_endpoints(tmpdir):
+def test_async_endpoint_wrapper(tmpdir):
     from tesseract_core.runtime.config import update_config
 
     TESSERACT_API = dedent(
         """
-        import asyncio
         import time
+        import numpy as np
         from pydantic import BaseModel
         from tesseract_core.runtime import Array, Differentiable, Float32
 
         class InputSchema(BaseModel):
-            x: Differentiable[Array[..., Float32]]
+            x: Differentiable[Array[(None,), Float32]]
             sleep: float
             raise_error: bool
 
         class OutputSchema(BaseModel):
-            y: Differentiable[Array[..., Float32]]
+            y: Differentiable[Array[(None,), Float32]]
 
         def apply(inputs: InputSchema) -> OutputSchema:
             if inputs.raise_error:
@@ -325,8 +325,13 @@ def test_async_endpoints(tmpdir):
             time.sleep(inputs.sleep)
             return OutputSchema(y=inputs.x**2)
 
-        def jacobian(inputs: InputSchema) -> OutputSchema:
-            return OutputSchema(something=inputs.x)
+        def jacobian(
+            inputs: InputSchema,
+            jac_inputs: set[str],
+            jac_outputs: set[str],
+        ):
+            jacobian = {"y": {"x": np.eye(len(inputs.x)) * 2 * inputs.x}}
+            return jacobian
         """
     )
     api_path = Path(tmpdir / "tesseract_api.py")
