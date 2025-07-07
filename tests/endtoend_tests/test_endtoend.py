@@ -4,6 +4,7 @@
 """End-to-end tests for Tesseract workflows."""
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -476,6 +477,10 @@ def test_tesseract_serve_docker_volume(
         with open(tmpfile, "w") as hello:
             hello.write("world")
             hello.flush()
+
+        if user not in (None, "root"):
+            # If we are not running as root, ensure the file is readable by the target user
+            os.chown(tmpfile, *user.split(":"))
 
         exit_code, output = tesseract0.exec_run(["cat", f"{dest}/hi"])
         assert exit_code == 0

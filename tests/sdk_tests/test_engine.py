@@ -170,7 +170,7 @@ def test_run_tesseract_file_input(mocked_docker, tmpdir):
     res = json.loads(res)
     assert res["command"] == [
         "apply",
-        "@/mnt/payload.json",
+        "@/tesseract/input_data/payload.json",
         "--output-path",
         "/mnt/output",
     ]
