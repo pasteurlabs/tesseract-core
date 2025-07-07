@@ -82,9 +82,7 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
 
     from concurrent.futures import ProcessPoolExecutor
 
-    executor = ProcessPoolExecutor(
-        max_workers=4
-    )  # TODO: Adjust the number of workers according to user-configured num_workers!
+    executor = ProcessPoolExecutor(max_workers=config.max_num_workers)
 
     open_tasks = {}
 
