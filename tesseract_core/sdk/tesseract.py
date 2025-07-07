@@ -7,7 +7,6 @@ import base64
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from functools import cached_property, wraps
-from os import PathLike
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -26,6 +25,8 @@ from tesseract_core.runtime.file_interactions import (
 )
 
 from . import engine
+
+PathLike = str | Path
 
 
 @dataclass
@@ -114,8 +115,12 @@ class Tesseract:
 
         Args:
             image: The Docker image to use.
-            input_path: Path to be mounted as the input directory in the container (read only).
-            output_path: Path to be mounted as the output directory in the container (read+write).
+            input_path: Path to be mounted as the input directory in the
+                container (read only). All paths in the input payload must be
+                relative to this path.
+            output_path: Path to be mounted as the output directory in the
+                container (read+write). All paths in the output result will be
+                relative to this path.
             gpus: List of GPUs to use, e.g. ["0", "1"]. (default: no GPUs)
             num_workers: Number of worker processes to use. This determines how
                 many requests can be handled in parallel. Higher values
@@ -167,6 +172,10 @@ class Tesseract:
         Args:
             tesseract_api: Path to the `tesseract_api.py` file, or an
                 already imported Tesseract API module.
+            input_path: Path of input directory. All paths in the tesseract
+                payload have to be relative to this path.
+            output_path: Path of output directory. All paths in the tesseract
+                result with be given relative to this path.
 
         Returns:
             A Tesseract instance.
