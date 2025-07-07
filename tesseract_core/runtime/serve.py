@@ -256,14 +256,19 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
     return app
 
 
-def serve(host: str, port: int, num_workers: int) -> None:
+def serve(host: str, port: int, num_workers: int, request_timeout: float) -> None:
     """Start the REST API."""
+    # Unicorn num_workers must be 1 to avoid concurencey issues.
+    # We create a process pool during rest api creating that reads
+    # max_num_workers form the config and spawns multiple workers.
+    update_config(
+        max_num_workers=num_workers,
+        request_timeout=request_timeout,
+    )
     config = get_config()
     if config.debug:
         import debugpy
 
         debugpy.listen(("0.0.0.0", 5678))
 
-    uvicorn.run(
-        "tesseract_core.runtime.app_http:app", host=host, port=port, workers=num_workers
-    )
+    uvicorn.run("tesseract_core.runtime.app_http:app", host=host, port=port, workers=1)

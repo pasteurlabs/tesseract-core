@@ -311,9 +311,17 @@ def check_gradients(
 @click.option("-p", "--port", default=8000, help="Port number")
 @click.option("-h", "--host", default="127.0.0.1", help="Host IP address")
 @click.option("-w", "--num-workers", default=1, help="Number of worker processes")
-def serve(host: str, port: int, num_workers: int) -> None:
+@click.option(
+    "-t",
+    "--request-timeout",
+    default=10.0,
+    help="Time before rest API requests time out.",
+)
+def serve(host: str, port: int, num_workers: int, request_timeout: float) -> None:
     """Start running this Tesseract's web server."""
-    serve_(host=host, port=port, num_workers=num_workers)
+    serve_(
+        host=host, port=port, num_workers=num_workers, request_timeout=request_timeout
+    )
 
 
 def _create_user_defined_cli_command(

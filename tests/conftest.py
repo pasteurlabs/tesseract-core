@@ -442,14 +442,16 @@ def serve_in_subprocess():
 
 
 @contextmanager
-def _serve_in_subprocess(api_file, port, num_workers=1, timeout=30.0):
+def _serve_in_subprocess(
+    api_file, port, num_workers=1, request_timeout=10.0, timeout=30.0
+):
     try:
         proc = subprocess.Popen(
             [
                 sys.executable,
                 "-c",
                 "from tesseract_core.runtime.serve import serve; "
-                f"serve(host='localhost', port={port}, num_workers={num_workers})",
+                f"serve(host='localhost', port={port}, num_workers={num_workers}, request_timeout={request_timeout})",
             ],
             env=dict(os.environ, TESSERACT_API_PATH=api_file),
             stdout=subprocess.PIPE,
