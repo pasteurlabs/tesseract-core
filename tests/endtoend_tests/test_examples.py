@@ -733,7 +733,7 @@ TEST_CASES = {
                 endpoint="apply",
                 payload={
                     "inputs": {
-                        "data":  [
+                        "data": [
                             "sample_7.json",
                             "sample_6.json",
                             "sample_1.json",
@@ -747,7 +747,7 @@ TEST_CASES = {
                         ]
                     }
                 },
-                output_contains_pattern=['output/sample_0.json']
+                output_contains_pattern=["output/sample_0.json"],
             )
         ],
         volume_mounts=[

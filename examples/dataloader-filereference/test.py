@@ -32,11 +32,8 @@ with Tesseract.from_tesseract_api(
 
 with Tesseract.from_image(
     "dataloader-filereference",
-    # FIXME: to be replaced with input_path and output_path args
-    volumes=[
-        f"{here.as_posix()}/testdata:/tesseract/input/:ro",
-        f"{here.as_posix()}/output:/tesseract/output/:rw",
-    ],
+    input_path=input_path,
+    output_path=output_path,
 ) as tess:
     result = tess.apply({"data": data})
     print(result)

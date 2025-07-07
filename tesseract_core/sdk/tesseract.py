@@ -7,6 +7,7 @@ import base64
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from functools import cached_property, wraps
+from os import PathLike
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -16,6 +17,13 @@ import numpy as np
 import requests
 from pydantic import BaseModel, TypeAdapter, ValidationError
 from pydantic_core import InitErrorDetails
+
+from tesseract_core.runtime.file_interactions import (
+    DEFAULT_INPUT_PATH,
+    DEFAULT_OUTPUT_PATH,
+    set_input_path,
+    set_output_path,
+)
 
 from . import engine
 
@@ -61,6 +69,8 @@ class Tesseract:
         self._serve_context = None
         self._lastlog = None
         self._client = HTTPClient(url)
+        self._path_config = {"input_current": None, "output_current": None}
+        self._output_path = None
 
     @classmethod
     def from_url(cls, url: str) -> Tesseract:
@@ -83,7 +93,8 @@ class Tesseract:
         cls,
         image: str,
         *,
-        volumes: list[str] | None = None,
+        input_path: PathLike | None = None,
+        output_path: PathLike | None = None,
         gpus: list[str] | None = None,
         num_workers: int = 1,
         no_compose: bool = False,
@@ -103,7 +114,8 @@ class Tesseract:
 
         Args:
             image: The Docker image to use.
-            volumes: List of volumes to mount, e.g. ["/path/on/host:/path/in/container"].
+            input_path: Path to be mounted as the input directory in the container (read only).
+            output_path: Path to be mounted as the output directory in the container (read+write).
             gpus: List of GPUs to use, e.g. ["0", "1"]. (default: no GPUs)
             num_workers: Number of worker processes to use. This determines how
                 many requests can be handled in parallel. Higher values
@@ -114,6 +126,13 @@ class Tesseract:
             A Tesseract instance.
         """
         obj = cls.__new__(cls)
+
+        volumes = []
+        if input_path is not None:
+            volumes.append(f"{Path(input_path).resolve()}:{DEFAULT_INPUT_PATH}:ro")
+        if output_path is not None:
+            volumes.append(f"{Path(output_path).resolve()}:{DEFAULT_OUTPUT_PATH}:rw")
+
         obj._spawn_config = SpawnConfig(
             image=image,
             volumes=volumes,
@@ -125,6 +144,10 @@ class Tesseract:
         obj._serve_context = None
         obj._lastlog = None
         obj._client = None
+        obj._path_config = {
+            "input_current": DEFAULT_INPUT_PATH,
+            "output_current": DEFAULT_OUTPUT_PATH,
+        }
         return obj
 
     @classmethod
@@ -148,16 +171,6 @@ class Tesseract:
         Returns:
             A Tesseract instance.
         """
-        if input_path is not None:
-            from tesseract_core.runtime.file_interactions import set_input_path
-
-            set_input_path(input_path)
-
-        if output_path is not None:
-            from tesseract_core.runtime.file_interactions import set_output_path
-
-            set_output_path(output_path)
-
         if isinstance(tesseract_api, str | Path):
             from tesseract_core.runtime.core import load_module_from_path
 
@@ -179,6 +192,14 @@ class Tesseract:
         obj._serve_context = None
         obj._lastlog = None
         obj._client = LocalClient(tesseract_api)
+        obj._path_config = {
+            "input_current": Path(input_path).resolve()
+            if input_path is not None
+            else DEFAULT_INPUT_PATH,
+            "output_current": Path(output_path).resolve()
+            if output_path is not None
+            else DEFAULT_OUTPUT_PATH,
+        }
         return obj
 
     def __enter__(self) -> Tesseract:
@@ -188,6 +209,16 @@ class Tesseract:
         """
         if self._serve_context is not None:
             raise RuntimeError("Cannot serve the same Tesseract multiple times.")
+
+        if self._path_config["input_current"] is not None:
+            from tesseract_core.runtime.file_interactions import set_input_path
+
+            set_input_path(self._path_config["input_current"])
+
+        if self._path_config["output_current"] is not None:
+            from tesseract_core.runtime.file_interactions import set_output_path
+
+            set_output_path(self._path_config["output_current"])
 
         if self._client is not None:
             # Tesseract is already being served -> no-op
@@ -205,6 +236,9 @@ class Tesseract:
             # This can happen if __enter__ short-cirtuits
             return
         self.teardown()
+
+        set_input_path(DEFAULT_INPUT_PATH)
+        set_output_path(DEFAULT_OUTPUT_PATH)
 
     def server_logs(self) -> str:
         """Get the logs of the Tesseract server.
