@@ -63,12 +63,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 {% endif %}
 
-# Drop to a non-root user
-RUN groupadd -o -g 1000 tesseractor && \
-    useradd -o -u 1000 -g 1000 --create-home -s /bin/bash tesseractor
 WORKDIR /tesseract
-RUN chown tesseractor:tesseractor /tesseract
-USER tesseractor
+RUN chmod 755 /tesseract
 
 # Set environment variables
 ENV TESSERACT_NAME="{{ config.name | replace('"', '\\"') | replace('\n', '\\n') }}" \
@@ -78,7 +74,7 @@ ENV TESSERACT_NAME="{{ config.name | replace('"', '\\"') | replace('\n', '\\n') 
 
 # Copy only necessary files
 COPY --from=build_stage /python-env /python-env
-COPY --chown=1000:1000 "{{ tesseract_source_directory }}/tesseract_api.py" ${TESSERACT_API_PATH}
+COPY "{{ tesseract_source_directory }}/tesseract_api.py" ${TESSERACT_API_PATH}
 
 ENV PATH="/python-env/bin:$PATH"
 
@@ -93,6 +89,13 @@ COPY ["{{ tesseract_source_directory }}/{{ source_path }}", "{{ target_path }}"]
 # Custom build steps
 {{ config.build_config.custom_build_steps | join("\n") }}
 {% endif %}
+
+VOLUME ["/tesseract/input_data", "/tesseract/output_data"]
+RUN mkdir -p /tesseract/input_data /tesseract/output_data && \
+    chmod 755 /tesseract/input_data && \
+    chmod 777 /tesseract/output_data
+
+USER 1000:1000
 
 # Final sanity check to ensure the runtime is installed and tesseract_api.py is valid
 {% if not config.build_config.skip_checks %}

@@ -568,6 +568,7 @@ def serve(
         no_compose: if True, do not use Docker Compose to serve the Tesseracts.
         service_names: list of service names under which to expose each Tesseract container on the shared network.
         user: user to run the Tesseracts as, e.g. '1000' or '1000:1000' (uid:gid).
+            Defaults to the current user.
 
     Returns:
         A string representing the Tesseract project ID.
@@ -594,6 +595,10 @@ def serve(
                 f"Number of service names ({len(service_names)}) must match number of images ({len(image_ids)})"
             )
         _validate_service_names(service_names)
+
+    if user is None:
+        # Use the current user if not specified
+        user = f"{os.getuid()}:{os.getgid()}" if os.name != "nt" else None
 
     if no_compose:
         if len(images) > 1:
@@ -856,6 +861,7 @@ def run_tesseract(
         ports: dictionary of ports to bind to the host. Key is the host port,
             value is the container port.
         user: user to run the Tesseract as, e.g. '1000' or '1000:1000' (uid:gid).
+            Defaults to the current user.
 
     Returns:
         Tuple with the stdout and stderr of the Tesseract.
@@ -870,6 +876,10 @@ def run_tesseract(
         parsed_volumes = {}
     else:
         parsed_volumes = _parse_volumes(volumes)
+
+    if user is None:
+        # Use the current user if not specified
+        user = f"{os.getuid()}:{os.getgid()}" if os.name != "nt" else None
 
     for arg in args:
         if arg.startswith("-"):
