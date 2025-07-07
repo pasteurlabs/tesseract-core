@@ -751,7 +751,10 @@ def _create_docker_compose_template(
             "port": f"{ports[i]}:8000",
             "volumes": volumes,
             "gpus": gpu_settings,
-            "environment": {"TESSERACT_DEBUG": "1" if debug else "0", **environment},
+            "environment": {
+                "TESSERACT_DEBUG": "1" if debug else "0",
+                **(environment or {}),
+            },
             "num_workers": num_workers,
             "debugpy_port": debugpy_ports[i] if debug else None,
         }
