@@ -172,7 +172,7 @@ def test_run_tesseract_file_input(mocked_docker, tmpdir):
         "apply",
         "@/tesseract/input_data/payload.json",
         "--output-path",
-        "/mnt/output",
+        "/tesseract/output_data",
     ]
     assert res["image"] == "foobar"
     assert res["volumes"].keys() == {str(infile), str(outdir)}
