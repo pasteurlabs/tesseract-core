@@ -21,32 +21,32 @@ def running_in_docker() -> bool:
     return Path("/.dockerenv").exists()
 
 
-DEFAULT_INPUT_PATH: Path = Path("/tesseract/input")
-DEFAULT_OUTPUT_PATH: Path = Path("/tesseract/output")
-__PATH_CONFIG = threading.local()
-__PATH_CONFIG.input_current = DEFAULT_INPUT_PATH
-__PATH_CONFIG.output_current = DEFAULT_OUTPUT_PATH
+CONTAINER_INPUT_PATH: Path = Path("/tesseract/input")
+CONTAINER_OUTPUT_PATH: Path = Path("/tesseract/output")
+_PATH_CONFIG = threading.local()
+_PATH_CONFIG.input_current = CONTAINER_INPUT_PATH
+_PATH_CONFIG.output_current = CONTAINER_OUTPUT_PATH
 
 
 def set_input_path(path: PathLike) -> None:
     """Set the current input path."""
-    __PATH_CONFIG.input_current = Path(path).resolve()
+    _PATH_CONFIG.input_current = Path(path).resolve()
 
 
 def get_input_path() -> Path:
     """Get the current input path."""
-    return __PATH_CONFIG.input_current
+    return _PATH_CONFIG.input_current
 
 
 def set_output_path(path: PathLike) -> None:
     """Set the current output path."""
-    __PATH_CONFIG.output_current = Path(path).resolve()
+    _PATH_CONFIG.output_current = Path(path).resolve()
     # __PATH_CONFIG.output_current.mkdir(parents=True, exist_ok=True)
 
 
 def get_output_path() -> Path:
     """Get the current output path."""
-    return __PATH_CONFIG.output_current
+    return _PATH_CONFIG.output_current
 
 
 def guess_format_from_path(path: PathLike) -> supported_format_type:

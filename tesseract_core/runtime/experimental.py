@@ -19,7 +19,7 @@ from pydantic import (
 from pydantic.json_schema import JsonSchemaValue
 from pydantic_core import SchemaSerializer, SchemaValidator, core_schema
 
-from tesseract_core.runtime.file_interactions import parent_path
+from tesseract_core.runtime.file_interactions import get_input_path, parent_path
 from tesseract_core.runtime.schema_types import safe_issubclass
 
 
@@ -121,9 +121,8 @@ class PydanticLazySequenceAnnotation:
             )
 
             maybe_path = maybe_path[1:]
-            from tesseract_core.runtime.file_interactions import DEFAULT_INPUT_PATH
 
-            items = expand_glob(DEFAULT_INPUT_PATH / maybe_path)
+            items = expand_glob(get_input_path() / maybe_path)
 
             def load_item(key: str) -> Any:
                 buffer = read_from_path(key)

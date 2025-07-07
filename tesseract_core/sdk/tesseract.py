@@ -18,8 +18,8 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 from pydantic_core import InitErrorDetails
 
 from tesseract_core.runtime.file_interactions import (
-    DEFAULT_INPUT_PATH,
-    DEFAULT_OUTPUT_PATH,
+    CONTAINER_INPUT_PATH,
+    CONTAINER_OUTPUT_PATH,
     set_input_path,
     set_output_path,
 )
@@ -134,9 +134,9 @@ class Tesseract:
 
         volumes = []
         if input_path is not None:
-            volumes.append(f"{Path(input_path).resolve()}:{DEFAULT_INPUT_PATH}:ro")
+            volumes.append(f"{Path(input_path).resolve()}:{CONTAINER_INPUT_PATH}:ro")
         if output_path is not None:
-            volumes.append(f"{Path(output_path).resolve()}:{DEFAULT_OUTPUT_PATH}:rw")
+            volumes.append(f"{Path(output_path).resolve()}:{CONTAINER_OUTPUT_PATH}:rw")
 
         obj._spawn_config = SpawnConfig(
             image=image,
@@ -150,8 +150,8 @@ class Tesseract:
         obj._lastlog = None
         obj._client = None
         obj._path_config = {
-            "input_current": DEFAULT_INPUT_PATH,
-            "output_current": DEFAULT_OUTPUT_PATH,
+            "input_current": CONTAINER_INPUT_PATH,
+            "output_current": CONTAINER_OUTPUT_PATH,
         }
         return obj
 
@@ -204,10 +204,10 @@ class Tesseract:
         obj._path_config = {
             "input_current": Path(input_path).resolve()
             if input_path is not None
-            else DEFAULT_INPUT_PATH,
+            else Path.cwd(),
             "output_current": Path(output_path).resolve()
             if output_path is not None
-            else DEFAULT_OUTPUT_PATH,
+            else Path.cwd(),
         }
         return obj
 
@@ -246,8 +246,8 @@ class Tesseract:
             return
         self.teardown()
 
-        set_input_path(DEFAULT_INPUT_PATH)
-        set_output_path(DEFAULT_OUTPUT_PATH)
+        set_input_path(CONTAINER_INPUT_PATH)
+        set_output_path(CONTAINER_OUTPUT_PATH)
 
     def server_logs(self) -> str:
         """Get the logs of the Tesseract server.

@@ -848,6 +848,9 @@ def test_unit_tesseract_endtoend(
     """Test that unit Tesseract images can be built and used to serve REST API."""
     from tesseract_core.sdk.cli import app
 
+    if "filereference" in unit_tesseract_path.name:
+        pytest.skip("FileReference example needs mount permission fix in CI.")
+
     cli_runner = CliRunner(mix_stderr=False)
 
     # Stage 1: Build
