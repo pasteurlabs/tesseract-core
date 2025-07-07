@@ -549,6 +549,7 @@ def serve(
     num_workers: int = 1,
     no_compose: bool = False,
     service_names: list[str] | None = None,
+    user: str | None = None,
 ) -> str:
     """Serve one or more Tesseract images.
 
@@ -566,6 +567,7 @@ def serve(
         num_workers: number of workers to use for serving the Tesseracts.
         no_compose: if True, do not use Docker Compose to serve the Tesseracts.
         service_names: list of service names under which to expose each Tesseract container on the shared network.
+        user: user to run the Tesseracts as, e.g. '1000' or '1000:1000' (uid:gid).
 
     Returns:
         A string representing the Tesseract project ID.
@@ -642,6 +644,7 @@ def serve(
             ports=port_mappings,
             detach=True,
             volumes=volumes,
+            user=user,
         )
         # wait for server to start
         timeout = 30
@@ -671,6 +674,7 @@ def serve(
         gpus,
         num_workers,
         debug=debug,
+        user=user,
     )
     compose_fname = f"docker-compose-{_id_generator()}.yml"
 
@@ -696,6 +700,7 @@ def _create_docker_compose_template(
     gpus: list[str] | None = None,
     num_workers: int = 1,
     debug: bool = False,
+    user: str | None = None,
 ) -> str:
     """Create Docker Compose template."""
     services = []
@@ -744,6 +749,7 @@ def _create_docker_compose_template(
     for i, image_id in enumerate(image_ids):
         service = {
             "name": service_names[i],
+            "user": user,
             "image": image_id,
             "port": f"{ports[i]}:8000",
             "volumes": volumes,
@@ -756,8 +762,28 @@ def _create_docker_compose_template(
         }
 
         services.append(service)
+
+    docker_volumes = {}  # Dictionary of volume names mapped to whether or not they already exist
+    if volumes:
+        for volume in volumes:
+            source = volume.split(":")[0]
+            # Check if source exists to determine if specified volume is a docker volume
+            if not Path(source).exists():
+                # Check if volume exists
+                if not docker_client.volumes.get(source):
+                    if "/" not in source:
+                        docker_volumes[source] = False
+                    else:
+                        raise ValueError(
+                            f"Volume/Path {source} does not already exist, "
+                            "and new volume cannot be created due to '/' in name."
+                        )
+                else:
+                    # Docker volume is external
+                    docker_volumes[source] = True
+
     template = ENV.get_template("docker-compose.yml")
-    return template.render(services=services)
+    return template.render(services=services, docker_volumes=docker_volumes)
 
 
 def _id_generator(
@@ -817,6 +843,7 @@ def run_tesseract(
     volumes: list[str] | None = None,
     gpus: list[int | str] | None = None,
     ports: dict[str, str] | None = None,
+    user: str | None = None,
 ) -> tuple[str, str]:
     """Start a Tesseract and execute a given command.
 
@@ -828,6 +855,7 @@ def run_tesseract(
         gpus: list of GPUs, as indices or names, to passthrough the container.
         ports: dictionary of ports to bind to the host. Key is the host port,
             value is the container port.
+        user: user to run the Tesseract as, e.g. '1000' or '1000:1000' (uid:gid).
 
     Returns:
         Tuple with the stdout and stderr of the Tesseract.
@@ -896,6 +924,7 @@ def run_tesseract(
         detach=False,
         remove=True,
         stderr=True,
+        user=user,
     )
     stdout = stdout.decode("utf-8")
     stderr = stderr.decode("utf-8")
