@@ -902,7 +902,7 @@ def run_tesseract(
                     f"Path {local_path} provided as output is not a directory"
                 )
 
-            path_in_container = "/mnt/output"
+            path_in_container = "/tesseract/output_data"
             arg = path_in_container
 
             # Bind-mount directory
@@ -915,7 +915,9 @@ def run_tesseract(
             if not local_path.is_file():
                 raise RuntimeError(f"Path {local_path} provided as input is not a file")
 
-            path_in_container = os.path.join("/mnt", f"payload{local_path.suffix}")
+            path_in_container = os.path.join(
+                "/tesseract/input_data", f"payload{local_path.suffix}"
+            )
             arg = f"@{path_in_container}"
 
             # Bind-mount file
