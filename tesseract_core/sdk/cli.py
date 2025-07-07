@@ -194,12 +194,12 @@ def main_callback(
 
 def _parse_config_override(
     options: list[str] | None,
-) -> tuple[tuple[list[str], Any], ...]:
+) -> dict[tuple[str, ...], Any]:
     """Parse `["path1.path2.path3=value"]` into `[(["path1", "path2", "path3"], "value")]`."""
     if options is None:
-        return ()
+        return {}
 
-    def _parse_option(option: str) -> tuple[list[str], Any]:
+    def _parse_option(option: str) -> tuple[tuple[str, ...], Any]:
         if "=" not in option:
             raise typer.BadParameter(
                 f'Invalid config override "{option}" (must be `keypath=value`)',
@@ -213,7 +213,7 @@ def _parse_config_override(
                 param_hint="config_override",
             )
 
-        path = key.split(".")
+        path = tuple(key.split("."))
 
         try:
             value = yaml.safe_load(value)
@@ -225,7 +225,7 @@ def _parse_config_override(
 
         return path, value
 
-    return tuple(_parse_option(option) for option in options)
+    return dict(_parse_option(option) for option in options)
 
 
 @app.command("build")
