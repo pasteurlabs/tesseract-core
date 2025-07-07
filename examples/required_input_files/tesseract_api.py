@@ -27,7 +27,6 @@ class OutputSchema(BaseModel):
 
 
 def apply(inputs: InputSchema) -> OutputSchema:
-    # print cwd
     with open("/tesseract-input/parameters1.json", "rb") as f:
         data1 = json.load(f)
 
