@@ -939,7 +939,7 @@ def run_container(
             volumes=volume,
             gpus=gpus,
             environment=environment,
-            user=user
+            user=user,
         )
 
     except ImageNotFound as e:
