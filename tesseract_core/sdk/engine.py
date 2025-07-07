@@ -371,7 +371,7 @@ def build_tesseract(
     image_tag: str | None,
     build_dir: Path | None = None,
     inject_ssh: bool = False,
-    config_override: tuple[tuple[list[str], str], ...] = (),
+    config_override: dict[tuple[str, ...], Any] | None = None,
     generate_only: bool = False,
 ) -> Image | Path:
     """Build a new Tesseract from a context directory.
@@ -397,11 +397,12 @@ def build_tesseract(
     config = get_config(src_dir)
 
     # Apply config overrides
-    for path, value in config_override:
-        c = config
-        for k in path[:-1]:
-            c = getattr(c, k)
-        setattr(c, path[-1], value)
+    if config_override is not None:
+        for path, value in config_override.items():
+            c = config
+            for k in path[:-1]:
+                c = getattr(c, k)
+            setattr(c, path[-1], value)
 
     image_name = config.name
     if image_tag:
