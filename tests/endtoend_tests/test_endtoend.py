@@ -4,7 +4,6 @@
 """End-to-end tests for Tesseract workflows."""
 
 import json
-import os
 from pathlib import Path
 
 import pytest
@@ -480,8 +479,7 @@ def test_tesseract_serve_docker_volume(
 
         if user not in (None, "root"):
             # If we are not running as root, ensure the file is readable by the target user
-            uid, gid = user.split(":")
-            os.chown(tmpfile, int(uid), int(gid))
+            tmpfile.chmod(0o644)
 
         exit_code, output = tesseract0.exec_run(["cat", f"{dest}/hi"])
         assert exit_code == 0
@@ -489,12 +487,12 @@ def test_tesseract_serve_docker_volume(
 
     # Create file inside a container and access it from the other
     bar_file = dest / "bar"
-    exit_code, output = tesseract0.exec_run(["ls", "-la", dest])
+    exit_code, output = tesseract0.exec_run(["ls", "-la", str(dest)])
     assert exit_code == 0, output.decode()
 
-    exit_code, output = tesseract0.exec_run(["touch", bar_file])
+    exit_code, output = tesseract0.exec_run(["touch", str(bar_file)])
     assert exit_code == 0
-    exit_code, output = tesseract1.exec_run(["cat", bar_file])
+    exit_code, output = tesseract1.exec_run(["cat", str(bar_file)])
     assert exit_code == 0
     exit_code, output = tesseract1.exec_run(
         ["bash", "-c", f'echo "hello" > {bar_file}']
