@@ -8,6 +8,7 @@
 :glob:
 building-blocks/helloworld.md
 building-blocks/vectoradd.md
+building-blocks/univariate.md
 building-blocks/packagedata.md
 building-blocks/arm64.md
 building-blocks/localdependency.md
@@ -35,6 +36,11 @@ You can also find these Tesseracts in the `examples` directory of the [code repo
       :link: building-blocks/vectoradd.html
 
      Tesseract performing vector addition. Highlighting simple array operations and how to use the Tesseract Python API.
+   :::
+   :::{grid-item-card} Univariate
+      :link: building-blocks/univariate.html
+
+      A Tesseract that wraps the univariate Rosenbrock function, which is a common test problem for optimization algorithms.
    :::
    :::{grid-item-card} Package Data
       :link: building-blocks/packagedata.html
