@@ -821,8 +821,11 @@ def _parse_volumes(options: list[str]) -> dict[str, dict[str, str]]:
                 f"Invalid mount volume specification {option} "
                 "(must be `/path/to/source:/path/totarget:(ro|rw)`)",
             )
-        # Docker doesn't like paths like ".", so we convert to absolute path here
-        source = str(Path(source).resolve())
+
+        is_local_mount = "/" in source or Path(source).exists()
+        if is_local_mount:
+            # Docker doesn't like paths like ".", so we convert to absolute path here
+            source = str(Path(source).resolve())
         return source, {"bind": target, "mode": mode}
 
     return dict(_parse_option(opt) for opt in options)
