@@ -273,6 +273,7 @@ jobs:
           echo "TESSERACT_DOCKER_EXECUTABLE=podman" >> $GITHUB_ENV
           # Podman doesn't support --cache-from
           echo "TESSERACT_DOCKER_BUILD_ARGS=" >> $GITHUB_ENV
+          echo "TESSERACT_DOCKER_RUN_ARGS=--userns=keep-id" >> $GITHUB_ENV
 
       - name: Run test suite
         run: |

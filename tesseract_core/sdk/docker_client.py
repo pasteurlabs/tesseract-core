@@ -538,6 +538,7 @@ class Containers:
         Returns:
             Container object if detach is True, otherwise returns list of stdout and stderr.
         """
+        config = get_config()
         docker = _get_executable("docker")
 
         # If command is a type string and not list, make list
@@ -583,6 +584,7 @@ class Containers:
             *docker,
             "run",
             *optional_args,
+            *config.docker_run_args,
             image,
             *command,
         ]
