@@ -1,0 +1,12 @@
+{
+  "object_type": "array",
+  "shape": [
+    3,
+    3
+  ],
+  "dtype": "float32",
+  "data": {
+    "buffer": "a2af4236-15c5-40ec-9014-b79f9cbad50c.bin:72",
+    "encoding": "binref"
+  }
+}

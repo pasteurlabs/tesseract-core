@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
+import threading
 import urllib.parse
 from pathlib import Path
 from typing import Any, Literal, Optional, Union, get_args
@@ -13,6 +14,39 @@ PathLike = Union[str, Path]
 
 supported_format_type = Literal["json", "msgpack", "json+base64", "json+binref"]
 SUPPORTED_FORMATS = get_args(supported_format_type)
+
+
+def running_in_docker() -> bool:
+    """Check if tesseract-runtime is running inside a Docker container."""
+    return Path("/.dockerenv").exists()
+
+
+CONTAINER_INPUT_PATH: Path = Path("/tesseract/input")
+CONTAINER_OUTPUT_PATH: Path = Path("/tesseract/output")
+_PATH_CONFIG = threading.local()
+_PATH_CONFIG.input_current = CONTAINER_INPUT_PATH
+_PATH_CONFIG.output_current = CONTAINER_OUTPUT_PATH
+
+
+def set_input_path(path: PathLike) -> None:
+    """Set the current input path."""
+    _PATH_CONFIG.input_current = Path(path).resolve()
+
+
+def get_input_path() -> Path:
+    """Get the current input path."""
+    return _PATH_CONFIG.input_current
+
+
+def set_output_path(path: PathLike) -> None:
+    """Set the current output path."""
+    _PATH_CONFIG.output_current = Path(path).resolve()
+    # __PATH_CONFIG.output_current.mkdir(parents=True, exist_ok=True)
+
+
+def get_output_path() -> Path:
+    """Get the current output path."""
+    return _PATH_CONFIG.output_current
 
 
 def guess_format_from_path(path: PathLike) -> supported_format_type:
@@ -108,7 +142,7 @@ def write_to_path(buffer: bytes, path: PathLike, append: bool = False) -> None:
         f.write(buffer)
 
 
-def expand_glob(pattern: str) -> list[str]:
+def expand_glob(pattern: PathLike) -> list[str]:
     """Expand the given glob pattern.
 
     Path may be anything supported by fsspec.
