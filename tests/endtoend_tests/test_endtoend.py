@@ -473,6 +473,7 @@ def test_tesseract_serve_docker_volume(
     import os
 
     print(os.getuid(), os.getgid())
+    print(tmp_path.stat())
 
     if volume_type == "bind":
         # Create file outside the containers and check it from inside the container
@@ -488,7 +489,7 @@ def test_tesseract_serve_docker_volume(
 
         # debugging
         exit_code, output = tesseract0.exec_run(
-            ["bash", "-c", f"ls -la {dest} && echo $USER"]
+            ["bash", "-c", "ls -la /tesseract && id"]
         )
         assert exit_code == 0, output.decode()
         print(output.decode())
@@ -498,9 +499,7 @@ def test_tesseract_serve_docker_volume(
         assert output.decode() == "world"
 
     # debugging
-    exit_code, output = tesseract0.exec_run(
-        ["bash", "-c", f"ls -la {dest} && echo $USER"]
-    )
+    exit_code, output = tesseract0.exec_run(["bash", "-c", "ls -la /tesseract && id"])
     assert exit_code == 0, output.decode()
     print(output.decode())
 
