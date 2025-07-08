@@ -479,6 +479,7 @@ def test_tesseract_serve_docker_volume(
 
         if user not in (None, "root"):
             # If we are not running as root, ensure the file is readable by the target user
+            tmp_path.chmod(0o644)
             tmpfile.chmod(0o644)
 
         exit_code, output = tesseract0.exec_run(["cat", f"{dest}/hi"])
