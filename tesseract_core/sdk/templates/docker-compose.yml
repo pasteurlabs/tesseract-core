@@ -42,6 +42,9 @@ services:
     {% endif %}
 {% endfor %}
 
+x-podman:
+  userns_mode: "keep-id"
+
 {%- if docker_volumes %}
 volumes:
 {%- for name, external in docker_volumes.items() %}
