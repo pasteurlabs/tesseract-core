@@ -40,10 +40,9 @@ services:
             capabilities: [gpu]
             {{ service.gpus }}
     {% endif %}
+    userns_mode: "keep-id"
 {% endfor %}
 
-x-podman:
-  userns_mode: "keep-id"
 
 {%- if docker_volumes %}
 volumes:
@@ -57,3 +56,6 @@ volumes:
 
 networks:
   multi-tesseract-network:
+
+x-podman:
+  in_pod: false
