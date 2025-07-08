@@ -470,6 +470,10 @@ def test_tesseract_serve_docker_volume(
     tesseract1_id = project_meta["containers"][1]["name"]
     tesseract1 = docker_client.containers.get(tesseract1_id)
 
+    import os
+
+    print(os.getuid(), os.getgid())
+
     if volume_type == "bind":
         # Create file outside the containers and check it from inside the container
         tmpfile = Path(tmp_path) / "hi"
@@ -477,14 +481,28 @@ def test_tesseract_serve_docker_volume(
             hello.write("world")
             hello.flush()
 
-        if user not in (None, "root"):
+        if volume_type == "bind" and user not in (None, "root"):
             # If we are not running as root, ensure the file is readable by the target user
             tmp_path.chmod(0o777)
             tmpfile.chmod(0o644)
 
+        # debugging
+        exit_code, output = tesseract0.exec_run(
+            ["bash", "-c", f"ls -la {dest} && echo $USER"]
+        )
+        assert exit_code == 0, output.decode()
+        print(output.decode())
+
         exit_code, output = tesseract0.exec_run(["cat", f"{dest}/hi"])
         assert exit_code == 0
         assert output.decode() == "world"
+
+    # debugging
+    exit_code, output = tesseract0.exec_run(
+        ["bash", "-c", f"ls -la {dest} && echo $USER"]
+    )
+    assert exit_code == 0, output.decode()
+    print(output.decode())
 
     # Create file inside a container and access it from the other
     bar_file = dest / "bar"
