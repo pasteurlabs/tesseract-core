@@ -14,8 +14,8 @@ services:
     {% endif %}
     {%- if service.volumes %}
     volumes:
-    {%- for volume in service.volumes %}
-      - {{ volume }}
+    {%- for volume_source, volume_data in service.volumes.items() %}
+      - {{ volume_source }}:{{ volume_data["bind"] }}
     {% endfor -%}
     {% endif %}
     healthcheck:

@@ -642,13 +642,15 @@ def serve(
         if debug:
             logger.info(f"Debugpy server listening at http://{ping_ip}:{debugpy_port}")
 
+        parsed_volumes = _parse_volumes(volumes) if volumes else {}
+
         container = docker_client.containers.run(
             image=image_ids[0],
             command=["serve", *args],
             device_requests=gpus,
             ports=port_mappings,
             detach=True,
-            volumes=volumes,
+            volumes=parsed_volumes,
             user=user,
         )
         # wait for server to start
@@ -751,13 +753,15 @@ def _create_docker_compose_template(
         else:
             gpu_settings = f"device_ids: {gpus}"
 
+    parsed_volumes = _parse_volumes(volumes) if volumes else {}
+
     for i, image_id in enumerate(image_ids):
         service = {
             "name": service_names[i],
             "user": user,
             "image": image_id,
             "port": f"{ports[i]}:8000",
-            "volumes": volumes,
+            "volumes": parsed_volumes,
             "gpus": gpu_settings,
             "environment": {
                 "TESSERACT_DEBUG": "1" if debug else "0",

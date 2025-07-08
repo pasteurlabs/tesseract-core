@@ -579,7 +579,6 @@ class Containers:
             for host_port, container_port in ports.items():
                 optional_args.extend(["-p", f"{host_port}:{container_port}"])
 
-        # Run with detached to get the container id of the running container.
         full_cmd = [
             *docker,
             "run",

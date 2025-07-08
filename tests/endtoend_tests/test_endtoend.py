@@ -417,16 +417,18 @@ def test_tesseract_serve_ports(built_image_name, port, docker_cleanup, free_port
     assert str(actual_port) in run_res.stdout
 
 
+@pytest.mark.parametrize("no_compose", [True, False])
 @pytest.mark.parametrize("volume_type", ["bind", "named"])
 @pytest.mark.parametrize("user", [None, "root", "1000:1000"])
 def test_tesseract_serve_docker_volume(
     built_image_name,
     docker_client,
     docker_volume,
-    user,
-    volume_type,
     tmp_path,
     docker_cleanup,
+    user,
+    volume_type,
+    no_compose,
 ):
     """Test serving Tesseract with a Docker volume or bind mount.
 
@@ -451,10 +453,10 @@ def test_tesseract_serve_docker_volume(
         [
             "serve",
             "--volume",
-            f"{volume_to_bind}:{dest}",
+            f"{volume_to_bind}:{dest}:rw",
             *(("--user", user) if user else []),
             built_image_name,
-            built_image_name,
+            *(("--no-compose",) if no_compose else [built_image_name]),
         ],
         catch_exceptions=False,
     )
@@ -463,12 +465,14 @@ def test_tesseract_serve_docker_volume(
 
     project_meta = json.loads(run_res.stdout)
     project_id = project_meta["project_id"]
-    docker_cleanup["project_ids"].append(project_id)
+
+    if no_compose:
+        docker_cleanup["containers"].append(project_id)
+    else:
+        docker_cleanup["project_ids"].append(project_id)
 
     tesseract0_id = project_meta["containers"][0]["name"]
     tesseract0 = docker_client.containers.get(tesseract0_id)
-    tesseract1_id = project_meta["containers"][1]["name"]
-    tesseract1 = docker_client.containers.get(tesseract1_id)
 
     import os
 
@@ -510,12 +514,17 @@ def test_tesseract_serve_docker_volume(
 
     exit_code, output = tesseract0.exec_run(["touch", str(bar_file)])
     assert exit_code == 0
-    exit_code, output = tesseract1.exec_run(["cat", str(bar_file)])
-    assert exit_code == 0
-    exit_code, output = tesseract1.exec_run(
-        ["bash", "-c", f'echo "hello" > {bar_file}']
-    )
-    assert exit_code == 0
+
+    if not no_compose:
+        tesseract1_id = project_meta["containers"][1]["name"]
+        tesseract1 = docker_client.containers.get(tesseract1_id)
+
+        exit_code, output = tesseract1.exec_run(["cat", str(bar_file)])
+        assert exit_code == 0
+        exit_code, output = tesseract1.exec_run(
+            ["bash", "-c", f'echo "hello" > {bar_file}']
+        )
+        assert exit_code == 0
 
     if volume_type == "bind":
         # The file should exist outside the container
