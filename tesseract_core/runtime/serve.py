@@ -96,36 +96,55 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
 
         @wraps(endpoint_func)
         async def wrapper(*args: Any, accept: str, **kwargs: Any):
-            if async_endpoint:
-                new_task_id = str(uuid4())
-                # new_task_id = "1" # TODO: Remove this hardcoded task ID, since it is only for testing purposes!
+            assert "payload" in kwargs, (
+                f"Defining async. endpoint {endpoint_func.__name__}. "
+                "For simplicity, we assume a single payload argument here, "
+                "but none was provided!"
+            )
+            picklable_payload_dict = kwargs["payload"].model_dump()
 
-                assert "payload" in kwargs, (
-                    f"Defining async. endpoint {endpoint_func.__name__}. "
-                    "For simplicity, we assume a single payload argument here, "
-                    "but none was provided!"
-                )
-                picklable_payload_dict = kwargs["payload"].model_dump()
+            new_task_id = str(uuid4())
 
-                open_tasks[new_task_id] = (
+            open_tasks[new_task_id] = (
+                endpoint_func.__name__,
+                accept,
+                executor.submit(
+                    _run_api_function_within_worker,
                     endpoint_func.__name__,
-                    accept,
-                    executor.submit(
-                        _run_api_function_within_worker,
-                        endpoint_func.__name__,
-                        config,
-                        picklable_payload_dict=picklable_payload_dict,
-                    ),
-                )
+                    config,
+                    picklable_payload_dict=picklable_payload_dict,
+                ),
+            )
 
+            if async_endpoint:
                 return Response(
                     status_code=202,
                     content=f'{{"task_id": "{new_task_id}", "status": "starting task"}}',
                     media_type="application/json",
                 )
             else:
-                result = endpoint_func(*args, **kwargs)
-                return create_response(result, accept)
+                _, _, task = open_tasks[new_task_id]
+                del open_tasks[new_task_id]
+                # exceptions that occurred inside the endpoint function are raised when retrieving result
+                try:
+                    output = await asyncio.wrap_future(task)
+                    output_model = endpoint_func.output_schema.model_validate(
+                        output,
+                        context={
+                            "defer_validation": True
+                        },  # Outputs have already been evaluated by worker process
+                    )
+                except Exception as exc:
+                    return Response(
+                        status_code=500,
+                        content=(
+                            f'{{"task_id": "{new_task_id}", '
+                            f'"status": "{endpoint_func.__name__} error", '
+                            f'"message": "{exc!s}"}}'
+                        ),
+                        media_type="application/json",
+                    )
+                return create_response(output_model, accept)
 
         if endpoint_func.__name__ not in endpoints_to_wrap:
             return endpoint_func
@@ -158,8 +177,6 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
     for endpoint_func in tesseract_endpoints:
         endpoint_name = endpoint_func.__name__
 
-        # TODO: Remove sync endpoints for compute requests OR change them to internally use async mechanism, since
-        # we only have 1 uvicorn worker now and need to offload the blocking calls to a separate process!
         wrapped_endpoint = wrap_endpoint(endpoint_func, async_endpoint=False)
         http_methods = ["GET"] if endpoint_name in GET_ENDPOINTS else ["POST"]
         app.add_api_route(f"/{endpoint_name}", wrapped_endpoint, methods=http_methods)
@@ -228,7 +245,7 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
                         raise exc
 
                 del open_tasks[task_id]
-                # exceptions that occurred inside the apply function are raised when retrieving result
+                # exceptions that occurred inside the endpoint function are raised when retrieving result
                 try:
                     output = task.result()
                     output_model = async_endpoint_func.output_schema.model_validate(
@@ -240,7 +257,7 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
                 except Exception as exc:
                     return Response(
                         status_code=500,
-                        content=f'{{"task_id": "{task_id}", "status": "apply error", "message": "{exc!s}"}}',
+                        content=f'{{"task_id": "{task_id}", "status": f"{task_endpoint} error", "message": "{exc!s}"}}',
                         media_type="application/json",
                     )
                 return create_response(output_model, accept)
