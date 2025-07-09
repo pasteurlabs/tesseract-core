@@ -3,6 +3,7 @@
 
 """End to end tests for docker cli wrapper."""
 
+import os
 import subprocess
 import textwrap
 from contextlib import closing
@@ -17,6 +18,7 @@ from tesseract_core.sdk.docker_client import (
     ContainerError,
     ImageNotFound,
     build_docker_image,
+    is_podman,
 )
 
 
@@ -468,3 +470,14 @@ def test_volume_uid_permissions(
     )
     stdout = run_tesseract_with_volume(cmd, volume=volume_args)
     assert stdout == b"hello\n"
+
+
+def test_is_podman():
+    """Test is_podman function.
+
+    This assumes that the DOCKER_HOST environment variable is set to a Podman socket
+    when running in a Podman environment. This is true on CI, but may deviate on
+    local machines.
+    """
+    real_is_podman = "podman" in os.environ.get("DOCKER_HOST", "")
+    assert is_podman() == real_is_podman

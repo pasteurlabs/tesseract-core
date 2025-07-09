@@ -31,6 +31,21 @@ def _get_executable(program: Literal["docker", "docker-compose"]) -> tuple[str, 
     raise ValueError(f"Unknown program: {program}")
 
 
+def is_podman() -> bool:
+    """Check if the current environment is using Podman instead of Docker."""
+    docker = _get_executable("docker")
+    try:
+        result = subprocess.run(
+            [*docker, "version"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return "podman" in result.stdout.lower()
+    except subprocess.CalledProcessError:
+        return False
+
+
 @dataclass
 class Image:
     """Image class to wrap Docker image details."""

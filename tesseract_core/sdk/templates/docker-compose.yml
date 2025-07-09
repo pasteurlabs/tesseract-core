@@ -40,7 +40,6 @@ services:
             capabilities: [gpu]
             {{ service.gpus }}
     {% endif %}
-    userns_mode: "keep-id"
 {% endfor %}
 
 
@@ -56,6 +55,3 @@ volumes:
 
 networks:
   multi-tesseract-network:
-
-x-podman:
-  in_pod: false

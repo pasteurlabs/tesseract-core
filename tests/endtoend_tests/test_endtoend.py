@@ -13,6 +13,7 @@ from common import build_tesseract, image_exists
 from typer.testing import CliRunner
 
 from tesseract_core.sdk.cli import AVAILABLE_RECIPES, app
+from tesseract_core.sdk.docker_client import is_podman
 
 
 @pytest.fixture(scope="module")
@@ -434,6 +435,9 @@ def test_tesseract_serve_docker_volume(
 
     This should cover most permissions issues that can arise with Docker volumes.
     """
+    if is_podman() and not no_compose:
+        pytest.skip("Podman does not support --no-compose option.")
+
     cli_runner = CliRunner(mix_stderr=False)
     project_id = None
 
