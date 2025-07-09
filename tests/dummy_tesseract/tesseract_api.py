@@ -1,6 +1,8 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import os
+
 import numpy as np
 from pydantic import BaseModel, Field
 
@@ -40,6 +42,10 @@ def apply(inputs: InputSchema) -> OutputSchema:
     if inputs.normalize:
         norm = np.linalg.norm(result, ord=2)
         result /= norm
+
+    env_var = os.getenv("TEST_ENV_VAR")
+    if env_var:
+        print(f"TEST_ENV_VAR: {env_var}")
 
     return OutputSchema(result=result)
 

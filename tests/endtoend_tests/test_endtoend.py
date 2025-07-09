@@ -5,6 +5,7 @@
 
 import json
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -126,6 +127,85 @@ def test_build_generate_only(dummy_tesseract_location, skip_checks):
             assert 'RUN ["tesseract-runtime", "check"]' not in docker_file_contents
         else:
             assert 'RUN ["tesseract-runtime", "check"]' in docker_file_contents
+
+
+def test_env_passthrough_run(
+    docker_cleanup, docker_client, dummy_image_name, dummy_tesseract_location
+):
+    """Ensure we can pass environment variables to tesseracts when running."""
+    image_name = build_tesseract(
+        docker_client,
+        dummy_tesseract_location,
+        dummy_image_name,
+    )
+    assert image_exists(docker_client, image_name)
+    docker_cleanup["images"].append(image_name)
+
+    result = subprocess.run(
+        [
+            "tesseract",
+            "run",
+            "--env=TEST_ENV_VAR=foo",
+            dummy_image_name,
+            "apply",
+            '{"inputs": {"a": [1, 2, 3], "b": [4, 5, 6]}}',
+        ],
+        capture_output=True,
+        cwd=dummy_tesseract_location,
+    )
+    assert result.returncode == 0, result.stderr.decode()
+    assert "TEST_ENV_VAR: foo" in result.stderr.decode()
+
+
+def test_env_passthrough_serve(
+    docker_cleanup, docker_client, dummy_image_name, dummy_tesseract_location
+):
+    """Ensure we can pass environment variables to tesseracts when serving."""
+    image_name = build_tesseract(
+        docker_client,
+        dummy_tesseract_location,
+        dummy_image_name,
+    )
+    assert image_exists(docker_client, image_name)
+    docker_cleanup["images"].append(image_name)
+
+    cli_runner = CliRunner(mix_stderr=False)
+    run_res = subprocess.run(
+        [
+            "tesseract",
+            "serve",
+            image_name,
+            "--env=TEST_ENV_VAR=foo",
+        ],
+        capture_output=True,
+        cwd=dummy_tesseract_location,
+        text=True,
+    )
+    assert run_res.returncode == 0, run_res.stderr
+    assert run_res.stdout
+
+    project_meta = json.loads(run_res.stdout)
+    project_id = project_meta["project_id"]
+    tesseract_id = project_meta["containers"][0]["name"]
+
+    # Send apply request to the served Tesseract
+    res = requests.post(
+        f"http://{project_meta['containers'][0]['ip']}:{project_meta['containers'][0]['port']}/apply",
+        json={"inputs": {"a": [1, 2, 3], "b": [4, 5, 6]}},
+    )
+    assert res.status_code == 200, res.text
+
+    # Check docker logs for the environment variable
+    logs = docker_client.containers.get(tesseract_id).logs().decode("utf-8")
+    assert "TEST_ENV_VAR: foo" in logs
+
+    # Teardown the project
+    run_res = cli_runner.invoke(
+        app,
+        ["teardown", project_id],
+        catch_exceptions=False,
+    )
+    assert run_res.exit_code == 0, run_res.stderr
 
 
 def test_tesseract_list(built_image_name):
