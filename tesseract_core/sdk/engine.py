@@ -544,6 +544,7 @@ def serve(
     host_ip: str = "127.0.0.1",
     ports: list[str] | None = None,
     volumes: list[str] | None = None,
+    environment: dict[str, str] | None = None,
     gpus: list[str] | None = None,
     debug: bool = False,
     num_workers: int = 1,
@@ -560,6 +561,7 @@ def serve(
         host_ip: IP address to bind the Tesseracts to.
         ports: port or port range to serve each Tesseract on.
         volumes: list of paths to mount in the Tesseract container.
+        environment: dictionary of environment variables to pass to the Tesseract.
         gpus: IDs of host Nvidia GPUs to make available to the Tesseracts.
         debug: Enable debug mode. This will propagate full tracebacks to the client
             and start a debugpy server in the Tesseract.
@@ -671,6 +673,7 @@ def serve(
         service_names,
         ports,
         volumes,
+        environment,
         gpus,
         num_workers,
         debug=debug,
@@ -697,6 +700,7 @@ def _create_docker_compose_template(
     service_names: list[str] | None = None,
     ports: list[str] | None = None,
     volumes: list[str] | None = None,
+    environment: dict[str, str] | None = None,
     gpus: list[str] | None = None,
     num_workers: int = 1,
     debug: bool = False,
@@ -756,6 +760,7 @@ def _create_docker_compose_template(
             "gpus": gpu_settings,
             "environment": {
                 "TESSERACT_DEBUG": "1" if debug else "0",
+                **(environment or {}),
             },
             "num_workers": num_workers,
             "debugpy_port": debugpy_ports[i] if debug else None,
@@ -843,6 +848,7 @@ def run_tesseract(
     volumes: list[str] | None = None,
     gpus: list[int | str] | None = None,
     ports: dict[str, str] | None = None,
+    environment: dict[str, str] | None = None,
     user: str | None = None,
 ) -> tuple[str, str]:
     """Start a Tesseract and execute a given command.
@@ -855,6 +861,8 @@ def run_tesseract(
         gpus: list of GPUs, as indices or names, to passthrough the container.
         ports: dictionary of ports to bind to the host. Key is the host port,
             value is the container port.
+        environment: list of environment variables to set in the container,
+            in Docker format: key=value.
         user: user to run the Tesseract as, e.g. '1000' or '1000:1000' (uid:gid).
 
     Returns:
@@ -920,6 +928,7 @@ def run_tesseract(
         command=cmd,
         volumes=parsed_volumes,
         device_requests=gpus,
+        environment=environment,
         ports=ports,
         detach=False,
         remove=True,

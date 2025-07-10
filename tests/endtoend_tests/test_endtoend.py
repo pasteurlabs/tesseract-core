@@ -5,6 +5,7 @@
 
 import json
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -126,6 +127,33 @@ def test_build_generate_only(dummy_tesseract_location, skip_checks):
             assert 'RUN ["tesseract-runtime", "check"]' not in docker_file_contents
         else:
             assert 'RUN ["tesseract-runtime", "check"]' in docker_file_contents
+
+
+def test_env_passthrough_serve(docker_cleanup, docker_client, built_image_name):
+    """Ensure we can pass environment variables to tesseracts when serving."""
+    run_res = subprocess.run(
+        [
+            "tesseract",
+            "serve",
+            built_image_name,
+            "--env=TEST_ENV_VAR=foo",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert run_res.returncode == 0, run_res.stderr
+    assert run_res.stdout
+
+    project_meta = json.loads(run_res.stdout)
+    project_id = project_meta["project_id"]
+    tesseract_id = project_meta["containers"][0]["name"]
+
+    docker_cleanup["project_ids"].append(project_id)
+
+    container = docker_client.containers.get(tesseract_id)
+    exit_code, output = container.exec_run(["sh", "-c", "echo $TEST_ENV_VAR"])
+    assert exit_code == 0, f"Command failed with exit code {exit_code}"
+    assert "foo" in output.decode("utf-8"), f"Output was: {output.decode('utf-8')}"
 
 
 def test_tesseract_list(built_image_name):

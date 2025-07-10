@@ -436,6 +436,14 @@ def serve(
             show_default=False,
         ),
     ] = None,
+    environment: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--env",
+            "-e",
+            help="Set environment variables in the Tesseract containers, in Docker format: key=value.",
+        ),
+    ] = None,
     port: Annotated[
         str | None,
         typer.Option(
@@ -542,6 +550,19 @@ def serve(
     else:
         ports = None
 
+    # Parse environment variables from list to dict
+    if environment is not None:
+        try:
+            environment = {
+                env.split("=", maxsplit=1)[0]: env.split("=", maxsplit=1)[1]
+                for env in environment
+            }
+        except Exception as ex:
+            raise typer.BadParameter(
+                "Environment variables must be in the format 'key=value'.",
+                param_hint="environment",
+            ) from ex
+
     if service_names is not None:
         if no_compose:
             raise typer.BadParameter(
@@ -559,6 +580,7 @@ def serve(
             host_ip,
             ports,
             volume,
+            environment,
             gpus,
             debug,
             num_workers,
@@ -840,6 +862,16 @@ def run_container(
             ),
         ),
     ] = None,
+    environment: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--env",
+            "-e",
+            help="Set environment variables in the Tesseract container, in Docker format: key=value.",
+            metavar="key=value",
+            show_default=False,
+        ),
+    ] = None,
     user: Annotated[
         str | None,
         typer.Option(
@@ -888,9 +920,26 @@ def run_container(
         )
         raise typer.BadParameter(error_string, param_hint="cmd")
 
+    if environment is not None:
+        try:
+            environment = {
+                item.split("=", maxsplit=1)[0]: item.split("=", maxsplit=1)[1]
+                for item in environment
+            }
+        except Exception as ex:
+            raise typer.BadParameter(
+                "Environment variables must be in the format 'key=value'.",
+                param_hint="env",
+            ) from ex
     try:
         result_out, result_err = engine.run_tesseract(
-            tesseract_image, cmd, args, volumes=volume, gpus=gpus, user=user
+            tesseract_image,
+            cmd,
+            args,
+            volumes=volume,
+            gpus=gpus,
+            environment=environment,
+            user=user,
         )
 
     except ImageNotFound as e:

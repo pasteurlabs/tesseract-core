@@ -507,6 +507,7 @@ class Containers:
         command: list_[str],
         volumes: dict | None = None,
         device_requests: list_[int | str] | None = None,
+        environment: dict[str, str] | None = None,
         detach: bool = False,
         remove: bool = False,
         ports: dict | None = None,
@@ -564,6 +565,12 @@ class Containers:
         if device_requests:
             gpus_str = ",".join(device_requests)
             optional_args.extend(["--gpus", f'"device={gpus_str}"'])
+
+        if environment:
+            env_args = []
+            for env_var, value in environment.items():
+                env_args.extend(["-e", f"{env_var}={value}"])
+            optional_args.extend(env_args)
 
         # Remove and detached cannot both be set to true
         if remove and detach:
