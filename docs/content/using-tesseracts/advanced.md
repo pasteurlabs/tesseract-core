@@ -16,10 +16,10 @@ target path:
 $ tesseract run vectoradd apply --output-path /tmp/output @inputs.json
 ```
 
-## Passing environment variables
+## Passing environment variables to Tesseract containers
 
-Through the optional `--env` argument, you can pass environment variables to tesseracts.
-This works both for serving a tesseract and running a single execution:
+Through the optional `--env` argument, you can pass environment variables to Tesseracts.
+This works both for serving a Tesseract and running a single execution:
 
 ```bash
 $ tesseract serve --env=MY_ENV_VARIABLE="some value" helloworld
