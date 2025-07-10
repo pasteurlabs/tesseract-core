@@ -129,7 +129,10 @@ def test_build_generate_only(dummy_tesseract_location, skip_checks):
             assert 'RUN ["tesseract-runtime", "check"]' in docker_file_contents
 
 
-def test_env_passthrough_serve(docker_cleanup, docker_client, built_image_name):
+@pytest.mark.parametrize("no_compose", [True, False])
+def test_env_passthrough_serve(
+    docker_cleanup, docker_client, built_image_name, no_compose
+):
     """Ensure we can pass environment variables to tesseracts when serving."""
     run_res = subprocess.run(
         [
@@ -137,6 +140,7 @@ def test_env_passthrough_serve(docker_cleanup, docker_client, built_image_name):
             "serve",
             built_image_name,
             "--env=TEST_ENV_VAR=foo",
+            *(["--no-compose"] if no_compose else []),
         ],
         capture_output=True,
         text=True,
@@ -148,7 +152,10 @@ def test_env_passthrough_serve(docker_cleanup, docker_client, built_image_name):
     project_id = project_meta["project_id"]
     tesseract_id = project_meta["containers"][0]["name"]
 
-    docker_cleanup["project_ids"].append(project_id)
+    if no_compose:
+        docker_cleanup["containers"].append(tesseract_id)
+    else:
+        docker_cleanup["project_ids"].append(project_id)
 
     container = docker_client.containers.get(tesseract_id)
     exit_code, output = container.exec_run(["sh", "-c", "echo $TEST_ENV_VAR"])
