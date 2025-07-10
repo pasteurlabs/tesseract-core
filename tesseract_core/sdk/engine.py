@@ -551,7 +551,7 @@ def serve(
     no_compose: bool = False,
     service_names: list[str] | None = None,
     user: str | None = None,
-    input_path: str | None = None,
+    input_path: str | Path | None = None,
 ) -> str:
     """Serve one or more Tesseract images.
 
@@ -862,7 +862,7 @@ def run_tesseract(
     ports: dict[str, str] | None = None,
     environment: dict[str, str] | None = None,
     user: str | None = None,
-    input_path: str | None = None,
+    input_path: str | Path | None = None,
 ) -> tuple[str, str]:
     """Start a Tesseract and execute a given command.
 

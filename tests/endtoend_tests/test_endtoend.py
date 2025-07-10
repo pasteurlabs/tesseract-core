@@ -443,7 +443,7 @@ def test_tesseract_serve_with_volumes(
     volume_args = []
     if use_input_path:
         dest = Path("/tesseract/input_data")
-        volume_args = ["--input-path", str(tmp_path)]
+        volume_args = ["--input-path", f"{tmp_path}"]
     else:
         dest = Path("/foo/")
         volume_args = ["--volume", f"{tmp_path}:{dest}"]
