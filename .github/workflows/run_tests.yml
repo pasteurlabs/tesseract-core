@@ -115,6 +115,7 @@ jobs:
             --cov-report=term-missing:skip-covered \
             --cov-report=xml:coverage.xml \
             --cov=tesseract_core
+            --cov-branch
 
       - name: Run test suite (Windows)
         if: runner.os == 'Windows'
@@ -126,6 +127,7 @@ jobs:
             --cov-report=term-missing:skip-covered \
             --cov-report=xml:coverage.xml \
             --cov=tesseract_core
+            --cov-branch
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v5.4.3
@@ -279,6 +281,7 @@ jobs:
           if [ "${{ matrix.unit-tesseract }}" == "base" ]; then
             uv run --no-sync pytest \
               --always-run-endtoend \
+              --cov-branch
               --cov-report=term-missing:skip-covered \
               --cov-report=xml:coverage.xml \
               --cov=tesseract_core \
@@ -287,6 +290,7 @@ jobs:
           else
             uv run --no-sync pytest \
               --always-run-endtoend \
+              --cov-branch
               --cov-report=term-missing:skip-covered \
               --cov-report=xml:coverage.xml \
               --cov=tesseract_core \
