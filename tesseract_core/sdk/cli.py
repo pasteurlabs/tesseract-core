@@ -885,6 +885,7 @@ def run_container(
             "--input-path",
             help="Input path to read input files from, such as local directory or S3 URI "
             "(may be anything supported by fsspec).",
+            hidden=True,
         ),
     ] = None,
 ) -> None:

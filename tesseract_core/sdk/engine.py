@@ -879,8 +879,9 @@ def run_tesseract(
     if input_path:
         if volumes is None:
             volumes = []
-        volumes.append(f"{input_path}:/tesseract/input_data")
-        os.environ["TESSERACT_INPUT_PATH"] = "/tesseract/input_data"
+        if "://" not in input_path:
+            volumes.append(f"{input_path}:/tesseract/input_data")
+        environment["TESSERACT_INPUT_PATH"] = "/tesseract/input_data"
 
     if not volumes:
         parsed_volumes = {}
