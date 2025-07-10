@@ -551,6 +551,7 @@ def serve(
     no_compose: bool = False,
     service_names: list[str] | None = None,
     user: str | None = None,
+    input_path: str | None = None,
 ) -> str:
     """Serve one or more Tesseract images.
 
@@ -570,6 +571,7 @@ def serve(
         no_compose: if True, do not use Docker Compose to serve the Tesseracts.
         service_names: list of service names under which to expose each Tesseract container on the shared network.
         user: user to run the Tesseracts as, e.g. '1000' or '1000:1000' (uid:gid).
+        input_path: Input path to read input files from, such as local directory or S3 URI.
 
     Returns:
         A string representing the Tesseract project ID.
@@ -596,6 +598,16 @@ def serve(
                 f"Number of service names ({len(service_names)}) must match number of images ({len(image_ids)})"
             )
         _validate_service_names(service_names)
+
+    if input_path:
+        if environment is None:
+            environment = {}
+        environment["TESSERACT_INPUT_PATH"] = "/tesseract/input_data"
+        if volumes is None:
+            volumes = []
+        if "://" not in input_path:
+            input_path = Path(input_path).resolve()
+            volumes.append(f"{input_path}:/tesseract/input_data:ro")
 
     if no_compose:
         if len(images) > 1:
@@ -881,6 +893,9 @@ def run_tesseract(
             volumes = []
         if "://" not in input_path:
             volumes.append(f"{input_path}:/tesseract/input_data")
+
+        if environment is None:
+            environment = {}
         environment["TESSERACT_INPUT_PATH"] = "/tesseract/input_data"
 
     if not volumes:
@@ -916,17 +931,24 @@ def run_tesseract(
             parsed_volumes[str(local_path)] = {"bind": path_in_container, "mode": "rw"}
 
         # Mount local input files marked by @ into Docker container as a volume
-        elif arg.startswith("@") and "://" not in arg and not input_path:
-            local_path = Path(arg.lstrip("@")).resolve()
+        elif arg.startswith("@") and "://" not in arg:
+            if input_path:
+                local_path = (Path(input_path) / arg.lstrip("@")).resolve()
+            else:
+                local_path = Path(arg.lstrip("@")).resolve()
 
             if not local_path.is_file():
                 raise RuntimeError(f"Path {local_path} provided as input is not a file")
 
-            path_in_container = os.path.join("/mnt", f"payload{local_path.suffix}")
-            arg = f"@{path_in_container}"
+            if not input_path:
+                path_in_container = os.path.join("/mnt", f"payload{local_path.suffix}")
+                arg = f"@{path_in_container}"
 
-            # Bind-mount file
-            parsed_volumes[str(local_path)] = {"bind": path_in_container, "mode": "ro"}
+                # Bind-mount file
+                parsed_volumes[str(local_path)] = {
+                    "bind": path_in_container,
+                    "mode": "ro",
+                }
 
         current_cmd = None
         cmd.append(arg)
