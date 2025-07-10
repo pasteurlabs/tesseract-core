@@ -160,13 +160,10 @@ def test_env_passthrough_serve(
     project_id = project_meta["project_id"]
     tesseract_id = project_meta["containers"][0]["name"]
 
-    try:
-        container = docker_client.containers.get(tesseract_id)
-        exit_code, output = container.exec_run(["sh", "-c", "echo $TEST_ENV_VAR"])
-        assert exit_code == 0, f"Command failed with exit code {exit_code}"
-        assert "foo" in output.decode("utf-8"), f"Output was: {output.decode('utf-8')}"
-    except ContainerError as e:
-        pytest.fail(f"Failed to execute command in container: {e}")
+    container = docker_client.containers.get(tesseract_id)
+    exit_code, output = container.exec_run(["sh", "-c", "echo $TEST_ENV_VAR"])
+    assert exit_code == 0, f"Command failed with exit code {exit_code}"
+    assert "foo" in output.decode("utf-8"), f"Output was: {output.decode('utf-8')}"
 
     # Teardown the project
     run_res = cli_runner.invoke(
