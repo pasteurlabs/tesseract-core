@@ -37,7 +37,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up WSL (Windows)
-        uses: Vampire/setup-wsl@v5
+        uses: Vampire/setup-wsl@v6
         if: runner.os == 'Windows'
         with:
           distribution: Ubuntu-24.04
