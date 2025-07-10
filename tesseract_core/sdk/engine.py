@@ -647,6 +647,7 @@ def serve(
             detach=True,
             volumes=volumes,
             user=user,
+            environment=environment,
         )
         # wait for server to start
         timeout = 30
