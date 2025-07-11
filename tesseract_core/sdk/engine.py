@@ -922,7 +922,7 @@ def run_tesseract(
             volumes = []
         if "://" not in input_path:
             volumes.append(f"{input_path}:/tesseract/input_data")
-        environment["TESSERACT_LOCAL_INPUT_PATH"] = str(input_path)
+        environment["TESSERACT_INPUT_PATH"] = "/tesseract/input_data"
 
     if not volumes:
         parsed_volumes = {}
@@ -959,7 +959,7 @@ def run_tesseract(
 
             # Bind-mount directory
             parsed_volumes[str(local_path)] = {"bind": path_in_container, "mode": "rw"}
-            environment["TESSERACT_LOCAL_OUTPUT_PATH"] = str(local_path)
+            environment["TESSERACT_OUTPUT_PATH"] = path_in_container
 
         # Mount local input files marked by @ into Docker container as a volume
         elif arg.startswith("@") and "://" not in arg:

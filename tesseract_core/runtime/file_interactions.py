@@ -15,9 +15,6 @@ PathLike = Union[str, Path]
 supported_format_type = Literal["json", "msgpack", "json+base64", "json+binref"]
 SUPPORTED_FORMATS = get_args(supported_format_type)
 
-os.environ["TESSERACT_CONTAINER_INPUT_PATH"] = "/tesseract/input_path"
-os.environ["TESSERACT_CONTAINER_OUTPUT_PATH"] = "/tesseract/output_path"
-
 
 def running_in_docker() -> bool:
     """Check if tesseract-runtime is running inside a Docker container."""
@@ -26,7 +23,7 @@ def running_in_docker() -> bool:
 
 def get_input_path() -> Path:
     """Get the current input path."""
-    path = os.environ.get("TESSERACT_CLIENT_INPUT_PATH", None)
+    path = os.environ.get("TESSERACT_INPUT_PATH", None)
     if path is None:
         raise ValueError("Input path not set.")
     if running_in_docker():
@@ -36,7 +33,7 @@ def get_input_path() -> Path:
 
 def get_output_path() -> Path:
     """Get the current output path."""
-    path = os.environ.get("TESSERACT_CLIENT_OUTPUT_PATH", None)
+    path = os.environ.get("TESSERACT_OUTPUT_PATH", None)
     if path is None:
         raise ValueError("Output path not set.")
     if running_in_docker():
@@ -44,16 +41,18 @@ def get_output_path() -> Path:
     return Path(path)
 
 
-def set_client_input_path(path) -> None:
+def set_input_path(path: PathLike) -> None:
+    """Set the tesseract input path."""
     path = Path(path).resolve()
-    os.environ["TESSERACT_CLIENT_INPUT_PATH"] = str(path)
+    os.environ["TESSERACT_INPUT_PATH"] = str(path)
     if not running_in_docker():
         path.mkdir(parents=True, exist_ok=True)
 
 
-def set_client_output_path(path) -> None:
+def set_output_path(path: PathLike) -> None:
+    """Set the tesseract output path."""
     path = Path(path).resolve()
-    os.environ["TESSERACT_CLIENT_OUTPUT_PATH"] = str(path)
+    os.environ["TESSERACT_OUTPUT_PATH"] = str(path)
     if not running_in_docker():
         path.mkdir(parents=True, exist_ok=True)
 
