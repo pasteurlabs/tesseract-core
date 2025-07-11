@@ -3,6 +3,7 @@
 
 """End to end tests for docker cli wrapper."""
 
+import os
 import subprocess
 import textwrap
 from contextlib import closing
@@ -14,8 +15,10 @@ from common import image_exists
 
 from tesseract_core.sdk.docker_client import (
     APIError,
+    ContainerError,
     ImageNotFound,
     build_docker_image,
+    is_podman,
 )
 
 
@@ -396,3 +399,85 @@ def test_compose_error(docker_client, tmp_path, docker_client_built_image_name):
         docker_client.compose.up(str(compose_file), "docker_client_compose_test")
     # Check that the container's logs were printed to stderr
     assert "Failed to start Tesseract container" in str(e.value)
+
+
+def test_volume_uid_permissions(
+    docker_client, docker_client_built_image_name, docker_volume, docker_cleanup
+):
+    # Set up root only directory
+    def run_tesseract_with_volume(cmd: str, user: str = "root:root", volume: str = ""):
+        if not volume:
+            volume = {docker_volume.name: {"bind": "/bar", "mode": "rw"}}
+        return docker_client.containers.run(
+            docker_client_built_image_name,
+            [cmd],
+            remove=True,
+            volumes=volume,
+            user=user,
+        )
+
+    cmd = "mkdir -p /bar && echo hello > /bar/hello.txt && chmod 700 /bar"
+    _ = run_tesseract_with_volume(cmd)
+
+    # Try to read the file as UID 1000
+    read_cmd = "cat /bar/hello.txt"
+    with pytest.raises(ContainerError) as e:
+        _ = run_tesseract_with_volume(read_cmd, user="1000:1000")
+    assert "Permission denied" in str(e)
+
+    # Try to write to the folder as UID 1000
+    write_cmd = "echo hello > /bar/hello_1000.txt && cat /bar/hello_1000.txt"
+    with pytest.raises(ContainerError) as e:
+        _ = run_tesseract_with_volume(write_cmd, user="1000:1000")
+    assert "Permission denied" in str(e)
+
+    # Grant permission to the file
+    cmd = "chmod 777 /bar"
+    _ = run_tesseract_with_volume(cmd)
+
+    # Try to read the file as UID 1000 again
+    stdout = run_tesseract_with_volume(read_cmd, user="1000:1000")
+    assert stdout == b"hello\n"
+
+    # Try to write to the folder as UID 1000 again
+    stdout = run_tesseract_with_volume(write_cmd, user="1000:1000")
+    assert stdout == b"hello\n"
+
+    # Try to copy a file from a volume with permissions 700 to a volume with permission 777
+    volume_777 = docker_client.volumes.create(name="docker_client_test_volume_777")
+    docker_cleanup["volumes"].append(volume_777)
+    volume_args = {
+        docker_volume.name: {"bind": "/from", "mode": "rw"},
+        volume_777.name: {"bind": "/to", "mode": "rw"},
+    }
+    cmd = "chmod 700 /from && cp /from/hello.txt /to/hello.txt && cat /to/hello.txt"
+    stdout = run_tesseract_with_volume(cmd, volume=volume_args)
+    assert stdout == b"hello\n"
+
+    # Try to access files as UID1000
+    cmd = "cat /to/hello.txt"
+    stdout = run_tesseract_with_volume(cmd, user="1000:1000", volume=volume_args)
+    assert stdout == b"hello\n"
+
+    with pytest.raises(ContainerError) as e:
+        run_tesseract_with_volume(
+            "cat /from/hello_777.txt", user="1000:1000", volume=volume_args
+        )
+    assert "Permission denied" in str(e)
+
+    cmd = (
+        "adduser -D testuser && chmod 777 /from && su - testuser && cat /from/hello.txt"
+    )
+    stdout = run_tesseract_with_volume(cmd, volume=volume_args)
+    assert stdout == b"hello\n"
+
+
+def test_is_podman():
+    """Test is_podman function.
+
+    This assumes that the DOCKER_HOST environment variable is set to a Podman socket
+    when running in a Podman environment. This is true on CI, but may deviate on
+    local machines.
+    """
+    real_is_podman = "podman" in os.environ.get("DOCKER_HOST", "")
+    assert is_podman() == real_is_podman

@@ -237,7 +237,7 @@ attribute:
 ```python
 >>> with Tesseract(image="vectoradd") as vectoradd:
 >>>     vectoradd.available_endpoints
-['apply', 'jacobian', 'health', 'input_schema', 'output_schema', 'abstract_eval']
+['apply', 'jacobian', 'health', 'input_schema', 'output_schema']
 ```
 :::
 ::::
