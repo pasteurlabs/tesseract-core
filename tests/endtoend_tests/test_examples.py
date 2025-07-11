@@ -108,6 +108,8 @@ class Config:
     test_with_random_inputs: bool = False
     sample_requests: list[SampleRequest] = None
     volume_mounts: list[str] = None
+    input_path: str = None
+    output_path: str = None
 
 
 # Add config and test cases for specific unit Tesseracts here
