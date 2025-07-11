@@ -24,6 +24,10 @@ Tesseract tries to ensure that the container user has the same permissions as th
 
 In cases where this fails or is not desired, you can explicitly set the user ID and group ID of the container user using the `--user` argument. This allows you to specify a different user or group for the container, which can be useful for ensuring proper permissions when accessing mounted volumes.
 
+```{warning}
+In cases where the Tesseract user is neither `root` nor the local user / file owner, you may encounter permission issues when accessing files in mounted volumes. To resolve this, ensure that the user ID and group ID are set correctly using the `--user` argument, or modify the permissions of files to be readable by any user.
+```
+
 ## Passing environment variables to Tesseract containers
 
 Through the optional `--env` argument, you can pass environment variables to Tesseracts.

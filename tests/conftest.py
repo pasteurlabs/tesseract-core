@@ -446,6 +446,7 @@ def mocked_docker(monkeypatch):
 
     mock_instance = MockedDocker()
     monkeypatch.setattr(engine, "docker_client", mock_instance)
+    monkeypatch.setattr(engine, "is_podman", lambda: False)
     monkeypatch.setattr(
         tesseract_core.sdk.docker_client, "CLIDockerClient", MockedDocker
     )

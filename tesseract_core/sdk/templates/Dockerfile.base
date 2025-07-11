@@ -93,7 +93,6 @@ COPY ["{{ tesseract_source_directory }}/{{ source_path }}", "{{ target_path }}"]
 RUN mkdir -p /tesseract/input_data /tesseract/output_data && \
     chmod 755 /tesseract/input_data && \
     chmod 777 /tesseract/output_data
-VOLUME ["/tesseract/input_data", "/tesseract/output_data"]
 
 USER 1000:1000
 

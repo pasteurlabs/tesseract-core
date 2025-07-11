@@ -4,6 +4,7 @@
 """End-to-end tests for Tesseract workflows."""
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -206,24 +207,43 @@ def test_tesseract_run_stdout(built_image_name):
             raise
 
 
+@pytest.mark.parametrize("no_compose", [True, False])
 @pytest.mark.parametrize("user", [None, "root", "1000:1000"])
-def test_run_as_user(built_image_name, user):
+def test_run_as_user(docker_client, built_image_name, user, no_compose, docker_cleanup):
     """Ensure we can run a basic Tesseract image as any user."""
     cli_runner = CliRunner(mix_stderr=False)
 
     run_res = cli_runner.invoke(
         app,
         [
-            "run",
+            "serve",
             built_image_name,
             "--user",
             user,
-            "health",
+            *(["--no-compose"] if no_compose else []),
         ],
         catch_exceptions=False,
     )
     assert run_res.exit_code == 0, run_res.stderr
-    assert run_res.stdout
+
+    project_meta = json.loads(run_res.stdout)
+    project_id = project_meta["project_id"]
+    container = docker_client.containers.get(project_meta["containers"][0]["name"])
+    if no_compose:
+        docker_cleanup["containers"].append(container)
+    else:
+        docker_cleanup["project_ids"].append(project_id)
+
+    exit_code, output = container.exec_run(["id", "-u"])
+    if user is None:
+        expected_user = os.getuid()
+    elif user == "root":
+        expected_user = 0
+    else:
+        expected_user = int(user.split(":")[0])
+
+    assert exit_code == 0
+    assert output.decode("utf-8").strip() == str(expected_user)
 
 
 @pytest.mark.parametrize("no_compose", [True, False])
