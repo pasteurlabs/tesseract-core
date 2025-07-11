@@ -4,6 +4,7 @@
 from abc import ABCMeta
 from enum import IntEnum
 from functools import partial
+from pathlib import Path
 from typing import (
     Annotated,
     Any,
@@ -371,3 +372,25 @@ UInt32 = Array[(), "uint32"]
 UInt64 = Array[(), "uint64"]
 Complex64 = Array[(), "complex64"]
 Complex128 = Array[(), "complex128"]
+
+
+def _resolve_input_path(path: Path) -> Path:
+    from tesseract_core.runtime.file_interactions import get_input_path
+
+    tess_path = get_input_path() / path
+    if not tess_path.exists():
+        raise FileNotFoundError(f"Input file {tess_path} does not exist.")
+    return tess_path.resolve()
+
+
+def _strip_output_path(path: Path) -> Path:
+    from tesseract_core.runtime.file_interactions import get_output_path
+
+    output_path = get_output_path()
+    if path.is_relative_to(output_path):
+        return path.relative_to(output_path)
+    return path
+
+
+InputFileReference = Annotated[Path, AfterValidator(_resolve_input_path)]
+OutputFileReference = Annotated[Path, AfterValidator(_strip_output_path)]

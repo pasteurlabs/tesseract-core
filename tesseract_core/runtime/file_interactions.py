@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
+import os
 import urllib.parse
 from pathlib import Path
 from typing import Any, Literal, Optional, Union, get_args
@@ -13,6 +14,31 @@ PathLike = Union[str, Path]
 
 supported_format_type = Literal["json", "msgpack", "json+base64", "json+binref"]
 SUPPORTED_FORMATS = get_args(supported_format_type)
+
+
+def running_in_docker() -> bool:
+    """Check if tesseract-runtime is running inside a Docker container."""
+    return Path("/.dockerenv").exists()
+
+
+def set_input_path(path: PathLike) -> None:
+    """Set the current input path."""
+    os.environ["TESSERACT_INPUT_PATH"] = str(path)
+
+
+def get_input_path() -> Path:
+    """Get the current input path."""
+    return Path(os.environ.get("TESSERACT_INPUT_PATH", ""))
+
+
+def set_output_path(path: PathLike) -> None:
+    """Set the current output path."""
+    os.environ["TESSERACT_OUTPUT_PATH"] = str(path)
+
+
+def get_output_path() -> Path:
+    """Get the current output path."""
+    return Path(os.environ.get("TESSERACT_OUTPUT_PATH", ""))
 
 
 def guess_format_from_path(path: PathLike) -> supported_format_type:
@@ -108,7 +134,7 @@ def write_to_path(buffer: bytes, path: PathLike, append: bool = False) -> None:
         f.write(buffer)
 
 
-def expand_glob(pattern: str) -> list[str]:
+def expand_glob(pattern: PathLike) -> list[str]:
     """Expand the given glob pattern.
 
     Path may be anything supported by fsspec.
