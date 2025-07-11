@@ -5,8 +5,8 @@ from rich import print
 from tesseract_core import Tesseract
 
 here = Path(__file__).parent.resolve()
-input_path = "./testdata"
-output_path = "./output"
+input_path = Path("./testdata")
+output_path = Path("/Users/niklas/Desktop/output")
 
 # these are relative to input_path
 data = [
@@ -27,14 +27,14 @@ with Tesseract.from_tesseract_api(
 ) as tess:
     result = tess.apply({"data": data})
     print(result)
-    assert all(p.exists() for p in result["data"])
+    assert all((output_path / p).exists() for p in result["data"])
 
 
 with Tesseract.from_image(
-    "dataloader-filereference",
+    "filereference",
     input_path=input_path,
     output_path=output_path,
 ) as tess:
     result = tess.apply({"data": data})
     print(result)
-    assert all(Path(p).exists() for p in result["data"])
+    assert all((output_path / p).exists() for p in result["data"])

@@ -28,6 +28,8 @@ from tesseract_core.runtime.file_interactions import (
     load_bytes,
     output_to_bytes,
     read_from_path,
+    set_input_path,
+    set_output_path,
     write_to_path,
 )
 from tesseract_core.runtime.finite_differences import (
@@ -378,7 +380,7 @@ def _create_user_defined_cli_command(
         **optional_args: Any,
     ):
         if input_path:
-            os.environ["TESSERACT_INPUT_PATH"] = input_path
+            set_input_path(input_path)
 
         if output_format == "json+binref" and output_path is None:
             raise ValueError("--output-path must be specified for json+binref format")
@@ -400,6 +402,9 @@ def _create_user_defined_cli_command(
                     param_hint=InputSchema.__name__,
                 ) from e
 
+        if output_path:
+            set_output_path(output_path)
+
         result = user_function(**user_function_args)
         result = output_to_bytes(result, output_format, output_path)
 
@@ -408,6 +413,7 @@ def _create_user_defined_cli_command(
             out_stream_.buffer.write(result)
             out_stream_.flush()
         else:
+            set_output_path(output_path)
             format = output_format.split("+", maxsplit=1)[0]
             write_to_path(result, f"{output_path}/results.{format}")
 

@@ -28,17 +28,18 @@ def set_input_path(path: PathLike) -> None:
 
 def get_input_path() -> Path:
     """Get the current input path."""
-    return Path(os.environ.get("TESSERACT_INPUT_PATH", ""))
+    return Path(os.environ.get("TESSERACT_INPUT_PATH", "/tesseract/input_path"))
 
 
 def set_output_path(path: PathLike) -> None:
     """Set the current output path."""
+    Path(path).mkdir(parents=True, exist_ok=True)
     os.environ["TESSERACT_OUTPUT_PATH"] = str(path)
 
 
 def get_output_path() -> Path:
     """Get the current output path."""
-    return Path(os.environ.get("TESSERACT_OUTPUT_PATH", ""))
+    return Path(os.environ.get("TESSERACT_OUTPUT_PATH", "/tesseract/output_path"))
 
 
 def guess_format_from_path(path: PathLike) -> supported_format_type:
