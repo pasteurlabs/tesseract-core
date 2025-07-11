@@ -2,6 +2,35 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.10.0] - 2025-07-11
+
+### Features
+
+- *(sdk)* Expose no compose in Python API (#223)
+- [**breaking**] Enable remote debugging (#184)
+- Add --service-names argument to `tesseract serve` so served Tesseracts can be reached by name (#206)
+- Allow skipping checks by passing `--skip-checks` flag to the tesseract build command (#233)
+- Add Volume class to docker client and --user flag to cli (#241)
+- Pass env variables through `tesseract run` and `tesseract serve` (#250)
+- Allow to run T containers as any user, for better volume permission handling (#253)
+
+### Bug Fixes
+
+- Fix teardown command crashing for wrong proj ID (#207)
+- Add FileNotFoundError to docker info (#215)
+- Gracefully exit when Docker executable not found (#216)
+- "docker buildx build requires exactly 1 argument" error when using `tesseract build --forward-ssh-agent` (#231)
+- Remove zip(strict=True) for py39 support (#227)
+- Allow to set all configs via `tesseract build --config-override` (#239)
+- Add environment to no_compose (#257)
+
+### Documentation
+
+- Add in data assimilation tutorial and refactor example gallery (#200)
+- Remove reference to Hessian matrices (#221)
+- New user usability improvements (#226)
+- Fine-tune onboarding experience (#243)
+
 ## [0.9.1] - 2025-06-05
 
 ### Features
