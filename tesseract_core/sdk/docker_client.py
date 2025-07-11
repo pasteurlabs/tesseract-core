@@ -551,6 +551,8 @@ class Containers:
                    and the values are the container ports.
             stdout: If True, return stdout.
             stderr: If True, return stderr.
+            environment: Environment variables to set in the container.
+            extra_args: Additional arguments to pass to the `docker run` CLI command.
 
         Returns:
             Container object if detach is True, otherwise returns list of stdout and stderr.
