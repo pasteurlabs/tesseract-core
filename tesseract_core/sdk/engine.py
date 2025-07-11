@@ -889,14 +889,14 @@ def run_tesseract(
     cmd = [command]
     current_cmd = None
 
+    if environment is None:
+        environment = {}
+
     if input_path:
         if volumes is None:
             volumes = []
         if "://" not in input_path:
             volumes.append(f"{input_path}:/tesseract/input_data")
-
-        if environment is None:
-            environment = {}
         environment["TESSERACT_INPUT_PATH"] = "/tesseract/input_data"
 
     if not volumes:
@@ -925,31 +925,28 @@ def run_tesseract(
                     f"Path {local_path} provided as output is not a directory"
                 )
 
-            path_in_container = "/mnt/output"
+            path_in_container = "/tesseract/output_data"
             arg = path_in_container
 
             # Bind-mount directory
             parsed_volumes[str(local_path)] = {"bind": path_in_container, "mode": "rw"}
+            environment["TESSERACT_OUTPUT_PATH"] = path_in_container
 
         # Mount local input files marked by @ into Docker container as a volume
         elif arg.startswith("@") and "://" not in arg:
-            if input_path:
-                local_path = (Path(input_path) / arg.lstrip("@")).resolve()
-            else:
-                local_path = Path(arg.lstrip("@")).resolve()
+            local_path = Path(arg.lstrip("@")).resolve()
 
             if not local_path.is_file():
                 raise RuntimeError(f"Path {local_path} provided as input is not a file")
 
-            if not input_path:
-                path_in_container = os.path.join("/mnt", f"payload{local_path.suffix}")
-                arg = f"@{path_in_container}"
+            path_in_container = os.path.join("/mnt", f"payload{local_path.suffix}")
+            arg = f"@{path_in_container}"
 
-                # Bind-mount file
-                parsed_volumes[str(local_path)] = {
-                    "bind": path_in_container,
-                    "mode": "ro",
-                }
+            # Bind-mount file
+            parsed_volumes[str(local_path)] = {
+                "bind": path_in_container,
+                "mode": "ro",
+            }
 
         current_cmd = None
         cmd.append(arg)

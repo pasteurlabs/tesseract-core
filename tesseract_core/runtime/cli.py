@@ -82,22 +82,10 @@ def _parse_arg_callback(
         return value, base_dir
 
     if value.startswith("@"):
-        value = value[1:]
-        tesseract_input_path = os.environ.get("TESSERACT_INPUT_PATH")
-        if tesseract_input_path:
-            if not os.access(tesseract_input_path, os.R_OK):
-                raise click.BadParameter(
-                    f"Tesseract input path {tesseract_input_path} is not accessible."
-                )
-            value = os.path.join(tesseract_input_path, value)
-            typer.echo(
-                f"Resolving @path to {value}. \n"
-                "Clear the TESSERACT_INPUT_PATH environment variable to disable this behavior."
-            )
-        base_dir = Path(value).parent
-        value_format = guess_format_from_path(value)
+        base_dir = Path(value[1:]).parent
+        value_format = guess_format_from_path(value[1:])
         try:
-            value_bytes = read_from_path(value)
+            value_bytes = read_from_path(value[1:])
         except Exception as e:
             raise click.BadParameter(f"Could not read data from path {value}.") from e
     else:
@@ -360,6 +348,12 @@ def _create_user_defined_cli_command(
     options.extend(
         [
             click.Option(
+                ["--input-path"],
+                type=click.STRING,
+                help="coming soon.",
+                default=None,
+            ),
+            click.Option(
                 ["-o", "--output-path"],
                 type=click.STRING,
                 help=(
@@ -378,10 +372,14 @@ def _create_user_defined_cli_command(
     )
 
     def _callback_wrapper(
+        input_path: Optional[str],
         output_path: Optional[str],
         output_format: SUPPORTED_FORMATS,
         **optional_args: Any,
     ):
+        if input_path:
+            os.environ["TESSERACT_INPUT_PATH"] = input_path
+
         if output_format == "json+binref" and output_path is None:
             raise ValueError("--output-path must be specified for json+binref format")
 
