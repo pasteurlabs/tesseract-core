@@ -13,7 +13,6 @@ build_config:
 
   custom_build_steps:
     - |
-      USER root
       # Python bindings into the Python site-packages directory
       RUN python_site=$(python -c "import site; print(site.getsitepackages()[0])") && \
           ln -s /usr/lib/python3/dist-packages/vtk* $python_site && \
@@ -21,4 +20,3 @@ build_config:
           python -c "import vtk"
       # Must install pyvista with --no-deps to avoid installing vtk (which we copied from the system)
       RUN pip install matplotlib numpy pillow pooch scooby && pip install --no-deps pyvista==0.44.1
-      USER tesseractor

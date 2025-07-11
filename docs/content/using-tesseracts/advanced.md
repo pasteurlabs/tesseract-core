@@ -1,6 +1,6 @@
 # Advanced usage
 
-## File system I/O
+## File aliasing
 
 The `tesseract` command can take care of
 passing data from local disk
@@ -14,6 +14,18 @@ target path:
 
 ```bash
 $ tesseract run vectoradd apply --output-path /tmp/output @inputs.json
+```
+
+## Volume mounts and user permissions
+
+When mounting a volume into a Tesseract container, default behavior depends on the Docker engine being used. Specifically, Docker Desktop, Docker Engine, and Podman have different ways of handling user permissions for mounted volumes.
+
+Tesseract tries to ensure that the container user has the same permissions as the host user running the `tesseract` command. This is done by setting the user ID and group ID of the container user to match those of the host user.
+
+In cases where this fails or is not desired, you can explicitly set the user ID and group ID of the container user using the `--user` argument. This allows you to specify a different user or group for the container, which can be useful for ensuring proper permissions when accessing mounted volumes.
+
+```{warning}
+In cases where the Tesseract user is neither `root` nor the local user / file owner, you may encounter permission issues when accessing files in mounted volumes. To resolve this, ensure that the user ID and group ID are set correctly using the `--user` argument, or modify the permissions of files to be readable by any user.
 ```
 
 ## Passing environment variables to Tesseract containers

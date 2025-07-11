@@ -708,7 +708,7 @@ TEST_CASES = {
                 endpoint="apply",
                 payload={
                     "inputs": {
-                        "data": "@/mnt/data/sample_*.json",
+                        "data": "@/tesseract/input_data/sample_*.json",
                     },
                 },
                 output_contains_pattern=[
@@ -719,12 +719,12 @@ TEST_CASES = {
                 endpoint="check-gradients",
                 payload={
                     "inputs": {
-                        "data": "@/mnt/data/sample_*.json",
+                        "data": "@/tesseract/input_data/sample_*.json",
                     },
                 },
             ),
         ],
-        volume_mounts=["testdata:/mnt/data:ro"],
+        volume_mounts=["testdata:/tesseract/input_data:ro"],
     ),
     "conda": Config(
         test_with_random_inputs=False,

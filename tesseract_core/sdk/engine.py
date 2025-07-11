@@ -39,6 +39,7 @@ from .docker_client import (
     ContainerError,
     Image,
     build_docker_image,
+    is_podman,
 )
 from .exceptions import UserError
 
@@ -570,6 +571,7 @@ def serve(
         no_compose: if True, do not use Docker Compose to serve the Tesseracts.
         service_names: list of service names under which to expose each Tesseract container on the shared network.
         user: user to run the Tesseracts as, e.g. '1000' or '1000:1000' (uid:gid).
+            Defaults to the current user.
 
     Returns:
         A string representing the Tesseract project ID.
@@ -596,6 +598,10 @@ def serve(
                 f"Number of service names ({len(service_names)}) must match number of images ({len(image_ids)})"
             )
         _validate_service_names(service_names)
+
+    if user is None:
+        # Use the current user if not specified
+        user = f"{os.getuid()}:{os.getgid()}" if os.name != "nt" else None
 
     if no_compose:
         if len(images) > 1:
@@ -639,15 +645,22 @@ def serve(
         if debug:
             logger.info(f"Debugpy server listening at http://{ping_ip}:{debugpy_port}")
 
+        parsed_volumes = _parse_volumes(volumes) if volumes else {}
+
+        extra_args = []
+        if is_podman():
+            extra_args.extend(["--userns", "keep-id"])
+
         container = docker_client.containers.run(
             image=image_ids[0],
             command=["serve", *args],
             device_requests=gpus,
             ports=port_mappings,
             detach=True,
-            volumes=volumes,
+            volumes=parsed_volumes,
             user=user,
             environment=environment,
+            extra_args=extra_args,
         )
         # wait for server to start
         timeout = 30
@@ -667,6 +680,12 @@ def serve(
                 raise TimeoutError("Tesseract did not start in time")
 
         return container.name
+
+    if is_podman() and volumes:
+        raise UserError(
+            "Podman does not support volume mounts in Docker Compose. "
+            "Please use --no-compose / no_compose=True instead."
+        )
 
     template = _create_docker_compose_template(
         image_ids,
@@ -751,13 +770,15 @@ def _create_docker_compose_template(
         else:
             gpu_settings = f"device_ids: {gpus}"
 
+    parsed_volumes = _parse_volumes(volumes) if volumes else {}
+
     for i, image_id in enumerate(image_ids):
         service = {
             "name": service_names[i],
             "user": user,
             "image": image_id,
             "port": f"{ports[i]}:8000",
-            "volumes": volumes,
+            "volumes": parsed_volumes,
             "gpus": gpu_settings,
             "environment": {
                 "TESSERACT_DEBUG": "1" if debug else "0",
@@ -818,8 +839,11 @@ def _parse_volumes(options: list[str]) -> dict[str, dict[str, str]]:
                 f"Invalid mount volume specification {option} "
                 "(must be `/path/to/source:/path/totarget:(ro|rw)`)",
             )
-        # Docker doesn't like paths like ".", so we convert to absolute path here
-        source = str(Path(source).resolve())
+
+        is_local_mount = "/" in source or Path(source).exists()
+        if is_local_mount:
+            # Docker doesn't like paths like ".", so we convert to absolute path here
+            source = str(Path(source).resolve())
         return source, {"bind": target, "mode": mode}
 
     return dict(_parse_option(opt) for opt in options)
@@ -865,6 +889,7 @@ def run_tesseract(
         environment: list of environment variables to set in the container,
             in Docker format: key=value.
         user: user to run the Tesseract as, e.g. '1000' or '1000:1000' (uid:gid).
+            Defaults to the current user.
 
     Returns:
         Tuple with the stdout and stderr of the Tesseract.
@@ -879,6 +904,10 @@ def run_tesseract(
         parsed_volumes = {}
     else:
         parsed_volumes = _parse_volumes(volumes)
+
+    if user is None:
+        # Use the current user if not specified
+        user = f"{os.getuid()}:{os.getgid()}" if os.name != "nt" else None
 
     for arg in args:
         if arg.startswith("-"):
@@ -901,7 +930,7 @@ def run_tesseract(
                     f"Path {local_path} provided as output is not a directory"
                 )
 
-            path_in_container = "/mnt/output"
+            path_in_container = "/tesseract/output_data"
             arg = path_in_container
 
             # Bind-mount directory
@@ -914,7 +943,9 @@ def run_tesseract(
             if not local_path.is_file():
                 raise RuntimeError(f"Path {local_path} provided as input is not a file")
 
-            path_in_container = os.path.join("/mnt", f"payload{local_path.suffix}")
+            path_in_container = os.path.join(
+                "/tesseract/input_data", f"payload{local_path.suffix}"
+            )
             arg = f"@{path_in_container}"
 
             # Bind-mount file
@@ -922,6 +953,10 @@ def run_tesseract(
 
         current_cmd = None
         cmd.append(arg)
+
+    extra_args = []
+    if is_podman():
+        extra_args.extend(["--userns", "keep-id"])
 
     # Run the container
     stdout, stderr = docker_client.containers.run(
@@ -935,6 +970,7 @@ def run_tesseract(
         remove=True,
         stderr=True,
         user=user,
+        extra_args=extra_args,
     )
     stdout = stdout.decode("utf-8")
     stderr = stderr.decode("utf-8")

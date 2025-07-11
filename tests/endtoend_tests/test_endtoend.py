@@ -15,7 +15,7 @@ from common import build_tesseract, image_exists
 from typer.testing import CliRunner
 
 from tesseract_core.sdk.cli import AVAILABLE_RECIPES, app
-from tesseract_core.sdk.docker_client import ContainerError
+from tesseract_core.sdk.docker_client import is_podman
 
 
 @pytest.fixture(scope="module")
@@ -205,6 +205,45 @@ def test_tesseract_run_stdout(built_image_name):
             print(f"failed to decode {command} stdout as JSON")
             print(run_res.stdout)
             raise
+
+
+@pytest.mark.parametrize("no_compose", [True, False])
+@pytest.mark.parametrize("user", [None, "root", "1000:1000"])
+def test_run_as_user(docker_client, built_image_name, user, no_compose, docker_cleanup):
+    """Ensure we can run a basic Tesseract image as any user."""
+    cli_runner = CliRunner(mix_stderr=False)
+
+    run_res = cli_runner.invoke(
+        app,
+        [
+            "serve",
+            built_image_name,
+            "--user",
+            user,
+            *(["--no-compose"] if no_compose else []),
+        ],
+        catch_exceptions=False,
+    )
+    assert run_res.exit_code == 0, run_res.stderr
+
+    project_meta = json.loads(run_res.stdout)
+    project_id = project_meta["project_id"]
+    container = docker_client.containers.get(project_meta["containers"][0]["name"])
+    if no_compose:
+        docker_cleanup["containers"].append(container)
+    else:
+        docker_cleanup["project_ids"].append(project_id)
+
+    exit_code, output = container.exec_run(["id", "-u"])
+    if user is None:
+        expected_user = os.getuid()
+    elif user == "root":
+        expected_user = 0
+    else:
+        expected_user = int(user.split(":")[0])
+
+    assert exit_code == 0
+    assert output.decode("utf-8").strip() == str(expected_user)
 
 
 @pytest.mark.parametrize("no_compose", [True, False])
@@ -434,25 +473,49 @@ def test_tesseract_serve_ports(built_image_name, port, docker_cleanup, free_port
     assert str(actual_port) in run_res.stdout
 
 
-def test_tesseract_serve_with_volumes(built_image_name, tmp_path, docker_client):
-    """Try to serve multiple Tesseracts with volume mounting."""
+@pytest.mark.parametrize("no_compose", [True, False])
+@pytest.mark.parametrize("volume_type", ["bind", "named"])
+@pytest.mark.parametrize("user", [None, "root", "1000:1000"])
+def test_tesseract_serve_docker_volume(
+    built_image_name,
+    docker_client,
+    docker_volume,
+    tmp_path,
+    docker_cleanup,
+    user,
+    volume_type,
+    no_compose,
+):
+    """Test serving Tesseract with a Docker volume or bind mount.
+
+    This should cover most permissions issues that can arise with Docker volumes.
+    """
+    if is_podman() and not no_compose:
+        pytest.xfail("Podman does not support --no-compose option.")
+
     cli_runner = CliRunner(mix_stderr=False)
     project_id = None
 
-    # Pytest creates the tmp_path fixture with drwx------ mode, we need others
-    # to be able to read and execute the path so the Docker volume is readable
-    # from within the container
-    tmp_path.chmod(0o0707)
+    dest = Path("/tesseract/output_data")
 
-    dest = Path("/foo/")
+    if volume_type == "bind":
+        # Use bind mount with a temporary directory
+        volume_to_bind = str(tmp_path)
+    elif volume_type == "named":
+        # Use docker volume instead of bind mounting
+        volume_to_bind = docker_volume.name
+    else:
+        raise ValueError(f"Unknown volume type: {volume_type}")
+
     run_res = cli_runner.invoke(
         app,
         [
             "serve",
             "--volume",
-            f"{tmp_path}:{dest}",
+            f"{volume_to_bind}:{dest}:rw",
+            *(("--user", user) if user else []),
             built_image_name,
-            built_image_name,
+            *(("--no-compose",) if no_compose else [built_image_name]),
         ],
         catch_exceptions=False,
     )
@@ -462,106 +525,52 @@ def test_tesseract_serve_with_volumes(built_image_name, tmp_path, docker_client)
     project_meta = json.loads(run_res.stdout)
     project_id = project_meta["project_id"]
 
-    try:
-        tesseract0_id = project_meta["containers"][0]["name"]
-        tesseract0 = docker_client.containers.get(tesseract0_id)
-        tesseract1_id = project_meta["containers"][1]["name"]
-        tesseract1 = docker_client.containers.get(tesseract1_id)
+    if no_compose:
+        docker_cleanup["containers"].append(project_id)
+    else:
+        docker_cleanup["project_ids"].append(project_id)
 
+    tesseract0_id = project_meta["containers"][0]["name"]
+    tesseract0 = docker_client.containers.get(tesseract0_id)
+
+    if volume_type == "bind":
         # Create file outside the containers and check it from inside the container
         tmpfile = Path(tmp_path) / "hi"
         with open(tmpfile, "w") as hello:
             hello.write("world")
             hello.flush()
 
+        if volume_type == "bind" and user not in (None, "root"):
+            # If we are not running as root, ensure the file is readable by the target user
+            tmp_path.chmod(0o777)
+            tmpfile.chmod(0o644)
+
         exit_code, output = tesseract0.exec_run(["cat", f"{dest}/hi"])
         assert exit_code == 0
         assert output.decode() == "world"
 
-        # Create file inside a container and check it from the other
-        bar_file = dest / "bar"
-        exit_code, output = tesseract0.exec_run(["touch", f"{bar_file}"])
-        assert exit_code == 0
-        exit_code, output = tesseract1.exec_run(["cat", f"{bar_file}"])
-        assert exit_code == 0
+    # Create file inside a container and access it from the other
+    bar_file = dest / "bar"
+    exit_code, output = tesseract0.exec_run(["ls", "-la", str(dest)])
+    assert exit_code == 0, output.decode()
 
-        # The file should exist outside the container
-        assert (tmp_path / "bar").exists()
-    finally:
-        if project_id:
-            run_res = cli_runner.invoke(
-                app,
-                [
-                    "teardown",
-                    project_id,
-                ],
-                catch_exceptions=False,
-            )
-            assert run_res.exit_code == 0, run_res.stderr
+    exit_code, output = tesseract0.exec_run(["touch", str(bar_file)])
+    assert exit_code == 0
 
-
-@pytest.mark.parametrize("user", ["root", "1000"])
-def test_tesseract_serve_docker_volume(
-    built_image_name, docker_client, docker_volume, user
-):
-    cli_runner = CliRunner(mix_stderr=False)
-    project_id = None
-
-    dest = Path("/foo/")
-    # Use docker volume instead of bind mounting
-    volume_to_bind = docker_volume.name
-
-    run_res = cli_runner.invoke(
-        app,
-        [
-            "serve",
-            "--volume",
-            f"{volume_to_bind}:{dest}",
-            "--user",
-            user,
-            built_image_name,
-            built_image_name,
-        ],
-        catch_exceptions=False,
-    )
-    assert run_res.exit_code == 0, run_res.stderr
-    assert run_res.stdout
-
-    project_meta = json.loads(run_res.stdout)
-    project_id = project_meta["project_id"]
-
-    def volume_read_write():
-        # Create file inside a container and check it from the other
-        bar_file = dest / "bar"
-        exit_code, _ = tesseract0.exec_run(["touch", f"{bar_file}"])
-        assert exit_code == 0
-        exit_code, _ = tesseract1.exec_run(["cat", f"{bar_file}"])
-        assert exit_code == 0
-
-    try:
-        tesseract0_id = project_meta["containers"][0]["name"]
-        tesseract0 = docker_client.containers.get(tesseract0_id)
+    if not no_compose:
         tesseract1_id = project_meta["containers"][1]["name"]
         tesseract1 = docker_client.containers.get(tesseract1_id)
-        # Podman does UID remapping by default to avoid permission issues
-        docker_host = os.environ.get("DOCKER_HOST", "")
-        if user == "root" or "podman" in docker_host:
-            volume_read_write()
-        else:
-            with pytest.raises(ContainerError) as e:
-                volume_read_write()
-            assert "Permission denied" in str(e)
-    finally:
-        if project_id:
-            run_res = cli_runner.invoke(
-                app,
-                [
-                    "teardown",
-                    project_id,
-                ],
-                catch_exceptions=False,
-            )
-            assert run_res.exit_code == 0, run_res.stderr
+
+        exit_code, output = tesseract1.exec_run(["cat", str(bar_file)])
+        assert exit_code == 0
+        exit_code, output = tesseract1.exec_run(
+            ["bash", "-c", f'echo "hello" > {bar_file}']
+        )
+        assert exit_code == 0
+
+    if volume_type == "bind":
+        # The file should exist outside the container
+        assert (tmp_path / "bar").exists()
 
 
 def test_tesseract_serve_interop(built_image_name, docker_client, docker_cleanup):
@@ -660,8 +669,6 @@ def test_serve_nonstandard_host_ip(
 
 def test_tesseract_cli_options_parsing(built_image_name, tmpdir):
     cli_runner = CliRunner(mix_stderr=False)
-
-    tmpdir.chmod(0o0707)
 
     examples_dir = Path(__file__).parent.parent.parent / "examples"
     example_inputs = examples_dir / "vectoradd" / "example_inputs.json"

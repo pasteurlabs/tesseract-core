@@ -523,7 +523,8 @@ def serve(
         typer.Option(
             "--user",
             help=(
-                "User to run the Tesseracts as e.g. '1000' or '1000:1000' (uid:gid)."
+                "User to run the Tesseracts as e.g. '1000' or '1000:1000' (uid:gid). "
+                "Defaults to the current user."
             ),
         ),
     ] = None,
@@ -876,7 +877,10 @@ def run_container(
         str | None,
         typer.Option(
             "--user",
-            help=("User to run the Tesseract as e.g. '1000' or '1000:1000' (uid:gid)."),
+            help=(
+                "User to run the Tesseract as e.g. '1000' or '1000:1000' (uid:gid). "
+                "Defaults to the current user."
+            ),
         ),
     ] = None,
 ) -> None:
