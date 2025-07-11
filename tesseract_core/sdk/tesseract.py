@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import atexit
 import base64
+import traceback
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from functools import cached_property, wraps
@@ -665,7 +666,12 @@ class LocalClient:
             else:
                 result = self._endpoints[endpoint]()
         except Exception as ex:
-            raise RuntimeError(f"Error running Tesseract API {endpoint}.") from ex
+            # Some clients like Tesseract-JAX swallow tracebacks from re-raised exceptions, so we explicitly
+            # format the traceback here to include it in the error message.
+            tb = traceback.format_exc()
+            raise RuntimeError(
+                f"{tb}\nError running Tesseract API {endpoint}: {ex} (see above for full traceback)"
+            ) from None
 
         if OutputSchema is not None:
             # Validate via schema, then dump to stay consistent with other clients
