@@ -886,9 +886,19 @@ def test_unit_tesseract_endtoend(
             mount_args.extend(["--volume", mnt])
 
     if unit_tesseract_config.input_path:
-        mount_args.extend(["--input-path", unit_tesseract_config.input_path])
+        mount_args.extend(
+            [
+                "--input-path",
+                str(unit_tesseract_path / unit_tesseract_config.input_path),
+            ]
+        )
     if unit_tesseract_config.output_path:
-        mount_args.extend(["--output-path", unit_tesseract_config.output_path])
+        mount_args.extend(
+            [
+                "--output-path",
+                str(unit_tesseract_path / unit_tesseract_config.output_path),
+            ]
+        )
 
     if unit_tesseract_config.test_with_random_inputs:
         random_input = example_from_json_schema(json.loads(input_schema))
