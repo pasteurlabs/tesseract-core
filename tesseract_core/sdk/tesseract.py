@@ -17,13 +17,6 @@ import requests
 from pydantic import BaseModel, TypeAdapter, ValidationError
 from pydantic_core import InitErrorDetails
 
-from tesseract_core.runtime.file_interactions import (
-    get_input_path,
-    get_output_path,
-    set_input_path,
-    set_output_path,
-)
-
 from . import engine
 
 PathLike = str | Path
