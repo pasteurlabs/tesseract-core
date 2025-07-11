@@ -736,7 +736,7 @@ TEST_CASES = {
             )
         ],
     ),
-    "dataloader-filereference": Config(
+    "filereference": Config(
         test_with_random_inputs=False,
         sample_requests=[
             SampleRequest(
@@ -760,10 +760,8 @@ TEST_CASES = {
                 output_contains_pattern=["output/sample_0.json"],
             )
         ],
-        volume_mounts=[
-            "testdata:/tesseract/input/:ro",
-            "output:/tesseract/output/:rw",
-        ],
+        input_path="testdata",
+        output_path="output",
     ),
 }
 
@@ -884,6 +882,11 @@ def test_unit_tesseract_endtoend(
                 local_path = unit_tesseract_path / local_path
             mnt = ":".join([str(local_path), *other])
             mount_args.extend(["--volume", mnt])
+
+    if unit_tesseract_config.input_path:
+        mount_args.extend(["--input-path", unit_tesseract_config.input_path])
+    if unit_tesseract_config.output_path:
+        mount_args.extend(["--output-path", unit_tesseract_config.output_path])
 
     if unit_tesseract_config.test_with_random_inputs:
         random_input = example_from_json_schema(json.loads(input_schema))
