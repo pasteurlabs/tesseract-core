@@ -3,14 +3,10 @@
 
 import base64
 import json
-import os
 import platform
-import signal
-import subprocess
-import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
+from pathlib import Path
 from textwrap import dedent
 
 import numpy as np
@@ -18,6 +14,7 @@ import pytest
 import requests
 from fastapi.testclient import TestClient
 
+from tesseract_core.runtime.core import load_module_from_path
 from tesseract_core.runtime.serve import create_rest_api
 
 test_input = {
@@ -50,47 +47,6 @@ def array_from_json(json_data):
 
 def model_to_json(model):
     return json.loads(model.model_dump_json())
-
-
-@contextmanager
-def serve_in_subprocess(api_file, port, num_workers=1, timeout=30.0):
-    try:
-        proc = subprocess.Popen(
-            [
-                sys.executable,
-                "-c",
-                "from tesseract_core.runtime.serve import serve; "
-                f"serve(host='localhost', port={port}, num_workers={num_workers})",
-            ],
-            env=dict(os.environ, TESSERACT_API_PATH=api_file),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-
-        # wait for server to start
-        while True:
-            try:
-                response = requests.get(f"http://localhost:{port}/health")
-            except requests.exceptions.ConnectionError:
-                pass
-            else:
-                if response.status_code == 200:
-                    break
-
-            time.sleep(0.1)
-            timeout -= 0.1
-
-            if timeout < 0:
-                raise TimeoutError("Server did not start in time")
-
-        yield f"http://localhost:{port}"
-
-    finally:
-        proc.send_signal(signal.SIGINT)
-        stdout, stderr = proc.communicate()
-        print(stdout.decode())
-        print(stderr.decode())
-        proc.wait(timeout=5)
 
 
 @pytest.fixture
@@ -212,7 +168,7 @@ def test_get_openapi_schema(http_client):
     is_wsl(),
     reason="flaky on Windows",
 )
-def test_threading_sanity(tmpdir, free_port):
+def test_threading_sanity(tmpdir, free_port, serve_in_subprocess):
     """Test with a Tesseract that requires to be run in the main thread.
 
     This is important so we don't require users to be aware of threading issues.
@@ -252,7 +208,7 @@ def test_threading_sanity(tmpdir, free_port):
     is_wsl(),
     reason="flaky on Windows",
 )
-def test_multiple_workers(tmpdir, free_port):
+def test_multiple_workers(serve_in_subprocess, tmpdir, free_port):
     """Test that the server can be run with multiple worker processes."""
     TESSERACT_API = dedent(
         """
@@ -304,7 +260,6 @@ def test_debug_mode(dummy_tesseract_module, monkeypatch):
         raise ValueError("This is a test error")
 
     orig_config = tesseract_core.runtime.config._current_config
-
     monkeypatch.setattr(dummy_tesseract_module, "apply", apply_that_raises)
 
     try:
@@ -344,3 +299,151 @@ def test_debug_mode(dummy_tesseract_module, monkeypatch):
         assert "Traceback" in response.text
     finally:
         tesseract_core.runtime.config._current_config = orig_config
+
+
+def test_async_endpoint_wrapper(tmpdir):
+    from tesseract_core.runtime.config import update_config
+
+    TESSERACT_API = dedent(
+        """
+        import time
+        import numpy as np
+        from pydantic import BaseModel
+        from tesseract_core.runtime import Array, Differentiable, Float32
+
+        class InputSchema(BaseModel):
+            x: Differentiable[Array[(None,), Float32]]
+            sleep: float
+            raise_error: bool
+
+        class OutputSchema(BaseModel):
+            y: Differentiable[Array[(None,), Float32]]
+
+        def apply(inputs: InputSchema) -> OutputSchema:
+            if inputs.raise_error:
+                raise ValueError("Apply failed")
+            time.sleep(inputs.sleep)
+            return OutputSchema(y=inputs.x**2)
+
+        def jacobian(
+            inputs: InputSchema,
+            jac_inputs: set[str],
+            jac_outputs: set[str],
+        ):
+            jacobian = {"y": {"x": np.eye(len(inputs.x)) * 2 * inputs.x}}
+            return jacobian
+        """
+    )
+    api_path = Path(tmpdir / "tesseract_api.py")
+    with open(api_path, "w") as f:
+        f.write(TESSERACT_API)
+    api_module = load_module_from_path(api_path)
+
+    request_timeout = 0.1
+    apply_sleep = 1.0  # make sure request times out
+    max_wait_time = 10.0  # max time to wait on task to complete
+
+    def mk_payload(sleep, raise_error=False):
+        return {
+            "inputs": model_to_json(
+                api_module.InputSchema.model_validate(
+                    {
+                        "x": [1.0, 2.0, 3.0],
+                        "sleep": sleep,
+                        "raise_error": raise_error,
+                    }
+                )
+            )
+        }
+
+    update_config(
+        debug=False,
+        api_path=api_module.__file__,
+        request_timeout=request_timeout,
+    )
+
+    rest_api = create_rest_api(api_module)
+    http_client = TestClient(rest_api, raise_server_exceptions=False)
+
+    # start task with apply function that sleeps for apply_sleep seconds
+    task_start_time = time.time()
+    response = http_client.post(
+        "/apply/async_start",
+        json=mk_payload(sleep=apply_sleep),
+        headers={"Accept": "application/json"},
+    )
+    task_id = response.json()["task_id"]
+    assert response.status_code == 202, response.text
+
+    # test response when trying to retrieve results with task_id
+    response = http_client.post(
+        "/apply/async_retrieve",
+        json={"task_id": "bad_task_id"},
+        headers={"Accept": "application/json"},
+    )
+    assert response.status_code == 404, response.text
+
+    # test response when trying to retrieve results with valid task_id but wrong endpoint
+    response = http_client.post(
+        "/jacobian/async_retrieve",
+        json={"task_id": task_id},
+        headers={"Accept": "application/json"},
+    )
+    assert response.status_code == 400, response.text
+
+    # keep testing responses with correct task_id and endpoint until task completes
+    request_counter = 0
+    while True:
+        response = http_client.post(
+            "/apply/async_retrieve",
+            json={"task_id": task_id},
+            headers={"Accept": "application/json"},
+        )
+        # taks definitely not finished yet
+        if time.time() - task_start_time < apply_sleep:
+            request_counter += 1
+            assert response.status_code == 202, response.text
+        # tasks takes too long
+        elif time.time() - task_start_time > max_wait_time:
+            raise AssertionError("Task timed out")
+        # tasks finished or failed
+        elif response.status_code != 202:
+            break
+    assert response.status_code == 200, response.text
+    # we want to hit at least one 202 check in while loop
+    assert request_counter > 1
+
+    # test that completed task was removed from open tasks dict
+    response = http_client.post(
+        "/apply/async_retrieve",
+        json={"task_id": task_id},
+        headers={"Accept": "application/json"},
+    )
+    assert response.status_code == 404, response.text
+
+    # start new task with apply function that raises an error
+    response = http_client.post(
+        "/apply/async_start",
+        json=mk_payload(sleep=apply_sleep, raise_error=True),
+        headers={"Accept": "application/json"},
+    )
+    task_id = response.json()["task_id"]
+    assert response.status_code == 202, response.text
+
+    # test that response shows error
+    time.sleep(1)  # wait for task to fail
+    response = http_client.post(
+        "/apply/async_retrieve",
+        json={"task_id": task_id},
+        headers={"Accept": "application/json"},
+    )
+    assert response.status_code == 500, response.text
+    assert response.json()["message"] == "Apply failed"
+
+    # test that failed task was removed from open tasks dict
+    response = http_client.post(
+        "/apply/async_retrieve",
+        json={"task_id": task_id},
+        headers={"Accept": "application/json"},
+    )
+    assert response.status_code == 404, response.text

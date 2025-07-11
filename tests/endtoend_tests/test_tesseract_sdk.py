@@ -13,12 +13,12 @@ from tesseract_core.sdk import engine
 expected_endpoints = {
     "apply",
     "jacobian",
+    "jacobian_vector_product",
+    "vector_jacobian_product",
     "health",
     "input_schema",
     "output_schema",
     "abstract_eval",
-    "jacobian_vector_product",
-    "vector_jacobian_product",
 }
 
 

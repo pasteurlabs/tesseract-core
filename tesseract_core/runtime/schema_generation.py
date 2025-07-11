@@ -93,6 +93,13 @@ def apply_function_to_model_tree(
 
     seen_models = set()
 
+    def _maybe_defer_validation(
+        cls: type, v: Any, handler: Callable, info: ValidationInfo
+    ):
+        return (
+            v if info.context and info.context.get("defer_validation") else handler(v)
+        )
+
     def _recurse_over_model_tree(treeobj: Any, path: list[str]) -> Any:
         # Get the origin type of the annotation, e.g. List for List[int]
         origin_type = get_origin(treeobj)
@@ -145,6 +152,11 @@ def apply_function_to_model_tree(
                 **new_fields,
                 model_config=(ConfigDict, model_config),
                 __base__=treeobj,
+                __validators__={
+                    "_maybe_defer_validation": field_validator("*", mode="wrap")(
+                        _maybe_defer_validation
+                    )
+                },
             )
 
         elif _is_annotated(treeobj):
@@ -481,6 +493,9 @@ def create_autodiff_schema(
         Since the structure of the result is already validated in core.py, we only need to check the shapes
         to ensure they match what's expected from the schema.
         """
+        if info.context and info.context.get("defer_validation"):
+            return result
+
         if ad_flavor == "jacobian":
             if set(info.context["output_keys"]) != set(result.keys()):
                 raise ValueError(

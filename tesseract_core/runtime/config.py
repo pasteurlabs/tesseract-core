@@ -16,6 +16,9 @@ class RuntimeConfig(BaseModel):
     version: str = "0+unknown"
     debug: bool = False
 
+    request_timeout: float = 10.0
+    max_num_workers: int = 4
+
     model_config = ConfigDict(frozen=True, extra="forbid")
 
 
