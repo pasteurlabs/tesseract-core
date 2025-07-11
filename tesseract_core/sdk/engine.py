@@ -933,23 +933,16 @@ def run_tesseract(
 
         # Mount local input files marked by @ into Docker container as a volume
         elif arg.startswith("@") and "://" not in arg:
-            if input_path:
-                local_path = (Path(input_path) / arg.lstrip("@")).resolve()
-            else:
-                local_path = Path(arg.lstrip("@")).resolve()
+            local_path = Path(arg.lstrip("@")).resolve()
 
             if not local_path.is_file():
                 raise RuntimeError(f"Path {local_path} provided as input is not a file")
 
-            if not input_path:
-                path_in_container = os.path.join("/mnt", f"payload{local_path.suffix}")
-                arg = f"@{path_in_container}"
+            path_in_container = os.path.join("/mnt", f"payload{local_path.suffix}")
+            arg = f"@{path_in_container}"
 
-                # Bind-mount file
-                parsed_volumes[str(local_path)] = {
-                    "bind": path_in_container,
-                    "mode": "ro",
-                }
+            # Bind-mount file
+            parsed_volumes[str(local_path)] = {"bind": path_in_container, "mode": "ro"}
 
         current_cmd = None
         cmd.append(arg)
