@@ -39,6 +39,7 @@ from .docker_client import (
     ContainerError,
     Image,
     build_docker_image,
+    is_podman,
 )
 from .exceptions import UserError
 
@@ -544,6 +545,7 @@ def serve(
     host_ip: str = "127.0.0.1",
     ports: list[str] | None = None,
     volumes: list[str] | None = None,
+    environment: dict[str, str] | None = None,
     gpus: list[str] | None = None,
     debug: bool = False,
     num_workers: int = 1,
@@ -560,6 +562,7 @@ def serve(
         host_ip: IP address to bind the Tesseracts to.
         ports: port or port range to serve each Tesseract on.
         volumes: list of paths to mount in the Tesseract container.
+        environment: dictionary of environment variables to pass to the Tesseract.
         gpus: IDs of host Nvidia GPUs to make available to the Tesseracts.
         debug: Enable debug mode. This will propagate full tracebacks to the client
             and start a debugpy server in the Tesseract.
@@ -644,6 +647,10 @@ def serve(
 
         parsed_volumes = _parse_volumes(volumes) if volumes else {}
 
+        extra_args = []
+        if is_podman():
+            extra_args.extend(["--userns", "keep-id"])
+
         container = docker_client.containers.run(
             image=image_ids[0],
             command=["serve", *args],
@@ -652,6 +659,8 @@ def serve(
             detach=True,
             volumes=parsed_volumes,
             user=user,
+            environment=environment,
+            extra_args=extra_args,
         )
         # wait for server to start
         timeout = 30
@@ -672,12 +681,19 @@ def serve(
 
         return container.name
 
+    if is_podman() and volumes:
+        raise UserError(
+            "Podman does not support volume mounts in Docker Compose. "
+            "Please use --no-compose / no_compose=True instead."
+        )
+
     template = _create_docker_compose_template(
         image_ids,
         host_ip,
         service_names,
         ports,
         volumes,
+        environment,
         gpus,
         num_workers,
         debug=debug,
@@ -704,6 +720,7 @@ def _create_docker_compose_template(
     service_names: list[str] | None = None,
     ports: list[str] | None = None,
     volumes: list[str] | None = None,
+    environment: dict[str, str] | None = None,
     gpus: list[str] | None = None,
     num_workers: int = 1,
     debug: bool = False,
@@ -765,6 +782,7 @@ def _create_docker_compose_template(
             "gpus": gpu_settings,
             "environment": {
                 "TESSERACT_DEBUG": "1" if debug else "0",
+                **(environment or {}),
             },
             "num_workers": num_workers,
             "debugpy_port": debugpy_ports[i] if debug else None,
@@ -855,6 +873,7 @@ def run_tesseract(
     volumes: list[str] | None = None,
     gpus: list[int | str] | None = None,
     ports: dict[str, str] | None = None,
+    environment: dict[str, str] | None = None,
     user: str | None = None,
 ) -> tuple[str, str]:
     """Start a Tesseract and execute a given command.
@@ -867,6 +886,8 @@ def run_tesseract(
         gpus: list of GPUs, as indices or names, to passthrough the container.
         ports: dictionary of ports to bind to the host. Key is the host port,
             value is the container port.
+        environment: list of environment variables to set in the container,
+            in Docker format: key=value.
         user: user to run the Tesseract as, e.g. '1000' or '1000:1000' (uid:gid).
             Defaults to the current user.
 
@@ -933,17 +954,23 @@ def run_tesseract(
         current_cmd = None
         cmd.append(arg)
 
+    extra_args = []
+    if is_podman():
+        extra_args.extend(["--userns", "keep-id"])
+
     # Run the container
     stdout, stderr = docker_client.containers.run(
         image=image,
         command=cmd,
         volumes=parsed_volumes,
         device_requests=gpus,
+        environment=environment,
         ports=ports,
         detach=False,
         remove=True,
         stderr=True,
         user=user,
+        extra_args=extra_args,
     )
     stdout = stdout.decode("utf-8")
     stderr = stderr.decode("utf-8")

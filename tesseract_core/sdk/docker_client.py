@@ -522,12 +522,14 @@ class Containers:
         command: list_[str],
         volumes: dict | None = None,
         device_requests: list_[int | str] | None = None,
+        environment: dict[str, str] | None = None,
         detach: bool = False,
         remove: bool = False,
         ports: dict | None = None,
         stdout: bool = True,
         stderr: bool = False,
         user: str | None = None,
+        extra_args: list_[str] | None = None,
     ) -> Container | tuple[bytes, bytes] | bytes:
         """Run a command in a container from an image.
 
@@ -556,10 +558,8 @@ class Containers:
         config = get_config()
         docker = _get_executable("docker")
 
-        # If command is a type string and not list, make list
         if isinstance(command, str):
             command = [command]
-        logger.debug(f"Running command: {command}")
 
         optional_args = []
 
@@ -581,6 +581,12 @@ class Containers:
             gpus_str = ",".join(device_requests)
             optional_args.extend(["--gpus", f'"device={gpus_str}"'])
 
+        if environment:
+            env_args = []
+            for env_var, value in environment.items():
+                env_args.extend(["-e", f"{env_var}={value}"])
+            optional_args.extend(env_args)
+
         # Remove and detached cannot both be set to true
         if remove and detach:
             raise ValueError(
@@ -595,14 +601,20 @@ class Containers:
             for host_port, container_port in ports.items():
                 optional_args.extend(["-p", f"{host_port}:{container_port}"])
 
+        if extra_args is None:
+            extra_args = []
+
         full_cmd = [
             *docker,
             "run",
             *optional_args,
             *config.docker_run_args,
+            *extra_args,
             image,
             *command,
         ]
+
+        logger.debug(f"Running command: {full_cmd}")
 
         result = subprocess.run(
             full_cmd,

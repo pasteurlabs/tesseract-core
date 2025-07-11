@@ -114,7 +114,8 @@ jobs:
             --skip-endtoend \
             --cov-report=term-missing:skip-covered \
             --cov-report=xml:coverage.xml \
-            --cov=tesseract_core
+            --cov=tesseract_core \
+            --cov-branch
 
       - name: Run test suite (Windows)
         if: runner.os == 'Windows'
@@ -125,7 +126,8 @@ jobs:
             --skip-endtoend \
             --cov-report=term-missing:skip-covered \
             --cov-report=xml:coverage.xml \
-            --cov=tesseract_core
+            --cov=tesseract_core \
+            --cov-branch
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v5.4.3
@@ -273,14 +275,13 @@ jobs:
           echo "TESSERACT_DOCKER_EXECUTABLE=podman" >> $GITHUB_ENV
           # Podman doesn't support --cache-from
           echo "TESSERACT_DOCKER_BUILD_ARGS=" >> $GITHUB_ENV
-          echo "TESSERACT_DOCKER_RUN_ARGS=--userns=keep-id" >> $GITHUB_ENV
-          echo "PODMAN_USERNS=keep-id" >> $GITHUB_ENV
 
       - name: Run test suite
         run: |
           if [ "${{ matrix.unit-tesseract }}" == "base" ]; then
             uv run --no-sync pytest \
               --always-run-endtoend \
+              --cov-branch \
               --cov-report=term-missing:skip-covered \
               --cov-report=xml:coverage.xml \
               --cov=tesseract_core \
@@ -289,6 +290,7 @@ jobs:
           else
             uv run --no-sync pytest \
               --always-run-endtoend \
+              --cov-branch \
               --cov-report=term-missing:skip-covered \
               --cov-report=xml:coverage.xml \
               --cov=tesseract_core \

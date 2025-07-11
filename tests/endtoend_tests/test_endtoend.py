@@ -4,6 +4,7 @@
 """End-to-end tests for Tesseract workflows."""
 
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -125,6 +126,40 @@ def test_build_generate_only(dummy_tesseract_location, skip_checks):
             assert 'RUN ["tesseract-runtime", "check"]' not in docker_file_contents
         else:
             assert 'RUN ["tesseract-runtime", "check"]' in docker_file_contents
+
+
+@pytest.mark.parametrize("no_compose", [True, False])
+def test_env_passthrough_serve(
+    docker_cleanup, docker_client, built_image_name, no_compose
+):
+    """Ensure we can pass environment variables to tesseracts when serving."""
+    run_res = subprocess.run(
+        [
+            "tesseract",
+            "serve",
+            built_image_name,
+            "--env=TEST_ENV_VAR=foo",
+            *(["--no-compose"] if no_compose else []),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert run_res.returncode == 0, run_res.stderr
+    assert run_res.stdout
+
+    project_meta = json.loads(run_res.stdout)
+    project_id = project_meta["project_id"]
+    tesseract_id = project_meta["containers"][0]["name"]
+
+    if no_compose:
+        docker_cleanup["containers"].append(tesseract_id)
+    else:
+        docker_cleanup["project_ids"].append(project_id)
+
+    container = docker_client.containers.get(tesseract_id)
+    exit_code, output = container.exec_run(["sh", "-c", "echo $TEST_ENV_VAR"])
+    assert exit_code == 0, f"Command failed with exit code {exit_code}"
+    assert "foo" in output.decode("utf-8"), f"Output was: {output.decode('utf-8')}"
 
 
 def test_tesseract_list(built_image_name):
@@ -436,7 +471,7 @@ def test_tesseract_serve_docker_volume(
     This should cover most permissions issues that can arise with Docker volumes.
     """
     if is_podman() and not no_compose:
-        pytest.skip("Podman does not support --no-compose option.")
+        pytest.xfail("Podman does not support --no-compose option.")
 
     cli_runner = CliRunner(mix_stderr=False)
     project_id = None
@@ -478,11 +513,6 @@ def test_tesseract_serve_docker_volume(
     tesseract0_id = project_meta["containers"][0]["name"]
     tesseract0 = docker_client.containers.get(tesseract0_id)
 
-    import os
-
-    print(os.getuid(), os.getgid())
-    print(tmp_path.stat())
-
     if volume_type == "bind":
         # Create file outside the containers and check it from inside the container
         tmpfile = Path(tmp_path) / "hi"
@@ -495,21 +525,9 @@ def test_tesseract_serve_docker_volume(
             tmp_path.chmod(0o777)
             tmpfile.chmod(0o644)
 
-        # debugging
-        exit_code, output = tesseract0.exec_run(
-            ["bash", "-c", "ls -la /tesseract && id"]
-        )
-        assert exit_code == 0, output.decode()
-        print(output.decode())
-
         exit_code, output = tesseract0.exec_run(["cat", f"{dest}/hi"])
         assert exit_code == 0
         assert output.decode() == "world"
-
-    # debugging
-    exit_code, output = tesseract0.exec_run(["bash", "-c", "ls -la /tesseract && id"])
-    assert exit_code == 0, output.decode()
-    print(output.decode())
 
     # Create file inside a container and access it from the other
     bar_file = dest / "bar"
