@@ -736,6 +736,35 @@ TEST_CASES = {
             )
         ],
     ),
+    "dataloader-filereference": Config(
+        test_with_random_inputs=False,
+        sample_requests=[
+            SampleRequest(
+                endpoint="apply",
+                payload={
+                    "inputs": {
+                        "data": [
+                            "sample_7.json",
+                            "sample_6.json",
+                            "sample_1.json",
+                            "sample_0.json",
+                            "sample_3.json",
+                            "sample_2.json",
+                            "sample_9.json",
+                            "sample_5.json",
+                            "sample_4.json",
+                            "sample_8.json",
+                        ]
+                    }
+                },
+                output_contains_pattern=["output/sample_0.json"],
+            )
+        ],
+        volume_mounts=[
+            "testdata:/tesseract/input/:ro",
+            "output:/tesseract/output/:rw",
+        ],
+    ),
 }
 
 
