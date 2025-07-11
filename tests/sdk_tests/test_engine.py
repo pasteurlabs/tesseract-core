@@ -199,7 +199,7 @@ def test_run_tesseract_file_input(mocked_docker, tmpdir):
         input_path=str(tmpdir),
     )
     res = json.loads(res)
-    assert res["volumes"].keys() == {str(outdir), str(tmpdir)}
+    assert res["volumes"].keys() == {str(outdir), str(tmpdir), str(infile)}
     assert res["volumes"][str(tmpdir)] == {
         "mode": "ro",
         "bind": "/tesseract/input_data",
