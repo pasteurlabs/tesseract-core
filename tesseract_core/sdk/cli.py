@@ -17,6 +17,7 @@ from typing import Annotated, Any, NoReturn
 
 import click
 import typer
+import yaml
 from jinja2 import Environment, PackageLoader, StrictUndefined
 from pydantic import ValidationError as PydanticValidationError
 from rich.console import Console as RichConsole
@@ -193,27 +194,38 @@ def main_callback(
 
 def _parse_config_override(
     options: list[str] | None,
-) -> tuple[tuple[list[str], str], ...]:
+) -> dict[tuple[str, ...], Any]:
     """Parse `["path1.path2.path3=value"]` into `[(["path1", "path2", "path3"], "value")]`."""
     if options is None:
-        return ()
+        return {}
 
-    def _parse_option(option: str):
-        bad_param = typer.BadParameter(
-            f"Invalid config override {option} (must be `keypath=value`)",
-            param_hint="config_override",
-        )
-        if option.count("=") != 1:
-            raise bad_param
+    def _parse_option(option: str) -> tuple[tuple[str, ...], Any]:
+        if "=" not in option:
+            raise typer.BadParameter(
+                f'Invalid config override "{option}" (must be `keypath=value`)',
+                param_hint="config_override",
+            )
 
-        key, value = option.split("=")
-        if not key or not value:
-            raise bad_param
+        key, value = option.split("=", maxsplit=1)
+        if not re.match(r"\w[\w|\.]*", key):
+            raise typer.BadParameter(
+                f'Invalid keypath "{key}" in config override "{option}"',
+                param_hint="config_override",
+            )
 
-        path = key.split(".")
+        path = tuple(key.split("."))
+
+        try:
+            value = yaml.safe_load(value)
+        except yaml.YAMLError as e:
+            raise typer.BadParameter(
+                f'Invalid value for config override "{option}", could not parse value as YAML: {e}',
+                param_hint="config_override",
+            ) from e
+
         return path, value
 
-    return tuple(_parse_option(option) for option in options)
+    return dict(_parse_option(option) for option in options)
 
 
 @app.command("build")
@@ -424,6 +436,14 @@ def serve(
             show_default=False,
         ),
     ] = None,
+    environment: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--env",
+            "-e",
+            help="Set environment variables in the Tesseract containers, in Docker format: key=value.",
+        ),
+    ] = None,
     port: Annotated[
         str | None,
         typer.Option(
@@ -498,6 +518,16 @@ def serve(
             ),
         ),
     ] = None,
+    user: Annotated[
+        str | None,
+        typer.Option(
+            "--user",
+            help=(
+                "User to run the Tesseracts as e.g. '1000' or '1000:1000' (uid:gid). "
+                "Defaults to the current user."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Serve one or more Tesseract images.
 
@@ -521,6 +551,19 @@ def serve(
     else:
         ports = None
 
+    # Parse environment variables from list to dict
+    if environment is not None:
+        try:
+            environment = {
+                env.split("=", maxsplit=1)[0]: env.split("=", maxsplit=1)[1]
+                for env in environment
+            }
+        except Exception as ex:
+            raise typer.BadParameter(
+                "Environment variables must be in the format 'key=value'.",
+                param_hint="environment",
+            ) from ex
+
     if service_names is not None:
         if no_compose:
             raise typer.BadParameter(
@@ -538,11 +581,13 @@ def serve(
             host_ip,
             ports,
             volume,
+            environment,
             gpus,
             debug,
             num_workers,
             no_compose,
             service_names_list,
+            user,
         )
     except RuntimeError as ex:
         raise UserError(
@@ -818,6 +863,26 @@ def run_container(
             ),
         ),
     ] = None,
+    environment: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--env",
+            "-e",
+            help="Set environment variables in the Tesseract container, in Docker format: key=value.",
+            metavar="key=value",
+            show_default=False,
+        ),
+    ] = None,
+    user: Annotated[
+        str | None,
+        typer.Option(
+            "--user",
+            help=(
+                "User to run the Tesseract as e.g. '1000' or '1000:1000' (uid:gid). "
+                "Defaults to the current user."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Execute a command in a Tesseract.
 
@@ -859,9 +924,26 @@ def run_container(
         )
         raise typer.BadParameter(error_string, param_hint="cmd")
 
+    if environment is not None:
+        try:
+            environment = {
+                item.split("=", maxsplit=1)[0]: item.split("=", maxsplit=1)[1]
+                for item in environment
+            }
+        except Exception as ex:
+            raise typer.BadParameter(
+                "Environment variables must be in the format 'key=value'.",
+                param_hint="env",
+            ) from ex
     try:
         result_out, result_err = engine.run_tesseract(
-            tesseract_image, cmd, args, volumes=volume, gpus=gpus
+            tesseract_image,
+            cmd,
+            args,
+            volumes=volume,
+            gpus=gpus,
+            environment=environment,
+            user=user,
         )
 
     except ImageNotFound as e:

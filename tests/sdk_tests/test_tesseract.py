@@ -116,6 +116,7 @@ def test_serve_lifecycle(mock_serving, mock_clients):
         ["sometesseract:0.2.3"],
         ports=None,
         volumes=None,
+        environment=None,
         gpus=None,
         debug=True,
         num_workers=1,
