@@ -135,7 +135,7 @@ def write_to_path(buffer: bytes, path: PathLike, append: bool = False) -> None:
         f.write(buffer)
 
 
-def expand_glob(pattern: PathLike) -> list[str]:
+def expand_glob(pattern: str) -> list[str]:
     """Expand the given glob pattern.
 
     Path may be anything supported by fsspec.

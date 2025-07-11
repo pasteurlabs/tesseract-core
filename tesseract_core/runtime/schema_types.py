@@ -377,10 +377,15 @@ Complex128 = Array[(), "complex128"]
 def _resolve_input_path(path: Path) -> Path:
     from tesseract_core.runtime.file_interactions import get_input_path
 
-    tess_path = get_input_path() / path
+    input_path = get_input_path()
+    tess_path = (input_path / path).resolve()
+    if str(input_path) not in str(tess_path):
+        raise ValueError("File references have to be relative to --input-path.")
     if not tess_path.exists():
-        raise FileNotFoundError(f"Input file {tess_path} does not exist.")
-    return tess_path.resolve()
+        raise FileNotFoundError(f"Input path {tess_path} does not exist.")
+    if not tess_path.is_file():
+        raise ValueError(f"Input path {tess_path} is not a file.")
+    return tess_path
 
 
 def _strip_output_path(path: Path) -> Path:
