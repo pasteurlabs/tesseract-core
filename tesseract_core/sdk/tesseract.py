@@ -17,7 +17,14 @@ import requests
 from pydantic import BaseModel, TypeAdapter, ValidationError
 from pydantic_core import InitErrorDetails
 
+from tesseract_core.runtime.file_interactions import (
+    set_client_input_path,
+    set_client_output_path,
+)
+
 from . import engine
+
+PathLike = str | Path
 
 
 @dataclass
@@ -84,8 +91,9 @@ class Tesseract:
         cls,
         image: str,
         *,
-        volumes: list[str] | None = None,
         environment: dict[str, str] | None = None,
+        input_path: PathLike | None = None,
+        output_path: PathLike | None = None,
         gpus: list[str] | None = None,
         num_workers: int = 1,
         no_compose: bool = False,
@@ -105,8 +113,13 @@ class Tesseract:
 
         Args:
             image: The Docker image to use.
-            volumes: List of volumes to mount, e.g. ["/path/on/host:/path/in/container"].
             environment: dictionary of environment variables to pass to the Tesseract.
+            input_path: Path to be mounted as the input directory in the
+                container (read only). All paths in the input payload must be
+                relative to this path.
+            output_path: Path to be mounted as the output directory in the
+                container (read+write). All paths in the output result will be
+                relative to this path.
             gpus: List of GPUs to use, e.g. ["0", "1"]. (default: no GPUs)
             num_workers: Number of worker processes to use. This determines how
                 many requests can be handled in parallel. Higher values
@@ -117,6 +130,20 @@ class Tesseract:
             A Tesseract instance.
         """
         obj = cls.__new__(cls)
+
+        if environment is None:
+            environment = {}
+
+        volumes = []
+        if input_path is not None:
+            input_path = Path(input_path).resolve()
+            environment["TESSERACT_CLIENT_INPUT_PATH"] = str(input_path)
+            volumes.append(f"{input_path}:/tesseract/input_path:ro")
+        if output_path is not None:
+            output_path = Path(output_path).resolve()
+            environment["TESSERACT_CLIENT_OUTPUT_PATH"] = str(output_path)
+            volumes.append(f"{output_path}:/tesseract/output_path:rw")
+
         obj._spawn_config = SpawnConfig(
             image=image,
             volumes=volumes,
@@ -135,6 +162,8 @@ class Tesseract:
     def from_tesseract_api(
         cls,
         tesseract_api: str | Path | ModuleType,
+        input_path: Path | None = None,
+        output_path: Path | None = None,
     ) -> Tesseract:
         """Create a Tesseract instance from a Tesseract API module.
 
@@ -146,6 +175,10 @@ class Tesseract:
         Args:
             tesseract_api: Path to the `tesseract_api.py` file, or an
                 already imported Tesseract API module.
+            input_path: Path of input directory. All paths in the tesseract
+                payload have to be relative to this path.
+            output_path: Path of output directory. All paths in the tesseract
+                result with be given relative to this path.
 
         Returns:
             A Tesseract instance.
@@ -165,6 +198,11 @@ class Tesseract:
                 raise RuntimeError(
                     f"Cannot load Tesseract API from {tesseract_api_path}"
                 ) from ex
+
+        if input_path is not None:
+            set_client_input_path(input_path)
+        if output_path is not None:
+            set_client_output_path(output_path)
 
         obj = cls.__new__(cls)
         obj._spawn_config = None

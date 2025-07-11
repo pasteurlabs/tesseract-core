@@ -1,9 +1,11 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import os
 from abc import ABCMeta
 from enum import IntEnum
 from functools import partial
+from pathlib import Path
 from typing import (
     Annotated,
     Any,
@@ -371,3 +373,41 @@ UInt32 = Array[(), "uint32"]
 UInt64 = Array[(), "uint64"]
 Complex64 = Array[(), "complex64"]
 Complex128 = Array[(), "complex128"]
+
+
+def _resolve_input_path(path: Path) -> Path:
+    from tesseract_core.runtime.file_interactions import get_input_path
+
+    input_path = get_input_path()
+    tess_path = (input_path / path).resolve()
+    if str(input_path) not in str(tess_path):
+        raise ValueError("File references have to be relative to --input-path.")
+    if not tess_path.exists():
+        raise FileNotFoundError(f"Input path {tess_path} does not exist.")
+    if not tess_path.is_file():
+        raise ValueError(f"Input path {tess_path} is not a file.")
+    return tess_path
+
+
+def _strip_output_path(path: Path) -> Path:
+    from tesseract_core.runtime.file_interactions import running_in_docker
+
+    client_output_path = os.environ.get("TESSERACT_CLIENT_OUTPUT_PATH", None)
+    if client_output_path is None:
+        raise ValueError("Output path not set")
+    else:
+        client_output_path = Path(client_output_path)
+
+    if running_in_docker():
+        output_path = Path("/tesseract/output_path")
+    else:
+        output_path = client_output_path
+
+    if path.is_relative_to(output_path):
+        return path.relative_to(output_path)
+    else:
+        return path
+
+
+InputFileReference = Annotated[Path, AfterValidator(_resolve_input_path)]
+OutputFileReference = Annotated[Path, AfterValidator(_strip_output_path)]

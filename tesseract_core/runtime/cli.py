@@ -28,6 +28,8 @@ from tesseract_core.runtime.file_interactions import (
     load_bytes,
     output_to_bytes,
     read_from_path,
+    set_client_input_path,
+    set_client_output_path,
     write_to_path,
 )
 from tesseract_core.runtime.finite_differences import (
@@ -348,6 +350,12 @@ def _create_user_defined_cli_command(
     options.extend(
         [
             click.Option(
+                ["--input-path"],
+                type=click.STRING,
+                help="coming soon.",
+                default=None,
+            ),
+            click.Option(
                 ["-o", "--output-path"],
                 type=click.STRING,
                 help=(
@@ -366,10 +374,14 @@ def _create_user_defined_cli_command(
     )
 
     def _callback_wrapper(
+        input_path: Optional[str],
         output_path: Optional[str],
         output_format: SUPPORTED_FORMATS,
         **optional_args: Any,
     ):
+        if input_path:
+            set_client_input_path(input_path)
+
         if output_format == "json+binref" and output_path is None:
             raise ValueError("--output-path must be specified for json+binref format")
 
@@ -389,6 +401,9 @@ def _create_user_defined_cli_command(
                     param=InputSchema,
                     param_hint=InputSchema.__name__,
                 ) from e
+
+        if output_path:
+            set_client_output_path(output_path)
 
         result = user_function(**user_function_args)
         result = output_to_bytes(result, output_format, output_path)
