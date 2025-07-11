@@ -1,4 +1,4 @@
-name: dataloader-filereference
+name: filereference
 version: "1.0.0"
 description: |
   Tesseract that loads data from a folder.
