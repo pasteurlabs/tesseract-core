@@ -1,11 +1,25 @@
-# `FileReference` example
+# `FileReference`
+
+## Content
+
+Tesseract that mounts input and output directories as datasets.
+To be used for Tesseracts with large inputs and/or outputs.
+
+
+## Example Tesseract (`examples/filereference`)
 
 Using `InputFileReference` and `OutputFileReference` you can
 include references to files in the `InputSchema` and `OuputSchema` of a Tesseract.
 The file reference schemas make sure that a file exists (either locally or in the Tesseract)
 and resolve paths correctly in both `tesseract-runtime` and `tesseract run` calls.
 
-For the `tesseract-runtime` command, paths are relative to the local path:
+```{literalinclude} ../../../../examples/filereference/tesseract_api.py
+:pyobject: InputSchema
+:language: python
+```
+
+
+For the `tesseract-runtime` command, paths are relative to the local input/output paths:
 ```bash
 tesseract-runtime apply \
     --input-path ./testdata \
