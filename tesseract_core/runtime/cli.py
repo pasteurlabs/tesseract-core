@@ -16,7 +16,10 @@ import click
 import typer
 from pydantic import ValidationError
 
-from tesseract_core.runtime.config import check_required_files, get_config
+from tesseract_core.runtime.config import (
+    check_required_files,
+    get_config,
+)
 from tesseract_core.runtime.core import (
     check_tesseract_api,
     create_endpoints,
@@ -24,6 +27,7 @@ from tesseract_core.runtime.core import (
 )
 from tesseract_core.runtime.file_interactions import (
     SUPPORTED_FORMATS,
+    get_input_path,
     guess_format_from_path,
     load_bytes,
     output_to_bytes,
@@ -60,7 +64,6 @@ class SpellcheckedTyperGroup(typer.core.TyperGroup):
 
 
 app = typer.Typer(name="tesseract-runtime", cls=SpellcheckedTyperGroup)
-TESSERACT_INPUT = Path("/tesseract-input")
 
 
 def _prettify_docstring(docstr: str) -> str:
@@ -84,53 +87,17 @@ def _parse_arg_callback(
         # Passthrough, probably a default value
         return value, base_dir
 
-    if TESSERACT_INPUT.is_dir():
-        # Check if we have read permissions if `tesseract-input` has been mounted
-        if not os.access(TESSERACT_INPUT, os.R_OK):
-            raise ValueError("Mounted --input-dir is not readable by the container.")
-
-        try:
-            check_required_files(get_config(), TESSERACT_INPUT)
-        except FileNotFoundError as e:
-            raise click.BadParameter(
-                f"Required input files not found in {TESSERACT_INPUT}. "
-                "Please ensure that the required files are present."
-            ) from e
-    elif get_config().required_input_files:
-        raise click.BadParameter(
-            "Required input files are specified in the Tesseract configuration, "
-            "but no input directory is mounted. Please mount the input directory "
-            "using --input-dir."
-        )
-
-    # If input dir is specified, read JSON_PAYLOAD arg as relative path to /tesseract-inputs
-    # LL: need to enable use of json input directly even if input dir is specified (to use required_files only)
     if value.startswith("@"):
-        if TESSERACT_INPUT.is_dir():
-            raise click.BadParameter("--input-dir should not be used along with @")
-        value = value[1:]
-        base_dir = Path(value).parent
-        value_format = guess_format_from_path(value)
+        base_dir = Path(value[1:]).parent
+        value_format = guess_format_from_path(value[1:])
         try:
-            value_bytes = read_from_path(value)
+            value_bytes = read_from_path(value[1:])
         except Exception as e:
             raise click.BadParameter(f"Could not read data from path {value}.") from e
     else:
-        _, ext = os.path.splitext(value)
-        if ext:
-            value = os.path.join(TESSERACT_INPUT, value)
-            base_dir = Path(value).parent
-            value_format = guess_format_from_path(value)
-            try:
-                value_bytes = read_from_path(value)
-            except Exception as e:
-                raise click.BadParameter(
-                    f"Could not read data from path {value}"
-                ) from e
-        else:
-            # If no extension, assume the value is a JSON string
-            value_format = "json"
-            value_bytes = value.encode()
+        # Data given directly via the CLI is always in JSON format
+        value_format = "json"
+        value_bytes = value.encode()
 
     try:
         decoded_value = load_bytes(value_bytes, value_format)
@@ -537,6 +504,23 @@ def main() -> None:
                 file=sys.stderr,
             )
             sys.exit(1)
+
+        if get_config().required_files:
+            # Check if the required input files are present
+            try:
+                check_required_files(get_config(), get_input_path())
+            except FileNotFoundError as e:
+                print(f"Error: {e}")
+                print(
+                    f"Required input files not found in {get_input_path()}. "
+                    "Please ensure that the required files are present.\n"
+                    "To use `required_input_files`, ensure that \n"
+                    "- `skip_checks: true` in `tesseract_config.yaml`. \n"
+                    "- `--input-path` points to the correct directory.\n"
+                    "Aborted.",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
 
         cli = _add_user_commands_to_cli(tesseract_runtime, out_stream=orig_stdout)
         cli(auto_envvar_prefix="TESSERACT_RUNTIME")

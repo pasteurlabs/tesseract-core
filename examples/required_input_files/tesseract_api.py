@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
+import os
 
 from pydantic import BaseModel
 
@@ -23,16 +24,18 @@ class OutputSchema(BaseModel):
 #
 
 # tested with
-# tesseract run --volume="./input:/tesseract-input/" required_input_files apply '{"inputs": {}}'
+# tesseract run --input-path=./input required_input_files apply '{"inputs": {}}'
 
 
 def apply(inputs: InputSchema) -> OutputSchema:
-    with open("/tesseract-input/parameters1.json", "rb") as f:
+    reqd_files_path = os.environ["TESSERACT_INPUT_PATH"]
+
+    with open(os.path.join(reqd_files_path, "parameters1.json"), "rb") as f:
         data1 = json.load(f)
 
     assert data1 == {"a": 1.0, "b": 100.0}
 
-    with open("/tesseract-input/parameters2.json", "rb") as f:
+    with open(os.path.join(reqd_files_path, "parameters2.json"), "rb") as f:
         data2 = json.load(f)
 
     assert data2 == {"a": 1.0, "b": 100.0}

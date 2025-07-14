@@ -62,7 +62,6 @@ def check_required_files(config: RuntimeConfig, path: Path) -> None:
     for file in reqd_input_files:
         file_path = path / file
         if not file_path.exists():
-            # TODO: raise a different error here?
             raise FileNotFoundError(
                 f"Required input file '{file}' not found in '{path}'. "
                 "Please ensure that the required files are present."
