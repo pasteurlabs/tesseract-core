@@ -5,7 +5,7 @@ include references to files in the `InputSchema` and `OuputSchema` of a Tesserac
 The file reference schemas make sure that a file exists (either locally or in the Tesseract)
 and resolve paths correctly in both `tesseract-runtime` and `tesseract run` calls.
 
-When in `tesseract-runtime`, paths are relative to the local path:
+For the `tesseract-runtime` command, paths are relative to the local path:
 ```bash
 tesseract-runtime apply \
     --input-path ./testdata \
@@ -13,7 +13,7 @@ tesseract-runtime apply \
     '{"inputs": {"data": ["sample_0.json", "sample_1.json"]}}'
 ```
 
-When in `tesseract run` the CLI command still looks the same but the file
+For the `tesseract run` command, the file
 reference schemas resolve to the mounted input/output folders inside the
 Tesseract:
 ```bash
