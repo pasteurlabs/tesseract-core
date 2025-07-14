@@ -26,45 +26,6 @@ def running_in_docker() -> bool:
 
 def get_input_path() -> Path:
     """Get the current input path."""
-    path = os.environ.get("TESSERACT_CLIENT_INPUT_PATH", None)
-    if path is None:
-        raise ValueError("Input path not set.")
-    if running_in_docker():
-        return Path("/tesseract/input_data")
-    return Path(path)
-
-
-def get_output_path() -> Path:
-    """Get the current output path."""
-    path = os.environ.get("TESSERACT_CLIENT_OUTPUT_PATH", None)
-    if path is None:
-        raise ValueError("Output path not set.")
-    if running_in_docker():
-        return Path("/tesseract/output_data")
-    return Path(path)
-
-
-def set_client_input_path(path) -> None:
-    path = Path(path).resolve()
-    os.environ["TESSERACT_CLIENT_INPUT_PATH"] = str(path)
-    if not running_in_docker():
-        path.mkdir(parents=True, exist_ok=True)
-
-
-def set_client_output_path(path) -> None:
-    path = Path(path).resolve()
-    os.environ["TESSERACT_CLIENT_OUTPUT_PATH"] = str(path)
-    if not running_in_docker():
-        path.mkdir(parents=True, exist_ok=True)
-
-
-def running_in_docker() -> bool:
-    """Check if tesseract-runtime is running inside a Docker container."""
-    return Path("/.dockerenv").exists()
-
-
-def get_input_path() -> Path:
-    """Get the current input path."""
     path = os.environ.get("TESSERACT_INPUT_PATH", None)
     if path is None:
         raise ValueError("Input path not set.")
