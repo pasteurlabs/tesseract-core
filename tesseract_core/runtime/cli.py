@@ -352,7 +352,11 @@ def _create_user_defined_cli_command(
             click.Option(
                 ["--input-path"],
                 type=click.STRING,
-                help="coming soon.",
+                help=(
+                    "Input path from which to read files. "
+                    "To be used in conjunction with `InputFileReference`s in the Tesseract InputSchema. "
+                    "See examples/filereference for a usage example."
+                ),
                 default=None,
             ),
             click.Option(
