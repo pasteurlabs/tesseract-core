@@ -4,4 +4,4 @@ description: |
   Empty Tesseract that requires Python 3.9 (set through a custom Docker image).
 
 build_config:
-  base_image: "python:3.9-slim-buster"
+  base_image: "python:3.9-slim-bookworm"
