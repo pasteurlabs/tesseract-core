@@ -765,6 +765,18 @@ TEST_CASES = {
         input_path="testdata",
         output_path="output",
     ),
+    "required_files": Config(
+        test_with_random_inputs=False,
+        sample_requests=[
+            SampleRequest(
+                endpoint="apply",
+                payload={
+                    "inputs": {},
+                },
+            )
+        ],
+        input_path="required_files",
+    ),
 }
 
 
