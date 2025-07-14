@@ -947,6 +947,13 @@ def test_unit_tesseract_endtoend(
                 if cli_cmd in ("check-gradients",):
                     # Result is text
                     output = result.output
+                elif unit_tesseract_config.output_path:
+                    with open(
+                        unit_tesseract_path
+                        / unit_tesseract_config.output_path
+                        / "results.json"
+                    ) as fi:
+                        output = json_normalize(fi.read())
                 else:
                     # Result is JSON output
                     output = json_normalize(result.output)
@@ -1024,7 +1031,10 @@ def test_unit_tesseract_endtoend(
     out_input_schema = response.json()
     assert "properties" in out_input_schema
 
-    if unit_tesseract_config.volume_mounts is not None:
+    if (
+        unit_tesseract_config.volume_mounts is not None
+        or unit_tesseract_config.input_path is not None
+    ):
         # TODO: Mounts are not supported in HTTP mode yet, skip rest of the test for now
         return
 
