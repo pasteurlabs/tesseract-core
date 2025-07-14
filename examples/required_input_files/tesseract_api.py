@@ -23,7 +23,7 @@ class OutputSchema(BaseModel):
 #
 
 # tested with
-# tesseract run required_input_files --input-dir ./input/ apply '{"inputs": {}}'
+# tesseract run --volume="./input:/tesseract-input/" required_input_files apply '{"inputs": {}}'
 
 
 def apply(inputs: InputSchema) -> OutputSchema:

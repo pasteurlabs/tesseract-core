@@ -129,10 +129,6 @@ class TesseractBuildConfig(BaseModel, validate_assignment=True):
             "Source paths are relative to the Tesseract directory."
         ),
     )
-    required_input_files: tuple[RelativeFilePath, ...] | None = Field(
-        (),
-        description=("List of input files that are required to be present at runtime."),
-    )
     custom_build_steps: tuple[StrictStr, ...] | None = Field(
         (),
         description=(
@@ -174,6 +170,10 @@ class TesseractConfig(BaseModel, validate_assignment=True):
     build_config: OptionalBuildConfig = Field(
         default_factory=TesseractBuildConfig,
         description="Configuration options for building the Tesseract.",
+    )
+    required_files: tuple[RelativeFilePath, ...] | None = Field(
+        (),
+        description=("List of input files that are required to be present at runtime."),
     )
 
     model_config = ConfigDict(extra="forbid")

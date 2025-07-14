@@ -97,8 +97,8 @@ POSSIBLE_CMDS.update({"health", "openapi-schema", "check", "check-gradients"})
 
 # All fields in TesseractConfig and TesseractBuildConfig for config override
 POSSIBLE_KEYPATHS = TesseractConfig.model_fields.keys()
-# Check that the only field that has nested fields is build_config
-assert len(get_non_base_fields_in_tesseract_config()) == 1
+# Check that the only field that has nested fields is build_config and required_files
+assert len(get_non_base_fields_in_tesseract_config()) == 2
 POSSIBLE_BUILD_CONFIGS = TesseractBuildConfig.model_fields.keys()
 
 # Traverse templates folder to seach for recipes

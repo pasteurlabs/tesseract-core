@@ -3,6 +3,6 @@ version: "0.1.0"
 
 build_config:
 
-  required_input_files:
-    - parameters1.json
-    - parameters2.json
+required_files:
+  - parameters1.json
+  - parameters2.json
