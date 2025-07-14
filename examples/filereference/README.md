@@ -13,7 +13,7 @@ tesseract-runtime apply \
     '{"inputs": {"data": ["sample_0.json", "sample_1.json"]}}'
 ```
 
-When in `tesseract run` the CLI command still looks the same but the file
+For the `tesseract run` command, the file
 reference schemas resolve to the mounted input/output folders inside the
 Tesseract:
 ```bash
