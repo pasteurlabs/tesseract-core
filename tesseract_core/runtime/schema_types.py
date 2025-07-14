@@ -392,16 +392,16 @@ def _resolve_input_path(path: Path) -> Path:
 def _strip_output_path(path: Path) -> Path:
     from tesseract_core.runtime.file_interactions import running_in_docker
 
-    client_output_path = os.environ.get("TESSERACT_CLIENT_OUTPUT_PATH", None)
-    if client_output_path is None:
+    output_path = os.environ.get("TESSERACT_OUTPUT_PATH", None)
+    if output_path is None:
         raise ValueError("Output path not set")
     else:
-        client_output_path = Path(client_output_path)
+        output_path = Path(output_path)
 
     if running_in_docker():
         output_path = Path("/tesseract/output_path")
     else:
-        output_path = client_output_path
+        output_path = output_path
 
     if path.is_relative_to(output_path):
         return path.relative_to(output_path)

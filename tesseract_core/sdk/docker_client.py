@@ -31,6 +31,21 @@ def _get_executable(program: Literal["docker", "docker-compose"]) -> tuple[str, 
     raise ValueError(f"Unknown program: {program}")
 
 
+def is_podman() -> bool:
+    """Check if the current environment is using Podman instead of Docker."""
+    docker = _get_executable("docker")
+    try:
+        result = subprocess.run(
+            [*docker, "version"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return "podman" in result.stdout.lower()
+    except subprocess.CalledProcessError:
+        return False
+
+
 @dataclass
 class Image:
     """Image class to wrap Docker image details."""
@@ -514,6 +529,7 @@ class Containers:
         stdout: bool = True,
         stderr: bool = False,
         user: str | None = None,
+        extra_args: list_[str] | None = None,
     ) -> Container | tuple[bytes, bytes] | bytes:
         """Run a command in a container from an image.
 
@@ -535,16 +551,17 @@ class Containers:
                    and the values are the container ports.
             stdout: If True, return stdout.
             stderr: If True, return stderr.
+            environment: Environment variables to set in the container.
+            extra_args: Additional arguments to pass to the `docker run` CLI command.
 
         Returns:
             Container object if detach is True, otherwise returns list of stdout and stderr.
         """
+        config = get_config()
         docker = _get_executable("docker")
 
-        # If command is a type string and not list, make list
         if isinstance(command, str):
             command = [command]
-        logger.debug(f"Running command: {command}")
 
         optional_args = []
 
@@ -586,14 +603,20 @@ class Containers:
             for host_port, container_port in ports.items():
                 optional_args.extend(["-p", f"{host_port}:{container_port}"])
 
-        # Run with detached to get the container id of the running container.
+        if extra_args is None:
+            extra_args = []
+
         full_cmd = [
             *docker,
             "run",
             *optional_args,
+            *config.docker_run_args,
+            *extra_args,
             image,
             *command,
         ]
+
+        logger.debug(f"Running command: {full_cmd}")
 
         result = subprocess.run(
             full_cmd,

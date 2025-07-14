@@ -210,15 +210,12 @@ def docker_client():
 @pytest.fixture
 def docker_volume(docker_client):
     # Create the Docker volume
-    volume = docker_client.volumes.create(name="docker_client_test_volume")
+    volume_name = f"test_volume_{''.join(random.choices(string.ascii_lowercase + string.digits, k=8))}"
+    volume = docker_client.volumes.create(name=volume_name)
     try:
         yield volume
     finally:
-        try:
-            volume.remove()
-        except Exception:
-            # already removed
-            pass
+        volume.remove(force=True)
 
 
 @pytest.fixture(scope="module")
@@ -449,6 +446,7 @@ def mocked_docker(monkeypatch):
 
     mock_instance = MockedDocker()
     monkeypatch.setattr(engine, "docker_client", mock_instance)
+    monkeypatch.setattr(engine, "is_podman", lambda: False)
     monkeypatch.setattr(
         tesseract_core.sdk.docker_client, "CLIDockerClient", MockedDocker
     )

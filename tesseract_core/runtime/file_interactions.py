@@ -58,6 +58,47 @@ def set_client_output_path(path) -> None:
         path.mkdir(parents=True, exist_ok=True)
 
 
+def running_in_docker() -> bool:
+    """Check if tesseract-runtime is running inside a Docker container."""
+    return Path("/.dockerenv").exists()
+
+
+def get_input_path() -> Path:
+    """Get the current input path."""
+    path = os.environ.get("TESSERACT_INPUT_PATH", None)
+    if path is None:
+        raise ValueError("Input path not set.")
+    if running_in_docker():
+        return Path("/tesseract/input_path")
+    return Path(path)
+
+
+def get_output_path() -> Path:
+    """Get the current output path."""
+    path = os.environ.get("TESSERACT_OUTPUT_PATH", None)
+    if path is None:
+        raise ValueError("Output path not set.")
+    if running_in_docker():
+        return Path("/tesseract/output_path")
+    return Path(path)
+
+
+def set_input_path(path: PathLike) -> None:
+    """Set the tesseract input path."""
+    path = Path(path).resolve()
+    os.environ["TESSERACT_INPUT_PATH"] = str(path)
+    if not running_in_docker():
+        path.mkdir(parents=True, exist_ok=True)
+
+
+def set_output_path(path: PathLike) -> None:
+    """Set the tesseract output path."""
+    path = Path(path).resolve()
+    os.environ["TESSERACT_OUTPUT_PATH"] = str(path)
+    if not running_in_docker():
+        path.mkdir(parents=True, exist_ok=True)
+
+
 def guess_format_from_path(path: PathLike) -> supported_format_type:
     """Guess the format from the given path.
 
