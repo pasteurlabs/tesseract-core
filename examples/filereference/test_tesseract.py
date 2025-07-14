@@ -6,7 +6,7 @@ from tesseract_core import Tesseract
 
 here = Path(__file__).parent.resolve()
 input_path = Path("./testdata")
-output_path = Path("/Users/niklas/Desktop/output")
+output_path = Path("./output")
 
 # these are relative to input_path
 data = [
