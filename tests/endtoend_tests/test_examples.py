@@ -759,7 +759,7 @@ TEST_CASES = {
                         ]
                     }
                 },
-                output_contains_pattern=["output/sample_0.json"],
+                output_contains_pattern=["sample_0.copy"],
             )
         ],
         input_path="testdata",
@@ -873,7 +873,7 @@ def test_unit_tesseract_endtoend(
     assert result.exit_code == 0, result.output
     input_schema = result.output
 
-    mount_args = []
+    mount_args, io_args = [], []
 
     if unit_tesseract_config.volume_mounts:
         for mnt in unit_tesseract_config.volume_mounts:
@@ -886,14 +886,14 @@ def test_unit_tesseract_endtoend(
             mount_args.extend(["--volume", mnt])
 
     if unit_tesseract_config.input_path:
-        mount_args.extend(
+        io_args.extend(
             [
                 "--input-path",
                 str(unit_tesseract_path / unit_tesseract_config.input_path),
             ]
         )
     if unit_tesseract_config.output_path:
-        mount_args.extend(
+        io_args.extend(
             [
                 "--output-path",
                 str(unit_tesseract_path / unit_tesseract_config.output_path),
@@ -935,6 +935,7 @@ def test_unit_tesseract_endtoend(
                     *mount_args,
                     cli_cmd,
                     json.dumps(request.payload),
+                    *io_args,
                     "--output-format",
                     request.output_format,
                 ]

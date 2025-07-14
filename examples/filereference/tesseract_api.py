@@ -22,6 +22,7 @@ def apply(inputs: InputSchema) -> OutputSchema:
     files = []
     for source in inputs.data:
         target = output_path / source.name
+        target = target.with_suffix(".copy")
         shutil.copy(source, target)
         files.append(target)
     return OutputSchema(data=files)
