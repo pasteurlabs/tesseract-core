@@ -138,11 +138,11 @@ class Tesseract:
         if input_path is not None:
             input_path = Path(input_path).resolve()
             environment["TESSERACT_INPUT_PATH"] = str(input_path)
-            volumes.append(f"{input_path}:/tesseract/input_path:ro")
+            volumes.append(f"{input_path}:/tesseract/input_data:ro")
         if output_path is not None:
             output_path = Path(output_path).resolve()
             environment["TESSERACT_OUTPUT_PATH"] = str(output_path)
-            volumes.append(f"{output_path}:/tesseract/output_path:rw")
+            volumes.append(f"{output_path}:/tesseract/output_data:rw")
 
         obj._spawn_config = SpawnConfig(
             image=image,

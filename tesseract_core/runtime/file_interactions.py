@@ -15,8 +15,8 @@ PathLike = Union[str, Path]
 supported_format_type = Literal["json", "msgpack", "json+base64", "json+binref"]
 SUPPORTED_FORMATS = get_args(supported_format_type)
 
-os.environ["TESSERACT_CONTAINER_INPUT_PATH"] = "/tesseract/input_path"
-os.environ["TESSERACT_CONTAINER_OUTPUT_PATH"] = "/tesseract/output_path"
+os.environ["TESSERACT_CONTAINER_INPUT_PATH"] = "/tesseract/input_data"
+os.environ["TESSERACT_CONTAINER_OUTPUT_PATH"] = "/tesseract/output_data"
 
 
 def running_in_docker() -> bool:
@@ -30,7 +30,7 @@ def get_input_path() -> Path:
     if path is None:
         raise ValueError("Input path not set.")
     if running_in_docker():
-        return Path("/tesseract/input_path")
+        return Path("/tesseract/input_data")
     return Path(path)
 
 
@@ -40,7 +40,7 @@ def get_output_path() -> Path:
     if path is None:
         raise ValueError("Output path not set.")
     if running_in_docker():
-        return Path("/tesseract/output_path")
+        return Path("/tesseract/output_data")
     return Path(path)
 
 
@@ -69,7 +69,7 @@ def get_input_path() -> Path:
     if path is None:
         raise ValueError("Input path not set.")
     if running_in_docker():
-        return Path("/tesseract/input_path")
+        return Path("/tesseract/input_data")
     return Path(path)
 
 
@@ -79,7 +79,7 @@ def get_output_path() -> Path:
     if path is None:
         raise ValueError("Output path not set.")
     if running_in_docker():
-        return Path("/tesseract/output_path")
+        return Path("/tesseract/output_data")
     return Path(path)
 
 

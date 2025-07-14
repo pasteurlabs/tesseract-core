@@ -399,7 +399,7 @@ def _strip_output_path(path: Path) -> Path:
         output_path = Path(output_path)
 
     if running_in_docker():
-        output_path = Path("/tesseract/output_path")
+        output_path = Path("/tesseract/output_data")
     else:
         output_path = output_path
 
