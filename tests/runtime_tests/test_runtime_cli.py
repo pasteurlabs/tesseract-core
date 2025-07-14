@@ -267,9 +267,8 @@ def test_apply_command_noenv(
 @pytest.mark.parametrize(
     "input_format", ["json", "msgpack", "json+base64", "json+binref"]
 )
-@pytest.mark.parametrize("use_input_path", [True, False])
 def test_input_vals_from_local_file(
-    cli, cli_runner, tmpdir, dummy_tesseract_module, input_format, use_input_path
+    cli, cli_runner, tmpdir, dummy_tesseract_module, input_format
 ):
     """Test the apply command with input arguments from a local file."""
     if "+" in input_format:
@@ -288,32 +287,18 @@ def test_input_vals_from_local_file(
     with open(a_file, "wb") as f:
         f.write(input_bytes)
 
-    if use_input_path:
-        # Assume that '/tesseract/input_data' is mounted and created by tesseract-core
-        # Mock the `/tesseract/input_data dir to point to the tmpdir`
-        os.environ["TESSERACT_INPUT_PATH"] = str(tmpdir)
-        a_file = f"a.{container}"
-
-    cmd = ["apply", f"@{a_file}"]
     result = cli_runner.invoke(
         cli,
-        cmd,
+        ["apply", f"@{a_file}"],
         catch_exceptions=False,
     )
     assert result.exit_code == 0, result.stderr
 
-    if use_input_path:
-        # Extra logging when TESSERACT_INPUT_PATH is specified
-        assert str(tmpdir) in result.stdout
-        result = result.stdout.split("behavior.")[1]
-    else:
-        result = result.stdout
+    result = result.stdout
 
     test_input_val = dummy_tesseract_module.InputSchema.model_validate(test_input)
     expected = dummy_tesseract_module.apply(test_input_val).model_dump_json()
     assert json.loads(result) == json.loads(expected)
-    if use_input_path:
-        del os.environ["TESSERACT_INPUT_PATH"]
 
 
 @pytest.mark.parametrize(

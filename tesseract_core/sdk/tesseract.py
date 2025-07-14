@@ -319,7 +319,6 @@ class Tesseract:
         else:
             ports = None
 
-        print(volumes)
         project_id = engine.serve(
             [image],
             ports=ports,

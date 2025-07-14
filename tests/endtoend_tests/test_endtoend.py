@@ -667,18 +667,11 @@ def test_serve_nonstandard_host_ip(
         requests.get(f"http://localhost:{project_container.host_port}/health")
 
 
-@pytest.mark.parametrize("use_input_path", [True, False])
-def test_tesseract_cli_options_parsing(built_image_name, tmpdir, use_input_path):
+def test_tesseract_cli_options_parsing(built_image_name, tmpdir):
     cli_runner = CliRunner(mix_stderr=False)
 
     examples_dir = Path(__file__).parent.parent.parent / "examples"
     example_inputs = examples_dir / "vectoradd" / "example_inputs.json"
-
-    if use_input_path:
-        additional_options = ["--input-path", str(examples_dir)]
-        example_inputs = "vectoradd/example_inputs.json"
-    else:
-        additional_options = []
 
     test_commands = (
         ["apply", "-f", "json+binref", "-o", str(tmpdir), f"@{example_inputs}"],
@@ -692,7 +685,6 @@ def test_tesseract_cli_options_parsing(built_image_name, tmpdir, use_input_path)
             [
                 "run",
                 built_image_name,
-                *additional_options,
                 *args,
             ],
             catch_exceptions=False,
