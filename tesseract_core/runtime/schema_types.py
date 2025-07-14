@@ -1,7 +1,6 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-import os
 from abc import ABCMeta
 from enum import IntEnum
 from functools import partial
@@ -33,6 +32,7 @@ from tesseract_core.runtime.array_encoding import (
     get_array_model,
     python_to_array,
 )
+from tesseract_core.runtime.file_interactions import get_input_path, get_output_path
 
 AnnotatedType = type(Annotated[Any, Any])
 EllipsisType = type(Ellipsis)
@@ -376,8 +376,6 @@ Complex128 = Array[(), "complex128"]
 
 
 def _resolve_input_path(path: Path) -> Path:
-    from tesseract_core.runtime.file_interactions import get_input_path
-
     input_path = get_input_path()
     tess_path = (input_path / path).resolve()
     if str(input_path) not in str(tess_path):
@@ -390,19 +388,7 @@ def _resolve_input_path(path: Path) -> Path:
 
 
 def _strip_output_path(path: Path) -> Path:
-    from tesseract_core.runtime.file_interactions import running_in_docker
-
-    output_path = os.environ.get("TESSERACT_OUTPUT_PATH", None)
-    if output_path is None:
-        raise ValueError("Output path not set")
-    else:
-        output_path = Path(output_path)
-
-    if running_in_docker():
-        output_path = Path("/tesseract/output_data")
-    else:
-        output_path = output_path
-
+    output_path = get_output_path()
     if path.is_relative_to(output_path):
         return path.relative_to(output_path)
     else:
