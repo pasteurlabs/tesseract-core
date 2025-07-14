@@ -24,7 +24,9 @@ def apply(inputs: InputSchema) -> OutputSchema:
     output_path = get_output_path()
     files = []
     for source in inputs.data:
+        # source is a pathlib.Path starting with /path/to/input_path/...
         target = output_path / source.name
+        # target must be a pathlib.Path at /path/to/output_path
         target = target.with_suffix(".copy")
         shutil.copy(source, target)
         files.append(target)

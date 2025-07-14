@@ -18,6 +18,16 @@ and resolve paths correctly in both `tesseract-runtime` and `tesseract run` call
 :language: python
 ```
 
+```{literalinclude} ../../../../examples/filereference/tesseract_api.py
+:pyobject: OutputSchema
+:language: python
+```
+
+```{literalinclude} ../../../../examples/filereference/tesseract_api.py
+:pyobject: apply
+:language: python
+```
+
 
 For the `tesseract-runtime` command, paths are relative to the local input/output paths:
 ```bash
