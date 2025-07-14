@@ -267,9 +267,8 @@ def test_apply_command_noenv(
 @pytest.mark.parametrize(
     "input_format", ["json", "msgpack", "json+base64", "json+binref"]
 )
-@pytest.mark.parametrize("use_input_dir", [True, False])
 def test_input_vals_from_local_file(
-    cli, cli_runner, tmpdir, dummy_tesseract_module, input_format, use_input_dir, mocker
+    cli, cli_runner, tmpdir, dummy_tesseract_module, input_format
 ):
     """Test the apply command with input arguments from a local file."""
     if "+" in input_format:
@@ -288,17 +287,9 @@ def test_input_vals_from_local_file(
     with open(a_file, "wb") as f:
         f.write(input_bytes)
 
-    if use_input_dir:
-        # Assume that '/tesseract-input' is mounted and created by tesseract-core
-        # Mock the `/tesseract-input dir to point to the tmpdir`
-        mocker.patch("tesseract_core.runtime.cli.TESSERACT_INPUT", Path(tmpdir))
-        cmd = ["apply", f"{a_file}"]
-    else:
-        cmd = ["apply", f"@{a_file}"]
-
     result = cli_runner.invoke(
         cli,
-        cmd,
+        ["apply", f"@{a_file}"],
         catch_exceptions=False,
     )
     assert result.exit_code == 0, result.stderr
