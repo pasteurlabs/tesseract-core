@@ -379,7 +379,10 @@ def _resolve_input_path(path: Path) -> Path:
     input_path = get_input_path()
     tess_path = (input_path / path).resolve()
     if str(input_path) not in str(tess_path):
-        raise ValueError("File references have to be relative to --input-path.")
+        raise ValueError(
+            f"Invalid input file reference: {path}. "
+            "File references have to be relative to --input-path."
+        )
     if not tess_path.exists():
         raise FileNotFoundError(f"Input path {tess_path} does not exist.")
     if not tess_path.is_file():

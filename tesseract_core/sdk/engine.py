@@ -902,8 +902,9 @@ def run_tesseract(
         environment: list of environment variables to set in the container,
             in Docker format: key=value.
         user: user to run the Tesseract as, e.g. '1000' or '1000:1000' (uid:gid).
-              Defaults to the current user.
+            Defaults to the current user.
         input_path: Input path to read input files from, such as local directory or S3 URI.
+            The input path is mounted read-only into the Tesseract at `/tesseract/input_data`.
 
     Returns:
         Tuple with the stdout and stderr of the Tesseract.
@@ -922,7 +923,6 @@ def run_tesseract(
             volumes = []
         if "://" not in input_path:
             volumes.append(f"{input_path}:/tesseract/input_data")
-        # environment["TESSERACT_LOCAL_INPUT_PATH"] = str(input_path)
         environment["TESSERACT_INPUT_PATH"] = "/tesseract/input_data"
 
     if not volumes:
@@ -960,7 +960,6 @@ def run_tesseract(
 
             # Bind-mount directory
             parsed_volumes[str(local_path)] = {"bind": path_in_container, "mode": "rw"}
-            # environment["TESSERACT_LOCAL_OUTPUT_PATH"] = str(local_path)
             environment["TESSERACT_OUTPUT_PATH"] = path_in_container
 
         # Mount local input files marked by @ into Docker container as a volume

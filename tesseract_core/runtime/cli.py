@@ -354,8 +354,7 @@ def _create_user_defined_cli_command(
                 type=click.STRING,
                 help=(
                     "Input path from which to read files. "
-                    "To be used in conjunction with InputFileReferences in the Tesseract InputSchema. "
-                    "See examples/filereference for a usage example."
+                    "To be used in conjunction with InputFileReferences in the Tesseract InputSchema."
                 ),
                 default=None,
             ),
