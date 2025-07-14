@@ -91,6 +91,7 @@ class Tesseract:
         cls,
         image: str,
         *,
+        volumes: list[str] | None = None,
         environment: dict[str, str] | None = None,
         input_path: PathLike | None = None,
         output_path: PathLike | None = None,
@@ -113,6 +114,7 @@ class Tesseract:
 
         Args:
             image: The Docker image to use.
+            volumes: List of volumes to mount, e.g. ["/path/on/host:/path/in/container"].
             environment: dictionary of environment variables to pass to the Tesseract.
             input_path: Path to be mounted as the input directory in the
                 container (read only). All paths in the input payload must be
@@ -133,8 +135,8 @@ class Tesseract:
 
         if environment is None:
             environment = {}
-
-        volumes = []
+        if volumes is None:
+            volumes = []
         if input_path is not None:
             input_path = Path(input_path).resolve()
             environment["TESSERACT_INPUT_PATH"] = str(input_path)
