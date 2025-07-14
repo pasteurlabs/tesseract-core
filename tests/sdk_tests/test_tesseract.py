@@ -75,7 +75,9 @@ def test_Tesseract_from_tesseract_api(dummy_tesseract_location, dummy_tesseract_
 
 def test_Tesseract_from_image(mock_serving, mock_clients):
     # Object is built and has the correct attributes set
-    t = Tesseract.from_image("sometesseract:0.2.3", volumes=["/my/files"], gpus=["all"])
+    t = Tesseract.from_image(
+        "sometesseract:0.2.3", input_path="/my/files", gpus=["all"]
+    )
 
     # Now we can use it as a context manager
     # NOTE: we invoke available_endpoints because it requires an active client and is not cached
@@ -115,8 +117,8 @@ def test_serve_lifecycle(mock_serving, mock_clients):
     mock_serving["serve_mock"].assert_called_with(
         ["sometesseract:0.2.3"],
         ports=None,
-        volumes=None,
-        environment=None,
+        volumes=[],
+        environment={},
         gpus=None,
         debug=True,
         num_workers=1,
