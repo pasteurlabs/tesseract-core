@@ -473,16 +473,6 @@ def test_tesseract_serve_ports(built_image_name, port, docker_cleanup, free_port
     assert str(actual_port) in run_res.stdout
 
 
-<<<<<<< HEAD
-@pytest.mark.parametrize("use_input_path", [True, False])
-def test_tesseract_serve_with_volumes(
-    built_image_name, tmp_path, docker_client, use_input_path
-):
-    """Try to serve multiple Tesseracts with volume mounting."""
-||||||| c695c46
-def test_tesseract_serve_with_volumes(built_image_name, tmp_path, docker_client):
-    """Try to serve multiple Tesseracts with volume mounting."""
-=======
 @pytest.mark.parametrize("no_compose", [True, False])
 @pytest.mark.parametrize("volume_type", ["bind", "named"])
 @pytest.mark.parametrize("user", [None, "root", "1000:1000"])
@@ -503,7 +493,6 @@ def test_tesseract_serve_docker_volume(
     if is_podman() and not no_compose:
         pytest.xfail("Podman does not support --no-compose option.")
 
->>>>>>> 46202de8edafa930c4535f1026f3420147c847f5
     cli_runner = CliRunner(mix_stderr=False)
     project_id = None
 
@@ -518,35 +507,13 @@ def test_tesseract_serve_docker_volume(
     else:
         raise ValueError(f"Unknown volume type: {volume_type}")
 
-<<<<<<< HEAD
-    volume_args = []
-    if use_input_path:
-        dest = Path("/tesseract/input_data")
-        volume_args = ["--input-path", f"{tmp_path}"]
-    else:
-        dest = Path("/foo/")
-        volume_args = ["--volume", f"{tmp_path}:{dest}"]
-
-||||||| c695c46
-    dest = Path("/foo/")
-=======
->>>>>>> 46202de8edafa930c4535f1026f3420147c847f5
     run_res = cli_runner.invoke(
         app,
         [
             "serve",
-<<<<<<< HEAD
-            *volume_args,
-            built_image_name,
-||||||| c695c46
-            "--volume",
-            f"{tmp_path}:{dest}",
-            built_image_name,
-=======
             "--volume",
             f"{volume_to_bind}:{dest}:rw",
             *(("--user", user) if user else []),
->>>>>>> 46202de8edafa930c4535f1026f3420147c847f5
             built_image_name,
             *(("--no-compose",) if no_compose else [built_image_name]),
         ],
@@ -582,50 +549,6 @@ def test_tesseract_serve_docker_volume(
         assert exit_code == 0
         assert output.decode() == "world"
 
-<<<<<<< HEAD
-        # Input path is mounted as read only volume
-        if not use_input_path:
-            # Create file inside a container and check it from the other
-            bar_file = dest / "bar"
-            exit_code, output = tesseract0.exec_run(["touch", f"{bar_file}"])
-            assert exit_code == 0
-            exit_code, output = tesseract1.exec_run(["cat", f"{bar_file}"])
-            assert exit_code == 0
-            # The file should exist outside the container
-            assert (tmp_path / "bar").exists()
-    finally:
-        if project_id:
-            run_res = cli_runner.invoke(
-                app,
-                [
-                    "teardown",
-                    project_id,
-                ],
-                catch_exceptions=False,
-            )
-            assert run_res.exit_code == 0, run_res.stderr
-||||||| c695c46
-        # Create file inside a container and check it from the other
-        bar_file = dest / "bar"
-        exit_code, output = tesseract0.exec_run(["touch", f"{bar_file}"])
-        assert exit_code == 0
-        exit_code, output = tesseract1.exec_run(["cat", f"{bar_file}"])
-        assert exit_code == 0
-
-        # The file should exist outside the container
-        assert (tmp_path / "bar").exists()
-    finally:
-        if project_id:
-            run_res = cli_runner.invoke(
-                app,
-                [
-                    "teardown",
-                    project_id,
-                ],
-                catch_exceptions=False,
-            )
-            assert run_res.exit_code == 0, run_res.stderr
-=======
     # Create file inside a container and access it from the other
     bar_file = dest / "bar"
     exit_code, output = tesseract0.exec_run(["ls", "-la", str(dest)])
@@ -633,7 +556,6 @@ def test_tesseract_serve_docker_volume(
 
     exit_code, output = tesseract0.exec_run(["touch", str(bar_file)])
     assert exit_code == 0
->>>>>>> 46202de8edafa930c4535f1026f3420147c847f5
 
     if not no_compose:
         tesseract1_id = project_meta["containers"][1]["name"]
