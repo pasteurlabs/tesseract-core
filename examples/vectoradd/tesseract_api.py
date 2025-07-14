@@ -1,6 +1,8 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+from typing import Self
+
 import numpy as np
 from pydantic import BaseModel, Field, model_validator
 
@@ -21,7 +23,7 @@ class InputSchema(BaseModel):
     )
 
     @model_validator(mode="after")
-    def validate_shape_inputs(self) -> None:
+    def validate_shape_inputs(self) -> Self:
         if self.a.shape != self.b.shape:
             raise ValueError(
                 f"a and b must have the same shape. "
@@ -45,14 +47,6 @@ def apply(inputs: InputSchema) -> OutputSchema:
         result /= norm
 
     return OutputSchema(result=result)
-
-
-def abstract_eval(abstract_inputs):
-    """Calculate output shape of apply from the shape of its inputs."""
-    result_shape = abstract_inputs.a
-    assert result_shape is not None
-
-    return {"result": result_shape}
 
 
 def jacobian(

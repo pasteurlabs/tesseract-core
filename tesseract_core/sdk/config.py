@@ -50,6 +50,7 @@ class RuntimeConfig(BaseModel):
     docker_build_args: Annotated[
         tuple[str, ...], BeforeValidator(maybe_split_args)
     ] = ()
+    docker_run_args: Annotated[tuple[str, ...], BeforeValidator(maybe_split_args)] = ()
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 

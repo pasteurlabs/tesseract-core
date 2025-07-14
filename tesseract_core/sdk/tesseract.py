@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import atexit
 import base64
+import traceback
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from functools import cached_property, wraps
@@ -26,6 +27,7 @@ class SpawnConfig:
 
     image: str
     volumes: list[str] | None
+    environment: dict[str, str] | None
     gpus: list[str] | None
     num_workers: int
     debug: bool
@@ -84,6 +86,7 @@ class Tesseract:
         image: str,
         *,
         volumes: list[str] | None = None,
+        environment: dict[str, str] | None = None,
         gpus: list[str] | None = None,
         num_workers: int = 1,
         no_compose: bool = False,
@@ -104,6 +107,7 @@ class Tesseract:
         Args:
             image: The Docker image to use.
             volumes: List of volumes to mount, e.g. ["/path/on/host:/path/in/container"].
+            environment: dictionary of environment variables to pass to the Tesseract.
             gpus: List of GPUs to use, e.g. ["0", "1"]. (default: no GPUs)
             num_workers: Number of worker processes to use. This determines how
                 many requests can be handled in parallel. Higher values
@@ -117,6 +121,7 @@ class Tesseract:
         obj._spawn_config = SpawnConfig(
             image=image,
             volumes=volumes,
+            environment=environment,
             gpus=gpus,
             num_workers=num_workers,
             debug=True,
@@ -223,6 +228,7 @@ class Tesseract:
             self._spawn_config.image,
             port=port,
             volumes=self._spawn_config.volumes,
+            environment=self._spawn_config.environment,
             gpus=self._spawn_config.gpus,
             num_workers=self._spawn_config.num_workers,
             debug=self._spawn_config.debug,
@@ -265,6 +271,7 @@ class Tesseract:
         port: str | None = None,
         host_ip: str = "127.0.0.1",
         volumes: list[str] | None = None,
+        environment: dict[str, str] | None = None,
         gpus: list[str] | None = None,
         debug: bool = False,
         num_workers: int = 1,
@@ -279,6 +286,7 @@ class Tesseract:
             [image],
             ports=ports,
             volumes=volumes,
+            environment=environment,
             gpus=gpus,
             debug=debug,
             num_workers=num_workers,
@@ -658,7 +666,12 @@ class LocalClient:
             else:
                 result = self._endpoints[endpoint]()
         except Exception as ex:
-            raise RuntimeError(f"Error running Tesseract API {endpoint}.") from ex
+            # Some clients like Tesseract-JAX swallow tracebacks from re-raised exceptions, so we explicitly
+            # format the traceback here to include it in the error message.
+            tb = traceback.format_exc()
+            raise RuntimeError(
+                f"{tb}\nError running Tesseract API {endpoint}: {ex} (see above for full traceback)"
+            ) from None
 
         if OutputSchema is not None:
             # Validate via schema, then dump to stay consistent with other clients

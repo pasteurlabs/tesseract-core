@@ -52,3 +52,75 @@ def test_bad_docker_executable_env_var():
     )
     assert result.returncode == 1
     assert "Executable `not-a-docker` not found" in result.stderr.decode()
+
+
+@pytest.mark.parametrize(
+    "arg_to_override",
+    [
+        "name",
+        "build_config.custom_build_steps",
+        "build_config.base_image",
+        "build_config.package_data",
+    ],
+)
+def test_config_override(
+    arg_to_override, cli_runner, mocker, dummy_tesseract_location, mocked_docker
+):
+    mocked_build = mocker.patch("tesseract_core.sdk.engine.build_tesseract")
+
+    def _run_with_override(key, value):
+        return cli_runner.invoke(
+            cli,
+            [
+                "build",
+                str(dummy_tesseract_location),
+                "--config-override",
+                f"{key}={value}",
+                "--generate-only",
+            ],
+            catch_exceptions=False,
+        )
+
+    if arg_to_override == "name":
+        argpairs = (
+            (
+                "my-tesseract",
+                {("name",): "my-tesseract"},
+            ),
+        )
+    elif arg_to_override == "build_config.custom_build_steps":
+        argpairs = (
+            (
+                "[RUN foo='bar']",
+                {("build_config", "custom_build_steps"): ["RUN foo='bar'"]},
+            ),
+            (
+                '[RUN echo "hello world"]',
+                {("build_config", "custom_build_steps"): ['RUN echo "hello world"']},
+            ),
+        )
+    elif arg_to_override == "build_config.base_image":
+        argpairs = (
+            (
+                "ubuntu:latest",
+                {("build_config", "base_image"): "ubuntu:latest"},
+            ),
+        )
+    elif arg_to_override == "build_config.package_data":
+        argpairs = (
+            (
+                '["data/file.txt:/app/data/file.txt"]',
+                {
+                    ("build_config", "package_data"): [
+                        "data/file.txt:/app/data/file.txt"
+                    ]
+                },
+            ),
+        )
+    else:
+        raise ValueError(f"Unknown arg_to_override: {arg_to_override}")
+
+    for value, expected in argpairs:
+        result = _run_with_override(arg_to_override, value)
+        assert result.exit_code == 0, result.stderr
+        assert mocked_build.call_args[1]["config_override"] == expected
