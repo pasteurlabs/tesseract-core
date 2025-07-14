@@ -5,8 +5,11 @@ import shutil
 
 from pydantic import BaseModel
 
-from tesseract_core.runtime.file_interactions import get_output_path
-from tesseract_core.runtime.schema_types import InputFileReference, OutputFileReference
+from tesseract_core.runtime import (
+    InputFileReference,
+    OutputFileReference,
+    get_output_path,
+)
 
 
 class InputSchema(BaseModel):
