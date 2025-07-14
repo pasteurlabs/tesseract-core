@@ -81,6 +81,18 @@ def _parse_arg_callback(
 
     Returns a tuple of the parsed value and the base directory of the input path, if any.
     """
+    if get_config().required_files:
+        # Check if the required input files are present
+        try:
+            check_required_files(get_config(), get_input_path())
+        except FileNotFoundError as e:
+            raise click.BadParameter(
+                f"Required input files not found in {get_input_path()}. "
+                "To use `required_input_files`, ensure that \n"
+                "- `--input-path` points to the correct directory.\n"
+                "- the required files are present in that directory at runtime.\n"
+            ) from e
+
     base_dir = None
 
     if not isinstance(value, str):
@@ -504,23 +516,6 @@ def main() -> None:
                 file=sys.stderr,
             )
             sys.exit(1)
-
-        if get_config().required_files:
-            # Check if the required input files are present
-            try:
-                check_required_files(get_config(), get_input_path())
-            except FileNotFoundError as e:
-                print(f"Error: {e}")
-                print(
-                    f"Required input files not found in {get_input_path()}. "
-                    "Please ensure that the required files are present.\n"
-                    "To use `required_input_files`, ensure that \n"
-                    "- `skip_checks: true` in `tesseract_config.yaml`. \n"
-                    "- `--input-path` points to the correct directory.\n"
-                    "Aborted.",
-                    file=sys.stderr,
-                )
-                sys.exit(1)
 
         cli = _add_user_commands_to_cli(tesseract_runtime, out_stream=orig_stdout)
         cli(auto_envvar_prefix="TESSERACT_RUNTIME")

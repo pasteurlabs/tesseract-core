@@ -1,9 +1,6 @@
 name: "required_files"
 version: "0.1.0"
 
-build_config:
-  skip_checks: true
-
 required_files:
   - parameters1.json
   - parameters2.json

@@ -6,6 +6,8 @@ import os
 
 from pydantic import BaseModel
 
+from tesseract_core.runtime import get_input_path
+
 #
 # Schemas
 #
@@ -28,7 +30,7 @@ class OutputSchema(BaseModel):
 
 
 def apply(inputs: InputSchema) -> OutputSchema:
-    reqd_files_path = os.environ["TESSERACT_INPUT_PATH"]
+    reqd_files_path = get_input_path()
 
     with open(os.path.join(reqd_files_path, "parameters1.json"), "rb") as f:
         data1 = json.load(f)
