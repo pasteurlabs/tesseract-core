@@ -476,7 +476,7 @@ def test_tesseract_serve_ports(built_image_name, port, docker_cleanup, free_port
 @pytest.mark.parametrize("no_compose", [True, False])
 @pytest.mark.parametrize("volume_type", ["bind", "named"])
 @pytest.mark.parametrize("user", [None, "root", "1000:1000"])
-def test_tesseract_serve_docker_volume(
+def test_tesseract_serve_volume_permissions(
     built_image_name,
     docker_client,
     docker_volume,
@@ -532,6 +532,10 @@ def test_tesseract_serve_docker_volume(
 
     tesseract0_id = project_meta["containers"][0]["name"]
     tesseract0 = docker_client.containers.get(tesseract0_id)
+
+    # Sanity check: Should always be allowed to read/write files in the default workdir
+    exit_code, output = tesseract0.exec_run(["touch", "./test.txt"])
+    assert exit_code == 0, output.decode()
 
     if volume_type == "bind":
         # Create file outside the containers and check it from inside the container

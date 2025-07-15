@@ -64,7 +64,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 {% endif %}
 
 WORKDIR /tesseract
-RUN chmod 755 /tesseract
+RUN chmod 777 /tesseract
 
 # Set environment variables
 ENV TESSERACT_NAME="{{ config.name | replace('"', '\\"') | replace('\n', '\\n') }}" \
@@ -75,6 +75,7 @@ ENV TESSERACT_NAME="{{ config.name | replace('"', '\\"') | replace('\n', '\\n') 
 # Copy only necessary files
 COPY --from=build_stage /python-env /python-env
 COPY "{{ tesseract_source_directory }}/tesseract_api.py" ${TESSERACT_API_PATH}
+RUN chmod 444 ${TESSERACT_API_PATH}
 
 ENV PATH="/python-env/bin:$PATH"
 
@@ -82,6 +83,7 @@ ENV PATH="/python-env/bin:$PATH"
 # Copy package data to image
 {% for source_path, target_path in config.build_config.package_data %}
 COPY ["{{ tesseract_source_directory }}/{{ source_path }}", "{{ target_path }}"]
+RUN chmod 777 {{ target_path }}
 {% endfor %}
 {% endif %}
 
