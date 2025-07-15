@@ -1,7 +1,9 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import os
 from collections.abc import Iterator, Sequence
+from pathlib import Path
 from typing import (
     Annotated,
     Any,
@@ -21,6 +23,8 @@ from pydantic_core import SchemaSerializer, SchemaValidator, core_schema
 
 from tesseract_core.runtime.file_interactions import parent_path
 from tesseract_core.runtime.schema_types import safe_issubclass
+
+IS_BUILDING = os.environ.get("_TESSERACT_IS_BUILDING", "0") == "1"
 
 
 class LazySequence(Sequence):
@@ -189,3 +193,19 @@ class PydanticLazySequenceAnnotation:
     ) -> JsonSchemaValue:
         """This method is called by Pydantic to get the JSON schema for the annotated type."""
         return handler(_core_schema)
+
+
+def require_file(file_path: str | Path, require_writable: bool = False) -> Path:
+    """Require a file to be present at the given path."""
+    file_path = (Path("/tesseract/input_data") / file_path).resolve()
+
+    if IS_BUILDING:
+        return file_path
+
+    if not file_path.is_file():
+        raise FileNotFoundError(f"Required file not found: {file_path}")
+
+    if require_writable and not os.access(file_path, os.W_OK):
+        raise PermissionError(f"Required file is not writable: {file_path}")
+
+    return file_path
