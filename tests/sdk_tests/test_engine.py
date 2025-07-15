@@ -170,7 +170,7 @@ def test_run_tesseract_file_input(mocked_docker, tmpdir):
     res = json.loads(res)
     assert res["command"] == [
         "apply",
-        "@/tesseract/input_data/payload.json",
+        "@/tesseract/payload.json",
         "--output-path",
         "/tesseract/output_data",
     ]
@@ -192,15 +192,15 @@ def test_run_tesseract_file_input(mocked_docker, tmpdir):
     }
 
     # Test the same but with --input_path
+    indir = tmpdir / "input_path"
     res, _ = engine.run_tesseract(
         "foobar",
         "apply",
-        [f"@{infile}", "--output-path", str(outdir)],
-        input_path=str(tmpdir),
+        [f"@{infile}", "--output-path", str(outdir), "--input-path", str(indir)],
     )
     res = json.loads(res)
-    assert res["volumes"].keys() == {str(outdir), str(tmpdir), str(infile)}
-    assert res["volumes"][str(tmpdir)] == {
+    assert res["volumes"].keys() == {str(outdir), str(indir), str(infile)}
+    assert res["volumes"][str(indir)] == {
         "mode": "ro",
         "bind": "/tesseract/input_data",
     }
