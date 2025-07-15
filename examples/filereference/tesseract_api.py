@@ -6,11 +6,11 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from tesseract_core.runtime import (
+from tesseract_core.runtime.config import get_config
+from tesseract_core.runtime.experimental import (
     InputFileReference,
     OutputFileReference,
 )
-from tesseract_core.runtime.config import get_config
 
 
 class InputSchema(BaseModel):
