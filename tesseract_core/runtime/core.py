@@ -2,13 +2,11 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import importlib
-import os
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Union
 
-import requests
 from pydantic import BaseModel
 
 from .config import get_config
@@ -54,29 +52,8 @@ def get_supported_endpoints(api_module: ModuleType) -> tuple[str, ...]:
     return tuple(func for func in optional_funcs if hasattr(api_module, func))
 
 
-def _ensure_mlflow_reachable_and_silence_git_warning() -> None:
-    """Suppress MLflow git warnings and, if applicable, check if MLflow server is reachable."""
-    os.environ["GIT_PYTHON_REFRESH"] = "quiet"
-
-    try:
-        mlflow_tracking_uri = os.environ.get("MLFLOW_TRACKING_URI")
-        if mlflow_tracking_uri and (
-            mlflow_tracking_uri.startswith("http://")
-            or mlflow_tracking_uri.startswith("https://")
-        ):
-            response = requests.get(mlflow_tracking_uri)
-            response.raise_for_status()
-    except requests.RequestException as e:
-        raise RuntimeError(
-            f"Failed to connect to MLflow tracking server at {mlflow_tracking_uri}. "
-            "Please make sure an MLflow server is running and MLFLOW_TRACKING_URI is set correctly. "
-            'Alternatively, switch to local MLflow file-based logging through MLFLOW_TRACKING_URI="".'
-        ) from e
-
-
 def get_tesseract_api() -> ModuleType:
     """Import tesseract_api.py file."""
-    _ensure_mlflow_reachable_and_silence_git_warning()
     return load_module_from_path(get_config().api_path)
 
 
