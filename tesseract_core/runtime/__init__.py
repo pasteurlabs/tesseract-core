@@ -30,12 +30,6 @@ except ModuleNotFoundError as e:
     sys.exit(1)
 
 # Import public API
-from .file_interactions import (
-    get_input_path,
-    get_output_path,
-    set_input_path,
-    set_output_path,
-)
 from .schema_types import (
     Array,
     Differentiable,
@@ -72,8 +66,4 @@ __all__ = [
     "UInt16",
     "UInt32",
     "UInt64",
-    "get_input_path",
-    "get_output_path",
-    "set_input_path",
-    "set_output_path",
 ]

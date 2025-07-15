@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
-import os
 import urllib.parse
 from pathlib import Path
 from typing import Any, Literal, Optional, Union, get_args
@@ -14,47 +13,6 @@ PathLike = Union[str, Path]
 
 supported_format_type = Literal["json", "msgpack", "json+base64", "json+binref"]
 SUPPORTED_FORMATS = get_args(supported_format_type)
-
-
-def running_in_docker() -> bool:
-    """Check if tesseract-runtime is running inside a Docker container."""
-    return Path("/.dockerenv").exists()
-
-
-def get_input_path() -> Path:
-    """Get the current input path."""
-    path = os.environ.get("TESSERACT_INPUT_PATH", None)
-    if path is None:
-        raise ValueError("Input path not set. Did you specify --input-path?")
-    if running_in_docker():
-        return Path("/tesseract/input_data")
-    return Path(path)
-
-
-def get_output_path() -> Path:
-    """Get the current output path."""
-    path = os.environ.get("TESSERACT_OUTPUT_PATH", None)
-    if path is None:
-        raise ValueError("Output path not set. Did you specify --output-path?")
-    if running_in_docker():
-        return Path("/tesseract/output_data")
-    return Path(path)
-
-
-def set_input_path(path: PathLike) -> None:
-    """Set the tesseract input path."""
-    path = Path(path).resolve()
-    os.environ["TESSERACT_INPUT_PATH"] = str(path)
-    if not running_in_docker():
-        path.mkdir(parents=True, exist_ok=True)
-
-
-def set_output_path(path: PathLike) -> None:
-    """Set the tesseract output path."""
-    path = Path(path).resolve()
-    os.environ["TESSERACT_OUTPUT_PATH"] = str(path)
-    if not running_in_docker():
-        path.mkdir(parents=True, exist_ok=True)
 
 
 def guess_format_from_path(path: PathLike) -> supported_format_type:

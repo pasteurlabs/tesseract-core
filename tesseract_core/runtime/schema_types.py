@@ -32,7 +32,6 @@ from tesseract_core.runtime.array_encoding import (
     get_array_model,
     python_to_array,
 )
-from tesseract_core.runtime.file_interactions import get_input_path, get_output_path
 
 AnnotatedType = type(Annotated[Any, Any])
 EllipsisType = type(Ellipsis)
@@ -376,7 +375,9 @@ Complex128 = Array[(), "complex128"]
 
 
 def _resolve_input_path(path: Path) -> Path:
-    input_path = get_input_path()
+    from tesseract_core.runtime.config import get_config
+
+    input_path = get_config().input_path
     tess_path = (input_path / path).resolve()
     if str(input_path) not in str(tess_path):
         raise ValueError(
@@ -391,7 +392,9 @@ def _resolve_input_path(path: Path) -> Path:
 
 
 def _strip_output_path(path: Path) -> Path:
-    output_path = get_output_path()
+    from tesseract_core.runtime.config import get_config
+
+    output_path = get_config().output_path
     if path.is_relative_to(output_path):
         return path.relative_to(output_path)
     else:

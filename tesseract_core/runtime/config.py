@@ -15,9 +15,24 @@ class RuntimeConfig(BaseModel):
     name: str = "Tesseract"
     version: str = "0+unknown"
     debug: bool = False
-    input_path: str = ""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
+
+    @property
+    def input_path(self) -> Path:
+        """Read tesseract input path from environment variable."""
+        path = os.environ.get("TESSERACT_INPUT_PATH", None)
+        if path is None:
+            raise ValueError("TESSERACT_INPUT_PATH environment variable is not set.")
+        return Path(path).resolve()
+
+    @property
+    def output_path(self) -> Path:
+        """Read tesseract output path from environment variable."""
+        path = os.environ.get("TESSERACT_OUTPUT_PATH", None)
+        if path is None:
+            raise ValueError("TESSERACT_OUTPUT_PATH environment variable is not set.")
+        return Path(path).resolve()
 
 
 def update_config(**kwargs: Any) -> None:
