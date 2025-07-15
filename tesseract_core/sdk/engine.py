@@ -699,8 +699,6 @@ def serve(
             "Please use --no-compose / no_compose=True instead."
         )
 
-    _serve_mlflow_compose()
-
     template = _create_docker_compose_template(
         image_ids,
         host_ip,
@@ -726,12 +724,6 @@ def serve(
         if not docker_client.compose.up(compose_file.name, project_name):
             raise RuntimeError("Cannot serve Tesseracts")
         return project_name
-
-
-def _serve_mlflow_compose():
-    mlflow_compose_file = get_template_dir() / "docker-compose-mlflow.yml"
-    if not docker_client.compose.up(mlflow_compose_file, "mlflow-server"):
-        raise RuntimeError("Cannot serve MLflow")
 
 
 def _create_docker_compose_template(
@@ -802,7 +794,6 @@ def _create_docker_compose_template(
             "gpus": gpu_settings,
             "environment": {
                 "TESSERACT_DEBUG": "1" if debug else "0",
-                "MLFLOW_TRACKING_URI": "http://mlflow-server:5000",
                 **(environment or {}),
             },
             "num_workers": num_workers,

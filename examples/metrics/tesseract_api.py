@@ -24,8 +24,8 @@ def apply(inputs: InputSchema) -> OutputSchema:
             mlflow.log_metric("squared_step", metric_value, step=step)
 
         text = "This is an output file we want to log as an artifact."
-        with open("artifact.txt", "w") as f:
+        with open("/tmp/artifact.txt", "w") as f:
             f.write(text)
 
-        mlflow.log_artifact("artifact.txt")
+        mlflow.log_artifact("/tmp/artifact.txt")
     return OutputSchema()

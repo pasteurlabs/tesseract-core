@@ -27,35 +27,44 @@ target path:
 $ tesseract run vectoradd apply --output-path /tmp/output @inputs.json
 ```
 
-## Logging metrics
+## Logging metrics and artifacts
 
-Tesseracts may log metrics and artifacts (e.g. iteration numbers, VTK files, ...) using MLflow, following the [MLflow example](examples/mlflow/).
+Tesseracts may log metrics and artifacts (e.g. iteration numbers, VTK files, ...) using MLflow as demonstrated in the `metrics` example Tesseract.
 
-When serving a Tesseract via `tesseract serve`, an MLflow server is automatically spun up.
-
-```bash
-$ tesseract serve mlflow
+```{literalinclude} ../../../../examples/metrics/tesseract_api.py
+:pyobject: apply
+:language: python
 ```
 
-You can view logged items at `http://localhost:5000`.
-
-Alternatively, you can point your Tesseract to an existing MLflow server:
+For local development, you can spin up an MLflow server (ready to use with Tesseract) through the provided docker-compose file:
 
 ```bash
-$ tesseract serve --env=MLFLOW_TRACKING_URI="..."  mlflow
+docker-compose -f extra-mlflow/docker-compose-mlflow.yml up
+```
+
+When using this MLflow server, you can view logged items in MLflow's GUI at `http://localhost:5000`.
+
+Launch the `metrics` example Tesseract with the appropriate volume mount and `MLFLOW_TRACKING_URI` to ensure that it connects to that MLflow server.
+
+MacOS and Windows with Docker Desktop requires the `host.docker.internal` hostname to access services running on the host machine:
+
+```bash
+tesseract serve --env=MLFLOW_TRACKING_URI=http://host.docker.internal:5000 --volume mlflow-data:/mlflow-data metrics
+```
+
+For Linux, you can set your Tesseracts to use the host network and access the MLflow server at `localhost`:
+
+```bash
+tesseract serve --env=MLFLOW_TRACKING_URI=http://localhost:5000 --network=host --volume mlflow-data:/mlflow-data metrics
+```
+
+The same options apply when executing Tesseracts through `tesseract run`.
+
+As an alternative to the MLflow setup we provide, you can point your Tesseract to a custom MLflow server:
+
+```bash
+$ tesseract serve --env=MLFLOW_TRACKING_URI="..."  metrics
 ````
-
-When performing a single execution, Tesseract won't provide an MLflow server. However, you can again point your Tesseract to an existing server:
-
-```bash
-$ tesseract run mlflow apply --network=host --env=MLFLOW_TRACKING_URI="..." '{"inputs": {}}'
-```
-
-When executing a tesseract natively through `tesseract-runtime`, you can set the same environment variable:
-
-```bash
-$ MLFLOW_TRACKING_URI="..." tesseract-runtime serve -p 8080
-```
 
 ## Volume mounts and user permissions
 

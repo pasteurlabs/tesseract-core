@@ -7,7 +7,7 @@ services:
         echo 'Initializing MLflow volume permissions...'
         mkdir -p /mlflow-data/mlruns
         chown -R 1000:1000 /mlflow-data
-        chmod -R 755 /mlflow-data
+        chmod -R 777 /mlflow-data
         echo 'MLflow volume ready for user 1000'
       "
     volumes:
@@ -32,6 +32,8 @@ services:
 
 volumes:
   mlflow-data:
+    name: mlflow-data
+
 
 # We create the network here once for all tesseracts.
 # This is to avoid creating it multiple times in subsequent docker-compose up commands.
