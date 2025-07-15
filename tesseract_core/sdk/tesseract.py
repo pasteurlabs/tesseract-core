@@ -18,10 +18,7 @@ import requests
 from pydantic import BaseModel, TypeAdapter, ValidationError
 from pydantic_core import InitErrorDetails
 
-from tesseract_core.runtime.file_interactions import (
-    set_input_path,
-    set_output_path,
-)
+from tesseract_core.runtime.config import update_config
 
 from . import engine
 
@@ -140,11 +137,9 @@ class Tesseract:
             volumes = []
         if input_path is not None:
             input_path = Path(input_path).resolve()
-            environment["TESSERACT_INPUT_PATH"] = str(input_path)
             volumes.append(f"{input_path}:/tesseract/input_data:ro")
         if output_path is not None:
             output_path = Path(output_path).resolve()
-            environment["TESSERACT_OUTPUT_PATH"] = str(output_path)
             volumes.append(f"{output_path}:/tesseract/output_data:rw")
 
         obj._spawn_config = SpawnConfig(
@@ -203,9 +198,9 @@ class Tesseract:
                 ) from ex
 
         if input_path is not None:
-            set_input_path(input_path)
+            update_config(input_path=str(input_path.resolve()))
         if output_path is not None:
-            set_output_path(output_path)
+            update_config(output_path=str(output_path.resolve()))
 
         obj = cls.__new__(cls)
         obj._spawn_config = None

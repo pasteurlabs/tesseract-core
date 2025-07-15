@@ -2,13 +2,14 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import shutil
+from pathlib import Path
 
 from pydantic import BaseModel
 
-from tesseract_core.runtime import (
+from tesseract_core.runtime.config import get_config
+from tesseract_core.runtime.experimental import (
     InputFileReference,
     OutputFileReference,
-    get_output_path,
 )
 
 
@@ -21,7 +22,7 @@ class OutputSchema(BaseModel):
 
 
 def apply(inputs: InputSchema) -> OutputSchema:
-    output_path = get_output_path()
+    output_path = Path(get_config().output_path)
     files = []
     for source in inputs.data:
         # source is a pathlib.Path starting with /path/to/input_path/...
