@@ -193,6 +193,7 @@ def test_run_tesseract_file_input(mocked_docker, tmpdir):
 
     # Test the same but with --input_path
     indir = tmpdir / "input_path"
+    indir.mkdir()
     res, _ = engine.run_tesseract(
         "foobar",
         "apply",
