@@ -524,7 +524,6 @@ class Containers:
         environment: dict[str, str] | None = None,
         network: str | None = None,
         device_requests: list_[int | str] | None = None,
-        environment: dict[str, str] | None = None,
         detach: bool = False,
         remove: bool = False,
         ports: dict | None = None,

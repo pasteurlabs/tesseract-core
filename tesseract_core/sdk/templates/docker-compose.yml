@@ -14,6 +14,7 @@ services:
     {% endif %}
     volumes:
       - mlflow-data:/mlflow-data
+    {%- if service.volumes %}
     {%- for volume_source, volume_data in service.volumes.items() %}
       - {{ volume_source }}:{{ volume_data["bind"] }}
     {% endfor -%}
@@ -42,11 +43,11 @@ services:
     {% endif %}
 {% endfor %}
 
-{%- if docker_volumes %}
 volumes:
   mlflow-data:
     external: true
     name: mlflow-server_mlflow-data
+{%- if docker_volumes %}
 {%- for name, external in docker_volumes.items() %}
   {{ name }}:
     {%- if external %}
