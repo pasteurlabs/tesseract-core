@@ -481,12 +481,30 @@ def stdout_to_stderr() -> Generator:
         os.dup2(orig_stdout, sys.stdout.fileno())
 
 
+@contextlib.contextmanager
+def stdout_to_file(file_name: str) -> Generator:
+    """Redirect stdout to a file at OS level."""
+    orig_stdout = os.dup(sys.stdout.fileno())
+    sys.stdout.flush()
+
+    # Open the file and redirect stdout to it
+    with open(file_name, "w") as f:
+        os.dup2(f.fileno(), sys.stdout.fileno())
+        try:
+            yield os.fdopen(orig_stdout, "w", closefd=False)
+        finally:
+            sys.stdout.flush()
+            os.dup2(orig_stdout, sys.stdout.fileno())
+
+
 def main() -> None:
     """Entrypoint for the command line interface."""
     # Redirect stdout to stderr to avoid mixing any output with the JSON response.
-    with stdout_to_stderr() as orig_stdout:
+    config = get_config()
+    log_cm = stdout_to_file(config.log_file) if config.log_file else stdout_to_stderr()
+    with log_cm as orig_stdout:
         # Fail as fast as possible if the Tesseract API path is not set
-        api_path = get_config().api_path
+        api_path = config.api_path
         if not api_path.is_file():
             print(
                 f"Tesseract API file '{api_path}' does not exist. "

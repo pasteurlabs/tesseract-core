@@ -16,6 +16,7 @@ class RuntimeConfig(BaseModel):
     version: str = "0+unknown"
     debug: bool = False
     input_path: str = ""
+    log_file: str = None
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
