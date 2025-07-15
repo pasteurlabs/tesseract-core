@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import atexit
 import base64
-import os
 import traceback
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -18,6 +17,8 @@ import numpy as np
 import requests
 from pydantic import BaseModel, TypeAdapter, ValidationError
 from pydantic_core import InitErrorDetails
+
+from tesseract_core.runtime.config import update_config
 
 from . import engine
 
@@ -136,11 +137,9 @@ class Tesseract:
             volumes = []
         if input_path is not None:
             input_path = Path(input_path).resolve()
-            environment["TESSERACT_INPUT_PATH"] = "/tesseract/input_data"
             volumes.append(f"{input_path}:/tesseract/input_data:ro")
         if output_path is not None:
             output_path = Path(output_path).resolve()
-            environment["TESSERACT_OUTPUT_PATH"] = "/tesseract/output_data"
             volumes.append(f"{output_path}:/tesseract/output_data:rw")
 
         obj._spawn_config = SpawnConfig(
@@ -199,9 +198,9 @@ class Tesseract:
                 ) from ex
 
         if input_path is not None:
-            os.environ["TESSERACT_INPUT_PATH"] = str(input_path.resolve())
+            update_config(input_path=str(input_path.resolve()))
         if output_path is not None:
-            os.environ["TESSERACT_OUTPUT_PATH"] = str(output_path.resolve())
+            update_config(output_path=str(output_path.resolve()))
 
         obj = cls.__new__(cls)
         obj._spawn_config = None

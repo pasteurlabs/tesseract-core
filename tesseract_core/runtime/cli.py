@@ -16,7 +16,7 @@ import click
 import typer
 from pydantic import ValidationError
 
-from tesseract_core.runtime.config import get_config
+from tesseract_core.runtime.config import get_config, update_config
 from tesseract_core.runtime.core import (
     check_tesseract_api,
     create_endpoints,
@@ -381,7 +381,7 @@ def _create_user_defined_cli_command(
         **optional_args: Any,
     ):
         if input_path:
-            os.environ["TESSERACT_INPUT_PATH"] = input_path
+            update_config(input_path=input_path)
 
         if output_format == "json+binref" and output_path is None:
             raise ValueError("--output-path must be specified for json+binref format")
@@ -404,7 +404,7 @@ def _create_user_defined_cli_command(
                 ) from e
 
         if output_path:
-            os.environ["TESSERACT_OUTPUT_PATH"] = output_path
+            update_config(output_path=output_path)
             Path(output_path).mkdir(parents=True, exist_ok=True)
 
         result = user_function(**user_function_args)
