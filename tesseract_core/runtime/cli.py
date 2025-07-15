@@ -436,11 +436,9 @@ def _add_user_commands_to_cli(
     tesseract_package = get_tesseract_api()
     endpoints = create_endpoints(tesseract_package)
 
-    openapi_schema_ = create_rest_api(tesseract_package).openapi()
-
     def openapi_schema() -> dict:
         """Get the openapi.json schema."""
-        return openapi_schema_
+        return create_rest_api(tesseract_package).openapi()
 
     endpoints.append(openapi_schema)
 
