@@ -69,7 +69,17 @@ def assert_relative_path(value: str) -> str:
     return value
 
 
+def assert_relative_filepath(value: str) -> str:
+    """Assert that a string encodes a relative file path."""
+    if Path(value).is_absolute():
+        raise ValueError(f"value must be a relative file path (got {value})")
+    if not Path(value).suffix:
+        raise ValueError(f"value must be a file (got {value})")
+    return value
+
+
 RelativePath = Annotated[str, AfterValidator(assert_relative_path)]
+RelativeFilePath = Annotated[str, AfterValidator(assert_relative_filepath)]
 StrictStr = Annotated[str, Strict()]
 
 
@@ -160,6 +170,10 @@ class TesseractConfig(BaseModel, validate_assignment=True):
     build_config: OptionalBuildConfig = Field(
         default_factory=TesseractBuildConfig,
         description="Configuration options for building the Tesseract.",
+    )
+    required_files: tuple[RelativeFilePath, ...] | None = Field(
+        (),
+        description=("List of input files that are required to be present at runtime."),
     )
 
     model_config = ConfigDict(extra="forbid")

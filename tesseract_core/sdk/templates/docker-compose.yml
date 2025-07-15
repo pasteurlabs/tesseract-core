@@ -42,7 +42,6 @@ services:
     {% endif %}
 {% endfor %}
 
-
 {%- if docker_volumes %}
 volumes:
 {%- for name, external in docker_volumes.items() %}
