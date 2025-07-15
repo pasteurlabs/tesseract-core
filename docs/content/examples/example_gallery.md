@@ -8,10 +8,12 @@
 :glob:
 building-blocks/helloworld.md
 building-blocks/vectoradd.md
+building-blocks/univariate.md
 building-blocks/packagedata.md
 building-blocks/arm64.md
 building-blocks/localdependency.md
 building-blocks/dataloader.md
+building-blocks/filereference.md
 ```
 
 This is a gallery of Tesseract examples that end at the `build` stage of the Tesseract lifecycle, and that can act as starting points to define and build your own Tesseracts.
@@ -36,6 +38,11 @@ You can also find these Tesseracts in the `examples` directory of the [code repo
 
      Tesseract performing vector addition. Highlighting simple array operations and how to use the Tesseract Python API.
    :::
+   :::{grid-item-card} Univariate
+      :link: building-blocks/univariate.html
+
+      A Tesseract that wraps the univariate Rosenbrock function, which is a common test problem for optimization algorithms.
+   :::
    :::{grid-item-card} Package Data
       :link: building-blocks/packagedata.html
 
@@ -56,5 +63,13 @@ You can also find these Tesseracts in the `examples` directory of the [code repo
 
      Tesseract that loads in data samples from a folder without loading them into memory.
    :::
+
+   :::{grid-item-card} Input/Output File References
+      :link: building-blocks/filereference.html
+
+     Tesseract that mounts input and output directories as datasets.
+     To be used for Tesseracts with large inputs and/or outputs.
+   :::
+
 
 ::::

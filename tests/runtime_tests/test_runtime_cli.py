@@ -294,9 +294,11 @@ def test_input_vals_from_local_file(
     )
     assert result.exit_code == 0, result.stderr
 
+    result = result.stdout
+
     test_input_val = dummy_tesseract_module.InputSchema.model_validate(test_input)
     expected = dummy_tesseract_module.apply(test_input_val).model_dump_json()
-    assert json.loads(result.stdout) == json.loads(expected)
+    assert json.loads(result) == json.loads(expected)
 
 
 @pytest.mark.parametrize(

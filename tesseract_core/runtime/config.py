@@ -15,6 +15,7 @@ class RuntimeConfig(BaseModel):
     name: str = "Tesseract"
     version: str = "0+unknown"
     debug: bool = False
+    input_path: str = ""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -32,16 +33,23 @@ def update_config(**kwargs: Any) -> None:
         if env_key in os.environ:
             conf_settings[field] = os.environ[env_key]
 
-    conf_settings.update(kwargs)
+    for field in _config_overrides:
+        conf_settings[field] = getattr(_current_config, field)
 
+    conf_settings.update(kwargs)
     config = RuntimeConfig(**conf_settings)
+
+    _config_overrides.update(set(conf_settings.keys()))
     _current_config = config
 
 
 _current_config = None
-update_config()
+_config_overrides = set()
 
 
 def get_config() -> RuntimeConfig:
     """Return the current runtime configuration."""
+    if _current_config is None:
+        update_config()
+    assert _current_config is not None
     return _current_config

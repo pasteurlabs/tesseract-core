@@ -18,6 +18,8 @@ Then, verify everything is working as intended:
 $ tesseract list
 ```
 
+If the output is an empty table, that's okay! The CLI is functioning correctly, there are simply no components available yet.
+
 (installation-docker)=
 ## Installing Docker
 

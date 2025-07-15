@@ -152,13 +152,13 @@ def dummy_tesseract(dummy_tesseract_package):
     # default may have been used and tesseract_api.py is not guaranteed to exist
     # therefore, we only pass the original path in cleanup if not equal to default
     if orig_path != Path("tesseract_api.py"):
-        orig_config_kwargs |= {"tesseract_api_path": orig_path}
+        orig_config_kwargs |= {"api_path": orig_path}
     api_path = Path(dummy_tesseract_package / "tesseract_api.py").resolve()
 
     try:
         # Configure via envvar so we also propagate it to subprocesses
         os.environ["TESSERACT_API_PATH"] = str(api_path)
-        update_config()
+        update_config(api_path=api_path)
         yield
     finally:
         # As this is used by an auto-use fixture, cleanup may happen
@@ -207,6 +207,17 @@ def docker_client():
     return docker_client_module.CLIDockerClient()
 
 
+@pytest.fixture
+def docker_volume(docker_client):
+    # Create the Docker volume
+    volume_name = f"test_volume_{''.join(random.choices(string.ascii_lowercase + string.digits, k=8))}"
+    volume = docker_client.volumes.create(name=volume_name)
+    try:
+        yield volume
+    finally:
+        volume.remove(force=True)
+
+
 @pytest.fixture(scope="module")
 def docker_cleanup_module(docker_client, request):
     """Clean up all tesseracts created by the tests after the module exits."""
@@ -222,7 +233,7 @@ def docker_cleanup(docker_client, request):
 def _docker_cleanup(docker_client, request):
     """Clean up all tesseracts created by the tests."""
     # Shared object to track what objects need to be cleaned up in each test
-    context = {"images": [], "project_ids": [], "containers": []}
+    context = {"images": [], "project_ids": [], "containers": [], "volumes": []}
 
     def pprint_exc(e: BaseException) -> str:
         """Pretty print exception."""
@@ -267,6 +278,18 @@ def _docker_cleanup(docker_client, request):
                 docker_client.images.remove(image_obj.id)
             except Exception as e:
                 failures.append(f"Failed to remove image {image}: {pprint_exc(e)}")
+
+        # Remove volumes
+        for volume in context["volumes"]:
+            try:
+                if isinstance(volume, str):
+                    volume_obj = docker_client.volumes.get(volume)
+                else:
+                    volume_obj = volume
+
+                volume_obj.remove(force=True)
+            except Exception as e:
+                failures.append(f"Failed to remove volume {volume}: {pprint_exc(e)}")
 
         if failures:
             raise RuntimeError(
@@ -423,6 +446,7 @@ def mocked_docker(monkeypatch):
 
     mock_instance = MockedDocker()
     monkeypatch.setattr(engine, "docker_client", mock_instance)
+    monkeypatch.setattr(engine, "is_podman", lambda: False)
     monkeypatch.setattr(
         tesseract_core.sdk.docker_client, "CLIDockerClient", MockedDocker
     )

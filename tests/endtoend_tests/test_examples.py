@@ -108,6 +108,8 @@ class Config:
     test_with_random_inputs: bool = False
     sample_requests: list[SampleRequest] = None
     volume_mounts: list[str] = None
+    input_path: str = None
+    output_path: str = None
 
 
 # Add config and test cases for specific unit Tesseracts here
@@ -708,7 +710,7 @@ TEST_CASES = {
                 endpoint="apply",
                 payload={
                     "inputs": {
-                        "data": "@/mnt/data/sample_*.json",
+                        "data": "@/tesseract/input_data/sample_*.json",
                     },
                 },
                 output_contains_pattern=[
@@ -719,12 +721,12 @@ TEST_CASES = {
                 endpoint="check-gradients",
                 payload={
                     "inputs": {
-                        "data": "@/mnt/data/sample_*.json",
+                        "data": "@/tesseract/input_data/sample_*.json",
                     },
                 },
             ),
         ],
-        volume_mounts=["testdata:/mnt/data:ro"],
+        volume_mounts=["testdata:/tesseract/input_data:ro"],
     ),
     "conda": Config(
         test_with_random_inputs=False,
@@ -735,6 +737,33 @@ TEST_CASES = {
                 output_contains_pattern=[r'{"cowsays":"  ____\n| Hey! |\n  ====\n'],
             )
         ],
+    ),
+    "filereference": Config(
+        test_with_random_inputs=False,
+        sample_requests=[
+            SampleRequest(
+                endpoint="apply",
+                payload={
+                    "inputs": {
+                        "data": [
+                            "sample_7.json",
+                            "sample_6.json",
+                            "sample_1.json",
+                            "sample_0.json",
+                            "sample_3.json",
+                            "sample_2.json",
+                            "sample_9.json",
+                            "sample_5.json",
+                            "sample_4.json",
+                            "sample_8.json",
+                        ]
+                    }
+                },
+                output_contains_pattern=["sample_0.copy"],
+            )
+        ],
+        input_path="testdata",
+        output_path="output",
     ),
 }
 
@@ -844,7 +873,7 @@ def test_unit_tesseract_endtoend(
     assert result.exit_code == 0, result.output
     input_schema = result.output
 
-    mount_args = []
+    mount_args, io_args = [], []
 
     if unit_tesseract_config.volume_mounts:
         for mnt in unit_tesseract_config.volume_mounts:
@@ -855,6 +884,21 @@ def test_unit_tesseract_endtoend(
                 local_path = unit_tesseract_path / local_path
             mnt = ":".join([str(local_path), *other])
             mount_args.extend(["--volume", mnt])
+
+    if unit_tesseract_config.input_path:
+        io_args.extend(
+            [
+                "--input-path",
+                str(unit_tesseract_path / unit_tesseract_config.input_path),
+            ]
+        )
+    if unit_tesseract_config.output_path:
+        io_args.extend(
+            [
+                "--output-path",
+                str(unit_tesseract_path / unit_tesseract_config.output_path),
+            ]
+        )
 
     if unit_tesseract_config.test_with_random_inputs:
         random_input = example_from_json_schema(json.loads(input_schema))
@@ -891,6 +935,7 @@ def test_unit_tesseract_endtoend(
                     *mount_args,
                     cli_cmd,
                     json.dumps(request.payload),
+                    *io_args,
                     "--output-format",
                     request.output_format,
                 ]
@@ -902,6 +947,13 @@ def test_unit_tesseract_endtoend(
                 if cli_cmd in ("check-gradients",):
                     # Result is text
                     output = result.output
+                elif unit_tesseract_config.output_path:
+                    with open(
+                        unit_tesseract_path
+                        / unit_tesseract_config.output_path
+                        / "results.json"
+                    ) as fi:
+                        output = json_normalize(fi.read())
                 else:
                     # Result is JSON output
                     output = json_normalize(result.output)
@@ -979,7 +1031,10 @@ def test_unit_tesseract_endtoend(
     out_input_schema = response.json()
     assert "properties" in out_input_schema
 
-    if unit_tesseract_config.volume_mounts is not None:
+    if (
+        unit_tesseract_config.volume_mounts is not None
+        or unit_tesseract_config.input_path is not None
+    ):
         # TODO: Mounts are not supported in HTTP mode yet, skip rest of the test for now
         return
 

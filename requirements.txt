@@ -2,9 +2,9 @@
 #    uv export --frozen --color never --no-emit-project --no-hashes
 annotated-types==0.7.0
     # via pydantic
-certifi==2025.1.31
+certifi==2025.7.9
     # via requests
-charset-normalizer==3.4.1
+charset-normalizer==3.4.2
     # via requests
 click==8.1.8
     # via typer
@@ -22,19 +22,19 @@ mdurl==0.1.2
     # via markdown-it-py
 numpy==2.2.4
     # via tesseract-core
-pip==25.0.1
+pip==25.1.1
     # via tesseract-core
-pydantic==2.10.6
+pydantic==2.11.0
     # via tesseract-core
-pydantic-core==2.27.2
+pydantic-core==2.33.0
     # via pydantic
-pygments==2.19.1
+pygments==2.19.2
     # via rich
 pyyaml==6.0.2
     # via tesseract-core
-requests==2.32.3
+requests==2.32.4
     # via tesseract-core
-rich==13.9.4
+rich==14.0.0
     # via
     #   tesseract-core
     #   typer
@@ -42,11 +42,14 @@ shellingham==1.5.4
     # via typer
 typer==0.15.2
     # via tesseract-core
-typing-extensions==4.13.0
+typing-extensions==4.14.1
     # via
     #   pydantic
     #   pydantic-core
     #   rich
     #   typer
-urllib3==2.3.0
+    #   typing-inspection
+typing-inspection==0.4.1
+    # via pydantic
+urllib3==2.5.0
     # via requests

@@ -4,6 +4,9 @@ services:
     image: {{ service.image }}
     restart: unless-stopped
     command: ["serve", "--host", "0.0.0.0", "--num-workers", "{{ service.num_workers }}"]
+    {%- if service.user %}
+    user: "{{ service.user }}"
+    {%- endif %}
     ports:
       - {{ service.port }}
     {% if service.environment.TESSERACT_DEBUG == "1" %}
@@ -11,9 +14,8 @@ services:
     {% endif %}
     volumes:
       - mlflow-data:/mlflow-data
-    {%- if service.volumes %}
-    {%- for volume in service.volumes %}
-      - {{ volume }}
+    {%- for volume_source, volume_data in service.volumes.items() %}
+      - {{ volume_source }}:{{ volume_data["bind"] }}
     {% endfor -%}
     {% endif %}
     healthcheck:
@@ -40,10 +42,18 @@ services:
     {% endif %}
 {% endfor %}
 
+{%- if docker_volumes %}
 volumes:
   mlflow-data:
     external: true
     name: mlflow-server_mlflow-data
+{%- for name, external in docker_volumes.items() %}
+  {{ name }}:
+    {%- if external %}
+    external: true
+    {% endif %}
+{% endfor %}
+{% endif %}
 
 networks:
   multi-tesseract-network:

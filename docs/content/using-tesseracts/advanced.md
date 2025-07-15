@@ -1,11 +1,22 @@
 # Advanced usage
 
-## File system I/O
+## File aliasing
 
 The `tesseract` command can take care of
 passing data from local disk
 (or any [fsspec-compatible](https://filesystem-spec.readthedocs.io/en/latest/) resource,
 like HTTP, FTP, S3 Buckets, and so on) to a Tesseract via the `@` syntax.
+
+You can mount a folder into a Tesseract with `--input-path`. A The input path is mounted with read-only permissions so a Tesseract will never mutate files located at the input path.
+Paths in a Tesseract's payload have to be relative to `--input-path`:
+```bash
+tesseract run filereference apply \
+    --input-path ./testdata \
+    --output-path ./output \
+    '{"inputs": {"data": ["sample_2.json", "sample_3.json"]}}'
+```
+See [`examples/filereference`](../examples/building-blocks/filereference)
+
 
 If you want to write the output of a Tesseract to a file,
 you can use the `--output-path` parameter, which also supports any
@@ -44,6 +55,28 @@ When executing a tesseract natively through `tesseract-runtime`, you can set the
 
 ```bash
 $ MLFLOW_TRACKING_URI="..." tesseract-runtime serve -p 8080
+```
+
+## Volume mounts and user permissions
+
+When mounting a volume into a Tesseract container, default behavior depends on the Docker engine being used. Specifically, Docker Desktop, Docker Engine, and Podman have different ways of handling user permissions for mounted volumes.
+
+Tesseract tries to ensure that the container user has the same permissions as the host user running the `tesseract` command. This is done by setting the user ID and group ID of the container user to match those of the host user.
+
+In cases where this fails or is not desired, you can explicitly set the user ID and group ID of the container user using the `--user` argument. This allows you to specify a different user or group for the container, which can be useful for ensuring proper permissions when accessing mounted volumes.
+
+```{warning}
+In cases where the Tesseract user is neither `root` nor the local user / file owner, you may encounter permission issues when accessing files in mounted volumes. To resolve this, ensure that the user ID and group ID are set correctly using the `--user` argument, or modify the permissions of files to be readable by any user.
+```
+
+## Passing environment variables to Tesseract containers
+
+Through the optional `--env` argument, you can pass environment variables to Tesseracts.
+This works both for serving a Tesseract and running a single execution:
+
+```bash
+$ tesseract serve --env=MY_ENV_VARIABLE="some value" helloworld
+$ tesseract run --env=MY_ENV_VARIABLE="some value" helloworld apply '{"inputs": {"name": "Osborne"}}'
 ```
 
 ## Using GPUs

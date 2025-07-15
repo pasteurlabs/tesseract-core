@@ -14,7 +14,7 @@ dependencies = [
     "pyyaml",
     "pydantic",
     "numpy",
-    "requests",
+    "requests>=2.32.4",
     "pip",
 ]
 dynamic = [
