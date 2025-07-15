@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, FilePath
+from pydantic import BaseModel, ConfigDict, FilePath
 
 
 class RuntimeConfig(BaseModel):
@@ -15,10 +15,8 @@ class RuntimeConfig(BaseModel):
     name: str = "Tesseract"
     version: str = "0+unknown"
     debug: bool = False
-    input_path: str = Field(default="/tesseract/input_data", env="TESSERACT_INPUT_PATH")
-    output_path: str = Field(
-        default="/tesseract/output_data", env="TESSERACT_OUTPUT_PATH"
-    )
+    input_path: str = "/tesseract/input_data"
+    output_path: str = "/tesseract/output_data"
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
