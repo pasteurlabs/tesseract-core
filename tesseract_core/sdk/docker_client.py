@@ -521,9 +521,9 @@ class Containers:
         image: str,
         command: list_[str],
         volumes: dict | None = None,
+        device_requests: list_[int | str] | None = None,
         environment: dict[str, str] | None = None,
         network: str | None = None,
-        device_requests: list_[int | str] | None = None,
         detach: bool = False,
         remove: bool = False,
         ports: dict | None = None,
@@ -730,7 +730,7 @@ class Compose:
             The project name.
         """
         docker_compose = _get_executable("docker-compose")
-        logger.info(f"Waiting for {project_name} containers to start ...")
+        logger.info("Waiting for Tesseract containers to start ...")
         try:
             _ = subprocess.run(
                 [
