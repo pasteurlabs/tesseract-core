@@ -4,6 +4,7 @@
 from abc import ABCMeta
 from enum import IntEnum
 from functools import partial
+from pathlib import Path
 from typing import (
     Annotated,
     Any,
@@ -31,6 +32,7 @@ from tesseract_core.runtime.array_encoding import (
     get_array_model,
     python_to_array,
 )
+from tesseract_core.runtime.file_interactions import get_input_path, get_output_path
 
 AnnotatedType = type(Annotated[Any, Any])
 EllipsisType = type(Ellipsis)
@@ -371,3 +373,30 @@ UInt32 = Array[(), "uint32"]
 UInt64 = Array[(), "uint64"]
 Complex64 = Array[(), "complex64"]
 Complex128 = Array[(), "complex128"]
+
+
+def _resolve_input_path(path: Path) -> Path:
+    input_path = get_input_path()
+    tess_path = (input_path / path).resolve()
+    if str(input_path) not in str(tess_path):
+        raise ValueError(
+            f"Invalid input file reference: {path}. "
+            "File references have to be relative to --input-path."
+        )
+    if not tess_path.exists():
+        raise FileNotFoundError(f"Input path {tess_path} does not exist.")
+    if not tess_path.is_file():
+        raise ValueError(f"Input path {tess_path} is not a file.")
+    return tess_path
+
+
+def _strip_output_path(path: Path) -> Path:
+    output_path = get_output_path()
+    if path.is_relative_to(output_path):
+        return path.relative_to(output_path)
+    else:
+        return path
+
+
+InputFileReference = Annotated[Path, AfterValidator(_resolve_input_path)]
+OutputFileReference = Annotated[Path, AfterValidator(_strip_output_path)]

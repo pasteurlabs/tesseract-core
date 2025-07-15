@@ -7,6 +7,17 @@ passing data from local disk
 (or any [fsspec-compatible](https://filesystem-spec.readthedocs.io/en/latest/) resource,
 like HTTP, FTP, S3 Buckets, and so on) to a Tesseract via the `@` syntax.
 
+You can mount a folder into a Tesseract with `--input-path`. A The input path is mounted with read-only permissions so a Tesseract will never mutate files located at the input path.
+Paths in a Tesseract's payload have to be relative to `--input-path`:
+```bash
+tesseract run filereference apply \
+    --input-path ./testdata \
+    --output-path ./output \
+    '{"inputs": {"data": ["sample_2.json", "sample_3.json"]}}'
+```
+See [`examples/filereference`](../examples/building-blocks/filereference)
+
+
 If you want to write the output of a Tesseract to a file,
 you can use the `--output-path` parameter, which also supports any
 [fsspec-compatible](https://filesystem-spec.readthedocs.io/en/latest/)
