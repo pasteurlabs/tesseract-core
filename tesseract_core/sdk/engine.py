@@ -887,7 +887,6 @@ def run_tesseract(
     ports: dict[str, str] | None = None,
     environment: dict[str, str] | None = None,
     user: str | None = None,
-    input_path: str | Path | None = None,
 ) -> tuple[str, str]:
     """Start a Tesseract and execute a given command.
 
@@ -911,19 +910,13 @@ def run_tesseract(
     """
     # Args that require rw access to the mounted volume
     output_args = {"-o", "--output-path"}
+    input_args = {"-i", "--input-path"}
 
     cmd = [command]
     current_cmd = None
 
     if environment is None:
         environment = {}
-
-    if input_path:
-        if volumes is None:
-            volumes = []
-        if "://" not in input_path:
-            volumes.append(f"{input_path}:/tesseract/input_data")
-        environment["TESSERACT_INPUT_PATH"] = "/tesseract/input_data"
 
     if not volumes:
         parsed_volumes = {}
@@ -962,6 +955,20 @@ def run_tesseract(
             parsed_volumes[str(local_path)] = {"bind": path_in_container, "mode": "rw"}
             environment["TESSERACT_OUTPUT_PATH"] = path_in_container
 
+        if current_cmd in input_args and "://" not in arg:
+            local_path = Path(arg).resolve()
+            if not local_path.is_dir():
+                raise RuntimeError(
+                    f"Path {local_path} provided as input is not a directory"
+                )
+
+            path_in_container = "/tesseract/input_data"
+            arg = path_in_container
+
+            # Bind-mount directory
+            parsed_volumes[str(local_path)] = {"bind": path_in_container, "mode": "ro"}
+            environment["TESSERACT_INPUT_PATH"] = path_in_container
+
         # Mount local input files marked by @ into Docker container as a volume
         elif arg.startswith("@") and "://" not in arg:
             local_path = Path(arg.lstrip("@")).resolve()
@@ -970,7 +977,7 @@ def run_tesseract(
                 raise RuntimeError(f"Path {local_path} provided as input is not a file")
 
             path_in_container = os.path.join(
-                "/tesseract/input_data", f"payload{local_path.suffix}"
+                "/tesseract", f"payload{local_path.suffix}"
             )
             arg = f"@{path_in_container}"
 
