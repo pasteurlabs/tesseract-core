@@ -202,6 +202,8 @@ class Images:
             "--load",
             "--tag",
             tag,
+            "--tag",
+            f"{tag.split(':')[0]}:latest",
             "--file",
             str(dockerfile),
             *extra_args,
