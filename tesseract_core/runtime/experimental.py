@@ -21,6 +21,7 @@ from pydantic import (
 from pydantic.json_schema import JsonSchemaValue
 from pydantic_core import SchemaSerializer, SchemaValidator, core_schema
 
+from tesseract_core.runtime import mpa
 from tesseract_core.runtime.file_interactions import parent_path
 from tesseract_core.runtime.schema_types import safe_issubclass
 
@@ -222,3 +223,12 @@ def _strip_output_path(path: Path) -> Path:
 
 InputFileReference = Annotated[Path, AfterValidator(_resolve_input_path)]
 OutputFileReference = Annotated[Path, AfterValidator(_strip_output_path)]
+
+
+__all__ = [
+    "InputFileReference",
+    "LazySequence",
+    "OutputFileReference",
+    "PydanticLazySequenceAnnotation",
+    "mpa",
+]

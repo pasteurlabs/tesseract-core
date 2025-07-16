@@ -32,8 +32,6 @@ $ tesseract run vectoradd apply --output-path /tmp/output @inputs.json
 Tesseracts may log metrics and artifacts (e.g. iteration numbers, VTK files, ...) as demonstrated in the `metrics` example Tesseract.
 
 ```{literalinclude} ../../../examples/metrics/tesseract_api.py
-:pyobject: apply
-:language: python
 ```
 
 By default, Tesseracts log metrics and artifacts to a local directory named `mpa_logs` in the current working directory. By setting the environment variable `MPA_LOG_DIR`, you can change the log directory. (Note that, when running Tesseracts in a container, the log directory is placed inside the container.)

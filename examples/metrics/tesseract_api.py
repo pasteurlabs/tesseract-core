@@ -3,7 +3,7 @@
 
 from pydantic import BaseModel
 
-from tesseract_core.runtime import mpa
+from tesseract_core.runtime.experimental import mpa
 
 
 class InputSchema(BaseModel):
