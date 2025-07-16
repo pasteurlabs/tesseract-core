@@ -39,7 +39,7 @@ By default, Tesseracts log metrics and artifacts to a local directory named `mpa
 Alternatively, you can log metrics and artifacts to an MLflow server by setting the `MLFLOW_TRACKING_URI` environment variable. For local development, you can spin up an MLflow server (ready to use with Tesseract) through the provided docker-compose file:
 
 ```bash
-docker-compose -f extra-mlflow/docker-compose-mlflow.yml up
+docker-compose -f extra/mlflow/docker-compose-mlflow.yml up
 ```
 
 This MLflow server shows logged items in the MLflow GUI at `http://localhost:5000`.

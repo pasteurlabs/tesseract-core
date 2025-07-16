@@ -5,6 +5,7 @@ import csv
 import json
 import os
 import shutil
+from abc import ABC, abstractmethod
 from collections.abc import Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -15,25 +16,30 @@ from typing import Any, Optional
 import requests
 
 
-class BaseBackend:
+class BaseBackend(ABC):
     """Base class for MPA backends."""
 
+    @abstractmethod
     def log_parameter(self, key: str, value: Any) -> None:
         """Log a parameter."""
-        raise NotImplementedError
+        pass
 
+    @abstractmethod
     def log_metric(self, key: str, value: float, step: Optional[int] = None) -> None:
         """Log a metric."""
-        raise NotImplementedError
+        pass
 
+    @abstractmethod
     def log_artifact(self, local_path: str) -> None:
         """Log an artifact."""
-        raise NotImplementedError
+        pass
 
+    @abstractmethod
     def start_run(self) -> None:
         """Start a new run."""
         pass
 
+    @abstractmethod
     def end_run(self) -> None:
         """End the current run."""
         pass
@@ -102,6 +108,14 @@ class FileBackend(BaseBackend):
 
         dest_path = self.artifacts_dir / source_path.name
         shutil.copy2(source_path, dest_path)
+
+    def start_run(self) -> None:
+        """Start a new run. File backend doesn't need special start logic."""
+        pass
+
+    def end_run(self) -> None:
+        """End the current run. File backend doesn't need special end logic."""
+        pass
 
 
 class MLflowBackend(BaseBackend):
