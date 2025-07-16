@@ -469,7 +469,7 @@ def _add_user_commands_to_cli(
 
 
 @contextlib.contextmanager
-def redirect_stdout(log_file: Optional[str]) -> Generator:
+def redirect_stdout(log_file: Optional[str] = None) -> Generator:
     """Redirect stdout to stderr at OS level."""
     orig_stdout = os.dup(sys.stdout.fileno())
     sys.stdout.flush()
