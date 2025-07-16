@@ -3,7 +3,7 @@
 
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, FilePath
 
@@ -17,7 +17,7 @@ class RuntimeConfig(BaseModel):
     debug: bool = False
     input_path: str = "/tesseract/input_data"
     output_path: str = "/tesseract/output_data"
-    log_file: str = None
+    log_file: Optional[str] = None
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
