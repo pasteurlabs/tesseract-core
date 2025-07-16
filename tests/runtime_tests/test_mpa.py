@@ -9,7 +9,7 @@ import os
 
 import pytest
 
-from tesseract_core.runtime import mpa
+from tesseract_core.runtime.experimental import mpa
 
 
 class TestContextManagement:
