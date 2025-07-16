@@ -165,6 +165,13 @@ $ tesseract-runtime apply '{"inputs": {"name": "Tessie"}}'
 More info on usage is contained in `tesseract-runtime --help` (and in its subcommands,
 like `tesseract-runtime apply --help`).
 
+To avoid mixing logging outputs with the JSON response, `stdout` is redirected to `stderr` by default. You can instead redirect `stdout` to a log file by setting the `TESSERACT_LOG_FILE` environment variable to the desired log file path. For example:
+
+```bash
+$ export TESSERACT_LOG_FILE=/tmp/tesseract.log
+$ tesseract-runtime apply '{"inputs": {"name": "Tessie"}}'
+```
+
 
 ## Creating a Tesseract from a Python package
 
