@@ -31,7 +31,7 @@ $ tesseract run vectoradd apply --output-path /tmp/output @inputs.json
 
 Tesseracts may log metrics and artifacts (e.g. iteration numbers, VTK files, ...) as demonstrated in the `metrics` example Tesseract.
 
-```{literalinclude} ../../../../examples/metrics/tesseract_api.py
+```{literalinclude} ../../../examples/metrics/tesseract_api.py
 :pyobject: apply
 :language: python
 ```
