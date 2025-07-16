@@ -41,13 +41,13 @@ Tesseracts provide built-in support for [differentiable programming](https://doc
 
    ```bash
    $ git clone https://github.com/pasteurlabs/tesseract-core
-   $ tesseract build tesseract-core/examples/vectoradd --tag 0.1.0
+   $ tesseract build tesseract-core/examples/vectoradd
    ```
 
 3. Display its API documentation:
 
    ```bash
-   $ tesseract apidoc vectoradd:0.1.0
+   $ tesseract apidoc vectoradd:1.2.3
    ```
 
 <p align="center">
