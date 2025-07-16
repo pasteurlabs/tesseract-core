@@ -15,8 +15,8 @@ class RuntimeConfig(BaseModel):
     name: str = "Tesseract"
     version: str = "0+unknown"
     debug: bool = False
-    input_path: str = "/tesseract/input_data"
-    output_path: str = "/tesseract/output_data"
+    input_path: str = "."
+    output_path: str = "."
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
