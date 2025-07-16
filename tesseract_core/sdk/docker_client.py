@@ -136,6 +136,27 @@ class Images:
         return Images._get_images(tesseract_only=tesseract_only)
 
     @staticmethod
+    def get_tags(image: str) -> list_[str]:
+        """Finds all tags associated with a given image.
+
+        Params:
+            image: The image name to find tags for.
+
+        Returns:
+           List of tags associated with the given image.
+        """
+        all_images = Images.list()
+        if not all_images or len(all_images) == 0:
+            raise RuntimeError("No Tesseract images found on this machine.")
+        tags = [
+            tag.split(":")[-1]
+            for image_ in all_images
+            for tag in image_.tags or []
+            if tag.startswith(image)
+        ]
+        return tags
+
+    @staticmethod
     def remove(image: str) -> None:
         """Remove an image (name or id) from the local Docker registry.
 
