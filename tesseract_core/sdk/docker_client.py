@@ -6,6 +6,7 @@
 import json
 import logging
 import os
+import re
 import shlex
 import subprocess
 from dataclasses import dataclass
@@ -29,6 +30,14 @@ def _get_executable(program: Literal["docker", "docker-compose"]) -> tuple[str, 
     if program == "docker-compose":
         return config.docker_compose_executable
     raise ValueError(f"Unknown program: {program}")
+
+
+def _is_valid_docker_tag(tag: str) -> bool:
+    if not (1 <= len(tag) <= 128):
+        return False
+    if not re.match(r"^[A-Za-z0-9_.-]+$", tag):
+        return False
+    return True
 
 
 def is_podman() -> bool:
@@ -232,6 +241,13 @@ class Images:
             Built Image object.
         """
         from tesseract_core.sdk.engine import LogPipe
+
+        proper_tag = tag.split(":")[1]
+        if not _is_valid_docker_tag(proper_tag):
+            raise ValueError(
+                f"Invalid tag {proper_tag}; only alphanumeric characters, "
+                "'.', and '-' are allowed."
+            )
 
         build_cmd = Images._get_buildx_command(
             path=path,
