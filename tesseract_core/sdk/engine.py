@@ -408,6 +408,8 @@ def build_tesseract(
     image_name = config.name
     if image_tag:
         image_name += f":{image_tag}"
+    else:
+        image_name += f":{config.version}"
 
     source_basename = Path(src_dir).name
 
