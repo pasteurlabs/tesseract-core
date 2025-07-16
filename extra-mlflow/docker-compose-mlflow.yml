@@ -12,8 +12,6 @@ services:
       "
     volumes:
       - mlflow-data:/mlflow-data
-    networks:
-      - multi-tesseract-network
 
   mlflow-server:
     image: ghcr.io/mlflow/mlflow:latest
@@ -22,8 +20,6 @@ services:
     command: mlflow server --backend-store-uri sqlite:///mlflow-data/mlflow.db --default-artifact-root file:///mlflow-data/mlruns --host 0.0.0.0 --port 5000
     volumes:
       - mlflow-data:/mlflow-data
-    networks:
-      - multi-tesseract-network
     ports:
       - "5000:5000"
     depends_on:
@@ -33,10 +29,3 @@ services:
 volumes:
   mlflow-data:
     name: mlflow-data
-
-
-# We create the network here once for all tesseracts.
-# This is to avoid creating it multiple times in subsequent docker-compose up commands.
-networks:
-  multi-tesseract-network:
-    name: multi-tesseract-network
