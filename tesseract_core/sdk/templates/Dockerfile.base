@@ -98,6 +98,9 @@ RUN mkdir -p /tesseract/input_data /tesseract/output_data && \
 
 USER 1000:1000
 
+ENV TESSERACT_INPUT_PATH="/tesseract/input_data"
+ENV TESSERACT_OUTPUT_PATH="/tesseract/output_data"
+
 # Final sanity check to ensure the runtime is installed and tesseract_api.py is valid
 {% if not config.build_config.skip_checks %}
 RUN ["tesseract-runtime", "check"]
