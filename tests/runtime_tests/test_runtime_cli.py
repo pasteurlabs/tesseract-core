@@ -475,7 +475,7 @@ def test_stdout_redirect_subprocess(tmpdir):
         "from tesseract_core.runtime.cli import redirect_stdout",
         "print('stdout', file=sys.stdout)",
         "print('stderr', file=sys.stderr)",
-        f"with redirect_stdout({str(tmpdir)!r}) as orig_stdout:",
+        f"with redirect_stdout('tess_name', {str(tmpdir)!r}) as orig_stdout:",
         "    os.system('echo stderr')",
         "    print('stderr', file=sys.stdout)",
         "    print('stderr', file=sys.stderr)",
