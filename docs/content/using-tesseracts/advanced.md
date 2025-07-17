@@ -44,7 +44,9 @@ docker-compose -f extra/mlflow/docker-compose-mlflow.yml up
 
 This MLflow server shows logged items in the MLflow GUI at `http://localhost:5000`.
 
-Launch the `metrics` example Tesseract with the the following volume mount and `MLFLOW_TRACKING_URI` to ensure that it connects to that MLflow server. MacOS and Windows with Docker Desktop requires the `host.docker.internal` hostname to access services running on the host machine:
+Launch the `metrics` example Tesseract with the the following volume mount and `MLFLOW_TRACKING_URI` to ensure that it connects to that MLflow server. Note that your Tesseract now needs to declare `mlflow` as a required package in its `requirements.txt` file.
+
+MacOS and Windows with Docker Desktop requires the `host.docker.internal` hostname to access services running on the host machine:
 
 ```bash
 tesseract serve --env=MLFLOW_TRACKING_URI=http://host.docker.internal:5000 --volume mlflow-data:/mlflow-data metrics
