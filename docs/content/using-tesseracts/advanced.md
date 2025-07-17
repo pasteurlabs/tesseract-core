@@ -34,7 +34,7 @@ Tesseracts may log metrics and artifacts (e.g. iteration numbers, VTK files, ...
 ```{literalinclude} ../../../examples/metrics/tesseract_api.py
 ```
 
-By default, Tesseracts log metrics and artifacts to a directory `mpa` in the Tesseract's `--output-path`. By setting the environment variable `MPA_DIR`, you can change that log directory. (Note that, when running Tesseracts in a container, the log directory is placed inside the container.)
+By default, Tesseracts log metrics, parameters and artifacts to a directory `mpa` in the Tesseract's `--output-path`. By setting the environment variable `MPA_DIR`, you can change that log directory. (Note that, when running Tesseracts in a container, the log directory is placed inside the container.)
 
 Alternatively, you can log metrics and artifacts to an MLflow server by setting the `MLFLOW_TRACKING_URI` environment variable. For local development, you can spin up an MLflow server (ready to use with Tesseract) through the provided docker-compose file:
 
