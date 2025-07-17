@@ -15,7 +15,7 @@ class OutputSchema(BaseModel):
 
 
 def apply(inputs: InputSchema) -> OutputSchema:
-    """This demonstrates logging metrics to MLflow."""
+    """This demonstrates logging parameters, metrics and artifacts."""
     log_parameter("example_param", "value")
 
     for step in range(10):
