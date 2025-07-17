@@ -3,7 +3,7 @@
 
 from pydantic import BaseModel
 
-from tesseract_core.runtime.experimental import mpa
+from tesseract_core.runtime.experimental import log_artifact, log_metric, log_parameter
 
 
 class InputSchema(BaseModel):
@@ -16,16 +16,15 @@ class OutputSchema(BaseModel):
 
 def apply(inputs: InputSchema) -> OutputSchema:
     """This demonstrates logging metrics to MLflow."""
-    with mpa.start_run():
-        mpa.log_parameter("example_param", "value")
+    log_parameter("example_param", "value")
 
-        for step in range(10):
-            metric_value = step**2
-            mpa.log_metric("squared_step", metric_value, step=step)
+    for step in range(10):
+        metric_value = step**2
+        log_metric("squared_step", metric_value, step=step)
 
-        text = "This is an output file we want to log as an artifact."
-        with open("/tmp/artifact.txt", "w") as f:
-            f.write(text)
+    text = "This is an output file we want to log as an artifact."
+    with open("/tmp/artifact.txt", "w") as f:
+        f.write(text)
 
-        mpa.log_artifact("/tmp/artifact.txt")
+    log_artifact("/tmp/artifact.txt")
     return OutputSchema()

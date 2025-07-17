@@ -9,39 +9,45 @@ import os
 
 import pytest
 
-from tesseract_core.runtime.experimental import mpa
+from tesseract_core.runtime import mpa
+from tesseract_core.runtime.experimental import (
+    log_artifact,
+    log_metric,
+    log_parameter,
+    start_run,
+)
 
 
 def test_start_run_context_manager():
     """Test that start_run works as a context manager."""
-    with mpa.start_run():
-        mpa.log_parameter("test_param", "value")
-        mpa.log_metric("test_metric", 0.5)
+    with start_run():
+        log_parameter("test_param", "value")
+        log_metric("test_metric", 0.5)
 
 
 def test_no_active_run_error():
     """Test that logging functions raise error when no run is active."""
     with pytest.raises(RuntimeError, match="No active MPA run"):
-        mpa.log_parameter("test", "value")
+        log_parameter("test", "value")
 
     with pytest.raises(RuntimeError, match="No active MPA run"):
-        mpa.log_metric("test", 0.5)
+        log_metric("test", 0.5)
 
     with pytest.raises(RuntimeError, match="No active MPA run"):
-        mpa.log_artifact("test.txt")
+        log_artifact("test.txt")
 
 
 def test_nested_runs():
     """Test that nested runs work correctly."""
-    with mpa.start_run():
-        mpa.log_parameter("outer", "value1")
+    with start_run():
+        log_parameter("outer", "value1")
 
-        with mpa.start_run():
-            mpa.log_parameter("inner", "value2")
-            mpa.log_metric("inner_metric", 1.0)
+        with start_run():
+            log_parameter("inner", "value2")
+            log_metric("inner_metric", 1.0)
 
         # Should still work in outer context
-        mpa.log_parameter("outer2", "value3")
+        log_parameter("outer2", "value3")
 
 
 def test_file_backend_default():

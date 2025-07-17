@@ -21,8 +21,13 @@ from pydantic import (
 from pydantic.json_schema import JsonSchemaValue
 from pydantic_core import SchemaSerializer, SchemaValidator, core_schema
 
-from tesseract_core.runtime import mpa
 from tesseract_core.runtime.file_interactions import parent_path
+from tesseract_core.runtime.mpa import (
+    log_artifact,
+    log_metric,
+    log_parameter,
+    start_run,
+)
 from tesseract_core.runtime.schema_types import safe_issubclass
 
 
@@ -230,5 +235,8 @@ __all__ = [
     "LazySequence",
     "OutputFileReference",
     "PydanticLazySequenceAnnotation",
-    "mpa",
+    "log_artifact",
+    "log_metric",
+    "log_parameter",
+    "start_run",
 ]
