@@ -1,7 +1,7 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for the MPA (Model Performance Analytics) library."""
+"""Tests for the MPA library."""
 
 import csv
 import json
