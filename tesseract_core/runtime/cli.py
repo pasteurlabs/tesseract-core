@@ -3,13 +3,9 @@
 
 """This module provides a command-line interface for interacting with the Tesseract runtime."""
 
-import contextlib
-import datetime
 import io
-import os
 import sys
-import threading
-from collections.abc import Callable, Generator
+from collections.abc import Callable
 from pathlib import Path
 from textwrap import dedent
 from typing import Any, Optional
@@ -469,77 +465,26 @@ def _add_user_commands_to_cli(
     return group
 
 
-@contextlib.contextmanager
-def redirect_stdout(name: str, output_path: str) -> Generator[None, None, None]:
-    """Redirect stdout to stderr and log file at OS level."""
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_file = Path(output_path) / f"{name}-{timestamp}.log"
-    log_file.parent.mkdir(parents=True, exist_ok=True)
-
-    orig_stdout_fd = os.dup(sys.stdout.fileno())
-    orig_stdout_file = os.fdopen(orig_stdout_fd, "w", closefd=False)
-
-    # Create pipe for capturing stdout
-    read_fd, write_fd = os.pipe()
-
-    def tee_worker():
-        """Read from pipe and write to both stderr and log file."""
-        try:
-            with (
-                os.fdopen(read_fd, "r") as read_file,
-                open(log_file, "a") as log_file_handle,
-            ):
-                while True:
-                    data = read_file.read(1024)  # Read in chunks
-                    if not data:
-                        break
-                    # Write to both stderr and log file
-                    sys.stderr.write(data)
-                    sys.stderr.flush()
-                    log_file_handle.write(data)
-                    log_file_handle.flush()
-        except Exception:
-            # Silently handle any errors in the worker thread
-            pass
-
-    # Start the tee worker thread
-    tee_thread = threading.Thread(target=tee_worker, daemon=True)
-    tee_thread.start()
-
-    # Redirect stdout to the write end of the pipe
-    os.dup2(write_fd, sys.stdout.fileno())
-    try:
-        yield orig_stdout_file
-    finally:
-        # Restore original stdout
-        sys.stdout.flush()
-        os.dup2(orig_stdout_fd, sys.stdout.fileno())
-        os.close(write_fd)
-
-
 def main() -> None:
     """Entrypoint for the command line interface."""
-    # Redirect stdout to stderr or file to avoid mixing any output with the JSON response.
-    config = get_config()
-    with redirect_stdout(config.name, config.output_path) as orig_stdout:
-        # Fail as fast as possible if the Tesseract API path is not set
-        api_path = config.api_path
-        if not api_path.is_file():
-            print(
-                f"Tesseract API file '{api_path}' does not exist. "
-                "Please ensure it is a valid file, or set the TESSERACT_API_PATH "
-                "environment variable to the path of your Tesseract API file.\n"
-                "\n"
-                "Example:\n"
-                "    $ export TESSERACT_API_PATH=/path/to/your/tesseract_api.py\n"
-                "\n"
-                "Aborted.",
-                file=sys.stderr,
-            )
-            sys.exit(1)
+    # Fail as fast as possible if the Tesseract API path is not set
+    api_path = get_config().api_path
+    if not api_path.is_file():
+        print(
+            f"Tesseract API file '{api_path}' does not exist. "
+            "Please ensure it is a valid file, or set the TESSERACT_API_PATH "
+            "environment variable to the path of your Tesseract API file.\n"
+            "\n"
+            "Example:\n"
+            "    $ export TESSERACT_API_PATH=/path/to/your/tesseract_api.py\n"
+            "\n"
+            "Aborted.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
-        cli = _add_user_commands_to_cli(tesseract_runtime, out_stream=orig_stdout)
-        cli(auto_envvar_prefix="TESSERACT_RUNTIME")
+    cli = _add_user_commands_to_cli(tesseract_runtime, out_stream=sys.stdout)
+    cli(auto_envvar_prefix="TESSERACT_RUNTIME")
 
 
 if __name__ == "__main__":

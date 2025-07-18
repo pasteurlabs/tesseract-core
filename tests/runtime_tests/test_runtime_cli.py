@@ -17,7 +17,6 @@ import pytest
 from click.testing import CliRunner
 from moto.server import ThreadedMotoServer
 
-import tesseract_core.runtime
 from tesseract_core.runtime.cli import _add_user_commands_to_cli
 from tesseract_core.runtime.cli import tesseract_runtime as cli_cmd
 from tesseract_core.runtime.file_interactions import load_bytes, output_to_bytes
@@ -454,28 +453,17 @@ def test_apply_fails_if_required_args_missing(cli, cli_runner):
     assert "missing" in result.stderr
 
 
-def test_stdout_redirect_cli():
-    """Ensure that stdout is redirected to stderr during normal Python execution."""
-    # Use subprocess to ensure that CLI entrypoint is used
-    result = subprocess.run(
-        [sys.executable, tesseract_core.runtime.cli.__file__, "--help"],
-        capture_output=True,
-    )
-    assert result.returncode == 0, result.stderr
-    assert result.stdout == b""
-    assert "Usage:" in result.stderr.decode("utf-8")
-
-
 def test_stdout_redirect_subprocess(tmpdir):
     """Ensure that stdout is redirected to stderr even in non-Python subprocesses."""
     testscript = [
         # Print messages that signify where the output is supposed to go
         "import os",
         "import sys",
-        "from tesseract_core.runtime.cli import redirect_stdout",
+        "from pathlib import Path",
+        "from tesseract_core.runtime.mpa import redirect_stdout",
         "print('stdout', file=sys.stdout)",
         "print('stderr', file=sys.stderr)",
-        f"with redirect_stdout('tess_name', {str(tmpdir)!r}) as orig_stdout:",
+        f"with redirect_stdout(Path({str(tmpdir)!r}) / 'test_output.log') as orig_stdout:",
         "    os.system('echo stderr')",
         "    print('stderr', file=sys.stdout)",
         "    print('stderr', file=sys.stderr)",
@@ -491,11 +479,9 @@ def test_stdout_redirect_subprocess(tmpdir):
     result = subprocess.run([sys.executable, testscript_path], capture_output=True)
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert result.stdout == b"stdout\n" * 4
-    assert result.stderr == b"stderr\n" * 5
-    # Find the timestamped log file using glob
-    log_files = list(Path(tmpdir).glob("*.log"))
-    assert len(log_files) == 1, f"Expected exactly one log file, found: {log_files}"
-    log_file = log_files[0]
+    assert result.stderr == b"stderr\n" * 3
+    # Find the log file
+    log_file = tmpdir / "test_output.log"
     with open(log_file, "rb") as f:
         log_content = f.read()
     assert log_content == b"stderr\n" * 2
