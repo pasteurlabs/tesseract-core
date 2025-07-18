@@ -38,6 +38,7 @@ from .docker_client import (
     Container,
     ContainerError,
     Image,
+    NotFound,
     build_docker_image,
     is_podman,
 )
@@ -809,14 +810,15 @@ def _create_docker_compose_template(
             # Check if source exists to determine if specified volume is a docker volume
             if not Path(source).exists():
                 # Check if volume exists
-                if not docker_client.volumes.get(source):
-                    if "/" not in source:
-                        docker_volumes[source] = False
-                    else:
+                try:
+                    docker_client.volumes.get(source)
+                except NotFound:
+                    # Not a known volume, assume it's a bind mount
+                    if "/" in source:
                         raise ValueError(
-                            f"Volume/Path {source} does not already exist, "
-                            "and new volume cannot be created due to '/' in name."
-                        )
+                            f"Volume path {source} does not exist."
+                        ) from None
+                    docker_volumes[source] = False
                 else:
                     # Docker volume is external
                     docker_volumes[source] = True
