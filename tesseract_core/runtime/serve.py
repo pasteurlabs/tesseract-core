@@ -38,7 +38,7 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
     app = FastAPI(
         title=config.name,
         version=config.version,
-        description=config.description,
+        description=config.description.replace("\\n", "\n"),
         docs_url=None,
         redoc_url="/docs",
         debug=config.debug,
