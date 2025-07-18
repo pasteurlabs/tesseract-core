@@ -765,6 +765,16 @@ TEST_CASES = {
         input_path="testdata",
         output_path="output",
     ),
+    "metrics": Config(
+        test_with_random_inputs=True,
+        sample_requests=[
+            SampleRequest(
+                endpoint="apply",
+                payload={"inputs": {}},
+                # Just verify it runs without error - output will be empty
+            ),
+        ],
+    ),
 }
 
 
