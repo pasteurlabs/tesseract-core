@@ -28,6 +28,7 @@ BASE_OPTIONAL_DEPS = {
         "fastapi",
         "httpx",  # required by fastapi test client
         "jsf",
+        "mlflow",
         "numpy",
         "pre-commit",
         "pytest",

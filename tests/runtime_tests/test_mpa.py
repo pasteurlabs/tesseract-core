@@ -150,3 +150,34 @@ def test_log_artifact_missing_file():
 
     with pytest.raises(FileNotFoundError, match="Artifact file not found"):
         backend.log_artifact("non_existent_file.txt")
+
+
+def test_mlflow_backend_creation(tmpdir):
+    """Test that MLflowBackend is created when MLFLOW_TRACKING_URI is set."""
+    mlflow_dir = tmpdir / "mlflow_backend_test"
+    os.environ["MLFLOW_TRACKING_URI"] = f"file://{mlflow_dir}"
+    backend = mpa._create_backend()
+    assert isinstance(backend, mpa.MLflowBackend)
+
+
+def test_mlflow_log_calls(tmpdir):
+    """Test MLflow backend logging functions with temporary directory."""
+    mlflow_dir = tmpdir / "mlflow_logging_test"
+    os.environ["MLFLOW_TRACKING_URI"] = f"file://{mlflow_dir}"
+
+    with start_run():
+        log_parameter("model_type", "neural_network")
+        log_parameter("epochs", 100)
+
+        log_metric("accuracy", 0.85)
+        log_metric("loss", 0.25, step=1)
+
+        artifact_file = tmpdir / "model_config.json"
+        artifact_file.write_text("Test content", encoding="utf-8")
+        log_artifact(str(artifact_file))
+
+    # Verify MLflow directory structure was created
+    assert mlflow_dir.exists()
+    # MLflow creates experiment directories, so we should see some structure
+    mlflow_contents = list(mlflow_dir.listdir())
+    assert len(mlflow_contents) > 0
