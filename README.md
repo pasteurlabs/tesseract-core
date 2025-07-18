@@ -47,7 +47,7 @@ Tesseracts provide built-in support for [differentiable programming](https://doc
 3. Display its API documentation:
 
    ```bash
-   $ tesseract apidoc vectoradd:1.2.3
+   $ tesseract apidoc vectoradd
    ```
 
 <p align="center">
@@ -57,7 +57,7 @@ Tesseracts provide built-in support for [differentiable programming](https://doc
 4. Run the Tesseract:
 
    ```bash
-   $ tesseract run vectoradd:0.1.0 apply '{"inputs": {"a": [1], "b": [2]}}'
+   $ tesseract run vectoradd apply '{"inputs": {"a": [1], "b": [2]}}'
    {"result":{"object_type":"array","shape":[1],"dtype":"float64","data":{"buffer":[3.0],"encoding":"json"}}}⏎
    ```
 
