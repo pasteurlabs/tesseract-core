@@ -250,7 +250,8 @@ def build_image(
             "--tag",
             "-t",
             help="Tag for the resulting Tesseract. By default, this will "
-            "be inferred from the version specified in tesseract_config.yaml.",
+            "be inferred from the version specified in tesseract_config.yaml. "
+            "The Tesseract will also be tagged as `latest` by default.",
         ),
     ] = None,
     build_dir: Annotated[
