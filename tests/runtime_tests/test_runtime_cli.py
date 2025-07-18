@@ -453,6 +453,19 @@ def test_apply_fails_if_required_args_missing(cli, cli_runner):
     assert "missing" in result.stderr
 
 
+# TODO: uncomment when stdout to strerr redirection is implemented
+# def test_stdout_redirect_cli():
+#     """Ensure that stdout is redirected to stderr during normal Python execution."""
+#     # Use subprocess to ensure that CLI entrypoint is used
+#     result = subprocess.run(
+#         [sys.executable, tesseract_core.runtime.cli.__file__, "--help"],
+#         capture_output=True,
+#     )
+#     assert result.returncode == 0, result.stderr
+#     assert result.stdout == b""
+#     assert "Usage:" in result.stderr.decode("utf-8")
+
+
 def test_stdout_redirect_subprocess(tmpdir):
     """Ensure that stdout is redirected to stderr even in non-Python subprocesses."""
     testscript = [
