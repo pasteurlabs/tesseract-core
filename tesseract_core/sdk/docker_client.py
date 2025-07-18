@@ -6,6 +6,7 @@
 import json
 import logging
 import os
+import re
 import shlex
 import subprocess
 from dataclasses import dataclass
@@ -29,6 +30,14 @@ def _get_executable(program: Literal["docker", "docker-compose"]) -> tuple[str, 
     if program == "docker-compose":
         return config.docker_compose_executable
     raise ValueError(f"Unknown program: {program}")
+
+
+def _is_valid_docker_tag(tag: str) -> bool:
+    if not (1 <= len(tag) <= 128):
+        return False
+    if not re.match(r"^[A-Za-z0-9_.-]+$", tag):
+        return False
+    return True
 
 
 def is_podman() -> bool:
@@ -136,6 +145,27 @@ class Images:
         return Images._get_images(tesseract_only=tesseract_only)
 
     @staticmethod
+    def get_tags(image: str) -> list_[str]:
+        """Finds all tags associated with a given image.
+
+        Params:
+            image: The image name to find tags for.
+
+        Returns:
+           List of tags associated with the given image.
+        """
+        all_images = Images.list()
+        if not all_images or len(all_images) == 0:
+            raise RuntimeError("No Tesseract images found on this machine.")
+        tags = [
+            tag.split(":")[-1]
+            for image_ in all_images
+            for tag in image_.tags or []
+            if tag.startswith(image)
+        ]
+        return tags
+
+    @staticmethod
     def remove(image: str) -> None:
         """Remove an image (name or id) from the local Docker registry.
 
@@ -159,7 +189,7 @@ class Images:
     @staticmethod
     def _get_buildx_command(
         path: str | Path,
-        tag: str,
+        tags: list_[str],
         dockerfile: str | Path,
         ssh: str | None = None,
     ) -> list_[str]:
@@ -174,13 +204,14 @@ class Images:
         if ssh is not None:
             extra_args = ("--ssh", ssh, *extra_args)
 
+        tag_args = [f"--tag {t}" for t in tags]
+
         build_cmd = [
             *docker,
             "buildx",
             "build",
             "--load",
-            "--tag",
-            tag,
+            *tag_args,
             "--file",
             str(dockerfile),
             *extra_args,
@@ -193,7 +224,7 @@ class Images:
     @staticmethod
     def buildx(
         path: str | Path,
-        tag: str,
+        tags: list_[str],
         dockerfile: str | Path,
         ssh: str | None = None,
     ) -> Image:
@@ -210,9 +241,16 @@ class Images:
         """
         from tesseract_core.sdk.engine import LogPipe
 
+        # proper_tag = tag.split(":")[1]
+        # if not _is_valid_docker_tag(proper_tag):
+        #     raise ValueError(
+        #         f"Invalid tag {proper_tag}; only alphanumeric characters, "
+        #         "'.', and '-' are allowed."
+        #     )
+
         build_cmd = Images._get_buildx_command(
             path=path,
-            tag=tag,
+            tags=tags,
             dockerfile=dockerfile,
             ssh=ssh,
         )
@@ -228,7 +266,7 @@ class Images:
         if return_code != 0:
             raise BuildError(logs)
 
-        return Images.get(tag)
+        return Images.get(tags[0])
 
     @staticmethod
     def _get_images(tesseract_only: bool = True) -> list_[Image]:
@@ -1078,7 +1116,7 @@ def get_docker_metadata(
 
 def build_docker_image(
     path: str | Path,
-    tag: str,
+    tags: list[str],
     dockerfile: str | Path,
     inject_ssh: bool = False,
     print_and_exit: bool = False,
@@ -1097,7 +1135,7 @@ def build_docker_image(
     """
     # use an instantiated client here, which may be mocked in tests
     client = CLIDockerClient()
-    build_args = dict(path=path, tag=tag, dockerfile=dockerfile)
+    build_args = dict(path=path, tags=tags, dockerfile=dockerfile)
 
     if inject_ssh:
         ssh_sock = os.environ.get("SSH_AUTH_SOCK")

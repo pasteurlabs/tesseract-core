@@ -19,6 +19,7 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 from pydantic_core import InitErrorDetails
 
 from tesseract_core.runtime.config import update_config
+from tesseract_core.sdk.docker_client import Images
 
 from . import engine
 
@@ -141,6 +142,11 @@ class Tesseract:
         if output_path is not None:
             output_path = Path(output_path).resolve()
             volumes.append(f"{output_path}:/tesseract/output_data:rw")
+
+        if ":" not in image:
+            versions = Images.get_tags(image)
+            if versions:
+                image += ":" + max(versions)
 
         obj._spawn_config = SpawnConfig(
             image=image,
