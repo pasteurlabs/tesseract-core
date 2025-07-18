@@ -407,9 +407,12 @@ def build_tesseract(
 
     image_name = config.name
     if image_tag:
-        image_name += f":{image_tag}"
+        tags = [f"{image_name}:{image_tag}"]
     else:
-        image_name += f":{config.version}"
+        tags = [
+            f"{image_name}:{config.version}",
+            f"{image_name}:latest",
+        ]
 
     source_basename = Path(src_dir).name
 
@@ -433,7 +436,7 @@ def build_tesseract(
     try:
         image = build_docker_image(
             path=context_dir.as_posix(),
-            tag=image_name,
+            tags=tags,
             dockerfile=context_dir / "Dockerfile",
             inject_ssh=inject_ssh,
             print_and_exit=generate_only,

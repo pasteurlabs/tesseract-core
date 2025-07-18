@@ -189,7 +189,7 @@ class Images:
     @staticmethod
     def _get_buildx_command(
         path: str | Path,
-        tag: str,
+        tags: list_[str],
         dockerfile: str | Path,
         ssh: str | None = None,
     ) -> list_[str]:
@@ -204,15 +204,14 @@ class Images:
         if ssh is not None:
             extra_args = ("--ssh", ssh, *extra_args)
 
+        tag_args = [f"--tag {t}" for t in tags]
+
         build_cmd = [
             *docker,
             "buildx",
             "build",
             "--load",
-            "--tag",
-            tag,
-            "--tag",
-            f"{tag.split(':')[0]}:latest",
+            *tag_args,
             "--file",
             str(dockerfile),
             *extra_args,
@@ -225,7 +224,7 @@ class Images:
     @staticmethod
     def buildx(
         path: str | Path,
-        tag: str,
+        tags: list_[str],
         dockerfile: str | Path,
         ssh: str | None = None,
     ) -> Image:
@@ -242,16 +241,16 @@ class Images:
         """
         from tesseract_core.sdk.engine import LogPipe
 
-        proper_tag = tag.split(":")[1]
-        if not _is_valid_docker_tag(proper_tag):
-            raise ValueError(
-                f"Invalid tag {proper_tag}; only alphanumeric characters, "
-                "'.', and '-' are allowed."
-            )
+        # proper_tag = tag.split(":")[1]
+        # if not _is_valid_docker_tag(proper_tag):
+        #     raise ValueError(
+        #         f"Invalid tag {proper_tag}; only alphanumeric characters, "
+        #         "'.', and '-' are allowed."
+        #     )
 
         build_cmd = Images._get_buildx_command(
             path=path,
-            tag=tag,
+            tags=tags,
             dockerfile=dockerfile,
             ssh=ssh,
         )
@@ -267,7 +266,7 @@ class Images:
         if return_code != 0:
             raise BuildError(logs)
 
-        return Images.get(tag)
+        return Images.get(tags[0])
 
     @staticmethod
     def _get_images(tesseract_only: bool = True) -> list_[Image]:
@@ -1113,7 +1112,7 @@ def get_docker_metadata(
 
 def build_docker_image(
     path: str | Path,
-    tag: str,
+    tags: list[str],
     dockerfile: str | Path,
     inject_ssh: bool = False,
     print_and_exit: bool = False,
@@ -1132,7 +1131,7 @@ def build_docker_image(
     """
     # use an instantiated client here, which may be mocked in tests
     client = CLIDockerClient()
-    build_args = dict(path=path, tag=tag, dockerfile=dockerfile)
+    build_args = dict(path=path, tags=tags, dockerfile=dockerfile)
 
     if inject_ssh:
         ssh_sock = os.environ.get("SSH_AUTH_SOCK")
