@@ -886,6 +886,7 @@ def run_tesseract(
     gpus: list[int | str] | None = None,
     ports: dict[str, str] | None = None,
     environment: dict[str, str] | None = None,
+    network: str | None = None,
     user: str | None = None,
 ) -> tuple[str, str]:
     """Start a Tesseract and execute a given command.
@@ -900,6 +901,7 @@ def run_tesseract(
             value is the container port.
         environment: list of environment variables to set in the container,
             in Docker format: key=value.
+        network: name of the Docker network to connect the container to.
         user: user to run the Tesseract as, e.g. '1000' or '1000:1000' (uid:gid).
             Defaults to the current user.
         input_path: Input path to read input files from, such as local directory or S3 URI.
@@ -1001,6 +1003,7 @@ def run_tesseract(
         volumes=parsed_volumes,
         device_requests=gpus,
         environment=environment,
+        network=network,
         ports=ports,
         detach=False,
         remove=True,
