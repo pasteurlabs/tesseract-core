@@ -7,11 +7,13 @@ import csv
 import json
 import os
 import shutil
+import sys
 from abc import ABC, abstractmethod
 from collections.abc import Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime
+from io import UnsupportedOperation
 from pathlib import Path
 from typing import Any, Optional
 
@@ -22,6 +24,19 @@ from tesseract_core.runtime.config import get_config
 
 class BaseBackend(ABC):
     """Base class for MPA backends."""
+
+    def __init__(self) -> None:
+        self.log_dir = os.getenv("MPA_DIR")
+        if not self.log_dir:
+            self.log_dir = Path(get_config().output_path) / "mpa"
+        else:
+            self.log_dir = Path(self.log_dir)
+        self.log_dir.mkdir(exist_ok=True)
+
+        # Create a unique run directory
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        self.run_dir = self.log_dir / f"run_{timestamp}"
+        self.run_dir.mkdir(exist_ok=True)
 
     @abstractmethod
     def log_parameter(self, key: str, value: Any) -> None:
@@ -53,18 +68,7 @@ class FileBackend(BaseBackend):
     """MPA backend that writes to local files."""
 
     def __init__(self) -> None:
-        self.log_dir = os.getenv("MPA_DIR")
-        if not self.log_dir:
-            self.log_dir = Path(get_config().output_path) / "mpa"
-        else:
-            self.log_dir = Path(self.log_dir)
-        self.log_dir.mkdir(exist_ok=True)
-
-        # Create a unique run directory
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        self.run_dir = self.log_dir / f"run_{timestamp}"
-        self.run_dir.mkdir(exist_ok=True)
-
+        super().__init__()
         # Initialize log files
         self.params_file = self.run_dir / "parameters.json"
         self.metrics_file = self.run_dir / "metrics.csv"
@@ -129,6 +133,7 @@ class MLflowBackend(BaseBackend):
     """MPA backend that writes to an MLflow tracking server."""
 
     def __init__(self) -> None:
+        super().__init__()
         try:
             os.environ["GIT_PYTHON_REFRESH"] = (
                 "quiet"  # Suppress potential MLflow git warnings
@@ -224,8 +229,27 @@ def start_run() -> Generator[None, None, None]:
     backend = _create_backend()
     token = _current_backend.set(backend)
     backend.start_run()
+
     try:
-        yield
+        with redirect_stdout(backend.run_dir / "stdout.log"):
+            yield
     finally:
         backend.end_run()
         _current_backend.reset(token)
+
+
+@contextmanager
+def redirect_stdout(log_file: Path) -> Generator:
+    """Redirect stdout to a file at OS level."""
+    try:
+        orig_stdout = os.dup(sys.stdout.fileno())
+        sys.stdout.flush()
+        with open(log_file, "w") as f:
+            os.dup2(f.fileno(), sys.stdout.fileno())
+            try:
+                yield os.fdopen(orig_stdout, "w", closefd=False)
+            finally:
+                sys.stdout.flush()
+                os.dup2(orig_stdout, sys.stdout.fileno())
+    except UnsupportedOperation:
+        yield

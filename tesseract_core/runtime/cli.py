@@ -3,11 +3,9 @@
 
 """This module provides a command-line interface for interacting with the Tesseract runtime."""
 
-import contextlib
 import io
-import os
 import sys
-from collections.abc import Callable, Generator
+from collections.abc import Callable
 from pathlib import Path
 from textwrap import dedent
 from typing import Any, Optional
@@ -467,41 +465,26 @@ def _add_user_commands_to_cli(
     return group
 
 
-@contextlib.contextmanager
-def stdout_to_stderr() -> Generator:
-    """Redirect stdout to stderr at OS level."""
-    orig_stdout = os.dup(sys.stdout.fileno())
-    sys.stdout.flush()
-    os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
-    try:
-        yield os.fdopen(orig_stdout, "w", closefd=False)
-    finally:
-        sys.stdout.flush()
-        os.dup2(orig_stdout, sys.stdout.fileno())
-
-
 def main() -> None:
     """Entrypoint for the command line interface."""
-    # Redirect stdout to stderr to avoid mixing any output with the JSON response.
-    with stdout_to_stderr() as orig_stdout:
-        # Fail as fast as possible if the Tesseract API path is not set
-        api_path = get_config().api_path
-        if not api_path.is_file():
-            print(
-                f"Tesseract API file '{api_path}' does not exist. "
-                "Please ensure it is a valid file, or set the TESSERACT_API_PATH "
-                "environment variable to the path of your Tesseract API file.\n"
-                "\n"
-                "Example:\n"
-                "    $ export TESSERACT_API_PATH=/path/to/your/tesseract_api.py\n"
-                "\n"
-                "Aborted.",
-                file=sys.stderr,
-            )
-            sys.exit(1)
+    # Fail as fast as possible if the Tesseract API path is not set
+    api_path = get_config().api_path
+    if not api_path.is_file():
+        print(
+            f"Tesseract API file '{api_path}' does not exist. "
+            "Please ensure it is a valid file, or set the TESSERACT_API_PATH "
+            "environment variable to the path of your Tesseract API file.\n"
+            "\n"
+            "Example:\n"
+            "    $ export TESSERACT_API_PATH=/path/to/your/tesseract_api.py\n"
+            "\n"
+            "Aborted.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
-        cli = _add_user_commands_to_cli(tesseract_runtime, out_stream=orig_stdout)
-        cli(auto_envvar_prefix="TESSERACT_RUNTIME")
+    cli = _add_user_commands_to_cli(tesseract_runtime, out_stream=sys.stdout)
+    cli(auto_envvar_prefix="TESSERACT_RUNTIME")
 
 
 if __name__ == "__main__":
