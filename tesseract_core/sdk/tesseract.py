@@ -18,8 +18,6 @@ import requests
 from pydantic import BaseModel, TypeAdapter, ValidationError
 from pydantic_core import InitErrorDetails
 
-from tesseract_core.runtime.config import update_config
-
 from . import engine
 
 PathLike = str | Path
@@ -181,6 +179,8 @@ class Tesseract:
         Returns:
             A Tesseract instance.
         """
+        from tesseract_core.runtime.config import update_config
+
         if isinstance(tesseract_api, str | Path):
             from tesseract_core.runtime.core import load_module_from_path
 
