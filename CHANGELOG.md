@@ -17,6 +17,7 @@ All notable changes to this project will be documented in this file.
 - Tesseract-runtime default io paths (#266)
 - Add volume statements to dockerfile to ensure logs / metrics / data are always written to a volume (#270)
 - Add tests for MLflow backend using MLflow's capabillity to write to file (#271)
+- Bug in volume error handling (#272)
 
 ### Refactor
 
