@@ -810,7 +810,6 @@ def _create_docker_compose_template(
     for source in parsed_volumes:
         # Check if the volume is a local bind-mount
         if _is_local_volume(source):
-            external_volume_map[source] = False
             continue
 
         # Check if the volume is an existing Docker volume
@@ -823,7 +822,7 @@ def _create_docker_compose_template(
             external_volume_map[source] = True
 
     template = ENV.get_template("docker-compose.yml")
-    return template.render(services=services, docker_volumes=external_volume_map)
+    return template.render(services=services, named_volumes=external_volume_map)
 
 
 def _id_generator(
