@@ -204,7 +204,7 @@ class Images:
         if ssh is not None:
             extra_args = ("--ssh", ssh, *extra_args)
 
-        tag_args = [f"--tag {t}" for t in tags]
+        tag_args = [x for t in tags for x in ["--tag", t]]
 
         build_cmd = [
             *docker,
