@@ -241,12 +241,13 @@ class Images:
         """
         from tesseract_core.sdk.engine import LogPipe
 
-        # proper_tag = tag.split(":")[1]
-        # if not _is_valid_docker_tag(proper_tag):
-        #     raise ValueError(
-        #         f"Invalid tag {proper_tag}; only alphanumeric characters, "
-        #         "'.', and '-' are allowed."
-        #     )
+        for tag in tags:
+            proper_tag = tag.split(":")[1]
+            if not _is_valid_docker_tag(proper_tag):
+                raise ValueError(
+                    f"Invalid tag {proper_tag}; only alphanumeric characters, "
+                    "'.', and '-' are allowed."
+                )
 
         build_cmd = Images._get_buildx_command(
             path=path,
