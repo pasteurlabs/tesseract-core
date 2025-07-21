@@ -15,7 +15,7 @@ from contextvars import ContextVar
 from datetime import datetime
 from io import UnsupportedOperation
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import requests
 
@@ -224,7 +224,7 @@ def log_artifact(local_path: str) -> None:
 
 
 @contextmanager
-def stdio_to_logfile(logfile: str | Path) -> Generator[None, None, None]:
+def stdio_to_logfile(logfile: Union[str, Path]) -> Generator[None, None, None]:
     """Context manager for redirecting stdout and stderr to a log file."""
     from tesseract_core.runtime.core import redirect_fd
 
