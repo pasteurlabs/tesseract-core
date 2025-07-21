@@ -155,12 +155,11 @@ def test_create_image(
 
         # Create a second image with no label
         # Check that :latest gets added automatically
-        image1_name = "docker_client_create_image_test"
+        image1_name = "docker_client_create_image_test:latest"
         docker_client.images.buildx(
-            dummy_tesseract_location, image1_name, dummy_docker_file
+            dummy_tesseract_location, [image1_name], dummy_docker_file
         )
         image1 = docker_client.images.get(image1_name)
-        image1_name = image1_name + ":latest"
         assert image1 is not None
         assert image_exists(docker_client, image1_name)
         assert image_exists(docker_py_client, image1_name)
@@ -168,9 +167,9 @@ def test_create_image(
         # Create a third image with prefixed with repo url
         # Check that name gets handled properly
         repo_url = "local_host/foo/bar/"
-        image2_name = "docker_client_create_image_url_test"
+        image2_name = "docker_client_create_image_url_test:latest"
         docker_client.images.buildx(
-            dummy_tesseract_location, repo_url + image2_name, dummy_docker_file
+            dummy_tesseract_location, [repo_url + image2_name], dummy_docker_file
         )
         image2_py = docker_py_client.images.get(repo_url + image2_name)
         assert image2_py is not None
