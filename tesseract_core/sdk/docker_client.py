@@ -40,6 +40,24 @@ def _is_valid_docker_tag(tag: str) -> bool:
     return True
 
 
+def _matches_image_tag(tag: str, image: str) -> bool:
+    """Determine whether a given image tag corresponds to a specific image name.
+
+    This function checks if the `tag` string ends with the given `image` name
+    followed by a colon and a valid tag. It supports matching image paths that
+    may be nested within a repository path.
+
+    Args:
+        tag (str): The full image tag string (e.g., 'repo/image/name:tag').
+        image (str): The image name to match (e.g., 'image/name').
+
+    Returns:
+        bool: True if the tag ends with the image name followed by a valid tag.
+    """
+    pattern = rf"(?:^|/){re.escape(image)}:[\w.-]+$"
+    return re.search(pattern, tag) is not None
+
+
 def is_podman() -> bool:
     """Check if the current environment is using Podman instead of Docker."""
     docker = _get_executable("docker")
@@ -161,7 +179,7 @@ class Images:
             tag.split(":")[-1]
             for image_ in all_images
             for tag in image_.tags or []
-            if tag.startswith(image)
+            if _matches_image_tag(tag, image)
         ]
         return tags
 
