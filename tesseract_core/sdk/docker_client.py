@@ -41,11 +41,14 @@ def _is_valid_docker_tag(tag: str) -> bool:
 
 
 def _matches_image_tag(tag: str, image: str) -> bool:
-    """Determine whether a given image tag corresponds to a specific image name.
+    """Determine whether a given (full) image tag corresponds to a specific image name.
 
     This function checks if the `tag` string ends with the given `image` name
-    followed by a colon and a valid tag. It supports matching image paths that
-    may be nested within a repository path.
+    followed by a colon and a valid proper tag. It supports matching image
+    paths that may be nested within a repository path.
+
+    This is necessary here because podman will always specify the repository
+    path, even when it is localhost/.
 
     Args:
         tag (str): The full image tag string (e.g., 'repo/image/name:tag').
