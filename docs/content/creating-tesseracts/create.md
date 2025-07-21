@@ -138,7 +138,7 @@ is defined in the `tesseract_config.yaml` file, and it is `helloworld`,
 and by default it will be tagged with both the version specified there (`1.0.0`) and `latest`,
 so the full name of the tesseract we just built is `helloworld:1.0.0` or `helloworld:latest`.
 
-Notice that whenever a Tesseract is tagged as `latest`, and the Tesseract that was previously
+Notice that whenever a Tesseract is tagged as `latest`, the Tesseract that was previously
 tagged as `latest` loses that tag.
 
 
