@@ -722,9 +722,12 @@ def serve(
         compose_file.flush()
 
         project_name = f"tesseract-{_id_generator()}"
-        if not docker_client.compose.up(compose_file.name, project_name):
-            raise RuntimeError("Cannot serve Tesseracts")
-        return project_name
+        try:
+            docker_client.compose.up(compose_file.name, project_name)
+        except APIError as exc:
+            raise RuntimeError("Cannot serve Tesseracts") from exc
+
+    return project_name
 
 
 def _create_docker_compose_template(
@@ -803,28 +806,24 @@ def _create_docker_compose_template(
 
         services.append(service)
 
-    docker_volumes = {}  # Dictionary of volume names mapped to whether or not they already exist
-    if volumes:
-        for volume in volumes:
-            source = volume.split(":")[0]
-            # Check if source exists to determine if specified volume is a docker volume
-            if not Path(source).exists():
-                # Check if volume exists
-                try:
-                    docker_client.volumes.get(source)
-                except NotFound:
-                    # Not a known volume, assume it's a bind mount
-                    if "/" in source:
-                        raise ValueError(
-                            f"Volume path {source} does not exist."
-                        ) from None
-                    docker_volumes[source] = False
-                else:
-                    # Docker volume is external
-                    docker_volumes[source] = True
+    external_volume_map = {}
+    for source in parsed_volumes:
+        # Check if the volume is a local bind-mount
+        if _is_local_volume(source):
+            external_volume_map[source] = False
+            continue
+
+        # Check if the volume is an existing Docker volume
+        try:
+            docker_client.volumes.get(source)
+        except NotFound:
+            external_volume_map[source] = False
+        else:
+            # If the volume exists, it is an external Docker volume
+            external_volume_map[source] = True
 
     template = ENV.get_template("docker-compose.yml")
-    return template.render(services=services, docker_volumes=docker_volumes)
+    return template.render(services=services, docker_volumes=external_volume_map)
 
 
 def _id_generator(
@@ -832,6 +831,11 @@ def _id_generator(
 ) -> str:
     """Generate a random ID."""
     return "".join(random.choice(chars) for _ in range(size))
+
+
+def _is_local_volume(volume: str) -> bool:
+    """Check if a volume is a local path."""
+    return "/" in volume or "." in volume
 
 
 def _parse_volumes(options: list[str]) -> dict[str, dict[str, str]]:
@@ -854,8 +858,12 @@ def _parse_volumes(options: list[str]) -> dict[str, dict[str, str]]:
                 "(must be `/path/to/source:/path/totarget:(ro|rw)`)",
             )
 
-        is_local_mount = "/" in source or Path(source).exists()
-        if is_local_mount:
+        if _is_local_volume(source):
+            if not Path(source).exists():
+                raise RuntimeError(
+                    f"Source path {source} does not exist, "
+                    "please provide a valid local path."
+                )
             # Docker doesn't like paths like ".", so we convert to absolute path here
             source = str(Path(source).resolve())
         return source, {"bind": target, "mode": mode}
