@@ -453,30 +453,36 @@ def test_apply_fails_if_required_args_missing(cli, cli_runner):
     assert "missing" in result.stderr
 
 
-# TODO: uncomment when stdout to strerr redirection is implemented
-# def test_stdout_redirect_cli():
-#     """Ensure that stdout is redirected to stderr during normal Python execution."""
-#     # Use subprocess to ensure that CLI entrypoint is used
-#     result = subprocess.run(
-#         [sys.executable, tesseract_core.runtime.cli.__file__, "--help"],
-#         capture_output=True,
-#     )
-#     assert result.returncode == 0, result.stderr
-#     assert result.stdout == b""
-#     assert "Usage:" in result.stderr.decode("utf-8")
+def test_stdout_redirect_cli():
+    """Ensure that stdout is redirected to stderr during normal Python execution."""
+    import tesseract_core.runtime.cli
+
+    # Use subprocess to ensure that CLI entrypoint is used
+    result = subprocess.run(
+        [sys.executable, tesseract_core.runtime.cli.__file__, "--help"],
+        capture_output=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == b""
+    assert "Usage:" in result.stderr.decode("utf-8")
 
 
-def test_stdout_redirect_subprocess(tmpdir):
-    """Ensure that stdout is redirected to stderr even in non-Python subprocesses."""
+@pytest.mark.parametrize("target", ["file", "stderr"])
+def test_stdout_redirect_subprocess(tmpdir, target):
+    """Ensure that stdout is redirected to stderr / files even in non-Python subprocesses."""
+    if target == "file":
+        target_stream = f"open(\"{tmpdir / 'test_output.log'}\", 'w')"
+    else:
+        target_stream = "sys.stderr"
+
     testscript = [
         # Print messages that signify where the output is supposed to go
         "import os",
         "import sys",
-        "from pathlib import Path",
-        "from tesseract_core.runtime.mpa import redirect_stdout",
+        "from tesseract_core.runtime.core import redirect_fd",
         "print('stdout', file=sys.stdout)",
         "print('stderr', file=sys.stderr)",
-        f"with redirect_stdout(Path({str(tmpdir)!r}) / 'test_output.log') as orig_stdout:",
+        f"with redirect_fd(sys.stdout, {target_stream}) as orig_stdout:",
         "    os.system('echo stderr')",
         "    print('stderr', file=sys.stdout)",
         "    print('stderr', file=sys.stderr)",
@@ -488,16 +494,21 @@ def test_stdout_redirect_subprocess(tmpdir):
     testscript_path = tmpdir / "testscript.py"
     with open(testscript_path, "w") as f:
         f.write("\n".join(testscript))
+
     # Use subprocess since pytest messes with stdout/stderr
     result = subprocess.run([sys.executable, testscript_path], capture_output=True)
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert result.stdout == b"stdout\n" * 4
-    assert result.stderr == b"stderr\n" * 3
-    # Find the log file
-    log_file = tmpdir / "test_output.log"
-    with open(log_file, "rb") as f:
-        log_content = f.read()
-    assert log_content == b"stderr\n" * 2
+
+    if target == "file":
+        assert result.stderr == b"stderr\n" * 3
+        # Find the log file
+        log_file = tmpdir / "test_output.log"
+        with open(log_file, "rb") as f:
+            log_content = f.read()
+        assert log_content == b"stderr\n" * 2
+    else:
+        assert result.stderr == b"stderr\n" * 5
 
 
 def test_suggestion_on_misspelled_command(cli, cli_runner):

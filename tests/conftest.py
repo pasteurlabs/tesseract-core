@@ -91,6 +91,16 @@ def pytest_collection_modifyitems(config, items):
                 item.add_marker(pytest.mark.skip(reason=skip_reason))
 
 
+@pytest.fixture(scope="session", autouse=True)
+def set_tesseract_output_dir(tmp_path_factory):
+    """Set the Tesseract output directory for the session."""
+    from tesseract_core.runtime.config import update_config
+
+    output_path = tmp_path_factory.mktemp("output_path")
+    os.environ["TESSERACT_OUTPUT_PATH"] = str(output_path)
+    update_config(output_path=str(output_path))
+
+
 @pytest.fixture(scope="session")
 def unit_tesseract_names():
     """Return all unit tesseract names."""
