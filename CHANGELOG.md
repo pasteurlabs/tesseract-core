@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.10.1] - 2025-07-21
+
+### Features
+
+- Add --input-path to tesseract cli and TESSERACT_INPUT_PATH to runtime (#249)
+- Introduce logging metrics, parameters and artifacts to file or MLflow (#229)
+- Add top-level description field to OAS (#268)
+
+### Bug Fixes
+
+- Ensure tracebacks are always propagated through Python client (#228)
+- Ensure default workdir is writable (#263)
+- Tesseract-runtime default io paths (#266)
+- Add volume statements to dockerfile to ensure logs / metrics / data are always written to a volume (#270)
+- Add tests for MLflow backend using MLflow's capabillity to write to file (#271)
+
+### Refactor
+
+- Use RuntimeConfig for --input-path/--output-path (#264)
+
+### Documentation
+
+- Fix docstring on metrics example (#269)
+
 ## [0.10.0] - 2025-07-11
 
 ### Features
