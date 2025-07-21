@@ -10,7 +10,7 @@ import shutil
 import sys
 from abc import ABC, abstractmethod
 from collections.abc import Generator
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from contextvars import ContextVar
 from datetime import datetime
 from io import UnsupportedOperation
@@ -28,7 +28,7 @@ class BaseBackend(ABC):
     def __init__(self) -> None:
         self.log_dir = os.getenv("MPA_DIR")
         if not self.log_dir:
-            self.log_dir = Path(get_config().output_path) / "mpa"
+            self.log_dir = Path(get_config().output_path) / "logs"
         else:
             self.log_dir = Path(self.log_dir)
         self.log_dir.mkdir(exist_ok=True)
@@ -224,32 +224,39 @@ def log_artifact(local_path: str) -> None:
 
 
 @contextmanager
+def stdio_to_logfile(logfile: str | Path) -> Generator[None, None, None]:
+    """Context manager for redirecting stdout and stderr to a log file."""
+    from tesseract_core.runtime.core import redirect_fd
+
+    with ExitStack() as stack:
+        f = stack.enter_context(open(logfile, "w"))
+        try:
+            # Check if a file descriptor is available
+            sys.stdout.fileno()
+            sys.stderr.fileno()
+        except UnsupportedOperation:
+            # Don't redirect if stdout/stderr are not file descriptors
+            # (This likely means that streams are already redirected)
+            pass
+        else:
+            # Redirect file descriptors at OS level
+            stack.enter_context(redirect_fd(sys.stdout, f))
+            stack.enter_context(redirect_fd(sys.stderr, f))
+        yield
+
+
+@contextmanager
 def start_run() -> Generator[None, None, None]:
     """Context manager for starting and ending a run."""
     backend = _create_backend()
     token = _current_backend.set(backend)
     backend.start_run()
 
+    logfile = backend.run_dir / "tesseract.log"
+
     try:
-        with redirect_stdout(backend.run_dir / "stdout.log"):
+        with stdio_to_logfile(logfile):
             yield
     finally:
         backend.end_run()
         _current_backend.reset(token)
-
-
-@contextmanager
-def redirect_stdout(log_file: Path) -> Generator:
-    """Redirect stdout to a file at OS level."""
-    try:
-        orig_stdout = os.dup(sys.stdout.fileno())
-        sys.stdout.flush()
-        with open(log_file, "w") as f:
-            os.dup2(f.fileno(), sys.stdout.fileno())
-            try:
-                yield os.fdopen(orig_stdout, "w", closefd=False)
-            finally:
-                sys.stdout.flush()
-                os.dup2(orig_stdout, sys.stdout.fileno())
-    except UnsupportedOperation:
-        yield
