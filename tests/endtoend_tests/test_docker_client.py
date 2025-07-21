@@ -17,6 +17,7 @@ from tesseract_core.sdk.docker_client import (
     APIError,
     ContainerError,
     ImageNotFound,
+    _is_valid_docker_tag,
     build_docker_image,
     is_podman,
 )
@@ -37,17 +38,22 @@ def docker_client_built_image_name(
     dummy_docker_file,
 ):
     """Build the dummy image for the tests."""
-    image_name = "docker_client_create_image_test:dummy"
+    image_names = [
+        f"docker_client_create_image_test:{tag}" for tag in ["dummy", "latest"]
+    ]
 
-    build_docker_image(dummy_tesseract_location, image_name, dummy_docker_file)
+    build_docker_image(dummy_tesseract_location, image_names, dummy_docker_file)
     try:
-        yield image_name
+        # Let's just return one tag to use in tests, even if we are
+        # creating multiple ones for testing stuff like Images.get_tags
+        yield image_names[0]
     finally:
-        try:
-            docker_client.images.remove(image_name)
-        except ImageNotFound:
-            # already removed
-            pass
+        for image in image_names:
+            try:
+                docker_client.images.remove(image)
+            except ImageNotFound:
+                # already removed
+                pass
 
 
 def test_get_image(docker_client, docker_client_built_image_name, docker_py_client):
@@ -333,12 +339,14 @@ def test_compose_up_down(
     try:
         compose_file = tmp_path / "docker-compose.yml"
         # Use tail -f /dev/null to keep the container running
-        compose_content = textwrap.dedent(f"""
+        compose_content = textwrap.dedent(
+            f"""
             services:
               test:
                 image: {docker_client_built_image_name}
                 command: ["echo 'Hello Tesseract' && tail -f /dev/null"]
-        """)
+        """
+        )
         compose_file.write_text(compose_content)
         # Run docker-compose up
         project_name = docker_client.compose.up(
@@ -389,11 +397,13 @@ def test_compose_error(docker_client, tmp_path, docker_client_built_image_name):
     """Test docker-compose error handling."""
     compose_file = tmp_path / "docker-compose.yml"
     # Write a malformed compose file
-    compose_content = textwrap.dedent(f"""
+    compose_content = textwrap.dedent(
+        f"""
         services:
             test:
             image: {docker_client_built_image_name}
-    """)
+    """
+    )
     compose_file.write_text(compose_content)
     with pytest.raises(APIError) as e:
         docker_client.compose.up(str(compose_file), "docker_client_compose_test")
@@ -481,3 +491,30 @@ def test_is_podman():
     """
     real_is_podman = "podman" in os.environ.get("DOCKER_HOST", "")
     assert is_podman() == real_is_podman
+
+
+def test_get_tags(docker_client, docker_client_built_image_name):
+    """Test getting tags for a given image."""
+    base_name = docker_client_built_image_name.split(":")[0]
+    tags = docker_client.images.get_tags(base_name)
+    assert tags == ["dummy", "latest"]
+
+
+def test_is_valid_docker_tag():
+    valid_tags = [
+        "1.0.0",
+        "v1.0.0",
+        "sometag",
+        "some-tag",
+    ]
+    for tag in valid_tags:
+        assert _is_valid_docker_tag(tag)
+
+    invalid_tags = [
+        "0+unknown",
+        "my/repo",
+        "my\\tag",
+        "a" * 129,
+    ]
+    for tag in invalid_tags:
+        assert not _is_valid_docker_tag(tag)
