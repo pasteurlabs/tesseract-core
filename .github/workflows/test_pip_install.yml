@@ -3,9 +3,6 @@ name: Test installation via pip
 on:
     # run on PRs for validation
     pull_request:
-      paths:
-        - 'requirements.txt'
-
 
 jobs:
   test-pip-install:
