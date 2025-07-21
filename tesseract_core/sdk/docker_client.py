@@ -562,6 +562,7 @@ class Containers:
         volumes: dict | None = None,
         device_requests: list_[int | str] | None = None,
         environment: dict[str, str] | None = None,
+        network: str | None = None,
         detach: bool = False,
         remove: bool = False,
         ports: dict | None = None,
@@ -614,6 +615,9 @@ class Containers:
                     f"{host_path}:{volume_info['bind']}:{volume_info['mode']}"
                 )
             optional_args.extend(volume_args)
+
+        if network:
+            optional_args.extend(["--network", network])
 
         if user:
             optional_args.extend(["-u", user])

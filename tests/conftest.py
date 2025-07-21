@@ -335,6 +335,11 @@ def mocked_docker(monkeypatch):
             return {"StatusCode": 0, "Error": None}
 
         @property
+        def name(self):
+            """Mock name property for Container."""
+            return json.dumps(self.return_args)
+
+        @property
         def attrs(self):
             """Mock attrs method for Container."""
             return {"Config": {"Env": ["TESSERACT_NAME=vectoradd"]}}
@@ -362,6 +367,26 @@ def mocked_docker(monkeypatch):
         def info() -> tuple:
             """Mock info method for DockerClient."""
             return "", ""
+
+        class volumes:
+            """Mock of CLIDockerClient.volumes."""
+
+            @staticmethod
+            def create(name: str) -> Any:
+                """Mock of CLIDockerClient.volumes.create."""
+                return {"Name": name}
+
+            @staticmethod
+            def get(name: str) -> Any:
+                """Mock of CLIDockerClient.volumes.get."""
+                if "/" in name:
+                    raise NotFound(f"Volume {name} not found")
+                return {"Name": name}
+
+            @staticmethod
+            def list() -> list[Any]:
+                """Mock of CLIDockerClient.volumes.list."""
+                return [{"Name": "test_volume"}]
 
         class images:
             """Mock of CLIDockerClient.images."""
@@ -450,5 +475,13 @@ def mocked_docker(monkeypatch):
     monkeypatch.setattr(
         tesseract_core.sdk.docker_client, "CLIDockerClient", MockedDocker
     )
+
+    def hacked_get(url, *args, **kwargs):
+        if url.endswith("/health"):
+            # Simulate a successful health check
+            return type("Response", (), {"status_code": 200, "json": lambda: {}})()
+        raise NotImplementedError(f"Mocked get request to {url} not implemented")
+
+    engine.requests.get = hacked_get
 
     yield mock_instance

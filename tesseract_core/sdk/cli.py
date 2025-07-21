@@ -885,6 +885,16 @@ def run_container(
             show_default=False,
         ),
     ] = None,
+    network: Annotated[
+        str | None,
+        typer.Option(
+            "--network",
+            help="Network to use for the Tesseract container, analogous to Docker's --network option. "
+            "For example, 'host' uses the host system's network. Alternatively, you can create a custom "
+            "network with `docker network create <network-name>` and use it here.",
+            show_default=False,
+        ),
+    ] = None,
     user: Annotated[
         str | None,
         typer.Option(
@@ -955,6 +965,7 @@ def run_container(
             volumes=volume,
             gpus=gpus,
             environment=environment,
+            network=network,
             user=user,
         )
 
