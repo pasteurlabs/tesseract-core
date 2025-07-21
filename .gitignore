@@ -144,3 +144,6 @@ _version.py
 # Ignore UV dev environments
 uv.lock
 uv.lock.bak
+
+# Logs folders written by tests
+logs/
