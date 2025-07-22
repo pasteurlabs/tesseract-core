@@ -742,12 +742,7 @@ def test_tarball_install(dummy_tesseract_package, docker_cleanup):
     docker_cleanup["images"].append(img_tag)
 
 
-@pytest.mark.parametrize("default_log_dir", ["default", "custom"])
-def test_mpa_file_backend(
-    dummy_tesseract_package, tmpdir, docker_cleanup, default_log_dir
-):
-    """Test the MPA (Metrics, Parameters, and Artifacts) submodule with file backend."""
-    import csv
+def _prepare_mpa_test_image(dummy_tesseract_package, docker_cleanup):
     from textwrap import dedent
 
     tesseract_api = dedent(
@@ -788,6 +783,9 @@ def test_mpa_file_backend(
     # Write the API file
     with open(dummy_tesseract_package / "tesseract_api.py", "w") as f:
         f.write(tesseract_api)
+    # Add mlflow dependency
+    with open(dummy_tesseract_package / "tesseract_requirements.txt", "w") as f:
+        f.write("mlflow\n")
 
     cli_runner = CliRunner(mix_stderr=False)
 
@@ -801,6 +799,18 @@ def test_mpa_file_backend(
 
     img_tag = json.loads(result.stdout)[0]
     docker_cleanup["images"].append(img_tag)
+
+    return img_tag
+
+
+@pytest.mark.parametrize("default_log_dir", ["default", "custom"])
+def test_mpa_file_backend(
+    dummy_tesseract_package, tmpdir, docker_cleanup, default_log_dir
+):
+    """Test the MPA (Metrics, Parameters, and Artifacts) submodule with file backend."""
+    import csv
+
+    img_tag = _prepare_mpa_test_image(dummy_tesseract_package, docker_cleanup)
 
     if default_log_dir == "default":
         run_cmd = [
@@ -881,63 +891,7 @@ def test_mpa_file_backend(
 
 def test_mpa_mlflow_backend(dummy_tesseract_package, tmpdir, docker_cleanup):
     """Test the MPA (Metrics, Parameters, and Artifacts) submodule with MLflow backend."""
-    import json
-    from textwrap import dedent
-
-    tesseract_api = dedent(
-        """
-    from pydantic import BaseModel
-    from tesseract_core.runtime.experimental import log_artifact, log_metric, log_parameter
-
-    class InputSchema(BaseModel):
-        pass
-
-    class OutputSchema(BaseModel):
-        pass
-
-    def apply(inputs: InputSchema) -> OutputSchema:
-        steps = 5
-        param_value = "test_param"
-        # Log parameters
-        log_parameter("test_parameter", param_value)
-        log_parameter("steps_config", steps)
-
-        # Log metrics over multiple steps
-        for step in range(steps):
-            log_metric("squared_step", step ** 2, step=step)
-
-        # Create and log an artifact
-        artifact_content = "Test artifact content"
-
-        artifact_path = "/tmp/test_artifact.txt"
-        with open(artifact_path, "w") as f:
-            f.write(artifact_content)
-
-        log_artifact(artifact_path)
-
-        return OutputSchema()
-        """
-    )
-
-    # Write the API
-    with open(dummy_tesseract_package / "tesseract_api.py", "w") as f:
-        f.write(tesseract_api)
-    # Add mlflow as explicit dependency of test Tesseract
-    with open(dummy_tesseract_package / "tesseract_requirements.txt", "w") as f:
-        f.write("mlflow\n")
-
-    cli_runner = CliRunner(mix_stderr=False)
-
-    # Build the Tesseract
-    result = cli_runner.invoke(
-        app,
-        ["--loglevel", "debug", "build", str(dummy_tesseract_package)],
-        catch_exceptions=False,
-    )
-    assert result.exit_code == 0, result.stderr
-
-    img_tag = json.loads(result.stdout)[0]
-    docker_cleanup["images"].append(img_tag)
+    img_tag = _prepare_mpa_test_image(dummy_tesseract_package, docker_cleanup)
 
     # Point MLflow to a local directory
     run_cmd = [
