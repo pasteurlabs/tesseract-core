@@ -2,7 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import importlib
-from collections.abc import Callable
+import os
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
+from io import TextIOBase
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Union
@@ -17,6 +20,27 @@ from .schema_generation import (
     create_apply_schema,
     create_autodiff_schema,
 )
+
+
+@contextmanager
+def redirect_fd(
+    from_fd: TextIOBase, to_fd: TextIOBase
+) -> Generator[TextIOBase, None, None]:
+    """Redirect a file descriptor at OS level.
+
+    Yields:
+        A writable file object connected to the original file descriptor.
+    """
+    orig_fd = os.dup(from_fd.fileno())
+    from_fd.flush()
+    os.dup2(to_fd.fileno(), from_fd.fileno())
+    orig_fd_file = os.fdopen(orig_fd, "w", closefd=True)
+    try:
+        yield orig_fd_file
+    finally:
+        from_fd.flush()
+        os.dup2(orig_fd, from_fd.fileno())
+        orig_fd_file.close()
 
 
 def load_module_from_path(path: Union[Path, str]) -> ModuleType:

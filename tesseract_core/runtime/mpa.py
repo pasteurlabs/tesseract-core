@@ -7,13 +7,15 @@ import csv
 import json
 import os
 import shutil
+import sys
 from abc import ABC, abstractmethod
 from collections.abc import Generator
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from contextvars import ContextVar
 from datetime import datetime
+from io import UnsupportedOperation
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import requests
 
@@ -22,6 +24,19 @@ from tesseract_core.runtime.config import get_config
 
 class BaseBackend(ABC):
     """Base class for MPA backends."""
+
+    def __init__(self) -> None:
+        self.log_dir = os.getenv("MPA_DIR")
+        if not self.log_dir:
+            self.log_dir = Path(get_config().output_path) / "logs"
+        else:
+            self.log_dir = Path(self.log_dir)
+        self.log_dir.mkdir(exist_ok=True)
+
+        # Create a unique run directory
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        self.run_dir = self.log_dir / f"run_{timestamp}"
+        self.run_dir.mkdir(exist_ok=True)
 
     @abstractmethod
     def log_parameter(self, key: str, value: Any) -> None:
@@ -53,18 +68,7 @@ class FileBackend(BaseBackend):
     """MPA backend that writes to local files."""
 
     def __init__(self) -> None:
-        self.log_dir = os.getenv("MPA_DIR")
-        if not self.log_dir:
-            self.log_dir = Path(get_config().output_path) / "mpa"
-        else:
-            self.log_dir = Path(self.log_dir)
-        self.log_dir.mkdir(exist_ok=True)
-
-        # Create a unique run directory
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        self.run_dir = self.log_dir / f"run_{timestamp}"
-        self.run_dir.mkdir(exist_ok=True)
-
+        super().__init__()
         # Initialize log files
         self.params_file = self.run_dir / "parameters.json"
         self.metrics_file = self.run_dir / "metrics.csv"
@@ -129,6 +133,7 @@ class MLflowBackend(BaseBackend):
     """MPA backend that writes to an MLflow tracking server."""
 
     def __init__(self) -> None:
+        super().__init__()
         try:
             os.environ["GIT_PYTHON_REFRESH"] = (
                 "quiet"  # Suppress potential MLflow git warnings
@@ -219,13 +224,39 @@ def log_artifact(local_path: str) -> None:
 
 
 @contextmanager
+def stdio_to_logfile(logfile: Union[str, Path]) -> Generator[None, None, None]:
+    """Context manager for redirecting stdout and stderr to a log file."""
+    from tesseract_core.runtime.core import redirect_fd
+
+    with ExitStack() as stack:
+        f = stack.enter_context(open(logfile, "w"))
+        try:
+            # Check if a file descriptor is available
+            sys.stdout.fileno()
+            sys.stderr.fileno()
+        except UnsupportedOperation:
+            # Don't redirect if stdout/stderr are not file descriptors
+            # (This likely means that streams are already redirected)
+            pass
+        else:
+            # Redirect file descriptors at OS level
+            stack.enter_context(redirect_fd(sys.stdout, f))
+            stack.enter_context(redirect_fd(sys.stderr, f))
+        yield
+
+
+@contextmanager
 def start_run() -> Generator[None, None, None]:
     """Context manager for starting and ending a run."""
     backend = _create_backend()
     token = _current_backend.set(backend)
     backend.start_run()
+
+    logfile = backend.run_dir / "tesseract.log"
+
     try:
-        yield
+        with stdio_to_logfile(logfile):
+            yield
     finally:
         backend.end_run()
         _current_backend.reset(token)
