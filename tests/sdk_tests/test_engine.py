@@ -19,7 +19,7 @@ from tesseract_core.sdk.api_parse import (
     validate_tesseract_api,
 )
 from tesseract_core.sdk.cli import AVAILABLE_RECIPES
-from tesseract_core.sdk.docker_client import Image
+from tesseract_core.sdk.docker_client import Image, NotFound
 from tesseract_core.sdk.exceptions import UserError
 
 
@@ -170,9 +170,9 @@ def test_run_tesseract_file_input(mocked_docker, tmpdir):
     res = json.loads(res)
     assert res["command"] == [
         "apply",
-        "@/mnt/payload.json",
+        "@/tesseract/payload.json",
         "--output-path",
-        "/mnt/output",
+        "/tesseract/output_data",
     ]
     assert res["image"] == "foobar"
     assert res["volumes"].keys() == {str(infile), str(outdir)}
@@ -182,17 +182,32 @@ def test_run_tesseract_file_input(mocked_docker, tmpdir):
         "foobar",
         "apply",
         [f"@{infile}", "--output-path", str(outdir)],
-        volumes=["/path/on/host:/path/in/container:ro"],
+        volumes=[f"{tmpdir}:/path/in/container:ro"],
     )
     res = json.loads(res)
-    assert res["volumes"].keys() == {str(infile), str(outdir), "/path/on/host"}
-    assert res["volumes"]["/path/on/host"] == {
+    assert res["volumes"].keys() == {str(infile), str(outdir), f"{tmpdir}"}
+    assert res["volumes"][f"{tmpdir}"] == {
         "mode": "ro",
         "bind": "/path/in/container",
     }
 
+    # Test the same but with --input_path
+    indir = tmpdir / "input_path"
+    indir.mkdir()
+    res, _ = engine.run_tesseract(
+        "foobar",
+        "apply",
+        [f"@{infile}", "--output-path", str(outdir), "--input-path", str(indir)],
+    )
+    res = json.loads(res)
+    assert res["volumes"].keys() == {str(outdir), str(indir), str(infile)}
+    assert res["volumes"][str(indir)] == {
+        "mode": "ro",
+        "bind": "/tesseract/input_data",
+    }
 
-def test_serve_tesseracts_invalid_input_args():
+
+def test_serve_tesseracts_invalid_input_args(mocked_docker):
     """Test input validation logic for multi-tesseract serve."""
     with suppress_type_checks():
         with pytest.raises(ValueError):
@@ -206,6 +221,28 @@ def test_serve_tesseracts_invalid_input_args():
 
         with pytest.raises(ValueError):
             engine.teardown(None)
+
+        with pytest.raises(ValueError):
+            engine.serve(["vectoradd"], ports=["8080", "8081"])
+
+        with pytest.raises(ValueError):
+            engine.serve(["vectoradd"], service_names=["A", "B"])
+
+        with pytest.raises(ValueError):
+            engine.serve(
+                ["vectoradd", "vectoradd"],
+                no_compose=True,
+                service_names=["VA1", "VA2"],
+            )
+
+        with pytest.raises(ValueError):
+            engine.serve(["vectoradd", "vectoradd"], service_names=["dupe", "dupe"])
+
+        with pytest.raises(ValueError):
+            engine.serve(["vectoradd"], service_names=["inval$id-domain-name"])
+
+        with pytest.raises(ValueError):
+            engine.serve(["vectoradd"], service_names=["-invalid-name"])
 
 
 def test_get_tesseract_images(mocked_docker):
@@ -235,12 +272,62 @@ def test_serve_tesseracts(mocked_docker):
     engine.teardown(project_name_multi_tesseract)
 
     # Tear down invalid
-    with pytest.raises(ValueError):
+    with pytest.raises(NotFound):
         engine.teardown("invalid_project_name")
 
     # Serve with gpus
     project_name_multi_tesseract = engine.serve(["vectoradd"], gpus=["1", "3"])
     assert project_name_multi_tesseract
+
+    # Serve and specify tesseract service names
+    project_name_multi_tesseract = engine.serve(
+        ["vectoradd", "vectoradd"], service_names=["VA1", "VA2"]
+    )
+    assert project_name_multi_tesseract
+
+
+@pytest.mark.parametrize("no_compose", [True, False])
+def test_serve_tesseract_volumes(mocked_docker, tmpdir, no_compose):
+    """Test running a tesseract with volumes."""
+    # Test with a single volume
+    res = engine.serve(
+        ["foobar"],
+        volumes=[f"{tmpdir}:/path/in/container:ro"],
+        no_compose=no_compose,
+    )
+
+    if no_compose:
+        # Currently no good way to test return value of serve with no_compose=True
+        # since it returns a project ID.
+        res = json.loads(res)
+        assert res["volumes"].keys() == {f"{tmpdir}"}
+        assert res["volumes"][f"{tmpdir}"] == {
+            "mode": "ro",
+            "bind": "/path/in/container",
+        }
+
+    # Test with a named volume
+    res = engine.serve(
+        ["foobar"],
+        volumes=["my_named_volume:/path/in/container:ro"],
+        no_compose=no_compose,
+    )
+
+    if no_compose:
+        res = json.loads(res)
+        assert res["volumes"].keys() == {"my_named_volume"}
+        assert res["volumes"]["my_named_volume"] == {
+            "mode": "ro",
+            "bind": "/path/in/container",
+        }
+
+    with pytest.raises(RuntimeError):
+        # Test with a volume that does not exist
+        engine.serve(
+            ["foobar"],
+            volumes=["/non/existent/path:/path/in/container:ro"],
+            no_compose=no_compose,
+        )
 
 
 def test_needs_docker(mocked_docker, monkeypatch):

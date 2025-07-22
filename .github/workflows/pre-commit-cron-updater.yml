@@ -9,6 +9,7 @@ on:
 jobs:
   auto-update-hooks:
     runs-on: ubuntu-latest
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -57,10 +58,13 @@ jobs:
     # 3. Changes were made but pre-commit failed -> create PR with draft status
 
     - name: Create Pull Request (all good)
+      id: create-pr-ok
       if: steps.pre-commit.outputs.pre-commit-outcome == 'success'
       uses: peter-evans/create-pull-request@v7
       with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
+          committer: PasteurBot <${{ vars.PL_PASTEURBOT_EMAIL }}>
+          author: PasteurBot <${{ vars.PL_PASTEURBOT_EMAIL }}>
           commit-message: Update pre-commit hooks
           title: "chore: ✅ Update pre-commit hooks"
           branch: _bot/update-precommit
@@ -68,11 +72,21 @@ jobs:
           body: |
             Pre-commit hooks have been updated successfully without conflicts.
 
+    - name: Enable auto-merge
+      if: steps.create-pr-ok.outputs.pull-request-operation == 'created'
+      uses: peter-evans/enable-pull-request-automerge@v3
+      with:
+          token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
+          pull-request-number: ${{ steps.create-pr-ok.outputs.pull-request-number }}
+          merge-method: squash
+
     - name: Create Pull Request (conflicts)
       if: steps.pre-commit.outputs.pre-commit-outcome == 'failure'
       uses: peter-evans/create-pull-request@v7
       with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
+          committer: PasteurBot <${{ vars.PL_PASTEURBOT_EMAIL }}>
+          author: PasteurBot <${{ vars.PL_PASTEURBOT_EMAIL }}>
           commit-message: Update pre-commit hooks
           title: "chore: ⚠️ Update pre-commit hooks [review required]"
           branch: _bot/update-precommit

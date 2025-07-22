@@ -94,7 +94,7 @@ class CondaRequirements(BaseModel):
 PythonRequirements = Union[PipRequirements, CondaRequirements]
 
 
-class TesseractBuildConfig(BaseModel):
+class TesseractBuildConfig(BaseModel, validate_assignment=True):
     """Configuration options for building a Tesseract."""
 
     base_image: StrictStr = Field(
@@ -131,6 +131,15 @@ class TesseractBuildConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    skip_checks: bool = Field(
+        False,
+        description=(
+            "If True, skip build-time checks of Tesseract API module. "
+            "This can be useful when such a check cannot succeed (e.g. when building for a "
+            "different platform), but may lead to runtime errors if the Tesseract API is not valid."
+        ),
+    )
+
 
 # Allow None to be passed as a valid value for build_config, for example in YAML that comments out all options.
 OptionalBuildConfig = Annotated[
@@ -139,7 +148,7 @@ OptionalBuildConfig = Annotated[
 ]
 
 
-class TesseractConfig(BaseModel):
+class TesseractConfig(BaseModel, validate_assignment=True):
     """Configuration options for Tesseracts. Defines valid options in ``tesseract_config.yaml``."""
 
     name: StrictStr = Field(..., description="Name of the Tesseract.")
@@ -262,14 +271,7 @@ def validate_tesseract_api(src_dir: Path) -> None:
     for schema in ("InputSchema", "OutputSchema"):
         obj = toplevel_objects[schema]
         if not obj.bases:
-            subclass = None
-        else:
-            subclass = obj.bases[0].id
-
-        if subclass != "BaseModel":
-            raise ValidationError(
-                f"{schema} must be a subclass of pydantic.BaseModel (got: {subclass})"
-            )
+            raise ValidationError(f"{schema} must inherit from pydantic.BaseModel")
 
 
 def get_config(src_dir: Path) -> TesseractConfig:

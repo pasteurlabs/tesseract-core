@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import atexit
 import base64
-import json
-import subprocess
+import traceback
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from functools import cached_property, wraps
@@ -16,10 +15,12 @@ from urllib.parse import urlparse, urlunparse
 
 import numpy as np
 import requests
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 from pydantic_core import InitErrorDetails
 
 from . import engine
+
+PathLike = str | Path
 
 
 @dataclass
@@ -28,9 +29,11 @@ class SpawnConfig:
 
     image: str
     volumes: list[str] | None
+    environment: dict[str, str] | None
     gpus: list[str] | None
     num_workers: int
     debug: bool
+    no_compose: bool
 
 
 def requires_client(func: Callable) -> Callable:
@@ -85,8 +88,12 @@ class Tesseract:
         image: str,
         *,
         volumes: list[str] | None = None,
+        environment: dict[str, str] | None = None,
+        input_path: PathLike | None = None,
+        output_path: PathLike | None = None,
         gpus: list[str] | None = None,
         num_workers: int = 1,
+        no_compose: bool = False,
     ) -> Tesseract:
         """Create a Tesseract instance from a Docker image.
 
@@ -104,21 +111,43 @@ class Tesseract:
         Args:
             image: The Docker image to use.
             volumes: List of volumes to mount, e.g. ["/path/on/host:/path/in/container"].
+            environment: dictionary of environment variables to pass to the Tesseract.
+            input_path: Path to be mounted as the input directory in the
+                container (read only). All paths in the input payload must be
+                relative to this path.
+            output_path: Path to be mounted as the output directory in the
+                container (read+write). All paths in the output result will be
+                relative to this path.
             gpus: List of GPUs to use, e.g. ["0", "1"]. (default: no GPUs)
             num_workers: Number of worker processes to use. This determines how
                 many requests can be handled in parallel. Higher values
                 will increase throughput, but also increase resource usage.
+            no_compose: if True, do not use Docker Compose to serve the Tesseracts.
 
         Returns:
             A Tesseract instance.
         """
         obj = cls.__new__(cls)
+
+        if environment is None:
+            environment = {}
+        if volumes is None:
+            volumes = []
+        if input_path is not None:
+            input_path = Path(input_path).resolve()
+            volumes.append(f"{input_path}:/tesseract/input_data:ro")
+        if output_path is not None:
+            output_path = Path(output_path).resolve()
+            volumes.append(f"{output_path}:/tesseract/output_data:rw")
+
         obj._spawn_config = SpawnConfig(
             image=image,
             volumes=volumes,
+            environment=environment,
             gpus=gpus,
             num_workers=num_workers,
             debug=True,
+            no_compose=no_compose,
         )
         obj._serve_context = None
         obj._lastlog = None
@@ -129,6 +158,8 @@ class Tesseract:
     def from_tesseract_api(
         cls,
         tesseract_api: str | Path | ModuleType,
+        input_path: Path | None = None,
+        output_path: Path | None = None,
     ) -> Tesseract:
         """Create a Tesseract instance from a Tesseract API module.
 
@@ -140,10 +171,16 @@ class Tesseract:
         Args:
             tesseract_api: Path to the `tesseract_api.py` file, or an
                 already imported Tesseract API module.
+            input_path: Path of input directory. All paths in the tesseract
+                payload have to be relative to this path.
+            output_path: Path of output directory. All paths in the tesseract
+                result with be given relative to this path.
 
         Returns:
             A Tesseract instance.
         """
+        from tesseract_core.runtime.config import update_config
+
         if isinstance(tesseract_api, str | Path):
             from tesseract_core.runtime.core import load_module_from_path
 
@@ -159,6 +196,11 @@ class Tesseract:
                 raise RuntimeError(
                     f"Cannot load Tesseract API from {tesseract_api_path}"
                 ) from ex
+
+        if input_path is not None:
+            update_config(input_path=str(input_path.resolve()))
+        if output_path is not None:
+            update_config(output_path=str(output_path.resolve()))
 
         obj = cls.__new__(cls)
         obj._spawn_config = None
@@ -206,11 +248,12 @@ class Tesseract:
             return self._lastlog
         return engine.logs(self._serve_context["container_id"])
 
-    def serve(self, port: str | None = None) -> None:
+    def serve(self, port: str | None = None, host_ip: str = "127.0.0.1") -> None:
         """Serve the Tesseract.
 
         Args:
             port: Port to serve the Tesseract on.
+            host_ip: IP address of the host to bind the Tesseract to.
         """
         if self._spawn_config is None:
             raise RuntimeError("Can only serve a Tesseract created via from_image.")
@@ -220,9 +263,12 @@ class Tesseract:
             self._spawn_config.image,
             port=port,
             volumes=self._spawn_config.volumes,
+            environment=self._spawn_config.environment,
             gpus=self._spawn_config.gpus,
             num_workers=self._spawn_config.num_workers,
             debug=self._spawn_config.debug,
+            no_compose=self._spawn_config.no_compose,
+            host_ip=host_ip,
         )
         self._serve_context = dict(
             project_id=project_id,
@@ -230,7 +276,7 @@ class Tesseract:
             port=served_port,
         )
         self._lastlog = None
-        self._client = HTTPClient(f"http://localhost:{served_port}")
+        self._client = HTTPClient(f"http://{host_ip}:{served_port}")
         atexit.register(self.teardown)
 
     def teardown(self) -> None:
@@ -258,10 +304,13 @@ class Tesseract:
     def _serve(
         image: str,
         port: str | None = None,
+        host_ip: str = "127.0.0.1",
         volumes: list[str] | None = None,
+        environment: dict[str, str] | None = None,
         gpus: list[str] | None = None,
         debug: bool = False,
         num_workers: int = 1,
+        no_compose: bool = False,
     ) -> tuple[str, str, int]:
         if port is not None:
             ports = [port]
@@ -272,27 +321,16 @@ class Tesseract:
             [image],
             ports=ports,
             volumes=volumes,
+            environment=environment,
             gpus=gpus,
             debug=debug,
             num_workers=num_workers,
+            host_ip=host_ip,
+            no_compose=no_compose,
         )
 
-        command = ["docker", "compose", "-p", project_id, "ps", "--format", "json"]
-        result = subprocess.run(command, capture_output=True, text=True)
-
-        # This relies on the fact that result.stdout from docker compose ps
-        # contains multiple json dicts, one for each container, separated by newlines,
-        # but json.loads will only parse the first one.
-        # The first_container dict contains useful info like container id, ports, etc.
-        first_container = json.loads(result.stdout)
-
-        if first_container:
-            first_container_id = first_container["ID"]
-            first_container_port = first_container["Publishers"][0]["PublishedPort"]
-        else:
-            raise RuntimeError("No containers found.")
-
-        return project_id, first_container_id, first_container_port
+        first_container = engine.get_project_containers(project_id)[0]
+        return project_id, first_container.id, int(first_container.host_port)
 
     @cached_property
     @requires_client
@@ -663,10 +701,18 @@ class LocalClient:
             else:
                 result = self._endpoints[endpoint]()
         except Exception as ex:
-            raise RuntimeError(f"Error running Tesseract API {endpoint}.") from ex
+            # Some clients like Tesseract-JAX swallow tracebacks from re-raised exceptions, so we explicitly
+            # format the traceback here to include it in the error message.
+            tb = traceback.format_exc()
+            raise RuntimeError(
+                f"{tb}\nError running Tesseract API {endpoint}: {ex} (see above for full traceback)"
+            ) from None
 
-        if OutputSchema is not None and issubclass(OutputSchema, BaseModel):
+        if OutputSchema is not None:
             # Validate via schema, then dump to stay consistent with other clients
-            result = OutputSchema.model_validate(result).model_dump()
+            if isinstance(OutputSchema, type) and issubclass(OutputSchema, BaseModel):
+                result = OutputSchema.model_validate(result).model_dump()
+            else:
+                result = TypeAdapter(OutputSchema).validate_python(result)
 
         return result

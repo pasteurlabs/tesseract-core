@@ -36,8 +36,9 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
     """Create the Tesseract REST API."""
     config = get_config()
     app = FastAPI(
-        title=config.tesseract_name,
-        version=config.tesseract_version,
+        title=config.name,
+        version=config.version,
+        description=config.description.replace("\\n", "\n"),
         docs_url=None,
         redoc_url="/docs",
         debug=config.debug,
@@ -89,6 +90,12 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
 
 def serve(host: str, port: int, num_workers: int) -> None:
     """Start the REST API."""
+    config = get_config()
+    if config.debug:
+        import debugpy
+
+        debugpy.listen(("0.0.0.0", 5678))
+
     uvicorn.run(
         "tesseract_core.runtime.app_http:app", host=host, port=port, workers=num_workers
     )

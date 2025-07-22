@@ -2,6 +2,90 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.10.2] - 2025-07-21
+
+### Bug Fixes
+
+- Fix + test for missing deps in pip install test (#278)
+
+## [0.10.1] - 2025-07-21
+
+### Features
+
+- Add --input-path to tesseract cli and TESSERACT_INPUT_PATH to runtime (#249)
+- Introduce logging metrics, parameters and artifacts to file or MLflow (#229)
+- Add top-level description field to OAS (#268)
+
+### Bug Fixes
+
+- Ensure tracebacks are always propagated through Python client (#228)
+- Ensure default workdir is writable (#263)
+- Tesseract-runtime default io paths (#266)
+- Add volume statements to dockerfile to ensure logs / metrics / data are always written to a volume (#270)
+- Add tests for MLflow backend using MLflow's capabillity to write to file (#271)
+- Bug in volume error handling (#272)
+
+### Refactor
+
+- Use RuntimeConfig for --input-path/--output-path (#264)
+
+### Documentation
+
+- Fix docstring on metrics example (#269)
+
+## [0.10.0] - 2025-07-11
+
+### Features
+
+- *(sdk)* Expose no compose in Python API (#223)
+- [**breaking**] Enable remote debugging (#184)
+- Add --service-names argument to `tesseract serve` so served Tesseracts can be reached by name (#206)
+- Allow skipping checks by passing `--skip-checks` flag to the tesseract build command (#233)
+- Add Volume class to docker client and --user flag to cli (#241)
+- Pass env variables through `tesseract run` and `tesseract serve` (#250)
+- Allow to run T containers as any user, for better volume permission handling (#253)
+
+### Bug Fixes
+
+- Fix teardown command crashing for wrong proj ID (#207)
+- Add FileNotFoundError to docker info (#215)
+- Gracefully exit when Docker executable not found (#216)
+- "docker buildx build requires exactly 1 argument" error when using `tesseract build --forward-ssh-agent` (#231)
+- Remove zip(strict=True) for py39 support (#227)
+- Allow to set all configs via `tesseract build --config-override` (#239)
+- Add environment to no_compose (#257)
+
+### Documentation
+
+- Add in data assimilation tutorial and refactor example gallery (#200)
+- Remove reference to Hessian matrices (#221)
+- New user usability improvements (#226)
+- Fine-tune onboarding experience (#243)
+
+## [0.9.1] - 2025-06-05
+
+### Features
+
+- *(cli)* Add serve --no-compose and other missing cli options (#161)
+- *(sdk)* Make docker executable and build args configurable (#162)
+- More comprehensive validation of input and output schema during `tesseract-runtime check` (#170)
+- Add ability to configure host IP during `tesseract serve` (#185)
+
+### Bug Fixes
+
+- Add new cleanup fixture to track docker assets that need to be cleaned up (#129)
+- Some validation errors do not get piped through the python client (#152)
+- Podman compatibility and testing (#142)
+- Apidoc CLI call used container ID in place of container object to retrieve host port (#172)
+- Overhaul docker client for better podman compatibility and better error handling (#178)
+- Sanitize all config fields passed as envvars to dockerfile (#187)
+
+### Documentation
+
+- Updated diagram on tesseract interfaces (#150)
+- Tesseract Example Gallery (#149)
+- Remove how-to guides froms sidebar (#177)
+
 ## [0.9.0] - 2025-05-02
 
 ### Features

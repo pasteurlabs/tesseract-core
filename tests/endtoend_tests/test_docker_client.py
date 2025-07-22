@@ -14,9 +14,11 @@ import pytest
 from common import image_exists
 
 from tesseract_core.sdk.docker_client import (
+    APIError,
     ContainerError,
     ImageNotFound,
     build_docker_image,
+    is_podman,
 )
 
 
@@ -50,24 +52,35 @@ def docker_client_built_image_name(
 
 def test_get_image(docker_client, docker_client_built_image_name, docker_py_client):
     """Test image retrieval."""
+
+    def _strip_image_prefix(image_name):
+        """Strip the 'sha256:' prefix from the image name if it exists."""
+        if image_name.startswith("sha256:"):
+            return image_name.split(":")[1]
+        return image_name
+
     # Get the image
     image = docker_client.images.get(docker_client_built_image_name)
     assert image is not None
-    assert docker_client.images._tag_exists(docker_client_built_image_name, image.tags)
 
     docker_py_image = docker_py_client.images.get(docker_client_built_image_name)
     assert docker_py_image is not None
 
-    non_sha_id = docker_py_image.short_id.split(":")[1]
-    docker_image_short = docker_client.images.get(docker_py_image.short_id)
-    docker_image_non_sha = docker_client.images.get(non_sha_id)
-    assert docker_image_short is not None
-    assert docker_image_non_sha is not None
+    docker_image_short = docker_client.images.get(image.short_id)
+    assert docker_image_short == image
 
-    assert image.id == docker_py_image.id
-    assert image.short_id == docker_py_image.short_id
+    # Whether images start with sha256: depends on the used Docker implementation (e.g. Podman vs. Docker)
+    if docker_py_image.short_id.startswith("sha256:"):
+        non_sha_id = docker_py_image.short_id.split(":")[1]
+        docker_image_non_sha = docker_client.images.get(non_sha_id)
+        assert docker_image_non_sha is not None
+        assert docker_image_short.id == docker_image_non_sha.id
+
+    assert _strip_image_prefix(image.id) == _strip_image_prefix(docker_py_image.id)
+    assert _strip_image_prefix(image.short_id) == _strip_image_prefix(
+        docker_py_image.short_id
+    )
     assert image.tags == docker_py_image.tags
-    assert docker_image_short.id == docker_image_non_sha.id
     # Check the repr function
     assert (
         str(image)
@@ -97,11 +110,16 @@ def test_get_image(docker_client, docker_client_built_image_name, docker_py_clie
     image_list = docker_client.images.list(tesseract_only=False)
     assert image_list is not None
     assert len(image_list) > 0
+
     docker_py_image_list = docker_py_client.images.list()
     assert docker_py_image_list is not None
+
     # Check that every image in image_list is also in docker_py_image_list
+    docker_py_image_ids = set(
+        _strip_image_prefix(img.id) for img in docker_py_image_list if img
+    )
     for image in image_list:
-        assert image.id in [img.id for img in docker_py_image_list if img]
+        assert _strip_image_prefix(image.id) in docker_py_image_ids
 
 
 def test_create_image(
@@ -121,9 +139,6 @@ def test_create_image(
     try:
         image = docker_client.images.get(docker_client_built_image_name)
         assert image is not None
-        assert docker_client.images._tag_exists(
-            docker_client_built_image_name, image.tags
-        )
 
         image_id_obj = docker_client.images.get(image.id)
         image_short_id_obj = docker_client.images.get(image.short_id)
@@ -141,7 +156,6 @@ def test_create_image(
         image1 = docker_client.images.get(image1_name)
         image1_name = image1_name + ":latest"
         assert image1 is not None
-        assert docker_client.images._tag_exists(image1_name, image1.tags)
         assert image_exists(docker_client, image1_name)
         assert image_exists(docker_py_client, image1_name)
 
@@ -155,36 +169,8 @@ def test_create_image(
         image2_py = docker_py_client.images.get(repo_url + image2_name)
         assert image2_py is not None
 
-        # Our docker client should be able to retrieve images with just the name
         image2 = docker_client.images.get(repo_url + image2_name)
-        image2_no_url = docker_client.images.get(image2_name)
-        assert docker_client.images._tag_exists(image2_name, image2.tags)
-
         assert image2 is not None
-        assert image2_no_url is not None
-        assert image2.id == image2_py.id
-        assert image2_no_url.id == image2_py.id
-
-        # Check we are not overmatching but we are getting all possible cases
-        docker_host = os.environ.get("DOCKER_HOST", "")
-
-        podman = False
-        if "podman" in docker_host:
-            podman = True
-
-        for client in [docker_client, docker_py_client]:
-            assert not image_exists(client, "create_image")
-
-            if (podman and client == docker_py_client) or client == docker_client:
-                # Docker-py does not support partial string matching
-                assert image_exists(client, image2_name)
-                assert image_exists(client, f"/{image2_name}")
-                assert image_exists(client, f"bar/{image2_name}")
-                assert image_exists(client, f"bar/{image2_name}:latest")
-                assert not image_exists(client, f"ar/{image2_name}")
-                assert image_exists(client, f"foo/bar/{image2_name}")
-
-            assert image_exists(client, repo_url + image2_name)
 
     finally:
         # Clean up the images
@@ -203,6 +189,13 @@ def test_create_container(
     docker_client, docker_py_client, docker_client_built_image_name
 ):
     """Test container creation, run, logs, and remove."""
+
+    def _strip_image_prefix(image_name):
+        """Strip the 'sha256:' prefix from the image name if it exists."""
+        if image_name.startswith("sha256:"):
+            return image_name.split(":")[1]
+        return image_name
+
     # Create a container
     container, container_py = None, None
     try:
@@ -217,7 +210,9 @@ def test_create_container(
         # Check property fields
         assert container.project_id is None
         assert container.host_port is None
-        assert container_py.image.id == container.image.id
+        assert _strip_image_prefix(container_py.image.id) == _strip_image_prefix(
+            container.image.id
+        )
 
         container_get = docker_client.containers.get(container.id)
         container_name_get = docker_client.containers.get(container.name)
@@ -293,7 +288,7 @@ def test_container_volume_mounts(
         remove=True,
     )
 
-    assert stdout == "hello\n"
+    assert stdout == b"hello\n"
     # Check file exists in tmp path
     assert (tmp_path / "hello.txt").exists()
 
@@ -400,7 +395,89 @@ def test_compose_error(docker_client, tmp_path, docker_client_built_image_name):
             image: {docker_client_built_image_name}
     """)
     compose_file.write_text(compose_content)
-    with pytest.raises(ContainerError) as e:
+    with pytest.raises(APIError) as e:
         docker_client.compose.up(str(compose_file), "docker_client_compose_test")
     # Check that the container's logs were printed to stderr
     assert "Failed to start Tesseract container" in str(e.value)
+
+
+def test_volume_uid_permissions(
+    docker_client, docker_client_built_image_name, docker_volume, docker_cleanup
+):
+    # Set up root only directory
+    def run_tesseract_with_volume(cmd: str, user: str = "root:root", volume: str = ""):
+        if not volume:
+            volume = {docker_volume.name: {"bind": "/bar", "mode": "rw"}}
+        return docker_client.containers.run(
+            docker_client_built_image_name,
+            [cmd],
+            remove=True,
+            volumes=volume,
+            user=user,
+        )
+
+    cmd = "mkdir -p /bar && echo hello > /bar/hello.txt && chmod 700 /bar"
+    _ = run_tesseract_with_volume(cmd)
+
+    # Try to read the file as UID 1000
+    read_cmd = "cat /bar/hello.txt"
+    with pytest.raises(ContainerError) as e:
+        _ = run_tesseract_with_volume(read_cmd, user="1000:1000")
+    assert "Permission denied" in str(e)
+
+    # Try to write to the folder as UID 1000
+    write_cmd = "echo hello > /bar/hello_1000.txt && cat /bar/hello_1000.txt"
+    with pytest.raises(ContainerError) as e:
+        _ = run_tesseract_with_volume(write_cmd, user="1000:1000")
+    assert "Permission denied" in str(e)
+
+    # Grant permission to the file
+    cmd = "chmod 777 /bar"
+    _ = run_tesseract_with_volume(cmd)
+
+    # Try to read the file as UID 1000 again
+    stdout = run_tesseract_with_volume(read_cmd, user="1000:1000")
+    assert stdout == b"hello\n"
+
+    # Try to write to the folder as UID 1000 again
+    stdout = run_tesseract_with_volume(write_cmd, user="1000:1000")
+    assert stdout == b"hello\n"
+
+    # Try to copy a file from a volume with permissions 700 to a volume with permission 777
+    volume_777 = docker_client.volumes.create(name="docker_client_test_volume_777")
+    docker_cleanup["volumes"].append(volume_777)
+    volume_args = {
+        docker_volume.name: {"bind": "/from", "mode": "rw"},
+        volume_777.name: {"bind": "/to", "mode": "rw"},
+    }
+    cmd = "chmod 700 /from && cp /from/hello.txt /to/hello.txt && cat /to/hello.txt"
+    stdout = run_tesseract_with_volume(cmd, volume=volume_args)
+    assert stdout == b"hello\n"
+
+    # Try to access files as UID1000
+    cmd = "cat /to/hello.txt"
+    stdout = run_tesseract_with_volume(cmd, user="1000:1000", volume=volume_args)
+    assert stdout == b"hello\n"
+
+    with pytest.raises(ContainerError) as e:
+        run_tesseract_with_volume(
+            "cat /from/hello_777.txt", user="1000:1000", volume=volume_args
+        )
+    assert "Permission denied" in str(e)
+
+    cmd = (
+        "adduser -D testuser && chmod 777 /from && su - testuser && cat /from/hello.txt"
+    )
+    stdout = run_tesseract_with_volume(cmd, volume=volume_args)
+    assert stdout == b"hello\n"
+
+
+def test_is_podman():
+    """Test is_podman function.
+
+    This assumes that the DOCKER_HOST environment variable is set to a Podman socket
+    when running in a Podman environment. This is true on CI, but may deviate on
+    local machines.
+    """
+    real_is_podman = "podman" in os.environ.get("DOCKER_HOST", "")
+    assert is_podman() == real_is_podman

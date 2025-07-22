@@ -15,7 +15,7 @@ BASE_OPTIONAL_DEPS = {
         "sphinx",
         "sphinx_autodoc_typehints",
         "furo",
-        "myst-parser",
+        "myst-nb",
         "sphinx_click",
         "autodoc_pydantic",
         "sphinx_design",
@@ -28,7 +28,7 @@ BASE_OPTIONAL_DEPS = {
         "fastapi",
         "httpx",  # required by fastapi test client
         "jsf",
-        "requests",
+        "mlflow",
         "numpy",
         "pre-commit",
         "pytest",

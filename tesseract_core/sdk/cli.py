@@ -17,7 +17,9 @@ from typing import Annotated, Any, NoReturn
 
 import click
 import typer
+import yaml
 from jinja2 import Environment, PackageLoader, StrictUndefined
+from pydantic import ValidationError as PydanticValidationError
 from rich.console import Console as RichConsole
 from rich.table import Table as RichTable
 
@@ -29,6 +31,7 @@ from .api_parse import (
     ValidationError,
     get_non_base_fields_in_tesseract_config,
 )
+from .config import get_config
 from .docker_client import (
     APIError,
     BuildError,
@@ -37,6 +40,7 @@ from .docker_client import (
     ContainerError,
     Image,
     ImageNotFound,
+    NotFound,
 )
 from .exceptions import UserError
 from .logs import DEFAULT_CONSOLE, set_logger
@@ -173,30 +177,55 @@ def main_callback(
 
     set_logger(loglevel, catch_warnings=True, rich_format=True)
 
+    try:
+        get_config()
+    except PydanticValidationError as err:
+        message = [
+            "Error while parsing Tesseract configuration. "
+            "Please check your environment variables.",
+            "Errors found:",
+        ]
+        for error in err.errors():
+            message.append(
+                f' - TESSERACT_{str(error["loc"][0]).upper()}="{error["input"]}": {error["msg"]}'
+            )
+        raise UserError("\n".join(message)) from None
+
 
 def _parse_config_override(
     options: list[str] | None,
-) -> tuple[tuple[list[str], str], ...]:
+) -> dict[tuple[str, ...], Any]:
     """Parse `["path1.path2.path3=value"]` into `[(["path1", "path2", "path3"], "value")]`."""
     if options is None:
-        return []
+        return {}
 
-    def _parse_option(option: str):
-        bad_param = typer.BadParameter(
-            f"Invalid config override {option} (must be `keypath=value`)",
-            param_hint="config_override",
-        )
-        if option.count("=") != 1:
-            raise bad_param
+    def _parse_option(option: str) -> tuple[tuple[str, ...], Any]:
+        if "=" not in option:
+            raise typer.BadParameter(
+                f'Invalid config override "{option}" (must be `keypath=value`)',
+                param_hint="config_override",
+            )
 
-        key, value = option.split("=")
-        if not key or not value:
-            raise bad_param
+        key, value = option.split("=", maxsplit=1)
+        if not re.match(r"\w[\w|\.]*", key):
+            raise typer.BadParameter(
+                f'Invalid keypath "{key}" in config override "{option}"',
+                param_hint="config_override",
+            )
 
-        path = key.split(".")
+        path = tuple(key.split("."))
+
+        try:
+            value = yaml.safe_load(value)
+        except yaml.YAMLError as e:
+            raise typer.BadParameter(
+                f'Invalid value for config override "{option}", could not parse value as YAML: {e}',
+                param_hint="config_override",
+            ) from e
+
         return path, value
 
-    return tuple(_parse_option(option) for option in options)
+    return dict(_parse_option(option) for option in options)
 
 
 @app.command("build")
@@ -297,7 +326,9 @@ def build_image(
                 generate_only=generate_only,
             )
     except BuildError as e:
-        raise UserError(f"Error building Tesseract: {e}") from e
+        # raise from None to Avoid overly long tracebacks,
+        # all the information is in the printed logs / exception str already
+        raise UserError(f"Error building Tesseract: {e}") from None
     except APIError as e:
         raise UserError(f"Docker server error: {e}") from e
     except TypeError as e:
@@ -380,9 +411,9 @@ def _validate_port(port: str | None) -> str | None:
             param_hint="port",
         )
 
-    if not (1025 <= start <= 65535) or not (1025 <= end <= 65535):
+    if not (0 <= start <= 65535) or not (0 <= end <= 65535):
         raise typer.BadParameter(
-            f"Ports '{port}' must be between 1025 and 65535.",
+            f"Ports '{port}' must be between 0 and 65535.",
             param_hint="port",
         )
     return port
@@ -405,6 +436,14 @@ def serve(
             show_default=False,
         ),
     ] = None,
+    environment: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--env",
+            "-e",
+            help="Set environment variables in the Tesseract containers, in Docker format: key=value.",
+        ),
+    ] = None,
     port: Annotated[
         str | None,
         typer.Option(
@@ -415,6 +454,17 @@ def serve(
             callback=_validate_port,
         ),
     ] = None,
+    host_ip: Annotated[
+        str,
+        typer.Option(
+            "--host-ip",
+            help=(
+                "IP address of the host to bind the Tesseract to. "
+                "Defaults to 127.0.0.1 (localhost). To bind to all interfaces, use '0.0.0.0'. "
+                "WARNING: This may expose Tesseract to all local networks, use with caution."
+            ),
+        ),
+    ] = "127.0.0.1",
     gpus: Annotated[
         list[str] | None,
         typer.Option(
@@ -424,6 +474,69 @@ def serve(
                 "IDs of host Nvidia GPUs to make available in the Tesseract. "
                 "You can use all GPUs via `--gpus all` or pass (multiple) IDs: `--gpus 0 --gpus 1`."
             ),
+        ),
+    ] = None,
+    num_workers: Annotated[
+        int,
+        typer.Option(
+            "--num-workers",
+            help="Number of worker processes to use when serving the Tesseract.",
+            show_default=True,
+        ),
+    ] = 1,
+    debug: Annotated[
+        bool,
+        typer.Option(
+            "--debug",
+            help=(
+                "Enable debug mode. This will propagate full tracebacks to the client "
+                "and start a debugpy server in the Tesseract. "
+                "WARNING: This may expose sensitive information, use with caution (and never in production)."
+            ),
+        ),
+    ] = False,
+    no_compose: Annotated[
+        bool,
+        typer.Option(
+            "--no-compose",
+            help=(
+                "Do not use Docker Compose to serve the Tesseract. "
+                "Instead, the command will block until interrupted. "
+                "This is useful for cases in which docker-compose is not available."
+            ),
+        ),
+    ] = False,
+    service_names: Annotated[
+        str | None,
+        typer.Option(
+            "--service-names",
+            help=(
+                "Comma-separated list of service names by which each Tesseract should be exposed "
+                "in the shared network. "
+                "Tesseracts are reachable from one another at http://{service_name}:8000. "
+                "Not supported when using --no-compose."
+            ),
+        ),
+    ] = None,
+    user: Annotated[
+        str | None,
+        typer.Option(
+            "--user",
+            help=(
+                "User to run the Tesseracts as e.g. '1000' or '1000:1000' (uid:gid). "
+                "Defaults to the current user."
+            ),
+        ),
+    ] = None,
+    input_path: Annotated[
+        str | None,
+        typer.Option(
+            "--input-path",
+            help=(
+                "Input path to read input files from, such as local directory or S3 URI "
+                "(may be anything supported by fsspec)."
+            ),
+            hidden=True,
         ),
     ] = None,
 ) -> None:
@@ -441,7 +554,7 @@ def serve(
             raise typer.BadParameter(
                 (
                     "Port specification only works if exactly one Tesseract is being served. "
-                    f"Currently serving `{len(image_names)}` Tesseracts."
+                    f"Currently attempting to serve `{len(image_names)}` Tesseracts."
                 ),
                 param_hint="image_names",
             )
@@ -449,23 +562,57 @@ def serve(
     else:
         ports = None
 
+    # Parse environment variables from list to dict
+    if environment is not None:
+        try:
+            environment = {
+                env.split("=", maxsplit=1)[0]: env.split("=", maxsplit=1)[1]
+                for env in environment
+            }
+        except Exception as ex:
+            raise typer.BadParameter(
+                "Environment variables must be in the format 'key=value'.",
+                param_hint="environment",
+            ) from ex
+
+    if service_names is not None:
+        if no_compose:
+            raise typer.BadParameter(
+                "Service name specification only works with Docker Compose.",
+                param_hint="service_names",
+            )
+
+        service_names_list = service_names.split(",")
+    else:
+        service_names_list = None
+
     try:
-        project_id = engine.serve(image_names, ports, volume, gpus)
-        container_ports = _display_project_meta(project_id)
-        logger.info(
-            f"Docker Compose Project ID, use it with 'tesseract teardown' command: {project_id}"
+        project_id = engine.serve(
+            image_names,
+            host_ip,
+            ports,
+            volume,
+            environment,
+            gpus,
+            debug,
+            num_workers,
+            no_compose,
+            service_names_list,
+            user,
+            input_path=input_path,
         )
-
-        project_meta = {"project_id": project_id, "containers": container_ports}
-        json_info = json.dumps(project_meta)
-        typer.echo(json_info, nl=False)
-
-    except ValueError as ex:
-        raise typer.BadParameter(f"{ex}", param_hint="image_names") from ex
     except RuntimeError as ex:
         raise UserError(
             f"Internal Docker error occurred while serving Tesseracts: {ex}"
         ) from ex
+
+    container_ports = _display_project_meta(project_id)
+    logger.info(
+        f"Tesseract project ID, use it with 'tesseract teardown' command: {project_id}"
+    )
+    project_meta = {"project_id": project_id, "containers": container_ports}
+    json_info = json.dumps(project_meta)
+    typer.echo(json_info, nl=False)
 
 
 @app.command("list")
@@ -502,7 +649,9 @@ def _display_tesseract_image_meta() -> None:
 
 def _display_tesseract_containers_meta() -> None:
     """Display Tesseract containers metadata."""
-    table = RichTable("ID", "Name", "Version", "Host Port", "Project ID", "Description")
+    table = RichTable(
+        "ID", "Name", "Version", "Host Address", "Project ID", "Description"
+    )
     containers = docker_client.containers.list()
     for container in containers:
         tesseract_vals = _get_tesseract_env_vals(container)
@@ -512,7 +661,7 @@ def _display_tesseract_containers_meta() -> None:
                 container.id[:12],
                 tesseract_vals["TESSERACT_NAME"],
                 tesseract_vals["TESSERACT_VERSION"],
-                container.host_port,
+                f"{container.host_ip}:{container.host_port}",
                 tesseract_project,
                 tesseract_vals.get("TESSERACT_DESCRIPTION", "").replace("\\n", " "),
             )
@@ -530,17 +679,20 @@ def _get_tesseract_env_vals(
 def _find_tesseract_project(
     tesseract: Container,
 ) -> str:
-    """Find the Tesseract Project ID for a given tesseract."""
+    """Find the Tesseract Project ID for a given tesseract.
+
+    A Tesseract Project ID is either a Docker Compose ID or a container name.
+    """
     if tesseract.project_id is not None:
         return tesseract.project_id
 
     tesseract_id = tesseract.id[:12]
 
-    for project, containers in docker_client.compose.list():
+    for project, containers in docker_client.compose.list().items():
         if tesseract_id in containers:
             return project
 
-    return "Unknown"
+    return tesseract.name
 
 
 @app.command("apidoc")
@@ -556,11 +708,11 @@ def apidoc(
     ] = True,
 ) -> None:
     """Serve the OpenAPI schema for a Tesseract."""
-    project_id = None
+    host_ip = "127.0.0.1"
+    project_id = engine.serve([image_name], no_compose=True, host_ip=host_ip)
     try:
-        project_id = engine.serve([image_name])
-        container = docker_client.compose.list()[project_id][0]
-        url = f"http://localhost:{container.host_port}/docs"
+        container = docker_client.containers.get(project_id)
+        url = f"http://{host_ip}:{container.host_port}/docs"
         logger.info(f"Serving OpenAPI docs for Tesseract {image_name} at {url}")
         logger.info("  Press Ctrl+C to stop")
         if browser:
@@ -571,8 +723,7 @@ def apidoc(
         except KeyboardInterrupt:
             return
     finally:
-        if project_id is not None:
-            engine.teardown(project_id)
+        engine.teardown(project_id)
 
 
 def _display_project_meta(project_id: str) -> list:
@@ -581,8 +732,13 @@ def _display_project_meta(project_id: str) -> list:
     Returns a list of dictionaries {name: container_name, port: host_port}.
     """
     container_ports = []
-    projects = docker_client.compose.list()
-    containers = projects[project_id]
+
+    compose_projects = docker_client.compose.list()
+    if project_id in compose_projects:
+        containers = compose_projects[project_id]
+    else:
+        containers = [project_id]
+
     for container_id in containers:
         container = docker_client.containers.get(container_id)
         logger.info(f"Container ID: {container.id}")
@@ -590,8 +746,15 @@ def _display_project_meta(project_id: str) -> list:
         entrypoint = container.attrs["Config"]["Entrypoint"]
         logger.info(f"Entrypoint: {entrypoint}")
         host_port = container.host_port
-        logger.info(f"View Tesseract: http://localhost:{host_port}/docs")
-        container_ports.append({"name": container.name, "port": host_port})
+        host_ip = container.host_ip
+        logger.info(f"View Tesseract: http://{host_ip}:{host_port}/docs")
+        container_ports.append(
+            {"name": container.name, "port": host_port, "ip": host_ip}
+        )
+        if container.host_debugpy_port:
+            logger.info(
+                f"Debugpy server listening at http://{host_ip}:{container.host_debugpy_port}"
+            )
 
     return container_ports
 
@@ -639,6 +802,8 @@ def teardown(
         raise UserError(
             f"Internal Docker error occurred while tearing down Tesseracts: {ex}"
         ) from ex
+    except NotFound as ex:
+        raise UserError(f"Tesseract Project ID not found: {ex}") from ex
 
 
 def _sanitize_error_output(error_output: str, tesseract_image: str) -> str:
@@ -710,6 +875,36 @@ def run_container(
             ),
         ),
     ] = None,
+    environment: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--env",
+            "-e",
+            help="Set environment variables in the Tesseract container, in Docker format: key=value.",
+            metavar="key=value",
+            show_default=False,
+        ),
+    ] = None,
+    network: Annotated[
+        str | None,
+        typer.Option(
+            "--network",
+            help="Network to use for the Tesseract container, analogous to Docker's --network option. "
+            "For example, 'host' uses the host system's network. Alternatively, you can create a custom "
+            "network with `docker network create <network-name>` and use it here.",
+            show_default=False,
+        ),
+    ] = None,
+    user: Annotated[
+        str | None,
+        typer.Option(
+            "--user",
+            help=(
+                "User to run the Tesseract as e.g. '1000' or '1000:1000' (uid:gid). "
+                "Defaults to the current user."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Execute a command in a Tesseract.
 
@@ -751,9 +946,27 @@ def run_container(
         )
         raise typer.BadParameter(error_string, param_hint="cmd")
 
+    if environment is not None:
+        try:
+            environment = {
+                item.split("=", maxsplit=1)[0]: item.split("=", maxsplit=1)[1]
+                for item in environment
+            }
+        except Exception as ex:
+            raise typer.BadParameter(
+                "Environment variables must be in the format 'key=value'.",
+                param_hint="env",
+            ) from ex
     try:
         result_out, result_err = engine.run_tesseract(
-            tesseract_image, cmd, args, volumes=volume, gpus=gpus
+            tesseract_image,
+            cmd,
+            args,
+            volumes=volume,
+            gpus=gpus,
+            environment=environment,
+            network=network,
+            user=user,
         )
 
     except ImageNotFound as e:
@@ -762,15 +975,13 @@ def run_container(
             f"Are you sure your tesseract image name is {tesseract_image}?\n\n{e}"
         ) from e
 
-    except (
-        APIError,
-        ContainerError,
-    ) as e:
-        if "No such command" in str(e):
+    except ContainerError as e:
+        msg = e.stderr.decode("utf-8").strip()
+        if "No such command" in msg:
             error_string = f"Error running Tesseract '{tesseract_image}' \n\n Error: Unimplemented command '{cmd}'.  "
         else:
             error_string = _sanitize_error_output(
-                f"Error running Tesseract. \n\n{e}", tesseract_image
+                f"Error running Tesseract. \n\n{msg}", tesseract_image
             )
 
         raise UserError(error_string) from e
@@ -787,10 +998,15 @@ def entrypoint() -> NoReturn:
     try:
         result = app()
     except UserError as e:
-        logger.error(f"{e}", exc_info=state.print_user_error_tracebacks)
+        if state.print_user_error_tracebacks:
+            # Do not print the exception here since it's part of the traceback
+            logger.error("UserError occurred, traceback:", exc_info=True)
+        else:
+            # Prints only the error message without traceback
+            logger.error(str(e), exc_info=False)
         result = 1
-    except Exception as e:
-        logger.critical(f"Uncaught error: {e}", exc_info=True)
+    except Exception:
+        logger.critical("Uncaught error", exc_info=True)
         result = 2
 
     if result > 0:

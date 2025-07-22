@@ -5,6 +5,7 @@ import base64
 import json
 import os
 import platform
+import signal
 import subprocess
 import sys
 import time
@@ -85,7 +86,7 @@ def serve_in_subprocess(api_file, port, num_workers=1, timeout=30.0):
         yield f"http://localhost:{port}"
 
     finally:
-        proc.terminate()
+        proc.send_signal(signal.SIGINT)
         stdout, stderr = proc.communicate()
         print(stdout.decode())
         print(stderr.decode())
@@ -307,7 +308,7 @@ def test_debug_mode(dummy_tesseract_module, monkeypatch):
     monkeypatch.setattr(dummy_tesseract_module, "apply", apply_that_raises)
 
     try:
-        update_config(debug=False, tesseract_api_path=dummy_tesseract_module.__file__)
+        update_config(debug=False, api_path=dummy_tesseract_module.__file__)
         rest_api = create_rest_api(dummy_tesseract_module)
         http_client = TestClient(rest_api, raise_server_exceptions=False)
 
@@ -326,7 +327,7 @@ def test_debug_mode(dummy_tesseract_module, monkeypatch):
         tesseract_core.runtime.config._current_config = orig_config
 
     try:
-        update_config(debug=True, tesseract_api_path=dummy_tesseract_module.__file__)
+        update_config(debug=True, api_path=dummy_tesseract_module.__file__)
         rest_api = create_rest_api(dummy_tesseract_module)
         http_client = TestClient(rest_api, raise_server_exceptions=False)
 

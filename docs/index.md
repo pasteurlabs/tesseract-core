@@ -95,12 +95,13 @@ content/using-tesseracts/advanced.md
 ```
 
 ```{toctree}
-:caption: Tutorials
+:caption: Examples
 :maxdepth: 2
 :hidden:
 
-Expert showcase <https://si-tesseract.discourse.group/c/showcase/expert-showcase/12>
-How-to Guides <https://si-tesseract.discourse.group/c/support/how-to-guides/10>
+content/examples/example_gallery.md
+content/demo/demo.md
+Tesseract Community Showcase <https://si-tesseract.discourse.group/c/showcase/11>
 ```
 
 ```{toctree}

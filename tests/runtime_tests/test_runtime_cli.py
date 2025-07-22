@@ -17,7 +17,6 @@ import pytest
 from click.testing import CliRunner
 from moto.server import ThreadedMotoServer
 
-import tesseract_core.runtime
 from tesseract_core.runtime.cli import _add_user_commands_to_cli
 from tesseract_core.runtime.cli import tesseract_runtime as cli_cmd
 from tesseract_core.runtime.file_interactions import load_bytes, output_to_bytes
@@ -294,9 +293,11 @@ def test_input_vals_from_local_file(
     )
     assert result.exit_code == 0, result.stderr
 
+    result = result.stdout
+
     test_input_val = dummy_tesseract_module.InputSchema.model_validate(test_input)
     expected = dummy_tesseract_module.apply(test_input_val).model_dump_json()
-    assert json.loads(result.stdout) == json.loads(expected)
+    assert json.loads(result) == json.loads(expected)
 
 
 @pytest.mark.parametrize(
@@ -454,6 +455,8 @@ def test_apply_fails_if_required_args_missing(cli, cli_runner):
 
 def test_stdout_redirect_cli():
     """Ensure that stdout is redirected to stderr during normal Python execution."""
+    import tesseract_core.runtime.cli
+
     # Use subprocess to ensure that CLI entrypoint is used
     result = subprocess.run(
         [sys.executable, tesseract_core.runtime.cli.__file__, "--help"],
@@ -464,17 +467,22 @@ def test_stdout_redirect_cli():
     assert "Usage:" in result.stderr.decode("utf-8")
 
 
-def test_stdout_redirect_subprocess(tmpdir):
-    """Ensure that stdout is redirected to stderr even in non-Python subprocesses."""
-    # Use subprocess since pytest messes with stdout/stderr
+@pytest.mark.parametrize("target", ["file", "stderr"])
+def test_stdout_redirect_subprocess(tmpdir, target):
+    """Ensure that stdout is redirected to stderr / files even in non-Python subprocesses."""
+    if target == "file":
+        target_stream = f"open(\"{tmpdir / 'test_output.log'}\", 'w')"
+    else:
+        target_stream = "sys.stderr"
+
     testscript = [
         # Print messages that signify where the output is supposed to go
         "import os",
         "import sys",
-        "from tesseract_core.runtime.cli import stdout_to_stderr",
+        "from tesseract_core.runtime.core import redirect_fd",
         "print('stdout', file=sys.stdout)",
         "print('stderr', file=sys.stderr)",
-        "with stdout_to_stderr() as orig_stdout:",
+        f"with redirect_fd(sys.stdout, {target_stream}) as orig_stdout:",
         "    os.system('echo stderr')",
         "    print('stderr', file=sys.stdout)",
         "    print('stderr', file=sys.stderr)",
@@ -487,10 +495,20 @@ def test_stdout_redirect_subprocess(tmpdir):
     with open(testscript_path, "w") as f:
         f.write("\n".join(testscript))
 
+    # Use subprocess since pytest messes with stdout/stderr
     result = subprocess.run([sys.executable, testscript_path], capture_output=True)
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert result.stdout == b"stdout\n" * 4
-    assert result.stderr == b"stderr\n" * 5
+
+    if target == "file":
+        assert result.stderr == b"stderr\n" * 3
+        # Find the log file
+        log_file = tmpdir / "test_output.log"
+        with open(log_file, "rb") as f:
+            log_content = f.read()
+        assert log_content == b"stderr\n" * 2
+    else:
+        assert result.stderr == b"stderr\n" * 5
 
 
 def test_suggestion_on_misspelled_command(cli, cli_runner):
@@ -509,28 +527,73 @@ def test_check(cli, cli_runner, dummy_tesseract_package):
     from tesseract_core.runtime.config import update_config
 
     tesseract_api_file = Path(dummy_tesseract_package) / "tesseract_api.py"
-    update_config(tesseract_api_path=tesseract_api_file)
+    update_config(api_path=tesseract_api_file)
     result = cli_runner.invoke(cli, ["check"], catch_exceptions=True)
     assert result.exit_code == 0, result.stderr
     assert "check successful" in result.stdout
 
-    corrupted_api_file = Path(dummy_tesseract_package) / "tesseract_api_corrupted.py"
-    with open(corrupted_api_file, "w") as f:
+    api_file_bad_syntax = Path(dummy_tesseract_package) / "tesseract_api_bad_syntax.py"
+    with open(api_file_bad_syntax, "w") as f:
         f.write("bad-syntax=1")
 
-    update_config(tesseract_api_path=corrupted_api_file)
+    update_config(api_path=api_file_bad_syntax)
     result = cli_runner.invoke(cli, ["check"], catch_exceptions=True)
     assert result.exit_code == 1, result.stderr
     assert "Could not load module" in result.exception.args[0]
     full_traceback = "".join(traceback.format_exception(*result.exc_info))
     assert "SyntaxError" in full_traceback
 
-    with open(tesseract_api_file, "w") as f:
+    # Write new file for each case instead of overwriting same file to avoid caching issues
+    api_file_bad_import = Path(dummy_tesseract_package) / "tesseract_api_bad_import.py"
+    with open(api_file_bad_import, "w") as f:
         f.write("import non_existent_module")
 
-    update_config(tesseract_api_path=tesseract_api_file)
+    update_config(api_path=api_file_bad_import)
     result = cli_runner.invoke(cli, ["check"], catch_exceptions=True)
     assert result.exit_code == 1, result.stderr
     assert "Could not load module" in result.exception.args[0]
     full_traceback = "".join(traceback.format_exception(*result.exc_info))
     assert "ModuleNotFoundError" in full_traceback
+
+    with open(tesseract_api_file) as f:
+        tesseract_api_code = f.read()
+
+    # check if error is raised if schemas or required endpoints are missing
+    for schema_or_endpoint in ("InputSchema", "OutputSchema", "apply"):
+        invalid_code = tesseract_api_code.replace(
+            f"{schema_or_endpoint}", f"{schema_or_endpoint}_hide"
+        )
+        api_file_missing_schema_or_endpoint = (
+            Path(dummy_tesseract_package)
+            / f"tesseract_api_missing_{schema_or_endpoint.lower()}.py"
+        )
+        with open(api_file_missing_schema_or_endpoint, "w") as f:
+            f.write(invalid_code)
+        update_config(api_path=api_file_missing_schema_or_endpoint)
+        result = cli_runner.invoke(cli, ["check"], catch_exceptions=True)
+        assert result.exit_code == 1, result.stderr
+        full_traceback = "".join(traceback.format_exception(*result.exc_info))
+        assert (
+            f"{schema_or_endpoint} is not defined in Tesseract API module"
+            in result.exception.args[0]
+        )
+
+    # check if error is raised for schemas with unsupported parent class
+    for schema_name in ("InputSchema", "OutputSchema"):
+        invalid_code = tesseract_api_code.replace(
+            f"{schema_name}(BaseModel)", f"{schema_name}(tuple)"
+        )
+        api_file_bad_parent_class = (
+            Path(dummy_tesseract_package)
+            / f"tesseract_api_bad_{schema_name.lower()}_parent_class.py"
+        )
+        with open(api_file_bad_parent_class, "w") as f:
+            f.write(invalid_code)
+        update_config(api_path=api_file_bad_parent_class)
+        result = cli_runner.invoke(cli, ["check"], catch_exceptions=True)
+        assert result.exit_code == 1, result.stderr
+        full_traceback = "".join(traceback.format_exception(*result.exc_info))
+        assert (
+            f"{schema_name} is not a subclass of pydantic.BaseModel"
+            in result.exception.args[0]
+        )

@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 from pydantic import ValidationError
@@ -16,16 +18,20 @@ def mock_serving(mocker):
     serve_mock = mocker.patch("tesseract_core.sdk.engine.serve")
     serve_mock.return_value = "proj-id-123"
 
-    subprocess_run_mock = mocker.patch("subprocess.run")
-    subprocess_run_mock.return_value.stdout = (
-        '{"ID": "abc1234", "Publishers":[{"PublishedPort": 54321}]}'
+    fake_container = SimpleNamespace()
+    fake_container.host_port = 1234
+    fake_container.id = "container-id-123"
+
+    get_project_containers_mock = mocker.patch(
+        "tesseract_core.sdk.engine.get_project_containers"
     )
+    get_project_containers_mock.return_value = [fake_container]
 
     teardown_mock = mocker.patch("tesseract_core.sdk.engine.teardown")
     logs_mock = mocker.patch("tesseract_core.sdk.engine.logs")
     return {
         "serve_mock": serve_mock,
-        "subprocess_run_mock": subprocess_run_mock,
+        "get_project_containers_mock": get_project_containers_mock,
         "teardown_mock": teardown_mock,
         "logs_mock": logs_mock,
     }
@@ -69,7 +75,9 @@ def test_Tesseract_from_tesseract_api(dummy_tesseract_location, dummy_tesseract_
 
 def test_Tesseract_from_image(mock_serving, mock_clients):
     # Object is built and has the correct attributes set
-    t = Tesseract.from_image("sometesseract:0.2.3", volumes=["/my/files"], gpus=["all"])
+    t = Tesseract.from_image(
+        "sometesseract:0.2.3", input_path="/my/files", gpus=["all"]
+    )
 
     # Now we can use it as a context manager
     # NOTE: we invoke available_endpoints because it requires an active client and is not cached
@@ -109,10 +117,13 @@ def test_serve_lifecycle(mock_serving, mock_clients):
     mock_serving["serve_mock"].assert_called_with(
         ["sometesseract:0.2.3"],
         ports=None,
-        volumes=None,
+        volumes=[],
+        environment={},
         gpus=None,
         debug=True,
         num_workers=1,
+        host_ip="127.0.0.1",
+        no_compose=False,
     )
 
     mock_serving["teardown_mock"].assert_called_with("proj-id-123")

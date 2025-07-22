@@ -6,11 +6,14 @@
 import json
 import logging
 import os
-import re
 import shlex
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from textwrap import indent
+from typing import Literal
+
+from tesseract_core.sdk.config import get_config
 
 logger = logging.getLogger("tesseract")
 
@@ -19,21 +22,54 @@ logger = logging.getLogger("tesseract")
 list_ = list
 
 
+def _get_executable(program: Literal["docker", "docker-compose"]) -> tuple[str, ...]:
+    config = get_config()
+    if program == "docker":
+        return config.docker_executable
+    if program == "docker-compose":
+        return config.docker_compose_executable
+    raise ValueError(f"Unknown program: {program}")
+
+
+def is_podman() -> bool:
+    """Check if the current environment is using Podman instead of Docker."""
+    docker = _get_executable("docker")
+    try:
+        result = subprocess.run(
+            [*docker, "version"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return "podman" in result.stdout.lower()
+    except subprocess.CalledProcessError:
+        return False
+
+
 @dataclass
 class Image:
     """Image class to wrap Docker image details."""
 
-    id: str
-    short_id: str
+    id: str | None
+    short_id: str | None
     tags: list[str] | None
     attrs: dict
 
     @classmethod
     def from_dict(cls, json_dict: dict) -> "Image":
         """Create an Image object from a json dictionary."""
+        image_id = json_dict.get("Id", None)
+        short_id = None
+        if image_id:
+            if image_id.startswith("sha256:"):
+                short_id = image_id[:19]
+            else:
+                # Some container engines (e.g., Podman) do not prefix IDs with sha256
+                short_id = image_id[:12]
+
         return cls(
-            id=json_dict.get("Id", None),
-            short_id=json_dict.get("Id", [])[:19],
+            id=image_id,
+            short_id=short_id,
             tags=json_dict.get("RepoTags", None),
             attrs=json_dict,
         )
@@ -41,34 +77,6 @@ class Image:
 
 class Images:
     """Namespace for functions to interface with Tesseract docker images."""
-
-    @staticmethod
-    def _tag_exists(image_name: str, tags: list_) -> bool:
-        """Helper function to check if image name exists in the list of tags.
-
-        Specially handling has to be done to achieve unfuzzy substring matching, i.e.
-        if image tag is foo/bar/image, we need to return true for foo/bar/image, bar/image,
-        and image, but not ar/image.
-
-        There is no equivalent in docker-py.
-
-        Params:
-            image_name: The image name to check.
-            tags: The list of tags to check against.
-
-        Returns:
-            True if the image name exists in the list of tags, False otherwise.
-        """
-        if ":" not in image_name:
-            image_name += ":latest"
-
-        image_name_parts = image_name.strip("/").split("/")
-        for tag in tags:
-            tag_parts = tag.strip("/").split("/")
-            # Check if the last parts of the tag matches the subportion that image name specifies
-            if tag_parts[-len(image_name_parts) :] == image_name_parts:
-                return True
-        return False
 
     @staticmethod
     def get(image_id_or_name: str | bytes, tesseract_only: bool = True) -> Image:
@@ -94,31 +102,26 @@ class Images:
         if not image_id_or_name:
             raise ValueError("Image name cannot be empty.")
 
-        def is_image_id(s: str) -> bool:
-            """Check if string is image name or id by checking if it's sha256 format."""
-            return bool(re.fullmatch(r"(sha256:)?[a-fA-F0-9]{12,64}", s))
+        docker = _get_executable("docker")
+        try:
+            result = subprocess.run(
+                [*docker, "inspect", image_id_or_name, "--type", "image"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            json_dict = json.loads(result.stdout)
+        except subprocess.CalledProcessError as ex:
+            raise ImageNotFound(f"Image {image_id_or_name} not found.") from ex
+        if not json_dict:
+            raise ImageNotFound(f"Image {image_id_or_name} not found.")
 
-        if ":" not in image_id_or_name:
-            # Check if image param is a name or id so we can append latest tag if needed
-            if not is_image_id(image_id_or_name):
-                image_id_or_name = image_id_or_name + ":latest"
-            else:
-                # If image_id_or_name is an image id, we need to get the full id
-                # by prepending sha256
-                image_id_or_name = "sha256:" + image_id_or_name
-        images = Images.list(tesseract_only=tesseract_only)
-
-        # Check for both name and id to find the image
-        # Tags may be prefixed by repository url
-        for image_obj in images:
-            if (
-                image_obj.id == image_id_or_name
-                or image_obj.short_id == image_id_or_name
-                or Images._tag_exists(image_id_or_name, image_obj.tags)
-            ):
-                return image_obj
-
-        raise ImageNotFound(f"Image {image_id_or_name} not found.")
+        if tesseract_only and not any(
+            "TESSERACT_NAME" in env_var for env_var in json_dict[0]["Config"]["Env"]
+        ):
+            raise ImageNotFound(f"Image {image_id_or_name} is not a Tesseract image.")
+        image_obj = Image.from_dict(json_dict[0])
+        return image_obj
 
     @staticmethod
     def list(tesseract_only: bool = True) -> list_[Image]:
@@ -139,9 +142,10 @@ class Images:
         Params:
             image: The image name or id to remove.
         """
+        docker = _get_executable("docker")
         try:
             res = subprocess.run(
-                ["docker", "rmi", image, "--force"],
+                [*docker, "rmi", image, "--force"],
                 check=True,
                 capture_output=True,
                 text=True,
@@ -164,8 +168,14 @@ class Images:
         Returns:
             The buildx command as a list of strings.
         """
+        docker = _get_executable("docker")
+        extra_args = get_config().docker_build_args
+
+        if ssh is not None:
+            extra_args = ("--ssh", ssh, *extra_args)
+
         build_cmd = [
-            "docker",
+            *docker,
             "buildx",
             "build",
             "--load",
@@ -173,11 +183,10 @@ class Images:
             tag,
             "--file",
             str(dockerfile),
+            *extra_args,
+            "--",
             str(path),
         ]
-
-        if ssh is not None:
-            build_cmd.extend(["--ssh", ssh])
 
         return build_cmd
 
@@ -231,10 +240,11 @@ class Images:
         Returns:
             List of (non-dangling) Image objects.
         """
+        docker = _get_executable("docker")
         images = []
         try:
             image_ids = subprocess.run(
-                ["docker", "images", "-q"],  # List only image IDs
+                [*docker, "images", "-q"],  # List only image IDs
                 capture_output=True,
                 text=True,
                 check=True,
@@ -269,8 +279,9 @@ class Images:
 class Container:
     """Container class to wrap Docker container details.
 
-    Container class has additional member variable `host_port` that docker-py
-    does not have. This is because Tesseract requires frequent access to the host port.
+    Container class has additional member variables `host_port` and `host_ip` that
+    docker-py does not have. This is because Tesseract requires frequent access to the host
+    port mappings.
     """
 
     id: str
@@ -294,7 +305,7 @@ class Container:
         image_id = self.attrs.get("ImageID", self.attrs["Image"])
         if image_id is None:
             return None
-        return Images.get(image_id.split(":")[1])
+        return Images.get(image_id)
 
     @property
     def host_port(self) -> str | None:
@@ -302,9 +313,31 @@ class Container:
         if self.attrs.get("NetworkSettings", None):
             ports = self.attrs["NetworkSettings"].get("Ports", None)
             if ports:
-                port_key = next(iter(ports))  # Get the first port key
-                if ports[port_key]:
-                    return ports[port_key][0].get("HostPort")
+                api_port_key = "8000/tcp"
+                if ports[api_port_key]:
+                    return ports[api_port_key][0].get("HostPort")
+        return None
+
+    @property
+    def host_debugpy_port(self) -> str | None:
+        """Gets the host port which maps to debugpy server in the container."""
+        if self.attrs.get("NetworkSettings", None):
+            ports = self.attrs["NetworkSettings"].get("Ports", None)
+            if ports:
+                debugpy_port_key = "5678/tcp"
+                if debugpy_port_key in ports:
+                    return ports[debugpy_port_key][0].get("HostPort")
+        return None
+
+    @property
+    def host_ip(self) -> str | None:
+        """Gets the host IP of the container."""
+        if self.attrs.get("NetworkSettings", None):
+            ports = self.attrs["NetworkSettings"].get("Ports", None)
+            if ports:
+                api_port_key = "8000/tcp"
+                if ports[api_port_key]:
+                    return ports[api_port_key][0].get("HostIp")
         return None
 
     @property
@@ -315,22 +348,27 @@ class Container:
             project_id = project_id["Labels"].get("com.docker.compose.project", None)
         return project_id
 
-    def exec_run(self, command: list) -> tuple:
+    def exec_run(self, command: list) -> tuple[int, bytes]:
         """Run a command in this container.
 
         Return exit code and stdout.
         """
-        try:
-            result = subprocess.run(
-                ["docker", "exec", self.id, *command],
-                check=True,
-                capture_output=True,
-            )
-            return result.returncode, result.stdout
-        except subprocess.CalledProcessError as ex:
+        docker = _get_executable("docker")
+        result = subprocess.run(
+            [*docker, "exec", self.id, *command],
+            check=False,
+            capture_output=True,
+            text=False,
+        )
+        if result.returncode != 0:
             raise ContainerError(
-                f"Cannot run command in container {self.id}: {ex}"
-            ) from ex
+                self.id,
+                result.returncode,
+                shlex.join(command),
+                self.image.id if self.image else "unknown",
+                result.stderr,
+            )
+        return result.returncode, result.stdout
 
     def logs(self, stdout: bool = True, stderr: bool = True) -> bytes:
         """Get the logs for this container.
@@ -342,6 +380,8 @@ class Container:
             stdout: If True, return stdout.
             stderr: If True, return stderr.
         """
+        docker = _get_executable("docker")
+
         if stdout and stderr:
             # use subprocess.STDOUT to combine stdout and stderr into one stream
             # with the correct order of output
@@ -361,15 +401,13 @@ class Container:
 
         try:
             result = subprocess.run(
-                ["docker", "logs", self.id],
+                [*docker, "logs", self.id],
                 check=True,
                 stdout=stdout_pipe,
                 stderr=stderr_pipe,
             )
         except subprocess.CalledProcessError as ex:
-            raise ContainerError(
-                f"Cannot get logs for container {self.id}: {ex}"
-            ) from ex
+            raise APIError(f"Cannot get logs for container {self.id}: {ex}") from ex
 
         return getattr(result, output_attr)
 
@@ -379,9 +417,11 @@ class Container:
         Returns:
             A dict with the exit code of the container.
         """
+        docker = _get_executable("docker")
+
         try:
             result = subprocess.run(
-                ["docker", "wait", self.id],
+                [*docker, "wait", self.id],
                 check=True,
                 capture_output=True,
                 text=True,
@@ -389,7 +429,7 @@ class Container:
             # Container's exit code is printed by the wait command
             return {"StatusCode": int(result.stdout)}
         except subprocess.CalledProcessError as ex:
-            raise ContainerError(f"Cannot wait for container {self.id}: {ex}") from ex
+            raise APIError(f"Cannot wait for container {self.id}: {ex}") from ex
 
     def remove(self, v: bool = False, link: bool = False, force: bool = False) -> str:
         """Remove the container.
@@ -402,10 +442,11 @@ class Container:
         Returns:
             The output of the remove command.
         """
+        docker = _get_executable("docker")
         try:
             result = subprocess.run(
                 [
-                    "docker",
+                    *docker,
                     "rm",
                     *(["-f"] if force else []),
                     *(["-v"] if v else []),
@@ -419,7 +460,7 @@ class Container:
             return result.stdout
         except subprocess.CalledProcessError as ex:
             if "docker" in ex.stderr:
-                raise ContainerError(f"Cannot remove container {self.id}: {ex}") from ex
+                raise APIError(f"Cannot remove container {self.id}: {ex}") from ex
             raise ex
 
 
@@ -427,7 +468,7 @@ class Containers:
     """Namespace to interface with docker containers."""
 
     @staticmethod
-    def list(all: bool = False, tesseract_only: bool = True) -> list:
+    def list(all: bool = False, tesseract_only: bool = True) -> list_[Container]:
         """Returns the current list of containers.
 
         Params:
@@ -452,19 +493,27 @@ class Containers:
         Returns:
             Container object.
         """
-        container_list = Containers.list(all=True, tesseract_only=tesseract_only)
+        docker = _get_executable("docker")
 
-        for container_obj in container_list:
-            got_container = (
-                container_obj.id == id_or_name
-                or container_obj.short_id == id_or_name
-                or container_obj.name == id_or_name
+        try:
+            result = subprocess.run(
+                [*docker, "inspect", id_or_name, "--type", "container"],
+                check=True,
+                capture_output=True,
+                text=True,
             )
-            if got_container:
-                break
-        else:
-            raise ContainerError(f"Container {id_or_name} not found.")
+            json_dict = json.loads(result.stdout)
+        except subprocess.CalledProcessError as ex:
+            raise NotFound(f"Container {id_or_name} not found.") from ex
 
+        if not json_dict:
+            raise NotFound(f"Container {id_or_name} not found.")
+        if tesseract_only and not any(
+            "TESSERACT_NAME" in env_var for env_var in json_dict[0]["Config"]["Env"]
+        ):
+            raise NotFound(f"Container {id_or_name} is not a Tesseract container.")
+
+        container_obj = Container.from_dict(json_dict[0])
         return container_obj
 
     @staticmethod
@@ -473,17 +522,23 @@ class Containers:
         command: list_[str],
         volumes: dict | None = None,
         device_requests: list_[int | str] | None = None,
+        environment: dict[str, str] | None = None,
+        network: str | None = None,
         detach: bool = False,
         remove: bool = False,
+        ports: dict | None = None,
         stdout: bool = True,
         stderr: bool = False,
-    ) -> tuple | Container | str:
+        user: str | None = None,
+        extra_args: list_[str] | None = None,
+    ) -> Container | tuple[bytes, bytes] | bytes:
         """Run a command in a container from an image.
 
         Params:
             image: The image name or id to run the command in.
             command: The command to run in the container.
             volumes: A dict of volumes to mount in the container.
+            user: String of user information to run command as in the format "uid:(optional)gid".
             device_requests: A list of device requests for the container.
             detach: If True, run the container in detached mode. Detach must be set to
                     True if we wish to retrieve the container id of the running container,
@@ -493,89 +548,115 @@ class Containers:
                     after it finishes executing the command. This means that we cannot set
                     both detach and remove simulataneously to True or else there
                     would be no way of retrieving the logs from the removed container.
+            ports: A dict of ports to expose in the container. The keys are the host ports
+                   and the values are the container ports.
             stdout: If True, return stdout.
             stderr: If True, return stderr.
+            environment: Environment variables to set in the container.
+            extra_args: Additional arguments to pass to the `docker run` CLI command.
 
         Returns:
             Container object if detach is True, otherwise returns list of stdout and stderr.
         """
-        # If command is a type string and not list, make list
+        config = get_config()
+        docker = _get_executable("docker")
+
         if isinstance(command, str):
             command = [command]
-        logger.debug(f"Running command: {command}")
+
+        optional_args = []
 
         # Convert the parsed_volumes into a list of strings in proper argument format,
         # `-v host_path:container_path:mode`.
-        if not volumes:
-            volume_args = []
-        else:
+        if volumes:
             volume_args = []
             for host_path, volume_info in volumes.items():
                 volume_args.append("-v")
                 volume_args.append(
                     f"{host_path}:{volume_info['bind']}:{volume_info['mode']}"
                 )
+            optional_args.extend(volume_args)
+
+        if network:
+            optional_args.extend(["--network", network])
+
+        if user:
+            optional_args.extend(["-u", user])
 
         if device_requests:
             gpus_str = ",".join(device_requests)
-            gpus_option = f'--gpus "device={gpus_str}"'
-        else:
-            gpus_option = ""
+            optional_args.extend(["--gpus", f'"device={gpus_str}"'])
+
+        if environment:
+            env_args = []
+            for env_var, value in environment.items():
+                env_args.extend(["-e", f"{env_var}={value}"])
+            optional_args.extend(env_args)
 
         # Remove and detached cannot both be set to true
         if remove and detach:
-            raise ContainerError(
+            raise ValueError(
                 "Cannot set both remove and detach to True when running a container."
             )
+        if detach:
+            optional_args.append("--detach")
+        if remove:
+            optional_args.append("--rm")
 
-        # Run with detached to get the container id of the running container.
-        cmd_list = [
-            "docker",
+        if ports:
+            for host_port, container_port in ports.items():
+                optional_args.extend(["-p", f"{host_port}:{container_port}"])
+
+        if extra_args is None:
+            extra_args = []
+
+        full_cmd = [
+            *docker,
             "run",
-            *(["-d"] if detach else []),
-            *(["--rm"] if remove else []),
-            *volume_args,
-            *([gpus_option] if gpus_option else []),
+            *optional_args,
+            *config.docker_run_args,
+            *extra_args,
             image,
             *command,
         ]
 
-        try:
-            result = subprocess.run(
-                cmd_list,
-                capture_output=True,
-                text=True,
-                check=True,
+        logger.debug(f"Running command: {full_cmd}")
+
+        result = subprocess.run(
+            full_cmd,
+            capture_output=True,
+            text=False,
+            check=False,
+        )
+
+        if result.returncode != 0:
+            stderr_str = result.stderr.decode("utf-8", errors="ignore")
+            if "repository" in stderr_str:
+                raise ImageNotFound(stderr_str)
+            raise ContainerError(
+                None,
+                result.returncode,
+                shlex.join(full_cmd),
+                image,
+                result.stderr,
             )
 
-            if detach:
-                # If detach is True, stdout prints out the container ID of the running container
-                container_id = result.stdout.strip()
-                container_obj = Containers.get(container_id)
-                return container_obj
+        if detach:
+            # If detach is True, stdout prints out the container ID of the running container
+            container_id = result.stdout.decode("utf-8", errors="ignore").strip()
+            container_obj = Containers.get(container_id)
+            return container_obj
 
-            if result.returncode != 0:
-                raise ContainerError("Error running container command.")
-
-            if stdout and stderr:
-                return result.stdout, result.stderr
-            if stderr:
-                return result.stderr
-            return result.stdout
-
-        except subprocess.CalledProcessError as ex:
-            if "repository" in ex.stderr:
-                raise ImageNotFound() from ex
-            if "docker" in ex.stderr:
-                raise ContainerError(
-                    f"Error running container command: `{' '.join(cmd_list)}`. \n\n{ex.stderr}"
-                ) from ex
-            raise ex
+        if stdout and stderr:
+            return result.stdout, result.stderr
+        if stderr:
+            return result.stderr
+        return result.stdout
 
     @staticmethod
     def _get_containers(
         include_stopped: bool = False, tesseract_only: bool = True
-    ) -> list:
+    ) -> list_[Container]:
         """Updates and retrieves the list of containers by querying Docker CLI.
 
         Params:
@@ -585,9 +666,10 @@ class Containers:
         Returns:
             List of Container objects.
         """
+        docker = _get_executable("docker")
         containers = []
 
-        cmd = ["docker", "ps", "-q"]
+        cmd = [*docker, "ps", "-q"]
         if include_stopped:
             cmd.append("--all")
 
@@ -625,7 +707,7 @@ class Compose:
     """
 
     @staticmethod
-    def list(include_stopped: bool = False) -> dict:
+    def list(include_stopped: bool = False) -> dict[str, list_[str]]:
         """Returns the current list of projects.
 
         Params:
@@ -647,12 +729,12 @@ class Compose:
         Returns:
             The project name.
         """
+        docker_compose = _get_executable("docker-compose")
         logger.info("Waiting for Tesseract containers to start ...")
         try:
             _ = subprocess.run(
                 [
-                    "docker",
-                    "compose",
+                    *docker_compose,
                     "-f",
                     compose_fpath,
                     "-p",
@@ -666,22 +748,17 @@ class Compose:
             )
             return project_name
         except subprocess.CalledProcessError as ex:
-            # If the project successfully started, try to get the logs from the containers
-            project_containers = Compose.list(include_stopped=True).get(
-                project_name, None
-            )
-            if project_containers:
-                container = Containers.get(project_containers[0])
-                stderr = container.logs(stderr=True)
-                raise ContainerError(
-                    f"Failed to start Tesseract container: {container.name}, logs: ",
-                    stderr,
-                ) from ex
             logger.error(str(ex))
             logger.error(ex.stderr.decode())
-            raise ContainerError(
-                "Failed to start Tesseract containers.", ex.stderr
-            ) from ex
+            # If the project successfully started, try to get the logs from the containers
+            project_containers = Compose.list(include_stopped=True).get(
+                project_name, ()
+            )
+            for container_name in project_containers:
+                container = Containers.get(container_name)
+                logger.error(f"Container {container_name} logs:")
+                logger.error(indent(container.logs(stderr=True).decode(), " > "))
+            raise APIError("Failed to start Tesseract containers.") from ex
 
     @staticmethod
     def down(project_id: str) -> bool:
@@ -693,9 +770,10 @@ class Compose:
         Returns:
             True if the project was stopped successfully, False otherwise.
         """
+        docker_compose = _get_executable("docker-compose")
         try:
             __ = subprocess.run(
-                ["docker", "compose", "-p", project_id, "down"],
+                [*docker_compose, "-p", project_id, "down"],
                 check=True,
                 capture_output=True,
             )
@@ -735,6 +813,116 @@ class Compose:
         return project_container_map
 
 
+@dataclass
+class Volume:
+    """Volume class to wrap Docker volumes."""
+
+    name: str
+    attrs: dict
+
+    @classmethod
+    def from_dict(cls, json_dict: dict) -> "Volume":
+        """Create an Image object from a json dictionary.
+
+        Params:
+            json_dict: The json dictionary to create the object from.
+
+        Returns:
+            The created volume object.
+        """
+        return cls(
+            name=json_dict.get("Name", None),
+            attrs=json_dict,
+        )
+
+    def remove(self, force: bool = False) -> None:
+        """Remove a Docker volume.
+
+        Params:
+            force: If True, force the removal of the volume.
+        """
+        docker = _get_executable("docker")
+        try:
+            _ = subprocess.run(
+                [*docker, "volume", "rm", "--force" if force else "", self.name],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except subprocess.CalledProcessError as ex:
+            raise NotFound(f"Error removing volume {self.name}: {ex}") from ex
+
+
+class Volumes:
+    """Volume class to wrap Docker volumes."""
+
+    @staticmethod
+    def create(name: str) -> Volume:
+        """Create a Docker volume.
+
+        Params:
+            name: The name of the volume to create.
+
+        Returns:
+            The created volume object.
+        """
+        docker = _get_executable("docker")
+        try:
+            _ = subprocess.run(
+                [*docker, "volume", "create", name],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            return Volumes.get(name)
+        except subprocess.CalledProcessError as ex:
+            raise NotFound(f"Error creating volume {name}: {ex}") from ex
+
+    @staticmethod
+    def get(name: str) -> Volume:
+        """Get a Docker volume.
+
+        Params:
+            name: The name of the volume to get.
+
+        Returns:
+            The volume object.
+        """
+        docker = _get_executable("docker")
+        try:
+            result = subprocess.run(
+                [*docker, "volume", "inspect", name],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            json_dict = json.loads(result.stdout)
+        except subprocess.CalledProcessError as ex:
+            raise NotFound(f"Volume {name} not found: {ex}") from ex
+        if not json_dict:
+            raise NotFound(f"Volume {name} not found.")
+        return Volume.from_dict(json_dict[0])
+
+    @staticmethod
+    def list() -> list[str]:
+        """List all Docker volumes.
+
+        Returns:
+            List of volume names.
+        """
+        docker = _get_executable("docker")
+        try:
+            result = subprocess.run(
+                [*docker, "volume", "ls", "-q"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except subprocess.CalledProcessError as ex:
+            raise APIError(f"Error listing volumes: {ex}") from ex
+        return result.stdout.strip().split("\n")
+
+
 class DockerException(Exception):
     """Base class for Docker CLI exceptions."""
 
@@ -747,11 +935,29 @@ class BuildError(DockerException):
     def __init__(self, build_log: list_[str]) -> None:
         self.build_log = build_log
 
+    def __str__(self) -> str:
+        return (
+            "Docker build failed. Please check the build log for details:\n"
+            + "\n".join(self.build_log)
+        )
+
 
 class ContainerError(DockerException):
-    """Raised when a container has error."""
+    """Raised when a container encounters an error."""
 
-    pass
+    def __init__(
+        self,
+        container: str | None,
+        exit_status: int,
+        command: str,
+        image: str,
+        stderr: bytes,
+    ) -> None:
+        self.container = container
+        self.exit_status = exit_status
+        self.command = command
+        self.image = image
+        self.stderr = stderr
 
 
 class APIError(DockerException):
@@ -760,7 +966,13 @@ class APIError(DockerException):
     pass
 
 
-class ImageNotFound(DockerException):
+class NotFound(DockerException):
+    """Raised when a Docker resource is not found."""
+
+    pass
+
+
+class ImageNotFound(NotFound):
     """Raised when an image is not found."""
 
     pass
@@ -784,13 +996,15 @@ class CLIDockerClient:
         self.containers = Containers()
         self.images = Images()
         self.compose = Compose()
+        self.volumes = Volumes()
 
     @staticmethod
     def info() -> tuple:
         """Wrapper around docker info call."""
+        docker = _get_executable("docker")
         try:
             result = subprocess.run(
-                ["docker", "info"],
+                [*docker, "info"],
                 check=True,
                 capture_output=True,
             )
@@ -812,6 +1026,7 @@ def get_docker_metadata(
     Returns:
         A dict mapping asset ids to their metadata.
     """
+    docker = _get_executable("docker")
     if not docker_asset_ids:
         return {}
 
@@ -819,7 +1034,7 @@ def get_docker_metadata(
     metadata = None
     try:
         result = subprocess.run(
-            ["docker", "inspect", *docker_asset_ids],
+            [*docker, "inspect", *docker_asset_ids],
             check=True,
             capture_output=True,
             text=True,
@@ -833,9 +1048,7 @@ def get_docker_metadata(
             if f"No such image: {asset_id}" in error_message:
                 logger.error(f"Image {asset_id} is not a valid image.")
         if "No such object" in error_message:
-            raise ContainerError(
-                "Unhealthy container found. Please restart docker."
-            ) from e
+            raise APIError("Unhealthy container found. Please restart docker.") from e
 
     if not metadata:
         return {}

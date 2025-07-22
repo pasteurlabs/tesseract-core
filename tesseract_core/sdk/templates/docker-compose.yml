@@ -3,13 +3,19 @@ services:
   {{ service.name }}:
     image: {{ service.image }}
     restart: unless-stopped
-    command: ["serve", "--num-workers", "{{ num_workers }}"]
+    command: ["serve", "--host", "0.0.0.0", "--num-workers", "{{ service.num_workers }}"]
+    {%- if service.user %}
+    user: "{{ service.user }}"
+    {%- endif %}
     ports:
       - {{ service.port }}
+    {% if service.environment.TESSERACT_DEBUG == "1" %}
+      - "{{ service.debugpy_port }}:5678"
+    {% endif %}
     {%- if service.volumes %}
     volumes:
-    {%- for volume in service.volumes %}
-      - {{ volume }}
+    {%- for volume_source, volume_data in service.volumes.items() %}
+      - {{ volume_source }}:{{ volume_data["bind"] }}
     {% endfor -%}
     {% endif %}
     healthcheck:
@@ -36,6 +42,13 @@ services:
     {% endif %}
 {% endfor %}
 
+{%- if named_volumes %}
+volumes:
+{%- for name, external in named_volumes.items() %}
+  {{ name }}:
+    external: {{ external }}
+{% endfor %}
+{% endif %}
+
 networks:
   multi-tesseract-network:
-    name: multi-tesseract-network
