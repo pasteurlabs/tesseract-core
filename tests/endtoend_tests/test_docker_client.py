@@ -45,7 +45,7 @@ def docker_client_built_image_name(
     build_docker_image(dummy_tesseract_location, image_names, dummy_docker_file)
     try:
         # Let's just return one tag to use in tests, even if we are
-        # creating multiple ones for testing stuff like Images.get_tags
+        # creating multiple ones for testing purposes.
         yield image_names[0]
     finally:
         for image in image_names:
