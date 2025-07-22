@@ -40,27 +40,6 @@ def _is_valid_docker_tag(tag: str) -> bool:
     return True
 
 
-def _matches_image_tag(tag: str, image: str) -> bool:
-    """Determine whether a given (full) image tag corresponds to a specific image name.
-
-    This function checks if the `tag` string ends with the given `image` name
-    followed by a colon and a valid proper tag. It supports matching image
-    paths that may be nested within a repository path.
-
-    This is necessary here because podman will always specify the repository
-    path, even when it is localhost/.
-
-    Args:
-        tag (str): The full image tag string (e.g., 'repo/image/name:tag').
-        image (str): The image name to match (e.g., 'image/name').
-
-    Returns:
-        bool: True if the tag ends with the image name followed by a valid tag.
-    """
-    pattern = rf"(?:^|/){re.escape(image)}:[\w.-]+$"
-    return re.search(pattern, tag) is not None
-
-
 def is_podman() -> bool:
     """Check if the current environment is using Podman instead of Docker."""
     docker = _get_executable("docker")
@@ -164,27 +143,6 @@ class Images:
             List of Image objects.
         """
         return Images._get_images(tesseract_only=tesseract_only)
-
-    @staticmethod
-    def get_tags(image: str) -> list_[str]:
-        """Finds all tags associated with a given image.
-
-        Params:
-            image: The image name to find tags for.
-
-        Returns:
-           List of tags associated with the given image.
-        """
-        all_images = Images.list()
-        if not all_images or len(all_images) == 0:
-            raise RuntimeError("No Tesseract images found on this machine.")
-        tags = [
-            tag
-            for image_ in all_images
-            for tag in image_.tags or []
-            if _matches_image_tag(tag, image)
-        ]
-        return tags
 
     @staticmethod
     def remove(image: str) -> None:
