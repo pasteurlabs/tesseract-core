@@ -3,11 +3,9 @@
 
 """This module provides a command-line interface for interacting with the Tesseract runtime."""
 
-import contextlib
 import io
-import os
 import sys
-from collections.abc import Callable, Generator
+from collections.abc import Callable
 from pathlib import Path
 from textwrap import dedent
 from typing import Any, Optional
@@ -21,6 +19,7 @@ from tesseract_core.runtime.core import (
     check_tesseract_api,
     create_endpoints,
     get_tesseract_api,
+    redirect_fd,
 )
 from tesseract_core.runtime.file_interactions import (
     SUPPORTED_FORMATS,
@@ -317,7 +316,7 @@ def serve(host: str, port: int, num_workers: int) -> None:
 
 
 def _create_user_defined_cli_command(
-    user_function: Callable, out_stream: Optional[io.IOBase]
+    user_function: Callable, out_stream: Optional[io.TextIOBase]
 ) -> click.Command:
     """Creates a click command which sends requests to Tesseract endpoints.
 
@@ -467,23 +466,10 @@ def _add_user_commands_to_cli(
     return group
 
 
-@contextlib.contextmanager
-def stdout_to_stderr() -> Generator:
-    """Redirect stdout to stderr at OS level."""
-    orig_stdout = os.dup(sys.stdout.fileno())
-    sys.stdout.flush()
-    os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
-    try:
-        yield os.fdopen(orig_stdout, "w", closefd=False)
-    finally:
-        sys.stdout.flush()
-        os.dup2(orig_stdout, sys.stdout.fileno())
-
-
 def main() -> None:
     """Entrypoint for the command line interface."""
     # Redirect stdout to stderr to avoid mixing any output with the JSON response.
-    with stdout_to_stderr() as orig_stdout:
+    with redirect_fd(sys.stdout, sys.stderr) as orig_stdout:
         # Fail as fast as possible if the Tesseract API path is not set
         api_path = get_config().api_path
         if not api_path.is_file():

@@ -165,7 +165,6 @@ $ tesseract-runtime apply '{"inputs": {"name": "Tessie"}}'
 More info on usage is contained in `tesseract-runtime --help` (and in its subcommands,
 like `tesseract-runtime apply --help`).
 
-
 ## Creating a Tesseract from a Python package
 
 Sometimes it is useful to create a Tesseract from an already-existing
