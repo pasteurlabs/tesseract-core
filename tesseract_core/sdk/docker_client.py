@@ -179,7 +179,7 @@ class Images:
         if not all_images or len(all_images) == 0:
             raise RuntimeError("No Tesseract images found on this machine.")
         tags = [
-            tag.split(":")[-1]
+            tag
             for image_ in all_images
             for tag in image_.tags or []
             if _matches_image_tag(tag, image)

@@ -496,7 +496,8 @@ def test_get_tags(docker_client, docker_client_built_image_name):
     """Test getting tags for a given image."""
     base_name = docker_client_built_image_name.split(":")[0]
     tags = docker_client.images.get_tags(base_name)
-    assert sorted(tags) == ["dummy", "latest"]
+    proper_tags = [t.split(":")[-1] for t in tags]
+    assert sorted(proper_tags) == ["dummy", "latest"]
 
 
 def test_is_valid_docker_tag():
