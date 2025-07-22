@@ -896,7 +896,7 @@ def test_mpa_file_backend(
             "tesseract",
             "run",
             "--env",
-            "MPA_DIR=/tesseract/output_data/mpa_logs",
+            "LOG_DIR=/tesseract/output_data/mpa_logs",
             img_tag,
             "apply",
             '{"inputs": {}}',
