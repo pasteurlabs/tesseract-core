@@ -26,7 +26,7 @@ class BaseBackend(ABC):
     """Base class for MPA backends."""
 
     def __init__(self) -> None:
-        self.log_dir = os.getenv("MPA_DIR")
+        self.log_dir = os.getenv("LOG_DIR")
         if not self.log_dir:
             self.log_dir = Path(get_config().output_path) / "logs"
         else:
