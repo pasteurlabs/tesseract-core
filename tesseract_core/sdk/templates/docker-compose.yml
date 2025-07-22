@@ -42,14 +42,11 @@ services:
     {% endif %}
 {% endfor %}
 
-
-{%- if docker_volumes %}
+{%- if named_volumes %}
 volumes:
-{%- for name, external in docker_volumes.items() %}
+{%- for name, external in named_volumes.items() %}
   {{ name }}:
-    {%- if external %}
-    external: true
-    {% endif %}
+    external: {{ external }}
 {% endfor %}
 {% endif %}
 
