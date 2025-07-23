@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.11.0] - 2025-07-23
+
+### Features
+
+- [**breaking**] Automatically redirect stdout + stderr to logfile within Tesseract endpoints (#265)
+- Add e2e tests for MPA (both file and MLflow backend) (#277)
+- [**breaking**] Use `version` from `tesseract_config.yaml` as default Docker image tag (#267)
+
 ## [0.10.2] - 2025-07-21
 
 ### Bug Fixes
