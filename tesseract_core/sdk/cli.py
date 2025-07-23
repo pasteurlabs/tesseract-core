@@ -170,7 +170,7 @@ def main_callback(
         ),
     ] = None,
 ) -> None:
-    """Tesseract: A toolkit for re-usable, autodiff-native software components."""
+    """Tesseract: A toolkit for universal, autodiff-native software components."""
     verbose_tracebacks = loglevel == LogLevel.debug
     state.print_user_error_tracebacks = verbose_tracebacks
     app.pretty_exceptions_show_locals = verbose_tracebacks
