@@ -6,7 +6,7 @@
 
 ### Tesseract Core
 
-Autodiff-native, self-documenting software components for Simulation Intelligence. :package:
+Universal, autodiff-native software components for Simulation Intelligence. :package:
 
 [Read the docs](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/) |
 [Report an issue](https://github.com/pasteurlabs/tesseract-core/issues) |
@@ -14,6 +14,8 @@ Autodiff-native, self-documenting software components for Simulation Intelligenc
 [Contribute](https://github.com/pasteurlabs/tesseract-core/blob/main/CONTRIBUTING.md)
 
 ---
+
+[![DOI](https://joss.theoj.org/papers/10.21105/joss.08385/status.svg)](https://doi.org/10.21105/joss.08385)
 
 **Tesseract Core** bundles:
 
