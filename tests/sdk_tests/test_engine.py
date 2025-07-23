@@ -129,7 +129,12 @@ def test_run_tesseract(mocked_docker):
 
     # Mocked docker just returns the kwargs to `docker run` as json
     res = json.loads(res_out)
-    assert res["command"] == ["apply", '{"inputs": {"a": [1, 2, 3], "b": [4, 5, 6]}}']
+    assert res["command"] == [
+        "apply",
+        '{"inputs": {"a": [1, 2, 3], "b": [4, 5, 6]}}',
+        "--output-path",
+        Path(os.getcwd()) / "tesseract_output",
+    ]
     assert res["image"] == "foobar"
 
     # Also check that stderr is captured
@@ -152,10 +157,18 @@ def test_run_gpu(mocked_docker):
     assert res["device_requests"] == ["all"]
 
 
-def test_run_tesseract_file_input(mocked_docker, tmpdir):
+pytest.mark.parametrize("default_output_path", [True, False])
+
+
+def test_run_tesseract_file_input(mocked_docker, tmpdir, default_output_path):
     """Test running a tesseract with file input / output."""
-    outdir = Path(tmpdir) / "output"
-    outdir.mkdir()
+    if not default_output_path:
+        outdir = Path(tmpdir) / "output"
+        outdir.mkdir()
+        output_args = ["--output-path", str(outdir)]
+    else:
+        output_args = []
+        outdir = "."
 
     infile = Path(tmpdir) / "input.json"
     infile.touch()
@@ -163,7 +176,7 @@ def test_run_tesseract_file_input(mocked_docker, tmpdir):
     res, _ = engine.run_tesseract(
         "foobar",
         "apply",
-        [f"@{infile}", "--output-path", str(outdir)],
+        [f"@{infile}", *output_args],
     )
 
     # Mocked docker just returns the kwargs to `docker run` as json
@@ -181,7 +194,7 @@ def test_run_tesseract_file_input(mocked_docker, tmpdir):
     res, _ = engine.run_tesseract(
         "foobar",
         "apply",
-        [f"@{infile}", "--output-path", str(outdir)],
+        [f"@{infile}", *output_args],
         volumes=[f"{tmpdir}:/path/in/container:ro"],
     )
     res = json.loads(res)
@@ -197,7 +210,7 @@ def test_run_tesseract_file_input(mocked_docker, tmpdir):
     res, _ = engine.run_tesseract(
         "foobar",
         "apply",
-        [f"@{infile}", "--output-path", str(outdir), "--input-path", str(indir)],
+        [*[f"@{infile}"], *output_args, "--input-path", str(indir)],
     )
     res = json.loads(res)
     assert res["volumes"].keys() == {str(outdir), str(indir), str(infile)}
