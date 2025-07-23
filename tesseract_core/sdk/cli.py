@@ -249,9 +249,9 @@ def build_image(
         typer.Option(
             "--tag",
             "-t",
-            help="Tag for the resulting Tesseract. This can help you distinguish between "
-            "Tesseracts with the same base name, like `cfd:v1` and cfd:v2`, "
-            "both named `cfd` but tagged as `v1` and `v2` respectively.",
+            help="Tag for the resulting Tesseract. By default, this will "
+            "be inferred from the version specified in tesseract_config.yaml, "
+            "and the Tesseract will also be tagged as `latest`.",
         ),
     ] = None,
     build_dir: Annotated[

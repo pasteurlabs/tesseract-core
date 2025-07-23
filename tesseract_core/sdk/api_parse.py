@@ -152,7 +152,7 @@ class TesseractConfig(BaseModel, validate_assignment=True):
     """Configuration options for Tesseracts. Defines valid options in ``tesseract_config.yaml``."""
 
     name: StrictStr = Field(..., description="Name of the Tesseract.")
-    version: StrictStr = Field("0+unknown", description="Version of the Tesseract.")
+    version: StrictStr = Field("unknown", description="Version of the Tesseract.")
     description: StrictStr = Field(
         "",
         description="Free-text description of what the Tesseract does.",
