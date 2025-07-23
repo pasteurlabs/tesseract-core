@@ -1,6 +1,6 @@
 [project]
 name = "tesseract-core"
-description = "A toolkit for univsersal, autodiff-native software components."
+description = "A toolkit for universal, autodiff-native software components."
 readme = "README.md"
 authors = [
     {name = "The Tesseract team @ Pasteur Labs + OSS contributors", email = "info@simulation.science"},
