@@ -231,12 +231,8 @@ def test_serve_tesseracts_invalid_input_args(mocked_docker):
         with pytest.raises(ValueError):
             engine.serve(
                 ["vectoradd", "vectoradd"],
-                no_compose=True,
                 service_names=["VA1", "VA2"],
             )
-
-        with pytest.raises(ValueError):
-            engine.serve(["vectoradd", "vectoradd"], service_names=["dupe", "dupe"])
 
         with pytest.raises(ValueError):
             engine.serve(["vectoradd"], service_names=["inval$id-domain-name"])
@@ -286,47 +282,41 @@ def test_serve_tesseracts(mocked_docker):
     assert project_name_multi_tesseract
 
 
-@pytest.mark.parametrize("no_compose", [True, False])
-def test_serve_tesseract_volumes(mocked_docker, tmpdir, no_compose):
+def test_serve_tesseract_volumes(mocked_docker, tmpdir):
     """Test running a tesseract with volumes."""
     # Test with a single volume
     res = engine.serve(
         ["foobar"],
         volumes=[f"{tmpdir}:/path/in/container:ro"],
-        no_compose=no_compose,
     )
 
-    if no_compose:
-        # Currently no good way to test return value of serve with no_compose=True
-        # since it returns a project ID.
-        res = json.loads(res)
-        assert res["volumes"].keys() == {f"{tmpdir}"}
-        assert res["volumes"][f"{tmpdir}"] == {
-            "mode": "ro",
-            "bind": "/path/in/container",
-        }
+    # Currently no good way to test return value of serve
+    # since it returns a project ID.
+    res = json.loads(res)
+    assert res["volumes"].keys() == {f"{tmpdir}"}
+    assert res["volumes"][f"{tmpdir}"] == {
+        "mode": "ro",
+        "bind": "/path/in/container",
+    }
 
     # Test with a named volume
     res = engine.serve(
         ["foobar"],
         volumes=["my_named_volume:/path/in/container:ro"],
-        no_compose=no_compose,
     )
 
-    if no_compose:
-        res = json.loads(res)
-        assert res["volumes"].keys() == {"my_named_volume"}
-        assert res["volumes"]["my_named_volume"] == {
-            "mode": "ro",
-            "bind": "/path/in/container",
-        }
+    res = json.loads(res)
+    assert res["volumes"].keys() == {"my_named_volume"}
+    assert res["volumes"]["my_named_volume"] == {
+        "mode": "ro",
+        "bind": "/path/in/container",
+    }
 
     with pytest.raises(RuntimeError):
         # Test with a volume that does not exist
         engine.serve(
             ["foobar"],
             volumes=["/non/existent/path:/path/in/container:ro"],
-            no_compose=no_compose,
         )
 
 
