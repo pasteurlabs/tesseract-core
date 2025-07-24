@@ -454,6 +454,16 @@ def serve(
             callback=_validate_port,
         ),
     ] = None,
+    network: Annotated[
+        str | None,
+        typer.Option(
+            "--network",
+            help="Network to use for the Tesseract container, analogous to Docker's --network option. "
+            "For example, 'host' uses the host system's network. Alternatively, you can create a custom "
+            "network with `docker network create <network-name>` and use it here.",
+            show_default=False,
+        ),
+    ] = None,
     host_ip: Annotated[
         str,
         typer.Option(
@@ -591,6 +601,7 @@ def serve(
             image_names,
             host_ip,
             ports,
+            network,
             volume,
             environment,
             gpus,
