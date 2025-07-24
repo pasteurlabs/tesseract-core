@@ -522,7 +522,7 @@ def serve(
     num_workers: int = 1,
     user: str | None = None,
     input_path: str | Path | None = None,
-) -> str:
+) -> tuple:
     """Serve one or more Tesseract images.
 
     Start the Tesseracts listening on an available ports on the host.
