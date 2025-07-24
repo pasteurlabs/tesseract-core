@@ -817,10 +817,15 @@ def _create_docker_compose_template(
 
     for i, image_id in enumerate(image_ids):
         # Write each Tesseract's output to a separate output directory
-        temp_parsed_volumes = parsed_volumes.copy()
-        source = f"{output_path}/{service_names[i]}"
-        Path(source).mkdir(exist_ok=True)
-        temp_parsed_volumes[source] = {"bind": "/tesseract/output_data", "mode": "rw"}
+        temp_parsed_volumes = parsed_volumes
+        if output_path != "None":
+            temp_parsed_volumes = parsed_volumes.copy()
+            source = f"{output_path}/{service_names[i]}"
+            Path(source).mkdir(exist_ok=True)
+            temp_parsed_volumes[source] = {
+                "bind": "/tesseract/output_data",
+                "mode": "rw",
+            }
         service = {
             "name": service_names[i],
             "user": user,

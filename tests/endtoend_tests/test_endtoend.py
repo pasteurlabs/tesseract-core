@@ -211,6 +211,8 @@ def test_tesseract_run_stdout(built_image_name):
                 "run",
                 built_image_name,
                 command,
+                "--output-path",
+                "STDOUT",
             ],
             catch_exceptions=False,
         )
@@ -532,6 +534,8 @@ def test_tesseract_serve_volume_permissions(
             "--volume",
             f"{volume_to_bind}:{dest}:rw",
             *(("--user", user) if user else []),
+            "--output-path",
+            "STDOUT",
             built_image_name,
             *(("--no-compose",) if no_compose else [built_image_name]),
         ],
