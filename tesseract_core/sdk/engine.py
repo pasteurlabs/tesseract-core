@@ -559,6 +559,7 @@ def serve(
     service_names: list[str] | None = None,
     user: str | None = None,
     input_path: str | Path | None = None,
+    output_path: str | Path | None = None,
 ) -> str:
     """Serve one or more Tesseract images.
 
@@ -580,6 +581,7 @@ def serve(
         user: user to run the Tesseracts as, e.g. '1000' or '1000:1000' (uid:gid).
               Defaults to the current user.
         input_path: Input path to read input files from, such as local directory or S3 URI.
+        output_path: Output path to write output files to, such as local directory or S3 URI.
 
     Returns:
         A string representing the Tesseract project ID.
@@ -611,12 +613,30 @@ def serve(
         # Use the current user if not specified
         user = f"{os.getuid()}:{os.getgid()}" if os.name != "nt" else None
 
+    # Handle Input/Output paths mounting
+    if not output_path:
+        output_path = Path(os.getcwd()) / "tesseract_output"
+        # Make a directory in cwd called /tesseract_output
+        output_path.mkdir(exist_ok=True)
+        logger.info(
+            "`--output-path` not specified. Writing output to current directory: %s",
+            output_path,
+        )
+
+    if environment is None:
+        environment = {}
+    environment["TESSERACT_OUTPUT_PATH"] = "/tesseract/output_data"
+    if volumes is None:
+        volumes = []
+    if "://" not in str(output_path):
+        # Process output path separately in docker compose template
+        if "STDOUT" in str(output_path):
+            output_path = None
+        else:
+            output_path = Path(output_path).resolve()
+
     if input_path:
-        if environment is None:
-            environment = {}
         environment["TESSERACT_INPUT_PATH"] = "/tesseract/input_data"
-        if volumes is None:
-            volumes = []
         if "://" not in input_path:
             input_path = Path(input_path).resolve()
             volumes.append(f"{input_path}:/tesseract/input_data:ro")
@@ -716,6 +736,7 @@ def serve(
         num_workers,
         debug=debug,
         user=user,
+        output_path=str(output_path),
     )
     compose_fname = f"docker-compose-{_id_generator()}.yml"
 
@@ -746,6 +767,7 @@ def _create_docker_compose_template(
     num_workers: int = 1,
     debug: bool = False,
     user: str | None = None,
+    output_path: str | None = None,
 ) -> str:
     """Create Docker Compose template."""
     services = []
@@ -794,12 +816,22 @@ def _create_docker_compose_template(
     parsed_volumes = _parse_volumes(volumes) if volumes else {}
 
     for i, image_id in enumerate(image_ids):
+        # Write each Tesseract's output to a separate output directory
+        temp_parsed_volumes = parsed_volumes
+        if output_path != "None":
+            temp_parsed_volumes = parsed_volumes.copy()
+            source = f"{output_path}/{service_names[i]}"
+            Path(source).mkdir(exist_ok=True)
+            temp_parsed_volumes[source] = {
+                "bind": "/tesseract/output_data",
+                "mode": "rw",
+            }
         service = {
             "name": service_names[i],
             "user": user,
             "image": image_id,
             "port": f"{ports[i]}:8000",
-            "volumes": parsed_volumes,
+            "volumes": temp_parsed_volumes,
             "gpus": gpu_settings,
             "environment": {
                 "TESSERACT_DEBUG": "1" if debug else "0",
@@ -808,7 +840,6 @@ def _create_docker_compose_template(
             "num_workers": num_workers,
             "debugpy_port": debugpy_ports[i] if debug else None,
         }
-
         services.append(service)
 
     external_volume_map = {}
@@ -918,8 +949,6 @@ def run_tesseract(
         network: name of the Docker network to connect the container to.
         user: user to run the Tesseract as, e.g. '1000' or '1000:1000' (uid:gid).
             Defaults to the current user.
-        input_path: Input path to read input files from, such as local directory or S3 URI.
-            The input path is mounted read-only into the Tesseract at `/tesseract/input_data`.
 
     Returns:
         Tuple with the stdout and stderr of the Tesseract.
@@ -943,6 +972,16 @@ def run_tesseract(
         # Use the current user if not specified
         user = f"{os.getuid()}:{os.getgid()}" if os.name != "nt" else None
 
+    # Default output path behavior if not specified
+    if "--output-path" not in args and "-o" not in args:
+        args.append("--output-path")
+        output_path = str(Path(os.getcwd()) / "tesseract_output")
+        args.append(output_path)
+        logger.info(
+            "`--output-path` not specified, writing to current directory: %s",
+            output_path,
+        )
+
     for arg in args:
         if arg.startswith("-"):
             current_cmd = arg
@@ -951,6 +990,11 @@ def run_tesseract(
 
         # Mount local output directories into Docker container as a volume
         if current_cmd in output_args and "://" not in arg:
+            if "STDOUT" in arg:
+                # Pop out the last arg (--output-path) in cmd
+                cmd.pop()
+                continue
+
             if arg.startswith("@"):
                 raise ValueError(
                     f"Output path {arg} cannot start with '@' (used only for input files)"

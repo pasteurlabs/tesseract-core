@@ -360,7 +360,8 @@ def _create_user_defined_cli_command(
                 type=click.STRING,
                 help=(
                     "Output path to write the result to, such as local directory or S3 URI "
-                    "(may be anything supported by fsspec). [default: write to stdout]"
+                    "(may be anything supported by fsspec). Use STDOUT to write to stdout."
+                    "[default: ./tesseract_output]"
                 ),
                 default=None,
             ),

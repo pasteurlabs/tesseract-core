@@ -854,11 +854,13 @@ def test_unit_tesseract_endtoend(
     unit_tesseract_config,
     free_port,
     docker_cleanup,
+    tmpdir,
 ):
     """Test that unit Tesseract images can be built and used to serve REST API."""
     from tesseract_core.sdk.cli import app
 
     cli_runner = CliRunner(mix_stderr=False)
+    tmpdir.chmod(0o777)
 
     # Stage 1: Build
     img_name = build_tesseract(
@@ -877,6 +879,8 @@ def test_unit_tesseract_endtoend(
             "run",
             img_name,
             "input-schema",
+            "--output-path",
+            "STDOUT",
         ],
         catch_exceptions=False,
     )
@@ -909,6 +913,14 @@ def test_unit_tesseract_endtoend(
                 str(unit_tesseract_path / unit_tesseract_config.output_path),
             ]
         )
+    else:
+        # Override default output path behavior to prevent permission issues
+        io_args.extend(
+            [
+                "--output-path",
+                "STDOUT",
+            ]
+        )
 
     if unit_tesseract_config.test_with_random_inputs:
         random_input = example_from_json_schema(json.loads(input_schema))
@@ -937,6 +949,8 @@ def test_unit_tesseract_endtoend(
                     img_name,
                     cli_cmd,
                     json.dumps(request.payload),
+                    "--output-path",
+                    "STDOUT",
                 ]
             else:
                 args = [
