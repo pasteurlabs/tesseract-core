@@ -619,7 +619,8 @@ def serve(
         # Make a directory in cwd called /tesseract_output
         output_path.mkdir(exist_ok=True)
         logger.info(
-            "`--output-path` not specified. Writing output to current directory `tesseract_output`..."
+            "`--output-path` not specified. Writing output to current directory: %s",
+            output_path,
         )
 
     if environment is None:
@@ -966,8 +967,12 @@ def run_tesseract(
     # Default output path behavior if not specified
     if "--output-path" not in args:
         cmd.append("--output-path")
-        cmd.append(str(Path(os.getcwd()) / "tesseract_output"))
-        logger.info("`--output-path` not specified, writing to current directory.")
+        output_path = str(Path(os.getcwd()) / "tesseract_output")
+        cmd.append(output_path)
+        logger.info(
+            "`--output-path` not specified, writing to current directory: %s",
+            output_path,
+        )
 
     for arg in args:
         if arg.startswith("-"):
