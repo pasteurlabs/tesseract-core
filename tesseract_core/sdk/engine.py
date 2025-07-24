@@ -966,9 +966,9 @@ def run_tesseract(
 
     # Default output path behavior if not specified
     if "--output-path" not in args:
-        cmd.append("--output-path")
+        args.append("--output-path")
         output_path = str(Path(os.getcwd()) / "tesseract_output")
-        cmd.append(output_path)
+        args.append(output_path)
         logger.info(
             "`--output-path` not specified, writing to current directory: %s",
             output_path,

@@ -161,12 +161,12 @@ def test_run_gpu(mocked_docker):
 def test_run_tesseract_file_input(mocked_docker, tmpdir, default_output_path):
     """Test running a tesseract with file input / output."""
     if not default_output_path:
-        outdir = Path(tmpdir) / "output"
+        outdir = Path(tmpdir) / "tesseract_output"
         outdir.mkdir()
         output_args = ["--output-path", str(outdir)]
     else:
         output_args = []
-        outdir = str(Path(os.getcwd()) / "tesseract_output")
+        outdir = Path(os.getcwd()) / "tesseract_output"
 
     infile = Path(tmpdir) / "input.json"
     infile.touch()
@@ -181,9 +181,9 @@ def test_run_tesseract_file_input(mocked_docker, tmpdir, default_output_path):
     res = json.loads(res)
     assert res["command"] == [
         "apply",
+        "@/tesseract/payload.json",
         "--output-path",
         "/tesseract/output_data",
-        "@/tesseract/payload.json",
     ]
     assert res["image"] == "foobar"
     assert res["volumes"].keys() == {str(infile), str(outdir)}
