@@ -534,8 +534,6 @@ def serve(
     command, as well as a list of all containers spawned and their respective
     ports.
     """
-    ports = [port] if port is not None else None
-
     # Parse environment variables from list to dict
     if environment is not None:
         try:
@@ -553,7 +551,7 @@ def serve(
         project_id = engine.serve(
             image_name,
             host_ip,
-            ports,
+            port,
             network,
             volume,
             environment,
@@ -671,7 +669,7 @@ def apidoc(
 ) -> None:
     """Serve the OpenAPI schema for a Tesseract."""
     host_ip = "127.0.0.1"
-    project_id = engine.serve([image_name], host_ip=host_ip)
+    project_id = engine.serve(image_name, host_ip=host_ip)
     try:
         container = docker_client.containers.get(project_id)
         url = f"http://{host_ip}:{container.host_port}/docs"

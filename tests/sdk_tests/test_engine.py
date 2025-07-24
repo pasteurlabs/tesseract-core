@@ -208,37 +208,19 @@ def test_run_tesseract_file_input(mocked_docker, tmpdir):
 
 
 def test_serve_tesseracts_invalid_input_args(mocked_docker):
-    """Test input validation logic for multi-tesseract serve."""
+    """Test input validation logic for tesseract serve."""
     with suppress_type_checks():
         with pytest.raises(ValueError):
-            engine.serve([None])
+            engine.serve(None)
 
         with pytest.raises(ValueError):
-            engine.serve([])
+            engine.serve()
 
         with pytest.raises(ValueError):
             engine.serve([None, "vectoradd"])
 
         with pytest.raises(ValueError):
             engine.teardown(None)
-
-        with pytest.raises(ValueError):
-            engine.serve(["vectoradd"], ports=["8080", "8081"])
-
-        with pytest.raises(ValueError):
-            engine.serve(["vectoradd"], service_names=["A", "B"])
-
-        with pytest.raises(ValueError):
-            engine.serve(
-                ["vectoradd", "vectoradd"],
-                service_names=["VA1", "VA2"],
-            )
-
-        with pytest.raises(ValueError):
-            engine.serve(["vectoradd"], service_names=["inval$id-domain-name"])
-
-        with pytest.raises(ValueError):
-            engine.serve(["vectoradd"], service_names=["-invalid-name"])
 
 
 def test_get_tesseract_images(mocked_docker):
@@ -254,31 +236,18 @@ def test_get_tesseract_containers(mocked_docker):
 def test_serve_tesseracts(mocked_docker):
     """Test multi-tesseract serve."""
     # Serve valid
-    project_name_single_tesseract = engine.serve(["vectoradd"])
+    project_name_single_tesseract = engine.serve("vectoradd")
     assert project_name_single_tesseract
 
     # Teardown valid
     engine.teardown(project_name_single_tesseract)
-
-    # Multi-serve valid
-    project_name_multi_tesseract = engine.serve(["vectoradd", "vectoradd"])
-    assert project_name_multi_tesseract
-
-    # Multi-teardown valid
-    engine.teardown(project_name_multi_tesseract)
 
     # Tear down invalid
     with pytest.raises(NotFound):
         engine.teardown("invalid_project_name")
 
     # Serve with gpus
-    project_name_multi_tesseract = engine.serve(["vectoradd"], gpus=["1", "3"])
-    assert project_name_multi_tesseract
-
-    # Serve and specify tesseract service names
-    project_name_multi_tesseract = engine.serve(
-        ["vectoradd", "vectoradd"], service_names=["VA1", "VA2"]
-    )
+    project_name_multi_tesseract = engine.serve("vectoradd", gpus=["1", "3"])
     assert project_name_multi_tesseract
 
 
@@ -286,7 +255,7 @@ def test_serve_tesseract_volumes(mocked_docker, tmpdir):
     """Test running a tesseract with volumes."""
     # Test with a single volume
     res = engine.serve(
-        ["foobar"],
+        "foobar",
         volumes=[f"{tmpdir}:/path/in/container:ro"],
     )
 
@@ -301,7 +270,7 @@ def test_serve_tesseract_volumes(mocked_docker, tmpdir):
 
     # Test with a named volume
     res = engine.serve(
-        ["foobar"],
+        "foobar",
         volumes=["my_named_volume:/path/in/container:ro"],
     )
 
@@ -315,7 +284,7 @@ def test_serve_tesseract_volumes(mocked_docker, tmpdir):
     with pytest.raises(RuntimeError):
         # Test with a volume that does not exist
         engine.serve(
-            ["foobar"],
+            "foobar",
             volumes=["/non/existent/path:/path/in/container:ro"],
         )
 

@@ -115,8 +115,8 @@ def test_serve_lifecycle(mock_serving, mock_clients):
         pass
 
     mock_serving["serve_mock"].assert_called_with(
-        ["sometesseract:0.2.3"],
-        ports=None,
+        "sometesseract:0.2.3",
+        port=None,
         volumes=[],
         environment={},
         gpus=None,

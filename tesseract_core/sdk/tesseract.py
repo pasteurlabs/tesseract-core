@@ -306,14 +306,9 @@ class Tesseract:
         debug: bool = False,
         num_workers: int = 1,
     ) -> tuple[str, str, int]:
-        if port is not None:
-            ports = [port]
-        else:
-            ports = None
-
         project_id = engine.serve(
             [image],
-            ports=ports,
+            port=port,
             volumes=volumes,
             environment=environment,
             gpus=gpus,

@@ -524,11 +524,19 @@ def test_tesseract_serve_volume_permissions(
 def test_tesseract_serve_interop(built_image_name, docker_client, docker_cleanup):
     cli_runner = CliRunner(mix_stderr=False)
 
+    # Network create using subprocess
+    subprocess.run(
+        ["docker", "network", "create", "multi-tesseract-network"],
+        check=True,
+    )
+
     # Serve first Tesseract
     run_res = cli_runner.invoke(
         app,
         [
             "serve",
+            "--network",
+            "multi-tesseract-network",
             built_image_name,
         ],
         env={"COLUMNS": "1000"},
@@ -547,6 +555,8 @@ def test_tesseract_serve_interop(built_image_name, docker_client, docker_cleanup
         [
             "serve",
             built_image_name,
+            "--network",
+            "multi-tesseract-network",
         ],
         env={"COLUMNS": "1000"},
         catch_exceptions=False,
