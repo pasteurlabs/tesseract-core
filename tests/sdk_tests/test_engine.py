@@ -133,7 +133,7 @@ def test_run_tesseract(mocked_docker):
         "apply",
         '{"inputs": {"a": [1, 2, 3], "b": [4, 5, 6]}}',
         "--output-path",
-        Path(os.getcwd()) / "tesseract_output",
+        str(Path(os.getcwd()) / "tesseract_output"),
     ]
     assert res["image"] == "foobar"
 
@@ -168,7 +168,7 @@ def test_run_tesseract_file_input(mocked_docker, tmpdir, default_output_path):
         output_args = ["--output-path", str(outdir)]
     else:
         output_args = []
-        outdir = "."
+        outdir = str(Path(os.getcwd()) / "tesseract_output")
 
     infile = Path(tmpdir) / "input.json"
     infile.touch()

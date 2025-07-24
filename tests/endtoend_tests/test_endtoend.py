@@ -614,6 +614,8 @@ def test_tesseract_serve_multiple_outputs(
     if default_output_path:
         output_args = []
         output_dir = Path(os.getcwd()) / "tesseract_output"
+        output_dir.mkdir(exist_ok=True)
+        output_dir.chmod(0o777)
     else:
         output_args = ["--output-path", str(tmp_path)]
         output_dir = tmp_path
