@@ -949,6 +949,8 @@ def test_unit_tesseract_endtoend(
                     img_name,
                     cli_cmd,
                     json.dumps(request.payload),
+                    "--output-path",
+                    "STDOUT",
                 ]
             else:
                 args = [
