@@ -854,6 +854,7 @@ def test_unit_tesseract_endtoend(
     unit_tesseract_config,
     free_port,
     docker_cleanup,
+    tmpdir,
 ):
     """Test that unit Tesseract images can be built and used to serve REST API."""
     from tesseract_core.sdk.cli import app
@@ -907,6 +908,14 @@ def test_unit_tesseract_endtoend(
             [
                 "--output-path",
                 str(unit_tesseract_path / unit_tesseract_config.output_path),
+            ]
+        )
+    else:
+        # Override default output path behavior to prevent permission issues
+        io_args.extend(
+            [
+                "--output-path",
+                str(tmpdir),
             ]
         )
 
