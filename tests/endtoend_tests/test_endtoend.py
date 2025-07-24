@@ -816,7 +816,7 @@ def _prepare_mpa_test_image(dummy_tesseract_package, docker_cleanup):
     tesseract_api = dedent(
         """
     from pydantic import BaseModel
-    from tesseract_core.runtime.experimental import log_artifact, log_metric, log_parameter
+    from tesseract_core.runtime.experimental import start_run, log_artifact, log_metric, log_parameter
 
     class InputSchema(BaseModel):
         pass
@@ -828,21 +828,22 @@ def _prepare_mpa_test_image(dummy_tesseract_package, docker_cleanup):
         steps = 5
         param_value = "test_param"
         # Log parameters
-        log_parameter("test_parameter", param_value)
-        log_parameter("steps_config", steps)
+        with start_run():
+            log_parameter("test_parameter", param_value)
+            log_parameter("steps_config", steps)
 
-        # Log metrics over multiple steps
-        for step in range(steps):
-            log_metric("squared_step", step ** 2, step=step)
+            # Log metrics over multiple steps
+            for step in range(steps):
+                log_metric("squared_step", step ** 2, step=step)
 
-        # Create and log an artifact
-        artifact_content = "Test artifact content"
+            # Create and log an artifact
+            artifact_content = "Test artifact content"
 
-        artifact_path = "/tmp/test_artifact.txt"
-        with open(artifact_path, "w") as f:
-            f.write(artifact_content)
+            artifact_path = "/tmp/test_artifact.txt"
+            with open(artifact_path, "w") as f:
+                f.write(artifact_content)
 
-        log_artifact(artifact_path)
+            log_artifact(artifact_path)
 
         return OutputSchema()
         """
