@@ -860,6 +860,7 @@ def test_unit_tesseract_endtoend(
     from tesseract_core.sdk.cli import app
 
     cli_runner = CliRunner(mix_stderr=False)
+    tmpdir.chmod(0o777)
 
     # Stage 1: Build
     img_name = build_tesseract(
@@ -878,6 +879,8 @@ def test_unit_tesseract_endtoend(
             "run",
             img_name,
             "input-schema",
+            "--output-path",
+            str(tmpdir),
         ],
         catch_exceptions=False,
     )
