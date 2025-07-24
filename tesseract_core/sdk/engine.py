@@ -968,7 +968,7 @@ def run_tesseract(
         user = f"{os.getuid()}:{os.getgid()}" if os.name != "nt" else None
 
     # Default output path behavior if not specified
-    if "--output-path" not in args:
+    if "--output-path" not in args and "-o" not in args:
         args.append("--output-path")
         output_path = str(Path(os.getcwd()) / "tesseract_output")
         args.append(output_path)
