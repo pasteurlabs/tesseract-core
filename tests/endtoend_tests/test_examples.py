@@ -880,7 +880,7 @@ def test_unit_tesseract_endtoend(
             img_name,
             "input-schema",
             "--output-path",
-            str(tmpdir),
+            "STDOUT",
         ],
         catch_exceptions=False,
     )
@@ -918,7 +918,7 @@ def test_unit_tesseract_endtoend(
         io_args.extend(
             [
                 "--output-path",
-                str(tmpdir),
+                "STDOUT",
             ]
         )
 

@@ -630,7 +630,10 @@ def serve(
         volumes = []
     if "://" not in str(output_path):
         # Process output path separately in docker compose template
-        output_path = Path(output_path).resolve()
+        if "STDOUT" in str(output_path):
+            output_path = None
+        else:
+            output_path = Path(output_path).resolve()
 
     if input_path:
         environment["TESSERACT_INPUT_PATH"] = "/tesseract/input_data"
@@ -982,6 +985,11 @@ def run_tesseract(
 
         # Mount local output directories into Docker container as a volume
         if current_cmd in output_args and "://" not in arg:
+            if "STDOUT" in arg:
+                # Pop out the last arg (--output-path) in cmd
+                cmd.pop()
+                continue
+
             if arg.startswith("@"):
                 raise ValueError(
                     f"Output path {arg} cannot start with '@' (used only for input files)"

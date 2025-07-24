@@ -544,7 +544,8 @@ def serve(
             "--output-path",
             help=(
                 "Output path to write output files to, such as local directory or S3 URI "
-                "(may be anything supported by fsspec)."
+                "(may be anything supported by fsspec). Use STDOUT to write to stdout."
+                "[default: ./tesseract_output]"
             ),
         ),
     ] = None,
