@@ -213,7 +213,7 @@ def test_serve_tesseracts_invalid_input_args(mocked_docker):
         with pytest.raises(ValueError):
             engine.serve(None)
 
-        with pytest.raises(ValueError):
+        with pytest.raises(TypeError):
             engine.serve()
 
         with pytest.raises(ValueError):
@@ -236,31 +236,34 @@ def test_get_tesseract_containers(mocked_docker):
 def test_serve_tesseracts(mocked_docker):
     """Test multi-tesseract serve."""
     # Serve valid
-    project_name_single_tesseract = engine.serve("vectoradd")
-    assert project_name_single_tesseract
+    container_name_single_tesseract, _ = engine.serve("vectoradd")
+    assert container_name_single_tesseract
 
     # Teardown valid
-    engine.teardown(project_name_single_tesseract)
+    engine.teardown(container_name_single_tesseract)
 
     # Tear down invalid
     with pytest.raises(NotFound):
-        engine.teardown("invalid_project_name")
+        engine.teardown("invalid_container_name")
 
     # Serve with gpus
-    project_name_multi_tesseract = engine.serve("vectoradd", gpus=["1", "3"])
-    assert project_name_multi_tesseract
+    container_name_multi_tesseract, _ = engine.serve("vectoradd", gpus=["1", "3"])
+    assert container_name_multi_tesseract
+
+    # Teardown valid
+    engine.teardown(container_name_multi_tesseract)
 
 
 def test_serve_tesseract_volumes(mocked_docker, tmpdir):
     """Test running a tesseract with volumes."""
     # Test with a single volume
-    res = engine.serve(
+    res, _ = engine.serve(
         "foobar",
         volumes=[f"{tmpdir}:/path/in/container:ro"],
     )
 
     # Currently no good way to test return value of serve
-    # since it returns a project ID.
+    # since it returns a container name.
     res = json.loads(res)
     assert res["volumes"].keys() == {f"{tmpdir}"}
     assert res["volumes"][f"{tmpdir}"] == {
@@ -269,7 +272,7 @@ def test_serve_tesseract_volumes(mocked_docker, tmpdir):
     }
 
     # Test with a named volume
-    res = engine.serve(
+    res, _ = engine.serve(
         "foobar",
         volumes=["my_named_volume:/path/in/container:ro"],
     )
