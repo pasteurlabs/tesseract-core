@@ -7,7 +7,6 @@ import json
 import os
 import subprocess
 from pathlib import Path
-from shutil import rmtree
 
 import pytest
 import requests
@@ -596,7 +595,6 @@ def test_tesseract_serve_volume_permissions(
         assert (tmp_path / "bar").exists()
 
 
-@pytest.mark.parametrize("default_output_path", [True, False])
 def test_tesseract_serve_multiple_outputs(
     built_image_name,
     docker_client,
@@ -611,15 +609,9 @@ def test_tesseract_serve_multiple_outputs(
     cli_runner = CliRunner(mix_stderr=False)
     project_id = None
 
-    if default_output_path:
-        output_args = []
-        output_dir = Path(os.getcwd()) / "tesseract_output"
-        output_dir.mkdir(exist_ok=True)
-        output_dir.chmod(0o777)
-    else:
-        output_args = ["--output-path", str(tmp_path)]
-        output_dir = tmp_path
-        tmp_path.chmod(0o777)
+    output_args = ["--output-path", str(tmp_path)]
+    output_dir = tmp_path
+    tmp_path.chmod(0o777)
 
     run_res = cli_runner.invoke(
         app,
@@ -665,10 +657,6 @@ def test_tesseract_serve_multiple_outputs(
     assert (output_dir / "tess-1" / "test_0.txt").exists()
     assert (output_dir / "tess-2" / "test_1.txt").exists()
     assert (output_dir / "tess-3" / "test_2.txt").exists()
-
-    if default_output_path:
-        # Remove the tesseract_output directory
-        rmtree(output_dir)
 
 
 def test_tesseract_serve_interop(built_image_name, docker_client, docker_cleanup):

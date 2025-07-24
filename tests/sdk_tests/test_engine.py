@@ -131,9 +131,9 @@ def test_run_tesseract(mocked_docker):
     res = json.loads(res_out)
     assert res["command"] == [
         "apply",
-        '{"inputs": {"a": [1, 2, 3], "b": [4, 5, 6]}}',
         "--output-path",
         str(Path(os.getcwd()) / "tesseract_output"),
+        '{"inputs": {"a": [1, 2, 3], "b": [4, 5, 6]}}',
     ]
     assert res["image"] == "foobar"
 
@@ -157,9 +157,7 @@ def test_run_gpu(mocked_docker):
     assert res["device_requests"] == ["all"]
 
 
-pytest.mark.parametrize("default_output_path", [True, False])
-
-
+@pytest.mark.parametrize("default_output_path", [True, False])
 def test_run_tesseract_file_input(mocked_docker, tmpdir, default_output_path):
     """Test running a tesseract with file input / output."""
     if not default_output_path:
