@@ -242,7 +242,7 @@ class Tesseract:
             )
         if self._serve_context is None:
             return self._lastlog
-        return engine.logs(self._serve_context["container_id"])
+        return engine.logs(self._serve_context["container_name"])
 
     def serve(self, port: str | None = None, host_ip: str = "127.0.0.1") -> None:
         """Serve the Tesseract.
@@ -255,7 +255,7 @@ class Tesseract:
             raise RuntimeError("Can only serve a Tesseract created via from_image.")
         if self._serve_context is not None:
             raise RuntimeError("Tesseract is already being served.")
-        project_id, container_id, served_port = self._serve(
+        container_name, served_port = engine.serve(
             self._spawn_config.image,
             port=port,
             volumes=self._spawn_config.volumes,
@@ -266,8 +266,7 @@ class Tesseract:
             host_ip=host_ip,
         )
         self._serve_context = dict(
-            project_id=project_id,
-            container_id=container_id,
+            container_name=container_name,
             port=served_port,
         )
         self._lastlog = None
@@ -282,7 +281,7 @@ class Tesseract:
         if self._serve_context is None:
             raise RuntimeError("Tesseract is not being served.")
         self._lastlog = self.server_logs()
-        engine.teardown(self._serve_context["project_id"])
+        engine.teardown(self._serve_context["container_name"])
         self._client = None
         self._serve_context = None
         atexit.unregister(self.teardown)
@@ -294,36 +293,6 @@ class Tesseract:
         """
         if self._serve_context is not None:
             self.teardown()
-
-    @staticmethod
-    def _serve(
-        image: str,
-        port: str | None = None,
-        host_ip: str = "127.0.0.1",
-        volumes: list[str] | None = None,
-        environment: dict[str, str] | None = None,
-        gpus: list[str] | None = None,
-        debug: bool = False,
-        num_workers: int = 1,
-    ) -> tuple[str, str, int]:
-        if port is not None:
-            ports = [port]
-        else:
-            ports = None
-
-        project_id = engine.serve(
-            [image],
-            ports=ports,
-            volumes=volumes,
-            environment=environment,
-            gpus=gpus,
-            debug=debug,
-            num_workers=num_workers,
-            host_ip=host_ip,
-        )
-
-        first_container = engine.get_project_containers(project_id)[0]
-        return project_id, first_container.id, int(first_container.host_port)
 
     @cached_property
     @requires_client

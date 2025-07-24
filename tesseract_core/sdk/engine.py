@@ -463,63 +463,46 @@ def build_tesseract(
     return image
 
 
-def teardown(project_ids: Sequence[str] | None = None, tear_all: bool = False) -> None:
-    """Teardown Tesseract image(s) running in a Docker Compose project or standalone containers.
+def teardown(
+    container_ids: Sequence[str] | None = None, tear_all: bool = False
+) -> None:
+    """Teardown Tesseract container(s).
 
     Args:
-        project_ids: List of Docker Compose project IDs to teardown.
-        tear_all: boolean flag to teardown all Tesseract projects.
+        container_ids: List of container IDs to teardown.
+        tear_all: boolean flag to teardown all Tesseract containers.
     """
     if tear_all:
-        # Identify all Tesseract projects to tear down, whether they're running in
-        # Docker Compose or as standalone containers
-        compose_projects = docker_client.compose.list()
-        compose_containers = set()
-        for project_containers in compose_projects.values():
-            compose_containers.update(project_containers)
-        other_containers = set(
-            container.id
-            for container in docker_client.containers.list()
-            if container.id not in compose_containers
-        )
-        project_ids = [
-            *compose_projects.keys(),
-            *other_containers,
-        ]
-        if not project_ids:
-            logger.info("No Tesseract projects to teardown")
+        # Identify all Tesseract containers to tear down
+        containers = set(container.id for container in docker_client.containers.list())
+        if not containers:
+            logger.info("No Tesseract containers to teardown")
             return
 
-    if not project_ids:
-        raise ValueError("project_ids must be provided if tear_all is False")
+    if not container_ids:
+        raise ValueError("container_id must be provided if tear_all is False")
 
-    if isinstance(project_ids, str):
-        project_ids = [project_ids]
+    if isinstance(container_ids, str):
+        container_ids = [container_ids]
 
-    def _is_container_id(project_id: str) -> bool:
+    def _is_container_id(container_id: str) -> bool:
         try:
-            docker_client.containers.get(project_id)
+            docker_client.containers.get(container_id)
             return True
         except ContainerError:
             return False
 
-    for project_id in project_ids:
-        if docker_client.compose.exists(project_id):
-            if not docker_client.compose.down(project_id):
-                raise RuntimeError(
-                    f"Cannot teardown Docker Compose project with ID: {project_id}"
-                )
-            logger.info(
-                f"Tesseracts are shutdown for Docker Compose project ID: {project_id}"
-            )
-        elif _is_container_id(project_id):
-            container = docker_client.containers.get(project_id)
+    for container_id in container_ids:
+        if _is_container_id(container_id):
+            container = docker_client.containers.get(container_id)
             container.remove(force=True)
-            logger.info(f"Tesseract is shutdown for Docker container ID: {project_id}")
+            logger.info(
+                f"Tesseract is shutdown for Docker container ID: {container_id}"
+            )
         else:
             raise ValueError(
-                f"A Docker Compose project with ID {project_id} cannot be found, "
-                "use `tesseract ps` to find project ID"
+                f"A Docker container with ID {container_id} cannot be found, "
+                "use `tesseract ps` to find container ID"
             )
 
 
@@ -531,22 +514,6 @@ def get_tesseract_containers() -> list[Container]:
 def get_tesseract_images() -> list[Image]:
     """Get Tesseract images."""
     return docker_client.images.list()
-
-
-def get_project_containers(project_id: str) -> list[Container]:
-    """Get containers for a given Tesseract project ID."""
-    if docker_client.compose.exists(project_id):
-        containers = docker_client.compose.list()[project_id]
-        return [docker_client.containers.get(c) for c in containers]
-
-    try:
-        container = docker_client.containers.get(project_id)
-        return [container]
-    except ContainerError as exc:
-        raise ValueError(
-            f"A Tesseract project with ID {project_id} cannot be found, "
-            "use `tesseract ps` to find project ID"
-        ) from exc
 
 
 def serve(
@@ -561,7 +528,7 @@ def serve(
     num_workers: int = 1,
     user: str | None = None,
     input_path: str | Path | None = None,
-) -> str:
+) -> tuple:
     """Serve one or more Tesseract images.
 
     Start the Tesseracts listening on an available ports on the host.
@@ -583,7 +550,7 @@ def serve(
         input_path: Input path to read input files from, such as local directory or S3 URI.
 
     Returns:
-        A string representing the Tesseract project ID.
+        A tuple of the Tesseract container name and the port it is serving on.
     """
     if not image_name or not isinstance(image_name, str):
         raise ValueError("Tesseract image name must be provided")
@@ -672,7 +639,7 @@ def serve(
         if timeout < 0:
             raise TimeoutError("Tesseract did not start in time")
 
-    return container.name
+    return container.name, container.host_port
 
 
 def _is_local_volume(volume: str) -> bool:

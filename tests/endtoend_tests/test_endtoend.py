@@ -144,12 +144,12 @@ def test_env_passthrough_serve(docker_cleanup, docker_client, built_image_name):
     assert run_res.returncode == 0, run_res.stderr
     assert run_res.stdout
 
-    project_meta = json.loads(run_res.stdout)
-    tesseract_id = project_meta["containers"][0]["name"]
+    serve_meta = json.loads(run_res.stdout)
+    container_name = serve_meta["containers"][0]["name"]
 
-    docker_cleanup["containers"].append(tesseract_id)
+    docker_cleanup["containers"].append(container_name)
 
-    container = docker_client.containers.get(tesseract_id)
+    container = docker_client.containers.get(container_name)
     exit_code, output = container.exec_run(["sh", "-c", "echo $TEST_ENV_VAR"])
     assert exit_code == 0, f"Command failed with exit code {exit_code}"
     assert "foo" in output.decode("utf-8"), f"Output was: {output.decode('utf-8')}"
@@ -216,8 +216,8 @@ def test_run_as_user(docker_client, built_image_name, user, docker_cleanup):
     )
     assert run_res.exit_code == 0, run_res.stderr
 
-    project_meta = json.loads(run_res.stdout)
-    container = docker_client.containers.get(project_meta["containers"][0]["name"])
+    serve_meta = json.loads(run_res.stdout)
+    container = docker_client.containers.get(serve_meta["containers"][0]["name"])
     docker_cleanup["containers"].append(container)
 
     exit_code, output = container.exec_run(["id", "-u"])
@@ -246,23 +246,21 @@ def test_tesseract_serve_pipeline(docker_client, built_image_name, docker_cleanu
     assert run_res.exit_code == 0, run_res.stderr
     assert run_res.stdout
 
-    project_meta = json.loads(run_res.stdout)
+    serve_meta = json.loads(run_res.stdout)
 
-    project_id = project_meta["project_id"]
-    project_container = docker_client.containers.get(project_id)
-    docker_cleanup["containers"].append(project_container)
+    container_name = serve_meta["container_name"]
+    container = docker_client.containers.get(container_name)
+    docker_cleanup["containers"].append(container)
 
-    assert project_container.name == project_meta["containers"][0]["name"]
-    assert project_container.host_port == project_meta["containers"][0]["port"]
-    assert project_container.host_ip == project_meta["containers"][0]["ip"]
+    assert container.name == container_name
+    assert container.host_port == serve_meta["port"]
+    assert container.host_ip == serve_meta["ip"]
 
     # Ensure served Tesseract is usable
-    res = requests.get(
-        f"http://{project_container.host_ip}:{project_container.host_port}/health"
-    )
+    res = requests.get(f"http://{container.host_ip}:{container.host_port}/health")
     assert res.status_code == 200, res.text
 
-    # Ensure project id is shown in `tesseract ps`
+    # Ensure container name is shown in `tesseract ps`
     run_res = cli_runner.invoke(
         app,
         ["ps"],
@@ -270,18 +268,18 @@ def test_tesseract_serve_pipeline(docker_client, built_image_name, docker_cleanu
         catch_exceptions=False,
     )
     assert run_res.exit_code == 0, run_res.stderr
-    assert project_id in run_res.stdout
-    assert project_container.host_port in run_res.stdout
-    assert project_container.host_ip in run_res.stdout
-    assert project_container.short_id in run_res.stdout
+    assert container_name in run_res.stdout
+    assert container.host_port in run_res.stdout
+    assert container.host_ip in run_res.stdout
+    assert container.short_id in run_res.stdout
 
 
 @pytest.mark.parametrize("tear_all", [True, False])
 def test_tesseract_teardown_multiple(built_image_name, tear_all):
-    """Teardown multiple projects."""
+    """Teardown multiple served tesseracts."""
     cli_runner = CliRunner(mix_stderr=False)
 
-    project_ids = []
+    container_names = []
     try:
         for _ in range(2):
             # Serve
@@ -296,10 +294,10 @@ def test_tesseract_teardown_multiple(built_image_name, tear_all):
             assert run_res.exit_code == 0, run_res.stderr
             assert run_res.stdout
 
-            project_meta = json.loads(run_res.stdout)
+            serve_meta = json.loads(run_res.stdout)
 
-            project_id = project_meta["project_id"]
-            project_ids.append(project_id)
+            container_name = serve_meta["container_name"]
+            container_names.append(container_name)
 
     finally:
         # Teardown multiple/all
@@ -307,7 +305,7 @@ def test_tesseract_teardown_multiple(built_image_name, tear_all):
         if tear_all:
             args.extend(["--all"])
         else:
-            args.extend(project_ids)
+            args.extend(container_names)
 
         run_res = cli_runner.invoke(
             app,
@@ -315,7 +313,7 @@ def test_tesseract_teardown_multiple(built_image_name, tear_all):
             catch_exceptions=False,
         )
         assert run_res.exit_code == 0, run_res.stderr
-        # Ensure all projects are killed
+        # Ensure all containers are killed
         run_res = cli_runner.invoke(
             app,
             ["ps"],
@@ -323,8 +321,8 @@ def test_tesseract_teardown_multiple(built_image_name, tear_all):
             catch_exceptions=False,
         )
         assert run_res.exit_code == 0, run_res.stderr
-        for project_id in project_ids:
-            assert project_id not in run_res.stdout
+        for container_name in container_names:
+            assert container_name not in run_res.stdout
 
 
 def test_tesseract_serve_ports_error(built_image_name):
@@ -381,7 +379,7 @@ def test_tesseract_serve_ports_error(built_image_name):
 def test_tesseract_serve_ports(built_image_name, port, docker_cleanup, free_port):
     """Try to serve multiple Tesseracts on multiple ports."""
     cli_runner = CliRunner(mix_stderr=False)
-    project_id = None
+    container_name = None
 
     if port == "fixed":
         port_arg = str(free_port)
@@ -399,16 +397,16 @@ def test_tesseract_serve_ports(built_image_name, port, docker_cleanup, free_port
     assert run_res.exit_code == 0, run_res.stderr
     assert run_res.stdout
 
-    project_meta = json.loads(run_res.stdout)
-    project_id = project_meta["project_id"]
-    docker_cleanup["project_ids"].append(project_id)
+    serve_meta = json.loads(run_res.stdout)
+    container_name = serve_meta["container_name"]
+    docker_cleanup["containers"].append(container_name)
 
     # Ensure that actual used ports are in the specified port range.
     test_ports = port_arg.split("-")
     start_port = int(test_ports[0])
     end_port = int(test_ports[1]) if len(test_ports) > 1 else start_port
 
-    actual_port = int(project_meta["containers"][0]["port"])
+    actual_port = int(serve_meta["port"])
     assert actual_port in range(start_port, end_port + 1)
 
     # Ensure specified ports are in `tesseract ps` and served Tesseracts are usable.
@@ -443,7 +441,7 @@ def test_tesseract_serve_volume_permissions(
         pytest.xfail("Podman does not support serve.")
 
     cli_runner = CliRunner(mix_stderr=False)
-    project_id = None
+    container_name = None
 
     dest = Path("/tesseract/output_data")
 
@@ -470,13 +468,12 @@ def test_tesseract_serve_volume_permissions(
     assert run_res.exit_code == 0, run_res.stderr
     assert run_res.stdout
 
-    project_meta = json.loads(run_res.stdout)
-    project_id = project_meta["project_id"]
+    serve_meta = json.loads(run_res.stdout)
+    container_name = serve_meta["container_name"]
 
-    docker_cleanup["containers"].append(project_id)
+    docker_cleanup["containers"].append(container_name)
 
-    tesseract0_id = project_meta["containers"][0]["name"]
-    tesseract0 = docker_client.containers.get(tesseract0_id)
+    tesseract0 = docker_client.containers.get(container_name)
 
     # Sanity check: Should always be allowed to read/write files in the default workdir
     exit_code, output = tesseract0.exec_run(["touch", "./test.txt"])
@@ -506,16 +503,6 @@ def test_tesseract_serve_volume_permissions(
     exit_code, output = tesseract0.exec_run(["touch", str(bar_file)])
     assert exit_code == 0
 
-    tesseract1_id = project_meta["containers"][1]["name"]
-    tesseract1 = docker_client.containers.get(tesseract1_id)
-
-    exit_code, output = tesseract1.exec_run(["cat", str(bar_file)])
-    assert exit_code == 0
-    exit_code, output = tesseract1.exec_run(
-        ["bash", "-c", f'echo "hello" > {bar_file}']
-    )
-    assert exit_code == 0
-
     if volume_type == "bind":
         # The file should exist outside the container
         assert (tmp_path / "bar").exists()
@@ -524,11 +511,19 @@ def test_tesseract_serve_volume_permissions(
 def test_tesseract_serve_interop(built_image_name, docker_client, docker_cleanup):
     cli_runner = CliRunner(mix_stderr=False)
 
+    # Network create using subprocess
+    subprocess.run(
+        ["docker", "network", "create", "multi-tesseract-network"],
+        check=True,
+    )
+
     # Serve first Tesseract
     run_res = cli_runner.invoke(
         app,
         [
             "serve",
+            "--network",
+            "multi-tesseract-network",
             built_image_name,
         ],
         env={"COLUMNS": "1000"},
@@ -536,9 +531,9 @@ def test_tesseract_serve_interop(built_image_name, docker_client, docker_cleanup
     )
     assert run_res.exit_code == 0
 
-    project_meta = json.loads(run_res.stdout)
-    project_id = project_meta["project_id"]
-    tess_1 = docker_client.containers.get(project_id)
+    serve_meta = json.loads(run_res.stdout)
+    container_name = serve_meta["container_name"]
+    tess_1 = docker_client.containers.get(container_name)
     docker_cleanup["containers"].append(tess_1)
 
     # Serve second Tesseract
@@ -547,15 +542,17 @@ def test_tesseract_serve_interop(built_image_name, docker_client, docker_cleanup
         [
             "serve",
             built_image_name,
+            "--network",
+            "multi-tesseract-network",
         ],
         env={"COLUMNS": "1000"},
         catch_exceptions=False,
     )
     assert run_res.exit_code == 0
 
-    project_meta = json.loads(run_res.stdout)
-    project_id = project_meta["project_id"]
-    tess_2 = docker_client.containers.get(project_id)
+    container_meta = json.loads(run_res.stdout)
+    container_name = container_meta["container_name"]
+    tess_2 = docker_client.containers.get(container_name)
     docker_cleanup["containers"].append(tess_2)
 
     returncode, stdout = tess_1.exec_run(
@@ -584,7 +581,7 @@ def test_serve_nonstandard_host_ip(
             return s.getsockname()[0]
 
     cli_runner = CliRunner(mix_stderr=False)
-    project_id = None
+    container_name = None
 
     # Use a non-standard host IP
     host_ip = _get_host_ip()
@@ -597,22 +594,20 @@ def test_serve_nonstandard_host_ip(
     )
     assert run_res.exit_code == 0, run_res.stderr
     assert run_res.stdout
-    project_meta = json.loads(run_res.stdout)
-    project_id = project_meta["project_id"]
+    serve_meta = json.loads(run_res.stdout)
+    container_name = serve_meta["container_name"]
 
-    docker_cleanup["containers"].append(project_id)
+    docker_cleanup["containers"].append(container_name)
 
-    project_container = docker_client.containers.get(
-        project_meta["containers"][0]["name"]
-    )
-    assert project_container.host_ip == host_ip
+    container = docker_client.containers.get(container_name)
+    assert container.host_ip == host_ip
 
-    res = requests.get(f"http://{host_ip}:{project_container.host_port}/health")
+    res = requests.get(f"http://{host_ip}:{container.host_port}/health")
     assert res.status_code == 200, res.text
 
     with pytest.raises(requests.ConnectionError):
         # Ensure that the Tesseract is not accessible from localhost
-        requests.get(f"http://localhost:{project_container.host_port}/health")
+        requests.get(f"http://localhost:{container.host_port}/health")
 
 
 def test_tesseract_cli_options_parsing(built_image_name, tmpdir):

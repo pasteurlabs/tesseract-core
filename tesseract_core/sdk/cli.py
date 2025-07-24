@@ -530,12 +530,9 @@ def serve(
     """Serve one or more Tesseract images.
 
     A successful serve command will display on standard output a JSON object
-    with the Docker Compose project ID, which is required to run the teardown
-    command, as well as a list of all containers spawned and their respective
-    ports.
+    with the Tesseract container name, which is required to run the teardown
+    command and its respective port.
     """
-    ports = [port] if port is not None else None
-
     # Parse environment variables from list to dict
     if environment is not None:
         try:
@@ -550,10 +547,10 @@ def serve(
             ) from ex
 
     try:
-        project_id = engine.serve(
+        container_name, _ = engine.serve(
             image_name,
             host_ip,
-            ports,
+            port,
             network,
             volume,
             environment,
@@ -568,12 +565,12 @@ def serve(
             f"Internal Docker error occurred while serving Tesseracts: {ex}"
         ) from ex
 
-    container_ports = _display_project_meta(project_id)
+    container_ports = _display_container_meta(container_name)
     logger.info(
-        f"Tesseract project ID, use it with 'tesseract teardown' command: {project_id}"
+        f"Tesseract container name, use it with 'tesseract teardown' command: {container_name}"
     )
-    project_meta = {"project_id": project_id, "containers": container_ports}
-    json_info = json.dumps(project_meta)
+    container_meta = {"container_name": container_name, "containers": container_ports}
+    json_info = json.dumps(container_meta)
     typer.echo(json_info, nl=False)
 
 
@@ -612,19 +609,18 @@ def _display_tesseract_image_meta() -> None:
 def _display_tesseract_containers_meta() -> None:
     """Display Tesseract containers metadata."""
     table = RichTable(
-        "ID", "Name", "Version", "Host Address", "Project ID", "Description"
+        "ID", "Name", "Version", "Host Address", "Container Name", "Description"
     )
     containers = docker_client.containers.list()
     for container in containers:
         tesseract_vals = _get_tesseract_env_vals(container)
         if tesseract_vals:
-            tesseract_project = _find_tesseract_project(container)
             table.add_row(
                 container.id[:12],
                 tesseract_vals["TESSERACT_NAME"],
                 tesseract_vals["TESSERACT_VERSION"],
                 f"{container.host_ip}:{container.host_port}",
-                tesseract_project,
+                container.name,
                 tesseract_vals.get("TESSERACT_DESCRIPTION", "").replace("\\n", " "),
             )
     RichConsole().print(table)
@@ -636,25 +632,6 @@ def _get_tesseract_env_vals(
     """Convert Tesseract environment variables from list to dictionary."""
     env_vals = [s for s in docker_asset.attrs["Config"]["Env"] if "TESSERACT_" in s]
     return {item.split("=")[0]: item.split("=")[1] for item in env_vals}
-
-
-def _find_tesseract_project(
-    tesseract: Container,
-) -> str:
-    """Find the Tesseract Project ID for a given tesseract.
-
-    A Tesseract Project ID is either a Docker Compose ID or a container name.
-    """
-    if tesseract.project_id is not None:
-        return tesseract.project_id
-
-    tesseract_id = tesseract.id[:12]
-
-    for project, containers in docker_client.compose.list().items():
-        if tesseract_id in containers:
-            return project
-
-    return tesseract.name
 
 
 def _get_tesseract_network_meta(container: Container) -> dict:
@@ -683,10 +660,9 @@ def apidoc(
 ) -> None:
     """Serve the OpenAPI schema for a Tesseract."""
     host_ip = "127.0.0.1"
-    project_id = engine.serve([image_name], host_ip=host_ip)
+    container_name, port = engine.serve(image_name, host_ip=host_ip)
     try:
-        container = docker_client.containers.get(project_id)
-        url = f"http://{host_ip}:{container.host_port}/docs"
+        url = f"http://{host_ip}:{port}/docs"
         logger.info(f"Serving OpenAPI docs for Tesseract {image_name} at {url}")
         logger.info("  Press Ctrl+C to stop")
         if browser:
@@ -697,54 +673,37 @@ def apidoc(
         except KeyboardInterrupt:
             return
     finally:
-        engine.teardown(project_id)
+        engine.teardown(container_name)
 
 
-def _display_project_meta(project_id: str) -> list:
-    """Display project metadata.
+def _display_container_meta(container_name: str) -> dict:
+    """Display container metadata.
 
-    Returns a list of dictionaries {name: container_name, port: host_port}.
+    Returns a dictionary {name: container_name, port: host_port, ip: host_ip}.
     """
-    container_ports = []
-
-    compose_projects = docker_client.compose.list()
-    if project_id in compose_projects:
-        containers = compose_projects[project_id]
-    else:
-        containers = [project_id]
-
-    for container_id in containers:
-        container = docker_client.containers.get(container_id)
-        logger.info(f"Container ID: {container.id}")
-        logger.info(f"Name: {container.name}")
-        entrypoint = container.attrs["Config"]["Entrypoint"]
-        logger.info(f"Entrypoint: {entrypoint}")
-        host_port = container.host_port
-        host_ip = container.host_ip
-        logger.info(f"View Tesseract: http://{host_ip}:{host_port}/docs")
-        network_meta = _get_tesseract_network_meta(container)
-        container_ports.append(
-            {
-                "name": container.name,
-                "port": host_port,
-                "ip": host_ip,
-                "networks": network_meta,
-            }
+    container = docker_client.containers.get(container_name)
+    logger.info(f"Container ID: {container.id}")
+    logger.info(f"Name: {container.name}")
+    entrypoint = container.attrs["Config"]["Entrypoint"]
+    logger.info(f"Entrypoint: {entrypoint}")
+    host_port = container.host_port
+    host_ip = container.host_ip
+    logger.info(f"View Tesseract: http://{host_ip}:{host_port}/docs")
+    network_meta = _get_tesseract_network_meta(container)
+    if container.host_debugpy_port:
+        logger.info(
+            f"Debugpy server listening at http://{host_ip}:{container.host_debugpy_port}"
         )
-        if container.host_debugpy_port:
-            logger.info(
-                f"Debugpy server listening at http://{host_ip}:{container.host_debugpy_port}"
-            )
 
-    return container_ports
+    return {"name": container.name, "port": host_port, "ip": host_ip, "networks": network_meta,}
 
 
 @app.command("teardown")
 @engine.needs_docker
 def teardown(
-    project_ids: Annotated[
+    container_names: Annotated[
         list[str] | None,
-        typer.Argument(..., help="Docker Compose project IDs"),
+        typer.Argument(..., help="Tesseract container names"),
     ] = None,
     tear_all: Annotated[
         bool,
@@ -756,24 +715,24 @@ def teardown(
 ) -> None:
     """Tear down one or more Tesseracts that were previously started with `tesseract serve`.
 
-    One or more Tesseract project ids must be specified unless `--all` is set.
+    One or more Tesseract container names must be specified unless `--all` is set.
     """
-    if not project_ids and not tear_all:
+    if not container_names and not tear_all:
         raise typer.BadParameter(
-            "Either project IDs or --all flag must be provided",
-            param_hint="project_ids",
+            "Either container names or --all flag must be provided",
+            param_hint="container_names",
         )
 
-    if project_ids and tear_all:
+    if container_names and tear_all:
         raise typer.BadParameter(
-            "Either project IDs or --all flag must be provided, but not both",
-            param_hint="project_ids",
+            "Either container names or --all flag must be provided, but not both",
+            param_hint="container_names",
         )
 
     try:
-        if not project_ids:
-            project_ids = []  # Pass in empty list if no project_ids are provided.
-        engine.teardown(project_ids, tear_all=tear_all)
+        if not container_names:
+            container_names = []  # Pass in empty list if no container_names are provided.
+        engine.teardown(container_names, tear_all=tear_all)
     except ValueError as ex:
         raise UserError(
             f"Input error occurred while tearing down Tesseracts: {ex}"

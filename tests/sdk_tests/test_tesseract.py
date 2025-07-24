@@ -15,23 +15,17 @@ from tesseract_core.sdk.tesseract import (
 
 @pytest.fixture
 def mock_serving(mocker):
-    serve_mock = mocker.patch("tesseract_core.sdk.engine.serve")
-    serve_mock.return_value = "proj-id-123"
-
     fake_container = SimpleNamespace()
     fake_container.host_port = 1234
     fake_container.id = "container-id-123"
 
-    get_project_containers_mock = mocker.patch(
-        "tesseract_core.sdk.engine.get_project_containers"
-    )
-    get_project_containers_mock.return_value = [fake_container]
+    serve_mock = mocker.patch("tesseract_core.sdk.engine.serve")
+    serve_mock.return_value = fake_container.id, fake_container.host_port
 
     teardown_mock = mocker.patch("tesseract_core.sdk.engine.teardown")
     logs_mock = mocker.patch("tesseract_core.sdk.engine.logs")
     return {
         "serve_mock": serve_mock,
-        "get_project_containers_mock": get_project_containers_mock,
         "teardown_mock": teardown_mock,
         "logs_mock": logs_mock,
     }
@@ -115,8 +109,8 @@ def test_serve_lifecycle(mock_serving, mock_clients):
         pass
 
     mock_serving["serve_mock"].assert_called_with(
-        ["sometesseract:0.2.3"],
-        ports=None,
+        "sometesseract:0.2.3",
+        port=None,
         volumes=[],
         environment={},
         gpus=None,
@@ -125,7 +119,7 @@ def test_serve_lifecycle(mock_serving, mock_clients):
         host_ip="127.0.0.1",
     )
 
-    mock_serving["teardown_mock"].assert_called_with("proj-id-123")
+    mock_serving["teardown_mock"].assert_called_with("container-id-123")
 
     # check that the same Tesseract obj cannot be used to instantiate two containers
     with pytest.raises(RuntimeError):
