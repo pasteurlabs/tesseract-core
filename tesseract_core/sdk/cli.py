@@ -422,9 +422,9 @@ def _validate_port(port: str | None) -> str | None:
 @app.command("serve")
 @engine.needs_docker
 def serve(
-    image_names: Annotated[
-        list[str],
-        typer.Argument(..., help="One or more Tesseract image names"),
+    image_name: Annotated[
+        str,
+        typer.Argument(..., help="Tesseract image name"),
     ],
     volume: Annotated[
         list[str] | None,
@@ -505,29 +505,6 @@ def serve(
             ),
         ),
     ] = False,
-    no_compose: Annotated[
-        bool,
-        typer.Option(
-            "--no-compose",
-            help=(
-                "Do not use Docker Compose to serve the Tesseract. "
-                "Instead, the command will block until interrupted. "
-                "This is useful for cases in which docker-compose is not available."
-            ),
-        ),
-    ] = False,
-    service_names: Annotated[
-        str | None,
-        typer.Option(
-            "--service-names",
-            help=(
-                "Comma-separated list of service names by which each Tesseract should be exposed "
-                "in the shared network. "
-                "Tesseracts are reachable from one another at http://{service_name}:8000. "
-                "Not supported when using --no-compose."
-            ),
-        ),
-    ] = None,
     user: Annotated[
         str | None,
         typer.Option(
@@ -557,20 +534,7 @@ def serve(
     command, as well as a list of all containers spawned and their respective
     ports.
     """
-    if port is not None:
-        if len(image_names) > 1:
-            # TODO: Docker compose with multiple ports is not supported until
-            # docker/compose#7188 is resolved.
-            raise typer.BadParameter(
-                (
-                    "Port specification only works if exactly one Tesseract is being served. "
-                    f"Currently attempting to serve `{len(image_names)}` Tesseracts."
-                ),
-                param_hint="image_names",
-            )
-        ports = [port]
-    else:
-        ports = None
+    ports = [port] if port is not None else None
 
     # Parse environment variables from list to dict
     if environment is not None:
@@ -585,20 +549,9 @@ def serve(
                 param_hint="environment",
             ) from ex
 
-    if service_names is not None:
-        if no_compose:
-            raise typer.BadParameter(
-                "Service name specification only works with Docker Compose.",
-                param_hint="service_names",
-            )
-
-        service_names_list = service_names.split(",")
-    else:
-        service_names_list = None
-
     try:
         project_id = engine.serve(
-            image_names,
+            image_name,
             host_ip,
             ports,
             network,
@@ -607,8 +560,6 @@ def serve(
             gpus,
             debug,
             num_workers,
-            no_compose,
-            service_names_list,
             user,
             input_path=input_path,
         )
@@ -732,7 +683,7 @@ def apidoc(
 ) -> None:
     """Serve the OpenAPI schema for a Tesseract."""
     host_ip = "127.0.0.1"
-    project_id = engine.serve([image_name], no_compose=True, host_ip=host_ip)
+    project_id = engine.serve([image_name], host_ip=host_ip)
     try:
         container = docker_client.containers.get(project_id)
         url = f"http://{host_ip}:{container.host_port}/docs"

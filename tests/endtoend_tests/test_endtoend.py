@@ -129,10 +129,7 @@ def test_build_generate_only(dummy_tesseract_location, skip_checks):
             assert 'RUN ["tesseract-runtime", "check"]' in docker_file_contents
 
 
-@pytest.mark.parametrize("no_compose", [True, False])
-def test_env_passthrough_serve(
-    docker_cleanup, docker_client, built_image_name, no_compose
-):
+def test_env_passthrough_serve(docker_cleanup, docker_client, built_image_name):
     """Ensure we can pass environment variables to tesseracts when serving."""
     run_res = subprocess.run(
         [
@@ -140,7 +137,6 @@ def test_env_passthrough_serve(
             "serve",
             built_image_name,
             "--env=TEST_ENV_VAR=foo",
-            *(["--no-compose"] if no_compose else []),
         ],
         capture_output=True,
         text=True,
@@ -149,13 +145,9 @@ def test_env_passthrough_serve(
     assert run_res.stdout
 
     project_meta = json.loads(run_res.stdout)
-    project_id = project_meta["project_id"]
     tesseract_id = project_meta["containers"][0]["name"]
 
-    if no_compose:
-        docker_cleanup["containers"].append(tesseract_id)
-    else:
-        docker_cleanup["project_ids"].append(project_id)
+    docker_cleanup["containers"].append(tesseract_id)
 
     container = docker_client.containers.get(tesseract_id)
     exit_code, output = container.exec_run(["sh", "-c", "echo $TEST_ENV_VAR"])
@@ -207,9 +199,8 @@ def test_tesseract_run_stdout(built_image_name):
             raise
 
 
-@pytest.mark.parametrize("no_compose", [True, False])
 @pytest.mark.parametrize("user", [None, "root", "1000:1000"])
-def test_run_as_user(docker_client, built_image_name, user, no_compose, docker_cleanup):
+def test_run_as_user(docker_client, built_image_name, user, docker_cleanup):
     """Ensure we can run a basic Tesseract image as any user."""
     cli_runner = CliRunner(mix_stderr=False)
 
@@ -220,19 +211,14 @@ def test_run_as_user(docker_client, built_image_name, user, no_compose, docker_c
             built_image_name,
             "--user",
             user,
-            *(["--no-compose"] if no_compose else []),
         ],
         catch_exceptions=False,
     )
     assert run_res.exit_code == 0, run_res.stderr
 
     project_meta = json.loads(run_res.stdout)
-    project_id = project_meta["project_id"]
     container = docker_client.containers.get(project_meta["containers"][0]["name"])
-    if no_compose:
-        docker_cleanup["containers"].append(container)
-    else:
-        docker_cleanup["project_ids"].append(project_id)
+    docker_cleanup["containers"].append(container)
 
     exit_code, output = container.exec_run(["id", "-u"])
     if user is None:
@@ -246,18 +232,13 @@ def test_run_as_user(docker_client, built_image_name, user, no_compose, docker_c
     assert output.decode("utf-8").strip() == str(expected_user)
 
 
-@pytest.mark.parametrize("no_compose", [True, False])
-def test_tesseract_serve_pipeline(
-    docker_client, built_image_name, no_compose, docker_cleanup
-):
+def test_tesseract_serve_pipeline(docker_client, built_image_name, docker_cleanup):
     cli_runner = CliRunner(mix_stderr=False)
-    project_id = None
     run_res = cli_runner.invoke(
         app,
         [
             "serve",
             built_image_name,
-            *(["--no-compose"] if no_compose else []),
         ],
         catch_exceptions=False,
     )
@@ -268,16 +249,8 @@ def test_tesseract_serve_pipeline(
     project_meta = json.loads(run_res.stdout)
 
     project_id = project_meta["project_id"]
-    if no_compose:
-        project_container = docker_client.containers.get(project_id)
-        docker_cleanup["containers"].append(project_container)
-    else:
-        docker_cleanup["project_ids"].append(project_id)
-        project_containers = project_meta["containers"][0]["name"]
-        if not project_containers:
-            raise ValueError(f"Could not find container for project '{project_id}'")
-
-        project_container = docker_client.containers.get(project_containers)
+    project_container = docker_client.containers.get(project_id)
+    docker_cleanup["containers"].append(project_container)
 
     assert project_container.name == project_meta["containers"][0]["name"]
     assert project_container.host_port == project_meta["containers"][0]["port"]
@@ -304,8 +277,7 @@ def test_tesseract_serve_pipeline(
 
 
 @pytest.mark.parametrize("tear_all", [True, False])
-@pytest.mark.parametrize("no_compose", [True, False])
-def test_tesseract_teardown_multiple(built_image_name, tear_all, no_compose):
+def test_tesseract_teardown_multiple(built_image_name, tear_all):
     """Teardown multiple projects."""
     cli_runner = CliRunner(mix_stderr=False)
 
@@ -318,7 +290,6 @@ def test_tesseract_teardown_multiple(built_image_name, tear_all, no_compose):
                 [
                     "serve",
                     built_image_name,
-                    *(["--no-compose"] if no_compose else []),
                 ],
                 catch_exceptions=False,
             )
@@ -359,26 +330,6 @@ def test_tesseract_teardown_multiple(built_image_name, tear_all, no_compose):
 def test_tesseract_serve_ports_error(built_image_name):
     """Check error handling for serve -p flag."""
     cli_runner = CliRunner(mix_stderr=False)
-
-    # Check multiple Tesseracts being served.
-    run_res = cli_runner.invoke(
-        app,
-        [
-            "serve",
-            built_image_name,
-            built_image_name,
-            built_image_name,
-            "-p",
-            "8000-8001",
-        ],
-        env={"COLUMNS": "1000"},
-        catch_exceptions=False,
-    )
-    assert run_res.exit_code
-    assert (
-        "Port specification only works if exactly one Tesseract is being served."
-        in run_res.stderr
-    )
 
     # Check invalid ports.
     run_res = cli_runner.invoke(
@@ -473,7 +424,6 @@ def test_tesseract_serve_ports(built_image_name, port, docker_cleanup, free_port
     assert str(actual_port) in run_res.stdout
 
 
-@pytest.mark.parametrize("no_compose", [True, False])
 @pytest.mark.parametrize("volume_type", ["bind", "named"])
 @pytest.mark.parametrize("user", [None, "root", "1000:1000"])
 def test_tesseract_serve_volume_permissions(
@@ -484,14 +434,13 @@ def test_tesseract_serve_volume_permissions(
     docker_cleanup,
     user,
     volume_type,
-    no_compose,
 ):
     """Test serving Tesseract with a Docker volume or bind mount.
 
     This should cover most permissions issues that can arise with Docker volumes.
     """
-    if is_podman() and not no_compose:
-        pytest.xfail("Podman does not support --no-compose option.")
+    if is_podman():
+        pytest.xfail("Podman does not support serve.")
 
     cli_runner = CliRunner(mix_stderr=False)
     project_id = None
@@ -515,7 +464,6 @@ def test_tesseract_serve_volume_permissions(
             f"{volume_to_bind}:{dest}:rw",
             *(("--user", user) if user else []),
             built_image_name,
-            *(("--no-compose",) if no_compose else [built_image_name]),
         ],
         catch_exceptions=False,
     )
@@ -525,10 +473,7 @@ def test_tesseract_serve_volume_permissions(
     project_meta = json.loads(run_res.stdout)
     project_id = project_meta["project_id"]
 
-    if no_compose:
-        docker_cleanup["containers"].append(project_id)
-    else:
-        docker_cleanup["project_ids"].append(project_id)
+    docker_cleanup["containers"].append(project_id)
 
     tesseract0_id = project_meta["containers"][0]["name"]
     tesseract0 = docker_client.containers.get(tesseract0_id)
@@ -561,16 +506,15 @@ def test_tesseract_serve_volume_permissions(
     exit_code, output = tesseract0.exec_run(["touch", str(bar_file)])
     assert exit_code == 0
 
-    if not no_compose:
-        tesseract1_id = project_meta["containers"][1]["name"]
-        tesseract1 = docker_client.containers.get(tesseract1_id)
+    tesseract1_id = project_meta["containers"][1]["name"]
+    tesseract1 = docker_client.containers.get(tesseract1_id)
 
-        exit_code, output = tesseract1.exec_run(["cat", str(bar_file)])
-        assert exit_code == 0
-        exit_code, output = tesseract1.exec_run(
-            ["bash", "-c", f'echo "hello" > {bar_file}']
-        )
-        assert exit_code == 0
+    exit_code, output = tesseract1.exec_run(["cat", str(bar_file)])
+    assert exit_code == 0
+    exit_code, output = tesseract1.exec_run(
+        ["bash", "-c", f'echo "hello" > {bar_file}']
+    )
+    assert exit_code == 0
 
     if volume_type == "bind":
         # The file should exist outside the container
@@ -580,14 +524,12 @@ def test_tesseract_serve_volume_permissions(
 def test_tesseract_serve_interop(built_image_name, docker_client, docker_cleanup):
     cli_runner = CliRunner(mix_stderr=False)
 
+    # Serve first Tesseract
     run_res = cli_runner.invoke(
         app,
         [
             "serve",
             built_image_name,
-            built_image_name,
-            "--service-names",
-            "tess-1,tess-2",
         ],
         env={"COLUMNS": "1000"},
         catch_exceptions=False,
@@ -596,25 +538,38 @@ def test_tesseract_serve_interop(built_image_name, docker_client, docker_cleanup
 
     project_meta = json.loads(run_res.stdout)
     project_id = project_meta["project_id"]
-    docker_cleanup["project_ids"].append(project_id)
+    tess_1 = docker_client.containers.get(project_id)
+    docker_cleanup["containers"].append(tess_1)
 
-    project_containers = [project_meta["containers"][i]["name"] for i in range(2)]
+    # Serve second Tesseract
+    run_res = cli_runner.invoke(
+        app,
+        [
+            "serve",
+            built_image_name,
+        ],
+        env={"COLUMNS": "1000"},
+        catch_exceptions=False,
+    )
+    assert run_res.exit_code == 0
 
-    tess_1 = docker_client.containers.get(project_containers[0])
+    project_meta = json.loads(run_res.stdout)
+    project_id = project_meta["project_id"]
+    tess_2 = docker_client.containers.get(project_id)
+    docker_cleanup["containers"].append(tess_2)
 
     returncode, stdout = tess_1.exec_run(
         [
             "python",
             "-c",
-            'import requests; requests.get("http://tess-2:8000/health").raise_for_status()',
+            f'import requests; requests.get("http://{tess_2.name}:8000/health").raise_for_status()',
         ]
     )
     assert returncode == 0, stdout.decode()
 
 
-@pytest.mark.parametrize("no_compose", [True, False])
 def test_serve_nonstandard_host_ip(
-    docker_client, built_image_name, docker_cleanup, free_port, no_compose
+    docker_client, built_image_name, docker_cleanup, free_port
 ):
     """Test serving Tesseract with a non-standard host IP."""
 
@@ -637,15 +592,7 @@ def test_serve_nonstandard_host_ip(
 
     run_res = cli_runner.invoke(
         app,
-        [
-            "serve",
-            built_image_name,
-            "-p",
-            str(free_port),
-            "--host-ip",
-            host_ip,
-            *(["--no-compose"] if no_compose else []),
-        ],
+        ["serve", built_image_name, "-p", str(free_port), "--host-ip", host_ip],
         catch_exceptions=False,
     )
     assert run_res.exit_code == 0, run_res.stderr
@@ -653,10 +600,7 @@ def test_serve_nonstandard_host_ip(
     project_meta = json.loads(run_res.stdout)
     project_id = project_meta["project_id"]
 
-    if no_compose:
-        docker_cleanup["containers"].append(project_id)
-    else:
-        docker_cleanup["project_ids"].append(project_id)
+    docker_cleanup["containers"].append(project_id)
 
     project_container = docker_client.containers.get(
         project_meta["containers"][0]["name"]
