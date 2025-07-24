@@ -709,13 +709,12 @@ def _find_tesseract_project(
 def _get_tesseract_network_meta(container: Container) -> dict:
     """Retrieve network addresses from container."""
     network_meta = {}
-    networks = container.attrs["NetworkSettings"]["Networks"]
+    networks = container.attrs["NetworkSettings"].get("Networks", {})
     for network_name, network_info in networks.items():
         network_meta[network_name] = {
             "ip": f"{network_info['IPAddress']}",
             "port": 8000,
         }
-
     return network_meta
 
 
