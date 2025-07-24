@@ -131,9 +131,9 @@ def test_run_tesseract(mocked_docker):
     res = json.loads(res_out)
     assert res["command"] == [
         "apply",
-        "--output-path",
-        str(Path(os.getcwd()) / "tesseract_output"),
         '{"inputs": {"a": [1, 2, 3], "b": [4, 5, 6]}}',
+        "--output-path",
+        "/tesseract/output_data",
     ]
     assert res["image"] == "foobar"
 

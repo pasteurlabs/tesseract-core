@@ -878,9 +878,9 @@ def test_unit_tesseract_endtoend(
         [
             "run",
             img_name,
-            "input-schema",
             "--output-path",
             str(tmpdir),
+            "input-schema",
         ],
         catch_exceptions=False,
     )
