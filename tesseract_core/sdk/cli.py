@@ -706,6 +706,19 @@ def _find_tesseract_project(
     return tesseract.name
 
 
+def _get_tesseract_network_meta(container: Container) -> dict:
+    """Retrieve network addresses from container."""
+    network_meta = {}
+    networks = container.attrs["NetworkSettings"]["Networks"]
+    for network_name, network_info in networks.items():
+        network_meta[network_name] = {
+            "ip": f"{network_info['IPAddress']}",
+            "port": 8000,
+        }
+
+    return network_meta
+
+
 @app.command("apidoc")
 @engine.needs_docker
 def apidoc(
@@ -759,8 +772,14 @@ def _display_project_meta(project_id: str) -> list:
         host_port = container.host_port
         host_ip = container.host_ip
         logger.info(f"View Tesseract: http://{host_ip}:{host_port}/docs")
+        network_meta = _get_tesseract_network_meta(container)
         container_ports.append(
-            {"name": container.name, "port": host_port, "ip": host_ip}
+            {
+                "name": container.name,
+                "port": host_port,
+                "ip": host_ip,
+                "networks": network_meta,
+            }
         )
         if container.host_debugpy_port:
             logger.info(
