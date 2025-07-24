@@ -732,7 +732,7 @@ def serve(
         num_workers,
         debug=debug,
         user=user,
-        output_path=output_path,
+        output_path=str(output_path),
     )
     compose_fname = f"docker-compose-{_id_generator()}.yml"
 
@@ -813,15 +813,16 @@ def _create_docker_compose_template(
 
     for i, image_id in enumerate(image_ids):
         # Write each Tesseract's output to a separate output directory
+        temp_parsed_volumes = parsed_volumes.copy()
         source = f"{output_path}/{service_names[i]}"
         Path(source).mkdir(exist_ok=True)
-        parsed_volumes[source] = {"bind": "/tesseract/output_data", "mode": "rw"}
+        temp_parsed_volumes[source] = {"bind": "/tesseract/output_data", "mode": "rw"}
         service = {
             "name": service_names[i],
             "user": user,
             "image": image_id,
             "port": f"{ports[i]}:8000",
-            "volumes": parsed_volumes,
+            "volumes": temp_parsed_volumes,
             "gpus": gpu_settings,
             "environment": {
                 "TESSERACT_DEBUG": "1" if debug else "0",
@@ -830,7 +831,6 @@ def _create_docker_compose_template(
             "num_workers": num_workers,
             "debugpy_port": debugpy_ports[i] if debug else None,
         }
-        parsed_volumes.pop(source)
         services.append(service)
 
     external_volume_map = {}
@@ -966,7 +966,7 @@ def run_tesseract(
     # Default output path behavior if not specified
     if "--output-path" not in args:
         cmd.append("--output-path")
-        cmd.append(Path(os.getcwd()) / "tesseract_output")
+        cmd.append(str(Path(os.getcwd()) / "tesseract_output"))
         logger.info("`--output-path` not specified, writing to current directory.")
 
     for arg in args:

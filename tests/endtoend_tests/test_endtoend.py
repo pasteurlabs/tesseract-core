@@ -596,7 +596,7 @@ def test_tesseract_serve_volume_permissions(
         assert (tmp_path / "bar").exists()
 
 
-@pytest.mark.parametrize("default_output_path", [False])
+@pytest.mark.parametrize("default_output_path", [True, False])
 def test_tesseract_serve_multiple_outputs(
     built_image_name,
     docker_client,
