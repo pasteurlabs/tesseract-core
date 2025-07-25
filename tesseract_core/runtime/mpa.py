@@ -7,19 +7,18 @@ import csv
 import json
 import os
 import shutil
-import sys
 from abc import ABC, abstractmethod
 from collections.abc import Generator
-from contextlib import ExitStack, contextmanager
+from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime
-from io import UnsupportedOperation
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any, Optional
 
 import requests
 
 from tesseract_core.runtime.core import make_timestamped_logdir
+
 
 class BaseBackend(ABC):
     """Base class for MPA backends."""
@@ -217,11 +216,8 @@ def start_run() -> Generator[None, None, None]:
     token = _current_backend.set(backend)
     backend.start_run()
 
-    logfile = backend.run_dir / "tesseract.log"
-
     try:
-        with stdio_to_logfile(logfile):
-            yield
+        yield
     finally:
         backend.end_run()
         _current_backend.reset(token)

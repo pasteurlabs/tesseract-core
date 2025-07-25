@@ -21,7 +21,6 @@ from .schema_generation import (
     create_autodiff_schema,
 )
 
-from tesseract_core.runtime.config import get_config
 
 def make_timestamped_logdir() -> Path:
     """Make a directory named "run_$TIMESTAMP" under the configured logging directory.
@@ -66,9 +65,9 @@ def redirect_fd(
 
 
 @contextmanager
-def stdio_to_logfile(logfile: Union[str, Path]) -> Generator[None, None, None]:
+def stdio_to_logfile() -> Generator[None, None, None]:
     """Context manager for redirecting stdout and stderr to a log file."""
-    from tesseract_core.runtime.core import redirect_fd
+    logfile = make_timestamped_logdir() / "tesseract.log"
 
     with ExitStack() as stack:
         f = stack.enter_context(open(logfile, "w"))
@@ -191,7 +190,8 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
     @assemble_docstring(api_module.apply)
     def apply(payload: ApplyInputSchema) -> ApplyOutputSchema:
         """Apply the Tesseract to the input data."""
-        out = api_module.apply(payload.inputs)
+        with stdio_to_logfile():
+            out = api_module.apply(payload.inputs)
         if isinstance(out, api_module.OutputSchema):
             out = out.model_dump()
         return ApplyOutputSchema.model_validate(out)
@@ -209,7 +209,8 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
 
             Differentiates ``jac_outputs`` with respect to ``jac_inputs``, at the point ``inputs``.
             """
-            out = api_module.jacobian(**dict(payload))
+            with stdio_to_logfile():
+                out = api_module.jacobian(**dict(payload))
             return JacobianOutputSchema.model_validate(
                 out,
                 context={
@@ -232,7 +233,8 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
             Evaluates the Jacobian vector product between the Jacobian given by ``jvp_outputs``
             with respect to ``jvp_inputs`` at the point ``inputs`` and the given tangent vector.
             """
-            out = api_module.jacobian_vector_product(**dict(payload))
+            with stdio_to_logfile():
+                out = api_module.jacobian_vector_product(**dict(payload))
             return JVPOutputSchema.model_validate(
                 out, context={"output_keys": payload.jvp_outputs}
             )
@@ -251,7 +253,8 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
             Computes the vector Jacobian product between the Jacobian given by ``vjp_outputs``
             with respect to ``vjp_inputs`` at the point ``inputs`` and the given cotangent vector.
             """
-            out = api_module.vector_jacobian_product(**dict(payload))
+            with stdio_to_logfile():
+                out = api_module.vector_jacobian_product(**dict(payload))
             return VJPOutputSchema.model_validate(
                 out, context={"input_keys": payload.vjp_inputs}
             )
