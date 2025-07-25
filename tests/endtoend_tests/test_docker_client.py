@@ -5,7 +5,6 @@
 
 import os
 import subprocess
-import textwrap
 from contextlib import closing
 from pathlib import Path
 
@@ -14,7 +13,6 @@ import pytest
 from common import image_exists
 
 from tesseract_core.sdk.docker_client import (
-    APIError,
     ContainerError,
     ImageNotFound,
     _is_valid_docker_tag,
@@ -213,7 +211,6 @@ def test_create_container(
         )
         assert container_py is not None
         # Check property fields
-        assert container.project_id is None
         assert container.host_port is None
         assert _strip_image_prefix(container_py.image.id) == _strip_image_prefix(
             container.image.id
@@ -328,86 +325,6 @@ def test_container_volume_mounts(
     assert status["StatusCode"] == 0
     stdout = container1.logs(stdout=True, stderr=False)
     assert stdout == b"hello tesseract\n"
-
-
-def test_compose_up_down(
-    docker_client, docker_py_client, tmp_path, docker_client_built_image_name
-):
-    """Test docker-compose up and down."""
-    project_name, project_name1 = None, None
-    try:
-        compose_file = tmp_path / "docker-compose.yml"
-        # Use tail -f /dev/null to keep the container running
-        compose_content = textwrap.dedent(
-            f"""
-            services:
-              test:
-                image: {docker_client_built_image_name}
-                command: ["echo 'Hello Tesseract' && tail -f /dev/null"]
-        """
-        )
-        compose_file.write_text(compose_content)
-        # Run docker-compose up
-        project_name = docker_client.compose.up(
-            str(compose_file), "docker_client_compose_test"
-        )
-        assert project_name == "docker_client_compose_test"
-
-        # Check that project is visible in list
-        projects = docker_client.compose.list()
-        assert project_name in projects
-        assert docker_client.compose.exists(project_name)
-
-        # Get container associated with this project
-        containers = projects.get(project_name)
-        container = docker_client.containers.get(containers[0])
-        assert container is not None
-        stdout = container.logs(stdout=True, stderr=False)
-        assert stdout == b"Hello Tesseract\n"
-
-        # Get container from docker-py
-        container_py = docker_py_client.containers.get(containers[0])
-        assert container_py is not None
-        stdout_py = container_py.logs(stdout=True, stderr=False)
-        assert stdout_py == stdout
-
-        # Create a second project
-        project_name1 = docker_client.compose.up(
-            str(compose_file), "docker_client_compose_test_1"
-        )
-        # Check both projects exist
-        assert docker_client.compose.exists(project_name)
-        assert docker_client.compose.exists(project_name1)
-
-    finally:
-        # Remove one project
-        if project_name:
-            docker_client.compose.down(project_name)
-            assert not docker_client.compose.exists(project_name)
-
-        # Remove second project
-        if project_name1:
-            assert docker_client.compose.exists(project_name1)
-            docker_client.compose.down(project_name1)
-            assert not docker_client.compose.exists(project_name1)
-
-
-def test_compose_error(docker_client, tmp_path, docker_client_built_image_name):
-    """Test docker-compose error handling."""
-    compose_file = tmp_path / "docker-compose.yml"
-    # Write a malformed compose file
-    compose_content = textwrap.dedent(
-        f"""
-        services:
-            test:
-            image: {docker_client_built_image_name}
-    """
-    )
-    compose_file.write_text(compose_content)
-    with pytest.raises(APIError) as e:
-        docker_client.compose.up(str(compose_file), "docker_client_compose_test")
-    # Check that the container's logs were printed to stderr
-    assert "Failed to start Tesseract container" in str(e.value)
 
 
 def test_volume_uid_permissions(

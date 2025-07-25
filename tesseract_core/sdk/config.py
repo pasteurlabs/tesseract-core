@@ -44,9 +44,6 @@ class RuntimeConfig(BaseModel):
     docker_executable: Annotated[
         tuple[str, ...], BeforeValidator(validate_executable)
     ] = ("docker",)
-    docker_compose_executable: Annotated[
-        tuple[str, ...], BeforeValidator(validate_executable)
-    ] = ("docker", "compose")
     docker_build_args: Annotated[
         tuple[str, ...], BeforeValidator(maybe_split_args)
     ] = ()
