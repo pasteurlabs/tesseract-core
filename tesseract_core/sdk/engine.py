@@ -468,8 +468,10 @@ def teardown(
     """
     if tear_all:
         # Identify all Tesseract containers to tear down
-        containers = set(container.id for container in docker_client.containers.list())
-        if not containers:
+        container_ids = set(
+            container.id for container in docker_client.containers.list()
+        )
+        if not container_ids:
             logger.info("No Tesseract containers to teardown")
             return
 

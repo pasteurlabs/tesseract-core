@@ -145,7 +145,7 @@ def test_env_passthrough_serve(docker_cleanup, docker_client, built_image_name):
     assert run_res.stdout
 
     serve_meta = json.loads(run_res.stdout)
-    container_name = serve_meta["containers"][0]["name"]
+    container_name = serve_meta["container_name"]
 
     docker_cleanup["containers"].append(container_name)
 
@@ -217,7 +217,7 @@ def test_run_as_user(docker_client, built_image_name, user, docker_cleanup):
     assert run_res.exit_code == 0, run_res.stderr
 
     serve_meta = json.loads(run_res.stdout)
-    container = docker_client.containers.get(serve_meta["containers"][0]["name"])
+    container = docker_client.containers.get(serve_meta["container_name"])
     docker_cleanup["containers"].append(container)
 
     exit_code, output = container.exec_run(["id", "-u"])
@@ -248,13 +248,14 @@ def test_tesseract_serve_pipeline(docker_client, built_image_name, docker_cleanu
 
     serve_meta = json.loads(run_res.stdout)
 
+    print("AKOAKO meta", serve_meta)
     container_name = serve_meta["container_name"]
     container = docker_client.containers.get(container_name)
     docker_cleanup["containers"].append(container)
 
     assert container.name == container_name
-    assert container.host_port == serve_meta["port"]
-    assert container.host_ip == serve_meta["ip"]
+    assert container.host_port == serve_meta["containers"]["port"]
+    assert container.host_ip == serve_meta["containers"]["ip"]
 
     # Ensure served Tesseract is usable
     res = requests.get(f"http://{container.host_ip}:{container.host_port}/health")
