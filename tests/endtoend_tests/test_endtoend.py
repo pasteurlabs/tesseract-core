@@ -248,7 +248,6 @@ def test_tesseract_serve_pipeline(docker_client, built_image_name, docker_cleanu
 
     serve_meta = json.loads(run_res.stdout)
 
-    print("AKOAKO meta", serve_meta)
     container_name = serve_meta["container_name"]
     container = docker_client.containers.get(container_name)
     docker_cleanup["containers"].append(container)
@@ -407,7 +406,7 @@ def test_tesseract_serve_ports(built_image_name, port, docker_cleanup, free_port
     start_port = int(test_ports[0])
     end_port = int(test_ports[1]) if len(test_ports) > 1 else start_port
 
-    actual_port = int(serve_meta["port"])
+    actual_port = int(serve_meta["containers"]["port"])
     assert actual_port in range(start_port, end_port + 1)
 
     # Ensure specified ports are in `tesseract ps` and served Tesseracts are usable.

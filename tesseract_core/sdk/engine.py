@@ -578,6 +578,11 @@ def serve(
 
     if not port:
         port = str(get_free_port())
+    else:
+        # Convert port ranges to fixed ports
+        if "-" in port:
+            port_start, port_end = port.split("-")
+            port = str(get_free_port(within_range=(int(port_start), int(port_end))))
 
     if num_workers > 1:
         args.extend(["--num-workers", str(num_workers)])
