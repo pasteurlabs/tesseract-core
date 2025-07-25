@@ -5,14 +5,10 @@ from pydantic import BaseModel, Field
 
 from tesseract_core import Tesseract
 
-TesseractReference = str
-
 
 class InputSchema(BaseModel):
     name: str = Field(description="Name of the person you want to greet.")
-    tt_ref: TesseractReference = Field(
-        description="Url of 'helloworld' target Tesseract."
-    )
+    tt_ref: str = Field(description="Url of 'helloworld' target Tesseract.")
 
 
 class OutputSchema(BaseModel):
