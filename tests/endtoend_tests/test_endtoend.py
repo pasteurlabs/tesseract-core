@@ -15,7 +15,6 @@ from common import build_tesseract, image_exists
 from typer.testing import CliRunner
 
 from tesseract_core.sdk.cli import AVAILABLE_RECIPES, app
-from tesseract_core.sdk.docker_client import is_podman
 
 
 @pytest.fixture(scope="module")
@@ -145,7 +144,7 @@ def test_env_passthrough_serve(docker_cleanup, docker_client, built_image_name):
     assert run_res.stdout
 
     serve_meta = json.loads(run_res.stdout)
-    container_name = serve_meta["containers"][0]["name"]
+    container_name = serve_meta["container_name"]
 
     docker_cleanup["containers"].append(container_name)
 
@@ -217,7 +216,7 @@ def test_run_as_user(docker_client, built_image_name, user, docker_cleanup):
     assert run_res.exit_code == 0, run_res.stderr
 
     serve_meta = json.loads(run_res.stdout)
-    container = docker_client.containers.get(serve_meta["containers"][0]["name"])
+    container = docker_client.containers.get(serve_meta["container_name"])
     docker_cleanup["containers"].append(container)
 
     exit_code, output = container.exec_run(["id", "-u"])
@@ -253,8 +252,8 @@ def test_tesseract_serve_pipeline(docker_client, built_image_name, docker_cleanu
     docker_cleanup["containers"].append(container)
 
     assert container.name == container_name
-    assert container.host_port == serve_meta["port"]
-    assert container.host_ip == serve_meta["ip"]
+    assert container.host_port == serve_meta["containers"]["port"]
+    assert container.host_ip == serve_meta["containers"]["ip"]
 
     # Ensure served Tesseract is usable
     res = requests.get(f"http://{container.host_ip}:{container.host_port}/health")
@@ -406,7 +405,7 @@ def test_tesseract_serve_ports(built_image_name, port, docker_cleanup, free_port
     start_port = int(test_ports[0])
     end_port = int(test_ports[1]) if len(test_ports) > 1 else start_port
 
-    actual_port = int(serve_meta["port"])
+    actual_port = int(serve_meta["containers"]["port"])
     assert actual_port in range(start_port, end_port + 1)
 
     # Ensure specified ports are in `tesseract ps` and served Tesseracts are usable.
@@ -437,9 +436,6 @@ def test_tesseract_serve_volume_permissions(
 
     This should cover most permissions issues that can arise with Docker volumes.
     """
-    if is_podman():
-        pytest.xfail("Podman does not support serve.")
-
     cli_runner = CliRunner(mix_stderr=False)
 
     dest = Path("/tesseract/output_data")

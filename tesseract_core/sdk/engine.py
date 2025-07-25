@@ -13,7 +13,7 @@ import socket
 import tempfile
 import threading
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from contextlib import closing
 from pathlib import Path
 from shutil import copy, copytree, rmtree
@@ -464,7 +464,7 @@ def build_tesseract(
 
 
 def teardown(
-    container_ids: Sequence[str] | None = None, tear_all: bool = False
+    container_ids: Collection[str] | None = None, tear_all: bool = False
 ) -> None:
     """Teardown Tesseract container(s).
 
@@ -474,8 +474,10 @@ def teardown(
     """
     if tear_all:
         # Identify all Tesseract containers to tear down
-        containers = set(container.id for container in docker_client.containers.list())
-        if not containers:
+        container_ids = set(
+            container.id for container in docker_client.containers.list()
+        )
+        if not container_ids:
             logger.info("No Tesseract containers to teardown")
             return
 
@@ -564,9 +566,10 @@ def serve(
         # Use the current user if not specified
         user = f"{os.getuid()}:{os.getgid()}" if os.name != "nt" else None
 
+    if environment is None:
+        environment = {}
+
     if input_path:
-        if environment is None:
-            environment = {}
         environment["TESSERACT_INPUT_PATH"] = "/tesseract/input_data"
         if volumes is None:
             volumes = []
@@ -582,6 +585,11 @@ def serve(
 
     if not port:
         port = str(get_free_port())
+    else:
+        # Convert port ranges to fixed ports
+        if "-" in port:
+            port_start, port_end = port.split("-")
+            port = str(get_free_port(within_range=(int(port_start), int(port_end))))
 
     if num_workers > 1:
         args.extend(["--num-workers", str(num_workers)])
@@ -598,6 +606,7 @@ def serve(
     if debug:
         debugpy_port = str(get_free_port())
         port_mappings[f"{host_ip}:{debugpy_port}"] = container_debugpy_port
+        environment["TESSERACT_DEBUG"] = "1"
 
     logger.info(f"Serving Tesseract at http://{ping_ip}:{port}")
     logger.info(f"View Tesseract: http://{ping_ip}:{port}/docs")
