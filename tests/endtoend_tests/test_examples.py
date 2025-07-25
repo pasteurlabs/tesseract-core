@@ -12,6 +12,7 @@ Add test cases for specific unit Tesseracts to the TEST_CASES dictionary.
 import base64
 import json
 import re
+import subprocess
 import time
 import traceback
 from dataclasses import dataclass
@@ -23,6 +24,8 @@ import pytest
 import requests
 from common import build_tesseract, image_exists
 from typer.testing import CliRunner
+
+from tesseract_core.sdk.config import get_config
 
 
 # Only necessary when matching multi-word string
@@ -1084,3 +1087,83 @@ def test_unit_tesseract_endtoend(
             array = request.output_contains_array
             output_json = json.loads(output)
             assert_contains_array_allclose(output_json, array)
+
+
+def test_hot_helloworld_tesseract_endtoend(
+    docker_client,
+    unit_tesseracts_parent_dir,
+    dummy_image_name,
+    dummy_network_name,
+    docker_cleanup,
+):
+    """Test that unit Tesseract images can be built and used to serve REST API."""
+    from tesseract_core.sdk.cli import app
+
+    cli_runner = CliRunner(mix_stderr=False)
+
+    # Build HOT and target Tesseract
+    img_names = []
+    for tess_name in ("hot_helloworld", "helloworld"):
+        img_name = build_tesseract(
+            docker_client,
+            unit_tesseracts_parent_dir / tess_name,
+            dummy_image_name + f"_{tess_name}",
+            tag="sometag",
+        )
+        img_names.append(img_name)
+        assert image_exists(docker_client, img_name)
+        docker_cleanup["images"].append(img_name)
+
+    config = get_config()
+    docker = config.docker_executable
+
+    result = subprocess.run(
+        [*docker, "network", "create", dummy_network_name],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.returncode == 0, result.stderr
+    docker_cleanup["networks"].append(dummy_network_name)
+
+    # Serve target Tesseract
+    hot_img_name, tt_img_name = img_names
+    tt_refs = {}
+    result = cli_runner.invoke(
+        app,
+        [
+            "serve",
+            tt_img_name,
+            "--no-compose",
+            "--network",
+            dummy_network_name,
+        ],
+        catch_exceptions=True,
+    )
+    assert result.exit_code == 0, result.output
+    container_meta = json.loads(result.stdout)
+    # The project id is the container name for --no-compose
+    project_id = container_meta["project_id"]
+    docker_cleanup["project_ids"].append(project_id)
+    tt_refs[project_id] = (
+        f"{container_meta['containers'][0]['networks'][dummy_network_name]['ip']}:"
+        f"{container_meta['containers'][0]['networks'][dummy_network_name]['port']}"
+    )
+
+    payload = json.dumps({"inputs": {"name": "you", "tt_ref": tt_refs[project_id]}})
+
+    # Run HOT
+    result = cli_runner.invoke(
+        app,
+        [
+            "run",
+            hot_img_name,
+            "apply",
+            payload,
+            "--network",
+            dummy_network_name,
+        ],
+        catch_exceptions=True,
+    )
+    assert result.exit_code == 0, result.output
+    assert "The target Tesseract says: Hello you!" in result.output

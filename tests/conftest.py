@@ -5,6 +5,7 @@ import json
 import os
 import random
 import string
+import subprocess
 from pathlib import Path
 from shutil import copytree
 from textwrap import indent
@@ -18,7 +19,12 @@ import pytest
 here = Path(__file__).parent
 
 UNIT_TESSERACT_PATH = here / ".." / "examples"
-UNIT_TESSERACTS = [Path(tr).stem for tr in UNIT_TESSERACT_PATH.glob("*/")]
+UNIT_TESSERACTS = [
+    Path(tr).stem
+    for tr in (
+        set(UNIT_TESSERACT_PATH.glob("*/")) - set(UNIT_TESSERACT_PATH.glob("hot_*/"))
+    )
+]
 
 
 def pytest_addoption(parser):
@@ -112,6 +118,12 @@ def unit_tesseract_path(request) -> Path:
     """Parametrized fixture to return all unit tesseracts."""
     # pass only tesseract names as params to get prettier test names
     return UNIT_TESSERACT_PATH / request.param
+
+
+@pytest.fixture(scope="session")
+def unit_tesseracts_parent_dir(request) -> Path:
+    """Fixture that return parent dir of unit tesseracts."""
+    return UNIT_TESSERACT_PATH
 
 
 @pytest.fixture()
@@ -243,7 +255,13 @@ def docker_cleanup(docker_client, request):
 def _docker_cleanup(docker_client, request):
     """Clean up all tesseracts created by the tests."""
     # Shared object to track what objects need to be cleaned up in each test
-    context = {"images": [], "project_ids": [], "containers": [], "volumes": []}
+    context = {
+        "images": [],
+        "project_ids": [],
+        "containers": [],
+        "volumes": [],
+        "networks": [],
+    }
 
     def pprint_exc(e: BaseException) -> str:
         """Pretty print exception."""
@@ -301,6 +319,19 @@ def _docker_cleanup(docker_client, request):
             except Exception as e:
                 failures.append(f"Failed to remove volume {volume}: {pprint_exc(e)}")
 
+        from tesseract_core.sdk.config import get_config
+
+        config = get_config()
+        docker_cmd = config.docker_executable
+        for network in context["networks"]:
+            try:
+                _ = subprocess.run(
+                    [*docker_cmd, "network", "rm", network],
+                    check=True,
+                )
+            except Exception as e:
+                failures.append(f"Failed to remove network {network}: {pprint_exc(e)}")
+
         if failures:
             raise RuntimeError(
                 "Failed to clean up some Docker objects during test teardown:\n"
@@ -325,6 +356,14 @@ def shared_dummy_image_name():
     image_id = "".join(random.choices(string.ascii_lowercase + string.digits, k=16))
     image_name = f"tmp_tesseract_image_{image_id}"
     yield image_name
+
+
+@pytest.fixture
+def dummy_network_name():
+    """Create a dummy image name, and clean up after the test."""
+    network_name = "".join(random.choices(string.ascii_lowercase + string.digits, k=16))
+    network_name = f"tmp_tesseract_network_{network_name}"
+    yield network_name
 
 
 @pytest.fixture
