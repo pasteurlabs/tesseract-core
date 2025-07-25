@@ -473,8 +473,7 @@ def test_tesseract_serve_volume_permissions(
 
     docker_cleanup["containers"].append(container_name)
 
-    tesseract0_id = serve_meta["containers"][0]["name"]
-    tesseract0 = docker_client.containers.get(tesseract0_id)
+    tesseract0 = docker_client.containers.get(container_name)
 
     # Sanity check: Should always be allowed to read/write files in the default workdir
     exit_code, output = tesseract0.exec_run(["touch", "./test.txt"])
@@ -502,16 +501,6 @@ def test_tesseract_serve_volume_permissions(
     assert exit_code == 0, output.decode()
 
     exit_code, output = tesseract0.exec_run(["touch", str(bar_file)])
-    assert exit_code == 0
-
-    tesseract1_id = serve_meta["containers"][1]["name"]
-    tesseract1 = docker_client.containers.get(tesseract1_id)
-
-    exit_code, output = tesseract1.exec_run(["cat", str(bar_file)])
-    assert exit_code == 0
-    exit_code, output = tesseract1.exec_run(
-        ["bash", "-c", f'echo "hello" > {bar_file}']
-    )
     assert exit_code == 0
 
     if volume_type == "bind":

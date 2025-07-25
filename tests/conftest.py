@@ -338,7 +338,7 @@ def mocked_docker(monkeypatch):
         @property
         def name(self):
             """Mock name property for Container."""
-            return "vectoradd"
+            return json.dumps({**self.return_args, "name": "vectoradd"})
 
         @property
         def attrs(self):

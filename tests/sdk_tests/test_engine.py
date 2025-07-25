@@ -240,7 +240,7 @@ def test_serve_tesseracts(mocked_docker):
     assert container_name_single_tesseract
 
     # Teardown valid
-    engine.teardown(container_name_single_tesseract)
+    engine.teardown(json.loads(container_name_single_tesseract)["name"])
 
     # Tear down invalid
     with pytest.raises(NotFound):
@@ -251,7 +251,7 @@ def test_serve_tesseracts(mocked_docker):
     assert container_name_multi_tesseract
 
     # Teardown valid
-    engine.teardown(container_name_multi_tesseract)
+    engine.teardown(json.loads(container_name_multi_tesseract)["name"])
 
 
 def test_serve_tesseract_volumes(mocked_docker, tmpdir):
