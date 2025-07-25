@@ -4,9 +4,9 @@
 import importlib
 import os
 import sys
+import uuid
 from collections.abc import Callable, Generator
 from contextlib import ExitStack, contextmanager
-from datetime import datetime
 from io import TextIOBase, UnsupportedOperation
 from pathlib import Path
 from types import ModuleType
@@ -22,11 +22,11 @@ from .schema_generation import (
 )
 
 
-def make_timestamped_logdir() -> Path:
-    """Make a directory named "run_$TIMESTAMP" under the configured logging directory.
+def make_default_logdir() -> Path:
+    """Makes and returns the path to the configured logging directory.
 
     Returns:
-        The path to the created directory
+        The path to the created logging directory
     """
     log_dir = os.getenv("LOG_DIR")
     if not log_dir:
@@ -35,12 +35,18 @@ def make_timestamped_logdir() -> Path:
         log_dir = Path(log_dir)
 
     log_dir.mkdir(exist_ok=True)
+    return log_dir
 
-    # Create a unique run directory
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    run_dir = log_dir / f"run_{timestamp}"
-    run_dir.mkdir(exist_ok=True)
-    return run_dir
+
+def make_textlogs_logdir() -> Path:
+    """Makes and returns the path to the default directory for text logs.
+    Returns:
+        The path to the directory
+    """
+
+    textlogs_dir = make_default_logdir() / "text_logs"
+    textlogs_dir.mkdir(exist_ok=True)
+    return textlogs_dir
 
 
 @contextmanager
@@ -67,7 +73,7 @@ def redirect_fd(
 @contextmanager
 def stdio_to_logfile() -> Generator[None, None, None]:
     """Context manager for redirecting stdout and stderr to a log file."""
-    logfile = make_timestamped_logdir() / "tesseract.log"
+    logfile = make_textlogs_logdir() / f"{uuid.uuid4()!s}.log"
 
     with ExitStack() as stack:
         f = stack.enter_context(open(logfile, "w"))

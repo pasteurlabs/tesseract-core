@@ -69,7 +69,7 @@ def test_custom_log_directory(tmpdir):
     os.environ["LOG_DIR"] = str(custom_dir)
 
     backend = mpa.FileBackend()
-    assert backend.run_dir.is_relative_to(custom_dir)
+    assert backend.run_dir.is_relative_to(custom_dir / "mpa_logs")
     assert backend.run_dir.exists()
 
 

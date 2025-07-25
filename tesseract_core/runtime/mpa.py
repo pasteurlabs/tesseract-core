@@ -17,7 +17,7 @@ from typing import Any, Optional
 
 import requests
 
-from tesseract_core.runtime.core import make_timestamped_logdir
+from tesseract_core.runtime.core import make_default_logdir
 
 
 class BaseBackend(ABC):
@@ -53,7 +53,13 @@ class FileBackend(BaseBackend):
     """MPA backend that writes to local files."""
 
     def __init__(self) -> None:
-        self.run_dir = make_timestamped_logdir()
+        mpa_log_dir = make_default_logdir() / "mpa_logs"
+        mpa_log_dir.mkdir(exist_ok=True)
+
+        # Create a unique run directory
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        self.run_dir = mpa_log_dir / f"run_{timestamp}"
+        self.run_dir.mkdir(exist_ok=True)
 
         # Initialize log files
         self.params_file = self.run_dir / "parameters.json"

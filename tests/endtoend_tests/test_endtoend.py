@@ -891,20 +891,20 @@ def test_mpa_file_backend(
             "--output-path",
             tmpdir,
         ]
-        log_dir = Path(tmpdir) / "logs"
+        mpa_log_dir = Path(tmpdir) / "logs/mpa_logs"
     elif default_log_dir == "custom":
         run_cmd = [
             "tesseract",
             "run",
             "--env",
-            "LOG_DIR=/tesseract/output_data/mpa_logs",
+            "LOG_DIR=/tesseract/output_data/custom_logs",
             img_tag,
             "apply",
             '{"inputs": {}}',
             "--output-path",
             tmpdir,
         ]
-        log_dir = Path(tmpdir) / "mpa_logs"
+        mpa_log_dir = Path(tmpdir) / "custom_logs/mpa_logs"
 
     run_res = subprocess.run(
         run_cmd,
@@ -913,10 +913,10 @@ def test_mpa_file_backend(
     )
     assert run_res.returncode == 0, run_res.stderr
 
-    assert log_dir.exists()
+    assert mpa_log_dir.exists()
 
     # Find the run directory (should be only one)
-    run_dirs = list(log_dir.glob("run_*"))
+    run_dirs = list(mpa_log_dir.glob("run_*"))
     assert len(run_dirs) == 1
     run_dir = run_dirs[0]
 
