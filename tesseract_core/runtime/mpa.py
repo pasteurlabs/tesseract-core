@@ -224,28 +224,6 @@ def log_artifact(local_path: str) -> None:
 
 
 @contextmanager
-def stdio_to_logfile(logfile: Union[str, Path]) -> Generator[None, None, None]:
-    """Context manager for redirecting stdout and stderr to a log file."""
-    from tesseract_core.runtime.core import redirect_fd
-
-    with ExitStack() as stack:
-        f = stack.enter_context(open(logfile, "w"))
-        try:
-            # Check if a file descriptor is available
-            sys.stdout.fileno()
-            sys.stderr.fileno()
-        except UnsupportedOperation:
-            # Don't redirect if stdout/stderr are not file descriptors
-            # (This likely means that streams are already redirected)
-            pass
-        else:
-            # Redirect file descriptors at OS level
-            stack.enter_context(redirect_fd(sys.stdout, f))
-            stack.enter_context(redirect_fd(sys.stderr, f))
-        yield
-
-
-@contextmanager
 def start_run() -> Generator[None, None, None]:
     """Context manager for starting and ending a run."""
     backend = _create_backend()
