@@ -19,24 +19,10 @@ from typing import Any, Optional, Union
 
 import requests
 
-from tesseract_core.runtime.config import get_config
-
+from tesseract_core.runtime.core import make_timestamped_logdir
 
 class BaseBackend(ABC):
     """Base class for MPA backends."""
-
-    def __init__(self) -> None:
-        self.log_dir = os.getenv("LOG_DIR")
-        if not self.log_dir:
-            self.log_dir = Path(get_config().output_path) / "logs"
-        else:
-            self.log_dir = Path(self.log_dir)
-        self.log_dir.mkdir(exist_ok=True)
-
-        # Create a unique run directory
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        self.run_dir = self.log_dir / f"run_{timestamp}"
-        self.run_dir.mkdir(exist_ok=True)
 
     @abstractmethod
     def log_parameter(self, key: str, value: Any) -> None:
@@ -68,7 +54,8 @@ class FileBackend(BaseBackend):
     """MPA backend that writes to local files."""
 
     def __init__(self) -> None:
-        super().__init__()
+        self.run_dir = make_timestamped_logdir()
+
         # Initialize log files
         self.params_file = self.run_dir / "parameters.json"
         self.metrics_file = self.run_dir / "metrics.csv"

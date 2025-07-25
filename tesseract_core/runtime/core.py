@@ -3,9 +3,11 @@
 
 import importlib
 import os
+import sys
 from collections.abc import Callable, Generator
-from contextlib import contextmanager
-from io import TextIOBase
+from contextlib import ExitStack, contextmanager
+from datetime import datetime
+from io import TextIOBase, UnsupportedOperation
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Union
@@ -18,6 +20,28 @@ from .schema_generation import (
     create_apply_schema,
     create_autodiff_schema,
 )
+
+from tesseract_core.runtime.config import get_config
+
+def make_timestamped_logdir() -> Path:
+    """Make a directory named "run_$TIMESTAMP" under the configured logging directory.
+
+    Returns:
+        The path to the created directory
+    """
+    log_dir = os.getenv("LOG_DIR")
+    if not log_dir:
+        log_dir = Path(get_config().output_path) / "logs"
+    else:
+        log_dir = Path(log_dir)
+
+    log_dir.mkdir(exist_ok=True)
+
+    # Create a unique run directory
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    run_dir = log_dir / f"run_{timestamp}"
+    run_dir.mkdir(exist_ok=True)
+    return run_dir
 
 
 @contextmanager
