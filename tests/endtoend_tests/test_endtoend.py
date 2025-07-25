@@ -441,7 +441,6 @@ def test_tesseract_serve_volume_permissions(
         pytest.xfail("Podman does not support serve.")
 
     cli_runner = CliRunner(mix_stderr=False)
-    container_name = None
 
     dest = Path("/tesseract/output_data")
 
@@ -454,27 +453,26 @@ def test_tesseract_serve_volume_permissions(
     else:
         raise ValueError(f"Unknown volume type: {volume_type}")
 
-    run_res = cli_runner.invoke(
-        app,
-        [
-            "serve",
-            "--volume",
-            f"{volume_to_bind}:{dest}:rw",
-            *(("--user", user) if user else []),
-            built_image_name,
-        ],
-        catch_exceptions=False,
-    )
-    assert run_res.exit_code == 0, run_res.stderr
-    assert run_res.stdout
+    def serve_tesseract():
+        run_res = cli_runner.invoke(
+            app,
+            [
+                "serve",
+                "--volume",
+                f"{volume_to_bind}:{dest}:rw",
+                *(("--user", user) if user else []),
+                built_image_name,
+            ],
+            catch_exceptions=False,
+        )
+        assert run_res.exit_code == 0, run_res.stderr
+        assert run_res.stdout
+        serve_meta = json.loads(run_res.stdout)
+        container_name = serve_meta["container_name"]
+        docker_cleanup["containers"].append(container_name)
+        return docker_client.containers.get(container_name)
 
-    serve_meta = json.loads(run_res.stdout)
-    container_name = serve_meta["container_name"]
-
-    docker_cleanup["containers"].append(container_name)
-
-    tesseract0 = docker_client.containers.get(container_name)
-
+    tesseract0 = serve_tesseract()
     # Sanity check: Should always be allowed to read/write files in the default workdir
     exit_code, output = tesseract0.exec_run(["touch", "./test.txt"])
     assert exit_code == 0, output.decode()
@@ -503,6 +501,14 @@ def test_tesseract_serve_volume_permissions(
     exit_code, output = tesseract0.exec_run(["touch", str(bar_file)])
     assert exit_code == 0
 
+    tesseract1 = serve_tesseract()
+    exit_code, output = tesseract1.exec_run(["cat", str(bar_file)])
+    assert exit_code == 0
+    exit_code, output = tesseract1.exec_run(
+        ["bash", "-c", f'echo "hello" > {bar_file}']
+    )
+    assert exit_code == 0
+
     if volume_type == "bind":
         # The file should exist outside the container
         assert (tmp_path / "bar").exists()
@@ -517,43 +523,29 @@ def test_tesseract_serve_interop(built_image_name, docker_client, docker_cleanup
         check=True,
     )
 
-    # Serve first Tesseract
-    run_res = cli_runner.invoke(
-        app,
-        [
-            "serve",
-            "--network",
-            "multi-tesseract-network",
-            built_image_name,
-        ],
-        env={"COLUMNS": "1000"},
-        catch_exceptions=False,
-    )
-    assert run_res.exit_code == 0
+    def serve_tesseract():
+        run_res = cli_runner.invoke(
+            app,
+            [
+                "serve",
+                "--network",
+                "multi-tesseract-network",
+                built_image_name,
+            ],
+            env={"COLUMNS": "1000"},
+            catch_exceptions=False,
+        )
+        assert run_res.exit_code == 0
 
-    serve_meta = json.loads(run_res.stdout)
-    container_name = serve_meta["container_name"]
-    tess_1 = docker_client.containers.get(container_name)
-    docker_cleanup["containers"].append(tess_1)
+        serve_meta = json.loads(run_res.stdout)
+        container_name = serve_meta["container_name"]
+        container = docker_client.containers.get(container_name)
+        docker_cleanup["containers"].append(container)
+        return container
 
-    # Serve second Tesseract
-    run_res = cli_runner.invoke(
-        app,
-        [
-            "serve",
-            built_image_name,
-            "--network",
-            "multi-tesseract-network",
-        ],
-        env={"COLUMNS": "1000"},
-        catch_exceptions=False,
-    )
-    assert run_res.exit_code == 0
-
-    container_meta = json.loads(run_res.stdout)
-    container_name = container_meta["container_name"]
-    tess_2 = docker_client.containers.get(container_name)
-    docker_cleanup["containers"].append(tess_2)
+    # Serve two separate tesseracts on the same network
+    tess_1 = serve_tesseract()
+    tess_2 = serve_tesseract()
 
     returncode, stdout = tess_1.exec_run(
         [
