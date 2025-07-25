@@ -119,7 +119,7 @@ def test_serve_lifecycle(mock_serving, mock_clients):
         host_ip="127.0.0.1",
     )
 
-    mock_serving["teardown_mock"].assert_called_with("proj-id-123")
+    mock_serving["teardown_mock"].assert_called_with("container-id-123")
 
     # check that the same Tesseract obj cannot be used to instantiate two containers
     with pytest.raises(RuntimeError):

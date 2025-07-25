@@ -242,7 +242,7 @@ class Tesseract:
             )
         if self._serve_context is None:
             return self._lastlog
-        return engine.logs(self._serve_context["container_id"])
+        return engine.logs(self._serve_context["container_name"])
 
     def serve(self, port: str | None = None, host_ip: str = "127.0.0.1") -> None:
         """Serve the Tesseract.
