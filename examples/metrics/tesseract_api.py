@@ -3,7 +3,12 @@
 
 from pydantic import BaseModel
 
-from tesseract_core.runtime.experimental import log_artifact, log_metric, log_parameter
+from tesseract_core.runtime.experimental import (
+    log_artifact,
+    log_metric,
+    log_parameter,
+    start_run,
+)
 
 
 class InputSchema(BaseModel):
@@ -16,15 +21,17 @@ class OutputSchema(BaseModel):
 
 def apply(inputs: InputSchema) -> OutputSchema:
     """This demonstrates logging parameters, metrics and artifacts."""
-    log_parameter("example_param", "value")
+    with start_run():
+        log_parameter("example_param", "value")
 
-    for step in range(10):
-        metric_value = step**2
-        log_metric("squared_step", metric_value, step=step)
+        for step in range(10):
+            metric_value = step**2
+            log_metric("squared_step", metric_value, step=step)
 
-    text = "This is an output file we want to log as an artifact."
-    with open("/tmp/artifact.txt", "w") as f:
-        f.write(text)
+        text = "This is an output file we want to log as an artifact."
+        with open("/tmp/artifact.txt", "w") as f:
+            f.write(text)
 
-    log_artifact("/tmp/artifact.txt")
+        log_artifact("/tmp/artifact.txt")
+
     return OutputSchema()

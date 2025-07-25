@@ -6,6 +6,7 @@
 import json
 import os
 import subprocess
+import uuid
 from pathlib import Path
 
 import pytest
@@ -801,9 +802,11 @@ def test_logging(dummy_tesseract_package, tmpdir, docker_cleanup):
         results = json.load(f)
         assert results["out"] == "Received message: Test message"
 
-    logdir = next((Path(tmpdir) / "logs").iterdir())
-    log_file = logdir / "tesseract.log"
+    log_file = next((Path(tmpdir) / "logs/text_logs").iterdir())
     assert log_file.exists()
+    job_id = str(log_file.name).split(".")[0]
+    # Check that the id is a well-formed uuid
+    uuid.UUID(job_id)
 
     with open(log_file) as f:
         log_content = f.read()

@@ -40,10 +40,10 @@ def make_default_logdir() -> Path:
 
 def make_textlogs_logdir() -> Path:
     """Makes and returns the path to the default directory for text logs.
+
     Returns:
         The path to the directory
     """
-
     textlogs_dir = make_default_logdir() / "text_logs"
     textlogs_dir.mkdir(exist_ok=True)
     return textlogs_dir
