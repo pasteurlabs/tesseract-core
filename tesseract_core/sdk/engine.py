@@ -13,7 +13,7 @@ import socket
 import tempfile
 import threading
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from contextlib import closing
 from pathlib import Path
 from shutil import copy, copytree, rmtree
@@ -458,7 +458,7 @@ def build_tesseract(
 
 
 def teardown(
-    container_ids: Sequence[str] | None = None, tear_all: bool = False
+    container_ids: Collection[str] | None = None, tear_all: bool = False
 ) -> None:
     """Teardown Tesseract container(s).
 
