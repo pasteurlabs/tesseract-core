@@ -903,6 +903,7 @@ def test_unit_tesseract_endtoend(
                 str(unit_tesseract_path / unit_tesseract_config.input_path),
             ]
         )
+
     if unit_tesseract_config.output_path:
         io_args.extend(
             [
@@ -910,7 +911,7 @@ def test_unit_tesseract_endtoend(
                 str(unit_tesseract_path / unit_tesseract_config.output_path),
             ]
         )
-            
+
     result = cli_runner.invoke(
         app,
         [

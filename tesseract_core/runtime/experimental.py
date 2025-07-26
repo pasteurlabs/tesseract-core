@@ -1,6 +1,7 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import inspect
 import os
 from collections.abc import Iterator, Sequence
 from pathlib import Path
@@ -202,21 +203,6 @@ class PydanticLazySequenceAnnotation:
         return handler(_core_schema)
 
 
-def require_file(file_path: str | Path, require_writable: bool = False) -> Path:
-    """Require a file to be present at the given path."""
-    file_path = (Path("/tesseract/input_data") / file_path).resolve()
-
-    if IS_BUILDING:
-        return file_path
-
-    if not file_path.is_file():
-        raise FileNotFoundError(f"Required file not found: {file_path}")
-
-    if require_writable and not os.access(file_path, os.W_OK):
-        raise PermissionError(f"Required file is not writable: {file_path}")
-
-    return file_path
-
 def _resolve_input_path(path: Path) -> Path:
     from tesseract_core.runtime.config import get_config
 
@@ -246,6 +232,57 @@ def _strip_output_path(path: Path) -> Path:
 
 InputFileReference = Annotated[Path, AfterValidator(_resolve_input_path)]
 OutputFileReference = Annotated[Path, AfterValidator(_strip_output_path)]
+
+
+def _require_file(file_path: str | Path, require_writable: bool = False) -> Path:
+    """Require a file to be present at the given path."""
+    # TODO: This should look in default input-dir, or specific mounted volume?
+    file_path = (Path("/tesseract/input_data") / file_path).resolve()
+
+    # if IS_BUILDING:
+    #     return file_path
+
+    if not file_path.is_file():
+        raise FileNotFoundError(f"Required file not found: {file_path}")
+
+    if require_writable and not os.access(file_path, os.W_OK):
+        raise PermissionError(f"Required file is not writable: {file_path}")
+
+    return file_path
+
+
+def required_file(require_writable: bool) -> Callable:
+    """Decorator for function to load required files."""
+
+    def required_file_inner(loader_func: Callable):
+        signature = inspect.signature(loader_func)
+        if "filepath" not in signature.parameters:
+            raise ValueError("loader_func mast have `filepath` argument")
+        if signature.parameters["filepath"].default != inspect.Parameter.empty:
+            filepath = signature.parameters["filepath"].default
+        else:
+            filepath = None
+
+        loader_func_name = loader_func.__name__
+
+        def wrapper(filepath: str = filepath, *args: Any, **kwargs: Any):
+            if filepath is None:
+                raise ValueError(
+                    f"No filepath passed to required_file {loader_func_name}.\
+                                 Either assign the `filepath` explicitly or \
+                                 as default argument in the loader function."
+                )
+
+            if not IS_BUILDING:
+                container_filepath = _require_file(filepath, require_writable)
+                data = loader_func(container_filepath, *args, **kwargs)
+                return data
+            else:
+                return None
+
+        return wrapper
+
+    return required_file_inner
 
 
 __all__ = [

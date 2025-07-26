@@ -5,19 +5,35 @@ import json
 
 from pydantic import BaseModel
 
-from tesseract_core.runtime.experimental import IS_BUILDING, require_file
+from tesseract_core.runtime.experimental import required_file
+
+
+# define function to load a specific required file
+# TODO: is it possible/desired to validate correct format of loaded data (at runtime)
+# based on return type of loader function denoted here (using pydantic)?
+@required_file(require_writable=False)
+def load_parameters(filepath: str = "parameters1.json"):
+    """Function to load required files.
+
+    Must have `filepath` as first argument.
+
+    Args:
+        filepath (str): Path to file, relative to mounted directory.
+
+    Returns:
+        data: Loaded data.
+    """
+    with open(filepath, "rb") as f:
+        data = json.load(f)
+    return data
+
+
+# load required file
+data = load_parameters()
 
 #
 # Schemas
 #
-
-param_file = require_file("parameters1.json")
-if not IS_BUILDING:
-    with open(param_file, "rb") as f:
-        data = json.load(f)
-else:
-    # Simulate the data for building purposes
-    data = {"a": 1.0, "b": 100.0}
 
 
 class InputSchema(BaseModel):
@@ -33,8 +49,8 @@ class OutputSchema(BaseModel):
 # Required endpoints
 #
 
-# tested with
-# tesseract run required_input_files --input-dir ./input/ apply '{"inputs": {}}'
+# executed with
+# tesseract run -v "./input:/tesseract/input_data:ro" required_input_files apply '{"inputs": {}}'
 
 
 def apply(inputs: InputSchema) -> OutputSchema:
