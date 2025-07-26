@@ -14,6 +14,7 @@ from typing import (
 )
 
 from pydantic import (
+    AfterValidator,
     GetCoreSchemaHandler,
     GetJsonSchemaHandler,
     TypeAdapter,
@@ -22,6 +23,12 @@ from pydantic.json_schema import JsonSchemaValue
 from pydantic_core import SchemaSerializer, SchemaValidator, core_schema
 
 from tesseract_core.runtime.file_interactions import parent_path
+from tesseract_core.runtime.mpa import (
+    log_artifact,
+    log_metric,
+    log_parameter,
+    start_run,
+)
 from tesseract_core.runtime.schema_types import safe_issubclass
 
 IS_BUILDING = os.environ.get("_TESSERACT_IS_BUILDING", "0") == "1"
@@ -209,3 +216,45 @@ def require_file(file_path: str | Path, require_writable: bool = False) -> Path:
         raise PermissionError(f"Required file is not writable: {file_path}")
 
     return file_path
+
+def _resolve_input_path(path: Path) -> Path:
+    from tesseract_core.runtime.config import get_config
+
+    input_path = get_config().input_path
+    tess_path = (input_path / path).resolve()
+    if str(input_path) not in str(tess_path):
+        raise ValueError(
+            f"Invalid input file reference: {path}. "
+            "File references have to be relative to --input-path."
+        )
+    if not tess_path.exists():
+        raise FileNotFoundError(f"Input path {tess_path} does not exist.")
+    if not tess_path.is_file():
+        raise ValueError(f"Input path {tess_path} is not a file.")
+    return tess_path
+
+
+def _strip_output_path(path: Path) -> Path:
+    from tesseract_core.runtime.config import get_config
+
+    output_path = get_config().output_path
+    if path.is_relative_to(output_path):
+        return path.relative_to(output_path)
+    else:
+        return path
+
+
+InputFileReference = Annotated[Path, AfterValidator(_resolve_input_path)]
+OutputFileReference = Annotated[Path, AfterValidator(_strip_output_path)]
+
+
+__all__ = [
+    "InputFileReference",
+    "LazySequence",
+    "OutputFileReference",
+    "PydanticLazySequenceAnnotation",
+    "log_artifact",
+    "log_metric",
+    "log_parameter",
+    "start_run",
+]

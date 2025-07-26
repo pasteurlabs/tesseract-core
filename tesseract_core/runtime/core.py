@@ -2,12 +2,17 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import importlib
-from collections.abc import Callable
+import os
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
+from io import TextIOBase
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Union
 
 from pydantic import BaseModel
+
+from tesseract_core.runtime.experimental import start_run
 
 from .config import get_config
 from .schema_generation import (
@@ -15,6 +20,27 @@ from .schema_generation import (
     create_apply_schema,
     create_autodiff_schema,
 )
+
+
+@contextmanager
+def redirect_fd(
+    from_fd: TextIOBase, to_fd: TextIOBase
+) -> Generator[TextIOBase, None, None]:
+    """Redirect a file descriptor at OS level.
+
+    Yields:
+        A writable file object connected to the original file descriptor.
+    """
+    orig_fd = os.dup(from_fd.fileno())
+    from_fd.flush()
+    os.dup2(to_fd.fileno(), from_fd.fileno())
+    orig_fd_file = os.fdopen(orig_fd, "w", closefd=True)
+    try:
+        yield orig_fd_file
+    finally:
+        from_fd.flush()
+        os.dup2(orig_fd, from_fd.fileno())
+        orig_fd_file.close()
 
 
 def load_module_from_path(path: Union[Path, str]) -> ModuleType:
@@ -121,7 +147,8 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
     @assemble_docstring(api_module.apply)
     def apply(payload: ApplyInputSchema) -> ApplyOutputSchema:
         """Apply the Tesseract to the input data."""
-        out = api_module.apply(payload.inputs)
+        with start_run():
+            out = api_module.apply(payload.inputs)
         if isinstance(out, api_module.OutputSchema):
             out = out.model_dump()
         return ApplyOutputSchema.model_validate(out)
@@ -139,7 +166,8 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
 
             Differentiates ``jac_outputs`` with respect to ``jac_inputs``, at the point ``inputs``.
             """
-            out = api_module.jacobian(**dict(payload))
+            with start_run():
+                out = api_module.jacobian(**dict(payload))
             return JacobianOutputSchema.model_validate(
                 out,
                 context={
@@ -162,7 +190,8 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
             Evaluates the Jacobian vector product between the Jacobian given by ``jvp_outputs``
             with respect to ``jvp_inputs`` at the point ``inputs`` and the given tangent vector.
             """
-            out = api_module.jacobian_vector_product(**dict(payload))
+            with start_run():
+                out = api_module.jacobian_vector_product(**dict(payload))
             return JVPOutputSchema.model_validate(
                 out, context={"output_keys": payload.jvp_outputs}
             )
@@ -181,7 +210,8 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
             Computes the vector Jacobian product between the Jacobian given by ``vjp_outputs``
             with respect to ``vjp_inputs`` at the point ``inputs`` and the given cotangent vector.
             """
-            out = api_module.vector_jacobian_product(**dict(payload))
+            with start_run():
+                out = api_module.vector_jacobian_product(**dict(payload))
             return VJPOutputSchema.model_validate(
                 out, context={"input_keys": payload.vjp_inputs}
             )

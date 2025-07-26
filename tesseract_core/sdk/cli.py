@@ -170,7 +170,7 @@ def main_callback(
         ),
     ] = None,
 ) -> None:
-    """Tesseract: A toolkit for re-usable, autodiff-native software components."""
+    """Tesseract: A toolkit for universal, autodiff-native software components."""
     verbose_tracebacks = loglevel == LogLevel.debug
     state.print_user_error_tracebacks = verbose_tracebacks
     app.pretty_exceptions_show_locals = verbose_tracebacks
@@ -249,9 +249,9 @@ def build_image(
         typer.Option(
             "--tag",
             "-t",
-            help="Tag for the resulting Tesseract. This can help you distinguish between "
-            "Tesseracts with the same base name, like `cfd:v1` and cfd:v2`, "
-            "both named `cfd` but tagged as `v1` and `v2` respectively.",
+            help="Tag for the resulting Tesseract. By default, this will "
+            "be inferred from the version specified in tesseract_config.yaml, "
+            "and the Tesseract will also be tagged as `latest`.",
         ),
     ] = None,
     build_dir: Annotated[
@@ -528,6 +528,17 @@ def serve(
             ),
         ),
     ] = None,
+    input_path: Annotated[
+        str | None,
+        typer.Option(
+            "--input-path",
+            help=(
+                "Input path to read input files from, such as local directory or S3 URI "
+                "(may be anything supported by fsspec)."
+            ),
+            hidden=True,
+        ),
+    ] = None,
 ) -> None:
     """Serve one or more Tesseract images.
 
@@ -588,6 +599,7 @@ def serve(
             no_compose,
             service_names_list,
             user,
+            input_path=input_path,
         )
     except RuntimeError as ex:
         raise UserError(
@@ -873,6 +885,16 @@ def run_container(
             show_default=False,
         ),
     ] = None,
+    network: Annotated[
+        str | None,
+        typer.Option(
+            "--network",
+            help="Network to use for the Tesseract container, analogous to Docker's --network option. "
+            "For example, 'host' uses the host system's network. Alternatively, you can create a custom "
+            "network with `docker network create <network-name>` and use it here.",
+            show_default=False,
+        ),
+    ] = None,
     user: Annotated[
         str | None,
         typer.Option(
@@ -943,6 +965,7 @@ def run_container(
             volumes=volume,
             gpus=gpus,
             environment=environment,
+            network=network,
             user=user,
         )
 

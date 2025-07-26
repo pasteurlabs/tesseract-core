@@ -476,7 +476,7 @@ def test_tesseract_serve_ports(built_image_name, port, docker_cleanup, free_port
 @pytest.mark.parametrize("no_compose", [True, False])
 @pytest.mark.parametrize("volume_type", ["bind", "named"])
 @pytest.mark.parametrize("user", [None, "root", "1000:1000"])
-def test_tesseract_serve_docker_volume(
+def test_tesseract_serve_volume_permissions(
     built_image_name,
     docker_client,
     docker_volume,
@@ -532,6 +532,10 @@ def test_tesseract_serve_docker_volume(
 
     tesseract0_id = project_meta["containers"][0]["name"]
     tesseract0 = docker_client.containers.get(tesseract0_id)
+
+    # Sanity check: Should always be allowed to read/write files in the default workdir
+    exit_code, output = tesseract0.exec_run(["touch", "./test.txt"])
+    assert exit_code == 0, output.decode()
 
     if volume_type == "bind":
         # Create file outside the containers and check it from inside the container
@@ -697,7 +701,6 @@ def test_tesseract_cli_options_parsing(built_image_name, tmpdir):
 
 
 def test_tarball_install(dummy_tesseract_package, docker_cleanup):
-    import subprocess
     from textwrap import dedent
 
     tesseract_api = dedent(
@@ -736,3 +739,281 @@ def test_tarball_install(dummy_tesseract_package, docker_cleanup):
 
     img_tag = json.loads(result.stdout)[0]
     docker_cleanup["images"].append(img_tag)
+
+
+def test_logging(dummy_tesseract_package, tmpdir, docker_cleanup):
+    from textwrap import dedent
+
+    tesseract_api = dedent(
+        """
+    from pydantic import BaseModel
+
+    print("Hello from tesseract_api.py!")
+
+    class InputSchema(BaseModel):
+        message: str = "Hello, Tesseractor!"
+
+    class OutputSchema(BaseModel):
+        out: str
+
+    def apply(inputs: InputSchema) -> OutputSchema:
+        print("Hello from apply!")
+        return OutputSchema(out=f"Received message: {inputs.message}")
+    """
+    )
+
+    with open(dummy_tesseract_package / "tesseract_api.py", "w") as f:
+        f.write(tesseract_api)
+
+    cli_runner = CliRunner(mix_stderr=False)
+    result = cli_runner.invoke(
+        app,
+        ["--loglevel", "debug", "build", str(dummy_tesseract_package)],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0, result.stderr
+
+    img_tag = json.loads(result.stdout)[0]
+    docker_cleanup["images"].append(img_tag)
+
+    # Run the Tesseract and capture logs
+    # Use subprocess because pytest messes with stdout/stderr
+    run_res = subprocess.run(
+        [
+            "tesseract",
+            "run",
+            img_tag,
+            "apply",
+            '{"inputs": {"message": "Test message"}}',
+            "--output-path",
+            tmpdir,
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert run_res.returncode == 0, run_res.stderr
+    assert "" == run_res.stdout.strip()
+    assert "Hello from tesseract_api.py!" == run_res.stderr.strip()
+
+    out_file = Path(tmpdir) / "results.json"
+    assert out_file.exists()
+    with open(out_file) as f:
+        results = json.load(f)
+        assert results["out"] == "Received message: Test message"
+
+    logdir = next((Path(tmpdir) / "logs").iterdir())
+    log_file = logdir / "tesseract.log"
+    assert log_file.exists()
+
+    with open(log_file) as f:
+        log_content = f.read()
+    assert "Hello from apply!" == log_content.strip()
+
+
+def _prepare_mpa_test_image(dummy_tesseract_package, docker_cleanup):
+    from textwrap import dedent
+
+    tesseract_api = dedent(
+        """
+    from pydantic import BaseModel
+    from tesseract_core.runtime.experimental import log_artifact, log_metric, log_parameter
+
+    class InputSchema(BaseModel):
+        pass
+
+    class OutputSchema(BaseModel):
+        pass
+
+    def apply(inputs: InputSchema) -> OutputSchema:
+        steps = 5
+        param_value = "test_param"
+        # Log parameters
+        log_parameter("test_parameter", param_value)
+        log_parameter("steps_config", steps)
+
+        # Log metrics over multiple steps
+        for step in range(steps):
+            log_metric("squared_step", step ** 2, step=step)
+
+        # Create and log an artifact
+        artifact_content = "Test artifact content"
+
+        artifact_path = "/tmp/test_artifact.txt"
+        with open(artifact_path, "w") as f:
+            f.write(artifact_content)
+
+        log_artifact(artifact_path)
+
+        return OutputSchema()
+        """
+    )
+
+    # Write the API file
+    with open(dummy_tesseract_package / "tesseract_api.py", "w") as f:
+        f.write(tesseract_api)
+    # Add mlflow dependency
+    with open(dummy_tesseract_package / "tesseract_requirements.txt", "w") as f:
+        f.write("mlflow\n")
+
+    cli_runner = CliRunner(mix_stderr=False)
+
+    # Build the Tesseract
+    result = cli_runner.invoke(
+        app,
+        ["--loglevel", "debug", "build", str(dummy_tesseract_package)],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0, result.stderr
+
+    img_tag = json.loads(result.stdout)[0]
+    docker_cleanup["images"].append(img_tag)
+
+    return img_tag
+
+
+@pytest.mark.parametrize("default_log_dir", ["default", "custom"])
+def test_mpa_file_backend(
+    dummy_tesseract_package, tmpdir, docker_cleanup, default_log_dir
+):
+    """Test the MPA (Metrics, Parameters, and Artifacts) submodule with file backend."""
+    import csv
+
+    img_tag = _prepare_mpa_test_image(dummy_tesseract_package, docker_cleanup)
+
+    if default_log_dir == "default":
+        run_cmd = [
+            "tesseract",
+            "run",
+            img_tag,
+            "apply",
+            '{"inputs": {}}',
+            "--output-path",
+            tmpdir,
+        ]
+        log_dir = Path(tmpdir) / "logs"
+    elif default_log_dir == "custom":
+        run_cmd = [
+            "tesseract",
+            "run",
+            "--env",
+            "LOG_DIR=/tesseract/output_data/mpa_logs",
+            img_tag,
+            "apply",
+            '{"inputs": {}}',
+            "--output-path",
+            tmpdir,
+        ]
+        log_dir = Path(tmpdir) / "mpa_logs"
+
+    run_res = subprocess.run(
+        run_cmd,
+        capture_output=True,
+        text=True,
+    )
+    assert run_res.returncode == 0, run_res.stderr
+
+    assert log_dir.exists()
+
+    # Find the run directory (should be only one)
+    run_dirs = list(log_dir.glob("run_*"))
+    assert len(run_dirs) == 1
+    run_dir = run_dirs[0]
+
+    # Verify parameters file
+    params_file = run_dir / "parameters.json"
+    assert params_file.exists()
+    with open(params_file) as f:
+        params = json.load(f)
+        assert params["test_parameter"] == "test_param"
+        assert params["steps_config"] == 5
+
+    # Verify metrics file
+    metrics_file = run_dir / "metrics.csv"
+    assert metrics_file.exists()
+
+    with open(metrics_file) as f:
+        reader = csv.DictReader(f)
+        metrics = list(reader)
+
+        # Should have 5 metrics: 5 squared_step (0, 1, 4, 9, 16)
+        assert len(metrics) == 5
+
+        # Check squared_step values
+        squared_metrics = [m for m in metrics if m["key"] == "squared_step"]
+        assert len(squared_metrics) == 5
+        for i, metric in enumerate(squared_metrics):
+            assert float(metric["value"]) == i**2
+            assert int(metric["step"]) == i
+
+    # Verify artifacts directory and artifact file
+    artifacts_dir = run_dir / "artifacts"
+    assert artifacts_dir.exists()
+
+    artifact_file = artifacts_dir / "test_artifact.txt"
+    assert artifact_file.exists()
+
+    with open(artifact_file) as f:
+        artifact_data = f.read()
+        assert artifact_data == "Test artifact content"
+
+
+def test_mpa_mlflow_backend(dummy_tesseract_package, tmpdir, docker_cleanup):
+    """Test the MPA (Metrics, Parameters, and Artifacts) submodule with MLflow backend."""
+    img_tag = _prepare_mpa_test_image(dummy_tesseract_package, docker_cleanup)
+
+    # Point MLflow to a local directory
+    run_cmd = [
+        "tesseract",
+        "run",
+        "--env",
+        "MLFLOW_TRACKING_URI=/tesseract/output_data/mlruns",
+        img_tag,
+        "apply",
+        '{"inputs": {}}',
+        "--output-path",
+        tmpdir,
+    ]
+
+    run_res = subprocess.run(
+        run_cmd,
+        capture_output=True,
+        text=True,
+    )
+    assert run_res.returncode == 0, run_res.stderr
+
+    # Check for mlruns directory structure
+    mlruns_dir = Path(tmpdir) / "mlruns"
+    assert mlruns_dir.exists()
+    assert (mlruns_dir / "0").exists()  # Default experiment ID is 0
+
+    # Find run directories
+    run_dirs = [d for d in (mlruns_dir / "0").iterdir() if d.is_dir()]
+    assert len(run_dirs) == 1  # Should be only one run
+    run_dir = run_dirs[0]
+    assert run_dir.is_dir()
+    assert (run_dir / "artifacts").exists()
+    assert (run_dir / "metrics").exists()
+    assert (run_dir / "params").exists()
+
+    # Verify parameters file
+    param_file = run_dir / "params" / "test_parameter"
+    assert param_file.exists()
+    with open(param_file) as f:
+        param_value = f.read().strip()
+        assert param_value == "test_param"
+
+    # Verify metrics file
+    metrics_file = run_dir / "metrics" / "squared_step"
+    assert metrics_file.exists()
+    with open(metrics_file) as f:
+        metrics = f.readlines()
+        assert len(metrics) == 5
+        for i, metric in enumerate(metrics):
+            parts = metric.split()
+            assert len(parts) == 3
+            assert float(parts[1]) == i**2  # Check squared_step values
+            assert int(parts[2]) == i
+
+    # Verify artifacts directory and artifact file
+    artifacts_dir = run_dir / "artifacts"
+    assert artifacts_dir.exists()

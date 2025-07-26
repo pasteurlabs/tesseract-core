@@ -13,8 +13,11 @@ class RuntimeConfig(BaseModel):
 
     api_path: FilePath = Path("tesseract_api.py")
     name: str = "Tesseract"
-    version: str = "0+unknown"
+    description: str = ""
+    version: str = "unknown"
     debug: bool = False
+    input_path: str = "."
+    output_path: str = "."
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 

@@ -1,6 +1,6 @@
 # Tesseract
 
-Autodiff-native, self-documenting software components for [Simulation Intelligence](#what-is-si). 📦
+Universal, autodiff-native software components for [Simulation Intelligence](#what-is-si). 📦
 
 ```{seealso}
 Already convinced? 👉 See how to [Get started](content/introduction/get-started.md) instead.

@@ -6,7 +6,7 @@
 
 ### Tesseract Core
 
-Autodiff-native, self-documenting software components for Simulation Intelligence. :package:
+Universal, autodiff-native software components for Simulation Intelligence. :package:
 
 [Read the docs](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/) |
 [Report an issue](https://github.com/pasteurlabs/tesseract-core/issues) |
@@ -14,6 +14,8 @@ Autodiff-native, self-documenting software components for Simulation Intelligenc
 [Contribute](https://github.com/pasteurlabs/tesseract-core/blob/main/CONTRIBUTING.md)
 
 ---
+
+[![DOI](https://joss.theoj.org/papers/10.21105/joss.08385/status.svg)](https://doi.org/10.21105/joss.08385)
 
 **Tesseract Core** bundles:
 
@@ -41,13 +43,13 @@ Tesseracts provide built-in support for [differentiable programming](https://doc
 
    ```bash
    $ git clone https://github.com/pasteurlabs/tesseract-core
-   $ tesseract build tesseract-core/examples/vectoradd --tag 0.1.0
+   $ tesseract build tesseract-core/examples/vectoradd
    ```
 
 3. Display its API documentation:
 
    ```bash
-   $ tesseract apidoc vectoradd:0.1.0
+   $ tesseract apidoc vectoradd
    ```
 
 <p align="center">
@@ -57,7 +59,7 @@ Tesseracts provide built-in support for [differentiable programming](https://doc
 4. Run the Tesseract:
 
    ```bash
-   $ tesseract run vectoradd:0.1.0 apply '{"inputs": {"a": [1], "b": [2]}}'
+   $ tesseract run vectoradd apply '{"inputs": {"a": [1], "b": [2]}}'
    {"result":{"object_type":"array","shape":[1],"dtype":"float64","data":{"buffer":[3.0],"encoding":"json"}}}⏎
    ```
 

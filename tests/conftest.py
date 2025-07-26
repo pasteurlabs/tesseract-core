@@ -91,6 +91,16 @@ def pytest_collection_modifyitems(config, items):
                 item.add_marker(pytest.mark.skip(reason=skip_reason))
 
 
+@pytest.fixture(scope="session", autouse=True)
+def set_tesseract_output_dir(tmp_path_factory):
+    """Set the Tesseract output directory for the session."""
+    from tesseract_core.runtime.config import update_config
+
+    output_path = tmp_path_factory.mktemp("output_path")
+    os.environ["TESSERACT_OUTPUT_PATH"] = str(output_path)
+    update_config(output_path=str(output_path))
+
+
 @pytest.fixture(scope="session")
 def unit_tesseract_names():
     """Return all unit tesseract names."""
@@ -335,6 +345,11 @@ def mocked_docker(monkeypatch):
             return {"StatusCode": 0, "Error": None}
 
         @property
+        def name(self):
+            """Mock name property for Container."""
+            return json.dumps(self.return_args)
+
+        @property
         def attrs(self):
             """Mock attrs method for Container."""
             return {"Config": {"Env": ["TESSERACT_NAME=vectoradd"]}}
@@ -362,6 +377,26 @@ def mocked_docker(monkeypatch):
         def info() -> tuple:
             """Mock info method for DockerClient."""
             return "", ""
+
+        class volumes:
+            """Mock of CLIDockerClient.volumes."""
+
+            @staticmethod
+            def create(name: str) -> Any:
+                """Mock of CLIDockerClient.volumes.create."""
+                return {"Name": name}
+
+            @staticmethod
+            def get(name: str) -> Any:
+                """Mock of CLIDockerClient.volumes.get."""
+                if "/" in name:
+                    raise NotFound(f"Volume {name} not found")
+                return {"Name": name}
+
+            @staticmethod
+            def list() -> list[Any]:
+                """Mock of CLIDockerClient.volumes.list."""
+                return [{"Name": "test_volume"}]
 
         class images:
             """Mock of CLIDockerClient.images."""
@@ -450,5 +485,13 @@ def mocked_docker(monkeypatch):
     monkeypatch.setattr(
         tesseract_core.sdk.docker_client, "CLIDockerClient", MockedDocker
     )
+
+    def hacked_get(url, *args, **kwargs):
+        if url.endswith("/health"):
+            # Simulate a successful health check
+            return type("Response", (), {"status_code": 200, "json": lambda: {}})()
+        raise NotImplementedError(f"Mocked get request to {url} not implemented")
+
+    engine.requests.get = hacked_get
 
     yield mock_instance

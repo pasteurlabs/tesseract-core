@@ -38,6 +38,7 @@ from .docker_client import (
     Container,
     ContainerError,
     Image,
+    NotFound,
     build_docker_image,
     is_podman,
 )
@@ -407,7 +408,12 @@ def build_tesseract(
 
     image_name = config.name
     if image_tag:
-        image_name += f":{image_tag}"
+        tags = [f"{image_name}:{image_tag}"]
+    else:
+        tags = [
+            f"{image_name}:{config.version}",
+            f"{image_name}:latest",
+        ]
 
     source_basename = Path(src_dir).name
 
@@ -431,7 +437,7 @@ def build_tesseract(
     try:
         image = build_docker_image(
             path=context_dir.as_posix(),
-            tag=image_name,
+            tags=tags,
             dockerfile=context_dir / "Dockerfile",
             inject_ssh=inject_ssh,
             print_and_exit=generate_only,
@@ -552,6 +558,7 @@ def serve(
     no_compose: bool = False,
     service_names: list[str] | None = None,
     user: str | None = None,
+    input_path: str | Path | None = None,
 ) -> str:
     """Serve one or more Tesseract images.
 
@@ -571,7 +578,8 @@ def serve(
         no_compose: if True, do not use Docker Compose to serve the Tesseracts.
         service_names: list of service names under which to expose each Tesseract container on the shared network.
         user: user to run the Tesseracts as, e.g. '1000' or '1000:1000' (uid:gid).
-            Defaults to the current user.
+              Defaults to the current user.
+        input_path: Input path to read input files from, such as local directory or S3 URI.
 
     Returns:
         A string representing the Tesseract project ID.
@@ -602,6 +610,16 @@ def serve(
     if user is None:
         # Use the current user if not specified
         user = f"{os.getuid()}:{os.getgid()}" if os.name != "nt" else None
+
+    if input_path:
+        if environment is None:
+            environment = {}
+        environment["TESSERACT_INPUT_PATH"] = "/tesseract/input_data"
+        if volumes is None:
+            volumes = []
+        if "://" not in input_path:
+            input_path = Path(input_path).resolve()
+            volumes.append(f"{input_path}:/tesseract/input_data:ro")
 
     if no_compose:
         if len(images) > 1:
@@ -709,9 +727,12 @@ def serve(
         compose_file.flush()
 
         project_name = f"tesseract-{_id_generator()}"
-        if not docker_client.compose.up(compose_file.name, project_name):
-            raise RuntimeError("Cannot serve Tesseracts")
-        return project_name
+        try:
+            docker_client.compose.up(compose_file.name, project_name)
+        except APIError as exc:
+            raise RuntimeError("Cannot serve Tesseracts") from exc
+
+    return project_name
 
 
 def _create_docker_compose_template(
@@ -790,27 +811,23 @@ def _create_docker_compose_template(
 
         services.append(service)
 
-    docker_volumes = {}  # Dictionary of volume names mapped to whether or not they already exist
-    if volumes:
-        for volume in volumes:
-            source = volume.split(":")[0]
-            # Check if source exists to determine if specified volume is a docker volume
-            if not Path(source).exists():
-                # Check if volume exists
-                if not docker_client.volumes.get(source):
-                    if "/" not in source:
-                        docker_volumes[source] = False
-                    else:
-                        raise ValueError(
-                            f"Volume/Path {source} does not already exist, "
-                            "and new volume cannot be created due to '/' in name."
-                        )
-                else:
-                    # Docker volume is external
-                    docker_volumes[source] = True
+    external_volume_map = {}
+    for source in parsed_volumes:
+        # Check if the volume is a local bind-mount
+        if _is_local_volume(source):
+            continue
+
+        # Check if the volume is an existing Docker volume
+        try:
+            docker_client.volumes.get(source)
+        except NotFound:
+            external_volume_map[source] = False
+        else:
+            # If the volume exists, it is an external Docker volume
+            external_volume_map[source] = True
 
     template = ENV.get_template("docker-compose.yml")
-    return template.render(services=services, docker_volumes=docker_volumes)
+    return template.render(services=services, named_volumes=external_volume_map)
 
 
 def _id_generator(
@@ -818,6 +835,11 @@ def _id_generator(
 ) -> str:
     """Generate a random ID."""
     return "".join(random.choice(chars) for _ in range(size))
+
+
+def _is_local_volume(volume: str) -> bool:
+    """Check if a volume is a local path."""
+    return "/" in volume or "." in volume
 
 
 def _parse_volumes(options: list[str]) -> dict[str, dict[str, str]]:
@@ -840,8 +862,12 @@ def _parse_volumes(options: list[str]) -> dict[str, dict[str, str]]:
                 "(must be `/path/to/source:/path/totarget:(ro|rw)`)",
             )
 
-        is_local_mount = "/" in source or Path(source).exists()
-        if is_local_mount:
+        if _is_local_volume(source):
+            if not Path(source).exists():
+                raise RuntimeError(
+                    f"Source path {source} does not exist, "
+                    "please provide a valid local path."
+                )
             # Docker doesn't like paths like ".", so we convert to absolute path here
             source = str(Path(source).resolve())
         return source, {"bind": target, "mode": mode}
@@ -874,6 +900,7 @@ def run_tesseract(
     gpus: list[int | str] | None = None,
     ports: dict[str, str] | None = None,
     environment: dict[str, str] | None = None,
+    network: str | None = None,
     user: str | None = None,
 ) -> tuple[str, str]:
     """Start a Tesseract and execute a given command.
@@ -888,19 +915,26 @@ def run_tesseract(
             value is the container port.
         environment: list of environment variables to set in the container,
             in Docker format: key=value.
+        network: name of the Docker network to connect the container to.
         user: user to run the Tesseract as, e.g. '1000' or '1000:1000' (uid:gid).
             Defaults to the current user.
+        input_path: Input path to read input files from, such as local directory or S3 URI.
+            The input path is mounted read-only into the Tesseract at `/tesseract/input_data`.
 
     Returns:
         Tuple with the stdout and stderr of the Tesseract.
     """
     # Args that require rw access to the mounted volume
     output_args = {"-o", "--output-path"}
+    input_args = {"-i", "--input-path"}
 
     cmd = [command]
     current_cmd = None
 
-    if volumes is None:
+    if environment is None:
+        environment = {}
+
+    if not volumes:
         parsed_volumes = {}
     else:
         parsed_volumes = _parse_volumes(volumes)
@@ -935,6 +969,21 @@ def run_tesseract(
 
             # Bind-mount directory
             parsed_volumes[str(local_path)] = {"bind": path_in_container, "mode": "rw"}
+            environment["TESSERACT_OUTPUT_PATH"] = path_in_container
+
+        if current_cmd in input_args and "://" not in arg:
+            local_path = Path(arg).resolve()
+            if not local_path.is_dir():
+                raise RuntimeError(
+                    f"Path {local_path} provided as input is not a directory"
+                )
+
+            path_in_container = "/tesseract/input_data"
+            arg = path_in_container
+
+            # Bind-mount directory
+            parsed_volumes[str(local_path)] = {"bind": path_in_container, "mode": "ro"}
+            environment["TESSERACT_INPUT_PATH"] = path_in_container
 
         # Mount local input files marked by @ into Docker container as a volume
         elif arg.startswith("@") and "://" not in arg:
@@ -944,12 +993,15 @@ def run_tesseract(
                 raise RuntimeError(f"Path {local_path} provided as input is not a file")
 
             path_in_container = os.path.join(
-                "/tesseract/input_data", f"payload{local_path.suffix}"
+                "/tesseract", f"payload{local_path.suffix}"
             )
             arg = f"@{path_in_container}"
 
             # Bind-mount file
-            parsed_volumes[str(local_path)] = {"bind": path_in_container, "mode": "ro"}
+            parsed_volumes[str(local_path)] = {
+                "bind": path_in_container,
+                "mode": "ro",
+            }
 
         current_cmd = None
         cmd.append(arg)
@@ -965,6 +1017,7 @@ def run_tesseract(
         volumes=parsed_volumes,
         device_requests=gpus,
         environment=environment,
+        network=network,
         ports=ports,
         detach=False,
         remove=True,
