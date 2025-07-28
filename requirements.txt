@@ -34,7 +34,7 @@ pyyaml==6.0.2
     # via tesseract-core
 requests==2.32.4
     # via tesseract-core
-rich==14.0.0
+rich==14.1.0
     # via
     #   tesseract-core
     #   typer
@@ -46,7 +46,6 @@ typing-extensions==4.14.1
     # via
     #   pydantic
     #   pydantic-core
-    #   rich
     #   typer
     #   typing-inspection
 typing-inspection==0.4.1
