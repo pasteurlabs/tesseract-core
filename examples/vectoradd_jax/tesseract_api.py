@@ -48,7 +48,7 @@ class InputSchema(BaseModel):
 
 
 class Result_and_Norm(BaseModel):
-    result: Differentiable[Array[(None,), Float32]] = Field(
+    result: Annotated[np.ndarray, Differentiable[Array[(None,), Float32]]] = Field(
         description="Vector s_a·a + s_b·b"
     )
     normed_result: Differentiable[Array[(None,), Float32]] = Field(
