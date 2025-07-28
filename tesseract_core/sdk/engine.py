@@ -569,7 +569,7 @@ def serve(
         images: a list of Tesseract image IDs as strings.
         host_ip: IP address to bind the Tesseracts to.
         ports: port or port range to serve each Tesseract on.
-        network: network to which the Tesseract will be attached to.
+        network: name of the network the Tesseract will be attached to.
         volumes: list of paths to mount in the Tesseract container.
         environment: dictionary of environment variables to pass to the Tesseract.
         gpus: IDs of host Nvidia GPUs to make available to the Tesseracts.
