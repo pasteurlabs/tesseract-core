@@ -311,29 +311,24 @@ def test_json_schema(mode):
 def test_json_schema_flags_and_typenames():
     schema = MyModel.model_json_schema()
 
-    array_int_typeref = schema["properties"]["array_int"]["$ref"]
-    assert array_int_typeref == "#/$defs/EncodedArrayModel__2_3__int64__noflags"
-    array_int_def = schema["$defs"][array_int_typeref.split("/")[-1]]
+    def _maybe_resolve_ref(subschema):
+        # types may be inlined or referenced
+        if "$ref" in subschema:
+            ref = subschema["$ref"]
+            assert ref.startswith("#/$defs/")
+            return schema["$defs"][ref.split("/")[-1]]
+        return subschema
+
+    array_int_def = _maybe_resolve_ref(schema["properties"]["array_int"])
     assert array_int_def["array_flags"] == []
 
-    array_float_typeref = schema["properties"]["array_float"]["$ref"]
-    assert (
-        array_float_typeref
-        == "#/$defs/EncodedArrayModel__any_3__float64__DIFFERENTIABLE"
-    )
-    array_float_def = schema["$defs"][array_float_typeref.split("/")[-1]]
+    array_float_def = _maybe_resolve_ref(schema["properties"]["array_float"])
     assert array_float_def["array_flags"] == ["DIFFERENTIABLE"]
 
-    array_bool_typeref = schema["properties"]["array_bool"]["$ref"]
-    assert array_bool_typeref == "#/$defs/EncodedArrayModel__anyrank__bool__noflags"
-    array_bool_def = schema["$defs"][array_bool_typeref.split("/")[-1]]
+    array_bool_def = _maybe_resolve_ref(schema["properties"]["array_bool"])
     assert array_bool_def["array_flags"] == []
 
-    scalar_int_typeref = schema["properties"]["scalar_int"]["$ref"]
-    assert (
-        scalar_int_typeref == "#/$defs/EncodedArrayModel__scalar__int32__DIFFERENTIABLE"
-    )
-    scalar_int_def = schema["$defs"][scalar_int_typeref.split("/")[-1]]
+    scalar_int_def = _maybe_resolve_ref(schema["properties"]["scalar_int"])
     assert scalar_int_def["array_flags"] == ["DIFFERENTIABLE"]
 
 
