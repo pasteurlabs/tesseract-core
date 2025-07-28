@@ -175,8 +175,7 @@ jobs:
           fi
           # get JSON array of directories in EXAMPLES_DIR
           subjobs=$(
-            find "${{ env.EXAMPLES_DIR }}" -type d -maxdepth 1 -mindepth 1 -exec basename {} \; \
-            | grep -v '^multi-tesseract-' \
+            find "${{ env.EXAMPLES_DIR }}" -type d -maxdepth 1 -mindepth 1 -exec test -f {}/tesseract_api.py \; -exec basename {} \; \
             | jq -R -s -c 'split("\n")[:-1]'
           )
           # add "base" to subjobs
