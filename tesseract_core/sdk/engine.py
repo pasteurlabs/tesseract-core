@@ -550,6 +550,7 @@ def serve(
     images: list[str],
     host_ip: str = "127.0.0.1",
     ports: list[str] | None = None,
+    network: str | None = None,
     volumes: list[str] | None = None,
     environment: dict[str, str] | None = None,
     gpus: list[str] | None = None,
@@ -568,6 +569,7 @@ def serve(
         images: a list of Tesseract image IDs as strings.
         host_ip: IP address to bind the Tesseracts to.
         ports: port or port range to serve each Tesseract on.
+        network: name of the network the Tesseract will be attached to.
         volumes: list of paths to mount in the Tesseract container.
         environment: dictionary of environment variables to pass to the Tesseract.
         gpus: IDs of host Nvidia GPUs to make available to the Tesseracts.
@@ -674,6 +676,7 @@ def serve(
             command=["serve", *args],
             device_requests=gpus,
             ports=port_mappings,
+            network=network,
             detach=True,
             volumes=parsed_volumes,
             user=user,
