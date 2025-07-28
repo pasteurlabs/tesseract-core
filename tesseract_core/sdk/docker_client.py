@@ -11,22 +11,14 @@ import shlex
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
 
 from tesseract_core.sdk.config import get_config
 
 logger = logging.getLogger("tesseract")
-
+config = get_config()
 
 # store a reference to list, which is shadowed by some function names below
 list_ = list
-
-
-def _get_executable(program: Literal["docker"]) -> tuple[str, ...]:
-    config = get_config()
-    if program == "docker":
-        return config.docker_executable
-    raise ValueError(f"Unknown program: {program}")
 
 
 def _is_valid_docker_tag(tag: str) -> bool:
@@ -39,7 +31,7 @@ def _is_valid_docker_tag(tag: str) -> bool:
 
 def is_podman() -> bool:
     """Check if the current environment is using Podman instead of Docker."""
-    docker = _get_executable("docker")
+    docker = config.docker_executable
     try:
         result = subprocess.run(
             [*docker, "version"],
@@ -108,7 +100,7 @@ class Images:
         if not image_id_or_name:
             raise ValueError("Image name cannot be empty.")
 
-        docker = _get_executable("docker")
+        docker = config.docker_executable
         try:
             result = subprocess.run(
                 [*docker, "inspect", image_id_or_name, "--type", "image"],
@@ -148,7 +140,7 @@ class Images:
         Params:
             image: The image name or id to remove.
         """
-        docker = _get_executable("docker")
+        docker = config.docker_executable
         try:
             res = subprocess.run(
                 [*docker, "rmi", image, "--force"],
@@ -174,8 +166,8 @@ class Images:
         Returns:
             The buildx command as a list of strings.
         """
-        docker = _get_executable("docker")
-        extra_args = get_config().docker_build_args
+        docker = config.docker_executable
+        extra_args = config.docker_build_args
 
         if ssh is not None:
             extra_args = ("--ssh", ssh, *extra_args)
@@ -255,7 +247,7 @@ class Images:
         Returns:
             List of (non-dangling) Image objects.
         """
-        docker = _get_executable("docker")
+        docker = config.docker_executable
         images = []
         try:
             image_ids = subprocess.run(
@@ -360,7 +352,7 @@ class Container:
 
         Return exit code and stdout.
         """
-        docker = _get_executable("docker")
+        docker = config.docker_executable
         result = subprocess.run(
             [*docker, "exec", self.id, *command],
             check=False,
@@ -387,7 +379,7 @@ class Container:
             stdout: If True, return stdout.
             stderr: If True, return stderr.
         """
-        docker = _get_executable("docker")
+        docker = config.docker_executable
 
         if stdout and stderr:
             # use subprocess.STDOUT to combine stdout and stderr into one stream
@@ -424,7 +416,7 @@ class Container:
         Returns:
             A dict with the exit code of the container.
         """
-        docker = _get_executable("docker")
+        docker = config.docker_executable
 
         try:
             result = subprocess.run(
@@ -449,7 +441,7 @@ class Container:
         Returns:
             The output of the remove command.
         """
-        docker = _get_executable("docker")
+        docker = config.docker_executable
         try:
             result = subprocess.run(
                 [
@@ -500,7 +492,7 @@ class Containers:
         Returns:
             Container object.
         """
-        docker = _get_executable("docker")
+        docker = config.docker_executable
 
         try:
             result = subprocess.run(
@@ -565,8 +557,7 @@ class Containers:
         Returns:
             Container object if detach is True, otherwise returns list of stdout and stderr.
         """
-        config = get_config()
-        docker = _get_executable("docker")
+        docker = config.docker_executable
 
         if isinstance(command, str):
             command = [command]
@@ -673,7 +664,7 @@ class Containers:
         Returns:
             List of Container objects.
         """
-        docker = _get_executable("docker")
+        docker = config.docker_executable
         containers = []
 
         cmd = [*docker, "ps", "-q"]
@@ -733,7 +724,7 @@ class Volume:
         Params:
             force: If True, force the removal of the volume.
         """
-        docker = _get_executable("docker")
+        docker = config.docker_executable
         try:
             _ = subprocess.run(
                 [*docker, "volume", "rm", "--force" if force else "", self.name],
@@ -758,7 +749,7 @@ class Volumes:
         Returns:
             The created volume object.
         """
-        docker = _get_executable("docker")
+        docker = config.docker_executable
         try:
             _ = subprocess.run(
                 [*docker, "volume", "create", name],
@@ -780,7 +771,7 @@ class Volumes:
         Returns:
             The volume object.
         """
-        docker = _get_executable("docker")
+        docker = config.docker_executable
         try:
             result = subprocess.run(
                 [*docker, "volume", "inspect", name],
@@ -802,7 +793,7 @@ class Volumes:
         Returns:
             List of volume names.
         """
-        docker = _get_executable("docker")
+        docker = config.docker_executable
         try:
             result = subprocess.run(
                 [*docker, "volume", "ls", "-q"],
@@ -890,7 +881,7 @@ class CLIDockerClient:
     @staticmethod
     def info() -> tuple:
         """Wrapper around docker info call."""
-        docker = _get_executable("docker")
+        docker = config.docker_executable
         try:
             result = subprocess.run(
                 [*docker, "info"],
@@ -915,7 +906,7 @@ def get_docker_metadata(
     Returns:
         A dict mapping asset ids to their metadata.
     """
-    docker = _get_executable("docker")
+    docker = config.docker_executable
     if not docker_asset_ids:
         return {}
 
