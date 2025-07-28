@@ -558,7 +558,7 @@ def serve(
             ) from ex
 
     try:
-        container_name, _ = engine.serve(
+        container_name, container = engine.serve(
             image_name,
             host_ip,
             port,
@@ -577,7 +577,7 @@ def serve(
             f"Internal Docker error occurred while serving Tesseracts: {ex}"
         ) from ex
 
-    container_ports = _display_container_meta(container_name)
+    container_ports = _display_container_meta(container)
     logger.info(
         f"Tesseract container name, use it with 'tesseract teardown' command: {container_name}"
     )
@@ -672,9 +672,9 @@ def apidoc(
 ) -> None:
     """Serve the OpenAPI schema for a Tesseract."""
     host_ip = "127.0.0.1"
-    container_name, port = engine.serve(image_name, host_ip=host_ip)
+    container_name, container = engine.serve(image_name, host_ip=host_ip)
     try:
-        url = f"http://{host_ip}:{port}/docs"
+        url = f"http://{host_ip}:{container.host_port}/docs"
         logger.info(f"Serving OpenAPI docs for Tesseract {image_name} at {url}")
         logger.info("  Press Ctrl+C to stop")
         if browser:
@@ -688,12 +688,11 @@ def apidoc(
         engine.teardown(container_name)
 
 
-def _display_container_meta(container_name: str) -> dict:
+def _display_container_meta(container: Container) -> dict:
     """Display container metadata.
 
     Returns a dictionary {name: container_name, port: host_port, ip: host_ip}.
     """
-    container = docker_client.containers.get(container_name)
     logger.info(f"Container ID: {container.id}")
     logger.info(f"Name: {container.name}")
     entrypoint = container.attrs["Config"]["Entrypoint"]

@@ -655,7 +655,7 @@ def serve(
         if timeout < 0:
             raise TimeoutError("Tesseract did not start in time")
 
-    return container.name, container.attrs
+    return container.name, container
 
 
 def _is_local_volume(volume: str) -> bool:

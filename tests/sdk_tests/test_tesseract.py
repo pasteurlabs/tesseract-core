@@ -20,7 +20,7 @@ def mock_serving(mocker):
     fake_container.id = "container-id-123"
 
     serve_mock = mocker.patch("tesseract_core.sdk.engine.serve")
-    serve_mock.return_value = fake_container.id, fake_container.host_port
+    serve_mock.return_value = fake_container.id, fake_container
 
     teardown_mock = mocker.patch("tesseract_core.sdk.engine.teardown")
     logs_mock = mocker.patch("tesseract_core.sdk.engine.logs")
