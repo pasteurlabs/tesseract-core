@@ -9,6 +9,7 @@ import logging
 import optparse
 import os
 import random
+import re
 import socket
 import tempfile
 import threading
@@ -528,6 +529,7 @@ def serve(
     gpus: list[str] | None = None,
     debug: bool = False,
     num_workers: int = 1,
+    service_name: str | None = None,
     user: str | None = None,
     input_path: str | Path | None = None,
 ) -> tuple:
@@ -547,12 +549,13 @@ def serve(
             and start a debugpy server in the Tesseract.
             WARNING: This may expose sensitive information, use with caution (and never in production).
         num_workers: number of workers to use for serving the Tesseracts.
+        service_name: service name under which to expose each Tesseract container on the shared network.
         user: user to run the Tesseracts as, e.g. '1000' or '1000:1000' (uid:gid).
               Defaults to the current user.
         input_path: Input path to read input files from, such as local directory or S3 URI.
 
     Returns:
-        A tuple of the Tesseract container name and the port it is serving on.
+        A tuple of the Tesseract container name and container metadata.
     """
     if not image_name or not isinstance(image_name, str):
         raise ValueError("Tesseract image name must be provided")
@@ -619,6 +622,10 @@ def serve(
     if is_podman():
         extra_args.extend(["--userns", "keep-id"])
 
+    if service_name:
+        _validate_service_name(service_name)
+        extra_args.extend(["--name", service_name])
+
     container = docker_client.containers.run(
         image=image_name,
         command=["serve", *args],
@@ -648,12 +655,24 @@ def serve(
         if timeout < 0:
             raise TimeoutError("Tesseract did not start in time")
 
-    return container.name, container.host_port
+    return container.name, container.attrs
 
 
 def _is_local_volume(volume: str) -> bool:
     """Check if a volume is a local path."""
     return "/" in volume or "." in volume
+
+
+def _validate_service_name(service_name: str) -> None:
+    if (
+        not re.match(r"^[A-Za-z0-9][A-Za-z0-9-]*$", service_name)
+        or service_name[-1] == "-"
+    ):
+        raise ValueError(
+            f"Invalid service name: {service_name}. "
+            "Service names must contain only alphanumeric characters and hyphens, and must "
+            "not begin or end with a hyphen. "
+        )
 
 
 def _parse_volumes(options: list[str]) -> dict[str, dict[str, str]]:

@@ -222,6 +222,12 @@ def test_serve_tesseracts_invalid_input_args(mocked_docker):
         with pytest.raises(ValueError):
             engine.teardown(None)
 
+        with pytest.raises(ValueError):
+            engine.serve("vectoradd", service_name="inval$id-domain-name")
+
+        with pytest.raises(ValueError):
+            engine.serve("vectoradd", service_name="-invalid-name")
+
 
 def test_get_tesseract_images(mocked_docker):
     tesseract_images = engine.get_tesseract_images()
@@ -247,11 +253,15 @@ def test_serve_tesseracts(mocked_docker):
         engine.teardown("invalid_container_name")
 
     # Serve with gpus
-    container_name_multi_tesseract, _ = engine.serve("vectoradd", gpus=["1", "3"])
-    assert container_name_multi_tesseract
+    container_name_gpu_tesseract, _ = engine.serve("vectoradd", gpus=["1", "3"])
+    assert container_name_gpu_tesseract
 
     # Teardown valid
-    engine.teardown(json.loads(container_name_multi_tesseract)["name"])
+    engine.teardown(json.loads(container_name_gpu_tesseract)["name"])
+
+    # Serve and specify tesseract service names
+    container_service_name_tesseract, _ = engine.serve("vectoradd", service_name="VA1")
+    assert container_service_name_tesseract
 
 
 def test_serve_tesseract_volumes(mocked_docker, tmpdir):
