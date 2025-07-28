@@ -19,17 +19,10 @@ from collections.abc import Callable, Sequence
 from contextlib import closing
 from pathlib import Path
 from shutil import copy, copytree, rmtree
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import requests
 from jinja2 import Environment, PackageLoader, StrictUndefined
-from pip._internal.index.package_finder import PackageFinder
-from pip._internal.network.session import PipSession
-from pip._internal.req.req_file import (
-    RequirementsFileParser,
-    get_line_parser,
-    handle_line,
-)
 
 from .api_parse import TesseractConfig, get_config, validate_tesseract_api
 from .docker_client import (
@@ -43,6 +36,10 @@ from .docker_client import (
     is_podman,
 )
 from .exceptions import UserError
+
+if TYPE_CHECKING:
+    from pip._internal.index.package_finder import PackageFinder
+    from pip._internal.network.session import PipSession
 
 logger = logging.getLogger("tesseract")
 docker_client = CLIDockerClient()
@@ -152,8 +149,8 @@ def get_free_port(
 
 def parse_requirements(
     filename: str | Path,
-    session: PipSession | None = None,
-    finder: PackageFinder | None = None,
+    session: "PipSession | None" = None,
+    finder: "PackageFinder | None" = None,
     options: optparse.Values | None = None,
     constraint: bool = False,
 ) -> tuple[list[str], list[str]]:
@@ -162,6 +159,13 @@ def parse_requirements(
     All CLI options that may be part of the given requiremets file are included in
     the remote dependencies.
     """
+    from pip._internal.network.session import PipSession
+    from pip._internal.req.req_file import (
+        RequirementsFileParser,
+        get_line_parser,
+        handle_line,
+    )
+
     if session is None:
         session = PipSession()
 
