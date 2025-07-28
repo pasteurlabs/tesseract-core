@@ -38,11 +38,11 @@ scalar_int = np.int32(42)
 
 def test_generic_array_type_repr():
     typ = Array[(2, 3), Int64]
-    assert repr(typ) == "typing.Annotated[numpy.ndarray, Array[(2, 3), 'int64']]"
+    assert repr(typ) == "Array[(2, 3), 'int64']"
 
 
 def test_flag_propagation():
-    get_flags = lambda model, field: model.model_fields[field].metadata[0].flags
+    get_flags = lambda model, field: model.model_fields[field].annotation.flags
     assert get_flags(MyModel, "array_int") == ()
     assert get_flags(MyModel, "array_float") == (ArrayFlags.DIFFERENTIABLE,)
     assert get_flags(MyModel, "array_bool") == ()

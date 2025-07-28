@@ -235,8 +235,8 @@ def _serialize_diffable_arrays(
     """
     serialized = {}
     for pathtuple, value in obj.items():
-        shape = value.__metadata__[0].expected_shape
-        dtype = value.__metadata__[0].expected_dtype
+        shape = value.expected_shape
+        dtype = value.expected_dtype
 
         # Ensure shape is JSON serializable
         if shape is Ellipsis:
@@ -324,7 +324,9 @@ def create_abstract_eval_schema(
 
     def replace_array_with_shapedtype(obj: T, _: Any) -> Union[T, type[ShapeDType]]:
         if is_array_annotation(obj):
-            return ShapeDType.from_array_annotation(obj)
+            return ShapeDType.from_array_type(obj.__metadata__[0])
+        elif safe_issubclass(obj, PydanticArrayAnnotation):
+            return ShapeDType.from_array_type(obj)
         return obj
 
     GeneratedInputSchema = apply_function_to_model_tree(
@@ -369,6 +371,9 @@ def _get_diffable_arrays(schema: type[BaseModel]) -> dict[tuple, Any]:
 
     def add_to_dict_if_diffable(obj: T, path: tuple) -> T:
         if is_differentiable(obj):
+            if is_array_annotation(obj):
+                # If it's an array annotation, we need to extract the type and shape
+                obj = obj.__metadata__[0]
             diffable_paths[path] = obj
         return obj
 
@@ -462,7 +467,7 @@ def create_autodiff_schema(
                 path_matches = path_pattern == concrete_path
 
             if path_matches:
-                return array_type.__metadata__[0].expected_shape
+                return array_type.expected_shape
 
         raise ValueError(f"Invalid path: {concrete_path}")
 
