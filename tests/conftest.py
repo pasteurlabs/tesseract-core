@@ -22,7 +22,8 @@ UNIT_TESSERACT_PATH = here / ".." / "examples"
 UNIT_TESSERACTS = [
     Path(tr).stem
     for tr in (
-        set(UNIT_TESSERACT_PATH.glob("*/")) - set(UNIT_TESSERACT_PATH.glob("hot_*/"))
+        set(UNIT_TESSERACT_PATH.glob("*/"))
+        - set(UNIT_TESSERACT_PATH.glob("multi-tesseract-*/"))
     )
 ]
 

@@ -1089,21 +1089,21 @@ def test_unit_tesseract_endtoend(
             assert_contains_array_allclose(output_json, array)
 
 
-def test_hot_helloworld_tesseract_endtoend(
+def test_multi_tesseract_helloworld_endtoend(
     docker_client,
     unit_tesseracts_parent_dir,
     dummy_image_name,
     dummy_network_name,
     docker_cleanup,
 ):
-    """Test that unit Tesseract images can be built and used to serve REST API."""
+    """Test that helloworld multi-tesseract example can be built, served, and executed."""
     from tesseract_core.sdk.cli import app
 
     cli_runner = CliRunner(mix_stderr=False)
 
-    # Build HOT and target Tesseract
+    # Build Tesseract images
     img_names = []
-    for tess_name in ("hot_helloworld", "helloworld"):
+    for tess_name in ("multi-tesseract-helloworld", "helloworld"):
         img_name = build_tesseract(
             docker_client,
             unit_tesseracts_parent_dir / tess_name,
@@ -1127,13 +1127,12 @@ def test_hot_helloworld_tesseract_endtoend(
     docker_cleanup["networks"].append(dummy_network_name)
 
     # Serve target Tesseract
-    hot_img_name, tt_img_name = img_names
-    tt_refs = {}
+    multi_tesseract_img_name, helloworld_tesseract_img_name = img_names
     result = cli_runner.invoke(
         app,
         [
             "serve",
-            tt_img_name,
+            helloworld_tesseract_img_name,
             "--no-compose",
             "--network",
             dummy_network_name,
@@ -1145,19 +1144,26 @@ def test_hot_helloworld_tesseract_endtoend(
     # The project id is the container name for --no-compose
     project_id = container_meta["project_id"]
     docker_cleanup["project_ids"].append(project_id)
-    tt_refs[project_id] = (
+    helloworld_tesseract_url = (
         f"{container_meta['containers'][0]['networks'][dummy_network_name]['ip']}:"
         f"{container_meta['containers'][0]['networks'][dummy_network_name]['port']}"
     )
 
-    payload = json.dumps({"inputs": {"name": "you", "tt_ref": tt_refs[project_id]}})
+    payload = json.dumps(
+        {
+            "inputs": {
+                "name": "you",
+                "helloworld_tesseract_url": helloworld_tesseract_url,
+            }
+        }
+    )
 
-    # Run HOT
+    # Run relay Tesseract
     result = cli_runner.invoke(
         app,
         [
             "run",
-            hot_img_name,
+            multi_tesseract_img_name,
             "apply",
             payload,
             "--network",
