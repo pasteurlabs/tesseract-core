@@ -1158,7 +1158,7 @@ def test_multi_tesseract_helloworld_endtoend(
         }
     )
 
-    # Run relay Tesseract
+    # Run multi Tesseract
     result = cli_runner.invoke(
         app,
         [
