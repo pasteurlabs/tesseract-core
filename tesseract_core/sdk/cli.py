@@ -526,17 +526,6 @@ def serve(
             hidden=True,
         ),
     ] = None,
-    service_name: Annotated[
-        str | None,
-        typer.Option(
-            "--service-name",
-            help=(
-                "Service name by which each Tesseract should be exposed "
-                "in the shared network (i.e. container name of the Tesseract). "
-                "Tesseracts are reachable from one another at http://{service_name}:8000."
-            ),
-        ),
-    ] = None,
 ) -> None:
     """Serve one or more Tesseract images.
 
@@ -568,7 +557,6 @@ def serve(
             gpus,
             debug,
             num_workers,
-            service_name,
             user,
             input_path=input_path,
         )

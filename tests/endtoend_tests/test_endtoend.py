@@ -510,22 +510,16 @@ def test_tesseract_serve_volume_permissions(
         assert (tmp_path / "bar").exists()
 
 
-@pytest.mark.parametrize("use_service_name", [True, False])
-def test_tesseract_serve_interop(
-    built_image_name, docker_client, docker_cleanup, use_service_name
-):
+def test_tesseract_serve_interop(built_image_name, docker_client, docker_cleanup):
     cli_runner = CliRunner(mix_stderr=False)
 
-    # Network create using subprocess if it doesn't already exist
-    try:
-        subprocess.run(
-            ["docker", "network", "create", "multi-tesseract-network"],
-            check=True,
-        )
-    except subprocess.CalledProcessError:
-        pass
+    # Network create using subprocess
+    subprocess.run(
+        ["docker", "network", "create", "multi-tesseract-network"],
+        check=True,
+    )
 
-    def serve_tesseract(name: str = ""):
+    def serve_tesseract():
         run_res = cli_runner.invoke(
             app,
             [
@@ -533,7 +527,6 @@ def test_tesseract_serve_interop(
                 "--network",
                 "multi-tesseract-network",
                 built_image_name,
-                *(["--service-name", name] if name else []),
             ],
             env={"COLUMNS": "1000"},
             catch_exceptions=False,
@@ -547,17 +540,8 @@ def test_tesseract_serve_interop(
         return container
 
     # Serve two separate tesseracts on the same network
-    if use_service_name:
-        names = ["tess-1", "tess-2"]
-    else:
-        names = ["", ""]
-
-    tess_1 = serve_tesseract(names[0])
-    tess_2 = serve_tesseract(names[1])
-
-    if use_service_name:
-        assert tess_1.name == "tess-1"
-        assert tess_2.name == "tess-2"
+    tess_1 = serve_tesseract()
+    tess_2 = serve_tesseract()
 
     returncode, stdout = tess_1.exec_run(
         [
