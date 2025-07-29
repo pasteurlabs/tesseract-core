@@ -1089,21 +1089,21 @@ def test_unit_tesseract_endtoend(
             assert_contains_array_allclose(output_json, array)
 
 
-def test_multi_tesseract_helloworld_endtoend(
+def test_multi_helloworld_endtoend(
     docker_client,
     unit_tesseracts_parent_dir,
     dummy_image_name,
     dummy_network_name,
     docker_cleanup,
 ):
-    """Test that relay_helloworld multi tesseract example can be built, served, and executed."""
+    """Test that multi_helloworld example can be built, served, and executed."""
     from tesseract_core.sdk.cli import app
 
     cli_runner = CliRunner(mix_stderr=False)
 
     # Build Tesseract images
     img_names = []
-    for tess_name in ("multi-tesseracts/relay_helloworld", "helloworld"):
+    for tess_name in ("multi-tesseracts/multi_helloworld", "helloworld"):
         img_name = build_tesseract(
             docker_client,
             unit_tesseracts_parent_dir / tess_name,
@@ -1127,12 +1127,12 @@ def test_multi_tesseract_helloworld_endtoend(
     docker_cleanup["networks"].append(dummy_network_name)
 
     # Serve target Tesseract
-    relay_helloworld_tesseract_img_name, helloworld_tesseract_img_name = img_names
+    multi_helloworld_tesseract_img_name, helloworld_tesseract_img_name = img_names
     result = cli_runner.invoke(
         app,
         [
             "serve",
-            relay_helloworld_tesseract_img_name,
+            helloworld_tesseract_img_name,
             "--no-compose",
             "--network",
             dummy_network_name,
@@ -1158,12 +1158,12 @@ def test_multi_tesseract_helloworld_endtoend(
         }
     )
 
-    # Run relay_helloworld Tesseract
+    # Run multi_helloworld Tesseract
     result = cli_runner.invoke(
         app,
         [
             "run",
-            relay_helloworld_tesseract_img_name,
+            multi_helloworld_tesseract_img_name,
             "apply",
             payload,
             "--network",

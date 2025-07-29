@@ -323,7 +323,7 @@ def _docker_cleanup(docker_client, request):
         for network in context["networks"]:
             try:
                 _ = subprocess.run(
-                    [*docker_cmd, "network", "rm", network],
+                    [*docker_cmd, "network", "rm", network, "--force"],
                     check=True,
                 )
             except Exception as e:

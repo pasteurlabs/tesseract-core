@@ -21,5 +21,5 @@ class OutputSchema(BaseModel):
 def apply(inputs: InputSchema) -> OutputSchema:
     """Forward name to helloworld tesseract and relay its greeting."""
     tess = Tesseract.from_url(inputs.helloworld_tesseract_url)
-    greeting = tess.apply({"name": f"{inputs.name}"})["greeting"]
+    greeting = tess.apply(inputs={"name": f"{inputs.name}"})["greeting"]
     return OutputSchema(greeting=f"The target Tesseract says: {greeting}")
