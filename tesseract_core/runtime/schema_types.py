@@ -1,6 +1,7 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import sys
 from abc import ABCMeta
 from enum import IntEnum
 from functools import partial
@@ -9,7 +10,6 @@ from typing import (
     Annotated,
     Any,
     Optional,
-    TypeAlias,
     Union,
     get_args,
     get_origin,
@@ -34,8 +34,15 @@ from tesseract_core.runtime.array_encoding import (
     python_to_array,
 )
 
-AnnotatedType: TypeAlias = type(Annotated[Any, Any])
-EllipsisType: TypeAlias = type(Ellipsis)
+if sys.version_info < (3, 10):
+    # TypeAlias is not available in Python < 3.10
+    AnnotatedType = type(Annotated[Any, Any])
+    EllipsisType = type(Ellipsis)
+else:
+    from typing import TypeAlias
+
+    AnnotatedType: TypeAlias = type(Annotated[Any, Any])
+    EllipsisType: TypeAlias = type(Ellipsis)
 
 
 class ArrayFlags(IntEnum):
