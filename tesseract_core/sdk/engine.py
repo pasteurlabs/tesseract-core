@@ -159,6 +159,8 @@ def parse_requirements(
     All CLI options that may be part of the given requiremets file are included in
     the remote dependencies.
     """
+    # pip internals monkeypatch some typing behavior at import time, so we delay
+    # these imports as much as possible to avoid conflicts.
     from pip._internal.network.session import PipSession
     from pip._internal.req.req_file import (
         RequirementsFileParser,
