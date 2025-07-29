@@ -210,6 +210,8 @@ def test_get_openapi_schema(http_client):
     assert response.status_code == 200, response.text
     assert response.json()["info"]["title"] == "Tesseract"
     assert response.json()["paths"]
+    # The job_id query parameter is intended to be hidden
+    assert "job_id" not in response.json()
 
 
 @pytest.mark.skipif(

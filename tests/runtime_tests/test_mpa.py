@@ -6,6 +6,7 @@
 import csv
 import json
 import os
+import uuid
 
 import pytest
 
@@ -71,6 +72,12 @@ def test_custom_log_directory(tmpdir):
     backend = mpa.FileBackend()
     assert backend.log_dir == custom_dir
     assert backend.log_dir.exists()
+
+
+def test_uses_job_id_log_directory(tmpdir):
+    job_id = str(uuid.uuid4())
+    backend = mpa.FileBackend(job_id)
+    assert backend.run_dir.name == f"run_{job_id}"
 
 
 def test_unique_run_directories():
