@@ -8,6 +8,7 @@ import os
 import subprocess
 import uuid
 from pathlib import Path
+from textwrap import dedent
 
 import pytest
 import requests
@@ -721,10 +722,8 @@ def test_tarball_install(dummy_tesseract_package, docker_cleanup):
     docker_cleanup["images"].append(img_tag)
 
 
-def test_logging(dummy_tesseract_package, tmpdir, docker_cleanup):
-    from textwrap import dedent
-
-    tesseract_api = dedent(
+def logging_tesseract_api_string():
+    return dedent(
         """
     from pydantic import BaseModel
 
@@ -741,6 +740,10 @@ def test_logging(dummy_tesseract_package, tmpdir, docker_cleanup):
         return OutputSchema(out=f"Received message: {inputs.message}")
     """
     )
+
+
+def test_logging_tesseract_run(dummy_tesseract_package, tmpdir, docker_cleanup):
+    tesseract_api = logging_tesseract_api_string()
 
     with open(dummy_tesseract_package / "tesseract_api.py", "w") as f:
         f.write(tesseract_api)
@@ -783,9 +786,65 @@ def test_logging(dummy_tesseract_package, tmpdir, docker_cleanup):
 
     log_file = next((Path(tmpdir) / "logs").iterdir())
     assert log_file.exists()
-    job_id = str(log_file.name).split(".")[0]
+    job_id = str(log_file.name).removeprefix("job_").removesuffix(".log")
     # Check that the id is a well-formed uuid
     uuid.UUID(job_id)
+
+    with open(log_file) as f:
+        log_content = f.read()
+    assert "Hello from apply!" == log_content.strip()
+
+
+def test_logging_tesseract_serve(
+    dummy_tesseract_package, tmpdir, docker_cleanup, docker_client
+):
+    tesseract_api = logging_tesseract_api_string()
+
+    with open(dummy_tesseract_package / "tesseract_api.py", "w") as f:
+        f.write(tesseract_api)
+
+    cli_runner = CliRunner(mix_stderr=False)
+    result = cli_runner.invoke(
+        app,
+        ["--loglevel", "debug", "build", str(dummy_tesseract_package)],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0, result.stderr
+
+    img_tag = json.loads(result.stdout)[0]
+    docker_cleanup["images"].append(img_tag)
+
+    serve_res = subprocess.run(
+        [
+            "tesseract",
+            "serve",
+            img_tag,
+            "--output-path",
+            tmpdir,
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert serve_res.returncode == 0, serve_res.stderr
+    assert serve_res.stdout
+
+    serve_meta = json.loads(serve_res.stdout)
+    container_name = serve_meta["container_name"]
+    docker_cleanup["containers"].append(container_name)
+    container = docker_client.containers.get(container_name)
+
+    job_id = str(uuid.uuid4())
+    res = requests.post(
+        f"http://{container.host_ip}:{container.host_port}/apply",
+        params={"job_id": job_id},
+        json={"inputs": {}},
+    )
+    assert res.status_code == 200, res.text
+
+    log_file = next((Path(tmpdir) / "logs").iterdir())
+    assert log_file.exists()
+    logged_job_id = str(log_file.name).removeprefix("job_").removesuffix(".log")
+    assert logged_job_id == job_id
 
     with open(log_file) as f:
         log_content = f.read()
