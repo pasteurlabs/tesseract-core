@@ -612,15 +612,16 @@ def serve(
         port_mappings[f"{host_ip}:{debugpy_port}"] = container_debugpy_port
         environment["TESSERACT_DEBUG"] = "1"
 
-    logger.info(f"Serving Tesseract at http://{ping_ip}:{port}")
-    logger.info(f"View Tesseract: http://{ping_ip}:{port}/docs")
-    if debug:
-        logger.info(f"Debugpy server listening at http://{ping_ip}:{debugpy_port}")
-
     parsed_volumes = _parse_volumes(volumes) if volumes else {}
 
-    extra_args = []
+    extra_args = [
+        "--restart",
+        "unless-stopped",
+    ]
+
     if is_podman():
+        # This ensures podman behaves like Docker in terms of user namespaces
+        # and allows the container to run with the same user ID as the host.
         extra_args.extend(["--userns", "keep-id"])
 
     if network_alias is not None:
@@ -640,6 +641,9 @@ def serve(
         environment=environment,
         extra_args=extra_args,
     )
+    assert isinstance(container, Container)
+
+    logger.info("Waiting for Tesseract to start...")
     # wait for server to start
     timeout = 30
     while True:
@@ -654,8 +658,32 @@ def serve(
         time.sleep(0.1)
         timeout -= 0.1
 
-        if timeout < 0:
-            raise TimeoutError("Tesseract did not start in time")
+        container_status = docker_client.containers.get(container.id).status
+
+        if timeout < 0 or container_status != "running":
+            try:
+                container_logs = container.logs(stdout=True, stderr=True)
+                logger.error(
+                    f"Tesseract container {container.name} failed to start:\n{container_logs.decode()}"
+                )
+            except APIError as ex:
+                logger.warning(
+                    f"Failed to get logs for container {container.name}: {ex}"
+                )
+            try:
+                container.stop()
+            except APIError as ex:
+                logger.warning(f"Failed to stop container {container.name}: {ex}")
+
+            if timeout < 0:
+                raise TimeoutError("Tesseract did not start in time")
+            else:
+                raise RuntimeError("Tesseract failed to start")
+
+    logger.info(f"Serving Tesseract at http://{ping_ip}:{port}")
+    logger.info(f"View Tesseract: http://{ping_ip}:{port}/docs")
+    if debug:
+        logger.info(f"Debugpy server listening at http://{ping_ip}:{debugpy_port}")
 
     return container.name, container
 
