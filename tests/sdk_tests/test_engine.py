@@ -277,38 +277,20 @@ def test_serve_tesseract_volumes(mocked_docker, tmpdir):
     # Test running with input and output paths
     indir = Path(tmpdir / "input_path")
     indir.mkdir()
-    outdir1 = Path(tmpdir) / "output1"
-    outdir1.mkdir()
-    outdir2 = Path(tmpdir) / "output2"
-    outdir2.mkdir()
+    outdir = Path(tmpdir) / "output1"
+    outdir.mkdir()
 
-    res, _ = engine.serve(
-        "foobar", input_path=str(indir), output_paths=[str(outdir1), str(outdir2)]
-    )
+    res, _ = engine.serve("foobar", input_path=str(indir), output_path=str(outdir))
     res = json.loads(res)
-    assert res["volumes"].keys() == {str(indir), str(outdir1), str(outdir2)}
+    assert res["volumes"].keys() == {str(indir), str(outdir)}
     assert res["volumes"][str(indir)] == {
         "mode": "ro",
         "bind": "/tesseract/input_data",
     }
-    assert res["volumes"][str(outdir1)] == {
+    assert res["volumes"][str(outdir)] == {
         "mode": "rw",
-        "bind": "/tesseract/output_data/output1",
+        "bind": "/tesseract/output_data",
     }
-    assert res["volumes"][str(outdir2)] == {
-        "mode": "rw",
-        "bind": "/tesseract/output_data/output2",
-    }
-
-    outdir3 = Path(tmpdir) / "different_parent" / "output1"
-    outdir3.mkdir(parents=True, exist_ok=True)
-
-    with pytest.raises(ValueError):
-        # Test with a duplicate named output folders
-        engine.serve(
-            "foobar",
-            output_paths=[str(outdir1), str(outdir2), str(outdir3)],
-        )
 
 
 def test_needs_docker(mocked_docker, monkeypatch):

@@ -533,7 +533,7 @@ def serve(
     num_workers: int = 1,
     user: str | None = None,
     input_path: str | Path | None = None,
-    output_paths: list[str | Path] | None = None,
+    output_path: str | Path | None = None,
 ) -> tuple:
     """Serve one or more Tesseract images.
 
@@ -555,7 +555,7 @@ def serve(
         user: user to run the Tesseracts as, e.g. '1000' or '1000:1000' (uid:gid).
               Defaults to the current user.
         input_path: Input path to read input files from, such as local directory or S3 URI.
-        output_paths: Output paths to write output files to, such as local directory or S3 URI.
+        output_path: Output path to write output files to, such as local directory or S3 URI.
 
     Returns:
         A tuple of the Tesseract container name and the port it is serving on.
@@ -584,21 +584,11 @@ def serve(
             local_path = _resolve_file_path(input_path)
             volumes.append(f"{local_path}:/tesseract/input_data:ro")
 
-    if output_paths:
+    if output_path:
         environment["TESSERACT_OUTPUT_PATH"] = "/tesseract/output_data"
-        container_paths = set()
-        for output_path in output_paths:
-            if "://" not in output_path:
-                local_path = _resolve_file_path(output_path, make_dir=True)
-                if local_path.name in container_paths:
-                    raise ValueError(
-                        f"Output paths must have unique names. {local_path} is not unique."
-                    )
-                else:
-                    container_paths.add(local_path.name)
-                volumes.append(
-                    f"{local_path}:/tesseract/output_data/{local_path.name}:rw"
-                )
+        if "://" not in output_path:
+            local_path = _resolve_file_path(output_path, make_dir=True)
+            volumes.append(f"{local_path}:/tesseract/output_data:rw")
 
     args = []
     container_api_port = "8000"
