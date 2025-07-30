@@ -3,7 +3,6 @@
 
 """Docker client for Tesseract usage."""
 
-# store a reference to the list type, which is shadowed by some function names below
 import json
 import logging
 import os
@@ -12,6 +11,8 @@ import shlex
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+
+# store a reference to the list type, which is shadowed by some function names below
 from typing import List as list_  # noqa: UP035
 
 from tesseract_core.sdk.config import get_config
