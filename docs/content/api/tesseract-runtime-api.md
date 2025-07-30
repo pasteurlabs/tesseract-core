@@ -1,11 +1,12 @@
 (tr-runtime-api)=
-# `tesseract_runtime` Python API
+# `tesseract_core.runtime` Python API
 
-The `tesseract_runtime` Python module contains some useful utilities to create and extend `tesseract_api.py` files. It is available in all Tesseract container images.
+The `tesseract_core.runtime` Python module contains some useful utilities to create and extend `tesseract_api.py` files. It is available in all Tesseract container images.
 
 ```{eval-rst}
 .. automodule:: tesseract_core.runtime
    :members:
+   :exclude-members: Float16, Float32, Float64, Int8, Int16, Int32, Int64, UInt8, UInt16, UInt32, UInt64, Bool, Complex64, Complex128
 ```
 
 ```{eval-rst}
