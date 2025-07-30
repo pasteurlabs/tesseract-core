@@ -254,7 +254,6 @@ def _docker_cleanup(docker_client, request):
     # Shared object to track what objects need to be cleaned up in each test
     context = {
         "images": [],
-        "project_ids": [],
         "containers": [],
         "volumes": [],
         "networks": [],
@@ -268,15 +267,6 @@ def _docker_cleanup(docker_client, request):
 
     def cleanup_func():
         failures = []
-
-        # Teardown projects first
-        for project_id in context["project_ids"]:
-            try:
-                docker_client.compose.down(project_id)
-            except Exception as e:
-                failures.append(
-                    f"Failed to tear down project {project_id}: {pprint_exc(e)}"
-                )
 
         # Remove containers
         for container in context["containers"]:
@@ -383,7 +373,7 @@ def mocked_docker(monkeypatch):
         @property
         def name(self):
             """Mock name property for Container."""
-            return json.dumps(self.return_args)
+            return json.dumps({**self.return_args, "name": "vectoradd"})
 
         @property
         def attrs(self):
@@ -403,8 +393,6 @@ def mocked_docker(monkeypatch):
         def remove(self, **kwargs: Any):
             """Mock remove method for Container."""
             pass
-
-    created_ids = set()
 
     class MockedDocker:
         """Mock CLIDockerClient class."""
@@ -491,29 +479,6 @@ def mocked_docker(monkeypatch):
                     container.logs(stdout=True, stderr=False),
                     container.logs(stdout=False, stderr=True),
                 )
-
-        class compose:
-            @staticmethod
-            def list() -> set:
-                """Return ids of all created tesseracts projects."""
-                return created_ids
-
-            @staticmethod
-            def up(compose_fpath: str, project_name: str) -> str:
-                """Mock of CLIDockerClient.compose.up."""
-                created_ids.add(project_name)
-                return project_name
-
-            @staticmethod
-            def down(project_id: str) -> bool:
-                """Mock of CLIDockerClient.compose.down."""
-                created_ids.remove(project_id)
-                return True
-
-            @staticmethod
-            def exists(project_id: str) -> bool:
-                """Mock of CLIDockerClient.compose.exists."""
-                return project_id in created_ids
 
     mock_instance = MockedDocker()
     monkeypatch.setattr(engine, "docker_client", mock_instance)
