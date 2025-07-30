@@ -551,7 +551,16 @@ def serve(
                 "Input path to read input files from, such as local directory or S3 URI "
                 "(may be anything supported by fsspec)."
             ),
-            hidden=True,
+        ),
+    ] = None,
+    output_path: Annotated[
+        str | None,
+        typer.Option(
+            "--output-path",
+            help=(
+                "Output path to write output files to, such as local directory or S3 URI "
+                "(may be anything supported by fsspec)."
+            ),
         ),
     ] = None,
 ) -> None:
@@ -583,6 +592,7 @@ def serve(
             num_workers=num_workers,
             user=user,
             input_path=input_path,
+            output_path=output_path,
         )
     except RuntimeError as ex:
         raise UserError(

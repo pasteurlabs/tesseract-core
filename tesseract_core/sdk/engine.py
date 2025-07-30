@@ -533,6 +533,7 @@ def serve(
     num_workers: int = 1,
     user: str | None = None,
     input_path: str | Path | None = None,
+    output_path: str | Path | None = None,
 ) -> tuple:
     """Serve one or more Tesseract images.
 
@@ -554,6 +555,7 @@ def serve(
         user: user to run the Tesseracts as, e.g. '1000' or '1000:1000' (uid:gid).
               Defaults to the current user.
         input_path: Input path to read input files from, such as local directory or S3 URI.
+        output_path: Output path to write output files to, such as local directory or S3 URI.
 
     Returns:
         A tuple of the Tesseract container name and the port it is serving on.
@@ -573,13 +575,20 @@ def serve(
     if environment is None:
         environment = {}
 
+    if volumes is None:
+        volumes = []
+
     if input_path:
         environment["TESSERACT_INPUT_PATH"] = "/tesseract/input_data"
-        if volumes is None:
-            volumes = []
         if "://" not in str(input_path):
-            input_path = Path(input_path).resolve()
-            volumes.append(f"{input_path}:/tesseract/input_data:ro")
+            local_path = _resolve_file_path(input_path)
+            volumes.append(f"{local_path}:/tesseract/input_data:ro")
+
+    if output_path:
+        environment["TESSERACT_OUTPUT_PATH"] = "/tesseract/output_data"
+        if "://" not in str(output_path):
+            local_path = _resolve_file_path(output_path, make_dir=True)
+            volumes.append(f"{local_path}:/tesseract/output_data:rw")
 
     args = []
     container_api_port = "8000"
@@ -752,8 +761,6 @@ def run_tesseract(
         network: name of the Docker network to connect the container to.
         user: user to run the Tesseract as, e.g. '1000' or '1000:1000' (uid:gid).
             Defaults to the current user.
-        input_path: Input path to read input files from, such as local directory or S3 URI.
-            The input path is mounted read-only into the Tesseract at `/tesseract/input_data`.
 
     Returns:
         Tuple with the stdout and stderr of the Tesseract.
@@ -790,13 +797,7 @@ def run_tesseract(
                     f"Output path {arg} cannot start with '@' (used only for input files)"
                 )
 
-            local_path = Path(arg).resolve()
-            local_path.mkdir(parents=True, exist_ok=True)
-
-            if not local_path.is_dir():
-                raise RuntimeError(
-                    f"Path {local_path} provided as output is not a directory"
-                )
+            local_path = _resolve_file_path(arg, make_dir=True)
 
             path_in_container = "/tesseract/output_data"
             arg = path_in_container
@@ -806,17 +807,15 @@ def run_tesseract(
             environment["TESSERACT_OUTPUT_PATH"] = path_in_container
 
         if current_cmd in input_args and "://" not in arg:
-            local_path = Path(arg).resolve()
-            if not local_path.is_dir():
-                raise RuntimeError(
-                    f"Path {local_path} provided as input is not a directory"
-                )
+            local_path = _resolve_file_path(arg)
 
             path_in_container = "/tesseract/input_data"
             arg = path_in_container
-
             # Bind-mount directory
-            parsed_volumes[str(local_path)] = {"bind": path_in_container, "mode": "ro"}
+            parsed_volumes[str(local_path)] = {
+                "bind": path_in_container,
+                "mode": "ro",
+            }
             environment["TESSERACT_INPUT_PATH"] = path_in_container
 
         # Mount local input files marked by @ into Docker container as a volume
@@ -864,6 +863,17 @@ def run_tesseract(
     stdout = stdout.decode("utf-8")
     stderr = stderr.decode("utf-8")
     return stdout, stderr
+
+
+def _resolve_file_path(path: str, make_dir: bool = False) -> Path:
+    """Resolve a file path, creating the directory if necessary."""
+    local_path = Path(path).resolve()
+    if make_dir:
+        local_path.mkdir(parents=True, exist_ok=True)
+    if not local_path.is_dir():
+        raise RuntimeError(f"Path {local_path} provided is not a directory")
+
+    return local_path
 
 
 def logs(container_id: str) -> str:

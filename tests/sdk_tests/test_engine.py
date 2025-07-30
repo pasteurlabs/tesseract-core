@@ -274,6 +274,24 @@ def test_serve_tesseract_volumes(mocked_docker, tmpdir):
             volumes=["/non/existent/path:/path/in/container:ro"],
         )
 
+    # Test running with input and output paths
+    indir = Path(tmpdir / "input_path")
+    indir.mkdir()
+    outdir = Path(tmpdir) / "output1"
+    outdir.mkdir()
+
+    res, _ = engine.serve("foobar", input_path=str(indir), output_path=str(outdir))
+    res = json.loads(res)
+    assert res["volumes"].keys() == {str(indir), str(outdir)}
+    assert res["volumes"][str(indir)] == {
+        "mode": "ro",
+        "bind": "/tesseract/input_data",
+    }
+    assert res["volumes"][str(outdir)] == {
+        "mode": "rw",
+        "bind": "/tesseract/output_data",
+    }
+
 
 def test_needs_docker(mocked_docker, monkeypatch):
     @engine.needs_docker
