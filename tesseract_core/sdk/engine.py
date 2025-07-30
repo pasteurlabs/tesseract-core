@@ -580,13 +580,13 @@ def serve(
 
     if input_path:
         environment["TESSERACT_INPUT_PATH"] = "/tesseract/input_data"
-        if "://" not in input_path:
+        if "://" not in str(input_path):
             local_path = _resolve_file_path(input_path)
             volumes.append(f"{local_path}:/tesseract/input_data:ro")
 
     if output_path:
         environment["TESSERACT_OUTPUT_PATH"] = "/tesseract/output_data"
-        if "://" not in output_path:
+        if "://" not in str(output_path):
             local_path = _resolve_file_path(output_path, make_dir=True)
             volumes.append(f"{local_path}:/tesseract/output_data:rw")
 
@@ -797,24 +797,26 @@ def run_tesseract(
                     f"Output path {arg} cannot start with '@' (used only for input files)"
                 )
 
-            local_path = _resolve_file_path(arg, make_dir=True)
+            local_path = _resolve_file_path(arg)
+
+            path_in_container = "/tesseract/output_data"
+            arg = path_in_container
 
             # Bind-mount directory
-            parsed_volumes[str(local_path)] = {
-                "bind": "/tesseract/output_data",
-                "mode": "rw",
-            }
-            environment["TESSERACT_OUTPUT_PATH"] = "/tesseract/output_data"
+            parsed_volumes[str(local_path)] = {"bind": path_in_container, "mode": "rw"}
+            environment["TESSERACT_OUTPUT_PATH"] = path_in_container
 
         if current_cmd in input_args and "://" not in arg:
             local_path = _resolve_file_path(arg)
 
+            path_in_container = "/tesseract/input_data"
+            arg = path_in_container
             # Bind-mount directory
             parsed_volumes[str(local_path)] = {
-                "bind": "/tesseract/input_data",
+                "bind": path_in_container,
                 "mode": "ro",
             }
-            environment["TESSERACT_INPUT_PATH"] = "/tesseract/input_data"
+            environment["TESSERACT_INPUT_PATH"] = path_in_container
 
         # Mount local input files marked by @ into Docker container as a volume
         elif arg.startswith("@") and "://" not in arg:
@@ -851,7 +853,7 @@ def run_tesseract(
         network=network,
         ports=ports,
         detach=False,
-        remove=True,
+        remove=False,
         stderr=True,
         user=user,
         extra_args=extra_args,
