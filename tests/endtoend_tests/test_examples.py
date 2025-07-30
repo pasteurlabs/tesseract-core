@@ -1133,7 +1133,6 @@ def test_multi_helloworld_endtoend(
         [
             "serve",
             helloworld_tesseract_img_name,
-            "--no-compose",
             "--network",
             dummy_network_name,
         ],
@@ -1141,12 +1140,10 @@ def test_multi_helloworld_endtoend(
     )
     assert result.exit_code == 0, result.output
     container_meta = json.loads(result.stdout)
-    # The project id is the container name for --no-compose
-    project_id = container_meta["project_id"]
-    docker_cleanup["project_ids"].append(project_id)
+    docker_cleanup["containers"].append(container_meta["container_name"])
     helloworld_tesseract_url = (
-        f"{container_meta['containers'][0]['networks'][dummy_network_name]['ip']}:"
-        f"{container_meta['containers'][0]['networks'][dummy_network_name]['port']}"
+        f"{container_meta['containers']['networks'][dummy_network_name]['ip']}:"
+        f"{container_meta['containers']['networks'][dummy_network_name]['port']}"
     )
 
     payload = json.dumps(
@@ -1172,4 +1169,4 @@ def test_multi_helloworld_endtoend(
         catch_exceptions=True,
     )
     assert result.exit_code == 0, result.output
-    assert "The target Tesseract says: Hello you!" in result.output
+    assert "The helloworld Tesseract says: Hello you!" in result.output
