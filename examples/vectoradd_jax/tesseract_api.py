@@ -15,7 +15,7 @@ from tesseract_core.runtime.tree_transforms import filter_func, flatten_with_pat
 
 
 class Vector_and_Scalar(BaseModel):
-    v: Annotated[np.ndarray, Differentiable[Array[(None,), Float32]]] = Field(
+    v: Differentiable[Array[(None,), Float32]] = Field(
         description="An arbitrary vector"
     )
     s: Differentiable[Float32] = Field(description="A scalar", default=1.0)
