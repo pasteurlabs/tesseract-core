@@ -797,7 +797,7 @@ def run_tesseract(
                     f"Output path {arg} cannot start with '@' (used only for input files)"
                 )
 
-            local_path = _resolve_file_path(arg)
+            local_path = _resolve_file_path(arg, make_dir=True)
 
             path_in_container = "/tesseract/output_data"
             arg = path_in_container
@@ -853,7 +853,7 @@ def run_tesseract(
         network=network,
         ports=ports,
         detach=False,
-        remove=False,
+        remove=True,
         stderr=True,
         user=user,
         extra_args=extra_args,
