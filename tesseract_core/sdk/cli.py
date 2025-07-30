@@ -419,12 +419,31 @@ def _validate_port(port: str | None) -> str | None:
     return port
 
 
+def _parse_environment(
+    environment: list[str] | None,
+) -> dict[str, str] | None:
+    """Parse environment variables from a list to a dictionary."""
+    if environment is None:
+        return None
+
+    env_dict = {}
+    for env in environment:
+        if "=" not in env:
+            raise typer.BadParameter(
+                f"Environment variable '{env}' must be in the format 'key=value'.",
+                param_hint="environment",
+            )
+        key, value = env.split("=", maxsplit=1)
+        env_dict[key] = value
+    return env_dict
+
+
 @app.command("serve")
 @engine.needs_docker
 def serve(
-    image_names: Annotated[
-        list[str],
-        typer.Argument(..., help="One or more Tesseract image names"),
+    image_name: Annotated[
+        str,
+        typer.Argument(..., help="Tesseract image name"),
     ],
     volume: Annotated[
         list[str] | None,
@@ -452,6 +471,25 @@ def serve(
             help="Optional port/port range to serve the Tesseract on (e.g. -p '8080-8082'). "
             "Port must be between 1025 and 65535.",
             callback=_validate_port,
+        ),
+    ] = None,
+    network: Annotated[
+        str | None,
+        typer.Option(
+            "--network",
+            help="Network to use for the Tesseract container, analogous to Docker's --network option. "
+            "For example, 'host' uses the host system's network. Alternatively, you can create a custom "
+            "network with `docker network create <network-name>` and use it here.",
+            show_default=False,
+        ),
+    ] = None,
+    network_alias: Annotated[
+        str | None,
+        typer.Option(
+            "--network-alias",
+            help="Network alias to use for the Tesseract container. This makes the Tesseract accessible "
+            "via this alias within the specified network. Must be used with --network.",
+            show_default=False,
         ),
     ] = None,
     host_ip: Annotated[
@@ -495,29 +533,6 @@ def serve(
             ),
         ),
     ] = False,
-    no_compose: Annotated[
-        bool,
-        typer.Option(
-            "--no-compose",
-            help=(
-                "Do not use Docker Compose to serve the Tesseract. "
-                "Instead, the command will block until interrupted. "
-                "This is useful for cases in which docker-compose is not available."
-            ),
-        ),
-    ] = False,
-    service_names: Annotated[
-        str | None,
-        typer.Option(
-            "--service-names",
-            help=(
-                "Comma-separated list of service names by which each Tesseract should be exposed "
-                "in the shared network. "
-                "Tesseracts are reachable from one another at http://{service_name}:8000. "
-                "Not supported when using --no-compose."
-            ),
-        ),
-    ] = None,
     user: Annotated[
         str | None,
         typer.Option(
@@ -543,62 +558,30 @@ def serve(
     """Serve one or more Tesseract images.
 
     A successful serve command will display on standard output a JSON object
-    with the Docker Compose project ID, which is required to run the teardown
-    command, as well as a list of all containers spawned and their respective
-    ports.
+    with the Tesseract container name, which is required to run the teardown
+    command and its respective port.
     """
-    if port is not None:
-        if len(image_names) > 1:
-            # TODO: Docker compose with multiple ports is not supported until
-            # docker/compose#7188 is resolved.
-            raise typer.BadParameter(
-                (
-                    "Port specification only works if exactly one Tesseract is being served. "
-                    f"Currently attempting to serve `{len(image_names)}` Tesseracts."
-                ),
-                param_hint="image_names",
-            )
-        ports = [port]
-    else:
-        ports = None
+    parsed_environment = _parse_environment(environment)
 
-    # Parse environment variables from list to dict
-    if environment is not None:
-        try:
-            environment = {
-                env.split("=", maxsplit=1)[0]: env.split("=", maxsplit=1)[1]
-                for env in environment
-            }
-        except Exception as ex:
-            raise typer.BadParameter(
-                "Environment variables must be in the format 'key=value'.",
-                param_hint="environment",
-            ) from ex
-
-    if service_names is not None:
-        if no_compose:
-            raise typer.BadParameter(
-                "Service name specification only works with Docker Compose.",
-                param_hint="service_names",
-            )
-
-        service_names_list = service_names.split(",")
-    else:
-        service_names_list = None
+    if network_alias is not None and network is None:
+        raise typer.BadParameter(
+            "Network alias can only be used with a specified network.",
+            param_hint="network_alias",
+        )
 
     try:
-        project_id = engine.serve(
-            image_names,
-            host_ip,
-            ports,
-            volume,
-            environment,
-            gpus,
-            debug,
-            num_workers,
-            no_compose,
-            service_names_list,
-            user,
+        container_name, container = engine.serve(
+            image_name,
+            host_ip=host_ip,
+            port=port,
+            network=network,
+            network_alias=network_alias,
+            volumes=volume,
+            environment=parsed_environment,
+            gpus=gpus,
+            debug=debug,
+            num_workers=num_workers,
+            user=user,
             input_path=input_path,
         )
     except RuntimeError as ex:
@@ -606,12 +589,12 @@ def serve(
             f"Internal Docker error occurred while serving Tesseracts: {ex}"
         ) from ex
 
-    container_ports = _display_project_meta(project_id)
+    container_ports = _display_container_meta(container)
     logger.info(
-        f"Tesseract project ID, use it with 'tesseract teardown' command: {project_id}"
+        f"Tesseract container name, use it with 'tesseract teardown' command: {container_name}"
     )
-    project_meta = {"project_id": project_id, "containers": container_ports}
-    json_info = json.dumps(project_meta)
+    container_meta = {"container_name": container_name, "containers": container_ports}
+    json_info = json.dumps(container_meta)
     typer.echo(json_info, nl=False)
 
 
@@ -650,19 +633,18 @@ def _display_tesseract_image_meta() -> None:
 def _display_tesseract_containers_meta() -> None:
     """Display Tesseract containers metadata."""
     table = RichTable(
-        "ID", "Name", "Version", "Host Address", "Project ID", "Description"
+        "ID", "Name", "Version", "Host Address", "Container Name", "Description"
     )
     containers = docker_client.containers.list()
     for container in containers:
         tesseract_vals = _get_tesseract_env_vals(container)
         if tesseract_vals:
-            tesseract_project = _find_tesseract_project(container)
             table.add_row(
                 container.id[:12],
                 tesseract_vals["TESSERACT_NAME"],
                 tesseract_vals["TESSERACT_VERSION"],
                 f"{container.host_ip}:{container.host_port}",
-                tesseract_project,
+                container.name,
                 tesseract_vals.get("TESSERACT_DESCRIPTION", "").replace("\\n", " "),
             )
     RichConsole().print(table)
@@ -676,23 +658,16 @@ def _get_tesseract_env_vals(
     return {item.split("=")[0]: item.split("=")[1] for item in env_vals}
 
 
-def _find_tesseract_project(
-    tesseract: Container,
-) -> str:
-    """Find the Tesseract Project ID for a given tesseract.
-
-    A Tesseract Project ID is either a Docker Compose ID or a container name.
-    """
-    if tesseract.project_id is not None:
-        return tesseract.project_id
-
-    tesseract_id = tesseract.id[:12]
-
-    for project, containers in docker_client.compose.list().items():
-        if tesseract_id in containers:
-            return project
-
-    return tesseract.name
+def _get_tesseract_network_meta(container: Container) -> dict:
+    """Retrieve network addresses from container."""
+    network_meta = {}
+    networks = container.attrs["NetworkSettings"].get("Networks", {})
+    for network_name, network_info in networks.items():
+        network_meta[network_name] = {
+            "ip": f"{network_info['IPAddress']}",
+            "port": 8000,
+        }
+    return network_meta
 
 
 @app.command("apidoc")
@@ -709,9 +684,8 @@ def apidoc(
 ) -> None:
     """Serve the OpenAPI schema for a Tesseract."""
     host_ip = "127.0.0.1"
-    project_id = engine.serve([image_name], no_compose=True, host_ip=host_ip)
+    container_name, container = engine.serve(image_name, host_ip=host_ip)
     try:
-        container = docker_client.containers.get(project_id)
         url = f"http://{host_ip}:{container.host_port}/docs"
         logger.info(f"Serving OpenAPI docs for Tesseract {image_name} at {url}")
         logger.info("  Press Ctrl+C to stop")
@@ -723,48 +697,41 @@ def apidoc(
         except KeyboardInterrupt:
             return
     finally:
-        engine.teardown(project_id)
+        engine.teardown(container_name)
 
 
-def _display_project_meta(project_id: str) -> list:
-    """Display project metadata.
+def _display_container_meta(container: Container) -> dict:
+    """Display container metadata.
 
-    Returns a list of dictionaries {name: container_name, port: host_port}.
+    Returns a dictionary {name: container_name, port: host_port, ip: host_ip}.
     """
-    container_ports = []
-
-    compose_projects = docker_client.compose.list()
-    if project_id in compose_projects:
-        containers = compose_projects[project_id]
-    else:
-        containers = [project_id]
-
-    for container_id in containers:
-        container = docker_client.containers.get(container_id)
-        logger.info(f"Container ID: {container.id}")
-        logger.info(f"Name: {container.name}")
-        entrypoint = container.attrs["Config"]["Entrypoint"]
-        logger.info(f"Entrypoint: {entrypoint}")
-        host_port = container.host_port
-        host_ip = container.host_ip
-        logger.info(f"View Tesseract: http://{host_ip}:{host_port}/docs")
-        container_ports.append(
-            {"name": container.name, "port": host_port, "ip": host_ip}
+    logger.info(f"Container ID: {container.id}")
+    logger.info(f"Name: {container.name}")
+    entrypoint = container.attrs["Config"]["Entrypoint"]
+    logger.info(f"Entrypoint: {entrypoint}")
+    host_port = container.host_port
+    host_ip = container.host_ip
+    logger.info(f"View Tesseract: http://{host_ip}:{host_port}/docs")
+    network_meta = _get_tesseract_network_meta(container)
+    if container.host_debugpy_port:
+        logger.info(
+            f"Debugpy server listening at http://{host_ip}:{container.host_debugpy_port}"
         )
-        if container.host_debugpy_port:
-            logger.info(
-                f"Debugpy server listening at http://{host_ip}:{container.host_debugpy_port}"
-            )
 
-    return container_ports
+    return {
+        "name": container.name,
+        "port": host_port,
+        "ip": host_ip,
+        "networks": network_meta,
+    }
 
 
 @app.command("teardown")
 @engine.needs_docker
 def teardown(
-    project_ids: Annotated[
+    container_names: Annotated[
         list[str] | None,
-        typer.Argument(..., help="Docker Compose project IDs"),
+        typer.Argument(..., help="Tesseract container names"),
     ] = None,
     tear_all: Annotated[
         bool,
@@ -776,24 +743,24 @@ def teardown(
 ) -> None:
     """Tear down one or more Tesseracts that were previously started with `tesseract serve`.
 
-    One or more Tesseract project ids must be specified unless `--all` is set.
+    One or more Tesseract container names must be specified unless `--all` is set.
     """
-    if not project_ids and not tear_all:
+    if not container_names and not tear_all:
         raise typer.BadParameter(
-            "Either project IDs or --all flag must be provided",
-            param_hint="project_ids",
+            "Either container names or --all flag must be provided",
+            param_hint="container_names",
         )
 
-    if project_ids and tear_all:
+    if container_names and tear_all:
         raise typer.BadParameter(
-            "Either project IDs or --all flag must be provided, but not both",
-            param_hint="project_ids",
+            "Either container names or --all flag must be provided, but not both",
+            param_hint="container_names",
         )
 
     try:
-        if not project_ids:
-            project_ids = []  # Pass in empty list if no project_ids are provided.
-        engine.teardown(project_ids, tear_all=tear_all)
+        if not container_names:
+            container_names = []  # Pass in empty list if no container_names are provided.
+        engine.teardown(container_names, tear_all=tear_all)
     except ValueError as ex:
         raise UserError(
             f"Input error occurred while tearing down Tesseracts: {ex}"

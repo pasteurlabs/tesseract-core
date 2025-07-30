@@ -1010,7 +1010,7 @@ def test_unit_tesseract_endtoend(
 
     # Cannot mix stderr if we want to load the json
     cli_runner = CliRunner(mix_stderr=False)
-    project_id = None
+    container_name = None
 
     run_res = cli_runner.invoke(
         app,
@@ -1026,9 +1026,9 @@ def test_unit_tesseract_endtoend(
     assert run_res.exit_code == 0, run_res.stderr
     assert run_res.stdout
 
-    project_meta = json.loads(run_res.stdout)
-    project_id = project_meta["project_id"]
-    docker_cleanup["project_ids"].append(project_id)
+    serve_meta = json.loads(run_res.stdout)
+    container_name = serve_meta["container_name"]
+    docker_cleanup["containers"].append(container_name)
 
     # Give server some time to start up
     timeout = 10
