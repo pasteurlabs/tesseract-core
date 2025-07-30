@@ -1012,6 +1012,16 @@ def test_unit_tesseract_endtoend(
     cli_runner = CliRunner(mix_stderr=False)
     container_name = None
 
+    # required files need input_path with serve
+    serve_io_args = []
+    if unit_tesseract_config.input_path:
+        serve_io_args.extend(
+            [
+                "--input-path",
+                str(unit_tesseract_path / unit_tesseract_config.input_path),
+            ]
+        )
+
     run_res = cli_runner.invoke(
         app,
         [
@@ -1019,6 +1029,7 @@ def test_unit_tesseract_endtoend(
             img_name,
             "-p",
             free_port,
+            *serve_io_args,
         ],
         catch_exceptions=False,
     )
