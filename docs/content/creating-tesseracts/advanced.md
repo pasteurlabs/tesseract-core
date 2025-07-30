@@ -146,7 +146,7 @@ In order to do so, you should:
     This is done by setting the `TESSERACT_API_PATH` environment variable via
     `export TESSERACT_API_PATH=/path/to/your/tesseract_api.py`.
 
-After that is done, you will be able to use the `tesseract_runtime` command in your shell.
+After that is done, you will be able to use the `tesseract-runtime` command in your shell.
 This is the exact same command that is launched inside Tesseract containers to run their
 various endpoints, and its syntax mirrors the one of `tesseract run`.
 
