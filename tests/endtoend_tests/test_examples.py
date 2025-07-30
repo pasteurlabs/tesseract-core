@@ -747,9 +747,7 @@ TEST_CASES = {
                 output_contains_pattern=[r'{"a":1.0,"b":100.0}'],
             ),
         ],
-        volume_mounts=[
-            "input:/tesseract/input_data:ro",
-        ],
+        input_path="input",
     ),
     "filereference": Config(
         test_with_random_inputs=False,
@@ -919,6 +917,7 @@ def test_unit_tesseract_endtoend(
             img_name,
             *mount_args,
             "input-schema",
+            *io_args,
         ],
         catch_exceptions=False,
     )
@@ -936,6 +935,7 @@ def test_unit_tesseract_endtoend(
                 *mount_args,
                 "apply",
                 json.dumps(random_input),
+                *io_args,
             ],
             catch_exceptions=False,
         )

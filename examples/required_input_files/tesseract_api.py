@@ -9,8 +9,7 @@ from tesseract_core.runtime.experimental import required_file
 
 
 # define function to load a specific required file
-# TODO: is it possible/desired to validate correct format of loaded data (at runtime)
-# based on return type of loader function denoted here (using pydantic)?
+# TODO: possibly revert back to using more verbose required file declaration
 @required_file(require_writable=False)
 def load_parameters(filepath: str = "parameters1.json"):
     """Function to load required files.
@@ -50,7 +49,7 @@ class OutputSchema(BaseModel):
 #
 
 # executed with
-# tesseract run -v "./input:/tesseract/input_data:ro" required_input_files apply '{"inputs": {}}'
+# tesseract run required_input_files apply '{"inputs": {}}' --input-path ./input
 
 
 def apply(inputs: InputSchema) -> OutputSchema:

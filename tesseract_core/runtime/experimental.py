@@ -23,7 +23,7 @@ from pydantic import (
 from pydantic.json_schema import JsonSchemaValue
 from pydantic_core import SchemaSerializer, SchemaValidator, core_schema
 
-from tesseract_core.runtime.file_interactions import parent_path
+from tesseract_core.runtime.file_interactions import PathLike, parent_path
 from tesseract_core.runtime.mpa import (
     log_artifact,
     log_metric,
@@ -211,6 +211,7 @@ def _resolve_input_path(path: Path) -> Path:
     if str(input_path) not in str(tess_path):
         raise ValueError(
             f"Invalid input file reference: {path}. "
+            f"Expected path to be relative to {input_path}, but got {tess_path}. "
             "File references have to be relative to --input-path."
         )
     if not tess_path.exists():
@@ -234,12 +235,9 @@ InputFileReference = Annotated[Path, AfterValidator(_resolve_input_path)]
 OutputFileReference = Annotated[Path, AfterValidator(_strip_output_path)]
 
 
-def _require_file(file_path: str | Path, require_writable: bool = False) -> Path:
+def _require_file(file_path: PathLike, require_writable: bool = False) -> Path:
     """Require a file to be present at the given path."""
     file_path = _resolve_input_path(Path(file_path))
-
-    # if IS_BUILDING:
-    #     return file_path
 
     if not file_path.is_file():
         raise FileNotFoundError(f"Required file not found: {file_path}")
@@ -264,16 +262,21 @@ def required_file(require_writable: bool) -> Callable:
 
         loader_func_name = loader_func.__name__
 
-        def wrapper(filepath: str = filepath, *args: Any, **kwargs: Any):
+        def wrapper(
+            filepath: Union[PathLike, None] = filepath, *args: Any, **kwargs: Any
+        ):
             if filepath is None:
                 raise ValueError(
                     f"No filepath passed to required_file {loader_func_name}.\
-                                 Either assign the `filepath` explicitly or \
-                                 as default argument in the loader function."
+                      Either assign the `filepath` explicitly or \
+                      as default argument in {loader_func_name}."
                 )
 
             if not IS_BUILDING:
                 container_filepath = _require_file(filepath, require_writable)
+                print(
+                    f"Loading required file {container_filepath} for {loader_func_name}."
+                )
                 data = loader_func(container_filepath, *args, **kwargs)
                 return data
             else:
