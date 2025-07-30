@@ -484,6 +484,11 @@ def main() -> None:
             )
             sys.exit(1)
 
+        # TODO: actually parse this gracefully
+        if "--input-path" in sys.argv:
+            input_path = Path(sys.argv[sys.argv.index("--input-path") + 1])
+            update_config(input_path=input_path.as_posix())
+
         cli = _add_user_commands_to_cli(tesseract_runtime, out_stream=orig_stdout)
         cli(auto_envvar_prefix="TESSERACT_RUNTIME")
 

@@ -236,8 +236,7 @@ OutputFileReference = Annotated[Path, AfterValidator(_strip_output_path)]
 
 def _require_file(file_path: str | Path, require_writable: bool = False) -> Path:
     """Require a file to be present at the given path."""
-    # TODO: This should look in default input-dir, or specific mounted volume?
-    file_path = (Path("/tesseract/input_data") / file_path).resolve()
+    file_path = _resolve_input_path(Path(file_path))
 
     # if IS_BUILDING:
     #     return file_path
