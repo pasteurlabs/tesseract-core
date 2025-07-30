@@ -1,7 +1,7 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from typing import Annotated, Any
+from typing import Any
 
 import equinox as eqx
 import jax
@@ -20,7 +20,7 @@ class Vector_and_Scalar(BaseModel):
     )
     s: Differentiable[Float32] = Field(description="A scalar", default=1.0)
 
-    def scale(self) -> Differentiable[Array[(None,), Float32]]:
+    def scale(self) -> np.ndarray:
         return self.s * self.v
 
 
@@ -48,7 +48,7 @@ class InputSchema(BaseModel):
 
 
 class Result_and_Norm(BaseModel):
-    result: Annotated[np.ndarray, Differentiable[Array[(None,), Float32]]] = Field(
+    result: Differentiable[Array[(None,), Float32]] = Field(
         description="Vector s_a·a + s_b·b"
     )
     normed_result: Differentiable[Array[(None,), Float32]] = Field(

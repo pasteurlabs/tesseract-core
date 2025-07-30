@@ -12,7 +12,6 @@ from typing import (
     Optional,
     Union,
     get_args,
-    get_origin,
 )
 
 import numpy as np
@@ -80,11 +79,6 @@ def safe_issubclass(obj: Any, baseclass: type[object]) -> bool:
         return issubclass(obj, baseclass)
     except TypeError:
         return False
-
-
-def _is_annotated(obj: Any) -> bool:
-    """Check if an object is typing.Annotated or typing_extensions.Annotated."""
-    return get_origin(obj) is Annotated
 
 
 class PydanticArrayAnnotation(metaclass=ArrayAnnotationType):
@@ -257,19 +251,6 @@ class Array:
         return model
 
 
-def is_array_annotation(obj: Any) -> bool:
-    """Check if an object is a Pydantic array type annotation.
-
-    That is, this returns True if the object is Annotated[<something>, Array[<shape>, <dtype>]].
-    """
-    if not _is_annotated(obj):
-        return False
-    meta = obj.__metadata__
-    if not meta:
-        return False
-    return safe_issubclass(meta[0], PydanticArrayAnnotation)
-
-
 class Differentiable:
     """Type annotation for a differentiable array.
 
@@ -293,13 +274,9 @@ class Differentiable:
 
 def is_differentiable(obj: Any) -> bool:
     """Check if an object is a Differentiable array type annotation."""
-    if is_array_annotation(obj):
-        flags = obj.__metadata__[0].flags
-    elif safe_issubclass(obj, PydanticArrayAnnotation):
-        flags = obj.flags
-    else:
+    if not safe_issubclass(obj, PydanticArrayAnnotation):
         return False
-    return ArrayFlags.DIFFERENTIABLE in flags
+    return ArrayFlags.DIFFERENTIABLE in obj.flags
 
 
 def _ensure_valid_shapedtype(expected_shape: Any, expected_dtype: Any) -> tuple:

@@ -33,8 +33,6 @@ from .schema_types import (
     Array,
     PydanticArrayAnnotation,
     ShapeDType,
-    _is_annotated,
-    is_array_annotation,
     is_differentiable,
     safe_issubclass,
 )
@@ -62,6 +60,11 @@ def _construct_annotated(obj: Any, metadata: Iterable[Any]) -> Any:
     return out
 
 
+def _is_annotated(obj: Any) -> bool:
+    """Check if an object is typing.Annotated or typing_extensions.Annotated."""
+    return get_origin(obj) is Annotated
+
+
 def apply_function_to_model_tree(
     Schema: type[BaseModel],
     func: Callable[[type, tuple], type],
@@ -85,9 +88,6 @@ def apply_function_to_model_tree(
     The path to the field "a" would be ["a"], and the path to the int type would be
     ["a", SEQ_INDEX_SENTINEL, DICT_INDEX_SENTINEL].
     """
-    # Annotation types that should be treated as leaves and not recursed into
-    annotated_types_as_leaves = (PydanticArrayAnnotation,)
-
     if default_model_config is None:
         default_model_config = {}
 
@@ -154,20 +154,7 @@ def apply_function_to_model_tree(
             inner_type = treeobj.__origin__
             *other_meta, current_meta = treeobj.__metadata__
 
-            is_leaf = False
-            for t in annotated_types_as_leaves:
-                if safe_issubclass(current_meta, t):
-                    is_leaf = True
-                    break
-
-            if is_leaf:
-                # Reached a leaf -> apply func to object as-is, then re-attach add'l metadata
-                current_annotation = Annotated[inner_type, current_meta]
-                out = func(current_annotation, tuple(path))
-                out = _construct_annotated(out, other_meta)
-                return out
-
-            # Not a leaf -> recurse into Annotated[inner_type, *other_meta] and re-attach current_meta to the result
+            # Recurse into Annotated[inner_type, *other_meta] and re-attach current_meta to the result
             inner_type = _construct_annotated(inner_type, other_meta)
             new_type = _recurse_over_model_tree(inner_type, path)
 
@@ -323,9 +310,7 @@ def create_abstract_eval_schema(
     """
 
     def replace_array_with_shapedtype(obj: T, _: Any) -> Union[T, type[ShapeDType]]:
-        if is_array_annotation(obj):
-            return ShapeDType.from_array_type(obj.__metadata__[0])
-        elif safe_issubclass(obj, PydanticArrayAnnotation):
+        if safe_issubclass(obj, PydanticArrayAnnotation):
             return ShapeDType.from_array_type(obj)
         return obj
 
@@ -371,9 +356,6 @@ def _get_diffable_arrays(schema: type[BaseModel]) -> dict[tuple, Any]:
 
     def add_to_dict_if_diffable(obj: T, path: tuple) -> T:
         if is_differentiable(obj):
-            if is_array_annotation(obj):
-                # If it's an array annotation, we need to extract the type and shape
-                obj = obj.__metadata__[0]
             diffable_paths[path] = obj
         return obj
 
