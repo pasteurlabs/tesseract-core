@@ -237,6 +237,7 @@ def prepare_build_context(
     Returns:
         The path to the build context directory.
     """
+    src_dir = Path(src_dir)
     context_dir = Path(context_dir)
     context_dir.mkdir(parents=True, exist_ok=True)
 
@@ -520,9 +521,11 @@ def get_tesseract_images() -> list[Image]:
 
 def serve(
     image_name: str,
+    *,
     host_ip: str = "127.0.0.1",
     port: str | None = None,
     network: str | None = None,
+    network_alias: str | None = None,
     volumes: list[str] | None = None,
     environment: dict[str, str] | None = None,
     gpus: list[str] | None = None,
@@ -540,6 +543,7 @@ def serve(
         host_ip: IP address to bind the Tesseracts to.
         port: port or port range to serve each Tesseract on.
         network: name of the network the Tesseract will be attached to.
+        network_alias: alias to use for the Tesseract within the network.
         volumes: list of paths to mount in the Tesseract container.
         environment: dictionary of environment variables to pass to the Tesseract.
         gpus: IDs of host Nvidia GPUs to make available to the Tesseracts.
@@ -573,7 +577,7 @@ def serve(
         environment["TESSERACT_INPUT_PATH"] = "/tesseract/input_data"
         if volumes is None:
             volumes = []
-        if "://" not in input_path:
+        if "://" not in str(input_path):
             input_path = Path(input_path).resolve()
             volumes.append(f"{input_path}:/tesseract/input_data:ro")
 
@@ -618,6 +622,11 @@ def serve(
     extra_args = []
     if is_podman():
         extra_args.extend(["--userns", "keep-id"])
+
+    if network_alias is not None:
+        if network is None:
+            raise ValueError("Network must be specified if network_alias is provided")
+        extra_args.extend(["--network-alias", network_alias])
 
     container = docker_client.containers.run(
         image=image_name,
@@ -808,7 +817,7 @@ def run_tesseract(
         extra_args.extend(["--userns", "keep-id"])
 
     # Run the container
-    stdout, stderr = docker_client.containers.run(
+    result = docker_client.containers.run(
         image=image,
         command=cmd,
         volumes=parsed_volumes,
@@ -822,6 +831,8 @@ def run_tesseract(
         user=user,
         extra_args=extra_args,
     )
+    assert isinstance(result, tuple)
+    stdout, stderr = result
     stdout = stdout.decode("utf-8")
     stderr = stderr.decode("utf-8")
     return stdout, stderr

@@ -419,6 +419,25 @@ def _validate_port(port: str | None) -> str | None:
     return port
 
 
+def _parse_environment(
+    environment: list[str] | None,
+) -> dict[str, str] | None:
+    """Parse environment variables from a list to a dictionary."""
+    if environment is None:
+        return None
+
+    env_dict = {}
+    for env in environment:
+        if "=" not in env:
+            raise typer.BadParameter(
+                f"Environment variable '{env}' must be in the format 'key=value'.",
+                param_hint="environment",
+            )
+        key, value = env.split("=", maxsplit=1)
+        env_dict[key] = value
+    return env_dict
+
+
 @app.command("serve")
 @engine.needs_docker
 def serve(
@@ -461,6 +480,15 @@ def serve(
             help="Network to use for the Tesseract container, analogous to Docker's --network option. "
             "For example, 'host' uses the host system's network. Alternatively, you can create a custom "
             "network with `docker network create <network-name>` and use it here.",
+            show_default=False,
+        ),
+    ] = None,
+    network_alias: Annotated[
+        str | None,
+        typer.Option(
+            "--network-alias",
+            help="Network alias to use for the Tesseract container. This makes the Tesseract accessible "
+            "via this alias within the specified network. Must be used with --network.",
             show_default=False,
         ),
     ] = None,
@@ -533,31 +561,27 @@ def serve(
     with the Tesseract container name, which is required to run the teardown
     command and its respective port.
     """
-    # Parse environment variables from list to dict
-    if environment is not None:
-        try:
-            environment = {
-                env.split("=", maxsplit=1)[0]: env.split("=", maxsplit=1)[1]
-                for env in environment
-            }
-        except Exception as ex:
-            raise typer.BadParameter(
-                "Environment variables must be in the format 'key=value'.",
-                param_hint="environment",
-            ) from ex
+    parsed_environment = _parse_environment(environment)
+
+    if network_alias is not None and network is None:
+        raise typer.BadParameter(
+            "Network alias can only be used with a specified network.",
+            param_hint="network_alias",
+        )
 
     try:
         container_name, container = engine.serve(
             image_name,
-            host_ip,
-            port,
-            network,
-            volume,
-            environment,
-            gpus,
-            debug,
-            num_workers,
-            user,
+            host_ip=host_ip,
+            port=port,
+            network=network,
+            network_alias=network_alias,
+            volumes=volume,
+            environment=parsed_environment,
+            gpus=gpus,
+            debug=debug,
+            num_workers=num_workers,
+            user=user,
             input_path=input_path,
         )
     except RuntimeError as ex:
