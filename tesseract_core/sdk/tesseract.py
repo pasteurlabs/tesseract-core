@@ -33,7 +33,6 @@ class SpawnConfig:
     gpus: list[str] | None
     num_workers: int
     debug: bool
-    no_compose: bool
 
 
 def requires_client(func: Callable) -> Callable:
@@ -93,7 +92,6 @@ class Tesseract:
         output_path: PathLike | None = None,
         gpus: list[str] | None = None,
         num_workers: int = 1,
-        no_compose: bool = False,
     ) -> Tesseract:
         """Create a Tesseract instance from a Docker image.
 
@@ -122,7 +120,6 @@ class Tesseract:
             num_workers: Number of worker processes to use. This determines how
                 many requests can be handled in parallel. Higher values
                 will increase throughput, but also increase resource usage.
-            no_compose: if True, do not use Docker Compose to serve the Tesseracts.
 
         Returns:
             A Tesseract instance.
@@ -147,7 +144,6 @@ class Tesseract:
             gpus=gpus,
             num_workers=num_workers,
             debug=True,
-            no_compose=no_compose,
         )
         obj._serve_context = None
         obj._lastlog = None
@@ -246,7 +242,7 @@ class Tesseract:
             )
         if self._serve_context is None:
             return self._lastlog
-        return engine.logs(self._serve_context["container_id"])
+        return engine.logs(self._serve_context["container_name"])
 
     def serve(self, port: str | None = None, host_ip: str = "127.0.0.1") -> None:
         """Serve the Tesseract.
@@ -259,7 +255,7 @@ class Tesseract:
             raise RuntimeError("Can only serve a Tesseract created via from_image.")
         if self._serve_context is not None:
             raise RuntimeError("Tesseract is already being served.")
-        project_id, container_id, served_port = self._serve(
+        container_name, container = engine.serve(
             self._spawn_config.image,
             port=port,
             volumes=self._spawn_config.volumes,
@@ -267,16 +263,14 @@ class Tesseract:
             gpus=self._spawn_config.gpus,
             num_workers=self._spawn_config.num_workers,
             debug=self._spawn_config.debug,
-            no_compose=self._spawn_config.no_compose,
             host_ip=host_ip,
         )
         self._serve_context = dict(
-            project_id=project_id,
-            container_id=container_id,
-            port=served_port,
+            container_name=container_name,
+            port=container.host_port,
         )
         self._lastlog = None
-        self._client = HTTPClient(f"http://{host_ip}:{served_port}")
+        self._client = HTTPClient(f"http://{host_ip}:{container.host_port}")
         atexit.register(self.teardown)
 
     def teardown(self) -> None:
@@ -287,7 +281,7 @@ class Tesseract:
         if self._serve_context is None:
             raise RuntimeError("Tesseract is not being served.")
         self._lastlog = self.server_logs()
-        engine.teardown(self._serve_context["project_id"])
+        engine.teardown(self._serve_context["container_name"])
         self._client = None
         self._serve_context = None
         atexit.unregister(self.teardown)
@@ -299,38 +293,6 @@ class Tesseract:
         """
         if self._serve_context is not None:
             self.teardown()
-
-    @staticmethod
-    def _serve(
-        image: str,
-        port: str | None = None,
-        host_ip: str = "127.0.0.1",
-        volumes: list[str] | None = None,
-        environment: dict[str, str] | None = None,
-        gpus: list[str] | None = None,
-        debug: bool = False,
-        num_workers: int = 1,
-        no_compose: bool = False,
-    ) -> tuple[str, str, int]:
-        if port is not None:
-            ports = [port]
-        else:
-            ports = None
-
-        project_id = engine.serve(
-            [image],
-            ports=ports,
-            volumes=volumes,
-            environment=environment,
-            gpus=gpus,
-            debug=debug,
-            num_workers=num_workers,
-            host_ip=host_ip,
-            no_compose=no_compose,
-        )
-
-        first_container = engine.get_project_containers(project_id)[0]
-        return project_id, first_container.id, int(first_container.host_port)
 
     @cached_property
     @requires_client
