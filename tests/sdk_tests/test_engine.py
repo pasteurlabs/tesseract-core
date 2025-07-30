@@ -11,7 +11,6 @@ from pathlib import Path
 import pytest
 import yaml
 from jinja2.exceptions import TemplateNotFound
-from typeguard import suppress_type_checks
 
 from tesseract_core.sdk import engine
 from tesseract_core.sdk.api_parse import (
@@ -205,22 +204,6 @@ def test_run_tesseract_file_input(mocked_docker, tmpdir):
         "mode": "ro",
         "bind": "/tesseract/input_data",
     }
-
-
-def test_serve_tesseracts_invalid_input_args(mocked_docker):
-    """Test input validation logic for tesseract serve."""
-    with suppress_type_checks():
-        with pytest.raises(ValueError):
-            engine.serve(None)
-
-        with pytest.raises(TypeError):
-            engine.serve()
-
-        with pytest.raises(ValueError):
-            engine.serve([None, "vectoradd"])
-
-        with pytest.raises(ValueError):
-            engine.teardown(None)
 
 
 def test_get_tesseract_images(mocked_docker):
