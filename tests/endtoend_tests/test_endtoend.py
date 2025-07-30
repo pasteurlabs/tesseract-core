@@ -128,14 +128,22 @@ def test_build_generate_only(dummy_tesseract_location, skip_checks):
             assert 'RUN ["tesseract-runtime", "check"]' in docker_file_contents
 
 
-def test_env_passthrough_serve(docker_cleanup, docker_client, built_image_name):
+def test_env_passthrough_serve(docker_cleanup, docker_client, built_image_name, tmpdir):
     """Ensure we can pass environment variables to tesseracts when serving."""
+    tmpdir.chmod(0o777)
+    (tmpdir / "input").mkdir()
+    (tmpdir / "output").mkdir()
+
     run_res = subprocess.run(
         [
             "tesseract",
             "serve",
             built_image_name,
             "--env=TEST_ENV_VAR=foo",
+            "--input-path",
+            str(tmpdir / "input"),
+            "--output-paths",
+            str(tmpdir / "output"),
         ],
         capture_output=True,
         text=True,
@@ -152,6 +160,16 @@ def test_env_passthrough_serve(docker_cleanup, docker_client, built_image_name):
     exit_code, output = container.exec_run(["sh", "-c", "echo $TEST_ENV_VAR"])
     assert exit_code == 0, f"Command failed with exit code {exit_code}"
     assert "foo" in output.decode("utf-8"), f"Output was: {output.decode('utf-8')}"
+
+    exit_code, input_path = container.exec_run(
+        ["sh", "-c", "echo $TESSERACT_INPUT_PATH"]
+    )
+    exit_code, output_path = container.exec_run(
+        ["sh", "-c", "echo $TESSERACT_OUTPUT_PATH"]
+    )
+    assert exit_code == 0, f"Command failed with exit code {exit_code}"
+    assert "/tesseract/input_data" in input_path.decode("utf-8")
+    assert "/tesseract/output_data" in output_path.decode("utf-8")
 
 
 def test_tesseract_list(built_image_name):
@@ -508,6 +526,50 @@ def test_tesseract_serve_volume_permissions(
     if volume_type == "bind":
         # The file should exist outside the container
         assert (tmp_path / "bar").exists()
+
+
+def test_tesseract_serve_multiple_outputs(
+    built_image_name,
+    docker_client,
+    tmp_path,
+    docker_cleanup,
+):
+    """Test serving Tesseract with a Docker volume or bind mount.
+
+    This should cover most permissions issues that can arise with Docker volumes.
+    """
+    cli_runner = CliRunner(mix_stderr=False)
+
+    output_args = ["--output-paths", f"{tmp_path / 'output1'},{tmp_path / 'output2'}"]
+    tmp_path.chmod(0o777)
+
+    run_res = cli_runner.invoke(
+        app,
+        [
+            "serve",
+            built_image_name,
+            *output_args,
+        ],
+        catch_exceptions=False,
+    )
+    assert run_res.exit_code == 0, run_res.stderr
+    assert run_res.stdout
+    serve_meta = json.loads(run_res.stdout)
+    container_name = serve_meta["container_name"]
+    docker_cleanup["containers"].append(container_name)
+    tesseract_0 = docker_client.containers.get(container_name)
+
+    exit_code, output = tesseract_0.exec_run(
+        ["touch", "/tesseract/output_data/output1/test_0.txt"]
+    )
+    assert exit_code == 0, output.decode()
+    exit_code, output = tesseract_0.exec_run(
+        ["touch", "/tesseract/output_data/output2/test_1.txt"]
+    )
+    assert exit_code == 0, output.decode()
+
+    assert (tmp_path / "output1" / "test_0.txt").exists()
+    assert (tmp_path / "output2" / "test_1.txt").exists()
 
 
 def test_tesseract_serve_interop(built_image_name, docker_client, docker_cleanup):

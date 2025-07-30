@@ -551,7 +551,16 @@ def serve(
                 "Input path to read input files from, such as local directory or S3 URI "
                 "(may be anything supported by fsspec)."
             ),
-            hidden=True,
+        ),
+    ] = None,
+    output_paths: Annotated[
+        str | None,
+        typer.Option(
+            "--output-paths",
+            help=(
+                "Comma separated list of output paths to write output files to, such as local directory or S3 URI "
+                "(may be anything supported by fsspec)."
+            ),
         ),
     ] = None,
 ) -> None:
@@ -569,6 +578,11 @@ def serve(
             param_hint="network_alias",
         )
 
+    if output_paths:
+        output_paths_list = output_paths.split(",")
+    else:
+        output_paths_list = []
+
     try:
         container_name, container = engine.serve(
             image_name,
@@ -583,6 +597,7 @@ def serve(
             num_workers=num_workers,
             user=user,
             input_path=input_path,
+            output_paths=output_paths_list,
         )
     except RuntimeError as ex:
         raise UserError(
