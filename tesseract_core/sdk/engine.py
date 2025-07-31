@@ -745,12 +745,15 @@ def run_tesseract(
     environment: dict[str, str] | None = None,
     network: str | None = None,
     user: str | None = None,
+    input_path: str | Path | None = None,
+    output_path: str | Path | None = None,
+    output_format: str | None = None,
 ) -> tuple[str, str]:
     """Start a Tesseract and execute a given command.
 
     Args:
         image: string of the Tesseract to run.
-        command: Tesseract command to run, e.g. apply.
+        command: Tesseract command to run, e.g. `"apply"`.
         args: arguments for the command.
         volumes: list of paths to mount in the Tesseract container.
         gpus: list of GPUs, as indices or names, to passthrough the container.
@@ -761,17 +764,14 @@ def run_tesseract(
         network: name of the Docker network to connect the container to.
         user: user to run the Tesseract as, e.g. '1000' or '1000:1000' (uid:gid).
             Defaults to the current user.
+        input_path: Input path to read input files from, such as local directory or S3 URI.
+        output_path: Output path to write output files to, such as local directory or S3 URI.
+        output_format: Format of the output, e.g. "json", "json+binref", etc. This is passed
+            to `tesseract-runtime` as the `--output-format` argument.
 
     Returns:
         Tuple with the stdout and stderr of the Tesseract.
     """
-    # Args that require rw access to the mounted volume
-    output_args = {"-o", "--output-path"}
-    input_args = {"-i", "--input-path"}
-
-    cmd = [command]
-    current_cmd = None
-
     if environment is None:
         environment = {}
 
@@ -784,42 +784,32 @@ def run_tesseract(
         # Use the current user if not specified
         user = f"{os.getuid()}:{os.getgid()}" if os.name != "nt" else None
 
-    for arg in args:
-        if arg.startswith("-"):
-            current_cmd = arg
-            cmd.append(arg)
-            continue
-
-        # Mount local output directories into Docker container as a volume
-        if current_cmd in output_args and "://" not in arg:
-            if arg.startswith("@"):
-                raise ValueError(
-                    f"Output path {arg} cannot start with '@' (used only for input files)"
-                )
-
-            local_path = _resolve_file_path(arg, make_dir=True)
-
-            path_in_container = "/tesseract/output_data"
-            arg = path_in_container
-
-            # Bind-mount directory
-            parsed_volumes[str(local_path)] = {"bind": path_in_container, "mode": "rw"}
-            environment["TESSERACT_OUTPUT_PATH"] = path_in_container
-
-        if current_cmd in input_args and "://" not in arg:
-            local_path = _resolve_file_path(arg)
-
-            path_in_container = "/tesseract/input_data"
-            arg = path_in_container
-            # Bind-mount directory
+    if input_path:
+        environment["TESSERACT_INPUT_PATH"] = "/tesseract/input_data"
+        if "://" not in str(input_path):
+            local_path = _resolve_file_path(input_path)
             parsed_volumes[str(local_path)] = {
-                "bind": path_in_container,
+                "bind": "/tesseract/input_data",
                 "mode": "ro",
             }
-            environment["TESSERACT_INPUT_PATH"] = path_in_container
 
+    if output_path:
+        environment["TESSERACT_OUTPUT_PATH"] = "/tesseract/output_data"
+        if "://" not in str(output_path):
+            local_path = _resolve_file_path(output_path, make_dir=True)
+            parsed_volumes[str(local_path)] = {
+                "bind": "/tesseract/output_data",
+                "mode": "rw",
+            }
+
+    cmd = []
+
+    if command:
+        cmd.append(command)
+
+    for arg in args:
         # Mount local input files marked by @ into Docker container as a volume
-        elif arg.startswith("@") and "://" not in arg:
+        if arg.startswith("@") and "://" not in arg:
             local_path = Path(arg.lstrip("@")).resolve()
 
             if not local_path.is_file():
@@ -835,9 +825,11 @@ def run_tesseract(
                 "bind": path_in_container,
                 "mode": "ro",
             }
-
-        current_cmd = None
         cmd.append(arg)
+
+    if output_format:
+        # If output format is specified, add it to the command
+        cmd.extend(["--output-format", output_format])
 
     extra_args = []
     if is_podman():
@@ -865,7 +857,7 @@ def run_tesseract(
     return stdout, stderr
 
 
-def _resolve_file_path(path: str, make_dir: bool = False) -> Path:
+def _resolve_file_path(path: str | Path, make_dir: bool = False) -> Path:
     """Resolve a file path, creating the directory if necessary."""
     local_path = Path(path).resolve()
     if make_dir:

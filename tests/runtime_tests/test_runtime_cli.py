@@ -18,7 +18,7 @@ from click.testing import CliRunner
 from moto.server import ThreadedMotoServer
 
 from tesseract_core.runtime.cli import _add_user_commands_to_cli
-from tesseract_core.runtime.cli import tesseract_runtime as cli_cmd
+from tesseract_core.runtime.cli import app as cli_cmd
 from tesseract_core.runtime.file_interactions import load_bytes, output_to_bytes
 
 test_input = {
