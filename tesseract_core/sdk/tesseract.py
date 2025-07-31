@@ -32,6 +32,8 @@ class SpawnConfig:
     environment: dict[str, str] | None
     gpus: list[str] | None
     num_workers: int
+    network: str | None
+    network_alias: str | None
     debug: bool
 
 
@@ -42,7 +44,8 @@ def requires_client(func: Callable) -> Callable:
     def wrapper(self: Tesseract, *args: Any, **kwargs: Any) -> Any:
         if not self._client:
             raise RuntimeError(
-                f"{self.__class__.__name__} must be used as a context manager when created via `from_image`."
+                f"When creating a {self.__class__.__name__} via `from_image`, "
+                "you must either use it as a context manager or call .serve() before use."
             )
         return func(self, *args, **kwargs)
 
@@ -92,6 +95,8 @@ class Tesseract:
         output_path: PathLike | None = None,
         gpus: list[str] | None = None,
         num_workers: int = 1,
+        network: str | None = None,
+        network_alias: str | None = None,
     ) -> Tesseract:
         """Create a Tesseract instance from a Docker image.
 
@@ -120,6 +125,8 @@ class Tesseract:
             num_workers: Number of worker processes to use. This determines how
                 many requests can be handled in parallel. Higher values
                 will increase throughput, but also increase resource usage.
+            network: Name of the Docker network to connect the Tesseract to.
+            network_alias: Alias for the Tesseract in the Docker network.
 
         Returns:
             A Tesseract instance.
@@ -143,6 +150,8 @@ class Tesseract:
             environment=environment,
             gpus=gpus,
             num_workers=num_workers,
+            network=network,
+            network_alias=network_alias,
             debug=True,
         )
         obj._serve_context = None
@@ -226,7 +235,7 @@ class Tesseract:
         This will stop the Tesseract server if it is running.
         """
         if self._serve_context is None:
-            # This can happen if __enter__ short-cirtuits
+            # This can happen if __enter__ short-circuits
             return
         self.teardown()
 
@@ -262,12 +271,16 @@ class Tesseract:
             environment=self._spawn_config.environment,
             gpus=self._spawn_config.gpus,
             num_workers=self._spawn_config.num_workers,
+            network=self._spawn_config.network,
+            network_alias=self._spawn_config.network_alias,
             debug=self._spawn_config.debug,
             host_ip=host_ip,
         )
         self._serve_context = dict(
             container_name=container_name,
             port=container.host_port,
+            network=self._spawn_config.network,
+            network_alias=self._spawn_config.network_alias,
         )
         self._lastlog = None
         self._client = HTTPClient(f"http://{host_ip}:{container.host_port}")
@@ -297,7 +310,7 @@ class Tesseract:
     @cached_property
     @requires_client
     def openapi_schema(self) -> dict:
-        """Get the OpenAPI schema of this Tessseract.
+        """Get the OpenAPI schema of this Tesseract.
 
         Returns:
             dictionary with the OpenAPI Schema.
@@ -307,7 +320,7 @@ class Tesseract:
     @cached_property
     @requires_client
     def input_schema(self) -> dict:
-        """Get the input schema of this Tessseract.
+        """Get the input schema of this Tesseract.
 
         Returns:
              dictionary with the input schema.
@@ -317,7 +330,7 @@ class Tesseract:
     @cached_property
     @requires_client
     def output_schema(self) -> dict:
-        """Get the output schema of this Tessseract.
+        """Get the output schema of this Tesseract.
 
         Returns:
              dictionary with the output schema.
