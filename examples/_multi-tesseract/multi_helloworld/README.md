@@ -9,6 +9,14 @@ $ tesseract build ./examples/helloworld
 $ tesseract build ./examples/_multi-tesseract/multi-helloworld
 ```
 
+### Create Network
+
+Next, we create a network by running:
+
+```bash
+$ docker network create my_network
+```
+
 ## Python SDK Instructions
 
 This example can be executed using the Tesseract Python SDK or CLI. To run the example using the Python SDK, simply execute the Python script:
@@ -20,26 +28,15 @@ $ python run_example.py
 
 ## CLI Instructions
 
-### 1. Create Network (optional)
-
-We can create a network by running:
-
-```bash
-$ docker network create my_network
-```
-
-If you choose not to create a network, you can omit the `--network` argument in the following commands. The Tesseracts will be automatically connected to a network named `bridge`.
-
-
-### 2. Serve `helloworld` Tesseract
+### Serve `helloworld` Tesseract
 
 To serve the Tesseract, run:
 
 ```bash
-$ tesseract serve "helloworld:latest" --network my_network
+$ tesseract serve "helloworld:latest" --network my_network --network-alias helloworld
 ```
 
-This command will print relevant container metadata to `stdout`. Importantly, the container metadata tells us the Tesseract's IP address for each network it is connected to. In our case, the helloworld Tesseract is connected to `my_network` (or `bridge` if no network was created) and is reachable at `172.19.0.2:8000`.
+This command will print relevant container metadata to `stdout`. Importantly, the container metadata tells us the Tesseract's IP address for each network it is connected to. In our case, the helloworld Tesseract is connected to `my_network` and is reachable at `172.19.0.2:8000`. The `network-alias` argument allows us to create more human-readable addresses, in this example `--network-alias helloworld` also makes the Tesseract available at `http://helloworld:8000`.
 
 ```
  [i] Serving Tesseract at http://127.0.0.1:53385
@@ -52,15 +49,15 @@ This command will print relevant container metadata to `stdout`. Importantly, th
 {"project_id": "recursing_kirch", "containers": [{"name": "recursing_kirch", "port": "53385", "ip": "127.0.0.1", "networks": {"my_network": {"ip": "172.19.0.2", "port": 8000}}}]}%
 ```
 
-### 3. Run `multi-helloworld` Tesseract
+### Run `multi-helloworld` Tesseract
 
 With the helloworld Tesseract served, we can now run the multi-helloworld Tesseract:
 
 ```bash
-$ tesseract run "multi-helloworld:latest" apply '{"inputs": {"helloworld_tesseract_url": "172.19.0.2:8000" , "name": "YOU"}}' --network my_network
+$ tesseract run "multi-helloworld:latest" apply '{"inputs": {"helloworld_tesseract_url": "http://helloworld:8000" , "name": "YOU"}}' --network my_network
 ```
 
-### 4. Teardown
+### Teardown
 
 Finally, we tear down the helloworld tesseract using the container name from the metadata returned by the serve command (or by running `tesseract ps`):
 
