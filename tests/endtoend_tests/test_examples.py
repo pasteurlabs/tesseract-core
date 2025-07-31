@@ -1135,22 +1135,18 @@ def test_multi_helloworld_endtoend(
             helloworld_tesseract_img_name,
             "--network",
             dummy_network_name,
+            "--network-alias",
+            "helloworld",
         ],
         catch_exceptions=True,
     )
     assert result.exit_code == 0, result.output
-    container_meta = json.loads(result.stdout)
-    docker_cleanup["containers"].append(container_meta["container_name"])
-    helloworld_tesseract_url = (
-        f"{container_meta['containers']['networks'][dummy_network_name]['ip']}:"
-        f"{container_meta['containers']['networks'][dummy_network_name]['port']}"
-    )
 
     payload = json.dumps(
         {
             "inputs": {
                 "name": "you",
-                "helloworld_tesseract_url": helloworld_tesseract_url,
+                "helloworld_tesseract_url": "http://helloworld:8000",
             }
         }
     )
