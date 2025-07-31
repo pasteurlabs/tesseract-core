@@ -237,6 +237,7 @@ def prepare_build_context(
     Returns:
         The path to the build context directory.
     """
+    src_dir = Path(src_dir)
     context_dir = Path(context_dir)
     context_dir.mkdir(parents=True, exist_ok=True)
 
@@ -520,9 +521,11 @@ def get_tesseract_images() -> list[Image]:
 
 def serve(
     image_name: str,
+    *,
     host_ip: str = "127.0.0.1",
     port: str | None = None,
     network: str | None = None,
+    network_alias: str | None = None,
     volumes: list[str] | None = None,
     environment: dict[str, str] | None = None,
     gpus: list[str] | None = None,
@@ -540,6 +543,7 @@ def serve(
         host_ip: IP address to bind the Tesseracts to.
         port: port or port range to serve each Tesseract on.
         network: name of the network the Tesseract will be attached to.
+        network_alias: alias to use for the Tesseract within the network.
         volumes: list of paths to mount in the Tesseract container.
         environment: dictionary of environment variables to pass to the Tesseract.
         gpus: IDs of host Nvidia GPUs to make available to the Tesseracts.
@@ -573,7 +577,7 @@ def serve(
         environment["TESSERACT_INPUT_PATH"] = "/tesseract/input_data"
         if volumes is None:
             volumes = []
-        if "://" not in input_path:
+        if "://" not in str(input_path):
             input_path = Path(input_path).resolve()
             volumes.append(f"{input_path}:/tesseract/input_data:ro")
 
@@ -608,16 +612,22 @@ def serve(
         port_mappings[f"{host_ip}:{debugpy_port}"] = container_debugpy_port
         environment["TESSERACT_DEBUG"] = "1"
 
-    logger.info(f"Serving Tesseract at http://{ping_ip}:{port}")
-    logger.info(f"View Tesseract: http://{ping_ip}:{port}/docs")
-    if debug:
-        logger.info(f"Debugpy server listening at http://{ping_ip}:{debugpy_port}")
-
     parsed_volumes = _parse_volumes(volumes) if volumes else {}
 
-    extra_args = []
+    extra_args = [
+        "--restart",
+        "unless-stopped",
+    ]
+
     if is_podman():
+        # This ensures podman behaves like Docker in terms of user namespaces
+        # and allows the container to run with the same user ID as the host.
         extra_args.extend(["--userns", "keep-id"])
+
+    if network_alias is not None:
+        if network is None:
+            raise ValueError("Network must be specified if network_alias is provided")
+        extra_args.extend(["--network-alias", network_alias])
 
     container = docker_client.containers.run(
         image=image_name,
@@ -631,6 +641,9 @@ def serve(
         environment=environment,
         extra_args=extra_args,
     )
+    assert isinstance(container, Container)
+
+    logger.info("Waiting for Tesseract to start...")
     # wait for server to start
     timeout = 30
     while True:
@@ -645,8 +658,32 @@ def serve(
         time.sleep(0.1)
         timeout -= 0.1
 
-        if timeout < 0:
-            raise TimeoutError("Tesseract did not start in time")
+        container_status = docker_client.containers.get(container.id).status
+
+        if timeout < 0 or container_status != "running":
+            try:
+                container_logs = container.logs(stdout=True, stderr=True)
+                logger.error(
+                    f"Tesseract container {container.name} failed to start:\n{container_logs.decode()}"
+                )
+            except APIError as ex:
+                logger.warning(
+                    f"Failed to get logs for container {container.name}: {ex}"
+                )
+            try:
+                container.stop()
+            except APIError as ex:
+                logger.warning(f"Failed to stop container {container.name}: {ex}")
+
+            if timeout < 0:
+                raise TimeoutError("Tesseract did not start in time")
+            else:
+                raise RuntimeError("Tesseract failed to start")
+
+    logger.info(f"Serving Tesseract at http://{ping_ip}:{port}")
+    logger.info(f"View Tesseract: http://{ping_ip}:{port}/docs")
+    if debug:
+        logger.info(f"Debugpy server listening at http://{ping_ip}:{debugpy_port}")
 
     return container.name, container
 
@@ -808,7 +845,7 @@ def run_tesseract(
         extra_args.extend(["--userns", "keep-id"])
 
     # Run the container
-    stdout, stderr = docker_client.containers.run(
+    result = docker_client.containers.run(
         image=image,
         command=cmd,
         volumes=parsed_volumes,
@@ -822,6 +859,8 @@ def run_tesseract(
         user=user,
         extra_args=extra_args,
     )
+    assert isinstance(result, tuple)
+    stdout, stderr = result
     stdout = stdout.decode("utf-8")
     stderr = stderr.decode("utf-8")
     return stdout, stderr

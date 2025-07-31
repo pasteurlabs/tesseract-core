@@ -522,13 +522,15 @@ def test_tesseract_serve_interop(
     )
     docker_cleanup["networks"].append(dummy_network_name)
 
-    def serve_tesseract():
+    def serve_tesseract(alias: str):
         run_res = cli_runner.invoke(
             app,
             [
                 "serve",
                 "--network",
                 dummy_network_name,
+                "--network-alias",
+                alias,
                 built_image_name,
             ],
             env={"COLUMNS": "1000"},
@@ -543,14 +545,23 @@ def test_tesseract_serve_interop(
         return container
 
     # Serve two separate tesseracts on the same network
-    tess_1 = serve_tesseract()
-    tess_2 = serve_tesseract()
+    tess_1 = serve_tesseract("tess_1")
+    tess_2 = serve_tesseract("tess_2")
 
     returncode, stdout = tess_1.exec_run(
         [
             "python",
             "-c",
-            f'import requests; requests.get("http://{tess_2.name}:8000/health").raise_for_status()',
+            'import requests; requests.get("http://tess_2:8000/health").raise_for_status()',
+        ]
+    )
+    assert returncode == 0, stdout.decode()
+
+    returncode, stdout = tess_2.exec_run(
+        [
+            "python",
+            "-c",
+            'import requests; requests.get("http://tess_1:8000/health").raise_for_status()',
         ]
     )
     assert returncode == 0, stdout.decode()
