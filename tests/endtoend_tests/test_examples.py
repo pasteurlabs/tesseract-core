@@ -1103,7 +1103,7 @@ def test_multi_helloworld_endtoend(
 
     # Build Tesseract images
     img_names = []
-    for tess_name in ("multi-tesseracts/multi_helloworld", "helloworld"):
+    for tess_name in ("_multi-tesseract/multi_helloworld", "helloworld"):
         img_name = build_tesseract(
             docker_client,
             unit_tesseracts_parent_dir / tess_name,

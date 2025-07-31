@@ -331,7 +331,7 @@ def _docker_cleanup(docker_client, request):
 
 @pytest.fixture
 def dummy_image_name():
-    """Create a dummy image name, and clean up after the test."""
+    """Create a dummy image name."""
     image_id = "".join(random.choices(string.ascii_lowercase + string.digits, k=16))
     image_name = f"tmp_tesseract_image_{image_id}"
     yield image_name
@@ -339,7 +339,7 @@ def dummy_image_name():
 
 @pytest.fixture(scope="module")
 def shared_dummy_image_name():
-    """Create a dummy image name, and clean up after all tests."""
+    """Create a dummy image name."""
     image_id = "".join(random.choices(string.ascii_lowercase + string.digits, k=16))
     image_name = f"tmp_tesseract_image_{image_id}"
     yield image_name
@@ -347,7 +347,7 @@ def shared_dummy_image_name():
 
 @pytest.fixture
 def dummy_network_name():
-    """Create a dummy image name, and clean up after the test."""
+    """Create a dummy image name."""
     network_name = "".join(random.choices(string.ascii_lowercase + string.digits, k=16))
     network_name = f"tmp_tesseract_network_{network_name}"
     yield network_name
