@@ -42,7 +42,8 @@ def requires_client(func: Callable) -> Callable:
     def wrapper(self: Tesseract, *args: Any, **kwargs: Any) -> Any:
         if not self._client:
             raise RuntimeError(
-                f"{self.__class__.__name__} must be used as a context manager when created via `from_image`."
+                f"When creating a {self.__class__.__name__} via `from_image`, "
+                "you must either use it as a context manager or call .serve() before use."
             )
         return func(self, *args, **kwargs)
 
