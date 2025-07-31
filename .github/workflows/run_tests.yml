@@ -173,18 +173,20 @@ jobs:
             echo "demos=[]" >> $GITHUB_OUTPUT
             exit 0
           fi
-          # get JSON array of directories in EXAMPLES_DIR
+          # get JSON array of directories in EXAMPLES_DIR, except ones that start with _
           subjobs=$(
-            find "${{ env.EXAMPLES_DIR }}" -type d -maxdepth 1 -mindepth 1 -exec test -f {}/tesseract_api.py \; -exec basename {} \; \
+            find "${{ env.EXAMPLES_DIR }}" -type d -maxdepth 1 -mindepth 1 -exec basename {} \; \
+            | grep -v '^_' \
             | jq -R -s -c 'split("\n")[:-1]'
           )
           # add "base" to subjobs
           subjobs=$(echo "$subjobs" | jq -c -r '. + ["base"]')
           printf 'matrix=%s\n' "$subjobs" >> $GITHUB_OUTPUT
 
-          # get JSON array of directories in DEMO_DIR
+          # get JSON array of directories in DEMO_DIR, except ones that start with _
           demos=$(
             find "${{ env.DEMO_DIR }}" -type d -maxdepth 1 -mindepth 1 -exec basename {} \; \
+            | grep -v '^_' \
             | jq -R -s -c 'split("\n")[:-1]'
           )
           printf 'demos=%s\n' "$demos" >> $GITHUB_OUTPUT

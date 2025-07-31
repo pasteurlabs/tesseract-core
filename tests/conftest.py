@@ -19,9 +19,7 @@ import pytest
 here = Path(__file__).parent
 
 UNIT_TESSERACT_PATH = here / ".." / "examples"
-UNIT_TESSERACTS = [
-    Path(tr).parent.stem for tr in UNIT_TESSERACT_PATH.glob("*/tesseract_api.py")
-]
+UNIT_TESSERACTS = [Path(tr).stem for tr in UNIT_TESSERACT_PATH.glob("!_*/")]
 
 
 def pytest_addoption(parser):
