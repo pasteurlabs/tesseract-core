@@ -234,7 +234,7 @@ class Tesseract:
         This will stop the Tesseract server if it is running.
         """
         if self._serve_context is None:
-            # This can happen if __enter__ short-cirtuits
+            # This can happen if __enter__ short-circuits
             return
         self.teardown()
 
@@ -309,7 +309,7 @@ class Tesseract:
     @cached_property
     @requires_client
     def openapi_schema(self) -> dict:
-        """Get the OpenAPI schema of this Tessseract.
+        """Get the OpenAPI schema of this Tesseract.
 
         Returns:
             dictionary with the OpenAPI Schema.
@@ -319,7 +319,7 @@ class Tesseract:
     @cached_property
     @requires_client
     def input_schema(self) -> dict:
-        """Get the input schema of this Tessseract.
+        """Get the input schema of this Tesseract.
 
         Returns:
              dictionary with the input schema.
@@ -329,7 +329,7 @@ class Tesseract:
     @cached_property
     @requires_client
     def output_schema(self) -> dict:
-        """Get the output schema of this Tessseract.
+        """Get the output schema of this Tesseract.
 
         Returns:
              dictionary with the output schema.
