@@ -528,14 +528,17 @@ def test_tesseract_serve_volume_permissions(
         assert (tmp_path / "bar").exists()
 
 
-def test_tesseract_serve_interop(built_image_name, docker_client, docker_cleanup):
+def test_tesseract_serve_interop(
+    built_image_name, dummy_network_name, docker_client, docker_cleanup
+):
     cli_runner = CliRunner(mix_stderr=False)
 
     # Network create using subprocess
     subprocess.run(
-        ["docker", "network", "create", "multi-tesseract-network"],
+        ["docker", "network", "create", dummy_network_name],
         check=True,
     )
+    docker_cleanup["networks"].append(dummy_network_name)
 
     def serve_tesseract(alias: str):
         run_res = cli_runner.invoke(
@@ -543,7 +546,7 @@ def test_tesseract_serve_interop(built_image_name, docker_client, docker_cleanup
             [
                 "serve",
                 "--network",
-                "multi-tesseract-network",
+                dummy_network_name,
                 "--network-alias",
                 alias,
                 built_image_name,
