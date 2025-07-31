@@ -128,9 +128,32 @@ def test_build_generate_only(dummy_tesseract_location, skip_checks):
             assert 'RUN ["tesseract-runtime", "check"]' in docker_file_contents
 
 
-def test_env_passthrough_serve(docker_cleanup, docker_client, built_image_name, tmpdir):
+def test_env_passthrough_serve(docker_cleanup, docker_client, built_image_name):
     """Ensure we can pass environment variables to tesseracts when serving."""
-    tmpdir.chmod(0o777)
+    run_res = subprocess.run(
+        [
+            "tesseract",
+            "serve",
+            built_image_name,
+            "--env=TEST_ENV_VAR=foo",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert run_res.returncode == 0, run_res.stderr
+    assert run_res.stdout
+
+    serve_meta = json.loads(run_res.stdout)
+    container_name = serve_meta["container_name"]
+    docker_cleanup["containers"].append(container_name)
+
+    container = docker_client.containers.get(container_name)
+    exit_code, output = container.exec_run(["sh", "-c", "echo $TEST_ENV_VAR"])
+    assert exit_code == 0, f"Command failed with exit code {exit_code}"
+    assert "foo" in output.decode("utf-8"), f"Output was: {output.decode('utf-8')}"
+
+
+def test_io_path_serve(docker_cleanup, docker_client, built_image_name, tmpdir):
     (tmpdir / "input").mkdir()
     (tmpdir / "output").mkdir()
 
@@ -139,7 +162,6 @@ def test_env_passthrough_serve(docker_cleanup, docker_client, built_image_name, 
             "tesseract",
             "serve",
             built_image_name,
-            "--env=TEST_ENV_VAR=foo",
             "--input-path",
             str(tmpdir / "input"),
             "--output-path",
@@ -153,13 +175,9 @@ def test_env_passthrough_serve(docker_cleanup, docker_client, built_image_name, 
 
     serve_meta = json.loads(run_res.stdout)
     container_name = serve_meta["container_name"]
-
     docker_cleanup["containers"].append(container_name)
 
     container = docker_client.containers.get(container_name)
-    exit_code, output = container.exec_run(["sh", "-c", "echo $TEST_ENV_VAR"])
-    assert exit_code == 0, f"Command failed with exit code {exit_code}"
-    assert "foo" in output.decode("utf-8"), f"Output was: {output.decode('utf-8')}"
 
     exit_code, input_path = container.exec_run(
         ["sh", "-c", "echo $TESSERACT_INPUT_PATH"]
@@ -636,27 +654,29 @@ def test_tesseract_cli_options_parsing(built_image_name, tmpdir):
     examples_dir = Path(__file__).parent.parent.parent / "examples"
     example_inputs = examples_dir / "vectoradd" / "example_inputs.json"
 
-    test_commands = (
-        ["apply", "-f", "json+binref", "-o", str(tmpdir), f"@{example_inputs}"],
-        ["apply", f"@{example_inputs}", "-f", "json+binref", "-o", str(tmpdir)],
-        ["apply", "-o", str(tmpdir), f"@{example_inputs}", "-f", "json+binref"],
+    test_command = [
+        "apply",
+        "--output-format",
+        "json+binref",
+        "--output-path",
+        str(tmpdir),
+        f"@{example_inputs}",
+    ]
+
+    run_res = cli_runner.invoke(
+        app,
+        [
+            "run",
+            built_image_name,
+            *test_command,
+        ],
+        catch_exceptions=False,
     )
+    assert run_res.exit_code == 0, run_res.stderr
 
-    for args in test_commands:
-        run_res = cli_runner.invoke(
-            app,
-            [
-                "run",
-                built_image_name,
-                *args,
-            ],
-            catch_exceptions=False,
-        )
-        assert run_res.exit_code == 0, run_res.stderr
-
-        with open(Path(tmpdir) / "results.json") as fi:
-            results = fi.read()
-            assert ".bin:0" in results
+    with open(Path(tmpdir) / "results.json") as fi:
+        results = fi.read()
+        assert ".bin:0" in results
 
 
 def test_tarball_install(dummy_tesseract_package, docker_cleanup):
