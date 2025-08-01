@@ -64,12 +64,12 @@ def test_file_backend_empty_mlflow_uri():
 
 
 def test_custom_log_directory(tmpdir):
-    """Test that FileBackend respects LOG_DIR environment variable."""
+    """Test that FileBackend respects MPA_DIR environment variable."""
     custom_dir = tmpdir / "custom_logs"
-    os.environ["LOG_DIR"] = str(custom_dir)
+    os.environ["MPA_DIR"] = str(custom_dir)
 
     backend = mpa.FileBackend()
-    assert backend.run_dir.is_relative_to(custom_dir / "mpa_logs")
+    assert backend.run_dir.is_relative_to(custom_dir)
     assert backend.run_dir.exists()
 
 

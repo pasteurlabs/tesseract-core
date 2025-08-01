@@ -22,31 +22,15 @@ from .schema_generation import (
 )
 
 
-def make_default_logdir() -> Path:
-    """Makes and returns the path to the configured logging directory.
+def make_logdir() -> Path:
+    """Makes and returns the path to the default logging directory.
 
     Returns:
         The path to the created logging directory
     """
-    log_dir = os.getenv("LOG_DIR")
-    if not log_dir:
-        log_dir = Path(get_config().output_path) / "logs"
-    else:
-        log_dir = Path(log_dir)
-
+    log_dir = Path(get_config().output_path) / "logs"
     log_dir.mkdir(exist_ok=True)
     return log_dir
-
-
-def make_textlogs_logdir() -> Path:
-    """Makes and returns the path to the default directory for text logs.
-
-    Returns:
-        The path to the directory
-    """
-    textlogs_dir = make_default_logdir() / "text_logs"
-    textlogs_dir.mkdir(exist_ok=True)
-    return textlogs_dir
 
 
 @contextmanager
@@ -73,7 +57,7 @@ def redirect_fd(
 @contextmanager
 def stdio_to_logfile() -> Generator[None, None, None]:
     """Context manager for redirecting stdout and stderr to a log file."""
-    logfile = make_textlogs_logdir() / f"{uuid.uuid4()!s}.log"
+    logfile = make_logdir() / f"{uuid.uuid4()!s}.log"
 
     with ExitStack() as stack:
         f = stack.enter_context(open(logfile, "w"))

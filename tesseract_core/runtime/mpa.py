@@ -17,7 +17,7 @@ from typing import Any, Optional
 
 import requests
 
-from tesseract_core.runtime.core import make_default_logdir
+from .config import get_config
 
 
 class BaseBackend(ABC):
@@ -49,11 +49,27 @@ class BaseBackend(ABC):
         pass
 
 
+def make_mpa_dir() -> Path:
+    """Makes and returns the path to the configured mpa output directory.
+
+    Returns:
+        The path to the created mpa directory
+    """
+    mpa_dir = os.getenv("MPA_DIR")
+    if not mpa_dir:
+        mpa_dir = Path(get_config().output_path) / "mpa"
+    else:
+        mpa_dir = Path(mpa_dir)
+
+    mpa_dir.mkdir(exist_ok=True)
+    return mpa_dir
+
+
 class FileBackend(BaseBackend):
     """MPA backend that writes to local files."""
 
     def __init__(self) -> None:
-        mpa_log_dir = make_default_logdir() / "mpa_logs"
+        mpa_log_dir = make_mpa_dir()
         mpa_log_dir.mkdir(exist_ok=True)
 
         # Create a unique run directory
