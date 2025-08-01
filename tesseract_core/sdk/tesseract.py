@@ -4,8 +4,13 @@ from __future__ import annotations
 
 import atexit
 import base64
+import shutil
+import sys
+import time
 import traceback
+import uuid
 from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from functools import cached_property, wraps
 from pathlib import Path
 from types import ModuleType
@@ -52,6 +57,7 @@ class Tesseract:
         self._serve_context = None
         self._lastlog = None
         self._client = HTTPClient(url)
+        self._executor = None
 
     @classmethod
     def from_url(cls, url: str) -> Tesseract:
@@ -148,6 +154,7 @@ class Tesseract:
         obj._serve_context = None
         obj._lastlog = None
         obj._client = None
+        obj._executor = ThreadPoolExecutor(max_workers=2)
         return obj
 
     @classmethod
@@ -334,7 +341,7 @@ class Tesseract:
             dictionary with the results.
         """
         payload = {"inputs": inputs}
-        return self._client.run_tesseract("apply", payload)
+        return self._run_tesseract_job("apply", payload)
 
     @requires_client
     def abstract_eval(self, abstract_inputs: dict) -> dict:
@@ -380,7 +387,7 @@ class Tesseract:
             "jac_inputs": jac_inputs,
             "jac_outputs": jac_outputs,
         }
-        return self._client.run_tesseract("jacobian", payload)
+        return self._run_tesseract_job("jacobian", payload)
 
     @requires_client
     def jacobian_vector_product(
@@ -412,7 +419,7 @@ class Tesseract:
             "jvp_outputs": jvp_outputs,
             "tangent_vector": tangent_vector,
         }
-        return self._client.run_tesseract("jacobian_vector_product", payload)
+        return self._run_tesseract_job("jacobian_vector_product", payload)
 
     @requires_client
     def vector_jacobian_product(
@@ -445,7 +452,43 @@ class Tesseract:
             "vjp_outputs": vjp_outputs,
             "cotangent_vector": cotangent_vector,
         }
-        return self._client.run_tesseract("vector_jacobian_product", payload)
+        return self._run_tesseract_job("vector_jacobian_product", payload)
+
+    def _run_tesseract_job(self, endpoint: str, payload: dict):
+        if not (self._spawn_config and self._spawn_config["output_path"]):
+            return self._client.run_tesseract(endpoint, payload)
+
+        job_id = str(uuid.uuid4())
+        result_future = self._executor.submit(
+            lambda: self._client.run_tesseract(endpoint, payload, job_id=job_id)
+        )
+
+        log_file_path = (
+            Path(self._spawn_config["output_path"]) / f"logs/run_{job_id}/tesseract.log"
+        )
+        interval_millis = 50
+        while not result_future.done():
+            if log_file_path.exists():
+                break
+            else:
+                time.sleep(interval_millis / 1000)
+
+        # If the log file doesn't exist by the time the future has completed,
+        # it's not worth waiting around for it.
+        if log_file_path.exists():
+            with open(log_file_path, "rb") as log_file:
+                # Forward log lines every {interval_millis} milliseconds
+                # until the future completes
+                while not result_future.done():
+                    shutil.copyfileobj(log_file, sys.stdout.buffer)
+                    sys.stdout.buffer.flush()
+                    time.sleep(interval_millis / 1000)
+
+                # Read any remaining content in the logfile
+                shutil.copyfileobj(log_file, sys.stdout.buffer)
+                sys.stdout.buffer.flush()
+
+        return result_future.result(timeout=0)
 
 
 def _tree_map(func: Callable, tree: Any, is_leaf: Callable | None = None) -> Any:
@@ -501,6 +544,7 @@ class HTTPClient:
 
     def __init__(self, url: str) -> None:
         self._url = self._sanitize_url(url)
+        self._executor = ThreadPoolExecutor(max_workers=2)
 
     @staticmethod
     def _sanitize_url(url: str) -> str:
@@ -519,8 +563,18 @@ class HTTPClient:
         return self._url
 
     def _request(
-        self, endpoint: str, method: str = "GET", payload: dict | None = None
+        self,
+        endpoint: str,
+        method: str = "GET",
+        payload: dict | None = None,
+        job_id: str | None = None,
     ) -> dict:
+        data_processing_endpoints = [
+            "apply",
+            "jacobian",
+            "jacobian_vector_product",
+            "vector_jacobian_product",
+        ]
         url = f"{self.url}/{endpoint.lstrip('/')}"
 
         if payload:
@@ -530,7 +584,10 @@ class HTTPClient:
         else:
             encoded_payload = None
 
-        response = requests.request(method=method, url=url, json=encoded_payload)
+        params = {"job_id": job_id} if job_id else None
+        response = requests.request(
+            method=method, url=url, json=encoded_payload, params=params
+        )
 
         if response.status_code == requests.codes.unprocessable_entity:
             # Try and raise a more helpful error if the response is a Pydantic error
@@ -569,12 +626,7 @@ class HTTPClient:
 
         data = response.json()
 
-        if endpoint in [
-            "apply",
-            "jacobian",
-            "jacobian_vector_product",
-            "vector_jacobian_product",
-        ]:
+        if endpoint in data_processing_endpoints:
             data = _tree_map(
                 _decode_array,
                 data,
@@ -583,12 +635,15 @@ class HTTPClient:
 
         return data
 
-    def run_tesseract(self, endpoint: str, payload: dict | None = None) -> dict:
+    def run_tesseract(
+        self, endpoint: str, payload: dict | None = None, job_id: str | None = None
+    ) -> dict:
         """Run a Tesseract endpoint.
 
         Args:
             endpoint: The endpoint to run.
             payload: The payload to send to the endpoint.
+            job_id: The id of the job. Used to retrieve resources associated with this call, such as logs.
 
         Returns:
             The loaded JSON response from the endpoint, with decoded arrays.
@@ -606,7 +661,7 @@ class HTTPClient:
         if endpoint == "openapi_schema":
             endpoint = "openapi.json"
 
-        return self._request(endpoint, method, payload)
+        return self._request(endpoint, method, payload, job_id)
 
 
 class LocalClient:

@@ -56,7 +56,9 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
         ]
 
         @wraps(endpoint_func)
-        async def wrapper(*args: Any, accept: str, job_id: Optional[str], **kwargs: Any):
+        async def wrapper(
+            *args: Any, accept: str, job_id: Optional[str], **kwargs: Any
+        ):
             result = endpoint_func(*args, job_id=job_id, **kwargs)
             return create_response(result, accept)
 

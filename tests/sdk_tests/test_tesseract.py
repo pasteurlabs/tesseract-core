@@ -145,13 +145,15 @@ def test_HTTPClient_run_tesseract(mocker):
 
     client = HTTPClient("somehost")
 
-    out = client.run_tesseract("apply", {"inputs": {"a": 1}})
+    job_id = "job-123"
+    out = client.run_tesseract("apply", {"inputs": {"a": 1}}, job_id=job_id)
 
     assert out == {"result": [4, 4, 4]}
     mocked_request.assert_called_with(
         method="POST",
         url="http://somehost/apply",
         json={"inputs": {"a": 1}},
+        params={"job_id": job_id},
     )
 
 

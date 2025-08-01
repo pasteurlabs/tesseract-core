@@ -145,7 +145,9 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
     )
 
     @assemble_docstring(api_module.apply)
-    def apply(payload: ApplyInputSchema, job_id: Optional[str] = None) -> ApplyOutputSchema:
+    def apply(
+        payload: ApplyInputSchema, job_id: Optional[str] = None
+    ) -> ApplyOutputSchema:
         """Apply the Tesseract to the input data."""
         with start_run(job_id):
             out = api_module.apply(payload.inputs)
