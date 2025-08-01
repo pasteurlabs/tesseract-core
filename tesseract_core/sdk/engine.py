@@ -209,7 +209,6 @@ def prepare_build_context(
     src_dir: str | Path,
     context_dir: str | Path,
     user_config: TesseractConfig,
-    use_ssh_mount: bool = False,
 ) -> Path:
     """Populate the build context for a Tesseract.
 
@@ -232,7 +231,6 @@ def prepare_build_context(
         src_dir: The source directory where the Tesseract project is located.
         context_dir: The directory where the build context will be created.
         user_config: The Tesseract configuration object.
-        use_ssh_mount: Whether to use SSH mount to install dependencies (prevents caching).
 
     Returns:
         The path to the build context directory.
@@ -250,7 +248,6 @@ def prepare_build_context(
         "tesseract_source_directory": "__tesseract_source__",
         "tesseract_runtime_location": "__tesseract_runtime__",
         "config": user_config,
-        "use_ssh_mount": use_ssh_mount,
     }
 
     logger.debug(f"Generating Dockerfile from template: {template_name}")
@@ -376,7 +373,6 @@ def build_tesseract(
     src_dir: str | Path,
     image_tag: str | None,
     build_dir: Path | None = None,
-    inject_ssh: bool = False,
     config_override: dict[tuple[str, ...], Any] | None = None,
     generate_only: bool = False,
 ) -> Image | Path:
@@ -389,7 +385,6 @@ def build_tesseract(
         image_tag: name to be used as a tag for the Tesseract image.
         build_dir: directory to be used to store the build context.
           If not provided, a temporary directory will be created.
-        inject_ssh: whether or not to forward SSH agent when building the image.
         config_override: overrides for configuration options in the Tesseract.
         generate_only: only generate the build context but do not build the image.
 
@@ -430,7 +425,9 @@ def build_tesseract(
         keep_build_dir = True
 
     context_dir = prepare_build_context(
-        src_dir, build_dir, config, use_ssh_mount=inject_ssh
+        src_dir,
+        build_dir,
+        config,
     )
 
     if generate_only:
@@ -443,7 +440,6 @@ def build_tesseract(
             path=context_dir.as_posix(),
             tags=tags,
             dockerfile=context_dir / "Dockerfile",
-            inject_ssh=inject_ssh,
             print_and_exit=generate_only,
         )
     finally:

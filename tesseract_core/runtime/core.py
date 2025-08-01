@@ -224,18 +224,6 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
 
     endpoints.append(health)
 
-    def input_schema() -> dict[str, Any]:
-        """Get input schema for tesseract apply function."""
-        return ApplyInputSchema.model_json_schema()
-
-    endpoints.append(input_schema)
-
-    def output_schema() -> dict[str, Any]:
-        """Get output schema for tesseract apply function."""
-        return ApplyOutputSchema.model_json_schema()
-
-    endpoints.append(output_schema)
-
     if "abstract_eval" in supported_functions:
         AbstractEvalInputSchema, AbstractEvalOutputSchema = create_abstract_eval_schema(
             api_module.InputSchema, api_module.OutputSchema

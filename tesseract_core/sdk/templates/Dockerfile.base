@@ -16,7 +16,6 @@ fi
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
-        ssh \
     && rm -rf /var/lib/apt/lists/*
 
 {% if config.build_config.extra_packages %}
@@ -24,11 +23,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN apt-get update && apt-get install -y --no-install-recommends \
     {{ config.build_config.extra_packages | join(" ") }} \
     && rm -rf /var/lib/apt/lists/*
-{% endif %}
-
-{% if use_ssh_mount %}
-# Set up SSH config
-RUN mkdir -p -m 0700 ~/.ssh && ssh-keyscan github.com >> ~/.ssh/known_hosts
 {% endif %}
 
 # Copy all dependencies, for both the specific Tesseract and the runtime
@@ -40,7 +34,7 @@ COPY local_requirements/ ./local_requirements
 
 # Build a python venv from python provider build scripts.
 # The build script has to create a venv at /python-env
-RUN {% if use_ssh_mount %}--mount=type=ssh{% endif %} bash {{ config.build_config.requirements._build_script }}
+RUN bash {{ config.build_config.requirements._build_script }}
 ENV PATH="/python-env/bin:$PATH"
 
 # Stage 2: Set up runtime environment
