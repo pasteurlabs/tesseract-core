@@ -58,28 +58,3 @@ REST API is not supported.
 ```
 :::
 ::::
-It is also possible to use [MessagePack](https://msgpack.org/index.html) for an efficient (but less human readable) encoding:
-::::{tab-set}
-:::{tab-item} CLI
-:sync: cli
-```bash
-$ tesseract run vectoradd apply --output-format msgpack @examples/vectoradd/example_inputs.json
-��result��nd��type�<f8�kind��shape��data�@@"@
-```
-:::
-:::{tab-item} REST API
-:sync: http
-```bash
-$ curl \
-  -H "Accept: application/msgpack" \
-  -H "Content-Type: application/json" \
-  -d @examples/vectoradd/example_inputs.json \
-  --output - \
-  http://<tesseract-address>:<port>/apply
-��result��nd��type�<f8�kind��shape��data�@@"@
-```
-:::
-::::
-
-Here the returned data is binary, so it is suggested to save it in a file rather than
-to print it directly to the shell.
