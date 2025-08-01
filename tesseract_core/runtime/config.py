@@ -21,6 +21,7 @@ class RuntimeConfig(BaseModel):
     input_path: str = "."
     output_path: str = "."
     output_format: supported_format_type = "json"
+    output_file: str = ""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 

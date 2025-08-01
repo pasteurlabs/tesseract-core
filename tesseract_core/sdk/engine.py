@@ -17,7 +17,7 @@ from collections.abc import Callable, Collection, Sequence
 from contextlib import closing
 from pathlib import Path
 from shutil import copy, copytree, rmtree
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import requests
 from jinja2 import Environment, PackageLoader, StrictUndefined
@@ -534,6 +534,8 @@ def serve(
     user: str | None = None,
     input_path: str | Path | None = None,
     output_path: str | Path | None = None,
+    output_format: Literal["json", "json+base64", "json+binref", "msgpack"]
+    | None = None,
 ) -> tuple:
     """Serve one or more Tesseract images.
 
@@ -556,6 +558,7 @@ def serve(
               Defaults to the current user.
         input_path: Input path to read input files from, such as local directory or S3 URI.
         output_path: Output path to write output files to, such as local directory or S3 URI.
+        output_format: Output format to use for the results.
 
     Returns:
         A tuple of the Tesseract container name and the port it is serving on.
@@ -575,20 +578,31 @@ def serve(
     if environment is None:
         environment = {}
 
-    if volumes is None:
-        volumes = []
+    if not volumes:
+        parsed_volumes = {}
+    else:
+        parsed_volumes = _parse_volumes(volumes)
 
     if input_path:
         environment["TESSERACT_INPUT_PATH"] = "/tesseract/input_data"
         if "://" not in str(input_path):
             local_path = _resolve_file_path(input_path)
-            volumes.append(f"{local_path}:/tesseract/input_data:ro")
+            parsed_volumes[str(local_path)] = {
+                "bind": "/tesseract/input_data",
+                "mode": "ro",
+            }
 
     if output_path:
         environment["TESSERACT_OUTPUT_PATH"] = "/tesseract/output_data"
         if "://" not in str(output_path):
             local_path = _resolve_file_path(output_path, make_dir=True)
-            volumes.append(f"{local_path}:/tesseract/output_data:rw")
+            parsed_volumes[str(local_path)] = {
+                "bind": "/tesseract/output_data",
+                "mode": "rw",
+            }
+
+    if output_format:
+        environment["TESSERACT_OUTPUT_FORMAT"] = output_format
 
     args = []
     container_api_port = "8000"
@@ -620,8 +634,6 @@ def serve(
         debugpy_port = str(get_free_port())
         port_mappings[f"{host_ip}:{debugpy_port}"] = container_debugpy_port
         environment["TESSERACT_DEBUG"] = "1"
-
-    parsed_volumes = _parse_volumes(volumes) if volumes else {}
 
     extra_args = [
         "--restart",
@@ -747,7 +759,9 @@ def run_tesseract(
     user: str | None = None,
     input_path: str | Path | None = None,
     output_path: str | Path | None = None,
-    output_format: str | None = None,
+    output_format: Literal["json", "json+base64", "json+binref", "msgpack"]
+    | None = None,
+    output_file: str | None = None,
 ) -> tuple[str, str]:
     """Start a Tesseract and execute a given command.
 
@@ -766,8 +780,9 @@ def run_tesseract(
             Defaults to the current user.
         input_path: Input path to read input files from, such as local directory or S3 URI.
         output_path: Output path to write output files to, such as local directory or S3 URI.
-        output_format: Format of the output, e.g. "json", "json+binref", etc. This is passed
-            to `tesseract-runtime` as the `--output-format` argument.
+        output_format: Format of the output.
+        output_file: If specified, the output will be written to this file within output_path
+            instead of stdout.
 
     Returns:
         Tuple with the stdout and stderr of the Tesseract.
@@ -802,6 +817,12 @@ def run_tesseract(
                 "mode": "rw",
             }
 
+    if output_format:
+        environment["TESSERACT_OUTPUT_FORMAT"] = output_format
+
+    if output_file:
+        environment["TESSERACT_OUTPUT_FILE"] = output_file
+
     cmd = []
 
     if command:
@@ -826,10 +847,6 @@ def run_tesseract(
                 "mode": "ro",
             }
         cmd.append(arg)
-
-    if output_format:
-        # If output format is specified, add it to the command
-        cmd.extend(["--output-format", output_format])
 
     extra_args = []
     if is_podman():

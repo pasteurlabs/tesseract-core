@@ -6,11 +6,18 @@
 import inspect
 import io
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from enum import Enum
 from pathlib import Path
 from textwrap import dedent
-from typing import Annotated, Any, Literal, Optional, get_args, get_origin
+from typing import (
+    Annotated,
+    Any,
+    Literal,
+    Optional,
+    get_args,
+    get_origin,
+)
 
 import click
 import typer
@@ -42,6 +49,18 @@ CONFIG_FIELDS = {
 }
 
 
+def make_choice_enum(name: str, choices: Iterable[str]) -> type[Enum]:
+    """Create a choice enum for Typer."""
+    return Enum(name, [(choice.upper(), choice) for choice in choices], type=str)
+
+
+def _enum_to_val(val: Any) -> Any:
+    """Convert an Enum value to its raw representation."""
+    if isinstance(val, Enum):
+        return val.value
+    return val
+
+
 class SpellcheckedTyperGroup(typer.core.TyperGroup):
     """A Typer group that suggests similar commands if a command is not found."""
 
@@ -62,7 +81,14 @@ class SpellcheckedTyperGroup(typer.core.TyperGroup):
         return super().get_command(ctx, invoked_command)
 
 
-app = typer.Typer(name="tesseract-runtime", cls=SpellcheckedTyperGroup)
+app = typer.Typer(
+    name="tesseract-runtime",
+    cls=SpellcheckedTyperGroup,
+    no_args_is_help=True,
+    help="Invoke the Tesseract runtime.",
+    invoke_without_command=True,
+    context_settings={"help_option_names": ["-h", "--help"]},
+)
 
 
 def _prettify_docstring(docstr: str) -> str:
@@ -119,7 +145,9 @@ def make_callback() -> Callable:
         The Tesseract runtime can be configured via environment variables; for example,
         ``export TESSERACT_RUNTIME_PORT=8080`` sets the port to use for ``tesseract serve`` to 8080.
         """
-        update_config(**{key: val for key, val in kwargs.items() if val is not None})
+        update_config(
+            **{key: _enum_to_val(val) for key, val in kwargs.items() if val is not None}
+        )
 
     params = []
     for field_name, field_type in CONFIG_FIELDS.items():
@@ -128,7 +156,7 @@ def make_callback() -> Callable:
             continue
 
         if get_origin(field_type) is Literal:
-            field_type = Enum(f"{field_name}Enum", {v: v for v in get_args(field_type)})
+            field_type = make_choice_enum(f"{field_name}Choices", get_args(field_type))
 
         params.append(
             inspect.Parameter(
@@ -153,12 +181,7 @@ def make_callback() -> Callable:
 
 
 main_callback = make_callback()
-register_callback = app.callback(
-    help="Invoke the Tesseract runtime.",
-    invoke_without_command=True,
-    context_settings={"help_option_names": ["-h", "--help"]},
-)
-register_callback(main_callback)
+app.callback()(main_callback)
 
 
 def _schema_to_docstring(schema: Any, current_indent: int = 0) -> str:
@@ -379,6 +402,7 @@ def _create_user_defined_cli_command(
         config = get_config()
         output_path = config.output_path
         output_format = config.output_format
+        output_file = config.output_file
 
         if output_format == "json+binref" and output_path is None:
             raise ValueError("--output-path must be specified for json+binref format")
@@ -401,21 +425,17 @@ def _create_user_defined_cli_command(
                 ) from e
 
         if output_path:
-            update_config(output_path=output_path)
-            output_path = get_config().output_path
-        else:
             Path(output_path).mkdir(parents=True, exist_ok=True)
 
         result = user_function(**user_function_args)
         result = output_to_bytes(result, output_format, output_path)
 
-        if output_path is None:
-            # write raw bytes to out_stream.buffer to support binary data (which may e.g. be piped)
+        # write raw bytes to out_stream.buffer to support binary data (which may e.g. be piped)
+        if not output_file:
             out_stream_.buffer.write(result)
             out_stream_.flush()
         else:
-            format = output_format.split("+", maxsplit=1)[0]
-            write_to_path(result, f"{output_path}/results.{format}")
+            write_to_path(result, f"{output_path}/{output_file}")
 
     function_name = user_function.__name__.replace("_", "-")
 
@@ -492,7 +512,7 @@ def main() -> None:
             sys.exit(1)
 
         _add_user_commands_to_cli(app, out_stream=orig_stdout)
-        app()
+        app(auto_envvar_prefix="TESSERACT_RUNTIME")
 
 
 if __name__ == "__main__":

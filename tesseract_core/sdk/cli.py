@@ -8,6 +8,7 @@ import re
 import sys
 import time
 import webbrowser
+from collections.abc import Iterable
 from contextlib import nullcontext
 from enum import Enum
 from logging import getLogger
@@ -79,7 +80,7 @@ class SpellcheckedTyperGroup(typer.core.TyperGroup):
 app = typer.Typer(
     # Make -h an alias for --help
     context_settings={"help_option_names": ["-h", "--help"]},
-    name="Tesseract",
+    name="tesseract",
     pretty_exceptions_show_locals=False,
     cls=SpellcheckedTyperGroup,
 )
@@ -109,16 +110,20 @@ for temp_with_path in ENV.list_templates(extensions=["py"]):
         AVAILABLE_RECIPES.add(str(temp_with_path.parent))
 AVAILABLE_RECIPES = sorted(AVAILABLE_RECIPES)
 
-# Create some enums for later (this is how typer handles choices)
-CmdEnum = Enum(
-    "CmdEnum", [(cmd.upper(), cmd) for cmd in sorted(POSSIBLE_CMDS)] + [("EMPTY", None)]
-)
-
 LOGLEVELS = ("debug", "info", "warning", "error", "critical")
-LogLevelEnum = Enum("LogLevel", [(level, level) for level in LOGLEVELS])
-
 OUTPUT_FORMATS = ("json", "json+base64", "json+binref", "msgpack")
-OutputFormatEnum = Enum("OutputFormat", [(fmt, fmt) for fmt in OUTPUT_FORMATS])
+
+
+def make_choice_enum(name: str, choices: Iterable[str]) -> type[Enum]:
+    """Create a choice enum for Typer."""
+    return Enum(name, [(choice.upper(), choice) for choice in choices], type=str)
+
+
+def _enum_to_val(val: Any) -> Any:
+    """Convert an Enum value to its raw representation."""
+    if isinstance(val, Enum):
+        return val.value
+    return val
 
 
 def _validate_tesseract_name(name: str | None) -> str:
@@ -149,10 +154,13 @@ def version_callback(value: bool | None) -> None:
         raise typer.Exit()
 
 
+LogLevelChoices = make_choice_enum("LogLevel", LOGLEVELS)
+
+
 @app.callback()
 def main_callback(
     loglevel: Annotated[
-        LogLevelEnum,
+        LogLevelChoices,
         typer.Option(
             help="Set the logging level. At debug level, also print tracebacks for user errors.",
             case_sensitive=False,
@@ -171,7 +179,7 @@ def main_callback(
     ] = None,
 ) -> None:
     """Tesseract: A toolkit for universal, autodiff-native software components."""
-    loglevel: str = loglevel.value.lower()
+    loglevel: str = _enum_to_val(loglevel).lower()
     verbose_tracebacks = loglevel == "debug"
     state.print_user_error_tracebacks = verbose_tracebacks
     app.pretty_exceptions_show_locals = verbose_tracebacks
@@ -350,17 +358,20 @@ def build_image(
         typer.echo(json.dumps(image.tags))
 
 
+RecipeChoices = make_choice_enum("Recipe", AVAILABLE_RECIPES)
+
+
 @app.command("init")
 def init(
     name: Annotated[
         # Guaranteed to be a string by _validate_tesseract_name
-        str | None,
+        str,
         typer.Option(
             help="Tesseract name as specified in tesseract_config.yaml. Will be prompted if not provided.",
             callback=_validate_tesseract_name,
             show_default=False,
         ),
-    ] = None,
+    ] = "",
     target_dir: Annotated[
         Path,
         typer.Option(
@@ -372,14 +383,14 @@ def init(
         ),
     ] = Path("."),
     recipe: Annotated[
-        str,
+        RecipeChoices,
         typer.Option(
-            click_type=click.Choice(AVAILABLE_RECIPES),
             help="Use a pre-configured template to initialize Tesseract API and configuration.",
         ),
     ] = "base",
 ) -> None:
     """Initialize a new Tesseract API module."""
+    recipe: str = _enum_to_val(recipe)
     logger.info(f"Initializing Tesseract {name} in directory: {target_dir}")
     engine.init_api(target_dir, name, recipe=recipe)
 
@@ -437,6 +448,9 @@ def _parse_environment(
         key, value = env.split("=", maxsplit=1)
         env_dict[key] = value
     return env_dict
+
+
+OutputFormatChoices = make_choice_enum("OutputFormat", OUTPUT_FORMATS)
 
 
 @app.command("serve")
@@ -564,6 +578,13 @@ def serve(
             ),
         ),
     ] = None,
+    output_format: Annotated[
+        OutputFormatChoices | None,
+        typer.Option(
+            "--output-format",
+            help=("Output format to use for the Tesseract."),
+        ),
+    ] = None,
 ) -> None:
     """Serve one or more Tesseract images.
 
@@ -571,6 +592,8 @@ def serve(
     with the Tesseract container name, which is required to run the teardown
     command and its respective port.
     """
+    output_format: str | None = _enum_to_val(output_format)
+
     parsed_environment = _parse_environment(environment)
 
     if network_alias is not None and network is None:
@@ -594,6 +617,7 @@ def serve(
             user=user,
             input_path=input_path,
             output_path=output_path,
+            output_format=_enum_to_val(output_format),
         )
     except RuntimeError as ex:
         raise UserError(
@@ -810,6 +834,9 @@ def _sanitize_error_output(error_output: str, tesseract_image: str) -> str:
     return error_output
 
 
+CmdChoices = make_choice_enum("Cmd", sorted(POSSIBLE_CMDS))
+
+
 @app.command(
     "run",
     # We implement --help manually to forward the help of the Tesseract container
@@ -829,7 +856,7 @@ def run_container(
         ),
     ] = None,
     cmd: Annotated[
-        CmdEnum | None,
+        CmdChoices | None,
         typer.Argument(
             help=f"Tesseract command to run, must be one of {sorted(POSSIBLE_CMDS)}",
             metavar="CMD",
@@ -867,13 +894,19 @@ def run_container(
         ),
     ] = None,
     output_format: Annotated[
-        OutputFormatEnum | None,
+        OutputFormatChoices | None,
         typer.Option(
             "--output-format",
+            help=("Output format to use for the Tesseract."),
+        ),
+    ] = None,
+    output_file: Annotated[
+        str | None,
+        typer.Option(
+            "--output-file",
             help=(
-                "Output format to use for the Tesseract. "
-                "This is passed to the Tesseract as an environment variable "
-                "and can be used to control the output format of the Tesseract."
+                "Output filename to write the result to (relative to output path). "
+                "If not set, results will be written to stdout."
             ),
         ),
     ] = None,
@@ -941,6 +974,9 @@ def run_container(
 
     This command starts a Tesseract instance and executes the given command.
     """
+    cmd: str | None = _enum_to_val(cmd)
+    output_format: str | None = _enum_to_val(output_format)
+
     if not tesseract_image:
         if invoke_help:
             context.get_help()
@@ -957,8 +993,6 @@ def run_container(
         else:
             error_string = f"Command is required. Are you sure your Tesseract image name is `{tesseract_image}`?"
             raise typer.BadParameter(error_string, param_hint="CMD")
-
-    cmd: str = cmd.value
 
     if cmd == "serve":
         raise typer.BadParameter(
@@ -995,6 +1029,8 @@ def run_container(
             volumes=volume,
             input_path=input_path,
             output_path=output_path,
+            output_format=output_format,
+            output_file=output_file,
             gpus=gpus,
             environment=parsed_environment,
             network=network,
