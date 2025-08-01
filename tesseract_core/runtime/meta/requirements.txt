@@ -3,7 +3,7 @@ fastapi==0.115.12
 requests==2.32.3
 uvicorn==0.34.0
 click==8.1.8
-typer==0.15.2
+typer==0.16.0
 fsspec[http,s3]==2025.3.0
 msgpack==1.1.0
 pybase64==1.4.1
