@@ -3,16 +3,16 @@
 
 import importlib
 import os
+import sys
+import uuid
 from collections.abc import Callable, Generator
-from contextlib import contextmanager
-from io import TextIOBase
+from contextlib import ExitStack, contextmanager
+from io import TextIOBase, UnsupportedOperation
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Union
 
 from pydantic import BaseModel
-
-from tesseract_core.runtime.experimental import start_run
 
 from .config import get_config
 from .schema_generation import (
@@ -20,6 +20,17 @@ from .schema_generation import (
     create_apply_schema,
     create_autodiff_schema,
 )
+
+
+def make_logdir() -> Path:
+    """Makes and returns the path to the default logging directory.
+
+    Returns:
+        The path to the created logging directory
+    """
+    log_dir = Path(get_config().output_path) / "logs"
+    log_dir.mkdir(exist_ok=True)
+    return log_dir
 
 
 @contextmanager
@@ -41,6 +52,28 @@ def redirect_fd(
         from_fd.flush()
         os.dup2(orig_fd, from_fd.fileno())
         orig_fd_file.close()
+
+
+@contextmanager
+def stdio_to_logfile(job_id: str) -> Generator[None, None, None]:
+    """Context manager for redirecting stdout and stderr to a log file."""
+    logfile = make_logdir() / f"job_{job_id}.log"
+
+    with ExitStack() as stack:
+        f = stack.enter_context(open(logfile, "w"))
+        try:
+            # Check if a file descriptor is available
+            sys.stdout.fileno()
+            sys.stderr.fileno()
+        except UnsupportedOperation:
+            # Don't redirect if stdout/stderr are not file descriptors
+            # (This likely means that streams are already redirected)
+            pass
+        else:
+            # Redirect file descriptors at OS level
+            stack.enter_context(redirect_fd(sys.stdout, f))
+            stack.enter_context(redirect_fd(sys.stderr, f))
+        yield
 
 
 def load_module_from_path(path: Union[Path, str]) -> ModuleType:
@@ -145,9 +178,11 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
     )
 
     @assemble_docstring(api_module.apply)
-    def apply(payload: ApplyInputSchema) -> ApplyOutputSchema:
+    def apply(payload: ApplyInputSchema, job_id: str = "") -> ApplyOutputSchema:
         """Apply the Tesseract to the input data."""
-        with start_run():
+        if job_id == "":
+            job_id = str(uuid.uuid4())
+        with stdio_to_logfile(job_id):
             out = api_module.apply(payload.inputs)
         if isinstance(out, api_module.OutputSchema):
             out = out.model_dump()
@@ -161,12 +196,16 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
         )
 
         @assemble_docstring(api_module.jacobian)
-        def jacobian(payload: JacobianInputSchema) -> JacobianOutputSchema:
+        def jacobian(
+            payload: JacobianInputSchema, job_id: str = ""
+        ) -> JacobianOutputSchema:
             """Computes the Jacobian of the Tesseract.
 
             Differentiates ``jac_outputs`` with respect to ``jac_inputs``, at the point ``inputs``.
             """
-            with start_run():
+            if job_id == "":
+                job_id = str(uuid.uuid4())
+            with stdio_to_logfile(job_id):
                 out = api_module.jacobian(**dict(payload))
             return JacobianOutputSchema.model_validate(
                 out,
@@ -184,13 +223,17 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
         )
 
         @assemble_docstring(api_module.jacobian_vector_product)
-        def jacobian_vector_product(payload: JVPInputSchema) -> JVPOutputSchema:
+        def jacobian_vector_product(
+            payload: JVPInputSchema, job_id: str = ""
+        ) -> JVPOutputSchema:
             """Compute the Jacobian vector product of the Tesseract at the input data.
 
             Evaluates the Jacobian vector product between the Jacobian given by ``jvp_outputs``
             with respect to ``jvp_inputs`` at the point ``inputs`` and the given tangent vector.
             """
-            with start_run():
+            if job_id == "":
+                job_id = str(uuid.uuid4())
+            with stdio_to_logfile(job_id):
                 out = api_module.jacobian_vector_product(**dict(payload))
             return JVPOutputSchema.model_validate(
                 out, context={"output_keys": payload.jvp_outputs}
@@ -204,13 +247,17 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
         )
 
         @assemble_docstring(api_module.vector_jacobian_product)
-        def vector_jacobian_product(payload: VJPInputSchema) -> VJPOutputSchema:
+        def vector_jacobian_product(
+            payload: VJPInputSchema, job_id: str = ""
+        ) -> VJPOutputSchema:
             """Compute the Jacobian vector product of the Tesseract at the input data.
 
             Computes the vector Jacobian product between the Jacobian given by ``vjp_outputs``
             with respect to ``vjp_inputs`` at the point ``inputs`` and the given cotangent vector.
             """
-            with start_run():
+            if job_id == "":
+                job_id = str(uuid.uuid4())
+            with stdio_to_logfile(job_id):
                 out = api_module.vector_jacobian_product(**dict(payload))
             return VJPOutputSchema.model_validate(
                 out, context={"input_keys": payload.vjp_inputs}
