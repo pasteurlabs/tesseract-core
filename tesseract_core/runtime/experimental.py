@@ -1,6 +1,8 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import inspect
+import os
 from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import (
@@ -21,7 +23,7 @@ from pydantic import (
 from pydantic.json_schema import JsonSchemaValue
 from pydantic_core import SchemaSerializer, SchemaValidator, core_schema
 
-from tesseract_core.runtime.file_interactions import parent_path
+from tesseract_core.runtime.file_interactions import PathLike, parent_path
 from tesseract_core.runtime.mpa import (
     log_artifact,
     log_metric,
@@ -29,6 +31,8 @@ from tesseract_core.runtime.mpa import (
     start_run,
 )
 from tesseract_core.runtime.schema_types import safe_issubclass
+
+IS_BUILDING = os.environ.get("_TESSERACT_IS_BUILDING", "0") == "1"
 
 
 class LazySequence(Sequence):
@@ -207,6 +211,7 @@ def _resolve_input_path(path: Path) -> Path:
     if str(input_path) not in str(tess_path):
         raise ValueError(
             f"Invalid input file reference: {path}. "
+            f"Expected path to be relative to {input_path}, but got {tess_path}. "
             "File references have to be relative to --input-path."
         )
     if not tess_path.exists():
@@ -228,6 +233,58 @@ def _strip_output_path(path: Path) -> Path:
 
 InputFileReference = Annotated[Path, AfterValidator(_resolve_input_path)]
 OutputFileReference = Annotated[Path, AfterValidator(_strip_output_path)]
+
+
+def _require_file(file_path: PathLike, require_writable: bool = False) -> Path:
+    """Require a file to be present at the given path."""
+    file_path = _resolve_input_path(Path(file_path))
+
+    if not file_path.is_file():
+        raise FileNotFoundError(f"Required file not found: {file_path}")
+
+    if require_writable and not os.access(file_path, os.W_OK):
+        raise PermissionError(f"Required file is not writable: {file_path}")
+
+    return file_path
+
+
+def required_file(require_writable: bool) -> Callable:
+    """Decorator for function to load required files."""
+
+    def required_file_inner(loader_func: Callable):
+        signature = inspect.signature(loader_func)
+        if "filepath" not in signature.parameters:
+            raise ValueError("loader_func mast have `filepath` argument")
+        if signature.parameters["filepath"].default != inspect.Parameter.empty:
+            filepath = signature.parameters["filepath"].default
+        else:
+            filepath = None
+
+        loader_func_name = loader_func.__name__
+
+        def wrapper(
+            filepath: Union[PathLike, None] = filepath, *args: Any, **kwargs: Any
+        ):
+            if filepath is None:
+                raise ValueError(
+                    f"No filepath passed to required_file {loader_func_name}.\
+                      Either assign the `filepath` explicitly or \
+                      as default argument in {loader_func_name}."
+                )
+
+            if not IS_BUILDING:
+                container_filepath = _require_file(filepath, require_writable)
+                print(
+                    f"Loading required file {container_filepath} for {loader_func_name}."
+                )
+                data = loader_func(container_filepath, *args, **kwargs)
+                return data
+            else:
+                return None
+
+        return wrapper
+
+    return required_file_inner
 
 
 __all__ = [

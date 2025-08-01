@@ -104,7 +104,7 @@ ENV TESSERACT_OUTPUT_PATH="/tesseract/output_data"
 
 # Final sanity check to ensure the runtime is installed and tesseract_api.py is valid
 {% if not config.build_config.skip_checks %}
-RUN ["tesseract-runtime", "check"]
+RUN _TESSERACT_IS_BUILDING=1 tesseract-runtime check
 {% endif %}
 
 EXPOSE 8000

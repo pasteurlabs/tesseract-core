@@ -741,6 +741,17 @@ TEST_CASES = {
             )
         ],
     ),
+    "required_input_files": Config(
+        test_with_random_inputs=False,
+        sample_requests=[
+            SampleRequest(
+                endpoint="apply",
+                payload={"inputs": {}},
+                output_contains_pattern=[r'{"a":1.0,"b":100.0}'],
+            ),
+        ],
+        input_path="input",
+    ),
     "filereference": Config(
         test_with_random_inputs=False,
         sample_requests=[
@@ -874,18 +885,6 @@ def test_unit_tesseract_endtoend(
     docker_cleanup["images"].append(img_name)
 
     # Stage 2: Test CLI usage
-    result = cli_runner.invoke(
-        app,
-        [
-            "run",
-            img_name,
-            "input-schema",
-        ],
-        catch_exceptions=False,
-    )
-    assert result.exit_code == 0, result.output
-    input_schema = result.output
-
     mount_args, io_args = [], []
 
     if unit_tesseract_config.volume_mounts:
@@ -905,6 +904,7 @@ def test_unit_tesseract_endtoend(
                 str(unit_tesseract_path / unit_tesseract_config.input_path),
             ]
         )
+
     if unit_tesseract_config.output_path:
         io_args.extend(
             [
@@ -912,6 +912,20 @@ def test_unit_tesseract_endtoend(
                 str(unit_tesseract_path / unit_tesseract_config.output_path),
             ]
         )
+
+    result = cli_runner.invoke(
+        app,
+        [
+            "run",
+            img_name,
+            *mount_args,
+            "input-schema",
+            *io_args,
+        ],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0, result.output
+    input_schema = result.output
 
     if unit_tesseract_config.test_with_random_inputs:
         random_input = example_from_json_schema(json.loads(input_schema))
@@ -924,6 +938,7 @@ def test_unit_tesseract_endtoend(
                 *mount_args,
                 "apply",
                 json.dumps(random_input),
+                *io_args,
             ],
             catch_exceptions=False,
         )
@@ -1000,6 +1015,16 @@ def test_unit_tesseract_endtoend(
     cli_runner = CliRunner(mix_stderr=False)
     container_name = None
 
+    # required files need input_path with serve
+    serve_io_args = []
+    if unit_tesseract_config.input_path:
+        serve_io_args.extend(
+            [
+                "--input-path",
+                str(unit_tesseract_path / unit_tesseract_config.input_path),
+            ]
+        )
+
     run_res = cli_runner.invoke(
         app,
         [
@@ -1007,6 +1032,7 @@ def test_unit_tesseract_endtoend(
             img_name,
             "-p",
             free_port,
+            *serve_io_args,
         ],
         catch_exceptions=False,
     )
