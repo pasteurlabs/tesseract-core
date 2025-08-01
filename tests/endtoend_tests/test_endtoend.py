@@ -576,7 +576,6 @@ def test_tesseract_serve_interop(
         assert run_res.exit_code == 0
 
         serve_meta = json.loads(run_res.stdout)
-        print(serve_meta)
         container_name = serve_meta["container_name"]
         container = docker_client.containers.get(container_name)
         docker_cleanup["containers"].append(container)
