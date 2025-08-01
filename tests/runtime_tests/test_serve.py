@@ -119,7 +119,6 @@ def http_client(dummy_tesseract_module):
         "json",
         "json+base64",
         "json+binref",
-        "msgpack",
     ],
 )
 def test_create_rest_api_apply_endpoint(http_client, dummy_tesseract_module, format):
@@ -134,16 +133,10 @@ def test_create_rest_api_apply_endpoint(http_client, dummy_tesseract_module, for
 
     assert response.status_code == 200, response.text
 
-    if format == "msgpack":
-        assert (
-            response.content
-            == b"\x81\xa6result\x85\xc4\x02nd\xc3\xc4\x04type\xa3<f4\xc4\x04kind\xc4\x00\xc4\x05shape\x91\x03\xc4\x04data\xc4\x0c\x00\x00`@\x00\x00\xc0@\x00\x00\x08A"  # noqa: E501
-        )
-    else:
-        result = array_from_json(
-            response.json()["result"], Path(get_config().output_path)
-        )
-        assert np.array_equal(result, np.array([3.5, 6.0, 8.5]))
+    result = array_from_json(
+        response.json()["result"], Path(get_config().output_path)
+    )
+    assert np.array_equal(result, np.array([3.5, 6.0, 8.5]))
 
 
 def test_create_rest_api_jacobian_endpoint(http_client, dummy_tesseract_module):

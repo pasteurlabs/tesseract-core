@@ -262,9 +262,7 @@ def test_apply_command_noenv(cli, cli_runner, dummy_tesseract_module, monkeypatc
     assert json.loads(result.stdout) == json.loads(expected)
 
 
-@pytest.mark.parametrize(
-    "input_format", ["json", "msgpack", "json+base64", "json+binref"]
-)
+@pytest.mark.parametrize("input_format", ["json", "json+base64", "json+binref"])
 def test_input_vals_from_local_file(
     cli, cli_runner, tmpdir, dummy_tesseract_module, input_format
 ):
@@ -299,9 +297,7 @@ def test_input_vals_from_local_file(
     assert json.loads(result) == json.loads(expected)
 
 
-@pytest.mark.parametrize(
-    "output_format", ["json", "msgpack", "json+base64", "json+binref"]
-)
+@pytest.mark.parametrize("output_format", ["json", "json+base64", "json+binref"])
 def test_outputs_to_local_file(
     cli, cli_runner, tmpdir, dummy_tesseract_module, output_format
 ):
@@ -354,9 +350,6 @@ def test_outputs_to_local_file(
 
     if container == "json":
         assert result == expected
-    elif container == "msgpack":
-        # result contains numpy arrays, so we need to compare them separately
-        assert (result["result"] == expected["result"]).all()
     else:
         # Unreachable
         raise AssertionError(f"Unexpected output format: {output_format}")
