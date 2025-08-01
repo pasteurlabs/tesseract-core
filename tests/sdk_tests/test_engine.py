@@ -168,7 +168,6 @@ def test_run_tesseract_file_input(mocked_docker, tmpdir):
 
     # Mocked docker just returns the kwargs to `docker run` as json
     res = json.loads(res)
-    print(res)
     assert res["command"] == [
         "apply",
         "@/tesseract/payload.json",
