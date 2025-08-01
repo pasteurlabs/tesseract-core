@@ -93,11 +93,7 @@ various circumstances:
 
 ## Building Tesseracts with private dependencies
 
-In case you have some dependencies in `tesseract_requirements.txt` for which you need to
-ssh into a server (e.g., private repositories which you specify via "git+ssh://..."),
-you can make your ssh agent available to `tesseract build` with the option
-`--forward-ssh-agent`. Alternatively you can use `pip download` to download a dependency
-to the machine that builds the Tesseract.
+In case you have some dependencies in `tesseract_requirements.txt` that are not accessible to the public (e.g., private GitHub repositories or PyPI registries), you can use `pip download`
 
 ## Customizing the build process
 

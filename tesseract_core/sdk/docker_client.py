@@ -5,7 +5,6 @@
 
 import json
 import logging
-import os
 import re
 import shlex
 import subprocess
@@ -988,7 +987,6 @@ def build_docker_image(
     path: str | Path,
     tags: list[str],
     dockerfile: str | Path,
-    inject_ssh: bool = False,
     print_and_exit: bool = False,
 ) -> Image | None:
     """Build a Docker image from a Dockerfile using BuildKit.
@@ -997,7 +995,6 @@ def build_docker_image(
         path: Path to the directory containing the Dockerfile.
         tag: The name of the image to build.
         dockerfile: path within the build context to the Dockerfile.
-        inject_ssh: If True, inject SSH keys into the build.
         print_and_exit: If True, log the build command and exit without building.
 
     Returns:
@@ -1006,19 +1003,6 @@ def build_docker_image(
     # use an instantiated client here, which may be mocked in tests
     client = CLIDockerClient()
     build_args = dict(path=path, tags=tags, dockerfile=dockerfile)
-
-    if inject_ssh:
-        ssh_sock = os.environ.get("SSH_AUTH_SOCK")
-        if ssh_sock is None:
-            raise ValueError(
-                "SSH_AUTH_SOCK environment variable not set (try running `ssh-agent`)"
-            )
-
-        ssh_keys = subprocess.run(["ssh-add", "-L"], capture_output=True)
-        if ssh_keys.returncode != 0 or not ssh_keys.stdout:
-            raise ValueError("No SSH keys found in SSH agent (try running `ssh-add`)")
-        build_args["ssh"] = f"default={ssh_sock}"
-
     build_cmd = Images._get_buildx_command(**build_args)
 
     if print_and_exit:

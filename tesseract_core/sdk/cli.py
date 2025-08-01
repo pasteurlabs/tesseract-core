@@ -263,15 +263,6 @@ def build_image(
             writable=True,
         ),
     ] = None,
-    forward_ssh_agent: Annotated[
-        bool,
-        typer.Option(
-            help=(
-                "Forward the SSH agent to the Docker build environment. "
-                "Has to be provided if requirements.txt contains private dependencies."
-            ),
-        ),
-    ] = False,
     config_override: Annotated[
         list[str] | None,
         typer.Option(
@@ -321,7 +312,6 @@ def build_image(
                 src_dir,
                 tag,
                 build_dir=build_dir,
-                inject_ssh=forward_ssh_agent,
                 config_override=parsed_config_override,
                 generate_only=generate_only,
             )
