@@ -133,9 +133,7 @@ def test_create_rest_api_apply_endpoint(http_client, dummy_tesseract_module, for
 
     assert response.status_code == 200, response.text
 
-    result = array_from_json(
-        response.json()["result"], Path(get_config().output_path)
-    )
+    result = array_from_json(response.json()["result"], Path(get_config().output_path))
     assert np.array_equal(result, np.array([3.5, 6.0, 8.5]))
 
 
