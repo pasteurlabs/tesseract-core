@@ -12,10 +12,14 @@ formatting on the docstrings to make them more readable.
 import copy
 from textwrap import indent
 
+import typer
+
 from tesseract_core.runtime.cli import (
     _add_user_commands_to_cli,
     _prettify_docstring,
-    tesseract_runtime,
+)
+from tesseract_core.runtime.cli import (
+    app as cli_app,
 )
 from tesseract_core.runtime.core import create_endpoints, get_tesseract_api
 
@@ -65,5 +69,8 @@ for func in endpoints:
 # `from tesseract_core.runtime.app_cli import jacobian`
 globals().update({func.__name__: func for func in endpoints})
 
-tesseract_runtime_cli = copy.deepcopy(tesseract_runtime)
-_add_user_commands_to_cli(tesseract_runtime_cli, out_stream=None)
+cli_app = copy.deepcopy(cli_app)
+_add_user_commands_to_cli(cli_app, out_stream=None)
+
+# Expose the underlying click object for doc generation
+tesseract_runtime_cli = typer.main.get_command(cli_app)

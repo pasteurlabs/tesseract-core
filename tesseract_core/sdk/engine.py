@@ -17,7 +17,7 @@ from collections.abc import Callable, Collection, Sequence
 from contextlib import closing
 from pathlib import Path
 from shutil import copy, copytree, rmtree
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import requests
 from jinja2 import Environment, PackageLoader, StrictUndefined
@@ -534,6 +534,8 @@ def serve(
     user: str | None = None,
     input_path: str | Path | None = None,
     output_path: str | Path | None = None,
+    output_format: Literal["json", "json+base64", "json+binref", "msgpack"]
+    | None = None,
 ) -> tuple:
     """Serve one or more Tesseract images.
 
@@ -556,6 +558,7 @@ def serve(
               Defaults to the current user.
         input_path: Input path to read input files from, such as local directory or S3 URI.
         output_path: Output path to write output files to, such as local directory or S3 URI.
+        output_format: Output format to use for the results.
 
     Returns:
         A tuple of the Tesseract container name and the port it is serving on.
@@ -575,20 +578,31 @@ def serve(
     if environment is None:
         environment = {}
 
-    if volumes is None:
-        volumes = []
+    if not volumes:
+        parsed_volumes = {}
+    else:
+        parsed_volumes = _parse_volumes(volumes)
 
     if input_path:
         environment["TESSERACT_INPUT_PATH"] = "/tesseract/input_data"
         if "://" not in str(input_path):
             local_path = _resolve_file_path(input_path)
-            volumes.append(f"{local_path}:/tesseract/input_data:ro")
+            parsed_volumes[str(local_path)] = {
+                "bind": "/tesseract/input_data",
+                "mode": "ro",
+            }
 
     if output_path:
         environment["TESSERACT_OUTPUT_PATH"] = "/tesseract/output_data"
         if "://" not in str(output_path):
             local_path = _resolve_file_path(output_path, make_dir=True)
-            volumes.append(f"{local_path}:/tesseract/output_data:rw")
+            parsed_volumes[str(local_path)] = {
+                "bind": "/tesseract/output_data",
+                "mode": "rw",
+            }
+
+    if output_format:
+        environment["TESSERACT_OUTPUT_FORMAT"] = output_format
 
     args = []
     container_api_port = "8000"
@@ -620,8 +634,6 @@ def serve(
         debugpy_port = str(get_free_port())
         port_mappings[f"{host_ip}:{debugpy_port}"] = container_debugpy_port
         environment["TESSERACT_DEBUG"] = "1"
-
-    parsed_volumes = _parse_volumes(volumes) if volumes else {}
 
     extra_args = [
         "--restart",
@@ -745,12 +757,17 @@ def run_tesseract(
     environment: dict[str, str] | None = None,
     network: str | None = None,
     user: str | None = None,
+    input_path: str | Path | None = None,
+    output_path: str | Path | None = None,
+    output_format: Literal["json", "json+base64", "json+binref", "msgpack"]
+    | None = None,
+    output_file: str | None = None,
 ) -> tuple[str, str]:
     """Start a Tesseract and execute a given command.
 
     Args:
         image: string of the Tesseract to run.
-        command: Tesseract command to run, e.g. apply.
+        command: Tesseract command to run, e.g. `"apply"`.
         args: arguments for the command.
         volumes: list of paths to mount in the Tesseract container.
         gpus: list of GPUs, as indices or names, to passthrough the container.
@@ -761,17 +778,15 @@ def run_tesseract(
         network: name of the Docker network to connect the container to.
         user: user to run the Tesseract as, e.g. '1000' or '1000:1000' (uid:gid).
             Defaults to the current user.
+        input_path: Input path to read input files from, such as local directory or S3 URI.
+        output_path: Output path to write output files to, such as local directory or S3 URI.
+        output_format: Format of the output.
+        output_file: If specified, the output will be written to this file within output_path
+            instead of stdout.
 
     Returns:
         Tuple with the stdout and stderr of the Tesseract.
     """
-    # Args that require rw access to the mounted volume
-    output_args = {"-o", "--output-path"}
-    input_args = {"-i", "--input-path"}
-
-    cmd = [command]
-    current_cmd = None
-
     if environment is None:
         environment = {}
 
@@ -784,42 +799,38 @@ def run_tesseract(
         # Use the current user if not specified
         user = f"{os.getuid()}:{os.getgid()}" if os.name != "nt" else None
 
-    for arg in args:
-        if arg.startswith("-"):
-            current_cmd = arg
-            cmd.append(arg)
-            continue
-
-        # Mount local output directories into Docker container as a volume
-        if current_cmd in output_args and "://" not in arg:
-            if arg.startswith("@"):
-                raise ValueError(
-                    f"Output path {arg} cannot start with '@' (used only for input files)"
-                )
-
-            local_path = _resolve_file_path(arg, make_dir=True)
-
-            path_in_container = "/tesseract/output_data"
-            arg = path_in_container
-
-            # Bind-mount directory
-            parsed_volumes[str(local_path)] = {"bind": path_in_container, "mode": "rw"}
-            environment["TESSERACT_OUTPUT_PATH"] = path_in_container
-
-        if current_cmd in input_args and "://" not in arg:
-            local_path = _resolve_file_path(arg)
-
-            path_in_container = "/tesseract/input_data"
-            arg = path_in_container
-            # Bind-mount directory
+    if input_path:
+        environment["TESSERACT_INPUT_PATH"] = "/tesseract/input_data"
+        if "://" not in str(input_path):
+            local_path = _resolve_file_path(input_path)
             parsed_volumes[str(local_path)] = {
-                "bind": path_in_container,
+                "bind": "/tesseract/input_data",
                 "mode": "ro",
             }
-            environment["TESSERACT_INPUT_PATH"] = path_in_container
 
+    if output_path:
+        environment["TESSERACT_OUTPUT_PATH"] = "/tesseract/output_data"
+        if "://" not in str(output_path):
+            local_path = _resolve_file_path(output_path, make_dir=True)
+            parsed_volumes[str(local_path)] = {
+                "bind": "/tesseract/output_data",
+                "mode": "rw",
+            }
+
+    if output_format:
+        environment["TESSERACT_OUTPUT_FORMAT"] = output_format
+
+    if output_file:
+        environment["TESSERACT_OUTPUT_FILE"] = output_file
+
+    cmd = []
+
+    if command:
+        cmd.append(command)
+
+    for arg in args:
         # Mount local input files marked by @ into Docker container as a volume
-        elif arg.startswith("@") and "://" not in arg:
+        if arg.startswith("@") and "://" not in arg:
             local_path = Path(arg.lstrip("@")).resolve()
 
             if not local_path.is_file():
@@ -835,8 +846,6 @@ def run_tesseract(
                 "bind": path_in_container,
                 "mode": "ro",
             }
-
-        current_cmd = None
         cmd.append(arg)
 
     extra_args = []
@@ -865,7 +874,7 @@ def run_tesseract(
     return stdout, stderr
 
 
-def _resolve_file_path(path: str, make_dir: bool = False) -> Path:
+def _resolve_file_path(path: str | Path, make_dir: bool = False) -> Path:
     """Resolve a file path, creating the directory if necessary."""
     local_path = Path(path).resolve()
     if make_dir:

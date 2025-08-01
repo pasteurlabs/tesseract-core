@@ -23,11 +23,13 @@ DEFAULT_ACCEPT = "application/json"
 
 def create_response(model: BaseModel, accept: str) -> Response:
     """Create a response of the format specified by the Accept header."""
+    config = get_config()
+
     if accept is None or accept == "*/*":
         accept = DEFAULT_ACCEPT
 
     output_format: SUPPORTED_FORMATS = accept.split("/")[-1]
-    content = output_to_bytes(model, output_format)
+    content = output_to_bytes(model, output_format, base_dir=config.output_path)
 
     return Response(status_code=200, content=content, media_type=accept)
 

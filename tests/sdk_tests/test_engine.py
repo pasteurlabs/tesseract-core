@@ -162,7 +162,8 @@ def test_run_tesseract_file_input(mocked_docker, tmpdir):
     res, _ = engine.run_tesseract(
         "foobar",
         "apply",
-        [f"@{infile}", "--output-path", str(outdir)],
+        [f"@{infile}"],
+        output_path=str(outdir),
     )
 
     # Mocked docker just returns the kwargs to `docker run` as json
@@ -170,9 +171,8 @@ def test_run_tesseract_file_input(mocked_docker, tmpdir):
     assert res["command"] == [
         "apply",
         "@/tesseract/payload.json",
-        "--output-path",
-        "/tesseract/output_data",
     ]
+    assert res["environment"]["TESSERACT_OUTPUT_PATH"] == "/tesseract/output_data"
     assert res["image"] == "foobar"
     assert res["volumes"].keys() == {str(infile), str(outdir)}
 
@@ -180,8 +180,9 @@ def test_run_tesseract_file_input(mocked_docker, tmpdir):
     res, _ = engine.run_tesseract(
         "foobar",
         "apply",
-        [f"@{infile}", "--output-path", str(outdir)],
+        [f"@{infile}"],
         volumes=[f"{tmpdir}:/path/in/container:ro"],
+        output_path=str(outdir),
     )
     res = json.loads(res)
     assert res["volumes"].keys() == {str(infile), str(outdir), f"{tmpdir}"}
@@ -196,9 +197,13 @@ def test_run_tesseract_file_input(mocked_docker, tmpdir):
     res, _ = engine.run_tesseract(
         "foobar",
         "apply",
-        [f"@{infile}", "--output-path", str(outdir), "--input-path", str(indir)],
+        [f"@{infile}"],
+        input_path=str(indir),
+        output_path=str(outdir),
     )
     res = json.loads(res)
+    assert res["environment"]["TESSERACT_INPUT_PATH"] == "/tesseract/input_data"
+    assert res["environment"]["TESSERACT_OUTPUT_PATH"] == "/tesseract/output_data"
     assert res["volumes"].keys() == {str(outdir), str(indir), str(infile)}
     assert res["volumes"][str(indir)] == {
         "mode": "ro",
