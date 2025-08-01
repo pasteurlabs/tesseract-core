@@ -1,6 +1,7 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import inspect
 import socket
 
 import numpy as np
@@ -184,3 +185,10 @@ def test_all_endpoints(
     out = getattr(vecadd, endpoint_name)
     if callable(out):
         out(**inputs)
+
+
+def test_signature_consistency():
+    """Test that from_image and engine.serve have the same signature."""
+    from_image_sig = inspect.signature(Tesseract.from_image)
+    serve_sig = inspect.signature(engine.serve)
+    assert from_image_sig == serve_sig
