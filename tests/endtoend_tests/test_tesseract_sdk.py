@@ -189,6 +189,20 @@ def test_all_endpoints(
 
 def test_signature_consistency():
     """Test that from_image and engine.serve have the same signature."""
-    from_image_sig = inspect.signature(Tesseract.from_image)
-    serve_sig = inspect.signature(engine.serve)
-    assert from_image_sig == serve_sig
+    # from_image does not have a `debug` parameter (debug mode is always enabled)
+    allowed_diff = ["debug"]
+
+    from_image_sig = dict(inspect.signature(Tesseract.from_image).parameters)
+    serve_sig = dict(inspect.signature(engine.serve).parameters)
+
+    for param in allowed_diff:
+        from_image_sig.pop(param, None)
+        serve_sig.pop(param, None)
+
+    assert set(from_image_sig.keys()) == set(serve_sig.keys())
+
+    for key in from_image_sig:
+        assert from_image_sig[key].default == serve_sig[key].default, (
+            f"Default value mismatch for parameter '{key}': "
+            f"{from_image_sig[key].default} != {serve_sig[key].default}"
+        )
