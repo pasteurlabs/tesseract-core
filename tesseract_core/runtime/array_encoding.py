@@ -373,6 +373,8 @@ def decode_array(
     expected_dtype: Optional[str],
 ) -> ArrayLike:
     """Decode an EncodedArrayModel to a NumPy array."""
+    from tesseract_core.runtime.config import get_config
+
     context = info.context if info.context else {}
 
     try:
@@ -380,7 +382,8 @@ def decode_array(
             data = _load_base64_arraydict(val.model_dump())
 
         elif val.data.encoding == "binref":
-            data = _load_binref_arraydict(val.model_dump(), context.get("base_dir"))
+            base_dir = context.get("base_dir", get_config().input_path)
+            data = _load_binref_arraydict(val.model_dump(), base_dir)
 
         # keep checking for "raw" for backwards compat
         elif val.data.encoding in {"json", "raw"}:
@@ -409,6 +412,8 @@ def encode_array(
     arr: ArrayLike, info: Any, expected_shape: ShapeType, expected_dtype: Optional[str]
 ) -> Union[EncodedArrayModel, ArrayLike]:
     """Encode a NumPy array as an EncodedArrayModel."""
+    from tesseract_core.runtime.config import get_config
+
     # Convert to a NumPy array if necessary
     arr = python_to_array(arr, expected_shape, expected_dtype)
 
@@ -422,15 +427,10 @@ def encode_array(
     if array_encoding == "base64":
         data = _dump_base64_arraydict(arr)
     elif array_encoding == "binref":
-        if not context.get("base_dir"):
-            raise ValueError(
-                "To write data with binref encoding you have to provide a 'base_dir' to "
-                "store array data like so: "
-                "`context={'array_encoding':'binref', 'base_dir': 'path/to/arraydata'}"
-            )
+        base_dir = context.get("base_dir", get_config().output_path)
         data, new_binref_uuid = _dump_binref_arraydict(
             arr,
-            base_dir=context.get("base_dir"),
+            base_dir=base_dir,
             current_binref_uuid=context.get("__binref_uuid", str(uuid4())),
             max_file_size=context.get("max_file_size", MAX_BINREF_BUFFER_SIZE),
         )
