@@ -154,6 +154,7 @@ def test_log_artifact_missing_file():
 
 def test_mlflow_backend_creation(tmpdir):
     """Test that MLflowBackend is created when MLFLOW_TRACKING_URI is set."""
+    pytest.importorskip("mlflow")  # Skip if MLflow is not installed
     mlflow_dir = tmpdir / "mlflow_backend_test"
     os.environ["MLFLOW_TRACKING_URI"] = f"file://{mlflow_dir}"
     backend = mpa._create_backend()
@@ -162,6 +163,7 @@ def test_mlflow_backend_creation(tmpdir):
 
 def test_mlflow_log_calls(tmpdir):
     """Test MLflow backend logging functions with temporary directory."""
+    pytest.importorskip("mlflow")  # Skip if MLflow is not installed
     mlflow_dir = tmpdir / "mlflow_logging_test"
     os.environ["MLFLOW_TRACKING_URI"] = f"file://{mlflow_dir}"
 

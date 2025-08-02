@@ -6,6 +6,7 @@ from typing import Any
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import numpy as np
 from pydantic import BaseModel, Field, model_validator
 from typing_extensions import Self
 
@@ -19,7 +20,7 @@ class Vector_and_Scalar(BaseModel):
     )
     s: Differentiable[Float32] = Field(description="A scalar", default=1.0)
 
-    def scale(self) -> Differentiable[Array[(None,), Float32]]:
+    def scale(self) -> np.ndarray:
         return self.s * self.v
 
 
