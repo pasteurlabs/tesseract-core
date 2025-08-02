@@ -14,11 +14,11 @@ import boto3
 import fsspec
 import numpy as np
 import pytest
-from click.testing import CliRunner
 from moto.server import ThreadedMotoServer
+from typer.testing import CliRunner
 
 from tesseract_core.runtime.cli import _add_user_commands_to_cli
-from tesseract_core.runtime.cli import tesseract_runtime as cli_cmd
+from tesseract_core.runtime.cli import app as cli_cmd
 from tesseract_core.runtime.file_interactions import load_bytes, output_to_bytes
 
 test_input = {
@@ -151,16 +151,17 @@ def test_http_server(free_port):
 @pytest.fixture
 def cli():
     new_cmd = copy.deepcopy(cli_cmd)
-    return _add_user_commands_to_cli(new_cmd, out_stream=None)
+    _add_user_commands_to_cli(new_cmd, out_stream=None)
+    return new_cmd
 
 
 def test_invocation_no_args_prints_usage(cli, cli_runner):
-    result = cli_runner.invoke(cli, env={"NO_COLOR": "true"})
-    assert result.exit_code == 2, result.stdout
-    assert "Usage: tesseract-runtime" in result.stderr
+    result = cli_runner.invoke(cli, env={"TERM": "dumb"})
+    assert result.exit_code == 0, result.stdout
+    assert "Usage: tesseract-runtime" in result.stdout
 
 
-def test_input_val_schema_command(cli, cli_runner):
+def test_input_schema_command(cli, cli_runner):
     result = cli_runner.invoke(cli, ["input-schema"], catch_exceptions=False)
     assert result.exit_code == 0, result.stderr
     assert "properties" in result.stdout
@@ -242,10 +243,8 @@ def test_apply_command_binref(cli, cli_runner, dummy_tesseract_module, tmpdir):
     assert "binref encoded with a relative path" in result.stderr
 
 
-def test_apply_command_noenv(
-    cli, cli_runner, dummy_tesseract_module, dummy_tesseract_noenv
-):
-    # ensure dummy_tesseract_noenv properly unset TESSERACT_API_PATH
+def test_apply_command_noenv(cli, cli_runner, dummy_tesseract_module, monkeypatch):
+    monkeypatch.delenv("TESSERACT_API_PATH", raising=False)
     assert "TESSERACT_API_PATH" not in os.environ
     inputs = dummy_tesseract_module.InputSchema(**test_input).model_dump_json(
         context={"array_encoding": "base64"}
@@ -304,23 +303,24 @@ def test_outputs_to_local_file(
 ):
     """Test the apply command writing outputs to a local file."""
     tmpdir = Path(tmpdir)
+    container = output_format.split("+")[0]
     result = cli_runner.invoke(
         cli,
         [
-            "apply",
-            json.dumps({"inputs": test_input}),
             "--output-path",
             tmpdir,
             "--output-format",
             output_format,
+            "--output-file",
+            f"results.{container}",
+            "apply",
+            json.dumps({"inputs": test_input}),
         ],
         catch_exceptions=False,
     )
     assert result.exit_code == 0, result.stderr
 
     test_input_val = dummy_tesseract_module.InputSchema.model_validate(test_input)
-
-    container = output_format.split("+")[0]
 
     expected = dummy_tesseract_module.apply(test_input_val)
     expected = output_to_bytes(expected, output_format, base_dir=tmpdir)
@@ -440,8 +440,6 @@ def test_optional_arguments_stay_optional_in_cli(
 
 def test_apply_fails_if_required_args_missing(cli, cli_runner):
     result = cli_runner.invoke(cli, ["apply", json.dumps({"inputs": {"a": [1, 2, 3]}})])
-    print("Result:", result)
-    print(result.exit_code, result.stdout, result.stderr)
     assert result.exit_code == 2
     assert "missing" in result.stderr
 

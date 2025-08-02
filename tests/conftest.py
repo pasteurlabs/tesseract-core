@@ -95,13 +95,32 @@ def pytest_collection_modifyitems(config, items):
 
 
 @pytest.fixture(scope="session", autouse=True)
-def set_tesseract_output_dir(tmp_path_factory):
+def tesseract_output_dir(tmp_path_factory):
     """Set the Tesseract output directory for the session."""
-    from tesseract_core.runtime.config import update_config
-
     output_path = tmp_path_factory.mktemp("output_path")
     os.environ["TESSERACT_OUTPUT_PATH"] = str(output_path)
-    update_config(output_path=str(output_path))
+    yield output_path
+
+
+@pytest.fixture(autouse=True)
+def reset_config():
+    """Reset the runtime configuration before each test."""
+    import tesseract_core.runtime.config
+    import tesseract_core.sdk.config
+
+    initial_config_sdk = tesseract_core.sdk.config._current_config
+    initial_config_runtime = tesseract_core.runtime.config._current_config
+
+    try:
+        yield
+    finally:
+        # Reset the SDK config
+        tesseract_core.sdk.config._current_config = initial_config_sdk
+        tesseract_core.sdk.config._config_overrides.clear()
+
+        # Reset the runtime config
+        tesseract_core.runtime.config._current_config = initial_config_runtime
+        tesseract_core.runtime.config._config_overrides.clear()
 
 
 @pytest.fixture(scope="session")
@@ -162,50 +181,11 @@ def dummy_tesseract_module(dummy_tesseract_package):
 
 
 @pytest.fixture
-def dummy_tesseract(dummy_tesseract_package):
+def dummy_tesseract(dummy_tesseract_package, monkeypatch):
     """Set tesseract_api_path env var for testing purposes."""
-    from tesseract_core.runtime.config import get_config, update_config
-
-    orig_config_kwargs = {}
-    orig_path = get_config().api_path
-    # default may have been used and tesseract_api.py is not guaranteed to exist
-    # therefore, we only pass the original path in cleanup if not equal to default
-    if orig_path != Path("tesseract_api.py"):
-        orig_config_kwargs |= {"api_path": orig_path}
     api_path = Path(dummy_tesseract_package / "tesseract_api.py").resolve()
-
-    try:
-        # Configure via envvar so we also propagate it to subprocesses
-        os.environ["TESSERACT_API_PATH"] = str(api_path)
-        update_config(api_path=api_path)
-        yield
-    finally:
-        # As this is used by an auto-use fixture, cleanup may happen
-        # after dummy_tesseract_noenv has already unset
-        if "TESSERACT_API_PATH" in os.environ:
-            del os.environ["TESSERACT_API_PATH"]
-        update_config(**orig_config_kwargs)
-
-
-@pytest.fixture
-def dummy_tesseract_noenv(dummy_tesseract_package):
-    """Use without tesseract_api_path to test handling of this."""
-    from tesseract_core.runtime.config import get_config, update_config
-
-    orig_api_path = get_config().api_path
-    orig_cwd = os.getcwd()
-
-    # Ensure TESSERACT_API_PATH is not set with python os
-    if "TESSERACT_API_PATH" in os.environ:
-        del os.environ["TESSERACT_API_PATH"]
-
-    try:
-        os.chdir(dummy_tesseract_package)
-        update_config()
-        yield
-    finally:
-        update_config(api_path=orig_api_path)
-        os.chdir(orig_cwd)
+    monkeypatch.setenv("TESSERACT_API_PATH", str(api_path))
+    yield
 
 
 @pytest.fixture
@@ -493,6 +473,6 @@ def mocked_docker(monkeypatch):
             return type("Response", (), {"status_code": 200, "json": lambda: {}})()
         raise NotImplementedError(f"Mocked get request to {url} not implemented")
 
-    engine.requests.get = hacked_get
+    monkeypatch.setattr(engine.requests, "get", hacked_get)
 
     yield mock_instance
