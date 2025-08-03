@@ -189,8 +189,12 @@ def test_all_endpoints(
 
 def test_signature_consistency():
     """Test that from_image and engine.serve have the same signature."""
-    # from_image does not have a `debug` parameter (debug mode is always enabled)
-    allowed_diff = ["debug"]
+    allowed_diff = [
+        # debug mode is always enabled in from_image
+        "debug",
+        # setting output format is not meaningful (arrays are decoded automatically)
+        "output_format",
+    ]
 
     from_image_sig = dict(inspect.signature(Tesseract.from_image).parameters)
     serve_sig = dict(inspect.signature(engine.serve).parameters)
