@@ -15,10 +15,7 @@ from .core import create_endpoints
 from .file_interactions import SUPPORTED_FORMATS, output_to_bytes
 
 # Endpoints that should use GET instead of POST
-GET_ENDPOINTS = {"input_schema", "output_schema", "health"}
-
-# TODO: make this configurable via environment variable
-DEFAULT_ACCEPT = "application/json"
+GET_ENDPOINTS = {"health"}
 
 
 def create_response(model: BaseModel, accept: str) -> Response:
@@ -26,9 +23,9 @@ def create_response(model: BaseModel, accept: str) -> Response:
     config = get_config()
 
     if accept is None or accept == "*/*":
-        accept = DEFAULT_ACCEPT
-
-    output_format: SUPPORTED_FORMATS = accept.split("/")[-1]
+        output_format = config.output_format
+    else:
+        output_format: SUPPORTED_FORMATS = accept.split("/")[-1]
     content = output_to_bytes(model, output_format, base_dir=config.output_path)
 
     return Response(status_code=200, content=content, media_type=accept)
