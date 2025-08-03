@@ -22,7 +22,7 @@ Tesseracts provide built-in support for propagating [gradient information](conte
 <small>Internal and external interfaces of a Tesseract.</small>
 ```
 
-Every Tesseract has a single entrypoint, `apply`, which wraps a software functionality of the tesseractor's choice. All other [endpoints](content/api/endpoints.md) that a Tesseract exposes are in relation to this entrypoint. For example, `input_schema` returns its input types, `jacobian` its derivative, ...
+Every Tesseract has a single entrypoint, `apply`, which wraps a software functionality of the tesseractor's choice. All other [endpoints](content/api/endpoints.md) that a Tesseract exposes are in relation to this entrypoint. For example, `abstract_eval` returns its output structure, `jacobian` its derivative, ...
 
 There are several ways in which users interact with Tesseracts, for example:
 

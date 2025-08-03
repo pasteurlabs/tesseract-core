@@ -876,7 +876,7 @@ def test_unit_tesseract_endtoend(
         [
             "run",
             img_name,
-            "input-schema",
+            "openapi-schema",
         ],
         catch_exceptions=False,
     )
@@ -1027,9 +1027,6 @@ def test_unit_tesseract_endtoend(
 
     # Now test server (send requests and validate outputs)
     response = requests.get(f"http://localhost:{free_port}/openapi.json")
-    assert response.status_code == 200
-
-    response = requests.get(f"http://localhost:{free_port}/input_schema")
     assert response.status_code == 200
     out_input_schema = response.json()
     assert "properties" in out_input_schema

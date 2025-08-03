@@ -14,8 +14,6 @@ expected_endpoints = {
     "apply",
     "jacobian",
     "health",
-    "input_schema",
-    "output_schema",
     "abstract_eval",
     "jacobian_vector_product",
     "vector_jacobian_product",

@@ -149,54 +149,9 @@ As they wrap arbitrary computation, each Tesseract has a unique input/output sig
 To make it easier to programmatically know each specific Tesseract's input and output schema,
 you can use the following:
 
-::::{tab-set}
-:::{tab-item} CLI
-:sync: cli
-For the input schema:
-
 ```bash
-$ tesseract run vectoradd input-schema
+$ tesseract apidoc vectoradd
 ```
-
-For the output schema:
-
-```bash
-$ tesseract run vectoradd output-schema
-```
-:::
-:::{tab-item} REST API
-:sync: http
-For the input schema:
-
-```bash
-$ curl <tesseract-address>:<port>/input_schema
-```
-
-For the output schema:
-
-```bash
-$ curl <tesseract-address>:<port>/output_schema
-```
-:::
-:::{tab-item} Python
-:sync: python
-For the input schema:
-
-```python
->>> from tesseract_core import Tesseract
->>> with Tesseract(image="vectoradd") as vectoradd:
->>>     vectoradd.input_schema
-```
-
-For the output schema:
-
-```python
->>> from tesseract_core import Tesseract
->>> with Tesseract(image="vectoradd") as vectoradd:
->>>     vectoradd.output_schema
-```
-:::
-::::
 
 Schemas are returned in the [JSON Schema](https://json-schema.org/) format,
 which is intended for programmatic parsing rather than human
@@ -237,7 +192,7 @@ attribute:
 ```python
 >>> with Tesseract(image="vectoradd") as vectoradd:
 >>>     vectoradd.available_endpoints
-['apply', 'jacobian', 'health', 'input_schema', 'output_schema']
+['apply', 'jacobian', 'health']
 ```
 :::
 ::::
