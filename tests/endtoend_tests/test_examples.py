@@ -882,12 +882,17 @@ def test_unit_tesseract_endtoend(
     )
     assert result.exit_code == 0, result.output
     openapi_schema = json.loads(result.output)
-    input_schema = openapi_schema["components"]["schemas"]["ApplyInputSchema"]
-    # input_schema = openapi_schema["paths"]["/apply"]["post"]["requestBody"]["content"]["application/json"]["schema"]
-    # input_schema.update({"components": openapi_schema["components"]})
 
-    print(input_schema)
-    raise
+    def _input_schema_from_openapi(openapi_schema):
+        input_schema = openapi_schema["components"]["schemas"]["ApplyInputSchema"]
+        input_schema.update({"$defs": openapi_schema["components"]["schemas"]})
+        input_schema["$defs"].pop("ApplyInputSchema", None)
+        input_schema = json.loads(
+            json.dumps(input_schema).replace("components/schemas", "$defs")
+        )
+        return input_schema
+
+    input_schema = _input_schema_from_openapi(openapi_schema)
 
     mount_args, io_args = [], []
 
@@ -988,10 +993,6 @@ def test_unit_tesseract_endtoend(
                 assert_contains_array_allclose(output_json, array)
 
     # Stage 3: Test HTTP server
-    if unit_tesseract_config.volume_mounts is not None:
-        # TODO: Mounts are not supported in HTTP mode yet, skip rest of the test for now
-        return
-
     # Cannot mix stderr if we want to load the json
     cli_runner = CliRunner(mix_stderr=False)
     container_name = None
@@ -1036,13 +1037,6 @@ def test_unit_tesseract_endtoend(
     assert response.status_code == 200
     out_input_schema = response.json()
     assert "properties" in out_input_schema
-
-    if (
-        unit_tesseract_config.volume_mounts is not None
-        or unit_tesseract_config.input_path is not None
-    ):
-        # TODO: Mounts are not supported in HTTP mode yet, skip rest of the test for now
-        return
 
     if unit_tesseract_config.test_with_random_inputs:
         payload_from_schema = example_from_json_schema(out_input_schema)
