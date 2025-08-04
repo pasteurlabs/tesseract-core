@@ -109,7 +109,7 @@ def test_serve_lifecycle(mock_serving, mock_clients):
         pass
 
     mock_serving["serve_mock"].assert_called_with(
-        "sometesseract:0.2.3",
+        image_name="sometesseract:0.2.3",
         port=None,
         volumes=[],
         environment={},
@@ -119,6 +119,9 @@ def test_serve_lifecycle(mock_serving, mock_clients):
         network=None,
         network_alias=None,
         host_ip="127.0.0.1",
+        user=None,
+        input_path=None,
+        output_path=None,
     )
 
     mock_serving["teardown_mock"].assert_called_with("container-id-123")
