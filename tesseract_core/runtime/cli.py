@@ -6,6 +6,7 @@
 import inspect
 import io
 import sys
+import warnings
 from collections.abc import Callable, Iterable
 from enum import Enum
 from pathlib import Path
@@ -405,8 +406,13 @@ def _create_user_defined_cli_command(
         output_file = config.output_file
 
         if output_format == "json+binref" and output_path is None:
-            raise ValueError(
-                "--output-path must be specified when using 'json+binref' format"
+            warnings.warn(
+                (
+                    "When using the 'json+binref' output format, "
+                    "consider specifying --output-path as well to easily retrieve .bin files."
+                ),
+                UserWarning,
+                stacklevel=2,
             )
 
         out_stream_ = out_stream or sys.stdout

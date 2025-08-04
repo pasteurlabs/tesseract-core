@@ -567,8 +567,11 @@ def serve(
         raise ValueError("Tesseract image name must be provided")
 
     if output_format == "json+binref" and output_path is None:
-        raise ValueError(
-            "--output-path must be specified when using 'json+binref' format"
+        logger.warning(
+            (
+                "When using the 'json+binref' output format, "
+                "consider specifying --output-path as well to easily retrieve .bin files."
+            ),
         )
 
     image = docker_client.images.get(image_name)

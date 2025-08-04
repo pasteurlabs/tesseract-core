@@ -190,7 +190,10 @@ def test_io_path_serve(docker_cleanup, docker_client, built_image_name, tmpdir):
     assert "/tesseract/input_data" in input_path.decode("utf-8")
     assert "/tesseract/output_data" in output_path.decode("utf-8")
 
-    # with --output-format json+binref, you have to specify an --output-path
+
+def test_io_path_serve_warnings(
+    docker_cleanup, docker_client, built_image_name, tmpdir
+):
     run_res = subprocess.run(
         [
             "tesseract",
@@ -202,7 +205,11 @@ def test_io_path_serve(docker_cleanup, docker_client, built_image_name, tmpdir):
         capture_output=True,
         text=True,
     )
-    assert "--output-path must be specified when using 'json+binref'" in run_res.stderr
+    from IPython import embed
+
+    embed()
+    raise
+    assert "consider specifying --output-path" in run_res.stderr
 
 
 def test_tesseract_list(built_image_name):
@@ -698,18 +705,18 @@ def test_tesseract_cli_options_parsing(built_image_name, tmpdir):
     assert len(list(tmpdir.glob("*.bin"))) > 0
 
     # with --output-format json+binref, you have to specify an --output-path
-    with pytest.raises(ValueError):
-        test_command = [
-            "apply",
-            "--output-format",
-            "json+binref",
-            f"@{example_inputs}",
-        ]
-        cli_runner.invoke(
-            app,
-            ["run", built_image_name, *test_command],
-            catch_exceptions=False,
-        )
+    test_command = [
+        "apply",
+        "--output-format",
+        "json+binref",
+        f"@{example_inputs}",
+    ]
+    run_res = cli_runner.invoke(
+        app,
+        ["run", built_image_name, *test_command],
+        catch_exceptions=False,
+    )
+    assert "consider specifying --output-path" in run_res.stderr
 
 
 def test_tarball_install(dummy_tesseract_package, docker_cleanup):

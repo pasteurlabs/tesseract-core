@@ -594,11 +594,6 @@ def serve(
     """
     output_format: str | None = _enum_to_val(output_format)
 
-    if output_format == "json+binref" and output_path is None:
-        raise ValueError(
-            "--output-path must be specified when using 'json+binref' format."
-        )
-
     parsed_environment = _parse_environment(environment)
 
     if network_alias is not None and network is None:
@@ -983,8 +978,11 @@ def run_container(
     output_format: str | None = _enum_to_val(output_format)
 
     if output_format == "json+binref" and output_path is None:
-        raise ValueError(
-            "--output-path must be specified when using 'json+binref' format."
+        logger.warning(
+            (
+                "When using the 'json+binref' output format, "
+                "consider specifying --output-path as well to easily retrieve .bin files."
+            ),
         )
 
     if not tesseract_image:
