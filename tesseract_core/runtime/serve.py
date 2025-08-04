@@ -15,7 +15,7 @@ from .core import create_endpoints
 from .file_interactions import SUPPORTED_FORMATS, output_to_bytes
 
 # Endpoints that should use GET instead of POST
-GET_ENDPOINTS = {"health"}
+GET_ENDPOINTS = {"input_schema", "output_schema", "health"}
 
 
 def create_response(model: BaseModel, accept: str) -> Response:
