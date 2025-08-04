@@ -1,14 +1,14 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-import importlib
+import importlib.util
 import os
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from io import TextIOBase
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Union
+from typing import Any, TextIO, Union
 
 from pydantic import BaseModel
 
@@ -24,22 +24,29 @@ from .schema_generation import (
 
 @contextmanager
 def redirect_fd(
-    from_fd: TextIOBase, to_fd: TextIOBase
-) -> Generator[TextIOBase, None, None]:
+    from_: TextIO, to_: Union[TextIO, int]
+) -> Generator[TextIO, None, None]:
     """Redirect a file descriptor at OS level.
+
+    Args:
+        from_: The file object to redirect from.
+        to_: The file descriptor or file object to redirect to.
 
     Yields:
         A writable file object connected to the original file descriptor.
     """
-    orig_fd = os.dup(from_fd.fileno())
-    from_fd.flush()
-    os.dup2(to_fd.fileno(), from_fd.fileno())
+    orig_fd = os.dup(from_.fileno())
+    from_.flush()
+    if isinstance(to_, TextIOBase):
+        to_ = to_.fileno()
+    assert isinstance(to_, int)
+    os.dup2(to_, from_.fileno())
     orig_fd_file = os.fdopen(orig_fd, "w", closefd=True)
     try:
         yield orig_fd_file
     finally:
-        from_fd.flush()
-        os.dup2(orig_fd, from_fd.fileno())
+        from_.flush()
+        os.dup2(orig_fd, from_.fileno())
         orig_fd_file.close()
 
 

@@ -462,7 +462,7 @@ def test_stdout_redirect_cli():
 def test_stdout_redirect_subprocess(tmpdir, target):
     """Ensure that stdout is redirected to stderr / files even in non-Python subprocesses."""
     if target == "file":
-        target_stream = f"open(\"{tmpdir / 'test_output.log'}\", 'w')"
+        target_stream = "f"
     else:
         target_stream = "sys.stderr"
 
@@ -473,7 +473,8 @@ def test_stdout_redirect_subprocess(tmpdir, target):
         "from tesseract_core.runtime.core import redirect_fd",
         "print('stdout', file=sys.stdout)",
         "print('stderr', file=sys.stderr)",
-        f"with redirect_fd(sys.stdout, {target_stream}) as orig_stdout:",
+        f"with open(\"{tmpdir / 'test_output.log'}\", 'w') as f:",
+        f"  with redirect_fd(sys.stdout, {target_stream}) as orig_stdout:",
         "    os.system('echo stderr')",
         "    print('stderr', file=sys.stdout)",
         "    print('stderr', file=sys.stderr)",

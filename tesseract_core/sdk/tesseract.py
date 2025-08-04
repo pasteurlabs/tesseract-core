@@ -250,7 +250,7 @@ class Tesseract:
                 "Can only retrieve logs for a Tesseract created via from_image."
             )
         if self._serve_context is None:
-            return self._lastlog
+            return self._lastlog or ""
         return engine.logs(self._serve_context["container_name"])
 
     def serve(self, port: str | None = None, host_ip: str = "127.0.0.1") -> None:

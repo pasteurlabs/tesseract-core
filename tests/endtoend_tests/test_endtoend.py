@@ -774,7 +774,7 @@ def test_logging(dummy_tesseract_package, tmpdir, docker_cleanup):
         text=True,
     )
     assert run_res.returncode == 0, run_res.stderr
-    assert "Hello from tesseract_api.py!" == run_res.stderr.strip()
+    assert "Hello from tesseract_api.py!\nHello from apply!" == run_res.stderr.strip()
 
     results = json.loads(run_res.stdout.strip())
     assert results["out"] == "Received message: Test message"
