@@ -191,7 +191,7 @@ def test_run_tesseract_file_input(mocked_docker, tmpdir):
         "bind": "/path/in/container",
     }
 
-    # Test the same but with --input_path
+    # Test the same but with --input-path
     indir = tmpdir / "input_path"
     indir.mkdir()
     res, _ = engine.run_tesseract(
