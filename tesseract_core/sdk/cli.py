@@ -981,7 +981,7 @@ def run_container(
         logger.warning(
             (
                 "When using the 'json+binref' output format, "
-                "consider specifying --output-path as well to easily retrieve .bin files."
+                "consider specifying --output-path to easily retrieve .bin files."
             ),
         )
 

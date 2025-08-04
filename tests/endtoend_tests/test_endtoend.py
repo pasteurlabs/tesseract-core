@@ -205,10 +205,6 @@ def test_io_path_serve_warnings(
         capture_output=True,
         text=True,
     )
-    from IPython import embed
-
-    embed()
-    raise
     assert "consider specifying --output-path" in run_res.stderr
 
 

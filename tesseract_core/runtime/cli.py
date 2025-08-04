@@ -409,7 +409,7 @@ def _create_user_defined_cli_command(
             warnings.warn(
                 (
                     "When using the 'json+binref' output format, "
-                    "consider specifying --output-path as well to easily retrieve .bin files."
+                    "consider specifying --output-path to easily retrieve .bin files."
                 ),
                 UserWarning,
                 stacklevel=2,
