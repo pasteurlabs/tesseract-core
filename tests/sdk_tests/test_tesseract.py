@@ -122,6 +122,7 @@ def test_serve_lifecycle(mock_serving, mock_clients):
         user=None,
         input_path=None,
         output_path=None,
+        output_format=None,
     )
 
     mock_serving["teardown_mock"].assert_called_with("container-id-123")

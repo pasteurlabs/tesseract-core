@@ -191,9 +191,7 @@ def test_io_path_serve(docker_cleanup, docker_client, built_image_name, tmpdir):
     assert "/tesseract/output_data" in output_path.decode("utf-8")
 
 
-def test_io_path_serve_warnings(
-    docker_cleanup, docker_client, built_image_name, tmpdir
-):
+def test_io_path_serve_warnings(built_image_name):
     run_res = subprocess.run(
         [
             "tesseract",
