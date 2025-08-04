@@ -85,6 +85,7 @@ class Tesseract:
         user: str | None = None,
         input_path: str | Path | None = None,
         output_path: str | Path | None = None,
+        output_format: Literal["json", "json+base64", "json+binref", "msgpack"] = "json"
     ) -> Tesseract:
         """Create a Tesseract instance from a Docker image.
 
@@ -141,6 +142,7 @@ class Tesseract:
             user=user,
             input_path=input_path,
             output_path=output_path,
+            output_format=output_format,
             port=port,
             host_ip=host_ip,
             debug=True,
@@ -156,6 +158,7 @@ class Tesseract:
         tesseract_api: str | Path | ModuleType,
         input_path: Path | None = None,
         output_path: Path | None = None,
+        output_format: Literal["json", "json+base64", "json+binref", "msgpack"] = "json"
     ) -> Tesseract:
         """Create a Tesseract instance from a Tesseract API module.
 
@@ -197,6 +200,7 @@ class Tesseract:
             update_config(input_path=str(input_path.resolve()))
         if output_path is not None:
             update_config(output_path=str(output_path.resolve()))
+        update_config(output_format=output_format)
 
         obj = cls.__new__(cls)
         obj._spawn_config = None
