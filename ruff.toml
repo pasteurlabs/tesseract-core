@@ -9,7 +9,6 @@ line-length = 88
 extend-exclude = [
     ".venv",
     "_version.py",
-    "tesseract_core/**/vendor/**/*.py",
 ]
 
 # Also lint/format Jupyter Notebooks.

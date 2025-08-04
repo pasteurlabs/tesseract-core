@@ -11,6 +11,7 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
+from pathlib import Path
 from textwrap import dedent
 
 import numpy as np
@@ -18,6 +19,7 @@ import pytest
 import requests
 from fastapi.testclient import TestClient
 
+from tesseract_core.runtime.config import get_config
 from tesseract_core.runtime.serve import create_rest_api
 
 test_input = {
@@ -33,7 +35,7 @@ def is_wsl():
     return "Microsoft" in kernel or "WSL" in kernel
 
 
-def array_from_json(json_data):
+def array_from_json(json_data, base_dir=None):
     encoding = json_data["data"]["encoding"]
     if encoding == "base64":
         decoded_buffer = base64.b64decode(json_data["data"]["buffer"])
@@ -44,6 +46,17 @@ def array_from_json(json_data):
         array = np.array(json_data["data"]["buffer"], dtype=json_data["dtype"]).reshape(
             json_data["shape"]
         )
+    elif encoding == "binref":
+        binfile, offset = json_data["data"]["buffer"].split(":")
+        length = np.prod(json_data["shape"]) * np.dtype(json_data["dtype"]).itemsize
+        with open(base_dir / binfile, "rb") as f:
+            f.seek(int(offset))
+            decoded_buffer = f.read(length)
+        array = np.frombuffer(decoded_buffer, dtype=json_data["dtype"]).reshape(
+            json_data["shape"]
+        )
+    else:
+        raise ValueError(f"Unsupported encoding: {encoding}")
 
     return array
 
@@ -105,8 +118,7 @@ def http_client(dummy_tesseract_module):
     [
         "json",
         "json+base64",
-        pytest.param("json+binref", marks=pytest.mark.xfail),  # FIXME
-        "msgpack",
+        "json+binref",
     ],
 )
 def test_create_rest_api_apply_endpoint(http_client, dummy_tesseract_module, format):
@@ -121,16 +133,8 @@ def test_create_rest_api_apply_endpoint(http_client, dummy_tesseract_module, for
 
     assert response.status_code == 200, response.text
 
-    if format in {"json", "json+base64"}:
-        result = array_from_json(response.json()["result"])
-        assert np.array_equal(result, np.array([3.5, 6.0, 8.5]))
-    elif format == "msgpack":
-        assert (
-            response.content
-            == b"\x81\xa6result\x85\xc4\x02nd\xc3\xc4\x04type\xa3<f4\xc4\x04kind\xc4\x00\xc4\x05shape\x91\x03\xc4\x04data\xc4\x0c\x00\x00`@\x00\x00\xc0@\x00\x00\x08A"  # noqa: E501
-        )
-    elif format == "json+binref":
-        raise NotImplementedError()
+    result = array_from_json(response.json()["result"], Path(get_config().output_path))
+    assert np.array_equal(result, np.array([3.5, 6.0, 8.5]))
 
 
 def test_create_rest_api_jacobian_endpoint(http_client, dummy_tesseract_module):
@@ -299,50 +303,41 @@ def test_multiple_workers(tmpdir, free_port):
 
 
 def test_debug_mode(dummy_tesseract_module, monkeypatch):
-    import tesseract_core.runtime.config
     from tesseract_core.runtime.config import update_config
 
     def apply_that_raises(inputs):
         raise ValueError("This is a test error")
 
-    orig_config = tesseract_core.runtime.config._current_config
-
     monkeypatch.setattr(dummy_tesseract_module, "apply", apply_that_raises)
 
-    try:
-        update_config(debug=False, api_path=dummy_tesseract_module.__file__)
-        rest_api = create_rest_api(dummy_tesseract_module)
-        http_client = TestClient(rest_api, raise_server_exceptions=False)
+    update_config(debug=False, api_path=dummy_tesseract_module.__file__)
+    rest_api = create_rest_api(dummy_tesseract_module)
+    http_client = TestClient(rest_api, raise_server_exceptions=False)
 
-        response = http_client.post(
-            "/apply",
-            json={
-                "inputs": model_to_json(
-                    dummy_tesseract_module.InputSchema.model_validate(test_input)
-                )
-            },
-        )
-        assert response.status_code == 500, response.text
-        assert response.text == "Internal Server Error"
-        assert "This is a test error" not in response.text
-    finally:
-        tesseract_core.runtime.config._current_config = orig_config
+    response = http_client.post(
+        "/apply",
+        json={
+            "inputs": model_to_json(
+                dummy_tesseract_module.InputSchema.model_validate(test_input)
+            )
+        },
+    )
+    assert response.status_code == 500, response.text
+    assert response.text == "Internal Server Error"
+    assert "This is a test error" not in response.text
 
-    try:
-        update_config(debug=True, api_path=dummy_tesseract_module.__file__)
-        rest_api = create_rest_api(dummy_tesseract_module)
-        http_client = TestClient(rest_api, raise_server_exceptions=False)
+    update_config(debug=True, api_path=dummy_tesseract_module.__file__)
+    rest_api = create_rest_api(dummy_tesseract_module)
+    http_client = TestClient(rest_api, raise_server_exceptions=False)
 
-        response = http_client.post(
-            "/apply",
-            json={
-                "inputs": model_to_json(
-                    dummy_tesseract_module.InputSchema.model_validate(test_input)
-                )
-            },
-        )
-        assert response.status_code == 500, response.text
-        assert "This is a test error" in response.text
-        assert "Traceback" in response.text
-    finally:
-        tesseract_core.runtime.config._current_config = orig_config
+    response = http_client.post(
+        "/apply",
+        json={
+            "inputs": model_to_json(
+                dummy_tesseract_module.InputSchema.model_validate(test_input)
+            )
+        },
+    )
+    assert response.status_code == 500, response.text
+    assert "This is a test error" in response.text
+    assert "Traceback" in response.text
