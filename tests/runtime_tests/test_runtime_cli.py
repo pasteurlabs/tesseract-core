@@ -161,18 +161,6 @@ def test_invocation_no_args_prints_usage(cli, cli_runner):
     assert "Usage: tesseract-runtime" in result.stdout
 
 
-def test_input_schema_command(cli, cli_runner):
-    result = cli_runner.invoke(cli, ["input-schema"], catch_exceptions=False)
-    assert result.exit_code == 0, result.stderr
-    assert "properties" in result.stdout
-
-
-def test_output_schema_command(cli, cli_runner):
-    result = cli_runner.invoke(cli, ["output-schema"], catch_exceptions=False)
-    assert result.exit_code == 0, result.stderr
-    assert "properties" in result.stdout
-
-
 def test_openapi_schema_command(cli, cli_runner):
     result = cli_runner.invoke(cli, ["openapi-schema"])
     assert result.exit_code == 0, result.stderr

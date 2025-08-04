@@ -209,10 +209,9 @@ def test_tesseract_list(built_image_name):
 
 
 def test_tesseract_run_stdout(built_image_name):
-    # Test List Command
     cli_runner = CliRunner(mix_stderr=False)
 
-    test_commands = ("input-schema", "output-schema", "openapi-schema", "health")
+    test_commands = ("openapi-schema", "health")
 
     for command in test_commands:
         run_res = cli_runner.invoke(

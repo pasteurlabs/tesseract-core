@@ -142,10 +142,11 @@ def _find_endpoint(endpoint_list, endpoint_name):
     for endpoint in endpoint_list:
         if endpoint.__name__ == endpoint_name:
             if "payload" in endpoint.__annotations__:
-                schema = endpoint.__annotations__["payload"]
+                input_schema = endpoint.__annotations__["payload"]
             else:
-                schema = None
-            return endpoint, schema
+                input_schema = None
+            output_schema = endpoint.__annotations__.get("return", None)
+            return endpoint, input_schema, output_schema
     raise ValueError(f"Endpoint {endpoint_name} not found.")
 
 
@@ -157,7 +158,7 @@ def test_create_endpoints(testmodule):
 def test_apply_endpoint(testmodule):
     endpoints = create_endpoints(testmodule)
 
-    apply_endpoint, EndpointSchema = _find_endpoint(endpoints, "apply")
+    apply_endpoint, EndpointSchema, _ = _find_endpoint(endpoints, "apply")
     assert apply_endpoint.__name__ == "apply"
 
     inputs = EndpointSchema.model_validate({"inputs": test_input})
@@ -174,7 +175,7 @@ def test_apply_returns_dict(testmodule):
 
     endpoints = create_endpoints(testmodule)
 
-    apply_endpoint, EndpointSchema = _find_endpoint(endpoints, "apply")
+    apply_endpoint, EndpointSchema, _ = _find_endpoint(endpoints, "apply")
     assert apply_endpoint.__name__ == "apply"
 
     inputs = EndpointSchema.model_validate({"inputs": test_input})
@@ -185,7 +186,9 @@ def test_apply_returns_dict(testmodule):
 def test_abstract_eval_endpoint(testmodule):
     endpoints = create_endpoints(testmodule)
 
-    abstract_eval_endpoint, EndpointSchema = _find_endpoint(endpoints, "abstract_eval")
+    abstract_eval_endpoint, EndpointSchema, _ = _find_endpoint(
+        endpoints, "abstract_eval"
+    )
     assert abstract_eval_endpoint.__name__ == "abstract_eval"
 
     def _array_to_shapedtype(obj):
@@ -205,20 +208,19 @@ def test_abstract_eval_endpoint(testmodule):
 
 def test_schemas_contain_diffable_paths_extra(testmodule):
     endpoints = create_endpoints(testmodule)
-    input_schema_endpoint, _ = _find_endpoint(endpoints, "input_schema")
+    _, InputSchema, OutputSchema = _find_endpoint(endpoints, "apply")
 
-    result = input_schema_endpoint()
-    assert "differentiable_arrays" in result
-    assert result["differentiable_arrays"].keys() == {
+    json_schema_in = InputSchema.model_json_schema()
+    assert "differentiable_arrays" in json_schema_in
+    assert json_schema_in["differentiable_arrays"].keys() == {
         "array_dict.{}",
         "array_seq.[]",
         "scalar_diff",
     }
 
-    output_schema_endpoint, _ = _find_endpoint(endpoints, "output_schema")
-    result = output_schema_endpoint()
-    assert "differentiable_arrays" in result
-    assert result["differentiable_arrays"].keys() == {"result_seq.[]"}
+    json_schema_out = OutputSchema.model_json_schema()
+    assert "differentiable_arrays" in json_schema_out
+    assert json_schema_out["differentiable_arrays"].keys() == {"result_seq.[]"}
 
 
 @pytest.mark.parametrize(
@@ -238,7 +240,7 @@ def test_schemas_contain_diffable_paths_extra(testmodule):
 def test_ad_endpoint(testmodule, ad_inout, endpoint_name):
     endpoints = create_endpoints(testmodule)
 
-    endpoint_func, EndpointSchema = _find_endpoint(endpoints, endpoint_name)
+    endpoint_func, EndpointSchema, _ = _find_endpoint(endpoints, endpoint_name)
     assert endpoint_func.__name__ == endpoint_name
 
     ad_inp, ad_out = ad_inout
@@ -342,7 +344,7 @@ def test_ad_endpoint(testmodule, ad_inout, endpoint_name):
 def test_ad_endpoint_invalid(testmodule, ad_inout_invalid, endpoint_name):
     endpoints = create_endpoints(testmodule)
 
-    endpoint_func, EndpointSchema = _find_endpoint(endpoints, endpoint_name)
+    endpoint_func, EndpointSchema, _ = _find_endpoint(endpoints, endpoint_name)
     assert endpoint_func.__name__ == endpoint_name
 
     msg, ad_inp, ad_out = ad_inout_invalid
@@ -392,7 +394,7 @@ def test_ad_endpoint_invalid(testmodule, ad_inout_invalid, endpoint_name):
 def test_ad_endpoint_bad_tangent(testmodule, endpoint_name, failure_mode):
     endpoints = create_endpoints(testmodule)
 
-    endpoint_func, EndpointSchema = _find_endpoint(endpoints, endpoint_name)
+    endpoint_func, EndpointSchema, _ = _find_endpoint(endpoints, endpoint_name)
     assert endpoint_func.__name__ == endpoint_name
 
     ad_inp = {"array_seq.[0]", "array_dict.{a}", "scalar_diff"}

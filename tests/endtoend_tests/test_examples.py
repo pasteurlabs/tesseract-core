@@ -881,7 +881,13 @@ def test_unit_tesseract_endtoend(
         catch_exceptions=False,
     )
     assert result.exit_code == 0, result.output
-    input_schema = result.output
+    openapi_schema = json.loads(result.output)
+    input_schema = openapi_schema["components"]["schemas"]["ApplyInputSchema"]
+    # input_schema = openapi_schema["paths"]["/apply"]["post"]["requestBody"]["content"]["application/json"]["schema"]
+    # input_schema.update({"components": openapi_schema["components"]})
+
+    print(input_schema)
+    raise
 
     mount_args, io_args = [], []
 
@@ -911,7 +917,7 @@ def test_unit_tesseract_endtoend(
         )
 
     if unit_tesseract_config.test_with_random_inputs:
-        random_input = example_from_json_schema(json.loads(input_schema))
+        random_input = example_from_json_schema(input_schema)
 
         result = cli_runner.invoke(
             app,
