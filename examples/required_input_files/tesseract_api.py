@@ -5,30 +5,16 @@ import json
 
 from pydantic import BaseModel
 
-from tesseract_core.runtime.experimental import required_file
+from tesseract_core.runtime.experimental import IS_BUILDING, require_file
 
-
-# define function to load a specific required file
-# TODO: possibly revert back to using more verbose required file declaration
-@required_file(require_writable=False)
-def load_parameters(filepath: str = "parameters1.json"):
-    """Function to load required files.
-
-    Must have `filepath` as first argument.
-
-    Args:
-        filepath (str): Path to file, relative to mounted directory.
-
-    Returns:
-        data: Loaded data.
-    """
-    with open(filepath, "rb") as f:
+# required files must be relative to --input-path
+param_filepath = require_file("parameters1.json")
+if not IS_BUILDING:
+    with open(param_filepath, "rb") as f:
         data = json.load(f)
-    return data
-
-
-# load required file
-data = load_parameters()
+else:
+    # No data is present during build time
+    data = None
 
 #
 # Schemas
@@ -48,8 +34,8 @@ class OutputSchema(BaseModel):
 # Required endpoints
 #
 
-# executed with
-# tesseract run required_input_files apply '{"inputs": {}}' --input-path ./input
+# execute with
+# tesseract run --input-path input required_input_files apply '{"inputs": {}}'
 
 
 def apply(inputs: InputSchema) -> OutputSchema:

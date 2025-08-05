@@ -1,7 +1,6 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-import inspect
 import os
 from collections.abc import Iterator, Sequence
 from pathlib import Path
@@ -235,56 +234,17 @@ InputFileReference = Annotated[Path, AfterValidator(_resolve_input_path)]
 OutputFileReference = Annotated[Path, AfterValidator(_strip_output_path)]
 
 
-def _require_file(file_path: PathLike, require_writable: bool = False) -> Path:
+def require_file(file_path: PathLike) -> Path:
     """Require a file to be present at the given path."""
+    if IS_BUILDING:
+        return file_path
+
     file_path = _resolve_input_path(Path(file_path))
 
     if not file_path.is_file():
         raise FileNotFoundError(f"Required file not found: {file_path}")
 
-    if require_writable and not os.access(file_path, os.W_OK):
-        raise PermissionError(f"Required file is not writable: {file_path}")
-
     return file_path
-
-
-def required_file(require_writable: bool) -> Callable:
-    """Decorator for function to load required files."""
-
-    def required_file_inner(loader_func: Callable):
-        signature = inspect.signature(loader_func)
-        if "filepath" not in signature.parameters:
-            raise ValueError("loader_func mast have `filepath` argument")
-        if signature.parameters["filepath"].default != inspect.Parameter.empty:
-            filepath = signature.parameters["filepath"].default
-        else:
-            filepath = None
-
-        loader_func_name = loader_func.__name__
-
-        def wrapper(
-            filepath: Union[PathLike, None] = filepath, *args: Any, **kwargs: Any
-        ):
-            if filepath is None:
-                raise ValueError(
-                    f"No filepath passed to required_file {loader_func_name}.\
-                      Either assign the `filepath` explicitly or \
-                      as default argument in {loader_func_name}."
-                )
-
-            if not IS_BUILDING:
-                container_filepath = _require_file(filepath, require_writable)
-                print(
-                    f"Loading required file {container_filepath} for {loader_func_name}."
-                )
-                data = loader_func(container_filepath, *args, **kwargs)
-                return data
-            else:
-                return None
-
-        return wrapper
-
-    return required_file_inner
 
 
 __all__ = [

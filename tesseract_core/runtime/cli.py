@@ -3,7 +3,6 @@
 
 """This module provides a command-line interface for interacting with the Tesseract runtime."""
 
-import argparse
 import inspect
 import io
 import sys
@@ -512,18 +511,13 @@ def main() -> None:
             )
             sys.exit(1)
 
-        # setting input_path here so that it's available when loading tesseract_api.py
-        # TODO: argparse might interfere with how we deal with other arguments?
-        parser = argparse.ArgumentParser(
-            description="Prepended input-path parser", add_help=False
-        )
-        parser.add_argument(
-            "--input-path",
-            type=str,
-        )
-        args, _ = parser.parse_known_args()
-        if args.input_path:
-            input_path = Path(args.input_path)
+        # when tesseract-runtime is used directly, input_path must be set
+        # here so that it is available when loading tesseract_api.py
+        if "--input-path" in sys.argv:
+            input_path_index = sys.argv.index("--input-path")
+            if len(sys.argv) <= input_path_index + 1:
+                raise ValueError("No input path provided after --input-path argument.")
+            input_path = Path(sys.argv[input_path_index + 1])
             update_config(input_path=input_path.as_posix())
 
         _add_user_commands_to_cli(app, out_stream=orig_stdout)
