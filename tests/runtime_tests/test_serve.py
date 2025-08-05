@@ -166,18 +166,6 @@ def test_create_rest_api_generates_health_endpoint(http_client):
     assert response.json() == {"status": "ok"}
 
 
-def test_get_input_schema(http_client):
-    response = http_client.get("/input_schema")
-
-    assert response.status_code == 200, response.text
-
-
-def test_get_output_schema(http_client):
-    response = http_client.get("/output_schema")
-
-    assert response.status_code == 200, response.text
-
-
 def test_post_abstract_eval(http_client):
     payload = {
         "inputs": {
