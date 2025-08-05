@@ -191,19 +191,67 @@ def test_io_path_serve(docker_cleanup, docker_client, built_image_name, tmpdir):
     assert "/tesseract/output_data" in output_path.decode("utf-8")
 
 
-def test_io_path_serve_warnings(built_image_name):
-    run_res = subprocess.run(
+@pytest.mark.parametrize("output_format", ["json", "json+base64", "json+binref"])
+def test_serve_output_formats(built_image_name, free_port, output_format):
+    subprocess.run(
         [
             "tesseract",
             "serve",
             built_image_name,
+            "--port",
+            str(free_port),
             "--output-format",
-            "json+binref",
+            output_format,
         ],
         capture_output=True,
         text=True,
     )
-    assert "consider specifying --output-path" in run_res.stderr
+
+    examples_dir = Path(__file__).parent.parent.parent / "examples"
+    example_inputs = examples_dir / "vectoradd" / "example_inputs.json"
+    run_res = subprocess.run(
+        [
+            "curl",
+            f"http://127.0.0.1:{free_port}/apply",
+            "-H",
+            "Content-Type: application/json",
+            "-d",
+            f"@{example_inputs}",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    result = json.loads(run_res.stdout)
+    assert result["result"]["data"]["encoding"] == output_format.split("+")[-1]
+
+    # check that json+binref throws warning
+    if output_format == "json+binref":
+        assert "consider specifying --output-path" in run_res.stderr
+
+
+@pytest.mark.parametrize("output_format", ["json", "json+base64", "json+binref"])
+def test_run_output_formats(built_image_name, output_format):
+    examples_dir = Path(__file__).parent.parent.parent / "examples"
+    example_inputs = examples_dir / "vectoradd" / "example_inputs.json"
+    run_res = subprocess.run(
+        [
+            "tesseract",
+            "run",
+            built_image_name,
+            "apply",
+            "--output-format",
+            output_format,
+            f"@{example_inputs}",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    result = json.loads(run_res.stdout)
+    assert result["result"]["data"]["encoding"] == output_format.split("+")[-1]
+
+    # check that json+binref throws warning
+    if output_format == "json+binref":
+        assert "consider specifying --output-path" in run_res.stderr
 
 
 def test_tesseract_list(built_image_name):
