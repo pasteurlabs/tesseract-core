@@ -22,6 +22,7 @@ class RuntimeConfig(BaseModel):
     output_path: str = "."
     output_format: supported_format_type = "json"
     output_file: str = ""
+    mlflow_tracking_uri: str = ""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
