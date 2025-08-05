@@ -21,6 +21,7 @@ from typing import Any, Optional, Union
 import requests
 
 from tesseract_core.runtime.config import get_config
+from tesseract_core.runtime.logs import LogPipe
 
 
 class BaseBackend(ABC):
@@ -233,24 +234,35 @@ def log_artifact(local_path: str) -> None:
 
 
 @contextmanager
-def stdio_to_logfile(logfile: Union[str, Path]) -> Generator[None, None, None]:
-    """Context manager for redirecting stdout and stderr to a log file."""
+def redirect_stdio(logfile: Union[str, Path]) -> Generator[None, None, None]:
+    """Context manager for redirecting stdout and stderr to a custom pipe.
+
+    Writes messages to both the original stderr and the given logfile.
+    """
     from tesseract_core.runtime.core import redirect_fd
+
+    try:
+        # Check if a file descriptor is available
+        sys.stdout.fileno()
+        sys.stderr.fileno()
+    except UnsupportedOperation:
+        # Don't redirect if stdout/stderr are not file descriptors
+        # (This likely means that streams are already redirected)
+        yield
+        return
 
     with ExitStack() as stack:
         f = stack.enter_context(open(logfile, "w"))
-        try:
-            # Check if a file descriptor is available
-            sys.stdout.fileno()
-            sys.stderr.fileno()
-        except UnsupportedOperation:
-            # Don't redirect if stdout/stderr are not file descriptors
-            # (This likely means that streams are already redirected)
-            pass
-        else:
-            # Redirect file descriptors at OS level
-            stack.enter_context(redirect_fd(sys.stdout, f))
-            stack.enter_context(redirect_fd(sys.stderr, f))
+
+        orig_stderr = sys.stderr
+        # Use `print` instead of `.write` so we get appropriate newlines and flush behavior
+        write_to_stderr = lambda msg: print(msg, file=orig_stderr, flush=True)
+        write_to_file = lambda msg: print(msg, file=f, flush=True)
+        pipe_fd = stack.enter_context(LogPipe(write_to_stderr, write_to_file))
+
+        # Redirect file descriptors at OS level
+        stack.enter_context(redirect_fd(sys.stdout, pipe_fd))
+        stack.enter_context(redirect_fd(sys.stderr, pipe_fd))
         yield
 
 
@@ -264,7 +276,7 @@ def start_run(job_id: Optional[str] = None) -> Generator[None, None, None]:
     logfile = backend.run_dir / "tesseract.log"
 
     try:
-        with stdio_to_logfile(logfile):
+        with redirect_stdio(logfile):
             yield
     finally:
         backend.end_run()
