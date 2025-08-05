@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [1.0.0] - 2025-07-30
+## [1.0.0] - 2025-08-05
 
 ### Features
 
@@ -11,14 +11,25 @@ All notable changes to this project will be documented in this file.
 - [**breaking**] Use `version` from `tesseract_config.yaml` as default Docker image tag (#267)
 - Add network argument to `tesseract serve` (#285)
 - Improved IDE type hints for array annotations (#291)
+- Add --network-alias option (#297)
+- Improve healthcheck after serve, add restart policy (#296)
+- Add hot example (#288)
+- Add network args to from_image (#299)
+- Add `--output-path` to serve (#295)
+- [**breaking**] Drop msgpack support (#303)
 
 ### Bug Fixes
 
 - Move private pip imports into relevant func scope (#292)
+- Correct error message on use of T created via from_image (#298)
+- Ensure signature consistency between `engine.serve` and `Tesseract.from_image` (#302)
+- Exclude broken version of setuptools-scm (#312)
+- Use TESSERACT_MLFLOW_TRACKING_URI instead of MLFLOW_TRACKING_URI (#313)
 
 ### Refactor
 
 - [**breaking**] Remove ability to serve multiple tesseracts / docker compose (#286)
+- Overhaul all clis (#301)
 
 ## [0.10.2] - 2025-07-21
 
