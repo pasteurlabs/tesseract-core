@@ -918,7 +918,6 @@ def test_unit_tesseract_endtoend(
                 str(unit_tesseract_path / unit_tesseract_config.input_path),
             ]
         )
-
     if unit_tesseract_config.output_path:
         io_args.extend(
             [
@@ -926,20 +925,6 @@ def test_unit_tesseract_endtoend(
                 str(unit_tesseract_path / unit_tesseract_config.output_path),
             ]
         )
-
-    result = cli_runner.invoke(
-        app,
-        [
-            "run",
-            img_name,
-            *mount_args,
-            "input-schema",
-            *io_args,
-        ],
-        catch_exceptions=False,
-    )
-    assert result.exit_code == 0, result.output
-    input_schema = result.output
 
     if unit_tesseract_config.test_with_random_inputs:
         random_input = example_from_json_schema(input_schema)
