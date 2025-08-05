@@ -17,9 +17,9 @@ Next, we create a network by running:
 $ docker network create my_network
 ```
 
-## Python SDK Instructions
+## Python API Instructions
 
-This example can be executed using the Tesseract Python SDK or CLI. To run the example using the Python SDK, simply execute the Python script:
+This example can be executed using the Tesseract Python API or CLI. To run the example using the Python API, simply execute the Python script:
 
 ```bash
 $ cd ./examples/_multi-tesseract/multi_helloworld/

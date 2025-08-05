@@ -293,26 +293,6 @@ class Tesseract:
         """
         return self._client.run_tesseract("openapi_schema")
 
-    @cached_property
-    @requires_client
-    def input_schema(self) -> dict:
-        """Get the input schema of this Tesseract.
-
-        Returns:
-             dictionary with the input schema.
-        """
-        return self._client.run_tesseract("input_schema")
-
-    @cached_property
-    @requires_client
-    def output_schema(self) -> dict:
-        """Get the output schema of this Tesseract.
-
-        Returns:
-             dictionary with the output schema.
-        """
-        return self._client.run_tesseract("output_schema")
-
     @property
     @requires_client
     def available_endpoints(self) -> list[str]:
@@ -594,8 +574,6 @@ class HTTPClient:
             The loaded JSON response from the endpoint, with decoded arrays.
         """
         if endpoint in [
-            "input_schema",
-            "output_schema",
             "openapi_schema",
             "health",
         ]:

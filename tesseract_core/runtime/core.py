@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from io import TextIOBase
 from pathlib import Path
 from types import ModuleType
-from typing import Any, TextIO, Union
+from typing import Any, Optional, TextIO, Union
 
 from pydantic import BaseModel
 
@@ -152,9 +152,11 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
     )
 
     @assemble_docstring(api_module.apply)
-    def apply(payload: ApplyInputSchema) -> ApplyOutputSchema:
+    def apply(
+        payload: ApplyInputSchema, job_id: Optional[str] = None
+    ) -> ApplyOutputSchema:
         """Apply the Tesseract to the input data."""
-        with start_run():
+        with start_run(job_id):
             out = api_module.apply(payload.inputs)
         if isinstance(out, api_module.OutputSchema):
             out = out.model_dump()
@@ -168,12 +170,14 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
         )
 
         @assemble_docstring(api_module.jacobian)
-        def jacobian(payload: JacobianInputSchema) -> JacobianOutputSchema:
+        def jacobian(
+            payload: JacobianInputSchema, job_id: Optional[str] = None
+        ) -> JacobianOutputSchema:
             """Computes the Jacobian of the Tesseract.
 
             Differentiates ``jac_outputs`` with respect to ``jac_inputs``, at the point ``inputs``.
             """
-            with start_run():
+            with start_run(job_id):
                 out = api_module.jacobian(**dict(payload))
             return JacobianOutputSchema.model_validate(
                 out,
@@ -191,13 +195,15 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
         )
 
         @assemble_docstring(api_module.jacobian_vector_product)
-        def jacobian_vector_product(payload: JVPInputSchema) -> JVPOutputSchema:
+        def jacobian_vector_product(
+            payload: JVPInputSchema, job_id: Optional[str] = None
+        ) -> JVPOutputSchema:
             """Compute the Jacobian vector product of the Tesseract at the input data.
 
             Evaluates the Jacobian vector product between the Jacobian given by ``jvp_outputs``
             with respect to ``jvp_inputs`` at the point ``inputs`` and the given tangent vector.
             """
-            with start_run():
+            with start_run(job_id):
                 out = api_module.jacobian_vector_product(**dict(payload))
             return JVPOutputSchema.model_validate(
                 out, context={"output_keys": payload.jvp_outputs}
@@ -211,13 +217,15 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
         )
 
         @assemble_docstring(api_module.vector_jacobian_product)
-        def vector_jacobian_product(payload: VJPInputSchema) -> VJPOutputSchema:
+        def vector_jacobian_product(
+            payload: VJPInputSchema, job_id: Optional[str] = None
+        ) -> VJPOutputSchema:
             """Compute the Jacobian vector product of the Tesseract at the input data.
 
             Computes the vector Jacobian product between the Jacobian given by ``vjp_outputs``
             with respect to ``vjp_inputs`` at the point ``inputs`` and the given cotangent vector.
             """
-            with start_run():
+            with start_run(job_id):
                 out = api_module.vector_jacobian_product(**dict(payload))
             return VJPOutputSchema.model_validate(
                 out, context={"input_keys": payload.vjp_inputs}
@@ -230,18 +238,6 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
         return {"status": "ok"}
 
     endpoints.append(health)
-
-    def input_schema() -> dict[str, Any]:
-        """Get input schema for tesseract apply function."""
-        return ApplyInputSchema.model_json_schema()
-
-    endpoints.append(input_schema)
-
-    def output_schema() -> dict[str, Any]:
-        """Get output schema for tesseract apply function."""
-        return ApplyOutputSchema.model_json_schema()
-
-    endpoints.append(output_schema)
 
     if "abstract_eval" in supported_functions:
         AbstractEvalInputSchema, AbstractEvalOutputSchema = create_abstract_eval_schema(
