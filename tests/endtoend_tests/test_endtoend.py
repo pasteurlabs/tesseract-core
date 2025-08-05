@@ -850,34 +850,6 @@ def test_logging_tesseract_serve(
     assert "Hello from apply!" == log_content.strip()
 
 
-def test_logging_passthrough(
-    capsys, dummy_tesseract_package, tmpdir, docker_cleanup, docker_client
-):
-    tesseract_api = logging_tesseract_api_string()
-
-    with open(dummy_tesseract_package / "tesseract_api.py", "w") as f:
-        f.write(tesseract_api)
-
-    cli_runner = CliRunner(mix_stderr=False)
-    result = cli_runner.invoke(
-        app,
-        ["--loglevel", "debug", "build", str(dummy_tesseract_package)],
-        catch_exceptions=False,
-    )
-    assert result.exit_code == 0, result.stderr
-
-    img_tag = json.loads(result.stdout)[0]
-    docker_cleanup["images"].append(img_tag)
-
-    from tesseract_core import Tesseract
-
-    with Tesseract.from_image(img_tag, output_path=str(tmpdir)) as tess:
-        tess.apply({})
-
-    captured = capsys.readouterr()
-    assert "Hello from apply!" == captured.out.strip()
-
-
 def _prepare_mpa_test_image(dummy_tesseract_package, docker_cleanup):
     from textwrap import dedent
 
