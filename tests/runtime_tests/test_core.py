@@ -141,10 +141,7 @@ def _recurse_pytree(pytree, func):
 def _find_endpoint(endpoint_list, endpoint_name):
     for endpoint in endpoint_list:
         if endpoint.__name__ == endpoint_name:
-            if "payload" in endpoint.__annotations__:
-                input_schema = endpoint.__annotations__["payload"]
-            else:
-                input_schema = None
+            input_schema = endpoint.__annotations__.get("payload", None)
             output_schema = endpoint.__annotations__.get("return", None)
             return endpoint, input_schema, output_schema
     raise ValueError(f"Endpoint {endpoint_name} not found.")
