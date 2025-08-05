@@ -84,11 +84,7 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
             )
             # Other header parameters common to computational endpoints
             # could be defined and appended here as well.
-            new_params = list(
-                (
-                    original_sig.parameters | {"accept": accept, "job_id": job_id}
-                ).values()
-            )
+            new_params = [*list(original_sig.parameters.values()), accept, job_id]
             new_sig = original_sig.replace(parameters=new_params)
             wrapper.__signature__ = new_sig
             return wrapper
