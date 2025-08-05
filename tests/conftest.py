@@ -5,6 +5,7 @@ import json
 import os
 import random
 import string
+import subprocess
 from pathlib import Path
 from shutil import copytree
 from textwrap import indent
@@ -18,7 +19,9 @@ import pytest
 here = Path(__file__).parent
 
 UNIT_TESSERACT_PATH = here / ".." / "examples"
-UNIT_TESSERACTS = [Path(tr).stem for tr in UNIT_TESSERACT_PATH.glob("*/")]
+UNIT_TESSERACTS = [
+    tr.stem for tr in UNIT_TESSERACT_PATH.glob("*/") if not tr.stem.startswith("_")
+]
 
 
 def pytest_addoption(parser):
@@ -92,13 +95,32 @@ def pytest_collection_modifyitems(config, items):
 
 
 @pytest.fixture(scope="session", autouse=True)
-def set_tesseract_output_dir(tmp_path_factory):
+def tesseract_output_dir(tmp_path_factory):
     """Set the Tesseract output directory for the session."""
-    from tesseract_core.runtime.config import update_config
-
     output_path = tmp_path_factory.mktemp("output_path")
     os.environ["TESSERACT_OUTPUT_PATH"] = str(output_path)
-    update_config(output_path=str(output_path))
+    yield output_path
+
+
+@pytest.fixture(autouse=True)
+def reset_config():
+    """Reset the runtime configuration before each test."""
+    import tesseract_core.runtime.config
+    import tesseract_core.sdk.config
+
+    initial_config_sdk = tesseract_core.sdk.config._current_config
+    initial_config_runtime = tesseract_core.runtime.config._current_config
+
+    try:
+        yield
+    finally:
+        # Reset the SDK config
+        tesseract_core.sdk.config._current_config = initial_config_sdk
+        tesseract_core.sdk.config._config_overrides.clear()
+
+        # Reset the runtime config
+        tesseract_core.runtime.config._current_config = initial_config_runtime
+        tesseract_core.runtime.config._config_overrides.clear()
 
 
 @pytest.fixture(scope="session")
@@ -112,6 +134,12 @@ def unit_tesseract_path(request) -> Path:
     """Parametrized fixture to return all unit tesseracts."""
     # pass only tesseract names as params to get prettier test names
     return UNIT_TESSERACT_PATH / request.param
+
+
+@pytest.fixture(scope="session")
+def unit_tesseracts_parent_dir(request) -> Path:
+    """Fixture that return parent dir of unit tesseracts."""
+    return UNIT_TESSERACT_PATH
 
 
 @pytest.fixture()
@@ -153,50 +181,11 @@ def dummy_tesseract_module(dummy_tesseract_package):
 
 
 @pytest.fixture
-def dummy_tesseract(dummy_tesseract_package):
+def dummy_tesseract(dummy_tesseract_package, monkeypatch):
     """Set tesseract_api_path env var for testing purposes."""
-    from tesseract_core.runtime.config import get_config, update_config
-
-    orig_config_kwargs = {}
-    orig_path = get_config().api_path
-    # default may have been used and tesseract_api.py is not guaranteed to exist
-    # therefore, we only pass the original path in cleanup if not equal to default
-    if orig_path != Path("tesseract_api.py"):
-        orig_config_kwargs |= {"api_path": orig_path}
     api_path = Path(dummy_tesseract_package / "tesseract_api.py").resolve()
-
-    try:
-        # Configure via envvar so we also propagate it to subprocesses
-        os.environ["TESSERACT_API_PATH"] = str(api_path)
-        update_config(api_path=api_path)
-        yield
-    finally:
-        # As this is used by an auto-use fixture, cleanup may happen
-        # after dummy_tesseract_noenv has already unset
-        if "TESSERACT_API_PATH" in os.environ:
-            del os.environ["TESSERACT_API_PATH"]
-        update_config(**orig_config_kwargs)
-
-
-@pytest.fixture
-def dummy_tesseract_noenv(dummy_tesseract_package):
-    """Use without tesseract_api_path to test handling of this."""
-    from tesseract_core.runtime.config import get_config, update_config
-
-    orig_api_path = get_config().api_path
-    orig_cwd = os.getcwd()
-
-    # Ensure TESSERACT_API_PATH is not set with python os
-    if "TESSERACT_API_PATH" in os.environ:
-        del os.environ["TESSERACT_API_PATH"]
-
-    try:
-        os.chdir(dummy_tesseract_package)
-        update_config()
-        yield
-    finally:
-        update_config(api_path=orig_api_path)
-        os.chdir(orig_cwd)
+    monkeypatch.setenv("TESSERACT_API_PATH", str(api_path))
+    yield
 
 
 @pytest.fixture
@@ -243,7 +232,12 @@ def docker_cleanup(docker_client, request):
 def _docker_cleanup(docker_client, request):
     """Clean up all tesseracts created by the tests."""
     # Shared object to track what objects need to be cleaned up in each test
-    context = {"images": [], "containers": [], "volumes": []}
+    context = {
+        "images": [],
+        "containers": [],
+        "volumes": [],
+        "networks": [],
+    }
 
     def pprint_exc(e: BaseException) -> str:
         """Pretty print exception."""
@@ -292,6 +286,19 @@ def _docker_cleanup(docker_client, request):
             except Exception as e:
                 failures.append(f"Failed to remove volume {volume}: {pprint_exc(e)}")
 
+        from tesseract_core.sdk.config import get_config
+
+        config = get_config()
+        docker_cmd = config.docker_executable
+        for network in context["networks"]:
+            try:
+                _ = subprocess.run(
+                    [*docker_cmd, "network", "rm", network, "--force"],
+                    check=True,
+                )
+            except Exception as e:
+                failures.append(f"Failed to remove network {network}: {pprint_exc(e)}")
+
         if failures:
             raise RuntimeError(
                 "Failed to clean up some Docker objects during test teardown:\n"
@@ -304,7 +311,7 @@ def _docker_cleanup(docker_client, request):
 
 @pytest.fixture
 def dummy_image_name():
-    """Create a dummy image name, and clean up after the test."""
+    """Create a dummy image name."""
     image_id = "".join(random.choices(string.ascii_lowercase + string.digits, k=16))
     image_name = f"tmp_tesseract_image_{image_id}"
     yield image_name
@@ -312,10 +319,18 @@ def dummy_image_name():
 
 @pytest.fixture(scope="module")
 def shared_dummy_image_name():
-    """Create a dummy image name, and clean up after all tests."""
+    """Create a dummy image name."""
     image_id = "".join(random.choices(string.ascii_lowercase + string.digits, k=16))
     image_name = f"tmp_tesseract_image_{image_id}"
     yield image_name
+
+
+@pytest.fixture
+def dummy_network_name():
+    """Create a dummy image name."""
+    network_name = "".join(random.choices(string.ascii_lowercase + string.digits, k=16))
+    network_name = f"tmp_tesseract_network_{network_name}"
+    yield network_name
 
 
 @pytest.fixture
@@ -458,6 +473,6 @@ def mocked_docker(monkeypatch):
             return type("Response", (), {"status_code": 200, "json": lambda: {}})()
         raise NotImplementedError(f"Mocked get request to {url} not implemented")
 
-    engine.requests.get = hacked_get
+    monkeypatch.setattr(engine.requests, "get", hacked_get)
 
     yield mock_instance

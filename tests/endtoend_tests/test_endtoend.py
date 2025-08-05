@@ -15,6 +15,7 @@ from common import build_tesseract, image_exists
 from typer.testing import CliRunner
 
 from tesseract_core.sdk.cli import AVAILABLE_RECIPES, app
+from tesseract_core.sdk.config import get_config
 
 
 @pytest.fixture(scope="module")
@@ -145,13 +146,49 @@ def test_env_passthrough_serve(docker_cleanup, docker_client, built_image_name):
 
     serve_meta = json.loads(run_res.stdout)
     container_name = serve_meta["container_name"]
-
     docker_cleanup["containers"].append(container_name)
 
     container = docker_client.containers.get(container_name)
     exit_code, output = container.exec_run(["sh", "-c", "echo $TEST_ENV_VAR"])
     assert exit_code == 0, f"Command failed with exit code {exit_code}"
     assert "foo" in output.decode("utf-8"), f"Output was: {output.decode('utf-8')}"
+
+
+def test_io_path_serve(docker_cleanup, docker_client, built_image_name, tmpdir):
+    (tmpdir / "input").mkdir()
+    (tmpdir / "output").mkdir()
+
+    run_res = subprocess.run(
+        [
+            "tesseract",
+            "serve",
+            built_image_name,
+            "--input-path",
+            str(tmpdir / "input"),
+            "--output-path",
+            str(tmpdir / "output"),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert run_res.returncode == 0, run_res.stderr
+    assert run_res.stdout
+
+    serve_meta = json.loads(run_res.stdout)
+    container_name = serve_meta["container_name"]
+    docker_cleanup["containers"].append(container_name)
+
+    container = docker_client.containers.get(container_name)
+
+    exit_code, input_path = container.exec_run(
+        ["sh", "-c", "echo $TESSERACT_INPUT_PATH"]
+    )
+    exit_code, output_path = container.exec_run(
+        ["sh", "-c", "echo $TESSERACT_OUTPUT_PATH"]
+    )
+    assert exit_code == 0, f"Command failed with exit code {exit_code}"
+    assert "/tesseract/input_data" in input_path.decode("utf-8")
+    assert "/tesseract/output_data" in output_path.decode("utf-8")
 
 
 def test_tesseract_list(built_image_name):
@@ -510,22 +547,27 @@ def test_tesseract_serve_volume_permissions(
         assert (tmp_path / "bar").exists()
 
 
-def test_tesseract_serve_interop(built_image_name, docker_client, docker_cleanup):
+def test_tesseract_serve_interop(
+    built_image_name, dummy_network_name, docker_client, docker_cleanup
+):
     cli_runner = CliRunner(mix_stderr=False)
 
     # Network create using subprocess
     subprocess.run(
-        ["docker", "network", "create", "multi-tesseract-network"],
+        ["docker", "network", "create", dummy_network_name],
         check=True,
     )
+    docker_cleanup["networks"].append(dummy_network_name)
 
-    def serve_tesseract():
+    def serve_tesseract(alias: str):
         run_res = cli_runner.invoke(
             app,
             [
                 "serve",
                 "--network",
-                "multi-tesseract-network",
+                dummy_network_name,
+                "--network-alias",
+                alias,
                 built_image_name,
             ],
             env={"COLUMNS": "1000"},
@@ -540,14 +582,23 @@ def test_tesseract_serve_interop(built_image_name, docker_client, docker_cleanup
         return container
 
     # Serve two separate tesseracts on the same network
-    tess_1 = serve_tesseract()
-    tess_2 = serve_tesseract()
+    tess_1 = serve_tesseract("tess_1")
+    tess_2 = serve_tesseract("tess_2")
 
     returncode, stdout = tess_1.exec_run(
         [
             "python",
             "-c",
-            f'import requests; requests.get("http://{tess_2.name}:8000/health").raise_for_status()',
+            'import requests; requests.get("http://tess_2:8000/health").raise_for_status()',
+        ]
+    )
+    assert returncode == 0, stdout.decode()
+
+    returncode, stdout = tess_2.exec_run(
+        [
+            "python",
+            "-c",
+            'import requests; requests.get("http://tess_1:8000/health").raise_for_status()',
         ]
     )
     assert returncode == 0, stdout.decode()
@@ -604,27 +655,31 @@ def test_tesseract_cli_options_parsing(built_image_name, tmpdir):
     examples_dir = Path(__file__).parent.parent.parent / "examples"
     example_inputs = examples_dir / "vectoradd" / "example_inputs.json"
 
-    test_commands = (
-        ["apply", "-f", "json+binref", "-o", str(tmpdir), f"@{example_inputs}"],
-        ["apply", f"@{example_inputs}", "-f", "json+binref", "-o", str(tmpdir)],
-        ["apply", "-o", str(tmpdir), f"@{example_inputs}", "-f", "json+binref"],
+    test_command = [
+        "apply",
+        "--output-format",
+        "json+binref",
+        "--output-path",
+        str(tmpdir),
+        "--output-file",
+        "results.json",
+        f"@{example_inputs}",
+    ]
+
+    run_res = cli_runner.invoke(
+        app,
+        [
+            "run",
+            built_image_name,
+            *test_command,
+        ],
+        catch_exceptions=False,
     )
+    assert run_res.exit_code == 0, run_res.stderr
 
-    for args in test_commands:
-        run_res = cli_runner.invoke(
-            app,
-            [
-                "run",
-                built_image_name,
-                *args,
-            ],
-            catch_exceptions=False,
-        )
-        assert run_res.exit_code == 0, run_res.stderr
-
-        with open(Path(tmpdir) / "results.json") as fi:
-            results = fi.read()
-            assert ".bin:0" in results
+    with open(Path(tmpdir) / "results.json") as fi:
+        results = fi.read()
+        assert ".bin:0" in results
 
 
 def test_tarball_install(dummy_tesseract_package, docker_cleanup):
@@ -719,14 +774,10 @@ def test_logging(dummy_tesseract_package, tmpdir, docker_cleanup):
         text=True,
     )
     assert run_res.returncode == 0, run_res.stderr
-    assert "" == run_res.stdout.strip()
     assert "Hello from tesseract_api.py!" == run_res.stderr.strip()
 
-    out_file = Path(tmpdir) / "results.json"
-    assert out_file.exists()
-    with open(out_file) as f:
-        results = json.load(f)
-        assert results["out"] == "Received message: Test message"
+    results = json.loads(run_res.stdout.strip())
+    assert results["out"] == "Received message: Test message"
 
     logdir = next((Path(tmpdir) / "logs").iterdir())
     log_file = logdir / "tesseract.log"
@@ -893,7 +944,7 @@ def test_mpa_mlflow_backend(dummy_tesseract_package, tmpdir, docker_cleanup):
         "tesseract",
         "run",
         "--env",
-        "MLFLOW_TRACKING_URI=/tesseract/output_data/mlruns",
+        "TESSERACT_MLFLOW_TRACKING_URI=/tesseract/output_data/mlruns",
         img_tag,
         "apply",
         '{"inputs": {}}',
@@ -944,3 +995,81 @@ def test_mpa_mlflow_backend(dummy_tesseract_package, tmpdir, docker_cleanup):
     # Verify artifacts directory and artifact file
     artifacts_dir = run_dir / "artifacts"
     assert artifacts_dir.exists()
+
+
+def test_multi_helloworld_endtoend(
+    docker_client,
+    unit_tesseracts_parent_dir,
+    dummy_image_name,
+    dummy_network_name,
+    docker_cleanup,
+):
+    """Test that multi_helloworld example can be built, served, and executed."""
+    cli_runner = CliRunner(mix_stderr=False)
+
+    # Build Tesseract images
+    img_names = []
+    for tess_name in ("_multi-tesseract/multi_helloworld", "helloworld"):
+        img_name = build_tesseract(
+            docker_client,
+            unit_tesseracts_parent_dir / tess_name,
+            dummy_image_name + f"_{tess_name}",
+            tag="sometag",
+        )
+        img_names.append(img_name)
+        assert image_exists(docker_client, img_name)
+        docker_cleanup["images"].append(img_name)
+
+    config = get_config()
+    docker = config.docker_executable
+
+    result = subprocess.run(
+        [*docker, "network", "create", dummy_network_name],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.returncode == 0, result.stderr
+    docker_cleanup["networks"].append(dummy_network_name)
+
+    # Serve target Tesseract
+    multi_helloworld_tesseract_img_name, helloworld_tesseract_img_name = img_names
+    result = cli_runner.invoke(
+        app,
+        [
+            "serve",
+            helloworld_tesseract_img_name,
+            "--network",
+            dummy_network_name,
+            "--network-alias",
+            "helloworld",
+        ],
+        catch_exceptions=True,
+    )
+    assert result.exit_code == 0, result.output
+    docker_cleanup["containers"].append(json.loads(result.output)["container_name"])
+
+    payload = json.dumps(
+        {
+            "inputs": {
+                "name": "you",
+                "helloworld_tesseract_url": "http://helloworld:8000",
+            }
+        }
+    )
+
+    # Run multi_helloworld Tesseract
+    result = cli_runner.invoke(
+        app,
+        [
+            "run",
+            multi_helloworld_tesseract_img_name,
+            "apply",
+            payload,
+            "--network",
+            dummy_network_name,
+        ],
+        catch_exceptions=True,
+    )
+    assert result.exit_code == 0, result.output
+    assert "The helloworld Tesseract says: Hello you!" in result.output

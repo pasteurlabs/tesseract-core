@@ -11,7 +11,6 @@ from pathlib import Path
 import pytest
 import yaml
 from jinja2.exceptions import TemplateNotFound
-from typeguard import suppress_type_checks
 
 from tesseract_core.sdk import engine
 from tesseract_core.sdk.api_parse import (
@@ -163,7 +162,8 @@ def test_run_tesseract_file_input(mocked_docker, tmpdir):
     res, _ = engine.run_tesseract(
         "foobar",
         "apply",
-        [f"@{infile}", "--output-path", str(outdir)],
+        [f"@{infile}"],
+        output_path=str(outdir),
     )
 
     # Mocked docker just returns the kwargs to `docker run` as json
@@ -171,9 +171,8 @@ def test_run_tesseract_file_input(mocked_docker, tmpdir):
     assert res["command"] == [
         "apply",
         "@/tesseract/payload.json",
-        "--output-path",
-        "/tesseract/output_data",
     ]
+    assert res["environment"]["TESSERACT_OUTPUT_PATH"] == "/tesseract/output_data"
     assert res["image"] == "foobar"
     assert res["volumes"].keys() == {str(infile), str(outdir)}
 
@@ -181,8 +180,9 @@ def test_run_tesseract_file_input(mocked_docker, tmpdir):
     res, _ = engine.run_tesseract(
         "foobar",
         "apply",
-        [f"@{infile}", "--output-path", str(outdir)],
+        [f"@{infile}"],
         volumes=[f"{tmpdir}:/path/in/container:ro"],
+        output_path=str(outdir),
     )
     res = json.loads(res)
     assert res["volumes"].keys() == {str(infile), str(outdir), f"{tmpdir}"}
@@ -197,30 +197,18 @@ def test_run_tesseract_file_input(mocked_docker, tmpdir):
     res, _ = engine.run_tesseract(
         "foobar",
         "apply",
-        [f"@{infile}", "--output-path", str(outdir), "--input-path", str(indir)],
+        [f"@{infile}"],
+        input_path=str(indir),
+        output_path=str(outdir),
     )
     res = json.loads(res)
+    assert res["environment"]["TESSERACT_INPUT_PATH"] == "/tesseract/input_data"
+    assert res["environment"]["TESSERACT_OUTPUT_PATH"] == "/tesseract/output_data"
     assert res["volumes"].keys() == {str(outdir), str(indir), str(infile)}
     assert res["volumes"][str(indir)] == {
         "mode": "ro",
         "bind": "/tesseract/input_data",
     }
-
-
-def test_serve_tesseracts_invalid_input_args(mocked_docker):
-    """Test input validation logic for tesseract serve."""
-    with suppress_type_checks():
-        with pytest.raises(ValueError):
-            engine.serve(None)
-
-        with pytest.raises(TypeError):
-            engine.serve()
-
-        with pytest.raises(ValueError):
-            engine.serve([None, "vectoradd"])
-
-        with pytest.raises(ValueError):
-            engine.teardown(None)
 
 
 def test_get_tesseract_images(mocked_docker):
@@ -290,6 +278,24 @@ def test_serve_tesseract_volumes(mocked_docker, tmpdir):
             "foobar",
             volumes=["/non/existent/path:/path/in/container:ro"],
         )
+
+    # Test running with input and output paths
+    indir = Path(tmpdir / "input_path")
+    indir.mkdir()
+    outdir = Path(tmpdir) / "output1"
+    outdir.mkdir()
+
+    res, _ = engine.serve("foobar", input_path=str(indir), output_path=str(outdir))
+    res = json.loads(res)
+    assert res["volumes"].keys() == {str(indir), str(outdir)}
+    assert res["volumes"][str(indir)] == {
+        "mode": "ro",
+        "bind": "/tesseract/input_data",
+    }
+    assert res["volumes"][str(outdir)] == {
+        "mode": "rw",
+        "bind": "/tesseract/output_data",
+    }
 
 
 def test_needs_docker(mocked_docker, monkeypatch):

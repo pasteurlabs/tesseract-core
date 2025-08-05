@@ -957,13 +957,6 @@ def test_unit_tesseract_endtoend(
                 if cli_cmd in ("check-gradients",):
                     # Result is text
                     output = result.output
-                elif unit_tesseract_config.output_path:
-                    with open(
-                        unit_tesseract_path
-                        / unit_tesseract_config.output_path
-                        / "results.json"
-                    ) as fi:
-                        output = json_normalize(fi.read())
                 else:
                     # Result is JSON output
                     output = json_normalize(result.output)
