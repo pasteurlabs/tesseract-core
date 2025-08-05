@@ -251,7 +251,7 @@ class Tesseract:
                 "Can only retrieve logs for a Tesseract created via from_image."
             )
         if self._serve_context is None:
-            return self._lastlog
+            return self._lastlog or ""
         return engine.logs(self._serve_context["container_name"])
 
     def serve(self) -> None:
@@ -302,26 +302,6 @@ class Tesseract:
             dictionary with the OpenAPI Schema.
         """
         return self._client.run_tesseract("openapi_schema")
-
-    @cached_property
-    @requires_client
-    def input_schema(self) -> dict:
-        """Get the input schema of this Tesseract.
-
-        Returns:
-             dictionary with the input schema.
-        """
-        return self._client.run_tesseract("input_schema")
-
-    @cached_property
-    @requires_client
-    def output_schema(self) -> dict:
-        """Get the output schema of this Tesseract.
-
-        Returns:
-             dictionary with the output schema.
-        """
-        return self._client.run_tesseract("output_schema")
 
     @property
     @requires_client
@@ -604,8 +584,6 @@ class HTTPClient:
             The loaded JSON response from the endpoint, with decoded arrays.
         """
         if endpoint in [
-            "input_schema",
-            "output_schema",
             "openapi_schema",
             "health",
         ]:

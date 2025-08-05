@@ -23,7 +23,6 @@ The `project id` is what is used in the `tesseract teardown` command and will ki
 
 ## Invoking a Tesseract
 
-
 The main operation which a Tesseract implements is called `apply`. This could be
 a forward pass of a neural network applied to some input data,
 a simulation of a quantity of interest which accepts its initial conditions as input,
@@ -93,6 +92,8 @@ a remote Tesseract via `Tesseract(url=...)`.```
 This Tesseract, which accepts two vectors, is returning an object which has the vector sum
 `a + b` in the `result` output field.
 
+## Optional endpoints and differentiation
+
 If the Tesseract you are using is differentiable, the endpoints which return derivatives can be called in a similar
 fashion; for instance, here is how one would calculate the Jacobian of the `result` output field, partial only
 on the `a` vector, at $a = (1,2,3)$, $b = (4,5,6)$:
@@ -113,7 +114,7 @@ $ curl -d @examples/vectoradd/example_jacobian_inputs.json \
   http://<tesseract-address>:<port>/jacobian
 {"result":{"a":{"object_type":"array","shape":[3,3],"dtype":"float64","data":{"buffer":[[1.0,0.0,0.0],[0.0,1.0,0.0],[0.0,0.0,1.0]],"encoding":"json"}}}}
 ```
-Notice that the payload we posted contains information about which inputs and outputs we want to consider
+The payload we posted contains information about which inputs and outputs we want to consider
 when computing derivatives:
 ```{literalinclude} ../../../examples/vectoradd/example_jacobian_inputs.json
 :caption: example_jacobian_inputs.json
@@ -139,76 +140,22 @@ when computing derivatives:
 
 Now the output is a 3x3 matrix, as expected.
 
-To know which endpoints among `jacobian`, `jacobian_vector_product`, or `vector_jacobian_product` are
-available in a given Tesseract, you can check which commands appear in `tesseract run <tesseract-name>[:tag] --help`, or
-look at the docs at the `/docs` endpoint of a running Tesseract service (or use `tesseract apidoc`).
-
-## Input and output schemas
-
-As they wrap arbitrary computation, each Tesseract has a unique input/output signature.
-To make it easier to programmatically know each specific Tesseract's input and output schema,
-you can use the following:
-
-::::{tab-set}
-:::{tab-item} CLI
-:sync: cli
-For the input schema:
-
-```bash
-$ tesseract run vectoradd input-schema
-```
-
-For the output schema:
-
-```bash
-$ tesseract run vectoradd output-schema
-```
-:::
-:::{tab-item} REST API
-:sync: http
-For the input schema:
-
-```bash
-$ curl <tesseract-address>:<port>/input_schema
-```
-
-For the output schema:
-
-```bash
-$ curl <tesseract-address>:<port>/output_schema
-```
-:::
-:::{tab-item} Python
-:sync: python
-For the input schema:
+To know which optional endpoints such as `jacobian`, `jacobian_vector_product`, or `vector_jacobian_product` are
+available in a given Tesseract, you can look at the docs at the `/docs` endpoint of a running Tesseract service, use `tesseract apidoc`, or use the [Tesseract Python API](#tesseract_core.Tesseract.available_endpoints):
 
 ```python
->>> from tesseract_core import Tesseract
 >>> with Tesseract(image="vectoradd") as vectoradd:
->>>     vectoradd.input_schema
-```
-
-For the output schema:
-
-```python
->>> from tesseract_core import Tesseract
->>> with Tesseract(image="vectoradd") as vectoradd:
->>>     vectoradd.output_schema
+...     print(vectoradd.available_endpoints)
+['apply', 'jacobian', 'health']
 ```
 :::
 ::::
 
-Schemas are returned in the [JSON Schema](https://json-schema.org/) format,
-which is intended for programmatic parsing rather than human
-readability. If you want a more human-readable version of the schema,
-your best option is instead to look at the docs in the `/docs` endpoint of a Tesseract
-service.
+## OpenAPI schemas for programmatic parsing
 
-The schemas returned by the command above are the ones of the `/apply` endpoint. The schema
-for differential endpoints, like `jacobian`, are derived from it -- see the
-[page on Autodiff](tr-autodiff) for more details.
-
-You can also get the OpenAPI schema for the whole API of each Tesseract via:
+Since they wrap arbitrary computation, each Tesseract has a unique input/output signature.
+To make it easier to programmatically know each specific Tesseract's input and output schema,
+you can use the following:
 
 ::::{tab-set}
 :::{tab-item} CLI
@@ -228,16 +175,16 @@ $ curl <tesseract-address>:<port>/openapi.json
 ```python
 >>> from tesseract_core import Tesseract
 >>> with Tesseract(image="vectoradd") as vectoradd:
->>>     vectoradd.openapi_schema
-```
-
-If you only care about which endpoints are available, you can use the [available_endpoints](#tesseract_core.Tesseract.available_endpoints)
-attribute:
-
-```python
->>> with Tesseract(image="vectoradd") as vectoradd:
->>>     vectoradd.available_endpoints
-['apply', 'jacobian', 'health', 'input_schema', 'output_schema']
+>>>     schema = vectoradd.openapi_schema
 ```
 :::
 ::::
+
+Schemas are returned in the [OpenAPI Schema](https://swagger.io/specification/) format,
+which is intended for programmatic parsing rather than human
+readability. If you want a more human-readable version of the schema,
+your best option is instead to look at the docs in the `/docs` endpoint of a Tesseract
+service or running `tesseract apidoc <tesseract-name>`.
+
+The OpenAPI schema contains the schemas of all endpoints, even though they are all derived from
+the inputs / outputs of `/apply`.

@@ -16,6 +16,8 @@ class OutputSchema(BaseModel):
 
 def apply(inputs: InputSchema) -> OutputSchema:
     """This demonstrates logging parameters, metrics and artifacts."""
+    print("This is a message from the apply function.")
+
     log_parameter("example_param", "value")
 
     for step in range(10):

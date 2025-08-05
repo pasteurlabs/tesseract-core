@@ -6,7 +6,9 @@
 import json
 import os
 import subprocess
+import uuid
 from pathlib import Path
+from textwrap import dedent
 
 import pytest
 import requests
@@ -272,10 +274,9 @@ def test_tesseract_list(built_image_name):
 
 
 def test_tesseract_run_stdout(built_image_name):
-    # Test List Command
     cli_runner = CliRunner(mix_stderr=False)
 
-    test_commands = ("input-schema", "output-schema", "openapi-schema", "health")
+    test_commands = ("openapi-schema", "health")
 
     for command in test_commands:
         run_res = cli_runner.invoke(
@@ -802,10 +803,8 @@ def test_tarball_install(dummy_tesseract_package, docker_cleanup):
     docker_cleanup["images"].append(img_tag)
 
 
-def test_logging(dummy_tesseract_package, tmpdir, docker_cleanup):
-    from textwrap import dedent
-
-    tesseract_api = dedent(
+def logging_tesseract_api_string():
+    return dedent(
         """
     from pydantic import BaseModel
 
@@ -822,6 +821,10 @@ def test_logging(dummy_tesseract_package, tmpdir, docker_cleanup):
         return OutputSchema(out=f"Received message: {inputs.message}")
     """
     )
+
+
+def test_logging_tesseract_run(dummy_tesseract_package, tmpdir, docker_cleanup):
+    tesseract_api = logging_tesseract_api_string()
 
     with open(dummy_tesseract_package / "tesseract_api.py", "w") as f:
         f.write(tesseract_api)
@@ -853,13 +856,71 @@ def test_logging(dummy_tesseract_package, tmpdir, docker_cleanup):
         text=True,
     )
     assert run_res.returncode == 0, run_res.stderr
-    assert "Hello from tesseract_api.py!" == run_res.stderr.strip()
+    assert "Hello from tesseract_api.py!\nHello from apply!" == run_res.stderr.strip()
 
     results = json.loads(run_res.stdout.strip())
     assert results["out"] == "Received message: Test message"
 
     logdir = next((Path(tmpdir) / "logs").iterdir())
+    job_id = str(logdir.name).removeprefix("run_")
+    # Check that the id is a well-formed uuid
+    uuid.UUID(job_id)
+
     log_file = logdir / "tesseract.log"
+    assert log_file.exists()
+
+    with open(log_file) as f:
+        log_content = f.read()
+    assert "Hello from apply!" == log_content.strip()
+
+
+def test_logging_tesseract_serve(
+    dummy_tesseract_package, tmpdir, docker_cleanup, docker_client
+):
+    tesseract_api = logging_tesseract_api_string()
+
+    with open(dummy_tesseract_package / "tesseract_api.py", "w") as f:
+        f.write(tesseract_api)
+
+    cli_runner = CliRunner(mix_stderr=False)
+    result = cli_runner.invoke(
+        app,
+        ["--loglevel", "debug", "build", str(dummy_tesseract_package)],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0, result.stderr
+
+    img_tag = json.loads(result.stdout)[0]
+    docker_cleanup["images"].append(img_tag)
+
+    serve_res = subprocess.run(
+        [
+            "tesseract",
+            "serve",
+            img_tag,
+            "--output-path",
+            tmpdir,
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert serve_res.returncode == 0, serve_res.stderr
+    assert serve_res.stdout
+
+    serve_meta = json.loads(serve_res.stdout)
+    container_name = serve_meta["container_name"]
+    docker_cleanup["containers"].append(container_name)
+    container = docker_client.containers.get(container_name)
+
+    job_id = str(uuid.uuid4())
+    res = requests.post(
+        f"http://{container.host_ip}:{container.host_port}/apply",
+        params={"job_id": job_id},
+        json={"inputs": {}},
+    )
+    assert res.status_code == 200, res.text
+
+    log_file = Path(tmpdir) / f"logs/run_{job_id}/tesseract.log"
     assert log_file.exists()
 
     with open(log_file) as f:
@@ -1023,7 +1084,7 @@ def test_mpa_mlflow_backend(dummy_tesseract_package, tmpdir, docker_cleanup):
         "tesseract",
         "run",
         "--env",
-        "MLFLOW_TRACKING_URI=/tesseract/output_data/mlruns",
+        "TESSERACT_MLFLOW_TRACKING_URI=/tesseract/output_data/mlruns",
         img_tag,
         "apply",
         '{"inputs": {}}',
