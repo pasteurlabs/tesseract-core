@@ -944,7 +944,7 @@ def test_mpa_mlflow_backend(dummy_tesseract_package, tmpdir, docker_cleanup):
         "tesseract",
         "run",
         "--env",
-        "MLFLOW_TRACKING_URI=/tesseract/output_data/mlruns",
+        "TESSERACT_MLFLOW_TRACKING_URI=/tesseract/output_data/mlruns",
         img_tag,
         "apply",
         '{"inputs": {}}',
