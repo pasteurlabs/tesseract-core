@@ -4,18 +4,27 @@
 """This module provides a command-line interface for interacting with the Tesseract runtime."""
 
 import argparse
+import inspect
 import io
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
+from enum import Enum
 from pathlib import Path
 from textwrap import dedent
-from typing import Any, Optional
+from typing import (
+    Annotated,
+    Any,
+    Literal,
+    Optional,
+    get_args,
+    get_origin,
+)
 
 import click
 import typer
 from pydantic import ValidationError
 
-from tesseract_core.runtime.config import get_config, update_config
+from tesseract_core.runtime.config import RuntimeConfig, get_config, update_config
 from tesseract_core.runtime.core import (
     check_tesseract_api,
     create_endpoints,
@@ -23,7 +32,6 @@ from tesseract_core.runtime.core import (
     redirect_fd,
 )
 from tesseract_core.runtime.file_interactions import (
-    SUPPORTED_FORMATS,
     guess_format_from_path,
     load_bytes,
     output_to_bytes,
@@ -35,6 +43,23 @@ from tesseract_core.runtime.finite_differences import (
 )
 from tesseract_core.runtime.serve import create_rest_api
 from tesseract_core.runtime.serve import serve as serve_
+
+CONFIG_FIELDS = {
+    str(field_name): field.annotation
+    for field_name, field in RuntimeConfig.model_fields.items()
+}
+
+
+def make_choice_enum(name: str, choices: Iterable[str]) -> type[Enum]:
+    """Create a choice enum for Typer."""
+    return Enum(name, [(choice.upper(), choice) for choice in choices], type=str)
+
+
+def _enum_to_val(val: Any) -> Any:
+    """Convert an Enum value to its raw representation."""
+    if isinstance(val, Enum):
+        return val.value
+    return val
 
 
 class SpellcheckedTyperGroup(typer.core.TyperGroup):
@@ -57,7 +82,14 @@ class SpellcheckedTyperGroup(typer.core.TyperGroup):
         return super().get_command(ctx, invoked_command)
 
 
-app = typer.Typer(name="tesseract-runtime", cls=SpellcheckedTyperGroup)
+app = typer.Typer(
+    name="tesseract-runtime",
+    cls=SpellcheckedTyperGroup,
+    no_args_is_help=True,
+    help="Invoke the Tesseract runtime.",
+    invoke_without_command=True,
+    context_settings={"help_option_names": ["-h", "--help"]},
+)
 
 
 def _prettify_docstring(docstr: str) -> str:
@@ -68,9 +100,7 @@ def _prettify_docstring(docstr: str) -> str:
     return "\n".join([docstring_lines[0].lstrip(), dedented_lines])
 
 
-def _parse_arg_callback(
-    ctx: Any, param: Any, value: Any
-) -> tuple[dict[str, Any], Optional[Path]]:
+def _parse_payload(value: Any) -> tuple[dict[str, Any], Optional[Path]]:
     """Click callback to parse Tesseract input arguments provided in the CLI.
 
     Returns a tuple of the parsed value and the base directory of the input path, if any.
@@ -103,20 +133,56 @@ def _parse_arg_callback(
     return decoded_value, base_dir
 
 
-@app.callback(
-    no_args_is_help=False,
-    context_settings={"help_option_names": ["-h", "--help"]},
-)
-def main_callback() -> None:
-    """Invoke the Tesseract runtime.
+def make_callback() -> Callable:
+    """Create a callback function for the Tesseract runtime CLI.
 
-    The Tesseract runtime can be configured via environment variables; for example,
-    ``export TESSERACT_RUNTIME_PORT=8080`` sets the port to use for ``tesseract serve`` to 8080.
+    This function dynamically generates a callback function that can be used with the Typer CLI
+    that includes all configuration fields as options.
     """
-    pass
+
+    def main_callback(**kwargs: Any) -> None:
+        """Invoke the Tesseract runtime.
+
+        The Tesseract runtime can be configured via environment variables; for example,
+        ``export TESSERACT_RUNTIME_PORT=8080`` sets the port to use for ``tesseract serve`` to 8080.
+        """
+        update_config(
+            **{key: _enum_to_val(val) for key, val in kwargs.items() if val is not None}
+        )
+
+    params = []
+    for field_name, field_type in CONFIG_FIELDS.items():
+        if field_name == "api_path":
+            # Too late to configure here, as the API path is needed to load the Tesseract API
+            continue
+
+        if get_origin(field_type) is Literal:
+            field_type = make_choice_enum(f"{field_name}Choices", get_args(field_type))
+
+        params.append(
+            inspect.Parameter(
+                field_name,
+                inspect.Parameter.KEYWORD_ONLY,
+                default=None,
+                annotation=Annotated[
+                    field_type,
+                    typer.Option(
+                        "--" + field_name.replace("_", "-"),
+                        help=f"Overwrite the `{field_name}` config option.",
+                        show_default=False,
+                    ),
+                ],
+            )
+        )
+    main_callback.__signature__ = inspect.Signature(
+        parameters=params,
+        return_annotation=None,
+    )
+    return main_callback
 
 
-tesseract_runtime = typer.main.get_command(app)
+main_callback = make_callback()
+app.callback()(main_callback)
 
 
 def _schema_to_docstring(schema: Any, current_indent: int = 0) -> str:
@@ -151,7 +217,7 @@ def _schema_to_docstring(schema: Any, current_indent: int = 0) -> str:
     return "\n".join(docstring)
 
 
-@tesseract_runtime.command()
+@app.command("check")
 def check() -> None:
     """Check whether the Tesseract API is valid."""
     api_module = get_tesseract_api()
@@ -159,109 +225,108 @@ def check() -> None:
     typer.echo("✅ Tesseract API check successful ✅")
 
 
-@tesseract_runtime.command()
-@click.argument(
-    "payload",
-    type=click.STRING,
-    required=True,
-    metavar="JSON_PAYLOAD",
-    callback=_parse_arg_callback,
-)
-@click.option(
-    "--endpoints",
-    type=click.STRING,
-    required=False,
-    multiple=True,
-    help="Endpoints to check gradients for (default: check all).",
-)
-@click.option(
-    "--input-paths",
-    type=click.STRING,
-    required=False,
-    multiple=True,
-    help="Paths to differentiable inputs to check gradients for (default: check all).",
-)
-@click.option(
-    "--output-paths",
-    type=click.STRING,
-    required=False,
-    multiple=True,
-    help="Paths to differentiable outputs to check gradients for (default: check all).",
-)
-@click.option(
-    "--eps",
-    type=click.FLOAT,
-    required=False,
-    help="Step size for finite differences.",
-    default=1e-4,
-    show_default=True,
-)
-@click.option(
-    "--rtol",
-    type=click.FLOAT,
-    required=False,
-    help="Relative tolerance when comparing finite differences to gradients.",
-    default=0.1,
-    show_default=True,
-)
-@click.option(
-    "--max-evals",
-    type=click.INT,
-    required=False,
-    help="Maximum number of evaluations per input.",
-    default=1000,
-    show_default=True,
-)
-@click.option(
-    "--max-failures",
-    type=click.INT,
-    required=False,
-    help="Maximum number of failures to report per endpoint.",
-    default=10,
-    show_default=True,
-)
-@click.option(
-    "--seed",
-    type=click.INT,
-    required=False,
-    help="Seed for random number generator. If not set, a random seed is used.",
-    default=None,
-)
-@click.option(
-    "--show-progress",
-    is_flag=True,
-    default=True,
-    help="Show progress bar.",
-)
+@app.command("check-gradients")
 def check_gradients(
-    payload: tuple[dict[str, Any], Optional[Path]],
-    input_paths: list[str],
-    output_paths: list[str],
-    endpoints: list[str],
-    eps: float,
-    rtol: float,
-    max_evals: int,
-    max_failures: int,
-    seed: Optional[int],
-    show_progress: bool,
+    payload: Annotated[
+        str,
+        typer.Argument(
+            help="JSON payload to pass to the Tesseract API. If prefixed with '@', it is treated as a file path.",
+            metavar="JSON_PAYLOAD",
+            show_default=False,
+        ),
+    ],
+    input_paths: Annotated[
+        Optional[list[str]],
+        typer.Option(
+            "--input-paths",
+            help="Paths to differentiable inputs to check gradients for.",
+            show_default="check all",
+        ),
+    ] = None,
+    output_paths: Annotated[
+        Optional[list[str]],
+        typer.Option(
+            "--output-paths",
+            help="Paths to differentiable outputs to check gradients for.",
+            show_default="check all",
+        ),
+    ] = None,
+    endpoints: Annotated[
+        Optional[list[str]],
+        typer.Option(
+            "--endpoints",
+            help="Endpoints to check gradients for.",
+            show_default="check all",
+        ),
+    ] = None,
+    eps: Annotated[
+        float,
+        typer.Option(
+            "--eps",
+            help="Step size for finite differences.",
+            show_default=True,
+        ),
+    ] = 1e-4,
+    rtol: Annotated[
+        float,
+        typer.Option(
+            "--rtol",
+            help="Relative tolerance when comparing finite differences to gradients.",
+            show_default=True,
+        ),
+    ] = 0.1,
+    max_evals: Annotated[
+        int,
+        typer.Option(
+            "--max-evals",
+            help="Maximum number of evaluations per input.",
+            show_default=True,
+        ),
+    ] = 1000,
+    max_failures: Annotated[
+        int,
+        typer.Option(
+            "--max-failures",
+            help="Maximum number of failures to report per endpoint.",
+            show_default=True,
+        ),
+    ] = 10,
+    seed: Annotated[
+        Optional[int],
+        typer.Option(
+            "--seed",
+            help="Seed for random number generator. If not set, a random seed is used.",
+            show_default=False,
+        ),
+    ] = None,
+    show_progress: Annotated[
+        bool,
+        typer.Option(
+            "--show-progress",
+            help="Show progress bar.",
+        ),
+    ] = True,
 ) -> None:
     """Check gradients of endpoints against a finite difference approximation.
 
+    \b
     This is an automated way to check the correctness of the gradients of the different AD endpoints
     (jacobian, jacobian_vector_product, vector_jacobian_product) of a ``tesseract_api.py`` module.
     It will sample random indices and compare the gradients computed by the AD endpoints with the
     finite difference approximation.
 
+    \b
     Warning:
         Finite differences are not exact and the comparison is done with a tolerance. This means
         that the check may fail even if the gradients are correct, and vice versa.
 
+    \b
     Finite difference approximations are sensitive to numerical precision. When finite differences
     are reported incorrectly as 0.0, it is likely that the chosen `eps` is too small, especially for
     inputs that do not use float64 precision.
-    """
+    """  # noqa: D301
     api_module = get_tesseract_api()
-    inputs, base_dir = payload
+    inputs, base_dir = _parse_payload(payload)
 
     result_iter = check_gradients_(
         api_module,
@@ -307,24 +372,26 @@ def check_gradients(
         sys.exit(1)
 
 
-@tesseract_runtime.command()
-@click.option("-p", "--port", default=8000, help="Port number")
-@click.option("-h", "--host", default="127.0.0.1", help="Host IP address")
-@click.option("-w", "--num-workers", default=1, help="Number of worker processes")
-def serve(host: str, port: int, num_workers: int) -> None:
+@app.command("serve")
+def serve(
+    host: Annotated[str, typer.Option(help="Host IP address")] = "127.0.0.1",
+    port: Annotated[int, typer.Option(help="Port number")] = 8000,
+    num_workers: Annotated[int, typer.Option(help="Number of worker processes")] = 1,
+) -> None:
     """Start running this Tesseract's web server."""
     serve_(host=host, port=port, num_workers=num_workers)
 
 
 def _create_user_defined_cli_command(
-    user_function: Callable, out_stream: Optional[io.TextIOBase]
-) -> click.Command:
+    app: typer.Typer, user_function: Callable, out_stream: Optional[io.TextIOBase]
+) -> None:
     """Creates a click command which sends requests to Tesseract endpoints.
 
     We need to do this dynamically, as we want to generate docs and usage
     from the Tesseract api's signature and docstrings.
 
     Args:
+        app: The Typer application to add the command to.
         user_function: The user-defined function to create a CLI command for.
         out_stream: The default output stream to write to. If None, defaults to
             sys.stdout at the time of invocation.
@@ -332,56 +399,11 @@ def _create_user_defined_cli_command(
     InputSchema = user_function.__annotations__.get("payload", None)
     OutputSchema = user_function.__annotations__.get("return", None)
 
-    options = []
-
-    if InputSchema is not None:
-        options.append(
-            click.Argument(
-                ["payload"],
-                type=click.STRING,
-                required=True,
-                metavar="JSON_PAYLOAD",
-                callback=_parse_arg_callback,
-            )
-        )
-
-    options.extend(
-        [
-            click.Option(
-                ["-i", "--input-path"],
-                type=click.STRING,
-                help=(
-                    "Input path from which to read files. "
-                    "To be used in conjunction with InputFileReferences in the Tesseract InputSchema."
-                ),
-                default=None,
-            ),
-            click.Option(
-                ["-o", "--output-path"],
-                type=click.STRING,
-                help=(
-                    "Output path to write the result to, such as local directory or S3 URI "
-                    "(may be anything supported by fsspec). [default: write to stdout]"
-                ),
-                default=None,
-            ),
-            click.Option(
-                ["-f", "--output-format"],
-                type=click.Choice(SUPPORTED_FORMATS),
-                help="Output format to write results in.",
-                default="json",
-            ),
-        ]
-    )
-
-    def _callback_wrapper(
-        input_path: Optional[str],
-        output_path: Optional[str],
-        output_format: SUPPORTED_FORMATS,
-        **optional_args: Any,
-    ):
-        if input_path:
-            update_config(input_path=input_path)
+    def _callback_wrapper(**kwargs: Any):
+        config = get_config()
+        output_path = config.output_path
+        output_format = config.output_format
+        output_file = config.output_file
 
         if output_format == "json+binref" and output_path is None:
             raise ValueError("--output-path must be specified for json+binref format")
@@ -391,32 +413,30 @@ def _create_user_defined_cli_command(
         user_function_args = {}
 
         if InputSchema is not None:
-            payload, base_dir = optional_args["payload"]
+            payload, base_dir = kwargs["payload"]
             try:
                 user_function_args["payload"] = InputSchema.model_validate(
                     payload, context={"base_dir": base_dir}
                 )
             except ValidationError as e:
                 raise click.BadParameter(
-                    e,
+                    str(e),
                     param=InputSchema,
                     param_hint=InputSchema.__name__,
                 ) from e
 
         if output_path:
-            update_config(output_path=output_path)
             Path(output_path).mkdir(parents=True, exist_ok=True)
 
         result = user_function(**user_function_args)
         result = output_to_bytes(result, output_format, output_path)
 
-        if output_path is None:
-            # write raw bytes to out_stream.buffer to support binary data (which may e.g. be piped)
+        # write raw bytes to out_stream.buffer to support binary data (which may e.g. be piped)
+        if not output_file:
             out_stream_.buffer.write(result)
             out_stream_.flush()
         else:
-            format = output_format.split("+", maxsplit=1)[0]
-            write_to_path(result, f"{output_path}/results.{format}")
+            write_to_path(result, f"{output_path}/{output_file}")
 
     function_name = user_function.__name__.replace("_", "-")
 
@@ -429,40 +449,47 @@ def _create_user_defined_cli_command(
         )
 
         # \b\n disables click's automatic formatting
-        function_doc.append("\n\n\b\nInput schema:")
+        function_doc.append("\n\nInput schema:")
         function_doc.append(_schema_to_docstring(InputSchema, current_indent=4))
 
     if OutputSchema is not None and hasattr(OutputSchema, "model_fields"):
-        function_doc.append("\n\n\b\nReturns:")
+        function_doc.append("\n\nReturns:")
         function_doc.append(_schema_to_docstring(OutputSchema, current_indent=4))
 
-    command = click.Command(
+    if InputSchema is not None:
+
+        def command_func(payload: str):
+            parsed_payload = _parse_payload(payload)
+            return _callback_wrapper(payload=parsed_payload)
+    else:
+
+        def command_func():
+            return _callback_wrapper()
+
+    help_string = "\n".join(function_doc).replace("\n\n", "\n\n\b")
+    decorator = app.command(
         function_name,
         short_help=f"Call the Tesseract function {function_name}.",
-        help="\n".join(function_doc),
-        callback=_callback_wrapper,
-        params=options,
+        help=help_string,
     )
-
-    return command
+    decorator(command_func)
 
 
 def _add_user_commands_to_cli(
-    group: click.Group, out_stream: Optional[io.IOBase]
-) -> click.Group:
+    app: typer.Typer, out_stream: Optional[io.IOBase]
+) -> None:
     tesseract_package = get_tesseract_api()
     endpoints = create_endpoints(tesseract_package)
 
     def openapi_schema() -> dict:
         """Get the openapi.json schema."""
-        return create_rest_api(tesseract_package).openapi()
+        openapi_schema_ = create_rest_api(tesseract_package).openapi()
+        return openapi_schema_
 
     endpoints.append(openapi_schema)
 
     for func in endpoints:
-        group.add_command(_create_user_defined_cli_command(func, out_stream))
-
-    return group
+        _create_user_defined_cli_command(app, func, out_stream)
 
 
 def main() -> None:
@@ -499,8 +526,8 @@ def main() -> None:
             input_path = Path(args.input_path)
             update_config(input_path=input_path.as_posix())
 
-        cli = _add_user_commands_to_cli(tesseract_runtime, out_stream=orig_stdout)
-        cli(auto_envvar_prefix="TESSERACT_RUNTIME")
+        _add_user_commands_to_cli(app, out_stream=orig_stdout)
+        app(auto_envvar_prefix="TESSERACT_RUNTIME")
 
 
 if __name__ == "__main__":

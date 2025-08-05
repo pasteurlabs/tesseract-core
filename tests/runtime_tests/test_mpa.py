@@ -6,10 +6,12 @@
 import csv
 import json
 import os
+import uuid
 
 import pytest
 
 from tesseract_core.runtime import mpa
+from tesseract_core.runtime.config import update_config
 from tesseract_core.runtime.experimental import (
     log_artifact,
     log_metric,
@@ -57,8 +59,8 @@ def test_file_backend_default():
 
 
 def test_file_backend_empty_mlflow_uri():
-    """Test that FileBackend is used when MLFLOW_TRACKING_URI is empty."""
-    os.environ["MLFLOW_TRACKING_URI"] = ""
+    """Test that FileBackend is used when mlflow_tracking_uri is empty."""
+    update_config(mlflow_tracking_uri="")
     backend = mpa._create_backend()
     assert isinstance(backend, mpa.FileBackend)
 
@@ -71,6 +73,12 @@ def test_custom_log_directory(tmpdir):
     backend = mpa.FileBackend()
     assert backend.log_dir == custom_dir
     assert backend.log_dir.exists()
+
+
+def test_uses_job_id_log_directory(tmpdir):
+    job_id = str(uuid.uuid4())
+    backend = mpa.FileBackend(job_id)
+    assert backend.run_dir.name == f"run_{job_id}"
 
 
 def test_unique_run_directories():
@@ -153,10 +161,10 @@ def test_log_artifact_missing_file():
 
 
 def test_mlflow_backend_creation(tmpdir):
-    """Test that MLflowBackend is created when MLFLOW_TRACKING_URI is set."""
+    """Test that MLflowBackend is created when mlflow_tracking_uri is set."""
     pytest.importorskip("mlflow")  # Skip if MLflow is not installed
     mlflow_dir = tmpdir / "mlflow_backend_test"
-    os.environ["MLFLOW_TRACKING_URI"] = f"file://{mlflow_dir}"
+    update_config(mlflow_tracking_uri=f"file://{mlflow_dir}")
     backend = mpa._create_backend()
     assert isinstance(backend, mpa.MLflowBackend)
 
@@ -165,7 +173,7 @@ def test_mlflow_log_calls(tmpdir):
     """Test MLflow backend logging functions with temporary directory."""
     pytest.importorskip("mlflow")  # Skip if MLflow is not installed
     mlflow_dir = tmpdir / "mlflow_logging_test"
-    os.environ["MLFLOW_TRACKING_URI"] = f"file://{mlflow_dir}"
+    update_config(mlflow_tracking_uri=f"file://{mlflow_dir}")
 
     with start_run():
         log_parameter("model_type", "neural_network")

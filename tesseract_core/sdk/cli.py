@@ -8,6 +8,7 @@ import re
 import sys
 import time
 import webbrowser
+from collections.abc import Iterable
 from contextlib import nullcontext
 from enum import Enum
 from logging import getLogger
@@ -79,7 +80,7 @@ class SpellcheckedTyperGroup(typer.core.TyperGroup):
 app = typer.Typer(
     # Make -h an alias for --help
     context_settings={"help_option_names": ["-h", "--help"]},
-    name="Tesseract",
+    name="tesseract",
     pretty_exceptions_show_locals=False,
     cls=SpellcheckedTyperGroup,
 )
@@ -93,7 +94,7 @@ POSSIBLE_CMDS = set(
     re.sub(r"([a-z])([A-Z])", r"\1-\2", object.name).replace("_", "-").lower()
     for object in EXPECTED_OBJECTS
 )
-POSSIBLE_CMDS.update({"health", "openapi-schema", "check", "check-gradients"})
+POSSIBLE_CMDS.update({"health", "openapi-schema", "check", "check-gradients", "serve"})
 
 # All fields in TesseractConfig and TesseractBuildConfig for config override
 POSSIBLE_KEYPATHS = TesseractConfig.model_fields.keys()
@@ -109,16 +110,20 @@ for temp_with_path in ENV.list_templates(extensions=["py"]):
         AVAILABLE_RECIPES.add(str(temp_with_path.parent))
 AVAILABLE_RECIPES = sorted(AVAILABLE_RECIPES)
 
+LOGLEVELS = ("debug", "info", "warning", "error", "critical")
+OUTPUT_FORMATS = ("json", "json+base64", "json+binref", "msgpack")
 
-class LogLevel(str, Enum):
-    """Available log levels for Tesseract CLI."""
 
-    # Must be an enum to represent a choice in Typer
-    debug = "debug"
-    info = "info"
-    warning = "warning"
-    error = "error"
-    critical = "critical"
+def make_choice_enum(name: str, choices: Iterable[str]) -> type[Enum]:
+    """Create a choice enum for Typer."""
+    return Enum(name, [(choice.upper(), choice) for choice in choices], type=str)
+
+
+def _enum_to_val(val: Any) -> Any:
+    """Convert an Enum value to its raw representation."""
+    if isinstance(val, Enum):
+        return val.value
+    return val
 
 
 def _validate_tesseract_name(name: str | None) -> str:
@@ -149,17 +154,20 @@ def version_callback(value: bool | None) -> None:
         raise typer.Exit()
 
 
+LogLevelChoices = make_choice_enum("LogLevel", LOGLEVELS)
+
+
 @app.callback()
 def main_callback(
     loglevel: Annotated[
-        LogLevel,
+        LogLevelChoices,
         typer.Option(
             help="Set the logging level. At debug level, also print tracebacks for user errors.",
             case_sensitive=False,
             show_default=True,
             metavar="LEVEL",
         ),
-    ] = LogLevel.info,
+    ] = "info",
     version: Annotated[
         bool | None,
         typer.Option(
@@ -171,7 +179,8 @@ def main_callback(
     ] = None,
 ) -> None:
     """Tesseract: A toolkit for universal, autodiff-native software components."""
-    verbose_tracebacks = loglevel == LogLevel.debug
+    loglevel: str = _enum_to_val(loglevel).lower()
+    verbose_tracebacks = loglevel == "debug"
     state.print_user_error_tracebacks = verbose_tracebacks
     app.pretty_exceptions_show_locals = verbose_tracebacks
 
@@ -349,17 +358,20 @@ def build_image(
         typer.echo(json.dumps(image.tags))
 
 
+RecipeChoices = make_choice_enum("Recipe", AVAILABLE_RECIPES)
+
+
 @app.command("init")
 def init(
     name: Annotated[
         # Guaranteed to be a string by _validate_tesseract_name
-        str | None,
+        str,
         typer.Option(
             help="Tesseract name as specified in tesseract_config.yaml. Will be prompted if not provided.",
             callback=_validate_tesseract_name,
             show_default=False,
         ),
-    ] = None,
+    ] = "",
     target_dir: Annotated[
         Path,
         typer.Option(
@@ -371,14 +383,14 @@ def init(
         ),
     ] = Path("."),
     recipe: Annotated[
-        str,
+        RecipeChoices,
         typer.Option(
-            click_type=click.Choice(AVAILABLE_RECIPES),
             help="Use a pre-configured template to initialize Tesseract API and configuration.",
         ),
     ] = "base",
 ) -> None:
     """Initialize a new Tesseract API module."""
+    recipe: str = _enum_to_val(recipe)
     logger.info(f"Initializing Tesseract {name} in directory: {target_dir}")
     engine.init_api(target_dir, name, recipe=recipe)
 
@@ -436,6 +448,9 @@ def _parse_environment(
         key, value = env.split("=", maxsplit=1)
         env_dict[key] = value
     return env_dict
+
+
+OutputFormatChoices = make_choice_enum("OutputFormat", OUTPUT_FORMATS)
 
 
 @app.command("serve")
@@ -551,7 +566,23 @@ def serve(
                 "Input path to read input files from, such as local directory or S3 URI "
                 "(may be anything supported by fsspec)."
             ),
-            hidden=True,
+        ),
+    ] = None,
+    output_path: Annotated[
+        str | None,
+        typer.Option(
+            "--output-path",
+            help=(
+                "Output path to write output files to, such as local directory or S3 URI "
+                "(may be anything supported by fsspec)."
+            ),
+        ),
+    ] = None,
+    output_format: Annotated[
+        OutputFormatChoices | None,
+        typer.Option(
+            "--output-format",
+            help=("Output format to use for the Tesseract."),
         ),
     ] = None,
 ) -> None:
@@ -561,6 +592,8 @@ def serve(
     with the Tesseract container name, which is required to run the teardown
     command and its respective port.
     """
+    output_format: str | None = _enum_to_val(output_format)
+
     parsed_environment = _parse_environment(environment)
 
     if network_alias is not None and network is None:
@@ -583,6 +616,8 @@ def serve(
             num_workers=num_workers,
             user=user,
             input_path=input_path,
+            output_path=output_path,
+            output_format=_enum_to_val(output_format),
         )
     except RuntimeError as ex:
         raise UserError(
@@ -799,27 +834,81 @@ def _sanitize_error_output(error_output: str, tesseract_image: str) -> str:
     return error_output
 
 
+CmdChoices = make_choice_enum("Cmd", sorted(POSSIBLE_CMDS))
+
+
 @app.command(
     "run",
-    # We need to ignore unknown options to forward the args to the Tesseract container
-    context_settings={"ignore_unknown_options": True},
     # We implement --help manually to forward the help of the Tesseract container
     add_help_option=False,
+    epilog=(
+        "For more information about a specific Tesseract, try `tesseract run <tesseract-name> <cmd> --help`.\n"
+        "For example, `tesseract run helloworld apply --help`.\n"
+    ),
 )
 @engine.needs_docker
 def run_container(
     context: click.Context,
     tesseract_image: Annotated[
-        str,
-        typer.Argument(help="Tesseract image name"),
-    ],
+        str | None,
+        typer.Argument(
+            help="Tesseract image name", metavar="TESSERACT_IMAGE", show_default=False
+        ),
+    ] = None,
     cmd: Annotated[
-        str,
-        typer.Argument(help="Tesseract command to run"),
-    ] = "",
-    args: Annotated[
-        list[str] | None,
-        typer.Argument(help="Arguments for the command"),
+        CmdChoices | None,
+        typer.Argument(
+            help=f"Tesseract command to run, must be one of {sorted(POSSIBLE_CMDS)}",
+            metavar="CMD",
+            show_default=False,
+        ),
+    ] = None,
+    payload: Annotated[
+        str | None,
+        typer.Argument(
+            help=(
+                "Optional payload to pass to the Tesseract command. "
+                "This can be a JSON string or an @ prefixed path to a JSON file."
+            ),
+            show_default=False,
+        ),
+    ] = None,
+    input_path: Annotated[
+        str | None,
+        typer.Option(
+            "--input-path",
+            help=(
+                "Input path to read input files from, such as local directory or S3 URI "
+                "(may be anything supported by fsspec)."
+            ),
+        ),
+    ] = None,
+    output_path: Annotated[
+        str | None,
+        typer.Option(
+            "--output-path",
+            help=(
+                "Output path to write output files to, such as local directory or S3 URI "
+                "(may be anything supported by fsspec)."
+            ),
+        ),
+    ] = None,
+    output_format: Annotated[
+        OutputFormatChoices | None,
+        typer.Option(
+            "--output-format",
+            help=("Output format to use for the Tesseract."),
+        ),
+    ] = None,
+    output_file: Annotated[
+        str | None,
+        typer.Option(
+            "--output-file",
+            help=(
+                "Output filename to write the result to (relative to output path). "
+                "If not set, results will be written to stdout."
+            ),
+        ),
     ] = None,
     volume: Annotated[
         list[str] | None,
@@ -872,50 +961,50 @@ def run_container(
             ),
         ),
     ] = None,
+    invoke_help: Annotated[
+        bool,
+        typer.Option(
+            "--help",
+            "-h",
+            help="Show help for the Tesseract command.",
+        ),
+    ] = False,
 ) -> None:
     """Execute a command in a Tesseract.
 
-    This command starts a Tesseract instance and executes the given
-    command.
+    This command starts a Tesseract instance and executes the given command.
     """
-    if args is None:
-        args = []
+    cmd: str | None = _enum_to_val(cmd)
+    output_format: str | None = _enum_to_val(output_format)
+
+    if not tesseract_image:
+        if invoke_help:
+            context.get_help()
+            return
+        raise typer.BadParameter(
+            "Tesseract image name is required.",
+            param_hint="TESSERACT_IMAGE",
+        )
+
+    if not cmd:
+        if invoke_help:
+            context.get_help()
+            return
+        else:
+            error_string = f"Command is required. Are you sure your Tesseract image name is `{tesseract_image}`?"
+            raise typer.BadParameter(error_string, param_hint="CMD")
 
     if cmd == "serve":
-        logger.error(
-            "You should not serve tesseracts via "
-            "`tesseract run <tesseract-name> serve`. "
-            "Use `tesseract serve <tesseract-name>` instead."
-        )
-        raise typer.Exit(1)
-
-    help_args = {"-h", "--help"}
-
-    # When called as `tesseract run --help` -> show generic help
-    if tesseract_image in help_args:
-        context.get_help()
-        return
-
-    invoke_help = any(arg in help_args for arg in args) or cmd in help_args
-
-    if (not cmd or cmd not in POSSIBLE_CMDS) and not invoke_help:
-        if not cmd:
-            error_string = f"Command is required. Are you sure your Tesseract image name is `{tesseract_image}`?\n"
-        else:
-            error_string = f"Command `{cmd}` does not exist. \n"
-
-        error_string += (
-            f"\nRun `tesseract run {tesseract_image} --help` for more information.\n"
+        raise typer.BadParameter(
+            "You should not serve tesseracts via `tesseract run <tesseract-name> serve`. "
+            "Use `tesseract serve <tesseract-name>` instead.",
+            param_hint="CMD",
         )
 
-        error_string = (
-            error_string + f"\nPossible commands are: {', '.join(POSSIBLE_CMDS)}"
-        )
-        raise typer.BadParameter(error_string, param_hint="cmd")
-
+    parsed_environment = {}
     if environment is not None:
         try:
-            environment = {
+            parsed_environment = {
                 item.split("=", maxsplit=1)[0]: item.split("=", maxsplit=1)[1]
                 for item in environment
             }
@@ -924,14 +1013,26 @@ def run_container(
                 "Environment variables must be in the format 'key=value'.",
                 param_hint="env",
             ) from ex
+
+    args = []
+    if invoke_help:
+        args.append("--help")
+
+    if payload is not None:
+        args.append(payload)
+
     try:
         result_out, result_err = engine.run_tesseract(
             tesseract_image,
             cmd,
             args,
             volumes=volume,
+            input_path=input_path,
+            output_path=output_path,
+            output_format=output_format,
+            output_file=output_file,
             gpus=gpus,
-            environment=environment,
+            environment=parsed_environment,
             network=network,
             user=user,
         )

@@ -162,7 +162,8 @@ def test_run_tesseract_file_input(mocked_docker, tmpdir):
     res, _ = engine.run_tesseract(
         "foobar",
         "apply",
-        [f"@{infile}", "--output-path", str(outdir)],
+        [f"@{infile}"],
+        output_path=str(outdir),
     )
 
     # Mocked docker just returns the kwargs to `docker run` as json
@@ -170,9 +171,8 @@ def test_run_tesseract_file_input(mocked_docker, tmpdir):
     assert res["command"] == [
         "apply",
         "@/tesseract/payload.json",
-        "--output-path",
-        "/tesseract/output_data",
     ]
+    assert res["environment"]["TESSERACT_OUTPUT_PATH"] == "/tesseract/output_data"
     assert res["image"] == "foobar"
     assert res["volumes"].keys() == {str(infile), str(outdir)}
 
@@ -180,8 +180,9 @@ def test_run_tesseract_file_input(mocked_docker, tmpdir):
     res, _ = engine.run_tesseract(
         "foobar",
         "apply",
-        [f"@{infile}", "--output-path", str(outdir)],
+        [f"@{infile}"],
         volumes=[f"{tmpdir}:/path/in/container:ro"],
+        output_path=str(outdir),
     )
     res = json.loads(res)
     assert res["volumes"].keys() == {str(infile), str(outdir), f"{tmpdir}"}
@@ -196,9 +197,13 @@ def test_run_tesseract_file_input(mocked_docker, tmpdir):
     res, _ = engine.run_tesseract(
         "foobar",
         "apply",
-        [f"@{infile}", "--output-path", str(outdir), "--input-path", str(indir)],
+        [f"@{infile}"],
+        input_path=str(indir),
+        output_path=str(outdir),
     )
     res = json.loads(res)
+    assert res["environment"]["TESSERACT_INPUT_PATH"] == "/tesseract/input_data"
+    assert res["environment"]["TESSERACT_OUTPUT_PATH"] == "/tesseract/output_data"
     assert res["volumes"].keys() == {str(outdir), str(indir), str(infile)}
     assert res["volumes"][str(indir)] == {
         "mode": "ro",
@@ -274,6 +279,24 @@ def test_serve_tesseract_volumes(mocked_docker, tmpdir):
             volumes=["/non/existent/path:/path/in/container:ro"],
         )
 
+    # Test running with input and output paths
+    indir = Path(tmpdir / "input_path")
+    indir.mkdir()
+    outdir = Path(tmpdir) / "output1"
+    outdir.mkdir()
+
+    res, _ = engine.serve("foobar", input_path=str(indir), output_path=str(outdir))
+    res = json.loads(res)
+    assert res["volumes"].keys() == {str(indir), str(outdir)}
+    assert res["volumes"][str(indir)] == {
+        "mode": "ro",
+        "bind": "/tesseract/input_data",
+    }
+    assert res["volumes"][str(outdir)] == {
+        "mode": "rw",
+        "bind": "/tesseract/output_data",
+    }
+
 
 def test_needs_docker(mocked_docker, monkeypatch):
     @engine.needs_docker
@@ -295,8 +318,9 @@ def test_needs_docker(mocked_docker, monkeypatch):
 
 def test_logpipe(caplog):
     # Verify that logging in a separate thread works as intended
-    from tesseract_core.sdk.engine import LogPipe
+    from tesseract_core.sdk.logs import LogPipe
 
+    logger = logging.getLogger("tesseract")
     caplog.set_level(logging.INFO, logger="tesseract")
 
     logged_lines = []
@@ -305,7 +329,7 @@ def test_logpipe(caplog):
         msg = "".join(random.choices("abcdefghijklmnopqrstuvwxyz", k=msg_length))
         logged_lines.append(msg)
 
-    logpipe = LogPipe(logging.INFO)
+    logpipe = LogPipe(logger.info)
     with logpipe:
         fd = os.fdopen(logpipe.fileno(), "w", closefd=False)
         for line in logged_lines:

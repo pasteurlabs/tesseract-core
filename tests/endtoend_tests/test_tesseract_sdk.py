@@ -1,6 +1,7 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import inspect
 import socket
 
 import numpy as np
@@ -14,8 +15,6 @@ expected_endpoints = {
     "apply",
     "jacobian",
     "health",
-    "input_schema",
-    "output_schema",
     "abstract_eval",
     "jacobian_vector_product",
     "vector_jacobian_product",
@@ -184,3 +183,28 @@ def test_all_endpoints(
     out = getattr(vecadd, endpoint_name)
     if callable(out):
         out(**inputs)
+
+
+def test_signature_consistency():
+    """Test that from_image and engine.serve have the same signature."""
+    allowed_diff = [
+        # debug mode is always enabled in from_image
+        "debug",
+        # setting output format is not meaningful (arrays are decoded automatically)
+        "output_format",
+    ]
+
+    from_image_sig = dict(inspect.signature(Tesseract.from_image).parameters)
+    serve_sig = dict(inspect.signature(engine.serve).parameters)
+
+    for param in allowed_diff:
+        from_image_sig.pop(param, None)
+        serve_sig.pop(param, None)
+
+    assert set(from_image_sig.keys()) == set(serve_sig.keys())
+
+    for key in from_image_sig:
+        assert from_image_sig[key].default == serve_sig[key].default, (
+            f"Default value mismatch for parameter '{key}': "
+            f"{from_image_sig[key].default} != {serve_sig[key].default}"
+        )

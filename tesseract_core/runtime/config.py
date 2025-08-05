@@ -7,6 +7,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, FilePath
 
+from tesseract_core.runtime.file_interactions import supported_format_type
+
 
 class RuntimeConfig(BaseModel):
     """Available runtime configuration."""
@@ -18,6 +20,9 @@ class RuntimeConfig(BaseModel):
     debug: bool = False
     input_path: str = "."
     output_path: str = "."
+    output_format: supported_format_type = "json"
+    output_file: str = ""
+    mlflow_tracking_uri: str = ""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 

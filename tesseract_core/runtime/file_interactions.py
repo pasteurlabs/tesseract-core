@@ -11,7 +11,7 @@ from pydantic import TypeAdapter
 
 PathLike = Union[str, Path]
 
-supported_format_type = Literal["json", "msgpack", "json+base64", "json+binref"]
+supported_format_type = Literal["json", "json+base64", "json+binref"]
 SUPPORTED_FORMATS = get_args(supported_format_type)
 
 
@@ -22,8 +22,6 @@ def guess_format_from_path(path: PathLike) -> supported_format_type:
     """
     if path.endswith(".json"):
         return "json"
-    elif path.endswith(".msgpack"):
-        return "msgpack"
 
     raise ValueError(
         f"Could not guess format from path {path} (supported formats: {SUPPORTED_FORMATS})"
@@ -52,13 +50,6 @@ def output_to_bytes(
             context={"array_encoding": "binref", "base_dir": base_dir},
             exclude_unset=True,
         )
-    elif format == "msgpack":
-        import msgpack
-
-        import tesseract_core.runtime.vendor.msgpack_numpy as msgpack_numpy
-
-        obj_clean = ObjSchema.dump_python(obj, exclude_unset=True)
-        return msgpack.packb(obj_clean, default=msgpack_numpy.encode)
 
     raise ValueError(
         f"Unsupported format {format} (must be one of {SUPPORTED_FORMATS})"
@@ -75,12 +66,6 @@ def load_bytes(
     """
     if format.startswith("json"):
         return json.loads(buffer.decode())
-    elif format == "msgpack":
-        import msgpack
-
-        import tesseract_core.runtime.vendor.msgpack_numpy as msgpack_numpy
-
-        return msgpack.unpackb(buffer, object_hook=msgpack_numpy.decode)
 
     raise ValueError(
         f"Unsupported format {format} (must be one of {SUPPORTED_FORMATS})"

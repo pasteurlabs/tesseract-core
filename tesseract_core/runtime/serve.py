@@ -4,10 +4,10 @@
 import inspect
 from functools import wraps
 from types import ModuleType
-from typing import Any, Callable, Union
+from typing import Annotated, Any, Callable, Optional, Union
 
 import uvicorn
-from fastapi import FastAPI, Header, Response
+from fastapi import FastAPI, Header, Query, Response
 from pydantic import BaseModel
 
 from .config import get_config
@@ -15,19 +15,18 @@ from .core import create_endpoints
 from .file_interactions import SUPPORTED_FORMATS, output_to_bytes
 
 # Endpoints that should use GET instead of POST
-GET_ENDPOINTS = {"input_schema", "output_schema", "health"}
-
-# TODO: make this configurable via environment variable
-DEFAULT_ACCEPT = "application/json"
+GET_ENDPOINTS = {"health"}
 
 
 def create_response(model: BaseModel, accept: str) -> Response:
     """Create a response of the format specified by the Accept header."""
-    if accept is None or accept == "*/*":
-        accept = DEFAULT_ACCEPT
+    config = get_config()
 
-    output_format: SUPPORTED_FORMATS = accept.split("/")[-1]
-    content = output_to_bytes(model, output_format)
+    if accept is None or accept == "*/*":
+        output_format = config.output_format
+    else:
+        output_format: SUPPORTED_FORMATS = accept.split("/")[-1]
+    content = output_to_bytes(model, output_format, base_dir=config.output_path)
 
     return Response(status_code=200, content=content, media_type=accept)
 
@@ -54,14 +53,16 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
         ]
 
         @wraps(endpoint_func)
-        async def wrapper(*args: Any, accept: str, **kwargs: Any):
-            result = endpoint_func(*args, **kwargs)
+        async def wrapper(
+            *args: Any, accept: str, job_id: Optional[str], **kwargs: Any
+        ):
+            result = endpoint_func(*args, job_id=job_id, **kwargs)
             return create_response(result, accept)
 
         if endpoint_func.__name__ not in endpoints_to_wrap:
             return endpoint_func
         else:
-            # wrapper's signarure will be the same as endpoint
+            # wrapper's signature will be the same as endpoint
             # func's signature. We do however need to change this
             # in order to add a Header parameter that FastAPI
             # will understand.
@@ -72,10 +73,18 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
                 default=Header(default=None),
                 annotation=Union[str, None],
             )
+            job_id = inspect.Parameter(
+                "job_id",
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                default="",
+                annotation=Annotated[Optional[str], Query(include_in_schema=False)],
+            )
             # Other header parameters common to computational endpoints
             # could be defined and appended here as well.
-            new_params = [*list(original_sig.parameters.values()), accept]
-            new_sig = original_sig.replace(parameters=new_params)
+            new_params = original_sig.parameters.copy()
+            new_params.update({"accept": accept, "job_id": job_id})
+            # Update the signature of the wrapper
+            new_sig = original_sig.replace(parameters=list(new_params.values()))
             wrapper.__signature__ = new_sig
             return wrapper
 

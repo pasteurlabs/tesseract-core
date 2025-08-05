@@ -52,8 +52,6 @@ def test_Tesseract_from_tesseract_api(dummy_tesseract_location, dummy_tesseract_
         "jacobian_vector_product",
         "vector_jacobian_product",
         "health",
-        "input_schema",
-        "output_schema",
         "abstract_eval",
     ]
 
@@ -90,16 +88,14 @@ def test_Tesseract_from_image(mock_serving, mock_clients):
         t.teardown()
 
 
-def test_Tesseract_schema_methods(mocker, mock_serving):
+def test_Tesseract_schema_method(mocker, mock_serving):
     mocked_run = mocker.patch("tesseract_core.sdk.tesseract.HTTPClient.run_tesseract")
     mocked_run.return_value = {"#defs": {"some": "stuff"}}
 
     with Tesseract.from_image("sometesseract:0.2.3") as t:
-        input_schema = t.input_schema
-        output_schema = t.output_schema
         openapi_schema = t.openapi_schema
 
-    assert input_schema == output_schema == openapi_schema == mocked_run.return_value
+    assert openapi_schema == mocked_run.return_value
 
 
 def test_serve_lifecycle(mock_serving, mock_clients):
@@ -109,14 +105,19 @@ def test_serve_lifecycle(mock_serving, mock_clients):
         pass
 
     mock_serving["serve_mock"].assert_called_with(
-        "sometesseract:0.2.3",
+        image_name="sometesseract:0.2.3",
         port=None,
         volumes=[],
         environment={},
         gpus=None,
         debug=True,
         num_workers=1,
+        network=None,
+        network_alias=None,
         host_ip="127.0.0.1",
+        user=None,
+        input_path=None,
+        output_path=None,
     )
 
     mock_serving["teardown_mock"].assert_called_with("container-id-123")
