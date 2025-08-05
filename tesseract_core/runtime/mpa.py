@@ -151,21 +151,26 @@ class MLflowBackend(BaseBackend):
                 "MLflow is required for MLflowBackend but is not installed"
             ) from exc
 
+        config = get_config()
+        mlflow.set_tracking_uri(config.mlflow_tracking_uri)
+
     def _ensure_mlflow_reachable(self) -> None:
-        try:
-            mlflow_tracking_uri = os.environ.get("MLFLOW_TRACKING_URI")
-            if mlflow_tracking_uri and (
-                mlflow_tracking_uri.startswith("http://")
-                or mlflow_tracking_uri.startswith("https://")
-            ):
+        """Check if the MLflow tracking server is reachable."""
+        config = get_config()
+        mlflow_tracking_uri = config.mlflow_tracking_uri
+        if mlflow_tracking_uri and (
+            mlflow_tracking_uri.startswith("http://")
+            or mlflow_tracking_uri.startswith("https://")
+        ):
+            try:
                 response = requests.get(mlflow_tracking_uri, timeout=5)
                 response.raise_for_status()
-        except requests.RequestException as e:
-            raise RuntimeError(
-                f"Failed to connect to MLflow tracking server at {mlflow_tracking_uri}. "
-                "Please make sure an MLflow server is running and MLFLOW_TRACKING_URI is set correctly. "
-                "Alternatively, switch to local file-based by setting MLFLOW_TRACKING_URI to an empty string."
-            ) from e
+            except requests.RequestException as e:
+                raise RuntimeError(
+                    f"Failed to connect to MLflow tracking server at {mlflow_tracking_uri}. "
+                    "Please make sure an MLflow server is running and TESSERACT_MLFLOW_TRACKING_URI is set correctly, "
+                    "or switch to file-based logging by setting TESSERACT_MLFLOW_TRACKING_URI to an empty string."
+                ) from e
 
     def log_parameter(self, key: str, value: Any) -> None:
         """Log a parameter to MLflow."""
@@ -190,7 +195,8 @@ class MLflowBackend(BaseBackend):
 
 def _create_backend(job_id: Optional[str] = None) -> BaseBackend:
     """Create the appropriate backend based on environment."""
-    if os.getenv("MLFLOW_TRACKING_URI"):
+    config = get_config()
+    if config.mlflow_tracking_uri:
         return MLflowBackend(job_id)
     else:
         return FileBackend(job_id)
