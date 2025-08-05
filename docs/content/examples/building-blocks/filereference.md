@@ -47,4 +47,4 @@ tesseract run filereference apply \
     '{"inputs": {"data": ["sample_2.json", "sample_3.json"]}}'
 ```
 
-For the Python SDK usage examples see `test_tesseract.py`.
+For the Python API usage examples see `test_tesseract.py`.

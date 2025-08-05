@@ -22,7 +22,7 @@ Tesseracts provide built-in support for propagating [gradient information](conte
 <small>Internal and external interfaces of a Tesseract.</small>
 ```
 
-Every Tesseract has a single entrypoint, `apply`, which wraps a software functionality of the tesseractor's choice. All other [endpoints](content/api/endpoints.md) that a Tesseract exposes are in relation to this entrypoint. For example, `abstract_eval` returns its output structure, `jacobian` its derivative, ...
+Every Tesseract has a primary entrypoint, `apply`, which wraps a software functionality of the Tesseract creator's choice. All other [endpoints](content/api/endpoints.md) that a Tesseract exposes are in relation to this entrypoint. For example, `abstract_eval` returns its output structure, `jacobian` its derivative, ...
 
 There are several ways in which users interact with Tesseracts, for example:
 
@@ -42,7 +42,7 @@ There are several ways in which users interact with Tesseracts, for example:
 :::
 :::{tab-item} Restrictions
 - **Python first** – Although Tesseracts may use any software under the hood, Tesseracts always use Python as glue between the Tesseract runtime and the wrapped functionality. This also means that support for working with Python projects is more mature than other languages.
-- **Single entrypoint** – Tesseracts have a single entrypoint, `apply`, which wraps a software functionality of the tesseractor's choice. When exposing N entrypoints of a software, users need to create N distinct Tesseracts.
+- **Single entrypoint** – Tesseracts have a single entrypoint, `apply`, which wraps a software functionality of the Tesseract creator's choice. When exposing N entrypoints of a software, users need to create N distinct Tesseracts.
 - **Context-free** – Tesseracts are not aware of outer-loop orchestration or runtime details.
 - **Runtime overhead** – Tesseracts are primarily designed for compute kernels and data transformations that run at least several seconds, so they may not be the best choice for workloads with very low latency requirements.
 :::
