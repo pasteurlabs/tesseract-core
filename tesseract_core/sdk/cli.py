@@ -977,14 +977,6 @@ def run_container(
     cmd: str | None = _enum_to_val(cmd)
     output_format: str | None = _enum_to_val(output_format)
 
-    if output_format == "json+binref" and output_path is None:
-        logger.warning(
-            (
-                "When using the 'json+binref' output format, "
-                "consider specifying --output-path to easily retrieve .bin files."
-            ),
-        )
-
     if not tesseract_image:
         if invoke_help:
             context.get_help()
