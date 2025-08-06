@@ -254,8 +254,8 @@ def test_tesseract_serve_pipeline(docker_client, built_image_name, docker_cleanu
     docker_cleanup["containers"].append(container)
 
     assert container.name == container_name
-    assert container.host_port == serve_meta["containers"]["port"]
-    assert container.host_ip == serve_meta["containers"]["ip"]
+    assert container.host_port == serve_meta["containers"][0]["port"]
+    assert container.host_ip == serve_meta["containers"][0]["ip"]
 
     # Ensure served Tesseract is usable
     res = requests.get(f"http://{container.host_ip}:{container.host_port}/health")
@@ -407,7 +407,7 @@ def test_tesseract_serve_ports(built_image_name, port, docker_cleanup, free_port
     start_port = int(test_ports[0])
     end_port = int(test_ports[1]) if len(test_ports) > 1 else start_port
 
-    actual_port = int(serve_meta["containers"]["port"])
+    actual_port = int(serve_meta["containers"][0]["port"])
     assert actual_port in range(start_port, end_port + 1)
 
     # Ensure specified ports are in `tesseract ps` and served Tesseracts are usable.
