@@ -224,11 +224,11 @@ def test_apply_command_binref(cli, cli_runner, dummy_tesseract_module, tmpdir):
         cli,
         ["apply", json.dumps({"inputs": test_input_binref})],
         catch_exceptions=False,
-        env={"TERM": "dumb", "COLUMNS": "9999"},
+        env={"TERM": "dumb", "COLUMNS": "1000"},
     )
     assert result.exit_code == 2
     assert "Value error" in result.stderr
-    assert "No such file or directory" in result.stderr
+    assert "Failed to decode buffer as binref" in result.stderr
 
 
 def test_apply_command_noenv(cli, cli_runner, dummy_tesseract_module, monkeypatch):
