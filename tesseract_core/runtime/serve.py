@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import inspect
+import uuid
 from functools import wraps
 from types import ModuleType
 from typing import Annotated, Any, Callable, Optional, Union
@@ -10,7 +11,7 @@ import uvicorn
 from fastapi import FastAPI, Header, Query, Response
 from pydantic import BaseModel
 
-from .config import get_config
+from .config import get_config, update_config
 from .core import create_endpoints
 from .file_interactions import SUPPORTED_FORMATS, output_to_bytes
 
@@ -56,8 +57,16 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
         async def wrapper(
             *args: Any, accept: str, job_id: Optional[str], **kwargs: Any
         ):
-            result = endpoint_func(*args, job_id=job_id, **kwargs)
-            return create_response(result, accept)
+            if job_id is None:
+                job_id = str(uuid.uuid4())
+            try:
+                base_output_path = get_config().output_path
+                update_config(output_path=f"{base_output_path}/run_{job_id}")
+                result = endpoint_func(*args, **kwargs)
+                return create_response(result, accept)
+            finally:
+                # Reset the output path to the base path after the request
+                update_config(output_path=base_output_path)
 
         if endpoint_func.__name__ not in endpoints_to_wrap:
             return endpoint_func
@@ -76,7 +85,7 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
             job_id = inspect.Parameter(
                 "job_id",
                 inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                default="",
+                default=None,
                 annotation=Annotated[Optional[str], Query(include_in_schema=False)],
             )
             # Other header parameters common to computational endpoints

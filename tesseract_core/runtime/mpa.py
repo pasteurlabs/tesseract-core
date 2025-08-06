@@ -8,7 +8,6 @@ import json
 import os
 import shutil
 import sys
-import uuid
 from abc import ABC, abstractmethod
 from collections.abc import Generator
 from contextlib import ExitStack, contextmanager
@@ -27,20 +26,9 @@ from tesseract_core.runtime.logs import LogPipe
 class BaseBackend(ABC):
     """Base class for MPA backends."""
 
-    def __init__(self, job_id: Optional[str] = None) -> None:
-        if job_id is None:
-            job_id = str(uuid.uuid4())
-        self.job_id = job_id
-        self.log_dir = os.getenv("LOG_DIR")
-        if not self.log_dir:
-            self.log_dir = Path(get_config().output_path) / "logs"
-        else:
-            self.log_dir = Path(self.log_dir)
-        self.log_dir.mkdir(exist_ok=True)
-
-        # Create a unique run directory
-        self.run_dir = self.log_dir / f"run_{job_id}"
-        self.run_dir.mkdir(exist_ok=True)
+    def __init__(self) -> None:
+        self.log_dir = Path(get_config().output_path) / "logs"
+        self.log_dir.mkdir(parents=True, exist_ok=True)
 
     @abstractmethod
     def log_parameter(self, key: str, value: Any) -> None:
@@ -71,12 +59,12 @@ class BaseBackend(ABC):
 class FileBackend(BaseBackend):
     """MPA backend that writes to local files."""
 
-    def __init__(self, job_id: Optional[str] = None) -> None:
-        super().__init__(job_id)
+    def __init__(self) -> None:
+        super().__init__()
         # Initialize log files
-        self.params_file = self.run_dir / "parameters.json"
-        self.metrics_file = self.run_dir / "metrics.csv"
-        self.artifacts_dir = self.run_dir / "artifacts"
+        self.params_file = self.log_dir / "parameters.json"
+        self.metrics_file = self.log_dir / "metrics.csv"
+        self.artifacts_dir = self.log_dir / "artifacts"
         self.artifacts_dir.mkdir(exist_ok=True)
 
         # Initialize parameters dict and metrics list
@@ -136,8 +124,8 @@ class FileBackend(BaseBackend):
 class MLflowBackend(BaseBackend):
     """MPA backend that writes to an MLflow tracking server."""
 
-    def __init__(self, job_id: Optional[str] = None) -> None:
-        super().__init__(job_id)
+    def __init__(self) -> None:
+        super().__init__()
         try:
             os.environ["GIT_PYTHON_REFRESH"] = (
                 "quiet"  # Suppress potential MLflow git warnings
@@ -187,20 +175,20 @@ class MLflowBackend(BaseBackend):
 
     def start_run(self) -> None:
         """Start a new MLflow run."""
-        self.mlflow.start_run(run_name=f"run_{self.job_id}")
+        self.mlflow.start_run()
 
     def end_run(self) -> None:
         """End the current MLflow run."""
         self.mlflow.end_run()
 
 
-def _create_backend(job_id: Optional[str] = None) -> BaseBackend:
+def _create_backend() -> BaseBackend:
     """Create the appropriate backend based on environment."""
     config = get_config()
     if config.mlflow_tracking_uri:
-        return MLflowBackend(job_id)
+        return MLflowBackend()
     else:
-        return FileBackend(job_id)
+        return FileBackend()
 
 
 # Context variable for the current backend instance
@@ -267,13 +255,13 @@ def redirect_stdio(logfile: Union[str, Path]) -> Generator[None, None, None]:
 
 
 @contextmanager
-def start_run(job_id: Optional[str] = None) -> Generator[None, None, None]:
+def start_run() -> Generator[None, None, None]:
     """Context manager for starting and ending a run."""
-    backend = _create_backend(job_id)
+    backend = _create_backend()
     token = _current_backend.set(backend)
     backend.start_run()
 
-    logfile = backend.run_dir / "tesseract.log"
+    logfile = backend.log_dir / "tesseract.log"
 
     try:
         with redirect_stdio(logfile):

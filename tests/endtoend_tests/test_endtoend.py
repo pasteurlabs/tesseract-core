@@ -782,10 +782,7 @@ def test_logging_tesseract_run(dummy_tesseract_package, tmpdir, docker_cleanup):
     results = json.loads(run_res.stdout.strip())
     assert results["out"] == "Received message: Test message"
 
-    logdir = next((Path(tmpdir) / "logs").iterdir())
-    job_id = str(logdir.name).removeprefix("run_")
-    # Check that the id is a well-formed uuid
-    uuid.UUID(job_id)
+    logdir = Path(tmpdir) / "logs"
 
     log_file = logdir / "tesseract.log"
     assert log_file.exists()
@@ -841,7 +838,7 @@ def test_logging_tesseract_serve(
     )
     assert res.status_code == 200, res.text
 
-    log_file = Path(tmpdir) / f"logs/run_{job_id}/tesseract.log"
+    log_file = Path(tmpdir) / f"run_{job_id}/logs/tesseract.log"
     assert log_file.exists()
 
     with open(log_file) as f:
@@ -910,39 +907,23 @@ def _prepare_mpa_test_image(dummy_tesseract_package, docker_cleanup):
     return img_tag
 
 
-@pytest.mark.parametrize("default_log_dir", ["default", "custom"])
-def test_mpa_file_backend(
-    dummy_tesseract_package, tmpdir, docker_cleanup, default_log_dir
-):
+def test_mpa_file_backend(dummy_tesseract_package, tmpdir, docker_cleanup):
     """Test the MPA (Metrics, Parameters, and Artifacts) submodule with file backend."""
     import csv
 
     img_tag = _prepare_mpa_test_image(dummy_tesseract_package, docker_cleanup)
 
-    if default_log_dir == "default":
-        run_cmd = [
-            "tesseract",
-            "run",
-            img_tag,
-            "apply",
-            '{"inputs": {}}',
-            "--output-path",
-            tmpdir,
-        ]
-        log_dir = Path(tmpdir) / "logs"
-    elif default_log_dir == "custom":
-        run_cmd = [
-            "tesseract",
-            "run",
-            "--env",
-            "LOG_DIR=/tesseract/output_data/mpa_logs",
-            img_tag,
-            "apply",
-            '{"inputs": {}}',
-            "--output-path",
-            tmpdir,
-        ]
-        log_dir = Path(tmpdir) / "mpa_logs"
+    outdir = Path(tmpdir)
+
+    run_cmd = [
+        "tesseract",
+        "run",
+        img_tag,
+        "apply",
+        '{"inputs": {}}',
+        "--output-path",
+        outdir,
+    ]
 
     run_res = subprocess.run(
         run_cmd,
@@ -951,15 +932,16 @@ def test_mpa_file_backend(
     )
     assert run_res.returncode == 0, run_res.stderr
 
-    assert log_dir.exists()
-
     # Find the run directory (should be only one)
-    run_dirs = list(log_dir.glob("run_*"))
+    run_dirs = list(outdir.glob("run_*"))
     assert len(run_dirs) == 1
     run_dir = run_dirs[0]
 
+    log_dir = run_dir / "logs"
+    assert log_dir.exists()
+
     # Verify parameters file
-    params_file = run_dir / "parameters.json"
+    params_file = log_dir / "parameters.json"
     assert params_file.exists()
     with open(params_file) as f:
         params = json.load(f)
@@ -967,7 +949,7 @@ def test_mpa_file_backend(
         assert params["steps_config"] == 5
 
     # Verify metrics file
-    metrics_file = run_dir / "metrics.csv"
+    metrics_file = log_dir / "metrics.csv"
     assert metrics_file.exists()
 
     with open(metrics_file) as f:
@@ -985,7 +967,7 @@ def test_mpa_file_backend(
             assert int(metric["step"]) == i
 
     # Verify artifacts directory and artifact file
-    artifacts_dir = run_dir / "artifacts"
+    artifacts_dir = log_dir / "artifacts"
     assert artifacts_dir.exists()
 
     artifact_file = artifacts_dir / "test_artifact.txt"

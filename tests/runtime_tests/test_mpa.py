@@ -5,8 +5,6 @@
 
 import csv
 import json
-import os
-import uuid
 
 import pytest
 
@@ -63,32 +61,6 @@ def test_file_backend_empty_mlflow_uri():
     update_config(mlflow_tracking_uri="")
     backend = mpa._create_backend()
     assert isinstance(backend, mpa.FileBackend)
-
-
-def test_custom_log_directory(tmpdir):
-    """Test that FileBackend respects LOG_DIR environment variable."""
-    custom_dir = tmpdir / "custom_logs"
-    os.environ["LOG_DIR"] = str(custom_dir)
-
-    backend = mpa.FileBackend()
-    assert backend.log_dir == custom_dir
-    assert backend.log_dir.exists()
-
-
-def test_uses_job_id_log_directory(tmpdir):
-    job_id = str(uuid.uuid4())
-    backend = mpa.FileBackend(job_id)
-    assert backend.run_dir.name == f"run_{job_id}"
-
-
-def test_unique_run_directories():
-    """Test that each FileBackend instance creates unique run directories."""
-    backend1 = mpa.FileBackend()
-    backend2 = mpa.FileBackend()
-
-    assert backend1.run_dir != backend2.run_dir
-    assert backend1.run_dir.exists()
-    assert backend2.run_dir.exists()
 
 
 def test_log_parameter_content():

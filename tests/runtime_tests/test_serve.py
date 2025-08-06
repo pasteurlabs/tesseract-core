@@ -129,11 +129,14 @@ def test_create_rest_api_apply_endpoint(http_client, dummy_tesseract_module, for
         "/apply",
         json={"inputs": model_to_json(test_inputs)},
         headers={"Accept": f"application/{format}"},
+        params={"job_id": "test_job"},
     )
 
     assert response.status_code == 200, response.text
 
-    result = array_from_json(response.json()["result"], Path(get_config().output_path))
+    result = array_from_json(
+        response.json()["result"], Path(get_config().output_path) / "run_test_job"
+    )
     assert np.array_equal(result, np.array([3.5, 6.0, 8.5]))
 
 
