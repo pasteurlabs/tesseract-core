@@ -235,7 +235,11 @@ OutputFileReference = Annotated[Path, AfterValidator(_strip_output_path)]
 
 
 def require_file(file_path: PathLike) -> Path:
-    """Require a file to be present at the given path."""
+    """Designate a file which is required to be present at runtime.
+
+    Args:
+        file_path: Path to required file. Must be relative to `input_path` assigned in `tesseract run`.
+    """
     if IS_BUILDING:
         return file_path
 
@@ -255,5 +259,6 @@ __all__ = [
     "log_artifact",
     "log_metric",
     "log_parameter",
+    "require_file",
     "start_run",
 ]

@@ -902,7 +902,7 @@ def test_unit_tesseract_endtoend(
     # Stage 2: Test CLI usage
     result = cli_runner.invoke(
         app,
-        ["run", img_name, "openapi-schema", *io_args],
+        ["run", img_name, "openapi-schema"],
         catch_exceptions=False,
     )
     assert result.exit_code == 0, result.output

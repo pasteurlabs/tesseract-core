@@ -5,6 +5,7 @@
 
 import inspect
 import io
+import os
 import sys
 from collections.abc import Callable, Iterable
 from enum import Enum
@@ -23,6 +24,7 @@ import click
 import typer
 from pydantic import ValidationError
 
+import tesseract_core.runtime.experimental as experimental
 from tesseract_core.runtime.config import RuntimeConfig, get_config, update_config
 from tesseract_core.runtime.core import (
     check_tesseract_api,
@@ -491,6 +493,32 @@ def _add_user_commands_to_cli(
         _create_user_defined_cli_command(app, func, out_stream)
 
 
+def _configure_required_file_load() -> None:
+    skip_required_file_load_args = [
+        "-h",
+        "--help",
+        "--version",
+        "-v",
+        "openapi-schema",
+        "check",
+    ]
+    if "--input-path" in sys.argv:
+        # Make sure input_path is available when loading tesseract_api.py for the first time
+        # (needed to resolve required files)
+        input_path_index = sys.argv.index("--input-path")
+        if len(sys.argv) <= input_path_index + 1:
+            raise ValueError("No input path provided after --input-path argument.")
+        input_path = Path(sys.argv[input_path_index + 1])
+        update_config(input_path=input_path.as_posix())
+    if any(arg in sys.argv for arg in skip_required_file_load_args):
+        # Skip loading if unnecessary, based on above arguments
+        os.environ["_TESSERACT_IS_BUILDING"] = "1"
+        import importlib
+
+        # Need to reload to ensure that experimental.IS_BUILDING has correct value
+        importlib.reload(experimental)
+
+
 def main() -> None:
     """Entrypoint for the command line interface."""
     # Redirect stdout to stderr to avoid mixing any output with the JSON response.
@@ -511,14 +539,7 @@ def main() -> None:
             )
             sys.exit(1)
 
-        # Make sure input_path is available when loading tesseract_api.py for the first time
-        # (needed to resolve required files)
-        if "--input-path" in sys.argv:
-            input_path_index = sys.argv.index("--input-path")
-            if len(sys.argv) <= input_path_index + 1:
-                raise ValueError("No input path provided after --input-path argument.")
-            input_path = Path(sys.argv[input_path_index + 1])
-            update_config(input_path=input_path.as_posix())
+        _configure_required_file_load()
 
         _add_user_commands_to_cli(app, out_stream=orig_stdout)
         app(auto_envvar_prefix="TESSERACT_RUNTIME")
