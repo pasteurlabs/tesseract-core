@@ -295,6 +295,7 @@ def _docker_cleanup(docker_client, request):
                 _ = subprocess.run(
                     [*docker_cmd, "network", "rm", network, "--force"],
                     check=True,
+                    capture_output=True,
                 )
             except Exception as e:
                 failures.append(f"Failed to remove network {network}: {pprint_exc(e)}")
