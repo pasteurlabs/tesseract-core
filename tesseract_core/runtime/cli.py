@@ -511,8 +511,8 @@ def main() -> None:
             )
             sys.exit(1)
 
-        # when tesseract-runtime is used directly, input_path must be set
-        # here so that it is available when loading tesseract_api.py
+        # Make sure input_path is available when loading tesseract_api.py for the first time
+        # (needed to resolve required files)
         if "--input-path" in sys.argv:
             input_path_index = sys.argv.index("--input-path")
             if len(sys.argv) <= input_path_index + 1:
