@@ -628,7 +628,7 @@ def serve(
     logger.info(
         f"Tesseract container name, use it with 'tesseract teardown' command: {container_name}"
     )
-    container_meta = {"container_name": container_name, "containers": container_ports}
+    container_meta = {"container_name": container_name, "containers": [container_ports]}
     json_info = json.dumps(container_meta)
     typer.echo(json_info, nl=False)
 

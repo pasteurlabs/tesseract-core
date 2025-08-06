@@ -280,6 +280,11 @@ def _load_base64_arraydict(val: dict) -> np.ndarray:
 def _load_binref_arraydict(val: dict, base_dir: Union[str, Path, None]) -> np.ndarray:
     """Load array from json+binref encoded array dict."""
     path_match = re.match(r"^(?P<path>.+?)(\:(?P<offset>\d+))?$", val["data"]["buffer"])
+    if not path_match:
+        raise ValueError(
+            f"Invalid binref path format: {val['data']['buffer']}. "
+            "Expected format is '<path>[:<offset>]'."
+        )
     bufferpath = path_match.group("path")
     if path_match.group("offset") is None:
         offset = 0
@@ -290,7 +295,7 @@ def _load_binref_arraydict(val: dict, base_dir: Union[str, Path, None]) -> np.nd
     if uses_relative_path and base_dir is None:
         raise ValueError(
             "Array data is binref encoded with a relative path but no base_dir is provided. "
-            "Invoke the Tesseract via file aliasing or make sure that paths are absolute."
+            "Invoke the Tesseract with an input / output path set, or make sure that paths are absolute."
         )
 
     dtype = np.dtype(val["dtype"])

@@ -1,7 +1,6 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-import json
 import urllib.parse
 from pathlib import Path
 from typing import Any, Literal, Optional, Union, get_args
@@ -13,19 +12,6 @@ PathLike = Union[str, Path]
 
 supported_format_type = Literal["json", "json+base64", "json+binref"]
 SUPPORTED_FORMATS = get_args(supported_format_type)
-
-
-def guess_format_from_path(path: PathLike) -> supported_format_type:
-    """Guess the format from the given path.
-
-    The format is determined by the file extension.
-    """
-    if path.endswith(".json"):
-        return "json"
-
-    raise ValueError(
-        f"Could not guess format from path {path} (supported formats: {SUPPORTED_FORMATS})"
-    )
 
 
 def output_to_bytes(
@@ -50,22 +36,6 @@ def output_to_bytes(
             context={"array_encoding": "binref", "base_dir": base_dir},
             exclude_unset=True,
         )
-
-    raise ValueError(
-        f"Unsupported format {format} (must be one of {SUPPORTED_FORMATS})"
-    )
-
-
-def load_bytes(
-    buffer: bytes,
-    format: supported_format_type,
-) -> Any:
-    """Decode the given buffer to a Python object.
-
-    The buffer is expected to be in the given format.
-    """
-    if format.startswith("json"):
-        return json.loads(buffer.decode())
 
     raise ValueError(
         f"Unsupported format {format} (must be one of {SUPPORTED_FORMATS})"
