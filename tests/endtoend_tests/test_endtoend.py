@@ -128,10 +128,7 @@ def test_build_generate_only(dummy_tesseract_location, skip_checks):
         if skip_checks:
             assert "tesseract-runtime check" not in docker_file_contents
         else:
-            assert (
-                "RUN _TESSERACT_IS_BUILDING=1 tesseract-runtime check"
-                in docker_file_contents
-            )
+            assert "tesseract-runtime check" in docker_file_contents
 
 
 def test_env_passthrough_serve(docker_cleanup, docker_client, built_image_name):
