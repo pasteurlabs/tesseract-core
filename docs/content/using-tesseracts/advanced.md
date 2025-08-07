@@ -119,7 +119,7 @@ Running Tesseracts on high-performance computing clusters can have many use case
 * Running an entire optimization workflow on a dedicated compute node
 * Large parameter scans distributed in parallel over a multitude of cores.
 
-All of this is possible even in scenarios where containerisation options are either unavailable or incompatible, thanks to the alternative container-free tesseract-runtime CLI tool (we will explore containerised options in the future). For more details, please see our [tutorial](https://si-tesseract.discourse.group/t/deploying-and-interacting-with-tesseracts-on-hpc-clusters-using-tesseract-runtime-serve/104), which demonstrates how to launch uncontainerised Tesseracts using SLURM, either as a batch job or for interactive use.
+All of this is possible even in scenarios where containerisation options are either unavailable or incompatible by directly using `tesseract-runtime` (which includes a `serve` feature). For more details, please see our [tutorial](https://si-tesseract.discourse.group/t/deploying-and-interacting-with-tesseracts-on-hpc-clusters-using-tesseract-runtime-serve/104), which demonstrates how to launch uncontainerised Tesseracts using SLURM, either as a batch job or for interactive use.
 
 ## Debug mode
 
