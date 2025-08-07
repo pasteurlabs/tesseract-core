@@ -13,14 +13,16 @@ from pydantic import BaseModel
 
 from .config import get_config
 from .core import create_endpoints
-from .file_interactions import SUPPORTED_FORMATS, output_to_bytes
+from .file_interactions import SUPPORTED_FORMATS, join_paths, output_to_bytes
 from .mpa import start_run
 
 # Endpoints that should use GET instead of POST
 GET_ENDPOINTS = {"health"}
 
 
-def create_response(model: BaseModel, accept: str, base_dir: Optional[str]) -> Response:
+def create_response(
+    model: BaseModel, accept: str, base_dir: Optional[str], binref_dir: Optional[str]
+) -> Response:
     """Create a response of the format specified by the Accept header."""
     config = get_config()
 
@@ -32,7 +34,9 @@ def create_response(model: BaseModel, accept: str, base_dir: Optional[str]) -> R
     if base_dir is None:
         base_dir = config.output_path
 
-    content = output_to_bytes(model, output_format, base_dir=base_dir)
+    content = output_to_bytes(
+        model, output_format, base_dir=base_dir, binref_dir=binref_dir
+    )
     return Response(status_code=200, content=content, media_type=accept)
 
 
@@ -63,10 +67,14 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
         ):
             if job_id is None:
                 job_id = str(uuid.uuid4())
-            output_path = f"{get_config().output_path}/run_{job_id}"
-            with start_run(base_dir=output_path):
+            output_path = get_config().output_path
+            rundir_name = f"run_{job_id}"
+            rundir = join_paths(output_path, rundir_name)
+            with start_run(base_dir=rundir):
                 result = endpoint_func(*args, **kwargs)
-            return create_response(result, accept, base_dir=output_path)
+            return create_response(
+                result, accept, base_dir=output_path, binref_dir=rundir_name
+            )
 
         if endpoint_func.__name__ not in endpoints_to_wrap:
             return endpoint_func

@@ -15,7 +15,10 @@ SUPPORTED_FORMATS = get_args(supported_format_type)
 
 
 def output_to_bytes(
-    obj: Any, format: supported_format_type, base_dir: Optional[Union[str, Path]] = None
+    obj: Any,
+    format: supported_format_type,
+    base_dir: Optional[Union[str, Path]] = None,
+    binref_dir: Optional[Union[str, Path]] = None,
 ) -> bytes:
     """Encode endpoint output to bytes in the given format.
 
@@ -33,7 +36,11 @@ def output_to_bytes(
     elif format == "json+binref":
         return ObjSchema.dump_json(
             obj,
-            context={"array_encoding": "binref", "base_dir": base_dir},
+            context={
+                "array_encoding": "binref",
+                "base_dir": base_dir,
+                "binref_dir": binref_dir,
+            },
             exclude_unset=True,
         )
 

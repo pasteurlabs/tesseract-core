@@ -205,6 +205,7 @@ def get_array_model(
 def _dump_binref_arraydict(
     arr: Union[np.ndarray, np.number, np.bool_],
     base_dir: Union[Path, str],
+    subdir: Optional[Union[Path, str]],
     current_binref_uuid: str,
     max_file_size: int = MAX_BINREF_BUFFER_SIZE,
 ) -> tuple[dict[str, Union[str, dict[str, str]]], str]:
@@ -213,6 +214,8 @@ def _dump_binref_arraydict(
     Writes a .bin file and returns json encoded data.
     """
     target_name = f"{current_binref_uuid}.bin"
+    if subdir is not None:
+        target_name = join_paths(subdir, target_name)
     target_path = join_paths(base_dir, target_name)
 
     current_size = get_filesize(target_path)
@@ -222,6 +225,8 @@ def _dump_binref_arraydict(
         current_size = 0
         current_binref_uuid = str(uuid4())
         target_name = f"{current_binref_uuid}.bin"
+        if subdir is not None:
+            target_name = join_paths(subdir, target_name)
         target_path = join_paths(base_dir, target_name)
 
     write_to_path(arr.tobytes(), target_path, append=True)
@@ -388,6 +393,9 @@ def decode_array(
 
         elif val.data.encoding == "binref":
             base_dir = context.get("base_dir", get_config().input_path)
+            subdir = context.get("binref_dir", None)
+            if subdir is not None:
+                base_dir = join_paths(base_dir, subdir)
             data = _load_binref_arraydict(val.model_dump(), base_dir)
 
         # keep checking for "raw" for backwards compat
@@ -433,9 +441,11 @@ def encode_array(
         data = _dump_base64_arraydict(arr)
     elif array_encoding == "binref":
         base_dir = context.get("base_dir", get_config().output_path)
+        subdir = context.get("binref_dir", None)
         data, new_binref_uuid = _dump_binref_arraydict(
             arr,
             base_dir=base_dir,
+            subdir=subdir,
             current_binref_uuid=context.get("__binref_uuid", str(uuid4())),
             max_file_size=context.get("max_file_size", MAX_BINREF_BUFFER_SIZE),
         )

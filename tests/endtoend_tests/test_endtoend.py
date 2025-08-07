@@ -597,8 +597,18 @@ def test_io_path_interactions(
         binref_file = output_dir / binref_path
         assert binref_file.exists(), f"Expected binref file {binref_file} to exist"
 
+    # Ensure logs are written to the output directory
     if method == "serve":
-        # also try overriding the output format via Accept header
+        run_dirs = list(output_dir.glob("run_*/"))
+        assert len(run_dirs) == 1, f"Expected one run directory, found: {run_dirs}"
+        output_dir = run_dirs[0]
+
+    log_dir = output_dir / "logs"
+    assert log_dir.exists(), f"Expected log directory {log_dir} to exist"
+    assert (log_dir / "tesseract.log").exists(), "Expected tesseract.log to exist"
+
+    # Also try overriding the output format via Accept header
+    if method == "serve":
         req = requests.post(
             f"http://localhost:{serve_meta['containers'][0]['port']}/apply",
             json=example_inputs,
@@ -608,16 +618,6 @@ def test_io_path_interactions(
         result = req.json()
         assert "result" in result
         assert result["result"]["data"]["encoding"] == "base64"
-
-    # Ensure logs are written to the output directory
-    log_dir = output_dir / "logs"
-    assert log_dir.exists(), f"Expected log directory {log_dir} to exist"
-
-    run_dirs = list(log_dir.glob("run_*/"))
-    assert len(run_dirs) == 1, f"Expected one run directory, found: {run_dirs}"
-
-    run_dir = run_dirs[0]
-    assert (run_dir / "tesseract.log").exists(), "Expected tesseract.log to exist"
 
 
 def test_tesseract_serve_interop(
