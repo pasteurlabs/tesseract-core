@@ -483,8 +483,7 @@ def serve(
     user: str | None = None,
     input_path: str | Path | None = None,
     output_path: str | Path | None = None,
-    output_format: Literal["json", "json+base64", "json+binref", "msgpack"]
-    | None = None,
+    output_format: Literal["json", "json+base64", "json+binref"] | None = None,
 ) -> tuple:
     """Serve one or more Tesseract images.
 
@@ -514,6 +513,12 @@ def serve(
     """
     if not image_name or not isinstance(image_name, str):
         raise ValueError("Tesseract image name must be provided")
+
+    if output_format == "json+binref" and output_path is None:
+        logger.warning(
+            "Consider specifying --output-path when using the 'json+binref' output format "
+            "to easily retrieve .bin files."
+        )
 
     image = docker_client.images.get(image_name)
 
@@ -708,8 +713,7 @@ def run_tesseract(
     user: str | None = None,
     input_path: str | Path | None = None,
     output_path: str | Path | None = None,
-    output_format: Literal["json", "json+base64", "json+binref", "msgpack"]
-    | None = None,
+    output_format: Literal["json", "json+base64", "json+binref"] | None = None,
     output_file: str | None = None,
 ) -> tuple[str, str]:
     """Start a Tesseract and execute a given command.
@@ -736,6 +740,12 @@ def run_tesseract(
     Returns:
         Tuple with the stdout and stderr of the Tesseract.
     """
+    if output_format == "json+binref" and output_path is None:
+        logger.warning(
+            "Consider specifying --output-path when using the 'json+binref' output format "
+            "to easily retrieve .bin files."
+        )
+
     if environment is None:
         environment = {}
 

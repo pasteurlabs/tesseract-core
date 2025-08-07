@@ -1,6 +1,7 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import json
 from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import (
@@ -122,8 +123,6 @@ class PydanticLazySequenceAnnotation:
             # We know that the path is a glob pattern, so we need to load items from files
             from .file_interactions import (
                 expand_glob,
-                guess_format_from_path,
-                load_bytes,
                 read_from_path,
             )
 
@@ -132,8 +131,7 @@ class PydanticLazySequenceAnnotation:
 
             def load_item(key: str) -> Any:
                 buffer = read_from_path(key)
-                format = guess_format_from_path(key)
-                obj = load_bytes(buffer, format)
+                obj = json.loads(buffer.decode("utf-8"))
                 context = {"base_dir": parent_path(key)}
                 return validator.validate_python(obj, context=context)
 
