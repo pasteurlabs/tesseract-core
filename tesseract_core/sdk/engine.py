@@ -483,8 +483,7 @@ def serve(
     user: str | None = None,
     input_path: str | Path | None = None,
     output_path: str | Path | None = None,
-    output_format: Literal["json", "json+base64", "json+binref", "msgpack"]
-    | None = None,
+    output_format: Literal["json", "json+base64", "json+binref"] | None = None,
 ) -> tuple:
     """Serve one or more Tesseract images.
 
@@ -714,8 +713,7 @@ def run_tesseract(
     user: str | None = None,
     input_path: str | Path | None = None,
     output_path: str | Path | None = None,
-    output_format: Literal["json", "json+base64", "json+binref", "msgpack"]
-    | None = None,
+    output_format: Literal["json", "json+base64", "json+binref"] | None = None,
     output_file: str | None = None,
 ) -> tuple[str, str]:
     """Start a Tesseract and execute a given command.
