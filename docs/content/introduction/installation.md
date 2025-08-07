@@ -26,10 +26,9 @@ If the output is an empty table, that's okay! The CLI is functioning correctly, 
 [Docker Desktop](https://www.docker.com/products/docker-desktop/) ships with everything you need to run Tesseract Core, including the Docker Engine CLI, Docker Compose, and Docker Buildx. It also includes a GUI for managing containers and images.
 It is available for Windows, macOS, and Linux for Debian and Fedora based distros.
 
-If your system is not supported by Docker Desktop, or you prefer a more minimal setup, you will need to install the [`docker` engine CLI](https://docs.docker.com/engine/install/) together with some required plugins:
+If your system is not supported by Docker Desktop, or you prefer a more minimal setup, you will need to install the [`docker` engine CLI](https://docs.docker.com/engine/install/) together with the following plug in:
 
 1. [`docker-buildx`](https://github.com/docker/buildx)
-2. [`docker-compose`](https://github.com/docker/compose)
 
 To use Tesseract without `sudo`, you will need to add your user to the `docker` group. See [Linux post-installation steps for Docker Engine > Manage Docker as a non-root user](https://docs.docker.com/engine/install/linux-postinstall/#manage-docker-as-a-non-root-user), or run:
 
@@ -41,6 +40,16 @@ Then, log out and back in to apply the changes.
 
 ```{warning}
 Using `sudo tesseract` may bypass active virtual environments and shadow the `tesseract` command with [conflicting executables](#exe-conflicts). To avoid this, make sure you're using the correct `tesseract` executable, or add your user to the `docker` group (and omit `sudo`).
+```
+
+(installation-podman)=
+## Using alternative container engines (such as podman)
+
+The choice of container engine can be customised with the environment variable `TESSERACT_DOCKER_EXECUTABLE`. Tesseracts currently support container engines that have API's consistent with the `docker` CLI (e.g. `podman`). Assuming `podman` is already installed on your system and permissions are set up to allow running as a non-root user (typically the default), all that is required is to set the environment variable accordingly.
+
+```bash
+$ export TESSERACT_DOCKER_EXECUTABLE=podman
+$ echo "export TESSERACT_DOCKER_EXECUTABLE=podman" >> ~/.bashrc
 ```
 
 (installation-runtime)=
