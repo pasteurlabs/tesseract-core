@@ -85,7 +85,7 @@ The [Tesseract](#tesseract_core.Tesseract) context manager will spin up
 a Tesseract locally, and tear it down once the context is exited.
 
 ```{tip} You can also instantiate a Tesseract object which connects to
-a remote Tesseract via `Tesseract(url=...)`.```
+a remote Tesseract via `Tesseract.from_url(...)`.```
 :::
 ::::
 
