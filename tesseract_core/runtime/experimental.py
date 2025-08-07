@@ -27,7 +27,6 @@ from tesseract_core.runtime.mpa import (
     log_artifact,
     log_metric,
     log_parameter,
-    start_run,
 )
 from tesseract_core.runtime.schema_types import safe_issubclass
 
@@ -236,5 +235,4 @@ __all__ = [
     "log_artifact",
     "log_metric",
     "log_parameter",
-    "start_run",
 ]
