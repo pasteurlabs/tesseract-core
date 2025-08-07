@@ -63,12 +63,12 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
 
         @wraps(endpoint_func)
         async def wrapper(
-            *args: Any, accept: str, job_id: Optional[str], **kwargs: Any
+            *args: Any, accept: str, run_id: Optional[str], **kwargs: Any
         ):
-            if job_id is None:
-                job_id = str(uuid.uuid4())
+            if run_id is None:
+                run_id = str(uuid.uuid4())
             output_path = get_config().output_path
-            rundir_name = f"run_{job_id}"
+            rundir_name = f"run_{run_id}"
             rundir = join_paths(output_path, rundir_name)
             with start_run(base_dir=rundir):
                 result = endpoint_func(*args, **kwargs)
@@ -90,8 +90,8 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
                 default=Header(default=None),
                 annotation=Union[str, None],
             )
-            job_id = inspect.Parameter(
-                "job_id",
+            run_id = inspect.Parameter(
+                "run_id",
                 inspect.Parameter.POSITIONAL_OR_KEYWORD,
                 default=None,
                 annotation=Annotated[Optional[str], Query(include_in_schema=False)],
@@ -99,7 +99,7 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
             # Other header parameters common to computational endpoints
             # could be defined and appended here as well.
             new_params = original_sig.parameters.copy()
-            new_params.update({"accept": accept, "job_id": job_id})
+            new_params.update({"accept": accept, "run_id": run_id})
             # Update the signature of the wrapper
             new_sig = original_sig.replace(parameters=list(new_params.values()))
             wrapper.__signature__ = new_sig

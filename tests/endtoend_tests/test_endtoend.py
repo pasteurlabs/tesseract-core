@@ -864,15 +864,15 @@ def test_logging_tesseract_serve(
     docker_cleanup["containers"].append(container_name)
     container = docker_client.containers.get(container_name)
 
-    job_id = str(uuid.uuid4())
+    run_id = str(uuid.uuid4())
     res = requests.post(
         f"http://{container.host_ip}:{container.host_port}/apply",
-        params={"job_id": job_id},
+        params={"run_id": run_id},
         json={"inputs": {}},
     )
     assert res.status_code == 200, res.text
 
-    log_file = Path(tmpdir) / f"run_{job_id}/logs/tesseract.log"
+    log_file = Path(tmpdir) / f"run_{run_id}/logs/tesseract.log"
     assert log_file.exists()
 
     with open(log_file) as f:

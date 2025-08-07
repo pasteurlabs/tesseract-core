@@ -129,7 +129,7 @@ def test_create_rest_api_apply_endpoint(http_client, dummy_tesseract_module, for
         "/apply",
         json={"inputs": model_to_json(test_inputs)},
         headers={"Accept": f"application/{format}"},
-        params={"job_id": "test_job"},
+        params={"run_id": "test_job"},
     )
 
     assert response.status_code == 200, response.text
@@ -199,8 +199,8 @@ def test_get_openapi_schema(http_client):
     assert response.status_code == 200, response.text
     assert response.json()["info"]["title"] == "Tesseract"
     assert response.json()["paths"]
-    # The job_id query parameter is intended to be hidden
-    assert "job_id" not in response.json()
+    # The run_id query parameter is intended to be hidden
+    assert "run_id" not in response.json()
 
 
 @pytest.mark.skipif(
