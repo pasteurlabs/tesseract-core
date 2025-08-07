@@ -164,6 +164,7 @@ def prepare_build_context(
 
     Generated folder structure:
     ├── Dockerfile
+    ├── .dockerignore
     ├── __tesseract_source__
     │   ├── tesseract_api.py
     │   ├── tesseract_config.yaml
@@ -264,6 +265,11 @@ def prepare_build_context(
     )
     for metafile in (runtime_source_dir / "meta").glob("*"):
         copy(metafile, context_dir / "__tesseract_runtime__")
+
+    # Docker requires a .dockerignore file to be at the root of the build context
+    dockerignore_path = runtime_source_dir / "meta" / ".dockerignore"
+    if dockerignore_path.exists():
+        copy(dockerignore_path, context_dir / ".dockerignore")
 
     return context_dir
 
