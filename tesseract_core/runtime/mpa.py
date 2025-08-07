@@ -26,8 +26,10 @@ from tesseract_core.runtime.logs import LogPipe
 class BaseBackend(ABC):
     """Base class for MPA backends."""
 
-    def __init__(self) -> None:
-        self.log_dir = Path(get_config().output_path) / "logs"
+    def __init__(self, base_dir: Optional[str] = None) -> None:
+        if base_dir is None:
+            base_dir = get_config().output_path
+        self.log_dir = Path(base_dir) / "logs"
         self.log_dir.mkdir(parents=True, exist_ok=True)
 
     @abstractmethod
@@ -59,8 +61,8 @@ class BaseBackend(ABC):
 class FileBackend(BaseBackend):
     """MPA backend that writes to local files."""
 
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, base_dir: Optional[str] = None) -> None:
+        super().__init__(base_dir)
         # Initialize log files
         self.params_file = self.log_dir / "parameters.json"
         self.metrics_file = self.log_dir / "metrics.csv"
@@ -124,33 +126,40 @@ class FileBackend(BaseBackend):
 class MLflowBackend(BaseBackend):
     """MPA backend that writes to an MLflow tracking server."""
 
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, base_dir: Optional[str] = None) -> None:
+        super().__init__(base_dir)
+        os.environ["GIT_PYTHON_REFRESH"] = (
+            "quiet"  # Suppress potential MLflow git warnings
+        )
+
         try:
-            os.environ["GIT_PYTHON_REFRESH"] = (
-                "quiet"  # Suppress potential MLflow git warnings
-            )
-            self._ensure_mlflow_reachable()
-
             import mlflow
-
-            self.mlflow = mlflow
         except ImportError as exc:
             raise ImportError(
                 "MLflow is required for MLflowBackend but is not installed"
             ) from exc
 
+        self._ensure_mlflow_reachable()
+        self.mlflow = mlflow
+
         config = get_config()
-        mlflow.set_tracking_uri(config.mlflow_tracking_uri)
+        tracking_uri = config.mlflow_tracking_uri
+
+        if not tracking_uri.startswith(("http://", "https://")):
+            # If it's a file URI, convert to local path
+            tracking_uri = tracking_uri.replace("file://", "")
+
+            # Relative paths are resolved against the log_dir
+            if not Path(tracking_uri).is_absolute():
+                tracking_uri = (Path(self.log_dir) / tracking_uri).resolve()
+
+        mlflow.set_tracking_uri(tracking_uri)
 
     def _ensure_mlflow_reachable(self) -> None:
         """Check if the MLflow tracking server is reachable."""
         config = get_config()
         mlflow_tracking_uri = config.mlflow_tracking_uri
-        if mlflow_tracking_uri and (
-            mlflow_tracking_uri.startswith("http://")
-            or mlflow_tracking_uri.startswith("https://")
-        ):
+        if mlflow_tracking_uri.startswith(("http://", "https://")):
             try:
                 response = requests.get(mlflow_tracking_uri, timeout=5)
                 response.raise_for_status()
@@ -182,13 +191,13 @@ class MLflowBackend(BaseBackend):
         self.mlflow.end_run()
 
 
-def _create_backend() -> BaseBackend:
+def _create_backend(base_dir: Optional[str]) -> BaseBackend:
     """Create the appropriate backend based on environment."""
     config = get_config()
     if config.mlflow_tracking_uri:
-        return MLflowBackend()
+        return MLflowBackend(base_dir)
     else:
-        return FileBackend()
+        return FileBackend(base_dir)
 
 
 # Context variable for the current backend instance
@@ -255,9 +264,9 @@ def redirect_stdio(logfile: Union[str, Path]) -> Generator[None, None, None]:
 
 
 @contextmanager
-def start_run() -> Generator[None, None, None]:
+def start_run(base_dir: Optional[str] = None) -> Generator[None, None, None]:
     """Context manager for starting and ending a run."""
-    backend = _create_backend()
+    backend = _create_backend(base_dir)
     token = _current_backend.set(backend)
     backend.start_run()
 

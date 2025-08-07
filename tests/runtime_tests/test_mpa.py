@@ -10,7 +10,7 @@ import pytest
 
 from tesseract_core.runtime import mpa
 from tesseract_core.runtime.config import update_config
-from tesseract_core.runtime.experimental import (
+from tesseract_core.runtime.mpa import (
     log_artifact,
     log_metric,
     log_parameter,
@@ -52,14 +52,14 @@ def test_nested_runs():
 
 def test_file_backend_default():
     """Test that FileBackend is used by default."""
-    backend = mpa._create_backend()
+    backend = mpa._create_backend(None)
     assert isinstance(backend, mpa.FileBackend)
 
 
 def test_file_backend_empty_mlflow_uri():
     """Test that FileBackend is used when mlflow_tracking_uri is empty."""
     update_config(mlflow_tracking_uri="")
-    backend = mpa._create_backend()
+    backend = mpa._create_backend(None)
     assert isinstance(backend, mpa.FileBackend)
 
 
@@ -137,7 +137,7 @@ def test_mlflow_backend_creation(tmpdir):
     pytest.importorskip("mlflow")  # Skip if MLflow is not installed
     mlflow_dir = tmpdir / "mlflow_backend_test"
     update_config(mlflow_tracking_uri=f"file://{mlflow_dir}")
-    backend = mpa._create_backend()
+    backend = mpa._create_backend(None)
     assert isinstance(backend, mpa.MLflowBackend)
 
 

@@ -11,15 +11,16 @@ import uvicorn
 from fastapi import FastAPI, Header, Query, Response
 from pydantic import BaseModel
 
-from .config import get_config, update_config
+from .config import get_config
 from .core import create_endpoints
 from .file_interactions import SUPPORTED_FORMATS, output_to_bytes
+from .mpa import start_run
 
 # Endpoints that should use GET instead of POST
 GET_ENDPOINTS = {"health"}
 
 
-def create_response(model: BaseModel, accept: str) -> Response:
+def create_response(model: BaseModel, accept: str, base_dir: Optional[str]) -> Response:
     """Create a response of the format specified by the Accept header."""
     config = get_config()
 
@@ -27,8 +28,11 @@ def create_response(model: BaseModel, accept: str) -> Response:
         output_format = config.output_format
     else:
         output_format: SUPPORTED_FORMATS = accept.split("/")[-1]
-    content = output_to_bytes(model, output_format, base_dir=config.output_path)
 
+    if base_dir is None:
+        base_dir = config.output_path
+
+    content = output_to_bytes(model, output_format, base_dir=base_dir)
     return Response(status_code=200, content=content, media_type=accept)
 
 
@@ -59,14 +63,10 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
         ):
             if job_id is None:
                 job_id = str(uuid.uuid4())
-            try:
-                base_output_path = get_config().output_path
-                update_config(output_path=f"{base_output_path}/run_{job_id}")
+            output_path = f"{get_config().output_path}/run_{job_id}"
+            with start_run(base_dir=output_path):
                 result = endpoint_func(*args, **kwargs)
-                return create_response(result, accept)
-            finally:
-                # Reset the output path to the base path after the request
-                update_config(output_path=base_output_path)
+            return create_response(result, accept, base_dir=output_path)
 
         if endpoint_func.__name__ not in endpoints_to_wrap:
             return endpoint_func

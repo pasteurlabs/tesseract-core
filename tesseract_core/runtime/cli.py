@@ -40,6 +40,7 @@ from tesseract_core.runtime.file_interactions import (
 from tesseract_core.runtime.finite_differences import (
     check_gradients as check_gradients_,
 )
+from tesseract_core.runtime.mpa import start_run
 from tesseract_core.runtime.serve import create_rest_api
 from tesseract_core.runtime.serve import serve as serve_
 
@@ -427,7 +428,9 @@ def _create_user_defined_cli_command(
         if output_path:
             Path(output_path).mkdir(parents=True, exist_ok=True)
 
-        result = user_function(**user_function_args)
+        with start_run(base_dir=output_path):
+            result = user_function(**user_function_args)
+
         result = output_to_bytes(result, output_format, output_path)
 
         # write raw bytes to out_stream.buffer to support binary data (which may e.g. be piped)
