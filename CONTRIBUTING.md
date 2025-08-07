@@ -68,7 +68,7 @@ to state so.
 
 Make sure you have [Docker installed](https://docs.docker.com/engine/install/)
 on your machine and you can run `docker` commands via your user. After that,
-clone the repository, install the dependencies, and setup pre-commit hooks:
+clone the repository, install the dependencies, and setup [pre-commit](https://pre-commit.com/) hooks:
 
 ```console
 $ git clone git@github.com:pasteurlabs/tesseract-core.git
