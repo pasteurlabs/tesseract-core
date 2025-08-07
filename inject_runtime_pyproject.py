@@ -24,7 +24,6 @@ BASE_OPTIONAL_DEPS = {
         "tesseract-core[runtime]",
     ],
     "dev": [
-        "docker",
         "fastapi",
         "httpx",  # required by fastapi test client
         "jsf",

@@ -5,10 +5,8 @@
 
 import os
 import subprocess
-from contextlib import closing
 from pathlib import Path
 
-import docker
 import pytest
 from common import image_exists
 
@@ -19,14 +17,6 @@ from tesseract_core.sdk.docker_client import (
     build_docker_image,
     is_podman,
 )
-
-
-@pytest.fixture(scope="module")
-def docker_py_client():
-    # Create a Docker client using the docker-py library
-    # You may need to set the environment variable $DOCKER_HOST if encountering issues
-    with closing(docker.from_env()) as client:
-        yield client
 
 
 @pytest.fixture()
@@ -405,7 +395,7 @@ def test_is_podman():
     when running in a Podman environment. This is true on CI, but may deviate on
     local machines.
     """
-    real_is_podman = "podman" in os.environ.get("DOCKER_HOST", "")
+    real_is_podman = "podman" in os.environ.get("TESSERACT_DOCKER_EXECUTABLE", "")
     assert is_podman() == real_is_podman
 
 
