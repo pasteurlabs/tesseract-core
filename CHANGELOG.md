@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [1.0.0] - 2025-08-05
+## [1.0.0] - 2025-08-07
 
 ### Features
 
@@ -17,6 +17,8 @@ All notable changes to this project will be documented in this file.
 - Add network args to from_image (#299)
 - Add `--output-path` to serve (#295)
 - [**breaking**] Drop msgpack support (#303)
+- Introduce job ID to control the location of output logs / artifacts (#314)
+- Also print text logs to stderr (#311)
 
 ### Bug Fixes
 
@@ -25,11 +27,16 @@ All notable changes to this project will be documented in this file.
 - Ensure signature consistency between `engine.serve` and `Tesseract.from_image` (#302)
 - Exclude broken version of setuptools-scm (#312)
 - Use TESSERACT_MLFLOW_TRACKING_URI instead of MLFLOW_TRACKING_URI (#313)
+- Make `tesseract serve --output-format` behave as expected (#307)
+- Test that LogPipe implementations do not diverge (#316)
+- Use `--input-path`/`--output-path` as `base_dir` in `json+binref` encoder (#304)
 
 ### Refactor
 
 - [**breaking**] Remove ability to serve multiple tesseracts / docker compose (#286)
 - Overhaul all clis (#301)
+- [**breaking**] Remove input-schema and output-schema endpoints (#308)
+- Transpose folder structure (#318)
 
 ## [0.10.2] - 2025-07-21
 
