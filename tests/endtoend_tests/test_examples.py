@@ -11,8 +11,6 @@ Add test cases for specific unit Tesseracts to the TEST_CASES dictionary.
 
 import base64
 import json
-import re
-import time
 import traceback
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,37 +19,13 @@ import numpy as np
 import numpy.typing as npt
 import pytest
 import requests
-from common import build_tesseract, image_exists
+from common import build_tesseract, encode_array, image_exists
 from typer.testing import CliRunner
-
-
-# Only necessary when matching multi-word string
-def format_stderr(stderr: str) -> str:
-    no_color = re.sub(r"\x1b\[[0-9;]*m", "", stderr)
-    return " ".join(re.sub(r"[^\w \d_.,!?:;\-]+", " ", no_color).split())
 
 
 def json_normalize(obj: str):
     """Normalize JSON str for comparison."""
     return json.dumps(json.loads(obj), separators=(",", ":"))
-
-
-def encode_array(arr, as_json=False):
-    """Helper function to encode a numpy array into Tesseract-friendly format."""
-    arr = np.asarray(arr)
-    out = {
-        "object_type": "array",
-        "shape": arr.shape,
-        "dtype": arr.dtype.name,
-        "data": {
-            "buffer": base64.b64encode(arr.tobytes()).decode(),
-            "encoding": "base64",
-        },
-    }
-    if as_json:
-        return json.dumps(out, separators=(",", ":"))
-
-    return out
 
 
 def assert_contains_array_allclose(
@@ -746,16 +720,16 @@ TEST_CASES = {
                 payload={
                     "inputs": {
                         "data": [
-                            "sample_7.json",
-                            "sample_6.json",
-                            "sample_1.json",
                             "sample_0.json",
-                            "sample_3.json",
+                            "sample_1.json",
                             "sample_2.json",
-                            "sample_9.json",
-                            "sample_5.json",
+                            "sample_3.json",
                             "sample_4.json",
+                            "sample_5.json",
+                            "sample_6.json",
+                            "sample_7.json",
                             "sample_8.json",
+                            "sample_9.json",
                         ]
                     }
                 },
@@ -876,12 +850,25 @@ def test_unit_tesseract_endtoend(
         [
             "run",
             img_name,
-            "input-schema",
+            "openapi-schema",
         ],
         catch_exceptions=False,
     )
     assert result.exit_code == 0, result.output
-    input_schema = result.output
+    openapi_schema = json.loads(result.output)
+
+    def _input_schema_from_openapi(openapi_schema):
+        input_schema = openapi_schema["components"]["schemas"]["ApplyInputSchema"]
+        # For some reason, jsf can't handle #/components/schemas/<x> references,
+        # so we convert them to #$defs/<x>
+        input_schema.update({"$defs": openapi_schema["components"]["schemas"]})
+        input_schema["$defs"].pop("ApplyInputSchema", None)
+        input_schema = json.loads(
+            json.dumps(input_schema).replace("components/schemas", "$defs")
+        )
+        return input_schema
+
+    input_schema = _input_schema_from_openapi(openapi_schema)
 
     mount_args, io_args = [], []
 
@@ -911,7 +898,7 @@ def test_unit_tesseract_endtoend(
         )
 
     if unit_tesseract_config.test_with_random_inputs:
-        random_input = example_from_json_schema(json.loads(input_schema))
+        random_input = example_from_json_schema(input_schema)
 
         result = cli_runner.invoke(
             app,
@@ -921,6 +908,7 @@ def test_unit_tesseract_endtoend(
                 *mount_args,
                 "apply",
                 json.dumps(random_input),
+                *io_args,
             ],
             catch_exceptions=False,
         )
@@ -950,7 +938,7 @@ def test_unit_tesseract_endtoend(
                     request.output_format,
                 ]
 
-            result = cli_runner.invoke(app, args)
+            result = cli_runner.invoke(app, args, env={"TERM": "dumb"})
             if request.expected_status_code == 200:
                 print_debug_info(result)
                 assert result.exit_code == 0, result.exception
@@ -961,12 +949,10 @@ def test_unit_tesseract_endtoend(
                     # Result is JSON output
                     output = json_normalize(result.output)
             else:
-                assert result.exit_code != 0
                 # Result is an error message
+                assert result.exit_code != 0
+                assert result.exc_info is not None
                 output = "".join(traceback.format_exception(*result.exc_info))
-                # Click with rich adds color codes and boxes to the output
-                # which we need to remove in case they break multi-word pattern matching
-                output = format_stderr(output)
 
             if request.output_contains_pattern is not None:
                 patterns = request.output_contains_pattern
@@ -982,14 +968,6 @@ def test_unit_tesseract_endtoend(
                 assert_contains_array_allclose(output_json, array)
 
     # Stage 3: Test HTTP server
-    if unit_tesseract_config.volume_mounts is not None:
-        # TODO: Mounts are not supported in HTTP mode yet, skip rest of the test for now
-        return
-
-    # Cannot mix stderr if we want to load the json
-    cli_runner = CliRunner(mix_stderr=False)
-    container_name = None
-
     run_res = cli_runner.invoke(
         app,
         [
@@ -997,6 +975,8 @@ def test_unit_tesseract_endtoend(
             img_name,
             "-p",
             free_port,
+            *mount_args,
+            *io_args,
         ],
         catch_exceptions=False,
     )
@@ -1008,41 +988,14 @@ def test_unit_tesseract_endtoend(
     container_name = serve_meta["container_name"]
     docker_cleanup["containers"].append(container_name)
 
-    # Give server some time to start up
-    timeout = 10
-    interval = 0.1
-    while True:
-        try:
-            is_alive = requests.get(f"http://localhost:{free_port}/health")
-        except requests.exceptions.ConnectionError:
-            pass
-        else:
-            assert is_alive.status_code == 200
-            break
-
-        if timeout <= 0:
-            raise TimeoutError("Container did not start in time")
-        time.sleep(interval)
-        timeout -= interval
-
     # Now test server (send requests and validate outputs)
     response = requests.get(f"http://localhost:{free_port}/openapi.json")
     assert response.status_code == 200
-
-    response = requests.get(f"http://localhost:{free_port}/input_schema")
-    assert response.status_code == 200
-    out_input_schema = response.json()
-    assert "properties" in out_input_schema
-
-    if (
-        unit_tesseract_config.volume_mounts is not None
-        or unit_tesseract_config.input_path is not None
-    ):
-        # TODO: Mounts are not supported in HTTP mode yet, skip rest of the test for now
-        return
+    openapi_schema = response.json()
+    input_schema = _input_schema_from_openapi(openapi_schema)
 
     if unit_tesseract_config.test_with_random_inputs:
-        payload_from_schema = example_from_json_schema(out_input_schema)
+        payload_from_schema = example_from_json_schema(input_schema)
         response = requests.post(
             f"http://localhost:{free_port}/apply", json=payload_from_schema
         )

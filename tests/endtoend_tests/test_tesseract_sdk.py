@@ -15,8 +15,6 @@ expected_endpoints = {
     "apply",
     "jacobian",
     "health",
-    "input_schema",
-    "output_schema",
     "abstract_eval",
     "jacobian_vector_product",
     "vector_jacobian_product",
@@ -210,3 +208,13 @@ def test_signature_consistency():
             f"Default value mismatch for parameter '{key}': "
             f"{from_image_sig[key].default} != {serve_sig[key].default}"
         )
+
+
+def test_logpipe_consistency():
+    """Test that the source code of the two duplicate LogPipe implementations is identical."""
+    from tesseract_core.runtime.logs import LogPipe as RuntimeLogPipe
+    from tesseract_core.sdk.logs import LogPipe as SDKLogPipe
+
+    runtime_source = inspect.getsource(RuntimeLogPipe)
+    sdk_source = inspect.getsource(SDKLogPipe)
+    assert runtime_source == sdk_source

@@ -1,18 +1,16 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-import importlib
+import importlib.util
 import os
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from io import TextIOBase
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Union
+from typing import Any, TextIO, Union
 
 from pydantic import BaseModel
-
-from tesseract_core.runtime.experimental import start_run
 
 from .config import get_config
 from .schema_generation import (
@@ -24,22 +22,29 @@ from .schema_generation import (
 
 @contextmanager
 def redirect_fd(
-    from_fd: TextIOBase, to_fd: TextIOBase
-) -> Generator[TextIOBase, None, None]:
+    from_: TextIO, to_: Union[TextIO, int]
+) -> Generator[TextIO, None, None]:
     """Redirect a file descriptor at OS level.
+
+    Args:
+        from_: The file object to redirect from.
+        to_: The file descriptor or file object to redirect to.
 
     Yields:
         A writable file object connected to the original file descriptor.
     """
-    orig_fd = os.dup(from_fd.fileno())
-    from_fd.flush()
-    os.dup2(to_fd.fileno(), from_fd.fileno())
+    orig_fd = os.dup(from_.fileno())
+    from_.flush()
+    if isinstance(to_, TextIOBase):
+        to_ = to_.fileno()
+    assert isinstance(to_, int)
+    os.dup2(to_, from_.fileno())
     orig_fd_file = os.fdopen(orig_fd, "w", closefd=True)
     try:
         yield orig_fd_file
     finally:
-        from_fd.flush()
-        os.dup2(orig_fd, from_fd.fileno())
+        from_.flush()
+        os.dup2(orig_fd, from_.fileno())
         orig_fd_file.close()
 
 
@@ -147,8 +152,7 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
     @assemble_docstring(api_module.apply)
     def apply(payload: ApplyInputSchema) -> ApplyOutputSchema:
         """Apply the Tesseract to the input data."""
-        with start_run():
-            out = api_module.apply(payload.inputs)
+        out = api_module.apply(payload.inputs)
         if isinstance(out, api_module.OutputSchema):
             out = out.model_dump()
         return ApplyOutputSchema.model_validate(out)
@@ -166,8 +170,7 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
 
             Differentiates ``jac_outputs`` with respect to ``jac_inputs``, at the point ``inputs``.
             """
-            with start_run():
-                out = api_module.jacobian(**dict(payload))
+            out = api_module.jacobian(**dict(payload))
             return JacobianOutputSchema.model_validate(
                 out,
                 context={
@@ -190,8 +193,7 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
             Evaluates the Jacobian vector product between the Jacobian given by ``jvp_outputs``
             with respect to ``jvp_inputs`` at the point ``inputs`` and the given tangent vector.
             """
-            with start_run():
-                out = api_module.jacobian_vector_product(**dict(payload))
+            out = api_module.jacobian_vector_product(**dict(payload))
             return JVPOutputSchema.model_validate(
                 out, context={"output_keys": payload.jvp_outputs}
             )
@@ -210,8 +212,7 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
             Computes the vector Jacobian product between the Jacobian given by ``vjp_outputs``
             with respect to ``vjp_inputs`` at the point ``inputs`` and the given cotangent vector.
             """
-            with start_run():
-                out = api_module.vector_jacobian_product(**dict(payload))
+            out = api_module.vector_jacobian_product(**dict(payload))
             return VJPOutputSchema.model_validate(
                 out, context={"input_keys": payload.vjp_inputs}
             )
@@ -223,18 +224,6 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
         return {"status": "ok"}
 
     endpoints.append(health)
-
-    def input_schema() -> dict[str, Any]:
-        """Get input schema for tesseract apply function."""
-        return ApplyInputSchema.model_json_schema()
-
-    endpoints.append(input_schema)
-
-    def output_schema() -> dict[str, Any]:
-        """Get output schema for tesseract apply function."""
-        return ApplyOutputSchema.model_json_schema()
-
-    endpoints.append(output_schema)
 
     if "abstract_eval" in supported_functions:
         AbstractEvalInputSchema, AbstractEvalOutputSchema = create_abstract_eval_schema(

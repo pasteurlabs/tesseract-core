@@ -20,23 +20,17 @@ from typing import Any, Optional, Union
 import requests
 
 from tesseract_core.runtime.config import get_config
+from tesseract_core.runtime.logs import LogPipe
 
 
 class BaseBackend(ABC):
     """Base class for MPA backends."""
 
-    def __init__(self) -> None:
-        self.log_dir = os.getenv("LOG_DIR")
-        if not self.log_dir:
-            self.log_dir = Path(get_config().output_path) / "logs"
-        else:
-            self.log_dir = Path(self.log_dir)
-        self.log_dir.mkdir(exist_ok=True)
-
-        # Create a unique run directory
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        self.run_dir = self.log_dir / f"run_{timestamp}"
-        self.run_dir.mkdir(exist_ok=True)
+    def __init__(self, base_dir: Optional[str] = None) -> None:
+        if base_dir is None:
+            base_dir = get_config().output_path
+        self.log_dir = Path(base_dir) / "logs"
+        self.log_dir.mkdir(parents=True, exist_ok=True)
 
     @abstractmethod
     def log_parameter(self, key: str, value: Any) -> None:
@@ -67,12 +61,12 @@ class BaseBackend(ABC):
 class FileBackend(BaseBackend):
     """MPA backend that writes to local files."""
 
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, base_dir: Optional[str] = None) -> None:
+        super().__init__(base_dir)
         # Initialize log files
-        self.params_file = self.run_dir / "parameters.json"
-        self.metrics_file = self.run_dir / "metrics.csv"
-        self.artifacts_dir = self.run_dir / "artifacts"
+        self.params_file = self.log_dir / "parameters.json"
+        self.metrics_file = self.log_dir / "metrics.csv"
+        self.artifacts_dir = self.log_dir / "artifacts"
         self.artifacts_dir.mkdir(exist_ok=True)
 
         # Initialize parameters dict and metrics list
@@ -132,33 +126,40 @@ class FileBackend(BaseBackend):
 class MLflowBackend(BaseBackend):
     """MPA backend that writes to an MLflow tracking server."""
 
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, base_dir: Optional[str] = None) -> None:
+        super().__init__(base_dir)
+        os.environ["GIT_PYTHON_REFRESH"] = (
+            "quiet"  # Suppress potential MLflow git warnings
+        )
+
         try:
-            os.environ["GIT_PYTHON_REFRESH"] = (
-                "quiet"  # Suppress potential MLflow git warnings
-            )
-            self._ensure_mlflow_reachable()
-
             import mlflow
-
-            self.mlflow = mlflow
         except ImportError as exc:
             raise ImportError(
                 "MLflow is required for MLflowBackend but is not installed"
             ) from exc
 
+        self._ensure_mlflow_reachable()
+        self.mlflow = mlflow
+
         config = get_config()
-        mlflow.set_tracking_uri(config.mlflow_tracking_uri)
+        tracking_uri = config.mlflow_tracking_uri
+
+        if not tracking_uri.startswith(("http://", "https://")):
+            # If it's a file URI, convert to local path
+            tracking_uri = tracking_uri.replace("file://", "")
+
+            # Relative paths are resolved against the log_dir
+            if not Path(tracking_uri).is_absolute():
+                tracking_uri = (Path(self.log_dir) / tracking_uri).resolve()
+
+        mlflow.set_tracking_uri(tracking_uri)
 
     def _ensure_mlflow_reachable(self) -> None:
         """Check if the MLflow tracking server is reachable."""
         config = get_config()
         mlflow_tracking_uri = config.mlflow_tracking_uri
-        if mlflow_tracking_uri and (
-            mlflow_tracking_uri.startswith("http://")
-            or mlflow_tracking_uri.startswith("https://")
-        ):
+        if mlflow_tracking_uri.startswith(("http://", "https://")):
             try:
                 response = requests.get(mlflow_tracking_uri, timeout=5)
                 response.raise_for_status()
@@ -190,13 +191,13 @@ class MLflowBackend(BaseBackend):
         self.mlflow.end_run()
 
 
-def _create_backend() -> BaseBackend:
+def _create_backend(base_dir: Optional[str]) -> BaseBackend:
     """Create the appropriate backend based on environment."""
     config = get_config()
     if config.mlflow_tracking_uri:
-        return MLflowBackend()
+        return MLflowBackend(base_dir)
     else:
-        return FileBackend()
+        return FileBackend(base_dir)
 
 
 # Context variable for the current backend instance
@@ -230,38 +231,49 @@ def log_artifact(local_path: str) -> None:
 
 
 @contextmanager
-def stdio_to_logfile(logfile: Union[str, Path]) -> Generator[None, None, None]:
-    """Context manager for redirecting stdout and stderr to a log file."""
+def redirect_stdio(logfile: Union[str, Path]) -> Generator[None, None, None]:
+    """Context manager for redirecting stdout and stderr to a custom pipe.
+
+    Writes messages to both the original stderr and the given logfile.
+    """
     from tesseract_core.runtime.core import redirect_fd
+
+    try:
+        # Check if a file descriptor is available
+        sys.stdout.fileno()
+        sys.stderr.fileno()
+    except UnsupportedOperation:
+        # Don't redirect if stdout/stderr are not file descriptors
+        # (This likely means that streams are already redirected)
+        yield
+        return
 
     with ExitStack() as stack:
         f = stack.enter_context(open(logfile, "w"))
-        try:
-            # Check if a file descriptor is available
-            sys.stdout.fileno()
-            sys.stderr.fileno()
-        except UnsupportedOperation:
-            # Don't redirect if stdout/stderr are not file descriptors
-            # (This likely means that streams are already redirected)
-            pass
-        else:
-            # Redirect file descriptors at OS level
-            stack.enter_context(redirect_fd(sys.stdout, f))
-            stack.enter_context(redirect_fd(sys.stderr, f))
+
+        orig_stderr = sys.stderr
+        # Use `print` instead of `.write` so we get appropriate newlines and flush behavior
+        write_to_stderr = lambda msg: print(msg, file=orig_stderr, flush=True)
+        write_to_file = lambda msg: print(msg, file=f, flush=True)
+        pipe_fd = stack.enter_context(LogPipe(write_to_stderr, write_to_file))
+
+        # Redirect file descriptors at OS level
+        stack.enter_context(redirect_fd(sys.stdout, pipe_fd))
+        stack.enter_context(redirect_fd(sys.stderr, pipe_fd))
         yield
 
 
 @contextmanager
-def start_run() -> Generator[None, None, None]:
+def start_run(base_dir: Optional[str] = None) -> Generator[None, None, None]:
     """Context manager for starting and ending a run."""
-    backend = _create_backend()
+    backend = _create_backend(base_dir)
     token = _current_backend.set(backend)
     backend.start_run()
 
-    logfile = backend.run_dir / "tesseract.log"
+    logfile = backend.log_dir / "tesseract.log"
 
     try:
-        with stdio_to_logfile(logfile):
+        with redirect_stdio(logfile):
             yield
     finally:
         backend.end_run()

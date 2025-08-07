@@ -191,7 +191,7 @@ def test_run_tesseract_file_input(mocked_docker, tmpdir):
         "bind": "/path/in/container",
     }
 
-    # Test the same but with --input_path
+    # Test the same but with --input-path
     indir = tmpdir / "input_path"
     indir.mkdir()
     res, _ = engine.run_tesseract(
@@ -318,8 +318,9 @@ def test_needs_docker(mocked_docker, monkeypatch):
 
 def test_logpipe(caplog):
     # Verify that logging in a separate thread works as intended
-    from tesseract_core.sdk.engine import LogPipe
+    from tesseract_core.sdk.logs import LogPipe
 
+    logger = logging.getLogger("tesseract")
     caplog.set_level(logging.INFO, logger="tesseract")
 
     logged_lines = []
@@ -328,7 +329,7 @@ def test_logpipe(caplog):
         msg = "".join(random.choices("abcdefghijklmnopqrstuvwxyz", k=msg_length))
         logged_lines.append(msg)
 
-    logpipe = LogPipe(logging.INFO)
+    logpipe = LogPipe(logger.info)
     with logpipe:
         fd = os.fdopen(logpipe.fileno(), "w", closefd=False)
         for line in logged_lines:

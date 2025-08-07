@@ -19,7 +19,7 @@ from typer.testing import CliRunner
 
 from tesseract_core.runtime.cli import _add_user_commands_to_cli
 from tesseract_core.runtime.cli import app as cli_cmd
-from tesseract_core.runtime.file_interactions import load_bytes, output_to_bytes
+from tesseract_core.runtime.file_interactions import output_to_bytes
 
 test_input = {
     "a": [1.0, 2.0, 3.0],
@@ -161,18 +161,6 @@ def test_invocation_no_args_prints_usage(cli, cli_runner):
     assert "Usage: tesseract-runtime" in result.stdout
 
 
-def test_input_schema_command(cli, cli_runner):
-    result = cli_runner.invoke(cli, ["input-schema"], catch_exceptions=False)
-    assert result.exit_code == 0, result.stderr
-    assert "properties" in result.stdout
-
-
-def test_output_schema_command(cli, cli_runner):
-    result = cli_runner.invoke(cli, ["output-schema"], catch_exceptions=False)
-    assert result.exit_code == 0, result.stderr
-    assert "properties" in result.stdout
-
-
 def test_openapi_schema_command(cli, cli_runner):
     result = cli_runner.invoke(cli, ["openapi-schema"])
     assert result.exit_code == 0, result.stderr
@@ -236,11 +224,11 @@ def test_apply_command_binref(cli, cli_runner, dummy_tesseract_module, tmpdir):
         cli,
         ["apply", json.dumps({"inputs": test_input_binref})],
         catch_exceptions=False,
-        env={"TERM": "true", "COLUMNS": "9999"},
+        env={"TERM": "dumb", "COLUMNS": "1000"},
     )
     assert result.exit_code == 2
     assert "Value error" in result.stderr
-    assert "binref encoded with a relative path" in result.stderr
+    assert "Failed to decode buffer as binref" in result.stderr
 
 
 def test_apply_command_noenv(cli, cli_runner, dummy_tesseract_module, monkeypatch):
@@ -267,10 +255,7 @@ def test_input_vals_from_local_file(
     cli, cli_runner, tmpdir, dummy_tesseract_module, input_format
 ):
     """Test the apply command with input arguments from a local file."""
-    if "+" in input_format:
-        container = input_format.split("+")[0]
-    else:
-        container = input_format
+    container = input_format.split("+")[-1]
 
     a_file = tmpdir / f"a.{container}"
     inputs = {"inputs": dummy_tesseract_module.InputSchema(**test_input)}
@@ -285,7 +270,7 @@ def test_input_vals_from_local_file(
 
     result = cli_runner.invoke(
         cli,
-        ["apply", f"@{a_file}"],
+        ["--input-path", tmpdir, "apply", f"@{a_file}"],
         catch_exceptions=False,
     )
     assert result.exit_code == 0, result.stderr
@@ -321,6 +306,8 @@ def test_outputs_to_local_file(
     assert result.exit_code == 0, result.stderr
 
     test_input_val = dummy_tesseract_module.InputSchema.model_validate(test_input)
+
+    load_bytes = lambda x, fmt: json.loads(x.decode("utf-8"))
 
     expected = dummy_tesseract_module.apply(test_input_val)
     expected = output_to_bytes(expected, output_format, base_dir=tmpdir)
@@ -462,7 +449,7 @@ def test_stdout_redirect_cli():
 def test_stdout_redirect_subprocess(tmpdir, target):
     """Ensure that stdout is redirected to stderr / files even in non-Python subprocesses."""
     if target == "file":
-        target_stream = f"open(\"{tmpdir / 'test_output.log'}\", 'w')"
+        target_stream = "f"
     else:
         target_stream = "sys.stderr"
 
@@ -473,7 +460,8 @@ def test_stdout_redirect_subprocess(tmpdir, target):
         "from tesseract_core.runtime.core import redirect_fd",
         "print('stdout', file=sys.stdout)",
         "print('stderr', file=sys.stderr)",
-        f"with redirect_fd(sys.stdout, {target_stream}) as orig_stdout:",
+        f"with open(\"{tmpdir / 'test_output.log'}\", 'w') as f:",
+        f"  with redirect_fd(sys.stdout, {target_stream}) as orig_stdout:",
         "    os.system('echo stderr')",
         "    print('stderr', file=sys.stdout)",
         "    print('stderr', file=sys.stderr)",

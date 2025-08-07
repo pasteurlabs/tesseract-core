@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import List as list_  # noqa: UP035
 
 from tesseract_core.sdk.config import get_config
+from tesseract_core.sdk.logs import LogPipe
 
 logger = logging.getLogger("tesseract")
 
@@ -216,8 +217,6 @@ class Images:
         Returns:
             Built Image object.
         """
-        from tesseract_core.sdk.engine import LogPipe
-
         for tag in tags:
             proper_tag = tag.split(":")[1]
             if not _is_valid_docker_tag(proper_tag):
@@ -233,7 +232,7 @@ class Images:
             ssh=ssh,
         )
 
-        out_pipe = LogPipe(logging.DEBUG)
+        out_pipe = LogPipe(logger.debug)
 
         with out_pipe as out_pipe_fd:
             proc = subprocess.run(build_cmd, stdout=out_pipe_fd, stderr=out_pipe_fd)

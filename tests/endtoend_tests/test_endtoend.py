@@ -5,13 +5,17 @@
 
 import json
 import os
+import shutil
 import subprocess
+import uuid
 from pathlib import Path
+from textwrap import dedent
 
+import numpy as np
 import pytest
 import requests
 import yaml
-from common import build_tesseract, image_exists
+from common import build_tesseract, encode_array, image_exists
 from typer.testing import CliRunner
 
 from tesseract_core.sdk.cli import AVAILABLE_RECIPES, app
@@ -154,43 +158,6 @@ def test_env_passthrough_serve(docker_cleanup, docker_client, built_image_name):
     assert "foo" in output.decode("utf-8"), f"Output was: {output.decode('utf-8')}"
 
 
-def test_io_path_serve(docker_cleanup, docker_client, built_image_name, tmpdir):
-    (tmpdir / "input").mkdir()
-    (tmpdir / "output").mkdir()
-
-    run_res = subprocess.run(
-        [
-            "tesseract",
-            "serve",
-            built_image_name,
-            "--input-path",
-            str(tmpdir / "input"),
-            "--output-path",
-            str(tmpdir / "output"),
-        ],
-        capture_output=True,
-        text=True,
-    )
-    assert run_res.returncode == 0, run_res.stderr
-    assert run_res.stdout
-
-    serve_meta = json.loads(run_res.stdout)
-    container_name = serve_meta["container_name"]
-    docker_cleanup["containers"].append(container_name)
-
-    container = docker_client.containers.get(container_name)
-
-    exit_code, input_path = container.exec_run(
-        ["sh", "-c", "echo $TESSERACT_INPUT_PATH"]
-    )
-    exit_code, output_path = container.exec_run(
-        ["sh", "-c", "echo $TESSERACT_OUTPUT_PATH"]
-    )
-    assert exit_code == 0, f"Command failed with exit code {exit_code}"
-    assert "/tesseract/input_data" in input_path.decode("utf-8")
-    assert "/tesseract/output_data" in output_path.decode("utf-8")
-
-
 def test_tesseract_list(built_image_name):
     # Test List Command
     cli_runner = CliRunner(mix_stderr=False)
@@ -209,10 +176,9 @@ def test_tesseract_list(built_image_name):
 
 
 def test_tesseract_run_stdout(built_image_name):
-    # Test List Command
     cli_runner = CliRunner(mix_stderr=False)
 
-    test_commands = ("input-schema", "output-schema", "openapi-schema", "health")
+    test_commands = ("openapi-schema", "health")
 
     for command in test_commands:
         run_res = cli_runner.invoke(
@@ -289,8 +255,8 @@ def test_tesseract_serve_pipeline(docker_client, built_image_name, docker_cleanu
     docker_cleanup["containers"].append(container)
 
     assert container.name == container_name
-    assert container.host_port == serve_meta["containers"]["port"]
-    assert container.host_ip == serve_meta["containers"]["ip"]
+    assert container.host_port == serve_meta["containers"][0]["port"]
+    assert container.host_ip == serve_meta["containers"][0]["ip"]
 
     # Ensure served Tesseract is usable
     res = requests.get(f"http://{container.host_ip}:{container.host_port}/health")
@@ -442,7 +408,7 @@ def test_tesseract_serve_ports(built_image_name, port, docker_cleanup, free_port
     start_port = int(test_ports[0])
     end_port = int(test_ports[1]) if len(test_ports) > 1 else start_port
 
-    actual_port = int(serve_meta["containers"]["port"])
+    actual_port = int(serve_meta["containers"][0]["port"])
     assert actual_port in range(start_port, end_port + 1)
 
     # Ensure specified ports are in `tesseract ps` and served Tesseracts are usable.
@@ -547,6 +513,113 @@ def test_tesseract_serve_volume_permissions(
         assert (tmp_path / "bar").exists()
 
 
+@pytest.mark.parametrize("method", ["run", "serve"])
+@pytest.mark.parametrize("array_format", ["json", "json+base64", "json+binref"])
+def test_io_path_interactions(
+    docker_cleanup, built_image_name, tmp_path, method, array_format
+):
+    """Ensure that input / output paths work across different methods of interaction and file formats."""
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    input_dir.mkdir()
+    output_dir.mkdir()
+
+    encoding = array_format.split("+")[-1]
+    example_inputs = {
+        "inputs": {
+            "a": encode_array(np.array([1, 2]), encoding=encoding, basedir=input_dir),
+            "b": encode_array(np.array([3, 4]), encoding=encoding, basedir=input_dir),
+            "s": 1.0,
+            "normalize": True,
+        },
+    }
+
+    if method == "serve":
+        run_res = subprocess.run(
+            [
+                "tesseract",
+                "serve",
+                built_image_name,
+                "--input-path",
+                str(input_dir),
+                "--output-path",
+                str(output_dir),
+                "--output-format",
+                array_format,
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert run_res.returncode == 0, run_res.stderr
+        assert run_res.stdout
+
+        serve_meta = json.loads(run_res.stdout)
+        container_name = serve_meta["container_name"]
+        docker_cleanup["containers"].append(container_name)
+
+        req = requests.post(
+            f"http://localhost:{serve_meta['containers'][0]['port']}/apply",
+            json=example_inputs,
+        )
+        assert req.status_code == 200, req.text
+        result = req.json()
+
+    elif method == "run":
+        run_res = subprocess.run(
+            [
+                "tesseract",
+                "run",
+                built_image_name,
+                "apply",
+                "--input-path",
+                str(input_dir),
+                "--output-path",
+                str(output_dir),
+                "--output-format",
+                array_format,
+                json.dumps(example_inputs),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert run_res.returncode == 0, run_res.stderr
+        assert run_res.stdout
+        result = json.loads(run_res.stdout)
+    else:
+        raise ValueError(f"Unknown method: {method}")
+
+    # Ensure result payload is as expected
+    assert "result" in result
+    assert result["result"]["data"]["encoding"] == encoding
+
+    if array_format == "json+binref":
+        binref_path = result["result"]["data"]["buffer"].rsplit(":", maxsplit=1)[0]
+        binref_file = output_dir / binref_path
+        assert binref_file.exists(), f"Expected binref file {binref_file} to exist"
+
+    # Ensure logs are written to the output directory
+    if method == "serve":
+        run_dirs = list(output_dir.glob("run_*/"))
+        assert len(run_dirs) == 1, f"Expected one run directory, found: {run_dirs}"
+        output_dir = run_dirs[0]
+
+    log_dir = output_dir / "logs"
+    assert log_dir.exists(), f"Expected log directory {log_dir} to exist"
+    assert (log_dir / "tesseract.log").exists(), "Expected tesseract.log to exist"
+
+    # Also try overriding the output format via Accept header
+    if method == "serve":
+        req = requests.post(
+            f"http://localhost:{serve_meta['containers'][0]['port']}/apply",
+            json=example_inputs,
+            headers={"Accept": "application/json+base64"},
+        )
+        assert req.status_code == 200, req.text
+        result = req.json()
+        assert "result" in result
+        assert result["result"]["data"]["encoding"] == "base64"
+
+
 def test_tesseract_serve_interop(
     built_image_name, dummy_network_name, docker_client, docker_cleanup
 ):
@@ -649,42 +722,7 @@ def test_serve_nonstandard_host_ip(
         requests.get(f"http://localhost:{container.host_port}/health")
 
 
-def test_tesseract_cli_options_parsing(built_image_name, tmpdir):
-    cli_runner = CliRunner(mix_stderr=False)
-
-    examples_dir = Path(__file__).parent.parent.parent / "examples"
-    example_inputs = examples_dir / "vectoradd" / "example_inputs.json"
-
-    test_command = [
-        "apply",
-        "--output-format",
-        "json+binref",
-        "--output-path",
-        str(tmpdir),
-        "--output-file",
-        "results.json",
-        f"@{example_inputs}",
-    ]
-
-    run_res = cli_runner.invoke(
-        app,
-        [
-            "run",
-            built_image_name,
-            *test_command,
-        ],
-        catch_exceptions=False,
-    )
-    assert run_res.exit_code == 0, run_res.stderr
-
-    with open(Path(tmpdir) / "results.json") as fi:
-        results = fi.read()
-        assert ".bin:0" in results
-
-
 def test_tarball_install(dummy_tesseract_package, docker_cleanup):
-    from textwrap import dedent
-
     tesseract_api = dedent(
         """
     import cowsay
@@ -723,9 +761,8 @@ def test_tarball_install(dummy_tesseract_package, docker_cleanup):
     docker_cleanup["images"].append(img_tag)
 
 
-def test_logging(dummy_tesseract_package, tmpdir, docker_cleanup):
-    from textwrap import dedent
-
+@pytest.fixture(scope="module")
+def logging_test_image(dummy_tesseract_location, tmpdir_factory, docker_cleanup_module):
     tesseract_api = dedent(
         """
     from pydantic import BaseModel
@@ -744,27 +781,43 @@ def test_logging(dummy_tesseract_package, tmpdir, docker_cleanup):
     """
     )
 
-    with open(dummy_tesseract_package / "tesseract_api.py", "w") as f:
+    workdir = tmpdir_factory.mktemp("mpa_test_image")
+
+    # Write the API file
+    with open(workdir / "tesseract_api.py", "w") as f:
         f.write(tesseract_api)
+    # Add mlflow dependency
+    with open(workdir / "tesseract_requirements.txt", "w") as f:
+        f.write("mlflow\n")
+
+    shutil.copy(
+        dummy_tesseract_location / "tesseract_config.yaml",
+        workdir / "tesseract_config.yaml",
+    )
 
     cli_runner = CliRunner(mix_stderr=False)
+
+    # Build the Tesseract
     result = cli_runner.invoke(
         app,
-        ["--loglevel", "debug", "build", str(dummy_tesseract_package)],
+        ["--loglevel", "debug", "build", str(workdir), "--tag", "logging_test_image"],
         catch_exceptions=False,
     )
     assert result.exit_code == 0, result.stderr
 
     img_tag = json.loads(result.stdout)[0]
-    docker_cleanup["images"].append(img_tag)
+    docker_cleanup_module["images"].append(img_tag)
+    return img_tag
 
+
+def test_logging_tesseract_run(logging_test_image, tmpdir):
     # Run the Tesseract and capture logs
     # Use subprocess because pytest messes with stdout/stderr
     run_res = subprocess.run(
         [
             "tesseract",
             "run",
-            img_tag,
+            logging_test_image,
             "apply",
             '{"inputs": {"message": "Test message"}}',
             "--output-path",
@@ -774,12 +827,13 @@ def test_logging(dummy_tesseract_package, tmpdir, docker_cleanup):
         text=True,
     )
     assert run_res.returncode == 0, run_res.stderr
-    assert "Hello from tesseract_api.py!" == run_res.stderr.strip()
+    assert "Hello from tesseract_api.py!\nHello from apply!" == run_res.stderr.strip()
 
     results = json.loads(run_res.stdout.strip())
     assert results["out"] == "Received message: Test message"
 
-    logdir = next((Path(tmpdir) / "logs").iterdir())
+    logdir = Path(tmpdir) / "logs"
+
     log_file = logdir / "tesseract.log"
     assert log_file.exists()
 
@@ -788,9 +842,46 @@ def test_logging(dummy_tesseract_package, tmpdir, docker_cleanup):
     assert "Hello from apply!" == log_content.strip()
 
 
-def _prepare_mpa_test_image(dummy_tesseract_package, docker_cleanup):
-    from textwrap import dedent
+def test_logging_tesseract_serve(
+    logging_test_image, tmpdir, docker_cleanup, docker_client
+):
+    serve_res = subprocess.run(
+        [
+            "tesseract",
+            "serve",
+            logging_test_image,
+            "--output-path",
+            tmpdir,
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert serve_res.returncode == 0, serve_res.stderr
+    assert serve_res.stdout
 
+    serve_meta = json.loads(serve_res.stdout)
+    container_name = serve_meta["container_name"]
+    docker_cleanup["containers"].append(container_name)
+    container = docker_client.containers.get(container_name)
+
+    run_id = str(uuid.uuid4())
+    res = requests.post(
+        f"http://{container.host_ip}:{container.host_port}/apply",
+        params={"run_id": run_id},
+        json={"inputs": {}},
+    )
+    assert res.status_code == 200, res.text
+
+    log_file = Path(tmpdir) / f"run_{run_id}/logs/tesseract.log"
+    assert log_file.exists()
+
+    with open(log_file) as f:
+        log_content = f.read()
+    assert "Hello from apply!" == log_content.strip()
+
+
+@pytest.fixture(scope="module")
+def mpa_test_image(dummy_tesseract_location, tmpdir_factory, docker_cleanup_module):
     tesseract_api = dedent(
         """
     from pydantic import BaseModel
@@ -825,63 +916,50 @@ def _prepare_mpa_test_image(dummy_tesseract_package, docker_cleanup):
         return OutputSchema()
         """
     )
+    workdir = tmpdir_factory.mktemp("mpa_test_image")
 
     # Write the API file
-    with open(dummy_tesseract_package / "tesseract_api.py", "w") as f:
+    with open(workdir / "tesseract_api.py", "w") as f:
         f.write(tesseract_api)
     # Add mlflow dependency
-    with open(dummy_tesseract_package / "tesseract_requirements.txt", "w") as f:
+    with open(workdir / "tesseract_requirements.txt", "w") as f:
         f.write("mlflow\n")
+
+    shutil.copy(
+        dummy_tesseract_location / "tesseract_config.yaml",
+        workdir / "tesseract_config.yaml",
+    )
 
     cli_runner = CliRunner(mix_stderr=False)
 
     # Build the Tesseract
     result = cli_runner.invoke(
         app,
-        ["--loglevel", "debug", "build", str(dummy_tesseract_package)],
+        ["--loglevel", "debug", "build", str(workdir), "--tag", "mpa_test_image"],
         catch_exceptions=False,
     )
     assert result.exit_code == 0, result.stderr
 
     img_tag = json.loads(result.stdout)[0]
-    docker_cleanup["images"].append(img_tag)
-
+    docker_cleanup_module["images"].append(img_tag)
     return img_tag
 
 
-@pytest.mark.parametrize("default_log_dir", ["default", "custom"])
-def test_mpa_file_backend(
-    dummy_tesseract_package, tmpdir, docker_cleanup, default_log_dir
-):
+def test_mpa_file_backend(tmpdir, mpa_test_image):
     """Test the MPA (Metrics, Parameters, and Artifacts) submodule with file backend."""
     import csv
 
-    img_tag = _prepare_mpa_test_image(dummy_tesseract_package, docker_cleanup)
+    outdir = Path(tmpdir)
 
-    if default_log_dir == "default":
-        run_cmd = [
-            "tesseract",
-            "run",
-            img_tag,
-            "apply",
-            '{"inputs": {}}',
-            "--output-path",
-            tmpdir,
-        ]
-        log_dir = Path(tmpdir) / "logs"
-    elif default_log_dir == "custom":
-        run_cmd = [
-            "tesseract",
-            "run",
-            "--env",
-            "LOG_DIR=/tesseract/output_data/mpa_logs",
-            img_tag,
-            "apply",
-            '{"inputs": {}}',
-            "--output-path",
-            tmpdir,
-        ]
-        log_dir = Path(tmpdir) / "mpa_logs"
+    run_cmd = [
+        "tesseract",
+        "run",
+        mpa_test_image,
+        "apply",
+        '{"inputs": {}}',
+        "--output-path",
+        outdir,
+    ]
 
     run_res = subprocess.run(
         run_cmd,
@@ -890,15 +968,11 @@ def test_mpa_file_backend(
     )
     assert run_res.returncode == 0, run_res.stderr
 
+    log_dir = outdir / "logs"
     assert log_dir.exists()
 
-    # Find the run directory (should be only one)
-    run_dirs = list(log_dir.glob("run_*"))
-    assert len(run_dirs) == 1
-    run_dir = run_dirs[0]
-
     # Verify parameters file
-    params_file = run_dir / "parameters.json"
+    params_file = log_dir / "parameters.json"
     assert params_file.exists()
     with open(params_file) as f:
         params = json.load(f)
@@ -906,7 +980,7 @@ def test_mpa_file_backend(
         assert params["steps_config"] == 5
 
     # Verify metrics file
-    metrics_file = run_dir / "metrics.csv"
+    metrics_file = log_dir / "metrics.csv"
     assert metrics_file.exists()
 
     with open(metrics_file) as f:
@@ -924,7 +998,7 @@ def test_mpa_file_backend(
             assert int(metric["step"]) == i
 
     # Verify artifacts directory and artifact file
-    artifacts_dir = run_dir / "artifacts"
+    artifacts_dir = log_dir / "artifacts"
     assert artifacts_dir.exists()
 
     artifact_file = artifacts_dir / "test_artifact.txt"
@@ -935,17 +1009,15 @@ def test_mpa_file_backend(
         assert artifact_data == "Test artifact content"
 
 
-def test_mpa_mlflow_backend(dummy_tesseract_package, tmpdir, docker_cleanup):
+def test_mpa_mlflow_backend(mpa_test_image, tmpdir):
     """Test the MPA (Metrics, Parameters, and Artifacts) submodule with MLflow backend."""
-    img_tag = _prepare_mpa_test_image(dummy_tesseract_package, docker_cleanup)
-
     # Point MLflow to a local directory
     run_cmd = [
         "tesseract",
         "run",
         "--env",
         "TESSERACT_MLFLOW_TRACKING_URI=/tesseract/output_data/mlruns",
-        img_tag,
+        mpa_test_image,
         "apply",
         '{"inputs": {}}',
         "--output-path",
