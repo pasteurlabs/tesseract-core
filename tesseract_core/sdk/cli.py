@@ -562,6 +562,7 @@ def serve(
         str | None,
         typer.Option(
             "--input-path",
+            "-i",
             help=(
                 "Input path to read input files from, such as local directory or S3 URI "
                 "(may be anything supported by fsspec)."
@@ -572,6 +573,7 @@ def serve(
         str | None,
         typer.Option(
             "--output-path",
+            "-o",
             help=(
                 "Output path to write output files to, such as local directory or S3 URI "
                 "(may be anything supported by fsspec)."
@@ -582,6 +584,7 @@ def serve(
         OutputFormatChoices | None,
         typer.Option(
             "--output-format",
+            "-f",
             help=("Output format to use for the Tesseract."),
         ),
     ] = None,
@@ -877,6 +880,7 @@ def run_container(
         str | None,
         typer.Option(
             "--input-path",
+            "-i",
             help=(
                 "Input path to read input files from, such as local directory or S3 URI "
                 "(may be anything supported by fsspec)."
@@ -887,6 +891,7 @@ def run_container(
         str | None,
         typer.Option(
             "--output-path",
+            "-o",
             help=(
                 "Output path to write output files to, such as local directory or S3 URI "
                 "(may be anything supported by fsspec)."
@@ -897,6 +902,7 @@ def run_container(
         OutputFormatChoices | None,
         typer.Option(
             "--output-format",
+            "-f",
             help=("Output format to use for the Tesseract."),
         ),
     ] = None,

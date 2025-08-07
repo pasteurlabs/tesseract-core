@@ -22,13 +22,16 @@ from pydantic import (
 from pydantic.json_schema import JsonSchemaValue
 from pydantic_core import SchemaSerializer, SchemaValidator, core_schema
 
-from tesseract_core.runtime.file_interactions import parent_path
+from tesseract_core.runtime.file_interactions import PathLike, parent_path
 from tesseract_core.runtime.mpa import (
     log_artifact,
     log_metric,
     log_parameter,
 )
 from tesseract_core.runtime.schema_types import safe_issubclass
+
+# Flag is modified by runtime.cli based on arguments or during build time
+SKIP_REQUIRED_FILE_CHECK = False
 
 
 class LazySequence(Sequence):
@@ -204,6 +207,7 @@ def _resolve_input_path(path: Path) -> Path:
     if str(input_path) not in str(tess_path):
         raise ValueError(
             f"Invalid input file reference: {path}. "
+            f"Expected path to be relative to {input_path}, but got {tess_path}. "
             "File references have to be relative to --input-path."
         )
     if not tess_path.exists():
@@ -227,6 +231,23 @@ InputFileReference = Annotated[Path, AfterValidator(_resolve_input_path)]
 OutputFileReference = Annotated[Path, AfterValidator(_strip_output_path)]
 
 
+def require_file(file_path: PathLike) -> Path:
+    """Designate a file which is required to be present at runtime.
+
+    Args:
+        file_path: Path to required file. Must be relative to `input_path` assigned in `tesseract run`.
+    """
+    if SKIP_REQUIRED_FILE_CHECK:
+        return Path(file_path)
+
+    file_path = _resolve_input_path(Path(file_path))
+
+    if not file_path.is_file():
+        raise FileNotFoundError(f"Required file not found: {file_path}")
+
+    return file_path
+
+
 __all__ = [
     "InputFileReference",
     "LazySequence",
@@ -235,4 +256,5 @@ __all__ = [
     "log_artifact",
     "log_metric",
     "log_parameter",
+    "require_file",
 ]
