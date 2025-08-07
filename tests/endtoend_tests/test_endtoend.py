@@ -128,9 +128,9 @@ def test_build_generate_only(dummy_tesseract_location, skip_checks):
     with open(build_dir / "Dockerfile") as f:
         docker_file_contents = f.read()
         if skip_checks:
-            assert 'RUN ["tesseract-runtime", "check"]' not in docker_file_contents
+            assert "tesseract-runtime check" not in docker_file_contents
         else:
-            assert 'RUN ["tesseract-runtime", "check"]' in docker_file_contents
+            assert "tesseract-runtime check" in docker_file_contents
 
 
 def test_env_passthrough_serve(docker_cleanup, docker_client, built_image_name):
@@ -540,11 +540,11 @@ def test_io_path_interactions(
                 "tesseract",
                 "serve",
                 built_image_name,
-                "--input-path",
+                "-i",
                 str(input_dir),
-                "--output-path",
+                "-o",
                 str(output_dir),
-                "--output-format",
+                "-f",
                 array_format,
             ],
             capture_output=True,
@@ -571,11 +571,11 @@ def test_io_path_interactions(
                 "run",
                 built_image_name,
                 "apply",
-                "--input-path",
+                "-i",
                 str(input_dir),
-                "--output-path",
+                "-o",
                 str(output_dir),
-                "--output-format",
+                "-f",
                 array_format,
                 json.dumps(example_inputs),
             ],
