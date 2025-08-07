@@ -1019,7 +1019,7 @@ def test_mpa_mlflow_backend(mpa_test_image, tmpdir):
         "tesseract",
         "run",
         "--env",
-        "TESSERACT_MLFLOW_TRACKING_URI=/tesseract/output_data/mlruns",
+        "TESSERACT_MLFLOW_TRACKING_URI=mlruns",
         mpa_test_image,
         "apply",
         '{"inputs": {}}',
