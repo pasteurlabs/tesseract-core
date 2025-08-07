@@ -63,6 +63,12 @@ def test_file_backend_empty_mlflow_uri():
     assert isinstance(backend, mpa.FileBackend)
 
 
+def test_uses_custom_base_directory(tmpdir):
+    outdir = tmpdir / "mpa_test"
+    backend = mpa.FileBackend(base_dir=str(outdir))
+    assert backend.log_dir == outdir / "logs"
+
+
 def test_log_parameter_content():
     """Test parameter logging creates correct JSON content."""
     backend = mpa.FileBackend()
