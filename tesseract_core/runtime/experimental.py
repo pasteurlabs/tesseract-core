@@ -1,7 +1,6 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-import os
 from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import (
@@ -31,7 +30,8 @@ from tesseract_core.runtime.mpa import (
 )
 from tesseract_core.runtime.schema_types import safe_issubclass
 
-IS_BUILDING = os.environ.get("_TESSERACT_IS_BUILDING", "0") == "1"
+# Flag is modified by runtime.cli based on arguments or during build time
+SKIP_REQUIRED_FILE_CHECK = False
 
 
 class LazySequence(Sequence):
@@ -240,8 +240,8 @@ def require_file(file_path: PathLike) -> Path:
     Args:
         file_path: Path to required file. Must be relative to `input_path` assigned in `tesseract run`.
     """
-    if IS_BUILDING:
-        return file_path
+    if SKIP_REQUIRED_FILE_CHECK:
+        return Path(file_path)
 
     file_path = _resolve_input_path(Path(file_path))
 

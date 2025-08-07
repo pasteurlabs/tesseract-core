@@ -5,11 +5,11 @@ import json
 
 from pydantic import BaseModel
 
-from tesseract_core.runtime.experimental import IS_BUILDING, require_file
+from tesseract_core.runtime.experimental import SKIP_REQUIRED_FILE_CHECK, require_file
 
 # required files must be relative to --input-path
 param_filepath = require_file("parameters1.json")
-if not IS_BUILDING:
+if not SKIP_REQUIRED_FILE_CHECK:
     with open(param_filepath, "rb") as f:
         data = json.load(f)
 else:

@@ -730,7 +730,7 @@ TEST_CASES = {
             )
         ],
     ),
-    "required_input_files": Config(
+    "required_files": Config(
         test_with_random_inputs=False,
         sample_requests=[
             SampleRequest(
@@ -873,7 +873,30 @@ def test_unit_tesseract_endtoend(
     assert image_exists(docker_client, img_name)
     docker_cleanup["images"].append(img_name)
 
+    # Stage 2: Test CLI usage
+    result = cli_runner.invoke(
+        app,
+        ["run", img_name, "openapi-schema"],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0, result.output
+    openapi_schema = json.loads(result.output)
+
+    def _input_schema_from_openapi(openapi_schema):
+        input_schema = openapi_schema["components"]["schemas"]["ApplyInputSchema"]
+        # For some reason, jsf can't handle #/components/schemas/<x> references,
+        # so we convert them to #$defs/<x>
+        input_schema.update({"$defs": openapi_schema["components"]["schemas"]})
+        input_schema["$defs"].pop("ApplyInputSchema", None)
+        input_schema = json.loads(
+            json.dumps(input_schema).replace("components/schemas", "$defs")
+        )
+        return input_schema
+
+    input_schema = _input_schema_from_openapi(openapi_schema)
+
     mount_args, io_args = [], []
+
     if unit_tesseract_config.volume_mounts:
         for mnt in unit_tesseract_config.volume_mounts:
             # Assume that the mount is relative to the Tesseract path
@@ -898,28 +921,6 @@ def test_unit_tesseract_endtoend(
                 str(unit_tesseract_path / unit_tesseract_config.output_path),
             ]
         )
-
-    # Stage 2: Test CLI usage
-    result = cli_runner.invoke(
-        app,
-        ["run", img_name, "openapi-schema"],
-        catch_exceptions=False,
-    )
-    assert result.exit_code == 0, result.output
-    openapi_schema = json.loads(result.output)
-
-    def _input_schema_from_openapi(openapi_schema):
-        input_schema = openapi_schema["components"]["schemas"]["ApplyInputSchema"]
-        # For some reason, jsf can't handle #/components/schemas/<x> references,
-        # so we convert them to #$defs/<x>
-        input_schema.update({"$defs": openapi_schema["components"]["schemas"]})
-        input_schema["$defs"].pop("ApplyInputSchema", None)
-        input_schema = json.loads(
-            json.dumps(input_schema).replace("components/schemas", "$defs")
-        )
-        return input_schema
-
-    input_schema = _input_schema_from_openapi(openapi_schema)
 
     if unit_tesseract_config.test_with_random_inputs:
         random_input = example_from_json_schema(input_schema)
