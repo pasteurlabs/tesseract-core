@@ -20,6 +20,7 @@ from typer.testing import CliRunner
 
 from tesseract_core.sdk.cli import AVAILABLE_RECIPES, app
 from tesseract_core.sdk.config import get_config
+from tesseract_core.sdk.docker_client import _get_docker_executable
 
 
 @pytest.fixture(scope="module")
@@ -625,9 +626,11 @@ def test_tesseract_serve_interop(
 ):
     cli_runner = CliRunner(mix_stderr=False)
 
+    docker = _get_docker_executable()
+
     # Network create using subprocess
     subprocess.run(
-        ["docker", "network", "create", dummy_network_name],
+        [*docker, "network", "create", dummy_network_name],
         check=True,
     )
     docker_cleanup["networks"].append(dummy_network_name)
