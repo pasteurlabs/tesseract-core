@@ -1,10 +1,14 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import base64
 import json
 import traceback
+from pathlib import Path
+from uuid import uuid4
 
 import docker.errors
+import numpy as np
 from typer.testing import CliRunner
 
 from tesseract_core.sdk.cli import app
@@ -91,3 +95,37 @@ def build_tesseract(
     # This raise an error if the image does not exist
     client.images.get(image_tag)
     return image_tag
+
+
+def encode_array(arr, as_json=False, encoding="base64", basedir=None):
+    """Helper function to encode a numpy array into Tesseract-friendly format."""
+    arr = np.asarray(arr)
+
+    if encoding == "json":
+        buffer = arr.tolist()
+    elif encoding == "base64":
+        buffer = base64.b64encode(arr.tobytes()).decode()
+    elif encoding == "binref":
+        filename = f"{uuid4()}.bin"
+        if basedir is None:
+            raise ValueError("basedir must be provided for binref encoding")
+        filepath = Path(basedir) / filename
+        with open(filepath, "wb") as f:
+            f.write(arr.tobytes())
+        buffer = str(filename)
+    else:
+        raise ValueError(f"Unsupported encoding: {encoding}")
+
+    out = {
+        "object_type": "array",
+        "shape": arr.shape,
+        "dtype": arr.dtype.name,
+        "data": {
+            "buffer": buffer,
+            "encoding": encoding,
+        },
+    }
+    if as_json:
+        return json.dumps(out, separators=(",", ":"))
+
+    return out
