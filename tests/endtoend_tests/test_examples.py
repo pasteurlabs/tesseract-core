@@ -19,31 +19,13 @@ import numpy as np
 import numpy.typing as npt
 import pytest
 import requests
-from common import build_tesseract, image_exists
+from common import build_tesseract, encode_array, image_exists
 from typer.testing import CliRunner
 
 
 def json_normalize(obj: str):
     """Normalize JSON str for comparison."""
     return json.dumps(json.loads(obj), separators=(",", ":"))
-
-
-def encode_array(arr, as_json=False):
-    """Helper function to encode a numpy array into Tesseract-friendly format."""
-    arr = np.asarray(arr)
-    out = {
-        "object_type": "array",
-        "shape": arr.shape,
-        "dtype": arr.dtype.name,
-        "data": {
-            "buffer": base64.b64encode(arr.tobytes()).decode(),
-            "encoding": "base64",
-        },
-    }
-    if as_json:
-        return json.dumps(out, separators=(",", ":"))
-
-    return out
 
 
 def assert_contains_array_allclose(

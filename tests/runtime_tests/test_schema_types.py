@@ -163,11 +163,10 @@ def test_json_binref_roundtrip(tmpdir):
     for field in model.model_fields:
         assert np.array_equal(getattr(roundtrip, field), getattr(model, field))
 
-    with pytest.raises(ValidationError, match="relative path but no base_dir"):
+    # when we don't supply a base_dir, we default to the current working directory
+    # which is not where the files are, so we expect an error
+    with pytest.raises(ValidationError, match="No such file or directory"):
         model.model_validate_json(serialized)
-
-    with pytest.raises(ValueError, match="base_dir"):
-        model.model_dump_json(context={"array_encoding": "binref"})
 
 
 def test_python_dump_array_encoding():
