@@ -712,6 +712,17 @@ TEST_CASES = {
             )
         ],
     ),
+    "required_files": Config(
+        test_with_random_inputs=False,
+        sample_requests=[
+            SampleRequest(
+                endpoint="apply",
+                payload={"inputs": {}},
+                output_contains_pattern=[r'{"a":1.0,"b":100.0}'],
+            ),
+        ],
+        input_path="input",
+    ),
     "filereference": Config(
         test_with_random_inputs=False,
         sample_requests=[

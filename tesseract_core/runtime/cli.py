@@ -6,6 +6,7 @@
 import inspect
 import io
 import json
+import os
 import sys
 from collections.abc import Callable, Iterable
 from enum import Enum
@@ -24,6 +25,7 @@ import click
 import typer
 from pydantic import ValidationError
 
+import tesseract_core.runtime.experimental
 from tesseract_core.runtime.config import RuntimeConfig, get_config, update_config
 from tesseract_core.runtime.core import (
     check_tesseract_api,
@@ -474,6 +476,31 @@ def _add_user_commands_to_cli(
         _create_user_defined_cli_command(app, func, out_stream)
 
 
+def _configure_required_file_load() -> None:
+    """Sets attributes needed for tesseract_core.runtime.experimental:require_file() when tesseract_api.py is loaded."""
+    skip_required_file_load_args = [
+        "-h",
+        "--help",
+        "--version",
+        "-v",
+        "openapi-schema",
+    ]
+    if "--input-path" in sys.argv:
+        # Make sure input_path is available when loading tesseract_api.py for the first time
+        # (needed to resolve required files)
+        input_path_index = sys.argv.index("--input-path")
+        if len(sys.argv) <= input_path_index + 1:
+            raise ValueError("No input path provided after --input-path argument.")
+        input_path = Path(sys.argv[input_path_index + 1])
+        update_config(input_path=input_path.as_posix())
+    if (
+        any(arg in sys.argv for arg in skip_required_file_load_args)
+        or os.environ.get("_TESSERACT_IS_BUILDING", "0") == "1"
+    ):
+        # Skip loading if unnecessary (based on above arguments) or during build time
+        tesseract_core.runtime.experimental.SKIP_REQUIRED_FILE_CHECK = True
+
+
 def main() -> None:
     """Entrypoint for the command line interface."""
     # Redirect stdout to stderr to avoid mixing any output with the JSON response.
@@ -493,6 +520,8 @@ def main() -> None:
                 file=sys.stderr,
             )
             sys.exit(1)
+
+        _configure_required_file_load()
 
         _add_user_commands_to_cli(app, out_stream=orig_stdout)
         app(auto_envvar_prefix="TESSERACT_RUNTIME")
