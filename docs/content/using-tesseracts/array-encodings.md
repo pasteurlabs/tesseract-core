@@ -41,7 +41,7 @@ encodings in Tesseracts.
 :::{tab-item} CLI
 :sync: cli
 ```bash
-$ tesseract run vectoradd apply -f "json+binref" -o /tmp/output @example_inputs.json
+$ tesseract run vectoradd apply -f "json+binref" -o /tmp/output @examples/vectoradd/example_inputs.json
 
 $ ls /tmp/output
 7796fb36-849a-42ce-8288-a07426111f0c.bin results.json
@@ -52,9 +52,17 @@ $ cat /tmp/output/results.json
 :::
 :::{tab-item} REST API
 :sync: http
+
+To access the `.bin` files that are written when using the `json+binref` format, make sure
+to specify `--output-path` when serving your Tesseract. Otherwise the `.bin` files will only be accessible *inside* the Tesseract (under `/tesseract/output_path`).
 ```bash
-Tesseracts can read json+binref encoded payloads, but outputting json+binref via
-REST API is not supported.
+$ tesseract serve <tesseract-name> --output-path /tmp/output
+$ curl \
+  -H "Accept: application/json+binref" \
+  -H "Content-Type: application/json" \
+  -d @examples/vectoradd/example_inputs.json \
+  http://<tesseract-address>:<port>/apply
 ```
+The references to `.bin` files are relative to the `--output-path` you specified when serving the Tesseract.
 :::
 ::::
