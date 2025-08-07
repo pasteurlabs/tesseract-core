@@ -19,7 +19,7 @@ from typer.testing import CliRunner
 
 from tesseract_core.runtime.cli import _add_user_commands_to_cli
 from tesseract_core.runtime.cli import app as cli_cmd
-from tesseract_core.runtime.file_interactions import load_bytes, output_to_bytes
+from tesseract_core.runtime.file_interactions import output_to_bytes
 
 test_input = {
     "a": [1.0, 2.0, 3.0],
@@ -224,11 +224,11 @@ def test_apply_command_binref(cli, cli_runner, dummy_tesseract_module, tmpdir):
         cli,
         ["apply", json.dumps({"inputs": test_input_binref})],
         catch_exceptions=False,
-        env={"TERM": "true", "COLUMNS": "9999"},
+        env={"TERM": "dumb", "COLUMNS": "1000"},
     )
     assert result.exit_code == 2
     assert "Value error" in result.stderr
-    assert "binref encoded with a relative path" in result.stderr
+    assert "Failed to decode buffer as binref" in result.stderr
 
 
 def test_apply_command_noenv(cli, cli_runner, dummy_tesseract_module, monkeypatch):
@@ -255,10 +255,7 @@ def test_input_vals_from_local_file(
     cli, cli_runner, tmpdir, dummy_tesseract_module, input_format
 ):
     """Test the apply command with input arguments from a local file."""
-    if "+" in input_format:
-        container = input_format.split("+")[0]
-    else:
-        container = input_format
+    container = input_format.split("+")[-1]
 
     a_file = tmpdir / f"a.{container}"
     inputs = {"inputs": dummy_tesseract_module.InputSchema(**test_input)}
@@ -273,7 +270,7 @@ def test_input_vals_from_local_file(
 
     result = cli_runner.invoke(
         cli,
-        ["apply", f"@{a_file}"],
+        ["--input-path", tmpdir, "apply", f"@{a_file}"],
         catch_exceptions=False,
     )
     assert result.exit_code == 0, result.stderr
@@ -309,6 +306,8 @@ def test_outputs_to_local_file(
     assert result.exit_code == 0, result.stderr
 
     test_input_val = dummy_tesseract_module.InputSchema.model_validate(test_input)
+
+    load_bytes = lambda x, fmt: json.loads(x.decode("utf-8"))
 
     expected = dummy_tesseract_module.apply(test_input_val)
     expected = output_to_bytes(expected, output_format, base_dir=tmpdir)

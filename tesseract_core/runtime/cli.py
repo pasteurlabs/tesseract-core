@@ -5,6 +5,7 @@
 
 import inspect
 import io
+import json
 import sys
 from collections.abc import Callable, Iterable
 from enum import Enum
@@ -31,8 +32,6 @@ from tesseract_core.runtime.core import (
     redirect_fd,
 )
 from tesseract_core.runtime.file_interactions import (
-    guess_format_from_path,
-    load_bytes,
     output_to_bytes,
     read_from_path,
     write_to_path,
@@ -40,6 +39,7 @@ from tesseract_core.runtime.file_interactions import (
 from tesseract_core.runtime.finite_differences import (
     check_gradients as check_gradients_,
 )
+from tesseract_core.runtime.mpa import start_run
 from tesseract_core.runtime.serve import create_rest_api
 from tesseract_core.runtime.serve import serve as serve_
 
@@ -99,37 +99,19 @@ def _prettify_docstring(docstr: str) -> str:
     return "\n".join([docstring_lines[0].lstrip(), dedented_lines])
 
 
-def _parse_payload(value: Any) -> tuple[dict[str, Any], Optional[Path]]:
-    """Click callback to parse Tesseract input arguments provided in the CLI.
-
-    Returns a tuple of the parsed value and the base directory of the input path, if any.
-    """
-    base_dir = None
-
+def _parse_payload(value: Any) -> dict[str, Any]:
+    """Callback to parse Tesseract input arguments provided in the CLI."""
     if not isinstance(value, str):
         # Passthrough, probably a default value
-        return value, base_dir
+        return value
 
     if value.startswith("@"):
-        base_dir = Path(value[1:]).parent
-        value_format = guess_format_from_path(value[1:])
         try:
-            value_bytes = read_from_path(value[1:])
+            value = read_from_path(value[1:]).decode("utf-8")
         except Exception as e:
             raise click.BadParameter(f"Could not read data from path {value}.") from e
-    else:
-        # Data given directly via the CLI is always in JSON format
-        value_format = "json"
-        value_bytes = value.encode()
 
-    try:
-        decoded_value = load_bytes(value_bytes, value_format)
-    except Exception as e:
-        raise click.BadParameter(
-            f"Could not decode data using format {value_format}"
-        ) from e
-
-    return decoded_value, base_dir
+    return json.loads(value)
 
 
 def make_callback() -> Callable:
@@ -324,13 +306,14 @@ def check_gradients(
     are reported incorrectly as 0.0, it is likely that the chosen `eps` is too small, especially for
     inputs that do not use float64 precision.
     """  # noqa: D301
+    config = get_config()
     api_module = get_tesseract_api()
-    inputs, base_dir = _parse_payload(payload)
+    inputs = _parse_payload(payload)
 
     result_iter = check_gradients_(
         api_module,
         inputs,
-        base_dir=base_dir,
+        base_dir=Path(config.input_path) if config.input_path else None,
         input_paths=input_paths,
         output_paths=output_paths,
         endpoints=endpoints,
@@ -400,34 +383,34 @@ def _create_user_defined_cli_command(
 
     def _callback_wrapper(**kwargs: Any):
         config = get_config()
+        input_path = config.input_path
         output_path = config.output_path
         output_format = config.output_format
         output_file = config.output_file
-
-        if output_format == "json+binref" and output_path is None:
-            raise ValueError("--output-path must be specified for json+binref format")
 
         out_stream_ = out_stream or sys.stdout
 
         user_function_args = {}
 
         if InputSchema is not None:
-            payload, base_dir = kwargs["payload"]
+            payload = kwargs["payload"]
             try:
                 user_function_args["payload"] = InputSchema.model_validate(
-                    payload, context={"base_dir": base_dir}
+                    payload,
+                    context={"base_dir": input_path},
                 )
             except ValidationError as e:
                 raise click.BadParameter(
                     str(e),
-                    param=InputSchema,
-                    param_hint=InputSchema.__name__,
+                    param_hint="payload",
                 ) from e
 
         if output_path:
             Path(output_path).mkdir(parents=True, exist_ok=True)
 
-        result = user_function(**user_function_args)
+        with start_run(base_dir=output_path):
+            result = user_function(**user_function_args)
+
         result = output_to_bytes(result, output_format, output_path)
 
         # write raw bytes to out_stream.buffer to support binary data (which may e.g. be piped)

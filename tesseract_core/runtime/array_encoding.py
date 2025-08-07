@@ -205,6 +205,7 @@ def get_array_model(
 def _dump_binref_arraydict(
     arr: Union[np.ndarray, np.number, np.bool_],
     base_dir: Union[Path, str],
+    subdir: Optional[Union[Path, str]],
     current_binref_uuid: str,
     max_file_size: int = MAX_BINREF_BUFFER_SIZE,
 ) -> tuple[dict[str, Union[str, dict[str, str]]], str]:
@@ -213,6 +214,8 @@ def _dump_binref_arraydict(
     Writes a .bin file and returns json encoded data.
     """
     target_name = f"{current_binref_uuid}.bin"
+    if subdir is not None:
+        target_name = join_paths(subdir, target_name)
     target_path = join_paths(base_dir, target_name)
 
     current_size = get_filesize(target_path)
@@ -222,6 +225,8 @@ def _dump_binref_arraydict(
         current_size = 0
         current_binref_uuid = str(uuid4())
         target_name = f"{current_binref_uuid}.bin"
+        if subdir is not None:
+            target_name = join_paths(subdir, target_name)
         target_path = join_paths(base_dir, target_name)
 
     write_to_path(arr.tobytes(), target_path, append=True)
@@ -280,6 +285,11 @@ def _load_base64_arraydict(val: dict) -> np.ndarray:
 def _load_binref_arraydict(val: dict, base_dir: Union[str, Path, None]) -> np.ndarray:
     """Load array from json+binref encoded array dict."""
     path_match = re.match(r"^(?P<path>.+?)(\:(?P<offset>\d+))?$", val["data"]["buffer"])
+    if not path_match:
+        raise ValueError(
+            f"Invalid binref path format: {val['data']['buffer']}. "
+            "Expected format is '<path>[:<offset>]'."
+        )
     bufferpath = path_match.group("path")
     if path_match.group("offset") is None:
         offset = 0
@@ -290,7 +300,7 @@ def _load_binref_arraydict(val: dict, base_dir: Union[str, Path, None]) -> np.nd
     if uses_relative_path and base_dir is None:
         raise ValueError(
             "Array data is binref encoded with a relative path but no base_dir is provided. "
-            "Invoke the Tesseract via file aliasing or make sure that paths are absolute."
+            "Invoke the Tesseract with an input / output path set, or make sure that paths are absolute."
         )
 
     dtype = np.dtype(val["dtype"])
@@ -373,6 +383,8 @@ def decode_array(
     expected_dtype: Optional[str],
 ) -> ArrayLike:
     """Decode an EncodedArrayModel to a NumPy array."""
+    from tesseract_core.runtime.config import get_config
+
     context = info.context if info.context else {}
 
     try:
@@ -380,7 +392,11 @@ def decode_array(
             data = _load_base64_arraydict(val.model_dump())
 
         elif val.data.encoding == "binref":
-            data = _load_binref_arraydict(val.model_dump(), context.get("base_dir"))
+            base_dir = context.get("base_dir", get_config().input_path)
+            subdir = context.get("binref_dir", None)
+            if subdir is not None:
+                base_dir = join_paths(base_dir, subdir)
+            data = _load_binref_arraydict(val.model_dump(), base_dir)
 
         # keep checking for "raw" for backwards compat
         elif val.data.encoding in {"json", "raw"}:
@@ -409,6 +425,8 @@ def encode_array(
     arr: ArrayLike, info: Any, expected_shape: ShapeType, expected_dtype: Optional[str]
 ) -> Union[EncodedArrayModel, ArrayLike]:
     """Encode a NumPy array as an EncodedArrayModel."""
+    from tesseract_core.runtime.config import get_config
+
     # Convert to a NumPy array if necessary
     arr = python_to_array(arr, expected_shape, expected_dtype)
 
@@ -422,15 +440,12 @@ def encode_array(
     if array_encoding == "base64":
         data = _dump_base64_arraydict(arr)
     elif array_encoding == "binref":
-        if not context.get("base_dir"):
-            raise ValueError(
-                "To write data with binref encoding you have to provide a 'base_dir' to "
-                "store array data like so: "
-                "`context={'array_encoding':'binref', 'base_dir': 'path/to/arraydata'}"
-            )
+        base_dir = context.get("base_dir", get_config().output_path)
+        subdir = context.get("binref_dir", None)
         data, new_binref_uuid = _dump_binref_arraydict(
             arr,
-            base_dir=context.get("base_dir"),
+            base_dir=base_dir,
+            subdir=subdir,
             current_binref_uuid=context.get("__binref_uuid", str(uuid4())),
             max_file_size=context.get("max_file_size", MAX_BINREF_BUFFER_SIZE),
         )
