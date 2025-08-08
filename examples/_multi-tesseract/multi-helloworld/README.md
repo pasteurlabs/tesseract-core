@@ -22,7 +22,7 @@ $ docker network create my_network
 This example can be executed using the Tesseract Python API or CLI. To run the example using the Python API, simply execute the Python script:
 
 ```bash
-$ cd ./examples/_multi-tesseract/multi_helloworld/
+$ cd ./examples/_multi-tesseract/multi-helloworld/
 $ python run_example.py
 ```
 

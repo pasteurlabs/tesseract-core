@@ -1123,12 +1123,14 @@ def test_multi_helloworld_endtoend(
     )
     assert result.exit_code == 0, result.output
     docker_cleanup["containers"].append(json.loads(result.output)["container_name"])
-
+    api_port = json.loads(result.output)["containers"][0]["networks"][
+        dummy_network_name
+    ]["port"]
     payload = json.dumps(
         {
             "inputs": {
                 "name": "you",
-                "helloworld_tesseract_url": "http://helloworld:8000",
+                "helloworld_tesseract_url": f"http://helloworld:{api_port}",
             }
         }
     )
