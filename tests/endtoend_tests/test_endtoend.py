@@ -665,7 +665,7 @@ def test_tesseract_serve_interop(
         [
             "python",
             "-c",
-            'import requests; requests.get("http://tess_2:8000/health").raise_for_status()',
+            f'import requests; requests.get("http://tess_2:{tess_2.api_port}/health").raise_for_status()',
         ]
     )
     assert returncode == 0, stdout.decode()
@@ -674,7 +674,7 @@ def test_tesseract_serve_interop(
         [
             "python",
             "-c",
-            'import requests; requests.get("http://tess_1:8000/health").raise_for_status()',
+            f'import requests; requests.get("http://tess_1:{tess_1.api_port}/health").raise_for_status()',
         ]
     )
     assert returncode == 0, stdout.decode()
@@ -1079,12 +1079,12 @@ def test_multi_helloworld_endtoend(
     dummy_network_name,
     docker_cleanup,
 ):
-    """Test that multi_helloworld example can be built, served, and executed."""
+    """Test that multi-helloworld example can be built, served, and executed."""
     cli_runner = CliRunner(mix_stderr=False)
 
     # Build Tesseract images
     img_names = []
-    for tess_name in ("_multi-tesseract/multi_helloworld", "helloworld"):
+    for tess_name in ("_multi-tesseract/multi-helloworld", "helloworld"):
         img_name = build_tesseract(
             docker_client,
             unit_tesseracts_parent_dir / tess_name,
@@ -1123,17 +1123,19 @@ def test_multi_helloworld_endtoend(
     )
     assert result.exit_code == 0, result.output
     docker_cleanup["containers"].append(json.loads(result.output)["container_name"])
-
+    api_port = json.loads(result.output)["containers"][0]["networks"][
+        dummy_network_name
+    ]["port"]
     payload = json.dumps(
         {
             "inputs": {
                 "name": "you",
-                "helloworld_tesseract_url": "http://helloworld:8000",
+                "helloworld_tesseract_url": f"http://helloworld:{api_port}",
             }
         }
     )
 
-    # Run multi_helloworld Tesseract
+    # Run multi-helloworld Tesseract
     result = cli_runner.invoke(
         app,
         [
