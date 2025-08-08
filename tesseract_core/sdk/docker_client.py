@@ -339,7 +339,7 @@ class Container:
         return self.attrs["Config"]["Cmd"][2]
 
     @property
-    def docker_network_ips(self) -> str | None:
+    def docker_network_ips(self) -> dict | None:
         """Gets the host port of the container."""
         if self.attrs.get("NetworkSettings", None):
             networks = self.attrs["NetworkSettings"].get("Networks", None)
