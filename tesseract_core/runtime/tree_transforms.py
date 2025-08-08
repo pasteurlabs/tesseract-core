@@ -34,6 +34,10 @@ def get_at_path(tree: Any, path: str) -> Any:
     - `b.[0]` is the first element of the list `b`
     - `c.{key}` is the value of the key `key` in the dictionary `c`
     """
+    # Empty path means "the root of the tree"
+    if not path:
+        return tree
+        
     split_path = path.split(".")
 
     def _get_recursive(tree: Any, path: list[str]) -> Any:
