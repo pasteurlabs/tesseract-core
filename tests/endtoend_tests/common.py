@@ -7,6 +7,7 @@ import traceback
 from pathlib import Path
 from uuid import uuid4
 
+import docker.errors
 import numpy as np
 from typer.testing import CliRunner
 
@@ -28,7 +29,7 @@ def image_exists(client, image_name, tesseract_only: bool = True):
     try:
         client.images.get(image_name, **kwargs)
         return True
-    except ImageNotFound:
+    except (ImageNotFound, docker.errors.ImageNotFound):
         return False
 
 
