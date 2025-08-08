@@ -20,6 +20,7 @@ from typer.testing import CliRunner
 
 from tesseract_core.sdk.cli import AVAILABLE_RECIPES, app
 from tesseract_core.sdk.config import get_config
+from tesseract_core.sdk.docker_client import _get_docker_executable
 
 
 @pytest.fixture(scope="module")
@@ -128,9 +129,9 @@ def test_build_generate_only(dummy_tesseract_location, skip_checks):
     with open(build_dir / "Dockerfile") as f:
         docker_file_contents = f.read()
         if skip_checks:
-            assert 'RUN ["tesseract-runtime", "check"]' not in docker_file_contents
+            assert "tesseract-runtime check" not in docker_file_contents
         else:
-            assert 'RUN ["tesseract-runtime", "check"]' in docker_file_contents
+            assert "tesseract-runtime check" in docker_file_contents
 
 
 def test_env_passthrough_serve(docker_cleanup, docker_client, built_image_name):
@@ -540,11 +541,11 @@ def test_io_path_interactions(
                 "tesseract",
                 "serve",
                 built_image_name,
-                "--input-path",
+                "-i",
                 str(input_dir),
-                "--output-path",
+                "-o",
                 str(output_dir),
-                "--output-format",
+                "-f",
                 array_format,
             ],
             capture_output=True,
@@ -571,11 +572,11 @@ def test_io_path_interactions(
                 "run",
                 built_image_name,
                 "apply",
-                "--input-path",
+                "-i",
                 str(input_dir),
-                "--output-path",
+                "-o",
                 str(output_dir),
-                "--output-format",
+                "-f",
                 array_format,
                 json.dumps(example_inputs),
             ],
@@ -625,9 +626,11 @@ def test_tesseract_serve_interop(
 ):
     cli_runner = CliRunner(mix_stderr=False)
 
+    docker = _get_docker_executable()
+
     # Network create using subprocess
     subprocess.run(
-        ["docker", "network", "create", dummy_network_name],
+        [*docker, "network", "create", dummy_network_name],
         check=True,
     )
     docker_cleanup["networks"].append(dummy_network_name)
@@ -1016,7 +1019,7 @@ def test_mpa_mlflow_backend(mpa_test_image, tmpdir):
         "tesseract",
         "run",
         "--env",
-        "TESSERACT_MLFLOW_TRACKING_URI=/tesseract/output_data/mlruns",
+        "TESSERACT_MLFLOW_TRACKING_URI=mlruns",
         mpa_test_image,
         "apply",
         '{"inputs": {}}',
