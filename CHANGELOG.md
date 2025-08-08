@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [1.0.0] - 2025-08-07
+## [1.0.0] - 2025-08-08
 
 ### Features
 
@@ -19,6 +19,7 @@ All notable changes to this project will be documented in this file.
 - [**breaking**] Drop msgpack support (#303)
 - Introduce job ID to control the location of output logs / artifacts (#314)
 - Also print text logs to stderr (#311)
+- Add experimental `require_file` function to mark externally mounted files as required at runtime  (#261)
 
 ### Bug Fixes
 
@@ -30,6 +31,9 @@ All notable changes to this project will be documented in this file.
 - Make `tesseract serve --output-format` behave as expected (#307)
 - Test that LogPipe implementations do not diverge (#316)
 - Use `--input-path`/`--output-path` as `base_dir` in `json+binref` encoder (#304)
+- Bring back CLI option shorthands (#323)
+- Ensure .dockerignore is observed to avoid copying large amounts of data to build contexts (#218) (#321)
+- Change location of mlruns when TESSERACT_MLFLOW_TRACKING_URI is a relative path (#325)
 
 ### Refactor
 
@@ -37,6 +41,12 @@ All notable changes to this project will be documented in this file.
 - Overhaul all clis (#301)
 - [**breaking**] Remove input-schema and output-schema endpoints (#308)
 - Transpose folder structure (#318)
+
+### Documentation
+
+- Add link to pre-commit library (#327)
+- Document how to use Tesseract via SLURM on HPC clusters (#320)
+- Add Documentation for podman usage via TESSERACT_DOCKER_EXECUTABLE (#324)
 
 ## [0.10.2] - 2025-07-21
 
