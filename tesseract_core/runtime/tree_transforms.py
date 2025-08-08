@@ -11,7 +11,11 @@ from pydantic import BaseModel
 
 def path_to_index_op(
     path: str,
-) -> tuple[Literal["seq", "dict", "getattr"], Union[int, str]]:
+) -> Union[
+    tuple[Literal["seq"], int],
+    tuple[Literal["dict"], str],
+    tuple[Literal["getattr"], str],
+]:
     """Converts a path string to a tuple of operation and index."""
     seq_idx_re = re.match(r"^\[(\d+)\]$", path)
     if seq_idx_re:
