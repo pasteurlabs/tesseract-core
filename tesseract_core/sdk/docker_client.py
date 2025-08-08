@@ -328,9 +328,26 @@ class Container:
         if self.attrs.get("NetworkSettings", None):
             ports = self.attrs["NetworkSettings"].get("Ports", None)
             if ports:
-                api_port_key = "8000/tcp"
+                api_port_key = f"{self.api_port}/tcp"
                 if ports[api_port_key]:
                     return ports[api_port_key][0].get("HostPort")
+        return None
+
+    @property
+    def api_port(self) -> str | None:
+        """Gets the api port of the container."""
+        return self.attrs["Config"]["Cmd"][2]
+
+    @property
+    def docker_network_ips(self) -> str | None:
+        """Gets the host port of the container."""
+        if self.attrs.get("NetworkSettings", None):
+            networks = self.attrs["NetworkSettings"].get("Networks", None)
+            if networks:
+                network_ips = {}
+                for network_name, network_info in networks.items():
+                    network_ips[network_name] = f"{network_info['IPAddress']}"
+                return network_ips
         return None
 
     @property
@@ -350,7 +367,7 @@ class Container:
         if self.attrs.get("NetworkSettings", None):
             ports = self.attrs["NetworkSettings"].get("Ports", None)
             if ports:
-                api_port_key = "8000/tcp"
+                api_port_key = f"{self.api_port}/tcp"
                 if ports[api_port_key]:
                     return ports[api_port_key][0].get("HostIp")
         return None
