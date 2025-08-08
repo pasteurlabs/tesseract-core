@@ -5,6 +5,7 @@ import pytest
 from pydantic import BaseModel
 
 from tesseract_core.runtime.tree_transforms import (
+    flatten_with_paths,
     get_at_path,
     path_to_index_op,
     set_at_path,
@@ -368,3 +369,151 @@ class TestSetAtPath:
         assert result["mixed_list"] == original_mixed_list
         assert result["object"] is not original_object
         assert result["object"].attr == original_object.attr
+
+
+class TestFlattenWithPaths:
+    """Test cases for flatten_with_paths function."""
+
+    @pytest.mark.parametrize(
+        "include_paths,expected_keys",
+        [
+            # Single path
+            ({"root_key"}, {"root_key"}),
+            # Multiple simple paths
+            (
+                {"root_key", "numbers.[0]", "numbers.[1]"},
+                {"root_key", "numbers.[0]", "numbers.[1]"},
+            ),
+            # Mixed path types
+            (
+                {
+                    "root_key",
+                    "numbers.[0]",
+                    "nested_dict.{level1}.{level2}",
+                    "object.attr",
+                },
+                {
+                    "root_key",
+                    "numbers.[0]",
+                    "nested_dict.{level1}.{level2}",
+                    "object.attr",
+                },
+            ),
+            # Dictionary keys with special characters
+            (
+                {
+                    "dict_with_special_keys.{key with spaces}",
+                    "dict_with_special_keys.{123}",
+                },
+                {
+                    "dict_with_special_keys.{key with spaces}",
+                    "dict_with_special_keys.{123}",
+                },
+            ),
+            # Pydantic model access
+            (
+                {"pydantic_model.field1", "pydantic_model.field2.nested"},
+                {"pydantic_model.field1", "pydantic_model.field2.nested"},
+            ),
+            # Complex nested paths
+            (
+                {
+                    "mixed_list.[0].item",
+                    "mixed_list.[1].extra.[0]",
+                    "object.list_data.[2].inner",
+                },
+                {
+                    "mixed_list.[0].item",
+                    "mixed_list.[1].extra.[0]",
+                    "object.list_data.[2].inner",
+                },
+            ),
+            # All supported path syntax types
+            (
+                {
+                    "root_key",  # Simple dict key
+                    "numbers.[1]",  # List index
+                    "nested_dict.{level1}",  # Dict key with braces
+                    "nested_dict.level1.level2",  # Nested dict with fallback
+                    "object.attr",  # Object attribute
+                    "dict_with_special_keys.{key with spaces}",  # Special characters
+                    "pydantic_model.field1",  # Pydantic field
+                },
+                {
+                    "root_key",
+                    "numbers.[1]",
+                    "nested_dict.{level1}",
+                    "nested_dict.level1.level2",
+                    "object.attr",
+                    "dict_with_special_keys.{key with spaces}",
+                    "pydantic_model.field1",
+                },
+            ),
+        ],
+    )
+    def test_flatten_valid_paths(self, sample_tree, include_paths, expected_keys):
+        """Test flatten_with_paths with valid path sets."""
+        result = flatten_with_paths(sample_tree, include_paths)
+
+        # Should return a dictionary with exactly the expected keys
+        assert set(result.keys()) == expected_keys
+
+        # Each value should match what get_at_path returns
+        for path in include_paths:
+            assert result[path] == get_at_path(sample_tree, path)
+
+    def test_flatten_empty_paths(self, sample_tree):
+        """Test flatten_with_paths with empty path set."""
+        result = flatten_with_paths(sample_tree, set())
+        assert result == {}
+
+    def test_flatten_single_path(self, sample_tree):
+        """Test flatten_with_paths with a single path."""
+        include_paths = {"nested_dict.level1.level2"}
+        result = flatten_with_paths(sample_tree, include_paths)
+
+        assert len(result) == 1
+        assert result["nested_dict.level1.level2"] == "deep_value"
+
+    @pytest.mark.parametrize(
+        "invalid_paths,expected_error",
+        [
+            # Non-existent keys
+            ({"nonexistent"}, KeyError),
+            ({"nested_dict.nonexistent"}, KeyError),
+            # Invalid list indices
+            ({"numbers.[99]"}, IndexError),
+            ({"numbers.[-1]"}, ValueError),
+            # Invalid path syntax
+            ({"numbers.invalid_syntax"}, AttributeError),
+            # Object attributes that don't exist
+            ({"object.nonexistent_attr"}, AttributeError),
+        ],
+    )
+    def test_flatten_invalid_paths(self, sample_tree, invalid_paths, expected_error):
+        """Test flatten_with_paths with invalid paths raises appropriate errors."""
+        with pytest.raises(expected_error):
+            flatten_with_paths(sample_tree, invalid_paths)
+
+    def test_flatten_mixed_valid_invalid_paths(self, sample_tree):
+        """Test that flatten_with_paths fails if any path is invalid, even if others are valid."""
+        include_paths = {
+            "root_key",  # Valid
+            "numbers.[0]",  # Valid
+            "nonexistent",  # Invalid
+        }
+
+        with pytest.raises(KeyError):
+            flatten_with_paths(sample_tree, include_paths)
+
+    def test_flatten_duplicate_paths(self, sample_tree):
+        """Test flatten_with_paths behavior with duplicate paths in the set."""
+        # Sets naturally handle duplicates, but this tests the behavior explicitly
+        include_paths = {"root_key"}
+        include_paths_with_duplicate = {"root_key"}  # Set will deduplicate
+
+        result1 = flatten_with_paths(sample_tree, include_paths)
+        result2 = flatten_with_paths(sample_tree, include_paths_with_duplicate)
+
+        assert result1 == result2
+        assert len(result1) == 1
