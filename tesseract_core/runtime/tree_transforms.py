@@ -11,17 +11,17 @@ from pydantic import BaseModel
 
 def path_to_index_op(path: str) -> tuple[str, Union[int, str]]:
     """Converts a path string to a tuple of operation and index."""
-    seq_idx_re = re.match(r"\[(\d+)\]", path)
+    seq_idx_re = re.match(r"^\[(\d+)\]$", path)
     if seq_idx_re:
         return ("seq", int(seq_idx_re.group(1)))
 
-    dict_idx_re = re.match(r"\{(.+)\}", path)
+    dict_idx_re = re.match(r"^\{(.+)\}$", path)
     if dict_idx_re:
         return ("dict", dict_idx_re.group(1))
 
-    getattr_re = re.match(r"(\w+)", path)
-    if getattr_re:
-        return ("getattr", getattr_re.group(1))
+    # Use Python's built-in identifier validation for attribute names
+    if path.isidentifier():
+        return ("getattr", path)
 
     raise ValueError(f"Invalid path: {path}")
 
