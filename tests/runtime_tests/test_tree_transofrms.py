@@ -5,6 +5,7 @@ import pytest
 from pydantic import BaseModel
 
 from tesseract_core.runtime.tree_transforms import (
+    filter_func,
     flatten_with_paths,
     get_at_path,
     path_to_index_op,
@@ -428,7 +429,7 @@ class TestFlattenWithPaths:
                     "object.list_data.[2].inner",
                 },
             ),
-            # All supported path syntax types
+            # All supported path syntax types at once
             (
                 {
                     "root_key",  # Simple dict key
@@ -517,3 +518,74 @@ class TestFlattenWithPaths:
 
         assert result1 == result2
         assert len(result1) == 1
+
+
+class TestFilterFunc:
+    """Test cases for filter_func function."""
+
+    @pytest.fixture
+    def sample_func(self):
+        """A simple function that operates on the sample tree structure."""
+
+        def func(tree):
+            return {
+                "root_key": tree["root_key"].upper(),
+                "numbers": [x * 2 for x in tree["numbers"]],
+                "computed_sum": sum(tree["numbers"]),
+            }
+
+        return func
+
+    def test_filter_func_with_dict_input(self, sample_tree, sample_func):
+        """Test filter_func with dictionary input (no input_paths specified)."""
+        filtered_func = filter_func(sample_func, sample_tree)
+
+        # Call with dictionary input
+        result = filtered_func({"root_key": "hello"})
+
+        # Should return full output since no output_paths specified
+        assert result["root_key"] == "HELLO"
+        assert result["numbers"] == [20, 40, 60]  # original [10, 20, 30] * 2
+        assert result["computed_sum"] == 60
+
+    def test_filter_func_with_positional_args(self, sample_tree, sample_func):
+        """Test filter_func with positional arguments."""
+        input_paths = ["root_key", "numbers.[0]"]
+        filtered_func = filter_func(sample_func, sample_tree, input_paths=input_paths)
+
+        # Call with positional arguments
+        result = filtered_func("hello", 99)
+
+        # Should use "hello" for root_key and 99 for numbers.[0]
+        assert result["root_key"] == "HELLO"
+        assert result["numbers"] == [198, 40, 60]  # [99, 20, 30] * 2
+        assert result["computed_sum"] == 149
+
+    def test_filter_func_with_output_filtering(self, sample_tree, sample_func):
+        """Test filter_func with output path filtering."""
+        output_paths = {"root_key", "computed_sum"}
+        filtered_func = filter_func(sample_func, sample_tree, output_paths=output_paths)
+
+        result = filtered_func({"root_key": "world"})
+
+        # Should only return specified output paths
+        assert set(result.keys()) == {"root_key", "computed_sum"}
+        assert result["root_key"] == "WORLD"
+        assert result["computed_sum"] == 60
+
+    def test_filter_func_positional_args_mismatch(self, sample_tree, sample_func):
+        """Test that filter_func raises error when positional args don't match input_paths."""
+        input_paths = ["root_key", "numbers.[0]"]
+        filtered_func = filter_func(sample_func, sample_tree, input_paths=input_paths)
+
+        # Wrong number of arguments
+        with pytest.raises(AssertionError, match="Mismatch between number"):
+            filtered_func("hello")  # Missing second argument
+
+    def test_filter_func_dict_input_wrong_args(self, sample_tree, sample_func):
+        """Test that filter_func raises error with wrong number of dict arguments."""
+        filtered_func = filter_func(sample_func, sample_tree)
+
+        # Should expect exactly one dict argument
+        with pytest.raises(ValueError, match="Expected a single dictionary argument"):
+            filtered_func({"root_key": "hello"}, {"extra": "arg"})

@@ -4,12 +4,14 @@
 import re
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
-from typing import Any, Optional, Union
+from typing import Any, Literal, Optional, Union
 
 from pydantic import BaseModel
 
 
-def path_to_index_op(path: str) -> tuple[str, Union[int, str]]:
+def path_to_index_op(
+    path: str,
+) -> tuple[Literal["seq", "dict", "getattr"], Union[int, str]]:
     """Converts a path string to a tuple of operation and index."""
     seq_idx_re = re.match(r"^\[(\d+)\]$", path)
     if seq_idx_re:
@@ -126,7 +128,7 @@ def filter_func(
     func: Callable[[dict], dict],
     default_inputs: dict,
     output_paths: Optional[set[str]] = None,
-    input_paths: Optional[set[str]] = None,
+    input_paths: Optional[Sequence[str]] = None,
 ) -> Callable:
     """Modifies a function that operates on pytrees to operate on flat {path: value} or positional args instead.
 
