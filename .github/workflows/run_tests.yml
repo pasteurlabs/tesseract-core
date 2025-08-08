@@ -232,7 +232,7 @@ jobs:
 
       fail-fast: false
 
-    runs-on: ${{ matrix.arch == 'x64' && matrix.os == 'ubuntu-24.04' && 'ubuntu-24.04' || matrix.arch == 'arm' && matrix.os == 'ubuntu-24.04' && 'linux-arm64-ubuntu2404'}}
+    runs-on: ${{ matrix.arch == 'x64' && matrix.os == 'ubuntu-24.04' && 'ubuntu-24.04' || matrix.arch == 'arm' && matrix.os == 'ubuntu-24.04' && 'ubuntu-24.04-arm'}}
 
     env:
       TESSERACT_DOCKER_BUILD_ARGS: "--cache-from type=gha --cache-to type=gha,mode=max"
