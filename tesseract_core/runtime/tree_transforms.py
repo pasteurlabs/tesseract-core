@@ -37,7 +37,7 @@ def get_at_path(tree: Any, path: str) -> Any:
     # Empty path means "the root of the tree"
     if not path:
         return tree
-        
+
     split_path = path.split(".")
 
     def _get_recursive(tree: Any, path: list[str]) -> Any:
@@ -89,7 +89,7 @@ def set_at_path(tree: Any, values: dict[str, Any]) -> Any:
                     setattr(tree, key, value)
                     return
                 return _set_recursive(getattr(tree, key), path, value)
-            elif isinstance(tree, Mapping):
+            elif isinstance(tree, dict):
                 # If the key is not an attribute, try to access it as a key in a dictionary
                 # This is useful for accessing keys of models that have been dumped to dictionaries
                 if not path:
