@@ -1079,12 +1079,12 @@ def test_multi_helloworld_endtoend(
     dummy_network_name,
     docker_cleanup,
 ):
-    """Test that multi_helloworld example can be built, served, and executed."""
+    """Test that multi-helloworld example can be built, served, and executed."""
     cli_runner = CliRunner(mix_stderr=False)
 
     # Build Tesseract images
     img_names = []
-    for tess_name in ("_multi-tesseract/multi_helloworld", "helloworld"):
+    for tess_name in ("_multi-tesseract/multi-helloworld", "helloworld"):
         img_name = build_tesseract(
             docker_client,
             unit_tesseracts_parent_dir / tess_name,
@@ -1135,7 +1135,7 @@ def test_multi_helloworld_endtoend(
         }
     )
 
-    # Run multi_helloworld Tesseract
+    # Run multi-helloworld Tesseract
     result = cli_runner.invoke(
         app,
         [
