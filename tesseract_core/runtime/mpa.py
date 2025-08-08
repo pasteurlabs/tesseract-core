@@ -149,9 +149,9 @@ class MLflowBackend(BaseBackend):
             # If it's a file URI, convert to local path
             tracking_uri = tracking_uri.replace("file://", "")
 
-            # Relative paths are resolved against the log_dir
+            # Relative paths are resolved against the base output path
             if not Path(tracking_uri).is_absolute():
-                tracking_uri = (Path(self.log_dir) / tracking_uri).resolve()
+                tracking_uri = (Path(get_config().output_path) / tracking_uri).resolve()
 
         mlflow.set_tracking_uri(tracking_uri)
 

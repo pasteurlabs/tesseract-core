@@ -43,6 +43,9 @@ $ docker run vectoradd serve
 
 This provides fine-grained control over the Tesseract image, and allows you to use any container-aware tooling to manage and deploy them.
 
+```{tip}  As the `podman` API is fully compatible with `docker`, the above should still work if `docker` is replaced with `podman`.
+```
+
 ## Example: Deploying a Tesseract on [Azure Virtual Machines](https://azure.microsoft.com/en-us/products/virtual-machines)
 
 ```{note}
@@ -76,4 +79,15 @@ CLI:
 ```console
 $ az login
 $ az acr login --name <registry-name>
+```
+
+## Deploying without a container engine
+
+If your system does not have access to a compatible container engine, deployment is still possible using `tesseract-runtime serve`. This command has all the same functionality as `tesseract serve` and `docker run myimage serve` and can be queried in the same way (e.g. with `curl` or using the Python API via [`Tesseract.from_url`](#Tesseract.from_url)). This enables deployment without building an image, but does need to be run from a virtual Python environment consistent with `tesseract_requirements.txt` and `tesseract_config.yaml` as documented in [Tesseracts without containerization](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/creating-tesseracts/advanced.html#tesseracts-without-containerization). For a fully-worked example of how to use this on HPC clusters, see our dedicated [tutorial](https://si-tesseract.discourse.group/t/deploying-and-interacting-with-tesseracts-on-hpc-clusters-using-tesseract-runtime-serve/104).
+
+Example usage:
+
+```bash
+$ pip install -r tesseract_requirements.txt
+$ TESSERACT_API_PATH=/path/to/tesseract_api.py tesseract-runtime serve
 ```
