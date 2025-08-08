@@ -665,7 +665,7 @@ def test_tesseract_serve_interop(
         [
             "python",
             "-c",
-            'import requests; requests.get("http://tess_2:8000/health").raise_for_status()',
+            f'import requests; requests.get("http://tess_2:{tess_2.api_port}/health").raise_for_status()',
         ]
     )
     assert returncode == 0, stdout.decode()
@@ -674,7 +674,7 @@ def test_tesseract_serve_interop(
         [
             "python",
             "-c",
-            'import requests; requests.get("http://tess_1:8000/health").raise_for_status()',
+            f'import requests; requests.get("http://tess_1:{tess_1.api_port}/health").raise_for_status()',
         ]
     )
     assert returncode == 0, stdout.decode()
