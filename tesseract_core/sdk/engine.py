@@ -573,7 +573,7 @@ def serve(
             port = str(get_free_port(within_range=(int(port_start), int(port_end))))
 
     args = []
-    container_api_port = "8000" if not network or network != "host" else port
+    container_api_port = port
     container_debugpy_port = "5678"
 
     args.extend(["--port", container_api_port])
