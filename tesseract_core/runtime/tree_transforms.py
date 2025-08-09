@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import re
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from copy import deepcopy
 from typing import Any, Literal, Optional, Union
 
@@ -116,7 +116,7 @@ def set_at_path(tree: Any, values: dict[str, Any]) -> Any:
 
 def flatten_with_paths(
     tree: Union[Mapping, Sequence, BaseModel],
-    include_paths: set[str],
+    include_paths: Iterable[str],
 ) -> dict[str, Any]:
     """Filter and flatten a nested PyTree by extracting only the specified paths.
 
@@ -131,7 +131,7 @@ def flatten_with_paths(
 def filter_func(
     func: Callable[[dict], dict],
     default_inputs: dict,
-    output_paths: Optional[set[str]] = None,
+    output_paths: Optional[Iterable[str]] = None,
     input_paths: Optional[Sequence[str]] = None,
 ) -> Callable:
     """Modifies a function that operates on pytrees to operate on flat {path: value} or positional args instead.
