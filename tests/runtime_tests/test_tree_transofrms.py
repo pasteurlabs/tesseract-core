@@ -586,3 +586,23 @@ class TestFilterFunc:
         # Should expect exactly one dict argument
         with pytest.raises(ValueError, match="Expected a single dictionary argument"):
             filtered_func({"root_key": "hello"}, {"extra": "arg"})
+
+    @pytest.mark.parametrize(
+        "invalid_arg",
+        [
+            "not_a_dict",
+            ["not", "a", "dict"],
+            42,
+            None,
+            object(),
+        ],
+    )
+    def test_filter_func_dict_input_wrong_type(
+        self, sample_tree, sample_func, invalid_arg
+    ):
+        """Test that filter_func raises error when argument is not a dictionary."""
+        filtered_func = filter_func(sample_func, sample_tree)
+
+        # Should expect a dictionary argument
+        with pytest.raises(TypeError, match="Expected argument to be a dictionary"):
+            filtered_func(invalid_arg)

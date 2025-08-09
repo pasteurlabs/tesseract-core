@@ -162,6 +162,8 @@ def filter_func(
         else:
             if len(args) != 1:
                 raise ValueError("Expected a single dictionary argument")
+            if not isinstance(args[0], dict):
+                raise TypeError("Expected argument to be a dictionary")
             new_inputs = args[0]
 
         updated_inputs = set_at_path(default_inputs, new_inputs)
