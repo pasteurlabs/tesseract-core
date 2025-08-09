@@ -2,26 +2,32 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import re
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from copy import deepcopy
-from typing import Any, Optional, Union
+from typing import Any, Literal, Optional, Union
 
 from pydantic import BaseModel
 
 
-def path_to_index_op(path: str) -> tuple[str, Union[int, str]]:
+def path_to_index_op(
+    path: str,
+) -> Union[
+    tuple[Literal["seq"], int],
+    tuple[Literal["dict"], str],
+    tuple[Literal["getattr"], str],
+]:
     """Converts a path string to a tuple of operation and index."""
-    seq_idx_re = re.match(r"\[(\d+)\]", path)
+    seq_idx_re = re.match(r"^\[(\d+)\]$", path)
     if seq_idx_re:
         return ("seq", int(seq_idx_re.group(1)))
 
-    dict_idx_re = re.match(r"\{(.+)\}", path)
+    dict_idx_re = re.match(r"^\{(.+)\}$", path)
     if dict_idx_re:
         return ("dict", dict_idx_re.group(1))
 
-    getattr_re = re.match(r"(\w+)", path)
-    if getattr_re:
-        return ("getattr", getattr_re.group(1))
+    # Use Python's built-in identifier validation for attribute names
+    if path.isidentifier():
+        return ("getattr", path)
 
     raise ValueError(f"Invalid path: {path}")
 
@@ -34,6 +40,10 @@ def get_at_path(tree: Any, path: str) -> Any:
     - `b.[0]` is the first element of the list `b`
     - `c.{key}` is the value of the key `key` in the dictionary `c`
     """
+    # Empty path means "the root of the tree"
+    if not path:
+        return tree
+
     split_path = path.split(".")
 
     def _get_recursive(tree: Any, path: list[str]) -> Any:
@@ -85,7 +95,7 @@ def set_at_path(tree: Any, values: dict[str, Any]) -> Any:
                     setattr(tree, key, value)
                     return
                 return _set_recursive(getattr(tree, key), path, value)
-            elif isinstance(tree, Mapping):
+            elif isinstance(tree, dict):
                 # If the key is not an attribute, try to access it as a key in a dictionary
                 # This is useful for accessing keys of models that have been dumped to dictionaries
                 if not path:
@@ -106,7 +116,7 @@ def set_at_path(tree: Any, values: dict[str, Any]) -> Any:
 
 def flatten_with_paths(
     tree: Union[Mapping, Sequence, BaseModel],
-    include_paths: set[str],
+    include_paths: Iterable[str],
 ) -> dict[str, Any]:
     """Filter and flatten a nested PyTree by extracting only the specified paths.
 
@@ -121,8 +131,8 @@ def flatten_with_paths(
 def filter_func(
     func: Callable[[dict], dict],
     default_inputs: dict,
-    output_paths: Optional[set[str]] = None,
-    input_paths: Optional[set[str]] = None,
+    output_paths: Optional[Iterable[str]] = None,
+    input_paths: Optional[Sequence[str]] = None,
 ) -> Callable:
     """Modifies a function that operates on pytrees to operate on flat {path: value} or positional args instead.
 
@@ -152,6 +162,8 @@ def filter_func(
         else:
             if len(args) != 1:
                 raise ValueError("Expected a single dictionary argument")
+            if not isinstance(args[0], dict):
+                raise TypeError("Expected argument to be a dictionary")
             new_inputs = args[0]
 
         updated_inputs = set_at_path(default_inputs, new_inputs)
