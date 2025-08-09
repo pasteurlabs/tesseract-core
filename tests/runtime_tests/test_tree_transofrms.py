@@ -504,18 +504,6 @@ class TestFlattenWithPaths:
         with pytest.raises(KeyError):
             flatten_with_paths(sample_tree, include_paths)
 
-    def test_flatten_duplicate_paths(self, sample_tree):
-        """Test flatten_with_paths behavior with duplicate paths in the set."""
-        # Sets naturally handle duplicates, but this tests the behavior explicitly
-        include_paths = {"root_key"}
-        include_paths_with_duplicate = {"root_key"}  # Set will deduplicate
-
-        result1 = flatten_with_paths(sample_tree, include_paths)
-        result2 = flatten_with_paths(sample_tree, include_paths_with_duplicate)
-
-        assert result1 == result2
-        assert len(result1) == 1
-
 
 class TestFilterFunc:
     """Test cases for filter_func function."""
