@@ -704,7 +704,13 @@ def _parse_volumes(options: list[str]) -> dict[str, dict[str, str]]:
             source = str(Path(source).resolve())
         return source, {"bind": target, "mode": mode}
 
-    return dict(_parse_option(opt) for opt in options)
+    sources, opt_dicts = zip(*(_parse_option(opt) for opt in options))
+    if len(set(sources)) != len(sources):
+        raise ValueError(
+            "Duplicate source paths found in volume mounts, "
+            "please provide unique source paths."
+        )
+    return dict(zip(sources, opt_dicts))
 
 
 def run_tesseract(
@@ -768,6 +774,11 @@ def run_tesseract(
         environment["TESSERACT_INPUT_PATH"] = "/tesseract/input_data"
         if "://" not in str(input_path):
             local_path = _resolve_file_path(input_path)
+            if str(local_path) in parsed_volumes:
+                raise ValueError(
+                    f"Input path {local_path} is already mounted as a volume, "
+                    "please provide a unique path."
+                )
             parsed_volumes[str(local_path)] = {
                 "bind": "/tesseract/input_data",
                 "mode": "ro",
@@ -777,6 +788,11 @@ def run_tesseract(
         environment["TESSERACT_OUTPUT_PATH"] = "/tesseract/output_data"
         if "://" not in str(output_path):
             local_path = _resolve_file_path(output_path, make_dir=True)
+            if str(local_path) in parsed_volumes:
+                raise ValueError(
+                    f"Output path {local_path} is already mounted as a volume, "
+                    "please provide a unique path."
+                )
             parsed_volumes[str(local_path)] = {
                 "bind": "/tesseract/output_data",
                 "mode": "rw",
