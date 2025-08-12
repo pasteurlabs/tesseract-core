@@ -170,6 +170,12 @@ class TestGetAtPath:
             ("numbers.invalid_syntax", AttributeError),
             # Object attribute that doesn't exist
             ("object.nonexistent_attr", AttributeError),
+            # Pydantic model field that doesn't exist
+            ("pydantic_model.nonexistent_field", AttributeError),
+            # Pydantic model nested dict access with non-existent key
+            ("pydantic_model.field2.nonexistent", KeyError),
+            # TypeError: string indices must be integers, not 'str'
+            ("pydantic_model.field1.{invalid}", TypeError),
         ],
     )
     def test_invalid_paths(self, sample_tree, invalid_path, expected_error):
