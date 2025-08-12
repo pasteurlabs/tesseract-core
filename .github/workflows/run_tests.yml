@@ -34,7 +34,7 @@ jobs:
 
     steps:
       - name: Set up Git repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up WSL (Windows)
         uses: Vampire/setup-wsl@v6
@@ -146,7 +146,7 @@ jobs:
 
     steps:
       - name: Set up Git repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Get all changed files
         id: changed-files
@@ -243,7 +243,7 @@ jobs:
 
     steps:
       - name: Set up Git repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       # Use Conda to install Python (setup-python action doesn't support ARM)
       - uses: conda-incubator/setup-miniconda@v3
@@ -327,7 +327,7 @@ jobs:
 
     steps:
       - name: Set up Git repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install uv
         uses: astral-sh/setup-uv@v6
