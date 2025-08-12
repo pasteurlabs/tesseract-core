@@ -199,6 +199,26 @@ class TestSetAtPath:
         # Should be different objects
         assert result is not sample_tree
 
+        # Test deep copying of objects and Pydantic models
+        original_object = sample_tree["object"]
+        original_pydantic = sample_tree["pydantic_model"]
+
+        # Objects should be different instances
+        assert result["object"] is not original_object
+        assert result["pydantic_model"] is not original_pydantic
+
+        # But should have same content initially
+        assert result["object"].attr == original_object.attr
+        assert result["pydantic_model"].field1 == original_pydantic.field1
+
+        # Modifying original should not affect result
+        original_object.attr = "modified_original"
+        original_pydantic.field1 = "modified_pydantic"
+
+        # Result should still have original values
+        assert result["object"].attr == "object_attribute"
+        assert result["pydantic_model"].field1 == "pydantic_value"
+
     @pytest.mark.parametrize(
         "path_values,verification_path,expected_value",
         [
