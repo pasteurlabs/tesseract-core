@@ -31,7 +31,7 @@ def output_data():
 
 
 def _check_decoded_data(decoded: dict, array_encoding: str):
-    """Assert basic scalar and nested fields are correct."""
+    """Assert basic scalar and nested fields are correct and that the array field is properly encoded."""
     assert decoded["scalar"] == 1.0
     assert decoded["string"] == "hello 世界 🌍"
     assert decoded["nested"]["inner"] == [4.0, 5.0]
