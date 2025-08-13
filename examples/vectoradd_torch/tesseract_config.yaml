@@ -1,5 +1,5 @@
 name: vectoradd_torch
-version: "2025/02/05"
+version: "0.1.0" #2025/02/05
 description: |
   Tesseract that adds/subtracts two vectors. Uses torch internally.
 

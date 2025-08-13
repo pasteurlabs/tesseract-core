@@ -174,7 +174,7 @@ class TesseractConfig(BaseModel, validate_assignment=True):
         """Validate that the version string is a valid semantic version."""
         semver_pattern = r"""^\d+\.\d+\.\d+[a-zA-Z-+]*$"""
 
-        if not re.match(semver_pattern, v):
+        if (not re.match(semver_pattern, v)) and v != "unknown":
             raise ValueError(f"Version '{v}' is not a valid semantic version.")
 
         return v
