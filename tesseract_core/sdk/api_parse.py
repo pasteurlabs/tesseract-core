@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import ast
+import re
 from pathlib import Path
 from typing import Annotated, Literal, NamedTuple, Union
 
@@ -13,6 +14,7 @@ from pydantic import (
     ConfigDict,
     Field,
     Strict,
+    field_validator,
 )
 from pydantic import ValidationError as PydanticValidationError
 
@@ -153,7 +155,7 @@ class TesseractConfig(BaseModel, validate_assignment=True):
 
     name: StrictStr = Field(..., description="Name of the Tesseract.", min_length=1)
     version: StrictStr = Field(
-        "unknown", description="Version of the Tesseract.", min_length=1
+        "unknown", description="Version of the Tesseract.", min_length=1, max_length=128
     )
     description: StrictStr = Field(
         "",
@@ -165,6 +167,17 @@ class TesseractConfig(BaseModel, validate_assignment=True):
     )
 
     model_config = ConfigDict(extra="forbid")
+
+    @field_validator("version")
+    @classmethod
+    def validate_version(cls, v: str) -> str:
+        """Validate that the version string is a valid semantic version."""
+        semver_pattern = r"""^\d+\.\d+\.\d+[a-zA-Z-+]*$"""
+
+        if not re.match(semver_pattern, v):
+            raise ValueError(f"Version '{v}' is not a valid semantic version.")
+
+        return v
 
 
 class ValidationError(Exception):
