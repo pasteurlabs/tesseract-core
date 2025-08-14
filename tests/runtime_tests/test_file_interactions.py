@@ -90,6 +90,3 @@ def test_output_to_bytes_scalar_only():
     assert isinstance(result, bytes)
     decoded = json.loads(result.decode())
     assert decoded == 42.0
-
-
-# The remaining file_interactions functions are shallow wrappers around fsspec and urllib and do not need unit tests
