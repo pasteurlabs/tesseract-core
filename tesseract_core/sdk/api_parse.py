@@ -175,7 +175,11 @@ class TesseractConfig(BaseModel, validate_assignment=True):
         semver_pattern = r"""^\d+\.\d+\.\d+[a-zA-Z-]*$"""
 
         if (not re.match(semver_pattern, v)) and v != "unknown":
-            raise ValueError(f"Version '{v}' is not a valid semantic version.")
+            raise ValueError(
+                f"Version '{v}' is not a valid version number for a Tesseract. "
+                "You can only use three dot-separated digits (e.g. 1.2.3), to which "
+                "optionally you can append a hyphen - and a string (e.g. 1.2.3-nightly)"
+            )
 
         return v
 
