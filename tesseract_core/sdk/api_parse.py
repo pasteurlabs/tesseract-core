@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import ast
+import re
 from pathlib import Path
 from typing import Annotated, Literal, NamedTuple, Union
 
@@ -13,6 +14,7 @@ from pydantic import (
     ConfigDict,
     Field,
     Strict,
+    field_validator,
 )
 from pydantic import ValidationError as PydanticValidationError
 
@@ -151,8 +153,10 @@ OptionalBuildConfig = Annotated[
 class TesseractConfig(BaseModel, validate_assignment=True):
     """Configuration options for Tesseracts. Defines valid options in ``tesseract_config.yaml``."""
 
-    name: StrictStr = Field(..., description="Name of the Tesseract.")
-    version: StrictStr = Field("unknown", description="Version of the Tesseract.")
+    name: StrictStr = Field(..., description="Name of the Tesseract.", min_length=1)
+    version: StrictStr = Field(
+        "unknown", description="Version of the Tesseract.", min_length=1, max_length=128
+    )
     description: StrictStr = Field(
         "",
         description="Free-text description of what the Tesseract does.",
@@ -163,6 +167,21 @@ class TesseractConfig(BaseModel, validate_assignment=True):
     )
 
     model_config = ConfigDict(extra="forbid")
+
+    @field_validator("version")
+    @classmethod
+    def validate_version(cls, v: str) -> str:
+        """Validate that the version string is a valid semantic version."""
+        version_pattern = r"""^\d+\.\d+\.\d+[a-zA-Z-]*$"""
+
+        if (not re.match(version_pattern, v)) and v != "unknown":
+            raise ValueError(
+                f"Version '{v}' is not a valid version number for a Tesseract. "
+                "You can only use three dot-separated digits (e.g. 1.2.3), to which "
+                "optionally you can append a hyphen - and a string (e.g. 1.2.3-nightly)"
+            )
+
+        return v
 
 
 class ValidationError(Exception):
