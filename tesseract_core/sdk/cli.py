@@ -699,12 +699,13 @@ def _get_tesseract_env_vals(
 def _get_tesseract_network_meta(container: Container) -> dict:
     """Retrieve network addresses from container."""
     network_meta = {}
-    networks = container.attrs["NetworkSettings"].get("Networks", {})
-    for network_name, network_info in networks.items():
-        network_meta[network_name] = {
-            "ip": f"{network_info['IPAddress']}",
-            "port": 8000,
-        }
+    docker_network_ips = container.docker_network_ips
+    if docker_network_ips:
+        for network_name, ip in docker_network_ips.items():
+            network_meta[network_name] = {
+                "ip": ip,
+                "port": container.api_port,
+            }
     return network_meta
 
 
