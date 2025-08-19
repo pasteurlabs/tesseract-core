@@ -60,6 +60,11 @@ class TestPathToIndexOp:
             ("{123}", ("dict", "123")),
             ("{a123}", ("dict", "a123")),
             ("{ }", ("dict", " ")),
+            ('{"key with quotation marks"}', ("dict", '"key with quotation marks"')),
+            (
+                "{key with literal backslash \\}",
+                ("dict", "key with literal backslash \\"),
+            ),
             # Basic attribute access
             ("attr", ("getattr", "attr")),
             # Attribute access with underscores and numbers
@@ -91,6 +96,9 @@ class TestPathToIndexOp:
             # Invalid attribute names
             "attr-with-dashes",
             "attr with spaces",
+            "attr.with.dots",
+            "attr_with_square_brackets[0]",
+            "attr_with_curly_brackets{0}",
             "123startswithadigit",
             "attr!",
             "🚀rocket",
