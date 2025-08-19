@@ -8,6 +8,8 @@ from typing import (
     Annotated,
     Any,
     Callable,
+    Generic,
+    TypeVar,
     Union,
     get_args,
     get_origin,
@@ -15,13 +17,15 @@ from typing import (
 
 from pydantic import (
     AfterValidator,
+    BaseModel,
     GetCoreSchemaHandler,
     GetJsonSchemaHandler,
     TypeAdapter,
 )
 from pydantic.json_schema import JsonSchemaValue
-from pydantic_core import SchemaSerializer, SchemaValidator, core_schema
+from pydantic_core import CoreSchema, SchemaSerializer, SchemaValidator, core_schema
 
+from tesseract_core import Tesseract
 from tesseract_core.runtime.file_interactions import PathLike, parent_path
 from tesseract_core.runtime.mpa import (
     log_artifact,
@@ -246,6 +250,96 @@ def require_file(file_path: PathLike) -> Path:
         raise FileNotFoundError(f"Required file not found: {file_path}")
 
     return file_path
+
+
+T = TypeVar("lazy")
+eager = TypeVar("eager")
+lazy = TypeVar("lazy")
+
+
+class TesseractReference(BaseModel):
+    """Simple reference to a Tesseract."""
+
+    type: str
+    url: str
+
+
+class TesseractArg(Generic[T]):
+    """Tesseract argument wrapper that wraps a Tesseract client or reference."""
+
+    def __init__(self, tesseract: Tesseract) -> None:
+        self._tesseract = tesseract
+
+    def __getattr__(self, name: str) -> Any:
+        """Delegate attribute access to the underlying Tesseract instance."""
+        return getattr(self._tesseract, name)
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls, source_type: Any, handler: GetCoreSchemaHandler
+    ) -> CoreSchema:
+        """Generate Pydantic core schema for TesseractReference."""
+
+        def validate_tesseract_reference(v: Any) -> "TesseractReference":
+            """Validate and convert tesseract reference to TesseractReference instance."""
+            if isinstance(v, cls):
+                return v
+
+            if not (isinstance(v, dict) and "type" in v and "url" in v):
+                raise ValueError(
+                    f"Expected dict with 'type' and 'url' keys, got {type(v)}"
+                )
+
+            tesseract_type = v["type"]
+            url = v["url"]
+
+            if tesseract_type not in ("path", "url", "image"):
+                raise ValueError(
+                    f"Invalid tesseract type '{tesseract_type}'. Expected 'path', 'url', or 'image'"
+                )
+
+            if hasattr(source_type, "__args__") and source_type.__args__:
+                inner_type = source_type.__args__[0]
+                if inner_type == "lazy" or (
+                    hasattr(inner_type, "__name__") and inner_type.__name__ == "lazy"
+                ):
+                    return cls(TesseractReference(url=url, type=tesseract_type))
+            else:
+                if tesseract_type == "path":
+                    tesseract = Tesseract.from_tesseract_api(url)
+                elif tesseract_type == "url":
+                    tesseract = Tesseract.from_url(url)
+                elif tesseract_type == "image":
+                    tesseract = Tesseract.from_image(url)
+                    tesseract.serve()
+
+                return cls(tesseract)
+
+        return core_schema.no_info_plain_validator_function(
+            validate_tesseract_reference
+        )
+
+    @classmethod
+    def __get_pydantic_json_schema__(
+        cls, core_schema: CoreSchema, handler: GetJsonSchemaHandler
+    ) -> JsonSchemaValue:
+        """Generate JSON schema for OpenAPI."""
+        return {
+            "type": "object",
+            "properties": {
+                "type": {
+                    "type": "string",
+                    "enum": ["path", "url", "image"],
+                    "description": "Type of tesseract reference",
+                },
+                "url": {
+                    "type": "string",
+                    "description": "URL or path to the tesseract",
+                },
+            },
+            "required": ["type", "url"],
+            "additionalProperties": False,
+        }
 
 
 __all__ = [
