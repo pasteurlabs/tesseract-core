@@ -25,7 +25,6 @@ from pydantic import (
 from pydantic.json_schema import JsonSchemaValue
 from pydantic_core import CoreSchema, SchemaSerializer, SchemaValidator, core_schema
 
-from tesseract_core import Tesseract
 from tesseract_core.runtime.file_interactions import PathLike, parent_path
 from tesseract_core.runtime.mpa import (
     log_artifact,
@@ -267,12 +266,24 @@ class TesseractReference(BaseModel):
 class TesseractArg(Generic[T]):
     """Tesseract argument wrapper that wraps a Tesseract client or reference."""
 
-    def __init__(self, tesseract: Tesseract) -> None:
+    def __init__(self, tesseract: Any) -> None:
         self._tesseract = tesseract
 
     def __getattr__(self, name: str) -> Any:
         """Delegate attribute access to the underlying Tesseract instance."""
         return getattr(self._tesseract, name)
+
+    @classmethod
+    def _get_tesseract_class(cls) -> type:
+        """Lazy import of Tesseract class. Avoids dependency issue in environments without Tesseract SDK."""
+        try:
+            from tesseract_core import Tesseract
+
+            return Tesseract
+        except ImportError:
+            raise ImportError(
+                "Tesseract class not found. Ensure tesseract_core is installed and configured correctly."
+            ) from ImportError
 
     @classmethod
     def __get_pydantic_core_schema__(
@@ -305,6 +316,7 @@ class TesseractArg(Generic[T]):
                 ):
                     return cls(TesseractReference(url=url, type=tesseract_type))
             else:
+                Tesseract = cls._get_tesseract_class()
                 if tesseract_type == "path":
                     tesseract = Tesseract.from_tesseract_api(url)
                 elif tesseract_type == "url":
