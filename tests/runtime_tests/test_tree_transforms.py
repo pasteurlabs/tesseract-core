@@ -10,6 +10,37 @@ from tesseract_core.runtime.tree_transforms import (
 )
 
 
+@pytest.fixture
+def sample_tree():
+    """Create a sample nested tree for get/set at path testing."""
+
+    class SimpleObj:
+        def __init__(self):
+            self.attr = "object_attribute"
+            self.nested = {"key": "nested_value"}
+            self.list_data = [1, 2, {"inner": "list_dict"}]
+
+    class TestModel(BaseModel):
+        field1: str
+        field2: dict
+
+    model = TestModel(field1="pydantic_value", field2={"nested": "pydantic_nested"})
+
+    return {
+        "root_key": "root_value",
+        "numbers": [10, 20, 30],
+        "nested_dict": {"level1": {"level2": "deep_value"}},
+        "mixed_list": [{"item": "first"}, {"item": "second", "extra": [100, 200]}],
+        "object": SimpleObj(),
+        "pydantic_model": model,
+        "dict_with_special_keys": {
+            "key with spaces": "space_value",
+            "key-with-dashes": "dash_value",
+            "123": "numeric_key",
+        },
+    }
+
+
 class TestPathToIndexOp:
     """Test cases for path_to_index_op function."""
 
@@ -73,37 +104,6 @@ class TestPathToIndexOp:
         """Test invalid path patterns raise ValueError."""
         with pytest.raises(ValueError, match="Invalid path"):
             path_to_index_op(invalid_path)
-
-
-@pytest.fixture
-def sample_tree():
-    """Create a sample nested tree for get/set at path testing."""
-
-    class SimpleObj:
-        def __init__(self):
-            self.attr = "object_attribute"
-            self.nested = {"key": "nested_value"}
-            self.list_data = [1, 2, {"inner": "list_dict"}]
-
-    class TestModel(BaseModel):
-        field1: str
-        field2: dict
-
-    model = TestModel(field1="pydantic_value", field2={"nested": "pydantic_nested"})
-
-    return {
-        "root_key": "root_value",
-        "numbers": [10, 20, 30],
-        "nested_dict": {"level1": {"level2": "deep_value"}},
-        "mixed_list": [{"item": "first"}, {"item": "second", "extra": [100, 200]}],
-        "object": SimpleObj(),
-        "pydantic_model": model,
-        "dict_with_special_keys": {
-            "key with spaces": "space_value",
-            "key-with-dashes": "dash_value",
-            "123": "numeric_key",
-        },
-    }
 
 
 class TestGetAtPath:
