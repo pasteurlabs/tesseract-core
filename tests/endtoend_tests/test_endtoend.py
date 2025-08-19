@@ -1148,3 +1148,80 @@ def test_multi_helloworld_endtoend(
     )
     assert result.exit_code == 0, result.output
     assert "The helloworld Tesseract says: Hello you!" in result.output
+
+
+def test_tesseractarg_endtoend(
+    docker_client,
+    unit_tesseracts_parent_dir,
+    dummy_image_name,
+    dummy_network_name,
+    docker_cleanup,
+):
+    """Test that tesseractarg example can be built and executed, calling helloworld tesseract."""
+    cli_runner = CliRunner(mix_stderr=False)
+
+    # Build Tesseract images
+    img_names = []
+    for tess_name in ("tesseractarg", "helloworld"):
+        img_name = build_tesseract(
+            docker_client,
+            unit_tesseracts_parent_dir / tess_name,
+            dummy_image_name + f"_{tess_name}",
+            tag="sometag",
+        )
+        img_names.append(img_name)
+        assert image_exists(docker_client, img_name)
+        docker_cleanup["images"].append(img_name)
+
+    tesseractarg_img_name, helloworld_img_name = img_names
+
+    # Create Docker network
+    config = get_config()
+    docker = config.docker_executable
+
+    result = subprocess.run(
+        [*docker, "network", "create", dummy_network_name],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.returncode == 0, result.stderr
+    docker_cleanup["networks"].append(dummy_network_name)
+
+    # Serve helloworld Tesseract on the shared network
+    result = cli_runner.invoke(
+        app,
+        [
+            "serve",
+            helloworld_img_name,
+            "--network",
+            dummy_network_name,
+            "--network-alias",
+            "helloworld",
+        ],
+        catch_exceptions=True,
+    )
+    assert result.exit_code == 0, result.output
+    serve_meta = json.loads(result.output)
+    docker_cleanup["containers"].append(serve_meta["container_name"])
+
+    # Create payload for tesseractarg with target URL pointing to helloworld via network alias
+    payload = '{"inputs": {"target": {"type": "url", "url": "http://helloworld:8000"}}}'
+
+    # Run tesseractarg Tesseract on the same network
+    result = cli_runner.invoke(
+        app,
+        [
+            "run",
+            tesseractarg_img_name,
+            "apply",
+            payload,
+            "--network",
+            dummy_network_name,
+        ],
+        catch_exceptions=True,
+    )
+    assert result.exit_code == 0, result.output
+
+    output_data = json.loads(result.output)
+    assert output_data["result"] == "Hello Alice! Hello Bob!"
