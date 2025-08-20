@@ -1205,23 +1205,75 @@ def test_tesseractarg_endtoend(
     serve_meta = json.loads(result.output)
     docker_cleanup["containers"].append(serve_meta["container_name"])
 
-    # Create payload for tesseractarg with target URL pointing to helloworld via network alias
-    payload = '{"inputs": {"target": {"type": "url", "url": "http://helloworld:8000"}}}'
-
-    # Run tesseractarg Tesseract on the same network
+    # Test url type
+    url_payload = (
+        '{"inputs": {"target": {"type": "url", "url": "http://helloworld:8000"}}}'
+    )
     result = cli_runner.invoke(
         app,
         [
             "run",
             tesseractarg_img_name,
             "apply",
-            payload,
+            url_payload,
             "--network",
             dummy_network_name,
         ],
         catch_exceptions=True,
     )
     assert result.exit_code == 0, result.output
-
     output_data = json.loads(result.output)
-    assert output_data["result"] == "Hello Alice! Hello Bob!"
+    expected_result = "Hello Alice! Hello Bob!"
+    assert output_data["result"] == expected_result
+
+    # Test image type
+    image_payload = json.dumps(
+        {
+            "inputs": {
+                "target": {
+                    "type": "image",
+                    "url": helloworld_img_name,
+                }
+            }
+        }
+    )
+    result = cli_runner.invoke(
+        app,
+        [
+            "run",
+            str(unit_tesseracts_parent_dir / "tesseractarg/tesseract_api.py"),
+            "apply",
+            image_payload,
+        ],
+        catch_exceptions=True,
+    )
+    assert result.exit_code == 0, result.output
+    output_data = json.loads(result.output)
+    assert output_data["result"] == expected_result
+
+    # Test path type
+    path_payload = json.dumps(
+        {
+            "inputs": {
+                "target": {
+                    "type": "path",
+                    "url": str(
+                        unit_tesseracts_parent_dir / "helloworld/tesseract_api.py"
+                    ),
+                }
+            }
+        }
+    )
+    result = cli_runner.invoke(
+        app,
+        [
+            "run",
+            str(unit_tesseracts_parent_dir / "tesseractarg/tesseract_api.py"),
+            "apply",
+            path_payload,
+        ],
+        catch_exceptions=True,
+    )
+    assert result.exit_code == 0, result.output
+    output_data = json.loads(result.output)
+    assert output_data["result"] == expected_result
