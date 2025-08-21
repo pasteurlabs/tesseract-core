@@ -7,23 +7,27 @@ from animate import make_animation
 
 from tesseract_core import Tesseract
 
-# In this example, we use the tesseract to call and differentiate through the qpax solver.
+# In this example, we use tesseract to call and differentiate through the qpax solver.
 # github: https://github.com/kevin-tracy/qpax/tree/main
 # paper: https://arxiv.org/abs/2406.11749
 
 # The task we're solving here is to tune a linear constraint in a QP,
 # so that the solution of the QP matches a desired target value, i.e.
 
-# min (x* - x_true)^2
-# s.t.  x* \in argmin_x 0.5 * x^T Q x + q^T x
+# min_G (x*(G) - x_true)^2
+# s.t.  x*(G) \in argmin_x 0.5 * x^T Q x + q^T x
 #                 s.t.  G x <= h,
 # where x_true is the target value, and G are the coefficients we tune.
-# the qpax-tesseart is used to solve the inner QP and obtain gradients
-# of x* w.r.t. G, which we then use to update G using gradient descent.
+# The qpax tesseract is used to solve the inner QP and obtain gradients
+# of x* w.r.t. G, which we then use to update G using gradient descent
+# on the outer objective.
+
 
 # we want to minimize the decision error
 def decision_error(x_pred, x_true):
     return jnp.dot(x_pred - x_true, x_pred - x_true)
+
+
 decision_grad_fn = jax.grad(decision_error, argnums=0)
 
 # we want to tune a constraint so that this becomes the solution of our QP
@@ -39,21 +43,19 @@ b = None
 G = jnp.array([-1.0, 1.0]).reshape((1, 2))  # inequality constraint Gx <= h
 h = jnp.array([-1.0]).reshape((1,))  # inequality constraint h
 input = {
-        "Q": Q,
-        "q": q,
-        "A": A,
-        "b": b,
-        "G": G,
-        "h": h,
-        # this is a smoothing coeffient for the QP solver,
-        # if this is too low, the gradients can become unstable.
-        "target_kappa": 1e-1,
-        "solver_tol": 1e-4,
-    }
+    "Q": Q,
+    "q": q,
+    "A": A,
+    "b": b,
+    "G": G,
+    "h": h,
+    # this is a smoothing coeffient for the QP solver,
+    # if this is too low, the gradients can become unstable.
+    "target_kappa": 1e-1,
+    "solver_tol": 1e-4,
+}
 
 max_iterations = 200
-#init_stepsize = 0.5
-#lrs = jnp.linspace(init_stepsize, init_stepsize / 10, num_iterations)
 lrs = 0.1 * jnp.ones(max_iterations)
 tol = 1e-3
 save_every = 1
@@ -71,12 +73,12 @@ with Tesseract.from_image("qp_solve") as qp_solve:
             sols.append(x_pred)
             losses.append(loss)
             constraints.append((input["G"], input["h"]))
-        print(f"Iteration {k+1}, Loss: {loss:.2f}")
+        print(f"Iteration {k + 1}, Loss: {loss:.2f}")
         if loss < tol:
             sols.append(x_pred)
             losses.append(loss)
             constraints.append((input["G"], input["h"]))
-            print(f"Converged at iteration {k+1} with loss {loss}")
+            print(f"Converged at iteration {k + 1} with loss {loss}")
             break
 
         tangent_vector = decision_grad_fn(x_pred, x_true)
@@ -103,6 +105,3 @@ writergif = animation.PillowWriter(fps=30)
 anim = make_animation(constraints, sols, x_true, Q, q)
 this_dir = os.path.dirname(os.path.abspath(__file__))
 anim.save(f"{this_dir}/plots/qp_solve_animation.gif", writer=writergif)
-
-
-
