@@ -10,25 +10,16 @@ import optparse
 import os
 import random
 import socket
-import string
 import tempfile
-import threading
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from contextlib import closing
 from pathlib import Path
 from shutil import copy, copytree, rmtree
-from typing import Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import requests
 from jinja2 import Environment, PackageLoader, StrictUndefined
-from pip._internal.index.package_finder import PackageFinder
-from pip._internal.network.session import PipSession
-from pip._internal.req.req_file import (
-    RequirementsFileParser,
-    get_line_parser,
-    handle_line,
-)
 
 from .api_parse import TesseractConfig, get_config, validate_tesseract_api
 from .docker_client import (
@@ -38,8 +29,13 @@ from .docker_client import (
     ContainerError,
     Image,
     build_docker_image,
+    is_podman,
 )
 from .exceptions import UserError
+
+if TYPE_CHECKING:
+    from pip._internal.index.package_finder import PackageFinder
+    from pip._internal.network.session import PipSession
 
 logger = logging.getLogger("tesseract")
 docker_client = CLIDockerClient()
@@ -49,56 +45,6 @@ ENV = Environment(
     loader=PackageLoader("tesseract_core.sdk", "templates"),
     undefined=StrictUndefined,
 )
-
-
-class LogPipe(threading.Thread):
-    """Custom wrapper to support live logging from a subprocess via a pipe.
-
-    Runs a thread that logs everything read from the pipe to the standard logger.
-    Can be used as a context manager for automatic cleanup.
-    """
-
-    daemon = True
-
-    def __init__(self, level: int) -> None:
-        """Initialize the LogPipe with the given logging level."""
-        super().__init__()
-        self._level = level
-        self._fd_read, self._fd_write = os.pipe()
-        self._pipe_reader = os.fdopen(self._fd_read)
-        self._captured_lines = []
-
-    def __enter__(self) -> int:
-        """Start the thread and return the write file descriptor of the pipe."""
-        self.start()
-        return self.fileno()
-
-    def __exit__(self, *args: Any) -> None:
-        """Close the pipe and join the thread."""
-        os.close(self._fd_write)
-        # Use a timeout so something weird happening in the logging thread doesn't
-        # cause this to hang indefinitely
-        self.join(timeout=10)
-        # Do not close reader before thread is joined since there may be pending data
-        # This also closes the fd_read pipe
-        self._pipe_reader.close()
-
-    def fileno(self) -> int:
-        """Return the write file descriptor of the pipe."""
-        return self._fd_write
-
-    def run(self) -> None:
-        """Run the thread, logging everything."""
-        for line in iter(self._pipe_reader.readline, ""):
-            if line.endswith("\n"):
-                line = line[:-1]
-            self._captured_lines.append(line)
-            logger.log(self._level, line)
-
-    @property
-    def captured_lines(self) -> list[str]:
-        """Return all lines captured so far."""
-        return self._captured_lines
 
 
 def needs_docker(func: Callable) -> Callable:
@@ -113,13 +59,15 @@ def needs_docker(func: Callable) -> Callable:
             raise UserError(
                 "Could not reach Docker daemon, check if it is running."
             ) from ex
+        except FileNotFoundError as ex:
+            raise UserError("Docker not found, check if it is installed.") from ex
         return func(*args, **kwargs)
 
     return wrapper_needs_docker
 
 
 def get_free_port(
-    within_range: tuple[int, int] | None = (49152, 65535),
+    within_range: tuple[int, int] = (49152, 65535),
     exclude: Sequence[int] = (),
 ) -> int:
     """Find a random free port to use for HTTP."""
@@ -136,7 +84,7 @@ def get_free_port(
         # Check if the port is free
         with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
             try:
-                s.bind(("localhost", port))
+                s.bind(("127.0.0.1", port))
             except OSError:
                 # Port is already in use
                 continue
@@ -147,8 +95,8 @@ def get_free_port(
 
 def parse_requirements(
     filename: str | Path,
-    session: PipSession | None = None,
-    finder: PackageFinder | None = None,
+    session: "PipSession | None" = None,
+    finder: "PackageFinder | None" = None,
     options: optparse.Values | None = None,
     constraint: bool = False,
 ) -> tuple[list[str], list[str]]:
@@ -157,6 +105,15 @@ def parse_requirements(
     All CLI options that may be part of the given requiremets file are included in
     the remote dependencies.
     """
+    # pip internals monkeypatch some typing behavior at import time, so we delay
+    # these imports as much as possible to avoid conflicts.
+    from pip._internal.network.session import PipSession
+    from pip._internal.req.req_file import (
+        RequirementsFileParser,
+        get_line_parser,
+        handle_line,
+    )
+
     if session is None:
         session = PipSession()
 
@@ -207,6 +164,7 @@ def prepare_build_context(
 
     Generated folder structure:
     ├── Dockerfile
+    ├── .dockerignore
     ├── __tesseract_source__
     │   ├── tesseract_api.py
     │   ├── tesseract_config.yaml
@@ -229,6 +187,7 @@ def prepare_build_context(
     Returns:
         The path to the build context directory.
     """
+    src_dir = Path(src_dir)
     context_dir = Path(context_dir)
     context_dir.mkdir(parents=True, exist_ok=True)
 
@@ -307,6 +266,11 @@ def prepare_build_context(
     for metafile in (runtime_source_dir / "meta").glob("*"):
         copy(metafile, context_dir / "__tesseract_runtime__")
 
+    # Docker requires a .dockerignore file to be at the root of the build context
+    dockerignore_path = runtime_source_dir / "meta" / ".dockerignore"
+    if dockerignore_path.exists():
+        copy(dockerignore_path, context_dir / ".dockerignore")
+
     return context_dir
 
 
@@ -368,7 +332,7 @@ def build_tesseract(
     image_tag: str | None,
     build_dir: Path | None = None,
     inject_ssh: bool = False,
-    config_override: tuple[tuple[list[str], str], ...] = (),
+    config_override: dict[tuple[str, ...], Any] | None = None,
     generate_only: bool = False,
 ) -> Image | Path:
     """Build a new Tesseract from a context directory.
@@ -394,15 +358,21 @@ def build_tesseract(
     config = get_config(src_dir)
 
     # Apply config overrides
-    for path, value in config_override:
-        c = config
-        for k in path[:-1]:
-            c = getattr(c, k)
-        setattr(c, path[-1], value)
+    if config_override is not None:
+        for path, value in config_override.items():
+            c = config
+            for k in path[:-1]:
+                c = getattr(c, k)
+            setattr(c, path[-1], value)
 
     image_name = config.name
     if image_tag:
-        image_name += f":{image_tag}"
+        tags = [f"{image_name}:{image_tag}"]
+    else:
+        tags = [
+            f"{image_name}:{config.version}",
+            f"{image_name}:latest",
+        ]
 
     source_basename = Path(src_dir).name
 
@@ -426,7 +396,7 @@ def build_tesseract(
     try:
         image = build_docker_image(
             path=context_dir.as_posix(),
-            tag=image_name,
+            tags=tags,
             dockerfile=context_dir / "Dockerfile",
             inject_ssh=inject_ssh,
             print_and_exit=generate_only,
@@ -449,63 +419,48 @@ def build_tesseract(
     return image
 
 
-def teardown(project_ids: Sequence[str] | None = None, tear_all: bool = False) -> None:
-    """Teardown Tesseract image(s) running in a Docker Compose project or standalone containers.
+def teardown(
+    container_ids: Collection[str] | None = None, tear_all: bool = False
+) -> None:
+    """Teardown Tesseract container(s).
 
     Args:
-        project_ids: List of Docker Compose project IDs to teardown.
-        tear_all: boolean flag to teardown all Tesseract projects.
+        container_ids: List of container IDs to teardown.
+        tear_all: boolean flag to teardown all Tesseract containers.
     """
     if tear_all:
-        # Identify all Tesseract projects to tear down, whether they're running in
-        # Docker Compose or as standalone containers
-        compose_projects = docker_client.compose.list()
-        compose_containers = set()
-        for project_containers in compose_projects.values():
-            compose_containers.update(project_containers)
-        other_containers = set(
-            container.id
-            for container in docker_client.containers.list()
-            if container.id not in compose_containers
+        # Identify all Tesseract containers to tear down
+        container_ids = set(
+            container.id for container in docker_client.containers.list()
         )
-        project_ids = [
-            *compose_projects.keys(),
-            *other_containers,
-        ]
-        if not project_ids:
-            logger.info("No Tesseract projects to teardown")
+        if not container_ids:
+            logger.info("No Tesseract containers to teardown")
             return
 
-    if not project_ids:
-        raise ValueError("project_ids must be provided if tear_all is False")
+    if not container_ids:
+        raise ValueError("container_id must be provided if tear_all is False")
 
-    if isinstance(project_ids, str):
-        project_ids = [project_ids]
+    if isinstance(container_ids, str):
+        container_ids = [container_ids]
 
-    def _is_container_id(project_id: str) -> bool:
+    def _is_container_id(container_id: str) -> bool:
         try:
-            docker_client.containers.get(project_id)
+            docker_client.containers.get(container_id)
             return True
         except ContainerError:
             return False
 
-    for project_id in project_ids:
-        if docker_client.compose.exists(project_id):
-            if not docker_client.compose.down(project_id):
-                raise RuntimeError(
-                    f"Cannot teardown Docker Compose project with ID: {project_id}"
-                )
-            logger.info(
-                f"Tesseracts are shutdown for Docker Compose project ID: {project_id}"
-            )
-        elif _is_container_id(project_id):
-            container = docker_client.containers.get(project_id)
+    for container_id in container_ids:
+        if _is_container_id(container_id):
+            container = docker_client.containers.get(container_id)
             container.remove(force=True)
-            logger.info(f"Tesseract is shutdown for Docker container ID: {project_id}")
+            logger.info(
+                f"Tesseract is shutdown for Docker container ID: {container_id}"
+            )
         else:
             raise ValueError(
-                f"A Docker Compose project with ID {project_id} cannot be found, "
-                "use `tesseract ps` to find project ID"
+                f"A Docker container with ID {container_id} cannot be found, "
+                "use `tesseract ps` to find container ID"
             )
 
 
@@ -519,190 +474,204 @@ def get_tesseract_images() -> list[Image]:
     return docker_client.images.list()
 
 
-def get_project_containers(project_id: str) -> list[Container]:
-    """Get containers for a given Tesseract project ID."""
-    if docker_client.compose.exists(project_id):
-        containers = docker_client.compose.list()[project_id]
-        return [docker_client.containers.get(c) for c in containers]
-
-    try:
-        container = docker_client.containers.get(project_id)
-        return [container]
-    except ContainerError as exc:
-        raise ValueError(
-            f"A Tesseract project with ID {project_id} cannot be found, "
-            "use `tesseract ps` to find project ID"
-        ) from exc
-
-
 def serve(
-    images: list[str],
-    ports: list[str] | None = None,
+    image_name: str,
+    *,
+    host_ip: str = "127.0.0.1",
+    port: str | None = None,
+    network: str | None = None,
+    network_alias: str | None = None,
     volumes: list[str] | None = None,
+    environment: dict[str, str] | None = None,
     gpus: list[str] | None = None,
-    propagate_tracebacks: bool = False,
+    debug: bool = False,
     num_workers: int = 1,
-    no_compose: bool = False,
-) -> str:
+    user: str | None = None,
+    input_path: str | Path | None = None,
+    output_path: str | Path | None = None,
+    output_format: Literal["json", "json+base64", "json+binref"] | None = None,
+) -> tuple:
     """Serve one or more Tesseract images.
 
     Start the Tesseracts listening on an available ports on the host.
 
     Args:
-        images: a list of Tesseract image IDs as strings.
-        ports: port or port range to serve each Tesseract on.
+        image_name: Tesseract image name to serve.
+        host_ip: IP address to bind the Tesseracts to.
+        port: port or port range to serve each Tesseract on.
+        network: name of the network the Tesseract will be attached to.
+        network_alias: alias to use for the Tesseract within the network.
         volumes: list of paths to mount in the Tesseract container.
+        environment: dictionary of environment variables to pass to the Tesseract.
         gpus: IDs of host Nvidia GPUs to make available to the Tesseracts.
-        propagate_tracebacks: Enable debug mode. This will propagate full tracebacks to the client.
+        debug: Enable debug mode. This will propagate full tracebacks to the client
+            and start a debugpy server in the Tesseract.
             WARNING: This may expose sensitive information, use with caution (and never in production).
         num_workers: number of workers to use for serving the Tesseracts.
-        no_compose: if True, do not use Docker Compose to serve the Tesseracts.
+        user: user to run the Tesseracts as, e.g. '1000' or '1000:1000' (uid:gid).
+              Defaults to the current user.
+        input_path: Input path to read input files from, such as local directory or S3 URI.
+        output_path: Output path to write output files to, such as local directory or S3 URI.
+        output_format: Output format to use for the results.
 
     Returns:
-        A string representing the Tesseract project ID.
+        A tuple of the Tesseract container name and the port it is serving on.
     """
-    if not images or not all(isinstance(item, str) for item in images):
-        raise ValueError("One or more Tesseract image IDs must be provided")
+    if not image_name or not isinstance(image_name, str):
+        raise ValueError("Tesseract image name must be provided")
 
-    image_ids = []
-    for image_ in images:
-        image = docker_client.images.get(image_)
-
-        if not image:
-            raise ValueError(f"Image ID {image_} is not a valid Docker image")
-        image_ids.append(image.id)
-
-    if ports is not None and len(ports) != len(image_ids):
-        raise ValueError(
-            f"Number of ports ({len(ports)}) must match number of images ({len(image_ids)})"
+    if output_format == "json+binref" and output_path is None:
+        logger.warning(
+            "Consider specifying --output-path when using the 'json+binref' output format "
+            "to easily retrieve .bin files."
         )
 
-    if no_compose:
-        if len(images) > 1:
-            raise ValueError(
-                "Docker Compose is required to serve multiple Tesseracts. "
-                f"Currently attempting to serve `{len(images)}` Tesseracts."
-            )
-        args = []
-        container_port = "8000"
-        args.extend(["--port", container_port])
+    image = docker_client.images.get(image_name)
 
-        if ports:
-            port = ports[0]
+    if not image:
+        raise ValueError(f"Image ID {image_name} is not a valid Docker image")
+
+    if user is None:
+        # Use the current user if not specified
+        user = f"{os.getuid()}:{os.getgid()}" if os.name != "nt" else None
+
+    if environment is None:
+        environment = {}
+
+    if not volumes:
+        parsed_volumes = {}
+    else:
+        parsed_volumes = _parse_volumes(volumes)
+
+    if input_path:
+        environment["TESSERACT_INPUT_PATH"] = "/tesseract/input_data"
+        if "://" not in str(input_path):
+            local_path = _resolve_file_path(input_path)
+            parsed_volumes[str(local_path)] = {
+                "bind": "/tesseract/input_data",
+                "mode": "ro",
+            }
+
+    if output_path:
+        environment["TESSERACT_OUTPUT_PATH"] = "/tesseract/output_data"
+        if "://" not in str(output_path):
+            local_path = _resolve_file_path(output_path, make_dir=True)
+            parsed_volumes[str(local_path)] = {
+                "bind": "/tesseract/output_data",
+                "mode": "rw",
+            }
+
+    if output_format:
+        environment["TESSERACT_OUTPUT_FORMAT"] = output_format
+
+    args = []
+    container_api_port = "8000"
+    container_debugpy_port = "5678"
+
+    args.extend(["--port", container_api_port])
+
+    if not port:
+        port = str(get_free_port())
+    else:
+        # Convert port ranges to fixed ports
+        if "-" in port:
+            port_start, port_end = port.split("-")
+            port = str(get_free_port(within_range=(int(port_start), int(port_end))))
+
+    if num_workers > 1:
+        args.extend(["--num-workers", str(num_workers)])
+
+    # Always bind to all interfaces inside the container
+    args.extend(["--host", "0.0.0.0"])
+
+    if host_ip == "0.0.0.0":
+        ping_ip = "127.0.0.1"
+    else:
+        ping_ip = host_ip
+
+    port_mappings = {f"{host_ip}:{port}": container_api_port}
+    if debug:
+        debugpy_port = str(get_free_port())
+        port_mappings[f"{host_ip}:{debugpy_port}"] = container_debugpy_port
+        environment["TESSERACT_DEBUG"] = "1"
+
+    extra_args = [
+        "--restart",
+        "unless-stopped",
+    ]
+
+    if is_podman():
+        # This ensures podman behaves like Docker in terms of user namespaces
+        # and allows the container to run with the same user ID as the host.
+        extra_args.extend(["--userns", "keep-id"])
+
+    if network_alias is not None:
+        if network is None:
+            raise ValueError("Network must be specified if network_alias is provided")
+        extra_args.extend(["--network-alias", network_alias])
+
+    container = docker_client.containers.run(
+        image=image_name,
+        command=["serve", *args],
+        device_requests=gpus,
+        ports=port_mappings,
+        network=network,
+        detach=True,
+        volumes=parsed_volumes,
+        user=user,
+        environment=environment,
+        extra_args=extra_args,
+    )
+    assert isinstance(container, Container)
+
+    logger.info("Waiting for Tesseract to start...")
+    # wait for server to start
+    timeout = 30
+    while True:
+        try:
+            response = requests.get(f"http://{ping_ip}:{port}/health")
+        except requests.exceptions.ConnectionError:
+            pass
         else:
-            port = str(get_free_port())
+            if response.status_code == 200:
+                break
 
-        if num_workers > 1:
-            args.extend(["--num-workers", str(num_workers)])
-        if propagate_tracebacks:
-            args.append("--debug")
+        time.sleep(0.1)
+        timeout -= 0.1
 
-        logger.info(f"Serving Tesseract at http://localhost:{port}")
-        logger.info(f"View Tesseract: http://localhost:{port}/docs")
+        container_status = docker_client.containers.get(container.id).status
 
-        container = docker_client.containers.run(
-            image=image_ids[0],
-            command=["serve", *args],
-            device_requests=gpus,
-            ports={f"{port}": "8000"},
-            detach=True,
-            volumes=volumes,
-        )
-        # wait for server to start
-        timeout = 30
-        while True:
+        if timeout < 0 or container_status != "running":
             try:
-                response = requests.get(f"http://localhost:{port}/health")
-            except requests.exceptions.ConnectionError:
-                pass
-            else:
-                if response.status_code == 200:
-                    break
-
-            time.sleep(0.1)
-            timeout -= 0.1
+                container_logs = container.logs(stdout=True, stderr=True)
+                logger.error(
+                    f"Tesseract container {container.name} failed to start:\n{container_logs.decode()}"
+                )
+            except APIError as ex:
+                logger.warning(
+                    f"Failed to get logs for container {container.name}: {ex}"
+                )
+            try:
+                container.stop()
+            except APIError as ex:
+                logger.warning(f"Failed to stop container {container.name}: {ex}")
 
             if timeout < 0:
                 raise TimeoutError("Tesseract did not start in time")
+            else:
+                raise RuntimeError("Tesseract failed to start")
 
-        return container.name
+    logger.info(f"Serving Tesseract at http://{ping_ip}:{port}")
+    logger.info(f"View Tesseract: http://{ping_ip}:{port}/docs")
+    if debug:
+        logger.info(f"Debugpy server listening at http://{ping_ip}:{debugpy_port}")
 
-    template = _create_docker_compose_template(
-        image_ids, ports, volumes, gpus, num_workers, debug=propagate_tracebacks
-    )
-    compose_fname = f"docker-compose-{_id_generator()}.yml"
-
-    with tempfile.NamedTemporaryFile(
-        mode="w+",
-        prefix=compose_fname,
-    ) as compose_file:
-        compose_file.write(template)
-        compose_file.flush()
-
-        project_name = f"tesseract-{_id_generator()}"
-        if not docker_client.compose.up(compose_file.name, project_name):
-            raise RuntimeError("Cannot serve Tesseracts")
-        return project_name
+    return container.name, container
 
 
-def _create_docker_compose_template(
-    image_ids: list[str],
-    ports: list[str] | None = None,
-    volumes: list[str] | None = None,
-    gpus: list[str] | None = None,
-    num_workers: int = 1,
-    debug: bool = False,
-) -> str:
-    """Create Docker Compose template."""
-    services = []
-
-    # Get random unique ports for each image if not provided
-    if ports is None:
-        ports = []
-        for _ in image_ids:
-            taken_ports = [int(p) for p in ports if "-" not in p]
-            ports.append(str(get_free_port(exclude=taken_ports)))
-
-    # Convert port ranges to fixed ports
-    for i, port in enumerate(ports):
-        if "-" in port:
-            port_start, port_end = port.split("-")
-            taken_ports = [int(p) for p in ports if "-" not in p]
-            ports[i] = str(
-                get_free_port(
-                    within_range=(int(port_start), int(port_end)), exclude=taken_ports
-                )
-            )
-
-    gpu_settings = None
-    if gpus:
-        if (len(gpus) == 1) and (gpus[0] == "all"):
-            gpu_settings = "count: all"
-        else:
-            gpu_settings = f"device_ids: {gpus}"
-
-    for image_id, port in zip(image_ids, ports, strict=True):
-        service = {
-            "name": f"{image_id.split(':')[0]}-{_id_generator()}",
-            "image": image_id,
-            "port": f"{port}:8000",
-            "volumes": volumes,
-            "gpus": gpu_settings,
-            "environment": {
-                "TESSERACT_DEBUG": "1" if debug else "0",
-            },
-        }
-
-        services.append(service)
-    template = ENV.get_template("docker-compose.yml")
-    return template.render(services=services, num_workers=num_workers)
-
-
-def _id_generator(
-    size: int = 12, chars: Sequence[str] = string.ascii_lowercase + string.digits
-) -> str:
-    """Generate a random ID."""
-    return "".join(random.choice(chars) for _ in range(size))
+def _is_local_volume(volume: str) -> bool:
+    """Check if a volume is a local path."""
+    return "/" in volume or "." in volume
 
 
 def _parse_volumes(options: list[str]) -> dict[str, dict[str, str]]:
@@ -724,8 +693,15 @@ def _parse_volumes(options: list[str]) -> dict[str, dict[str, str]]:
                 f"Invalid mount volume specification {option} "
                 "(must be `/path/to/source:/path/totarget:(ro|rw)`)",
             )
-        # Docker doesn't like paths like ".", so we convert to absolute path here
-        source = str(Path(source).resolve())
+
+        if _is_local_volume(source):
+            if not Path(source).exists():
+                raise RuntimeError(
+                    f"Source path {source} does not exist, "
+                    "please provide a valid local path."
+                )
+            # Docker doesn't like paths like ".", so we convert to absolute path here
+            source = str(Path(source).resolve())
         return source, {"bind": target, "mode": mode}
 
     return dict(_parse_option(opt) for opt in options)
@@ -738,89 +714,140 @@ def run_tesseract(
     volumes: list[str] | None = None,
     gpus: list[int | str] | None = None,
     ports: dict[str, str] | None = None,
+    environment: dict[str, str] | None = None,
+    network: str | None = None,
+    user: str | None = None,
+    input_path: str | Path | None = None,
+    output_path: str | Path | None = None,
+    output_format: Literal["json", "json+base64", "json+binref"] | None = None,
+    output_file: str | None = None,
 ) -> tuple[str, str]:
     """Start a Tesseract and execute a given command.
 
     Args:
         image: string of the Tesseract to run.
-        command: Tesseract command to run, e.g. apply.
+        command: Tesseract command to run, e.g. `"apply"`.
         args: arguments for the command.
         volumes: list of paths to mount in the Tesseract container.
         gpus: list of GPUs, as indices or names, to passthrough the container.
         ports: dictionary of ports to bind to the host. Key is the host port,
             value is the container port.
+        environment: list of environment variables to set in the container,
+            in Docker format: key=value.
+        network: name of the Docker network to connect the container to.
+        user: user to run the Tesseract as, e.g. '1000' or '1000:1000' (uid:gid).
+            Defaults to the current user.
+        input_path: Input path to read input files from, such as local directory or S3 URI.
+        output_path: Output path to write output files to, such as local directory or S3 URI.
+        output_format: Format of the output.
+        output_file: If specified, the output will be written to this file within output_path
+            instead of stdout.
 
     Returns:
         Tuple with the stdout and stderr of the Tesseract.
     """
-    # Args that require rw access to the mounted volume
-    output_args = {"-o", "--output-path"}
+    if output_format == "json+binref" and output_path is None:
+        logger.warning(
+            "Consider specifying --output-path when using the 'json+binref' output format "
+            "to easily retrieve .bin files."
+        )
 
-    cmd = [command]
-    current_cmd = None
+    if environment is None:
+        environment = {}
 
-    if volumes is None:
+    if not volumes:
         parsed_volumes = {}
     else:
         parsed_volumes = _parse_volumes(volumes)
 
+    if user is None:
+        # Use the current user if not specified
+        user = f"{os.getuid()}:{os.getgid()}" if os.name != "nt" else None
+
+    if input_path:
+        environment["TESSERACT_INPUT_PATH"] = "/tesseract/input_data"
+        if "://" not in str(input_path):
+            local_path = _resolve_file_path(input_path)
+            parsed_volumes[str(local_path)] = {
+                "bind": "/tesseract/input_data",
+                "mode": "ro",
+            }
+
+    if output_path:
+        environment["TESSERACT_OUTPUT_PATH"] = "/tesseract/output_data"
+        if "://" not in str(output_path):
+            local_path = _resolve_file_path(output_path, make_dir=True)
+            parsed_volumes[str(local_path)] = {
+                "bind": "/tesseract/output_data",
+                "mode": "rw",
+            }
+
+    if output_format:
+        environment["TESSERACT_OUTPUT_FORMAT"] = output_format
+
+    if output_file:
+        environment["TESSERACT_OUTPUT_FILE"] = output_file
+
+    cmd = []
+
+    if command:
+        cmd.append(command)
+
     for arg in args:
-        if arg.startswith("-"):
-            current_cmd = arg
-            cmd.append(arg)
-            continue
-
-        # Mount local output directories into Docker container as a volume
-        if current_cmd in output_args and "://" not in arg:
-            if arg.startswith("@"):
-                raise ValueError(
-                    f"Output path {arg} cannot start with '@' (used only for input files)"
-                )
-
-            local_path = Path(arg).resolve()
-            local_path.mkdir(parents=True, exist_ok=True)
-
-            if not local_path.is_dir():
-                raise RuntimeError(
-                    f"Path {local_path} provided as output is not a directory"
-                )
-
-            path_in_container = "/mnt/output"
-            arg = path_in_container
-
-            # Bind-mount directory
-            parsed_volumes[str(local_path)] = {"bind": path_in_container, "mode": "rw"}
-
         # Mount local input files marked by @ into Docker container as a volume
-        elif arg.startswith("@") and "://" not in arg:
+        if arg.startswith("@") and "://" not in arg:
             local_path = Path(arg.lstrip("@")).resolve()
 
             if not local_path.is_file():
                 raise RuntimeError(f"Path {local_path} provided as input is not a file")
 
-            path_in_container = os.path.join("/mnt", f"payload{local_path.suffix}")
+            path_in_container = os.path.join(
+                "/tesseract", f"payload{local_path.suffix}"
+            )
             arg = f"@{path_in_container}"
 
             # Bind-mount file
-            parsed_volumes[str(local_path)] = {"bind": path_in_container, "mode": "ro"}
-
-        current_cmd = None
+            parsed_volumes[str(local_path)] = {
+                "bind": path_in_container,
+                "mode": "ro",
+            }
         cmd.append(arg)
 
+    extra_args = []
+    if is_podman():
+        extra_args.extend(["--userns", "keep-id"])
+
     # Run the container
-    stdout, stderr = docker_client.containers.run(
+    result = docker_client.containers.run(
         image=image,
         command=cmd,
         volumes=parsed_volumes,
         device_requests=gpus,
+        environment=environment,
+        network=network,
         ports=ports,
         detach=False,
         remove=True,
         stderr=True,
+        user=user,
+        extra_args=extra_args,
     )
+    assert isinstance(result, tuple)
+    stdout, stderr = result
     stdout = stdout.decode("utf-8")
     stderr = stderr.decode("utf-8")
     return stdout, stderr
+
+
+def _resolve_file_path(path: str | Path, make_dir: bool = False) -> Path:
+    """Resolve a file path, creating the directory if necessary."""
+    local_path = Path(path).resolve()
+    if make_dir:
+        local_path.mkdir(parents=True, exist_ok=True)
+    if not local_path.is_dir():
+        raise RuntimeError(f"Path {local_path} provided is not a directory")
+
+    return local_path
 
 
 def logs(container_id: str) -> str:

@@ -1,7 +1,9 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import json
 from collections.abc import Iterator, Sequence
+from pathlib import Path
 from typing import (
     Annotated,
     Any,
@@ -12,6 +14,7 @@ from typing import (
 )
 
 from pydantic import (
+    AfterValidator,
     GetCoreSchemaHandler,
     GetJsonSchemaHandler,
     TypeAdapter,
@@ -19,8 +22,16 @@ from pydantic import (
 from pydantic.json_schema import JsonSchemaValue
 from pydantic_core import SchemaSerializer, SchemaValidator, core_schema
 
-from tesseract_core.runtime.file_interactions import parent_path
+from tesseract_core.runtime.file_interactions import PathLike, parent_path
+from tesseract_core.runtime.mpa import (
+    log_artifact,
+    log_metric,
+    log_parameter,
+)
 from tesseract_core.runtime.schema_types import safe_issubclass
+
+# Flag is modified by runtime.cli based on arguments or during build time
+SKIP_REQUIRED_FILE_CHECK = False
 
 
 class LazySequence(Sequence):
@@ -115,8 +126,6 @@ class PydanticLazySequenceAnnotation:
             # We know that the path is a glob pattern, so we need to load items from files
             from .file_interactions import (
                 expand_glob,
-                guess_format_from_path,
-                load_bytes,
                 read_from_path,
             )
 
@@ -125,8 +134,7 @@ class PydanticLazySequenceAnnotation:
 
             def load_item(key: str) -> Any:
                 buffer = read_from_path(key)
-                format = guess_format_from_path(key)
-                obj = load_bytes(buffer, format)
+                obj = json.loads(buffer.decode("utf-8"))
                 context = {"base_dir": parent_path(key)}
                 return validator.validate_python(obj, context=context)
 
@@ -189,3 +197,64 @@ class PydanticLazySequenceAnnotation:
     ) -> JsonSchemaValue:
         """This method is called by Pydantic to get the JSON schema for the annotated type."""
         return handler(_core_schema)
+
+
+def _resolve_input_path(path: Path) -> Path:
+    from tesseract_core.runtime.config import get_config
+
+    input_path = get_config().input_path
+    tess_path = (input_path / path).resolve()
+    if str(input_path) not in str(tess_path):
+        raise ValueError(
+            f"Invalid input file reference: {path}. "
+            f"Expected path to be relative to {input_path}, but got {tess_path}. "
+            "File references have to be relative to --input-path."
+        )
+    if not tess_path.exists():
+        raise FileNotFoundError(f"Input path {tess_path} does not exist.")
+    if not tess_path.is_file():
+        raise ValueError(f"Input path {tess_path} is not a file.")
+    return tess_path
+
+
+def _strip_output_path(path: Path) -> Path:
+    from tesseract_core.runtime.config import get_config
+
+    output_path = get_config().output_path
+    if path.is_relative_to(output_path):
+        return path.relative_to(output_path)
+    else:
+        return path
+
+
+InputFileReference = Annotated[Path, AfterValidator(_resolve_input_path)]
+OutputFileReference = Annotated[Path, AfterValidator(_strip_output_path)]
+
+
+def require_file(file_path: PathLike) -> Path:
+    """Designate a file which is required to be present at runtime.
+
+    Args:
+        file_path: Path to required file. Must be relative to `input_path` assigned in `tesseract run`.
+    """
+    if SKIP_REQUIRED_FILE_CHECK:
+        return Path(file_path)
+
+    file_path = _resolve_input_path(Path(file_path))
+
+    if not file_path.is_file():
+        raise FileNotFoundError(f"Required file not found: {file_path}")
+
+    return file_path
+
+
+__all__ = [
+    "InputFileReference",
+    "LazySequence",
+    "OutputFileReference",
+    "PydanticLazySequenceAnnotation",
+    "log_artifact",
+    "log_metric",
+    "log_parameter",
+    "require_file",
+]

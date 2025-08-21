@@ -105,6 +105,10 @@ The last section in `tesseract_api.py` contains templates for optional endpoints
 You can leave it untouched for this example, as the operation we are
 implementing is not differentiable.
 
+```{tip}
+For a Tesseract that has all optional endpoints implemented, check out the [Univariate example](../examples/building-blocks/univariate.md).
+```
+
 Finally, we can set the name of this Tesseract and its version in
 `tesseract_config.yaml`.
 
@@ -125,16 +129,14 @@ current directory is where `tesseract_api.py` is located,
 the full command would be:
 
 ```
-$ tesseract build . -t v1.0.0
+$ tesseract build .
 ```
 
 This is to be interpreted as "build the Tesseract which is located in
-the current directory, and tag it as `v1.0.0`". The name of the Tesseract
-is defined in the `tesseract_config.yaml` file, and it is `helloworld`, so the full
-name of the tesseract we just built is `helloworld:v1.0.0`.
-
-It is not mandatory to provide a tag for a Tesseract; in case you don't do it, it is tagged
-as `latest`, and the Tesseract that was previously tagged as `latest` loses that tag.
+the current directory". The name of the Tesseract
+is defined in the `tesseract_config.yaml` file, and it is `helloworld`.
+By default it will be tagged with both the version specified there (`1.0.0`) and `latest`,
+so the full name of the tesseract we just built is `helloworld:1.0.0` or `helloworld:latest`.
 
 
 ### Viewing Built Tesseracts

@@ -1,4 +1,4 @@
-# Vector Add
+# VectorAdd
 
 ## Context
 Example using vector add with differentiable inputs and jacobians.
@@ -10,12 +10,12 @@ Inputs must be Differentiable if we wish to write a Jacobian function for the Te
 
 We also have an example of a basic apply function and how it utilizes the inputs.
 
-```{literalinclude} ../../../examples/vectoradd/tesseract_api.py
+```{literalinclude} ../../../../examples/vectoradd/tesseract_api.py
 :pyobject: InputSchema
 :language: python
 ```
 
-```{literalinclude} ../../../examples/vectoradd/tesseract_api.py
+```{literalinclude} ../../../../examples/vectoradd/tesseract_api.py
 :pyobject: apply
 :language: python
 ```
@@ -25,14 +25,7 @@ We also have an example of a basic apply function and how it utilizes the inputs
 As previously mentioned, the inputs are marked as Differentiable in order for us to write
 a Jacobian function.
 
-In order for us to do that, we must also write the abstract eval function.
-
-```{literalinclude} ../../../examples/vectoradd/tesseract_api.py
-:pyobject: abstract_eval
-:language: python
-```
-
-```{literalinclude} ../../../examples/vectoradd/tesseract_api.py
+```{literalinclude} ../../../../examples/vectoradd/tesseract_api.py
 :pyobject: jacobian
 :language: python
 ```

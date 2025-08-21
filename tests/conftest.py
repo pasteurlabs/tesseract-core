@@ -5,6 +5,7 @@ import json
 import os
 import random
 import string
+import subprocess
 from pathlib import Path
 from shutil import copytree
 from textwrap import indent
@@ -18,7 +19,9 @@ import pytest
 here = Path(__file__).parent
 
 UNIT_TESSERACT_PATH = here / ".." / "examples"
-UNIT_TESSERACTS = [Path(tr).stem for tr in UNIT_TESSERACT_PATH.glob("*/")]
+UNIT_TESSERACTS = [
+    tr.stem for tr in UNIT_TESSERACT_PATH.glob("*/") if not tr.stem.startswith("_")
+]
 
 
 def pytest_addoption(parser):
@@ -91,6 +94,35 @@ def pytest_collection_modifyitems(config, items):
                 item.add_marker(pytest.mark.skip(reason=skip_reason))
 
 
+@pytest.fixture(scope="session", autouse=True)
+def tesseract_output_dir(tmp_path_factory):
+    """Set the Tesseract output directory for the session."""
+    output_path = tmp_path_factory.mktemp("output_path")
+    os.environ["TESSERACT_OUTPUT_PATH"] = str(output_path)
+    yield output_path
+
+
+@pytest.fixture(autouse=True)
+def reset_config():
+    """Reset the runtime configuration before each test."""
+    import tesseract_core.runtime.config
+    import tesseract_core.sdk.config
+
+    initial_config_sdk = tesseract_core.sdk.config._current_config
+    initial_config_runtime = tesseract_core.runtime.config._current_config
+
+    try:
+        yield
+    finally:
+        # Reset the SDK config
+        tesseract_core.sdk.config._current_config = initial_config_sdk
+        tesseract_core.sdk.config._config_overrides.clear()
+
+        # Reset the runtime config
+        tesseract_core.runtime.config._current_config = initial_config_runtime
+        tesseract_core.runtime.config._config_overrides.clear()
+
+
 @pytest.fixture(scope="session")
 def unit_tesseract_names():
     """Return all unit tesseract names."""
@@ -102,6 +134,12 @@ def unit_tesseract_path(request) -> Path:
     """Parametrized fixture to return all unit tesseracts."""
     # pass only tesseract names as params to get prettier test names
     return UNIT_TESSERACT_PATH / request.param
+
+
+@pytest.fixture(scope="session")
+def unit_tesseracts_parent_dir(request) -> Path:
+    """Fixture that return parent dir of unit tesseracts."""
+    return UNIT_TESSERACT_PATH
 
 
 @pytest.fixture()
@@ -143,50 +181,11 @@ def dummy_tesseract_module(dummy_tesseract_package):
 
 
 @pytest.fixture
-def dummy_tesseract(dummy_tesseract_package):
+def dummy_tesseract(dummy_tesseract_package, monkeypatch):
     """Set tesseract_api_path env var for testing purposes."""
-    from tesseract_core.runtime.config import get_config, update_config
-
-    orig_config_kwargs = {}
-    orig_path = get_config().api_path
-    # default may have been used and tesseract_api.py is not guaranteed to exist
-    # therefore, we only pass the original path in cleanup if not equal to default
-    if orig_path != Path("tesseract_api.py"):
-        orig_config_kwargs |= {"tesseract_api_path": orig_path}
     api_path = Path(dummy_tesseract_package / "tesseract_api.py").resolve()
-
-    try:
-        # Configure via envvar so we also propagate it to subprocesses
-        os.environ["TESSERACT_API_PATH"] = str(api_path)
-        update_config()
-        yield
-    finally:
-        # As this is used by an auto-use fixture, cleanup may happen
-        # after dummy_tesseract_noenv has already unset
-        if "TESSERACT_API_PATH" in os.environ:
-            del os.environ["TESSERACT_API_PATH"]
-        update_config(**orig_config_kwargs)
-
-
-@pytest.fixture
-def dummy_tesseract_noenv(dummy_tesseract_package):
-    """Use without tesseract_api_path to test handling of this."""
-    from tesseract_core.runtime.config import get_config, update_config
-
-    orig_api_path = get_config().api_path
-    orig_cwd = os.getcwd()
-
-    # Ensure TESSERACT_API_PATH is not set with python os
-    if "TESSERACT_API_PATH" in os.environ:
-        del os.environ["TESSERACT_API_PATH"]
-
-    try:
-        os.chdir(dummy_tesseract_package)
-        update_config()
-        yield
-    finally:
-        update_config(api_path=orig_api_path)
-        os.chdir(orig_cwd)
+    monkeypatch.setenv("TESSERACT_API_PATH", str(api_path))
+    yield
 
 
 @pytest.fixture
@@ -196,7 +195,7 @@ def free_port():
     from contextlib import closing
 
     with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
-        s.bind(("localhost", 0))
+        s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
 
 
@@ -205,6 +204,17 @@ def docker_client():
     from tesseract_core.sdk import docker_client as docker_client_module
 
     return docker_client_module.CLIDockerClient()
+
+
+@pytest.fixture
+def docker_volume(docker_client):
+    # Create the Docker volume
+    volume_name = f"test_volume_{''.join(random.choices(string.ascii_lowercase + string.digits, k=8))}"
+    volume = docker_client.volumes.create(name=volume_name)
+    try:
+        yield volume
+    finally:
+        volume.remove(force=True)
 
 
 @pytest.fixture(scope="module")
@@ -222,7 +232,12 @@ def docker_cleanup(docker_client, request):
 def _docker_cleanup(docker_client, request):
     """Clean up all tesseracts created by the tests."""
     # Shared object to track what objects need to be cleaned up in each test
-    context = {"images": [], "project_ids": [], "containers": []}
+    context = {
+        "images": [],
+        "containers": [],
+        "volumes": [],
+        "networks": [],
+    }
 
     def pprint_exc(e: BaseException) -> str:
         """Pretty print exception."""
@@ -233,20 +248,11 @@ def _docker_cleanup(docker_client, request):
     def cleanup_func():
         failures = []
 
-        # Teardown projects first
-        for project_id in context["project_ids"]:
-            try:
-                docker_client.compose.down(project_id)
-            except Exception as e:
-                failures.append(
-                    f"Failed to tear down project {project_id}: {pprint_exc(e)}"
-                )
-
         # Remove containers
         for container in context["containers"]:
             try:
                 if isinstance(container, str):
-                    container_obj = docker_client.containers.get(container.id)
+                    container_obj = docker_client.containers.get(container)
                 else:
                     container_obj = container
 
@@ -268,6 +274,32 @@ def _docker_cleanup(docker_client, request):
             except Exception as e:
                 failures.append(f"Failed to remove image {image}: {pprint_exc(e)}")
 
+        # Remove volumes
+        for volume in context["volumes"]:
+            try:
+                if isinstance(volume, str):
+                    volume_obj = docker_client.volumes.get(volume)
+                else:
+                    volume_obj = volume
+
+                volume_obj.remove(force=True)
+            except Exception as e:
+                failures.append(f"Failed to remove volume {volume}: {pprint_exc(e)}")
+
+        from tesseract_core.sdk.config import get_config
+
+        config = get_config()
+        docker_cmd = config.docker_executable
+        for network in context["networks"]:
+            try:
+                _ = subprocess.run(
+                    [*docker_cmd, "network", "rm", network, "--force"],
+                    check=True,
+                    capture_output=True,
+                )
+            except Exception as e:
+                failures.append(f"Failed to remove network {network}: {pprint_exc(e)}")
+
         if failures:
             raise RuntimeError(
                 "Failed to clean up some Docker objects during test teardown:\n"
@@ -280,7 +312,7 @@ def _docker_cleanup(docker_client, request):
 
 @pytest.fixture
 def dummy_image_name():
-    """Create a dummy image name, and clean up after the test."""
+    """Create a dummy image name."""
     image_id = "".join(random.choices(string.ascii_lowercase + string.digits, k=16))
     image_name = f"tmp_tesseract_image_{image_id}"
     yield image_name
@@ -288,10 +320,18 @@ def dummy_image_name():
 
 @pytest.fixture(scope="module")
 def shared_dummy_image_name():
-    """Create a dummy image name, and clean up after all tests."""
+    """Create a dummy image name."""
     image_id = "".join(random.choices(string.ascii_lowercase + string.digits, k=16))
     image_name = f"tmp_tesseract_image_{image_id}"
     yield image_name
+
+
+@pytest.fixture
+def dummy_network_name():
+    """Create a dummy image name."""
+    network_name = "".join(random.choices(string.ascii_lowercase + string.digits, k=16))
+    network_name = f"tmp_tesseract_network_{network_name}"
+    yield network_name
 
 
 @pytest.fixture
@@ -312,6 +352,11 @@ def mocked_docker(monkeypatch):
             return {"StatusCode": 0, "Error": None}
 
         @property
+        def name(self):
+            """Mock name property for Container."""
+            return json.dumps({**self.return_args, "name": "vectoradd"})
+
+        @property
         def attrs(self):
             """Mock attrs method for Container."""
             return {"Config": {"Env": ["TESSERACT_NAME=vectoradd"]}}
@@ -330,8 +375,6 @@ def mocked_docker(monkeypatch):
             """Mock remove method for Container."""
             pass
 
-    created_ids = set()
-
     class MockedDocker:
         """Mock CLIDockerClient class."""
 
@@ -339,6 +382,26 @@ def mocked_docker(monkeypatch):
         def info() -> tuple:
             """Mock info method for DockerClient."""
             return "", ""
+
+        class volumes:
+            """Mock of CLIDockerClient.volumes."""
+
+            @staticmethod
+            def create(name: str) -> Any:
+                """Mock of CLIDockerClient.volumes.create."""
+                return {"Name": name}
+
+            @staticmethod
+            def get(name: str) -> Any:
+                """Mock of CLIDockerClient.volumes.get."""
+                if "/" in name:
+                    raise NotFound(f"Volume {name} not found")
+                return {"Name": name}
+
+            @staticmethod
+            def list() -> list[Any]:
+                """Mock of CLIDockerClient.volumes.list."""
+                return [{"Name": "test_volume"}]
 
         class images:
             """Mock of CLIDockerClient.images."""
@@ -398,33 +461,19 @@ def mocked_docker(monkeypatch):
                     container.logs(stdout=False, stderr=True),
                 )
 
-        class compose:
-            @staticmethod
-            def list() -> set:
-                """Return ids of all created tesseracts projects."""
-                return created_ids
-
-            @staticmethod
-            def up(compose_fpath: str, project_name: str) -> str:
-                """Mock of CLIDockerClient.compose.up."""
-                created_ids.add(project_name)
-                return project_name
-
-            @staticmethod
-            def down(project_id: str) -> bool:
-                """Mock of CLIDockerClient.compose.down."""
-                created_ids.remove(project_id)
-                return True
-
-            @staticmethod
-            def exists(project_id: str) -> bool:
-                """Mock of CLIDockerClient.compose.exists."""
-                return project_id in created_ids
-
     mock_instance = MockedDocker()
     monkeypatch.setattr(engine, "docker_client", mock_instance)
+    monkeypatch.setattr(engine, "is_podman", lambda: False)
     monkeypatch.setattr(
         tesseract_core.sdk.docker_client, "CLIDockerClient", MockedDocker
     )
+
+    def hacked_get(url, *args, **kwargs):
+        if url.endswith("/health"):
+            # Simulate a successful health check
+            return type("Response", (), {"status_code": 200, "json": lambda: {}})()
+        raise NotImplementedError(f"Mocked get request to {url} not implemented")
+
+    monkeypatch.setattr(engine.requests, "get", hacked_get)
 
     yield mock_instance

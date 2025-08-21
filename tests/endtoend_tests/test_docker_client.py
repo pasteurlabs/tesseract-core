@@ -3,8 +3,8 @@
 
 """End to end tests for docker cli wrapper."""
 
+import os
 import subprocess
-import textwrap
 from contextlib import closing
 from pathlib import Path
 
@@ -13,9 +13,11 @@ import pytest
 from common import image_exists
 
 from tesseract_core.sdk.docker_client import (
-    APIError,
+    ContainerError,
     ImageNotFound,
+    _is_valid_docker_tag,
     build_docker_image,
+    is_podman,
 )
 
 
@@ -34,17 +36,22 @@ def docker_client_built_image_name(
     dummy_docker_file,
 ):
     """Build the dummy image for the tests."""
-    image_name = "docker_client_create_image_test:dummy"
+    image_names = [
+        f"docker_client_create_image_test:{tag}" for tag in ["dummy", "latest"]
+    ]
 
-    build_docker_image(dummy_tesseract_location, image_name, dummy_docker_file)
+    build_docker_image(dummy_tesseract_location, image_names, dummy_docker_file)
     try:
-        yield image_name
+        # Let's just return one tag to use in tests, even if we are
+        # creating multiple ones for testing purposes.
+        yield image_names[0]
     finally:
-        try:
-            docker_client.images.remove(image_name)
-        except ImageNotFound:
-            # already removed
-            pass
+        for image in image_names:
+            try:
+                docker_client.images.remove(image)
+            except ImageNotFound:
+                # already removed
+                pass
 
 
 def test_get_image(docker_client, docker_client_built_image_name, docker_py_client):
@@ -146,12 +153,11 @@ def test_create_image(
 
         # Create a second image with no label
         # Check that :latest gets added automatically
-        image1_name = "docker_client_create_image_test"
+        image1_name = "docker_client_create_image_test:latest"
         docker_client.images.buildx(
-            dummy_tesseract_location, image1_name, dummy_docker_file
+            dummy_tesseract_location, [image1_name], dummy_docker_file
         )
         image1 = docker_client.images.get(image1_name)
-        image1_name = image1_name + ":latest"
         assert image1 is not None
         assert image_exists(docker_client, image1_name)
         assert image_exists(docker_py_client, image1_name)
@@ -159,9 +165,9 @@ def test_create_image(
         # Create a third image with prefixed with repo url
         # Check that name gets handled properly
         repo_url = "local_host/foo/bar/"
-        image2_name = "docker_client_create_image_url_test"
+        image2_name = "docker_client_create_image_url_test:latest"
         docker_client.images.buildx(
-            dummy_tesseract_location, repo_url + image2_name, dummy_docker_file
+            dummy_tesseract_location, [repo_url + image2_name], dummy_docker_file
         )
         image2_py = docker_py_client.images.get(repo_url + image2_name)
         assert image2_py is not None
@@ -205,7 +211,6 @@ def test_create_container(
         )
         assert container_py is not None
         # Check property fields
-        assert container.project_id is None
         assert container.host_port is None
         assert _strip_image_prefix(container_py.image.id) == _strip_image_prefix(
             container.image.id
@@ -322,77 +327,103 @@ def test_container_volume_mounts(
     assert stdout == b"hello tesseract\n"
 
 
-def test_compose_up_down(
-    docker_client, docker_py_client, tmp_path, docker_client_built_image_name
+def test_volume_uid_permissions(
+    docker_client, docker_client_built_image_name, docker_volume, docker_cleanup
 ):
-    """Test docker-compose up and down."""
-    project_name, project_name1 = None, None
-    try:
-        compose_file = tmp_path / "docker-compose.yml"
-        # Use tail -f /dev/null to keep the container running
-        compose_content = textwrap.dedent(f"""
-            services:
-              test:
-                image: {docker_client_built_image_name}
-                command: ["echo 'Hello Tesseract' && tail -f /dev/null"]
-        """)
-        compose_file.write_text(compose_content)
-        # Run docker-compose up
-        project_name = docker_client.compose.up(
-            str(compose_file), "docker_client_compose_test"
+    # Set up root only directory
+    def run_tesseract_with_volume(cmd: str, user: str = "root:root", volume: str = ""):
+        if not volume:
+            volume = {docker_volume.name: {"bind": "/bar", "mode": "rw"}}
+        return docker_client.containers.run(
+            docker_client_built_image_name,
+            [cmd],
+            remove=True,
+            volumes=volume,
+            user=user,
         )
-        assert project_name == "docker_client_compose_test"
 
-        # Check that project is visible in list
-        projects = docker_client.compose.list()
-        assert project_name in projects
-        assert docker_client.compose.exists(project_name)
+    cmd = "mkdir -p /bar && echo hello > /bar/hello.txt && chmod 700 /bar"
+    _ = run_tesseract_with_volume(cmd)
 
-        # Get container associated with this project
-        containers = projects.get(project_name)
-        container = docker_client.containers.get(containers[0])
-        assert container is not None
-        stdout = container.logs(stdout=True, stderr=False)
-        assert stdout == b"Hello Tesseract\n"
+    # Try to read the file as UID 1000
+    read_cmd = "cat /bar/hello.txt"
+    with pytest.raises(ContainerError) as e:
+        _ = run_tesseract_with_volume(read_cmd, user="1000:1000")
+    assert "Permission denied" in str(e)
 
-        # Get container from docker-py
-        container_py = docker_py_client.containers.get(containers[0])
-        assert container_py is not None
-        stdout_py = container_py.logs(stdout=True, stderr=False)
-        assert stdout_py == stdout
+    # Try to write to the folder as UID 1000
+    write_cmd = "echo hello > /bar/hello_1000.txt && cat /bar/hello_1000.txt"
+    with pytest.raises(ContainerError) as e:
+        _ = run_tesseract_with_volume(write_cmd, user="1000:1000")
+    assert "Permission denied" in str(e)
 
-        # Create a second project
-        project_name1 = docker_client.compose.up(
-            str(compose_file), "docker_client_compose_test_1"
+    # Grant permission to the file
+    cmd = "chmod 777 /bar"
+    _ = run_tesseract_with_volume(cmd)
+
+    # Try to read the file as UID 1000 again
+    stdout = run_tesseract_with_volume(read_cmd, user="1000:1000")
+    assert stdout == b"hello\n"
+
+    # Try to write to the folder as UID 1000 again
+    stdout = run_tesseract_with_volume(write_cmd, user="1000:1000")
+    assert stdout == b"hello\n"
+
+    # Try to copy a file from a volume with permissions 700 to a volume with permission 777
+    volume_777 = docker_client.volumes.create(name="docker_client_test_volume_777")
+    docker_cleanup["volumes"].append(volume_777)
+    volume_args = {
+        docker_volume.name: {"bind": "/from", "mode": "rw"},
+        volume_777.name: {"bind": "/to", "mode": "rw"},
+    }
+    cmd = "chmod 700 /from && cp /from/hello.txt /to/hello.txt && cat /to/hello.txt"
+    stdout = run_tesseract_with_volume(cmd, volume=volume_args)
+    assert stdout == b"hello\n"
+
+    # Try to access files as UID1000
+    cmd = "cat /to/hello.txt"
+    stdout = run_tesseract_with_volume(cmd, user="1000:1000", volume=volume_args)
+    assert stdout == b"hello\n"
+
+    with pytest.raises(ContainerError) as e:
+        run_tesseract_with_volume(
+            "cat /from/hello_777.txt", user="1000:1000", volume=volume_args
         )
-        # Check both projects exist
-        assert docker_client.compose.exists(project_name)
-        assert docker_client.compose.exists(project_name1)
+    assert "Permission denied" in str(e)
 
-    finally:
-        # Remove one project
-        if project_name:
-            docker_client.compose.down(project_name)
-            assert not docker_client.compose.exists(project_name)
-
-        # Remove second project
-        if project_name1:
-            assert docker_client.compose.exists(project_name1)
-            docker_client.compose.down(project_name1)
-            assert not docker_client.compose.exists(project_name1)
+    cmd = (
+        "adduser -D testuser && chmod 777 /from && su - testuser && cat /from/hello.txt"
+    )
+    stdout = run_tesseract_with_volume(cmd, volume=volume_args)
+    assert stdout == b"hello\n"
 
 
-def test_compose_error(docker_client, tmp_path, docker_client_built_image_name):
-    """Test docker-compose error handling."""
-    compose_file = tmp_path / "docker-compose.yml"
-    # Write a malformed compose file
-    compose_content = textwrap.dedent(f"""
-        services:
-            test:
-            image: {docker_client_built_image_name}
-    """)
-    compose_file.write_text(compose_content)
-    with pytest.raises(APIError) as e:
-        docker_client.compose.up(str(compose_file), "docker_client_compose_test")
-    # Check that the container's logs were printed to stderr
-    assert "Failed to start Tesseract container" in str(e.value)
+def test_is_podman():
+    """Test is_podman function.
+
+    This assumes that the DOCKER_HOST environment variable is set to a Podman socket
+    when running in a Podman environment. This is true on CI, but may deviate on
+    local machines.
+    """
+    real_is_podman = "podman" in os.environ.get("DOCKER_HOST", "")
+    assert is_podman() == real_is_podman
+
+
+def test_is_valid_docker_tag():
+    valid_tags = [
+        "1.0.0",
+        "v1.0.0",
+        "sometag",
+        "some-tag",
+    ]
+    for tag in valid_tags:
+        assert _is_valid_docker_tag(tag)
+
+    invalid_tags = [
+        "0+unknown",
+        "my/repo",
+        "my\\tag",
+        "a" * 129,
+    ]
+    for tag in invalid_tags:
+        assert not _is_valid_docker_tag(tag)

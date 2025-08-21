@@ -1,7 +1,6 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-import json
 import urllib.parse
 from pathlib import Path
 from typing import Any, Literal, Optional, Union, get_args
@@ -11,27 +10,15 @@ from pydantic import TypeAdapter
 
 PathLike = Union[str, Path]
 
-supported_format_type = Literal["json", "msgpack", "json+base64", "json+binref"]
+supported_format_type = Literal["json", "json+base64", "json+binref"]
 SUPPORTED_FORMATS = get_args(supported_format_type)
 
 
-def guess_format_from_path(path: PathLike) -> supported_format_type:
-    """Guess the format from the given path.
-
-    The format is determined by the file extension.
-    """
-    if path.endswith(".json"):
-        return "json"
-    elif path.endswith(".msgpack"):
-        return "msgpack"
-
-    raise ValueError(
-        f"Could not guess format from path {path} (supported formats: {SUPPORTED_FORMATS})"
-    )
-
-
 def output_to_bytes(
-    obj: Any, format: supported_format_type, base_dir: Optional[Union[str, Path]] = None
+    obj: Any,
+    format: supported_format_type,
+    base_dir: Optional[Union[str, Path]] = None,
+    binref_dir: Optional[Union[str, Path]] = None,
 ) -> bytes:
     """Encode endpoint output to bytes in the given format.
 
@@ -49,38 +36,13 @@ def output_to_bytes(
     elif format == "json+binref":
         return ObjSchema.dump_json(
             obj,
-            context={"array_encoding": "binref", "base_dir": base_dir},
+            context={
+                "array_encoding": "binref",
+                "base_dir": base_dir,
+                "binref_dir": binref_dir,
+            },
             exclude_unset=True,
         )
-    elif format == "msgpack":
-        import msgpack
-
-        import tesseract_core.runtime.vendor.msgpack_numpy as msgpack_numpy
-
-        obj_clean = ObjSchema.dump_python(obj, exclude_unset=True)
-        return msgpack.packb(obj_clean, default=msgpack_numpy.encode)
-
-    raise ValueError(
-        f"Unsupported format {format} (must be one of {SUPPORTED_FORMATS})"
-    )
-
-
-def load_bytes(
-    buffer: bytes,
-    format: supported_format_type,
-) -> Any:
-    """Decode the given buffer to a Python object.
-
-    The buffer is expected to be in the given format.
-    """
-    if format.startswith("json"):
-        return json.loads(buffer.decode())
-    elif format == "msgpack":
-        import msgpack
-
-        import tesseract_core.runtime.vendor.msgpack_numpy as msgpack_numpy
-
-        return msgpack.unpackb(buffer, object_hook=msgpack_numpy.decode)
 
     raise ValueError(
         f"Unsupported format {format} (must be one of {SUPPORTED_FORMATS})"

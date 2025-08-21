@@ -1,0 +1,38 @@
+cff-version: "1.2.0"
+authors:
+- family-names: Häfner
+  given-names: Dion
+  orcid: "https://orcid.org/0000-0002-4465-7317"
+- family-names: Lavin
+  given-names: Alexander
+  orcid: "https://orcid.org/0000-0003-3422-7820"
+contact:
+- family-names: Häfner
+  given-names: Dion
+  orcid: "https://orcid.org/0000-0002-4465-7317"
+doi: 10.5281/zenodo.16333901
+message: If you use this software, please cite our article in the
+  Journal of Open Source Software.
+preferred-citation:
+  authors:
+  - family-names: Häfner
+    given-names: Dion
+    orcid: "https://orcid.org/0000-0002-4465-7317"
+  - family-names: Lavin
+    given-names: Alexander
+    orcid: "https://orcid.org/0000-0003-3422-7820"
+  date-published: 2025-07-22
+  doi: 10.21105/joss.08385
+  issn: 2475-9066
+  issue: 111
+  journal: Journal of Open Source Software
+  publisher:
+    name: Open Journals
+  start: 8385
+  title: "Tesseract Core: Universal, autodiff-native software components
+    for Simulation Intelligence"
+  type: article
+  url: "https://joss.theoj.org/papers/10.21105/joss.08385"
+  volume: 10
+title: "Tesseract Core: Universal, autodiff-native software components
+  for Simulation Intelligence"

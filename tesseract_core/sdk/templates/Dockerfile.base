@@ -63,22 +63,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 {% endif %}
 
-# Drop to a non-root user
-RUN groupadd -o -g 1000 tesseractor && \
-    useradd -o -u 1000 -g 1000 --create-home -s /bin/bash tesseractor
 WORKDIR /tesseract
-RUN chown tesseractor:tesseractor /tesseract
-USER tesseractor
+RUN chmod 777 /tesseract
 
 # Set environment variables
-ENV TESSERACT_NAME="{{ config.name }}" \
-    TESSERACT_VERSION="{{ config.version }}" \
+ENV TESSERACT_NAME="{{ config.name | replace('"', '\\"') | replace('\n', '\\n') }}" \
+    TESSERACT_VERSION="{{ config.version | replace('"', '\\"') | replace('\n', '\\n') }}" \
     TESSERACT_DESCRIPTION="{{ config.description | replace('"', '\\"') | replace('\n', '\\n') }}" \
     TESSERACT_API_PATH="/tesseract/tesseract_api.py"
 
 # Copy only necessary files
 COPY --from=build_stage /python-env /python-env
-COPY --chown=1000:1000 "{{ tesseract_source_directory }}/tesseract_api.py" ${TESSERACT_API_PATH}
+COPY "{{ tesseract_source_directory }}/tesseract_api.py" ${TESSERACT_API_PATH}
+RUN chmod 444 ${TESSERACT_API_PATH}
 
 ENV PATH="/python-env/bin:$PATH"
 
@@ -86,6 +83,7 @@ ENV PATH="/python-env/bin:$PATH"
 # Copy package data to image
 {% for source_path, target_path in config.build_config.package_data %}
 COPY ["{{ tesseract_source_directory }}/{{ source_path }}", "{{ target_path }}"]
+RUN chmod 777 {{ target_path }}
 {% endfor %}
 {% endif %}
 
@@ -94,8 +92,20 @@ COPY ["{{ tesseract_source_directory }}/{{ source_path }}", "{{ target_path }}"]
 {{ config.build_config.custom_build_steps | join("\n") }}
 {% endif %}
 
+RUN mkdir -p /tesseract/input_data /tesseract/output_data && \
+    chmod 755 /tesseract/input_data && \
+    chmod 777 /tesseract/output_data
+VOLUME ["/tesseract/input_data", "/tesseract/output_data"]
+
+USER 1000:1000
+
+ENV TESSERACT_INPUT_PATH="/tesseract/input_data"
+ENV TESSERACT_OUTPUT_PATH="/tesseract/output_data"
+
 # Final sanity check to ensure the runtime is installed and tesseract_api.py is valid
-RUN ["tesseract-runtime", "check"]
+{% if not config.build_config.skip_checks %}
+RUN _TESSERACT_IS_BUILDING=1 tesseract-runtime check
+{% endif %}
 
 EXPOSE 8000
 ENTRYPOINT ["tesseract-runtime"]

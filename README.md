@@ -1,15 +1,21 @@
-<img src="docs/static/logo-transparent.png" width="128" align="right">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://github.com/pasteurlabs/tesseract-core/blob/main/docs/static/logo-dark.png" width="128" align="right">
+  <img alt="" src="https://github.com/pasteurlabs/tesseract-core/blob/main/docs/static/logo-light.png" width="128" align="right">
+</picture>
+
 
 ### Tesseract Core
 
-Autodiff-native, self-documenting software components for Simulation Intelligence. :package:
+Universal, autodiff-native software components for Simulation Intelligence. :package:
 
 [Read the docs](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/) |
 [Report an issue](https://github.com/pasteurlabs/tesseract-core/issues) |
 [Talk to the community](https://si-tesseract.discourse.group/) |
-[Contribute](CONTRIBUTING.md)
+[Contribute](https://github.com/pasteurlabs/tesseract-core/blob/main/CONTRIBUTING.md)
 
 ---
+
+[![DOI](https://joss.theoj.org/papers/10.21105/joss.08385/status.svg)](https://doi.org/10.21105/joss.08385)
 
 **Tesseract Core** bundles:
 
@@ -25,7 +31,7 @@ Tesseracts provide built-in support for [differentiable programming](https://doc
 ## Quick start
 
 > [!NOTE]
-> Before proceeding, make sure you have a [working installation of Docker](https://docs.docker.com/engine/install/) and a modern Python installation (Python 3.10+).
+> Before proceeding, make sure you have a [working installation of Docker](https://docs.docker.com/engine/install/) and a modern Python installation (Python 3.10+); if you prefer Docker Desktop for your platform, see [our extended installation instructions](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/introduction/installation.html#basic-installation).
 
 1. Install Tesseract Core:
 
@@ -37,23 +43,23 @@ Tesseracts provide built-in support for [differentiable programming](https://doc
 
    ```bash
    $ git clone https://github.com/pasteurlabs/tesseract-core
-   $ tesseract build tesseract-core/examples/vectoradd --tag 0.1.0
+   $ tesseract build tesseract-core/examples/vectoradd
    ```
 
 3. Display its API documentation:
 
    ```bash
-   $ tesseract apidoc vectoradd:0.1.0
+   $ tesseract apidoc vectoradd
    ```
 
 <p align="center">
-<img src="docs/img/apidoc-screenshot.png" width="600">
+<img src="https://github.com/pasteurlabs/tesseract-core/blob/main/docs/img/apidoc-screenshot.png" width="600">
 </p>
 
 4. Run the Tesseract:
 
    ```bash
-   $ tesseract run vectoradd:0.1.0 apply '{"inputs": {"a": [1], "b": [2]}}'
+   $ tesseract run vectoradd apply '{"inputs": {"a": [1], "b": [2]}}'
    {"result":{"object_type":"array","shape":[1],"dtype":"float64","data":{"buffer":[3.0],"encoding":"json"}}}⏎
    ```
 
@@ -65,6 +71,6 @@ Tesseracts provide built-in support for [differentiable programming](https://doc
 
 ## License
 
-Tesseract Core is licensed under the [Apache License 2.0](LICENSE) and is free to use, modify, and distribute (under the terms of the license).
+Tesseract Core is licensed under the [Apache License 2.0](https://github.com/pasteurlabs/tesseract-core/blob/main/LICENSE) and is free to use, modify, and distribute (under the terms of the license).
 
 Tesseract is a registered trademark of Pasteur Labs, Inc. and may not be used without permission.

@@ -1,0 +1,189 @@
+name: Handle release process
+
+# This workflow automates the release process.
+# Only safe to use if the following conditions are met:
+# 1. `main` is protected and requires a PR to merge.
+# 2. Only squash-merging is allowed.
+# 3. PRs are required to be up-to-date with `main` before merging.
+# 4. Everyone is forbidden from creating releases manually.
+
+on:
+  # Case 1: manual trigger -> initiate release process
+  workflow_dispatch:
+
+  # Case 2: release PR is being updated -> update changelog
+  push:
+    branches:
+      - 'bot/release/*'
+
+  # Case 3: release PR is merged -> create a new release
+  pull_request:
+    types:
+      - closed
+    branches:
+      - main
+
+env:
+  GH_TOKEN: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
+
+jobs:
+  trigger-pr:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: "pyproject.toml"
+
+      - name: Install git-cliff
+        run: |
+          pip install git-cliff
+
+      - name: Generate changelog
+        id: generate_changelog
+        run: |
+          git-cliff --output CHANGELOG.md --bump
+          new_version=$(git-cliff --bumped-version)
+          echo "new_version=$new_version" >> $GITHUB_OUTPUT
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v7
+        with:
+            token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
+            committer: PasteurBot <${{ vars.PL_PASTEURBOT_EMAIL }}>
+            author: PasteurBot <${{ vars.PL_PASTEURBOT_EMAIL }}>
+            commit-message: "chore: update changelog"
+            title: "chore: 🚢 release ${{ steps.generate_changelog.outputs.new_version }}"
+            branch: bot/release/${{ steps.generate_changelog.outputs.new_version }}
+            draft: false
+            base: main
+            add-paths: CHANGELOG.md
+            body: |
+              This PR contains the generated changelog for the release ${{ steps.generate_changelog.outputs.new_version }}.
+
+              ⚠️ **Merging this PR will immediately trigger a new release**. ⚠️
+
+              To specify additional release notes, please edit this comment after the following line.
+
+              ---
+
+  update-pr:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/bot/release/')
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: "pyproject.toml"
+
+      - name: Install git-cliff
+        run: |
+          pip install git-cliff
+
+      - name: Generate changelog
+        id: generate_changelog
+        run: |
+          git-cliff --output CHANGELOG.md --bump
+          new_version=$(git-cliff --bumped-version)
+          echo "new_version=$new_version" >> $GITHUB_OUTPUT
+
+      - name: Update PR with changelog
+        run: |
+          git config --global user.name "PasteurBot"
+          git config --global user.email "${{ vars.PL_PASTEURBOT_EMAIL }}"
+
+          git add CHANGELOG.md
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "chore: update changelog before release"
+            git push origin HEAD:${{ github.ref }}
+          fi
+
+  release:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' && github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'bot/release/')
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: "pyproject.toml"
+
+      - name: Install git-cliff
+        run: |
+          pip install git-cliff
+
+      - name: Get version numbers
+        id: get_version
+        run: |
+          current_version=$(gh release view --json tagName --jq '.tagName' || echo "v0.0.0")
+          echo "current_version=$current_version" >> $GITHUB_OUTPUT
+
+          new_version=$(git-cliff --bumped-version)
+          echo "new_version=$new_version" >> $GITHUB_OUTPUT
+
+      - name: Assemble release notes
+        id: release_notes
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          changelog=$(git-cliff --unreleased --bump --latest --strip all)
+          # Strip off first line (which is the version number)
+          changelog=$(printf "%s" "$changelog" | sed '1d')
+
+          # Get custom notes from the PR body
+          custom_notes="$PR_BODY"
+          # Fix line endings
+          custom_notes=$(echo "$custom_notes" | tr -d '\r')
+          # Keep only the part after the first '---' line
+          custom_notes=$(echo "$custom_notes" | sed -n '/^---$/,$p' | sed '1d')
+          # Strip leading / trailing whitespace
+          custom_notes=$(echo "$custom_notes" | sed 's/^[ \t]*//;s/[ \t]*$//')
+
+          # Create the release notes file
+          touch /tmp/notes.md
+          echo "# Release ${{ steps.get_version.outputs.new_version }}" > /tmp/notes.md
+          if [[ -n "$custom_notes" ]]; then
+            printf "%s\n\n" "$custom_notes" >> /tmp/notes.md
+          fi
+          printf "## What's Changed\n%s\n" "$changelog" >> /tmp/notes.md
+
+          # Append link to full diff
+          echo -e "\n**Full diff**: https://github.com/${{ github.repository }}/compare/${{ steps.get_version.outputs.current_version }}...${{ steps.get_version.outputs.new_version }}" >> /tmp/notes.md
+
+          echo "release_note_file=/tmp/notes.md" >> $GITHUB_OUTPUT
+
+      - name: Create new release
+        run: |
+          gh release create "${{ steps.get_version.outputs.new_version }}" \
+            --title "${{ steps.get_version.outputs.new_version }}" \
+            --notes-file "${{ steps.release_notes.outputs.release_note_file }}" \
+            --target ${{ github.event.pull_request.merge_commit_sha }} \
+            --latest

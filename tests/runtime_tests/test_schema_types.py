@@ -38,11 +38,11 @@ scalar_int = np.int32(42)
 
 def test_generic_array_type_repr():
     typ = Array[(2, 3), Int64]
-    assert repr(typ) == "typing.Annotated[numpy.ndarray, Array[(2, 3), 'int64']]"
+    assert repr(typ) == "Array[(2, 3), 'int64']"
 
 
 def test_flag_propagation():
-    get_flags = lambda model, field: model.model_fields[field].metadata[0].flags
+    get_flags = lambda model, field: model.model_fields[field].annotation.flags
     assert get_flags(MyModel, "array_int") == ()
     assert get_flags(MyModel, "array_float") == (ArrayFlags.DIFFERENTIABLE,)
     assert get_flags(MyModel, "array_bool") == ()
@@ -163,11 +163,10 @@ def test_json_binref_roundtrip(tmpdir):
     for field in model.model_fields:
         assert np.array_equal(getattr(roundtrip, field), getattr(model, field))
 
-    with pytest.raises(ValidationError, match="relative path but no base_dir"):
+    # when we don't supply a base_dir, we default to the current working directory
+    # which is not where the files are, so we expect an error
+    with pytest.raises(ValidationError, match="No such file or directory"):
         model.model_validate_json(serialized)
-
-    with pytest.raises(ValueError, match="base_dir"):
-        model.model_dump_json(context={"array_encoding": "binref"})
 
 
 def test_python_dump_array_encoding():
@@ -311,29 +310,24 @@ def test_json_schema(mode):
 def test_json_schema_flags_and_typenames():
     schema = MyModel.model_json_schema()
 
-    array_int_typeref = schema["properties"]["array_int"]["$ref"]
-    assert array_int_typeref == "#/$defs/EncodedArrayModel__2_3__int64__noflags"
-    array_int_def = schema["$defs"][array_int_typeref.split("/")[-1]]
+    def _maybe_resolve_ref(subschema):
+        # types may be inlined or referenced
+        if "$ref" in subschema:
+            ref = subschema["$ref"]
+            assert ref.startswith("#/$defs/")
+            return schema["$defs"][ref.split("/")[-1]]
+        return subschema
+
+    array_int_def = _maybe_resolve_ref(schema["properties"]["array_int"])
     assert array_int_def["array_flags"] == []
 
-    array_float_typeref = schema["properties"]["array_float"]["$ref"]
-    assert (
-        array_float_typeref
-        == "#/$defs/EncodedArrayModel__any_3__float64__DIFFERENTIABLE"
-    )
-    array_float_def = schema["$defs"][array_float_typeref.split("/")[-1]]
+    array_float_def = _maybe_resolve_ref(schema["properties"]["array_float"])
     assert array_float_def["array_flags"] == ["DIFFERENTIABLE"]
 
-    array_bool_typeref = schema["properties"]["array_bool"]["$ref"]
-    assert array_bool_typeref == "#/$defs/EncodedArrayModel__anyrank__bool__noflags"
-    array_bool_def = schema["$defs"][array_bool_typeref.split("/")[-1]]
+    array_bool_def = _maybe_resolve_ref(schema["properties"]["array_bool"])
     assert array_bool_def["array_flags"] == []
 
-    scalar_int_typeref = schema["properties"]["scalar_int"]["$ref"]
-    assert (
-        scalar_int_typeref == "#/$defs/EncodedArrayModel__scalar__int32__DIFFERENTIABLE"
-    )
-    scalar_int_def = schema["$defs"][scalar_int_typeref.split("/")[-1]]
+    scalar_int_def = _maybe_resolve_ref(schema["properties"]["scalar_int"])
     assert scalar_int_def["array_flags"] == ["DIFFERENTIABLE"]
 
 

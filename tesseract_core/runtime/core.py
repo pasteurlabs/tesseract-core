@@ -1,11 +1,14 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-import importlib
-from collections.abc import Callable
+import importlib.util
+import os
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
+from io import TextIOBase
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Union
+from typing import Any, TextIO, Union
 
 from pydantic import BaseModel
 
@@ -15,6 +18,34 @@ from .schema_generation import (
     create_apply_schema,
     create_autodiff_schema,
 )
+
+
+@contextmanager
+def redirect_fd(
+    from_: TextIO, to_: Union[TextIO, int]
+) -> Generator[TextIO, None, None]:
+    """Redirect a file descriptor at OS level.
+
+    Args:
+        from_: The file object to redirect from.
+        to_: The file descriptor or file object to redirect to.
+
+    Yields:
+        A writable file object connected to the original file descriptor.
+    """
+    orig_fd = os.dup(from_.fileno())
+    from_.flush()
+    if isinstance(to_, TextIOBase):
+        to_ = to_.fileno()
+    assert isinstance(to_, int)
+    os.dup2(to_, from_.fileno())
+    orig_fd_file = os.fdopen(orig_fd, "w", closefd=True)
+    try:
+        yield orig_fd_file
+    finally:
+        from_.flush()
+        os.dup2(orig_fd, from_.fileno())
+        orig_fd_file.close()
 
 
 def load_module_from_path(path: Union[Path, str]) -> ModuleType:
@@ -193,18 +224,6 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
         return {"status": "ok"}
 
     endpoints.append(health)
-
-    def input_schema() -> dict[str, Any]:
-        """Get input schema for tesseract apply function."""
-        return ApplyInputSchema.model_json_schema()
-
-    endpoints.append(input_schema)
-
-    def output_schema() -> dict[str, Any]:
-        """Get output schema for tesseract apply function."""
-        return ApplyOutputSchema.model_json_schema()
-
-    endpoints.append(output_schema)
 
     if "abstract_eval" in supported_functions:
         AbstractEvalInputSchema, AbstractEvalOutputSchema = create_abstract_eval_schema(

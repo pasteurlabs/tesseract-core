@@ -10,4 +10,3 @@ comment:
   hide_project_coverage: false
 ignore:
   - "tesseract_core/_version.py"
-  - "tesseract_core/**/vendor/**/*.py"

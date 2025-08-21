@@ -1,16 +1,17 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import sys
 from abc import ABCMeta
 from enum import IntEnum
 from functools import partial
 from typing import (
+    TYPE_CHECKING,
     Annotated,
     Any,
     Optional,
     Union,
     get_args,
-    get_origin,
 )
 
 import numpy as np
@@ -32,74 +33,15 @@ from tesseract_core.runtime.array_encoding import (
     python_to_array,
 )
 
-AnnotatedType = type(Annotated[Any, Any])
-EllipsisType = type(Ellipsis)
+if sys.version_info < (3, 10):
+    # TypeAlias is not available in Python < 3.10
+    AnnotatedType = type(Annotated[Any, Any])
+    EllipsisType = type(Ellipsis)
+else:
+    from typing import TypeAlias
 
-
-def _ensure_valid_shapedtype(expected_shape: Any, expected_dtype: Any) -> tuple:
-    if not isinstance(expected_shape, (tuple, EllipsisType)):
-        raise ValueError(
-            "Shape in Array[<shape>, <dtype>] must be a tuple or '...' (ellipsis)"
-        )
-
-    if isinstance(expected_shape, tuple):
-        for dim in expected_shape:
-            if dim is not None and not isinstance(dim, int):
-                raise ValueError(
-                    "Shape values in Array[<shape>, <dtype>] must be integers or None"
-                )
-
-    if is_array_annotation(expected_dtype):
-        expected_dtype = expected_dtype.__metadata__[0].expected_dtype
-
-    allowed_dtypes = get_args(AllowedDtypes)
-
-    if expected_dtype not in allowed_dtypes and expected_dtype is not None:
-        raise ValueError(
-            f"Invalid dtype in Array[<shape>, <dtype>]: {expected_dtype} "
-            f"(must be one of {allowed_dtypes} or a scalar Array type like, Array[(), Int32])"
-        )
-    return expected_shape, expected_dtype
-
-
-class ShapeDType(BaseModel):
-    """Data structure describing an array's shape and data type."""
-
-    shape: tuple[int, ...]
-    dtype: AllowedDtypes
-    # Ignore extra fields in the model, to allow encoded arrays to be passed
-    model_config = ConfigDict(extra="ignore")
-
-    def __class_getitem__(
-        cls,
-        key: tuple[
-            Union[tuple[Optional[int], ...], EllipsisType],
-            Union[AnnotatedType, str, None],
-        ],
-    ) -> AnnotatedType:
-        expected_shape, expected_dtype = _ensure_valid_shapedtype(*key)
-
-        def validate(shapedtype: ShapeDType) -> ShapeDType:
-            """Validator to check if the shape and dtype match the expected values."""
-            if isinstance(shapedtype, ShapeDType):
-                shape = shapedtype.shape
-                if expected_shape is Ellipsis:
-                    return shapedtype
-                for actual, expected in zip(shape, expected_shape, strict=True):
-                    if expected is not None and actual != expected:
-                        raise ValueError(
-                            f"Expected shape: {expected_shape}. Found: {shape}."
-                        )
-            return shapedtype
-
-        return Annotated[ShapeDType, AfterValidator(validate)]
-
-    @classmethod
-    def from_array_annotation(cls, obj: AnnotatedType) -> AnnotatedType:
-        """Create a ShapeDType from an array annotation."""
-        shape = obj.__metadata__[0].expected_shape
-        dtype = obj.__metadata__[0].expected_dtype
-        return cls[shape, dtype]
+    AnnotatedType: TypeAlias = type(Annotated[Any, Any])
+    EllipsisType: TypeAlias = type(Ellipsis)
 
 
 class ArrayFlags(IntEnum):
@@ -120,6 +62,10 @@ class ArrayAnnotationType(ABCMeta):
         MyArray[(2, 3), 'float32']
     """
 
+    expected_shape: Union[tuple[int, ...], EllipsisType]
+    expected_dtype: str
+    flags: tuple[ArrayFlags]
+
     def __repr__(cls) -> str:
         return f"{cls.__name__}[{cls.expected_shape!r}, {cls.expected_dtype!r}]"
 
@@ -133,11 +79,6 @@ def safe_issubclass(obj: Any, baseclass: type[object]) -> bool:
         return issubclass(obj, baseclass)
     except TypeError:
         return False
-
-
-def _is_annotated(obj: Any) -> bool:
-    """Check if an object is typing.Annotated or typing_extensions.Annotated."""
-    return get_origin(obj) is Annotated
 
 
 class PydanticArrayAnnotation(metaclass=ArrayAnnotationType):
@@ -295,9 +236,9 @@ class Array:
         cls,
         key: tuple[
             Union[tuple[Optional[int], ...], EllipsisType],
-            Union[AnnotatedType, str, None],
+            Union[ArrayAnnotationType, str, None],
         ],
-    ) -> AnnotatedType:
+    ) -> ArrayAnnotationType:
         """Create a new type annotation based on the given shape and dtype."""
         expected_shape, expected_dtype = _ensure_valid_shapedtype(*key)
         classvars = {
@@ -307,16 +248,7 @@ class Array:
             "__module__": cls.__module__,
         }
         model = type(cls.__name__, (PydanticArrayAnnotation,), classvars)
-        return Annotated[np.ndarray, model]
-
-
-def is_array_annotation(obj: Any) -> bool:
-    """Check if an object is a Pydantic array type annotation."""
-    if _is_annotated(obj):
-        metadata = obj.__metadata__[0]
-        if safe_issubclass(metadata, PydanticArrayAnnotation):
-            return True
-    return False
+        return model
 
 
 class Differentiable:
@@ -327,25 +259,113 @@ class Differentiable:
         ...     array: Differentiable[Array[(None, 3), Float64]]
     """
 
-    def __class_getitem__(cls, key: Any) -> AnnotatedType:
+    def __class_getitem__(cls, key: Any) -> ArrayAnnotationType:
         """Mark wrapped array type as differentiable."""
-        if not is_array_annotation(key):
+        if not safe_issubclass(key, PydanticArrayAnnotation):
             raise ValueError("Differentiable can only be applied to Array types")
 
-        arr = key.__metadata__[0]
+        arr = key
         # Create a new array type with the DIFFERENTIABLE flag, to not modify the original type in-place
         newarr = type(
             arr.__name__, (arr,), {"flags": (*arr.flags, ArrayFlags.DIFFERENTIABLE)}
         )
-        return Annotated[key.__origin__, newarr]
+        return newarr
 
 
 def is_differentiable(obj: Any) -> bool:
     """Check if an object is a Differentiable array type annotation."""
-    if is_array_annotation(obj):
-        return ArrayFlags.DIFFERENTIABLE in obj.__metadata__[0].flags
+    if not safe_issubclass(obj, PydanticArrayAnnotation):
+        return False
+    return ArrayFlags.DIFFERENTIABLE in obj.flags
 
-    return False
+
+def _ensure_valid_shapedtype(expected_shape: Any, expected_dtype: Any) -> tuple:
+    if not isinstance(expected_shape, (tuple, EllipsisType)):
+        raise ValueError(
+            "Shape in Array[<shape>, <dtype>] must be a tuple or '...' (ellipsis)"
+        )
+
+    if isinstance(expected_shape, tuple):
+        for dim in expected_shape:
+            if dim is not None and not isinstance(dim, int):
+                raise ValueError(
+                    "Shape values in Array[<shape>, <dtype>] must be integers or None"
+                )
+
+    if safe_issubclass(expected_dtype, PydanticArrayAnnotation):
+        expected_dtype = expected_dtype.expected_dtype
+
+    allowed_dtypes = get_args(AllowedDtypes)
+
+    if expected_dtype not in allowed_dtypes and expected_dtype is not None:
+        raise ValueError(
+            f"Invalid dtype in Array[<shape>, <dtype>]: {expected_dtype} "
+            f"(must be one of {allowed_dtypes} or a scalar Array type like, Array[(), Int32])"
+        )
+    return expected_shape, expected_dtype
+
+
+class ShapeDType(BaseModel):
+    """Data structure describing an array's shape and data type."""
+
+    shape: tuple[int, ...]
+    dtype: AllowedDtypes
+    # Ignore extra fields in the model, to allow encoded arrays to be passed
+    model_config = ConfigDict(extra="ignore")
+
+    def __class_getitem__(
+        cls,
+        key: tuple[
+            Union[tuple[Optional[int], ...], EllipsisType],
+            Union[AnnotatedType, str, None],
+        ],
+    ) -> AnnotatedType:
+        expected_shape, expected_dtype = _ensure_valid_shapedtype(*key)
+
+        def validate(shapedtype: ShapeDType) -> ShapeDType:
+            """Validator to check if the shape and dtype match the expected values."""
+            if isinstance(shapedtype, ShapeDType):
+                shape = shapedtype.shape
+                if expected_shape is Ellipsis:
+                    return shapedtype
+
+                # TODO: replace this check with `zip(... strict=True)`
+                # once we stop supporting 3.9
+                if len(shape) != len(expected_shape):
+                    raise ValueError(
+                        f"Expected shape: {expected_shape}. Found: {shape}."
+                    )
+
+                for actual, expected in zip(shape, expected_shape):
+                    if expected is not None and actual != expected:
+                        raise ValueError(
+                            f"Expected shape: {expected_shape}. Found: {shape}."
+                        )
+            return shapedtype
+
+        return Annotated[ShapeDType, AfterValidator(validate)]
+
+    @classmethod
+    def from_array_type(cls, obj: ArrayAnnotationType) -> AnnotatedType:
+        """Create a ShapeDType from an array annotation."""
+        shape = obj.expected_shape
+        dtype = obj.expected_dtype
+        return cls[shape, dtype]
+
+
+if TYPE_CHECKING:
+    # HACK: When type checking, we pretend that Array is a subclass of numpy.ndarray.
+    # This gives IDEs and type checkers the ability to infer types correctly
+    # when using Array annotations.
+    BaseArray: TypeAlias = Array
+
+    class Array(np.typing.NDArray, BaseArray):  # noqa: D101
+        pass
+
+    BaseDifferentiable: TypeAlias = Differentiable
+
+    class Differentiable(np.typing.NDArray, BaseDifferentiable):  # noqa: D101
+        pass
 
 
 # Export concrete scalar types

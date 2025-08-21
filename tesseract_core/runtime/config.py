@@ -7,14 +7,22 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, FilePath
 
+from tesseract_core.runtime.file_interactions import supported_format_type
+
 
 class RuntimeConfig(BaseModel):
     """Available runtime configuration."""
 
     api_path: FilePath = Path("tesseract_api.py")
     name: str = "Tesseract"
-    version: str = "0+unknown"
+    description: str = ""
+    version: str = "unknown"
     debug: bool = False
+    input_path: str = "."
+    output_path: str = "."
+    output_format: supported_format_type = "json"
+    output_file: str = ""
+    mlflow_tracking_uri: str = ""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -32,16 +40,23 @@ def update_config(**kwargs: Any) -> None:
         if env_key in os.environ:
             conf_settings[field] = os.environ[env_key]
 
-    conf_settings.update(kwargs)
+    for field in _config_overrides:
+        conf_settings[field] = getattr(_current_config, field)
 
+    conf_settings.update(kwargs)
     config = RuntimeConfig(**conf_settings)
+
+    _config_overrides.update(set(conf_settings.keys()))
     _current_config = config
 
 
 _current_config = None
-update_config()
+_config_overrides = set()
 
 
 def get_config() -> RuntimeConfig:
     """Return the current runtime configuration."""
+    if _current_config is None:
+        update_config()
+    assert _current_config is not None
     return _current_config

@@ -14,13 +14,12 @@ import boto3
 import fsspec
 import numpy as np
 import pytest
-from click.testing import CliRunner
 from moto.server import ThreadedMotoServer
+from typer.testing import CliRunner
 
-import tesseract_core.runtime
 from tesseract_core.runtime.cli import _add_user_commands_to_cli
-from tesseract_core.runtime.cli import tesseract_runtime as cli_cmd
-from tesseract_core.runtime.file_interactions import load_bytes, output_to_bytes
+from tesseract_core.runtime.cli import app as cli_cmd
+from tesseract_core.runtime.file_interactions import output_to_bytes
 
 test_input = {
     "a": [1.0, 2.0, 3.0],
@@ -152,25 +151,14 @@ def test_http_server(free_port):
 @pytest.fixture
 def cli():
     new_cmd = copy.deepcopy(cli_cmd)
-    return _add_user_commands_to_cli(new_cmd, out_stream=None)
+    _add_user_commands_to_cli(new_cmd, out_stream=None)
+    return new_cmd
 
 
 def test_invocation_no_args_prints_usage(cli, cli_runner):
-    result = cli_runner.invoke(cli, env={"NO_COLOR": "true"})
-    assert result.exit_code == 2, result.stdout
-    assert "Usage: tesseract-runtime" in result.stderr
-
-
-def test_input_val_schema_command(cli, cli_runner):
-    result = cli_runner.invoke(cli, ["input-schema"], catch_exceptions=False)
-    assert result.exit_code == 0, result.stderr
-    assert "properties" in result.stdout
-
-
-def test_output_schema_command(cli, cli_runner):
-    result = cli_runner.invoke(cli, ["output-schema"], catch_exceptions=False)
-    assert result.exit_code == 0, result.stderr
-    assert "properties" in result.stdout
+    result = cli_runner.invoke(cli, env={"TERM": "dumb"})
+    assert result.exit_code == 0, result.stdout
+    assert "Usage: tesseract-runtime" in result.stdout
 
 
 def test_openapi_schema_command(cli, cli_runner):
@@ -236,17 +224,15 @@ def test_apply_command_binref(cli, cli_runner, dummy_tesseract_module, tmpdir):
         cli,
         ["apply", json.dumps({"inputs": test_input_binref})],
         catch_exceptions=False,
-        env={"TERM": "true", "COLUMNS": "9999"},
+        env={"TERM": "dumb", "COLUMNS": "1000"},
     )
     assert result.exit_code == 2
     assert "Value error" in result.stderr
-    assert "binref encoded with a relative path" in result.stderr
+    assert "Failed to decode buffer as binref" in result.stderr
 
 
-def test_apply_command_noenv(
-    cli, cli_runner, dummy_tesseract_module, dummy_tesseract_noenv
-):
-    # ensure dummy_tesseract_noenv properly unset TESSERACT_API_PATH
+def test_apply_command_noenv(cli, cli_runner, dummy_tesseract_module, monkeypatch):
+    monkeypatch.delenv("TESSERACT_API_PATH", raising=False)
     assert "TESSERACT_API_PATH" not in os.environ
     inputs = dummy_tesseract_module.InputSchema(**test_input).model_dump_json(
         context={"array_encoding": "base64"}
@@ -264,17 +250,12 @@ def test_apply_command_noenv(
     assert json.loads(result.stdout) == json.loads(expected)
 
 
-@pytest.mark.parametrize(
-    "input_format", ["json", "msgpack", "json+base64", "json+binref"]
-)
+@pytest.mark.parametrize("input_format", ["json", "json+base64", "json+binref"])
 def test_input_vals_from_local_file(
     cli, cli_runner, tmpdir, dummy_tesseract_module, input_format
 ):
     """Test the apply command with input arguments from a local file."""
-    if "+" in input_format:
-        container = input_format.split("+")[0]
-    else:
-        container = input_format
+    container = input_format.split("+")[-1]
 
     a_file = tmpdir / f"a.{container}"
     inputs = {"inputs": dummy_tesseract_module.InputSchema(**test_input)}
@@ -289,33 +270,36 @@ def test_input_vals_from_local_file(
 
     result = cli_runner.invoke(
         cli,
-        ["apply", f"@{a_file}"],
+        ["--input-path", tmpdir, "apply", f"@{a_file}"],
         catch_exceptions=False,
     )
     assert result.exit_code == 0, result.stderr
 
+    result = result.stdout
+
     test_input_val = dummy_tesseract_module.InputSchema.model_validate(test_input)
     expected = dummy_tesseract_module.apply(test_input_val).model_dump_json()
-    assert json.loads(result.stdout) == json.loads(expected)
+    assert json.loads(result) == json.loads(expected)
 
 
-@pytest.mark.parametrize(
-    "output_format", ["json", "msgpack", "json+base64", "json+binref"]
-)
+@pytest.mark.parametrize("output_format", ["json", "json+base64", "json+binref"])
 def test_outputs_to_local_file(
     cli, cli_runner, tmpdir, dummy_tesseract_module, output_format
 ):
     """Test the apply command writing outputs to a local file."""
     tmpdir = Path(tmpdir)
+    container = output_format.split("+")[0]
     result = cli_runner.invoke(
         cli,
         [
-            "apply",
-            json.dumps({"inputs": test_input}),
             "--output-path",
             tmpdir,
             "--output-format",
             output_format,
+            "--output-file",
+            f"results.{container}",
+            "apply",
+            json.dumps({"inputs": test_input}),
         ],
         catch_exceptions=False,
     )
@@ -323,7 +307,7 @@ def test_outputs_to_local_file(
 
     test_input_val = dummy_tesseract_module.InputSchema.model_validate(test_input)
 
-    container = output_format.split("+")[0]
+    load_bytes = lambda x, fmt: json.loads(x.decode("utf-8"))
 
     expected = dummy_tesseract_module.apply(test_input_val)
     expected = output_to_bytes(expected, output_format, base_dir=tmpdir)
@@ -353,9 +337,6 @@ def test_outputs_to_local_file(
 
     if container == "json":
         assert result == expected
-    elif container == "msgpack":
-        # result contains numpy arrays, so we need to compare them separately
-        assert (result["result"] == expected["result"]).all()
     else:
         # Unreachable
         raise AssertionError(f"Unexpected output format: {output_format}")
@@ -446,14 +427,14 @@ def test_optional_arguments_stay_optional_in_cli(
 
 def test_apply_fails_if_required_args_missing(cli, cli_runner):
     result = cli_runner.invoke(cli, ["apply", json.dumps({"inputs": {"a": [1, 2, 3]}})])
-    print("Result:", result)
-    print(result.exit_code, result.stdout, result.stderr)
     assert result.exit_code == 2
     assert "missing" in result.stderr
 
 
 def test_stdout_redirect_cli():
     """Ensure that stdout is redirected to stderr during normal Python execution."""
+    import tesseract_core.runtime.cli
+
     # Use subprocess to ensure that CLI entrypoint is used
     result = subprocess.run(
         [sys.executable, tesseract_core.runtime.cli.__file__, "--help"],
@@ -464,17 +445,23 @@ def test_stdout_redirect_cli():
     assert "Usage:" in result.stderr.decode("utf-8")
 
 
-def test_stdout_redirect_subprocess(tmpdir):
-    """Ensure that stdout is redirected to stderr even in non-Python subprocesses."""
-    # Use subprocess since pytest messes with stdout/stderr
+@pytest.mark.parametrize("target", ["file", "stderr"])
+def test_stdout_redirect_subprocess(tmpdir, target):
+    """Ensure that stdout is redirected to stderr / files even in non-Python subprocesses."""
+    if target == "file":
+        target_stream = "f"
+    else:
+        target_stream = "sys.stderr"
+
     testscript = [
         # Print messages that signify where the output is supposed to go
         "import os",
         "import sys",
-        "from tesseract_core.runtime.cli import stdout_to_stderr",
+        "from tesseract_core.runtime.core import redirect_fd",
         "print('stdout', file=sys.stdout)",
         "print('stderr', file=sys.stderr)",
-        "with stdout_to_stderr() as orig_stdout:",
+        f"with open(\"{tmpdir / 'test_output.log'}\", 'w') as f:",
+        f"  with redirect_fd(sys.stdout, {target_stream}) as orig_stdout:",
         "    os.system('echo stderr')",
         "    print('stderr', file=sys.stdout)",
         "    print('stderr', file=sys.stderr)",
@@ -487,10 +474,20 @@ def test_stdout_redirect_subprocess(tmpdir):
     with open(testscript_path, "w") as f:
         f.write("\n".join(testscript))
 
+    # Use subprocess since pytest messes with stdout/stderr
     result = subprocess.run([sys.executable, testscript_path], capture_output=True)
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert result.stdout == b"stdout\n" * 4
-    assert result.stderr == b"stderr\n" * 5
+
+    if target == "file":
+        assert result.stderr == b"stderr\n" * 3
+        # Find the log file
+        log_file = tmpdir / "test_output.log"
+        with open(log_file, "rb") as f:
+            log_content = f.read()
+        assert log_content == b"stderr\n" * 2
+    else:
+        assert result.stderr == b"stderr\n" * 5
 
 
 def test_suggestion_on_misspelled_command(cli, cli_runner):

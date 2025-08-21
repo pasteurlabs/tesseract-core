@@ -1,6 +1,6 @@
 [project]
 name = "tesseract-core"
-description = "A toolkit for re-usable, autodiff-native software components."
+description = "A toolkit for universal, autodiff-native software components."
 readme = "README.md"
 authors = [
     {name = "The Tesseract team @ Pasteur Labs + OSS contributors", email = "info@simulation.science"},
@@ -14,7 +14,7 @@ dependencies = [
     "pyyaml",
     "pydantic",
     "numpy",
-    "requests",
+    "requests>=2.32.4",
     "pip",
 ]
 dynamic = [
@@ -30,7 +30,7 @@ Homepage = "https://github.com/pasteurlabs/tesseract-core"
 Documentation = "https://docs.pasteurlabs.ai/projects/tesseract-core/latest"
 
 [build-system]
-requires = ["hatchling", "hatch-vcs", "toml"]
+requires = ["hatchling", "hatch-vcs", "setuptools-scm!=9.0.0", "toml"]
 build-backend = "hatchling.build"
 
 [tool.hatch.version]

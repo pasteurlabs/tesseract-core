@@ -45,7 +45,7 @@ $ tesseract serve -p 8080 helloworld
  [i] Container ID: 2587deea2a2efb6198913f757772560d9c64cf8621a6d1a54aa3333a7b4bcf62
  [i] Name: tesseract-uum375qt6dj5-sha256-9by9ahsnsza2-1
  [i] Entrypoint: ['tesseract-runtime', 'serve']
- [i] View Tesseract: http://localhost:56489/docs
+ [i] View Tesseract: http://127.0.0.1:56489/docs
  [i] Docker Compose Project ID, use it with 'tesseract teardown' command: tesseract-u7um375qt6dj5
 {"project_id": "tesseract-u7um375qt6dj5", "containers": [{"name": "tesseract-uum375qt6dj5-sha256-9by9ahsnsza2-1", "port": "8080"}]}%
 
@@ -53,7 +53,7 @@ $ # The port at which your Tesseract will be served is random if `--port` is not
 $ # specify the one you received from `tesseract serve` output in the next command.
 $ curl -d '{"inputs": {"name": "Osborne"}}' \
        -H "Content-Type: application/json" \
-       http://localhost:8080/apply
+       http://127.0.0.1:8080/apply
 {"greeting":"Hello Osborne!"}
 
 $ tesseract teardown tesseract-9hj8fyxrx073
@@ -86,7 +86,7 @@ $ tesseract run helloworld --help
 ```bash
 $ tesseract apidoc helloworld
  [i] Waiting for Tesseract containers to start ...
- [i] Serving OpenAPI docs for Tesseract helloworld at http://localhost:59569/docs
+ [i] Serving OpenAPI docs for Tesseract helloworld at http://127.0.0.1:59569/docs
  [i]   Press Ctrl+C to stop
 ```
 :::
@@ -115,7 +115,7 @@ These files are all that's needed to define a Tesseract.
 ### `tesseract_api.py`
 
  The `tesseract_api.py` file defines the Tesseract's input and output schemas, and the functions that are being called when we invoke `tesseract run <funcname>`. These are,
- `apply`, `jacobian`, `jacobian_vector_product`, and `vector_jacobian_product`. Out of all of the endpoints you
+ `apply`, `abstract_eval`, `jacobian`, `jacobian_vector_product`, and `vector_jacobian_product` (see [endpoints](../api/endpoints.md)). Out of all of the endpoints you
  can implement, only `apply` is required for a Tesseract to work.
 
 ```{literalinclude} ../../../examples/helloworld/tesseract_api.py
@@ -128,6 +128,10 @@ These files are all that's needed to define a Tesseract.
 
 ```{literalinclude} ../../../examples/helloworld/tesseract_api.py
 :pyobject: apply
+```
+
+```{tip}
+For a Tesseract that has all optional endpoints implemented, check out the [Univariate example](../examples/building-blocks/univariate.md).
 ```
 
 (quickstart-tr-config)=

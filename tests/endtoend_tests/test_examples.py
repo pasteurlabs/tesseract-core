@@ -11,8 +11,6 @@ Add test cases for specific unit Tesseracts to the TEST_CASES dictionary.
 
 import base64
 import json
-import re
-import time
 import traceback
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,37 +19,13 @@ import numpy as np
 import numpy.typing as npt
 import pytest
 import requests
-from common import build_tesseract, image_exists
+from common import build_tesseract, encode_array, image_exists
 from typer.testing import CliRunner
-
-
-# Only necessary when matching multi-word string
-def format_stderr(stderr: str) -> str:
-    no_color = re.sub(r"\x1b\[[0-9;]*m", "", stderr)
-    return " ".join(re.sub(r"[^\w \d_.,!?:;\-]+", " ", no_color).split())
 
 
 def json_normalize(obj: str):
     """Normalize JSON str for comparison."""
     return json.dumps(json.loads(obj), separators=(",", ":"))
-
-
-def encode_array(arr, as_json=False):
-    """Helper function to encode a numpy array into Tesseract-friendly format."""
-    arr = np.asarray(arr)
-    out = {
-        "object_type": "array",
-        "shape": arr.shape,
-        "dtype": arr.dtype.name,
-        "data": {
-            "buffer": base64.b64encode(arr.tobytes()).decode(),
-            "encoding": "base64",
-        },
-    }
-    if as_json:
-        return json.dumps(out, separators=(",", ":"))
-
-    return out
 
 
 def assert_contains_array_allclose(
@@ -108,6 +82,8 @@ class Config:
     test_with_random_inputs: bool = False
     sample_requests: list[SampleRequest] = None
     volume_mounts: list[str] = None
+    input_path: str = None
+    output_path: str = None
 
 
 # Add config and test cases for specific unit Tesseracts here
@@ -708,7 +684,7 @@ TEST_CASES = {
                 endpoint="apply",
                 payload={
                     "inputs": {
-                        "data": "@/mnt/data/sample_*.json",
+                        "data": "@/tesseract/input_data/sample_*.json",
                     },
                 },
                 output_contains_pattern=[
@@ -719,12 +695,12 @@ TEST_CASES = {
                 endpoint="check-gradients",
                 payload={
                     "inputs": {
-                        "data": "@/mnt/data/sample_*.json",
+                        "data": "@/tesseract/input_data/sample_*.json",
                     },
                 },
             ),
         ],
-        volume_mounts=["testdata:/mnt/data:ro"],
+        volume_mounts=["testdata:/tesseract/input_data:ro"],
     ),
     "conda": Config(
         test_with_random_inputs=False,
@@ -734,6 +710,54 @@ TEST_CASES = {
                 payload={"inputs": {"message": "Hey!"}},
                 output_contains_pattern=[r'{"cowsays":"  ____\n| Hey! |\n  ====\n'],
             )
+        ],
+    ),
+    "required_files": Config(
+        test_with_random_inputs=False,
+        sample_requests=[
+            SampleRequest(
+                endpoint="apply",
+                payload={"inputs": {}},
+                output_contains_pattern=[r'{"a":1.0,"b":100.0}'],
+            ),
+        ],
+        input_path="input",
+    ),
+    "filereference": Config(
+        test_with_random_inputs=False,
+        sample_requests=[
+            SampleRequest(
+                endpoint="apply",
+                payload={
+                    "inputs": {
+                        "data": [
+                            "sample_0.json",
+                            "sample_1.json",
+                            "sample_2.json",
+                            "sample_3.json",
+                            "sample_4.json",
+                            "sample_5.json",
+                            "sample_6.json",
+                            "sample_7.json",
+                            "sample_8.json",
+                            "sample_9.json",
+                        ]
+                    }
+                },
+                output_contains_pattern=["sample_0.copy"],
+            )
+        ],
+        input_path="testdata",
+        output_path="output",
+    ),
+    "metrics": Config(
+        test_with_random_inputs=True,
+        sample_requests=[
+            SampleRequest(
+                endpoint="apply",
+                payload={"inputs": {}},
+                # Just verify it runs without error - output will be empty
+            ),
         ],
     ),
 }
@@ -837,14 +861,27 @@ def test_unit_tesseract_endtoend(
         [
             "run",
             img_name,
-            "input-schema",
+            "openapi-schema",
         ],
         catch_exceptions=False,
     )
     assert result.exit_code == 0, result.output
-    input_schema = result.output
+    openapi_schema = json.loads(result.output)
 
-    mount_args = []
+    def _input_schema_from_openapi(openapi_schema):
+        input_schema = openapi_schema["components"]["schemas"]["ApplyInputSchema"]
+        # For some reason, jsf can't handle #/components/schemas/<x> references,
+        # so we convert them to #$defs/<x>
+        input_schema.update({"$defs": openapi_schema["components"]["schemas"]})
+        input_schema["$defs"].pop("ApplyInputSchema", None)
+        input_schema = json.loads(
+            json.dumps(input_schema).replace("components/schemas", "$defs")
+        )
+        return input_schema
+
+    input_schema = _input_schema_from_openapi(openapi_schema)
+
+    mount_args, io_args = [], []
 
     if unit_tesseract_config.volume_mounts:
         for mnt in unit_tesseract_config.volume_mounts:
@@ -856,8 +893,23 @@ def test_unit_tesseract_endtoend(
             mnt = ":".join([str(local_path), *other])
             mount_args.extend(["--volume", mnt])
 
+    if unit_tesseract_config.input_path:
+        io_args.extend(
+            [
+                "--input-path",
+                str(unit_tesseract_path / unit_tesseract_config.input_path),
+            ]
+        )
+    if unit_tesseract_config.output_path:
+        io_args.extend(
+            [
+                "--output-path",
+                str(unit_tesseract_path / unit_tesseract_config.output_path),
+            ]
+        )
+
     if unit_tesseract_config.test_with_random_inputs:
-        random_input = example_from_json_schema(json.loads(input_schema))
+        random_input = example_from_json_schema(input_schema)
 
         result = cli_runner.invoke(
             app,
@@ -867,6 +919,7 @@ def test_unit_tesseract_endtoend(
                 *mount_args,
                 "apply",
                 json.dumps(random_input),
+                *io_args,
             ],
             catch_exceptions=False,
         )
@@ -891,11 +944,12 @@ def test_unit_tesseract_endtoend(
                     *mount_args,
                     cli_cmd,
                     json.dumps(request.payload),
+                    *io_args,
                     "--output-format",
                     request.output_format,
                 ]
 
-            result = cli_runner.invoke(app, args)
+            result = cli_runner.invoke(app, args, env={"TERM": "dumb"})
             if request.expected_status_code == 200:
                 print_debug_info(result)
                 assert result.exit_code == 0, result.exception
@@ -906,12 +960,10 @@ def test_unit_tesseract_endtoend(
                     # Result is JSON output
                     output = json_normalize(result.output)
             else:
-                assert result.exit_code != 0
                 # Result is an error message
+                assert result.exit_code != 0
+                assert result.exc_info is not None
                 output = "".join(traceback.format_exception(*result.exc_info))
-                # Click with rich adds color codes and boxes to the output
-                # which we need to remove in case they break multi-word pattern matching
-                output = format_stderr(output)
 
             if request.output_contains_pattern is not None:
                 patterns = request.output_contains_pattern
@@ -927,14 +979,6 @@ def test_unit_tesseract_endtoend(
                 assert_contains_array_allclose(output_json, array)
 
     # Stage 3: Test HTTP server
-    if unit_tesseract_config.volume_mounts is not None:
-        # TODO: Mounts are not supported in HTTP mode yet, skip rest of the test for now
-        return
-
-    # Cannot mix stderr if we want to load the json
-    cli_runner = CliRunner(mix_stderr=False)
-    project_id = None
-
     run_res = cli_runner.invoke(
         app,
         [
@@ -942,6 +986,8 @@ def test_unit_tesseract_endtoend(
             img_name,
             "-p",
             free_port,
+            *mount_args,
+            *io_args,
         ],
         catch_exceptions=False,
     )
@@ -949,42 +995,18 @@ def test_unit_tesseract_endtoend(
     assert run_res.exit_code == 0, run_res.stderr
     assert run_res.stdout
 
-    project_meta = json.loads(run_res.stdout)
-    project_id = project_meta["project_id"]
-    docker_cleanup["project_ids"].append(project_id)
-
-    # Give server some time to start up
-    timeout = 10
-    interval = 0.1
-    while True:
-        try:
-            is_alive = requests.get(f"http://localhost:{free_port}/health")
-        except requests.exceptions.ConnectionError:
-            pass
-        else:
-            assert is_alive.status_code == 200
-            break
-
-        if timeout <= 0:
-            raise TimeoutError("Container did not start in time")
-        time.sleep(interval)
-        timeout -= interval
+    serve_meta = json.loads(run_res.stdout)
+    container_name = serve_meta["container_name"]
+    docker_cleanup["containers"].append(container_name)
 
     # Now test server (send requests and validate outputs)
     response = requests.get(f"http://localhost:{free_port}/openapi.json")
     assert response.status_code == 200
-
-    response = requests.get(f"http://localhost:{free_port}/input_schema")
-    assert response.status_code == 200
-    out_input_schema = response.json()
-    assert "properties" in out_input_schema
-
-    if unit_tesseract_config.volume_mounts is not None:
-        # TODO: Mounts are not supported in HTTP mode yet, skip rest of the test for now
-        return
+    openapi_schema = response.json()
+    input_schema = _input_schema_from_openapi(openapi_schema)
 
     if unit_tesseract_config.test_with_random_inputs:
-        payload_from_schema = example_from_json_schema(out_input_schema)
+        payload_from_schema = example_from_json_schema(input_schema)
         response = requests.post(
             f"http://localhost:{free_port}/apply", json=payload_from_schema
         )
