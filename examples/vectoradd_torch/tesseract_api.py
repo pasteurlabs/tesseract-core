@@ -113,9 +113,8 @@ def jacobian(
     jac_inputs: set[str],
     jac_outputs: set[str],
 ):
-    # Cast to tuples for consistent ordering
+    # Cast to tuples for consistent ordering in positional function
     jac_inputs = tuple(jac_inputs)
-    jac_outputs = tuple(jac_outputs)
     # convert all numbers and arrays to torch tensors
     tensor_inputs = tree_map(to_tensor, inputs.model_dump())
 
@@ -155,9 +154,8 @@ def jacobian_vector_product(
     jvp_outputs: set[str],
     tangent_vector: dict[str, Any],
 ):
-    # Cast to tuples for consistent ordering
+    # Cast to tuples for consistent ordering in positional function
     jvp_inputs = tuple(jvp_inputs)
-    jvp_outputs = tuple(jvp_outputs)
     # Make ordering of tangent_vector identical to jvp_inputs
     tangent_vector = {key: tangent_vector[key] for key in jvp_inputs}
 
@@ -182,9 +180,8 @@ def vector_jacobian_product(
     vjp_outputs: set[str],
     cotangent_vector: dict[str, Any],
 ):
-    # Cast to tuples for consistent ordering
+    # Cast to tuples for consistent ordering in positional function
     vjp_inputs = tuple(vjp_inputs)
-    vjp_outputs = tuple(vjp_outputs)
     # Make ordering of cotangent_vector identical to vjp_inputs
     cotangent_vector = {key: cotangent_vector[key] for key in vjp_outputs}
 
