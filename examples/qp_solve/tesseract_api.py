@@ -24,32 +24,29 @@ class InputSchema(BaseModel):
         description="Quadratic cost matrix Q for the quadratic program."
     )
     q: Optional[Differentiable[Array[(None,), Float32]]] = Field(
-        description="Linear cost vector q for the quadratic program.",
-        default=None
+        description="Linear cost vector q for the quadratic program.", default=None
     )
     A: Optional[Differentiable[Array[(None, None), Float32]]] = Field(
         default=None,
-        description="Linear equality constraint matrix A for the quadratic program."
+        description="Linear equality constraint matrix A for the quadratic program.",
     )
     b: Optional[Differentiable[Array[(None,), Float32]]] = Field(
         default=None,
-        description="Linear equality constraint rhs b for the quadratic program."
+        description="Linear equality constraint rhs b for the quadratic program.",
     )
     G: Optional[Differentiable[Array[(None, None), Float32]]] = Field(
         description="Linear inequality constraint matrix G for the quadratic program.",
-        default=None
+        default=None,
     )
     h: Optional[Differentiable[Array[(None,), Float32]]] = Field(
         description="Linear inequality constraint rhs h for the quadratic program.",
-        default=None
+        default=None,
     )
     solver_tol: Optional[Float32] = Field(
-        description="Tolerance for the solver convergence.",
-        default=1e-4
+        description="Tolerance for the solver convergence.", default=1e-4
     )
     target_kappa: Optional[Float32] = Field(
-        description="QPAX parameter for QP relaxation.",
-        default=1e-3
+        description="QPAX parameter for QP relaxation.", default=1e-3
     )
 
     @model_validator(mode="after")
@@ -93,11 +90,15 @@ class OutputSchema(BaseModel):
         description="Optimal objective value for the quadratic program."
     )
 
-jit_solve_qp_primal = jax.jit(qpax.solve_qp_primal, static_argnames=("solver_tol", "target_kappa"))
+
+jit_solve_qp_primal = jax.jit(
+    qpax.solve_qp_primal, static_argnames=("solver_tol", "target_kappa")
+)
 
 #
 # Required endpoints
 #
+
 
 def apply(inputs: InputSchema) -> OutputSchema:
     x = jit_solve_qp_primal(
@@ -115,6 +116,7 @@ def apply(inputs: InputSchema) -> OutputSchema:
         x=x,
         objective_value=obj,
     )
+
 
 def vector_jacobian_product(
     inputs: InputSchema,
@@ -135,13 +137,9 @@ def vector_jacobian_product(
             solver_tol=inputs.solver_tol,
             target_kappa=kappa,
         )
-        _, f_vjp = jax.vjp(solve_fn,
-                            inputs.Q,
-                            inputs.q,
-                            inputs.A,
-                            inputs.b,
-                            inputs.G,
-                            inputs.h)
+        _, f_vjp = jax.vjp(
+            solve_fn, inputs.Q, inputs.q, inputs.A, inputs.b, inputs.G, inputs.h
+        )
         vjps = f_vjp(tangent)
         out = {}
         for dx in vjp_inputs:
@@ -154,6 +152,7 @@ def vector_jacobian_product(
                 break
             out[dx] = val
     if not success:
-        raise ValueError("Failed to compute VJP with the given inputs. Try increasing target_kappa.")
+        raise ValueError(
+            "Failed to compute VJP with the given inputs. Try increasing target_kappa."
+        )
     return out
-

@@ -7,20 +7,22 @@ from animate import make_animation
 
 from tesseract_core import Tesseract
 
-# In this example, we use tesseract to call and differentiate through the qpax solver.
-# github: https://github.com/kevin-tracy/qpax/tree/main
-# paper: https://arxiv.org/abs/2406.11749
+"""
+In this example, we use a Tesseract to call and differentiate through the qpax solver.
+github: https://github.com/kevin-tracy/qpax/tree/main
+paper: https://arxiv.org/abs/2406.11749
 
-# The task we're solving here is to tune a linear constraint in a QP,
-# so that the solution of the QP matches a desired target value, i.e.
+The task we're solving here is to tune a linear constraint in a QP,
+so that the solution of the QP matches a desired target value, i.e.
 
-# min_G (x*(G) - x_true)^2
-# s.t.  x*(G) \in argmin_x 0.5 * x^T Q x + q^T x
-#                 s.t.  G x <= h,
-# where x_true is the target value, and G are the coefficients we tune.
-# The qpax tesseract is used to solve the inner QP and obtain gradients
-# of x* w.r.t. G, which we then use to update G using gradient descent
-# on the outer objective.
+min_G (x*(G) - x_true)^2
+s.t.  x*(G) \\in argmin_x 0.5 * x^T Q x + q^T x
+                s.t.  G x <= h,
+where x_true is the target value, and G are the coefficients we tune.
+The qpax Tesseract is used to solve the inner QP and obtain gradients
+of x* w.r.t. G, which we then use to update G using gradient descent
+on the outer objective.
+"""
 
 
 # we want to minimize the decision error
