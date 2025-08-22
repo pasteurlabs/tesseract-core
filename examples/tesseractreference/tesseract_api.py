@@ -3,11 +3,11 @@
 
 from pydantic import BaseModel, Field
 
-from tesseract_core.runtime.experimental import TesseractArg
+from tesseract_core.runtime.experimental import TesseractReference
 
 
 class InputSchema(BaseModel):
-    target: TesseractArg = Field(description="Tesseract to call.")
+    target: TesseractReference = Field(description="Tesseract to call.")
 
 
 class OutputSchema(BaseModel):

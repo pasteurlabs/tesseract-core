@@ -1150,7 +1150,7 @@ def test_multi_helloworld_endtoend(
     assert "The helloworld Tesseract says: Hello you!" in result.output
 
 
-def test_tesseractarg_endtoend(
+def test_tesseractreference_endtoend(
     docker_client,
     unit_tesseracts_parent_dir,
     dummy_image_name,
@@ -1162,7 +1162,7 @@ def test_tesseractarg_endtoend(
 
     # Build Tesseract images
     img_names = []
-    for tess_name in ("tesseractarg", "helloworld"):
+    for tess_name in ("tesseractreference", "helloworld"):
         img_name = build_tesseract(
             docker_client,
             unit_tesseracts_parent_dir / tess_name,
@@ -1173,7 +1173,7 @@ def test_tesseractarg_endtoend(
         assert image_exists(docker_client, img_name)
         docker_cleanup["images"].append(img_name)
 
-    tesseractarg_img_name, helloworld_img_name = img_names
+    tesseractreference_img_name, helloworld_img_name = img_names
 
     # Create Docker network
     config = get_config()
@@ -1213,7 +1213,7 @@ def test_tesseractarg_endtoend(
         app,
         [
             "run",
-            tesseractarg_img_name,
+            tesseractreference_img_name,
             "apply",
             url_payload,
             "--network",
@@ -1226,37 +1226,12 @@ def test_tesseractarg_endtoend(
     expected_result = "Hello Alice! Hello Bob!"
     assert output_data["result"] == expected_result
 
-    # Test image type
-    image_payload = json.dumps(
-        {
-            "inputs": {
-                "target": {
-                    "type": "image",
-                    "url": helloworld_img_name,
-                }
-            }
-        }
-    )
-    result = cli_runner.invoke(
-        app,
-        [
-            "run",
-            str(unit_tesseracts_parent_dir / "tesseractarg/tesseract_api.py"),
-            "apply",
-            image_payload,
-        ],
-        catch_exceptions=True,
-    )
-    assert result.exit_code == 0, result.output
-    output_data = json.loads(result.output)
-    assert output_data["result"] == expected_result
-
-    # Test path type
+    # Test api_path type
     path_payload = json.dumps(
         {
             "inputs": {
                 "target": {
-                    "type": "path",
+                    "type": "api_path",
                     "url": str(
                         unit_tesseracts_parent_dir / "helloworld/tesseract_api.py"
                     ),
@@ -1268,7 +1243,7 @@ def test_tesseractarg_endtoend(
         app,
         [
             "run",
-            str(unit_tesseracts_parent_dir / "tesseractarg/tesseract_api.py"),
+            str(unit_tesseracts_parent_dir / "tesseractreference/tesseract_api.py"),
             "apply",
             path_payload,
         ],
