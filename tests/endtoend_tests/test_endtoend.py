@@ -1157,7 +1157,7 @@ def test_tesseractreference_endtoend(
     dummy_network_name,
     docker_cleanup,
 ):
-    """Test that tesseractarg example can be built and executed, calling helloworld tesseract."""
+    """Test that tesseractreference example can be built and executed, calling helloworld tesseract."""
     cli_runner = CliRunner(mix_stderr=False)
 
     # Build Tesseract images
@@ -1239,16 +1239,21 @@ def test_tesseractreference_endtoend(
             }
         }
     )
-    result = cli_runner.invoke(
-        app,
+    result = subprocess.run(
         [
-            "run",
-            str(unit_tesseracts_parent_dir / "tesseractreference/tesseract_api.py"),
+            "tesseract-runtime",
             "apply",
             path_payload,
         ],
-        catch_exceptions=True,
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "TESSERACT_API_PATH": str(
+                unit_tesseracts_parent_dir / "tesseractreference/tesseract_api.py"
+            ),
+        },
     )
-    assert result.exit_code == 0, result.output
-    output_data = json.loads(result.output)
+    assert result.returncode == 0, result.stderr
+    output_data = json.loads(result.stdout)
     assert output_data["result"] == expected_result

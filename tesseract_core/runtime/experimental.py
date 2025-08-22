@@ -333,6 +333,7 @@ __all__ = [
     "LazySequence",
     "OutputFileReference",
     "PydanticLazySequenceAnnotation",
+    "TesseractReference",
     "log_artifact",
     "log_metric",
     "log_parameter",
