@@ -267,8 +267,7 @@ class TesseractReference:
             return Tesseract
         except ImportError:
             raise ImportError(
-                "Tesseract class not found. Ensure tesseract_core is installed and configured correctly. "
-                "When building a Tesseract, you can add tesseract_core to your tesseract_requirements.txt."
+                "Tesseract class not found. Ensure tesseract_core is installed and configured correctly."
             ) from ImportError
 
     @classmethod
