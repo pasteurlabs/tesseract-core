@@ -1207,7 +1207,7 @@ def test_tesseractreference_endtoend(
 
     # Test url type
     url_payload = (
-        '{"inputs": {"target": {"type": "url", "url": "http://helloworld:8000"}}}'
+        '{"inputs": {"target": {"type": "url", "ref": "http://helloworld:8000"}}}'
     )
     result = cli_runner.invoke(
         app,
@@ -1232,7 +1232,7 @@ def test_tesseractreference_endtoend(
             "inputs": {
                 "target": {
                     "type": "api_path",
-                    "url": str(
+                    "ref": str(
                         unit_tesseracts_parent_dir / "helloworld/tesseract_api.py"
                     ),
                 }

@@ -267,7 +267,8 @@ class TesseractReference:
             return Tesseract
         except ImportError:
             raise ImportError(
-                "Tesseract class not found. Ensure tesseract_core is installed and configured correctly."
+                "Tesseract class not found. Ensure tesseract_core is installed and configured correctly. "
+                "When building a Tesseract, you can add tesseract_core to your tesseract_requirements.txt."
             ) from ImportError
 
     @classmethod
@@ -280,13 +281,13 @@ class TesseractReference:
             if isinstance(v, cls):
                 return v
 
-            if not (isinstance(v, dict) and "type" in v and "url" in v):
+            if not (isinstance(v, dict) and "type" in v and "ref" in v):
                 raise ValueError(
-                    f"Expected dict with 'type' and 'url' keys, got {type(v)}"
+                    f"Expected dict with 'type' and 'ref' keys, got {type(v)}"
                 )
 
             tesseract_type = v["type"]
-            url = v["url"]
+            ref = v["ref"]
 
             if tesseract_type not in ("api_path", "url"):
                 raise ValueError(
@@ -295,9 +296,9 @@ class TesseractReference:
 
             Tesseract = cls._get_tesseract_class()
             if tesseract_type == "api_path":
-                tesseract = Tesseract.from_tesseract_api(url)
+                tesseract = Tesseract.from_tesseract_api(ref)
             elif tesseract_type == "url":
-                tesseract = Tesseract.from_url(url)
+                tesseract = Tesseract.from_url(ref)
 
             return cls(tesseract)
 
@@ -318,12 +319,12 @@ class TesseractReference:
                     "enum": ["api_path", "url"],
                     "description": "Type of tesseract reference",
                 },
-                "url": {
+                "ref": {
                     "type": "string",
                     "description": "URL or file path to the tesseract",
                 },
             },
-            "required": ["type", "url"],
+            "required": ["type", "ref"],
             "additionalProperties": False,
         }
 
