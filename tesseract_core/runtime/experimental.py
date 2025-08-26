@@ -288,14 +288,17 @@ class TesseractReference:
             tesseract_type = v["type"]
             ref = v["ref"]
 
-            if tesseract_type not in ("api_path", "url"):
+            if tesseract_type not in ("api_path", "image", "url"):
                 raise ValueError(
-                    f"Invalid tesseract type '{tesseract_type}'. Expected 'api_path' or 'url'."
+                    f"Invalid tesseract type '{tesseract_type}'. Expected 'api_path', 'image' or 'url'."
                 )
 
             Tesseract = cls._get_tesseract_class()
             if tesseract_type == "api_path":
                 tesseract = Tesseract.from_tesseract_api(ref)
+            elif tesseract_type == "image":
+                tesseract = Tesseract.from_image(ref)
+                tesseract.serve()
             elif tesseract_type == "url":
                 tesseract = Tesseract.from_url(ref)
 
@@ -315,7 +318,7 @@ class TesseractReference:
             "properties": {
                 "type": {
                     "type": "string",
-                    "enum": ["api_path", "url"],
+                    "enum": ["api_path", "image", "url"],
                     "description": "Type of tesseract reference",
                 },
                 "ref": {

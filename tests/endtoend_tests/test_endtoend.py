@@ -1226,6 +1226,36 @@ def test_tesseractreference_endtoend(
     expected_result = "Hello Alice! Hello Bob!"
     assert output_data["result"] == expected_result
 
+    # Test image type
+    image_payload = json.dumps(
+        {
+            "inputs": {
+                "target": {
+                    "type": "image",
+                    "ref": helloworld_img_name,
+                }
+            }
+        }
+    )
+    result = subprocess.run(
+        [
+            "tesseract-runtime",
+            "apply",
+            image_payload,
+        ],
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "TESSERACT_API_PATH": str(
+                unit_tesseracts_parent_dir / "tesseractreference/tesseract_api.py"
+            ),
+        },
+    )
+    assert result.returncode == 0, result.stderr
+    output_data = json.loads(result.stdout)
+    assert output_data["result"] == expected_result
+
     # Test api_path type
     path_payload = json.dumps(
         {
