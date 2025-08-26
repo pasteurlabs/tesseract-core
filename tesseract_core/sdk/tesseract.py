@@ -497,6 +497,7 @@ class HTTPClient:
             parsed = urlparse(url)
 
         sanitized = urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", "", ""))
+        sanitized = sanitized.rstrip("/")
         return sanitized
 
     @property
