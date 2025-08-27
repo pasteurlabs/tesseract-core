@@ -130,7 +130,11 @@ def test_serve_lifecycle(mock_serving, mock_clients):
                 pass
 
 
-def test_HTTPClient_run_tesseract(mocker):
+@pytest.mark.parametrize(
+    "run_id",
+    [None, "fizzbuzz"],
+)
+def test_HTTPClient_run_tesseract(mocker, run_id):
     mock_response = mocker.Mock()
     mock_response.json.return_value = {"result": [4, 4, 4]}
     mock_response.raise_for_status = mocker.Mock()
@@ -142,13 +146,15 @@ def test_HTTPClient_run_tesseract(mocker):
 
     client = HTTPClient("somehost")
 
-    out = client.run_tesseract("apply", {"inputs": {"a": 1}})
+    out = client.run_tesseract("apply", {"inputs": {"a": 1}}, run_id=run_id)
 
     assert out == {"result": [4, 4, 4]}
+    expected_params = {} if run_id is None else {"run_id": run_id}
     mocked_request.assert_called_with(
         method="POST",
         url="http://somehost/apply",
         json={"inputs": {"a": 1}},
+        params=expected_params,
     )
 
 
