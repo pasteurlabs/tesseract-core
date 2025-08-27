@@ -760,6 +760,25 @@ TEST_CASES = {
             ),
         ],
     ),
+    "qp_solve": Config(
+        test_with_random_inputs=False,
+        sample_requests=[
+            SampleRequest(
+                endpoint="apply",
+                payload={
+                    "inputs": {
+                        "Q": encode_array(np.eye(2)),
+                        "q": encode_array(np.ones(2)),
+                        "G": encode_array(np.array([[-1.0, 1.0]]).reshape((1, 2))),
+                        "h": encode_array(np.array([-1]).reshape((1,))),
+                        "target_kappa": 1e-1,
+                        "solver_tol": 1e-4,
+                    }
+                },
+                output_contains_array=np.array([-0.5, -1.5], dtype="float32"),
+            )
+        ],
+    ),
 }
 
 
