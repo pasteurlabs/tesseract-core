@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.0] - 2025-08-27
+
+### Features
+
+- Add run_id parameter to Tesseract.apply and friends (#352)
+
+### Bug Fixes
+
+- Require name and version to be non-empty in TesseractConfig (#336)
+- Strip trailing slash from URL's passed to Tesseract HTTP client (#340)
+- Handling of tree_transforms edge cases (#331)
+- *(sdk)* Cast sets to tuples in Pytorch template when used as positional args (#347)
+
+### Testing
+
+- Runtime/file_interactions unit tests (#338)
+
 ## [1.0.0] - 2025-08-08
 
 ### Features
