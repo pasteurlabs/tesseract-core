@@ -2,11 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
-## [1.1.0] - 2025-08-27
+## [1.1.0] - 2025-08-28
 
 ### Features
 
 - Add run_id parameter to Tesseract.apply and friends (#352)
+- Add pydantic type making other Tesseracts callable (needed for HOTs) (#343)
 
 ### Bug Fixes
 
@@ -14,6 +15,8 @@ All notable changes to this project will be documented in this file.
 - Strip trailing slash from URL's passed to Tesseract HTTP client (#340)
 - Handling of tree_transforms edge cases (#331)
 - *(sdk)* Cast sets to tuples in Pytorch template when used as positional args (#347)
+- Use host port as api port (#330)
+- Allow digits in the pre-release semver tag (#355)
 
 ### Testing
 
