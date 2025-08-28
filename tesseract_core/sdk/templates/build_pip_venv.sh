@@ -2,9 +2,7 @@
 
 set -e  # Exit immediately if a command exits with a non-zero status
 
-python3 -m venv /python-env
-
-# Activate virtual environment
+uv venv /python-env
 source /python-env/bin/activate
 
 # Collect dependencies
@@ -14,7 +12,7 @@ TESSERACT_DEPS=$(find ./local_requirements/ -mindepth 1 -maxdepth 1 2>/dev/null 
 TESSERACT_DEPS+=" -r tesseract_requirements.txt"
 
 # Install dependencies
-pip install $TESSERACT_DEPS
+uv -v pip install --compile-bytecode $TESSERACT_DEPS
 
 # HACK: If `tesseract_core` is part of tesseract_requirements.txt, it may install an incompatible version
 # of the runtime from PyPI. We remove the runtime folder and install the local version instead.
@@ -23,4 +21,7 @@ if [ -d "$runtime_path" ]; then
     rm -rf "$runtime_path"/runtime
 fi
 
-pip install ./tesseract_runtime
+uv -v pip install --compile-bytecode ./tesseract_runtime
+
+# Install pip itself into the virtual environment for use by any custom build steps
+uv pip install pip
