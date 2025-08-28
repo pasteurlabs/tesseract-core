@@ -24,9 +24,7 @@ class LogPipe(threading.Thread):
         self._fd_read, self._fd_write = os.pipe()
         self._pipe_reader = os.fdopen(self._fd_read, closefd=False)
         self._captured_lines = []
-
         self._lock = threading.Lock()
-        self._closed = False
 
     def __enter__(self) -> int:
         """Start the thread and return the write file descriptor of the pipe."""
