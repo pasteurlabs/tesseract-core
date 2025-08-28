@@ -44,7 +44,7 @@ def valid_tesseract_config() -> str:
     return dedent(
         """
         name: foo
-        version: "unknown"
+        version: "1.2.3-rc2"
 
         build_config:
             package_data:
