@@ -22,11 +22,11 @@ class LogPipe(threading.Thread):
         super().__init__()
         self._sinks = sinks
         self._fd_read, self._fd_write = os.pipe()
-        self._pipe_reader = os.fdopen(self._fd_read, closefd=False)
+        self._pipe_reader = os.fdopen(self._fd_read)
         self._captured_lines = []
+
         self._lock = threading.Lock()
         self._closed = False
-        print("opening!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
 
     def __enter__(self) -> int:
         """Start the thread and return the write file descriptor of the pipe."""
@@ -39,19 +39,14 @@ class LogPipe(threading.Thread):
         # Use a timeout so something weird happening in the logging thread doesn't
         # cause this to hang indefinitely
         self.join(timeout=1)
-        # if self.is_alive():
-        #     raise ValueError("still alive")
         # Do not close reader before thread is joined since there may be pending data
         # This also closes the fd_read pipe
         self.close_pipe()
 
     def close_pipe(self) -> None:
-        print("attempting close of log pipe")
         with self._lock:
             if not self._closed:
-                print("closing!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
                 os.close(self._fd_read)
-                self._pipe_reader.close()
                 self._closed = True
 
     def fileno(self) -> int:
