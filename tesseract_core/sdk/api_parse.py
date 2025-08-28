@@ -172,7 +172,7 @@ class TesseractConfig(BaseModel, validate_assignment=True):
     @classmethod
     def validate_version(cls, v: str) -> str:
         """Validate that the version string is a valid semantic version."""
-        version_pattern = r"""^\d+\.\d+\.\d+[a-zA-Z-0-9]*$"""
+        version_pattern = r"^\d+\.\d+\.\d+[a-zA-Z-0-9]*$"
 
         if not re.match(version_pattern, v):
             raise ValueError(
