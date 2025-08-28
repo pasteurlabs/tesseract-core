@@ -45,7 +45,6 @@ COPY local_requirements/ ./local_requirements
 
 # Build a python venv from python provider build scripts.
 # The build script has to create a venv at /python-env
-RUN {% if use_ssh_mount %}--mount=type=ssh{% endif %} bash {{ config.build_config.requirements._build_script }}
 RUN --mount=type=cache,target=/root/.cache/uv {% if use_ssh_mount %}--mount=type=ssh{% endif %} bash {{ config.build_config.requirements._build_script }}
 ENV PATH="/python-env/bin:$PATH"
 
