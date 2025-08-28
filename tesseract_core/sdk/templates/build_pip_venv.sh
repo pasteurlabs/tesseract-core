@@ -22,3 +22,6 @@ if [ -d "$runtime_path" ]; then
 fi
 
 uv -v pip install --compile-bytecode ./tesseract_runtime
+
+# Install pip itself into the virtual environment for use by any custom build steps
+uv pip install pip
