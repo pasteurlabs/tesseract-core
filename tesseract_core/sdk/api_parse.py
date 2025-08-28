@@ -174,7 +174,7 @@ class TesseractConfig(BaseModel, validate_assignment=True):
         """Validate that the version string is a valid semantic version."""
         version_pattern = r"""^\d+\.\d+\.\d+[a-zA-Z-0-9]*$"""
 
-        if (not re.match(version_pattern, v)) and v != "unknown":
+        if not re.match(version_pattern, v):
             raise ValueError(
                 f"Version '{v}' is not a valid version number for a Tesseract. "
                 "You can only use three dot-separated digits (e.g. 1.2.3), to which "
