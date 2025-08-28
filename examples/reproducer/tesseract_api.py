@@ -28,6 +28,7 @@ def apply(inputs):
     futures = []
 
     for idx in data_ids:
+        # x = pool.submit(preprocess_fn, idx)
         x = pool.submit(np.identity, idx)
         futures.append(x)
         print(idx, "submitted")

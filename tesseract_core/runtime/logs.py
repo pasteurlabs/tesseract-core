@@ -22,7 +22,7 @@ class LogPipe(threading.Thread):
         super().__init__()
         self._sinks = sinks
         self._fd_read, self._fd_write = os.pipe()
-        self._pipe_reader = os.fdopen(self._fd_read)
+        self._pipe_reader = os.fdopen(self._fd_read, closefd=False)
         self._captured_lines = []
 
         self._lock = threading.Lock()
@@ -35,19 +35,19 @@ class LogPipe(threading.Thread):
 
     def __exit__(self, *args: Any) -> None:
         """Close the pipe and join the thread."""
-        os.close(self._fd_write)
-        # Use a timeout so something weird happening in the logging thread doesn't
-        # cause this to hang indefinitely
-        self.join(timeout=1)
-        # Do not close reader before thread is joined since there may be pending data
-        # This also closes the fd_read pipe
-        self.close_pipe()
-
-    def close_pipe(self) -> None:
         with self._lock:
-            if not self._closed:
-                os.close(self._fd_read)
-                self._closed = True
+            os.close(self._fd_write)
+
+            # Use a timeout so something weird happening in the logging thread doesn't
+            # cause this to hang indefinitely
+            #
+            # FIXME: this always times out in the multiprocessing case?
+            self.join(timeout=1)
+
+            # Do not close reader before thread is joined since there may be pending data
+            # This also closes the fd_read pipe
+            os.close(self._fd_read)
+            self._pipe_reader.close()
 
     def fileno(self) -> int:
         """Return the write file descriptor of the pipe."""
@@ -61,7 +61,6 @@ class LogPipe(threading.Thread):
             self._captured_lines.append(line)
             for sink in self._sinks:
                 sink(line)
-        self.close_pipe()
 
     @property
     def captured_lines(self) -> list[str]:
