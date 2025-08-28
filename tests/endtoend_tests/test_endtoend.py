@@ -1200,6 +1200,8 @@ def test_tesseractreference_endtoend(
             dummy_network_name,
             "--network-alias",
             "helloworld",
+            "--port",
+            "8000",
         ],
         catch_exceptions=True,
     )
