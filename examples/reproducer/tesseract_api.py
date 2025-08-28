@@ -1,8 +1,7 @@
 from concurrent.futures import ProcessPoolExecutor
+
 import numpy as np
 from pydantic import BaseModel
-
-import typer
 
 
 class InputSchema(BaseModel):
@@ -21,13 +20,13 @@ def preprocess_fn(data_id: int):
 
 
 def apply(inputs):
-
     data_ids = list(range(10))
 
     pool = ProcessPoolExecutor()
     futures = []
 
     for idx in data_ids:
+        # this causes the pickling error
         # x = pool.submit(preprocess_fn, idx)
         x = pool.submit(np.identity, idx)
         futures.append(x)
@@ -38,11 +37,3 @@ def apply(inputs):
         print(res, "done")
 
     return OutputSchema()
-
-
-app = typer.Typer()
-app.command("apply", short_help="test")(apply)
-
-if __name__ == "__main__":
-    # apply(InputSchema())
-    app()
