@@ -107,6 +107,16 @@ TEST_CASES = {
             ),
         ],
     ),
+    "pip_custom_step": Config(
+        test_with_random_inputs=True,
+        sample_requests=[
+            SampleRequest(
+                endpoint="apply",
+                payload={"inputs": {"name": "Ozzy"}},
+                output_contains_pattern="Hello Ozzy!",
+            ),
+        ],
+    ),
     "pyvista-arm64": Config(
         test_with_random_inputs=True,
         sample_requests=[
