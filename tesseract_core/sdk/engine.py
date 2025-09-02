@@ -10,6 +10,7 @@ import optparse
 import os
 import random
 import socket
+import subprocess
 import tempfile
 import time
 from collections.abc import Callable, Collection, Sequence
@@ -159,6 +160,7 @@ def prepare_build_context(
     context_dir: str | Path,
     user_config: TesseractConfig,
     use_ssh_mount: bool = False,
+    gitignore: bool = False,
 ) -> Path:
     """Populate the build context for a Tesseract.
 
@@ -183,6 +185,7 @@ def prepare_build_context(
         context_dir: The directory where the build context will be created.
         user_config: The Tesseract configuration object.
         use_ssh_mount: Whether to use SSH mount to install dependencies (prevents caching).
+        gitignore: Whether to use information from .gitignore files to exclude files from the build context.
 
     Returns:
         The path to the build context directory.
@@ -226,6 +229,22 @@ def prepare_build_context(
     local_requirements_path = context_dir / "local_requirements"
     Path.mkdir(local_requirements_path, parents=True, exist_ok=True)
 
+    def ignore_fn(src: str, names: list[str]):
+        if not names:
+            return []
+        try:
+            # Run git check-ignore on all names at once
+            result = subprocess.run(
+                ["git", "check-ignore", *names], cwd=src, capture_output=True, text=True
+            )
+            if result.stdout.strip():
+                ignored_names = set(result.stdout.strip().split("\n"))
+                return [name for name in names if name in ignored_names]
+            else:
+                return []
+        except Exception as e:
+            raise ValueError("Failed to parse .gitignore file.") from e
+
     if requirement_config.provider == "python-pip":
         reqstxt = src_dir / requirement_config._filename
         if reqstxt.exists():
@@ -240,7 +259,7 @@ def prepare_build_context(
                 if src.is_file():
                     copy(src, dest)
                 else:
-                    copytree(src, dest)
+                    copytree(src, dest, ignore=ignore_fn)
 
         # We need to write a new requirements file in the build dir, where we explicitly
         # removed the local dependencies
@@ -334,6 +353,7 @@ def build_tesseract(
     inject_ssh: bool = False,
     config_override: dict[tuple[str, ...], Any] | None = None,
     generate_only: bool = False,
+    gitignore: bool = False,
 ) -> Image | Path:
     """Build a new Tesseract from a context directory.
 
@@ -347,6 +367,7 @@ def build_tesseract(
         inject_ssh: whether or not to forward SSH agent when building the image.
         config_override: overrides for configuration options in the Tesseract.
         generate_only: only generate the build context but do not build the image.
+        gitignore: Whether to use information from .gitignore files to exclude files from the build context.
 
     Returns:
         Image object representing the built Tesseract image,
@@ -385,7 +406,11 @@ def build_tesseract(
         keep_build_dir = True
 
     context_dir = prepare_build_context(
-        src_dir, build_dir, config, use_ssh_mount=inject_ssh
+        src_dir,
+        build_dir,
+        config,
+        use_ssh_mount=inject_ssh,
+        gitignore=gitignore,
     )
 
     if generate_only:
