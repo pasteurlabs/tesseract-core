@@ -303,6 +303,12 @@ def build_image(
             help="Only generate the build context and do not actually build the image."
         ),
     ] = False,
+    gitignore: Annotated[
+        bool,
+        typer.Option(
+            help="Use .gitignore file to exclude files from the build context."
+        ),
+    ] = False,
 ) -> None:
     """Build a new Tesseract from a context directory.
 
@@ -333,6 +339,7 @@ def build_image(
                 inject_ssh=forward_ssh_agent,
                 config_override=parsed_config_override,
                 generate_only=generate_only,
+                gitignore=gitignore,
             )
     except BuildError as e:
         # raise from None to Avoid overly long tracebacks,
