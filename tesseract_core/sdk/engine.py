@@ -547,6 +547,7 @@ def serve(
         environment["TESSERACT_INPUT_PATH"] = "/tesseract/input_data"
         if "://" not in str(input_path):
             local_path = _resolve_file_path(input_path)
+            _check_duplicate_volume_source_path(local_path, parsed_volumes)
             parsed_volumes[str(local_path)] = {
                 "bind": "/tesseract/input_data",
                 "mode": "ro",
@@ -556,6 +557,7 @@ def serve(
         environment["TESSERACT_OUTPUT_PATH"] = "/tesseract/output_data"
         if "://" not in str(output_path):
             local_path = _resolve_file_path(output_path, make_dir=True)
+            _check_duplicate_volume_source_path(local_path, parsed_volumes)
             parsed_volumes[str(local_path)] = {
                 "bind": "/tesseract/output_data",
                 "mode": "rw",
@@ -704,7 +706,22 @@ def _parse_volumes(options: list[str]) -> dict[str, dict[str, str]]:
             source = str(Path(source).resolve())
         return source, {"bind": target, "mode": mode}
 
-    return dict(_parse_option(opt) for opt in options)
+    volumes = {}
+    for opt in options:
+        source, opt_dict = _parse_option(opt)
+        _check_duplicate_volume_source_path(source, volumes)
+        volumes[source] = opt_dict
+    return volumes
+
+
+def _check_duplicate_volume_source_path(
+    path: Path | str, volumes: dict[str, dict[str, str]]
+) -> None:
+    """Prevent duplicate source paths in volume mounts."""
+    if str(path) in volumes:
+        raise ValueError(
+            f"Path {path} is already mounted as a volume, please provide a unique path."
+        )
 
 
 def run_tesseract(
@@ -768,6 +785,7 @@ def run_tesseract(
         environment["TESSERACT_INPUT_PATH"] = "/tesseract/input_data"
         if "://" not in str(input_path):
             local_path = _resolve_file_path(input_path)
+            _check_duplicate_volume_source_path(local_path, parsed_volumes)
             parsed_volumes[str(local_path)] = {
                 "bind": "/tesseract/input_data",
                 "mode": "ro",
@@ -777,6 +795,7 @@ def run_tesseract(
         environment["TESSERACT_OUTPUT_PATH"] = "/tesseract/output_data"
         if "://" not in str(output_path):
             local_path = _resolve_file_path(output_path, make_dir=True)
+            _check_duplicate_volume_source_path(local_path, parsed_volumes)
             parsed_volumes[str(local_path)] = {
                 "bind": "/tesseract/output_data",
                 "mode": "rw",
