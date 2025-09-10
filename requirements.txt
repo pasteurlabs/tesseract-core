@@ -42,7 +42,7 @@ shellingham==1.5.4
     # via typer
 typer==0.15.2
     # via tesseract-core
-typing-extensions==4.14.1
+typing-extensions==4.15.0
     # via
     #   pydantic
     #   pydantic-core
