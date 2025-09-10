@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [1.1.0] - 2025-08-28
+## [2.0.0] - 2025-09-10
 
 ### Features
 
@@ -17,6 +17,10 @@ All notable changes to this project will be documented in this file.
 - *(sdk)* Cast sets to tuples in Pytorch template when used as positional args (#347)
 - Use host port as api port (#330)
 - Allow digits in the pre-release semver tag (#355)
+
+### Refactor
+
+- [**breaking**] Use uv to install python virtual env (#353)
 
 ### Testing
 
