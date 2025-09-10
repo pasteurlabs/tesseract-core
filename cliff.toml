@@ -61,7 +61,7 @@ commit_parsers = [
   { message = "^fix", group = "<!-- 1 -->Bug Fixes" },
   { message = "^doc", group = "<!-- 3 -->Documentation" },
   { message = "^perf", group = "<!-- 4 -->Performance" },
-  { message = "^refactor", group = "<!-- 2 -->Refactor", breaking = false },
+  { message = "^refactor", group = "<!-- 2 -->Refactor" },
   { message = "^test", group = "<!-- 5 -->Testing" },
   { message = "^chore\\(release\\): prepare for", skip = true },
   { message = "^chore\\(deps.*\\)", skip = true },
