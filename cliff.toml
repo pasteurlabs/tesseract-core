@@ -79,5 +79,4 @@ topo_order = false
 sort_commits = "oldest"
 
 [bump]
-features_always_bump_minor = true
-breaking_always_bump_major = false
+bump_type = "minor"
