@@ -253,7 +253,7 @@ def redirect_stdio(logfile: Union[str, Path]) -> Generator[None, None, None]:
 
         # Duplicate the original stderr file descriptor before any redirection
         orig_stderr_fd = os.dup(sys.stderr.fileno())
-        orig_stderr_file = os.fdopen(orig_stderr_fd, 'w')
+        orig_stderr_file = os.fdopen(orig_stderr_fd, "w")
         stack.callback(orig_stderr_file.close)
 
         # Use `print` instead of `.write` so we get appropriate newlines and flush behavior
