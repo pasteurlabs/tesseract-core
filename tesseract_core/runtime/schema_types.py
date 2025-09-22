@@ -320,7 +320,7 @@ class ShapeDType(BaseModel):
             Union[AnnotatedType, str, None],
         ],
     ) -> AnnotatedType:
-        expected_shape, expected_dtype = _ensure_valid_shapedtype(*key)
+        expected_shape, _ = _ensure_valid_shapedtype(*key)
 
         def validate(shapedtype: ShapeDType) -> ShapeDType:
             """Validator to check if the shape and dtype match the expected values."""
