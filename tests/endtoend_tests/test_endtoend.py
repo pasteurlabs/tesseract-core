@@ -925,7 +925,14 @@ def logging_with_mlflow_test_image(
     # Build the Tesseract
     result = cli_runner.invoke(
         app,
-        ["--loglevel", "debug", "build", str(workdir), "--tag", "logging_test_image"],
+        [
+            "--loglevel",
+            "debug",
+            "build",
+            str(workdir),
+            "--tag",
+            "logging_with_mlflow_test_image",
+        ],
         catch_exceptions=False,
     )
     assert result.exit_code == 0, result.stderr
