@@ -884,6 +884,94 @@ def test_logging_tesseract_serve(
 
 
 @pytest.fixture(scope="module")
+def logging_with_mlflow_test_image(
+    tmpdir_factory, dummy_tesseract_location, docker_cleanup_module
+):
+    tesseract_api = dedent(
+        """
+    from pydantic import BaseModel
+    import mlflow
+    import sys
+
+    class InputSchema(BaseModel):
+        pass
+
+    class OutputSchema(BaseModel):
+        pass
+
+    def apply(inputs: InputSchema) -> OutputSchema:
+        sys.__stderr__.write("DUMMY_STDERR_OUTPUT\\n")
+        mlflow.start_run()
+        return OutputSchema()
+    """
+    )
+
+    workdir = tmpdir_factory.mktemp("logging_with_mlflow_test_image")
+
+    # Write the API file
+    with open(workdir / "tesseract_api.py", "w") as f:
+        f.write(tesseract_api)
+    # Add mlflow dependency
+    with open(workdir / "tesseract_requirements.txt", "w") as f:
+        f.write("mlflow\n")
+
+    shutil.copy(
+        dummy_tesseract_location / "tesseract_config.yaml",
+        workdir / "tesseract_config.yaml",
+    )
+
+    cli_runner = CliRunner(mix_stderr=False)
+
+    # Build the Tesseract
+    result = cli_runner.invoke(
+        app,
+        [
+            "--loglevel",
+            "debug",
+            "build",
+            str(workdir),
+            "--tag",
+            "logging_with_mlflow_test_image",
+        ],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0, result.stderr
+
+    img_tag = json.loads(result.stdout)[0]
+    docker_cleanup_module["images"].append(img_tag)
+    return img_tag
+
+
+def test_logging_with_mlflow(logging_with_mlflow_test_image, tmpdir):
+    # This test covers a bug where mlflow would mess with stderr capturing
+    # We ensure that stderr output from the Tesseract is captured exactly once
+    # in stderr output and log file, even when mlflow is used.
+    run_res = subprocess.run(
+        [
+            "tesseract",
+            "run",
+            logging_with_mlflow_test_image,
+            "apply",
+            '{"inputs": {}}',
+            "--output-path",
+            tmpdir,
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert run_res.returncode == 0, run_res.stderr
+    assert run_res.stderr.count("DUMMY_STDERR_OUTPUT") == 1, run_res.stderr
+
+    log_file = Path(tmpdir) / "logs" / "tesseract.log"
+    assert log_file.exists()
+
+    with open(log_file) as f:
+        log_content = f.read()
+
+    assert log_content.count("DUMMY_STDERR_OUTPUT") == 1, log_content
+
+
+@pytest.fixture(scope="module")
 def mpa_test_image(dummy_tesseract_location, tmpdir_factory, docker_cleanup_module):
     tesseract_api = dedent(
         """
