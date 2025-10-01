@@ -5,6 +5,11 @@ FROM {{ config.build_config.base_image }} AS build_stage
 FROM --platform={{ config.build_config.target_platform }} {{ config.build_config.base_image }} AS build_stage
 {% endif %}
 
+# Obtain uv and companions
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+ENV UV_LINK_MODE=copy
+
 # Install Python if necessary
 RUN if [ ! -x "$(command -v python3)" ]; then \
     apt-get update && apt-get install -y --no-install-recommends \
@@ -40,7 +45,7 @@ COPY local_requirements/ ./local_requirements
 
 # Build a python venv from python provider build scripts.
 # The build script has to create a venv at /python-env
-RUN {% if use_ssh_mount %}--mount=type=ssh{% endif %} bash {{ config.build_config.requirements._build_script }}
+RUN --mount=type=cache,target=/root/.cache/uv {% if use_ssh_mount %}--mount=type=ssh{% endif %} bash {{ config.build_config.requirements._build_script }}
 ENV PATH="/python-env/bin:$PATH"
 
 # Stage 2: Set up runtime environment
@@ -97,6 +102,8 @@ RUN mkdir -p /tesseract/input_data /tesseract/output_data && \
     chmod 777 /tesseract/output_data
 VOLUME ["/tesseract/input_data", "/tesseract/output_data"]
 
+RUN getent group 1000 || groupadd -g 1000 tesseract && \
+    getent passwd 1000 || useradd -g $(getent group 1000 | cut -d: -f1) -u 1000 tesseract
 USER 1000:1000
 
 ENV TESSERACT_INPUT_PATH="/tesseract/input_data"
