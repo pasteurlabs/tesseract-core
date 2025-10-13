@@ -10,7 +10,7 @@ click==8.1.8
     # via typer
 colorama==0.4.6 ; sys_platform == 'win32'
     # via click
-idna==3.10
+idna==3.11
     # via requests
 jinja2==3.1.6
     # via tesseract-core
@@ -34,7 +34,7 @@ pyyaml==6.0.3
     # via tesseract-core
 requests==2.32.4
     # via tesseract-core
-rich==14.1.0
+rich==14.2.0
     # via
     #   tesseract-core
     #   typer
