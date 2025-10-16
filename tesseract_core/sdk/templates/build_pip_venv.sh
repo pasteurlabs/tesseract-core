@@ -12,7 +12,8 @@ TESSERACT_DEPS=$(find ./local_requirements/ -mindepth 1 -maxdepth 1 2>/dev/null 
 TESSERACT_DEPS+=" -r tesseract_requirements.txt"
 
 # Install dependencies
-uv -v pip install --compile-bytecode $TESSERACT_DEPS
+export UV_SKIP_WHEEL_FILENAME_CHECK=1
+uv -v pip install --compile-bytecode $TESSERACT_DEPS --index-strategy unsafe-best-match
 
 # HACK: If `tesseract_core` is part of tesseract_requirements.txt, it may install an incompatible version
 # of the runtime from PyPI. We remove the runtime folder and install the local version instead.
