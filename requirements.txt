@@ -22,7 +22,7 @@ mdurl==0.1.2
     # via markdown-it-py
 numpy==2.2.4
     # via tesseract-core
-pip==25.2
+pip==25.3
     # via tesseract-core
 pydantic==2.11.0
     # via tesseract-core
