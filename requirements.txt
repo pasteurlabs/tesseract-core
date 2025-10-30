@@ -4,7 +4,7 @@ annotated-types==0.7.0
     # via pydantic
 certifi==2025.10.5
     # via requests
-charset-normalizer==3.4.3
+charset-normalizer==3.4.4
     # via requests
 click==8.1.8
     # via typer
@@ -22,7 +22,7 @@ mdurl==0.1.2
     # via markdown-it-py
 numpy==2.2.4
     # via tesseract-core
-pip==25.2
+pip==25.3
     # via tesseract-core
 pydantic==2.11.0
     # via tesseract-core
