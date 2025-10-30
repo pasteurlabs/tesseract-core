@@ -133,6 +133,14 @@ class TesseractBuildConfig(BaseModel, validate_assignment=True):
 
     model_config = ConfigDict(extra="forbid")
 
+    skip_wheel_filename_check: bool = Field(
+        False,
+        description=(
+            "If True, skip wheel file name checks. "
+            "This can be used to install wheels with file names that does not match their metadata."
+        ),
+    )
+
     skip_checks: bool = Field(
         False,
         description=(
