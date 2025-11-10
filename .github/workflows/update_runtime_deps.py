@@ -5,7 +5,6 @@
 import subprocess
 import sys
 import tempfile
-from copy import copy
 
 import toml
 from packaging.requirements import Requirement
@@ -74,9 +73,11 @@ def get_updated_bounds(pyproject_file: str, resolved_env: str) -> list[str]:
         pkg_name = dep.name
         if pkg_name in new_upper_bounds:
             upper_bound = new_upper_bounds[pkg_name]
-            dep = copy(dep)
             dep.specifier = SpecifierSet(
-                [*dep.specifier, Specifier(f"<= {upper_bound}")]
+                [
+                    *[spec for spec in dep.specifier if spec.operator != "<="],
+                    Specifier(f"<= {upper_bound}"),
+                ]
             )
         final_deps.append(str(dep))
 
