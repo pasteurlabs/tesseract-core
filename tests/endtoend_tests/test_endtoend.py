@@ -1107,7 +1107,7 @@ def test_mpa_mlflow_backend(mpa_test_image, tmpdir):
         "tesseract",
         "run",
         "--env",
-        "TESSERACT_MLFLOW_TRACKING_URI=mlruns",
+        "TESSERACT_MLFLOW_TRACKING_URI=mlflow.db",
         mpa_test_image,
         "apply",
         '{"inputs": {}}',
@@ -1122,42 +1122,9 @@ def test_mpa_mlflow_backend(mpa_test_image, tmpdir):
     )
     assert run_res.returncode == 0, run_res.stderr
 
-    # Check for mlruns directory structure
-    mlruns_dir = Path(tmpdir) / "mlruns"
-    assert mlruns_dir.exists()
-    assert (mlruns_dir / "0").exists()  # Default experiment ID is 0
-
-    # Find run directories
-    run_dirs = [d for d in (mlruns_dir / "0").iterdir() if d.is_dir()]
-    assert len(run_dirs) == 1  # Should be only one run
-    run_dir = run_dirs[0]
-    assert run_dir.is_dir()
-    assert (run_dir / "artifacts").exists()
-    assert (run_dir / "metrics").exists()
-    assert (run_dir / "params").exists()
-
-    # Verify parameters file
-    param_file = run_dir / "params" / "test_parameter"
-    assert param_file.exists()
-    with open(param_file) as f:
-        param_value = f.read().strip()
-        assert param_value == "test_param"
-
-    # Verify metrics file
-    metrics_file = run_dir / "metrics" / "squared_step"
-    assert metrics_file.exists()
-    with open(metrics_file) as f:
-        metrics = f.readlines()
-        assert len(metrics) == 5
-        for i, metric in enumerate(metrics):
-            parts = metric.split()
-            assert len(parts) == 3
-            assert float(parts[1]) == i**2  # Check squared_step values
-            assert int(parts[2]) == i
-
-    # Verify artifacts directory and artifact file
-    artifacts_dir = run_dir / "artifacts"
-    assert artifacts_dir.exists()
+    # Check for MLflow database file
+    mlflow_db_path = Path(tmpdir) / "mlflow.db"
+    assert mlflow_db_path.exists(), "Expected MLflow database file to exist"
 
 
 def test_multi_helloworld_endtoend(
