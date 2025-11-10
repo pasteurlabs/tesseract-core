@@ -141,8 +141,8 @@ def test_log_artifact_missing_file():
 def test_mlflow_backend_creation(tmpdir):
     """Test that MLflowBackend is created when mlflow_tracking_uri is set."""
     pytest.importorskip("mlflow")  # Skip if MLflow is not installed
-    mlflow_dir = tmpdir / "mlflow_backend_test"
-    update_config(mlflow_tracking_uri=f"file://{mlflow_dir}")
+    mlflow_db_file = tmpdir / "mlflow.db"
+    update_config(mlflow_tracking_uri=f"sqlite:///{mlflow_db_file}")
     backend = mpa._create_backend(None)
     assert isinstance(backend, mpa.MLflowBackend)
 
@@ -150,8 +150,8 @@ def test_mlflow_backend_creation(tmpdir):
 def test_mlflow_log_calls(tmpdir):
     """Test MLflow backend logging functions with temporary directory."""
     pytest.importorskip("mlflow")  # Skip if MLflow is not installed
-    mlflow_dir = tmpdir / "mlflow_logging_test"
-    update_config(mlflow_tracking_uri=f"file://{mlflow_dir}")
+    mlflow_db_file = tmpdir / "mlflow.db"
+    update_config(mlflow_tracking_uri=f"sqlite:///{mlflow_db_file}")
 
     with start_run():
         log_parameter("model_type", "neural_network")
@@ -164,8 +164,5 @@ def test_mlflow_log_calls(tmpdir):
         artifact_file.write_text("Test content", encoding="utf-8")
         log_artifact(str(artifact_file))
 
-    # Verify MLflow directory structure was created
-    assert mlflow_dir.exists()
-    # MLflow creates experiment directories, so we should see some structure
-    mlflow_contents = list(mlflow_dir.listdir())
-    assert len(mlflow_contents) > 0
+    # Verify MLflow database file was created
+    assert mlflow_db_file.exists()
