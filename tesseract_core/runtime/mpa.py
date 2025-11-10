@@ -147,13 +147,13 @@ class MLflowBackend(BaseBackend):
 
         if not tracking_uri.startswith(("http://", "https://")):
             # If it's a db file URI, convert to local path
-            tracking_uri = tracking_uri.replace("sqlite://", "")
+            tracking_uri = tracking_uri.replace("sqlite:///", "")
 
             # Relative paths are resolved against the base output path
             if not Path(tracking_uri).is_absolute():
                 tracking_uri = (Path(get_config().output_path) / tracking_uri).resolve()
 
-            tracking_uri = f"sqlite://{tracking_uri}"
+            tracking_uri = f"sqlite:///{tracking_uri}"
 
         mlflow.set_tracking_uri(tracking_uri)
 
