@@ -37,7 +37,7 @@ def update_requirements(tmpdir: str) -> str:
     Returns the resolved environment as a requirements.txt string.
     """
     res = subprocess.run(
-        [sys.executable, "-m", "uv", "export", "--no-hashes", "--refresh"],
+        ["uv", "export", "--no-hashes", "--refresh"],
         cwd=tmpdir,
         capture_output=True,
         text=True,
