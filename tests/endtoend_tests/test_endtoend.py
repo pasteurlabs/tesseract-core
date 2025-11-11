@@ -17,7 +17,6 @@ import pytest
 import requests
 import yaml
 from common import build_tesseract, encode_array, image_exists
-from typer.testing import CliRunner
 
 from tesseract_core.sdk.cli import AVAILABLE_RECIPES, app
 from tesseract_core.sdk.config import get_config
@@ -51,11 +50,16 @@ build_matrix = [
 
 @pytest.mark.parametrize("tag,recipe,base_image", build_matrix)
 def test_build_from_init_endtoend(
-    docker_client, docker_cleanup, dummy_image_name, tmp_path, tag, recipe, base_image
+    cli_runner,
+    docker_client,
+    docker_cleanup,
+    dummy_image_name,
+    tmp_path,
+    tag,
+    recipe,
+    base_image,
 ):
     """Test that a trivial (empty) Tesseract image can be built from init."""
-    cli_runner = CliRunner()
-
     init_args = ["init", "--target-dir", str(tmp_path), "--name", dummy_image_name]
     if recipe:
         init_args.extend(["--recipe", recipe])
@@ -98,9 +102,8 @@ def test_build_from_init_endtoend(
 
 
 @pytest.mark.parametrize("skip_checks", [True, False])
-def test_build_generate_only(dummy_tesseract_location, skip_checks):
+def test_build_generate_only(cli_runner, dummy_tesseract_location, skip_checks):
     """Test output of build with --generate_only flag."""
-    cli_runner = CliRunner()
     build_res = cli_runner.invoke(
         app,
         [
@@ -160,10 +163,8 @@ def test_env_passthrough_serve(docker_cleanup, docker_client, built_image_name):
     assert "foo" in output.decode("utf-8"), f"Output was: {output.decode('utf-8')}"
 
 
-def test_tesseract_list(built_image_name):
+def test_tesseract_list(cli_runner, built_image_name):
     # Test List Command
-    cli_runner = CliRunner()
-
     list_res = cli_runner.invoke(
         app,
         [
@@ -177,9 +178,7 @@ def test_tesseract_list(built_image_name):
     assert built_image_name.split(":")[0] in list_res.stdout
 
 
-def test_tesseract_run_stdout(built_image_name):
-    cli_runner = CliRunner()
-
+def test_tesseract_run_stdout(cli_runner, built_image_name):
     test_commands = ("openapi-schema", "health")
 
     for command in test_commands:
@@ -204,10 +203,8 @@ def test_tesseract_run_stdout(built_image_name):
 
 
 @pytest.mark.parametrize("user", [None, "root", "1000:1000"])
-def test_run_as_user(docker_client, built_image_name, user, docker_cleanup):
+def test_run_as_user(cli_runner, docker_client, built_image_name, user, docker_cleanup):
     """Ensure we can run a basic Tesseract image as any user."""
-    cli_runner = CliRunner()
-
     run_res = cli_runner.invoke(
         app,
         [
@@ -236,8 +233,9 @@ def test_run_as_user(docker_client, built_image_name, user, docker_cleanup):
     assert output.decode("utf-8").strip() == str(expected_user)
 
 
-def test_tesseract_serve_pipeline(docker_client, built_image_name, docker_cleanup):
-    cli_runner = CliRunner()
+def test_tesseract_serve_pipeline(
+    cli_runner, docker_client, built_image_name, docker_cleanup
+):
     run_res = cli_runner.invoke(
         app,
         [
@@ -279,10 +277,8 @@ def test_tesseract_serve_pipeline(docker_client, built_image_name, docker_cleanu
 
 
 @pytest.mark.parametrize("tear_all", [True, False])
-def test_tesseract_teardown_multiple(built_image_name, tear_all):
+def test_tesseract_teardown_multiple(cli_runner, built_image_name, tear_all):
     """Teardown multiple served tesseracts."""
-    cli_runner = CliRunner()
-
     container_names = []
     try:
         for _ in range(2):
@@ -329,10 +325,8 @@ def test_tesseract_teardown_multiple(built_image_name, tear_all):
             assert container_name not in run_res.stdout
 
 
-def test_tesseract_serve_ports_error(built_image_name):
+def test_tesseract_serve_ports_error(cli_runner, built_image_name):
     """Check error handling for serve -p flag."""
-    cli_runner = CliRunner()
-
     # Check invalid ports.
     run_res = cli_runner.invoke(
         app,
@@ -380,9 +374,10 @@ def test_tesseract_serve_ports_error(built_image_name):
 
 
 @pytest.mark.parametrize("port", ["fixed", "range"])
-def test_tesseract_serve_ports(built_image_name, port, docker_cleanup, free_port):
+def test_tesseract_serve_ports(
+    cli_runner, built_image_name, port, docker_cleanup, free_port
+):
     """Try to serve multiple Tesseracts on multiple ports."""
-    cli_runner = CliRunner()
     container_name = None
 
     if port == "fixed":
@@ -429,6 +424,7 @@ def test_tesseract_serve_ports(built_image_name, port, docker_cleanup, free_port
 @pytest.mark.parametrize("volume_type", ["bind", "named"])
 @pytest.mark.parametrize("user", [None, "root", "1000:1000"])
 def test_tesseract_serve_volume_permissions(
+    cli_runner,
     built_image_name,
     docker_client,
     docker_volume,
@@ -441,8 +437,6 @@ def test_tesseract_serve_volume_permissions(
 
     This should cover most permissions issues that can arise with Docker volumes.
     """
-    cli_runner = CliRunner()
-
     dest = Path("/tesseract/output_data")
 
     if volume_type == "bind":
@@ -623,10 +617,8 @@ def test_io_path_interactions(
 
 
 def test_tesseract_serve_interop(
-    built_image_name, dummy_network_name, docker_client, docker_cleanup
+    cli_runner, built_image_name, dummy_network_name, docker_client, docker_cleanup
 ):
-    cli_runner = CliRunner()
-
     docker = _get_docker_executable()
 
     # Network create using subprocess
@@ -682,7 +674,7 @@ def test_tesseract_serve_interop(
 
 
 def test_serve_nonstandard_host_ip(
-    docker_client, built_image_name, docker_cleanup, free_port
+    cli_runner, docker_client, built_image_name, docker_cleanup, free_port
 ):
     """Test serving Tesseract with a non-standard host IP."""
 
@@ -696,7 +688,6 @@ def test_serve_nonstandard_host_ip(
             s.connect(("8.8.8.8", 80))
             return s.getsockname()[0]
 
-    cli_runner = CliRunner()
     container_name = None
 
     # Use a non-standard host IP
@@ -726,7 +717,7 @@ def test_serve_nonstandard_host_ip(
         requests.get(f"http://localhost:{container.host_port}/health")
 
 
-def test_tarball_install(dummy_tesseract_package, docker_cleanup):
+def test_tarball_install(cli_runner, dummy_tesseract_package, docker_cleanup):
     tesseract_api = dedent(
         """
     import cowsay
@@ -753,7 +744,6 @@ def test_tarball_install(dummy_tesseract_package, docker_cleanup):
     with open(dummy_tesseract_package / "tesseract_requirements.txt", "w") as f:
         f.write(tesseract_requirements)
 
-    cli_runner = CliRunner()
     result = cli_runner.invoke(
         app,
         ["--loglevel", "debug", "build", str(dummy_tesseract_package)],
@@ -766,7 +756,9 @@ def test_tarball_install(dummy_tesseract_package, docker_cleanup):
 
 
 @pytest.fixture(scope="module")
-def logging_test_image(dummy_tesseract_location, tmpdir_factory, docker_cleanup_module):
+def logging_test_image(
+    cli_runner, dummy_tesseract_location, tmpdir_factory, docker_cleanup_module
+):
     tesseract_api = dedent(
         """
     from pydantic import BaseModel
@@ -798,8 +790,6 @@ def logging_test_image(dummy_tesseract_location, tmpdir_factory, docker_cleanup_
         dummy_tesseract_location / "tesseract_config.yaml",
         workdir / "tesseract_config.yaml",
     )
-
-    cli_runner = CliRunner()
 
     # Build the Tesseract
     result = cli_runner.invoke(
@@ -886,7 +876,7 @@ def test_logging_tesseract_serve(
 
 @pytest.fixture(scope="module")
 def logging_with_mlflow_test_image(
-    tmpdir_factory, dummy_tesseract_location, docker_cleanup_module
+    cli_runner, tmpdir_factory, dummy_tesseract_location, docker_cleanup_module
 ):
     tesseract_api = dedent(
         """
@@ -920,8 +910,6 @@ def logging_with_mlflow_test_image(
         dummy_tesseract_location / "tesseract_config.yaml",
         workdir / "tesseract_config.yaml",
     )
-
-    cli_runner = CliRunner()
 
     # Build the Tesseract
     result = cli_runner.invoke(
@@ -973,7 +961,9 @@ def test_logging_with_mlflow(logging_with_mlflow_test_image, tmpdir):
 
 
 @pytest.fixture(scope="module")
-def mpa_test_image(dummy_tesseract_location, tmpdir_factory, docker_cleanup_module):
+def mpa_test_image(
+    cli_runner, dummy_tesseract_location, tmpdir_factory, docker_cleanup_module
+):
     tesseract_api = dedent(
         """
     from pydantic import BaseModel
@@ -1021,8 +1011,6 @@ def mpa_test_image(dummy_tesseract_location, tmpdir_factory, docker_cleanup_modu
         dummy_tesseract_location / "tesseract_config.yaml",
         workdir / "tesseract_config.yaml",
     )
-
-    cli_runner = CliRunner()
 
     # Build the Tesseract
     result = cli_runner.invoke(
@@ -1156,6 +1144,7 @@ def test_mpa_mlflow_backend(mpa_test_image, tmpdir):
 
 
 def test_multi_helloworld_endtoend(
+    cli_runner,
     docker_client,
     unit_tesseracts_parent_dir,
     dummy_image_name,
@@ -1163,8 +1152,6 @@ def test_multi_helloworld_endtoend(
     docker_cleanup,
 ):
     """Test that multi-helloworld example can be built, served, and executed."""
-    cli_runner = CliRunner()
-
     # Build Tesseract images
     img_names = []
     for tess_name in ("_multi-tesseract/multi-helloworld", "helloworld"):
@@ -1205,8 +1192,8 @@ def test_multi_helloworld_endtoend(
         catch_exceptions=True,
     )
     assert result.exit_code == 0, result.output
-    docker_cleanup["containers"].append(json.loads(result.output)["container_name"])
-    api_port = json.loads(result.output)["containers"][0]["networks"][
+    docker_cleanup["containers"].append(json.loads(result.stdout)["container_name"])
+    api_port = json.loads(result.stdout)["containers"][0]["networks"][
         dummy_network_name
     ]["port"]
     payload = json.dumps(
@@ -1236,6 +1223,7 @@ def test_multi_helloworld_endtoend(
 
 
 def test_tesseractreference_endtoend(
+    cli_runner,
     docker_client,
     unit_tesseracts_parent_dir,
     dummy_image_name,
@@ -1243,8 +1231,6 @@ def test_tesseractreference_endtoend(
     docker_cleanup,
 ):
     """Test that tesseractreference example can be built and executed, calling helloworld tesseract."""
-    cli_runner = CliRunner()
-
     # Build Tesseract images
     img_names = []
     for tess_name in ("tesseractreference", "helloworld"):
@@ -1289,7 +1275,7 @@ def test_tesseractreference_endtoend(
         catch_exceptions=True,
     )
     assert result.exit_code == 0, result.output
-    serve_meta = json.loads(result.output)
+    serve_meta = json.loads(result.stdout)
     docker_cleanup["containers"].append(serve_meta["container_name"])
 
     # Test url type
@@ -1309,7 +1295,7 @@ def test_tesseractreference_endtoend(
         catch_exceptions=True,
     )
     assert result.exit_code == 0, result.output
-    output_data = json.loads(result.output)
+    output_data = json.loads(result.stdout)
     expected_result = "Hello Alice! Hello Bob!"
     assert output_data["result"] == expected_result
 

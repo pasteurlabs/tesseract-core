@@ -199,6 +199,20 @@ def free_port():
         return s.getsockname()[1]
 
 
+@pytest.fixture(scope="module")
+def cli_runner():
+    import importlib.metadata
+
+    from typer.testing import CliRunner
+
+    kwargs = {}
+    click_version = importlib.metadata.version("click")
+    major_version = int(click_version.split(".")[0])
+    if major_version < 8:
+        kwargs = {"mix_stderr": True}
+    return CliRunner(**kwargs)
+
+
 @pytest.fixture(scope="session")
 def docker_client():
     from tesseract_core.sdk import docker_client as docker_client_module

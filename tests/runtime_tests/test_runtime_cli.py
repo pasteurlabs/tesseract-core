@@ -15,7 +15,6 @@ import fsspec
 import numpy as np
 import pytest
 from moto.server import ThreadedMotoServer
-from typer.testing import CliRunner
 
 from tesseract_core.runtime.cli import _add_user_commands_to_cli
 from tesseract_core.runtime.cli import app as cli_cmd
@@ -52,11 +51,6 @@ test_input_binref = {
 @pytest.fixture(autouse=True)
 def use_dummy_tesseract(dummy_tesseract):
     yield
-
-
-@pytest.fixture
-def cli_runner():
-    return CliRunner()
 
 
 @pytest.fixture(scope="module")

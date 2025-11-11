@@ -20,7 +20,6 @@ import numpy.typing as npt
 import pytest
 import requests
 from common import build_tesseract, encode_array, image_exists
-from typer.testing import CliRunner
 
 
 def json_normalize(obj: str):
@@ -846,6 +845,7 @@ def example_from_json_schema(schema):
 
 
 def test_unit_tesseract_endtoend(
+    cli_runner,
     docker_client,
     dummy_image_name,
     unit_tesseract_path,
@@ -855,8 +855,6 @@ def test_unit_tesseract_endtoend(
 ):
     """Test that unit Tesseract images can be built and used to serve REST API."""
     from tesseract_core.sdk.cli import app
-
-    cli_runner = CliRunner()
 
     # Stage 1: Build
     img_name = build_tesseract(
@@ -879,7 +877,7 @@ def test_unit_tesseract_endtoend(
         catch_exceptions=False,
     )
     assert result.exit_code == 0, result.output
-    openapi_schema = json.loads(result.output)
+    openapi_schema = json.loads(result.stdout)
 
     def _input_schema_from_openapi(openapi_schema):
         input_schema = openapi_schema["components"]["schemas"]["ApplyInputSchema"]
