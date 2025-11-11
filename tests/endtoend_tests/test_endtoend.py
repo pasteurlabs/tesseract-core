@@ -54,7 +54,7 @@ def test_build_from_init_endtoend(
     docker_client, docker_cleanup, dummy_image_name, tmp_path, tag, recipe, base_image
 ):
     """Test that a trivial (empty) Tesseract image can be built from init."""
-    cli_runner = CliRunner(mix_stderr=False)
+    cli_runner = CliRunner()
 
     init_args = ["init", "--target-dir", str(tmp_path), "--name", dummy_image_name]
     if recipe:
@@ -100,7 +100,7 @@ def test_build_from_init_endtoend(
 @pytest.mark.parametrize("skip_checks", [True, False])
 def test_build_generate_only(dummy_tesseract_location, skip_checks):
     """Test output of build with --generate_only flag."""
-    cli_runner = CliRunner(mix_stderr=False)
+    cli_runner = CliRunner()
     build_res = cli_runner.invoke(
         app,
         [
@@ -162,7 +162,7 @@ def test_env_passthrough_serve(docker_cleanup, docker_client, built_image_name):
 
 def test_tesseract_list(built_image_name):
     # Test List Command
-    cli_runner = CliRunner(mix_stderr=False)
+    cli_runner = CliRunner()
 
     list_res = cli_runner.invoke(
         app,
@@ -178,7 +178,7 @@ def test_tesseract_list(built_image_name):
 
 
 def test_tesseract_run_stdout(built_image_name):
-    cli_runner = CliRunner(mix_stderr=False)
+    cli_runner = CliRunner()
 
     test_commands = ("openapi-schema", "health")
 
@@ -206,7 +206,7 @@ def test_tesseract_run_stdout(built_image_name):
 @pytest.mark.parametrize("user", [None, "root", "1000:1000"])
 def test_run_as_user(docker_client, built_image_name, user, docker_cleanup):
     """Ensure we can run a basic Tesseract image as any user."""
-    cli_runner = CliRunner(mix_stderr=False)
+    cli_runner = CliRunner()
 
     run_res = cli_runner.invoke(
         app,
@@ -237,7 +237,7 @@ def test_run_as_user(docker_client, built_image_name, user, docker_cleanup):
 
 
 def test_tesseract_serve_pipeline(docker_client, built_image_name, docker_cleanup):
-    cli_runner = CliRunner(mix_stderr=False)
+    cli_runner = CliRunner()
     run_res = cli_runner.invoke(
         app,
         [
@@ -281,7 +281,7 @@ def test_tesseract_serve_pipeline(docker_client, built_image_name, docker_cleanu
 @pytest.mark.parametrize("tear_all", [True, False])
 def test_tesseract_teardown_multiple(built_image_name, tear_all):
     """Teardown multiple served tesseracts."""
-    cli_runner = CliRunner(mix_stderr=False)
+    cli_runner = CliRunner()
 
     container_names = []
     try:
@@ -331,7 +331,7 @@ def test_tesseract_teardown_multiple(built_image_name, tear_all):
 
 def test_tesseract_serve_ports_error(built_image_name):
     """Check error handling for serve -p flag."""
-    cli_runner = CliRunner(mix_stderr=False)
+    cli_runner = CliRunner()
 
     # Check invalid ports.
     run_res = cli_runner.invoke(
@@ -382,7 +382,7 @@ def test_tesseract_serve_ports_error(built_image_name):
 @pytest.mark.parametrize("port", ["fixed", "range"])
 def test_tesseract_serve_ports(built_image_name, port, docker_cleanup, free_port):
     """Try to serve multiple Tesseracts on multiple ports."""
-    cli_runner = CliRunner(mix_stderr=False)
+    cli_runner = CliRunner()
     container_name = None
 
     if port == "fixed":
@@ -441,7 +441,7 @@ def test_tesseract_serve_volume_permissions(
 
     This should cover most permissions issues that can arise with Docker volumes.
     """
-    cli_runner = CliRunner(mix_stderr=False)
+    cli_runner = CliRunner()
 
     dest = Path("/tesseract/output_data")
 
@@ -625,7 +625,7 @@ def test_io_path_interactions(
 def test_tesseract_serve_interop(
     built_image_name, dummy_network_name, docker_client, docker_cleanup
 ):
-    cli_runner = CliRunner(mix_stderr=False)
+    cli_runner = CliRunner()
 
     docker = _get_docker_executable()
 
@@ -696,7 +696,7 @@ def test_serve_nonstandard_host_ip(
             s.connect(("8.8.8.8", 80))
             return s.getsockname()[0]
 
-    cli_runner = CliRunner(mix_stderr=False)
+    cli_runner = CliRunner()
     container_name = None
 
     # Use a non-standard host IP
@@ -753,7 +753,7 @@ def test_tarball_install(dummy_tesseract_package, docker_cleanup):
     with open(dummy_tesseract_package / "tesseract_requirements.txt", "w") as f:
         f.write(tesseract_requirements)
 
-    cli_runner = CliRunner(mix_stderr=False)
+    cli_runner = CliRunner()
     result = cli_runner.invoke(
         app,
         ["--loglevel", "debug", "build", str(dummy_tesseract_package)],
@@ -799,7 +799,7 @@ def logging_test_image(dummy_tesseract_location, tmpdir_factory, docker_cleanup_
         workdir / "tesseract_config.yaml",
     )
 
-    cli_runner = CliRunner(mix_stderr=False)
+    cli_runner = CliRunner()
 
     # Build the Tesseract
     result = cli_runner.invoke(
@@ -921,7 +921,7 @@ def logging_with_mlflow_test_image(
         workdir / "tesseract_config.yaml",
     )
 
-    cli_runner = CliRunner(mix_stderr=False)
+    cli_runner = CliRunner()
 
     # Build the Tesseract
     result = cli_runner.invoke(
@@ -1022,7 +1022,7 @@ def mpa_test_image(dummy_tesseract_location, tmpdir_factory, docker_cleanup_modu
         workdir / "tesseract_config.yaml",
     )
 
-    cli_runner = CliRunner(mix_stderr=False)
+    cli_runner = CliRunner()
 
     # Build the Tesseract
     result = cli_runner.invoke(
@@ -1163,7 +1163,7 @@ def test_multi_helloworld_endtoend(
     docker_cleanup,
 ):
     """Test that multi-helloworld example can be built, served, and executed."""
-    cli_runner = CliRunner(mix_stderr=False)
+    cli_runner = CliRunner()
 
     # Build Tesseract images
     img_names = []
@@ -1243,7 +1243,7 @@ def test_tesseractreference_endtoend(
     docker_cleanup,
 ):
     """Test that tesseractreference example can be built and executed, calling helloworld tesseract."""
-    cli_runner = CliRunner(mix_stderr=False)
+    cli_runner = CliRunner()
 
     # Build Tesseract images
     img_names = []

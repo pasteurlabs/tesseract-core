@@ -17,7 +17,7 @@ from tesseract_core.sdk.cli import app as cli
 
 @pytest.fixture
 def cli_runner():
-    return CliRunner(mix_stderr=False)
+    return CliRunner()
 
 
 def test_suggestion_on_misspelled_command(cli_runner):

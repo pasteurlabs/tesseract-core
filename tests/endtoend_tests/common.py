@@ -54,7 +54,7 @@ def print_debug_info(result):
 def build_tesseract(
     client, sourcedir, image_name, config_override=None, tag=None, build_retries=3
 ):
-    cli_runner = CliRunner(mix_stderr=False)
+    cli_runner = CliRunner()
 
     build_args = [
         "--loglevel",

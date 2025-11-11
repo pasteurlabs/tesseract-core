@@ -56,7 +56,7 @@ def use_dummy_tesseract(dummy_tesseract):
 
 @pytest.fixture
 def cli_runner():
-    return CliRunner(mix_stderr=False)
+    return CliRunner()
 
 
 @pytest.fixture(scope="module")
@@ -157,7 +157,7 @@ def cli():
 
 def test_invocation_no_args_prints_usage(cli, cli_runner):
     result = cli_runner.invoke(cli, env={"TERM": "dumb"})
-    assert result.exit_code == 0, result.stdout
+    assert result.exit_code == 2, result.stdout
     assert "Usage: tesseract-runtime" in result.stdout
 
 
