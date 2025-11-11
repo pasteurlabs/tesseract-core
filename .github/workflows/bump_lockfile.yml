@@ -24,6 +24,11 @@ jobs:
         with:
           python-version-file: "pyproject.toml"
 
+      - name: Update runtime dependencies
+        run: |
+          pip install toml packaging
+          python .github/workflows/update_runtime_deps.py tesseract_core/runtime/meta/pyproject.toml
+
       - name: Update lockfile
         run: |
           mv production.uv.lock uv.lock
