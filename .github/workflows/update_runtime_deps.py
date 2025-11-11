@@ -9,6 +9,12 @@ import tempfile
 import toml
 from packaging.requirements import Requirement
 from packaging.specifiers import Specifier, SpecifierSet
+from packaging.version import Version
+
+
+def _filter_upper_bounds(specs: SpecifierSet) -> SpecifierSet:
+    """Return a SpecifierSet with upper bounds removed."""
+    return SpecifierSet([spec for spec in specs if spec.operator != "<="])
 
 
 def write_unbounded_pyproject(pyproject_file: str, workdir: str) -> None:
@@ -18,9 +24,7 @@ def write_unbounded_pyproject(pyproject_file: str, workdir: str) -> None:
 
     new_deps = []
     for req in old_deps:
-        req.specifier = SpecifierSet(
-            [spec for spec in req.specifier if spec.operator != "<="]
-        )
+        req.specifier = _filter_upper_bounds(req.specifier)
         new_deps.append(str(req))
     pyproject["project"]["dependencies"] = new_deps
 
@@ -60,8 +64,10 @@ def get_updated_bounds(pyproject_file: str, resolved_env: str) -> list[str]:
         if "==" in line:
             req = Requirement(line)
             pkg = req.name
-            ver = next(iter(req.specifier)).version
+            ver = Version(next(iter(req.specifier)).version)
 
+            # The same package may show up multiple times for different markers etc.
+            # We want the highest version as the new upper bound.
             if pkg in new_upper_bounds:
                 if ver > new_upper_bounds[pkg]:
                     new_upper_bounds[pkg] = ver
@@ -75,7 +81,7 @@ def get_updated_bounds(pyproject_file: str, resolved_env: str) -> list[str]:
             upper_bound = new_upper_bounds[pkg_name]
             dep.specifier = SpecifierSet(
                 [
-                    *[spec for spec in dep.specifier if spec.operator != "<="],
+                    *_filter_upper_bounds(dep.specifier),
                     Specifier(f"<= {upper_bound}"),
                 ]
             )
