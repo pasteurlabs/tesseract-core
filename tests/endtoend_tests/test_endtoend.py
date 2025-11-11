@@ -6,6 +6,7 @@
 import json
 import os
 import shutil
+import sqlite3
 import subprocess
 import uuid
 from pathlib import Path
@@ -1125,6 +1126,33 @@ def test_mpa_mlflow_backend(mpa_test_image, tmpdir):
     # Check for MLflow database file
     mlflow_db_path = Path(tmpdir) / "mlflow.db"
     assert mlflow_db_path.exists(), "Expected MLflow database file to exist"
+
+    # Query the database to verify content was logged
+    with sqlite3.connect(str(mlflow_db_path)) as conn:
+        cursor = conn.cursor()
+
+        # Check parameters were logged
+        cursor.execute("SELECT key, value FROM params")
+        params = dict(cursor.fetchall())
+        assert params["test_parameter"] == "test_param"
+        assert params["steps_config"] == "5"  # MLflow stores params as strings
+
+        # Check metrics were logged
+        cursor.execute("SELECT key, value, step FROM metrics ORDER BY step")
+        metrics = cursor.fetchall()
+        assert len(metrics) == 5
+
+        # Verify some of the squared_step values
+        squared_metrics = [m for m in metrics if m[0] == "squared_step"]
+        assert len(squared_metrics) == 5
+        assert squared_metrics[0] == ("squared_step", 0.0, 0)
+        assert squared_metrics[1] == ("squared_step", 1.0, 1)
+        assert squared_metrics[4] == ("squared_step", 16.0, 4)
+
+        # Check artifacts were logged (MLflow stores artifact info in runs table)
+        cursor.execute("SELECT artifact_uri FROM runs")
+        artifact_uris = [row[0] for row in cursor.fetchall()]
+        assert len(artifact_uris) > 0  # At least one run with artifacts
 
 
 def test_multi_helloworld_endtoend(

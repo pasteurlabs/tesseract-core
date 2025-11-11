@@ -5,6 +5,8 @@
 
 import csv
 import json
+import os
+import sqlite3
 
 import pytest
 
@@ -166,3 +168,39 @@ def test_mlflow_log_calls(tmpdir):
 
     # Verify MLflow database file was created
     assert mlflow_db_file.exists()
+
+    # Query the database to verify content was logged
+    with sqlite3.connect(str(mlflow_db_file)) as conn:
+        cursor = conn.cursor()
+
+        # Check parameters were logged
+        cursor.execute("SELECT key, value FROM params")
+        params = dict(cursor.fetchall())
+        assert params["model_type"] == "neural_network"
+        assert params["epochs"] == "100"
+
+        # Check metrics were logged
+        cursor.execute("SELECT key, value, step FROM metrics ORDER BY step")
+        metrics = cursor.fetchall()
+        assert len(metrics) == 2
+        assert metrics[0] == ("accuracy", 0.85, 0)  # step defaults to 0
+        assert metrics[1] == ("loss", 0.25, 1)
+
+        # Check artifacts were logged (MLflow stores artifact info in runs table)
+        cursor.execute("SELECT artifact_uri FROM runs")
+        artifact_uris = [row[0] for row in cursor.fetchall()]
+        assert len(artifact_uris) > 0  # At least one run with artifacts
+
+        # Verify the artifact file was actually copied to the artifact location
+        artifact_found = False
+        for artifact_uri in artifact_uris:
+            if artifact_uri and os.path.exists(artifact_uri):
+                try:
+                    artifact_files = os.listdir(artifact_uri)
+                    if "model_config.json" in artifact_files:
+                        artifact_found = True
+                        break
+                except OSError:
+                    continue
+
+        assert artifact_found
