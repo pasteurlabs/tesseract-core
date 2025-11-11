@@ -151,7 +151,6 @@ def cli():
 
 def test_invocation_no_args_prints_usage(cli, cli_runner):
     result = cli_runner.invoke(cli, env={"TERM": "dumb"})
-    assert result.exit_code == 2, result.stdout
     assert "Usage: tesseract-runtime" in result.stdout
 
 

@@ -209,7 +209,7 @@ def cli_runner():
     click_version = importlib.metadata.version("click").split(".")
     click_version = (int(click_version[0]), int(click_version[1]))
     if click_version < (8, 2):
-        kwargs = {"mix_stderr": True}
+        kwargs.update({"mix_stderr": False})
     return CliRunner(**kwargs)
 
 
