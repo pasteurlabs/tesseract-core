@@ -51,7 +51,7 @@ def update_requirements(tmpdir: str) -> str:
 
 
 def get_updated_bounds(pyproject_file: str, resolved_env: str) -> list[str]:
-    """Parse resolved environment and update upper bounds in original pyproject.toml."""
+    """Parse resolved environment and update upper bounds from original pyproject.toml."""
     pyproject = toml.load(pyproject_file)
     current_deps = [Requirement(dep) for dep in pyproject["project"]["dependencies"]]
 
