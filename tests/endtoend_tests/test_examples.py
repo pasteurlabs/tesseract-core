@@ -107,6 +107,16 @@ TEST_CASES = {
             ),
         ],
     ),
+    "pip_custom_step": Config(
+        test_with_random_inputs=True,
+        sample_requests=[
+            SampleRequest(
+                endpoint="apply",
+                payload={"inputs": {"name": "Ozzy"}},
+                output_contains_pattern="Hello Ozzy!",
+            ),
+        ],
+    ),
     "pyvista-arm64": Config(
         test_with_random_inputs=True,
         sample_requests=[
@@ -778,6 +788,8 @@ TEST_CASES = {
                 output_contains_array=np.array([-0.5, -1.5], dtype="float32"),
             )
         ],
+    "tesseractreference": Config(  # Can't test requests standalone; needs target Tesseract. Covered in separate test.
+        test_with_random_inputs=False, sample_requests=[]
     ),
 }
 

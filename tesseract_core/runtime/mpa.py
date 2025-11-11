@@ -146,12 +146,14 @@ class MLflowBackend(BaseBackend):
         tracking_uri = config.mlflow_tracking_uri
 
         if not tracking_uri.startswith(("http://", "https://")):
-            # If it's a file URI, convert to local path
-            tracking_uri = tracking_uri.replace("file://", "")
+            # If it's a db file URI, convert to local path
+            tracking_uri = tracking_uri.replace("sqlite:///", "")
 
             # Relative paths are resolved against the base output path
             if not Path(tracking_uri).is_absolute():
                 tracking_uri = (Path(get_config().output_path) / tracking_uri).resolve()
+
+            tracking_uri = f"sqlite:///{tracking_uri}"
 
         mlflow.set_tracking_uri(tracking_uri)
 
@@ -251,9 +253,13 @@ def redirect_stdio(logfile: Union[str, Path]) -> Generator[None, None, None]:
     with ExitStack() as stack:
         f = stack.enter_context(open(logfile, "w"))
 
-        orig_stderr = sys.stderr
+        # Duplicate the original stderr file descriptor before any redirection
+        orig_stderr_fd = os.dup(sys.stderr.fileno())
+        orig_stderr_file = os.fdopen(orig_stderr_fd, "w")
+        stack.callback(orig_stderr_file.close)
+
         # Use `print` instead of `.write` so we get appropriate newlines and flush behavior
-        write_to_stderr = lambda msg: print(msg, file=orig_stderr, flush=True)
+        write_to_stderr = lambda msg: print(msg, file=orig_stderr_file, flush=True)
         write_to_file = lambda msg: print(msg, file=f, flush=True)
         pipe_fd = stack.enter_context(LogPipe(write_to_stderr, write_to_file))
 
