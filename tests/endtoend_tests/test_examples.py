@@ -966,10 +966,10 @@ def test_unit_tesseract_endtoend(
                 assert result.exit_code == 0, result.exception
                 if cli_cmd in ("check-gradients",):
                     # Result is text
-                    output = result.output
+                    output = result.stdout
                 else:
                     # Result is JSON output
-                    output = json_normalize(result.output)
+                    output = json_normalize(result.stdout)
             else:
                 # Result is an error message
                 assert result.exit_code != 0

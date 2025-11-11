@@ -206,9 +206,9 @@ def cli_runner():
     from typer.testing import CliRunner
 
     kwargs = {}
-    click_version = importlib.metadata.version("click")
-    major_version = int(click_version.split(".")[0])
-    if major_version < 8:
+    click_version = importlib.metadata.version("click").split(".")
+    click_version = (int(click_version[0]), int(click_version[1]))
+    if click_version < (8, 2):
         kwargs = {"mix_stderr": True}
     return CliRunner(**kwargs)
 
