@@ -44,7 +44,7 @@ class TeePipe(threading.Thread):
         self._sinks = sinks
         self._fd_read, self._fd_write = os.pipe()
         self._captured_lines = []
-        self._last_line_time = time.time()
+        self._last_time = time.time()
 
     def __enter__(self) -> int:
         """Start the thread and return the write file descriptor of the pipe."""
@@ -55,7 +55,7 @@ class TeePipe(threading.Thread):
         """Close the pipe and join the thread."""
         # Wait for ongoing reads to complete
         grace = 0.1
-        while (time.time() - self._last_line_time) < grace:
+        while (time.time() - self._last_time) < grace:
             time.sleep(grace / 10)
 
         # This will signal EOF to the reader thread
@@ -73,7 +73,7 @@ class TeePipe(threading.Thread):
         return self._fd_write
 
     def run(self) -> None:
-        """Run the thread, logging everything."""
+        """Run the thread, pushing every full line of text to the sinks."""
         line_buffer = []
         while True:
             try:
@@ -85,24 +85,28 @@ class TeePipe(threading.Thread):
                 # EOF reached
                 break
 
-            self._last_line_time = time.time()
-            if data.endswith("\n"):
-                data = data[:-1]
-                flush = True
-            else:
-                flush = False
+            self._last_time = time.time()
 
-            line_buffer.append(data)
-            if flush:
-                line = "".join(line_buffer)
-                line_buffer.clear()
+            lines = data.splitlines()
+            if data.endswith("\n"):
+                # Treat trailing newline as an empty line
+                lines.append("")
+
+            # Log complete lines
+            for i, line in enumerate(lines[:-1]):
+                if i == 0:
+                    line = "".join([*line_buffer, line])
+                    line_buffer = []
                 self._captured_lines.append(line)
                 for sink in self._sinks:
                     sink(line)
 
+            # Accumulate incomplete line
+            line_buffer.append(lines[-1])
+
         # Flush incomplete lines at the end of the stream
-        if line_buffer:
-            line = "".join(line_buffer)
+        line = "".join(line_buffer)
+        if line:
             self._captured_lines.append(line)
             for sink in self._sinks:
                 sink(line)
