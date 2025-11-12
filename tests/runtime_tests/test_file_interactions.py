@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 from pydantic import BaseModel
-from typeguard import TypeCheckError
+from typeguard import suppress_type_checks
 
 from tesseract_core.runtime import Array, Float32
 from tesseract_core.runtime.file_interactions import output_to_bytes
@@ -72,8 +72,9 @@ def test_output_to_bytes_json_binref(output_data):
 
 
 def test_output_to_bytes_unsupported_format(output_data):
-    with pytest.raises(TypeCheckError):
-        output_to_bytes(output_data, "invalid")  # type: ignore
+    with pytest.raises(ValueError, match="Unsupported format invalid"):
+        with suppress_type_checks():
+            output_to_bytes(output_data, "invalid")  # type: ignore
 
 
 def test_output_to_bytes_empty_dict():
