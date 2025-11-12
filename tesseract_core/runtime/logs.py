@@ -40,6 +40,8 @@ class TeePipe(threading.Thread):
         grace = 0.1
         while (time.time() - self._last_line_time) < grace:
             time.sleep(grace / 10)
+
+        # This will signal EOF to the reader thread
         os.close(self._fd_read)
         # Use timeout and daemon=True to avoid hanging indefinitely if something goes wrong
         self.join(timeout=1)
