@@ -10,10 +10,17 @@ from typing import Any, Callable
 # NOTE: This is duplicated in `tesseract_core/sdk/logs.py`.
 # Make sure to propagate changes to both files.
 class TeePipe(threading.Thread):
-    """Custom I/O pipe to support live logging to multiple sinks.
+    """Custom I/O construct to support live logging from a single file descriptor to multiple sinks.
 
-    Runs a thread that logs everything written to the pipe to the given sinks.
-    Can be used as a context manager for automatic cleanup.
+    Runs a thread that records everything written to the file descriptor. Can be used as a
+    context manager for automatic cleanup.
+
+    Example:
+        >>> with TeePipe(print, logger.info) as pipe_fd:
+        ...     fd = os.fdopen(pipe_fd, "w")
+        ...     print("Hello, World!", file=fd, flush=True)
+        Hello, World!
+        2025-06-10 12:00:00,000 - INFO - Hello, World!
     """
 
     daemon = True
