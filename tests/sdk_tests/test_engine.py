@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import random
+import threading
 import time
 from pathlib import Path
 
@@ -316,9 +317,9 @@ def test_needs_docker(mocked_docker, monkeypatch):
         run_something_with_docker()
 
 
-def test_logpipe(caplog):
+def test_teepipe(caplog):
     # Verify that logging in a separate thread works as intended
-    from tesseract_core.sdk.logs import LogPipe
+    from tesseract_core.sdk.logs import TeePipe
 
     logger = logging.getLogger("tesseract")
     caplog.set_level(logging.INFO, logger="tesseract")
@@ -329,18 +330,58 @@ def test_logpipe(caplog):
         msg = "".join(random.choices("abcdefghijklmnopqrstuvwxyz", k=msg_length))
         logged_lines.append(msg)
 
-    logpipe = LogPipe(logger.info)
-    with logpipe:
-        fd = os.fdopen(logpipe.fileno(), "w", closefd=False)
+    teepipe = TeePipe(logger.info)
+    with teepipe:
+        fd = os.fdopen(teepipe.fileno(), "w", closefd=False)
         for line in logged_lines:
             print(line, file=fd)
             time.sleep(random.random() / 100)
         fd.flush()
 
-    assert logpipe.captured_lines == logged_lines
+    assert teepipe.captured_lines == logged_lines
     assert caplog.record_tuples == [
         ("tesseract", logging.INFO, line) for line in logged_lines
     ]
+
+
+def test_teepipe_early_exit():
+    # Verify that TeePipe can handle early exit without hanging or losing data
+    from tesseract_core.sdk.logs import TeePipe
+
+    logged_lines = []
+    for _ in range(100):
+        msg_length = 2 ** random.randint(2, 12)
+        msg = "".join(random.choices("abcdefghijklmnopqrstuvwxyz", k=msg_length))
+        logged_lines.append(msg)
+
+    teepipe = TeePipe()
+
+    teepipe.start()
+    fd = os.fdopen(teepipe.fileno(), "w", closefd=False)
+
+    def _write_to_pipe():
+        for line in logged_lines:
+            print(line, file=fd, flush=True)
+            time.sleep(random.random() / 100)
+
+        print("end without newline", end="", file=fd, flush=True)
+        fd.flush()
+
+    writer_thread = threading.Thread(target=_write_to_pipe)
+    writer_thread.start()
+
+    # Wait for the first data to roll in, i.e., thread is up and running
+    while not teepipe.captured_lines:
+        time.sleep(0.01)
+
+    assert len(teepipe.captured_lines) < len(logged_lines)
+
+    # Exit the pipe early before all data is written
+    # This should block until no more data is incoming
+    teepipe.stop()
+
+    assert len(teepipe.captured_lines) == len(logged_lines) + 1
+    assert teepipe.captured_lines == [*logged_lines, "end without newline"]
 
 
 def test_parse_requirements(tmpdir):
