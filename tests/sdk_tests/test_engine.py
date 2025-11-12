@@ -365,7 +365,6 @@ def test_teepipe_early_exit():
             time.sleep(random.random() / 100)
 
         print("end without newline", end="", file=fd, flush=True)
-        fd.flush()
 
     writer_thread = threading.Thread(target=_write_to_pipe)
     writer_thread.start()
@@ -374,6 +373,7 @@ def test_teepipe_early_exit():
     while not teepipe.captured_lines:
         time.sleep(0.01)
 
+    # Sanity check that not all data has been written yet
     assert len(teepipe.captured_lines) < len(logged_lines)
 
     # Exit the pipe early before all data is written

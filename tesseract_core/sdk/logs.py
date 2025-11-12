@@ -43,9 +43,6 @@ class TeePipe(threading.Thread):
         super().__init__()
         self._sinks = sinks
         self._fd_read, self._fd_write = os.pipe()
-        self._pipe_reader = os.fdopen(
-            self._fd_read, mode="r", closefd=False, buffering=1024
-        )
         self._captured_lines = []
         self._last_line_time = time.time()
 
@@ -62,11 +59,10 @@ class TeePipe(threading.Thread):
             time.sleep(grace / 10)
 
         # This will signal EOF to the reader thread
+        os.close(self._fd_write)
         os.close(self._fd_read)
         # Use timeout and daemon=True to avoid hanging indefinitely if something goes wrong
         self.join(timeout=1)
-        self._pipe_reader.close()
-        os.close(self._fd_write)
 
     def __exit__(self, *args: Any) -> None:
         """Close the pipe and join the thread."""
@@ -81,7 +77,7 @@ class TeePipe(threading.Thread):
         line_buffer = []
         while True:
             try:
-                data = self._pipe_reader.readline(1024)
+                data = os.read(self._fd_read, 1024).decode()
             except OSError:
                 # Pipe closed
                 break
