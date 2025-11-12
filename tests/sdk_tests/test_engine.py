@@ -334,14 +334,13 @@ def test_teepipe(caplog):
     with teepipe:
         fd = os.fdopen(teepipe.fileno(), "w", closefd=False)
         for line in logged_lines:
-            print(line, file=fd)
+            print(line, file=fd, flush=True)
             time.sleep(random.random() / 100)
-        fd.flush()
 
-    assert teepipe.captured_lines == logged_lines
     assert caplog.record_tuples == [
         ("tesseract", logging.INFO, line) for line in logged_lines
     ]
+    assert teepipe.captured_lines == logged_lines
 
 
 def test_teepipe_early_exit():
