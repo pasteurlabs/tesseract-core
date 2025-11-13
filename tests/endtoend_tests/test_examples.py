@@ -787,6 +787,7 @@ TEST_CASES = {
                 output_contains_array=np.array([-0.5, -1.5], dtype="float32"),
             )
         ],
+    ),
     "tesseractreference": Config(  # Can't test requests standalone; needs target Tesseract. Covered in separate test.
         test_with_random_inputs=False, sample_requests=[]
     ),
