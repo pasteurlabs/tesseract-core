@@ -20,7 +20,6 @@ import numpy.typing as npt
 import pytest
 import requests
 from common import build_tesseract, encode_array, image_exists
-from typer.testing import CliRunner
 
 
 def json_normalize(obj: str):
@@ -98,6 +97,16 @@ TEST_CASES = {
         test_with_random_inputs=True,
     ),
     "helloworld": Config(
+        test_with_random_inputs=True,
+        sample_requests=[
+            SampleRequest(
+                endpoint="apply",
+                payload={"inputs": {"name": "Ozzy"}},
+                output_contains_pattern="Hello Ozzy!",
+            ),
+        ],
+    ),
+    "pip_custom_step": Config(
         test_with_random_inputs=True,
         sample_requests=[
             SampleRequest(
@@ -760,6 +769,9 @@ TEST_CASES = {
             ),
         ],
     ),
+    "tesseractreference": Config(  # Can't test requests standalone; needs target Tesseract. Covered in separate test.
+        test_with_random_inputs=False, sample_requests=[]
+    ),
 }
 
 
@@ -833,6 +845,7 @@ def example_from_json_schema(schema):
 
 
 def test_unit_tesseract_endtoend(
+    cli_runner,
     docker_client,
     dummy_image_name,
     unit_tesseract_path,
@@ -842,8 +855,6 @@ def test_unit_tesseract_endtoend(
 ):
     """Test that unit Tesseract images can be built and used to serve REST API."""
     from tesseract_core.sdk.cli import app
-
-    cli_runner = CliRunner(mix_stderr=False)
 
     # Stage 1: Build
     img_name = build_tesseract(
@@ -866,7 +877,7 @@ def test_unit_tesseract_endtoend(
         catch_exceptions=False,
     )
     assert result.exit_code == 0, result.output
-    openapi_schema = json.loads(result.output)
+    openapi_schema = json.loads(result.stdout)
 
     def _input_schema_from_openapi(openapi_schema):
         input_schema = openapi_schema["components"]["schemas"]["ApplyInputSchema"]
@@ -955,10 +966,10 @@ def test_unit_tesseract_endtoend(
                 assert result.exit_code == 0, result.exception
                 if cli_cmd in ("check-gradients",):
                     # Result is text
-                    output = result.output
+                    output = result.stdout
                 else:
                     # Result is JSON output
-                    output = json_normalize(result.output)
+                    output = json_normalize(result.stdout)
             else:
                 # Result is an error message
                 assert result.exit_code != 0

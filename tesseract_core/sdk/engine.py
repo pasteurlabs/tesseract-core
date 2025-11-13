@@ -548,12 +548,6 @@ def serve(
     if output_format:
         environment["TESSERACT_OUTPUT_FORMAT"] = output_format
 
-    args = []
-    container_api_port = "8000"
-    container_debugpy_port = "5678"
-
-    args.extend(["--port", container_api_port])
-
     if not port:
         port = str(get_free_port())
     else:
@@ -561,6 +555,12 @@ def serve(
         if "-" in port:
             port_start, port_end = port.split("-")
             port = str(get_free_port(within_range=(int(port_start), int(port_end))))
+
+    args = []
+    container_api_port = port
+    container_debugpy_port = "5678"
+
+    args.extend(["--port", container_api_port])
 
     if num_workers > 1:
         args.extend(["--num-workers", str(num_workers)])

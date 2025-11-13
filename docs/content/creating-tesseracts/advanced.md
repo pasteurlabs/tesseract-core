@@ -150,6 +150,10 @@ After that is done, you will be able to use the `tesseract-runtime` command in y
 This is the exact same command that is launched inside Tesseract containers to run their
 various endpoints, and its syntax mirrors the one of `tesseract run`.
 
+```{note}
+When running without containerization, the directory containing `tesseract_api.py` is automatically added to `PYTHONPATH`, allowing you to import additional Python modules from that directory. This behavior matches what happens inside Tesseract containers, where the path containing `tesseract_api.py` is also added to `PYTHONPATH`.
+```
+
 For instance, to call the `apply` function, rather than first building a `helloworld` image and running this command:
 
 ```bash

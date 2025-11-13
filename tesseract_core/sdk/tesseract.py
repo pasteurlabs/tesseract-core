@@ -309,17 +309,19 @@ class Tesseract:
         return [endpoint.lstrip("/") for endpoint in self.openapi_schema["paths"]]
 
     @requires_client
-    def apply(self, inputs: dict) -> dict:
+    def apply(self, inputs: dict, run_id: str | None = None) -> dict:
         """Run apply endpoint.
 
         Args:
             inputs: a dictionary with the inputs.
+            run_id: a string to identify the run. Run outputs will be located
+                    in a directory suffixed with this id.
 
         Returns:
             dictionary with the results.
         """
         payload = {"inputs": inputs}
-        return self._client.run_tesseract("apply", payload)
+        return self._client.run_tesseract("apply", payload, run_id)
 
     @requires_client
     def abstract_eval(self, abstract_inputs: dict) -> dict:
@@ -345,7 +347,11 @@ class Tesseract:
 
     @requires_client
     def jacobian(
-        self, inputs: dict, jac_inputs: list[str], jac_outputs: list[str]
+        self,
+        inputs: dict,
+        jac_inputs: list[str],
+        jac_outputs: list[str],
+        run_id: str | None = None,
     ) -> dict:
         """Calculate the Jacobian of (some of the) outputs w.r.t. (some of the) inputs.
 
@@ -353,6 +359,8 @@ class Tesseract:
             inputs: a dictionary with the inputs.
             jac_inputs: Inputs with respect to which derivatives will be calculated.
             jac_outputs: Outputs which will be differentiated.
+            run_id: a string to identify the run. Run outputs will be located
+                    in a directory suffixed with this id.
 
         Returns:
             dictionary with the results.
@@ -365,7 +373,7 @@ class Tesseract:
             "jac_inputs": jac_inputs,
             "jac_outputs": jac_outputs,
         }
-        return self._client.run_tesseract("jacobian", payload)
+        return self._client.run_tesseract("jacobian", payload, run_id)
 
     @requires_client
     def jacobian_vector_product(
@@ -374,6 +382,7 @@ class Tesseract:
         jvp_inputs: list[str],
         jvp_outputs: list[str],
         tangent_vector: dict,
+        run_id: str | None = None,
     ) -> dict:
         """Calculate the Jacobian Vector Product (JVP) of (some of the) outputs w.r.t. (some of the) inputs.
 
@@ -382,6 +391,8 @@ class Tesseract:
             jvp_inputs: Inputs with respect to which derivatives will be calculated.
             jvp_outputs: Outputs which will be differentiated.
             tangent_vector: Element of the tangent space to multiply with the Jacobian.
+            run_id: a string to identify the run. Run outputs will be located
+                    in a directory suffixed with this id.
 
         Returns:
             dictionary with the results.
@@ -397,7 +408,7 @@ class Tesseract:
             "jvp_outputs": jvp_outputs,
             "tangent_vector": tangent_vector,
         }
-        return self._client.run_tesseract("jacobian_vector_product", payload)
+        return self._client.run_tesseract("jacobian_vector_product", payload, run_id)
 
     @requires_client
     def vector_jacobian_product(
@@ -406,6 +417,7 @@ class Tesseract:
         vjp_inputs: list[str],
         vjp_outputs: list[str],
         cotangent_vector: dict,
+        run_id: str | None = None,
     ) -> dict:
         """Calculate the Vector Jacobian Product (VJP) of (some of the) outputs w.r.t. (some of the) inputs.
 
@@ -414,6 +426,8 @@ class Tesseract:
             vjp_inputs: Inputs with respect to which derivatives will be calculated.
             vjp_outputs: Outputs which will be differentiated.
             cotangent_vector: Element of the cotangent space to multiply with the Jacobian.
+            run_id: a string to identify the run. Run outputs will be located
+                    in a directory suffixed with this id.
 
 
         Returns:
@@ -430,7 +444,7 @@ class Tesseract:
             "vjp_outputs": vjp_outputs,
             "cotangent_vector": cotangent_vector,
         }
-        return self._client.run_tesseract("vector_jacobian_product", payload)
+        return self._client.run_tesseract("vector_jacobian_product", payload, run_id)
 
 
 def _tree_map(func: Callable, tree: Any, is_leaf: Callable | None = None) -> Any:
@@ -496,6 +510,7 @@ class HTTPClient:
             parsed = urlparse(url)
 
         sanitized = urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", "", ""))
+        sanitized = sanitized.rstrip("/")
         return sanitized
 
     @property
@@ -504,7 +519,11 @@ class HTTPClient:
         return self._url
 
     def _request(
-        self, endpoint: str, method: str = "GET", payload: dict | None = None
+        self,
+        endpoint: str,
+        method: str = "GET",
+        payload: dict | None = None,
+        run_id: str | None = None,
     ) -> dict:
         url = f"{self.url}/{endpoint.lstrip('/')}"
 
@@ -515,7 +534,10 @@ class HTTPClient:
         else:
             encoded_payload = None
 
-        response = requests.request(method=method, url=url, json=encoded_payload)
+        params = {"run_id": run_id} if run_id is not None else {}
+        response = requests.request(
+            method=method, url=url, json=encoded_payload, params=params
+        )
 
         if response.status_code == requests.codes.unprocessable_entity:
             # Try and raise a more helpful error if the response is a Pydantic error
@@ -568,12 +590,16 @@ class HTTPClient:
 
         return data
 
-    def run_tesseract(self, endpoint: str, payload: dict | None = None) -> dict:
+    def run_tesseract(
+        self, endpoint: str, payload: dict | None = None, run_id: str | None = None
+    ) -> dict:
         """Run a Tesseract endpoint.
 
         Args:
             endpoint: The endpoint to run.
             payload: The payload to send to the endpoint.
+            run_id: a string to identify the run. Run outputs will be located
+                    in a directory suffixed with this id.
 
         Returns:
             The loaded JSON response from the endpoint, with decoded arrays.
@@ -589,7 +615,7 @@ class HTTPClient:
         if endpoint == "openapi_schema":
             endpoint = "openapi.json"
 
-        return self._request(endpoint, method, payload)
+        return self._request(endpoint, method, payload, run_id)
 
 
 class LocalClient:
@@ -604,12 +630,15 @@ class LocalClient:
         }
         self._openapi_schema = create_rest_api(tesseract_api).openapi()
 
-    def run_tesseract(self, endpoint: str, payload: dict | None = None) -> dict:
+    def run_tesseract(
+        self, endpoint: str, payload: dict | None = None, run_id: str | None = None
+    ) -> dict:
         """Run a Tesseract endpoint.
 
         Args:
             endpoint: The endpoint to run.
             payload: The payload to send to the endpoint.
+            run_id: a string to identify the run.
 
         Returns:
             The loaded JSON response from the endpoint, with decoded arrays.

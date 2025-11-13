@@ -10,14 +10,8 @@ import os
 import subprocess
 
 import pytest
-from typer.testing import CliRunner
 
 from tesseract_core.sdk.cli import app as cli
-
-
-@pytest.fixture
-def cli_runner():
-    return CliRunner(mix_stderr=False)
 
 
 def test_suggestion_on_misspelled_command(cli_runner):
