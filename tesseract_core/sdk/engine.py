@@ -658,15 +658,15 @@ def _is_local_volume(volume: str) -> bool:
     return "/" in volume or "." in volume
 
 
-def _parse_volumes(options: list[str]) -> dict[str, dict[str, str]]:
+def _parse_volumes(volume_specs: list[str]) -> dict[str, dict[str, str]]:
     """Parses volume mount strings to dict accepted by docker SDK.
 
     Strings of the form 'source:target:(ro|rw)' are parsed to
     `{source: {'bind': target, 'mode': '(ro|rw)'}}`.
     """
 
-    def _parse_option(option: str):
-        args = option.split(":")
+    def _parse_volume_spec(volume_spec: str):
+        args = volume_spec.split(":")
         if len(args) == 2:
             source, target = args
             mode = "ro"
@@ -674,7 +674,7 @@ def _parse_volumes(options: list[str]) -> dict[str, dict[str, str]]:
             source, target, mode = args
         else:
             raise ValueError(
-                f"Invalid mount volume specification {option} "
+                f"Invalid mount volume specification {volume_spec} "
                 "(must be `/path/to/source:/path/totarget:(ro|rw)`)",
             )
 
@@ -689,10 +689,10 @@ def _parse_volumes(options: list[str]) -> dict[str, dict[str, str]]:
         return source, {"bind": target, "mode": mode}
 
     volumes = {}
-    for opt in options:
-        source, opt_dict = _parse_option(opt)
+    for spec in volume_specs:
+        source, spec_dict = _parse_volume_spec(spec)
         _check_duplicate_volume_source_path(source, volumes)
-        volumes[source] = opt_dict
+        volumes[source] = spec_dict
     return volumes
 
 
