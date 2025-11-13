@@ -1,14 +1,5 @@
-import os
+r"""Example on how to use a Tesseract to call and differentiate through the qpax solver.
 
-import jax
-import jax.numpy as jnp
-import matplotlib.animation as animation
-from animate import make_animation
-
-from tesseract_core import Tesseract
-
-"""
-In this example, we use a Tesseract to call and differentiate through the qpax solver.
 github: https://github.com/kevin-tracy/qpax/tree/main
 paper: https://arxiv.org/abs/2406.11749
 
@@ -23,6 +14,15 @@ The qpax Tesseract is used to solve the inner QP and obtain gradients
 of x* w.r.t. G, which we then use to update G using gradient descent
 on the outer objective.
 """
+
+import os
+
+import jax
+import jax.numpy as jnp
+import matplotlib.animation as animation
+from animate import make_animation
+
+from tesseract_core import Tesseract
 
 
 # we want to minimize the decision error
