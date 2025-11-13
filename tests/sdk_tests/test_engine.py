@@ -233,6 +233,14 @@ def test_run_tesseract_file_input(mocked_docker, tmpdir):
             output_path=str(indir),
         )
 
+    with pytest.raises(ValueError):
+        res, _ = engine.run_tesseract(
+            "foobar",
+            "apply",
+            [f"@{infile}"],
+            volumes=[f"{infile}:/some/path:ro"],
+        )
+
 
 def test_get_tesseract_images(mocked_docker):
     tesseract_images = engine.get_tesseract_images()
