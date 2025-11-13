@@ -64,26 +64,27 @@ class TeePipe(threading.Thread):
         line_buffer = []
         while True:
             try:
-                data = os.read(self._fd_read, 1024).decode()
+                data = os.read(self._fd_read, 1024)
             except OSError:
                 # Pipe closed
                 break
-            if data == "":
+            if data == b"":
                 # EOF reached
                 break
 
             self._last_time = time.time()
 
             lines = data.splitlines()
-            if data.endswith("\n"):
+            if data.endswith(b"\n"):
                 # Treat trailing newline as an empty line
-                lines.append("")
+                lines.append(b"")
 
             # Log complete lines
             for i, line in enumerate(lines[:-1]):
                 if i == 0:
-                    line = "".join([*line_buffer, line])
+                    line = b"".join([*line_buffer, line])
                     line_buffer = []
+                line = line.decode(errors="ignore")
                 self._captured_lines.append(line)
                 for sink in self._sinks:
                     sink(line)
@@ -92,8 +93,9 @@ class TeePipe(threading.Thread):
             line_buffer.append(lines[-1])
 
         # Flush incomplete lines at the end of the stream
-        line = "".join(line_buffer)
+        line = b"".join(line_buffer)
         if line:
+            line = line.decode(errors="ignore")
             self._captured_lines.append(line)
             for sink in self._sinks:
                 sink(line)
