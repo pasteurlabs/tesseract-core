@@ -1089,7 +1089,8 @@ def test_mpa_file_backend(tmpdir, mpa_test_image):
         assert artifact_data == "Test artifact content"
 
 
-def test_mpa_mlflow_backend(mpa_test_image, tmpdir):
+@pytest.mark.parametrize("user", [None, "root", "12579:12579"])
+def test_mpa_mlflow_backend(mpa_test_image, tmpdir, user):
     """Test the MPA (Metrics, Parameters, and Artifacts) submodule with MLflow backend."""
     # Point MLflow to a local directory
     run_cmd = [
@@ -1097,6 +1098,7 @@ def test_mpa_mlflow_backend(mpa_test_image, tmpdir):
         "run",
         "--env",
         "TESSERACT_MLFLOW_TRACKING_URI=mlflow.db",
+        *(["--user", user] if user else []),
         mpa_test_image,
         "apply",
         '{"inputs": {}}',
