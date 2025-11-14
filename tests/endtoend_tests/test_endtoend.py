@@ -1092,6 +1092,9 @@ def test_mpa_file_backend(tmpdir, mpa_test_image):
 @pytest.mark.parametrize("user", [None, "root", "12579:12579"])
 def test_mpa_mlflow_backend(mpa_test_image, tmpdir, user):
     """Test the MPA (Metrics, Parameters, and Artifacts) submodule with MLflow backend."""
+    if user not in (None, "root"):
+        Path(tmpdir).chmod(0o777)
+
     # Point MLflow to a local directory
     run_cmd = [
         "tesseract",
