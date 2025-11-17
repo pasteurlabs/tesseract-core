@@ -53,6 +53,7 @@ class TeePipe(threading.Thread):
         self._captured_lines = []
         self._last_time = time.time()
         self._is_blocking = threading.Event()
+        self._grace_period = 0.1
 
     def __enter__(self) -> int:
         """Start the thread and return the write file descriptor of the pipe."""
@@ -63,12 +64,11 @@ class TeePipe(threading.Thread):
         """Close the pipe and join the thread."""
         # Wait for ongoing streams to dry up
         # We only continue once the reader has spent some time blocked on reading
-        grace = 10.0
         while True:
             self._is_blocking.wait(timeout=1)
-            if (time.time() - self._last_time) >= grace:
+            if (time.time() - self._last_time) >= self._grace_period:
                 break
-            time.sleep(grace / 10)
+            time.sleep(self._grace_period / 10)
 
         # This will signal EOF to the reader thread
         os.close(self._fd_write)

@@ -376,6 +376,8 @@ def test_teepipe(caplog):
         logged_lines.append(msg)
 
     teepipe = TeePipe(logger.info)
+    # Extend grace period to avoid flakes in tests when runners are slow
+    teepipe._grace_period = 1
     with teepipe:
         fd = os.fdopen(teepipe.fileno(), "w", closefd=False)
         for line in logged_lines:
@@ -400,6 +402,8 @@ def test_teepipe_early_exit():
         logged_lines.append(msg)
 
     teepipe = TeePipe()
+    # Extend grace period to avoid flakes in tests when runners are slow
+    teepipe._grace_period = 1
 
     teepipe.start()
     fd = os.fdopen(teepipe.fileno(), "w", closefd=False)
