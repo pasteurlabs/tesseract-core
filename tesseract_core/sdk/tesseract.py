@@ -127,10 +127,8 @@ class Tesseract:
             volumes = []
         if input_path is not None:
             input_path = Path(input_path).resolve()
-            volumes.append(f"{input_path}:/tesseract/input_data:ro")
         if output_path is not None:
             output_path = Path(output_path).resolve()
-            volumes.append(f"{output_path}:/tesseract/output_data:rw")
 
         obj._spawn_config = dict(
             image_name=image_name,
@@ -201,7 +199,8 @@ class Tesseract:
         if input_path is not None:
             update_config(input_path=str(input_path.resolve()))
         if output_path is not None:
-            update_config(output_path=str(output_path.resolve()))
+            local_path = engine._resolve_file_path(output_path, make_dir=True)
+            update_config(output_path=str(local_path))
         update_config(output_format=output_format)
 
         obj = cls.__new__(cls)
