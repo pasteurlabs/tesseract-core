@@ -535,31 +535,15 @@ def serve(
         # Use the current user if not specified
         user = f"{os.getuid()}:{os.getgid()}" if os.name != "nt" else None
 
+    parsed_volumes, volume_environment = _prepare_and_validate_volumes(
+        volume_specs=volumes,
+        input_path=input_path,
+        output_path=output_path,
+    )
+
     if environment is None:
         environment = {}
-
-    if not volumes:
-        parsed_volumes = {}
-    else:
-        parsed_volumes = _parse_volumes(volumes)
-
-    if input_path:
-        environment["TESSERACT_INPUT_PATH"] = "/tesseract/input_data"
-        if "://" not in str(input_path):
-            local_path = _resolve_file_path(input_path)
-            parsed_volumes[str(local_path)] = {
-                "bind": "/tesseract/input_data",
-                "mode": "ro",
-            }
-
-    if output_path:
-        environment["TESSERACT_OUTPUT_PATH"] = "/tesseract/output_data"
-        if "://" not in str(output_path):
-            local_path = _resolve_file_path(output_path, make_dir=True)
-            parsed_volumes[str(local_path)] = {
-                "bind": "/tesseract/output_data",
-                "mode": "rw",
-            }
+    environment.update(volume_environment)
 
     if output_format:
         environment["TESSERACT_OUTPUT_FORMAT"] = output_format
@@ -674,15 +658,15 @@ def _is_local_volume(volume: str) -> bool:
     return "/" in volume or "." in volume
 
 
-def _parse_volumes(options: list[str]) -> dict[str, dict[str, str]]:
+def _parse_volumes(volume_specs: list[str]) -> dict[str, dict[str, str]]:
     """Parses volume mount strings to dict accepted by docker SDK.
 
     Strings of the form 'source:target:(ro|rw)' are parsed to
     `{source: {'bind': target, 'mode': '(ro|rw)'}}`.
     """
 
-    def _parse_option(option: str):
-        args = option.split(":")
+    def _parse_volume_spec(volume_spec: str):
+        args = volume_spec.split(":")
         if len(args) == 2:
             source, target = args
             mode = "ro"
@@ -690,7 +674,7 @@ def _parse_volumes(options: list[str]) -> dict[str, dict[str, str]]:
             source, target, mode = args
         else:
             raise ValueError(
-                f"Invalid mount volume specification {option} "
+                f"Invalid mount volume specification {volume_spec} "
                 "(must be `/path/to/source:/path/totarget:(ro|rw)`)",
             )
 
@@ -704,7 +688,77 @@ def _parse_volumes(options: list[str]) -> dict[str, dict[str, str]]:
             source = str(Path(source).resolve())
         return source, {"bind": target, "mode": mode}
 
-    return dict(_parse_option(opt) for opt in options)
+    volumes = {}
+    for spec in volume_specs:
+        source, spec_dict = _parse_volume_spec(spec)
+        _check_duplicate_volume_source_path(source, volumes)
+        volumes[source] = spec_dict
+    return volumes
+
+
+def _check_duplicate_volume_source_path(
+    path: Path | str, volumes: dict[str, dict[str, str]]
+) -> None:
+    """Prevent duplicate source paths in volume mounts."""
+    if str(path) in volumes:
+        raise ValueError(
+            f"Path {path} is already mounted as a volume, please provide a unique path."
+        )
+
+
+def _prepare_and_validate_volumes(
+    volume_specs: list[str] | None = None,
+    input_path: str | Path | None = None,
+    output_path: str | Path | None = None,
+    file_inputs: list[tuple[Path, str]] | None = None,
+) -> tuple[dict[str, dict[str, str]], dict[str, str]]:
+    """Parse volumes, validate them, and generate associated env vars for the runtime.
+
+    Args:
+        volume_specs: List of volume mount specifications (e.g., ["src:dest:mode"]).
+        input_path: Input path to mount.
+        output_path: Output path to mount.
+        file_inputs: List of (local_path, container_path) tuples for file inputs.
+
+    Returns:
+        Tuple of (volumes_dict, environment_dict) ready for Docker.
+    """
+    environment = {}
+
+    if not volume_specs:
+        volumes = {}
+    else:
+        volumes = _parse_volumes(volume_specs)
+
+    if input_path:
+        environment["TESSERACT_INPUT_PATH"] = "/tesseract/input_data"
+        if "://" not in str(input_path):
+            local_path = _resolve_file_path(input_path)
+            _check_duplicate_volume_source_path(local_path, volumes)
+            volumes[str(local_path)] = {
+                "bind": "/tesseract/input_data",
+                "mode": "ro",
+            }
+
+    if output_path:
+        environment["TESSERACT_OUTPUT_PATH"] = "/tesseract/output_data"
+        if "://" not in str(output_path):
+            local_path = _resolve_file_path(output_path, make_dir=True)
+            _check_duplicate_volume_source_path(local_path, volumes)
+            volumes[str(local_path)] = {
+                "bind": "/tesseract/output_data",
+                "mode": "rw",
+            }
+
+    if file_inputs:
+        for local_path, container_path in file_inputs:
+            _check_duplicate_volume_source_path(local_path, volumes)
+            volumes[str(local_path)] = {
+                "bind": container_path,
+                "mode": "ro",
+            }
+
+    return volumes, environment
 
 
 def run_tesseract(
@@ -752,35 +806,33 @@ def run_tesseract(
             "to easily retrieve .bin files."
         )
 
-    if environment is None:
-        environment = {}
-
-    if not volumes:
-        parsed_volumes = {}
-    else:
-        parsed_volumes = _parse_volumes(volumes)
-
     if user is None:
         # Use the current user if not specified
         user = f"{os.getuid()}:{os.getgid()}" if os.name != "nt" else None
 
-    if input_path:
-        environment["TESSERACT_INPUT_PATH"] = "/tesseract/input_data"
-        if "://" not in str(input_path):
-            local_path = _resolve_file_path(input_path)
-            parsed_volumes[str(local_path)] = {
-                "bind": "/tesseract/input_data",
-                "mode": "ro",
-            }
+    file_inputs = []
+    for arg in args:
+        if arg.startswith("@") and "://" not in arg:
+            local_path = Path(arg.lstrip("@")).resolve()
 
-    if output_path:
-        environment["TESSERACT_OUTPUT_PATH"] = "/tesseract/output_data"
-        if "://" not in str(output_path):
-            local_path = _resolve_file_path(output_path, make_dir=True)
-            parsed_volumes[str(local_path)] = {
-                "bind": "/tesseract/output_data",
-                "mode": "rw",
-            }
+            if not local_path.is_file():
+                raise RuntimeError(f"Path {local_path} provided as input is not a file")
+
+            path_in_container = os.path.join(
+                "/tesseract", f"payload{local_path.suffix}"
+            )
+            file_inputs.append((local_path, path_in_container))
+
+    parsed_volumes, volume_environment = _prepare_and_validate_volumes(
+        volume_specs=volumes,
+        input_path=input_path,
+        output_path=output_path,
+        file_inputs=file_inputs,
+    )
+
+    if environment is None:
+        environment = {}
+    environment.update(volume_environment)
 
     if output_format:
         environment["TESSERACT_OUTPUT_FORMAT"] = output_format
@@ -793,24 +845,13 @@ def run_tesseract(
     if command:
         cmd.append(command)
 
+    file_input_map = {str(local): container for local, container in file_inputs}
     for arg in args:
-        # Mount local input files marked by @ into Docker container as a volume
+        # Replace @local_path with @container_path
         if arg.startswith("@") and "://" not in arg:
-            local_path = Path(arg.lstrip("@")).resolve()
-
-            if not local_path.is_file():
-                raise RuntimeError(f"Path {local_path} provided as input is not a file")
-
-            path_in_container = os.path.join(
-                "/tesseract", f"payload{local_path.suffix}"
-            )
-            arg = f"@{path_in_container}"
-
-            # Bind-mount file
-            parsed_volumes[str(local_path)] = {
-                "bind": path_in_container,
-                "mode": "ro",
-            }
+            local_path_str = str(Path(arg.lstrip("@")).resolve())
+            container_path = file_input_map[local_path_str]
+            arg = f"@{container_path}"
         cmd.append(arg)
 
     extra_args = []
