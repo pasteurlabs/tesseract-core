@@ -40,14 +40,17 @@ class TeePipe(threading.Thread):
 
     def stop(self) -> None:
         """Close the pipe and join the thread."""
-        # Wait for ongoing reads to complete
         grace = 0.1
+        # Initial sleep to allow messages from flush-and-close to arrive
+        time.sleep(grace / 10)
+        # Wait for ongoing streams to dry up
         while (time.time() - self._last_time) < grace:
             time.sleep(grace / 10)
 
         # This will signal EOF to the reader thread
         os.close(self._fd_write)
         os.close(self._fd_read)
+
         # Use timeout and daemon=True to avoid hanging indefinitely if something goes wrong
         self.join(timeout=1)
 
