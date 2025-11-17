@@ -192,6 +192,19 @@ def test_run_tesseract_file_input(mocked_docker, tmpdir):
         "bind": "/path/in/container",
     }
 
+    # test that identical source folders raise an error
+    with pytest.raises(ValueError):
+        res, _ = engine.run_tesseract(
+            "foobar",
+            "apply",
+            [f"@{infile}"],
+            volumes=[
+                f"{tmpdir}:/path/in/container:ro",
+                f"{tmpdir}:/path/in/container2:ro",
+            ],
+            output_path=str(outdir),
+        )
+
     # Test the same but with --input-path
     indir = tmpdir / "input_path"
     indir.mkdir()
@@ -210,6 +223,24 @@ def test_run_tesseract_file_input(mocked_docker, tmpdir):
         "mode": "ro",
         "bind": "/tesseract/input_data",
     }
+
+    with pytest.raises(ValueError):
+        # test that input_path cannot be the same as output_path
+        res, _ = engine.run_tesseract(
+            "foobar",
+            "apply",
+            [f"@{infile}"],
+            input_path=str(indir),
+            output_path=str(indir),
+        )
+
+    with pytest.raises(ValueError):
+        res, _ = engine.run_tesseract(
+            "foobar",
+            "apply",
+            [f"@{infile}"],
+            volumes=[f"{infile}:/some/path:ro"],
+        )
 
 
 def test_get_tesseract_images(mocked_docker):
@@ -280,6 +311,16 @@ def test_serve_tesseract_volumes(mocked_docker, tmpdir):
             volumes=["/non/existent/path:/path/in/container:ro"],
         )
 
+    with pytest.raises(ValueError):
+        # Test with a volume that has the same source path as another volume
+        engine.serve(
+            "foobar",
+            volumes=[
+                f"{tmpdir}:/path/in/container:ro",
+                f"{tmpdir}:/path/in/container2:ro",
+            ],
+        )
+
     # Test running with input and output paths
     indir = Path(tmpdir / "input_path")
     indir.mkdir()
@@ -297,6 +338,10 @@ def test_serve_tesseract_volumes(mocked_docker, tmpdir):
         "mode": "rw",
         "bind": "/tesseract/output_data",
     }
+
+    with pytest.raises(ValueError):
+        # test that input_path cannot be the same as output_path
+        engine.serve("foobar", input_path=str(indir), output_path=str(indir))
 
 
 def test_needs_docker(mocked_docker, monkeypatch):
