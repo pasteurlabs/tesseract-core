@@ -52,6 +52,7 @@ class TeePipe(threading.Thread):
         self._fd_read, self._fd_write = os.pipe()
         self._captured_lines = []
         self._last_time = time.time()
+        self._is_blocking = threading.Event()
 
     def __enter__(self) -> int:
         """Start the thread and return the write file descriptor of the pipe."""
@@ -60,11 +61,13 @@ class TeePipe(threading.Thread):
 
     def stop(self) -> None:
         """Close the pipe and join the thread."""
-        grace = 0.1
-        # Initial sleep to allow messages from flush-and-close to arrive
-        time.sleep(grace / 10)
         # Wait for ongoing streams to dry up
-        while (time.time() - self._last_time) < grace:
+        # We only continue once the reader has spent some time blocked on reading
+        grace = 0.1
+        while True:
+            self._is_blocking.wait(timeout=1)
+            if (time.time() - self._last_time) >= grace:
+                break
             time.sleep(grace / 10)
 
         # This will signal EOF to the reader thread
@@ -86,16 +89,18 @@ class TeePipe(threading.Thread):
         """Run the thread, pushing every full line of text to the sinks."""
         line_buffer = []
         while True:
+            self._last_time = time.time()
+            self._is_blocking.set()
             try:
                 data = os.read(self._fd_read, 1024)
+                self._is_blocking.clear()
             except OSError:
                 # Pipe closed
                 break
+
             if data == b"":
                 # EOF reached
                 break
-
-            self._last_time = time.time()
 
             lines = data.splitlines()
             if data.endswith(b"\n"):
