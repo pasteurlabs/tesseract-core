@@ -103,10 +103,7 @@ RUN mkdir -p /tesseract/input_data /tesseract/output_data && \
     chmod 777 /tesseract/output_data
 VOLUME ["/tesseract/input_data", "/tesseract/output_data"]
 
-RUN getent group 1000 || groupadd -g 1000 tesseract && \
-    getent passwd 1000 || useradd -g $(getent group 1000 | cut -d: -f1) -u 1000 tesseract
-USER 1000:1000
-
+ENV HOME=/tesseract
 ENV TESSERACT_INPUT_PATH="/tesseract/input_data"
 ENV TESSERACT_OUTPUT_PATH="/tesseract/output_data"
 
