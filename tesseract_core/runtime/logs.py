@@ -41,9 +41,9 @@ class TeePipe(threading.Thread):
 
     def stop(self) -> None:
         """Close the pipe and join the thread."""
-        grace = 0.1
         # Wait for ongoing streams to dry up
         # We only continue once the reader has spent some time blocked on reading
+        grace = 10.0
         while True:
             self._is_blocking.wait(timeout=1)
             if (time.time() - self._last_time) >= grace:
