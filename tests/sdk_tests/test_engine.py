@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import random
+import string
 import threading
 import time
 from pathlib import Path
@@ -371,8 +372,14 @@ def test_teepipe(caplog):
 
     logged_lines = []
     for _ in range(100):
-        msg_length = 2 ** random.randint(1, 12)
-        msg = "".join(random.choices("abcdefghijklmnopqrstuvwxyz", k=msg_length))
+        # Make sure to include a few really long lines without breaks
+        if random.random() < 0.1:
+            msg_length = random.randint(1000, 10_000)
+            alphabet = string.ascii_letters + "🤯"
+        else:
+            msg_length = 2 ** random.randint(2, 12)
+            alphabet = string.printable + "🤯"
+        msg = "".join(random.choices(alphabet, k=msg_length))
         logged_lines.append(msg)
 
     teepipe = TeePipe(logger.info)
@@ -385,10 +392,15 @@ def test_teepipe(caplog):
             time.sleep(random.random() / 100)
         fd.close()
 
+    expected_lines = []
+    for line in logged_lines:
+        sublines = line.split("\n")
+        expected_lines.extend(sublines)
+
+    assert teepipe.captured_lines == expected_lines
     assert caplog.record_tuples == [
-        ("tesseract", logging.INFO, line) for line in logged_lines
+        ("tesseract", logging.INFO, line) for line in expected_lines
     ]
-    assert teepipe.captured_lines == logged_lines
 
 
 def test_teepipe_early_exit():
@@ -397,8 +409,14 @@ def test_teepipe_early_exit():
 
     logged_lines = []
     for _ in range(100):
-        msg_length = 2 ** random.randint(2, 12)
-        msg = "".join(random.choices("abcdefghijklmnopqrstuvwxyz", k=msg_length))
+        # Make sure to include a few really long lines without breaks
+        if random.random() < 0.1:
+            msg_length = random.randint(1000, 10_000)
+            alphabet = string.ascii_letters + "🤯"
+        else:
+            msg_length = 2 ** random.randint(2, 12)
+            alphabet = string.printable + "🤯"
+        msg = "".join(random.choices(alphabet, k=msg_length))
         logged_lines.append(msg)
 
     teepipe = TeePipe()
@@ -415,6 +433,12 @@ def test_teepipe_early_exit():
 
         print("end without newline", end="", file=fd, flush=True)
 
+    expected_lines = []
+    for line in logged_lines:
+        sublines = line.split("\n")
+        expected_lines.extend(sublines)
+    expected_lines.append("end without newline")
+
     writer_thread = threading.Thread(target=_write_to_pipe)
     writer_thread.start()
 
@@ -423,14 +447,14 @@ def test_teepipe_early_exit():
         time.sleep(0.01)
 
     # Sanity check that not all data has been written yet
-    assert len(teepipe.captured_lines) < len(logged_lines)
+    assert len(teepipe.captured_lines) < len(expected_lines)
 
     # Exit the pipe early before all data is written
     # This should block until no more data is incoming
     teepipe.stop()
 
-    assert len(teepipe.captured_lines) == len(logged_lines) + 1
-    assert teepipe.captured_lines == [*logged_lines, "end without newline"]
+    assert len(teepipe.captured_lines) == len(expected_lines)
+    assert teepipe.captured_lines == expected_lines
 
 
 def test_parse_requirements(tmpdir):

@@ -102,10 +102,7 @@ class TeePipe(threading.Thread):
                 # EOF reached
                 break
 
-            lines = data.splitlines()
-            if data.endswith(b"\n"):
-                # Treat trailing newline as an empty line
-                lines.append(b"")
+            lines = data.split(b"\n")
 
             # Log complete lines
             for i, line in enumerate(lines[:-1]):
