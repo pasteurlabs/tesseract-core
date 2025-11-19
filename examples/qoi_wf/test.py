@@ -17,6 +17,7 @@ if __name__ == "__main__":
     xyz = np.ones((1000, 3))
     normals = np.ones((1000, 3))
     params = np.ones(1000)
+    
     with from_api(
         input_path=here / "inputs",
     ) as inference:
