@@ -1,9 +1,0 @@
-name: qio
-version: "0.1.0" #2025/02/05
-description: |
-  QoI tesseract.
-
-build_config:
-  target_platform: "native"
-  # package_data: []
-  # custom_build_steps: []
