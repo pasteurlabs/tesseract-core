@@ -109,7 +109,7 @@ class TeePipe(threading.Thread):
                 if i == 0:
                     line = b"".join([*line_buffer, line])
                     line_buffer = []
-                line = line.decode()  # (errors="ignore")
+                line = line.decode(errors="ignore")
                 self._captured_lines.append(line)
                 for sink in self._sinks:
                     sink(line)

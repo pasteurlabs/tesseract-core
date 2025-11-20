@@ -365,7 +365,10 @@ def test_needs_docker(mocked_docker, monkeypatch):
 
 def test_teepipe(caplog):
     # Verify that logging in a separate thread works as intended
-    from tesseract_core.sdk.logs import TeePipe
+    from tesseract_core.sdk.logs import TeePipe, set_logger
+
+    # Disable rich to ensure what we log is what we read
+    set_logger("info", catch_warnings=True, rich_format=False)
 
     logger = logging.getLogger("tesseract")
     caplog.set_level(logging.INFO, logger="tesseract")
