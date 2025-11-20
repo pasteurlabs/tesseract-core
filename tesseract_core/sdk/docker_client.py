@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import List as list_  # noqa: UP035
 
 from tesseract_core.sdk.config import get_config
-from tesseract_core.sdk.logs import LogPipe
+from tesseract_core.sdk.logs import TeePipe
 
 logger = logging.getLogger("tesseract")
 
@@ -232,7 +232,7 @@ class Images:
             ssh=ssh,
         )
 
-        out_pipe = LogPipe(logger.debug)
+        out_pipe = TeePipe(logger.debug)
 
         with out_pipe as out_pipe_fd:
             proc = subprocess.run(build_cmd, stdout=out_pipe_fd, stderr=out_pipe_fd)
