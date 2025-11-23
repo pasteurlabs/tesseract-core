@@ -1,0 +1,8 @@
+{
+  "experiment_type": "hybrid",
+  "experiment_name": null,
+  "timestamp": "20251122_164640",
+  "run_dir": "output/models/experiment_hybrid_20251122_164640",
+  "created_at": "2025-11-22T16:46:40.175258",
+  "config_file": "/Users/ignaciomoyaredondo/Documents/git/tesseract-core/examples/qoi_wf/qoi_train/inputs/config.yaml"
+}
