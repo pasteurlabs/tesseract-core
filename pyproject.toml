@@ -59,6 +59,7 @@ filterwarnings = [
     "ignore:numpy.ufunc size changed",
     # sometimes, dependencies leak resources
     "ignore:.*socket\\.socket.*:pytest.PytestUnraisableExceptionWarning",
+    "ignore:Exception ignored in: <sqlite3\\.Connection object.*:pytest.PytestUnraisableExceptionWarning",
 ]
 
 [tool.coverage.run]
