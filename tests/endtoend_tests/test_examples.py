@@ -93,7 +93,7 @@ TEST_CASES = {
             SampleRequest(endpoint="apply", payload={"inputs": {}}),
         ],
     ),
-    "py39": Config(
+    "py310": Config(
         test_with_random_inputs=True,
     ),
     "helloworld": Config(

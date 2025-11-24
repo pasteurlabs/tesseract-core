@@ -1,7 +1,6 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-import sys
 from abc import ABCMeta
 from enum import IntEnum
 from functools import partial
@@ -9,8 +8,7 @@ from typing import (
     TYPE_CHECKING,
     Annotated,
     Any,
-    Optional,
-    Union,
+    TypeAlias,
     get_args,
 )
 
@@ -33,15 +31,8 @@ from tesseract_core.runtime.array_encoding import (
     python_to_array,
 )
 
-if sys.version_info < (3, 10):
-    # TypeAlias is not available in Python < 3.10
-    AnnotatedType = type(Annotated[Any, Any])
-    EllipsisType = type(Ellipsis)
-else:
-    from typing import TypeAlias
-
-    AnnotatedType: TypeAlias = type(Annotated[Any, Any])
-    EllipsisType: TypeAlias = type(Ellipsis)
+AnnotatedType: TypeAlias = type(Annotated[Any, Any])
+EllipsisType: TypeAlias = type(Ellipsis)
 
 
 class ArrayFlags(IntEnum):
@@ -62,7 +53,7 @@ class ArrayAnnotationType(ABCMeta):
         MyArray[(2, 3), 'float32']
     """
 
-    expected_shape: Union[tuple[int, ...], EllipsisType]
+    expected_shape: tuple[int, ...] | EllipsisType
     expected_dtype: str
     flags: tuple[ArrayFlags]
 
@@ -95,7 +86,7 @@ class PydanticArrayAnnotation(metaclass=ArrayAnnotationType):
     """
 
     # These are class attributes that must be set when the class is created
-    expected_shape: Union[tuple[int, ...], EllipsisType]
+    expected_shape: tuple[int, ...] | EllipsisType
     expected_dtype: str
     flags: tuple[ArrayFlags]
 
@@ -235,8 +226,8 @@ class Array:
     def __class_getitem__(
         cls,
         key: tuple[
-            Union[tuple[Optional[int], ...], EllipsisType],
-            Union[ArrayAnnotationType, str, None],
+            tuple[int | None, ...] | EllipsisType,
+            ArrayAnnotationType | str | None,
         ],
     ) -> ArrayAnnotationType:
         """Create a new type annotation based on the given shape and dtype."""
@@ -316,8 +307,8 @@ class ShapeDType(BaseModel):
     def __class_getitem__(
         cls,
         key: tuple[
-            Union[tuple[Optional[int], ...], EllipsisType],
-            Union[AnnotatedType, str, None],
+            tuple[int | None, ...] | EllipsisType,
+            AnnotatedType | str | None,
         ],
     ) -> AnnotatedType:
         expected_shape, _ = _ensure_valid_shapedtype(*key)
@@ -329,14 +320,7 @@ class ShapeDType(BaseModel):
                 if expected_shape is Ellipsis:
                     return shapedtype
 
-                # TODO: replace this check with `zip(... strict=True)`
-                # once we stop supporting 3.9
-                if len(shape) != len(expected_shape):
-                    raise ValueError(
-                        f"Expected shape: {expected_shape}. Found: {shape}."
-                    )
-
-                for actual, expected in zip(shape, expected_shape):
+                for actual, expected in zip(shape, expected_shape, strict=True):
                     if expected is not None and actual != expected:
                         raise ValueError(
                             f"Expected shape: {expected_shape}. Found: {shape}."

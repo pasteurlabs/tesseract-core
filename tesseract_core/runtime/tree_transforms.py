@@ -4,18 +4,18 @@
 import re
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from copy import deepcopy
-from typing import Any, Literal, Optional, Union
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
 
 def path_to_index_op(
     path: str,
-) -> Union[
-    tuple[Literal["seq"], int],
-    tuple[Literal["dict"], str],
-    tuple[Literal["getattr"], str],
-]:
+) -> (
+    tuple[Literal["seq"], int]
+    | tuple[Literal["dict"], str]
+    | tuple[Literal["getattr"], str]
+):
     """Converts a path string to a tuple of operation and index."""
     seq_idx_re = re.match(r"^\[(\d+)\]$", path)
     if seq_idx_re:
@@ -115,7 +115,7 @@ def set_at_path(tree: Any, values: dict[str, Any]) -> Any:
 
 
 def flatten_with_paths(
-    tree: Union[Mapping, Sequence, BaseModel],
+    tree: Mapping | Sequence | BaseModel,
     include_paths: Iterable[str],
 ) -> dict[str, Any]:
     """Filter and flatten a nested PyTree by extracting only the specified paths.
@@ -131,8 +131,8 @@ def flatten_with_paths(
 def filter_func(
     func: Callable[[dict], dict],
     default_inputs: dict,
-    output_paths: Optional[Iterable[str]] = None,
-    input_paths: Optional[Sequence[str]] = None,
+    output_paths: Iterable[str] | None = None,
+    input_paths: Sequence[str] | None = None,
 ) -> Callable:
     """Modifies a function that operates on pytrees to operate on flat {path: value} or positional args instead.
 
@@ -153,12 +153,7 @@ def filter_func(
 
     def filtered_func(*args: Any) -> dict:
         if input_paths:
-            # TODO: replace this check with `zip(... strict=True)`
-            # once we stop supporting 3.9
-            assert len(input_paths) == len(args), (
-                f"Mismatch between number of given paths {len(input_paths)} and args {len(args)}."
-            )
-            new_inputs = dict(zip(input_paths, args))
+            new_inputs = dict(zip(input_paths, args, strict=True))
         else:
             if len(args) != 1:
                 raise ValueError("Expected a single dictionary argument")
