@@ -153,6 +153,10 @@ def filter_func(
 
     def filtered_func(*args: Any) -> dict:
         if input_paths:
+            if len(input_paths) != len(args):
+                raise ValueError(
+                    f"Mismatch between number of given paths {len(input_paths)} and args {len(args)}."
+                )
             new_inputs = dict(zip(input_paths, args, strict=True))
         else:
             if len(args) != 1:
