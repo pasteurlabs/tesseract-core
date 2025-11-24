@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.2.0] - 2025-11-24
+
+### Features
+
+- Add /tesseract to PYTHONPATH, similar to native execution (#372)
+- Add example for differentiable quadratic programming (QP) solver (#345)
+
+### Bug Fixes
+
+- Change docs to recommend mlflow-data volume mount as rw (#379)
+- Pin Python to <3.14 to resolve docs build failure (#390)
+- Switch MLflow tests from deprecated file backend to sqlite (#389)
+- Catch identical mounted volumes (#337)
+- Remove user creation logic, set `HOME` env var instead (#393)
+
 ## [1.1.1] - 2025-10-15
 
 ### Bug Fixes
