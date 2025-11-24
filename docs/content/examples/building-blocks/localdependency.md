@@ -47,10 +47,6 @@ We can then specify it as a local dependency in `tesseract_requirements.txt` by 
 ./cowsay-6.1-py3-none-any.whl
 ```
 
-```{note}
-If you have additional Python modules in the same directory as `tesseract_api.py`, you can import them directly without any special configuration. The directory containing `tesseract_api.py` is automatically added to `PYTHONPATH` in the container environment.
-```
-
 Finally, let's build the Tesseract, and verify it works
 ```bash
 $ tesseract build .
