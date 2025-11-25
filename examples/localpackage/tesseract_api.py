@@ -1,6 +1,7 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+from goodbyeworld import ungreet
 from helloworld import greet
 from pydantic import BaseModel, Field
 
@@ -10,9 +11,10 @@ class InputSchema(BaseModel):
 
 
 class OutputSchema(BaseModel):
-    greeting: str = Field(description="A greeting!")
+    message: str = Field(description="A message!")
 
 
 def apply(inputs: InputSchema) -> OutputSchema:
-    """Greet a person whose name is given as input."""
-    return OutputSchema(greeting=greet(inputs.name))
+    """Greets and ungreets a person whose name is given as input."""
+    message = f"{greet(inputs.name)}\n{ungreet(inputs.name)}"
+    return OutputSchema(message=message)
