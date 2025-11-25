@@ -101,6 +101,7 @@ content/using-tesseracts/advanced.md
 
 content/examples/example_gallery.md
 content/demo/demo.md
+content/examples/ansys_gallery.md
 Tesseract Community Showcase <https://si-tesseract.discourse.group/c/showcase/11>
 ```
 
