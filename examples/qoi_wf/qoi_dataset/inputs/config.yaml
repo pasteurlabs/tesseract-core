@@ -5,10 +5,10 @@ version: v1
 point_spec:
   n_points: 4096
   sampling_method: poisson
-  sphere_sampling: 
+  sphere_sampling:
     enabled: false
     radius: 420
-    centers: 
+    centers:
       - [185, 90, -380]
       - [2670, 90, -180]
   sphere_sampling_fraction: 0.75
@@ -30,7 +30,7 @@ param_expressions:
     enabled: true
     type: "select"
     expression: ['d72'] #['d13', 'd72', 'd61', 'd34']
-  
+
   bc:
     enabled: true
     type: "select"
@@ -45,10 +45,10 @@ qoi_expressions:
     enabled: false
     type: "ratio"
     numerator: ["area_pressure_outlet", "outlet"]  # Patterns to match in QoI names
-    denominator: ["area_pressure_inlet", "inlet"] 
-    
+    denominator: ["area_pressure_inlet", "inlet"]
+
   pressure_drop:
-    enabled: false  
+    enabled: false
     type: "difference"
     minuend: ["area_pressure_inlet", "inlet"]
     subtrahend: ["area_pressure_outlet", "outlet"]
@@ -57,7 +57,7 @@ qoi_expressions:
     enabled: false
     type: "custom"
     expression: "1 - outlet_area_total_pressure / inlet_area_total_pressure"
-  
+
   pressure_delta_part1:
     enabled: false
     type: "custom"
@@ -67,12 +67,12 @@ qoi_expressions:
     enabled: false
     type: "custom"
     expression: "1 - outlet_area_total_pressure / p1-plane_area_total_pressure"
-    
+
   velocity_uniformity:
     enabled: false
     type: "select"
     patterns: ["p1-plane_area_velocity_uniformity"]  # Select specific QoI by pattern
-    
+
   custom_metric:
     enabled: false
     type: "custom"
@@ -107,7 +107,7 @@ model_spec:
 
 # Add hybrid models section
 hybrid_models:
-  # PointNet-based models 
+  # PointNet-based models
   hybrid_pointnet_small:
     type: "hybrid_pc_tree"
     embedder_type: "pointnet"
