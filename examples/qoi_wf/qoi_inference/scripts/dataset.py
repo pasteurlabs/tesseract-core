@@ -350,8 +350,8 @@ def create_raw_splits(
     )
 
     # Generate indices
-    np.random.Generator(seed)
-    indices = np.random.Generator(n_total).tolist()
+    rng = np.random.default_rng(seed)
+    indices = rng.permutation(n_total).tolist()
 
     train_indices = indices[:n_train]
     val_indices = indices[n_train : n_train + n_val]
