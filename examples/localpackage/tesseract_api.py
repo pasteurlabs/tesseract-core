@@ -15,6 +15,6 @@ class OutputSchema(BaseModel):
 
 
 def apply(inputs: InputSchema) -> OutputSchema:
-    """Greet a person whose name is given as input."""
+    """Greets and ungreets a person whose name is given as input."""
     message = f"{greet(inputs.name)}\n{ungreet(inputs.name)}"
     return OutputSchema(message=message)
