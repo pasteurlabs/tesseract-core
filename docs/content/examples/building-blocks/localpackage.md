@@ -87,10 +87,10 @@ We can then specify it as a local dependency in `tesseract_requirements.txt` by 
 
 Finally, let's build the Tesseract, and verify it works
 ```bash
-$ tesseract build .
+$ tesseract build mytess
  [i] Building image ...
- [i] Built image sha256:7d024, ['cowsay:latest']
+ [i] Built image sha256:7d024, ['mytess:latest']
 
-$ tesseract run cowsay apply '{"inputs": {"message": "Hello, World!"}}'
+$ tesseract run mytess apply '{"inputs": {"message": "Hello, World!"}}'
 {"out":"  _____________\n| Hello, World! |\n  =============\n             \\\n              \\\n                ^__^\n                (oo)\\_______\n                (__)\\       )\\/\\\n                    ||----w |\n                    ||     ||"}
 ```
