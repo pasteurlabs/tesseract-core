@@ -1,21 +1,17 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+from pathlib import Path
 from typing import Any
-import yaml
 
 import numpy as np
 import torch
-from pydantic import BaseModel, Field, model_validator
-from torch.utils._pytree import tree_map
-from typing_extensions import Self
-from pathlib import Path
+import yaml
+from pydantic import BaseModel, Field
 from scripts.dataset import CADDataset, create_raw_splits, create_scaled_datasets
 from scripts.scaler import ScalingPipeline
-from scripts.train import create_training_args_from_config, train_hybrid_models
-
-from tesseract_core.runtime import Array, Differentiable, Float32
-from tesseract_core.runtime.tree_transforms import filter_func, flatten_with_paths
+from scripts.train import train_hybrid_models
+from torch.utils._pytree import tree_map
 
 from tesseract_core.runtime.experimental import InputFileReference, OutputFileReference
 
@@ -23,33 +19,32 @@ from tesseract_core.runtime.experimental import InputFileReference, OutputFileRe
 # Schemata
 #
 
-class InputSchema(BaseModel):
 
-    config: InputFileReference = Field(
-        description="Configuration file"
+class InputSchema(BaseModel):
+    config: InputFileReference = Field(description="Configuration file")
+
+    data: list[str] = Field(
+        description="List of npz file paths (can be absolute paths from dependent workflows)"
     )
 
-    data: list[str | Path] = Field(
-        description="List of npz files containing point-cloud data, simulation parameters and/or QoIs"
-    ) # TODO: Change input type to be list[InputFileReference] (as outputs are inside the qoi_dataset... How can we make this?)
-
-    
 
 class OutputSchema(BaseModel):
-
-    trained_model: OutputFileReference = Field(
+    trained_models: list[OutputFileReference] = Field(
         description="Pickle file containing weights of trained model"
     )
-    scaler: OutputFileReference = Field(
+    scaler: list[OutputFileReference] = Field(
         description="Pickle file containing the scaling method for the dataset"
-    ) 
-   
+    )
+
 
 def evaluate(inputs: Any) -> Any:
+    # Convert all inputs to Path objects (handles strings, InputFileReference, and Path)
+    config_path = Path(str(inputs["config"]))
+    data_files = [Path(str(f)) for f in inputs["data"]]
 
-    raw_dataset = CADDataset(files=inputs["data"], config_path=inputs["config"])
+    raw_dataset = CADDataset(files=data_files, config_path=config_path)
 
-    with open(inputs["config"], "r") as f:
+    with open(config_path) as f:
         config = yaml.safe_load(f)
 
     train_samples, val_samples, test_samples, split_info = create_raw_splits(
@@ -61,46 +56,48 @@ def evaluate(inputs: Any) -> Any:
     )
 
     # Create output directory
-    output_dir = Path("output")
+    output_dir = Path("outputs")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Create scaling pipeline from config
-    scaling_pipeline = ScalingPipeline(inputs["config"])
+    scaling_pipeline = ScalingPipeline(config_path)
     scaling_pipeline.fit(train_samples)
 
     scaled_train = scaling_pipeline.transform_samples(train_samples)
     scaled_val = scaling_pipeline.transform_samples(val_samples)
     scaled_test = scaling_pipeline.transform_samples(test_samples)
 
-    # Save the scaler to a pickle file using the save method
-    scaler_path = scaling_pipeline.save(output_dir / "scaler.pkl")
-
     train_dataset, val_dataset, test_dataset = create_scaled_datasets(
         scaled_train, scaled_val, scaled_test
     )
 
     model_folder = output_dir / "models"
-    training_args = create_training_args_from_config(
-        config, train_dataset, val_dataset, split_info, model_folder
-    )
 
     hybrid_model_configs = config.get("hybrid_models", None)
     hybrid_training_config = config.get("hybrid_training", {})
     print("\nStarting hybrid model training...")
-    model_path = train_hybrid_models(
+    results = train_hybrid_models(
         train_dataset=train_dataset,
         val_dataset=val_dataset,
         test_dataset=test_dataset,
         model_configs=hybrid_model_configs,
         training_config=hybrid_training_config,
         save_dir=model_folder,
-        config_path=inputs["config"],
+        config_path=config_path,
         split_info=split_info,
+        scaler=scaling_pipeline,
     )
 
+    print(results)
+    # Extract model paths (exclude scaler_path from results dict)
+    model_paths = [Path(info["model_path"]) for _, info in results.items()]
+
+    # Get the scaler path from results (saved in experiment folder by train_hybrid_models)
+    scaler_paths = [Path(info["scaler_path"]) for _, info in results.items()]
+
     return {
-        "trained_model": Path(model_path),  # placeholder for now
-        "scaler": scaler_path
+        "trained_models": model_paths,
+        "scaler": scaler_paths,
     }
 
 
@@ -152,10 +149,13 @@ def apply(inputs: InputSchema) -> OutputSchema:
 #     return dict(zip(vjp_inputs, vjp_vals, strict=True))
 
 
-to_tensor = lambda x: torch.tensor(x) if isinstance(x, np.generic | np.ndarray) else x
+def to_tensor(x: Any) -> torch.Tensor | Any:
+    """Convert numpy arrays/scalars to torch tensors, pass through other types."""
+    if isinstance(x, np.generic | np.ndarray):
+        return torch.tensor(x)
+    return x
 
 
 #
 # Required endpoints
 #
-

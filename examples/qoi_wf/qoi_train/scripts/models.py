@@ -287,7 +287,8 @@ class HybridPointCloudTreeModel:
         self.fusion_head = None
         self.regularizer = None
         self.tree_model = None
-        
+        self.scaler = None  # ScalingPipeline instance for reproducibility
+
         # Training state
         self.embedder_fitted = False
         self.tree_fitted = False
@@ -581,7 +582,7 @@ class HybridPointCloudTreeModel:
         y_pred = self.tree_model.predict(features)
         
         # Compute metrics
-        return compute_metrics(y_true, y_pred, include_additional=True)
+        return compute_metrics(y_true, y_pred)
     
     def save(self, path: Path):
         """Save the hybrid model."""
@@ -598,6 +599,7 @@ class HybridPointCloudTreeModel:
             'fusion_head_state_dict': self.fusion_head.state_dict(),
             'regularizer_state_dict': self.regularizer.state_dict(),
             'tree_model': self.tree_model,
+            'scaler': self.scaler,  # Save ScalingPipeline for reproducibility
             'latent_dim': self.latent_dim,
             'in_dim': self.in_dim,
             'p_dim': self.p_dim,
@@ -650,6 +652,7 @@ class HybridPointCloudTreeModel:
         self.fusion_head.load_state_dict(save_dict['fusion_head_state_dict'])
         self.regularizer.load_state_dict(save_dict['regularizer_state_dict'])
         self.tree_model = save_dict['tree_model']
+        self.scaler = save_dict.get('scaler', None)  # Load scaler (None for backward compatibility)
 
         # Restore training state
         self.embedder_fitted = save_dict['embedder_fitted']
@@ -658,4 +661,5 @@ class HybridPointCloudTreeModel:
         if self.embedder_fitted and self.tree_fitted:
             self.is_fitted = True
 
-        print(f"✅ Loaded hybrid {self._embedder_type} model: {self.name} (p_dim={self.p_dim}, q_dim={self.q_dim})")
+        scaler_status = "with scaler" if self.scaler is not None else "without scaler"
+        print(f"✅ Loaded hybrid {self._embedder_type} model: {self.name} (p_dim={self.p_dim}, q_dim={self.q_dim}, {scaler_status})")
