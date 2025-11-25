@@ -1,12 +1,12 @@
-import numpy as np
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+
 from torch.utils.data import DataLoader
-from .utils import set_seed
+
 from .dataset import cad_collate
-from .models import HybridPointCloudTreeModel
 from .experiment_tracker import ExperimentTracker
+from .models import HybridPointCloudTreeModel
+from .utils import set_seed
 
 
 def train_hybrid_models(
@@ -21,8 +21,6 @@ def train_hybrid_models(
     scaler = None
 ):
     """Train hybrid PointNeXt + Tree models."""
-    
-
     # Set random seed for reproducibility
     if split_info and 'seed' in split_info:
         seed = split_info['seed']

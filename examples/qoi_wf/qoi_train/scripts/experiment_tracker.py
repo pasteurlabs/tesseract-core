@@ -1,11 +1,12 @@
 """Experiment tracking for model training runs."""
-from pathlib import Path
-from datetime import datetime
 import json
-import yaml
 import shutil
-from typing import Dict, Any, Optional
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Optional
+
 import numpy as np
+import yaml
 
 
 class ExperimentTracker:
@@ -18,8 +19,7 @@ class ExperimentTracker:
         experiment_name: Optional[str] = None,
         config_path: Optional[Path] = None
     ):
-        """
-        Initialize experiment tracker.
+        """Initialize experiment tracker.
 
         Args:
             base_dir: Base directory for all models (e.g., "models_basic_run")
@@ -75,7 +75,7 @@ class ExperimentTracker:
         self.metadata["config_file"] = str(config_path)
         print(f"  ✅ Saved config to: {dest.relative_to(self.base_dir)}")
 
-    def log_dataset_info(self, split_info: Dict[str, Any]):
+    def log_dataset_info(self, split_info: dict[str, Any]):
         """Log dataset split information."""
         dataset_info_path = self.run_dir / "dataset_info.json"
         with open(dataset_info_path, "w") as f:
@@ -89,7 +89,7 @@ class ExperimentTracker:
             json.dump(serializable_info, f, indent=2)
         print(f"  ✅ Saved dataset info to: {dataset_info_path.relative_to(self.base_dir)}")
 
-    def log_training_step(self, step: int, metrics: Dict[str, float]):
+    def log_training_step(self, step: int, metrics: dict[str, float]):
         """Log metrics for a training step/epoch."""
         log_entry = {"step": step, **metrics}
         self.training_history.append(log_entry)
@@ -104,9 +104,8 @@ class ExperimentTracker:
             json.dump(self.training_history, f, indent=2)
         print(f"  ✅ Saved training history to: {history_path.relative_to(self.base_dir)}")
 
-    def log_model_metrics(self, model_name: str, metrics: Dict[str, float], split: str = "test"):
-        """
-        Log evaluation metrics for a specific model.
+    def log_model_metrics(self, model_name: str, metrics: dict[str, float], split: str = "test"):
+        """Log evaluation metrics for a specific model.
 
         Args:
             model_name: Name of the model
@@ -236,9 +235,8 @@ class ExperimentTracker:
         print(f"  ✅ Created README: {readme_path.relative_to(self.base_dir)}")
 
 
-def load_experiment(experiment_dir: Path) -> Dict[str, Any]:
-    """
-    Load an experiment's metadata and results.
+def load_experiment(experiment_dir: Path) -> dict[str, Any]:
+    """Load an experiment's metadata and results.
 
     Args:
         experiment_dir: Path to experiment directory

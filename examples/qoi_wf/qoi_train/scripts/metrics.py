@@ -1,15 +1,15 @@
 """Model evaluation metrics for regression tasks."""
 
-import torch
-import numpy as np
 from dataclasses import dataclass
 from typing import Union
+
+import numpy as np
+import torch
 
 
 @dataclass
 class ModelMetrics:
-    """
-    Comprehensive regression metrics.
+    """Comprehensive regression metrics.
 
     Includes both absolute and normalized (scale-independent) metrics.
     """
@@ -70,8 +70,7 @@ def compute_metrics(
     y_true: Union[np.ndarray, torch.Tensor],
     y_pred: Union[np.ndarray, torch.Tensor]
 ) -> ModelMetrics:
-    """
-    Compute comprehensive regression metrics.
+    """Compute comprehensive regression metrics.
 
     Args:
         y_true: Ground truth values
@@ -109,8 +108,14 @@ def compute_metrics(
 
     # MAPE (avoid division by zero)
     nonzero_mask = np.abs(y_true) > 1e-8
-    mape = np.mean(np.abs((y_true[nonzero_mask] - y_pred[nonzero_mask]) / y_true[nonzero_mask])) * 100 if np.any(nonzero_mask) else None
-
+    mape = (
+        np.mean(
+            np.abs(
+                (y_true[nonzero_mask] - y_pred[nonzero_mask])
+                / y_true[nonzero_mask]
+            )
+        ) * 100 if np.any(nonzero_mask) else None
+    )
     # Maximum absolute error
     max_error = np.max(np.abs(y_true - y_pred))
 

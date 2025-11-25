@@ -1,14 +1,12 @@
-import csv
-import numpy as np
-from pathlib import Path
-from typing import Dict, Tuple, List
-import torch
 import random
+
+import numpy as np
+import torch
 
 
 def set_seed(seed: int = 42):
     random.seed(seed)
-    np.random.seed(seed)
+    np.random.Generator(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
     # Set deterministic behavior for reproducibility
@@ -16,7 +14,7 @@ def set_seed(seed: int = 42):
     torch.backends.cudnn.benchmark = False
 
 
-def pca_align(xyz: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+def pca_align(xyz: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Align principal axes to XYZ using PCA (size preserved). Returns rotated points and R."""
     X = xyz - xyz.mean(axis=0, keepdims=True)
     # covariance (3x3)
@@ -76,10 +74,8 @@ def create_train_val_test_split(
     return train_dataset, val_dataset, test_dataset, split_info
 
 
-def compute_stats_from_samples(samples) -> Dict:
-    """
-    Compute global statistics from a list of raw samples.
-    """
+def compute_stats_from_samples(samples) -> dict:
+    """Compute global statistics from a list of raw samples."""
     all_xyz = []
     all_params = []
     all_qoi = []

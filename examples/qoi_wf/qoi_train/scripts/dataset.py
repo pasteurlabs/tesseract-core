@@ -1,18 +1,19 @@
 """PyTorch dataset for CAD simulation data with configurable feature extraction."""
 
-import numpy as np
-import yaml
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Dict
+from typing import Optional
+
+import numpy as np
 import torch
+import yaml
 from torch.utils.data import Dataset
+
 from .process.utils import compute_bbox_stats
 
 
 def cad_collate(batch):
-    """
-    Collate function for CAD dataset batching.
+    """Collate function for CAD dataset batching.
 
     Args:
         batch: List of (xyz, normals, params, qoi) tuples
@@ -54,8 +55,7 @@ class ExpressionEvaluator:
 
     @staticmethod
     def evaluate(names: np.ndarray, values: np.ndarray, expr_config: dict, data_type: str = "feature") -> np.ndarray:
-        """
-        Compute custom expressions based on named values.
+        """Compute custom expressions based on named values.
 
         Args:
             names: Array of feature names
@@ -170,12 +170,11 @@ class ExpressionEvaluator:
             result = eval(expression, safe_dict)
             return np.atleast_1d(np.asarray(result))
         except Exception as e:
-            raise ValueError(f"Error evaluating custom {data_type} expression '{expression}': {e}")
+            raise ValueError(f"Error evaluating custom {data_type} expression '{expression}': {e}") from e
 
 
 class CADDataset(Dataset):
-    """
-    Dataset for loading CAD simulation data from NPZ files.
+    """Dataset for loading CAD simulation data from NPZ files.
 
     Supports:
     - Optional point cloud normals
@@ -184,8 +183,7 @@ class CADDataset(Dataset):
     """
 
     def __init__(self, files: list[str | Path], config_path: Path):
-        """
-        Initialize dataset from NPZ files.
+        """Initialize dataset from NPZ files.
 
         Args:
             files: List of .npz data files
@@ -203,8 +201,7 @@ class CADDataset(Dataset):
         return len(self.files)
 
     def __getitem__(self, idx) -> RawDataSample:
-        """
-        Load and process a single data sample.
+        """Load and process a single data sample.
 
         Args:
             idx: Index of the sample to load
@@ -238,13 +235,13 @@ class CADDataset(Dataset):
             source_idx=idx,
         )
 
-    def _load_normals(self, data: Dict) -> Optional[np.ndarray]:
+    def _load_normals(self, data: dict) -> Optional[np.ndarray]:
         """Load normals if configured and available."""
         if self.cfg["model_spec"]["include_normals"] and "normals" in data:
             return data["normals"].astype(np.float32)
         return None
 
-    def _aggregate_params(self, data: Dict, xyz: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    def _aggregate_params(self, data: dict, xyz: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Combine parameters from multiple configured sources."""
         params_list = []
         names_list = []
@@ -270,7 +267,7 @@ class CADDataset(Dataset):
 
         return params, names
 
-    def _load_qoi(self, data: Dict, file_path: Path) -> np.ndarray:
+    def _load_qoi(self, data: dict, file_path: Path) -> np.ndarray:
         """Load QoI values, applying custom expressions if configured."""
         qoi_config = self.cfg.get("qoi_expressions")
 
@@ -313,7 +310,7 @@ class CADDataset(Dataset):
         # Fallback to original values if no expressions computed
         print(f"⚠️  No {data_type} expressions computed, using original values")
         return values
-    
+
 
 def create_raw_splits(
     dataset: CADDataset, train_ratio=0.8, val_ratio=0.1, test_ratio=0.1, seed=42
@@ -333,8 +330,8 @@ def create_raw_splits(
     )
 
     # Generate indices
-    np.random.seed(seed)
-    indices = np.random.permutation(n_total).tolist()
+    np.random.Generator(seed)
+    indices = np.random.Generator(n_total).tolist()
 
     train_indices = indices[:n_train]
     val_indices = indices[n_train : n_train + n_val]
@@ -362,31 +359,29 @@ def create_raw_splits(
 
 
 class ScaledCADDataset(Dataset):
-    """
-    PyTorch dataset for scaled data samples ready for training.
-    """
-    
+    """PyTorch dataset for scaled data samples ready for training."""
+
     def __init__(self, scaled_samples: list):
         self.samples = scaled_samples
-        
+
     def __len__(self):
         return len(self.samples)
-        
+
     def __getitem__(self, idx):
         sample = self.samples[idx]
-        
+
         xyz = sample.xyz  # (N, 3)
         normals = sample.normals  # (N, 3) or None
         params = sample.params  # (P,)
         qoi = sample.qoi  # (Q,)
-        
+
         return xyz, normals, params, qoi
-    
+
 
 def create_scaled_datasets(scaled_train, scaled_val, scaled_test):
     """Convert scaled samples to PyTorch datasets."""
     train_dataset = ScaledCADDataset(scaled_train)
-    val_dataset = ScaledCADDataset(scaled_val)  
+    val_dataset = ScaledCADDataset(scaled_val)
     test_dataset = ScaledCADDataset(scaled_test)
-    
+
     return train_dataset, val_dataset, test_dataset

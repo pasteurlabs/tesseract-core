@@ -2,17 +2,17 @@
 
 import csv
 import json
-import numpy as np
-from pathlib import Path
-from typing import Dict, Optional, Iterable
-import open3d as o3d
+from collections.abc import Iterable
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional
+
+import numpy as np
+import open3d as o3d
 
 
 def load_mesh(stl_path: Path) -> o3d.geometry.TriangleMesh:
-    """
-    Load an STL mesh from disk and ensure normals are present.
-    """
+    """Load an STL mesh from disk and ensure normals are present."""
     mesh = o3d.io.read_triangle_mesh(str(stl_path))
     if not mesh.has_vertex_normals():
         mesh.compute_vertex_normals()
@@ -25,9 +25,7 @@ def submesh_in_sphere(
     center: np.ndarray,
     radius: float,
 ) -> o3d.geometry.TriangleMesh | None:
-    """
-    Return a submesh consisting of triangles whose centroids fall inside a sphere.
-    """
+    """Return a submesh consisting of triangles whose centroids fall inside a sphere."""
     verts = np.asarray(mesh.vertices)
     tris = np.asarray(mesh.triangles)
 
@@ -49,9 +47,7 @@ def submesh_in_sphere(
 def sample_points(
     mesh: o3d.geometry.TriangleMesh, n_points: int = 1024, method: str = "poisson"
 ):
-    """
-    Sample N points from a mesh surface using Poisson-disk (default) or uniform sampling.
-    """
+    """Sample N points from a mesh surface using Poisson-disk (default) or uniform sampling."""
     if method == "poisson":
         # More uniform coverage on the surface
         pcd = mesh.sample_points_poisson_disk(n_points, init_factor=5)
@@ -69,8 +65,7 @@ def sample_points_with_spheres(
     spheres: Iterable[tuple[np.ndarray, float]] = (),
     sphere_fraction: float = 0.5,
 ):
-    """
-    Sample points on a mesh, allocating more samples inside given spheres.
+    """Sample points on a mesh, allocating more samples inside given spheres.
 
     Parameters
     ----------
@@ -143,10 +138,10 @@ def sample_points_with_spheres(
             nrm = nrm[:n_points]
 
     return pts, nrm
-    
 
 
-def compute_bbox_stats(xyz: np.ndarray) -> Dict[str, np.ndarray | float]:
+
+def compute_bbox_stats(xyz: np.ndarray) -> dict[str, np.ndarray | float]:
     mn = xyz.min(axis=0)
     mx = xyz.max(axis=0)
     size = mx - mn
@@ -180,7 +175,7 @@ def extract_cad_sketch(filename: Path) -> np.ndarray:
         raise FileNotFoundError(f"CAD sketch file {filename} not found")
 
     cad_sketch_features = {}
-    with open(filename, "r") as f:
+    with open(filename) as f:
         reader = csv.reader(f)
         for row in reader:
             if len(row) >= 3:
@@ -197,7 +192,7 @@ def extract_cad_sketch(filename: Path) -> np.ndarray:
 class SurfaceIntegralReport:
     quantity: str
     units: str
-    values: Dict[str, float]
+    values: dict[str, float]
     net: Optional[float]
 
     @classmethod
@@ -253,18 +248,16 @@ class SurfaceIntegralReport:
 
 
 def read_experiment_csv_to_metadata(csv_file_path: Path, data_dir: Path, shift_index=1) -> list[dict]:
-    """
-    Read experiment CSV data and convert each row to metadata dictionary format.
-    """    
-    with open(csv_file_path, 'r') as csvfile:
+    """Read experiment CSV data and convert each row to metadata dictionary format."""
+    with open(csv_file_path) as csvfile:
         reader = csv.DictReader(csvfile, delimiter=',')
-        
+
         for row in reader:
             row = {key.strip(): value.strip() for key, value in row.items()}
             # Skip unsuccessful experiments
             if row.get('Success', '').lower() != 'true':
                 continue
-                
+
             # Create metadata dictionary for this experiment
             metadata_dict = {
                 "file_series_version": 1.0,
@@ -279,7 +272,7 @@ def read_experiment_csv_to_metadata(csv_file_path: Path, data_dir: Path, shift_i
                     }
                 ]
             }
-            
+
             json_filename = data_dir / f"Experiment_{int(row['Experiment'])+shift_index}/metadata.json.series"
             with open(json_filename, 'w') as json_file:
                 json.dump(metadata_dict, json_file, indent=4)
