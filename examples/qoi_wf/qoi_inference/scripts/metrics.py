@@ -1,18 +1,19 @@
 """Model evaluation metrics for regression tasks."""
 
-import torch
-import numpy as np
 from dataclasses import dataclass
 from typing import Union
+
+import numpy as np
+import torch
 
 
 @dataclass
 class ModelMetrics:
-    """
-    Comprehensive regression metrics.
+    """Comprehensive regression metrics.
 
     Includes both absolute and normalized (scale-independent) metrics.
     """
+
     # Absolute metrics
     mse: float
     mae: float
@@ -42,7 +43,9 @@ class ModelMetrics:
             parts.append(f"NMAE: {self.nmae:.4f}")
 
         # Absolute metrics
-        parts.append(f"| MSE: {self.mse:.6f}, RMSE: {self.rmse:.6f}, MAE: {self.mae:.6f}")
+        parts.append(
+            f"| MSE: {self.mse:.6f}, RMSE: {self.rmse:.6f}, MAE: {self.mae:.6f}"
+        )
 
         if self.mape is not None:
             parts.append(f"MAPE: {self.mape:.2f}%")
@@ -54,24 +57,22 @@ class ModelMetrics:
     def to_dict(self):
         """Convert to dictionary for JSON serialization."""
         return {
-            'mse': float(self.mse),
-            'mae': float(self.mae),
-            'r2': float(self.r2),
-            'rmse': float(self.rmse),
-            'mape': float(self.mape) if self.mape is not None else None,
-            'max_error': float(self.max_error) if self.max_error is not None else None,
-            'nmse': float(self.nmse) if self.nmse is not None else None,
-            'nrmse': float(self.nrmse) if self.nrmse is not None else None,
-            'nmae': float(self.nmae) if self.nmae is not None else None,
+            "mse": float(self.mse),
+            "mae": float(self.mae),
+            "r2": float(self.r2),
+            "rmse": float(self.rmse),
+            "mape": float(self.mape) if self.mape is not None else None,
+            "max_error": float(self.max_error) if self.max_error is not None else None,
+            "nmse": float(self.nmse) if self.nmse is not None else None,
+            "nrmse": float(self.nrmse) if self.nrmse is not None else None,
+            "nmae": float(self.nmae) if self.nmae is not None else None,
         }
 
 
 def compute_metrics(
-    y_true: Union[np.ndarray, torch.Tensor],
-    y_pred: Union[np.ndarray, torch.Tensor]
+    y_true: Union[np.ndarray, torch.Tensor], y_pred: Union[np.ndarray, torch.Tensor]
 ) -> ModelMetrics:
-    """
-    Compute comprehensive regression metrics.
+    """Compute comprehensive regression metrics.
 
     Args:
         y_true: Ground truth values
@@ -109,13 +110,26 @@ def compute_metrics(
 
     # MAPE (avoid division by zero)
     nonzero_mask = np.abs(y_true) > 1e-8
-    mape = np.mean(np.abs((y_true[nonzero_mask] - y_pred[nonzero_mask]) / y_true[nonzero_mask])) * 100 if np.any(nonzero_mask) else None
+    mape = (
+        np.mean(
+            np.abs((y_true[nonzero_mask] - y_pred[nonzero_mask]) / y_true[nonzero_mask])
+        )
+        * 100
+        if np.any(nonzero_mask)
+        else None
+    )
 
     # Maximum absolute error
     max_error = np.max(np.abs(y_true - y_pred))
 
     return ModelMetrics(
-        mse=mse, mae=mae, r2=r2, rmse=rmse,
-        mape=mape, max_error=max_error,
-        nmse=nmse, nrmse=nrmse, nmae=nmae,
+        mse=mse,
+        mae=mae,
+        r2=r2,
+        rmse=rmse,
+        mape=mape,
+        max_error=max_error,
+        nmse=nmse,
+        nrmse=nrmse,
+        nmae=nmae,
     )

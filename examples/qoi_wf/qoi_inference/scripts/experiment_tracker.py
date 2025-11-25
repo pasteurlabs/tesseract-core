@@ -1,11 +1,13 @@
 """Experiment tracking for model training runs."""
-from pathlib import Path
-from datetime import datetime
+
 import json
-import yaml
 import shutil
-from typing import Dict, Any, Optional
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Optional
+
 import numpy as np
+import yaml
 
 
 class ExperimentTracker:
@@ -16,10 +18,9 @@ class ExperimentTracker:
         base_dir: Path,
         experiment_type: str,  # "sklearn", "hybrid", "neural", etc.
         experiment_name: Optional[str] = None,
-        config_path: Optional[Path] = None
+        config_path: Optional[Path] = None,
     ):
-        """
-        Initialize experiment tracker.
+        """Initialize experiment tracker.
 
         Args:
             base_dir: Base directory for all models (e.g., "models_basic_run")
@@ -75,7 +76,7 @@ class ExperimentTracker:
         self.metadata["config_file"] = str(config_path)
         print(f"  ✅ Saved config to: {dest.relative_to(self.base_dir)}")
 
-    def log_dataset_info(self, split_info: Dict[str, Any]):
+    def log_dataset_info(self, split_info: dict[str, Any]):
         """Log dataset split information."""
         dataset_info_path = self.run_dir / "dataset_info.json"
         with open(dataset_info_path, "w") as f:
@@ -83,13 +84,17 @@ class ExperimentTracker:
             serializable_info = {}
             for key, value in split_info.items():
                 if isinstance(value, (list, np.ndarray)):
-                    serializable_info[key] = [int(x) for x in value] if len(value) > 0 else []
+                    serializable_info[key] = (
+                        [int(x) for x in value] if len(value) > 0 else []
+                    )
                 else:
                     serializable_info[key] = value
             json.dump(serializable_info, f, indent=2)
-        print(f"  ✅ Saved dataset info to: {dataset_info_path.relative_to(self.base_dir)}")
+        print(
+            f"  ✅ Saved dataset info to: {dataset_info_path.relative_to(self.base_dir)}"
+        )
 
-    def log_training_step(self, step: int, metrics: Dict[str, float]):
+    def log_training_step(self, step: int, metrics: dict[str, float]):
         """Log metrics for a training step/epoch."""
         log_entry = {"step": step, **metrics}
         self.training_history.append(log_entry)
@@ -102,11 +107,14 @@ class ExperimentTracker:
         history_path = self.run_dir / "training_history.json"
         with open(history_path, "w") as f:
             json.dump(self.training_history, f, indent=2)
-        print(f"  ✅ Saved training history to: {history_path.relative_to(self.base_dir)}")
+        print(
+            f"  ✅ Saved training history to: {history_path.relative_to(self.base_dir)}"
+        )
 
-    def log_model_metrics(self, model_name: str, metrics: Dict[str, float], split: str = "test"):
-        """
-        Log evaluation metrics for a specific model.
+    def log_model_metrics(
+        self, model_name: str, metrics: dict[str, float], split: str = "test"
+    ):
+        """Log evaluation metrics for a specific model.
 
         Args:
             model_name: Name of the model
@@ -134,8 +142,22 @@ class ExperimentTracker:
                 return [convert_to_native(item) for item in obj]
             elif isinstance(obj, np.ndarray):
                 return obj.tolist()
-            elif isinstance(obj, (np.int_, np.intc, np.intp, np.int8, np.int16, np.int32, np.int64,
-                                  np.uint8, np.uint16, np.uint32, np.uint64)):
+            elif isinstance(
+                obj,
+                (
+                    np.int_,
+                    np.intc,
+                    np.intp,
+                    np.int8,
+                    np.int16,
+                    np.int32,
+                    np.int64,
+                    np.uint8,
+                    np.uint16,
+                    np.uint32,
+                    np.uint64,
+                ),
+            ):
                 return int(obj)
             elif isinstance(obj, (np.float16, np.float32, np.float64)):
                 return float(obj)
@@ -167,7 +189,9 @@ class ExperimentTracker:
         metadata_path = self.run_dir / "experiment_metadata.json"
         with open(metadata_path, "w") as f:
             json.dump(self.metadata, f, indent=2)
-        print(f"  ✅ Saved experiment metadata to: {metadata_path.relative_to(self.base_dir)}")
+        print(
+            f"  ✅ Saved experiment metadata to: {metadata_path.relative_to(self.base_dir)}"
+        )
 
     def add_metadata(self, key: str, value: Any):
         """Add custom metadata to the experiment."""
@@ -223,7 +247,9 @@ class ExperimentTracker:
                         f.write("\n")
 
             f.write("## Reproducing Results\n\n")
-            f.write("To reproduce this experiment, use the saved `config.yaml` with the same dataset splits:\n\n")
+            f.write(
+                "To reproduce this experiment, use the saved `config.yaml` with the same dataset splits:\n\n"
+            )
             f.write("```python\n")
             f.write("# Load the config\n")
             f.write(f"config_path = Path('{self.run_dir / 'config.yaml'}')\n\n")
@@ -236,9 +262,8 @@ class ExperimentTracker:
         print(f"  ✅ Created README: {readme_path.relative_to(self.base_dir)}")
 
 
-def load_experiment(experiment_dir: Path) -> Dict[str, Any]:
-    """
-    Load an experiment's metadata and results.
+def load_experiment(experiment_dir: Path) -> dict[str, Any]:
+    """Load an experiment's metadata and results.
 
     Args:
         experiment_dir: Path to experiment directory

@@ -1,13 +1,14 @@
-import numpy as np
-from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
-import yaml
 import pickle
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
+
+import numpy as np
+import yaml
+
 from .dataset import RawDataSample
-from .utils import compute_stats_from_samples, pca_align
 from .process.utils import compute_bbox_stats
-from typing import List
+from .utils import compute_stats_from_samples, pca_align
 
 
 @dataclass
@@ -47,7 +48,7 @@ class DataScaler:
         self.param_stats_ = {}
         self.qoi_stats_ = {}
 
-    def fit(self, global_stats: Dict):
+    def fit(self, global_stats: dict):
         """Fit scaler parameters based on global dataset statistics."""
         self.point_stats_ = global_stats["point_cloud"]
         self.param_stats_ = global_stats["params"]
@@ -95,9 +96,9 @@ class DataScaler:
         std = self.point_stats_["std"]
         return (xyz - mean) / (std + 1e-8)
 
-    def transform_points(self, xyz: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Transform point coordinates and compute global features.
+    def transform_points(self, xyz: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Transform point coordinates and compute global features.
+
         Returns: (transformed_xyz)
         """
         # Apply point scaling based on strategy
@@ -118,7 +119,7 @@ class DataScaler:
 
     def pca_align_points(
         self, xyz: np.ndarray, normals: Optional[np.ndarray] = None
-    ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+    ) -> tuple[np.ndarray, Optional[np.ndarray]]:
         """Apply PCA alignment to points and normals."""
         if not self.config.pca_align:
             return xyz, normals
@@ -138,7 +139,7 @@ class DataScaler:
     # ========== SHARED SCALING METHODS ==========
 
     def _transform_data(
-        self, data: np.ndarray, strategy: str, stats: Dict
+        self, data: np.ndarray, strategy: str, stats: dict
     ) -> np.ndarray:
         """Generic transform method for params and qoi."""
         if len(data) == 0:
@@ -198,7 +199,7 @@ class ScalingPipeline:
 
         return DataScaler(scaler_config)
 
-    def fit(self, train_samples: List[RawDataSample]) -> None:
+    def fit(self, train_samples: list[RawDataSample]) -> None:
         """Fit the scaler on training data."""
         train_stats = compute_stats_from_samples(train_samples)
         self.scaler.fit(train_stats)
@@ -228,14 +229,13 @@ class ScalingPipeline:
         )
 
     def transform_samples(
-        self, raw_samples: List[RawDataSample]
-    ) -> List[ScaledDataSample]:
+        self, raw_samples: list[RawDataSample]
+    ) -> list[ScaledDataSample]:
         """Transform a list of samples."""
         return [self.transform_sample(sample) for sample in raw_samples]
 
     def save(self, filepath: Path) -> Path:
-        """
-        Save the fitted scaling pipeline to a pickle file.
+        """Save the fitted scaling pipeline to a pickle file.
 
         Args:
             filepath: Path where to save the scaler pickle file
@@ -255,8 +255,7 @@ class ScalingPipeline:
 
     @classmethod
     def load(cls, filepath: Path) -> "ScalingPipeline":
-        """
-        Load a fitted scaling pipeline from a pickle file.
+        """Load a fitted scaling pipeline from a pickle file.
 
         Args:
             filepath: Path to the saved scaler pickle file
@@ -269,7 +268,9 @@ class ScalingPipeline:
             pipeline = pickle.load(f)
 
         if not isinstance(pipeline, cls):
-            raise TypeError(f"Loaded object is not a ScalingPipeline, got {type(pipeline)}")
+            raise TypeError(
+                f"Loaded object is not a ScalingPipeline, got {type(pipeline)}"
+            )
 
         # Ensure fitted flag is set to True after loading
         pipeline.fitted = True

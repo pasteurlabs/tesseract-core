@@ -1,12 +1,12 @@
-import numpy as np
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+
 from torch.utils.data import DataLoader
-from .utils import set_seed
+
 from .dataset import cad_collate
-from .models import HybridPointCloudTreeModel
 from .experiment_tracker import ExperimentTracker
+from .models import HybridPointCloudTreeModel
+from .utils import set_seed
 
 
 def train_hybrid_models(
@@ -18,14 +18,12 @@ def train_hybrid_models(
     save_dir: Path,
     config_path: Optional[Path] = None,
     split_info: Optional[dict] = None,
-    scaler = None
+    scaler=None,
 ):
     """Train hybrid PointNeXt + Tree models."""
-    
-
     # Set random seed for reproducibility
-    if split_info and 'seed' in split_info:
-        seed = split_info['seed']
+    if split_info and "seed" in split_info:
+        seed = split_info["seed"]
         set_seed(seed)
         print(f"🎲 Random seed set to: {seed}")
 
@@ -39,9 +37,7 @@ def train_hybrid_models(
 
     # Initialize experiment tracker
     tracker = ExperimentTracker(
-        base_dir=save_dir,
-        experiment_type="hybrid",
-        config_path=config_path
+        base_dir=save_dir, experiment_type="hybrid", config_path=config_path
     )
 
     # Log dataset split information
@@ -57,22 +53,28 @@ def train_hybrid_models(
 
     # Create PyTorch datasets and loaders (need full data for point clouds)
 
-    batch_size = training_config.get('batch_size', 32)
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, collate_fn=cad_collate)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, collate_fn=cad_collate)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, collate_fn=cad_collate)
+    batch_size = training_config.get("batch_size", 32)
+    train_loader = DataLoader(
+        train_dataset, batch_size=batch_size, shuffle=True, collate_fn=cad_collate
+    )
+    val_loader = DataLoader(
+        val_dataset, batch_size=batch_size, shuffle=False, collate_fn=cad_collate
+    )
+    test_loader = DataLoader(
+        test_dataset, batch_size=batch_size, shuffle=False, collate_fn=cad_collate
+    )
 
     results = {}
 
     for name, config in model_configs.items():
         # Reset seed for each model to ensure reproducibility
-        if split_info and 'seed' in split_info:
-            set_seed(split_info['seed'])
+        if split_info and "seed" in split_info:
+            set_seed(split_info["seed"])
             print(f"🎲 Reset random seed to: {split_info['seed']} for {name}")
 
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"Training Hybrid Model: {name}")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
 
         # Create model
         model_config = config.copy()
@@ -88,9 +90,7 @@ def train_hybrid_models(
 
         # Train model
         model.fit(
-            train_data=train_loader,
-            val_data=val_loader,
-            training_args=training_config
+            train_data=train_loader, val_data=val_loader, training_args=training_config
         )
 
         # Evaluate on all splits
