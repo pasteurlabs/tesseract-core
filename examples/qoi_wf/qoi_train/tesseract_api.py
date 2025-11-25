@@ -32,7 +32,7 @@ class OutputSchema(BaseModel):
     trained_models: list[OutputFileReference] = Field(
         description="Pickle file containing weights of trained model"
     )
-    scaler: list[OutputFileReference] = Field(
+    scalers: list[OutputFileReference] = Field(
         description="Pickle file containing the scaling method for the dataset"
     )
 
@@ -97,7 +97,7 @@ def evaluate(inputs: Any) -> Any:
 
     return {
         "trained_models": model_paths,
-        "scaler": scaler_paths,
+        "scalers": scaler_paths,
     }
 
 
