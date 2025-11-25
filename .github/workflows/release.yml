@@ -33,7 +33,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
           fetch-depth: 0
@@ -82,7 +82,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
           fetch-depth: 0
@@ -124,7 +124,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
           ref: ${{ github.event.pull_request.merge_commit_sha }}
