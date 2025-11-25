@@ -9,80 +9,6 @@ from .models import HybridPointCloudTreeModel
 from .experiment_tracker import ExperimentTracker
 
 
-def _worker_init_fn(worker_id):
-    """Initialize DataLoader worker with unique seed for reproducibility."""
-    worker_seed = torch.initial_seed() % 2**32
-    np.random.seed(worker_seed)
-    import random
-    random.seed(worker_seed)
-
-
-@dataclass
-class TrainingArgs:
-    """Training arguments loaded from config file."""
-    # Data
-    ds_train: object
-    ds_val: object
-    split_info: dict
-    
-    # Model architecture (loaded from config)
-    latent_dim: int
-    param_fusion: str
-    
-    # Training hyperparameters (loaded from config)
-    batch_size: int
-    lr: float
-    weight_decay: float
-    epochs: int
-    patience: int
-    
-    # Hardware (loaded from config)
-    cpu: bool
-    no_amp: bool
-    workers: int
-    
-    # Paths
-    models_dir: str
-    
-    # Random seed
-    seed: int
-
-
-def create_training_args_from_config(config: dict, train_dataset, val_dataset, split_info, models_dir: str) -> TrainingArgs:
-    """Create TrainingArgs from config dictionary."""
-    model_config = config.get("model_spec", {})
-    training_config = config.get("training", {})
-    
-    return TrainingArgs(
-        # Data
-        ds_train=train_dataset,
-        ds_val=val_dataset,
-        split_info=split_info,
-        
-        # Model architecture from config
-        latent_dim=model_config.get("latent_dim", 8),
-        param_fusion=model_config.get("param_fusion", "concat"),
-        
-        # Training hyperparameters from config
-        batch_size=training_config.get("batch_size", 32),
-        lr=training_config.get("learning_rate", 1e-4),
-        weight_decay=training_config.get("weight_decay", 1e-4),
-        epochs=training_config.get("epochs", 100),
-        patience=training_config.get("patience", 20),
-        
-        # Hardware from config
-        cpu=training_config.get("cpu", False),
-        no_amp=training_config.get("no_amp", False),
-        workers=training_config.get("workers", 4),
-        
-        # Paths
-        models_dir=str(models_dir),
-        
-        # Random seed
-        seed=config.get("random_seed", 42),
-    )
-
-
 def train_hybrid_models(
     train_dataset,
     val_dataset,
@@ -91,7 +17,8 @@ def train_hybrid_models(
     training_config: dict,
     save_dir: Path,
     config_path: Optional[Path] = None,
-    split_info: Optional[dict] = None
+    split_info: Optional[dict] = None,
+    scaler = None
 ):
     """Train hybrid PointNeXt + Tree models."""
     
@@ -121,12 +48,19 @@ def train_hybrid_models(
     if split_info:
         tracker.log_dataset_info(split_info)
 
+    # Save scaler to experiment directory for reproducibility
+    scaler_path = None
+    if scaler is not None:
+        scaler_path = tracker.run_dir / "scaler.pkl"
+        scaler.save(scaler_path)
+        print(f"  ✅ Saved scaler to: {scaler_path.relative_to(save_dir)}")
+
     # Create PyTorch datasets and loaders (need full data for point clouds)
 
     batch_size = training_config.get('batch_size', 32)
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, collate_fn=cad_collate, worker_init_fn=_worker_init_fn)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, collate_fn=cad_collate, worker_init_fn=_worker_init_fn)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, collate_fn=cad_collate, worker_init_fn=_worker_init_fn)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, collate_fn=cad_collate)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, collate_fn=cad_collate)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, collate_fn=cad_collate)
 
     results = {}
 
@@ -146,8 +80,8 @@ def train_hybrid_models(
 
         if model_type == "hybrid_pc_tree":
             model = HybridPointCloudTreeModel(name=name, **model_config)
-        # elif model_type == "hybrid_pc_nn":
-        #     model = HybridPointCloudNNModel(name=name, **model_config)
+            # Attach scaler to model for reproducibility
+            model.scaler = scaler
         else:
             print(f"Unknown hybrid model type: {model_type}")
             continue
@@ -170,13 +104,6 @@ def train_hybrid_models(
         tracker.log_model_metrics(name, val_metrics.__dict__, split="val")
         tracker.log_model_metrics(name, test_metrics.__dict__, split="test")
 
-        # Store results
-        results[name] = {
-            "train_metrics": train_metrics.__dict__,
-            "val_metrics": val_metrics.__dict__,
-            "test_metrics": test_metrics.__dict__,
-        }
-
         # Print results
         print(f"\n{name} Results:")
         print(f"  Train - MAE: {train_metrics.mae:.6f}, R²: {train_metrics.r2:.6f}")
@@ -188,8 +115,16 @@ def train_hybrid_models(
         model.save(model_path)
         print(f"  Model saved to: {model_path}")
 
+        # Store results with metrics and model path
+        results[name] = {
+            "model_path": model_path,
+            "scaler_path": scaler_path,
+            "train_metrics": train_metrics.__dict__,
+            "val_metrics": val_metrics.__dict__,
+            "test_metrics": test_metrics.__dict__,
+        }
+
     # Finalize experiment (saves all metadata and creates README)
     tracker.finalize()
 
-    #return results
-    return model_path
+    return results

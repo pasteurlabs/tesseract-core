@@ -1,10 +1,7 @@
-import yaml
-import torch
 from functools import partial
 from pathlib import Path
-from tesseract_core import Tesseract
 
-import numpy as np
+from tesseract_core import Tesseract
 
 here = Path(__file__).parent.resolve()
 print(here)
@@ -17,7 +14,7 @@ from_api = partial(Tesseract.from_tesseract_api, tesseract_api="tesseract_api.py
 
 if __name__ == "__main__":
     CONFIG = here / "inputs/config.yaml"
-    DATASET_FOLDER = here / "../qoi_dataset/inputs/dataset"
+    DATASET_FOLDER = here / "../qoi_dataset/outputs/dataset"
     DATASET_FOLDER = DATASET_FOLDER
     DATA = [p.resolve() for p in DATASET_FOLDER.glob("*.npz")][:5]
     TRAINED_MODEL = here / "inputs/model.pkl"
@@ -25,7 +22,7 @@ if __name__ == "__main__":
     # TODO: add scaler as part of the inputs
 
     print(DATA)
-    
+
     with from_api(
         input_path=here / "inputs",
     ) as inference:
@@ -34,7 +31,7 @@ if __name__ == "__main__":
                 "config": CONFIG,
                 "data": DATA,
                 "trained_model": TRAINED_MODEL,
-                "scaler": SCALER
+                "scaler": SCALER,
             }
         )
         print(result)

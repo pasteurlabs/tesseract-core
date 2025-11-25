@@ -6,23 +6,17 @@ point_spec:
   n_points: 4096
   sampling_method: poisson
   sphere_sampling: 
-    enabled: true
+    enabled: false
     radius: 420
     centers: 
       - [185, 90, -380]
       - [2670, 90, -180]
   sphere_sampling_fraction: 0.75
-  apply_augmentation: false
-  augment_rotation_deg: 0.0
-  augment_jitter_std: 0.0
-  augment_jitter_clip: 0.0
-  augment_translation_range: 0.0
-  augment_enable_scaling: false
 
-geometry_spec:
+geometry_params_spec:
   file: design_table_custom.csv
 
-params_spec:
+bc_params_spec:
   file: metadata.json.series
   variations: ["mean_velocity"]
 
@@ -111,126 +105,16 @@ model_spec:
   latent_dim: 4
   param_fusion: concat
 
-training:
-  # Training hyperparameters
-  batch_size: 32
-  learning_rate: 0.0001
-  weight_decay: 0.0001
-  epochs: 100
-  patience: 50
-  
-  # Hardware settings
-  cpu: false
-  no_amp: false
-  workers: 4
-  
-  # Training behavior
-  shuffle_train: true
-  pin_memory: true
-  gradient_clip_norm: 0.5
-  
-  # Scheduler settings
-  scheduler_type: "plateau"  # cosine, step, plateau
-  scheduler_params:
-    factor: 0.5
-    patience: 10
-    min_lr: 1e-6
-    #T_max: 100  # for cosine annealing
-
-sklearn_models:
-  random_forest:
-    type: "random_forest"
-    n_estimators: 200
-    max_depth: 15
-    min_samples_split: 5
-    min_samples_leaf: 2
-    random_state: 42
-    n_jobs: -1
-    
-  gradient_boosting:
-    type: "gradient_boosting"
-    n_estimators: 150
-    learning_rate: 0.1
-    max_depth: 6
-    random_state: 42
-    
-  xgboost:
-    type: "gradient_boosting"  # Can be extended to XGBoost later
-    n_estimators: 100
-    learning_rate: 0.15
-    max_depth: 4
-    random_state: 42
-    
-  linear_regression:
-    type: "linear"
-    
-  ridge_regression: 
-    type: "ridge"
-    alpha: 10.0
-    random_state: 42
-    
-  lasso_regression:
-    type: "lasso"
-    alpha: 1.0
-    random_state: 42
-
-
-# Add neural network models section
-neural_models:
-  simple_nn_small:
-    type: "simple_nn"
-    hidden_dims: [16, 4]
-    dropout: 0.0
-    use_batch_norm: true
-    activation: "relu"
-    
-  simple_nn_medium:
-    type: "simple_nn"
-    hidden_dims: [8, 4, 2]
-    dropout: 0.0
-    use_batch_norm: true
-    activation: "relu"
-    
-  simple_nn_large:
-    type: "simple_nn"
-    hidden_dims: [16, 8, 4, 2]
-    dropout: 0.0
-    use_batch_norm: true
-    activation: "gelu"
-
-# Neural network training settings
-nn_training:
-  epochs: 15000
-  lr: 0.0001
-  weight_decay: 0.0001
-  patience: 250
-  batch_size: 32
-
 # Add hybrid models section
 hybrid_models:
-  # 🚀 OPTIMIZED: Fix ignored point cloud features
-  hybrid_pointnet_optimized:
-    type: "dontrain"
-    embedder_type: "pointnet"
-    # Increased capacity to capture more information
-    in_dim: 6
-    latent_dim: 1  # ⬆️ Increased from 4 to 12 (more capacity)
-    pointnet_hidden_dims: [512, 1024, 2048, 1024]   # ⬆️ Larger hidden dims
-    embedder_dropout: 0.32  # ⬇️ Reduced from 0.3 (allow more learning)
-    # Random Forest params (slightly regularized to rely on embeddings more)
-    n_estimators: 150  # ⬇️ Reduced slightly
-    max_depth: 15  # ⬇️ Reduced to force RF to use features better
-    min_samples_split: 5  # ⬆️ Increased regularization
-    random_state: 42
-
-  # PointNet-based models (simpler, fewer parameters, better for small datasets)
+  # PointNet-based models 
   hybrid_pointnet_small:
     type: "hybrid_pc_tree"
     embedder_type: "pointnet"
     # PointNet params
     in_dim: 6
     latent_dim: 6
-    pointnet_hidden_dims: [512, 1024, 2048]  # Larger capacity
+    pointnet_hidden_dims: [512, 1024, 2048]
     embedder_dropout: 0.25
     # Random Forest params
     n_estimators: 150
@@ -238,121 +122,11 @@ hybrid_models:
     min_samples_split: 5
     random_state: 42
 
-  hybrid_pointnet_medium:
-    type: "dontrain"
-    embedder_type: "pointnet"
-    # PointNet params
-    in_dim: 6
-    latent_dim: 2
-    pointnet_hidden_dims: [512, 1024, 2048]  # Larger capacity
-    embedder_dropout: 0.28
-    # Random Forest params
-    n_estimators: 150
-    max_depth: 15
-    min_samples_split: 5
-    random_state: 42
-
-  # PointNeXt-based models (original, more complex)
-  hybrid_small:
-    type: "dontrain" #"hybrid_pc_tree"
-    # PointNeXt embedder params
-    in_dim: 6
-    latent_dim: 4              # Small latent space
-    backbone_dim: 512          # Small backbone
-    embedder_dropout: 0.3
-    # Random Forest params  
-    n_estimators: 200
-    max_depth: 15
-    min_samples_split: 5
-    random_state: 42
-    
-  hybrid_medium:
-    type: "dontrain" #"hybrid_pc_tree"
-    # PointNeXt embedder params
-    in_dim: 6
-    latent_dim: 4
-    backbone_dim: 512
-    embedder_dropout: 0.3
-    # Random Forest params
-    n_estimators: 200
-    max_depth: 15
-    min_samples_split: 5
-    random_state: 42
-
-  hybrid_nn_small:
-    type: "dontrain" #"hybrid_pc_nn"
-    # PointNeXt embedder params
-    in_dim: 6
-    latent_dim: 4
-    backbone_dim: 512
-    embedder_dropout: 0.5
-    # Simple NN params
-    hidden_dim: 32
-    nn_dropout: 0.0
-
-  # Point-BERT-based models (transformer-based, pre-trained on ShapeNet)
-
-  # OPTION 1: Frozen Point-BERT with higher capacity (RECOMMENDED TO TRY FIRST)
-  hybrid_pointbert:
-    type: "dontrain"
-    embedder_type: "pointbert"
-    pointbert_pretrained_path: "Point-BERT.pth"
-    pointbert_freeze: true  # Use frozen pre-trained features
-    in_dim: 6
-    latent_dim: 128  # ⬆️ MUCH HIGHER to preserve transformer features (was 4!)
-    embedder_dropout: 0.0
-    n_estimators: 200
-    max_depth: 20
-    min_samples_split: 5
-    random_state: 42
-
-  # OPTION 2: Medium capacity (good balance)
-  hybrid_pointbert_medium:
-    type: "dontrain"  # Enable after testing option 1
-    embedder_type: "pointbert"
-    pointbert_pretrained_path: "Point-BERT.pth"
-    pointbert_freeze: true
-    in_dim: 6
-    latent_dim: 64  # Medium capacity
-    embedder_dropout: 0.0
-    n_estimators: 200
-    max_depth: 20
-    min_samples_split: 5
-    random_state: 42
-
-  # OPTION 3: No projection (use full 384-dim features)
-  hybrid_pointbert_full:
-    type: "dontrain"  # Enable if options 1-2 work well
-    embedder_type: "pointbert"
-    pointbert_pretrained_path: "Point-BERT.pth"
-    pointbert_freeze: true
-    in_dim: 6
-    latent_dim: 384  # Full transformer dimension (no compression)
-    embedder_dropout: 0.0
-    n_estimators: 200
-    max_depth: 20
-    min_samples_split: 5
-    random_state: 42
-
-  # OPTION 4: Fine-tuned Point-BERT (try after frozen works)
-  hybrid_pointbert_finetune:
-    type: "dontrain"  # Try after frozen Point-BERT shows promise
-    embedder_type: "pointbert"
-    pointbert_pretrained_path: "Point-BERT.pth"
-    pointbert_freeze: false  # Fine-tune on HVAC data
-    in_dim: 6
-    latent_dim: 128
-    embedder_dropout: 0.4
-    n_estimators: 200
-    max_depth: 15
-    min_samples_split: 5
-    random_state: 42
-
 # Hybrid training settings
 hybrid_training:
-  epochs: 8000                  # ⬆️ Increased to allow embedder to learn more
-  lr: 0.0003                    # ⬆️ Increased 3x for faster embedder learning
-  weight_decay: 0.0005          # ⬇️ Reduced to allow more learning
-  patience: 100                  # ⬆️ Increased patience (give more time)
+  epochs: 1
+  lr: 0.0003
+  weight_decay: 0.0005
+  patience: 100
   batch_size: 32
-  gradient_clip_norm: 1.0       # Add gradient clipping for stability
+  gradient_clip_norm: 1.0

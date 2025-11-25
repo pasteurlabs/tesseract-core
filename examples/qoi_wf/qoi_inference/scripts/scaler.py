@@ -270,7 +270,7 @@ class ScalingPipeline:
 
         if not isinstance(pipeline, cls):
             raise TypeError(f"Loaded object is not a ScalingPipeline, got {type(pipeline)}")
-        
+
         # Ensure fitted flag is set to True after loading
         pipeline.fitted = True
 
