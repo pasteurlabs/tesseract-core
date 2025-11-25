@@ -133,7 +133,6 @@ def compute_stats_from_samples(samples) -> dict:
 def get_dataset_dimensions(data_loader):
     """Extract p_dim and q_dim from dataset."""
     sample_batch = next(iter(data_loader))
-    p_dim = sample_batch['params'].shape[1]
-    q_dim = sample_batch['qoi'].shape[1] if len(sample_batch['qoi'].shape) > 1 else 1
+    p_dim = sample_batch["params"].shape[1]
+    q_dim = sample_batch["qoi"].shape[1] if len(sample_batch["qoi"].shape) > 1 else 1
     return p_dim, q_dim
-

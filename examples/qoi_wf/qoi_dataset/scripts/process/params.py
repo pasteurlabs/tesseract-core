@@ -1,16 +1,18 @@
 """Parameter extraction from metadata and geometry files."""
 
 import json
-import numpy as np
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Tuple, List
+
+import numpy as np
+
 from .utils import extract_cad_sketch
 
 
 @dataclass
 class GeometryParamsConfig:
     """Configuration for geometry parameter extraction."""
+
     file: str = "design_table_custom.csv"
 
 
@@ -20,9 +22,8 @@ class GeometryParamsProcessor:
 
     cfg: GeometryParamsConfig
 
-    def download(self, folder: Path) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Extract geometry parameters from design table CSV.
+    def download(self, folder: Path) -> tuple[np.ndarray, np.ndarray]:
+        """Extract geometry parameters from design table CSV.
 
         Args:
             folder: Directory containing the design table file
@@ -38,8 +39,9 @@ class GeometryParamsProcessor:
 @dataclass
 class BCParamsConfig:
     """Configuration for boundary condition parameter extraction."""
+
     file: str = "metadata.json.series"
-    variations: List[str] = None
+    variations: list[str] = None
 
     # Optional processing flags (unused currently, for future extensions)
     normalize: bool = False
@@ -52,9 +54,8 @@ class BCParamsProcessor:
 
     cfg: BCParamsConfig
 
-    def download(self, folder: Path) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Extract BC parameters from metadata JSON file.
+    def download(self, folder: Path) -> tuple[np.ndarray, np.ndarray]:
+        """Extract BC parameters from metadata JSON file.
 
         Args:
             folder: Directory containing metadata JSON
@@ -66,7 +67,9 @@ class BCParamsProcessor:
         metadata = self._load_json(file_path)
 
         param_names = np.array(self.cfg.variations)
-        param_values = np.array([metadata["variations"][key] for key in self.cfg.variations])
+        param_values = np.array(
+            [metadata["variations"][key] for key in self.cfg.variations]
+        )
 
         return param_names, param_values
 

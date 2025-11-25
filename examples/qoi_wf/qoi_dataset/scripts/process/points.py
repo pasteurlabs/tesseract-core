@@ -1,15 +1,17 @@
 """Point cloud processing from STL mesh files."""
 
-import numpy as np
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Tuple
+
+import numpy as np
+
 from .utils import load_mesh, sample_points, sample_points_with_spheres
 
 
 @dataclass
 class SphereSamplingConfig:
     """Configuration for focused sampling in spherical regions of interest."""
+
     enabled: bool = False
     radius: float = 0.2
     fraction: float = 0.3
@@ -23,6 +25,7 @@ class SphereSamplingConfig:
 @dataclass
 class PointConfig:
     """Configuration for point cloud sampling and augmentation."""
+
     n_points: int = 2048
     sampling_method: str = "poisson"  # Options: "poisson", "uniform"
     sphere_sampling: SphereSamplingConfig = field(default_factory=SphereSamplingConfig)
@@ -42,9 +45,8 @@ class PointProcessor:
 
     cfg: PointConfig
 
-    def download(self, folder: Path) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Sample points from the STL file in the given folder.
+    def download(self, folder: Path) -> tuple[np.ndarray, np.ndarray]:
+        """Sample points from the STL file in the given folder.
 
         Args:
             folder: Directory containing a single .stl file
@@ -64,12 +66,16 @@ class PointProcessor:
                 sphere_fraction=self.cfg.sphere_sampling.fraction,
             )
 
-        return sample_points(mesh, n_points=self.cfg.n_points, method=self.cfg.sampling_method)
+        return sample_points(
+            mesh, n_points=self.cfg.n_points, method=self.cfg.sampling_method
+        )
 
     @staticmethod
     def _find_stl(folder: Path) -> Path:
         """Find the single STL file in folder, raising an error if none or multiple exist."""
         stls = list(folder.glob("*.stl"))
         if len(stls) != 1:
-            raise FileNotFoundError(f"Expected exactly 1 STL file in {folder}, found {len(stls)}")
+            raise FileNotFoundError(
+                f"Expected exactly 1 STL file in {folder}, found {len(stls)}"
+            )
         return stls[0]

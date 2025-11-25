@@ -1,19 +1,25 @@
 """NPZ dataset generation from simulation folders."""
 
-import yaml
-import numpy as np
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
-from .points import PointProcessor, PointConfig, SphereSamplingConfig
-from .params import GeometryParamsConfig, GeometryParamsProcessor, BCParamsConfig, BCParamsProcessor
-from .qoi import QoiProcessor, QoiConfig
+
+import numpy as np
+import yaml
+
+from .params import (
+    BCParamsConfig,
+    BCParamsProcessor,
+    GeometryParamsConfig,
+    GeometryParamsProcessor,
+)
+from .points import PointConfig, PointProcessor, SphereSamplingConfig
+from .qoi import QoiConfig, QoiProcessor
 
 
 @dataclass
 class NPZProcessor:
-    """
-    Processes simulation folders and creates compressed NPZ files.
+    """Processes simulation folders and creates compressed NPZ files.
 
     Each immediate subfolder in `root` is processed to create one NPZ file in `out_dir`.
     Configuration is loaded from `config_path` to specify what data to extract.
@@ -52,22 +58,25 @@ class NPZProcessor:
         # BC params processor (optional)
         self.params_processor = self._init_optional_processor(
             "bc_params_spec",
-            lambda spec: BCParamsProcessor(BCParamsConfig(
-                file=spec["file"],
-                variations=spec["variations"],
-            ))
+            lambda spec: BCParamsProcessor(
+                BCParamsConfig(
+                    file=spec["file"],
+                    variations=spec["variations"],
+                )
+            ),
         )
 
         # QoI processor (optional)
         self.qoi_processor = self._init_optional_processor(
-            "qoi_spec",
-            lambda spec: QoiProcessor(QoiConfig(files=spec["files"]))
+            "qoi_spec", lambda spec: QoiProcessor(QoiConfig(files=spec["files"]))
         )
 
         # Geometry processor (optional)
         self.geometry_processor = self._init_optional_processor(
             "geometry_params_spec",
-            lambda spec: GeometryParamsProcessor(GeometryParamsConfig(file=spec["file"]))
+            lambda spec: GeometryParamsProcessor(
+                GeometryParamsConfig(file=spec["file"])
+            ),
         )
 
     def _parse_sphere_config(self, point_spec: dict) -> SphereSamplingConfig:
@@ -79,7 +88,9 @@ class NPZProcessor:
         return SphereSamplingConfig(
             enabled=sphere_spec.get("enabled", False),
             radius=sphere_spec.get("radius", 0.2),
-            fraction=point_spec.get("sphere_sampling_fraction", sphere_spec.get("fraction", 0.3)),
+            fraction=point_spec.get(
+                "sphere_sampling_fraction", sphere_spec.get("fraction", 0.3)
+            ),
             centers=sphere_spec.get("centers", []),
         )
 
@@ -89,8 +100,7 @@ class NPZProcessor:
         return factory_fn(spec) if spec is not None else None
 
     def build(self) -> list[str | Path]:
-        """
-        Process all simulation folders and create NPZ files.
+        """Process all simulation folders and create NPZ files.
 
         Returns:
             List of paths to created NPZ files
@@ -107,25 +117,40 @@ class NPZProcessor:
 
                 # Extract data from folder
                 points, normals = self.point_processor.download(folder)
-                param_names, params = self._extract_optional(self.params_processor, folder)
+                param_names, params = self._extract_optional(
+                    self.params_processor, folder
+                )
                 qoi_names, qoi = self._extract_optional(self.qoi_processor, folder)
 
                 # Validate QoI if configured (skip folder if empty)
                 if self.qoi_processor is not None:
-                    if qoi is None or len(qoi) == 0 or qoi_names is None or len(qoi_names) == 0:
+                    if (
+                        qoi is None
+                        or len(qoi) == 0
+                        or qoi_names is None
+                        or len(qoi_names) == 0
+                    ):
                         print(f"⚠️  Skipping {folder.name}: Empty QoI data")
                         skipped_count += 1
                         continue
 
                 # Extract geometry (optional, may fail)
                 geometry_names, geometry = self._extract_optional(
-                    self.geometry_processor,
-                    folder,
-                    catch_exceptions=True
+                    self.geometry_processor, folder, catch_exceptions=True
                 )
 
                 # Save to NPZ
-                self.dump_npz(out_path, points, normals, param_names, params, qoi_names, qoi, geometry_names, geometry)
+                self.dump_npz(
+                    out_path,
+                    points,
+                    normals,
+                    param_names,
+                    params,
+                    qoi_names,
+                    qoi,
+                    geometry_names,
+                    geometry,
+                )
                 output_paths.append(out_path)
                 processed_count += 1
 
@@ -140,7 +165,9 @@ class NPZProcessor:
 
         return output_paths
 
-    def _extract_optional(self, processor, folder: Path, catch_exceptions: bool = False):
+    def _extract_optional(
+        self, processor, folder: Path, catch_exceptions: bool = False
+    ):
         """Extract data using optional processor, returning None if processor not configured."""
         if processor is None:
             return None, None
@@ -164,8 +191,7 @@ class NPZProcessor:
         geometry_names: Optional[np.ndarray] = None,
         geometry: Optional[np.ndarray] = None,
     ):
-        """
-        Save processed data to compressed NPZ file.
+        """Save processed data to compressed NPZ file.
 
         Args:
             out_path: Output file path
@@ -202,8 +228,7 @@ class NPZProcessor:
         np.savez_compressed(str(out_path), **payload)
 
     def process_single_folder(self, folder: Path, out_path: Path) -> None:
-        """
-        Process a single folder and create its NPZ file.
+        """Process a single folder and create its NPZ file.
 
         Args:
             folder: Simulation folder to process
@@ -221,18 +246,31 @@ class NPZProcessor:
 
             # Validate QoI if configured (raise error if empty)
             if self.qoi_processor is not None:
-                if qoi is None or len(qoi) == 0 or qoi_names is None or len(qoi_names) == 0:
+                if (
+                    qoi is None
+                    or len(qoi) == 0
+                    or qoi_names is None
+                    or len(qoi_names) == 0
+                ):
                     raise ValueError(f"Empty QoI data for folder {folder.name}")
 
             # Extract geometry (optional)
             geometry_names, geometry = self._extract_optional(
-                self.geometry_processor,
-                folder,
-                catch_exceptions=True
+                self.geometry_processor, folder, catch_exceptions=True
             )
 
             # Save to NPZ
-            self.dump_npz(out_path, points, normals, param_names, params, qoi_names, qoi, geometry_names, geometry)
+            self.dump_npz(
+                out_path,
+                points,
+                normals,
+                param_names,
+                params,
+                qoi_names,
+                qoi,
+                geometry_names,
+                geometry,
+            )
 
         except Exception as e:
             print(f"❌ Failed to process {folder.name}: {e}")

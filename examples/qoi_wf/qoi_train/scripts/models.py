@@ -39,11 +39,13 @@ class PointNetEmbedder(nn.Module):
         point_layers = []
         prev_dim = in_dim
         for h_dim in hidden_dims:
-            point_layers.extend([
-                nn.Conv1d(prev_dim, h_dim, 1),
-                nn.BatchNorm1d(h_dim) if use_batch_norm else nn.Identity(),
-                nn.ReLU(inplace=True),
-            ])
+            point_layers.extend(
+                [
+                    nn.Conv1d(prev_dim, h_dim, 1),
+                    nn.BatchNorm1d(h_dim) if use_batch_norm else nn.Identity(),
+                    nn.ReLU(inplace=True),
+                ]
+            )
             prev_dim = h_dim
         self.point_mlp = nn.Sequential(*point_layers)
 
@@ -90,7 +92,9 @@ class PointNetEmbedder(nn.Module):
                 # Already in (B, in_dim, N) format, keep as is
                 pass
             else:
-                raise ValueError(f"Input shape {x.shape} doesn't match expected in_dim={self.in_dim}")
+                raise ValueError(
+                    f"Input shape {x.shape} doesn't match expected in_dim={self.in_dim}"
+                )
         else:
             # x: (B, N, in_dim) → (B, in_dim, N) for Conv1d
             x = x.transpose(1, 2).contiguous()
@@ -133,26 +137,32 @@ class ParamFusionHead(nn.Module):
             layers = []
 
             # First layer
-            layers.extend([
-                nn.Linear(in_dim, hidden),
-                nn.BatchNorm1d(hidden) if use_batch_norm else nn.Identity(),
-                nn.ReLU(True),
-                nn.Dropout(dropout),
-            ])
+            layers.extend(
+                [
+                    nn.Linear(in_dim, hidden),
+                    nn.BatchNorm1d(hidden) if use_batch_norm else nn.Identity(),
+                    nn.ReLU(True),
+                    nn.Dropout(dropout),
+                ]
+            )
 
             # Second layer with residual option
             mid_dim = hidden // 2
-            layers.extend([
-                nn.Linear(hidden, mid_dim),
-                nn.BatchNorm1d(mid_dim) if use_batch_norm else nn.Identity(),
-                nn.ReLU(True),
-                nn.Dropout(dropout * 0.7),  # Reduce dropout towards output
-            ])
+            layers.extend(
+                [
+                    nn.Linear(hidden, mid_dim),
+                    nn.BatchNorm1d(mid_dim) if use_batch_norm else nn.Identity(),
+                    nn.ReLU(True),
+                    nn.Dropout(dropout * 0.7),  # Reduce dropout towards output
+                ]
+            )
 
             # Output layer with minimal dropout
-            layers.extend([
-                nn.Linear(mid_dim, q_dim),
-            ])
+            layers.extend(
+                [
+                    nn.Linear(mid_dim, q_dim),
+                ]
+            )
 
             self.mlp = nn.Sequential(*layers)
 
@@ -198,6 +208,7 @@ class ParamFusionHead(nn.Module):
             return self.out(torch.sigmoid(self.gate(p)) * z)
         raise RuntimeError
 
+
 class HybridPointCloudTreeModel:
     """Hybrid model: Point embedder + Random Forest using all parameters."""
 
@@ -220,14 +231,16 @@ class HybridPointCloudTreeModel:
         # PointNet-specific parameters
         pointnet_hidden_dims: Optional[list] = None,  # [64, 128, 256] default
         # PointBERT-specific parameters
-        pointbert_pretrained_path: Optional[str] = None,  # Path to pre-trained Point-BERT weights
+        pointbert_pretrained_path: Optional[
+            str
+        ] = None,  # Path to pre-trained Point-BERT weights
         pointbert_freeze: bool = True,  # Freeze Point-BERT encoder
         # Random Forest parameters
         n_estimators: int = 200,
         max_depth: int = 15,
         min_samples_split: int = 2,
         random_state: int = 42,
-        **tree_kwargs
+        **tree_kwargs,
     ):
         self.name = name
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -262,18 +275,25 @@ class HybridPointCloudTreeModel:
 
         # Store tree parameters
         tree_params = {
-            'n_estimators': n_estimators,
-            'max_depth': max_depth,
-            'min_samples_split': min_samples_split,
-            'random_state': random_state,
-            'n_jobs': -1,
+            "n_estimators": n_estimators,
+            "max_depth": max_depth,
+            "min_samples_split": min_samples_split,
+            "random_state": random_state,
+            "n_jobs": -1,
         }
 
         # Add valid sklearn RandomForest parameters from tree_kwargs
         valid_rf_params = {
-            'max_features', 'min_samples_leaf', 'min_weight_fraction_leaf',
-            'max_leaf_nodes', 'min_impurity_decrease', 'bootstrap',
-            'oob_score', 'warm_start', 'ccp_alpha', 'max_samples'
+            "max_features",
+            "min_samples_leaf",
+            "min_weight_fraction_leaf",
+            "max_leaf_nodes",
+            "min_impurity_decrease",
+            "bootstrap",
+            "oob_score",
+            "warm_start",
+            "ccp_alpha",
+            "max_samples",
         }
 
         for key, value in tree_kwargs.items():
@@ -314,7 +334,9 @@ class HybridPointCloudTreeModel:
                 use_batch_norm=True,
             ).to(self.device)
         else:
-            raise ValueError(f"Unknown embedder type: {self._embedder_type}. Use 'pointnet'")
+            raise ValueError(
+                f"Unknown embedder type: {self._embedder_type}. Use 'pointnet'"
+            )
 
         # Use the same fusion head as CADQoIModel with generic p_dim
         self.fusion_head = ParamFusionHead(
@@ -331,7 +353,9 @@ class HybridPointCloudTreeModel:
         if self.latent_dim < 32:
             self.regularizer = nn.Sequential(
                 nn.Linear(self.latent_dim, self.latent_dim * 2),
-                nn.LayerNorm(self.latent_dim * 2) if self._use_layer_norm else nn.Identity(),
+                nn.LayerNorm(self.latent_dim * 2)
+                if self._use_layer_norm
+                else nn.Identity(),
                 nn.ReLU(inplace=True),
                 nn.Dropout(self._embedder_dropout),
                 nn.Linear(self.latent_dim * 2, self.latent_dim),
@@ -384,16 +408,20 @@ class HybridPointCloudTreeModel:
             for batch in data_loader:
                 x = batch["x"].to(self.device)
                 xyz = batch["xyz"].to(self.device)
-                params = batch["params"].to(self.device)  # Use params as defined in batch
+                params = batch["params"].to(
+                    self.device
+                )  # Use params as defined in batch
                 qoi = batch["qoi"]
 
                 # Extract point cloud features (same as CADQoIModel)
                 z = self.embedder(x, xyz)  # (B, latent_dim)
-                z = self.regularizer(z)    # Apply regularization
+                z = self.regularizer(z)  # Apply regularization
 
                 # Combine latent features with params from batch
                 if self.param_fusion == "concat":
-                    fusion_input = torch.cat([z, params], dim=-1)  # (B, latent_dim + p_dim)
+                    fusion_input = torch.cat(
+                        [z, params], dim=-1
+                    )  # (B, latent_dim + p_dim)
                 elif self.param_fusion == "film":
                     # For FILM, modulate with params
                     gamma = self.fusion_head.film_gamma(params)
@@ -411,10 +439,14 @@ class HybridPointCloudTreeModel:
                 all_params.append(params.cpu().numpy())
                 all_qois.append(qoi.numpy())
 
-        embedder_features = np.concatenate(all_embedder_features, axis=0)  # (N, latent_dim)
-        fusion_features = np.concatenate(all_fusion_features, axis=0)      # (N, latent_dim + p_dim) or (N, latent_dim)
-        params_features = np.concatenate(all_params, axis=0)               # (N, p_dim)
-        qois = np.concatenate(all_qois, axis=0)                           # (N, qoi_dim)
+        embedder_features = np.concatenate(
+            all_embedder_features, axis=0
+        )  # (N, latent_dim)
+        fusion_features = np.concatenate(
+            all_fusion_features, axis=0
+        )  # (N, latent_dim + p_dim) or (N, latent_dim)
+        params_features = np.concatenate(all_params, axis=0)  # (N, p_dim)
+        qois = np.concatenate(all_qois, axis=0)  # (N, qoi_dim)
 
         print("📊 Extracted features:")
         print(f"   Embedder features: {embedder_features.shape}")
@@ -429,11 +461,15 @@ class HybridPointCloudTreeModel:
     def _fit_embedder(self, train_loader, val_loader, training_args):
         """Train the embedder using params from batch."""
         # Training parameters
-        epochs = training_args.get('epochs', 50) if training_args else 50
-        lr = training_args.get('lr', 1e-4) if training_args else 1e-4
-        weight_decay = training_args.get('weight_decay', 1e-3) if training_args else 1e-3
-        patience = training_args.get('patience', 20) if training_args else 20
-        gradient_clip_norm = training_args.get('gradient_clip_norm', None) if training_args else None
+        epochs = training_args.get("epochs", 50) if training_args else 50
+        lr = training_args.get("lr", 1e-4) if training_args else 1e-4
+        weight_decay = (
+            training_args.get("weight_decay", 1e-3) if training_args else 1e-3
+        )
+        patience = training_args.get("patience", 20) if training_args else 20
+        gradient_clip_norm = (
+            training_args.get("gradient_clip_norm", None) if training_args else None
+        )
 
         # Create a complete model like CADQoIModel for training
         model_params = (
@@ -444,7 +480,7 @@ class HybridPointCloudTreeModel:
         optimizer = torch.optim.AdamW(model_params, lr=lr, weight_decay=weight_decay)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
 
-        best_val_loss = float('inf')
+        best_val_loss = float("inf")
         no_improve = 0
 
         print(f"  Training embedder for {epochs} epochs (using params from batch)...")
@@ -460,7 +496,9 @@ class HybridPointCloudTreeModel:
             for batch in train_loader:
                 x = batch["x"].to(self.device)
                 xyz = batch["xyz"].to(self.device)
-                params = batch["params"].to(self.device)  # Use params as defined in batch
+                params = batch["params"].to(
+                    self.device
+                )  # Use params as defined in batch
                 qoi = batch["qoi"].to(self.device)
 
                 optimizer.zero_grad()
@@ -498,7 +536,9 @@ class HybridPointCloudTreeModel:
                     for batch in val_loader:
                         x = batch["x"].to(self.device)
                         xyz = batch["xyz"].to(self.device)
-                        params = batch["params"].to(self.device)  # Use params as defined in batch
+                        params = batch["params"].to(
+                            self.device
+                        )  # Use params as defined in batch
                         qoi = batch["qoi"].to(self.device)
 
                         # Forward pass
@@ -523,17 +563,18 @@ class HybridPointCloudTreeModel:
                     no_improve += 1
 
                 if no_improve >= patience:
-                    print(f"  Early stopping at epoch {epoch+1}")
+                    print(f"  Early stopping at epoch {epoch + 1}")
                     break
 
                 if (epoch + 1) % 10 == 0:
                     current_lr = scheduler.get_last_lr()[0]
-                    print(f"  Epoch {epoch+1:3d}: "
-                          f"train_loss={train_loss:.6f}, val_loss={val_loss:.6f}, lr={current_lr:.2e}")
+                    print(
+                        f"  Epoch {epoch + 1:3d}: "
+                        f"train_loss={train_loss:.6f}, val_loss={val_loss:.6f}, lr={current_lr:.2e}"
+                    )
 
         self.embedder_fitted = True
         print(f"  Embedder training completed. Best val loss: {best_val_loss:.6f}")
-
 
     def _fit_tree(self, train_loader, val_loader):
         """Train Random Forest on extracted features."""
@@ -542,7 +583,9 @@ class HybridPointCloudTreeModel:
         X_train, y_train = self._extract_features(train_loader)
 
         print(f"  Feature dimensions: {X_train.shape}")
-        print(f"  Feature type: {'Fusion features' if self.param_fusion == 'concat' else 'Modulated features'}")
+        print(
+            f"  Feature type: {'Fusion features' if self.param_fusion == 'concat' else 'Modulated features'}"
+        )
 
         # Train Random Forest
         print("  Training Random Forest...")
@@ -597,72 +640,82 @@ class HybridPointCloudTreeModel:
             backbone_dim = None  # Not used for PointNet
 
         save_dict = {
-            'embedder_state_dict': self.embedder.state_dict(),
-            'fusion_head_state_dict': self.fusion_head.state_dict(),
-            'regularizer_state_dict': self.regularizer.state_dict(),
-            'tree_model': self.tree_model,
-            'scaler': self.scaler,  # Save ScalingPipeline for reproducibility
-            'latent_dim': self.latent_dim,
-            'in_dim': self.in_dim,
-            'p_dim': self.p_dim,
-            'q_dim': self.q_dim,
-            'param_fusion': self.param_fusion,
-            'embedder_type': self._embedder_type,  # Save embedder type
-            'pointnet_hidden_dims': self._pointnet_hidden_dims,  # Save PointNet config
-            'pointbert_pretrained_path': self._pointbert_pretrained_path,  # Save Point-BERT config
-            'pointbert_freeze': self._pointbert_freeze,
-            'embedder_fitted': self.embedder_fitted,
-            'tree_fitted': self.tree_fitted,
-            'backbone_dim': backbone_dim,
-            'embedder_dropout': self._embedder_dropout,
-            'fusion_dropout': self._fusion_dropout,
-            'use_layer_norm': self._use_layer_norm,
-            'use_residual': self._use_residual,
+            "embedder_state_dict": self.embedder.state_dict(),
+            "fusion_head_state_dict": self.fusion_head.state_dict(),
+            "regularizer_state_dict": self.regularizer.state_dict(),
+            "tree_model": self.tree_model,
+            "scaler": self.scaler,  # Save ScalingPipeline for reproducibility
+            "latent_dim": self.latent_dim,
+            "in_dim": self.in_dim,
+            "p_dim": self.p_dim,
+            "q_dim": self.q_dim,
+            "param_fusion": self.param_fusion,
+            "embedder_type": self._embedder_type,  # Save embedder type
+            "pointnet_hidden_dims": self._pointnet_hidden_dims,  # Save PointNet config
+            "pointbert_pretrained_path": self._pointbert_pretrained_path,  # Save Point-BERT config
+            "pointbert_freeze": self._pointbert_freeze,
+            "embedder_fitted": self.embedder_fitted,
+            "tree_fitted": self.tree_fitted,
+            "backbone_dim": backbone_dim,
+            "embedder_dropout": self._embedder_dropout,
+            "fusion_dropout": self._fusion_dropout,
+            "use_layer_norm": self._use_layer_norm,
+            "use_residual": self._use_residual,
         }
 
-        with open(path, 'wb') as f:
+        with open(path, "wb") as f:
             pickle.dump(save_dict, f)
 
     def load(self, path: Path):
         """Load the hybrid model."""
-        with open(path, 'rb') as f:
+        with open(path, "rb") as f:
             save_dict = pickle.load(f)
 
         # Restore basic parameters first
-        self.latent_dim = save_dict['latent_dim']
-        self.in_dim = save_dict['in_dim']
-        self.p_dim = save_dict['p_dim']
-        self.q_dim = save_dict['q_dim']  # Now we know q_dim
-        self.param_fusion = save_dict['param_fusion']
+        self.latent_dim = save_dict["latent_dim"]
+        self.in_dim = save_dict["in_dim"]
+        self.p_dim = save_dict["p_dim"]
+        self.q_dim = save_dict["q_dim"]  # Now we know q_dim
+        self.param_fusion = save_dict["param_fusion"]
 
         # Store construction parameters
-        self._embedder_type = save_dict.get('embedder_type', 'pointnext')  # Default to pointnext for old models
-        self._pointnet_hidden_dims = save_dict.get('pointnet_hidden_dims', [64, 128, 256])
-        self._pointbert_pretrained_path = save_dict.get('pointbert_pretrained_path', None)
-        self._pointbert_freeze = save_dict.get('pointbert_freeze', True)
-        self._backbone_dim = save_dict.get('backbone_dim', 1024)
-        self._embedder_dropout = save_dict.get('embedder_dropout', 0.1)
-        self._fusion_dropout = save_dict.get('fusion_dropout', 0.2)
-        self._use_layer_norm = save_dict.get('use_layer_norm', True)
-        self._use_residual = save_dict.get('use_residual', False)
+        self._embedder_type = save_dict.get(
+            "embedder_type", "pointnext"
+        )  # Default to pointnext for old models
+        self._pointnet_hidden_dims = save_dict.get(
+            "pointnet_hidden_dims", [64, 128, 256]
+        )
+        self._pointbert_pretrained_path = save_dict.get(
+            "pointbert_pretrained_path", None
+        )
+        self._pointbert_freeze = save_dict.get("pointbert_freeze", True)
+        self._backbone_dim = save_dict.get("backbone_dim", 1024)
+        self._embedder_dropout = save_dict.get("embedder_dropout", 0.1)
+        self._fusion_dropout = save_dict.get("fusion_dropout", 0.2)
+        self._use_layer_norm = save_dict.get("use_layer_norm", True)
+        self._use_residual = save_dict.get("use_residual", False)
 
         # Initialize components now that we have all parameters
         self._initialize_components(self.p_dim, self.q_dim)
 
         # Now load the state dictionaries
-        self.embedder.load_state_dict(save_dict['embedder_state_dict'])
-        self.fusion_head.load_state_dict(save_dict['fusion_head_state_dict'])
-        self.regularizer.load_state_dict(save_dict['regularizer_state_dict'])
-        self.tree_model = save_dict['tree_model']
-        self.scaler = save_dict.get('scaler', None)  # Load scaler (None for backward compatibility)
+        self.embedder.load_state_dict(save_dict["embedder_state_dict"])
+        self.fusion_head.load_state_dict(save_dict["fusion_head_state_dict"])
+        self.regularizer.load_state_dict(save_dict["regularizer_state_dict"])
+        self.tree_model = save_dict["tree_model"]
+        self.scaler = save_dict.get(
+            "scaler", None
+        )  # Load scaler (None for backward compatibility)
 
         # Restore training state
-        self.embedder_fitted = save_dict['embedder_fitted']
-        self.tree_fitted = save_dict['tree_fitted']
+        self.embedder_fitted = save_dict["embedder_fitted"]
+        self.tree_fitted = save_dict["tree_fitted"]
 
         if self.embedder_fitted and self.tree_fitted:
             self.is_fitted = True
 
         scaler_status = "with scaler" if self.scaler is not None else "without scaler"
-        print(f"✅ Loaded hybrid {self._embedder_type} model: {self.name} "
-              f"(p_dim={self.p_dim}, q_dim={self.q_dim}, {scaler_status})")
+        print(
+            f"✅ Loaded hybrid {self._embedder_type} model: {self.name} "
+            f"(p_dim={self.p_dim}, q_dim={self.q_dim}, {scaler_status})"
+        )

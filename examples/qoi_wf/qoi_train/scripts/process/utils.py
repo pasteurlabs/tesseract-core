@@ -19,7 +19,6 @@ def load_mesh(stl_path: Path) -> o3d.geometry.TriangleMesh:
     return mesh
 
 
-
 def submesh_in_sphere(
     mesh: o3d.geometry.TriangleMesh,
     center: np.ndarray,
@@ -97,7 +96,9 @@ def sample_points_with_spheres(
     used_roi = 0
 
     for center, radius in spheres:
-        sub = submesh_in_sphere(mesh, np.asarray(center, dtype=np.float32), float(radius))
+        sub = submesh_in_sphere(
+            mesh, np.asarray(center, dtype=np.float32), float(radius)
+        )
         if sub is None:
             continue  # nothing of the mesh inside this sphere
 
@@ -138,7 +139,6 @@ def sample_points_with_spheres(
             nrm = nrm[:n_points]
 
     return pts, nrm
-
 
 
 def compute_bbox_stats(xyz: np.ndarray) -> dict[str, np.ndarray | float]:
@@ -247,15 +247,17 @@ class SurfaceIntegralReport:
         return values, net
 
 
-def read_experiment_csv_to_metadata(csv_file_path: Path, data_dir: Path, shift_index=1) -> list[dict]:
+def read_experiment_csv_to_metadata(
+    csv_file_path: Path, data_dir: Path, shift_index=1
+) -> list[dict]:
     """Read experiment CSV data and convert each row to metadata dictionary format."""
     with open(csv_file_path) as csvfile:
-        reader = csv.DictReader(csvfile, delimiter=',')
+        reader = csv.DictReader(csvfile, delimiter=",")
 
         for row in reader:
             row = {key.strip(): value.strip() for key, value in row.items()}
             # Skip unsuccessful experiments
-            if row.get('Success', '').lower() != 'true':
+            if row.get("Success", "").lower() != "true":
                 continue
 
             # Create metadata dictionary for this experiment
@@ -265,14 +267,12 @@ def read_experiment_csv_to_metadata(csv_file_path: Path, data_dir: Path, shift_i
                 "variations": {
                     key: float(value) for key, value in list(row.items())[1:-1]
                 },
-                "simulations": [
-                    {
-                        "time": 0.0,
-                        "file": "basic.cas.h5"
-                    }
-                ]
+                "simulations": [{"time": 0.0, "file": "basic.cas.h5"}],
             }
 
-            json_filename = data_dir / f"Experiment_{int(row['Experiment'])+shift_index}/metadata.json.series"
-            with open(json_filename, 'w') as json_file:
+            json_filename = (
+                data_dir
+                / f"Experiment_{int(row['Experiment']) + shift_index}/metadata.json.series"
+            )
+            with open(json_filename, "w") as json_file:
                 json.dump(metadata_dict, json_file, indent=4)

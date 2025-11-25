@@ -1,16 +1,18 @@
 """Quantity of Interest (QoI) extraction from simulation reports."""
 
-import numpy as np
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Tuple
+
+import numpy as np
+
 from .utils import SurfaceIntegralReport
 
 
 @dataclass
 class QoiConfig:
     """Configuration for QoI data extraction."""
-    files: List[str] = field(default_factory=lambda: ["all_pressure.txt"])
+
+    files: list[str] = field(default_factory=lambda: ["all_pressure.txt"])
 
 
 @dataclass
@@ -19,9 +21,8 @@ class QoiProcessor:
 
     cfg: QoiConfig
 
-    def download(self, folder: Path) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Extract QoI data from report files in the given folder.
+    def download(self, folder: Path) -> tuple[np.ndarray, np.ndarray]:
+        """Extract QoI data from report files in the given folder.
 
         Args:
             folder: Directory containing report files

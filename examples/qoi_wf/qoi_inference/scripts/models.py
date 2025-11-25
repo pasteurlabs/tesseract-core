@@ -231,7 +231,9 @@ class HybridPointCloudTreeModel:
         # PointNet-specific parameters
         pointnet_hidden_dims: Optional[list] = None,  # [64, 128, 256] default
         # PointBERT-specific parameters
-        pointbert_pretrained_path: Optional[str] = None,  # Path to pre-trained Point-BERT weights
+        pointbert_pretrained_path: Optional[
+            str
+        ] = None,  # Path to pre-trained Point-BERT weights
         pointbert_freeze: bool = True,  # Freeze Point-BERT encoder
         # Random Forest parameters
         n_estimators: int = 200,

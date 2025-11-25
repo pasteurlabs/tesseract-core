@@ -268,7 +268,9 @@ class ScalingPipeline:
             pipeline = pickle.load(f)
 
         if not isinstance(pipeline, cls):
-            raise TypeError(f"Loaded object is not a ScalingPipeline, got {type(pipeline)}")
+            raise TypeError(
+                f"Loaded object is not a ScalingPipeline, got {type(pipeline)}"
+            )
 
         # Ensure fitted flag is set to True after loading
         pipeline.fitted = True

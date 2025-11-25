@@ -42,6 +42,7 @@ def cad_collate(batch):
 @dataclass
 class RawDataSample:
     """Container for a single raw data sample."""
+
     xyz: np.ndarray  # (N, 3) point coordinates
     normals: Optional[np.ndarray]  # (N, 3) normal vectors or None
     params: np.ndarray  # (P,) parameter values
@@ -54,7 +55,12 @@ class ExpressionEvaluator:
     """Evaluates mathematical expressions on named data arrays."""
 
     @staticmethod
-    def evaluate(names: np.ndarray, values: np.ndarray, expr_config: dict, data_type: str = "feature") -> np.ndarray:
+    def evaluate(
+        names: np.ndarray,
+        values: np.ndarray,
+        expr_config: dict,
+        data_type: str = "feature",
+    ) -> np.ndarray:
         """Compute custom expressions based on named values.
 
         Args:
@@ -90,7 +96,11 @@ class ExpressionEvaluator:
                 matched.append(data_dict[pattern])
             else:
                 # Substring match
-                matches = [val for name, val in data_dict.items() if pattern.lower() in name.lower()]
+                matches = [
+                    val
+                    for name, val in data_dict.items()
+                    if pattern.lower() in name.lower()
+                ]
                 matched.extend(matches)
         return matched
 
@@ -162,7 +172,7 @@ class ExpressionEvaluator:
 
         # Sanitize variable names and add to namespace
         for name, value in data_dict.items():
-            var_name = re.sub(r'[^a-zA-Z0-9_]', '_', name)
+            var_name = re.sub(r"[^a-zA-Z0-9_]", "_", name)
             safe_dict[var_name] = value
             expression = expression.replace(name, var_name)
 
@@ -170,7 +180,9 @@ class ExpressionEvaluator:
             result = eval(expression, safe_dict)
             return np.atleast_1d(np.asarray(result))
         except Exception as e:
-            raise ValueError(f"Error evaluating custom {data_type} expression '{expression}': {e}") from e
+            raise ValueError(
+                f"Error evaluating custom {data_type} expression '{expression}': {e}"
+            ) from e
 
 
 class CADDataset(Dataset):
@@ -221,7 +233,9 @@ class CADDataset(Dataset):
 
         # Apply custom param expressions if configured
         if "param_expressions" in self.cfg and len(param_names) > 0:
-            params = self._compute_expressions(param_names, params, self.cfg["param_expressions"], "param")
+            params = self._compute_expressions(
+                param_names, params, self.cfg["param_expressions"], "param"
+            )
 
         # Load or compute QoI
         qoi = self._load_qoi(data, file_path)
@@ -241,7 +255,9 @@ class CADDataset(Dataset):
             return data["normals"].astype(np.float32)
         return None
 
-    def _aggregate_params(self, data: dict, xyz: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    def _aggregate_params(
+        self, data: dict, xyz: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray]:
         """Combine parameters from multiple configured sources."""
         params_list = []
         names_list = []
@@ -262,7 +278,11 @@ class CADDataset(Dataset):
             params_list.append(bbox_values)
             names_list.append(np.asarray(list(bbox_dict.keys()), dtype=object))
 
-        params = np.concatenate(params_list) if params_list else np.array([], dtype=np.float32)
+        params = (
+            np.concatenate(params_list)
+            if params_list
+            else np.array([], dtype=np.float32)
+        )
         names = np.concatenate(names_list) if names_list else np.array([], dtype=object)
 
         return params, names
@@ -273,7 +293,9 @@ class CADDataset(Dataset):
 
         if qoi_config is not None:
             if "qoi_names" not in data:
-                raise ValueError(f"QoI expressions defined but no 'qoi_names' in {file_path}")
+                raise ValueError(
+                    f"QoI expressions defined but no 'qoi_names' in {file_path}"
+                )
 
             qoi_names = data["qoi_names"]
             qoi_values = data["qoi"].astype(np.float32)
@@ -284,11 +306,7 @@ class CADDataset(Dataset):
         return data["qoi"].astype(np.float32)
 
     def _compute_expressions(
-        self,
-        names: np.ndarray,
-        values: np.ndarray,
-        expr_configs: dict,
-        data_type: str
+        self, names: np.ndarray, values: np.ndarray, expr_configs: dict, data_type: str
     ) -> np.ndarray:
         """Evaluate all enabled expressions in the config."""
         results = []
@@ -298,7 +316,9 @@ class CADDataset(Dataset):
                 continue
 
             try:
-                result = ExpressionEvaluator.evaluate(names, values, expr_config, data_type)
+                result = ExpressionEvaluator.evaluate(
+                    names, values, expr_config, data_type
+                )
                 results.append(result)
             except Exception as e:
                 print(f"❌ Error computing {data_type} expression '{expr_name}': {e}")
