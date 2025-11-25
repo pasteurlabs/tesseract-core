@@ -1,18 +1,13 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from typing import Any
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import torch
-from pydantic import BaseModel, Field, model_validator, ConfigDict
+from pydantic import BaseModel, Field
 from torch.utils._pytree import tree_map
-from typing_extensions import Self
-from scripts.dataset import CADDataset
-
-from tesseract_core.runtime import Array, Differentiable, Float32
-from tesseract_core.runtime.tree_transforms import filter_func, flatten_with_paths
 
 from tesseract_core.runtime.experimental import InputFileReference, OutputFileReference
 
@@ -20,11 +15,9 @@ from tesseract_core.runtime.experimental import InputFileReference, OutputFileRe
 # Schemata
 #
 
-class InputSchema(BaseModel):
 
-    config: InputFileReference = Field(
-        description="Configuration file"
-    )
+class InputSchema(BaseModel):
+    config: InputFileReference = Field(description="Configuration file")
 
     sim_folder: str | Path = Field(
         description="Folder path containing CAD files and simulation results",
@@ -34,21 +27,24 @@ class InputSchema(BaseModel):
         description="Folder path where postprocessed simulations will be dumped into"
     )
 
+
 class OutputSchema(BaseModel):
     data: list[OutputFileReference] = Field(
         description="List of npz files containing point-cloud data, simulation parameters and/or QoIs",
     )
-   
+
 
 def evaluate(inputs: Any) -> Any:
     from scripts.process.npz import NPZProcessor
 
-    processor = NPZProcessor(root=inputs["sim_folder"], out_dir=inputs["dataset_folder"], config_path=inputs["config"])
+    processor = NPZProcessor(
+        root=inputs["sim_folder"],
+        out_dir=inputs["dataset_folder"],
+        config_path=inputs["config"],
+    )
     processed_files = processor.build()
 
-    return {
-        "data" : processed_files
-    }
+    return {"data": processed_files}
 
 
 def apply(inputs: InputSchema) -> OutputSchema:
@@ -99,7 +95,11 @@ def apply(inputs: InputSchema) -> OutputSchema:
 #     return dict(zip(vjp_inputs, vjp_vals, strict=True))
 
 
-to_tensor = lambda x: torch.tensor(x) if isinstance(x, np.generic | np.ndarray) else x
+def to_tensor(x: Any) -> torch.Tensor | Any:
+    """Convert numpy arrays/scalars to torch tensors, pass through other types."""
+    if isinstance(x, np.generic | np.ndarray):
+        return torch.tensor(x)
+    return x
 
 
 #

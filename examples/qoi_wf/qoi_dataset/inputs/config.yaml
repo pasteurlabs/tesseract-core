@@ -13,10 +13,10 @@ point_spec:
       - [2670, 90, -180]
   sphere_sampling_fraction: 0.75
 
-geometry_spec:
+geometry_params_spec:
   file: design_table_custom.csv
 
-params_spec:
+bc_params_spec:
   file: metadata.json.series
   variations: ["mean_velocity"]
 

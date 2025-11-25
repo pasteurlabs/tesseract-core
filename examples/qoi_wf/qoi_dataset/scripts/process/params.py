@@ -1,3 +1,5 @@
+"""Parameter extraction from metadata and geometry files."""
+
 import json
 import numpy as np
 from dataclasses import dataclass
@@ -8,80 +10,68 @@ from .utils import extract_cad_sketch
 
 @dataclass
 class GeometryParamsConfig:
-    """Configuration for geometry processing."""
-
-    # File config
+    """Configuration for geometry parameter extraction."""
     file: str = "design_table_custom.csv"
 
 
 @dataclass
 class GeometryParamsProcessor:
-    """
-    Processes geometry data from configuration files.
-    """
+    """Extracts geometry parameters from CAD design tables."""
 
-    def __init__(self, config: GeometryParamsConfig):
-        self.cfg = config
+    cfg: GeometryParamsConfig
 
     def download(self, folder: Path) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Process geometry data from a folder containing configuration files.
+        Extract geometry parameters from design table CSV.
 
         Args:
-            folder: Path to folder containing configuration files
+            folder: Directory containing the design table file
 
         Returns:
-            Tuple of (geometry_names, geometry) as numpy arrays
+            (param_names, param_values): Arrays of parameter names and values
         """
-        filename = folder / self.cfg.file
-        geom_names, geom_values = extract_cad_sketch(filename)
-        return np.array(geom_names), np.array(geom_values)
+        file_path = folder / self.cfg.file
+        names, values = extract_cad_sketch(file_path)
+        return np.array(names), np.array(values)
 
 
 @dataclass
 class BCParamsConfig:
-    """Configuration for parameters processing."""
-
-    # File config
+    """Configuration for boundary condition parameter extraction."""
     file: str = "metadata.json.series"
     variations: List[str] = None
 
-    # Processing config
+    # Optional processing flags (unused currently, for future extensions)
     normalize: bool = False
     log_transform: bool = False
 
 
 @dataclass
 class BCParamsProcessor:
-    """
-    Processes parameters from JSON metadata files based on configuration settings.
-    """
+    """Extracts boundary condition parameters from simulation metadata."""
 
-    def __init__(self, config: BCParamsConfig):
-        self.cfg = config
+    cfg: BCParamsConfig
 
     def download(self, folder: Path) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Process parameter data from a folder containing metadata JSON.
+        Extract BC parameters from metadata JSON file.
 
         Args:
-            folder: Path to folder containing metadata JSON file
+            folder: Directory containing metadata JSON
 
         Returns:
-            Tuple of (param_names, params) as numpy arrays
+            (param_names, param_values): Arrays of parameter names and values
         """
-        # load config
-        filename = str(self.cfg.file)
-        var_keys = list(self.cfg.variations)
+        file_path = folder / self.cfg.file
+        metadata = self._load_json(file_path)
 
-        # logic
-        metadata_json = self._load_params_json(folder / filename)
-        params_names = np.array([v for v in var_keys])
-        params = np.array([metadata_json["variations"][v] for v in var_keys])
+        param_names = np.array(self.cfg.variations)
+        param_values = np.array([metadata["variations"][key] for key in self.cfg.variations])
 
-        return params_names, params
+        return param_names, param_values
 
     @staticmethod
-    def _load_params_json(path: Path) -> dict:
+    def _load_json(path: Path) -> dict:
+        """Load JSON file from disk."""
         with path.open("r", encoding="utf-8") as f:
             return json.load(f)

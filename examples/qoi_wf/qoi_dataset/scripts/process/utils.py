@@ -1,3 +1,5 @@
+"""Utility functions for data processing: mesh loading, sampling, and report parsing."""
+
 import csv
 import json
 import numpy as np
