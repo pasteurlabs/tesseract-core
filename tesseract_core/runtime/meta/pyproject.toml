@@ -1,7 +1,7 @@
 [project]
 name = "tesseract_runtime"
 version = "0.1.0"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 
 # NOTE: Upper bounds (<=) are periodically updated via .github/workflows/bump_lockfile.yml,
 # do not edit manually. To add constraints, use other operators (e.g. <, >=, ~=, ==) as needed.

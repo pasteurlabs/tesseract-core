@@ -598,7 +598,7 @@ class TestFilterFunc:
         filtered_func = filter_func(sample_func, sample_tree, input_paths=input_paths)
 
         # Wrong number of arguments
-        with pytest.raises(AssertionError, match="Mismatch between number"):
+        with pytest.raises(ValueError, match="Mismatch between number"):
             filtered_func("hello")  # Missing second argument
 
     def test_filter_func_dict_input_wrong_args(self, sample_tree, sample_func):
