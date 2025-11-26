@@ -439,6 +439,10 @@ class HybridPointCloudTreeModel:
                 all_params.append(params.cpu().numpy())
                 all_qois.append(qoi.numpy())
 
+        # Handle case when data loader is empty
+        if len(all_embedder_features) == 0:
+            return None, None
+
         embedder_features = np.concatenate(
             all_embedder_features, axis=0
         )  # (N, latent_dim)
@@ -550,7 +554,15 @@ class HybridPointCloudTreeModel:
                         val_loss += loss.item()
                         num_val_batches += 1
 
-                val_loss /= num_val_batches
+                # Handle case when validation set is empty
+                if num_val_batches > 0:
+                    val_loss /= num_val_batches
+                else:
+                    # Use train loss as proxy if no validation data
+                    val_loss = train_loss
+                    print(
+                        "  Warning: No validation batches, using train loss for monitoring"
+                    )
 
                 # Update scheduler
                 scheduler.step()
@@ -599,9 +611,14 @@ class HybridPointCloudTreeModel:
         # Evaluate on validation data if available
         if val_loader is not None:
             X_val, y_val = self._extract_features(val_loader)
-            val_pred = self.tree_model.predict(X_val)
-            val_metrics = compute_metrics(y_val, val_pred)
-            print(f"  Val metrics: {val_metrics}")
+            if X_val is not None and y_val is not None:
+                val_pred = self.tree_model.predict(X_val)
+                val_metrics = compute_metrics(y_val, val_pred)
+                print(f"  Val metrics: {val_metrics}")
+            else:
+                print(
+                    "  Warning: No validation data available, skipping validation metrics"
+                )
 
         self.tree_fitted = True
 
@@ -613,6 +630,10 @@ class HybridPointCloudTreeModel:
         # Extract features using embedder
         features, _ = self._extract_features(data_loader)
 
+        # Handle empty data loader
+        if features is None:
+            return np.array([])
+
         # Predict using Random Forest
         predictions = self.tree_model.predict(features)
 
@@ -622,6 +643,21 @@ class HybridPointCloudTreeModel:
         """Evaluate the hybrid model."""
         # Extract features and true labels
         features, y_true = self._extract_features(data_loader)
+
+        # Handle empty data loader
+        if features is None or y_true is None:
+            print("Warning: Cannot evaluate on empty dataset")
+            # Return empty metrics
+            return ModelMetrics(
+                mae=float("nan"),
+                r2=float("nan"),
+                rmse=float("nan"),
+                mape=float("nan"),
+                mse=float("nan"),
+                nmse=float("nan"),
+                nrmse=float("nan"),
+                nmae=float("nan"),
+            )
 
         # Make predictions
         y_pred = self.tree_model.predict(features)
