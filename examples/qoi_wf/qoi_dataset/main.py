@@ -10,7 +10,7 @@ from_api = partial(Tesseract.from_tesseract_api, tesseract_api="tesseract_api.py
 
 if __name__ == "__main__":
     CONFIG = here / "inputs/config.yaml"
-    SIM_FOLDER = here / "inputs/2025_06_17_HVAC"
+    SIM_FOLDER = here / "inputs/Ansys_Runs"
     OUTPUT_DIR = here / "outputs"
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     DATASET_FOLDER = OUTPUT_DIR / "dataset"
