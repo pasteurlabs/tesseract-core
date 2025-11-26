@@ -3,11 +3,11 @@
 ## Context
 Complex CAD models are often imported from parametric CAD software and require pre-processing by e.g. extracting a fluid volume for simulatuion, or naming domain faces such that appropriate boundary conditions can be applied.
 
-SpaceClaim is commonly used to perform these pre-procsesing actions, and additionally can be used to generate geometry. Here the use of SpaceClaim and automated SpaceClaim scripts (`.scscript`) will be demonstrated from within a Tesseract. This enables simple interaction
+SpaceClaim is commonly used to perform these pre-processing actions, and additionally can be used to generate geometry. In this example we demonstrate the use of SpaceClaim through SpaceClaim scripts (`.scscript`) within a Tesseract.
 
 ## What is different about this Tesseract?
 
-Tesseracts are most commonly used in their self-contained built form; however, in this case we want SpaceClaim to be called from within the Tesseract, and cannot containerize SpaceClaim itself. To allow us to use SpaceClaim (or any other propriatary software that cannot be containorized) we will be demonstrating a Runtime Tesseract with the [`serve`](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/api/tesseract-runtime-cli.html#tesseract-runtime-serve) functionality from [`tesseract-core[runtime]`](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/api/tesseract-runtime-cli.html). This will allow us to setup a Tesseract on an e.g. Windows machine with Ansys products and licensing, and then make requests to this Tesseract via HTTP.
+Tesseracts are most commonly used in their self-contained built form; however SpaceClaim is not containerization friendly. Instead we use the Tesseract [`tesseract-core[runtime]`](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/api/tesseract-runtime-cli.html to  [`serve`](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/api/tesseract-runtime-cli.html#tesseract-runtime-serve) the SpaceClaim (or any other proprietary software that cannot be containerized). This will allow us to setup a Tesseract on an e.g. Windows machine with Ansys installed and easily expose its functionality over as an HTTP API.
 
 ## Setting up a generic Tesseract Runtime Server
 
@@ -33,7 +33,7 @@ Now with an a open port of your choice, and from within the Tesseract directory,
 tesseract-runtime serve --port port_number
 ```
 
-The result should be an active Tesseract Runtime Server that we can now make requests too:
+The result is a Tesseract Runtime Server.
 
 ```bash
 $ tesseract-runtime serve --port 443
@@ -45,13 +45,13 @@ INFO:     Uvicorn running on http://127.0.0.1:443 (Press CTRL+C to quit)
 
 ## Example SpaceClaim Tesseract (`examples/ansys_integration/spaceclaim_tess`)
 
-For this specific example we are looking at the SpaceX Grid Fin geometry shown in this [demo](https://si-tesseract.discourse.group/c/showcase/11). This specific example requires `trimesh` as a dependency, so if you would like to follow along copy the files from `examples/ansys_integration/spaceclaim_tess` and install the following in your tesseract-core environment:
+For this specific example we are looking at the SpaceX Grid Fin geometry shown in this [demo](https://si-tesseract.discourse.group/c/showcase/11). This specific example requires `trimesh` as a dependency. For an easy setup navigate to  `examples/ansys_integration/spaceclaim_tess` and install the requirements in your python environment of choice
 
 ```bash
 pip install -r tesseract_requirements.txt
 ```
 
-This Tesseract accepts the goemetry parameters to batch create N Grid Fin geometries, so each parameter is an N length list. The only constant input is `string_parameters` which is a list of user defined strings that define the Path to the SpaceClaim exectutable file and the SpaceClaim `.scscript` to be run.
+This Tesseract accepts goemetry parameters to create `N` Grid Fin geometries simulatanously. The API was setup this way to hide the startup latency of SpaceClaim when requesting a large number of geometries. 
 
 ```{literalinclude} ../../../../examples/ansys_integration/spaceclaim_tess/tesseract_api.py
 :language: python
@@ -111,7 +111,7 @@ curl -Method POST `
      -Body '{"inputs":{"differentiable_parameters":[[200,600,0,3.14,0.39,3.53,0.79,3.93,1.18,4.32,1.57,4.71,1.96,5.11,2.36,5.50,2.75,5.89],[400,400,0,3.14,0.39,3.53,0.79,3.93,1.18,4.32,1.57,4.71,1.96,5.11,2.36,5.50,2.75,5.89]],"non_differentiable_parameters":[[800,100],[800,100]],"string_parameters":["F:\\Ansys installations\\ANSYS Inc\\v241\\scdm\\SpaceClaim.exe","geometry_generation.scscript"]}}'
 ```
 
-After the time it takes SpaceClaim to boot and process the script (~15 seconds) we will see the mesh output in text form. What that corresponds too is a Grid Fin like below (shown with randomised cross beam locations).
+After about (~15 seconds) the mesh output is returned and displayed in text form in your terminal. The point coordinates and cells correspond to a Grid Fin like below (shown with randomised cross beam locations).
 
 ![Example Grid Fin geometry](../../../img/grid_fin_stl.png)
 
