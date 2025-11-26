@@ -1,6 +1,6 @@
 name: "spaceclaim"
-version: "1.0.0"
-description: "Testing wrapping Spaceclaim in a runtime tesseract"
+version: "0.0.1"
+description: "Wrapping SpaceClaim in a runtime tesseract"
 
 build_config:
   # Base image to use for the container, must be Ubuntu or Debian-based

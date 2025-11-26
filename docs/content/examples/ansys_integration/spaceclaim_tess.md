@@ -1,15 +1,15 @@
 # SpaceClaim Tesseract
 
 ## Context
-Within the Ansys product collection there are many great ways to generate geometries for Computer Aided Engineering (CAE) simulations. Additionally, complex CAD models are often imported from parametric CAD software and require pre-processing by e.g. extracting a fluid volume for simulatuion, or naming domain faces such that appropriate boundary conditions can be applied.
+Complex CAD models are often imported from parametric CAD software and require pre-processing by e.g. extracting a fluid volume for simulatuion, or naming domain faces such that appropriate boundary conditions can be applied.
 
-SpaceClaim is commonly used to perform these pre-procsesing actions, and additionally can be used to generate geometry. Here the use of SpaceClaim and automated SpaceClaim scripts (`.scscript`) will be demonstrated from within a Tesseract.
+SpaceClaim is commonly used to perform these pre-procsesing actions, and additionally can be used to generate geometry. Here the use of SpaceClaim and automated SpaceClaim scripts (`.scscript`) will be demonstrated from within a Tesseract. This enables simple interaction
 
 ## What is different about this Tesseract?
 
-Tesseracts are most commonly used in their self-contained built form; however, in this case we want SpaceClaim to be called from within the Tesseract, and cannot containerize SpaceClaim itself. To allow us to use SpaceClaim (or any other propriatary software that cannot be containorized) we will be demonstrating a runtime Tesseract with the `serve` functionality from `tesseract-core[runtime]`. This will allow us to setup a Tesseract on a machine with Ansys products and licensing, and then make requests to this Tesseract via HTTP.
+Tesseracts are most commonly used in their self-contained built form; however, in this case we want SpaceClaim to be called from within the Tesseract, and cannot containerize SpaceClaim itself. To allow us to use SpaceClaim (or any other propriatary software that cannot be containorized) we will be demonstrating a Runtime Tesseract with the [`serve`](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/api/tesseract-runtime-cli.html#tesseract-runtime-serve) functionality from [`tesseract-core[runtime]`](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/api/tesseract-runtime-cli.html). This will allow us to setup a Tesseract on an e.g. Windows machine with Ansys products and licensing, and then make requests to this Tesseract via HTTP.
 
-## Setting up a Tesseract Runtime Server
+## Setting up a generic Tesseract Runtime Server
 
 When creating a Tesseract you should have a Tesseract directory with three files like so:
 
@@ -21,51 +21,138 @@ examples/helloworld
 └── tesseract_requirements.txt
 ```
 
-You can learn about Tesseract basics [here](../../introduction/get-started.md). Normally this directory would be passed to `tesseract build`, but instead we are going to make use of `tesseract-runtime` which will provide us an interface with the Tesseract:
+If this isn't familiar then you can learn about Tesseract basics [here](../../introduction/get-started.md). Normally this directory would be passed to `tesseract build`, but instead we can install and make use of the `tesseract-runtime` CLI application which will provide us an interface with the Tesseract:
 
 ```bash
 pip install tesseract-core[runtime]
 ```
 
-With this installed, and a open port of your choice, from within the Tesseract directory we can execute:
+Now with an a open port of your choice, and from within the Tesseract directory, we can execute:
 
 ```bash
-tesseract-runtime serve --port <port_number> --host 0.0.0.0
+tesseract-runtime serve --port port_number
 ```
 
 The result should be an active Tesseract Runtime Server that we can now make requests too:
 
 ```bash
-$ tesseract-runtime serve --port 443 --host 0.0.0.0
+$ tesseract-runtime serve --port 443
 INFO:     Started server process [14888]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
-INFO:     Uvicorn running on http://0.0.0.0:443 (Press CTRL+C to quit)
+INFO:     Uvicorn running on http://127.0.0.1:443 (Press CTRL+C to quit)
 ```
 
-## Example Tesseract (`examples/ansys_integration/spaceclaim_tess`)
+## Example SpaceClaim Tesseract (`examples/ansys_integration/spaceclaim_tess`)
 
-For this example we are looking at the SpaceX Grid Fin geometry demonstrated in this [demo](https://si-tesseract.discourse.group/c/showcase/11). This specific example requires some dependencies, so if you would like to follow along copy the files from `examples/ansys_integration/spaceclaim_tess` and create a new python environment, then:
+For this specific example we are looking at the SpaceX Grid Fin geometry shown in this [demo](https://si-tesseract.discourse.group/c/showcase/11). This specific example requires `trimesh` as a dependency, so if you would like to follow along copy the files from `examples/ansys_integration/spaceclaim_tess` and install the following in your tesseract-core environment:
 
 ```bash
-pip install tesseract-core[runtime] trimesh
+pip install -r tesseract_requirements.txt
 ```
 
+This Tesseract accepts the goemetry parameters to batch create N Grid Fin geometries, so each parameter is an N length list. The only constant input is `string_parameters` which is a list of user defined strings that define the Path to the SpaceClaim exectutable file and the SpaceClaim `.scscript` to be run.
 
+```{literalinclude} ../../../../examples/ansys_integration/spaceclaim_tess/tesseract_api.py
+:language: python
+:pyobject: InputSchema
+```
+
+The output of the Tesseract is a list of `TriangularMesh` objects representing the N Grid Fin meshes.
+
+```{literalinclude} ../../../../examples/ansys_integration/spaceclaim_tess/tesseract_api.py
+:language: python
+:pyobject: OutputSchema
+```
+```{literalinclude} ../../../../examples/ansys_integration/spaceclaim_tess/tesseract_api.py
+:language: python
+:pyobject: TriangularMesh
+```
+
+The explanation and intuation behind the inputs is explained further in the [demo](https://si-tesseract.discourse.group/c/showcase/11).
+
+Now that we understand the inputs and outputs of the Tesseract we can use it. From within the Tesseract directory setup the runtime server with a port of your choice:
+
+```bash
+tesseract-runtime serve --port 443
+```
+
+If we want to manually test the Tesseract it should now be possible to make a HTTP request for two Grid Fin geometries either from the same computer, as shown here, or a seperate one. __Make sure to change the URL IP and port to reflect your setup, along with the SpaceClaim.exe path__:
+
+```bash
+#Bash
+curl -d '{
+  "inputs": {
+    "differentiable_parameters": [
+    [200, 600, 0, 3.14, 0.39, 3.53, 0.79, 3.93, 1.18, 4.32, 1.57, 4.71, 1.96, 5.11, 2.36, 5.50, 2.75, 5.89],
+    [400, 400, 0, 3.14, 0.39, 3.53, 0.79, 3.93, 1.18, 4.32, 1.57, 4.71, 1.96, 5.11, 2.36, 5.50, 2.75, 5.89]
+    ],
+    "non_differentiable_parameters": [
+      [800, 100],
+      [800, 100]
+    ],
+    "string_parameters": [
+      "F:\\Ansys installations\\ANSYS Inc\\v241\\scdm\\SpaceClaim.exe",
+      "geometry_generation.scscript"
+    ]
+  }
+}' \
+-H "Content-Type: application/json" \
+http://127.0.0.1:443/apply
+```
+
+Or:
+
+```powershell
+# Windows PowerShell
+curl -Method POST `
+     -Uri "http://127.0.0.1:443/apply" `
+     -ContentType "application/json" `
+     -Body '{"inputs":{"differentiable_parameters":[[200,600,0,3.14,0.39,3.53,0.79,3.93,1.18,4.32,1.57,4.71,1.96,5.11,2.36,5.50,2.75,5.89],[400,400,0,3.14,0.39,3.53,0.79,3.93,1.18,4.32,1.57,4.71,1.96,5.11,2.36,5.50,2.75,5.89]],"non_differentiable_parameters":[[800,100],[800,100]],"string_parameters":["F:\\Ansys installations\\ANSYS Inc\\v241\\scdm\\SpaceClaim.exe","geometry_generation.scscript"]}}'
+```
+
+After the time it takes SpaceClaim to boot and process the script (~15 seconds) we will see the mesh output in text form. What that corresponds too is a Grid Fin like below (shown with randomised cross beam locations).
+
+![Example Grid Fin geometry](../../../img/grid_fin_stl.png)
+
+*Figure: Grid Fin geometry shown with randomised beam locations.*
+
+The `apply` function that we are invoking with the above command builds each of the Grid Fin geometries and extracts the mesh data from the `trimesh` objects.
+
+```{literalinclude} ../../../../examples/ansys_integration/spaceclaim_tess/tesseract_api.py
+:language: python
+:pyobject: apply
+```
+
+To build the geometries we first prepare the SpaceClaim `.scscript` by replacing placeholder values with the user inputs via string substituation. SpaceClaim is then run, outputting `.stl` meshes that are read with `trimesh`.
+
+```{literalinclude} ../../../../examples/ansys_integration/spaceclaim_tess/tesseract_api.py
+:language: python
+:pyobject: build_geometries
+```
+
+The `.scscript` preperation is unique to this Grid Fin example, with the user input values being processed into dictionaries that are then used within the string substituation. For a different geometry one would have to create their own dictionaries with all the neccessary inputs required by their new `.scscript`.
+
+```{literalinclude} ../../../../examples/ansys_integration/spaceclaim_tess/tesseract_api.py
+:language: python
+:pyobject: _prep_scscript
+```
+
+```{literalinclude} ../../../../examples/ansys_integration/spaceclaim_tess/tesseract_api.py
+:language: python
+:pyobject: _find_and_replace_keys_in_archive
+```
+
+```{literalinclude} ../../../../examples/ansys_integration/spaceclaim_tess/tesseract_api.py
+:language: python
+:pyobject: _safereplace
+```
+
+Once the `.scscript` is ready the final step is to run SpaceClaim. Here it is easy to see how this proecss could be extended to any software that cannot be containorized. For example Ansys Fluent could also be wrapped in a Runtime Tesseract, with the Adjoint solver used to produced gradient information allowing the Tesseract to be differentiable.
 
 ```{literalinclude} ../../../../examples/ansys_integration/spaceclaim_tess/tesseract_api.py
 :language: python
 :pyobject: run_spaceclaim
 ```
 
-Why spaceclaim
-
-Wrapping products that cannot be containorized
-
-Runtime tesseracts with serve
-
-Connecting to a runtime tesseract
-
-How we choose inputs and outputs
-
-See how this example is used in a DEMO
+See this Runtime Tesseract in action in our Grid Fin optimisation [demo](https://si-tesseract.discourse.group/c/showcase/11).

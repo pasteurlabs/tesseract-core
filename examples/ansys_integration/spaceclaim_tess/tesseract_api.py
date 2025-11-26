@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 from tesseract_core.runtime import Array, Float32
 
-# Example spaceclaim .exe and script file Paths
+# Example SpaceClaim .exe and script file Paths
 # spaceclaim_exe = "F:\\Ansys installations\\ANSYS Inc\\v241\\scdm\\SpaceClaim.exe"
 # spaceclaim_script = "geometry_generation.scscript"  # Relies on being executed in same directory as tesseract_api.py
 
@@ -62,8 +62,8 @@ class InputSchema(BaseModel):
     string_parameters: list[str] = Field(
         description=(
             "Two string parameters for geometry construction. "
-            "First str is Path to Spaceclaim executable. "
-            "Second str is Path to Spaceclaim Script (.scscript)."
+            "First str is Path to SpaceClaim executable. "
+            "Second str is Path to SpaceClaim Script (.scscript)."
         )
     )
 
@@ -96,16 +96,13 @@ def build_geometries(
     static_parameters: list[list[int]],
     string_parameters: list[str],
 ) -> list[trimesh.Trimesh]:
-    """Build a Spaceclaim geometry from the parameters by modifying template .scscript.
+    """Build SpaceClaim geometries from the parameters by modifying template .scscript.
 
-    Return a trimesh object.
+    Returns a list of trimesh objects.
     """
     spaceclaim_exe = Path(string_parameters[0])
     spaceclaim_script = Path(string_parameters[1])
 
-    # TODO: Want to stop using TemporaryDirectory for spaceclaim script
-    # and instead use the unique run directory created everytime the
-    # tesseract is run (so there is history).
     with TemporaryDirectory() as temp_dir:
         prepped_script_path = _prep_scscript(
             temp_dir,
@@ -129,13 +126,11 @@ def _prep_scscript(
     differentiable_parameters: list[np.ndarray],
     non_differentiable_parameters: list[np.ndarray],
 ) -> list[str]:
-    """Take tesseract inputs and place into a temp .scscript that will be used to run Spaceclaim.
+    """Take Tesseract inputs and place into a temp .scscript that will be used to run SpaceClaim.
 
-    Return the Path location of this script and the output .stl
+    Return the Path location of this script and the output .stl.
     """
     # Define output file name and location
-    # TODO: Same as before: can we output grid_fin.stl in the tesseract
-    # unique run directory instead of temp dir to keep history?
     output_file = os.path.join(
         temp_dir, "grid_fin"
     )  # .stl ending is included in .scscript
@@ -156,7 +151,7 @@ def _prep_scscript(
     num_of_batches = len(differentiable_parameters)  # number of geometries requested
     num_of_bars = (
         len(differentiable_parameters[0]) - 2
-    ) // 2  # Use firt geometry in batch to test number of beams
+    ) // 2  # Use first geometry in batch to test number of beams
 
     assert num_of_bars == 8
 
@@ -232,7 +227,7 @@ def _find_and_replace_keys_in_archive(file: Path, keyvalues: dict) -> None:
 
 
 def run_spaceclaim(spaceclaim_exe: Path, spaceclaim_script: Path) -> None:
-    """Runs Spaceclaim subprocess with .exe and script Path locations.
+    """Runs SpaceClaim subprocess with .exe and script Path locations.
 
     Returns the subprocess return code.
     """
@@ -260,7 +255,7 @@ def run_spaceclaim(spaceclaim_exe: Path, spaceclaim_script: Path) -> None:
 
 
 def apply(inputs: InputSchema) -> OutputSchema:
-    """Create a Spaceclaim geometry based on input parameters.
+    """Create a SpaceClaim geometry based on input parameters.
 
     Returns TraingularMesh objects.
     """
