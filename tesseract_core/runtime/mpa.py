@@ -20,7 +20,7 @@ from typing import Any, Optional, Union
 import requests
 
 from tesseract_core.runtime.config import get_config
-from tesseract_core.runtime.logs import LogPipe
+from tesseract_core.runtime.logs import TeePipe
 
 
 class BaseBackend(ABC):
@@ -261,7 +261,7 @@ def redirect_stdio(logfile: Union[str, Path]) -> Generator[None, None, None]:
         # Use `print` instead of `.write` so we get appropriate newlines and flush behavior
         write_to_stderr = lambda msg: print(msg, file=orig_stderr_file, flush=True)
         write_to_file = lambda msg: print(msg, file=f, flush=True)
-        pipe_fd = stack.enter_context(LogPipe(write_to_stderr, write_to_file))
+        pipe_fd = stack.enter_context(TeePipe(write_to_stderr, write_to_file))
 
         # Redirect file descriptors at OS level
         stack.enter_context(redirect_fd(sys.stdout, pipe_fd))
