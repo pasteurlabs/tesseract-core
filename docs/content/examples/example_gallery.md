@@ -1,4 +1,4 @@
-# Building Blocks
+# Building Blocks Example Gallery
 
 ```{toctree}
 :name: example-gallery
@@ -11,7 +11,7 @@ building-blocks/vectoradd.md
 building-blocks/univariate.md
 building-blocks/packagedata.md
 building-blocks/arm64.md
-building-blocks/localdependency.md
+building-blocks/localpackage.md
 building-blocks/dataloader.md
 building-blocks/filereference.md
 ```

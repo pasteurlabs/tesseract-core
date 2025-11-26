@@ -138,7 +138,7 @@ TEST_CASES = {
             SampleRequest(
                 endpoint="apply",
                 payload={"inputs": {"name": "Ozzy"}},
-                output_contains_pattern="Hello Ozzy!",
+                output_contains_pattern="Hello Ozzy!\\nGoodbye Ozzy!",
             ),
         ],
     ),
