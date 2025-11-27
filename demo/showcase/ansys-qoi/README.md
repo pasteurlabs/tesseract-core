@@ -105,7 +105,7 @@ The training workflow consists of two key Tesseract components:
 The inference workflow enables engineers to predict QoI using only CAD geometry and boundary condition parameters.
 
 This workflow consists of:
-- **Dataset Pre-Processing Tesseract**: Ensures format compatibility with the trained model
+- **Dataset Pre-Processing Tesseract**: Ensures format compatibility with the trained model.
 - **Inference Tesseract**: Feeds the pre-processed data into the trained model to predict QoI.
 #### 3.1.3. Tesseract Components
 **Dataset Tesseract**
