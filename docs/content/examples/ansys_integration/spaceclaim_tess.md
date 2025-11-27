@@ -43,28 +43,28 @@ INFO:     Application startup complete.
 INFO:     Uvicorn running on http://127.0.0.1:443 (Press CTRL+C to quit)
 ```
 
-## Example SpaceClaim Tesseract (`examples/ansys_integration/spaceclaim_tess`)
+## Example SpaceClaim Tesseract (`examples/spaceclaim`)
 
-For this specific example we are looking at the SpaceX Grid Fin geometry shown in this [demo](https://si-tesseract.discourse.group/c/showcase/11). This specific example requires `trimesh` as a dependency. For an easy setup navigate to  `examples/ansys_integration/spaceclaim_tess` and install the requirements in your python environment of choice
+For this specific example we are looking at the SpaceX Grid Fin geometry shown in this [demo](https://si-tesseract.discourse.group/c/showcase/11). This specific example requires `trimesh` as a dependency. For an easy setup navigate to  `examples/spaceclaim` and install the requirements in your python environment of choice
 
 ```bash
 pip install -r tesseract_requirements.txt
 ```
 
-This Tesseract accepts goemetry parameters to create `N` Grid Fin geometries simulatanously. The API was setup this way to hide the startup latency of SpaceClaim when requesting a large number of geometries. 
+This Tesseract accepts goemetry parameters to create `N` Grid Fin geometries simulatanously. The API was setup this way to hide the startup latency of SpaceClaim when requesting a large number of geometries.
 
-```{literalinclude} ../../../../examples/ansys_integration/spaceclaim_tess/tesseract_api.py
+```{literalinclude} ../../../../examples/spaceclaim/tesseract_api.py
 :language: python
 :pyobject: InputSchema
 ```
 
 The output of the Tesseract is a list of `TriangularMesh` objects representing the N Grid Fin meshes.
 
-```{literalinclude} ../../../../examples/ansys_integration/spaceclaim_tess/tesseract_api.py
+```{literalinclude} ../../../../examples/spaceclaim/tesseract_api.py
 :language: python
 :pyobject: OutputSchema
 ```
-```{literalinclude} ../../../../examples/ansys_integration/spaceclaim_tess/tesseract_api.py
+```{literalinclude} ../../../../examples/spaceclaim/tesseract_api.py
 :language: python
 :pyobject: TriangularMesh
 ```
@@ -119,38 +119,38 @@ After about (~15 seconds) the mesh output is returned and displayed in text form
 
 The `apply` function that we are invoking with the above command builds each of the Grid Fin geometries and extracts the mesh data from the `trimesh` objects.
 
-```{literalinclude} ../../../../examples/ansys_integration/spaceclaim_tess/tesseract_api.py
+```{literalinclude} ../../../../examples/spaceclaim/tesseract_api.py
 :language: python
 :pyobject: apply
 ```
 
 To build the geometries we first prepare the SpaceClaim `.scscript` by replacing placeholder values with the user inputs via string substituation. SpaceClaim is then run, outputting `.stl` meshes that are read with `trimesh`.
 
-```{literalinclude} ../../../../examples/ansys_integration/spaceclaim_tess/tesseract_api.py
+```{literalinclude} ../../../../examples/spaceclaim/tesseract_api.py
 :language: python
 :pyobject: build_geometries
 ```
 
 The `.scscript` preperation is unique to this Grid Fin example, with the user input values being processed into dictionaries that are then used within the string substituation. For a different geometry one would have to create their own dictionaries with all the neccessary inputs required by their new `.scscript`.
 
-```{literalinclude} ../../../../examples/ansys_integration/spaceclaim_tess/tesseract_api.py
+```{literalinclude} ../../../../examples/spaceclaim/tesseract_api.py
 :language: python
 :pyobject: _prep_scscript
 ```
 
-```{literalinclude} ../../../../examples/ansys_integration/spaceclaim_tess/tesseract_api.py
+```{literalinclude} ../../../../examples/spaceclaim/tesseract_api.py
 :language: python
 :pyobject: _find_and_replace_keys_in_archive
 ```
 
-```{literalinclude} ../../../../examples/ansys_integration/spaceclaim_tess/tesseract_api.py
+```{literalinclude} ../../../../examples/spaceclaim/tesseract_api.py
 :language: python
 :pyobject: _safereplace
 ```
 
 Once the `.scscript` is ready the final step is to run SpaceClaim. Here it is easy to see how this proecss could be extended to any software that cannot be containorized. For example Ansys Fluent could also be wrapped in a Runtime Tesseract, with the Adjoint solver used to produced gradient information allowing the Tesseract to be differentiable.
 
-```{literalinclude} ../../../../examples/ansys_integration/spaceclaim_tess/tesseract_api.py
+```{literalinclude} ../../../../examples/spaceclaim/tesseract_api.py
 :language: python
 :pyobject: run_spaceclaim
 ```

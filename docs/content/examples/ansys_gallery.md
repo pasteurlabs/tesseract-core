@@ -12,7 +12,7 @@ ansys_integration/pymapdl_tess.md
 
 This is a gallery of Tesseract examples integrating with Ansys products in different ways, demonstrating the versatility that you can then use to build your own Tesseracts.
 
-You can find these Ansys Tesseracts in the `examples/ansys_integration` directory of the [code repository](https://github.com/pasteurlabs/tesseract-core).
+You can find these Ansys Tesseracts in the `examples/` directory of the [code repository](https://github.com/pasteurlabs/tesseract-core).
 
 
 ::::{grid} 2
@@ -21,12 +21,12 @@ You can find these Ansys Tesseracts in the `examples/ansys_integration` director
    :::{grid-item-card} Spaceclaim
       :link: ansys_integration/spaceclaim_tess.html
 
-      A Spaceclaim Tesseract.
+      A Tesseract that wraps SpaceClaim geometry creation.
    :::
    :::{grid-item-card} PyMAPDL
       :link: ansys_integration/pymapdl_tess.html
 
-      Draft PyMAPDL md.
+      A differentiable Tesseract that wraps PyMAPDL performing SIMP topology optimization.
    :::
 
 ::::

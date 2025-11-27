@@ -791,6 +791,12 @@ TEST_CASES = {
     "tesseractreference": Config(  # Can't test requests standalone; needs target Tesseract. Covered in separate test.
         test_with_random_inputs=False, sample_requests=[]
     ),
+    "pymapdl": Config(  # Can't test without PyMAPDL.
+        test_with_random_inputs=False, sample_requests=[]
+    ),
+    "spaceclaim": Config(  # Can't test without SpaceClaim.
+        test_with_random_inputs=False, sample_requests=[]
+    ),
 }
 
 
