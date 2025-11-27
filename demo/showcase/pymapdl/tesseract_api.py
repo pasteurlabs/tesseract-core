@@ -612,7 +612,7 @@ def vector_jacobian_product(
     return gradients
 
 
-def abstract_eval(abstract_inputs):
+def abstract_eval(abstract_inputs: Any) -> dict:
     """Calculate output shapes and dtypes without executing the forward pass."""
     n_elems = abstract_inputs.hex_mesh.elems.shape[0]
     return {

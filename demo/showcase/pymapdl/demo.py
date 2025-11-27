@@ -21,7 +21,7 @@ if port is None:
     )
 
 
-def create_hex_mesh(Lx, Ly, Lz, Nx, Ny, Nz):
+def create_hex_mesh(Lx: float, Ly: float, Lz: float, Nx: int, Ny: int, Nz: int) -> dict:
     """Generate a structured hexahedral mesh for a rectangular domain.
 
     Args:
@@ -79,7 +79,9 @@ def create_hex_mesh(Lx, Ly, Lz, Nx, Ny, Nz):
     return hex_mesh
 
 
-def cantilever_bc(Lx, Ly, Lz, Nx, Ny, Nz, hex_mesh):
+def cantilever_bc(
+    Lx: float, Ly: float, Lz: float, Nx: int, Ny: int, Nz: int, hex_mesh: dict
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Define boundary conditions for a cantilever beam test case."""
     # Create a dirichlet_mask of nodes indices associated with dirichlet condition
     # dirichlet condition (select nodes at x=0)
@@ -112,7 +114,7 @@ def cantilever_bc(Lx, Ly, Lz, Nx, Ny, Nz, hex_mesh):
     return dirichlet_mask, dirichlet_values, von_neumann_mask, von_neumann_values
 
 
-def sample_rho(hex_mesh):
+def sample_rho(hex_mesh: dict) -> np.ndarray:
     """Create a uniform density field for topology optimization."""
     # Create a test density field varying from 0 to 1
     n_elem = hex_mesh["n_elems"]
@@ -121,7 +123,7 @@ def sample_rho(hex_mesh):
     return rho
 
 
-def main(tess_pymapdl):
+def main(tess_pymapdl: Tesseract) -> None:
     """Run the ANSYS MAPDL integration demo."""
     # Set the domain dimensions
     Lx, Ly, Lz = 3, 2, 1
