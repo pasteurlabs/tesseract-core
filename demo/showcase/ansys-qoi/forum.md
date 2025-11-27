@@ -162,6 +162,10 @@ class OutputSchema(BaseModel):
         description="QoIs - 2D array where each row is a prediction",
     )
 ```
-
+#### 3.1.4. Putting them all together
 ### 3.2. But... Why use Tesseracts?
-## 4. Lo
+## 4. Results
+## 5. Outlook
+## A. Annex - QoI Surrogate Model
+### A.1. Dataset Preparation
+### A.2. QoI Model Architecture
