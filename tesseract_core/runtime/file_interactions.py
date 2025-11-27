@@ -3,12 +3,12 @@
 
 import urllib.parse
 from pathlib import Path
-from typing import Any, Literal, Optional, Union, get_args
+from typing import Any, Literal, get_args
 
 import fsspec
 from pydantic import TypeAdapter
 
-PathLike = Union[str, Path]
+PathLike = str | Path
 
 supported_format_type = Literal["json", "json+base64", "json+binref"]
 SUPPORTED_FORMATS = get_args(supported_format_type)
@@ -17,8 +17,8 @@ SUPPORTED_FORMATS = get_args(supported_format_type)
 def output_to_bytes(
     obj: Any,
     format: supported_format_type,
-    base_dir: Optional[Union[str, Path]] = None,
-    binref_dir: Optional[Union[str, Path]] = None,
+    base_dir: str | Path | None = None,
+    binref_dir: str | Path | None = None,
 ) -> bytes:
     """Encode endpoint output to bytes in the given format.
 

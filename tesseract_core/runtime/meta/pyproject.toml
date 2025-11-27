@@ -1,13 +1,13 @@
 [project]
 name = "tesseract_runtime"
 version = "0.1.0"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 
 # NOTE: Upper bounds (<=) are periodically updated via .github/workflows/bump_lockfile.yml,
 # do not edit manually. To add constraints, use other operators (e.g. <, >=, ~=, ==) as needed.
 dependencies = [
     "pydantic<=2.12.4,>=2.10",
-    "fastapi<=0.121.2,>=0.115",
+    "fastapi<=0.121.3,>=0.115",
     "requests<=2.32.5,>=2.32.4",
     "uvicorn<=0.38.0,>=0.34",
     "click<=8.3.1,>=8.1",

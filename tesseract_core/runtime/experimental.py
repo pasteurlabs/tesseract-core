@@ -2,13 +2,11 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
 from typing import (
     Annotated,
     Any,
-    Callable,
-    Union,
     get_args,
     get_origin,
 )
@@ -114,7 +112,7 @@ class PydanticLazySequenceAnnotation:
         Does most of the heavy lifting for validation and serialization.
         """
 
-        def create_sequence(maybe_path: Union[str, Sequence[Any]]) -> LazySequence:
+        def create_sequence(maybe_path: str | Sequence[Any]) -> LazySequence:
             """Expand a glob pattern into a LazySequence if needed."""
             validator = SchemaValidator(item_schema)
 
