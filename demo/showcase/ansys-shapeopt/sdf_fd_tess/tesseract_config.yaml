@@ -1,0 +1,10 @@
+name: sdf_fd_tess
+version: "0.2.0"
+description: |
+  Tesseract that takes a .stl generating tesseract reference and uses finite difference gradients
+  to compute gradients for a signed distance field.
+
+build_config:
+  extra_packages:
+  - "build-essential"
+  - "libgl1"

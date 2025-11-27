@@ -1,0 +1,9 @@
+name: design-bars-3d
+version: "0.1.0"
+description: |
+  Tesseract that generates 3D bar geometry.
+
+  Parameters are expected to define the control points and radii of piecewise linear tubes in 3D space.
+
+build_config:
+  target_platform: "linux/x86_64"
