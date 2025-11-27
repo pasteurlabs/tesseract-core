@@ -1,5 +1,33 @@
 # Ansys <-> Tesseract: Exploring QoI Workflows
 
+## Table of Contents
+
+1. [Case Study: HVAC Duct Dataset](#1-case-study-hvac-duct-dataset)
+   - 1.1 [Dataset Variations](#11-dataset-variations)
+   - 1.2 [QoI](#12-qoi)
+   - 1.3 [Dataset Summary](#13-dataset-summary)
+
+2. [QoI Workflows](#2-qoi-workflows)
+   - 2.1 [CAD Geometry + Boundary Conditions → QoI Workflow](#21-cad-geometry--boundary-conditions---qoi-workflow)
+   - 2.2 [CAD Geometry + Boundary Conditions → Full-Field → QoI Workflow](#22-cad-geometry--boundary-conditions---full-field---qoi-workflow)
+
+3. [Ansys↔Tesseract QoI Workflow Proposal](#3-ansystesseract-qoi-workflow-proposal)
+   - 3.1 [Tesseract Workflows and Components](#31-tesseract-workflows-and-components)
+     - 3.1.1 [Training Workflow](#311-training-workflow)
+     - 3.1.2 [Inference Workflow](#312-inference-workflow)
+     - 3.1.3 [Tesseract Components](#313-tesseract-components)
+     - 3.1.4 [Putting them all together](#314-putting-them-all-together)
+   - 3.2 [But... Why use Tesseracts?](#32-but-why-use-tesseracts)
+
+4. [Results](#4-results)
+
+5. [Outlook](#5-outlook)
+
+**Annex**
+- A. [Annex - QoI Surrogate Model](#a-annex---qoi-surrogate-model)
+  - A.1 [Dataset Preparation](#a1-dataset-preparation)
+  - A.2 [QoI Model Architecture](#a2-qoi-model-architecture)
+
 Engineers iterate over their designs to meet specific requirements, which are metrics that translate directly into product performance or business needs. We call these metrics Quantities of Interest (QoI). In many engineering contexts, engineers extract QoI as post-processed metrics from simulation solutions. For example, CFD simulations of a wing compute lift and drag coefficients as QoI. Engineering workflows involve iterative updates over design variables (like CAD parameters and boundary conditions) to achieve the required design performance. 
 
 This showcase demonstrates how Tesseract and Ansys Fluent work together to extract insights from QoI datasets. In particular, we will cover:
