@@ -17,7 +17,7 @@ from tesseract_core.runtime.experimental import InputFileReference, OutputFileRe
 
 
 class InputSchema(BaseModel):
-    config: InputFileReference = Field(description="Configuration file")
+    config: str | Path = Field(description="Configuration file")
 
     sim_folder: str | Path = Field(
         description="Folder path containing CAD files and simulation results",
@@ -29,7 +29,7 @@ class InputSchema(BaseModel):
 
 
 class OutputSchema(BaseModel):
-    data: list[OutputFileReference] = Field(
+    data: list[str | Path] = Field(
         description="List of npz files containing point-cloud data, simulation parameters and/or QoIs",
     )
 

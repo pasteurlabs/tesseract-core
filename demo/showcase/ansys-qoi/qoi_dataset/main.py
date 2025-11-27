@@ -5,8 +5,8 @@ from tesseract_core import Tesseract
 
 here = Path(__file__).parent.resolve()
 
-from_api = partial(Tesseract.from_tesseract_api, tesseract_api="tesseract_api.py")
-
+#from_api = partial(Tesseract.from_tesseract_api, tesseract_api="tesseract_api.py")
+    
 
 if __name__ == "__main__":
     CONFIG = here / "inputs/config.yaml"
@@ -15,6 +15,8 @@ if __name__ == "__main__":
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     DATASET_FOLDER = OUTPUT_DIR / "dataset"
 
+    # FROM API
+    from_api = partial(Tesseract.from_tesseract_api, tesseract_api="tesseract_api.py")
     with from_api(
         input_path=here / "inputs",
     ) as inference:
@@ -26,3 +28,19 @@ if __name__ == "__main__":
             }
         )
         print(result)
+
+    # #  FROM IMAGE
+    # inputs={
+    #     "config": str(CONFIG),
+    #     "sim_folder": str(SIM_FOLDER),
+    #     "dataset_folder": str(DATASET_FOLDER),
+    # }
+
+    # qoi_dataset = Tesseract.from_image("qoi_dataset")
+
+    # qoi_dataset.serve()
+    # outputs = qoi_dataset.apply(inputs)
+    # qoi_dataset.teardown()
+
+
+

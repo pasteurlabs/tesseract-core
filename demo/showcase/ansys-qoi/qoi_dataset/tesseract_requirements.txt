@@ -1,3 +1,2 @@
---index-url https://download.pytorch.org/whl/cpu
 torch
 open3d

@@ -10,9 +10,6 @@ import numpy as np
 import torch
 import yaml
 from pydantic import BaseModel, Field
-from scripts.dataset import CADDataset, ScaledCADDataset, cad_collate
-from scripts.models import HybridPointCloudTreeModel
-from scripts.scaler import ScalingPipeline
 from torch.utils._pytree import tree_map
 
 from tesseract_core.runtime import Array, Float32
@@ -45,6 +42,9 @@ class OutputSchema(BaseModel):
 
 
 def evaluate(inputs: Any) -> Any:
+    from scripts.dataset import CADDataset, ScaledCADDataset, cad_collate
+    from scripts.models import HybridPointCloudTreeModel
+    from scripts.scaler import ScalingPipeline
     raw_dataset = CADDataset(files=inputs["data"], config_path=inputs["config"])
 
     with open(inputs["config"]) as f:
