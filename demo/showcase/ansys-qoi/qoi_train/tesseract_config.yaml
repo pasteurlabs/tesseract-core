@@ -1,7 +1,7 @@
-name: qoi
-version: "0.1.0" #2025/11/19
+name: qoi_train
+version: "0.1.0"
 description: |
-  QoI tesseract.
+  Tesseract for training QoI workflows.
 
 build_config:
   target_platform: "native"

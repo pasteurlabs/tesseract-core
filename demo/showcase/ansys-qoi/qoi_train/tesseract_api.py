@@ -23,7 +23,7 @@ from tesseract_core.runtime.experimental import InputFileReference, OutputFileRe
 class InputSchema(BaseModel):
     config: InputFileReference = Field(description="Configuration file")
 
-    data: list[str] = Field(
+    data: list[InputFileReference] = Field(
         description="List of npz file paths (can be absolute paths from dependent workflows)"
     )
 

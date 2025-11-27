@@ -26,7 +26,7 @@ from tesseract_core.runtime.experimental import InputFileReference
 class InputSchema(BaseModel):
     config: InputFileReference = Field(description="Configuration file")
 
-    data: list[str | Path] = Field(
+    data: list[InputFileReference] = Field(
         description="List of npz files containing point-cloud data, simulation parameters and/or QoIs"
     )  # TODO: Change input type to be list[InputFileReference] (as outputs are inside the qoi_dataset...)
 

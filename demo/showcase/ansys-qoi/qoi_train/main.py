@@ -10,7 +10,7 @@ from_api = partial(Tesseract.from_tesseract_api, tesseract_api="tesseract_api.py
 
 if __name__ == "__main__":
     CONFIG = here / "inputs/config.yaml"
-    DATASET_FOLDER = here / "../qoi_dataset/outputs/dataset"
+    DATASET_FOLDER = here / "inputs/dataset_reduced"
 
     # Convert paths to strings (Tesseract will handle them as external references)
     DATA = [str(p.resolve()) for p in DATASET_FOLDER.glob("*.npz")]
