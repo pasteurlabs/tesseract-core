@@ -17,32 +17,32 @@ This example requires a running ANSYS MAPDL server accessible via gRPC:
 "C:/Program Files/ANSYS Inc/v241/ansys/bin/winx64/ANSYS241.exe" -grpc -port 50052
 ```
 
-## Example Tesseract (examples/pymapdl)
+## Example Tesseract (demo/showcase/pymapdl)
 
 ### Core functionality --- schemas and `apply` function
 
 The Tesseract accepts a hexahedral mesh, density field, and boundary conditions as inputs. The density field `rho` is marked as `Differentiable` to enable gradient computation:
 
-```{literalinclude} ../../../../examples/pymapdl/tesseract_api.py
+```{literalinclude} ../../../../demo/showcase/pymapdl/tesseract_api.py
 :pyobject: HexMesh
 :language: python
 ```
 
-```{literalinclude} ../../../../examples/pymapdl/tesseract_api.py
+```{literalinclude} ../../../../demo/showcase/pymapdl/tesseract_api.py
 :pyobject: InputSchema
 :language: python
 ```
 
 The outputs include compliance (the optimization objective), element-wise strain energy, and sensitivity values:
 
-```{literalinclude} ../../../../examples/pymapdl/tesseract_api.py
+```{literalinclude} ../../../../demo/showcase/pymapdl/tesseract_api.py
 :pyobject: OutputSchema
 :language: python
 ```
 
 The `apply` function connects to MAPDL, creates the mesh, assigns SIMP-interpolated materials based on density, applies boundary conditions, solves the static analysis, and extracts results:
 
-```{literalinclude} ../../../../examples/pymapdl/tesseract_api.py
+```{literalinclude} ../../../../demo/showcase/pymapdl/tesseract_api.py
 :pyobject: apply
 :language: python
 ```
@@ -51,7 +51,7 @@ The `apply` function connects to MAPDL, creates the mesh, assigns SIMP-interpola
 
 The solver creates a unique material for each element with properties scaled by the density field using the SIMP formula:
 
-```{literalinclude} ../../../../examples/pymapdl/tesseract_api.py
+```{literalinclude} ../../../../demo/showcase/pymapdl/tesseract_api.py
 :pyobject: SIMPElasticity._define_simp_materials
 :language: python
 ```
@@ -62,14 +62,14 @@ This interpolation scheme penalizes intermediate densities, encouraging binary (
 
 For compliance minimization, the adjoint solution equals the negative displacement field. This allows computing sensitivities analytically without an explicit adjoint solve:
 
-```{literalinclude} ../../../../examples/pymapdl/tesseract_api.py
+```{literalinclude} ../../../../demo/showcase/pymapdl/tesseract_api.py
 :pyobject: SIMPElasticity._calculate_sensitivity
 :language: python
 ```
 
 The cached sensitivity is loaded during the VJP computation and multiplied by the upstream gradient:
 
-```{literalinclude} ../../../../examples/pymapdl/tesseract_api.py
+```{literalinclude} ../../../../demo/showcase/pymapdl/tesseract_api.py
 :pyobject: vector_jacobian_product
 :language: python
 ```
@@ -78,14 +78,14 @@ The cached sensitivity is loaded during the VJP computation and multiplied by th
 
 The `abstract_eval` function computes output shapes based on input shapes without running the ANSYS solver, enabling static analysis and memory pre-allocation:
 
-```{literalinclude} ../../../../examples/pymapdl/tesseract_api.py
+```{literalinclude} ../../../../demo/showcase/pymapdl/tesseract_api.py
 :pyobject: abstract_eval
 :language: python
 ```
 
 ## Demo script
 
-The demo script (`examples/pymapdl/demo.py`) shows a complete workflow for a cantilever beam problem:
+The demo script (`demo/showcase/pymapdl/demo.py`) shows a complete workflow for a cantilever beam problem:
 
 The demo requires you set environment variables pointing to the MAPDL server:
 
@@ -94,7 +94,7 @@ export MAPDL_HOST=192.168.1.100
 export MAPDL_PORT=50052
 ```
 
-```{literalinclude} ../../../../examples/pymapdl/demo.py
+```{literalinclude} ../../../../demo/showcase/pymapdl/demo.py
 :pyobject: main
 :language: python
 ```

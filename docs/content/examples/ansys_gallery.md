@@ -12,7 +12,7 @@ ansys_integration/pymapdl_tess.md
 
 This is a gallery of Tesseract examples integrating with Ansys products in different ways, demonstrating the versatility that you can then use to build your own Tesseracts.
 
-You can find these Ansys Tesseracts in the `examples/` directory of the [code repository](https://github.com/pasteurlabs/tesseract-core).
+You can find these Ansys Tesseracts in the `demo/showcase` directory of the [code repository](https://github.com/pasteurlabs/tesseract-core).
 
 
 ::::{grid} 2
