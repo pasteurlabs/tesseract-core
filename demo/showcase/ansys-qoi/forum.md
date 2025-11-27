@@ -199,7 +199,7 @@ Before examining the results, we need to understand how the Ansys Fluent simulat
 - Point-Cloud-derived parameters: represent geometric metrics that are not explicitly available from the STL file but can be directly computed from the sampled points
 - CAD parameters: correspond to the mentioned CAD sketch parameters (`d61`, `d72`, `d13`, `d34`)
 - Boundary conditions: inlet velocity of the HVAC duct 
-- QoI: averaged static pressure values at 4 stations (`inlet`, `outlet`, `p2-plane`, `p3-plane`).
+- QoI: averaged static pressure values at 4 stations (`inlet`, `outlet`, `p2-plane`, `p3-plane`)
 
 
 ![alt text](images/full_model.png)
@@ -217,8 +217,7 @@ The metrics of the architecture proposed for the QoI-based surrogate model have 
 ```
 The figures collectively indicate a reliable QoI predictions, especially considering that this model would be of special interest for early design phase and rapid design exploration.
 
-Alternatives architectures to the one proposed and benchmarks can be found in [Appendix A.2.](#a2-model-architecture). One architecture of particular interest trains the QoI-based surrogate model without any CAD parameters as input. This scenario represents situations where the original CAD sketches used to generate the STL files have been lost (a common occurrence when design traceability is poorly maintained).
-
+An alternative architectures to the one proposed and benchmarks can be found in [Appendix A.2.](#a2-model-architecture). This specific QoI-based surrogate model is trained without any CAD parameters as input. This scenario represents situations where the original CAD sketches used to generate the STL files have been lost (a common occurrence when design traceability is poorly maintained or when multiple CAD softwares are used).
 
 ## 5. Outlook
 ## Appendix
@@ -329,10 +328,60 @@ The NPZ files will be ingested and converted into PyTorch Dataset objects to ena
 
 #### A.2. Model Architecture
 
-**Complete architecture**
+The proposed approach employs a geometry embedding strategy over the points and normals to create a compact latent representation of the CAD geometry (STL). This embedding intends to capture the essential geometric features in a reduced-dimensional space `z`. Within this latent space, a parameter vector `p` is concatenated to incorporate physics-based and additional CAD design information. The parameter vector `p` contains:
+
+- Core component (always included): Boundary condition parameters (duct inlet velocity)
+
+- Optional components (model-variant dependent):
+
+   - Point-cloud derived parameters `["min", "max", "size", "diag", "max_side", "centroid"]`
+
+   - CAD parameters `["d61", "d72", "d13", "d34"]`, either in full or as a subset
+
+Following concatenation of the parameter vector `p` with the shape embedding `z`, various architectures can be attached to predict the QoI vector `q`. As illustrated in the figure below, this showcase employs a Random Forest (RF) regressor in the prediction block due to its straightforward implementation and robust performance characteristics.
+
+**Baseline architecture**
 ![alt text](images/full_model.png)
 
-The proposed model performs a shape embedding (E) over the sampled points and normals to capture essential features into a reduced-diimensional space (z). Within the latent space
-**Constrained architecture**
+The baseline architecture includes in the parameter vector `p`: boundary conditions, point-cloud derived parameters and CAD parameters. This is the default architecture for the showcase, and the results are available in the [results section](#4-results).
+
+```
+"test_metrics": {
+  "r2": 0.9559590920924331,
+  "nmse": 0.04404090592149448,
+  "nrmse": 0.20985925815702633,
+  "nmae": 0.07607935409954629
+}
+```
+
+
+
 
 **Architecture with no CAD parameters**
+![alt text](images/model_no_cadp.png)
+This architecture has been studied as an alternative to the baseline model. 
+
+This specific QoI-based surrogate model is trained without any CAD parameters in the parameters vector `p`. This scenario represents situations where the original CAD sketches used to generate the STL files have been lost (a common occurrence when design traceability is poorly maintained or when multiple CAD softwares are used).
+```
+"test_metrics": {
+  "r2": 0.9045070139578009,
+  "nmse": 0.09549298173583969,
+  "nrmse": 0.3090193954276475,
+  "nmae": 0.11722269859289076
+}
+```
+
+Despite not using some key information such as the building CAD parameters, the shape embedder is able to extract geometric information from the STL (although not reaching the metrics of the baseline model). 
+
+![alt text](images/latent.png)
+
+When looking at the latent space of the shape embedding block, we can see;
+- The middle baffle plate angle (d61) shows strong correlation with the principal latent dimensions, indicating that the embedding architecture is able to effectively capture it.
+
+- The angle between ducts (d13) show a partial representation within the latent space, suggesting that it is not captured as well as d61
+
+- The inlet aperture length (d72) and the curvature angle of the duct branch (d34) presence is limited in the latent representation. 
+
+It is important to remark the shape embedder is trained together with the QoI-based regressor, meaning that even though the embedder architecture only processes point clouds, the training step is done so that together with the vector `p` it helps predict the QoI `q`.
+
+> 📝 **Note:** These architecture represents an initial baseline representation rather than an optimized solution. The primary objective of this showcase is to establish an end-to-end workflow from geometry embedding through QoI prediction, demonstrating technical feasibility. Subsequent iterations can evaluate alternative embedding techniques (voxelization, SDF or GNN), feature fusion methods in the integration of `z` and `p`, or alternative architectures to replace Random Forests.
