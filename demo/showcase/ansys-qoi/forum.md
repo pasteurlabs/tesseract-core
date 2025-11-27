@@ -30,13 +30,13 @@
 
 Engineers iterate over their designs to meet specific requirements, which are metrics that translate directly into product performance or business needs. We call these metrics Quantities of Interest (QoI). In many engineering contexts, engineers extract QoI as post-processed metrics from simulation solutions. For example, CFD simulations of a wing compute lift and drag coefficients as QoI. Engineering workflows involve iterative updates over design variables (like CAD parameters and boundary conditions) to achieve the required design performance. 
 
-This showcase demonstrates how Tesseract and Ansys Fluent work together to extract insights from QoI datasets. In particular, we will cover:
-1. How to assemble an internal aerodynamics dataset with QoI metrics, based on Ansys simulations
-2. How to create and analyze QoI surrogate machine learning models built on top of Ansys datasets, eliminating the need for time-consuming simulations
-3. How to modularize and execute QoI workflows with Tesseracts that integrate with Ansys simulations outputs
+This showcase demonstrates how Tesseract and Ansys Fluent work together to extract insights from datasets of numerical simulations with QoI-based surrogacy. In particular, we will cover:
+1. How to assemble an internal aerodynamics dataset, based on Ansys simulations, mapping CAD parameters and boundary conditions to QoI. 
+2. How to create and analyze QoI-based surrogate models built on top of Ansys datasets, eliminating the need for time-consuming simulations
+3. How to modularize and execute QoI-based workflows with Tesseracts that integrate with Ansys Fluent simulations outputs
 
 ## 1. Case Study: HVAC Duct Dataset
-Prior to defining a QoI workflow, we created an internal aerodynamics dataset of ~300 samples with Ansys Fluent. This use case consisted of simulations of air flowing through an HVAC duct with two innter baffle plates. As the image below shows:
+Prior to defining a QoI-based workflow, we created an internal aerodynamics dataset of ~300 samples with Ansys Fluent. This use case consisted of numerical simulations of internal air flow through an HVAC duct with two inner baffle plates. As the image below shows:
 
 ![alt text](images/duct_1.png)
 - One baffle place is located just after the inlet acting as a flow constrainer
@@ -44,7 +44,7 @@ Prior to defining a QoI workflow, we created an internal aerodynamics dataset of
 
 ### 1.1 Dataset Variations
 
-**CAD Variations**
+**CAD parameters**
 
 Four geometric parameters were modified to explore different duct configurations:
 - `d61`: Angle of the middle baffle plate
@@ -54,14 +54,14 @@ Four geometric parameters were modified to explore different duct configurations
 
 <table> <tr> <td align="center"> <img src="images/d13.png" alt="d13" width="400"/><br/> <b>d13:</b> Angle between duct branches </td> <td align="center"> <img src="images/d34.png" alt="d34" width="400"/><br/> <b>d34:</b> Curvature angle of duct branch </td> </tr> <tr> <td align="center"> <img src="images/d61.png" alt="d61" width="400"/><br/> <b>d61:</b> Angle of middle baffle plate </td> <td align="center"> <img src="images/d72.png" alt="d72" width="400"/><br/> <b>d72:</b> Aperture length of inlet baffle </td> </tr> </table>
 
-**Boundary Condition Variations**
+**Boundary conditions**
 
-The team also varied the inlet velocity magnitude across simulations to capture different flow regimes and operating conditions.
+The inlet velocity magnitude has been varied across numerical simulations to capture different flow regimes and operating conditions.
 
 ### 1.2. QoI
-Although the dataset simulations were generated before thinking of any QoI workflow, a text file containing static pressure values averaged at certain stations was dumped as part of the reporting. This static pressure values will be considered as the base QoI of the simulation, although we will also explore how to define additional metrics based on these QoI (e.g. $\Delta p$). 
+Although the dataset of numerical simulations was generated without a specific QoI-based workflow in mind, a text file containing static pressure values averaged at certain slices of the HVAC was also available as part of the results. These static pressure values will be considered as the base QoI of each numerical simulation, although we will also explore how to define additional metrics based on these QoI (e.g. the pressure drops $\Delta p$ across different slices). 
 
-The static pressure values reported are averaged at 4 different sections: `inlet`, `outlet`, `p2-plane` (YZ plane after inlet baffle plane) and `p3-plane` (YZ plane before middle baffle plane)
+In particular, the reported static pressure values are averaged at 4 different sections: `inlet`, `outlet`, `p2-plane` (YZ plane after inlet baffle plane) and `p3-plane` (YZ plane before middle baffle plane).
 
 <table> <tr> <td align="center"> <img src="images/p2-plane.png" alt="p2-plane" height="300"/><br/> <b>p2-plane:</b> YZ plane after inlet baffle plate </td> <td align="center"> <img src="images/p3-plane.png" alt="p3-plane" height="300"/><br/> <b>p3-plane:</b> YZ plane before middle baffle plate </td> </tr> </table>
 
@@ -99,9 +99,9 @@ The static pressure values reported are averaged at 4 different sections: `inlet
 
 
 ## 2. QoI Workflows 
-Understanding how geometry design impacts QoI is of valuable interest for CAD and simulation engineers. Establishing a workflow that directly maps a CAD file (e.g. .stl) to QoI removes the need for meshing, simulation, and post-processing. This enables significant reductions in engineering time and accelerates design iteration.
+Understanding how geometry design impacts QoI is of valuable interest for CAD and simulation engineers. Establishing a workflow that directly maps a CAD file (e.g. .stl) to QoI removes the need for meshing, simulation, and post-processing. This enables a significant reduction in engineering time and accelerates design iteration.
 
-In [the following section](#3-ansys-tesseract-qoi-workflow-proposal) we will outline how Tesseracts are able to define a workflow on top of Ansys simulations and mention the benefits it provides. But first, let's explore some of the possibilities to define QoI workflows.
+In [the following section](#3-ansys-tesseract-qoi-workflow-proposal) we will outline how Tesseract allows us to define a workflow on top of Ansys Fluent simulations and discuss the benefits it provides. But first, let's explore some of the possibilities to define a QoI-based workflow.
 
 ### 2.1. CAD Geometry + Boundary Conditions -> QoI Workflow
 <p align="center">
@@ -115,22 +115,22 @@ This workflow enables engineers to directly predict QoI from CAD geometry and bo
   <img src="images/qoi_overview_full.png">
 </p>
 
-Engineers can also incorporate a full-field surrogate model into an alternative QoI workflow alongside direct CAD-to-QoI prediction. When a surrogate predictor generates full-field outputs (e.g., pressure distribution, temperature fields, stress contours), the QoI can be directly derived from these fields using standard post-processing tools. However, deploying a full-field surrogate introduces additional complexity and may not deliver significant benefits for early-stage design studies.
+Engineers can also incorporate a full-field surrogate model into an alternative QoI-based workflow alongside direct CAD-to-QoI predictions. When a surrogate model generates full-field outputs (e.g., pressure distributions, temperature fields, stress contours), different QoI can be directly derived from these fields using standard post-processing tools. However, deploying a full-field surrogate model introduces additional complexity and may not deliver significant benefits for early-stage design studies.
 
 ## 3. Ansys<->Tesseract QoI Workflow Proposal
-We can use Tesseracts to define modular and reusable components that orchestrate the QoI workflow on top of the Ansys HVAC simulations. The diagram below shows an approach to perform training an inference on a QoI surrogate model that maps CAD geometry files and boundary conditions to QoI  (see [reference](#21-cad-geometry--boundary-conditions---qoi-workflow)) with Tesseracts.
+We can use Tesseract to define modular and reusable components that orchestrate the QoI-based workflows on top of the Ansys Fluent simulations based on HVAC systems. The diagram below shows an approach to perform training and inference on a QoI-based surrogate model that maps CAD geometries and boundary conditions to QoI  (see [reference](#21-cad-geometry--boundary-conditions---qoi-workflow)) with Tesseract.
 
 ![alt text](images/tesseract_wf.png)
 
-To enable QoI prediction directly from CAD files and boundary conditions, engineers must first train a model. With this Tesseract architecture we can define two complementary workflows, a training workflow that learns from historical Ansys simulations, and an inference workflow that predicts QoI for new CAD designs.
+To enable QoI-based predictions directly from CAD geometries and boundary conditions, we first need to train a surrogate model. With Tesseract, we can define two complementary workflows: a training workflow where the surrogate model learns from historical Ansys Fluent simulation data, and an inference workflow where the surrogate model predicts QoI for new CAD parameters and boundary conditions.
 
 ### 3.1. Tesseract Workflows and Components
 #### 3.1.1 Training Workflow
 The training workflow consists of two key Tesseract components: 
-- **Dataset Pre-Processing Tesseract**: Extracts and formats data from Ansys simulation runs. This component samples geometry (point clouds in this case) and extracts the critical information downstream components need: boundary conditions and QoI values from each simulation. 
-- **Training Tesseract**: Consumes the processed dataset and defines a training loop to tune the QoI model's weights, learning the relationship between geometry, boundary conditions, and performance outcomes.
+- **Dataset Pre-Processing Tesseract**: Extracts and formats data from Ansys Fluent simulation runs. This component samples different geometries using point clouds and extracts the critical information downstream components need: CAD parameters, boundary conditions and QoI from each numerical simulation. 
+- **Training Tesseract**: Consumes the processed dataset and defines a training loop to tune the QoI-based surrogate model, learning the functional mapping between HVAC geometries, boundary conditions, and simulated QoI, namely pressure drops.
 #### 3.1.2. Inference Workflow
-The inference workflow enables engineers to predict QoI using only CAD geometry and boundary condition parameters.
+The inference workflow enables engineers to predict QoI using only CAD geometries and boundary conditions.
 
 This workflow consists of:
 - **Dataset Pre-Processing Tesseract**: Ensures format compatibility with the trained model.
