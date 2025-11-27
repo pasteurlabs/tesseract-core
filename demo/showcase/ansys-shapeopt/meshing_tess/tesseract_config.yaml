@@ -1,7 +1,0 @@
-name: meshing
-version: "0.1.0"
-description: |
-  Tesseract for differentibale adaptive meshing of hexahedral meshes.
-
-build_config:
-  target_platform: "linux/x86_64"

@@ -1,5 +1,0 @@
-numpy==1.26.4
-pyvista==0.45.2
-manifold3d==3.2.1
-trimesh==4.9.0
-pysdf==0.1.9
