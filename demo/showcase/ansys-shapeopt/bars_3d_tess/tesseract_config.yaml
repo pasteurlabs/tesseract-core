@@ -1,4 +1,4 @@
-name: design-bars-3d
+name: bars_3d_tess
 version: "0.1.0"
 description: |
   Tesseract that generates 3D bar geometry.
