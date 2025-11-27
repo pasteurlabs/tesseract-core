@@ -4,7 +4,7 @@
 import ast
 import re
 from pathlib import Path
-from typing import Annotated, Literal, NamedTuple, Union
+from typing import Annotated, Literal, NamedTuple
 
 import yaml
 from pydantic import (
@@ -93,7 +93,7 @@ class CondaRequirements(BaseModel):
     model_config: ConfigDict = ConfigDict(extra="forbid")
 
 
-PythonRequirements = Union[PipRequirements, CondaRequirements]
+PythonRequirements = PipRequirements | CondaRequirements
 
 
 class TesseractBuildConfig(BaseModel, validate_assignment=True):
