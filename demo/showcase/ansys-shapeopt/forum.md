@@ -65,3 +65,5 @@ When applying the optimization on the random intitial conditions we can a steady
 ### Results
 
 The optimization results show how a non-uniform grid pattern can provide a stiffer grid fin for the same mass. This stiffness is desirable as it will reduce deformation, keeping the lift and drag coefficients of the grid fin close to those assumed by the aerodynamic control laws.
+
+## What else can you do with Tesseract
