@@ -8,7 +8,7 @@ The main entry point of this demo is `optimization.ipynb`. The evolution of the 
 
 | Grid IC | Random IC |
 |----------|----------|
-| ![Workflow](imgs/mesh_grid_adam.gif)    | ![Workflow](imgs/mesh_grid_adam.gif)     |
+| ![Workflow](imgs/mesh_grid_adam.gif)    | ![Workflow](imgs/mesh_rnd_adam.gif)     |
 
 where the loss decay is plotted here:
 
