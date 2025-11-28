@@ -5,7 +5,7 @@ This guide outlines how to wrap Ansys SpaceClaim as a Tesseract. For this, we wi
 ```{seealso}
 The full code for this Tesseract can be found under `demo/_showcase/ansys-shapeopt/spaceclaim` in the [Tesseract Core repository](https://github.com/pasteurlabs/tesseract-core/tree/main/demo/_showcase/ansys-shapeopt/spaceclaim).
 
-The Tesseract can be seen in action within our [grid fin optimization showcase](ADD_FORUM_LINK_HERE).
+The Tesseract can be seen in action within our [rocket fin optimization showcase](https://si-tesseract.discourse.group/t/parametric-shape-optimization-of-rocket-fins-with-ansys-spaceclaim-and-pyansys/109).
 ```
 
 ## Why SpaceClaim as a Tesseract?
@@ -16,7 +16,7 @@ SpaceClaim is commonly used to generate parametric geometries and perform pre-pr
 
 ```{figure} ../../../img/spaceclaim_tesseract_workflow.png
 
-Architecture of the SpaceClaim Tesseract we are going to implement.
+Architecture of the SpaceClaim Tesseract implemented here.
 ```
 
 ## Core concepts
@@ -100,8 +100,8 @@ $ pip install -r tesseract_requirements.txt
 
 When using SpaceClaim as a geometry engine, the goal is typically to map design parameters in the parametric CAD model to a surface mesh. Here, we are creating a SpaceClaim Tesseract that operates on a grid fin geometry with a number of parameters representing the position of bars and their thickness.
 
-```{seealso}
-The explanation and intuation behind the inputs is explained further in the [demo](ADD_FORUM_LINK_HERE).
+```{note}
+This particular choice of inputs and outputs is motivated in our [rocket fin optimization showcase](https://si-tesseract.discourse.group/t/parametric-shape-optimization-of-rocket-fins-with-ansys-spaceclaim-and-pyansys/109).
 ```
 
 #### Input schema
@@ -222,4 +222,4 @@ Grid fin geometry shown with randomised beam locations.
 
 Invoking SpaceClaim via HTTP is only the start of the Tesseract journey.
 
-For example, by using finite difference approximations under the hood, we can make the resulting geometry [differentiable](../../introduction/differentiable-programming.md) with respect to the design parameters. For a concrete demonstration of end-to-end shape optimization in action, please have a look at our [grid fin optimization showcase](ADD_FORUM_LINK_HERE).
+For example, by using finite difference approximations under the hood, we can make the resulting geometry [differentiable](../../introduction/differentiable-programming.md) with respect to the design parameters. For a concrete demonstration of end-to-end shape optimization in action, please have a look at our [rocket fin optimization showcase](https://si-tesseract.discourse.group/t/parametric-shape-optimization-of-rocket-fins-with-ansys-spaceclaim-and-pyansys/109).

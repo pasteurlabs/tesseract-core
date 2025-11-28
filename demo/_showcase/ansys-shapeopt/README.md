@@ -1,6 +1,6 @@
 # Ansys Tesseract Integration
 
-This directory contains an example Tesseract configuration and scripts demonstrating how to use Tesseract-JAX with Ansys SpaceClaim and PyMAPDL. The overall workflow is illustrated below and demonstrated within our [grid fin optimization showcase](ADD_FORUM_LINK_HERE):
+This directory contains an example Tesseract configuration and scripts demonstrating how to use Tesseract-JAX with Ansys SpaceClaim and PyMAPDL. The overall workflow is illustrated below and demonstrated within our [rocket fin optimization showcase](https://si-tesseract.discourse.group/t/parametric-shape-optimization-of-rocket-fins-with-ansys-spaceclaim-and-pyansys/109):
 
 ![Workflow](imgs/workflow_1.png)
 
@@ -36,13 +36,13 @@ A machine B, ideally running linux, with:
 In Windows Powershell, install the the required dependencies by running:
 
 ```bash
-pip install tesseract-core[runtime] trimesh
+$ pip install tesseract-core[runtime] trimesh
 ```
 
 Clone this repository, navigate to `demo/_showcase/ansys-shapeopt/spaceclaim` and start the Tesseract runtime server with:
 
 ```bash
-tesseract-runtime serve --port <port_number_1> --host 0.0.0.0
+$ tesseract-runtime serve --port <port_number_1> --host 0.0.0.0
 ```
 Note that we do not build a Tesseract Docker image for SpaceClaim in this example. Instead, we use an existing SpaceClaim installation directly from the host machine. More details about this Tesseract can be found [here](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/examples/ansys_integration/spaceclaim_tess.html).
 
@@ -61,15 +61,15 @@ replace "v242" with your Ansys version and ensure the path is correct. More deta
 On machine B, navigate to `demo/_showcase/ansys-shapeopt/` and run
 
 ```bash
-pip install -r requirements.txt
+$ pip install -r requirements.txt
 ```
 
 and build the needed tesseracts using
 
 ```bash
-tesseract build spaceclaim
-tesseract build pymapdl
-tesseract build sdf_fd
+$ tesseract build spaceclaim
+$ tesseract build pymapdl
+$ tesseract build sdf_fd
 ```
 
 ### Run the notebook

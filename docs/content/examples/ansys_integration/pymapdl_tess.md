@@ -7,7 +7,7 @@ The Tesseract computes structural compliance using finite element analysis and p
 ```{seealso}
 The full code for this Tesseract can be found under `demo/_showcase/ansys-shapeopt/pymapdl` in the [Tesseract Core repository](https://github.com/pasteurlabs/tesseract-core/tree/main/demo/_showcase/ansys-shapeopt/pymapdl).
 
-The Tesseract can be seen in action within our [grid fin optimization showcase](ADD_FORUM_LINK_HERE).
+The Tesseract can be seen in action within our [rocket fin optimization showcase](https://si-tesseract.discourse.group/t/parametric-shape-optimization-of-rocket-fins-with-ansys-spaceclaim-and-pyansys/109).
 ```
 
 ## Prerequisites
