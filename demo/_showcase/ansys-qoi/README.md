@@ -1,6 +1,6 @@
-# QoI-Based Surrogate Modeling Workflow
+# QoI-based Workflows with Ansys Fluent and Terreract
 
-This showcase demonstrates an end-to-end workflow for building QoI-based surrogate models from Ansys simulation data using Tesseract.
+This showcase demonstrates an end-to-end workflow for building QoI-based surrogate models from Ansys simulation data using Tesseract. The overall workflow is illustrated below and demonstrated within our [QoI-based surrogacy showcase](https://si-tesseract.discourse.group/t/qoi-based-workflows-with-ansys-fluent-and-terreract/110).
 
 ## Overview
 

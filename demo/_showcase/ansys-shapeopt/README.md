@@ -1,4 +1,4 @@
-# Ansys Tesseract Integration
+# Parametric Shape Optimization of Rocket Fins with Ansys SpaceClaim and PyAnsys
 
 This directory contains an example Tesseract configuration and scripts demonstrating how to use Tesseract-JAX with Ansys SpaceClaim and PyMAPDL. The overall workflow is illustrated below and demonstrated within our [rocket fin optimization showcase](https://si-tesseract.discourse.group/t/parametric-shape-optimization-of-rocket-fins-with-ansys-spaceclaim-and-pyansys/109):
 
