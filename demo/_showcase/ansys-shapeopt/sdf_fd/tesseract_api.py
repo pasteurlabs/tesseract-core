@@ -242,7 +242,7 @@ def compute_sdf_pysdf(
     Ny: int,
     Nz: int,
 ) -> np.ndarray:
-    """Compute SDF usnig pysdf."""
+    """Compute SDF using pysdf."""
     points, faces = geometry.vertices, geometry.faces
 
     sdf_function = SDF(points, faces)
