@@ -96,6 +96,14 @@ def evaluate(inputs: Any) -> Any:
     # Convert predictions to 2D torch tensor (stacking all predictions)
     qoi_predictions = torch.tensor(predictions, dtype=torch.float32)
 
+    # Inverse transform predictions back to original scale
+    print("Inverse transforming predictions to original scale...")
+    qoi_predictions_numpy = qoi_predictions.numpy()
+    qoi_predictions_original = scaling_pipeline.inverse_transform_qoi(
+        qoi_predictions_numpy
+    )
+    qoi_predictions = torch.tensor(qoi_predictions_original, dtype=torch.float32)
+
     # Save predictions to multiple formats
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 

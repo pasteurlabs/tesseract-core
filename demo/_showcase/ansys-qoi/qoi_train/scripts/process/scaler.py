@@ -168,6 +168,30 @@ class DataScaler:
         """Transform QoI values."""
         return self._transform_data(qoi, self.config.qoi_strategy, self.qoi_stats_)
 
+    def _inverse_transform_data(
+        self, data: np.ndarray, strategy: str, stats: dict
+    ) -> np.ndarray:
+        """Generic inverse transform method for params and qoi."""
+        if len(data) == 0:
+            return data.copy()
+
+        if strategy == "none":
+            return data.copy()
+        elif strategy == "standardize":
+            mean, std = stats["mean"], stats["std"]
+            return data * (std + 1e-8) + mean
+        elif strategy == "normalize":
+            min_val, max_val = stats["min"], stats["max"]
+            return data * (max_val - min_val + 1e-8) + min_val
+        else:
+            raise ValueError(f"Unknown strategy: {strategy}")
+
+    def inverse_transform_qoi(self, qoi: np.ndarray) -> np.ndarray:
+        """Inverse transform QoI values back to original scale."""
+        return self._inverse_transform_data(
+            qoi, self.config.qoi_strategy, self.qoi_stats_
+        )
+
 
 class ScalingPipeline:
     """Simple scaling pipeline for CAD dataset."""
@@ -235,6 +259,20 @@ class ScalingPipeline:
     ) -> list[ScaledDataSample]:
         """Transform a list of samples."""
         return [self.transform_sample(sample) for sample in raw_samples]
+
+    def inverse_transform_qoi(self, qoi: np.ndarray) -> np.ndarray:
+        """Inverse transform QoI values back to original scale.
+
+        Args:
+            qoi: Scaled QoI values (can be 1D or 2D array)
+
+        Returns:
+            QoI values in original scale
+        """
+        if not self.fitted:
+            raise RuntimeError("Pipeline must be fitted before inverse transform")
+
+        return self.scaler.inverse_transform_qoi(qoi)
 
     def save(self, filepath: Path) -> Path:
         """Save the fitted scaling pipeline to a pickle file.
