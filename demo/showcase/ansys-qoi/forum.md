@@ -124,7 +124,9 @@ To enable QoI-based predictions directly from CAD geometries and boundary condit
 
 ### 3.1. Tesseract Workflows and Components
 #### 3.1.1 Tesseract Components
-##### TODO: SMALL INTRO TO TESSERACT COMPONENT? AND BENEFITS
+Tesseract Components offer significant advantages for these types of problems. They encapsulate dependecy management, eliminating the complexity of handling dependencies. This is particularly valuable in the rapidly evolving landscape of geometric deep-learning or CAD processing libraries. Additionally, Tesseract Components are deployment-ready by design, enabling seamless transition from prototype to production pipeline.
+
+Below, we define the three Tesseract Components used in the QoI-based surrogate model workflow.
 
 **Dataset Tesseract**
 ```python
@@ -188,7 +190,7 @@ The training workflow consists of two key Tesseract components:
 The inference workflow enables engineers to predict QoI using only CAD geometry files and boundary conditions.
 
 This workflow consists of:
-- **Dataset Pre-Processing Tesseract**: Ensures data format compatibility with the trained model.
+- **Dataset Pre-Processing Tesseract**: Ensures data format compatibility with the trained model and retrieves the required point-cloud samples, CAD parameters and boundary conditions.
 - **Inference Tesseract**: Feeds the pre-processed data into the trained model to predict QoI.
 
 ## 4. Results
@@ -220,6 +222,8 @@ The figures collectively indicate a reliable QoI predictions, especially conside
 An alternative architectures to the one proposed and benchmarks can be found in [Appendix A.2.](#a2-model-architecture). This specific QoI-based surrogate model is trained without any CAD parameters as input. This scenario represents situations where the original CAD sketches used to generate the STL files have been lost (a common occurrence when design traceability is poorly maintained or when multiple CAD softwares are used).
 
 ## 5. Outlook
+Tesseract makes QoI-based engineering workflows practical by combining modular, deployment-ready components on top of Ansys Fluent simulations. 
+
 ## Appendix
 ### A. QoI-based Surrogate Model
 #### A.1. Dataset Preparation
