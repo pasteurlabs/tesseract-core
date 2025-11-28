@@ -54,7 +54,7 @@ On machine A, run the following powershell command to start ansys with grpc serv
 Start-Process -FilePath "F:\ANSYS Inc\v242\ansys\bin\winx64\ANSYS242.exe" -ArgumentList "-grpc", "-port", "<port_number_2>"
 ```
 
-replace "v242" with your ansys version and esnure the path is correct. More details about this tesseract can be found [here](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/examples/ansys_integration/pymapdl_tess.html).
+replace "v242" with your ansys version and ensure the path is correct. More details about this tesseract can be found [here](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/examples/ansys_integration/pymapdl_tess.html).
 
 ### Building Tesseracts
 
