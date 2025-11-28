@@ -6,7 +6,7 @@ from torch.utils.data import DataLoader, Dataset
 from .dataset import cad_collate
 from .experiment_tracker import ExperimentTracker
 from .models import HybridPointCloudTreeModel
-from .scaler import SampleScaler
+from .scaler import DataScaler
 from .utils import set_seed
 
 
@@ -19,7 +19,7 @@ def train_hybrid_models(
     save_dir: Path,
     config_path: Path | None = None,
     split_info: dict[str, Any] | None = None,
-    scaler: SampleScaler | None = None,
+    scaler: DataScaler | None = None,
 ) -> dict[str, Any]:
     """Train hybrid PointNeXt + Tree models on CAD data.
 
