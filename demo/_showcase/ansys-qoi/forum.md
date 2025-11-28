@@ -29,12 +29,12 @@
 Engineers iterate over their designs to meet specific requirements, which are metrics that translate directly into product performance or business needs. We call these metrics Quantities of Interest (QoI). In many engineering contexts, engineers extract QoI as post-processed metrics from simulation solutions. For example, CFD simulations of a wing compute lift and drag coefficients as QoI. Engineering workflows involve iterative updates over design variables (like CAD parameters and boundary conditions) to achieve the required design performance.
 
 This showcase demonstrates how Tesseract and Ansys Fluent work together to extract insights from datasets of numerical simulations with QoI-based surrogacy. In particular, we will cover:
-1. How to assemble an internal aerodynamics dataset, based on Ansys simulations, mapping CAD parameters and boundary conditions to QoI.
-2. How to create and analyze QoI-based surrogate models built on top of Ansys datasets, eliminating the need for time-consuming simulations
+1. How to assemble an internal aerodynamics dataset, based on Ansys Fluent simulations, mapping CAD parameters and boundary conditions to QoI.
+2. How to create and analyze QoI-based surrogate models built on top of Ansys Fluent datasets, eliminating the need for time-consuming simulations
 3. How to modularize and execute QoI-based workflows with Tesseracts that integrate with Ansys Fluent simulations outputs
 
 ## 1. Case Study: HVAC Duct Dataset
-Prior to defining a QoI-based workflow, we created an internal aerodynamics dataset of ~300 samples with Ansys Fluent. This use case consisted of numerical simulations of internal air flow through an HVAC duct with two inner baffle plates. As the image below shows:
+Prior to defining a QoI-based workflow, we created an internal aerodynamics dataset of 298 samples with Ansys Fluent. This use case consisted of numerical simulations of internal air flow through an HVAC duct with two inner baffle plates. As the image below shows:
 
 ![alt text](images/duct_1.png)
 - One baffle place is located just after the inlet acting as a flow constrainer
@@ -258,7 +258,7 @@ This showcase demonstrates how Tesseract enables QoI-based surrogate model workf
 ## Appendix
 ### A. QoI-based Surrogate Model
 #### A.1. Dataset Preparation
-Referring back to the HVAC duct dataset introduced earlier, for each of the Ansys simulation runs the following files are present: a CAD geometry file (`duct_baffle.stl`), Ansys Fluent mesh discretization file (`duct_baffle.msh.h5`), Ansys Fluent solver case file (`duct_baffle.cas.h5`) and results data file (`duct_baffle.dat.h5`), a static pressure report (`all_pressure.txt`) and a file containing the CAD parameters and boundary conditions variations performed (`metadata.json.series`).
+Referring back to the HVAC duct dataset introduced earlier, for each of the Ansys Fluent simulation runs the following files are present: a CAD geometry file (`duct_baffle.stl`), Ansys Fluent mesh discretization file (`duct_baffle.msh.h5`), Ansys Fluent solver case file (`duct_baffle.cas.h5`) and results data file (`duct_baffle.dat.h5`), a static pressure report (`all_pressure.txt`) and a file containing the CAD parameters and boundary conditions variations performed (`metadata.json.series`).
 ```
 Experiment_0
 |-duct_baffle.stl
@@ -276,7 +276,7 @@ Although several pre-processing strategies can be used to convert CAD geometry f
 
 Point cloud sampling retrieves both point coordinates and their normals.
 
-Similar to the Ansys Meshing feature “Sphere of Influence” (referred to as SoI in the images), the implemented code is able to increase the sampling density in targeted regions. Since the baffle plates represent a relevant area of the CAD design, spheres of influence around these areas can be defined.
+Similar to the Ansys Fluent Meshing feature “Sphere of Influence” (referred to as SoI in the images), the implemented code is able to increase the sampling density in targeted regions. Since the baffle plates represent a relevant area of the CAD design, spheres of influence around these areas can be defined.
 <table>
   <tr>
     <td align="center">
