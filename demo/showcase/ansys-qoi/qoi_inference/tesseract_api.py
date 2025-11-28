@@ -13,7 +13,6 @@ from pydantic import BaseModel, Field
 from torch.utils._pytree import tree_map
 
 from tesseract_core.runtime import Array, Float32
-from tesseract_core.runtime.experimental import InputFileReference
 
 #
 # Schemata
@@ -25,7 +24,7 @@ class InputSchema(BaseModel):
 
     data_folder: str = Field(
         description="Folder containing the list of npz files containing point-cloud data, simulation parameters and/or QoIs"
-    )  
+    )
     trained_model: str = Field(
         description="Pickle file containing weights of trained model"
     )
@@ -44,6 +43,7 @@ def evaluate(inputs: Any) -> Any:
     from process.dataset import CADDataset, ScaledCADDataset, cad_collate
     from process.models import HybridPointCloudTreeModel
     from process.scaler import ScalingPipeline
+
     config_path = Path(inputs["config"])
     data_folder_path = Path(inputs["data_folder"])
     files = [str(p.resolve()) for p in data_folder_path.glob("*.npz")]

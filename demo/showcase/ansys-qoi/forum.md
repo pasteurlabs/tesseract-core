@@ -26,10 +26,10 @@
   - [A.1. Dataset Preparation](#a1-dataset-preparation)
   - [A.2. Model Architecture](#a2-model-architecture)
 
-Engineers iterate over their designs to meet specific requirements, which are metrics that translate directly into product performance or business needs. We call these metrics Quantities of Interest (QoI). In many engineering contexts, engineers extract QoI as post-processed metrics from simulation solutions. For example, CFD simulations of a wing compute lift and drag coefficients as QoI. Engineering workflows involve iterative updates over design variables (like CAD parameters and boundary conditions) to achieve the required design performance. 
+Engineers iterate over their designs to meet specific requirements, which are metrics that translate directly into product performance or business needs. We call these metrics Quantities of Interest (QoI). In many engineering contexts, engineers extract QoI as post-processed metrics from simulation solutions. For example, CFD simulations of a wing compute lift and drag coefficients as QoI. Engineering workflows involve iterative updates over design variables (like CAD parameters and boundary conditions) to achieve the required design performance.
 
 This showcase demonstrates how Tesseract and Ansys Fluent work together to extract insights from datasets of numerical simulations with QoI-based surrogacy. In particular, we will cover:
-1. How to assemble an internal aerodynamics dataset, based on Ansys simulations, mapping CAD parameters and boundary conditions to QoI. 
+1. How to assemble an internal aerodynamics dataset, based on Ansys simulations, mapping CAD parameters and boundary conditions to QoI.
 2. How to create and analyze QoI-based surrogate models built on top of Ansys datasets, eliminating the need for time-consuming simulations
 3. How to modularize and execute QoI-based workflows with Tesseracts that integrate with Ansys Fluent simulations outputs
 
@@ -57,13 +57,13 @@ Four geometric parameters were modified to explore different duct configurations
 The inlet velocity magnitude has been varied across numerical simulations to capture different flow regimes and operating conditions.
 
 ### 1.2. QoI
-Although the dataset of numerical simulations was generated without a specific QoI-based workflow in mind, a text file containing static pressure values averaged at certain slices of the HVAC was also available as part of the results. These static pressure values will be considered as the base QoI of each numerical simulation. While the implemented code also allows to define additional metrics based on these base QoI (such as pressure drops $\Delta p$ across different slices), this showcase focuses only on the base static pressure values. 
+Although the dataset of numerical simulations was generated without a specific QoI-based workflow in mind, a text file containing static pressure values averaged at certain slices of the HVAC was also available as part of the results. These static pressure values will be considered as the base QoI of each numerical simulation. While the implemented code also allows to define additional metrics based on these base QoI (such as pressure drops $\Delta p$ across different slices), this showcase focuses only on the base static pressure values.
 
 In particular, the reported static pressure values are averaged at 4 different sections: `inlet`, `outlet`, `p2-plane` (YZ plane after inlet baffle plane) and `p3-plane` (YZ plane before middle baffle plane).
 
 <table> <tr> <td align="center"> <img src="images/p2-plane.png" alt="p2-plane" height="300"/><br/> <b>p2-plane:</b> YZ plane after inlet baffle plate </td> <td align="center"> <img src="images/p3-plane.png" alt="p3-plane" height="300"/><br/> <b>p3-plane:</b> YZ plane before middle baffle plate </td> </tr> </table>
 
-<!-- > 📝 **Note:** How Ansys Fluent reporting tool enables the extraction of QoI 
+<!-- > 📝 **Note:** How Ansys Fluent reporting tool enables the extraction of QoI
 `/report/surface-integrals area-weighted-avg inlet outlet p2-plane p3-plane () pressure yes all_pressure.txt`-->
 
 ### 1.3. Dataset Summary
@@ -96,7 +96,7 @@ In particular, the reported static pressure values are averaged at 4 different s
 </table>
 
 
-## 2. QoI Workflows 
+## 2. QoI Workflows
 Understanding how geometry design impacts QoI is of valuable interest for CAD and simulation engineers. Establishing a workflow that directly maps a CAD file (e.g. .stl) to QoI removes the need for meshing, simulation, and post-processing. This enables a significant reduction in engineering time and accelerates design iteration.
 
 In [the following section](#3-ansys-tesseract-qoi-workflow-proposal) we will outline how Tesseract allows us to define a workflow on top of Ansys Fluent simulations and discuss the benefits it provides. But first, let's explore some of the possibilities to define a QoI-based workflow.
@@ -183,8 +183,8 @@ class OutputSchema(BaseModel):
     )
 ```
 #### 3.1.2. Tesseract Training Workflow
-The training workflow consists of two key Tesseract components: 
-- **Dataset Pre-Processing Tesseract**: Extracts and formats data from Ansys Fluent simulation runs. This component samples different geometries using point clouds and extracts the critical information downstream components need: CAD parameters, boundary conditions and QoI from each numerical simulation. 
+The training workflow consists of two key Tesseract components:
+- **Dataset Pre-Processing Tesseract**: Extracts and formats data from Ansys Fluent simulation runs. This component samples different geometries using point clouds and extracts the critical information downstream components need: CAD parameters, boundary conditions and QoI from each numerical simulation.
 - **Training Tesseract**: Consumes the processed dataset and defines a training loop to tune the QoI-based surrogate model, learning the functional mapping between HVAC geometries, boundary conditions, and simulated QoI.
 #### 3.1.3. Tesseract Inference Workflow
 The inference workflow enables engineers to predict QoI using only CAD geometry files and boundary conditions.
@@ -200,7 +200,7 @@ Before examining the results, we need to understand how the Ansys Fluent simulat
 - Point-Cloud points and normals: correspond to the (x, y, z) coordinates and (nx, ny, nz) normal unit vectors of the point-cloud sampling performed over the CAD geometry file (STL)
 - Point-Cloud-derived parameters: represent geometric metrics that are not explicitly available from the STL file but can be directly computed from the sampled points
 - CAD parameters: correspond to the mentioned CAD sketch parameters (`d61`, `d72`, `d13`, `d34`)
-- Boundary conditions: inlet velocity of the HVAC duct 
+- Boundary conditions: inlet velocity of the HVAC duct
 - QoI: averaged static pressure values at 4 stations (`inlet`, `outlet`, `p2-plane`, `p3-plane`)
 
 
@@ -208,7 +208,7 @@ Before examining the results, we need to understand how the Ansys Fluent simulat
 
 The proposed model performs a shape embedding over the sampled points and normals, then concatenates this representation with the boundary conditions, point-cloud-derived parameters, and CAD parameters. These combined inputs are passed to a regressor (such as a simple Random Forest) to predict the QoI. More information on the architecture and variations of it can be found in [Appendix A.2.](#a2-model-architecture)
 
-The metrics of the architecture proposed for the QoI-based surrogate model have been extracted for an unseen dataset of 31 samples. 
+The metrics of the architecture proposed for the QoI-based surrogate model have been extracted for an unseen dataset of 31 samples.
 ```
 "test_metrics": {
   "r2": 0.9559590920924331,
@@ -222,7 +222,7 @@ The figures collectively indicate a reliable QoI predictions, especially conside
 An alternative architectures to the one proposed and benchmarks can be found in [Appendix A.2.](#a2-model-architecture). This specific QoI-based surrogate model is trained without any CAD parameters as input. This scenario represents situations where the original CAD sketches used to generate the STL files have been lost (a common occurrence when design traceability is poorly maintained or when multiple CAD softwares are used).
 
 ## 5. Outlook
-Tesseract makes QoI-based engineering workflows practical by combining modular, deployment-ready components on top of Ansys Fluent simulations. 
+Tesseract makes QoI-based engineering workflows practical by combining modular, deployment-ready components on top of Ansys Fluent simulations.
 
 ## Appendix
 ### A. QoI-based Surrogate Model
@@ -239,13 +239,13 @@ Experiment_0
 ```
 A critical part for training a QoI-based surrogate model is the extraction of features from the available simulations. The following paragraphs describe the feature-extraction process in detail.
 ##### CAD Geometry File Pre-Processing
-Although several pre-processing strategies can be used to convert CAD geometry files into machine-learning-ready inputs (e.g. voxelization, signed distance fields, graph-based representations…) this showcase adopts a point-cloud representation as it offers a good balance between geometric fidelity and implementation simplicity. 
+Although several pre-processing strategies can be used to convert CAD geometry files into machine-learning-ready inputs (e.g. voxelization, signed distance fields, graph-based representations…) this showcase adopts a point-cloud representation as it offers a good balance between geometric fidelity and implementation simplicity.
 
 *Point-Cloud Sampling (Points & Normals)*
 
 Point-cloud sampling retrieves both point coordinates and their normals.
 
-Similar to the Ansys Meshing feature “Sphere of Influence” (referred to as SoI in the images), the implemented code is able to increase the sampling density in targeted regions. Since the baffle plates represent a relevant area of the CAD design, spheres of influence around these areas can be defined. 
+Similar to the Ansys Meshing feature “Sphere of Influence” (referred to as SoI in the images), the implemented code is able to increase the sampling density in targeted regions. Since the baffle plates represent a relevant area of the CAD design, spheres of influence around these areas can be defined.
 <table>
   <tr>
     <td align="center">
@@ -302,13 +302,13 @@ In the `metadata.json.series` file, the variations associated to the boundary co
 ```json
 "variations": {
     ...
-    "mean_velocity": 78.0 
+    "mean_velocity": 78.0
 }
 ```
 
 ##### QoI Pre-Processing
 
-Ansys Fluent simulation reports are generated for each simulation run and contain the static pressure values extracted at several stations (as described in [this section](#12-qoi)). 
+Ansys Fluent simulation reports are generated for each simulation run and contain the static pressure values extracted at several stations (as described in [this section](#12-qoi)).
 ```
                          "Surface Integral Report"
            Area-Weighted Average
@@ -363,7 +363,7 @@ The baseline architecture includes in the parameter vector `p`: boundary conditi
 
 **Architecture with no CAD parameters**
 ![alt text](images/model_no_cadp.png)
-This architecture has been studied as an alternative to the baseline model. 
+This architecture has been studied as an alternative to the baseline model.
 
 This specific QoI-based surrogate model is trained without any CAD parameters in the parameters vector `p`. This scenario represents situations where the original CAD sketches used to generate the STL files have been lost (a common occurrence when design traceability is poorly maintained or when multiple CAD softwares are used).
 ```
@@ -375,7 +375,7 @@ This specific QoI-based surrogate model is trained without any CAD parameters in
 }
 ```
 
-Despite not using some key information such as the building CAD parameters, the shape embedder is able to extract geometric information from the STL (although not reaching the metrics of the baseline model). 
+Despite not using some key information such as the building CAD parameters, the shape embedder is able to extract geometric information from the STL (although not reaching the metrics of the baseline model).
 
 ![alt text](images/latent.png)
 
@@ -384,7 +384,7 @@ When looking at the latent space of the shape embedding block, we can see;
 
 - The angle between ducts (d13) show a partial representation within the latent space, suggesting that it is not captured as well as d61
 
-- The inlet aperture length (d72) and the curvature angle of the duct branch (d34) presence is limited in the latent representation. 
+- The inlet aperture length (d72) and the curvature angle of the duct branch (d34) presence is limited in the latent representation.
 
 It is important to remark the shape embedder is trained together with the QoI-based regressor, meaning that even though the embedder architecture only processes point clouds, the training step is done so that together with the vector `p` it helps predict the QoI `q`.
 

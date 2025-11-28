@@ -1,6 +1,5 @@
 import pickle
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import torch
@@ -221,19 +220,18 @@ class HybridPointCloudTreeModel:
         param_fusion: str = "concat",
         backbone_dim: int = 1024,
         embedder_type: str = "pointnet",  # "pointnext", "pointnet", or "pointbert"
-        p_dim: Optional[int] = None,  # Will be auto-detected from dataset if None
-        q_dim: Optional[int] = None,  # Will be auto-detected from dataset if None
+        p_dim: int | None = None,  # Will be auto-detected from dataset if None
+        q_dim: int | None = None,  # Will be auto-detected from dataset if None
         # Embedder parameters
         embedder_dropout: float = 0.1,
         fusion_dropout: float = 0.2,
         use_layer_norm: bool = True,
         use_residual: bool = False,
         # PointNet-specific parameters
-        pointnet_hidden_dims: Optional[list] = None,  # [64, 128, 256] default
+        pointnet_hidden_dims: list | None = None,  # [64, 128, 256] default
         # PointBERT-specific parameters
-        pointbert_pretrained_path: Optional[
-            str
-        ] = None,  # Path to pre-trained Point-BERT weights
+        pointbert_pretrained_path: str
+        | None = None,  # Path to pre-trained Point-BERT weights
         pointbert_freeze: bool = True,  # Freeze Point-BERT encoder
         # Random Forest parameters
         n_estimators: int = 200,

@@ -1,13 +1,12 @@
 import pickle
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import yaml
 
 from .dataset import RawDataSample
-from .utils import compute_stats_from_samples, pca_align, compute_bbox_stats
+from .utils import compute_bbox_stats, compute_stats_from_samples, pca_align
 
 
 @dataclass
@@ -29,10 +28,10 @@ class ScaledDataSample:
     """Scaled data sample ready for training."""
 
     xyz: np.ndarray  # (N, 3) transformed point coordinates
-    normals: Optional[np.ndarray]  # (N, 3) transformed normal vectors or None
+    normals: np.ndarray | None  # (N, 3) transformed normal vectors or None
     params: np.ndarray  # (P,) scaled parameter values
     qoi: np.ndarray  # (Q,) scaled quantity of interest values
-    source_idx: Optional[int] = None  # Index into the original dataset files
+    source_idx: int | None = None  # Index into the original dataset files
 
 
 class DataScaler:
@@ -117,8 +116,8 @@ class DataScaler:
         return xyz_out.astype(np.float32)
 
     def pca_align_points(
-        self, xyz: np.ndarray, normals: Optional[np.ndarray] = None
-    ) -> tuple[np.ndarray, Optional[np.ndarray]]:
+        self, xyz: np.ndarray, normals: np.ndarray | None = None
+    ) -> tuple[np.ndarray, np.ndarray | None]:
         """Apply PCA alignment to points and normals."""
         if not self.config.pca_align:
             return xyz, normals

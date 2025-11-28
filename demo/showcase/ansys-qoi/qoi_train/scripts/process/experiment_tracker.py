@@ -4,7 +4,7 @@ import json
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 import yaml
@@ -17,8 +17,8 @@ class ExperimentTracker:
         self,
         base_dir: Path,
         experiment_type: str,  # "sklearn", "hybrid", "neural", etc.
-        experiment_name: Optional[str] = None,
-        config_path: Optional[Path] = None,
+        experiment_name: str | None = None,
+        config_path: Path | None = None,
     ):
         """Initialize experiment tracker.
 

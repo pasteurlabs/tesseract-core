@@ -2,12 +2,12 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import torch
 import yaml
 from torch.utils.data import Dataset
+
 from .utils import compute_bbox_stats
 
 
@@ -43,7 +43,7 @@ class RawDataSample:
     """Container for a single raw data sample."""
 
     xyz: np.ndarray  # (N, 3) point coordinates
-    normals: Optional[np.ndarray]  # (N, 3) normal vectors or None
+    normals: np.ndarray | None  # (N, 3) normal vectors or None
     params: np.ndarray  # (P,) parameter values
     qoi: np.ndarray  # (Q,) quantity of interest values
     file_path: Path  # original file path for reference
@@ -248,7 +248,7 @@ class CADDataset(Dataset):
             source_idx=idx,
         )
 
-    def _load_normals(self, data: dict) -> Optional[np.ndarray]:
+    def _load_normals(self, data: dict) -> np.ndarray | None:
         """Load normals if configured and available."""
         if self.cfg["model_spec"]["include_normals"] and "normals" in data:
             return data["normals"].astype(np.float32)

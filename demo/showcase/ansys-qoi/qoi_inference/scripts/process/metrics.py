@@ -1,7 +1,6 @@
 """Model evaluation metrics for regression tasks."""
 
 from dataclasses import dataclass
-from typing import Union
 
 import numpy as np
 import torch
@@ -70,7 +69,7 @@ class ModelMetrics:
 
 
 def compute_metrics(
-    y_true: Union[np.ndarray, torch.Tensor], y_pred: Union[np.ndarray, torch.Tensor]
+    y_true: np.ndarray | torch.Tensor, y_pred: np.ndarray | torch.Tensor
 ) -> ModelMetrics:
     """Compute comprehensive regression metrics.
 

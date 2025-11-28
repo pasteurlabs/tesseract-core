@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 import yaml
@@ -183,13 +183,13 @@ class NPZProcessor:
         self,
         out_path: Path,
         points: np.ndarray,
-        normals: Optional[np.ndarray] = None,
-        param_names: Optional[np.ndarray] = None,
-        params: Optional[np.ndarray] = None,
-        qoi_names: Optional[np.ndarray] = None,
-        qoi: Optional[np.ndarray] = None,
-        geometry_names: Optional[np.ndarray] = None,
-        geometry: Optional[np.ndarray] = None,
+        normals: np.ndarray | None = None,
+        param_names: np.ndarray | None = None,
+        params: np.ndarray | None = None,
+        qoi_names: np.ndarray | None = None,
+        qoi: np.ndarray | None = None,
+        geometry_names: np.ndarray | None = None,
+        geometry: np.ndarray | None = None,
     ):
         """Save processed data to compressed NPZ file.
 

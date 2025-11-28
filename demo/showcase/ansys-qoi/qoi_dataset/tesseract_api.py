@@ -9,8 +9,6 @@ import torch
 from pydantic import BaseModel, Field
 from torch.utils._pytree import tree_map
 
-from tesseract_core.runtime.experimental import InputFileReference, OutputFileReference
-
 #
 # Schemata
 #

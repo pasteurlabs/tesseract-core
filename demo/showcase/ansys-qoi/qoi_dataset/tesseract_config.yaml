@@ -6,6 +6,6 @@ description: |
 build_config:
   target_platform: "native"
   extra_packages: ["libegl1", "libgl1", "libgomp1"]
-  #package_data: 
+  #package_data:
   #  - ["inputs", "inputs"]
   # custom_build_steps: []

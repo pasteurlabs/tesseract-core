@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import Optional
 
 from torch.utils.data import DataLoader
 
@@ -16,8 +15,8 @@ def train_hybrid_models(
     model_configs: dict[str, dict],
     training_config: dict,
     save_dir: Path,
-    config_path: Optional[Path] = None,
-    split_info: Optional[dict] = None,
+    config_path: Path | None = None,
+    split_info: dict | None = None,
     scaler=None,
 ):
     """Train hybrid PointNeXt + Tree models."""

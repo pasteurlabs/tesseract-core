@@ -10,7 +10,7 @@ import yaml
 from pydantic import BaseModel, Field
 from torch.utils._pytree import tree_map
 
-from tesseract_core.runtime.experimental import InputFileReference, OutputFileReference
+from tesseract_core.runtime.experimental import OutputFileReference
 
 #
 # Schemata
@@ -38,6 +38,7 @@ def evaluate(inputs: Any) -> Any:
     from process.dataset import CADDataset, create_raw_splits, create_scaled_datasets
     from process.scaler import ScalingPipeline
     from process.train import train_hybrid_models
+
     # Convert all inputs to Path objects (handles strings, InputFileReference, and Path)
     config_path = Path(inputs["config"])
     data_folder_path = Path(inputs["data_folder"])

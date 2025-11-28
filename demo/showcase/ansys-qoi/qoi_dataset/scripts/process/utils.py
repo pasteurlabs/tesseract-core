@@ -5,7 +5,6 @@ import json
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import open3d as o3d
@@ -193,7 +192,7 @@ class SurfaceIntegralReport:
     quantity: str
     units: str
     values: dict[str, float]
-    net: Optional[float]
+    net: float | None
 
     @classmethod
     def from_text(cls, text: str) -> "SurfaceIntegralReport":

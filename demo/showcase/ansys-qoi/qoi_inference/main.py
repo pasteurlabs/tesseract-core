@@ -1,12 +1,6 @@
-from functools import partial
 from pathlib import Path
 
 from tesseract_core import Tesseract
-
-here = Path(__file__).parent.resolve()
-
-from_api = partial(Tesseract.from_tesseract_api, tesseract_api="tesseract_api.py")
-
 
 if __name__ == "__main__":
     here = Path("/tesseract/")
@@ -19,24 +13,14 @@ if __name__ == "__main__":
         "config": str(CONFIG),
         "data_folder": str(DATASET_FOLDER),
         "trained_model": str(TRAINED_MODEL),
-        "scaler": str(SCALER)
+        "scaler": str(SCALER),
     }
 
-    qoi_train = Tesseract.from_image("qoi_inference", volumes=["./inputs:/tesseract/inputs:ro", "./outputs:/tesseract/outputs:rw"])
+    qoi_inference = Tesseract.from_image(
+        "qoi_inference",
+        volumes=["./inputs:/tesseract/inputs:ro", "./outputs:/tesseract/outputs:rw"],
+    )
 
-    qoi_train.serve()
-    outputs = qoi_train.apply(inputs)
-    qoi_train.teardown()
-
-    # with from_api(
-    #     input_path=here / "inputs",
-    # ) as inference:
-    #     result = inference.apply(
-    #         inputs={
-    #             "config": CONFIG,
-    #             "data": DATA,
-    #             "trained_model": TRAINED_MODEL,
-    #             "scaler": SCALER,
-    #         }
-    #     )
-    #     print(result)
+    qoi_inference.serve()
+    outputs = qoi_inference.apply(inputs)
+    qoi_inference.teardown()
