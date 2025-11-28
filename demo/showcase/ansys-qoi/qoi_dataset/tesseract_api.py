@@ -17,13 +17,13 @@ from tesseract_core.runtime.experimental import InputFileReference, OutputFileRe
 
 
 class InputSchema(BaseModel):
-    config: str | Path = Field(description="Configuration file")
+    config: str = Field(description="Configuration file")
 
-    sim_folder: str | Path = Field(
+    sim_folder: str = Field(
         description="Folder path containing CAD files and simulation results",
     )
 
-    dataset_folder: str | Path = Field(
+    dataset_folder: str = Field(
         description="Folder path where postprocessed simulations will be dumped into"
     )
 
@@ -35,12 +35,12 @@ class OutputSchema(BaseModel):
 
 
 def evaluate(inputs: Any) -> Any:
-    from scripts.process.npz import NPZProcessor
+    from process.npz import NPZProcessor
 
     processor = NPZProcessor(
-        root=inputs["sim_folder"],
-        out_dir=inputs["dataset_folder"],
-        config_path=inputs["config"],
+        root=Path(inputs["sim_folder"]),
+        out_dir=Path(inputs["dataset_folder"]),
+        config_path=Path(inputs["config"]),
     )
     processed_files = processor.build()
 

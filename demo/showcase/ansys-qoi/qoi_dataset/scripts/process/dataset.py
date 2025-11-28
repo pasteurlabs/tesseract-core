@@ -9,7 +9,7 @@ import torch
 import yaml
 from torch.utils.data import Dataset
 
-from .process.utils import compute_bbox_stats
+from .utils import compute_bbox_stats
 
 
 def cad_collate(batch):
