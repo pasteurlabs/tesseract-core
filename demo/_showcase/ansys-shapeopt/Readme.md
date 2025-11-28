@@ -39,7 +39,7 @@ In windows powerhsell, install the the required depencencies by running
 pip install tesseract-core[runtime] trimesh
 ```
 
-Clone this repository, navigate to the `demo/showcase/ansys-shapeopt/spaceclaim_tess` and start the Tesseract runtime server with:
+Clone this repository, navigate to `demo/_showcase/ansys-shapeopt/spaceclaim` and start the Tesseract runtime server with:
 
 ```bash
 tesseract-runtime serve --port <port_number_1> --host 0.0.0.0
