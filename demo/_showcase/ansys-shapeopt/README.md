@@ -1,6 +1,6 @@
 # Ansys Tesseract Integration
 
-This directory contains an example Tesseract configuration and scripts demonstrating how to use Tesseract-JAX with Ansys SpaceClaim and PyMAPDL. The overall workflow is illustrated below:
+This directory contains an example Tesseract configuration and scripts demonstrating how to use Tesseract-JAX with Ansys SpaceClaim and PyMAPDL. The overall workflow is illustrated below and demonstrated within our [grid fin optimization showcase](ADD_FORUM_LINK_HERE):
 
 ![Workflow](imgs/workflow_1.png)
 
