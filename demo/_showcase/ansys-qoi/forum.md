@@ -129,7 +129,6 @@ Tesseract components offer significant advantages for these types of problems. T
 Below, we define the three Tesseract components used in the QoI-based surrogate model workflow.
 
 **Dataset Tesseract**
-### TODO UPDATE LAST AFTER ALESSANDRO REVIEW
 ```python
 class InputSchema(BaseModel):
     """Input schema for QoI dataset generation."""
@@ -156,9 +155,13 @@ class OutputSchema(BaseModel):
 **Training Tesseract**
 ```python
 class InputSchema(BaseModel):
-    config: InputFileReference = Field(description="Configuration file")
-    data: list[str] = Field(
-        description="List of npz files containing point cloud data information,  simulation parameters and QoI"
+    """Input schema for QoI model training."""
+
+    config: str = Field(description="Configuration file")
+
+    data_folder: str = Field(
+        description="Folder containing npz files containing point cloud data information, "
+        "simulation parameters and QoI"
     )
 ```
 ```python
@@ -267,7 +270,7 @@ Experiment_0
 ```
 A critical part for training a QoI-based surrogate model is the extraction of features from the available simulations. The following paragraphs describe the feature-extraction process in detail.
 ##### CAD Geometry File Pre-Processing
-Although several pre-processing strategies can be used to convert CAD geometry files into machine-learning-ready inputs (e.g. voxelization, signed distance fields, graph-based representations…) this showcase adopts a point cloud representation as it offers a good balance between geometric fidelity and implementation simplicity.
+Although several pre-processing strategies can be used to convert CAD geometry files into ML-ready inputs (e.g. voxelization, signed distance fields, graph-based representations…) this showcase adopts a point cloud-based representation as it offers a good balance between geometric fidelity and implementation simplicity.
 
 ###### *Point Cloud Sampling (Points & Normals)*
 
@@ -424,4 +427,4 @@ When looking at the latent space of the shape embedding block, we can see;
 
 It is important to remark the shape embedder is trained together with the QoI-based regressor, meaning that even though the embedder architecture only processes point clouds, the training step is done so that together with the vector `p` it helps predict the QoI `q`.
 
-> 📝 **Note:** These architecture represents an initial baseline representation rather than an optimized solution. The primary objective of this showcase is to establish an end-to-end workflow from geometry embedding through QoI prediction, demonstrating technical feasibility. Subsequent iterations can evaluate alternative embedding techniques (voxelization, signed distance functions or graph-based representations), feature fusion methods in the integration of `z` and `p`, or alternative architectures to replace Random Forests.
+> 📝 **Note:** These architecture represents an initial baseline representation rather than a globally optimized solution. The primary objective of this showcase is to establish an end-to-end workflow from geometry embedding through QoI predictions, demonstrating technical feasibility. Subsequent iterations can evaluate alternative embedding techniques (voxelization, signed distance functions or graph-based representations), feature fusion methods in the integration of `z` and `p`, or alternative architectures to replace Random Forests.
