@@ -100,10 +100,9 @@ content/using-tesseracts/advanced.md
 :hidden:
 
 content/examples/example_gallery.md
-content/demo/demo.md
-content/demo/ansys_showcase.md
 content/examples/ansys_gallery.md
-Tesseract Community Showcase <https://si-tesseract.discourse.group/c/showcase/11>
+content/demo/demo.md
+Tesseract Showcase <https://si-tesseract.discourse.group/c/showcase/11>
 ```
 
 ```{toctree}

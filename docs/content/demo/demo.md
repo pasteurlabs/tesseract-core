@@ -1,4 +1,4 @@
-# Demo: 4D-variational data assimilation with Tesseract
+# Demo: 4D-Variational Data Assimilation with Tesseract
 
 ```{toctree}
 :caption: Contents

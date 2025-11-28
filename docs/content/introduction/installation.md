@@ -68,6 +68,7 @@ Some shells use `[` and `]` as special characters, and might error out on the `p
 (installation-issues)=
 ## Common issues
 
+(windows-support)=
 ### Windows support
 
 Tesseract is fully supported on Windows via the Windows Subsystem for Linux (WSL). For guidance, please refer to the [official documentation](https://docs.microsoft.com/en-us/windows/wsl/).
