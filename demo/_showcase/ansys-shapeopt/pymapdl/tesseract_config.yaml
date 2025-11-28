@@ -1,5 +1,3 @@
-# Tesseract configuration file
-
 name: "pymapdl"
 version: "0.0.1"
 description: "Evaluate compliance using the SIMP material model"
