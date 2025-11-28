@@ -1,0 +1,4 @@
+#torch
+open3d
+pyyaml
+./scripts
