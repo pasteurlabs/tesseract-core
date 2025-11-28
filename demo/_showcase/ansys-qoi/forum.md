@@ -239,19 +239,19 @@ The figures collectively indicate a reliable QoI predictions, especially conside
 
 An alternative approach to the one described here can be found in [Appendix A.2.](#a2-model-architecture). This specific QoI-based surrogate model is trained without any CAD parameters as input. This scenario represents situations where the original CAD sketches used to generate the STL files have been lost (a common occurrence when design traceability is poorly maintained or when multiple CAD softwares are used).
 
-## 5. Outlook
-This showcase demonstrates how Tesseract enables QoI-based surrogate model workflows on top of Ansys Fluent numerical simulations. The approach offers tangible benefits for simulation-driven design:
+## 5. Conclusions and future developments
+This showcase demonstrates how Tesseract enables QoI-based surrogate model workflows on top of Ansys Fluent numerical simulations, offering tangible benefits for simulation-driven design.
 
-**Accelerated Design Iteration**: Direct QoI prediction bypasses expensive simulation runs during early-stage exploration. For the HVAC case shown here, the Tesseract training and inference workflows define a functional mapping between CAD parameters, boundary conditions and QoI. This eliminate some of the most costly stages of a simulation such as meshing, solving, and post-processing stages.
+**Accelerated Design Iteration**: Direct QoI prediction bypasses expensive simulation runs during early-stage exploration. For the HVAC case shown here, the Tesseract training and inference workflow defines a functional mapping between CAD parameters, boundary conditions and simulation-based QoI. This eliminates some of the most costly stages of a simulation such as meshing, solving, and post-processing stages.
 
 **Extension to Ansys Fluent Datasets**: The Tesseract components integrate with standard Ansys Fluent outputs (STL, mesh files, report files), enabling teams to adopt QoI-based workflows incrementally and train models on other Ansys Fluent simulations.
 
-**Tesseract modularity and Ansys products**: While this showcase focuses on Ansys Fluent pressure predictions, the workflow architecture can be integrated to other Ansys products. Similar approaches can be built for Ansys Mechanical applications, such as structural analysis (stress/displacement QoI) or thermal management (temperature QoI). The Tesseract workflow structure remains unchanged. Only the Tesseract pre-processing component needs adjustment to handle differnt file format and QoI reports, while training and inference Tesseracts can be reused as-id.
+**Tesseract modularity and Ansys products**: While this showcase focuses on Ansys Fluent pressure predictions, this workflow can be integrated with other Ansys products. Similar approaches can be built for Ansys Mechanical applications, such as structural analysis (stress/strain/displacement-based QoI) or thermal management (temperature-based QoI). The structure of the workflow remains unchanged. Only the Tesseract pre-processing component needs adjustment to handle different file formats and QoI reports, while training and inference Tesseracts can be reused as-is.
 
 
 **Handling Missing Design Information**: The model architecture (Appendix A.2) demonstrates that QoI prediction remains viable even when CAD parameter history is unavailable. This addresses a practical reality in engineering organizations, as STL files are often exchanged without underlying parametric models.
 
-**Exploiting Tesseract features**: summarize differentiability + sensitivity analysis workflows could be defined. Also, modularity and production
+**Exploiting Tesseract features**: This showcase can be seamlessly extended to next-generation CAE optimization, sensitivity analysis and uncertainty quantification workflows leveraging differentiable physics and probabilistic programming.
 
 
 
