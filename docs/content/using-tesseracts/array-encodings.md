@@ -1,4 +1,4 @@
-# Array encodings
+# Array Encodings
 
 ```{note}
 This section is only relevant to CLI or REST API usage; if you are using the Python API you can ignore
