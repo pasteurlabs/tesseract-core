@@ -24,6 +24,5 @@ if __name__ == "__main__":
         volumes=["./inputs:/tesseract/inputs:ro", "./outputs:/tesseract/outputs:rw"],
     )
 
-    qoi_dataset.serve()
-    outputs = qoi_dataset.apply(inputs)
-    qoi_dataset.teardown()
+    with qoi_dataset:
+        outputs = qoi_dataset.apply(inputs)

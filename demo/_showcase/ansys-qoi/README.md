@@ -69,7 +69,10 @@ Each component uses a `config.yaml` file in `inputs/config.yaml` that specifies:
 Execute all three components sequentially:
 
 ```bash
-cd demo/showcase/ansys-qoi
+cd demo/_showcase/ansys-qoi
+tesseract build ./qoi_dataset/
+tesseract build ./qoi_inference/
+tesseract build ./qoi_train/
 python workflow.py
 ```
 
@@ -91,6 +94,7 @@ Process Ansys simulation runs into point cloud datasets:
 
 ```bash
 cd qoi_dataset
+tesseract build .
 python main.py
 ```
 
@@ -109,6 +113,7 @@ Train hybrid ML models on the processed dataset:
 
 ```bash
 cd qoi_train
+tesseract build .
 python main.py
 ```
 
@@ -133,6 +138,7 @@ Run predictions on new geometries using trained models:
 
 ```bash
 cd qoi_inference
+tesseract build .
 python main.py
 ```
 

@@ -69,3 +69,12 @@ if __name__ == "__main__":
     qoi_inference.serve()
     outputs = qoi_inference.apply(inputs)
     qoi_inference.teardown()
+
+    print("\n" + "=" * 80)
+    print("✓ Workflow completed successfully!")
+    print("=" * 80)
+    print("\nOutputs:")
+    print(f"  • Dataset:     {DATASET_FOLDER}")
+    print(f"  • Models:      {latest_experiment}")
+    print(f"  • Predictions: {outputs}")
+    print("\n" + "=" * 80)

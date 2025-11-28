@@ -17,6 +17,5 @@ if __name__ == "__main__":
         volumes=["./inputs:/tesseract/inputs:ro", "./outputs:/tesseract/outputs:rw"],
     )
 
-    qoi_train.serve()
-    outputs = qoi_train.apply(inputs)
-    qoi_train.teardown()
+    with qoi_train:
+        outputs = qoi_train.apply(inputs)

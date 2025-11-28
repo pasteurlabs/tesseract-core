@@ -25,6 +25,5 @@ if __name__ == "__main__":
         volumes=["./inputs:/tesseract/inputs:ro", "./outputs:/tesseract/outputs:rw"],
     )
 
-    qoi_inference.serve()
-    outputs = qoi_inference.apply(inputs)
-    qoi_inference.teardown()
+    with qoi_inference:
+        outputs = qoi_inference.apply(inputs)

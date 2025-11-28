@@ -124,7 +124,7 @@ To enable QoI-based predictions directly from CAD geometries and boundary condit
 
 ### 3.1. Tesseract orchestration
 #### 3.1.1 Tesseract Components
-Tesseract components offer significant advantages for these types of problems. They encapsulate the required packages, eliminating the complexity of handling several dependencies across the pipeline. This is particularly valuable in the rapidly evolving landscape of geometric deep-learning or CAD processing libraries. Additionally, Tesseract components are deployment-ready by design, enabling seamless transition from prototype to production pipeline. 
+Tesseract components offer significant advantages for these types of problems. They encapsulate the required packages, eliminating the complexity of handling several dependencies across the pipeline. This is particularly valuable in the rapidly evolving landscape of geometric deep-learning or CAD processing libraries. Additionally, Tesseract components are deployment-ready by design, enabling seamless transition from prototype to production pipeline.
 
 Below, we define the three Tesseract components used in the QoI-based surrogate model workflow.
 
@@ -223,18 +223,18 @@ The figures collectively indicate a reliable QoI predictions, especially conside
 An alternative approach to the one described here can be found in [Appendix A.2.](#a2-model-architecture). This specific QoI-based surrogate model is trained without any CAD parameters as input. This scenario represents situations where the original CAD sketches used to generate the STL files have been lost (a common occurrence when design traceability is poorly maintained or when multiple CAD softwares are used).
 
 ## 5. Outlook
-This showcase demonstrates how Tesseract enables QoI-based surrogate model workflows on top of Ansys Fluent numerical simulations. The approach offers tangible benefits for simulation-driven design: 
+This showcase demonstrates how Tesseract enables QoI-based surrogate model workflows on top of Ansys Fluent numerical simulations. The approach offers tangible benefits for simulation-driven design:
 
-**Accelerated Design Iteration**: Direct QoI prediction bypasses expensive simulation runs during early-stage exploration. For the HVAC case shown here, the Tesseract training and inference workflows define a functional mapping between CAD parameters, boundary conditions and QoI. This eliminate some of the most costly stages of a simulation such as meshing, solving, and post-processing stages. 
+**Accelerated Design Iteration**: Direct QoI prediction bypasses expensive simulation runs during early-stage exploration. For the HVAC case shown here, the Tesseract training and inference workflows define a functional mapping between CAD parameters, boundary conditions and QoI. This eliminate some of the most costly stages of a simulation such as meshing, solving, and post-processing stages.
 
 **Extension to Ansys Fluent Datasets**: The Tesseract components integrate with standard Ansys Fluent outputs (STL, mesh files, report files), enabling teams to adopt QoI-based workflows incrementally and train models on other Ansys Fluent simulations.
 
-**Tesseract modularity and Ansys products**: While this showcase focuses on Ansys Fluent pressure predictions, the workflow architecture can be integrated to other Ansys products. Similar approaches can be built for Ansys Mechanical applications, such as structural analysis (stress/displacement QoI) or thermal management (temperature QoI). The Tesseract workflow structure remains the unchanged. Only the Tesseract pre-processing component needs adjustment to handle differnt file format and QoI reports, while training and inference Tesseracts can be reused as-id.
+**Tesseract modularity and Ansys products**: While this showcase focuses on Ansys Fluent pressure predictions, the workflow architecture can be integrated to other Ansys products. Similar approaches can be built for Ansys Mechanical applications, such as structural analysis (stress/displacement QoI) or thermal management (temperature QoI). The Tesseract workflow structure remains unchanged. Only the Tesseract pre-processing component needs adjustment to handle differnt file format and QoI reports, while training and inference Tesseracts can be reused as-id.
 
 
 **Handling Missing Design Information**: The model architecture (Appendix A.2) demonstrates that QoI prediction remains viable even when CAD parameter history is unavailable. This addresses a practical reality in engineering organizations, as STL files are often exchanged without underlying parametric models.
 
-**Tesseract exploiting features**: summarize differentiability + sensitivity analysis workflows could be defined. Also, modularity and production 
+**Tesseract exploiting features**: summarize differentiability + sensitivity analysis workflows could be defined. Also, modularity and production
 
 
 
@@ -365,7 +365,7 @@ The shape embedder employs a PointNet-based embedder for processing the 3D point
 2. Global Feature Aggregation: Max pooling aggregates point-wise features.
 3. Latent Space Projection: a fully connected MLP projects the global features into a lower-dimensional latent representation.
 
-More sophisticated point cloud embedders such as PointNeXt and PointBERT were evaluated during model development. However, these architectures demonstrated reduced performance on our dataset, likely due to their increased complexity and parameter count being poorly suited for the small training data. 
+More sophisticated point cloud embedders such as PointNeXt and PointBERT were evaluated during model development. However, these architectures demonstrated reduced performance on our dataset, likely due to their increased complexity and parameter count being poorly suited for the small training data.
 
 
 **Baseline model**

@@ -29,7 +29,7 @@ param_expressions:
   design_table:
     enabled: true
     type: "select"
-    expression: ['d72'] #['d13', 'd72', 'd61', 'd34']
+    expression: ['d13', 'd72', 'd61', 'd34']
 
   bc:
     enabled: true
