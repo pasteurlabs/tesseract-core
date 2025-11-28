@@ -44,7 +44,7 @@ Clone this repository, navigate to the `demo/showcase/ansys-shapeopt/spaceclaim_
 ```bash
 tesseract-runtime serve --port <port_number_1> --host 0.0.0.0
 ```
-Note that we dont build a Tesseract image for SpaceClaim in this example. This is because SpaceClaim cannot be installed in a containerized environment. More details about this tesseract can be found [here](docs/content/examples/ansys_integration/spaceclaim_tess.md). TODO: update link to docs
+Note that we dont build a Tesseract image for SpaceClaim in this example. This is because SpaceClaim cannot be installed in a containerized environment. More details about this tesseract can be found [here](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/examples/ansys_integration/spaceclaim_tess.html).
 
 ### PyMAPDL Server
 
@@ -54,7 +54,7 @@ On machine A, run the following powershell command to start ansys with grpc serv
 Start-Process -FilePath "F:\ANSYS Inc\v242\ansys\bin\winx64\ANSYS242.exe" -ArgumentList "-grpc", "-port", "<port_number_2>"
 ```
 
-replace "v242" with your ansys version and esnure the path is correct. More details about this tesseract can be found [here](docs/content/examples/ansys_integration/spaceclaim_tess.md). TODO: update link to docs
+replace "v242" with your ansys version and esnure the path is correct. More details about this tesseract can be found [here](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/examples/ansys_integration/pymapdl_tess.html).
 
 ### Building Tesseracts
 
@@ -69,7 +69,7 @@ pip install -r requirements.txt
 and build the needed tesseracts using
 
 ```bash
-tesseract build spaceclaim_tess
-tesseract build pymapdl_tess
-tesseract build sdf_fd_tess
+tesseract build spaceclaim
+tesseract build pymapdl
+tesseract build sdf_fd
 ```

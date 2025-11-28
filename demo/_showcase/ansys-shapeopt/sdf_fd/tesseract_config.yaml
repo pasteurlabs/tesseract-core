@@ -1,4 +1,4 @@
-name: sdf_fd_tess
+name: sdf_fd
 version: "0.2.0"
 description: |
   Tesseract that takes a .stl generating tesseract reference and uses finite difference gradients
