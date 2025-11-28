@@ -1,4 +1,4 @@
-# ANSYS Tesseract Integration
+# Ansys Tesseract Integration
 
 This directory contains an example Tesseract configuration and scripts demonstrating how to use Tesseract-JAX with ANSYS spaceclaim and PyMAPDL. The overall workflow is illustrated below:
 
