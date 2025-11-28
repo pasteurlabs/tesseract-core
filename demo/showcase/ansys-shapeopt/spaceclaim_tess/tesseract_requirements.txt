@@ -1,3 +1,0 @@
-# Add Python requirements like this:
-# numpy==1.18.1
-trimesh
