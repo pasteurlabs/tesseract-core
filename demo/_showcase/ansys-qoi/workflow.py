@@ -28,7 +28,6 @@ if __name__ == "__main__":
     with qoi_dataset:
         outputs = qoi_dataset.apply(inputs)
 
-
     # TRAINING TESSERACT
     inputs = {"config": str(CONFIG), "data_folder": str(DATASET_FOLDER)}
 
@@ -39,7 +38,6 @@ if __name__ == "__main__":
 
     with qoi_train:
         outputs = qoi_train.apply(inputs)
-
 
     # INFERENCE TESSERACT
 
