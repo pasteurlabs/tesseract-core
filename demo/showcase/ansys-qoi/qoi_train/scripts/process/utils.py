@@ -4,7 +4,7 @@ import numpy as np
 import torch
 
 
-def set_seed(seed: int = 42):
+def set_seed(seed: int = 42) -> None:
     random.seed(seed)
     np.random.seed(seed)  # noqa: NPY002
     torch.manual_seed(seed)

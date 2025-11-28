@@ -28,7 +28,7 @@ class PointNetEmbedder(nn.Module):
         hidden_dims=None,  # Point-wise MLP dimensions
         dropout: float = 0.2,
         use_batch_norm: bool = True,
-    ):
+    ) -> None:
         super().__init__()
         self.in_dim = in_dim
         self.latent_dim = latent_dim
@@ -123,7 +123,7 @@ class ParamFusionHead(nn.Module):
         dropout: float = 0.4,
         use_batch_norm: bool = False,
         use_residual: bool = False,
-    ):
+    ) -> None:
         super().__init__()
         self.mode = mode
         self.use_residual = use_residual
@@ -239,7 +239,7 @@ class HybridPointCloudTreeModel:
         min_samples_split: int = 2,
         random_state: int = 42,
         **tree_kwargs,
-    ):
+    ) -> None:
         self.name = name
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -663,7 +663,7 @@ class HybridPointCloudTreeModel:
         # Compute metrics
         return compute_metrics(y_true, y_pred)
 
-    def save(self, path: Path):
+    def save(self, path: Path) -> None:
         """Save the hybrid model."""
         # Get backbone_dim based on embedder type
         if self._embedder_type == "pointnext":
@@ -700,7 +700,7 @@ class HybridPointCloudTreeModel:
         with open(path, "wb") as f:
             pickle.dump(save_dict, f)
 
-    def load(self, path: Path):
+    def load(self, path: Path) -> None:
         """Load the hybrid model."""
         with open(path, "rb") as f:
             save_dict = pickle.load(f)

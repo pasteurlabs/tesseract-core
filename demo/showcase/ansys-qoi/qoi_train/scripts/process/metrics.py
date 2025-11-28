@@ -30,7 +30,7 @@ class ModelMetrics:
         if self.rmse is None:
             self.rmse = np.sqrt(self.mse)
 
-    def __str__(self):
+    def __str__(self) -> str:
         parts = [f"R²: {self.r2:.4f}"]
 
         # Show normalized metrics (scale-independent)

@@ -190,7 +190,7 @@ class NPZProcessor:
         qoi: np.ndarray | None = None,
         geometry_names: np.ndarray | None = None,
         geometry: np.ndarray | None = None,
-    ):
+    ) -> None:
         """Save processed data to compressed NPZ file.
 
         Args:

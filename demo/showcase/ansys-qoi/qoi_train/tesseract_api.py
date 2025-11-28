@@ -1,6 +1,8 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+"""Tesseract API for QoI model training."""
+
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +20,8 @@ from tesseract_core.runtime.experimental import OutputFileReference
 
 
 class InputSchema(BaseModel):
+    """Input schema for QoI model training."""
+
     config: str = Field(description="Configuration file")
 
     data_folder: str = Field(
@@ -26,6 +30,8 @@ class InputSchema(BaseModel):
 
 
 class OutputSchema(BaseModel):
+    """Output schema for QoI model training."""
+
     trained_models: list[OutputFileReference] = Field(
         description="Pickle file containing weights of trained model"
     )
@@ -35,6 +41,7 @@ class OutputSchema(BaseModel):
 
 
 def evaluate(inputs: Any) -> Any:
+    """Train QoI prediction models on the dataset."""
     from process.dataset import CADDataset, create_raw_splits, create_scaled_datasets
     from process.scaler import ScalingPipeline
     from process.train import train_hybrid_models
@@ -106,6 +113,14 @@ def evaluate(inputs: Any) -> Any:
 
 
 def apply(inputs: InputSchema) -> OutputSchema:
+    """Apply model training process to input data.
+
+    Args:
+        inputs: Input schema containing config and data paths
+
+    Returns:
+        Output schema with trained models and scalers
+    """
     # Optional: Insert any pre-processing/setup that doesn't require tracing
     # and is only required when specifically running your apply function
     # and not your differentiable endpoints.

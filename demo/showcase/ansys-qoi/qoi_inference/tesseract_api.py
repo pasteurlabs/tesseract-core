@@ -1,6 +1,8 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+"""Tesseract API for QoI model inference."""
+
 import csv
 from datetime import datetime
 from pathlib import Path
@@ -20,10 +22,12 @@ from tesseract_core.runtime import Array, Float32
 
 
 class InputSchema(BaseModel):
+    """Input schema for QoI model inference."""
+
     config: str = Field(description="Configuration file")
 
     data_folder: str = Field(
-        description="Folder containing the list of npz files containing point-cloud data, simulation parameters and/or QoIs"
+        description="Folder containing npz files with point-cloud data, params, and QoIs"
     )
     trained_model: str = Field(
         description="Pickle file containing weights of trained model"
@@ -34,12 +38,15 @@ class InputSchema(BaseModel):
 
 
 class OutputSchema(BaseModel):
+    """Output schema for QoI model inference."""
+
     qoi: Array[(None, None), Float32] = Field(
         description="QoIs - 2D array where each row is a prediction",
     )
 
 
 def evaluate(inputs: Any) -> Any:
+    """Run inference on QoI prediction models."""
     from process.dataset import CADDataset, ScaledCADDataset, cad_collate
     from process.models import HybridPointCloudTreeModel
     from process.scaler import ScalingPipeline
@@ -121,6 +128,14 @@ def evaluate(inputs: Any) -> Any:
 
 
 def apply(inputs: InputSchema) -> OutputSchema:
+    """Apply model inference process to input data.
+
+    Args:
+        inputs: Input schema containing config, data paths, model and scaler
+
+    Returns:
+        Output schema with QoI predictions
+    """
     # Optional: Insert any pre-processing/setup that doesn't require tracing
     # and is only required when specifically running your apply function
     # and not your differentiable endpoints.

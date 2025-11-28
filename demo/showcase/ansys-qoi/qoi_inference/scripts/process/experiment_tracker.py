@@ -19,7 +19,7 @@ class ExperimentTracker:
         experiment_type: str,  # "sklearn", "hybrid", "neural", etc.
         experiment_name: str | None = None,
         config_path: Path | None = None,
-    ):
+    ) -> None:
         """Initialize experiment tracker.
 
         Args:
@@ -69,14 +69,14 @@ class ExperimentTracker:
 
         print(f"📁 Created experiment directory: {self.run_dir.name}")
 
-    def log_config(self, config_path: Path):
+    def log_config(self, config_path: Path) -> None:
         """Copy config file to experiment directory."""
         dest = self.run_dir / "config.yaml"
         shutil.copy(config_path, dest)
         self.metadata["config_file"] = str(config_path)
         print(f"  ✅ Saved config to: {dest.relative_to(self.base_dir)}")
 
-    def log_dataset_info(self, split_info: dict[str, Any]):
+    def log_dataset_info(self, split_info: dict[str, Any]) -> None:
         """Log dataset split information."""
         dataset_info_path = self.run_dir / "dataset_info.json"
         with open(dataset_info_path, "w") as f:
@@ -94,12 +94,12 @@ class ExperimentTracker:
             f"  ✅ Saved dataset info to: {dataset_info_path.relative_to(self.base_dir)}"
         )
 
-    def log_training_step(self, step: int, metrics: dict[str, float]):
+    def log_training_step(self, step: int, metrics: dict[str, float]) -> None:
         """Log metrics for a training step/epoch."""
         log_entry = {"step": step, **metrics}
         self.training_history.append(log_entry)
 
-    def save_training_history(self):
+    def save_training_history(self) -> None:
         """Save complete training history to JSON."""
         if not self.training_history:
             return
@@ -113,7 +113,7 @@ class ExperimentTracker:
 
     def log_model_metrics(
         self, model_name: str, metrics: dict[str, float], split: str = "test"
-    ):
+    ) -> None:
         """Log evaluation metrics for a specific model.
 
         Args:
@@ -126,7 +126,7 @@ class ExperimentTracker:
 
         self.model_metrics[model_name][f"{split}_metrics"] = metrics
 
-    def save_model_metrics(self):
+    def save_model_metrics(self) -> None:
         """Save all model metrics to JSON."""
         if not self.model_metrics:
             return
@@ -184,7 +184,7 @@ class ExperimentTracker:
         """Get path for saving plot files."""
         return self.plots_dir / filename
 
-    def save_metadata(self):
+    def save_metadata(self) -> None:
         """Save experiment metadata to JSON."""
         metadata_path = self.run_dir / "experiment_metadata.json"
         with open(metadata_path, "w") as f:
@@ -193,11 +193,11 @@ class ExperimentTracker:
             f"  ✅ Saved experiment metadata to: {metadata_path.relative_to(self.base_dir)}"
         )
 
-    def add_metadata(self, key: str, value: Any):
+    def add_metadata(self, key: str, value: Any) -> None:
         """Add custom metadata to the experiment."""
         self.metadata[key] = value
 
-    def finalize(self):
+    def finalize(self) -> None:
         """Finalize the experiment by saving all metadata and summaries."""
         # Save all accumulated data
         self.save_training_history()

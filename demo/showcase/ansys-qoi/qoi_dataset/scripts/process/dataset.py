@@ -11,7 +11,7 @@ from torch.utils.data import Dataset
 from .utils import compute_bbox_stats
 
 
-def cad_collate(batch):
+def cad_collate(batch: list) -> dict[str, torch.Tensor]:
     """Collate function for CAD dataset batching.
 
     Args:
@@ -71,7 +71,7 @@ class ExpressionEvaluator:
         Returns:
             Computed values based on the expression
         """
-        data_dict = {name: value for name, value in zip(names, values)}
+        data_dict = {name: value for name, value in zip(names, values, strict=True)}
         expr_type = expr_config.get("type", "select")
 
         handlers = {
@@ -193,7 +193,7 @@ class CADDataset(Dataset):
     - Custom expressions for parameter and QoI computation
     """
 
-    def __init__(self, files: list[str | Path], config_path: Path):
+    def __init__(self, files: list[str | Path], config_path: Path) -> None:
         """Initialize dataset from NPZ files.
 
         Args:
@@ -208,10 +208,10 @@ class CADDataset(Dataset):
         with config_path.open("r", encoding="utf-8") as f:
             return yaml.safe_load(f) or {}
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.files)
 
-    def __getitem__(self, idx) -> RawDataSample:
+    def __getitem__(self, idx: int) -> RawDataSample:
         """Load and process a single data sample.
 
         Args:
@@ -332,8 +332,12 @@ class CADDataset(Dataset):
 
 
 def create_raw_splits(
-    dataset: CADDataset, train_ratio=0.8, val_ratio=0.1, test_ratio=0.1, seed=42
-):
+    dataset: CADDataset,
+    train_ratio: float = 0.8,
+    val_ratio: float = 0.1,
+    test_ratio: float = 0.1,
+    seed: int = 42,
+) -> tuple[list[RawDataSample], list[RawDataSample], list[RawDataSample]]:
     """Create train/val/test splits of raw data samples."""
     assert abs(train_ratio + val_ratio + test_ratio - 1.0) < 1e-6, (
         "Ratios must sum to 1.0"
@@ -380,13 +384,13 @@ def create_raw_splits(
 class ScaledCADDataset(Dataset):
     """PyTorch dataset for scaled data samples ready for training."""
 
-    def __init__(self, scaled_samples: list):
+    def __init__(self, scaled_samples: list) -> None:
         self.samples = scaled_samples
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.samples)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int) -> tuple:
         sample = self.samples[idx]
 
         xyz = sample.xyz  # (N, 3)
@@ -397,7 +401,9 @@ class ScaledCADDataset(Dataset):
         return xyz, normals, params, qoi
 
 
-def create_scaled_datasets(scaled_train, scaled_val, scaled_test):
+def create_scaled_datasets(
+    scaled_train: list, scaled_val: list, scaled_test: list
+) -> tuple[ScaledCADDataset, ScaledCADDataset, ScaledCADDataset]:
     """Convert scaled samples to PyTorch datasets."""
     train_dataset = ScaledCADDataset(scaled_train)
     val_dataset = ScaledCADDataset(scaled_val)

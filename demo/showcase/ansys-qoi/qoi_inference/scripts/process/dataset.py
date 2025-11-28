@@ -71,7 +71,7 @@ class ExpressionEvaluator:
         Returns:
             Computed values based on the expression
         """
-        data_dict = {name: value for name, value in zip(names, values)}
+        data_dict = {name: value for name, value in zip(names, values, strict=False)}
         expr_type = expr_config.get("type", "select")
 
         handlers = {
@@ -193,7 +193,7 @@ class CADDataset(Dataset):
     - Custom expressions for parameter and QoI computation
     """
 
-    def __init__(self, files: list[str | Path], config_path: Path):
+    def __init__(self, files: list[str | Path], config_path: Path) -> None:
         """Initialize dataset from NPZ files.
 
         Args:
@@ -208,7 +208,7 @@ class CADDataset(Dataset):
         with config_path.open("r", encoding="utf-8") as f:
             return yaml.safe_load(f) or {}
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.files)
 
     def __getitem__(self, idx) -> RawDataSample:
@@ -380,10 +380,10 @@ def create_raw_splits(
 class ScaledCADDataset(Dataset):
     """PyTorch dataset for scaled data samples ready for training."""
 
-    def __init__(self, scaled_samples: list):
+    def __init__(self, scaled_samples: list) -> None:
         self.samples = scaled_samples
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.samples)
 
     def __getitem__(self, idx):

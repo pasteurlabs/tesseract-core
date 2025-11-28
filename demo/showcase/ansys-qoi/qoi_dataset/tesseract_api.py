@@ -15,6 +15,8 @@ from torch.utils._pytree import tree_map
 
 
 class InputSchema(BaseModel):
+    """Input schema for QoI dataset generation."""
+
     config: str = Field(description="Configuration file")
 
     sim_folder: str = Field(
@@ -27,12 +29,15 @@ class InputSchema(BaseModel):
 
 
 class OutputSchema(BaseModel):
+    """Output schema for QoI dataset generation."""
+
     data: list[str | Path] = Field(
         description="List of npz files containing point-cloud data, simulation parameters and/or QoIs",
     )
 
 
 def evaluate(inputs: Any) -> Any:
+    """Process simulation data and generate NPZ dataset files."""
     from process.npz import NPZProcessor
 
     processor = NPZProcessor(
@@ -46,6 +51,14 @@ def evaluate(inputs: Any) -> Any:
 
 
 def apply(inputs: InputSchema) -> OutputSchema:
+    """Apply dataset generation process to input data.
+
+    Args:
+        inputs: Input schema containing config and data paths
+
+    Returns:
+        Output schema with list of generated NPZ files
+    """
     # Optional: Insert any pre-processing/setup that doesn't require tracing
     # and is only required when specifically running your apply function
     # and not your differentiable endpoints.

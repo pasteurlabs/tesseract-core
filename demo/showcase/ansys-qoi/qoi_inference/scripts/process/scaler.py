@@ -37,7 +37,7 @@ class ScaledDataSample:
 class DataScaler:
     """Handles all scaling operations for the CAD dataset."""
 
-    def __init__(self, config: ScalerConfig):
+    def __init__(self, config: ScalerConfig) -> None:
         self.config = config
         self.fitted = False
 
@@ -46,7 +46,7 @@ class DataScaler:
         self.param_stats_ = {}
         self.qoi_stats_ = {}
 
-    def fit(self, global_stats: dict):
+    def fit(self, global_stats: dict) -> None:
         """Fit scaler parameters based on global dataset statistics."""
         self.point_stats_ = global_stats["point_cloud"]
         self.param_stats_ = global_stats["params"]
@@ -168,7 +168,7 @@ class DataScaler:
 class ScalingPipeline:
     """Simple scaling pipeline for CAD dataset."""
 
-    def __init__(self, config_path: Path):
+    def __init__(self, config_path: Path) -> None:
         self.scaler = self._create_scaler_from_config(config_path)
         self.fitted = False
 
