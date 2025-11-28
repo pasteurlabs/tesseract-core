@@ -1,8 +1,8 @@
-jax
-matplotlib
-optax
-pyvista
-tesseract-jax
-tesseract-core[runtime]
-imageio
-mmapy
+jax==0.8.1
+matplotlib==3.10.7
+optax==0.2.6
+pyvista==0.46.4
+tesseract-jax==0.2.2
+tesseract-core[runtime]==1.1.1
+imageio==2.37.2
+mmapy==0.3.1
