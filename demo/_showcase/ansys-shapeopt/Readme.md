@@ -18,7 +18,7 @@ where the loss decay is plotted here:
 ### Prerequisites
 
 A windows machine A with:
-1. ANSYS installed and an active license.
+1. Ansys SpaceClaim + MAPDL installed with an active license.
 2. Python and a python environment (e.g., conda, venv).
 3. Two open ports.
 4. Known IP address, obtain it by running
