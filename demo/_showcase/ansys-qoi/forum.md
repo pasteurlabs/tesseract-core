@@ -124,7 +124,7 @@ To enable QoI-based predictions directly from CAD geometries and boundary condit
 
 ### 3.1. Tesseract Workflows and Components
 #### 3.1.1 Tesseract Components
-Tesseract Components offer significant advantages for these types of problems. They encapsulate dependecy management, eliminating the complexity of handling dependencies. This is particularly valuable in the rapidly evolving landscape of geometric deep-learning or CAD processing libraries. Additionally, Tesseract Components are deployment-ready by design, enabling seamless transition from prototype to production pipeline. 
+Tesseract Components offer significant advantages for these types of problems. They encapsulate dependecy management, eliminating the complexity of handling dependencies. This is particularly valuable in the rapidly evolving landscape of geometric deep-learning or CAD processing libraries. Additionally, Tesseract Components are deployment-ready by design, enabling seamless transition from prototype to production pipeline.
 
 Below, we define the three Tesseract Components used in the QoI-based surrogate model workflow.
 
@@ -352,7 +352,7 @@ The shape embedder employs a PointNet-based embedder for processing the 3D point
 2. Global Feature Aggregation: Max pooling aggregates point-wise features.
 3. Latent Space Projection: a fully connected MLP projects the global features into a lower-dimensional latent representation.
 
-More sophisticated point cloud embedders such as PointNeXt and PointBERT were evaluated during model development. However, these architectures demonstrated reduced performance on our dataset, likely due to their increased complexity and parameter count being poorly suited for the limited training data available. 
+More sophisticated point cloud embedders such as PointNeXt and PointBERT were evaluated during model development. However, these architectures demonstrated reduced performance on our dataset, likely due to their increased complexity and parameter count being poorly suited for the limited training data available.
 
 
 **Baseline model**
