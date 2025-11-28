@@ -4,6 +4,8 @@ This guide outlines how to wrap Ansys SpaceClaim as a Tesseract. For this, we wi
 
 ```{seealso}
 The full code for this Tesseract can be found under `demo/_showcase/ansys-shapeopt/spaceclaim` in the [Tesseract Core repository](https://github.com/pasteurlabs/tesseract-core/tree/main/demo/_showcase/ansys-shapeopt/spaceclaim).
+
+The Tesseract can be seen in action within our [rocket fin optimization showcase](https://si-tesseract.discourse.group/t/parametric-shape-optimization-of-rocket-fins-with-ansys-spaceclaim-and-pyansys/109).
 ```
 
 ## Why SpaceClaim as a Tesseract?
@@ -11,6 +13,11 @@ The full code for this Tesseract can be found under `demo/_showcase/ansys-shapeo
 Complex CAD models imported from parametric CAD software often require pre-processing before they can be fed into a simulator, such as extracting a fluid volume or naming domain faces such that appropriate boundary conditions can be applied.
 
 SpaceClaim is commonly used to generate parametric geometries and perform pre-processing actions on them. In this example we demonstrate the use of SpaceClaim as a geometry engine within Tesseract-driven processing pipelines. This unlocks powerful applications operating on real-world CAD geometries.
+
+```{figure} ../../../img/spaceclaim_tesseract_workflow.png
+
+Architecture of the SpaceClaim Tesseract implemented here.
+```
 
 ## Core concepts
 
@@ -93,8 +100,8 @@ $ pip install -r tesseract_requirements.txt
 
 When using SpaceClaim as a geometry engine, the goal is typically to map design parameters in the parametric CAD model to a surface mesh. Here, we are creating a SpaceClaim Tesseract that operates on a grid fin geometry with a number of parameters representing the position of bars and their thickness.
 
-```{seealso}
-The explanation and intuation behind the inputs is explained further in the [demo](https://si-tesseract.discourse.group/c/showcase/11).
+```{note}
+This particular choice of inputs and outputs is motivated in our [rocket fin optimization showcase](https://si-tesseract.discourse.group/t/parametric-shape-optimization-of-rocket-fins-with-ansys-spaceclaim-and-pyansys/109).
 ```
 
 #### Input schema
@@ -131,14 +138,14 @@ The `apply` function that we are invoking with the above command builds each of 
 :pyobject: apply
 ```
 
-To build the geometries we first prepare the SpaceClaim `.scscript` by replacing placeholder values with the user inputs via string substituation. SpaceClaim is then run, outputting `.stl` meshes that are read with `trimesh`.
+To build the geometries we first prepare the SpaceClaim `.scscript` by replacing placeholder values with the user inputs via string substitution. SpaceClaim is then run, outputting `.stl` meshes that are read with `trimesh`.
 
 ```{literalinclude} ../../../../demo/_showcase/ansys-shapeopt/spaceclaim/tesseract_api.py
 :language: python
 :pyobject: build_geometries
 ```
 
-The `.scscript` preperation is unique to this grid fin example, with the user input values being processed into dictionaries that are then used within the string substituation. For a different geometry one would have to create their own `.scscript` and dictionaries with all the neccessary inputs required.
+The `.scscript` preperation is unique to this grid fin example, with the user input values being processed into dictionaries that are then used within the string substitution. For a different geometry one would have to create their own `.scscript` and dictionaries with all the neccessary inputs required.
 
 ```{literalinclude} ../../../../demo/_showcase/ansys-shapeopt/spaceclaim/tesseract_api.py
 :language: python
@@ -204,7 +211,7 @@ curl -Method POST `
      -Body '{"inputs":{"differentiable_parameters":[[200,600,0,3.14,0.39,3.53,0.79,3.93,1.18,4.32,1.57,4.71,1.96,5.11,2.36,5.50,2.75,5.89],[400,400,0,3.14,0.39,3.53,0.79,3.93,1.18,4.32,1.57,4.71,1.96,5.11,2.36,5.50,2.75,5.89]],"non_differentiable_parameters":[[800,100],[800,100]],"string_parameters":["F:\\Ansys installations\\ANSYS Inc\\v241\\scdm\\SpaceClaim.exe","geometry_generation.scscript"]}}'
 ```
 
-After about (~15 seconds) the mesh output is returned and displayed in text form in your terminal. The point coordinates and cells correspond to a grid fin like below (shown with randomised cross beam locations).
+After about ~15 seconds the mesh output is returned and displayed in text form in your terminal. The point coordinates and cells correspond to a grid fin like below (shown with randomised cross beam locations).
 
 ```{figure} ../../../img/grid_fin_stl.png
 
@@ -215,4 +222,4 @@ Grid fin geometry shown with randomised beam locations.
 
 Invoking SpaceClaim via HTTP is only the start of the Tesseract journey.
 
-For example, by using finite difference approximations under the hood, we can make the resulting geometry [differentiable](../../introduction/differentiable-programming.md) with respect to the design parameters. For a concrete demonstration of end-to-end shape optimization in action, please have a look at our [grid fin optimization showcase](https://si-tesseract.discourse.group/c/showcase/11).
+For example, by using finite difference approximations under the hood, we can make the resulting geometry [differentiable](../../introduction/differentiable-programming.md) with respect to the design parameters. For a concrete demonstration of end-to-end shape optimization in action, please have a look at our [rocket fin optimization showcase](https://si-tesseract.discourse.group/t/parametric-shape-optimization-of-rocket-fins-with-ansys-spaceclaim-and-pyansys/109).
