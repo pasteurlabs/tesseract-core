@@ -8,8 +8,8 @@
    - [1.3. Dataset Summary](#13-dataset-summary)
 
 [2. QoI Workflows](#2-qoi-workflows)
-   - [2.1. CAD Geometry + Boundary Conditions → QoI Workflow](#21-cad-geometry--boundary-conditions---qoi-workflow)
-   - [2.2. CAD Geometry + Boundary Conditions → Full-Field → QoI Workflow](#22-cad-geometry--boundary-conditions---full-field---qoi-workflow)
+   - [2.1. CAD geometries + boundary conditions → QoI-based surrogacy](#21-cad-geometries--boundary-conditions--qoi-based-surrogacy)
+   - [2.2. CAD geometries + boundary conditions → Full-field surrogacy → QoI](#22-cad-geometries--boundary-conditions--full-field-surrogacy--qoi)
 
 [3. Ansys↔Tesseract QoI Workflow Proposal](#3-ansystesseract-qoi-workflow-proposal)
    - [3.1. Tesseract Components and Workflows](#31-tesseract-workflows-and-components)
@@ -97,18 +97,18 @@ In particular, the reported static pressure values are averaged at 4 different s
 
 
 ## 2. QoI Workflows
-Understanding how geometry design impacts QoI is of valuable interest for CAD and simulation engineers. Establishing a workflow that directly maps a CAD file (e.g. .stl) to QoI removes the need for meshing, simulation, and post-processing. This enables a significant reduction in engineering time and accelerates design iteration.
+Understanding how geometry design impacts QoI is of valuable interest for CAD and simulation engineers. Establishing a workflow that directly maps a CAD file (e.g. .STL) to QoI removes the need for meshing, simulation, and post-processing. This enables a significant reduction in engineering time and accelerates design iteration.
 
 In [the following section](#3-ansys-tesseract-qoi-workflow-proposal) we will outline how Tesseract allows us to define a workflow on top of Ansys Fluent simulations and discuss the benefits it provides. But first, let's explore some of the possibilities to define a QoI-based workflow.
 
-### 2.1. CAD Geometry + Boundary Conditions -> QoI Workflow
+### 2.1. CAD geometries + boundary conditions → QoI-based surrogacy
 <p align="center">
   <img src="images/qoi_overview_best.png">
 </p>
 
-This workflow enables engineers to directly predict QoI from CAD geometry files (e.g. stl) and boundary conditions. The workflow illustrated above has been selected for this showcase as it integrates methods that can be deployed during early-stage design and do not require complex full-field surrogate models. This ensures that the proposed solution remains practical, maintainable, and aligned with typical engineering development cycles.
+This workflow enables engineers to directly predict QoI from CAD geometry files (e.g. STL) and boundary conditions. The workflow illustrated above has been selected for this showcase as it integrates methods that can be deployed during early-stage design and do not require complex full-field surrogate models. This ensures that the proposed solution remains practical, maintainable, and aligned with typical engineering development cycles.
 
-### 2.2. CAD Geometry + Boundary Conditions -> Full-Field -> QoI Workflow
+### 2.2. CAD geometries + boundary conditions → Full-field surrogacy → QoI
 <p align="center">
   <img src="images/qoi_overview_full.png">
 </p>
@@ -129,6 +129,7 @@ Tesseract Components offer significant advantages for these types of problems. T
 Below, we define the three Tesseract Components used in the QoI-based surrogate model workflow.
 
 **Dataset Tesseract**
+### TODO UPDATE LAST AFTER ALESSANDRO REVIEW
 ```python
 class InputSchema(BaseModel):
     config: InputFileReference = Field(description="Configuration file")
@@ -201,7 +202,7 @@ Before examining the results, we need to understand how Ansys Fluent simulations
 - Point cloud-derived parameters: represent geometric values that are not explicitly available from the STL file but can be directly computed from the sampled points
 - CAD parameters: correspond to the mentioned CAD sketch parameters (`d61`, `d72`, `d13`, `d34`)
 - Boundary conditions: inlet velocity of the HVAC duct
-- QoI: averaged static pressure values at 4 stations (`inlet`, `outlet`, `p2-plane`, `p3-plane`)
+- QoI: averaged static pressure values at 4 slices (`inlet`, `outlet`, `p2-plane`, `p3-plane`)
 
 
 ![alt text](images/full_model.png)
@@ -308,7 +309,7 @@ In the `metadata.json.series` file, the variations associated to the boundary co
 
 ##### QoI Pre-Processing
 
-Ansys Fluent simulation reports are generated for each simulation run and contain the static pressure values extracted at several stations (as described in [this section](#12-qoi)).
+Ansys Fluent simulation reports are generated for each simulation run and contain the static pressure values extracted at several slices (as described in [this section](#12-qoi)).
 ```
                          "Surface Integral Report"
            Area-Weighted Average
