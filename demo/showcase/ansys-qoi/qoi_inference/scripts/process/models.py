@@ -1,11 +1,13 @@
 import pickle
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from sklearn.ensemble import RandomForestRegressor
+from torch.utils.data import DataLoader
 
 from .metrics import ModelMetrics, compute_metrics
 from .utils import get_dataset_dimensions
@@ -23,9 +25,9 @@ class PointNetEmbedder(nn.Module):
 
     def __init__(
         self,
-        in_dim=6,
-        latent_dim=8,
-        hidden_dims=None,  # Point-wise MLP dimensions
+        in_dim: int = 6,
+        latent_dim: int = 8,
+        hidden_dims: int | None = None,  # Point-wise MLP dimensions
         dropout: float = 0.2,
         use_batch_norm: bool = True,
     ) -> None:
@@ -74,7 +76,7 @@ class PointNetEmbedder(nn.Module):
                 nn.init.ones_(m.weight)
                 nn.init.zeros_(m.bias)
 
-    def forward(self, x, xyz):
+    def forward(self, x: torch.Tensor, xyz: torch.Tensor) -> torch.Tensor:
         """Forward pass.
 
         Args:
@@ -193,6 +195,7 @@ class ParamFusionHead(nn.Module):
         return self.q_dim
 
     def forward(self, z: torch.Tensor, p: torch.Tensor) -> torch.Tensor:
+        """Model forward pass."""
         if self.mode == "concat":
             concat_input = torch.cat([z, p], dim=-1)
             output = self.mlp(concat_input)
@@ -238,7 +241,7 @@ class HybridPointCloudTreeModel:
         max_depth: int = 15,
         min_samples_split: int = 2,
         random_state: int = 42,
-        **tree_kwargs,
+        **tree_kwargs: Any,
     ) -> None:
         self.name = name
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -312,8 +315,16 @@ class HybridPointCloudTreeModel:
         self.tree_fitted = False
         self.is_fitted = False
 
-    def _initialize_components(self, p_dim: int, q_dim: int):
-        """Initialize model components once p_dim and q_dim are known."""
+    def _initialize_components(self, p_dim: int, q_dim: int) -> None:
+        """Initialize model components once p_dim and q_dim are known.
+
+        Args:
+            p_dim: Dimension of parameter vector
+            q_dim: Dimension of QoI vector
+
+        Returns:
+            None
+        """
         if self.embedder is not None:
             return  # Already initialized
 
@@ -364,8 +375,22 @@ class HybridPointCloudTreeModel:
         # Random Forest for final prediction
         self.tree_model = RandomForestRegressor(**self._tree_params)
 
-    def fit(self, train_data, val_data=None, training_args=None):
-        """Two-stage training: 1) CADQoI-style embedder, 2) Random Forest."""
+    def fit(
+        self,
+        train_data: DataLoader,
+        val_data: DataLoader | None = None,
+        training_args: dict[str, Any] | None = None,
+    ) -> None:
+        """Two-stage training: 1) CADQoI-style embedder, 2) Random Forest.
+
+        Args:
+            train_data: Training data loader
+            val_data: Validation data loader (optional)
+            training_args: Training configuration dictionary (optional)
+
+        Returns:
+            None
+        """
         # Auto-detect p_dim and q_dim from dataset if not provided
         if self.p_dim is None or self.q_dim is None:
             detected_p_dim, detected_q_dim = get_dataset_dimensions(train_data)
@@ -392,8 +417,17 @@ class HybridPointCloudTreeModel:
         self.is_fitted = True
         return self
 
-    def _extract_features(self, data_loader):
-        """Extract features using point cloud + params from batch."""
+    def _extract_features(
+        self, data_loader: DataLoader
+    ) -> tuple[np.ndarray, np.ndarray] | tuple[None, None]:
+        """Extract features using point cloud + params from batch.
+
+        Args:
+            data_loader: DataLoader containing the data
+
+        Returns:
+            Tuple of (features, qois) or (None, None) if no data
+        """
         self.embedder.eval()
         self.fusion_head.eval()
 
@@ -460,8 +494,22 @@ class HybridPointCloudTreeModel:
 
         return combined_features, qois
 
-    def _fit_embedder(self, train_loader, val_loader, training_args):
-        """Train the embedder using params from batch."""
+    def _fit_embedder(
+        self,
+        train_loader: DataLoader,
+        val_loader: DataLoader | None,
+        training_args: dict[str, Any] | None,
+    ) -> None:
+        """Train the embedder using params from batch.
+
+        Args:
+            train_loader: Training data loader
+            val_loader: Validation data loader (optional)
+            training_args: Training configuration dictionary (optional)
+
+        Returns:
+            None
+        """
         # Training parameters
         epochs = training_args.get("epochs", 50) if training_args else 50
         lr = training_args.get("lr", 1e-4) if training_args else 1e-4
@@ -586,8 +634,18 @@ class HybridPointCloudTreeModel:
         self.embedder_fitted = True
         print(f"  Embedder training completed. Best val loss: {best_val_loss:.6f}")
 
-    def _fit_tree(self, train_loader, val_loader):
-        """Train Random Forest on extracted features."""
+    def _fit_tree(
+        self, train_loader: DataLoader, val_loader: DataLoader | None
+    ) -> None:
+        """Train Random Forest on extracted features.
+
+        Args:
+            train_loader: Training data loader
+            val_loader: Validation data loader (optional)
+
+        Returns:
+            None
+        """
         # Extract features from training data
         print("  Extracting features from training data...")
         X_train, y_train = self._extract_features(train_loader)
@@ -620,8 +678,15 @@ class HybridPointCloudTreeModel:
 
         self.tree_fitted = True
 
-    def predict(self, data_loader) -> np.ndarray:
-        """Make predictions using the hybrid model."""
+    def predict(self, data_loader: DataLoader) -> np.ndarray:
+        """Make predictions using the hybrid model.
+
+        Args:
+            data_loader: DataLoader containing the data to predict on
+
+        Returns:
+            Array of predictions
+        """
         if not self.is_fitted:
             raise ValueError("Model must be fitted before prediction")
 
@@ -637,7 +702,15 @@ class HybridPointCloudTreeModel:
 
         return predictions
 
-    def evaluate(self, data_loader) -> ModelMetrics:
+    def evaluate(self, data_loader: DataLoader) -> ModelMetrics:
+        """Evaluate model on test data.
+
+        Args:
+            data_loader: DataLoader containing the test data
+
+        Returns:
+            ModelMetrics object containing evaluation results
+        """
         """Evaluate the hybrid model."""
         # Extract features and true labels
         features, y_true = self._extract_features(data_loader)

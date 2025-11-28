@@ -26,7 +26,7 @@ class ModelMetrics:
     nrmse: float = None  # Normalized by std
     nmae: float = None  # Normalized by mean
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.rmse is None:
             self.rmse = np.sqrt(self.mse)
 
@@ -53,8 +53,12 @@ class ModelMetrics:
 
         return ", ".join(parts)
 
-    def to_dict(self):
-        """Convert to dictionary for JSON serialization."""
+    def to_dict(self) -> dict[str, float | None]:
+        """Convert to dictionary for JSON serialization.
+
+        Returns:
+            Dictionary containing all metric values
+        """
         return {
             "mse": float(self.mse),
             "mae": float(self.mae),

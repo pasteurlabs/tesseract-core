@@ -134,7 +134,7 @@ class ExperimentTracker:
         metrics_path = self.run_dir / "model_metrics.json"
 
         # Convert numpy types to native Python types for JSON serialization
-        def convert_to_native(obj):
+        def convert_to_native(obj: Any) -> Any:
             """Recursively convert numpy types to native Python types."""
             if isinstance(obj, dict):
                 return {k: convert_to_native(v) for k, v in obj.items()}

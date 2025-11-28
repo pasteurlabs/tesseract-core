@@ -1,25 +1,42 @@
 from pathlib import Path
+from typing import Any
 
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
 
 from .dataset import cad_collate
 from .experiment_tracker import ExperimentTracker
 from .models import HybridPointCloudTreeModel
+from .scaler import SampleScaler
 from .utils import set_seed
 
 
 def train_hybrid_models(
-    train_dataset,
-    val_dataset,
-    test_dataset,
-    model_configs: dict[str, dict],
-    training_config: dict,
+    train_dataset: Dataset,
+    val_dataset: Dataset,
+    test_dataset: Dataset,
+    model_configs: dict[str, dict[str, Any]],
+    training_config: dict[str, Any],
     save_dir: Path,
     config_path: Path | None = None,
-    split_info: dict | None = None,
-    scaler=None,
-):
-    """Train hybrid PointNeXt + Tree models."""
+    split_info: dict[str, Any] | None = None,
+    scaler: SampleScaler | None = None,
+) -> dict[str, Any]:
+    """Train hybrid PointNeXt + Tree models on CAD data.
+
+    Args:
+        train_dataset: Training dataset
+        val_dataset: Validation dataset
+        test_dataset: Test dataset
+        model_configs: Dictionary mapping model names to their configurations
+        training_config: Training hyperparameters (epochs, lr, batch_size, etc.)
+        save_dir: Directory to save models and experiment results
+        config_path: Path to configuration file (optional)
+        split_info: Information about data split (optional)
+        scaler: Data scaler for preprocessing (optional)
+
+    Returns:
+        Dictionary containing experiment results and metrics
+    """
     # Set random seed for reproducibility
     if split_info and "seed" in split_info:
         seed = split_info["seed"]

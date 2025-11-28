@@ -11,7 +11,14 @@ import open3d as o3d
 
 
 def load_mesh(stl_path: Path) -> o3d.geometry.TriangleMesh:
-    """Load an STL mesh from disk and ensure normals are present."""
+    """Load an STL mesh from disk and ensure normals are present.
+
+    Args:
+        stl_path: Path to the STL mesh file
+
+    Returns:
+        Triangle mesh with computed vertex normals
+    """
     mesh = o3d.io.read_triangle_mesh(str(stl_path))
     if not mesh.has_vertex_normals():
         mesh.compute_vertex_normals()
@@ -23,7 +30,16 @@ def submesh_in_sphere(
     center: np.ndarray,
     radius: float,
 ) -> o3d.geometry.TriangleMesh | None:
-    """Return a submesh consisting of triangles whose centroids fall inside a sphere."""
+    """Return a submesh consisting of triangles whose centroids fall inside a sphere.
+
+    Args:
+        mesh: Input triangle mesh
+        center: Sphere center coordinates (3,)
+        radius: Sphere radius
+
+    Returns:
+        Submesh with triangles inside sphere, or None if no triangles found
+    """
     verts = np.asarray(mesh.vertices)
     tris = np.asarray(mesh.triangles)
 
@@ -44,8 +60,17 @@ def submesh_in_sphere(
 
 def sample_points(
     mesh: o3d.geometry.TriangleMesh, n_points: int = 1024, method: str = "poisson"
-):
-    """Sample N points from a mesh surface using Poisson-disk (default) or uniform sampling."""
+) -> tuple[np.ndarray, np.ndarray | None]:
+    """Sample N points from a mesh surface using Poisson-disk (default) or uniform sampling.
+
+    Args:
+        mesh: Input triangle mesh
+        n_points: Number of points to sample
+        method: Sampling method, either 'poisson' or 'uniform'
+
+    Returns:
+        Tuple of (points, normals) where points is (N, 3) and normals is (N, 3) or None
+    """
     if method == "poisson":
         # More uniform coverage on the surface
         pcd = mesh.sample_points_poisson_disk(n_points, init_factor=5)
@@ -62,7 +87,7 @@ def sample_points_with_spheres(
     method: str = "poisson",
     spheres: Iterable[tuple[np.ndarray, float]] = (),
     sphere_fraction: float = 0.5,
-):
+) -> tuple[np.ndarray, np.ndarray | None]:
     """Sample points on a mesh, allocating more samples inside given spheres.
 
     Parameters
@@ -78,6 +103,11 @@ def sample_points_with_spheres(
     sphere_fraction : float in (0, 1]
         Fraction of total samples to dedicate to all spheres combined.
         The remainder is sampled over the full mesh.
+
+    Returns:
+    -------
+    tuple[np.ndarray, np.ndarray | None]
+        Tuple of (points, normals) where points is (N, 3) and normals is (N, 3) or None
     """
     spheres = list(spheres)
     if not spheres:
@@ -140,7 +170,18 @@ def sample_points_with_spheres(
     return pts, nrm
 
 
-def compute_bbox_stats(xyz: np.ndarray) -> dict[str, np.ndarray | float]:
+def compute_bbox_stats(
+    xyz: np.ndarray,
+) -> tuple[dict[str, np.ndarray | float], np.ndarray]:
+    """Compute bounding box statistics for a point cloud.
+
+    Args:
+        xyz: Point cloud coordinates (N, 3)
+
+    Returns:
+        Tuple of (bbox_dict, stats_values) where bbox_dict contains individual statistics
+        and stats_values is a flattened array of all statistics
+    """
     mn = xyz.min(axis=0)
     mx = xyz.max(axis=0)
     size = mx - mn
@@ -166,8 +207,18 @@ def compute_bbox_stats(xyz: np.ndarray) -> dict[str, np.ndarray | float]:
     return bbox_dict, stats_values
 
 
-def extract_cad_sketch(filename: Path) -> np.ndarray:
-    """Extract CAD sketch from the given folder."""
+def extract_cad_sketch(filename: Path) -> tuple[list[str], list[float]]:
+    """Extract CAD sketch parameters from a CSV file.
+
+    Args:
+        filename: Path to the CAD sketch CSV file
+
+    Returns:
+        Tuple of (parameter_names, parameter_values) extracted from the CSV
+
+    Raises:
+        FileNotFoundError: If the CAD sketch file does not exist
+    """
     # Placeholder implementation
     cad_sketch_path = Path(filename)
     if not cad_sketch_path.exists():
@@ -189,6 +240,8 @@ def extract_cad_sketch(filename: Path) -> np.ndarray:
 
 @dataclass
 class SurfaceIntegralReport:
+    """Simple data structure to hold data from surface integrals."""
+
     quantity: str
     units: str
     values: dict[str, float]
@@ -196,6 +249,14 @@ class SurfaceIntegralReport:
 
     @classmethod
     def from_text(cls, text: str) -> "SurfaceIntegralReport":
+        """Parse surface integral report from text content.
+
+        Args:
+            text: Report text content
+
+        Returns:
+            SurfaceIntegralReport instance with parsed data
+        """
         lines = [line.strip() for line in text.splitlines() if line.strip()]
 
         quantity, units = cls._extract_header(lines)
@@ -205,13 +266,29 @@ class SurfaceIntegralReport:
 
     @classmethod
     def from_file(cls, path: Path | str) -> "SurfaceIntegralReport":
+        """Load surface integral report from a file.
+
+        Args:
+            path: Path to the report file
+
+        Returns:
+            SurfaceIntegralReport instance with parsed data
+        """
         text = Path(path).read_text()
         return cls.from_text(text)
 
     # ------------- Internal helpers -------------
 
     @staticmethod
-    def _extract_header(lines):
+    def _extract_header(lines: list[str]) -> tuple[str, str]:
+        """Extract quantity name and units from report header.
+
+        Args:
+            lines: Lines of report text
+
+        Returns:
+            Tuple of (quantity_name, units)
+        """
         for line in lines:
             if "[" in line and "]" in line:
                 qty = line[: line.index("[")].strip()
@@ -220,7 +297,15 @@ class SurfaceIntegralReport:
         return "Unknown", "Unknown"
 
     @staticmethod
-    def _extract_data(lines):
+    def _extract_data(lines: list[str]) -> tuple[dict[str, float], float | None]:
+        """Extract data values from report lines.
+
+        Args:
+            lines: Lines of report text
+
+        Returns:
+            Tuple of (values_dict, net_value) where net_value is optional
+        """
         values = {}
         net = None
 
@@ -247,9 +332,18 @@ class SurfaceIntegralReport:
 
 
 def read_experiment_csv_to_metadata(
-    csv_file_path: Path, data_dir: Path, shift_index=1
-) -> list[dict]:
-    """Read experiment CSV data and convert each row to metadata dictionary format."""
+    csv_file_path: Path, data_dir: Path, shift_index: int = 1
+) -> None:
+    """Read experiment CSV data and convert each row to metadata dictionary format.
+
+    Args:
+        csv_file_path: Path to the experiment CSV file
+        data_dir: Directory where metadata JSON files will be written
+        shift_index: Index offset to apply to experiment numbers
+
+    Returns:
+        None
+    """
     with open(csv_file_path) as csvfile:
         reader = csv.DictReader(csvfile, delimiter=",")
 

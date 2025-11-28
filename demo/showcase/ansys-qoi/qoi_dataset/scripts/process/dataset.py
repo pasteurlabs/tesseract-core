@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import torch
@@ -337,8 +338,21 @@ def create_raw_splits(
     val_ratio: float = 0.1,
     test_ratio: float = 0.1,
     seed: int = 42,
-) -> tuple[list[RawDataSample], list[RawDataSample], list[RawDataSample]]:
-    """Create train/val/test splits of raw data samples."""
+) -> tuple[
+    list[RawDataSample], list[RawDataSample], list[RawDataSample], dict[str, Any]
+]:
+    """Create train/val/test splits of raw data samples.
+
+    Args:
+        dataset: CADDataset to split
+        train_ratio: Fraction of data for training (default: 0.8)
+        val_ratio: Fraction of data for validation (default: 0.1)
+        test_ratio: Fraction of data for testing (default: 0.1)
+        seed: Random seed for reproducibility (default: 42)
+
+    Returns:
+        Tuple containing (train_samples, val_samples, test_samples, split_info_dict)
+    """
     assert abs(train_ratio + val_ratio + test_ratio - 1.0) < 1e-6, (
         "Ratios must sum to 1.0"
     )
@@ -402,9 +416,20 @@ class ScaledCADDataset(Dataset):
 
 
 def create_scaled_datasets(
-    scaled_train: list, scaled_val: list, scaled_test: list
+    scaled_train: list[RawDataSample],
+    scaled_val: list[RawDataSample],
+    scaled_test: list[RawDataSample],
 ) -> tuple[ScaledCADDataset, ScaledCADDataset, ScaledCADDataset]:
-    """Convert scaled samples to PyTorch datasets."""
+    """Convert scaled samples to PyTorch datasets.
+
+    Args:
+        scaled_train: List of scaled training samples
+        scaled_val: List of scaled validation samples
+        scaled_test: List of scaled test samples
+
+    Returns:
+        Tuple containing (train_dataset, val_dataset, test_dataset)
+    """
     train_dataset = ScaledCADDataset(scaled_train)
     val_dataset = ScaledCADDataset(scaled_val)
     test_dataset = ScaledCADDataset(scaled_test)

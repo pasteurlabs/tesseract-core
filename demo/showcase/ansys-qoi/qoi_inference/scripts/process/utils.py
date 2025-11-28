@@ -5,6 +5,11 @@ import torch
 
 
 def set_seed(seed: int = 42) -> None:
+    """Set random seed for reproducibility across all random number generators.
+
+    Args:
+        seed: Random seed value
+    """
     random.seed(seed)
     np.random.seed(seed)  # noqa: NPY002
     torch.manual_seed(seed)
@@ -15,7 +20,15 @@ def set_seed(seed: int = 42) -> None:
 
 
 def pca_align(xyz: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Align principal axes to XYZ using PCA (size preserved). Returns rotated points and R."""
+    """Align principal axes to XYZ using PCA (size preserved).
+
+    Args:
+        xyz: Point cloud coordinates (N, 3)
+
+    Returns:
+        Tuple of (aligned_points, rotation_matrix) where aligned_points has shape (N, 3)
+        and rotation_matrix is (3, 3)
+    """
     X = xyz - xyz.mean(axis=0, keepdims=True)
     # covariance (3x3)
     C = np.cov(X.T)
@@ -28,8 +41,24 @@ def pca_align(xyz: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 
 
 def create_train_val_test_split(
-    dataset, train_ratio=0.8, val_ratio=0.10, test_ratio=0.10, seed=42
-):
+    dataset: torch.utils.data.Dataset,
+    train_ratio: float = 0.8,
+    val_ratio: float = 0.10,
+    test_ratio: float = 0.10,
+    seed: int = 42,
+) -> tuple:
+    """Split dataset into train, validation, and test subsets.
+
+    Args:
+        dataset: PyTorch dataset to split
+        train_ratio: Fraction of data for training
+        val_ratio: Fraction of data for validation
+        test_ratio: Fraction of data for testing
+        seed: Random seed for reproducibility
+
+    Returns:
+        Tuple of (train_dataset, val_dataset, test_dataset, split_info)
+    """
     assert abs(train_ratio + val_ratio + test_ratio - 1.0) < 1e-6, (
         "Ratios must sum to 1.0"
     )
@@ -74,8 +103,15 @@ def create_train_val_test_split(
     return train_dataset, val_dataset, test_dataset, split_info
 
 
-def compute_stats_from_samples(samples) -> dict:
-    """Compute global statistics from a list of raw samples."""
+def compute_stats_from_samples(samples: list) -> dict:
+    """Compute global statistics from a list of raw samples.
+
+    Args:
+        samples: List of RawDataSample objects
+
+    Returns:
+        Dictionary containing statistics for point_cloud, params, qoi, and num_samples
+    """
     all_xyz = []
     all_params = []
     all_qoi = []
@@ -130,15 +166,33 @@ def compute_stats_from_samples(samples) -> dict:
     }
 
 
-def get_dataset_dimensions(data_loader):
-    """Extract p_dim and q_dim from dataset."""
+def get_dataset_dimensions(data_loader: torch.utils.data.DataLoader) -> tuple[int, int]:
+    """Extract parameter and QoI dimensions from dataset.
+
+    Args:
+        data_loader: PyTorch DataLoader to sample from
+
+    Returns:
+        Tuple of (p_dim, q_dim) where p_dim is parameter dimension and q_dim is QoI dimension
+    """
     sample_batch = next(iter(data_loader))
     p_dim = sample_batch["params"].shape[1]
     q_dim = sample_batch["qoi"].shape[1] if len(sample_batch["qoi"].shape) > 1 else 1
     return p_dim, q_dim
 
 
-def compute_bbox_stats(xyz: np.ndarray) -> dict[str, np.ndarray | float]:
+def compute_bbox_stats(
+    xyz: np.ndarray,
+) -> tuple[dict[str, np.ndarray | float], np.ndarray]:
+    """Compute bounding box statistics for a point cloud.
+
+    Args:
+        xyz: Point cloud coordinates (N, 3)
+
+    Returns:
+        Tuple of (bbox_dict, stats_values) where bbox_dict contains individual statistics
+        and stats_values is a flattened array of all statistics
+    """
     mn = xyz.min(axis=0)
     mx = xyz.max(axis=0)
     size = mx - mn

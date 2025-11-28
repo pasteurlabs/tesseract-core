@@ -94,10 +94,14 @@ class DataScaler:
         std = self.point_stats_["std"]
         return (xyz - mean) / (std + 1e-8)
 
-    def transform_points(self, xyz: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    def transform_points(self, xyz: np.ndarray) -> np.ndarray:
         """Transform point coordinates and compute global features.
 
-        Returns: (transformed_xyz)
+        Args:
+            xyz: Point coordinates array
+
+        Returns:
+            Transformed point coordinates
         """
         # Apply point scaling based on strategy
         if self.config.point_strategy == "none":

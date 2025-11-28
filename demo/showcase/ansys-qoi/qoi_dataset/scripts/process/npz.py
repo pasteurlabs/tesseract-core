@@ -1,5 +1,6 @@
 """NPZ dataset generation from simulation folders."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -29,7 +30,7 @@ class NPZProcessor:
     out_dir: Path
     config_path: Path
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Load configuration and initialize data processors."""
         self.cfg = self._load_config()
         self._init_processors()
@@ -94,7 +95,7 @@ class NPZProcessor:
             centers=sphere_spec.get("centers", []),
         )
 
-    def _init_optional_processor(self, config_key: str, factory_fn):
+    def _init_optional_processor(self, config_key: str, factory_fn: Callable) -> Any:
         """Initialize an optional processor if its config exists."""
         spec = self.cfg.get(config_key)
         return factory_fn(spec) if spec is not None else None
@@ -166,8 +167,8 @@ class NPZProcessor:
         return output_paths
 
     def _extract_optional(
-        self, processor, folder: Path, catch_exceptions: bool = False
-    ):
+        self, processor: "NPZProcessor", folder: Path, catch_exceptions: bool = False
+    ) -> Any:
         """Extract data using optional processor, returning None if processor not configured."""
         if processor is None:
             return None, None
