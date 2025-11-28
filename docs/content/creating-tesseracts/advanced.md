@@ -1,4 +1,4 @@
-# Tips for defining Tesseract APIs
+# Tips for Defining Tesseract APIs
 
 ## Advanced Pydantic features
 

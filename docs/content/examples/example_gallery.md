@@ -1,4 +1,4 @@
-# Building Blocks Example Gallery
+# Example Gallery: Building Blocks
 
 ```{toctree}
 :name: example-gallery

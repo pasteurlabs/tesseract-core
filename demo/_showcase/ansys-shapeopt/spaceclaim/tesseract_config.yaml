@@ -1,0 +1,3 @@
+name: "spaceclaim"
+version: "0.0.1"
+description: "Wrapping SpaceClaim in a runtime tesseract"
