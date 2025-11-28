@@ -58,8 +58,6 @@ replace "v242" with your Ansys version and ensure the path is correct. More deta
 
 ### Building Tesseracts
 
-The following commands are also available inside the optimization.ipynb. Therefore at this stage you are ready to run the notebook.
-
 On machine B, navigate to `demo/_showcase/ansys-shapeopt/` and run
 
 ```bash
@@ -73,3 +71,7 @@ tesseract build spaceclaim
 tesseract build pymapdl
 tesseract build sdf_fd
 ```
+
+### Run the notebook
+
+At this stage you are ready to run the main notebook [optimization.ipynb](optimization.ipynb).
