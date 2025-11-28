@@ -12,6 +12,11 @@ Complex CAD models imported from parametric CAD software often require pre-proce
 
 SpaceClaim is commonly used to generate parametric geometries and perform pre-processing actions on them. In this example we demonstrate the use of SpaceClaim as a geometry engine within Tesseract-driven processing pipelines. This unlocks powerful applications operating on real-world CAD geometries.
 
+```{figure} ../../../img/spaceclaim_tesseract_workflow.png
+
+Architecture of the SpaceClaim Tesseract we are going to implement.
+```
+
 ## Core concepts
 
 ### Folder structure
@@ -131,14 +136,14 @@ The `apply` function that we are invoking with the above command builds each of 
 :pyobject: apply
 ```
 
-To build the geometries we first prepare the SpaceClaim `.scscript` by replacing placeholder values with the user inputs via string substituation. SpaceClaim is then run, outputting `.stl` meshes that are read with `trimesh`.
+To build the geometries we first prepare the SpaceClaim `.scscript` by replacing placeholder values with the user inputs via string substitution. SpaceClaim is then run, outputting `.stl` meshes that are read with `trimesh`.
 
 ```{literalinclude} ../../../../demo/_showcase/ansys-shapeopt/spaceclaim/tesseract_api.py
 :language: python
 :pyobject: build_geometries
 ```
 
-The `.scscript` preperation is unique to this grid fin example, with the user input values being processed into dictionaries that are then used within the string substituation. For a different geometry one would have to create their own `.scscript` and dictionaries with all the neccessary inputs required.
+The `.scscript` preperation is unique to this grid fin example, with the user input values being processed into dictionaries that are then used within the string substitution. For a different geometry one would have to create their own `.scscript` and dictionaries with all the neccessary inputs required.
 
 ```{literalinclude} ../../../../demo/_showcase/ansys-shapeopt/spaceclaim/tesseract_api.py
 :language: python
@@ -204,7 +209,7 @@ curl -Method POST `
      -Body '{"inputs":{"differentiable_parameters":[[200,600,0,3.14,0.39,3.53,0.79,3.93,1.18,4.32,1.57,4.71,1.96,5.11,2.36,5.50,2.75,5.89],[400,400,0,3.14,0.39,3.53,0.79,3.93,1.18,4.32,1.57,4.71,1.96,5.11,2.36,5.50,2.75,5.89]],"non_differentiable_parameters":[[800,100],[800,100]],"string_parameters":["F:\\Ansys installations\\ANSYS Inc\\v241\\scdm\\SpaceClaim.exe","geometry_generation.scscript"]}}'
 ```
 
-After about (~15 seconds) the mesh output is returned and displayed in text form in your terminal. The point coordinates and cells correspond to a grid fin like below (shown with randomised cross beam locations).
+After about ~15 seconds the mesh output is returned and displayed in text form in your terminal. The point coordinates and cells correspond to a grid fin like below (shown with randomised cross beam locations).
 
 ```{figure} ../../../img/grid_fin_stl.png
 

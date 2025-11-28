@@ -10,7 +10,7 @@ The full code for this Tesseract can be found under `demo/_showcase/ansys-shapeo
 
 ## Prerequisites
 
-This example requires a running ANSYS MAPDL server accessible via gRPC, e.g. via:
+This example requires a running Ansys MAPDL server accessible via gRPC, e.g. via:
 
 ```bash
 # Linux
@@ -93,6 +93,12 @@ The `abstract_eval` function computes output shapes based on input shapes withou
 ```
 
 ## Demo script
+
+```{seealso}
+The full code for this demo can be found in `demo/_showcase/ansys-shapeopt/pymapdl/demo.py` in the [Tesseract Core repository](https://github.com/pasteurlabs/tesseract-core/tree/main/demo/_showcase/ansys-shapeopt/pymapdl).
+```
+
+demo/_showcase/ansys-shapeopt/pymapdl/demo.py
 
 This demo shows a complete workflow for a cantilever beam problem. It requires you set environment variables pointing to the MAPDL server:
 
