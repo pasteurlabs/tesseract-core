@@ -20,7 +20,7 @@ def train_hybrid_models(
     config_path: Path | None = None,
     split_info: dict[str, Any] | None = None,
     scaler: DataScaler | None = None,
-) -> dict[str, Any]:
+) -> dict[str, Any] | None:
     """Train hybrid PointNeXt + Tree models on CAD data.
 
     Args:
