@@ -33,7 +33,7 @@ A machine B, ideally running linux, with:
 
 ### SpaceClaim Tesseract setup
 
-In windows powerhsell, install the following dependencies into
+In windows powerhsell, install the the required depencencies by running
 
 ```bash
 pip install tesseract-core[runtime] trimesh
