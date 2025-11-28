@@ -4,6 +4,8 @@ This directory contains an example Tesseract configuration and scripts demonstra
 
 ![Workflow](imgs/workflow_1.png)
 
+The main entry point of this demo is `optimization.ipynb`.
+
 ## Get Started
 
 ### Prerequisites
@@ -12,6 +14,11 @@ A windows machine A with:
 1. ANSYS installed and an active license.
 2. Python and a python environment (e.g., conda, venv).
 3. Two open ports.
+4. Known IP address, obtain it by running
+
+```powershell
+(Get-NetIPAddress -AddressFamily IPv4 -InterfaceAlias "Wi-Fi","Ethernet" | Where-Object {$_.IPAddress -notlike "169.254.*" -and $_.IPAddress -ne $null}).IPAddress
+```
 
 A machine B, ideally running linux, with:
 1. Docker installed and running.
@@ -25,60 +32,37 @@ In windows powerhsell, install the following dependencies into
 pip install tesseract-core[runtime] trimesh
 ```
 
-Clone this repository, navigate to the `examples/ansys/spaceclaim_tess` directory and start the Tesseract runtime server with:
+Clone this repository, navigate to the `demo/showcase/ansys-shapeopt/spaceclaim_tess` and start the Tesseract runtime server with:
 
 ```bash
 tesseract-runtime serve --port <port_number_1> --host 0.0.0.0
 ```
-Note that we dont build a Tesseract image for SpaceClaim in this example. This is because SpaceClaim cannot be installed in a containerized environment. You can test it using git bash and your specific Spaceclaim.exe Path:
-
-```bash
-curl -d '{"inputs":{"differentiable_parameters": [[200, 600, 0, 3.14, 0.39, 3.53, 0.79, 3.93, 1.18, 4.32, 1.57, 4.71, 1.96, 5.11, 2.36, 5.50, 2.75, 5.89], [400, 400, 0, 3.14, 0.39, 3.53, 0.79, 3.93, 1.18, 4.32, 1.57, 4.71, 1.96, 5.11, 2.36, 5.50, 2.75, 5.89]],  "non_differentiable_parameters": [800, 100], "string_parameters":["F:\\ANSYS Inc\\v242\\scdm\\SpaceClaim.exe", "geometry_generation.scscript"]}}' -H "Content-Type: application/json" http://0.0.0.0:443/apply
-```
-
-
-or the equivalent on powershell:
-
-```powershell
-Invoke-RestMethod -Uri "http://127.0.0.1:8000/apply" -Method Post -Body (
-    @{
-        inputs = @{
-            differentiable_bar_parameters = [[0, 3.14], [0.39, 3.53], [0.79, 3.93], [1.18, 4.32], [1.57, 4.71], [1.96, 5.11], [2.36, 5.50], [2.75, 5.89]]
-            differentiable_plane_parameters = [200, 600]
-            non_differentiable_parameters = [800, 100]
-            string_parameters = ["F:\\Ansys installations\\ANSYS Inc\\v241\\scdm\\SpaceClaim.exe", "geometry_generation.scscript"]
-        }
-    } | ConvertTo-Json -Depth 10
-) -ContentType "application/json"
-```
+Note that we dont build a Tesseract image for SpaceClaim in this example. This is because SpaceClaim cannot be installed in a containerized environment. More details about this tesseract can be found [here](docs/content/examples/ansys_integration/spaceclaim_tess.md). TODO: update link to docs
 
 ### PyMAPDL Server
 
-On the machine A, run the following powershell command to start ansys with grpc server enabled:
+On machine A, run the following powershell command to start ansys with grpc server enabled:
 
 ```powershell
 Start-Process -FilePath "F:\ANSYS Inc\v242\ansys\bin\winx64\ANSYS242.exe" -ArgumentList "-grpc", "-port", "<port_number_2>"
 ```
 
-replace "v242" with your ansys version and esnure the path is correct.
+replace "v242" with your ansys version and esnure the path is correct. More details about this tesseract can be found [here](docs/content/examples/ansys_integration/spaceclaim_tess.md). TODO: update link to docs
 
-### Build tesseracts
+### Building Tesseracts
 
-1. Obtain the ip adress of the windows machine by running:
+The following commands are also available inside the optimization.ipynb. Therefore at this stage you are ready to run the notebook.
 
-```powershell
-(Get-NetIPAddress -AddressFamily IPv4 -InterfaceAlias "Wi-Fi","Ethernet" | Where-Object {$_.IPAddress -notlike "169.254.*" -and $_.IPAddress -ne $null}).IPAddress
-```
-2. On the linux machine, create a new python env and install tesseract-core with:
+On machine B, navigate to `demo/showcase/ansys-shapeopt/` and run 
 
 ```bash
-pip install tesseract-core[runtime]
+pip install -r requirements.txt
 ```
 
-3. Build all relevant tesseracts:
+and build the needed tesseracts using
 
 ```bash
-tesseract build fem_tess
+tesseract build spaceclaim_tess
 tesseract build pymapdl_tess
-tesseract build meshing_tess
+tesseract build sdf_fd_tess
 ```
