@@ -3,7 +3,7 @@
 ## Table of Contents
 
 [1. Case Study: HVAC Duct Dataset](#1-case-study-hvac-duct-dataset)
-   - [1.1. Dataset Variations](#11-dataset-variations)
+   - [1.1. Dataset](#11-dataset)
    - [1.2. QoI](#12-qoi)
    - [1.3. Dataset Summary](#13-dataset-summary)
 
@@ -12,7 +12,7 @@
    - [2.2. CAD geometries + boundary conditions → Full-field surrogacy → QoI](#22-cad-geometries--boundary-conditions--full-field-surrogacy--qoi)
 
 [3. Ansys↔Tesseract QoI Workflow Proposal](#3-ansystesseract-qoi-workflow-proposal)
-   - [3.1. Tesseract Components and Workflows](#31-tesseract-workflows-and-components)
+   - [3.1. Tesseract orchestration](#31-tesseract-orchestration)
      - [3.1.1. Tesseract Components](#311-tesseract-components)
      - [3.1.2. Tesseract Training Workflow](#312-tesseract-training-workflow)
      - [3.1.3. Tesseract Inference Workflow](#313-tesseract-inference-workflow)
@@ -40,7 +40,7 @@ Prior to defining a QoI-based workflow, we created an internal aerodynamics data
 - One baffle place is located just after the inlet acting as a flow constrainer
 - The second baffle plate is in the intersection between duct branches and redirects the inlet flow
 
-### 1.1 Dataset Variations
+### 1.1 Dataset
 
 **CAD parameters**
 
@@ -50,11 +50,11 @@ Four geometric parameters were modified to explore different duct configurations
 - `d61`: Angle of the middle baffle plate
 - `d72`: Aperture length of the inlet baffle plate
 
-<table> <tr> <td align="center"> <img src="images/d13.png" alt="d13" width="400"/><br/> <b>d13:</b> Angle between duct branches </td> <td align="center"> <img src="images/d34.png" alt="d34" width="400"/><br/> <b>d34:</b> Curvature angle of duct branch </td> </tr> <tr> <td align="center"> <img src="images/d61.png" alt="d61" width="400"/><br/> <b>d61:</b> Angle of middle baffle plate </td> <td align="center"> <img src="images/d72.png" alt="d72" width="400"/><br/> <b>d72:</b> Aperture length of inlet baffle </td> </tr> </table>
+<table> <tr> <td align="center"> <img src="images/d13.png" alt="d13" width="400"/><br/> <b>d13:</b> Angle between duct branches </td> <td align="center"> <img src="images/d34.png" alt="d34" width="400"/><br/> <b>d34:</b> Curvature angle of duct branch </td> </tr> <tr> <td align="center"> <img src="images/d61.png" alt="d61" width="400"/><br/> <b>d61:</b> Angle of the middle baffle plate </td> <td align="center"> <img src="images/d72.png" alt="d72" width="400"/><br/> <b>d72:</b> Aperture length of the inlet baffle </td> </tr> </table>
 
 **Boundary conditions**
 
-The inlet velocity magnitude has been varied across numerical simulations to capture different flow regimes and operating conditions.
+The inlet mean velocity magnitude, defined through a User-Defined function (UDF), has been varied across numerical simulations to capture different flow regimes and operating conditions.
 
 ### 1.2. QoI
 Although the dataset of numerical simulations was generated without a specific QoI-based workflow in mind, a text file containing static pressure values averaged at certain slices of the HVAC was also available as part of the results. These static pressure values will be considered as the base QoI of each numerical simulation. While the implemented code also allows to define additional metrics based on these base QoI (such as pressure drops $\Delta p$ across different slices), this showcase focuses only on the base static pressure values.
@@ -116,17 +116,17 @@ This workflow enables engineers to directly predict QoI from CAD geometry files 
 Engineers can also incorporate a full-field surrogate model into an alternative QoI-based workflow alongside direct CAD-to-QoI predictions. When a surrogate model generates full-field outputs (e.g., pressure distributions, temperature fields, stress contours), different QoI can be directly derived from these fields using standard post-processing tools. However, deploying a full-field surrogate model introduces additional complexity and may not deliver significant benefits for early-stage design studies.
 
 ## 3. Ansys<->Tesseract QoI Workflow Proposal
-We can use Tesseract to define modular and reusable components that orchestrate the QoI-based workflows on top of the Ansys Fluent simulations based on HVAC systems. The diagram below shows an approach to perform training and inference on a QoI-based surrogate model that maps CAD geometries and boundary conditions to QoI  (see [reference](#21-cad-geometry--boundary-conditions---qoi-workflow)) with Tesseract.
+We can use Tesseract to define modular and reusable components that orchestrate the QoI-based workflows on top of the Ansys Fluent simulations based on HVAC systems. The diagram below shows an approach to perform training and inference on a QoI-based surrogate model that maps CAD geometries and boundary conditions to QoI  (see [reference](#21-cad-geometries--boundary-conditions--qoi-based-surrogacy)) with Tesseract.
 
 ![alt text](images/tesseract_wf.png)
 
 To enable QoI-based predictions directly from CAD geometries and boundary conditions, we first need to train a surrogate model. With Tesseract, we can define two complementary workflows: a training workflow where the surrogate model learns from historical Ansys Fluent simulation data, and an inference workflow where the surrogate model predicts QoI for a new CAD geometry file and boundary conditions.
 
-### 3.1. Tesseract Workflows and Components
+### 3.1. Tesseract orchestration
 #### 3.1.1 Tesseract Components
-Tesseract Components offer significant advantages for these types of problems. They encapsulate dependecy management, eliminating the complexity of handling dependencies. This is particularly valuable in the rapidly evolving landscape of geometric deep-learning or CAD processing libraries. Additionally, Tesseract Components are deployment-ready by design, enabling seamless transition from prototype to production pipeline.
+Tesseract components offer significant advantages for these types of problems. They encapsulate the required packages, eliminating the complexity of handling several dependencies across the pipeline. This is particularly valuable in the rapidly evolving landscape of geometric deep-learning or CAD processing libraries. Additionally, Tesseract components are deployment-ready by design, enabling seamless transition from prototype to production pipeline. 
 
-Below, we define the three Tesseract Components used in the QoI-based surrogate model workflow.
+Below, we define the three Tesseract components used in the QoI-based surrogate model workflow.
 
 **Dataset Tesseract**
 ### TODO UPDATE LAST AFTER ALESSANDRO REVIEW
@@ -191,14 +191,14 @@ The training workflow consists of two key Tesseract components:
 The inference workflow enables engineers to predict QoI using only CAD geometry files and boundary conditions.
 
 This workflow consists of:
-- **Dataset Pre-Processing Tesseract**: Ensures data format compatibility with the trained model and retrieves the required point-cloud samples, CAD parameters and boundary conditions.
+- **Dataset Pre-Processing Tesseract**: Ensures data format compatibility with the trained model and retrieves the required point cloud samples, CAD parameters and boundary conditions.
 - **Inference Tesseract**: Feeds the pre-processed data into the trained model to predict QoI.
 
 ## 4. Results
 
 Before examining the results, we need to understand how the Ansys Fluent simulations are transformed into a dataset suitable for training the QoI-based surrogate model. This preprocessing pipeline extracts and structures the relevant information from raw simulation outputs, converting them into machine-learning-ready inputs. Below we provide a brief overview of the elements of the dataset created, although a more detailed explanation is available in [Appendix A.1.](#a1-dataset-preparation):
 
-- Point-Cloud points and normals: correspond to the (x, y, z) coordinates and (nx, ny, nz) normal unit vectors of the point-cloud sampling performed over the CAD geometry file (STL)
+- Point-Cloud points and normals: correspond to the (x, y, z) coordinates and (nx, ny, nz) normal unit vectors of the point cloud sampling performed over the CAD geometry file (STL)
 - Point-Cloud-derived parameters: represent geometric metrics that are not explicitly available from the STL file but can be directly computed from the sampled points
 - CAD parameters: correspond to the mentioned CAD sketch parameters (`d61`, `d72`, `d13`, `d34`)
 - Boundary conditions: inlet velocity of the HVAC duct
@@ -207,7 +207,7 @@ Before examining the results, we need to understand how the Ansys Fluent simulat
 
 ![alt text](images/full_model.png)
 
-The proposed model performs a shape embedding over the sampled points and normals, then concatenates this representation with the boundary conditions, point-cloud-derived parameters, and CAD parameters. These combined inputs are passed to a regressor (such as a simple Random Forest) to predict the QoI. More information on the architecture can be found in [Appendix A.2.](#a2-model-architecture)
+The proposed model performs a shape embedding over the sampled points and normals, then concatenates this representation with the boundary conditions, point cloud-derived parameters, and CAD parameters. These combined inputs are passed to a regressor (such as a simple Random Forest) to predict the QoI. More information on the architecture can be found in [Appendix A.2.](#a2-model-architecture)
 
 The metrics of the architecture proposed for the QoI-based surrogate model have been extracted for an unseen dataset of 31 samples.
 ```
@@ -223,7 +223,20 @@ The figures collectively indicate a reliable QoI predictions, especially conside
 An alternative approach to the one described here can be found in [Appendix A.2.](#a2-model-architecture). This specific QoI-based surrogate model is trained without any CAD parameters as input. This scenario represents situations where the original CAD sketches used to generate the STL files have been lost (a common occurrence when design traceability is poorly maintained or when multiple CAD softwares are used).
 
 ## 5. Outlook
-Tesseract makes QoI-based engineering workflows practical by combining modular, deployment-ready components on top of Ansys Fluent simulations.
+This showcase demonstrates how Tesseract enables QoI-based surrogate model workflows on top of Ansys Fluent numerical simulations. The approach offers tangible benefits for simulation-driven design: 
+
+**Accelerated Design Iteration**: Direct QoI prediction bypasses expensive simulation runs during early-stage exploration. For the HVAC case shown here, the Tesseract training and inference workflows define a functional mapping between CAD parameters, boundary conditions and QoI. This eliminate some of the most costly stages of a simulation such as meshing, solving, and post-processing stages. 
+
+**Extension to Ansys Fluent Datasets**: The Tesseract components integrate with standard Ansys Fluent outputs (STL, mesh files, report files), enabling teams to adopt QoI-based workflows incrementally and train models on other Ansys Fluent simulations.
+
+**Tesseract modularity and Ansys products**: While this showcase focuses on Ansys Fluent pressure predictions, the workflow architecture can be integrated to other Ansys products. Similar approaches can be built for Ansys Mechanical applications, such as structural analysis (stress/displacement QoI) or thermal management (temperature QoI). The Tesseract workflow structure remains the unchanged. Only the Tesseract pre-processing component needs adjustment to handle differnt file format and QoI reports, while training and inference Tesseracts can be reused as-id.
+
+
+**Handling Missing Design Information**: The model architecture (Appendix A.2) demonstrates that QoI prediction remains viable even when CAD parameter history is unavailable. This addresses a practical reality in engineering organizations, as STL files are often exchanged without underlying parametric models.
+
+**Tesseract exploiting features**: summarize differentiability + sensitivity analysis workflows could be defined. Also, modularity and production 
+
+
 
 ## Appendix
 ### A. QoI-based Surrogate Model
@@ -240,11 +253,11 @@ Experiment_0
 ```
 A critical part for training a QoI-based surrogate model is the extraction of features from the available simulations. The following paragraphs describe the feature-extraction process in detail.
 ##### CAD Geometry File Pre-Processing
-Although several pre-processing strategies can be used to convert CAD geometry files into machine-learning-ready inputs (e.g. voxelization, signed distance fields, graph-based representations…) this showcase adopts a point-cloud representation as it offers a good balance between geometric fidelity and implementation simplicity.
+Although several pre-processing strategies can be used to convert CAD geometry files into machine-learning-ready inputs (e.g. voxelization, signed distance fields, graph-based representations…) this showcase adopts a point cloud representation as it offers a good balance between geometric fidelity and implementation simplicity.
 
-*Point-Cloud Sampling (Points & Normals)*
+###### *Point Cloud Sampling (Points & Normals)*
 
-Point-cloud sampling retrieves both point coordinates and their normals.
+Point cloud sampling retrieves both point coordinates and their normals.
 
 Similar to the Ansys Meshing feature “Sphere of Influence” (referred to as SoI in the images), the implemented code is able to increase the sampling density in targeted regions. Since the baffle plates represent a relevant area of the CAD design, spheres of influence around these areas can be defined.
 <table>
@@ -264,11 +277,11 @@ Similar to the Ansys Meshing feature “Sphere of Influence” (referred to as S
   </tr>
 </table>
 
-The `config.yaml` contains the parameters used to control the pre-processing of CAD geometry files, including the configuration of different point-cloud sampling techniques.
+The `config.yaml` contains the parameters used to control the pre-processing of CAD geometry files, including the configuration of different point cloud sampling techniques.
 
-*Point-Cloud Derived Parameters*
+###### *Point Cloud Derived Parameters*
 
-The point-cloud representation also enables the extraction of several geometric metrics that are not explicitly available from the STL file but can be directly computed from the sampled points. These features provide global descriptors of the geometry and will be used to help the QoI-based surrogate model capture coarser attributes that could influence the QoI. The metrics considered include:
+The point cloud representation also enables the extraction of several geometric metrics that are not explicitly available from the STL file but can be directly computed from the sampled points. These features provide global descriptors of the geometry and will be used to help the QoI-based surrogate model capture coarser attributes that could influence the QoI. The metrics considered include:
 
 - min(x, y, z): minimum coordinate values across all sampled points
 
@@ -327,7 +340,7 @@ A dedicated `SurfaceIntegralReport` class has been implemented to read these fil
 
 ##### Storing Pre-Processed Dataset
 
-Following the pre-processing phase, all CAD geometry files data (including point-cloud points and normals, and point-cloud-derived geometric parameters), CAD  parameters variations and boundary conditions are consolidated alongisde the QoI. These datasets are serialized in NPZ format for efficient storage and retrieval.
+Following the pre-processing phase, all CAD geometry files data (including point cloud points and normals, and point cloud-derived geometric parameters), CAD  parameters variations and boundary conditions are consolidated alongisde the QoI. These datasets are serialized in NPZ format for efficient storage and retrieval.
 
 The NPZ files will be ingested and converted into PyTorch Dataset objects to enable neural network training and inference.
 
@@ -343,7 +356,7 @@ The proposed approach employs a geometry embedding strategy over the points and 
 
    - CAD parameters `["d61", "d72", "d13", "d34"]`, either in full or as a subset
 
-Following concatenation of the parameter vector `p` with the shape embedding `z`, various architectures can be attached to predict the QoI vector `q`. As illustrated in the figure below, this showcase employs a Random Forest (RF) regressor in the prediction block due to its straightforward implementation and robust performance characteristics.
+Following concatenation of the parameter vector `p` with the shape embedding `z`, various architectures can be attached to predict the QoI vector `q`. As illustrated in the figure below, this showcase employs a Random Forest (RF) regressor in the prediction block due to its robust performance characteristics.
 
 ![alt text](images/full_model.png)
 
@@ -352,12 +365,12 @@ The shape embedder employs a PointNet-based embedder for processing the 3D point
 2. Global Feature Aggregation: Max pooling aggregates point-wise features.
 3. Latent Space Projection: a fully connected MLP projects the global features into a lower-dimensional latent representation.
 
-More sophisticated point cloud embedders such as PointNeXt and PointBERT were evaluated during model development. However, these architectures demonstrated reduced performance on our dataset, likely due to their increased complexity and parameter count being poorly suited for the limited training data available.
+More sophisticated point cloud embedders such as PointNeXt and PointBERT were evaluated during model development. However, these architectures demonstrated reduced performance on our dataset, likely due to their increased complexity and parameter count being poorly suited for the small training data. 
 
 
 **Baseline model**
 
-The baseline model includes in the parameter vector `p`: boundary conditions, point-cloud derived parameters and CAD parameters. This is the default architecture for the showcase, and the results are available in the [results section](#4-results).
+The baseline model includes in the parameter vector `p`: boundary conditions, point cloud-derived parameters and CAD parameters. This is the default architecture for the showcase, and the results are available in the [results section](#4-results).
 
 ```
 "test_metrics": {
@@ -397,4 +410,4 @@ When looking at the latent space of the shape embedding block, we can see;
 
 It is important to remark the shape embedder is trained together with the QoI-based regressor, meaning that even though the embedder architecture only processes point clouds, the training step is done so that together with the vector `p` it helps predict the QoI `q`.
 
-> 📝 **Note:** These architecture represents an initial baseline representation rather than an optimized solution. The primary objective of this showcase is to establish an end-to-end workflow from geometry embedding through QoI prediction, demonstrating technical feasibility. Subsequent iterations can evaluate alternative embedding techniques (voxelization, SDF or GNN), feature fusion methods in the integration of `z` and `p`, or alternative architectures to replace Random Forests.
+> 📝 **Note:** These architecture represents an initial baseline representation rather than an optimized solution. The primary objective of this showcase is to establish an end-to-end workflow from geometry embedding through QoI prediction, demonstrating technical feasibility. Subsequent iterations can evaluate alternative embedding techniques (voxelization, signed distance functions or graph-based representations), feature fusion methods in the integration of `z` and `p`, or alternative architectures to replace Random Forests.
