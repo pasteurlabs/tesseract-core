@@ -19,7 +19,7 @@ where the loss decay is plotted here:
 
 A windows machine A with:
 1. Ansys SpaceClaim + MAPDL installed with an active license.
-2. Python and a python environment (e.g., conda, venv).
+2. Python with a virtual environment (e.g. via conda, venv).
 3. Two open ports.
 4. Known IP address, obtain it by running
 
