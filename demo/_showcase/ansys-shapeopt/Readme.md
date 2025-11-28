@@ -60,7 +60,7 @@ replace "v242" with your ansys version and ensure the path is correct. More deta
 
 The following commands are also available inside the optimization.ipynb. Therefore at this stage you are ready to run the notebook.
 
-On machine B, navigate to `demo/showcase/ansys-shapeopt/` and run
+On machine B, navigate to `demo/_showcase/ansys-shapeopt/` and run
 
 ```bash
 pip install -r requirements.txt
