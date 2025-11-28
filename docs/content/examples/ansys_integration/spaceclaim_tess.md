@@ -4,6 +4,8 @@ This guide outlines how to wrap Ansys SpaceClaim as a Tesseract. For this, we wi
 
 ```{seealso}
 The full code for this Tesseract can be found under `demo/_showcase/ansys-shapeopt/spaceclaim` in the [Tesseract Core repository](https://github.com/pasteurlabs/tesseract-core/tree/main/demo/_showcase/ansys-shapeopt/spaceclaim).
+
+The Tesseract can be seen in action within our geometry optimization [demo](forum).
 ```
 
 ## Why SpaceClaim as a Tesseract?
