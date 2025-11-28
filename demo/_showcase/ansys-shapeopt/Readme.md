@@ -48,7 +48,7 @@ Note that we dont build a Tesseract image for SpaceClaim in this example. This i
 
 ### PyMAPDL Server
 
-On machine A, run the following powershell command to start ansys with grpc server enabled:
+On machine A, run the following Powershell command to start Ansys with gRPC server enabled:
 
 ```powershell
 Start-Process -FilePath "F:\ANSYS Inc\v242\ansys\bin\winx64\ANSYS242.exe" -ArgumentList "-grpc", "-port", "<port_number_2>"
