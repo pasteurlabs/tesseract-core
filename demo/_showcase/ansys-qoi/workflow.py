@@ -25,9 +25,9 @@ if __name__ == "__main__":
         volumes=["./inputs:/tesseract/inputs:ro", "./outputs:/tesseract/outputs:rw"],
     )
 
-    qoi_dataset.serve()
-    outputs = qoi_dataset.apply(inputs)
-    qoi_dataset.teardown()
+    with qoi_dataset:
+        outputs = qoi_dataset.apply(inputs)
+
 
     # TRAINING TESSERACT
     inputs = {"config": str(CONFIG), "data_folder": str(DATASET_FOLDER)}
@@ -37,9 +37,9 @@ if __name__ == "__main__":
         volumes=["./inputs:/tesseract/inputs:ro", "./outputs:/tesseract/outputs:rw"],
     )
 
-    qoi_train.serve()
-    outputs = qoi_train.apply(inputs)
-    qoi_train.teardown()
+    with qoi_train:
+        outputs = qoi_train.apply(inputs)
+
 
     # INFERENCE TESSERACT
 
@@ -66,9 +66,8 @@ if __name__ == "__main__":
         volumes=["./inputs:/tesseract/inputs:ro", "./outputs:/tesseract/outputs:rw"],
     )
 
-    qoi_inference.serve()
-    outputs = qoi_inference.apply(inputs)
-    qoi_inference.teardown()
+    with qoi_inference:
+        outputs = qoi_inference.apply(inputs)
 
     print("\n" + "=" * 80)
     print("✓ Workflow completed successfully!")
