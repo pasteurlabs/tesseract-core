@@ -195,10 +195,10 @@ This workflow consists of:
 
 ## 4. Results
 
-Before examining the results, we need to understand how the Ansys Fluent simulations are transformed into a dataset suitable for training the QoI-based surrogate model. This preprocessing pipeline extracts and structures the relevant information from raw simulation outputs, converting them into machine-learning-ready inputs. Below we provide a brief overview of the elements of the dataset created, although a more detailed explanation is available in [Appendix A.1.](#a1-dataset-preparation):
+Before examining the results, we need to understand how Ansys Fluent simulations are transformed into a dataset suitable for training the QoI-based surrogate model. This preprocessing pipeline extracts and structures the relevant information from raw simulation outputs, converting them into an ML-ready dataset. Below, we provide a brief overview of the elements of this dataset. A more detailed explanation is available in [Appendix A.1.](#a1-dataset-preparation):
 
-- Point-Cloud points and normals: correspond to the (x, y, z) coordinates and (nx, ny, nz) normal unit vectors of the point-cloud sampling performed over the CAD geometry file (STL)
-- Point-Cloud-derived parameters: represent geometric metrics that are not explicitly available from the STL file but can be directly computed from the sampled points
+- Point cloud vertices and normals: correspond to the (x, y, z) coordinates and (nx, ny, nz) normal unit vectors of the point cloud sampling performed over the CAD geometry file (STL)
+- Point cloud-derived parameters: represent geometric values that are not explicitly available from the STL file but can be directly computed from the sampled points
 - CAD parameters: correspond to the mentioned CAD sketch parameters (`d61`, `d72`, `d13`, `d34`)
 - Boundary conditions: inlet velocity of the HVAC duct
 - QoI: averaged static pressure values at 4 stations (`inlet`, `outlet`, `p2-plane`, `p3-plane`)
@@ -206,7 +206,7 @@ Before examining the results, we need to understand how the Ansys Fluent simulat
 
 ![alt text](images/full_model.png)
 
-The proposed model performs a shape embedding over the sampled points and normals, then concatenates this representation with the boundary conditions, point-cloud-derived parameters, and CAD parameters. These combined inputs are passed to a regressor (such as a simple Random Forest) to predict the QoI. More information on the architecture and variations of it can be found in [Appendix A.2.](#a2-model-architecture)
+The proposed model performs a shape embedding over the sampled points and normals, then concatenates this representation with the boundary conditions, point cloud-derived parameters, and CAD parameters. These combined inputs are passed to a regressor (such as a simple Random Forest) to predict the QoI. More information on the model architectures can be found in [Appendix A.2.](#a2-model-architecture)
 
 The metrics of the architecture proposed for the QoI-based surrogate model have been extracted for an unseen dataset of 31 samples.
 ```
@@ -217,9 +217,9 @@ The metrics of the architecture proposed for the QoI-based surrogate model have 
   "nmae": 0.07607935409954629
 }
 ```
-The figures collectively indicate a reliable QoI predictions, especially considering that this model would be of special interest for early design phase and rapid design exploration.
+The figures collectively indicate reliable QoI predictions, especially considering that this model would be of special interest for early design phase and rapid design exploration.
 
-An alternative architectures to the one proposed and benchmarks can be found in [Appendix A.2.](#a2-model-architecture). This specific QoI-based surrogate model is trained without any CAD parameters as input. This scenario represents situations where the original CAD sketches used to generate the STL files have been lost (a common occurrence when design traceability is poorly maintained or when multiple CAD softwares are used).
+An alternative architecture to the one proposed here and related benchmarks can be found in [Appendix A.2.](#a2-model-architecture). This specific QoI-based surrogate model is trained without any CAD parameters as input. This scenario represents situations where the original CAD parameters used to generate the STL files have been lost (a common occurrence when design traceability is poorly maintained or when multiple CAD softwares are used).
 
 ## 5. Outlook
 Tesseract makes QoI-based engineering workflows practical by combining modular, deployment-ready components on top of Ansys Fluent simulations.
@@ -241,9 +241,9 @@ A critical part for training a QoI-based surrogate model is the extraction of fe
 ##### CAD Geometry File Pre-Processing
 Although several pre-processing strategies can be used to convert CAD geometry files into machine-learning-ready inputs (e.g. voxelization, signed distance fields, graph-based representations…) this showcase adopts a point-cloud representation as it offers a good balance between geometric fidelity and implementation simplicity.
 
-*Point-Cloud Sampling (Points & Normals)*
+*Point cloud sampling (points & normals)*
 
-Point-cloud sampling retrieves both point coordinates and their normals.
+Point cloud sampling retrieves both point coordinates and their normals.
 
 Similar to the Ansys Meshing feature “Sphere of Influence” (referred to as SoI in the images), the implemented code is able to increase the sampling density in targeted regions. Since the baffle plates represent a relevant area of the CAD design, spheres of influence around these areas can be defined.
 <table>
@@ -283,7 +283,7 @@ The point-cloud representation also enables the extraction of several geometric 
 
 ##### CAD Parameters Pre-Processing
 
-In addition to the CAD geometry file (STL), each Ansys simulation folder includes a file that records the key variations applied during the dataset generation. This `metadata.json.series` file was automatically produced and serves to keep track of the CAD parameters and other variations performed.
+In addition to the CAD geometry file (STL), each Ansys simulation folder includes a file that records the key variations applied during the dataset generation. This `metadata.json.series` file was automatically produced and serves to keep track of the CAD parameters and other variations.
 
 ```json
 "variations": {
@@ -326,7 +326,7 @@ A dedicated `SurfaceIntegralReport` class has been implemented to read these fil
 
 ##### Storing Pre-Processed Dataset
 
-Following the pre-processing phase, all CAD geometry files data (including point-cloud points and normals, and point-cloud-derived geometric parameters), CAD  parameters variations and boundary conditions are consolidated alongisde the QoI. These datasets are serialized in NPZ format for efficient storage and retrieval.
+Following the pre-processing phase, all CAD geometry files data (including point clouds and normals, as well as point cloud-derived geometric parameters), CAD parameters variations and boundary conditions are consolidated alongside the QoI. These datasets are serialized in NPZ format for efficient storage and retrieval.
 
 The NPZ files will be ingested and converted into PyTorch Dataset objects to enable neural network training and inference.
 
@@ -340,9 +340,9 @@ The proposed approach employs a geometry embedding strategy over the points and 
 
    - Point-cloud derived parameters `["min", "max", "size", "diag", "max_side", "centroid"]`
 
-   - CAD parameters `["d61", "d72", "d13", "d34"]`, either in full or as a subset
+   - CAD parameters `["d61", "d72", "d13", "d34"]`, either all or a subset
 
-Following concatenation of the parameter vector `p` with the shape embedding `z`, various architectures can be attached to predict the QoI vector `q`. As illustrated in the figure below, this showcase employs a Random Forest (RF) regressor in the prediction block due to its straightforward implementation and robust performance characteristics.
+Following concatenation of the parameter vector `p` with the shape embedding `z`, various architectures can be attached to predict the QoI vector `q`. As illustrated in the figure below, this showcase employs a Random Forest (RF) regressor in the prediction block thanks to its robust performance.
 
 **Baseline architecture**
 ![alt text](images/full_model.png)
@@ -365,7 +365,7 @@ The baseline architecture includes in the parameter vector `p`: boundary conditi
 ![alt text](images/model_no_cadp.png)
 This architecture has been studied as an alternative to the baseline model.
 
-This specific QoI-based surrogate model is trained without any CAD parameters in the parameters vector `p`. This scenario represents situations where the original CAD sketches used to generate the STL files have been lost (a common occurrence when design traceability is poorly maintained or when multiple CAD softwares are used).
+This specific QoI-based surrogate model is trained without any CAD parameters in the parameters vector `p`. This scenario represents situations where the original CAD parameters used to generate the STL files have been lost (a common occurrence when design traceability is poorly maintained or when multiple CAD softwares are used).
 ```
 "test_metrics": {
   "r2": 0.9045070139578009,
@@ -386,6 +386,6 @@ When looking at the latent space of the shape embedding block, we can see;
 
 - The inlet aperture length (d72) and the curvature angle of the duct branch (d34) presence is limited in the latent representation.
 
-It is important to remark the shape embedder is trained together with the QoI-based regressor, meaning that even though the embedder architecture only processes point clouds, the training step is done so that together with the vector `p` it helps predict the QoI `q`.
+It is important to remark that the shape embedder is trained together with the QoI-based regressor, meaning that even though the embedder architecture only processes point clouds, the training step is done so that together with the vector `p` it helps predict the QoI `q`.
 
 > 📝 **Note:** These architecture represents an initial baseline representation rather than an optimized solution. The primary objective of this showcase is to establish an end-to-end workflow from geometry embedding through QoI prediction, demonstrating technical feasibility. Subsequent iterations can evaluate alternative embedding techniques (voxelization, SDF or GNN), feature fusion methods in the integration of `z` and `p`, or alternative architectures to replace Random Forests.
