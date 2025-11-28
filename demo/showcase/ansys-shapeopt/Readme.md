@@ -2,29 +2,24 @@
 
 This directory contains an example Tesseract configuration and scripts demonstrating how to use Tesseract-JAX with ANSYS spaceclaim and PyMAPDL. The overall worklflow is illustrated below:
 
-![Workflow](workflow.png)
+![Workflow](imgs/workflow_1.png)
 
 ## Get Started
 
-### PL internal instructions:
-
-- Our open ports are: 443, 8000 and 50052.
-- Make sure to be connected to the PL VPN.
-
 ### Prerequisites
 
-For the windows machine:
+A windows machine A with:
 1. ANSYS installed and an active license.
 2. Python and a python environment (e.g., conda, venv).
 3. Two open ports.
 
-For the linux machine:
+A machine B, ideally running linux, with:
 1. Docker installed and running.
 2. Python and a python environment (e.g., conda, venv).
 
-### SpaceClaim Tesseract
+### SpaceClaim Tesseract setup
 
-Create a new python env. Assuming you using windows powerhsell, install the required dependencies:
+In windows powerhsell, install the following dependencies into 
 
 ```bash
 pip install tesseract-core[runtime] trimesh
@@ -59,13 +54,13 @@ Invoke-RestMethod -Uri "http://127.0.0.1:8000/apply" -Method Post -Body (
 
 ### PyMAPDL Server
 
-On a windows machine, make sure ansys is installed. Then run the following powershell command to start ansys with grpc server enabled:
+On the machine A, run the following powershell command to start ansys with grpc server enabled:
 
 ```powershell
 Start-Process -FilePath "F:\ANSYS Inc\v242\ansys\bin\winx64\ANSYS242.exe" -ArgumentList "-grpc", "-port", "<port_number_2>"
 ```
 
-replace "v242" with your ansys version.
+replace "v242" with your ansys version and esnure the path is correct.
 
 ### Build tesseracts
 
