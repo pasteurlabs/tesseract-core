@@ -4,8 +4,15 @@ This directory contains an example Tesseract configuration and scripts demonstra
 
 ![Workflow](imgs/workflow_1.png)
 
-The main entry point of this demo is `optimization.ipynb`.
+The main entry point of this demo is `optimization.ipynb`. The evolution of the mesh over the optimation on two different initial conditions can be seen here:
 
+| Grid IC | Random IC |
+|----------|----------|
+| ![Workflow](imgs/mesh_grid_adam.gif)    | ![Workflow](imgs/mesh_grid_adam.gif)     |
+
+where the loss decay is plotted here:
+
+![Workflow](imgs/loss.png)
 ## Get Started
 
 ### Prerequisites
