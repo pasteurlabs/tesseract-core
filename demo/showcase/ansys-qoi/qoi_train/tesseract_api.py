@@ -18,10 +18,10 @@ from tesseract_core.runtime.experimental import InputFileReference, OutputFileRe
 
 
 class InputSchema(BaseModel):
-    config: InputFileReference = Field(description="Configuration file")
+    config: str = Field(description="Configuration file")
 
-    data: list[InputFileReference] = Field(
-        description="List of npz file paths (can be absolute paths from dependent workflows)"
+    data_folder: str = Field(
+        description="File folderList of npz file paths (can be absolute paths from dependent workflows)"
     )
 
 
@@ -35,12 +35,15 @@ class OutputSchema(BaseModel):
 
 
 def evaluate(inputs: Any) -> Any:
-    from scripts.dataset import CADDataset, create_raw_splits, create_scaled_datasets
-    from scripts.scaler import ScalingPipeline
-    from scripts.train import train_hybrid_models
+    from process.dataset import CADDataset, create_raw_splits, create_scaled_datasets
+    from process.scaler import ScalingPipeline
+    from process.train import train_hybrid_models
     # Convert all inputs to Path objects (handles strings, InputFileReference, and Path)
-    config_path = Path(str(inputs["config"]))
-    data_files = [Path(str(f)) for f in inputs["data"]]
+    config_path = Path(inputs["config"])
+    data_folder_path = Path(inputs["data_folder"])
+    files = [str(p.resolve()) for p in data_folder_path.glob("*.npz")]
+
+    data_files = [Path(f) for f in files]
 
     raw_dataset = CADDataset(files=data_files, config_path=config_path)
 
@@ -56,7 +59,7 @@ def evaluate(inputs: Any) -> Any:
     )
 
     # Create output directory
-    output_dir = Path("outputs")
+    output_dir = Path("/tesseract/outputs")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Create scaling pipeline from config

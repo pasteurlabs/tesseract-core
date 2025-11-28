@@ -1,3 +1,4 @@
-torch
-scikit-learn
+#torch
+#scikit-learn
 pyyaml
+./scripts

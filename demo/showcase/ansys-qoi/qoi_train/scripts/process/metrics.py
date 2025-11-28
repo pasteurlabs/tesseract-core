@@ -118,7 +118,6 @@ def compute_metrics(
         if np.any(nonzero_mask)
         else None
     )
-
     # Maximum absolute error
     max_error = np.max(np.abs(y_true - y_pred))
 

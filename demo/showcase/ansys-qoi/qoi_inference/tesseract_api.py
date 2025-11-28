@@ -21,16 +21,15 @@ from tesseract_core.runtime.experimental import InputFileReference
 
 
 class InputSchema(BaseModel):
-    config: InputFileReference = Field(description="Configuration file")
+    config: str = Field(description="Configuration file")
 
-    data: list[InputFileReference] = Field(
-        description="List of npz files containing point-cloud data, simulation parameters and/or QoIs"
-    )  # TODO: Change input type to be list[InputFileReference] (as outputs are inside the qoi_dataset...)
-
-    trained_model: InputFileReference = Field(
+    data_folder: str = Field(
+        description="Folder containing the list of npz files containing point-cloud data, simulation parameters and/or QoIs"
+    )  
+    trained_model: str = Field(
         description="Pickle file containing weights of trained model"
     )
-    scaler: InputFileReference = Field(
+    scaler: str = Field(
         description="Pickle file containing the scaling method for the dataset"
     )
 
@@ -42,20 +41,26 @@ class OutputSchema(BaseModel):
 
 
 def evaluate(inputs: Any) -> Any:
-    from scripts.dataset import CADDataset, ScaledCADDataset, cad_collate
-    from scripts.models import HybridPointCloudTreeModel
-    from scripts.scaler import ScalingPipeline
-    raw_dataset = CADDataset(files=inputs["data"], config_path=inputs["config"])
+    from process.dataset import CADDataset, ScaledCADDataset, cad_collate
+    from process.models import HybridPointCloudTreeModel
+    from process.scaler import ScalingPipeline
+    config_path = Path(inputs["config"])
+    data_folder_path = Path(inputs["data_folder"])
+    files = [str(p.resolve()) for p in data_folder_path.glob("*.npz")]
+
+    data_files = [Path(f) for f in files]
+
+    raw_dataset = CADDataset(files=data_files, config_path=config_path)
 
     with open(inputs["config"]) as f:
         config = yaml.safe_load(f)
 
     # Create output directory
-    output_dir = Path("outputs")
+    output_dir = Path("/tesseract/outputs")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Load the scaling pipeline from saved pickle file
-    scaling_pipeline = ScalingPipeline.load(inputs["scaler"])
+    scaling_pipeline = ScalingPipeline.load(Path(inputs["scaler"]))
 
     # Get all inference samples from the dataset
     inference_samples = [raw_dataset[i] for i in range(len(raw_dataset))]

@@ -7,8 +7,7 @@ import numpy as np
 import yaml
 
 from .dataset import RawDataSample
-from .process.utils import compute_bbox_stats
-from .utils import compute_stats_from_samples, pca_align
+from .utils import compute_stats_from_samples, pca_align, compute_bbox_stats
 
 
 @dataclass
