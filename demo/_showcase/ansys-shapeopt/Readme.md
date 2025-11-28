@@ -29,7 +29,7 @@ A windows machine A with:
 
 A machine B, ideally running linux, with:
 1. Docker installed and running.
-2. Python and a python environment (e.g., conda, venv).
+2. Python with a virtual environment (e.g. via conda, venv).
 
 ### SpaceClaim Tesseract setup
 
