@@ -3,6 +3,7 @@ from typing import TypeVar
 
 import jax
 import jax.numpy as jnp
+import matplotlib
 import matplotlib.pyplot as plt
 import mmapy
 import numpy as np
@@ -77,7 +78,15 @@ def plot_mesh(
         plt.close(fig)
 
 
-def plot_grid_slice(field_slice, extent, ax, title, xlabel, ylabel):
+def plot_grid_slice(
+    field_slice: jnp.ndarray,
+    extent: tuple[int, int],
+    ax: plt.Axes,
+    title: str,
+    xlabel: str,
+    ylabel: str,
+) -> matplotlib.image.AxesImage:
+    """Plot a 2D slice of a grid."""
     im = ax.imshow(field_slice.T, extent=extent, origin="lower")
     ax.set_title(title)
     ax.set_xlabel(xlabel)
@@ -89,7 +98,17 @@ def plot_grid_slice(field_slice, extent, ax, title, xlabel, ylabel):
     return im
 
 
-def plot_grid(field, Lx, Ly, Lz, Nx, Ny, Nz, title="SDF"):
+def plot_grid(
+    field: jnp.ndarray,
+    Lx: float,
+    Ly: float,
+    Lz: float,
+    Nx: int,
+    Ny: int,
+    Nz: int,
+    title: str = "SDF",
+) -> None:
+    """Plot a 3D grid with slices in each dimensions."""
     _, axs = plt.subplots(1, 3, figsize=(15, 5))
 
     plot_grid_slice(
@@ -135,10 +154,10 @@ def stop_grads_int(x: T) -> T:
         Value with stopped gradients.
     """
 
-    def stop(x):
+    def _stop(x: jnp.ndarray):
         return jax._src.ad_util.stop_gradient_p.bind(x)
 
-    return jax.tree_util.tree_map(stop, x)
+    return jax.tree_util.tree_map(_stop, x)
 
 
 def hex_to_pyvista(
@@ -272,6 +291,7 @@ class MMAOptimizer:
         x_min: jax.typing.ArrayLike = None,
         x_max: jax.typing.ArrayLike = None,
     ) -> jax.typing.ArrayLike:
+        """Calculate next parameters values."""
         if iteration < 1:
             raise Exception("The MMA problem expects an iteration count >= 1.")
 

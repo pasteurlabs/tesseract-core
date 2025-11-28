@@ -7,6 +7,7 @@ import pyvista as pv
 import trimesh
 from pydantic import BaseModel, Field
 from pysdf import SDF
+
 from tesseract_core.runtime import Array, Differentiable, Float32, Int32, ShapeDType
 from tesseract_core.runtime.experimental import TesseractReference
 
@@ -214,6 +215,7 @@ def compute_sdf_pyvista(
     Ny: int,
     Nz: int,
 ) -> np.ndarray:
+    """Compute SDF using pyvista."""
     pv_mesh = pv.wrap(geometry)
     grid = pv.ImageData(
         dimensions=(Nx, Ny, Nz),
@@ -240,7 +242,7 @@ def compute_sdf_pysdf(
     Ny: int,
     Nz: int,
 ) -> np.ndarray:
-    """Compute the signed distance field of a geometry on a regular grid."""
+    """Compute SDF usnig pysdf."""
     points, faces = geometry.vertices, geometry.faces
 
     sdf_function = SDF(points, faces)
@@ -457,7 +459,8 @@ def jacobian(
     inputs: InputSchema,
     jac_inputs: set[str],
     jac_outputs: set[str],
-):
+) -> dict[str, Any]:
+    """Jacobian endpoint of tesseract."""
     assert jac_inputs == {"differentiable_parameters"}
     assert jac_outputs == {"sdf"}
 
