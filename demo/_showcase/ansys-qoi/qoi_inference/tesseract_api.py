@@ -23,7 +23,7 @@ class InputSchema(BaseModel):
     config: str = Field(description="Configuration file")
 
     data_folder: str = Field(
-        description="Folder containing npz files with point-cloud data, params, and QoIs"
+        description="Folder containing npz files with point cloud data and simulation parameters"
     )
     trained_model: str = Field(
         description="Pickle file containing weights of trained model"

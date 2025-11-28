@@ -16,7 +16,7 @@ class InputSchema(BaseModel):
     config: str = Field(description="Configuration file")
 
     sim_folder: str = Field(
-        description="Folder path containing CAD files and simulation results",
+        description="Folder path containing Ansys Fluent simulations with CAD files and QoI reports",
     )
 
     dataset_folder: str = Field(
@@ -28,7 +28,7 @@ class OutputSchema(BaseModel):
     """Output schema for QoI dataset generation."""
 
     data: list[str | Path] = Field(
-        description="List of npz files containing point-cloud data, simulation parameters and/or QoIs",
+        description="List of npz files containing point cloud data, simulation parameters and QoI (if available)",
     )
 
 

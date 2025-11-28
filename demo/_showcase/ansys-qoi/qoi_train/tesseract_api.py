@@ -21,7 +21,8 @@ class InputSchema(BaseModel):
     config: str = Field(description="Configuration file")
 
     data_folder: str = Field(
-        description="File folderList of npz file paths (can be absolute paths from dependent workflows)"
+        description="Folder containing npz files containing point cloud data information, "
+        "simulation parameters and QoI"
     )
 
 

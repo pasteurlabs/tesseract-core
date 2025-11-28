@@ -132,18 +132,25 @@ Below, we define the three Tesseract components used in the QoI-based surrogate 
 ### TODO UPDATE LAST AFTER ALESSANDRO REVIEW
 ```python
 class InputSchema(BaseModel):
-    config: InputFileReference = Field(description="Configuration file")
-    sim_folder: str | Path = Field(
+    """Input schema for QoI dataset generation."""
+
+    config: str = Field(description="Configuration file")
+
+    sim_folder: str = Field(
         description="Folder path containing Ansys Fluent simulations with CAD files and QoI reports",
     )
-    dataset_folder: str | Path = Field(
+
+    dataset_folder: str = Field(
         description="Folder path where pre-processed simulations will be dumped into"
     )
 ```
+
 ```python
 class OutputSchema(BaseModel):
-    data: list[OutputFileReference] = Field(
-        description="List of npz files containing List of npz files containing point-cloud data information,  simulation parameters and QoIs",
+    """Output schema for QoI dataset generation."""
+
+    data: list[str | Path] = Field(
+        description="List of npz files containing point cloud data, simulation parameters and QoI (if available)",
     )
 ```
 **Training Tesseract**
@@ -151,11 +158,13 @@ class OutputSchema(BaseModel):
 class InputSchema(BaseModel):
     config: InputFileReference = Field(description="Configuration file")
     data: list[str] = Field(
-        description="List of npz files containing List of npz files containing point-cloud data information,  simulation parameters and QoIs"
+        description="List of npz files containing point cloud data information,  simulation parameters and QoI"
     )
 ```
 ```python
 class OutputSchema(BaseModel):
+    """Output schema for QoI model training."""
+
     trained_models: list[OutputFileReference] = Field(
         description="Pickle file containing weights of trained model"
     )
@@ -166,21 +175,26 @@ class OutputSchema(BaseModel):
 **Inference Tesseract**
 ```python
 class InputSchema(BaseModel):
-    config: InputFileReference = Field(description="Configuration file")
-    data: list[str | Path] = Field(
-        description="List of npz files containing point-cloud data information and simulation parameters"
+    """Input schema for QoI model inference."""
+
+    config: str = Field(description="Configuration file")
+
+    data_folder: str = Field(
+        description="Folder containing npz files with point cloud data and simulation parameters"
     )
-    trained_model: InputFileReference = Field(
+    trained_model: str = Field(
         description="Pickle file containing weights of trained model"
     )
-    scaler: InputFileReference = Field(
+    scaler: str = Field(
         description="Pickle file containing the scaling method for the dataset"
     )
 ```
 ```python
 class OutputSchema(BaseModel):
+    """Output schema for QoI model inference."""
+
     qoi: Array[(None, None), Float32] = Field(
-        description="QoIs - 2D array where each row is a prediction",
+        description="QoI - 2D array where each row is a prediction",
     )
 ```
 #### 3.1.2. Tesseract Training Workflow
@@ -234,7 +248,7 @@ This showcase demonstrates how Tesseract enables QoI-based surrogate model workf
 
 **Handling Missing Design Information**: The model architecture (Appendix A.2) demonstrates that QoI prediction remains viable even when CAD parameter history is unavailable. This addresses a practical reality in engineering organizations, as STL files are often exchanged without underlying parametric models.
 
-**Tesseract exploiting features**: summarize differentiability + sensitivity analysis workflows could be defined. Also, modularity and production
+**Exploiting Tesseract features**: summarize differentiability + sensitivity analysis workflows could be defined. Also, modularity and production
 
 
 
