@@ -14,7 +14,8 @@ where the loss decay is plotted here:
 
 ![Workflow](imgs/loss.png)
 
-In `optimization_os.ipynb` we provide a alternative workflow that is relying on the open source FEM solver [JAX-FEM](https://github.com/deepmodeling/jax-fem), hence does not access to an ANSYS licence. It can be run directly without having to the following installation steps.
+> [!TIP]
+> In `optimization_os.ipynb` we provide an alternative workflow that is relying on the open-source FEM solver [JAX-FEM](https://github.com/deepmodeling/jax-fem), and does not require an active Ansys license.
 
 
 
