@@ -13,6 +13,17 @@ The main entry point of this demo is `optimization.ipynb`. The evolution of the 
 where the loss decay is plotted here:
 
 ![Workflow](imgs/loss.png)
+
+> [!TIP]
+> In `optimization_os.ipynb` we provide an alternative workflow that is relying on the open-source FEM solver [JAX-FEM](https://github.com/deepmodeling/jax-fem), and does not require an active Ansys license.
+
+
+
+| Mesh | Loss |
+|----------|----------|
+| ![Workflow](imgs/mesh_optim.gif)    | ![Workflow](imgs/loss_os.png)     |
+
+
 ## Get Started
 
 ### Prerequisites
