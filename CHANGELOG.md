@@ -2,12 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
-## [1.2.0] - 2025-11-24
+## [2.0.0] - 2025-12-02
 
 ### Features
 
 - Add /tesseract to PYTHONPATH, similar to native execution (#372)
 - Add example for differentiable quadratic programming (QP) solver (#345)
+- Ensure modules next to tesseract_api.py can always be imported (#400)
+- Adding SpaceClaim/PyMAPDL Tesseract example and docs (#403)
 
 ### Bug Fixes
 
@@ -16,6 +18,18 @@ All notable changes to this project will be documented in this file.
 - Switch MLflow tests from deprecated file backend to sqlite (#389)
 - Catch identical mounted volumes (#337)
 - Remove user creation logic, set `HOME` env var instead (#393)
+
+### Refactor
+
+- [**breaking**] Replace python 3.9 with 3.10 as oldest supported version (#401)
+
+### Documentation
+
+- Ansys shapeopt showcase (#404)
+- Add Ansys Fluent QoI-based workflow example (#399)
+- Update showcase READMEs to reflect + link to forum posts (#405)
+- Add open-source alternative to Ansys-based shapeopt to showcase folder (#408)
+- Fix Tesseract names in open source shapeopt showcase (#409)
 
 ## [1.1.1] - 2025-10-15
 
