@@ -7,9 +7,9 @@ import os
 import sys
 import threading
 import warnings
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from types import ModuleType
-from typing import Any, Callable
+from typing import Any
 
 import typer
 from rich.console import Console

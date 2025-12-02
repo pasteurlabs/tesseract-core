@@ -2,16 +2,14 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import traceback
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from functools import wraps
 from pathlib import Path
 from types import ModuleType
 from typing import (
     Any,
-    Callable,
     Literal,
     NamedTuple,
-    Optional,
     get_args,
 )
 
@@ -43,9 +41,9 @@ class GradientCheckResult(NamedTuple):
     in_path: str
     out_path: str
     idx: tuple[int, ...]
-    grad_val: Optional[ArrayLike]
-    ref_val: Optional[ArrayLike]
-    exception: Optional[str]
+    grad_val: ArrayLike | None
+    ref_val: ArrayLike | None
+    exception: str | None
 
 
 def get_input_schema(endpoint_function: Callable) -> type[BaseModel]:
@@ -297,7 +295,7 @@ def _sample_indices(
             continue
         n_evals = max(1, int(max_evals * np.prod(shape) / total_elements))
         idx_tuple = np.unravel_index(rng.choice(int(np.prod(shape)), n_evals), shape)
-        idx_per_input[path] = list(zip(*idx_tuple))
+        idx_per_input[path] = list(zip(*idx_tuple, strict=True))
 
     items_to_check = []
     for in_path in diff_inputs:
@@ -408,14 +406,14 @@ def check_gradients(
     api_module: ModuleType,
     inputs: dict[str, Any],
     *,
-    input_paths: Optional[Sequence[str]] = None,
-    output_paths: Optional[Sequence[str]] = None,
-    base_dir: Optional[Path] = None,
-    endpoints: Optional[Sequence[ADEndpointName]] = None,
+    input_paths: Sequence[str] | None = None,
+    output_paths: Sequence[str] | None = None,
+    base_dir: Path | None = None,
+    endpoints: Sequence[ADEndpointName] | None = None,
     max_evals: int = 1000,
     eps: float = 1e-4,
     rtol: float = 0.1,
-    seed: Optional[int] = None,
+    seed: int | None = None,
     show_progress: bool = True,
 ) -> Iterator[tuple[str, list[GradientCheckResult], int]]:
     """Check gradients of endpoints against a finite difference approximation.

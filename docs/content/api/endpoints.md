@@ -1,4 +1,4 @@
-# Tesseract endpoints
+# Tesseract Endpoints
 
 ## Required endpoints
 

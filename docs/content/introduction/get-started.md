@@ -1,5 +1,5 @@
 (tr-quickstart)=
-# Get started
+# Get Started
 
 ```{note}
 Please ensure you have a working [installation](installation.md) before proceeding with this tutorial.

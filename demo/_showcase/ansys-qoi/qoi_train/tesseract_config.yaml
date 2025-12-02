@@ -1,0 +1,8 @@
+name: qoi_train
+version: "0.1.0"
+description: |
+  Tesseract for training QoI workflows.
+
+build_config:
+  target_platform: "native"
+  extra_packages: ["libegl1", "libgl1", "libgomp1"]
