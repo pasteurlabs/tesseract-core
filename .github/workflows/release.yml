@@ -51,8 +51,9 @@ jobs:
       - name: Generate changelog
         id: generate_changelog
         run: |
-          new_version=$(bash .github/workflows/get_new_version.sh)
-          git-cliff --output CHANGELOG.md --bump $new_version
+          bump_type=$(bash .github/workflows/get_bump_type.sh)
+          git-cliff --output CHANGELOG.md --bump $bump_type
+          new_version=$(git-cliff --bumped-version --bump $bump_type)
 
           echo "new_version=$new_version" >> $GITHUB_OUTPUT
 
@@ -101,8 +102,9 @@ jobs:
       - name: Generate changelog
         id: generate_changelog
         run: |
-          new_version=$(bash .github/workflows/get_new_version.sh)
-          git-cliff --output CHANGELOG.md --bump $new_version
+          bump_type=$(bash .github/workflows/get_bump_type.sh)
+          new_version=$(git-cliff --bumped-version --bump $bump_type)
+          git-cliff --output CHANGELOG.md --bump $bump_type
 
           echo "new_version=$new_version" >> $GITHUB_OUTPUT
 
@@ -148,7 +150,8 @@ jobs:
           current_version=$(gh release view --json tagName --jq '.tagName' || echo "v0.0.0")
           echo "current_version=$current_version" >> $GITHUB_OUTPUT
 
-          new_version=$(bash .github/workflows/get_new_version.sh)
+          bump_type=$(bash .github/workflows/get_bump_type.sh)
+          new_version=$(git-cliff --bumped-version --bump $bump_type)
           echo "new_version=$new_version" >> $GITHUB_OUTPUT
 
       - name: Assemble release notes

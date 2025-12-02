@@ -8,7 +8,9 @@ new_version=$(git-cliff --bumped-version)
 current_major=$(cut -d '.' -f 1 <<< "$current_version")
 new_major=$(cut -d '.' -f 1 <<< "$new_version")
 if [[ "$current_major" != "$new_major" ]]; then
-    new_version=$(git-cliff --bumped-version --bump-type minor)
+    bump_type=$(git-cliff --bumped-version --bump minor)
+else
+    bump_type="auto"
 fi
 
-echo $new_version
+echo $bump_type
