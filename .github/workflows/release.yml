@@ -52,7 +52,7 @@ jobs:
         id: generate_changelog
         run: |
           new_version=$(bash .github/workflows/get_new_version.sh)
-          git-cliff --output CHANGELOG.md --bump
+          git-cliff --output CHANGELOG.md --bump $new_version
 
           echo "new_version=$new_version" >> $GITHUB_OUTPUT
 
@@ -102,7 +102,7 @@ jobs:
         id: generate_changelog
         run: |
           new_version=$(bash .github/workflows/get_new_version.sh)
-          git-cliff --output CHANGELOG.md --bump
+          git-cliff --output CHANGELOG.md --bump $new_version
 
           echo "new_version=$new_version" >> $GITHUB_OUTPUT
 
@@ -156,7 +156,7 @@ jobs:
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
-          changelog=$(git-cliff --unreleased --bump --latest --strip all)
+          changelog=$(git-cliff --unreleased --bump ${{ steps.get_version.outputs.new_version }} --latest --strip all)
           # Strip off first line (which is the version number)
           changelog=$(printf "%s" "$changelog" | sed '1d')
 
