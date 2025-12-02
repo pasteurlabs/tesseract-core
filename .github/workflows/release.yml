@@ -159,7 +159,7 @@ jobs:
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
-          changelog=$(git-cliff --unreleased --bump ${{ steps.get_version.outputs.new_version }} --latest --strip all)
+          changelog=$(git-cliff --unreleased --latest --strip all)
           # Strip off first line (which is the version number)
           changelog=$(printf "%s" "$changelog" | sed '1d')
 
