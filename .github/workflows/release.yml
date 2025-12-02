@@ -51,8 +51,9 @@ jobs:
       - name: Generate changelog
         id: generate_changelog
         run: |
+          new_version=$(bash .github/workflows/get_new_version.sh)
           git-cliff --output CHANGELOG.md --bump
-          new_version=$(git-cliff --bumped-version)
+
           echo "new_version=$new_version" >> $GITHUB_OUTPUT
 
       - name: Create Pull Request
@@ -100,8 +101,9 @@ jobs:
       - name: Generate changelog
         id: generate_changelog
         run: |
+          new_version=$(bash .github/workflows/get_new_version.sh)
           git-cliff --output CHANGELOG.md --bump
-          new_version=$(git-cliff --bumped-version)
+
           echo "new_version=$new_version" >> $GITHUB_OUTPUT
 
       - name: Update PR with changelog
@@ -146,16 +148,7 @@ jobs:
           current_version=$(gh release view --json tagName --jq '.tagName' || echo "v0.0.0")
           echo "current_version=$current_version" >> $GITHUB_OUTPUT
 
-          new_version=$(git-cliff --bumped-version)
-
-          # Prevent bumping major versions, downgrade to minor in this case
-          current_major=$(cut -d '.' -f 1 <<< "$current_version")
-          new_major=$(cut -d '.' -f 1 <<< "$new_version")
-          if [[ "$current_major" != "$new_major" ]]; then
-            echo "GIT_CLIFF__BUMP__BUMP_TYPE=minor" >> $GITHUB_ENV
-            new_version=$(git-cliff --bumped-version)
-          fi
-
+          new_version=$(bash .github/workflows/get_new_version.sh)
           echo "new_version=$new_version" >> $GITHUB_OUTPUT
 
       - name: Assemble release notes
