@@ -51,8 +51,10 @@ jobs:
       - name: Generate changelog
         id: generate_changelog
         run: |
-          git-cliff --output CHANGELOG.md --bump
-          new_version=$(git-cliff --bumped-version)
+          bump_type=$(bash .github/workflows/get_bump_type.sh)
+          git-cliff --output CHANGELOG.md --bump $bump_type
+          new_version=$(git-cliff --bumped-version --bump $bump_type)
+
           echo "new_version=$new_version" >> $GITHUB_OUTPUT
 
       - name: Create Pull Request
@@ -100,8 +102,10 @@ jobs:
       - name: Generate changelog
         id: generate_changelog
         run: |
-          git-cliff --output CHANGELOG.md --bump
-          new_version=$(git-cliff --bumped-version)
+          bump_type=$(bash .github/workflows/get_bump_type.sh)
+          new_version=$(git-cliff --bumped-version --bump $bump_type)
+          git-cliff --output CHANGELOG.md --bump $bump_type
+
           echo "new_version=$new_version" >> $GITHUB_OUTPUT
 
       - name: Update PR with changelog
@@ -146,7 +150,8 @@ jobs:
           current_version=$(gh release view --json tagName --jq '.tagName' || echo "v0.0.0")
           echo "current_version=$current_version" >> $GITHUB_OUTPUT
 
-          new_version=$(git-cliff --bumped-version)
+          bump_type=$(bash .github/workflows/get_bump_type.sh)
+          new_version=$(git-cliff --bumped-version --bump $bump_type)
           echo "new_version=$new_version" >> $GITHUB_OUTPUT
 
       - name: Assemble release notes
@@ -154,7 +159,7 @@ jobs:
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
-          changelog=$(git-cliff --unreleased --bump --latest --strip all)
+          changelog=$(git-cliff --unreleased --latest --strip all)
           # Strip off first line (which is the version number)
           changelog=$(printf "%s" "$changelog" | sed '1d')
 
