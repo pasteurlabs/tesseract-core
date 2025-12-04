@@ -2,10 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
-import logging.handlers
 import os
 import sys
 import threading
+import time
 import warnings
 from collections.abc import Callable, Iterable
 from types import ModuleType
@@ -29,47 +29,98 @@ LEVEL_PREFIX = {
 
 # NOTE: This is duplicated in `tesseract_core/runtime/logs.py`.
 # Make sure to propagate changes to both files.
-class LogPipe(threading.Thread):
-    """Custom IO pipe to support live logging from subprocess.run or OS-level file descriptor.
+class TeePipe(threading.Thread):
+    """Custom I/O construct to support live logging from a single file descriptor to multiple sinks.
 
-    Runs a thread that logs everything read from the pipe to the given sinks.
-    Can be used as a context manager for automatic cleanup.
+    Runs a thread that records everything written to the file descriptor. Can be used as a
+    context manager for automatic cleanup.
+
+    Example:
+        >>> with TeePipe(print, logger.info) as pipe_fd:
+        ...     fd = os.fdopen(pipe_fd, "w")
+        ...     print("Hello, World!", file=fd, flush=True)
+        Hello, World!
+        2025-06-10 12:00:00,000 - INFO - Hello, World!
     """
 
     daemon = True
 
     def __init__(self, *sinks: Callable) -> None:
-        """Initialize the LogPipe with the given logging level."""
+        """Initialize the TeePipe by creating file descriptors."""
         super().__init__()
         self._sinks = sinks
         self._fd_read, self._fd_write = os.pipe()
-        self._pipe_reader = os.fdopen(self._fd_read)
         self._captured_lines = []
+        self._last_time = time.time()
+        self._is_blocking = threading.Event()
+        self._grace_period = 0.1
 
     def __enter__(self) -> int:
         """Start the thread and return the write file descriptor of the pipe."""
         self.start()
         return self.fileno()
 
+    def stop(self) -> None:
+        """Close the pipe and join the thread."""
+        # Wait for ongoing streams to dry up
+        # We only continue once the reader has spent some time blocked on reading
+        while True:
+            self._is_blocking.wait(timeout=1)
+            if (time.time() - self._last_time) >= self._grace_period:
+                break
+            time.sleep(self._grace_period / 10)
+
+        # This will signal EOF to the reader thread
+        os.close(self._fd_write)
+        os.close(self._fd_read)
+
+        # Use timeout and daemon=True to avoid hanging indefinitely if something goes wrong
+        self.join(timeout=1)
+
     def __exit__(self, *args: Any) -> None:
         """Close the pipe and join the thread."""
-        os.close(self._fd_write)
-        # Use a timeout so something weird happening in the logging thread doesn't
-        # cause this to hang indefinitely
-        self.join(timeout=10)
-        # Do not close reader before thread is joined since there may be pending data
-        # This also closes the fd_read pipe
-        self._pipe_reader.close()
+        self.stop()
 
     def fileno(self) -> int:
         """Return the write file descriptor of the pipe."""
         return self._fd_write
 
     def run(self) -> None:
-        """Run the thread, logging everything."""
-        for line in iter(self._pipe_reader.readline, ""):
-            if line.endswith("\n"):
-                line = line[:-1]
+        """Run the thread, pushing every full line of text to the sinks."""
+        line_buffer = []
+        while True:
+            self._last_time = time.time()
+            self._is_blocking.set()
+            try:
+                data = os.read(self._fd_read, 1024)
+                self._is_blocking.clear()
+            except OSError:
+                # Pipe closed
+                break
+
+            if data == b"":
+                # EOF reached
+                break
+
+            lines = data.split(b"\n")
+
+            # Log complete lines
+            for i, line in enumerate(lines[:-1]):
+                if i == 0:
+                    line = b"".join([*line_buffer, line])
+                    line_buffer = []
+                line = line.decode(errors="ignore")
+                self._captured_lines.append(line)
+                for sink in self._sinks:
+                    sink(line)
+
+            # Accumulate incomplete line
+            line_buffer.append(lines[-1])
+
+        # Flush incomplete lines at the end of the stream
+        line = b"".join(line_buffer)
+        if line:
+            line = line.decode(errors="ignore")
             self._captured_lines.append(line)
             for sink in self._sinks:
                 sink(line)

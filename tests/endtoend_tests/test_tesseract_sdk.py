@@ -210,11 +210,11 @@ def test_signature_consistency():
         )
 
 
-def test_logpipe_consistency():
-    """Test that the source code of the two duplicate LogPipe implementations is identical."""
-    from tesseract_core.runtime.logs import LogPipe as RuntimeLogPipe
-    from tesseract_core.sdk.logs import LogPipe as SDKLogPipe
+def test_teepipe_consistency():
+    """Test that the source code of the two duplicate TeePipe implementations is identical."""
+    from tesseract_core.runtime.logs import TeePipe as RuntimeTeePipe
+    from tesseract_core.sdk.logs import TeePipe as SDKTeePipe
 
-    runtime_source = inspect.getsource(RuntimeLogPipe)
-    sdk_source = inspect.getsource(SDKLogPipe)
+    runtime_source = inspect.getsource(RuntimeTeePipe)
+    sdk_source = inspect.getsource(SDKTeePipe)
     assert runtime_source == sdk_source
