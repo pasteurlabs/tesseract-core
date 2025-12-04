@@ -21,6 +21,8 @@ import pytest
 import requests
 from common import build_tesseract, encode_array, image_exists
 
+EXAMPLES_DIR = Path(__file__).parent.parent.parent / "examples"
+
 
 def json_normalize(obj: str):
     """Normalize JSON str for comparison."""
@@ -147,60 +149,52 @@ TEST_CASES = {
         sample_requests=[
             SampleRequest(
                 endpoint="apply",
-                payload={
-                    "inputs": {
-                        "a": encode_array([1, 2, 3]),
-                        "b": encode_array([4, 5, 6]),
-                    },
-                },
+                payload=json.loads(
+                    (
+                        EXAMPLES_DIR / "vectoradd/test_cases/example_input.json"
+                    ).read_text()
+                ),
                 output_contains_pattern=[encode_array([5.0, 7.0, 9.0], as_json=True)],
             ),
             SampleRequest(
                 endpoint="jacobian",
-                payload={
-                    "inputs": {
-                        "a": encode_array([1, 2, 3]),
-                        "b": encode_array([4, 5, 6]),
-                    },
-                    "jac_inputs": ["s", "a"],
-                    "jac_outputs": ["result"],
-                },
+                payload=json.loads(
+                    (
+                        EXAMPLES_DIR
+                        / "vectoradd/test_cases/example_jacobian_input.json"
+                    ).read_text()
+                ),
                 output_contains_pattern=['"s":', '"a":'],
             ),
             SampleRequest(
                 endpoint="jacobian",
-                payload={
-                    "inputs": {
-                        "a": encode_array([1, 2, 3]),
-                        "b": encode_array([4, 5, 6]),
-                    },
-                    "jac_inputs": ["invalid", "inputs"],
-                    "jac_outputs": ["result"],
-                },
+                payload=json.loads(
+                    (
+                        EXAMPLES_DIR
+                        / "vectoradd/test_cases/badInputs_jacobian_input.json"
+                    ).read_text()
+                ),
                 expected_status_code=422,
                 output_contains_pattern="Input should be",
             ),
             SampleRequest(
                 endpoint="jacobian",
-                payload={
-                    "inputs": {
-                        "a": encode_array([1, 2, 3]),
-                        "b": encode_array([4, 5, 6]),
-                    },
-                    "jac_inputs": ["s", "a"],
-                    "jac_outputs": ["invalid", "outputs"],
-                },
+                payload=json.loads(
+                    (
+                        EXAMPLES_DIR
+                        / "vectoradd/test_cases/badOutputs_jacobian_input.json"
+                    ).read_text()
+                ),
                 expected_status_code=422,
                 output_contains_pattern="Input should be",
             ),
             SampleRequest(
                 endpoint="check-gradients",
-                payload={
-                    "inputs": {
-                        "a": encode_array([1, 2, 3]),
-                        "b": encode_array([4, 5, 6]),
-                    },
-                },
+                payload=json.loads(
+                    (
+                        EXAMPLES_DIR / "vectoradd/test_cases/example_input.json"
+                    ).read_text()
+                ),
             ),
         ],
     ),
@@ -209,112 +203,90 @@ TEST_CASES = {
         sample_requests=[
             SampleRequest(
                 endpoint="apply",
-                payload={
-                    "inputs": {
-                        "a": {"v": encode_array([1, 2, 3]), "s": 3},
-                        "b": {"v": encode_array([4, 5, 6]), "s": 1},
-                    },
-                },
+                payload=json.loads(
+                    (
+                        EXAMPLES_DIR / "vectoradd_jax/test_cases/example_input.json"
+                    ).read_text()
+                ),
                 output_contains_array=np.array([7.0, 11.0, 15.0], dtype="float32"),
             ),
             SampleRequest(
                 endpoint="abstract_eval",
-                payload={
-                    "inputs": {
-                        "a": {
-                            "v": {"shape": [3], "dtype": "float32"},
-                            "s": {"shape": [], "dtype": "float32"},
-                        },
-                        "b": {
-                            "v": {"shape": [3], "dtype": "float32"},
-                            "s": {"shape": [], "dtype": "float32"},
-                        },
-                    }
-                },
+                payload=json.loads(
+                    (
+                        EXAMPLES_DIR
+                        / "vectoradd_jax/test_cases/example_abstract_input.json"
+                    ).read_text()
+                ),
             ),
             SampleRequest(
                 endpoint="apply",
-                payload={"inputs": {}},
+                payload=json.loads(
+                    (
+                        EXAMPLES_DIR / "vectoradd_jax/test_cases/bad_input.json"
+                    ).read_text()
+                ),
                 expected_status_code=422,
                 output_contains_pattern="missing",
             ),
             SampleRequest(
                 endpoint="jacobian",
-                payload={
-                    "inputs": {
-                        "a": {"v": encode_array([1, 2, 3]), "s": 2},
-                        "b": {"v": encode_array([4, 5, 6]), "s": 1},
-                    },
-                    "jac_inputs": ["a.s", "a.v"],
-                    "jac_outputs": ["vector_add.result"],
-                },
+                payload=json.loads(
+                    (
+                        EXAMPLES_DIR
+                        / "vectoradd_jax/test_cases/example_jacobian_input.json"
+                    ).read_text()
+                ),
                 output_contains_pattern=['"a.s":', '"a.v":'],
                 output_contains_array=np.array([[1, 2, 3]], dtype="float32"),
             ),
             SampleRequest(
                 endpoint="jacobian_vector_product",
-                payload={
-                    "inputs": {
-                        "a": {"v": encode_array([1, 2, 3]), "s": 2},
-                        "b": {"v": encode_array([4, 5, 6]), "s": 1},
-                    },
-                    "jvp_inputs": ["a.v"],
-                    "jvp_outputs": ["vector_add.result"],
-                    "tangent_vector": {"a.v": encode_array([0.1, 0.2, 0.3])},
-                },
+                payload=json.loads(
+                    (
+                        EXAMPLES_DIR
+                        / "vectoradd_jax/test_cases/wrtVector_jvp_input.json"
+                    ).read_text()
+                ),
                 output_contains_array=np.array([0.2, 0.4, 0.6], dtype="float32"),
             ),
             SampleRequest(
                 endpoint="jacobian_vector_product",
-                payload={
-                    "inputs": {
-                        "a": {"v": encode_array([1, 2, 3]), "s": 2},
-                        "b": {"v": encode_array([4, 5, 6]), "s": 1},
-                    },
-                    "jvp_inputs": ["a.s"],
-                    "jvp_outputs": ["vector_add.result"],
-                    "tangent_vector": {"a.s": 0.5},
-                },
+                payload=json.loads(
+                    (
+                        EXAMPLES_DIR
+                        / "vectoradd_jax/test_cases/wrtScalar_jvp_input.json"
+                    ).read_text()
+                ),
                 output_contains_array=np.array([0.5, 1.0, 1.5], dtype="float32"),
             ),
             SampleRequest(
                 endpoint="vector_jacobian_product",
-                payload={
-                    "inputs": {
-                        "a": {"v": encode_array([1.0, 2.0, 3.0]), "s": 2},
-                        "b": {"v": encode_array([4.0, 5.0, 6.0]), "s": 1},
-                    },
-                    "vjp_inputs": ["a.v"],
-                    "vjp_outputs": ["vector_add.result"],
-                    "cotangent_vector": {
-                        "vector_add.result": encode_array([0.1, 0.2, 0.3]),
-                    },
-                },
+                payload=json.loads(
+                    (
+                        EXAMPLES_DIR
+                        / "vectoradd_jax/test_cases/wrtVector_vjp_input.json"
+                    ).read_text()
+                ),
                 output_contains_array=np.array([0.2, 0.4, 0.6], dtype="float32"),
             ),
             SampleRequest(
                 endpoint="vector_jacobian_product",
-                payload={
-                    "inputs": {
-                        "a": {"v": encode_array([1.0, 2.0, 3.0]), "s": 2},
-                        "b": {"v": encode_array([4.0, 5.0, 6.0]), "s": 1},
-                    },
-                    "vjp_inputs": ["a.s"],
-                    "vjp_outputs": ["vector_add.result"],
-                    "cotangent_vector": {
-                        "vector_add.result": encode_array([0.1, 0.2, 0.3]),
-                    },
-                },
+                payload=json.loads(
+                    (
+                        EXAMPLES_DIR
+                        / "vectoradd_jax/test_cases/wrtScalar_vjp_input.json"
+                    ).read_text()
+                ),
                 output_contains_array=np.array([1.4], dtype="float32"),
             ),
             SampleRequest(
                 endpoint="check-gradients",
-                payload={
-                    "inputs": {
-                        "a": {"v": encode_array([1, 2, 3]), "s": 2},
-                        "b": {"v": encode_array([4, 5, 6]), "s": 1},
-                    },
-                },
+                payload=json.loads(
+                    (
+                        EXAMPLES_DIR / "vectoradd_jax/test_cases/example_input.json"
+                    ).read_text()
+                ),
             ),
         ],
     ),
@@ -323,87 +295,72 @@ TEST_CASES = {
         sample_requests=[
             SampleRequest(
                 endpoint="apply",
-                payload={
-                    "inputs": {
-                        "a": {"v": encode_array([1, 2, 3]), "s": 3},
-                        "b": {"v": encode_array([4, 5, 6]), "s": 1},
-                    },
-                },
+                payload=json.loads(
+                    (
+                        EXAMPLES_DIR / "vectoradd_torch/test_cases/example_input.json"
+                    ).read_text()
+                ),
                 output_contains_array=np.array([7.0, 11.0, 15.0], dtype="float32"),
             ),
             SampleRequest(
                 endpoint="apply",
-                payload={"inputs": {}},
+                payload=json.loads(
+                    (
+                        EXAMPLES_DIR / "vectoradd_torch/test_cases/bad_input.json"
+                    ).read_text()
+                ),
                 expected_status_code=422,
                 output_contains_pattern="missing",
             ),
             SampleRequest(
                 endpoint="jacobian",
-                payload={
-                    "inputs": {
-                        "a": {"v": encode_array([1, 2, 3]), "s": 2},
-                        "b": {"v": encode_array([4, 5, 6]), "s": 1},
-                    },
-                    "jac_inputs": ["a.s", "a.v"],
-                    "jac_outputs": ["vector_add.result"],
-                },
+                payload=json.loads(
+                    (
+                        EXAMPLES_DIR
+                        / "vectoradd_torch/test_cases/example_jacobian_input.json"
+                    ).read_text()
+                ),
                 output_contains_pattern=['"a.s":', '"a.v":'],
                 output_contains_array=np.array([[1, 2, 3]], dtype="float32"),
             ),
             SampleRequest(
                 endpoint="jacobian_vector_product",
-                payload={
-                    "inputs": {
-                        "a": {"v": encode_array([1, 2, 3]), "s": 2},
-                        "b": {"v": encode_array([4, 5, 6]), "s": 1},
-                    },
-                    "jvp_inputs": ["a.v"],
-                    "jvp_outputs": ["vector_add.result"],
-                    "tangent_vector": {"a.v": encode_array([0.1, 0.2, 0.3])},
-                },
+                payload=json.loads(
+                    (
+                        EXAMPLES_DIR
+                        / "vectoradd_torch/test_cases/wrtVector_jvp_input.json"
+                    ).read_text()
+                ),
                 output_contains_array=np.array([0.2, 0.4, 0.6], dtype="float32"),
             ),
             SampleRequest(
                 endpoint="jacobian_vector_product",
-                payload={
-                    "inputs": {
-                        "a": {"v": encode_array([1, 2, 3]), "s": 2},
-                        "b": {"v": encode_array([4, 5, 6]), "s": 1},
-                    },
-                    "jvp_inputs": ["a.s"],
-                    "jvp_outputs": ["vector_add.result"],
-                    "tangent_vector": {"a.s": 0.5},
-                },
+                payload=json.loads(
+                    (
+                        EXAMPLES_DIR
+                        / "vectoradd_torch/test_cases/wrtScalar_jvp_input.json"
+                    ).read_text()
+                ),
                 output_contains_array=np.array([0.5, 1.0, 1.5], dtype="float32"),
             ),
             SampleRequest(
                 endpoint="vector_jacobian_product",
-                payload={
-                    "inputs": {
-                        "a": {"v": encode_array([1.0, 2.0, 3.0]), "s": 2},
-                        "b": {"v": encode_array([4.0, 5.0, 6.0]), "s": 1},
-                    },
-                    "vjp_inputs": ["a.v"],
-                    "vjp_outputs": ["vector_add.result"],
-                    "cotangent_vector": {
-                        "vector_add.result": encode_array([0.1, 0.2, 0.3]),
-                    },
-                },
+                payload=json.loads(
+                    (
+                        EXAMPLES_DIR
+                        / "vectoradd_torch/test_cases/wrtVector_vjp_input.json"
+                    ).read_text()
+                ),
                 output_contains_array=np.array([0.2, 0.4, 0.6], dtype="float32"),
             ),
             SampleRequest(
                 endpoint="vector_jacobian_product",
-                payload={
-                    "inputs": {
-                        "a": {"v": encode_array([1.0, 2.0, 3.0]), "s": 2},
-                        "b": {"v": encode_array([4.0, 5.0, 6.0]), "s": 1},
-                    },
-                    "vjp_inputs": ["a.s"],
-                    "vjp_outputs": ["vector_add.result"],
-                    "cotangent_vector": {
-                        "vector_add.result": encode_array([0.1, 0.2, 0.3]),
-                    },
-                },
+                payload=json.loads(
+                    (
+                        EXAMPLES_DIR
+                        / "vectoradd_torch/test_cases/wrtScalar_vjp_input.json"
+                    ).read_text()
+                ),
                 output_contains_array=np.array([1.4], dtype="float32"),
             ),
         ],
@@ -413,61 +370,61 @@ TEST_CASES = {
         sample_requests=[
             SampleRequest(
                 endpoint="apply",
-                payload={
-                    "inputs": {"x": 0.0, "y": 0.0},
-                },
+                payload=json.loads(
+                    (
+                        EXAMPLES_DIR / "univariate/test_cases/example_input.json"
+                    ).read_text()
+                ),
                 output_contains_array=np.array([1.0], dtype="float64"),
             ),
             SampleRequest(
                 endpoint="jacobian",
-                payload={
-                    "inputs": {"x": 0.0, "y": 0.0},
-                    "jac_inputs": ["x"],
-                    "jac_outputs": ["result"],
-                },
+                payload=json.loads(
+                    (
+                        EXAMPLES_DIR / "univariate/test_cases/wrtX_jacobian_input.json"
+                    ).read_text()
+                ),
                 output_contains_pattern=[
                     f'"result":{{"x":{encode_array(np.float32(-2.0), as_json=True)}}}'
                 ],
             ),
             SampleRequest(
                 endpoint="jacobian",
-                payload={
-                    "inputs": {"x": 0.0, "y": 0.0},
-                    "jac_inputs": ["y"],
-                    "jac_outputs": ["result"],
-                },
+                payload=json.loads(
+                    (
+                        EXAMPLES_DIR / "univariate/test_cases/wrtY_jacobian_input.json"
+                    ).read_text()
+                ),
                 output_contains_pattern=[
                     f'"result":{{"y":{encode_array(np.float32(0.0), as_json=True)}}}'
                 ],
             ),
             SampleRequest(
                 endpoint="jacobian",
-                payload={
-                    "inputs": {"x": 0.0, "y": 0.0},
-                    "jac_inputs": ["hey"],
-                    "jac_outputs": ["result"],
-                },
+                payload=json.loads(
+                    (
+                        EXAMPLES_DIR / "univariate/test_cases/bad_jacobian_input.json"
+                    ).read_text()
+                ),
                 expected_status_code=422,
                 output_contains_pattern="Input should be",
             ),
             SampleRequest(
                 endpoint="jacobian_vector_product",
-                payload={
-                    "inputs": {"x": 0.0, "y": 0.0},
-                    "jvp_inputs": ["x", "y"],
-                    "jvp_outputs": ["result"],
-                    "tangent_vector": {"x": 1.0, "y": 0.0},
-                },
+                payload=json.loads(
+                    (
+                        EXAMPLES_DIR / "univariate/test_cases/example_jvp_input.json"
+                    ).read_text()
+                ),
                 output_contains_pattern=f'"result":{encode_array(np.float32(-2.0), as_json=True)}',
             ),
             SampleRequest(
                 endpoint="vector_jacobian_product",
-                payload={
-                    "inputs": {"x": 0.0, "y": 0.0},
-                    "vjp_inputs": ["x", "y"],
-                    "vjp_outputs": ["result"],
-                    "cotangent_vector": {"result": 1.0},
-                },
+                payload=json.loads(
+                    (
+                        EXAMPLES_DIR / "univariate/test_cases/example_vjp_input.json"
+                    ).read_text()
+                ),
                 output_contains_pattern=[
                     f'"x":{encode_array(np.float32(-2.0), as_json=True)}',
                     f'"y":{encode_array(np.float32(0.0), as_json=True)}',
@@ -475,9 +432,11 @@ TEST_CASES = {
             ),
             SampleRequest(
                 endpoint="check-gradients",
-                payload={
-                    "inputs": {"x": 0.0, "y": 0.0},
-                },
+                payload=json.loads(
+                    (
+                        EXAMPLES_DIR / "univariate/test_cases/example_input.json"
+                    ).read_text()
+                ),
             ),
         ],
     ),
@@ -492,197 +451,43 @@ TEST_CASES = {
         sample_requests=[
             SampleRequest(
                 endpoint="apply",
-                payload={
-                    "inputs": {
-                        "mesh": {
-                            "n_points": 5,
-                            "n_cells": 2,
-                            "points": encode_array(
-                                [
-                                    [0.0, 666.0, 0.0],
-                                    [1.0, 0.0, 0.0],
-                                    [0.0, 1.0, 0.0],
-                                    [1.0, 1.0, 0.0],
-                                    [0.5, 0.5, 1.0],
-                                ]
-                            ),
-                            "num_points_per_cell": encode_array([4, 4]),
-                            "cell_connectivity": encode_array([0, 1, 2, 3, 1, 2, 3, 4]),
-                            "cell_data": {
-                                "temperature": encode_array(
-                                    [[100.0, 105.0], [110.0, 115.0]]
-                                ),
-                                "pressure": encode_array([[1.0, 1.2], [1.1, 1.3]]),
-                            },
-                            "point_data": {
-                                "displacement": encode_array(
-                                    [
-                                        [0.0, 0.1, 0.2],
-                                        [0.1, 0.0, 0.2],
-                                        [0.2, 0.1, 0.0],
-                                        [0.1, 0.2, 0.1],
-                                        [0.2, 0.1, 0.1],
-                                    ]
-                                ),
-                                "velocity": encode_array(
-                                    [
-                                        [0.0, 0.0, 0.0],
-                                        [0.1, 0.0, 0.0],
-                                        [0.0, 0.1, 0.0],
-                                        [0.0, 0.0, 0.1],
-                                        [0.1, 0.1, 0.1],
-                                    ]
-                                ),
-                            },
-                        }
-                    },
-                },
+                payload=json.loads(
+                    (
+                        EXAMPLES_DIR / "meshstats/test_cases/example_input.json"
+                    ).read_text()
+                ),
                 output_contains_pattern=encode_array(
                     np.array([0.0, 666.0, 0.0], dtype="float32"), as_json=True
                 ),
             ),
             SampleRequest(
                 endpoint="abstract_eval",
-                payload={
-                    "inputs": {
-                        "mesh": {
-                            "n_points": 5,
-                            "n_cells": 8,
-                            "points": {
-                                "shape": [5, 3],
-                                "dtype": "float32",
-                            },
-                            "num_points_per_cell": {
-                                "shape": [2],
-                                "dtype": "int32",
-                            },
-                            "cell_connectivity": {
-                                "shape": [8],
-                                "dtype": "int32",
-                            },
-                            "cell_data": {
-                                "temperature": {
-                                    "shape": [2, 2],
-                                    "dtype": "float32",
-                                },
-                                "pressure": {
-                                    "shape": [2, 2],
-                                    "dtype": "float32",
-                                },
-                            },
-                            "point_data": {
-                                "displacement": {
-                                    "shape": [5, 3],
-                                    "dtype": "float32",
-                                },
-                                "velocity": {
-                                    "shape": [5, 3],
-                                    "dtype": "float32",
-                                },
-                            },
-                        }
-                    },
-                },
+                payload=json.loads(
+                    (
+                        EXAMPLES_DIR
+                        / "meshstats/test_cases/example_abstract_input.json"
+                    ).read_text()
+                ),
                 output_contains_pattern='"shape":[3],"dtype":"float32"',
             ),
             SampleRequest(
                 endpoint="jacobian",
-                payload={
-                    "jac_inputs": ["mesh.points"],
-                    "jac_outputs": ["statistics.barycenter"],
-                    "inputs": {
-                        "mesh": {
-                            "n_points": 5,
-                            "n_cells": 2,
-                            "points": encode_array(
-                                [
-                                    [0.0, 666.0, 0.0],
-                                    [1.0, 0.0, 0.0],
-                                    [0.0, 1.0, 0.0],
-                                    [1.0, 1.0, 0.0],
-                                    [0.5, 0.5, 1.0],
-                                ]
-                            ),
-                            "num_points_per_cell": encode_array([4, 4]),
-                            "cell_connectivity": encode_array([0, 1, 2, 3, 1, 2, 3, 4]),
-                            "cell_data": {
-                                "temperature": encode_array(
-                                    [[100.0, 105.0], [110.0, 115.0]]
-                                ),
-                                "pressure": encode_array([[1.0, 1.2], [1.1, 1.3]]),
-                            },
-                            "point_data": {
-                                "displacement": encode_array(
-                                    [
-                                        [0.0, 0.1, 0.2],
-                                        [0.1, 0.0, 0.2],
-                                        [0.2, 0.1, 0.0],
-                                        [0.1, 0.2, 0.1],
-                                        [0.2, 0.1, 0.1],
-                                    ]
-                                ),
-                                "velocity": encode_array(
-                                    [
-                                        [0.0, 0.0, 0.0],
-                                        [0.1, 0.0, 0.0],
-                                        [0.0, 0.1, 0.0],
-                                        [0.0, 0.0, 0.1],
-                                        [0.1, 0.1, 0.1],
-                                    ]
-                                ),
-                            },
-                        }
-                    },
-                },
+                payload=json.loads(
+                    (
+                        EXAMPLES_DIR
+                        / "meshstats/test_cases/example_jacobian_input.json"
+                    ).read_text()
+                ),
                 output_contains_pattern='"shape":[3,5,3]',
             ),
             SampleRequest(
                 endpoint="check-gradients",
-                payload={
-                    "inputs": {
-                        "mesh": {
-                            "n_points": 5,
-                            "n_cells": 2,
-                            "points": encode_array(
-                                [
-                                    [0.0, 2.0, 0.0],
-                                    [1.0, 0.0, 0.0],
-                                    [0.0, 1.0, 0.0],
-                                    [1.0, 1.0, 0.0],
-                                    [0.5, 0.5, 1.0],
-                                ]
-                            ),
-                            "num_points_per_cell": encode_array([4, 4]),
-                            "cell_connectivity": encode_array([0, 1, 2, 3, 1, 2, 3, 4]),
-                            "cell_data": {
-                                "temperature": encode_array(
-                                    [[100.0, 105.0], [110.0, 115.0]]
-                                ),
-                                "pressure": encode_array([[1.0, 1.2], [1.1, 1.3]]),
-                            },
-                            "point_data": {
-                                "displacement": encode_array(
-                                    [
-                                        [0.0, 0.1, 0.2],
-                                        [0.1, 0.0, 0.2],
-                                        [0.2, 0.1, 0.0],
-                                        [0.1, 0.2, 0.1],
-                                        [0.2, 0.1, 0.1],
-                                    ]
-                                ),
-                                "velocity": encode_array(
-                                    [
-                                        [0.0, 0.0, 0.0],
-                                        [0.1, 0.0, 0.0],
-                                        [0.0, 0.1, 0.0],
-                                        [0.0, 0.0, 0.1],
-                                        [0.1, 0.1, 0.1],
-                                    ]
-                                ),
-                            },
-                        }
-                    },
-                },
+                payload=json.loads(
+                    (
+                        EXAMPLES_DIR
+                        / "meshstats/test_cases/example_checkgradients_input.json"
+                    ).read_text()
+                ),
             ),
         ],
     ),

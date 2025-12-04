@@ -1,0 +1,12 @@
+{
+  "inputs": {
+    "x": 0.0,
+    "y": 0.0
+  },
+  "jac_inputs": [
+    "hey"
+  ],
+  "jac_outputs": [
+    "result"
+  ]
+}

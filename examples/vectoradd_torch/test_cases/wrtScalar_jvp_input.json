@@ -1,0 +1,41 @@
+{
+  "inputs": {
+    "a": {
+      "v": {
+        "object_type": "array",
+        "shape": [
+          3
+        ],
+        "dtype": "int64",
+        "data": {
+          "buffer": "AQAAAAAAAAACAAAAAAAAAAMAAAAAAAAA",
+          "encoding": "base64"
+        }
+      },
+      "s": 2
+    },
+    "b": {
+      "v": {
+        "object_type": "array",
+        "shape": [
+          3
+        ],
+        "dtype": "int64",
+        "data": {
+          "buffer": "BAAAAAAAAAAFAAAAAAAAAAYAAAAAAAAA",
+          "encoding": "base64"
+        }
+      },
+      "s": 1
+    }
+  },
+  "jvp_inputs": [
+    "a.s"
+  ],
+  "jvp_outputs": [
+    "vector_add.result"
+  ],
+  "tangent_vector": {
+    "a.s": 0.5
+  }
+}
