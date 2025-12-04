@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [1.2.0] - 2025-12-02
+## [1.2.0] - 2025-12-04
 
 ### Features
 
@@ -18,6 +18,7 @@ All notable changes to this project will be documented in this file.
 - Switch MLflow tests from deprecated file backend to sqlite (#389)
 - Catch identical mounted volumes (#337)
 - Remove user creation logic, set `HOME` env var instead (#393)
+- Ensure log messages aren't lost when application exits (#392)
 
 ### Refactor
 
