@@ -15,20 +15,22 @@ from pydantic import BaseModel, Field
 from torch.utils._pytree import tree_map
 
 from tesseract_core.runtime import Array, Float32
+from tesseract_core.runtime.config import get_config
+from tesseract_core.runtime.experimental import InputFileReference
 
 
 class InputSchema(BaseModel):
     """Input schema for QoI model inference."""
 
-    config: str = Field(description="Configuration file")
+    config: InputFileReference = Field(description="Configuration file")
 
     data_folder: str = Field(
         description="Folder containing npz files with point cloud data and simulation parameters"
     )
-    trained_model: str = Field(
+    trained_model: InputFileReference = Field(
         description="Pickle file containing weights of trained model"
     )
-    scaler: str = Field(
+    scaler: InputFileReference = Field(
         description="Pickle file containing the scaling method for the dataset"
     )
 
@@ -47,8 +49,11 @@ def evaluate(inputs: Any) -> Any:
     from process.models import HybridPointCloudTreeModel
     from process.scaler import ScalingPipeline
 
-    config_path = Path(inputs["config"])
-    data_folder_path = Path(inputs["data_folder"])
+    config = get_config()
+    input_base = Path(config.input_path)
+
+    config_path = input_base / inputs["config"]
+    data_folder_path = input_base / inputs["data_folder"]
     files = [str(p.resolve()) for p in data_folder_path.glob("*.npz")]
 
     data_files = [Path(f) for f in files]
@@ -63,7 +68,7 @@ def evaluate(inputs: Any) -> Any:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Load the scaling pipeline from saved pickle file
-    scaling_pipeline = ScalingPipeline.load(Path(inputs["scaler"]))
+    scaling_pipeline = ScalingPipeline.load(input_base / inputs["scaler"])
 
     # Get all inference samples from the dataset
     inference_samples = [raw_dataset[i] for i in range(len(raw_dataset))]
@@ -87,7 +92,7 @@ def evaluate(inputs: Any) -> Any:
     # Load the trained model
     print("Loading trained model...")
     model = HybridPointCloudTreeModel()
-    model.load(inputs["trained_model"])
+    model.load(input_base / inputs["trained_model"])
 
     # Make predictions
     print("Making predictions...")

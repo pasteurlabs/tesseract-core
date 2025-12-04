@@ -9,11 +9,14 @@ import torch
 from pydantic import BaseModel, Field
 from torch.utils._pytree import tree_map
 
+from tesseract_core.runtime.config import get_config
+from tesseract_core.runtime.experimental import InputFileReference, OutputFileReference
+
 
 class InputSchema(BaseModel):
     """Input schema for QoI dataset generation."""
 
-    config: str = Field(description="Configuration file")
+    config: InputFileReference = Field(description="Configuration file")
 
     sim_folder: str = Field(
         description="Folder path containing Ansys Fluent simulations with CAD files and QoI reports",
@@ -27,7 +30,7 @@ class InputSchema(BaseModel):
 class OutputSchema(BaseModel):
     """Output schema for QoI dataset generation."""
 
-    data: list[str | Path] = Field(
+    data: list[OutputFileReference] = Field(
         description="List of npz files containing point cloud data, simulation parameters and QoI (if available)",
     )
 
@@ -36,10 +39,13 @@ def evaluate(inputs: Any) -> Any:
     """Process simulation data and generate NPZ dataset files."""
     from process.npz import NPZProcessor
 
+    config = get_config()
+    input_base = Path(config.input_path)
+
     processor = NPZProcessor(
-        root=Path(inputs["sim_folder"]),
-        out_dir=Path(inputs["dataset_folder"]),
-        config_path=Path(inputs["config"]),
+        root=input_base / inputs["sim_folder"],
+        out_dir=input_base / inputs["dataset_folder"],
+        config_path=input_base / inputs["config"],
     )
     processed_files = processor.build()
 
