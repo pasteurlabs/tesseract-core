@@ -15,7 +15,7 @@ from contextvars import ContextVar
 from datetime import datetime
 from io import UnsupportedOperation
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any
 
 import requests
 
@@ -26,7 +26,7 @@ from tesseract_core.runtime.logs import TeePipe
 class BaseBackend(ABC):
     """Base class for MPA backends."""
 
-    def __init__(self, base_dir: Optional[str] = None) -> None:
+    def __init__(self, base_dir: str | None = None) -> None:
         if base_dir is None:
             base_dir = get_config().output_path
         self.log_dir = Path(base_dir) / "logs"
@@ -38,7 +38,7 @@ class BaseBackend(ABC):
         pass
 
     @abstractmethod
-    def log_metric(self, key: str, value: float, step: Optional[int] = None) -> None:
+    def log_metric(self, key: str, value: float, step: int | None = None) -> None:
         """Log a metric."""
         pass
 
@@ -61,7 +61,7 @@ class BaseBackend(ABC):
 class FileBackend(BaseBackend):
     """MPA backend that writes to local files."""
 
-    def __init__(self, base_dir: Optional[str] = None) -> None:
+    def __init__(self, base_dir: str | None = None) -> None:
         super().__init__(base_dir)
         # Initialize log files
         self.params_file = self.log_dir / "parameters.json"
@@ -84,7 +84,7 @@ class FileBackend(BaseBackend):
         with open(self.params_file, "w") as f:
             json.dump(self.parameters, f, indent=2, default=str)
 
-    def log_metric(self, key: str, value: float, step: Optional[int] = None) -> None:
+    def log_metric(self, key: str, value: float, step: int | None = None) -> None:
         """Log a metric to CSV file."""
         timestamp = datetime.now().isoformat()
         step_value = (
@@ -126,7 +126,7 @@ class FileBackend(BaseBackend):
 class MLflowBackend(BaseBackend):
     """MPA backend that writes to an MLflow tracking server."""
 
-    def __init__(self, base_dir: Optional[str] = None) -> None:
+    def __init__(self, base_dir: str | None = None) -> None:
         super().__init__(base_dir)
         os.environ["GIT_PYTHON_REFRESH"] = (
             "quiet"  # Suppress potential MLflow git warnings
@@ -176,7 +176,7 @@ class MLflowBackend(BaseBackend):
         """Log a parameter to MLflow."""
         self.mlflow.log_param(key, value)
 
-    def log_metric(self, key: str, value: float, step: Optional[int] = None) -> None:
+    def log_metric(self, key: str, value: float, step: int | None = None) -> None:
         """Log a metric to MLflow."""
         self.mlflow.log_metric(key, value, step=step)
 
@@ -193,7 +193,7 @@ class MLflowBackend(BaseBackend):
         self.mlflow.end_run()
 
 
-def _create_backend(base_dir: Optional[str]) -> BaseBackend:
+def _create_backend(base_dir: str | None) -> BaseBackend:
     """Create the appropriate backend based on environment."""
     config = get_config()
     if config.mlflow_tracking_uri:
@@ -222,7 +222,7 @@ def log_parameter(key: str, value: Any) -> None:
     _get_current_backend().log_parameter(key, value)
 
 
-def log_metric(key: str, value: float, step: Optional[int] = None) -> None:
+def log_metric(key: str, value: float, step: int | None = None) -> None:
     """Log a metric to the current run context."""
     _get_current_backend().log_metric(key, value, step)
 
@@ -233,7 +233,7 @@ def log_artifact(local_path: str) -> None:
 
 
 @contextmanager
-def redirect_stdio(logfile: Union[str, Path]) -> Generator[None, None, None]:
+def redirect_stdio(logfile: str | Path) -> Generator[None, None, None]:
     """Context manager for redirecting stdout and stderr to a custom pipe.
 
     Writes messages to both the original stderr and the given logfile.
@@ -270,7 +270,7 @@ def redirect_stdio(logfile: Union[str, Path]) -> Generator[None, None, None]:
 
 
 @contextmanager
-def start_run(base_dir: Optional[str] = None) -> Generator[None, None, None]:
+def start_run(base_dir: str | None = None) -> Generator[None, None, None]:
     """Context manager for starting and ending a run."""
     backend = _create_backend(base_dir)
     token = _current_backend.set(backend)

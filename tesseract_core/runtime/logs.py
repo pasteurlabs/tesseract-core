@@ -4,7 +4,8 @@
 import os
 import threading
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 
 # NOTE: This is duplicated in `tesseract_core/sdk/logs.py`.

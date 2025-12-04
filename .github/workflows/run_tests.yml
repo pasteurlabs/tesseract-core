@@ -20,12 +20,12 @@ jobs:
         # test with oldest and latest supported Python versions
         # NOTE: If bumping the minimum Python version here, also do it in
         # ruff.toml, setup.py and other CI files as well.
-        python-version: ["3.10", "3.12"]
+        python-version: ["3.10", "3.13"]
         runtime-deps: ["latest"]
 
         include:
           - os: ubuntu-latest
-            python-version: "3.12"
+            python-version: "3.10"
             runtime-deps: "oldest"
 
       fail-fast: false
@@ -34,7 +34,7 @@ jobs:
 
     steps:
       - name: Set up Git repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Set up WSL (Windows)
         uses: Vampire/setup-wsl@v6
@@ -146,7 +146,7 @@ jobs:
 
     steps:
       - name: Set up Git repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Get all changed files
         id: changed-files
@@ -199,7 +199,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-24.04]
-        python-version: ["3.12"]
+        python-version: ["3.13"]
 
         arch: ["x64"]
         docker-engine: ["docker"]
@@ -214,18 +214,18 @@ jobs:
           # Test on arm to ensure compatibility with Apple M1 chips
           # (OSX runners don't have access to Docker so we use Linux ARM runners instead)
           - os: "ubuntu-24.04"
-            python-version: "3.12"
+            python-version: "3.13"
             arch: "arm"
             docker-engine: "docker"
             unit-tesseract: "base"
           - os: "ubuntu-24.04"
-            python-version: "3.12"
+            python-version: "3.13"
             arch: "arm"
             docker-engine: "docker"
             unit-tesseract: "pyvista-arm64"
           # Run tests using Podman
           - os: "ubuntu-24.04"
-            python-version: "3.12"
+            python-version: "3.13"
             arch: "x64"
             docker-engine: "podman"
             unit-tesseract: "base"
@@ -243,7 +243,7 @@ jobs:
 
     steps:
       - name: Set up Git repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       # Use Conda to install Python (setup-python action doesn't support ARM)
       - uses: conda-incubator/setup-miniconda@v3
@@ -327,7 +327,7 @@ jobs:
 
     steps:
       - name: Set up Git repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7

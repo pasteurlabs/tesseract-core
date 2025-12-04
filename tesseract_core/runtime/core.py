@@ -3,12 +3,13 @@
 
 import importlib.util
 import os
+import sys
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from io import TextIOBase
 from pathlib import Path
 from types import ModuleType
-from typing import Any, TextIO, Union
+from typing import Any, TextIO
 
 from pydantic import BaseModel
 
@@ -21,9 +22,7 @@ from .schema_generation import (
 
 
 @contextmanager
-def redirect_fd(
-    from_: TextIO, to_: Union[TextIO, int]
-) -> Generator[TextIO, None, None]:
+def redirect_fd(from_: TextIO, to_: TextIO | int) -> Generator[TextIO, None, None]:
     """Redirect a file descriptor at OS level.
 
     Args:
@@ -48,23 +47,34 @@ def redirect_fd(
         orig_fd_file.close()
 
 
-def load_module_from_path(path: Union[Path, str]) -> ModuleType:
-    """Load a module from a file path."""
+def load_module_from_path(path: Path | str) -> ModuleType:
+    """Load a module from a file path.
+
+    Temporarily puts the module's parent folder on PYTHONPATH to ensure local imports work as expected.
+    """
     path = Path(path)
 
     if not path.is_file():
         raise ImportError(f"Could not load module from {path} (is not a file)")
 
     module_name = path.stem
+    module_dir = path.parent.resolve()
+
     spec = importlib.util.spec_from_file_location(module_name, path)
     if spec is None:
         raise ImportError(f"Could not load module from {path}")
 
     module = importlib.util.module_from_spec(spec)
+
     try:
+        old_path = sys.path
+        sys.path = [str(module_dir), *old_path]
         spec.loader.exec_module(module)
     except Exception as exc:
         raise ImportError(f"Could not load module from {path}") from exc
+    finally:
+        sys.path = old_path
+
     return module
 
 

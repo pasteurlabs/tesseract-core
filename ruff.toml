@@ -1,6 +1,5 @@
 # Set to the lowest supported Python version.
-# !! tesseract_runtime still supports Python 3.9 !!
-target-version = "py39"
+target-version = "py310"
 
 # Set the target line length for formatting.
 line-length = 88
