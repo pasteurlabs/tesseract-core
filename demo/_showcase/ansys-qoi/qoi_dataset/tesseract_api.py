@@ -41,10 +41,11 @@ def evaluate(inputs: Any) -> Any:
 
     config = get_config()
     input_base = Path(config.input_path)
+    output_base = Path(config.output_path)
 
     processor = NPZProcessor(
         root=input_base / inputs["sim_folder"],
-        out_dir=input_base / inputs["dataset_folder"],
+        out_dir=output_base / inputs["dataset_folder"],
         config_path=input_base / inputs["config"],
     )
     processed_files = processor.build()
