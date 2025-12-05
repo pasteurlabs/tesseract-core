@@ -51,6 +51,7 @@ def evaluate(inputs: Any) -> Any:
 
     config = get_config()
     input_base = Path(config.input_path)
+    output_base = Path(config.output_path)
 
     config_path = input_base / inputs["config"]
     data_folder_path = input_base / inputs["data_folder"]
@@ -62,10 +63,6 @@ def evaluate(inputs: Any) -> Any:
 
     with open(inputs["config"]) as f:
         config = yaml.safe_load(f)
-
-    # Create output directory
-    output_dir = Path("/tesseract/outputs")
-    output_dir.mkdir(parents=True, exist_ok=True)
 
     # Load the scaling pipeline from saved pickle file
     scaling_pipeline = ScalingPipeline.load(input_base / inputs["scaler"])
@@ -113,7 +110,7 @@ def evaluate(inputs: Any) -> Any:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     # Save as CSV
-    csv_path = output_dir / f"predictions_{timestamp}.csv"
+    csv_path = output_base / f"predictions_{timestamp}.csv"
     predictions_array = qoi_predictions.numpy()
 
     # Determine number of QoI outputs
