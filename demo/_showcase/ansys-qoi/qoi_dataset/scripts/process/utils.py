@@ -90,23 +90,14 @@ def sample_points_with_spheres(
 ) -> tuple[np.ndarray, np.ndarray | None]:
     """Sample points on a mesh, allocating more samples inside given spheres.
 
-    Parameters
-    ----------
-    mesh : TriangleMesh
-        Full mesh to sample from.
-    n_points : int
-        Total number of points to return.
-    method : {"poisson", "uniform"}
-        Sampling method.
-    spheres : iterable of (center, radius)
-        Each center is a (3,) np.ndarray; radius is a float.
-    sphere_fraction : float in (0, 1]
-        Fraction of total samples to dedicate to all spheres combined.
-        The remainder is sampled over the full mesh.
+    Args:
+        mesh: Input triangle mesh
+        n_points:Number of points to sample
+        method: Sampling method, either 'poisson' or 'uniform'
+        spheres : Iterable of (center, radius), each center is a (3,) np.ndarray; radius is a float.
+        sphere_fraction : Fraction of total samples to dedicate to all spheres combined
 
     Returns:
-    -------
-    tuple[np.ndarray, np.ndarray | None]
         Tuple of (points, normals) where points is (N, 3) and normals is (N, 3) or None
     """
     spheres = list(spheres)
