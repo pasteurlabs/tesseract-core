@@ -184,8 +184,10 @@ dependencies = [
     # ... other dependencies
 ]
 
-[tool.uv.indexes]
-pytorch-cu128 = "https://download.pytorch.org/whl/cu128"
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+
 
 [tool.uv.sources]
 torch = { index = "pytorch-cu128" }
