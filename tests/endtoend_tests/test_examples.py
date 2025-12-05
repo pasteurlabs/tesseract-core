@@ -192,7 +192,8 @@ TEST_CASES = {
                 endpoint="check-gradients",
                 payload=json.loads(
                     (
-                        EXAMPLES_DIR / "vectoradd/test_cases/example_input.json"
+                        EXAMPLES_DIR
+                        / "vectoradd/test_cases/example_checkgradients_input.json"
                     ).read_text()
                 ),
             ),
@@ -284,7 +285,8 @@ TEST_CASES = {
                 endpoint="check-gradients",
                 payload=json.loads(
                     (
-                        EXAMPLES_DIR / "vectoradd_jax/test_cases/example_input.json"
+                        EXAMPLES_DIR
+                        / "vectoradd_jax/test_cases/example_checkgradients_input.json"
                     ).read_text()
                 ),
             ),
@@ -434,7 +436,8 @@ TEST_CASES = {
                 endpoint="check-gradients",
                 payload=json.loads(
                     (
-                        EXAMPLES_DIR / "univariate/test_cases/example_input.json"
+                        EXAMPLES_DIR
+                        / "univariate/test_cases/example_checkgradients_input.json"
                     ).read_text()
                 ),
             ),
