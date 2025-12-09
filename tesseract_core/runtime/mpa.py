@@ -162,7 +162,7 @@ class MLflowBackend(BaseBackend):
         config = get_config()
         mlflow_tracking_uri = config.mlflow_tracking_uri
         if mlflow_tracking_uri.startswith(("http://", "https://")):
-            try: 
+            try:
                 # Fetch username and password if they exist
                 username = os.environ.get("MLFLOW_TRACKING_USERNAME")
                 password = os.environ.get("MLFLOW_TRACKING_PASSWORD")
