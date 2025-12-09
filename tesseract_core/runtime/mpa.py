@@ -163,12 +163,9 @@ class MLflowBackend(BaseBackend):
         mlflow_tracking_uri = config.mlflow_tracking_uri
         if mlflow_tracking_uri.startswith(("http://", "https://")):
             try:
-                # Fetch username and password if they exist
                 username = os.environ.get("MLFLOW_TRACKING_USERNAME")
                 password = os.environ.get("MLFLOW_TRACKING_PASSWORD")
-
-                # Check that if one of username/password are defined, both are
-                # defined. If not, raise an error.
+                
                 if bool(username) != bool(password):
                     raise RuntimeError(
                         "If one of MLFLOW_TRACKING_USERNAME and MLFLOW_TRACKING_PASSWORD is defined, "
