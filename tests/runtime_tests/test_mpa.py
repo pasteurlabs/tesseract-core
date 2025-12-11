@@ -236,7 +236,9 @@ def test_build_tracking_uri_url_encoded_credentials():
         mlflow_tracking_password="p@ss:w0rd!",
     )
     tracking_uri = mpa.MLflowBackend._build_tracking_uri()
-    assert tracking_uri == "https://user%40example.com:p%40ss%3Aw0rd%21@mlflow.example.com"
+    assert (
+        tracking_uri == "https://user%40example.com:p%40ss%3Aw0rd%21@mlflow.example.com"
+    )
 
 
 def test_build_tracking_uri_with_path_and_query():
@@ -247,7 +249,9 @@ def test_build_tracking_uri_with_path_and_query():
         mlflow_tracking_password="testpass",
     )
     tracking_uri = mpa.MLflowBackend._build_tracking_uri()
-    assert tracking_uri == "http://testuser:testpass@localhost:5000/api/mlflow?param=value"
+    assert (
+        tracking_uri == "http://testuser:testpass@localhost:5000/api/mlflow?param=value"
+    )
 
 
 def test_build_tracking_uri_username_without_password():
