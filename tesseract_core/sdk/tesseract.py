@@ -487,7 +487,7 @@ def _decode_array(encoded_arr: dict) -> np.ndarray:
         if encoded_arr["data"]["encoding"] == "base64":
             data = base64.b64decode(encoded_arr["data"]["buffer"])
             arr = np.frombuffer(data, dtype=encoded_arr["dtype"])
-        elif encoded_arr["data"]["encoding"] == "base64":
+        elif encoded_arr["data"]["encoding"] == "json":
             arr = np.array(encoded_arr["data"]["buffer"], dtype=encoded_arr["dtype"])
         elif encoded_arr["data"]["encoding"] == "binref":
             # This failure mode could be reached with Tesseract served with `--output-format=json+binref`
