@@ -85,7 +85,7 @@ class Tesseract:
         user: str | None = None,
         input_path: str | Path | None = None,
         output_path: str | Path | None = None,
-        output_format: Literal["json", "json+base64", "json+binref"] = "json+base64",
+        output_format: Literal["json", "json+base64"] = "json+base64",
     ) -> Tesseract:
         """Create a Tesseract instance from a Docker image.
 
@@ -114,7 +114,7 @@ class Tesseract:
                 Defaults to the current user.
             input_path: Input path to read input files from, such as local directory or S3 URI.
             output_path: Output path to write output files to, such as local directory or S3 URI.
-            output_format: Format to use for the output data.
+            output_format: Format to use for the output data (json+binref not yet supported).
 
         Returns:
             A Tesseract instance.
@@ -157,7 +157,7 @@ class Tesseract:
         tesseract_api: str | Path | ModuleType,
         input_path: Path | None = None,
         output_path: Path | None = None,
-        output_format: Literal["json", "json+base64", "json+binref"] = "json+base64",
+        output_format: Literal["json", "json+base64"] = "json+base64",
     ) -> Tesseract:
         """Create a Tesseract instance from a Tesseract API module.
 
@@ -173,7 +173,7 @@ class Tesseract:
                 payload have to be relative to this path.
             output_path: Path of output directory. All paths in the tesseract
                 result with be given relative to this path.
-            output_format: Format to use for the output data.
+            output_format: Format to use for the output data (json+binref not yet supported).
 
         Returns:
             A Tesseract instance.
