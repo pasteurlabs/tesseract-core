@@ -492,11 +492,11 @@ def _decode_array(encoded_arr: dict) -> np.ndarray:
         elif encoded_arr["data"]["encoding"] == "binref":
             # This failure mode could be reached with Tesseract served with `--output-format=json+binref`
             raise ValueError(
-                "Python SDK does not yet support json+binref output format"
+                "Python SDK does not yet support json+binref output format."
             )
         else:
             raise ValueError(
-                f"Unexpected array encoding {encoded_arr['data']['encoding']}."
+                f"Unexpected array encoding {encoded_arr['data']['encoding']}. Cannot decode."
             )
     else:
         raise ValueError("Encoded array does not contain 'data' key. Cannot decode.")
