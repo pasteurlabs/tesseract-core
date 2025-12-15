@@ -85,7 +85,7 @@ class Tesseract:
         user: str | None = None,
         input_path: str | Path | None = None,
         output_path: str | Path | None = None,
-        output_format: Literal["json", "json+base64", "json+binref"] = "json",
+        output_format: Literal["json", "json+base64", "json+binref"] = "json+base64",
     ) -> Tesseract:
         """Create a Tesseract instance from a Docker image.
 
