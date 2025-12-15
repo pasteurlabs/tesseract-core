@@ -198,8 +198,8 @@ class MLflowBackend(BaseBackend):
                     f"Failed to connect to MLflow tracking server at {display_uri}. "
                     "Please make sure an MLflow server is running and TESSERACT_MLFLOW_TRACKING_URI is set correctly, "
                     "or switch to file-based logging by setting TESSERACT_MLFLOW_TRACKING_URI to an empty string."
-                    "If your MLflow server has authentication enabled, please make sure that TESSERACT_MLFLOW_TRACKING_USERNAME"
-                    "and TESSERACT_MLFLOW_TRACKING_PASSWORD are set correctly."
+                    "If your MLflow server has authentication enabled, please make sure that"
+                    "TESSERACT_MLFLOW_TRACKING_USERNAME and TESSERACT_MLFLOW_TRACKING_PASSWORD are set correctly."
                 ) from e
 
     def log_parameter(self, key: str, value: Any) -> None:
