@@ -115,6 +115,7 @@ class Tesseract:
             input_path: Input path to read input files from, such as local directory or S3 URI.
             output_path: Output path to write output files to, such as local directory or S3 URI.
             output_format: Format to use for the output data (json+binref not yet supported).
+                This has no impact on what is returned to Python and only affects the format that is used internally.
 
         Returns:
             A Tesseract instance.
