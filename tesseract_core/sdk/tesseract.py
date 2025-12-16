@@ -85,7 +85,7 @@ class Tesseract:
         user: str | None = None,
         input_path: str | Path | None = None,
         output_path: str | Path | None = None,
-        output_format: Literal["json", "json+base64", "json+binref"] = "json",
+        output_format: Literal["json", "json+base64"] = "json+base64",
     ) -> Tesseract:
         """Create a Tesseract instance from a Docker image.
 
@@ -114,7 +114,8 @@ class Tesseract:
                 Defaults to the current user.
             input_path: Input path to read input files from, such as local directory or S3 URI.
             output_path: Output path to write output files to, such as local directory or S3 URI.
-            output_format: Format to use for the output data.
+            output_format: Format to use for the output data (json+binref not yet supported).
+                This has no impact on what is returned to Python and only affects the format that is used internally.
 
         Returns:
             A Tesseract instance.
@@ -157,7 +158,7 @@ class Tesseract:
         tesseract_api: str | Path | ModuleType,
         input_path: Path | None = None,
         output_path: Path | None = None,
-        output_format: Literal["json", "json+base64", "json+binref"] = "json",
+        output_format: Literal["json", "json+base64"] = "json+base64",
     ) -> Tesseract:
         """Create a Tesseract instance from a Tesseract API module.
 
@@ -173,7 +174,8 @@ class Tesseract:
                 payload have to be relative to this path.
             output_path: Path of output directory. All paths in the tesseract
                 result with be given relative to this path.
-            output_format: Format to use for the output data.
+            output_format: Format to use for the output data (json+binref not yet supported).
+                This has no impact on what is returned to Python and only affects the format that is used internally.
 
         Returns:
             A Tesseract instance.
@@ -487,8 +489,17 @@ def _decode_array(encoded_arr: dict) -> np.ndarray:
         if encoded_arr["data"]["encoding"] == "base64":
             data = base64.b64decode(encoded_arr["data"]["buffer"])
             arr = np.frombuffer(data, dtype=encoded_arr["dtype"])
-        else:
+        elif encoded_arr["data"]["encoding"] in ["json", "raw"]:
             arr = np.array(encoded_arr["data"]["buffer"], dtype=encoded_arr["dtype"])
+        elif encoded_arr["data"]["encoding"] == "binref":
+            # This failure mode could be reached with Tesseract served with `--output-format=json+binref`
+            raise ValueError(
+                "Python SDK does not yet support json+binref output format."
+            )
+        else:
+            raise ValueError(
+                f"Unexpected array encoding {encoded_arr['data']['encoding']}. Cannot decode."
+            )
     else:
         raise ValueError("Encoded array does not contain 'data' key. Cannot decode.")
     arr = arr.reshape(encoded_arr["shape"])
