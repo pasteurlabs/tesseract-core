@@ -33,7 +33,7 @@ $ python run_example.py
 To serve the Tesseract, run:
 
 ```bash
-$ tesseract serve "helloworld:latest" --network my_network --network-alias helloworld
+$ tesseract serve "helloworld:latest" --network my_network --network-alias helloworld --port 8000
 ```
 
 This command will print relevant container metadata to `stdout`. Importantly, the container metadata tells us the Tesseract's IP address for each network it is connected to. In our case, the helloworld Tesseract is connected to `my_network` and is reachable at `172.19.0.2:8000`. The `network-alias` argument allows us to create more human-readable addresses, in this example `--network-alias helloworld` also makes the Tesseract available at `http://helloworld:8000`.
