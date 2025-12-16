@@ -175,6 +175,7 @@ class Tesseract:
             output_path: Path of output directory. All paths in the tesseract
                 result with be given relative to this path.
             output_format: Format to use for the output data (json+binref not yet supported).
+                This has no impact on what is returned to Python and only affects the format that is used internally.
 
         Returns:
             A Tesseract instance.
