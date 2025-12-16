@@ -71,7 +71,7 @@ Note that if your MLFlow server uses basic auth, you need to populate the `TESSE
 
 ```bash
 $ tesseract serve --env=TESSERACT_MLFLOW_TRACKING_URI="..." \
-    --env=MLFLOW_TRACKING_USERNAME="..." --env=MLFLOW_TRACKING_PASSWORD="..." \
+    --env=TESSERACT_MLFLOW_TRACKING_USERNAME="..." --env=TESSERACT_MLFLOW_TRACKING_PASSWORD="..." \
     metrics
 ````
 
