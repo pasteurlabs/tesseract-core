@@ -58,7 +58,7 @@ jobs:
           echo "new_version=$new_version" >> $GITHUB_OUTPUT
 
       - name: Create Pull Request
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
             token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
             committer: PasteurBot <${{ vars.PL_PASTEURBOT_EMAIL }}>
