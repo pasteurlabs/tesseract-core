@@ -66,6 +66,15 @@ As an alternative to the MLflow setup we provide, you can point your Tesseract t
 $ tesseract serve --env=TESSERACT_MLFLOW_TRACKING_URI="..."  metrics
 ````
 
+Note that if your MLFlow server uses basic auth, you need to populate the `TESSERACT_MLFLOW_TRACKING_USERNAME` and
+`TESSERACT_MLFLOW_TRACKING_PASSWORD` for the Tesseract to be able to authenticate to it.
+
+```bash
+$ tesseract serve --env=TESSERACT_MLFLOW_TRACKING_URI="..." \
+    --env=TESSERACT_MLFLOW_TRACKING_USERNAME="..." --env=TESSERACT_MLFLOW_TRACKING_PASSWORD="..." \
+    metrics
+````
+
 ## Volume mounts and user permissions
 
 When mounting a volume into a Tesseract container, default behavior depends on the Docker engine being used. Specifically, Docker Desktop, Docker Engine, and Podman have different ways of handling user permissions for mounted volumes.
