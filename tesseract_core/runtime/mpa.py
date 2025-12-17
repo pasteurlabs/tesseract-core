@@ -202,21 +202,53 @@ class MLflowBackend(BaseBackend):
                     "TESSERACT_MLFLOW_TRACKING_USERNAME and TESSERACT_MLFLOW_TRACKING_PASSWORD are set correctly."
                 ) from e
 
+    def _ensure_active_run(self) -> None:
+        """Ensure there is an active MLflow run, starting one if needed."""
+        if self.mlflow.active_run() is None:
+            self.start_run()
+
     def log_parameter(self, key: str, value: Any) -> None:
         """Log a parameter to MLflow."""
+        self._ensure_active_run()
         self.mlflow.log_param(key, value)
 
     def log_metric(self, key: str, value: float, step: int | None = None) -> None:
         """Log a metric to MLflow."""
+        self._ensure_active_run()
         self.mlflow.log_metric(key, value, step=step)
 
     def log_artifact(self, local_path: str) -> None:
         """Log an artifact to MLflow."""
+        self._ensure_active_run()
         self.mlflow.log_artifact(local_path)
+
+    @staticmethod
+    def _parse_tags(tags_str: str) -> dict[str, str]:
+        """Parse tags from comma-separated key=value pairs.
+
+        Args:
+            tags_str: String in format "key1=val1, key2=val2, ..."
+
+        Returns:
+            Dictionary mapping tag keys to values. Empty dict if tags_str is empty.
+        """
+        if not tags_str:
+            return {}
+
+        tags = {}
+        for pair in tags_str.split(","):
+            pair = pair.strip()
+            if "=" in pair:
+                key, value = pair.split("=", 1)
+                tags[key.strip()] = value.strip()
+
+        return tags
 
     def start_run(self) -> None:
         """Start a new MLflow run."""
-        self.mlflow.start_run()
+        config = get_config()
+        tags = self._parse_tags(config.mlflow_tags) or None
+        self.mlflow.start_run(tags=tags)
 
     def end_run(self) -> None:
         """End the current MLflow run."""

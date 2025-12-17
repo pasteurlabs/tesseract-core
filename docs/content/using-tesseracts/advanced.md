@@ -75,6 +75,13 @@ $ tesseract serve --env=TESSERACT_MLFLOW_TRACKING_URI="..." \
     metrics
 ````
 
+If you wish to include tags on your MLFlow run, you can do so by passing them via the `TESSERACT_MLFLOW_TAGS` as a comma-seperated
+key value list.
+
+```bash
+$ tesseract serve --env=TESSERACT_MLFLOW_TRACKING_URI="..." \
+    --env=TESSERACT_MLFLOW_TAGS="key1=value1,key2=value2,..." metrics
+
 ## Volume mounts and user permissions
 
 When mounting a volume into a Tesseract container, default behavior depends on the Docker engine being used. Specifically, Docker Desktop, Docker Engine, and Podman have different ways of handling user permissions for mounted volumes.

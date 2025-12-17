@@ -293,3 +293,62 @@ def test_build_tracking_uri_sqlite_ignores_credentials():
     assert "testuser" not in tracking_uri
     assert "testpass" not in tracking_uri
     assert tracking_uri.startswith("sqlite:///")
+
+
+def test_parse_tags_basic():
+    """Test basic tag parsing with simple key=value pairs."""
+    pytest.importorskip("mlflow")
+    tags_str = "env=production,team=ml,version=1.0"
+    tags = mpa.MLflowBackend._parse_tags(tags_str)
+    assert tags == {"env": "production", "team": "ml", "version": "1.0"}
+
+
+def test_parse_tags_with_spaces():
+    """Test tag parsing handles extra spaces around keys and values."""
+    pytest.importorskip("mlflow")
+    tags_str = "env = production , team = ml , version = 1.0"
+    tags = mpa.MLflowBackend._parse_tags(tags_str)
+    assert tags == {"env": "production", "team": "ml", "version": "1.0"}
+
+
+def test_parse_tags_with_equals_in_value():
+    """Test tag parsing when value contains equals sign."""
+    pytest.importorskip("mlflow")
+    tags_str = "url=http://example.com?param=value,equation=x=y+z"
+    tags = mpa.MLflowBackend._parse_tags(tags_str)
+    assert tags == {"url": "http://example.com?param=value", "equation": "x=y+z"}
+
+
+def test_parse_tags_empty_string():
+    """Test tag parsing with empty string returns empty dict."""
+    pytest.importorskip("mlflow")
+    tags = mpa.MLflowBackend._parse_tags("")
+    assert tags == {}
+
+
+def test_parse_tags_single_pair():
+    """Test tag parsing with single key=value pair."""
+    pytest.importorskip("mlflow")
+    tags_str = "env=production"
+    tags = mpa.MLflowBackend._parse_tags(tags_str)
+    assert tags == {"env": "production"}
+
+
+def test_parse_tags_ignores_malformed():
+    """Test tag parsing ignores entries without equals sign."""
+    pytest.importorskip("mlflow")
+    tags_str = "env=production,invalid,team=ml"
+    tags = mpa.MLflowBackend._parse_tags(tags_str)
+    assert tags == {"env": "production", "team": "ml"}
+
+
+def test_parse_tags_special_characters():
+    """Test tag parsing with special characters in values."""
+    pytest.importorskip("mlflow")
+    tags_str = "user=john@example.com,path=/home/user/data,note=test:value"
+    tags = mpa.MLflowBackend._parse_tags(tags_str)
+    assert tags == {
+        "user": "john@example.com",
+        "path": "/home/user/data",
+        "note": "test:value",
+    }
