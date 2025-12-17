@@ -204,3 +204,92 @@ def test_mlflow_log_calls(tmpdir):
                     continue
 
         assert artifact_found
+
+
+def test_build_tracking_uri_with_credentials():
+    pytest.importorskip("mlflow")
+    update_config(
+        mlflow_tracking_uri="http://localhost:5000",
+        mlflow_tracking_username="testuser",
+        mlflow_tracking_password="testpass",
+    )
+    tracking_uri = mpa.MLflowBackend._build_tracking_uri()
+    assert tracking_uri == "http://testuser:testpass@localhost:5000"
+
+
+def test_build_tracking_uri_without_credentials():
+    pytest.importorskip("mlflow")
+    update_config(
+        mlflow_tracking_uri="http://localhost:5000",
+        mlflow_tracking_username="",
+        mlflow_tracking_password="",
+    )
+    tracking_uri = mpa.MLflowBackend._build_tracking_uri()
+    assert tracking_uri == "http://localhost:5000"
+
+
+def test_build_tracking_uri_url_encoded_credentials():
+    pytest.importorskip("mlflow")
+    update_config(
+        mlflow_tracking_uri="https://mlflow.example.com",
+        mlflow_tracking_username="user@example.com",
+        mlflow_tracking_password="p@ss:w0rd!",
+    )
+    tracking_uri = mpa.MLflowBackend._build_tracking_uri()
+    assert (
+        tracking_uri == "https://user%40example.com:p%40ss%3Aw0rd%21@mlflow.example.com"
+    )
+
+
+def test_build_tracking_uri_with_path_and_query():
+    pytest.importorskip("mlflow")
+    update_config(
+        mlflow_tracking_uri="http://localhost:5000/api/mlflow?param=value",
+        mlflow_tracking_username="testuser",
+        mlflow_tracking_password="testpass",
+    )
+    tracking_uri = mpa.MLflowBackend._build_tracking_uri()
+    assert (
+        tracking_uri == "http://testuser:testpass@localhost:5000/api/mlflow?param=value"
+    )
+
+
+def test_build_tracking_uri_username_without_password():
+    pytest.importorskip("mlflow")
+    update_config(
+        mlflow_tracking_uri="http://localhost:5000",
+        mlflow_tracking_username="testuser",
+        mlflow_tracking_password="",
+    )
+    with pytest.raises(
+        RuntimeError,
+        match="If one of TESSERACT_MLFLOW_TRACKING_USERNAME and TESSERACT_MLFLOW_TRACKING_PASSWORD is defined",
+    ):
+        mpa.MLflowBackend._build_tracking_uri()
+
+
+def test_build_tracking_uri_password_without_username():
+    pytest.importorskip("mlflow")
+    update_config(
+        mlflow_tracking_uri="http://localhost:5000",
+        mlflow_tracking_username="",
+        mlflow_tracking_password="testpass",
+    )
+    with pytest.raises(
+        RuntimeError,
+        match="If one of TESSERACT_MLFLOW_TRACKING_USERNAME and TESSERACT_MLFLOW_TRACKING_PASSWORD is defined",
+    ):
+        mpa.MLflowBackend._build_tracking_uri()
+
+
+def test_build_tracking_uri_sqlite_ignores_credentials():
+    pytest.importorskip("mlflow")
+    update_config(
+        mlflow_tracking_uri="sqlite:///mlflow.db",
+        mlflow_tracking_username="testuser",
+        mlflow_tracking_password="testpass",
+    )
+    tracking_uri = mpa.MLflowBackend._build_tracking_uri()
+    assert "testuser" not in tracking_uri
+    assert "testpass" not in tracking_uri
+    assert tracking_uri.startswith("sqlite:///")
