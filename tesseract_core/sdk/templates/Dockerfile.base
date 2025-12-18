@@ -24,6 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ssh \
         # Needed to compile addmeplease, and nice to have in general
         gcc \
+        libc6 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy and compile addmeplease
