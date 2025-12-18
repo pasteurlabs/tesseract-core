@@ -1,3 +1,22 @@
+/*
+ * addmeplease - Create user/group entries for non-privileged container users
+ *
+ * This program allows a non-privileged user to create their own entry in
+ * /etc/passwd and /etc/group. This is necessary because:
+ *
+ * 1. Containers run as non-root users (e.g., USER 501:501) for security
+ * 2. Some applications require an entry in /etc/passwd to function properly
+ * 3. The container entrypoint runs as the non-privileged user and cannot
+ *    directly modify /etc/passwd without elevated privileges
+ *
+ * This binary is compiled and installed with setuid root (chmod 4755), which
+ * allows it to temporarily elevate privileges to modify /etc/passwd and
+ * /etc/group, then immediately drop privileges back to the calling user.
+ *
+ * Note: setuid only works with compiled binaries, not shell scripts. This is
+ * why this must be implemented in C rather than as a bash script.
+ */
+
 #define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>

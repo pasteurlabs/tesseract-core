@@ -22,6 +22,7 @@ fi
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
         ssh \
+        # Needed to compile addmeplease, and nice to have in general
         gcc \
     && rm -rf /var/lib/apt/lists/*
 
@@ -119,7 +120,7 @@ ENV TESSERACT_OUTPUT_PATH="/tesseract/output_data"
 
 # Drop to random non-root user to prevent exploits
 # (this way, we never start the container as root unless specifically requested)
-USER 501:501
+USER 9999:9999
 
 # Final sanity check to ensure the runtime is installed and tesseract_api.py is valid
 {% if not config.build_config.skip_checks %}
