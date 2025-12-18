@@ -1,3 +1,6 @@
+# Copyright 2025 Pasteur Labs. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 # Stage 1: Build Python environment and install requirements
 {% if config.build_config.target_platform.strip() == "native" %}
 FROM {{ config.build_config.base_image }} AS build_stage
