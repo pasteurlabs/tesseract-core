@@ -22,7 +22,16 @@ fi
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
         ssh \
+        gcc \
     && rm -rf /var/lib/apt/lists/*
+
+# Copy and compile addmeplease
+COPY "addmeplease.c" /tmp/addmeplease.c
+RUN gcc -o /bin/addmeplease /tmp/addmeplease.c && \
+    rm /tmp/addmeplease.c && \
+    chown root:root /bin/addmeplease && \
+    chmod 4755 /bin/addmeplease && \
+    ls -l /bin/addmeplease
 
 {% if config.build_config.extra_packages %}
 # Install extra packages
@@ -40,7 +49,7 @@ RUN mkdir -p -m 0700 ~/.ssh && ssh-keyscan github.com >> ~/.ssh/known_hosts
 WORKDIR /tmp/build
 COPY {{ tesseract_runtime_location }} ./tesseract_runtime/
 COPY {{ tesseract_source_directory }}/{{ config.build_config.requirements._filename }} ./
-COPY {{ tesseract_source_directory }}/{{ config.build_config.requirements._build_script }} ./
+COPY {{ config.build_config.requirements._build_script }} ./
 COPY local_requirements/ ./local_requirements
 
 # Build a python venv from python provider build scripts.
@@ -79,6 +88,9 @@ ENV TESSERACT_NAME="{{ config.name | replace('"', '\\"') | replace('\n', '\\n') 
 
 # Copy only necessary files
 COPY --from=build_stage /python-env /python-env
+COPY --from=build_stage /bin/addmeplease /bin/addmeplease
+COPY "entrypoint.sh" /tesseract/entrypoint.sh
+RUN chmod 555 /tesseract/entrypoint.sh
 COPY "{{ tesseract_source_directory }}/tesseract_api.py" ${TESSERACT_API_PATH}
 RUN chmod 444 ${TESSERACT_API_PATH}
 
@@ -102,14 +114,17 @@ RUN mkdir -p /tesseract/input_data /tesseract/output_data && \
     chmod 777 /tesseract/output_data
 VOLUME ["/tesseract/input_data", "/tesseract/output_data"]
 
-ENV HOME=/tesseract
 ENV TESSERACT_INPUT_PATH="/tesseract/input_data"
 ENV TESSERACT_OUTPUT_PATH="/tesseract/output_data"
 
+# Drop to random non-root user to prevent exploits
+# (this way, we never start the container as root unless specifically requested)
+USER 501:501
+
 # Final sanity check to ensure the runtime is installed and tesseract_api.py is valid
 {% if not config.build_config.skip_checks %}
-RUN _TESSERACT_IS_BUILDING=1 tesseract-runtime check
+RUN _TESSERACT_IS_BUILDING=1 /tesseract/entrypoint.sh tesseract-runtime check
 {% endif %}
 
-ENTRYPOINT ["tesseract-runtime"]
+ENTRYPOINT ["/tesseract/entrypoint.sh", "tesseract-runtime"]
 CMD ["--help"]
