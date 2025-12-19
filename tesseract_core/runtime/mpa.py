@@ -16,7 +16,7 @@ from datetime import datetime
 from io import UnsupportedOperation
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote, urlparse
+from urllib.parse import ParseResult, quote, urlparse, urlunparse
 
 import requests
 
@@ -129,21 +129,11 @@ class MLflowBackend(BaseBackend):
 
     def __init__(self, base_dir: str | None = None) -> None:
         super().__init__(base_dir)
-        os.environ["GIT_PYTHON_REFRESH"] = (
-            "quiet"  # Suppress potential MLflow git warnings
-        )
+        from tesseract_core.runtime.mlflow_client import MLflowHTTPClient
 
-        try:
-            import mlflow
-        except ImportError as exc:
-            raise ImportError(
-                "MLflow is required for MLflowBackend but is not installed"
-            ) from exc
-
-        self.mlflow = mlflow
         tracking_uri = MLflowBackend._build_tracking_uri()
         self._ensure_mlflow_reachable(tracking_uri)
-        mlflow.set_tracking_uri(tracking_uri)
+        self.client = MLflowHTTPClient(tracking_uri=tracking_uri)
 
     @staticmethod
     def _build_tracking_uri() -> str:
@@ -151,76 +141,69 @@ class MLflowBackend(BaseBackend):
         config = get_config()
         tracking_uri = config.mlflow_tracking_uri
 
-        if not tracking_uri.startswith(("http://", "https://")):
-            # If it's a db file URI, convert to local path
-            tracking_uri = tracking_uri.replace("sqlite:///", "")
+        parsed = urlparse(tracking_uri)
+        if not parsed.scheme:
+            tracking_uri = f"https://{tracking_uri}"
 
-            # Relative paths are resolved against the base output path
-            if not Path(tracking_uri).is_absolute():
-                tracking_uri = (Path(get_config().output_path) / tracking_uri).resolve()
+        parsed = urlparse(tracking_uri)
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError(
+                f"MLflow logging only supports accessing MLflow via HTTP/HTTPS (got URI scheme: {parsed.scheme})"
+            )
 
-            tracking_uri = f"sqlite:///{tracking_uri}"
-        else:
-            username = config.mlflow_tracking_username
-            password = config.mlflow_tracking_password
+        username = config.mlflow_tracking_username
+        password = config.mlflow_tracking_password
 
-            if bool(username) != bool(password):
-                raise RuntimeError(
-                    "If one of TESSERACT_MLFLOW_TRACKING_USERNAME and TESSERACT_MLFLOW_TRACKING_PASSWORD is defined, "
-                    "both must be defined."
-                )
+        if bool(username) != bool(password):
+            raise RuntimeError(
+                "If one of TESSERACT_MLFLOW_TRACKING_USERNAME and TESSERACT_MLFLOW_TRACKING_PASSWORD is defined, "
+                "both must be defined."
+            )
 
-            if username and password:
-                parsed = urlparse(tracking_uri)
-                # Reconstruct URI with embedded credentials
-                tracking_uri = (
-                    f"{parsed.scheme}://{quote(username)}:{quote(password)}@"
-                    f"{parsed.netloc}{parsed.path}"
-                )
-                if parsed.query:
-                    tracking_uri += f"?{parsed.query}"
-                if parsed.fragment:
-                    tracking_uri += f"#{parsed.fragment}"
+        if username and password:
+            # Reconstruct URI with embedded credentials
+            urlparts = parsed._asdict()
+            urlparts["netloc"] = f"{quote(username)}:{quote(password)}@{parsed.netloc}"
+            parsed = ParseResult(**urlparts)
 
-        return tracking_uri
+        return urlunparse(parsed)
 
     def _ensure_mlflow_reachable(self, tracking_uri: str) -> None:
         """Check if the MLflow tracking server is reachable."""
-        if tracking_uri.startswith(("http://", "https://")):
-            try:
-                response = requests.get(tracking_uri, timeout=5)
-                response.raise_for_status()
-            except requests.RequestException as e:
-                # Don't expose credentials in error message - use the original URI
-                config = get_config()
-                display_uri = config.mlflow_tracking_uri
-                raise RuntimeError(
-                    f"Failed to connect to MLflow tracking server at {display_uri}. "
-                    "Please make sure an MLflow server is running and TESSERACT_MLFLOW_TRACKING_URI is set correctly, "
-                    "or switch to file-based logging by setting TESSERACT_MLFLOW_TRACKING_URI to an empty string."
-                    "If your MLflow server has authentication enabled, please make sure that"
-                    "TESSERACT_MLFLOW_TRACKING_USERNAME and TESSERACT_MLFLOW_TRACKING_PASSWORD are set correctly."
-                ) from e
+        try:
+            response = requests.get(tracking_uri, timeout=5)
+            response.raise_for_status()
+        except requests.RequestException as e:
+            # Don't expose credentials in error message - use the original URI
+            config = get_config()
+            display_uri = config.mlflow_tracking_uri
+            raise RuntimeError(
+                f"Failed to connect to MLflow tracking server at {display_uri}. "
+                "Please make sure an MLflow server is running and TESSERACT_MLFLOW_TRACKING_URI is set correctly, "
+                "or switch to file-based logging by setting TESSERACT_MLFLOW_TRACKING_URI to an empty string."
+                "If your MLflow server has authentication enabled, please make sure that"
+                "TESSERACT_MLFLOW_TRACKING_USERNAME and TESSERACT_MLFLOW_TRACKING_PASSWORD are set correctly."
+            ) from e
 
     def log_parameter(self, key: str, value: Any) -> None:
         """Log a parameter to MLflow."""
-        self.mlflow.log_param(key, value)
+        self.client.log_param(key, value)
 
     def log_metric(self, key: str, value: float, step: int | None = None) -> None:
         """Log a metric to MLflow."""
-        self.mlflow.log_metric(key, value, step=step)
+        self.client.log_metric(key, value, step=step)
 
     def log_artifact(self, local_path: str) -> None:
         """Log an artifact to MLflow."""
-        self.mlflow.log_artifact(local_path)
+        self.client.log_artifact(local_path)
 
     def start_run(self) -> None:
         """Start a new MLflow run."""
-        self.mlflow.start_run()
+        self.client.create_run()
 
     def end_run(self) -> None:
         """End the current MLflow run."""
-        self.mlflow.end_run()
+        self.client.end_run()
 
 
 def _create_backend(base_dir: str | None) -> BaseBackend:
