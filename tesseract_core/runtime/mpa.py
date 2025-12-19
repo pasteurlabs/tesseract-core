@@ -3,6 +3,7 @@
 
 """Metrics, Parameters, and Artifacts (MPA) library for Tesseract Core."""
 
+import ast
 import csv
 import json
 import os
@@ -223,32 +224,44 @@ class MLflowBackend(BaseBackend):
         self.mlflow.log_artifact(local_path)
 
     @staticmethod
-    def _parse_tags(tags_str: str) -> dict[str, str]:
-        """Parse tags from comma-separated key=value pairs.
+    def _parse_run_extra_args(args_str: str) -> dict[str, Any]:
+        """Parse extra arguments for mlflow.start_run() from string.
 
         Args:
-            tags_str: String in format "key1=val1, key2=val2, ..."
+            args_str: String representation of a Python dict, e.g.,
+                     '{"tags": {"env": "prod"}, "run_name": "myrun"}'
 
         Returns:
-            Dictionary mapping tag keys to values. Empty dict if tags_str is empty.
+            Dictionary of extra arguments to pass to mlflow.start_run().
+            Empty dict if args_str is empty.
+
+        Raises:
+            ValueError: If args_str is not a valid dict or contains invalid syntax.
         """
-        if not tags_str:
+        if not args_str or not args_str.strip():
             return {}
 
-        tags = {}
-        for pair in tags_str.split(","):
-            pair = pair.strip()
-            if "=" in pair:
-                key, value = pair.split("=", 1)
-                tags[key.strip()] = value.strip()
+        try:
+            result = ast.literal_eval(args_str.strip())
+        except (ValueError, SyntaxError) as e:
+            raise ValueError(
+                f"TESSERACT_MLFLOW_RUN_EXTRA_ARGS must be a valid Python dict string. "
+                f"Got: {args_str!r}. Error: {e}"
+            ) from e
 
-        return tags
+        if not isinstance(result, dict):
+            raise ValueError(
+                f"TESSERACT_MLFLOW_RUN_EXTRA_ARGS must evaluate to a dict, "
+                f"got {type(result).__name__}: {result!r}"
+            )
+
+        return result
 
     def start_run(self) -> None:
-        """Start a new MLflow run."""
+        """Start a new MLflow run with optional extra arguments from config."""
         config = get_config()
-        tags = self._parse_tags(config.mlflow_tags) or None
-        self.mlflow.start_run(tags=tags)
+        run_extra_args = self._parse_run_extra_args(config.mlflow_run_extra_args)
+        self.mlflow.start_run(**run_extra_args)
 
     def end_run(self) -> None:
         """End the current MLflow run."""

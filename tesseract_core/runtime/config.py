@@ -25,7 +25,7 @@ class RuntimeConfig(BaseModel):
     mlflow_tracking_uri: str = ""
     mlflow_tracking_username: str = ""
     mlflow_tracking_password: str = ""
-    mlflow_tags: str = ""
+    mlflow_run_extra_args: str = ""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 

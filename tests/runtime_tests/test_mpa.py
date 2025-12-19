@@ -295,60 +295,61 @@ def test_build_tracking_uri_sqlite_ignores_credentials():
     assert tracking_uri.startswith("sqlite:///")
 
 
-def test_parse_tags_basic():
-    """Test basic tag parsing with simple key=value pairs."""
+def test_parse_run_extra_args_basic_tags():
+    """Test parsing dict with basic tags."""
     pytest.importorskip("mlflow")
-    tags_str = "env=production,team=ml,version=1.0"
-    tags = mpa.MLflowBackend._parse_tags(tags_str)
-    assert tags == {"env": "production", "team": "ml", "version": "1.0"}
+    args_str = '{"tags": {"env": "prod", "team": "ml"}}'
+    args = mpa.MLflowBackend._parse_run_extra_args(args_str)
+    assert args == {"tags": {"env": "prod", "team": "ml"}}
 
 
-def test_parse_tags_with_spaces():
-    """Test tag parsing handles extra spaces around keys and values."""
+def test_parse_run_extra_args_multiple_params():
+    """Test parsing dict with multiple parameters."""
     pytest.importorskip("mlflow")
-    tags_str = "env = production , team = ml , version = 1.0"
-    tags = mpa.MLflowBackend._parse_tags(tags_str)
-    assert tags == {"env": "production", "team": "ml", "version": "1.0"}
-
-
-def test_parse_tags_with_equals_in_value():
-    """Test tag parsing when value contains equals sign."""
-    pytest.importorskip("mlflow")
-    tags_str = "url=http://example.com?param=value,equation=x=y+z"
-    tags = mpa.MLflowBackend._parse_tags(tags_str)
-    assert tags == {"url": "http://example.com?param=value", "equation": "x=y+z"}
-
-
-def test_parse_tags_empty_string():
-    """Test tag parsing with empty string returns empty dict."""
-    pytest.importorskip("mlflow")
-    tags = mpa.MLflowBackend._parse_tags("")
-    assert tags == {}
-
-
-def test_parse_tags_single_pair():
-    """Test tag parsing with single key=value pair."""
-    pytest.importorskip("mlflow")
-    tags_str = "env=production"
-    tags = mpa.MLflowBackend._parse_tags(tags_str)
-    assert tags == {"env": "production"}
-
-
-def test_parse_tags_ignores_malformed():
-    """Test tag parsing ignores entries without equals sign."""
-    pytest.importorskip("mlflow")
-    tags_str = "env=production,invalid,team=ml"
-    tags = mpa.MLflowBackend._parse_tags(tags_str)
-    assert tags == {"env": "production", "team": "ml"}
-
-
-def test_parse_tags_special_characters():
-    """Test tag parsing with special characters in values."""
-    pytest.importorskip("mlflow")
-    tags_str = "user=john@example.com,path=/home/user/data,note=test:value"
-    tags = mpa.MLflowBackend._parse_tags(tags_str)
-    assert tags == {
-        "user": "john@example.com",
-        "path": "/home/user/data",
-        "note": "test:value",
+    args_str = '{"tags": {"foo": "bar"}, "run_name": "myrun", "description": "test run"}'
+    args = mpa.MLflowBackend._parse_run_extra_args(args_str)
+    assert args == {
+        "tags": {"foo": "bar"},
+        "run_name": "myrun",
+        "description": "test run",
     }
+
+
+def test_parse_run_extra_args_empty_string():
+    """Test parsing empty string returns empty dict."""
+    pytest.importorskip("mlflow")
+    args = mpa.MLflowBackend._parse_run_extra_args("")
+    assert args == {}
+
+
+def test_parse_run_extra_args_whitespace_only():
+    """Test parsing whitespace-only string returns empty dict."""
+    pytest.importorskip("mlflow")
+    args = mpa.MLflowBackend._parse_run_extra_args("   ")
+    assert args == {}
+
+
+def test_parse_run_extra_args_invalid_syntax():
+    """Test parsing invalid syntax raises ValueError."""
+    pytest.importorskip("mlflow")
+    with pytest.raises(
+        ValueError, match="TESSERACT_MLFLOW_RUN_EXTRA_ARGS must be a valid Python dict string"
+    ):
+        mpa.MLflowBackend._parse_run_extra_args("{invalid syntax")
+
+
+def test_parse_run_extra_args_non_dict_type():
+    """Test parsing non-dict type raises ValueError."""
+    pytest.importorskip("mlflow")
+    with pytest.raises(
+        ValueError, match="TESSERACT_MLFLOW_RUN_EXTRA_ARGS must evaluate to a dict"
+    ):
+        mpa.MLflowBackend._parse_run_extra_args('["not", "a", "dict"]')
+
+
+def test_parse_run_extra_args_nested_structures():
+    """Test parsing nested dict structures."""
+    pytest.importorskip("mlflow")
+    args_str = '{"tags": {"env": "prod", "meta": {"team": "ml", "version": "1.0"}}}'
+    args = mpa.MLflowBackend._parse_run_extra_args(args_str)
+    assert args == {"tags": {"env": "prod", "meta": {"team": "ml", "version": "1.0"}}}
