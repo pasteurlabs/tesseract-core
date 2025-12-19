@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlparse
 
+import mlflow
 import requests
 
 from tesseract_core.runtime.config import get_config
@@ -133,14 +134,6 @@ class MLflowBackend(BaseBackend):
             "quiet"  # Suppress potential MLflow git warnings
         )
 
-        try:
-            import mlflow
-        except ImportError as exc:
-            raise ImportError(
-                "MLflow is required for MLflowBackend but is not installed"
-            ) from exc
-
-        self.mlflow = mlflow
         tracking_uri = MLflowBackend._build_tracking_uri()
         self._ensure_mlflow_reachable(tracking_uri)
         mlflow.set_tracking_uri(tracking_uri)
@@ -204,23 +197,23 @@ class MLflowBackend(BaseBackend):
 
     def log_parameter(self, key: str, value: Any) -> None:
         """Log a parameter to MLflow."""
-        self.mlflow.log_param(key, value)
+        mlflow.log_param(key, value)
 
     def log_metric(self, key: str, value: float, step: int | None = None) -> None:
         """Log a metric to MLflow."""
-        self.mlflow.log_metric(key, value, step=step)
+        mlflow.log_metric(key, value, step=step)
 
     def log_artifact(self, local_path: str) -> None:
         """Log an artifact to MLflow."""
-        self.mlflow.log_artifact(local_path)
+        mlflow.log_artifact(local_path)
 
     def start_run(self) -> None:
         """Start a new MLflow run."""
-        self.mlflow.start_run()
+        mlflow.start_run()
 
     def end_run(self) -> None:
         """End the current MLflow run."""
-        self.mlflow.end_run()
+        mlflow.end_run()
 
 
 def _create_backend(base_dir: str | None) -> BaseBackend:
