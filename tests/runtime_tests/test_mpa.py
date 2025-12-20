@@ -306,7 +306,9 @@ def test_parse_run_extra_args_basic_tags():
 def test_parse_run_extra_args_multiple_params():
     """Test parsing dict with multiple parameters."""
     pytest.importorskip("mlflow")
-    args_str = '{"tags": {"foo": "bar"}, "run_name": "myrun", "description": "test run"}'
+    args_str = (
+        '{"tags": {"foo": "bar"}, "run_name": "myrun", "description": "test run"}'
+    )
     args = mpa.MLflowBackend._parse_run_extra_args(args_str)
     assert args == {
         "tags": {"foo": "bar"},
@@ -333,7 +335,8 @@ def test_parse_run_extra_args_invalid_syntax():
     """Test parsing invalid syntax raises ValueError."""
     pytest.importorskip("mlflow")
     with pytest.raises(
-        ValueError, match="TESSERACT_MLFLOW_RUN_EXTRA_ARGS must be a valid Python dict string"
+        ValueError,
+        match="TESSERACT_MLFLOW_RUN_EXTRA_ARGS must be a valid Python dict string",
     ):
         mpa.MLflowBackend._parse_run_extra_args("{invalid syntax")
 
