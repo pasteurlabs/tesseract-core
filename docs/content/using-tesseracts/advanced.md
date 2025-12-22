@@ -97,6 +97,7 @@ $ tesseract serve --env=TESSERACT_MLFLOW_TRACKING_URI="..." \
 $ tesseract serve --env=TESSERACT_MLFLOW_TRACKING_URI="..." \
     --env=TESSERACT_MLFLOW_RUN_EXTRA_ARGS='{"run_name": "test_run", "description": "Testing new feature", "tags": {"version": "1.0"}}' \
     metrics
+```
 
 ## Volume mounts and user permissions
 
