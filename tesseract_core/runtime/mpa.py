@@ -203,24 +203,16 @@ class MLflowBackend(BaseBackend):
                     "TESSERACT_MLFLOW_TRACKING_USERNAME and TESSERACT_MLFLOW_TRACKING_PASSWORD are set correctly."
                 ) from e
 
-    def _ensure_active_run(self) -> None:
-        """Ensure there is an active MLflow run, starting one if needed."""
-        if self.mlflow.active_run() is None:
-            self.start_run()
-
     def log_parameter(self, key: str, value: Any) -> None:
         """Log a parameter to MLflow."""
-        self._ensure_active_run()
         self.mlflow.log_param(key, value)
 
     def log_metric(self, key: str, value: float, step: int | None = None) -> None:
         """Log a metric to MLflow."""
-        self._ensure_active_run()
         self.mlflow.log_metric(key, value, step=step)
 
     def log_artifact(self, local_path: str) -> None:
         """Log an artifact to MLflow."""
-        self._ensure_active_run()
         self.mlflow.log_artifact(local_path)
 
     @staticmethod
