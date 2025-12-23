@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from typing import Annotated, Any
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, FilePath
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, FilePath
 
 from tesseract_core.runtime.file_interactions import supported_format_type
 
@@ -36,7 +36,9 @@ class RuntimeConfig(BaseModel):
     mlflow_tracking_uri: str = ""
     mlflow_tracking_username: str = ""
     mlflow_tracking_password: str = ""
-    mlflow_run_extra_args: Annotated[dict[str, Any], BeforeValidator(_eval_str)]
+    mlflow_run_extra_args: Annotated[dict[str, Any], BeforeValidator(_eval_str)] = (
+        Field(default_factory=dict)
+    )
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
