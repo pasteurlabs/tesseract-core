@@ -105,7 +105,7 @@ def _validate_tree_structure(
         AssertionError: If structures don't match (type, keys, length, shape, dtype).
     """
     assert type(tree) is type(template), (
-        f"Type mismatch at {path}:\n"
+        f"Type mismatch at {'.'.join(path)}:\n"
         f"  Expected: {type(template).__name__}, "
         f"  Obtained: {type(tree).__name__}"
     )
