@@ -126,14 +126,14 @@ class TestValidateTreeStructure:
     def test_path_tracking(self):
         """Test that error messages contain correct path information."""
         # Deep nesting path - dicts are formatted as {key} when path_patterns=None
-        with pytest.raises(AssertionError, match=r"\{foo\}.*\{bar\}.*\[2\].*\{x\}"):
+        with pytest.raises(AssertionError, match=r"\{foo\}\.\{bar\}\.\[2\]\.\{x\}"):
             _validate_tree_structure(
                 {"foo": {"bar": [1, 2, {"x": 1}]}},
                 {"foo": {"bar": [1, 2, {"x": "1"}]}},
             )
 
         # List index path
-        with pytest.raises(AssertionError, match=r"\[1\].*\{b\}"):
+        with pytest.raises(AssertionError, match=r"\[1\]\.\{b\}"):
             _validate_tree_structure([{"a": 1}, {"b": 2}], [{"a": 1}, {"b": "2"}])
 
     def test_dict_vs_model_formatting(self):
@@ -161,16 +161,8 @@ class TestValidateTreeStructure:
 
     def test_leaf_collection(self):
         """Test that leaf values are collected with correct paths."""
-        tree1 = {
-            "scalar": 42,
-            "array": np.array([1, 2, 3]),
-            "nested": {"inner": 3.14},
-        }
-        tree2 = {
-            "scalar": 100,
-            "array": np.array([4, 5, 6]),
-            "nested": {"inner": 2.71},
-        }
+        tree1 = {"scalar": 42, "array": np.array([1, 2, 3]), "nested": {"inner": 3.14}}
+        tree2 = {"scalar": 100, "array": np.array([4, 5, 6]), "nested": {"inner": 2.71}}
 
         leaves = _validate_tree_structure(tree1, tree2)
 
@@ -253,11 +245,16 @@ class TestRegressTestCase:
                     "s": 2,
                 }
             },
-            "expected_exception": "AssertionError",
+            "expected_exception": "ValidationError",
         }
 
         # Should not raise (test passes because exception was expected)
         regress_test_case(dummy_tesseract_module, endpoints, test_spec)
+
+        # Wrong expected exception
+        test_spec["expected_exception"] = "IndexError"
+        with pytest.raises(ValueError):
+            regress_test_case(dummy_tesseract_module, endpoints, test_spec)
 
     def test_unexpected_exception(self, dummy_tesseract_module):
         """Test that unexpected exceptions are propagated."""
@@ -299,13 +296,7 @@ class TestIterRegressionTests:
             json.dumps(
                 {
                     "endpoint": "apply",
-                    "inputs": {
-                        "inputs": {
-                            "a": [1.0, 2.0],
-                            "b": [3.0, 4.0],
-                            "s": 1,
-                        }
-                    },
+                    "inputs": {"inputs": {"a": [1.0, 2.0], "b": [3.0, 4.0], "s": 1}},
                     "expected_outputs": {"result": [4.0, 6.0]},
                 }
             )
@@ -317,13 +308,7 @@ class TestIterRegressionTests:
             json.dumps(
                 {
                     "endpoint": "apply",
-                    "inputs": {
-                        "inputs": {
-                            "a": [1.0],
-                            "b": [2.0],
-                            "s": 1,
-                        }
-                    },
+                    "inputs": {"inputs": {"a": [1.0], "b": [2.0], "s": 1}},
                     "expected_outputs": {
                         "result": [999.0]  # Wrong values
                     },
