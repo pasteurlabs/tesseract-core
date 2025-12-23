@@ -6,7 +6,7 @@
 import numpy as np
 import pytest
 
-from tesseract_core.runtime.regression import _validate_tree_structure
+from tesseract_core.runtime.testing.regression import _validate_tree_structure
 
 
 def test_validate_tree_structure_passes():
