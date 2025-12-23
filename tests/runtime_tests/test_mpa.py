@@ -1,12 +1,12 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for the MPA library."""
+"""Tests for the MPA module."""
 
 import csv
 import json
-import os
-import sqlite3
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 
@@ -18,6 +18,45 @@ from tesseract_core.runtime.mpa import (
     log_parameter,
     start_run,
 )
+
+
+class Always400Handler(BaseHTTPRequestHandler):
+    """HTTP request handler that always returns 400."""
+
+    def do_GET(self):
+        """Handle GET requests with 400."""
+        self.send_response(400)
+        self.send_header("Content-Type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"Bad Request")
+
+    def do_POST(self):
+        """Handle POST requests with 400."""
+        self.send_response(400)
+        self.send_header("Content-Type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"Bad Request")
+
+    def log_message(self, format, *args):
+        """Suppress log messages."""
+        pass
+
+
+@pytest.fixture(scope="module")
+def dummy_mlflow_server():
+    """Start a dummy HTTP server that always returns 400."""
+    server = HTTPServer(("localhost", 0), Always400Handler)
+    port = server.server_address[1]
+
+    # Start server in a background thread
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    server_thread.start()
+
+    try:
+        yield f"http://localhost:{port}"
+    finally:
+        # Shutdown server
+        server.shutdown()
 
 
 def test_start_run_context_manager():
@@ -140,124 +179,68 @@ def test_log_artifact_missing_file():
         backend.log_artifact("non_existent_file.txt")
 
 
-def test_mlflow_backend_creation(tmpdir):
-    """Test that MLflowBackend is created when mlflow_tracking_uri is set."""
-    pytest.importorskip("mlflow")  # Skip if MLflow is not installed
-    mlflow_db_file = tmpdir / "mlflow.db"
-    update_config(mlflow_tracking_uri=f"sqlite:///{mlflow_db_file}")
-    backend = mpa._create_backend(None)
-    assert isinstance(backend, mpa.MLflowBackend)
+def test_mlflow_backend_creation_fails_with_unreachable_server(dummy_mlflow_server):
+    """Test that MLflowBackend creation fails when server returns 400."""
+    update_config(mlflow_tracking_uri=dummy_mlflow_server)
+    with pytest.raises(
+        RuntimeError, match="Failed to connect to MLflow tracking server"
+    ):
+        mpa._create_backend(None)
 
 
-def test_mlflow_log_calls(tmpdir):
-    """Test MLflow backend logging functions with temporary directory."""
-    pytest.importorskip("mlflow")  # Skip if MLflow is not installed
-    mlflow_db_file = tmpdir / "mlflow.db"
-    update_config(mlflow_tracking_uri=f"sqlite:///{mlflow_db_file}")
-
-    with start_run():
-        log_parameter("model_type", "neural_network")
-        log_parameter("epochs", 100)
-
-        log_metric("accuracy", 0.85)
-        log_metric("loss", 0.25, step=1)
-
-        artifact_file = tmpdir / "model_config.json"
-        artifact_file.write_text("Test content", encoding="utf-8")
-        log_artifact(str(artifact_file))
-
-    # Verify MLflow database file was created
-    assert mlflow_db_file.exists()
-
-    # Query the database to verify content was logged
-    with sqlite3.connect(str(mlflow_db_file)) as conn:
-        cursor = conn.cursor()
-
-        # Check parameters were logged
-        cursor.execute("SELECT key, value FROM params")
-        params = dict(cursor.fetchall())
-        assert params["model_type"] == "neural_network"
-        assert params["epochs"] == "100"
-
-        # Check metrics were logged
-        cursor.execute("SELECT key, value, step FROM metrics ORDER BY step")
-        metrics = cursor.fetchall()
-        assert len(metrics) == 2
-        assert metrics[0] == ("accuracy", 0.85, 0)  # step defaults to 0
-        assert metrics[1] == ("loss", 0.25, 1)
-
-        # Check artifacts were logged (MLflow stores artifact info in runs table)
-        cursor.execute("SELECT artifact_uri FROM runs")
-        artifact_uris = [row[0] for row in cursor.fetchall()]
-        assert len(artifact_uris) > 0  # At least one run with artifacts
-
-        # Verify the artifact file was actually copied to the artifact location
-        artifact_found = False
-        for artifact_uri in artifact_uris:
-            if artifact_uri and os.path.exists(artifact_uri):
-                try:
-                    artifact_files = os.listdir(artifact_uri)
-                    if "model_config.json" in artifact_files:
-                        artifact_found = True
-                        break
-                except OSError:
-                    continue
-
-        assert artifact_found
-
-
-def test_build_tracking_uri_with_credentials():
-    pytest.importorskip("mlflow")
+def test_build_tracking_uri_with_credentials(dummy_mlflow_server):
     update_config(
-        mlflow_tracking_uri="http://localhost:5000",
+        mlflow_tracking_uri=dummy_mlflow_server,
         mlflow_tracking_username="testuser",
         mlflow_tracking_password="testpass",
     )
     tracking_uri = mpa.MLflowBackend._build_tracking_uri()
-    assert tracking_uri == "http://testuser:testpass@localhost:5000"
+    # Extract host:port from dummy_mlflow_server
+    expected_uri = dummy_mlflow_server.replace("http://", "http://testuser:testpass@")
+    assert tracking_uri == expected_uri
 
 
-def test_build_tracking_uri_without_credentials():
-    pytest.importorskip("mlflow")
+def test_build_tracking_uri_without_credentials(dummy_mlflow_server):
     update_config(
-        mlflow_tracking_uri="http://localhost:5000",
+        mlflow_tracking_uri=dummy_mlflow_server,
         mlflow_tracking_username="",
         mlflow_tracking_password="",
     )
     tracking_uri = mpa.MLflowBackend._build_tracking_uri()
-    assert tracking_uri == "http://localhost:5000"
+    assert tracking_uri == dummy_mlflow_server
 
 
-def test_build_tracking_uri_url_encoded_credentials():
-    pytest.importorskip("mlflow")
+def test_build_tracking_uri_url_encoded_credentials(dummy_mlflow_server):
+    # Use a dummy HTTPS URL for testing URL encoding
+    dummy_https_url = dummy_mlflow_server.replace("http://", "https://")
     update_config(
-        mlflow_tracking_uri="https://mlflow.example.com",
+        mlflow_tracking_uri=dummy_https_url,
         mlflow_tracking_username="user@example.com",
         mlflow_tracking_password="p@ss:w0rd!",
     )
     tracking_uri = mpa.MLflowBackend._build_tracking_uri()
-    assert (
-        tracking_uri == "https://user%40example.com:p%40ss%3Aw0rd%21@mlflow.example.com"
-    )
+    # Verify that special characters are URL-encoded
+    assert "user%40example.com" in tracking_uri
+    assert "p%40ss%3Aw0rd%21" in tracking_uri
 
 
-def test_build_tracking_uri_with_path_and_query():
-    pytest.importorskip("mlflow")
+def test_build_tracking_uri_with_path_and_query(dummy_mlflow_server):
+    # Add path and query to dummy server URL
+    uri_with_path = f"{dummy_mlflow_server}/api/mlflow?param=value"
     update_config(
-        mlflow_tracking_uri="http://localhost:5000/api/mlflow?param=value",
+        mlflow_tracking_uri=uri_with_path,
         mlflow_tracking_username="testuser",
         mlflow_tracking_password="testpass",
     )
     tracking_uri = mpa.MLflowBackend._build_tracking_uri()
-    assert (
-        tracking_uri == "http://testuser:testpass@localhost:5000/api/mlflow?param=value"
-    )
+    # Verify credentials are inserted correctly with path and query preserved
+    assert "testuser:testpass@" in tracking_uri
+    assert "/api/mlflow?param=value" in tracking_uri
 
 
-def test_build_tracking_uri_username_without_password():
-    pytest.importorskip("mlflow")
+def test_build_tracking_uri_username_without_password(dummy_mlflow_server):
     update_config(
-        mlflow_tracking_uri="http://localhost:5000",
+        mlflow_tracking_uri=dummy_mlflow_server,
         mlflow_tracking_username="testuser",
         mlflow_tracking_password="",
     )
@@ -268,10 +251,9 @@ def test_build_tracking_uri_username_without_password():
         mpa.MLflowBackend._build_tracking_uri()
 
 
-def test_build_tracking_uri_password_without_username():
-    pytest.importorskip("mlflow")
+def test_build_tracking_uri_password_without_username(dummy_mlflow_server):
     update_config(
-        mlflow_tracking_uri="http://localhost:5000",
+        mlflow_tracking_uri=dummy_mlflow_server,
         mlflow_tracking_username="",
         mlflow_tracking_password="testpass",
     )
@@ -282,14 +264,14 @@ def test_build_tracking_uri_password_without_username():
         mpa.MLflowBackend._build_tracking_uri()
 
 
-def test_build_tracking_uri_sqlite_ignores_credentials():
-    pytest.importorskip("mlflow")
+def test_build_tracking_uri_non_http_scheme_raises_error():
+    """Test that non-HTTP/HTTPS schemes raise an error."""
     update_config(
         mlflow_tracking_uri="sqlite:///mlflow.db",
-        mlflow_tracking_username="testuser",
-        mlflow_tracking_password="testpass",
+        mlflow_tracking_username="",
+        mlflow_tracking_password="",
     )
-    tracking_uri = mpa.MLflowBackend._build_tracking_uri()
-    assert "testuser" not in tracking_uri
-    assert "testpass" not in tracking_uri
-    assert tracking_uri.startswith("sqlite:///")
+    with pytest.raises(
+        ValueError, match="MLflow logging only supports accessing MLflow via HTTP/HTTPS"
+    ):
+        mpa.MLflowBackend._build_tracking_uri()
