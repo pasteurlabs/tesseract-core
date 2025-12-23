@@ -3,7 +3,6 @@
 
 """Metrics, Parameters, and Artifacts (MPA) library for Tesseract Core."""
 
-import ast
 import csv
 import json
 import os
@@ -215,44 +214,10 @@ class MLflowBackend(BaseBackend):
         """Log an artifact to MLflow."""
         self.mlflow.log_artifact(local_path)
 
-    @staticmethod
-    def _parse_run_extra_args(args_str: str) -> dict[str, Any]:
-        """Parse extra arguments for mlflow.start_run() from string.
-
-        Args:
-            args_str: String representation of a Python dict, e.g.,
-                     '{"tags": {"env": "prod"}, "run_name": "myrun"}'
-
-        Returns:
-            Dictionary of extra arguments to pass to mlflow.start_run().
-            Empty dict if args_str is empty.
-
-        Raises:
-            ValueError: If args_str is not a valid dict or contains invalid syntax.
-        """
-        if not args_str or not args_str.strip():
-            return {}
-
-        try:
-            result = ast.literal_eval(args_str.strip())
-        except (ValueError, SyntaxError) as e:
-            raise ValueError(
-                f"TESSERACT_MLFLOW_RUN_EXTRA_ARGS must be a valid Python dict string. "
-                f"Got: {args_str!r}. Error: {e}"
-            ) from e
-
-        if not isinstance(result, dict):
-            raise ValueError(
-                f"TESSERACT_MLFLOW_RUN_EXTRA_ARGS must evaluate to a dict, "
-                f"got {type(result).__name__}: {result!r}"
-            )
-
-        return result
-
     def start_run(self) -> None:
         """Start a new MLflow run with optional extra arguments from config."""
         config = get_config()
-        run_extra_args = self._parse_run_extra_args(config.mlflow_run_extra_args)
+        run_extra_args = config.mlflow_run_extra_args
         self.mlflow.start_run(**run_extra_args)
 
     def end_run(self) -> None:
