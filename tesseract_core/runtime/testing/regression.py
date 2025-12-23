@@ -203,7 +203,7 @@ def _validate_tree_structure(
 def _array_discrepancy_msg(
     size: int,
     shape: tuple[int],
-    diff_ids: list,
+    diff_ids: list | np.ndarray,
     obtained_array: np.ndarray,
     expected_array: np.ndarray,
     threshold: int = 100,
@@ -339,9 +339,9 @@ def regress_test_case(
 
         OutputSchema = get_output_schema(endpoint_func)
         try:
-            OutputSchema.model_validate(
+            expected_outputs = OutputSchema.model_validate(
                 expected_outputs, context={"base_dir": base_dir}
-            )
+            ).model_dump()
         except ValidationError as e:
             error_str = "\n".join(f"  {line}" for line in str(e).splitlines())
             raise AssertionError(
