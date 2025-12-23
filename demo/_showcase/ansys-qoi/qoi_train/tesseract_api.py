@@ -12,13 +12,14 @@ import yaml
 from pydantic import BaseModel, Field
 from torch.utils._pytree import tree_map
 
-from tesseract_core.runtime.experimental import OutputFileReference
+from tesseract_core.runtime.config import get_config
+from tesseract_core.runtime.experimental import InputFileReference, OutputFileReference
 
 
 class InputSchema(BaseModel):
     """Input schema for QoI model training."""
 
-    config: str = Field(description="Configuration file")
+    config: InputFileReference = Field(description="Configuration file")
 
     data_folder: str = Field(
         description="Folder containing npz files containing point cloud data information, "
@@ -44,8 +45,12 @@ def evaluate(inputs: Any) -> Any:
     from process.train import train_hybrid_models
 
     # Convert all inputs to Path objects (handles strings, InputFileReference, and Path)
-    config_path = Path(inputs["config"])
-    data_folder_path = Path(inputs["data_folder"])
+    config = get_config()
+    input_base = Path(config.input_path)
+    output_base = Path(config.output_path)
+
+    config_path = input_base / inputs["config"]
+    data_folder_path = input_base / inputs["data_folder"]
     files = [str(p.resolve()) for p in data_folder_path.glob("*.npz")]
 
     data_files = [Path(f) for f in files]
@@ -64,8 +69,6 @@ def evaluate(inputs: Any) -> Any:
     )
 
     # Create output directory
-    output_dir = Path("/tesseract/outputs")
-    output_dir.mkdir(parents=True, exist_ok=True)
 
     # Create scaling pipeline from config
     scaling_pipeline = ScalingPipeline(config_path)
@@ -79,7 +82,7 @@ def evaluate(inputs: Any) -> Any:
         scaled_train, scaled_val, scaled_test
     )
 
-    model_folder = output_dir / "models"
+    model_folder = output_base / "models"
 
     hybrid_model_configs = config.get("hybrid_models", None)
     hybrid_training_config = config.get("hybrid_training", {})
