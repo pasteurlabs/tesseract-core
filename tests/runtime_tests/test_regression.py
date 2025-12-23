@@ -251,9 +251,11 @@ class TestRegressTestCase:
         # Should not raise (test passes because exception was expected)
         regress_test_case(dummy_tesseract_module, endpoints, test_spec)
 
-        # Wrong expected exception
+        # Wrong expected exception - should raise AssertionError about wrong exception type
         test_spec["expected_exception"] = "IndexError"
-        with pytest.raises(ValueError):
+        with pytest.raises(
+            AssertionError, match="inputs do not conform to InputSchema"
+        ):
             regress_test_case(dummy_tesseract_module, endpoints, test_spec)
 
     def test_unexpected_exception(self, dummy_tesseract_module):
