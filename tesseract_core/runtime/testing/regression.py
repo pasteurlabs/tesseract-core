@@ -1,3 +1,8 @@
+# Copyright 2025 Pasteur Labs. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""Regression testing utilities for Tesseract endpoints."""
+
 import json
 import re
 from collections.abc import Callable, Iterator, Mapping, Sequence
@@ -77,15 +82,27 @@ def _validate_tree_structure(
     tree: Any,
     template: Any,
     path_patterns: dict[tuple, type] | None = None,
-    path: tuple[str | object] = (),
-) -> dict[tuple[str], tuple[Any, Any]]:
-    """Recursively validates a tree-like structure against a template and collects leaf values.
+    path: tuple[str | object, ...] = (),
+) -> dict[tuple[str, ...], tuple[Any, Any]]:
+    """Recursively validate a tree-like structure against a template and collect leaf values.
 
     Compares types, dictionary keys, sequence lengths, array shapes and dtypes.
-    Does not compare values, raises AssertionError on first mismatch.
+    Does not compare values, raises AssertionError on first mismatch. Uses schema
+    path patterns to distinguish between dict keys (formatted as "{key}") and model
+    attributes (formatted as "attribute").
+
+    Args:
+        tree: The tree structure to validate (obtained values).
+        template: The template structure to validate against (expected values).
+        path_patterns: Optional schema patterns mapping path tuples to types,
+            used to distinguish dicts from model attributes.
+        path: Current path in the tree traversal (for error messages).
 
     Returns:
-        Dict mapping paths to (tree_leaf, template_leaf) tuples.
+        Dict mapping path tuples to (tree_leaf, template_leaf) tuples.
+
+    Raises:
+        AssertionError: If structures don't match (type, keys, length, shape, dtype).
     """
     assert type(tree) is type(template), (
         f"Type mismatch at {path}:\n"
@@ -120,9 +137,10 @@ def _validate_tree_structure(
         for key in template_keys:
             if is_dict:
                 # Drop sentinel
-                next_path_patterns = {
-                    k[1:]: v for k, v in path_patterns.items() if len(k) > 1
-                }
+                if path_patterns:
+                    next_path_patterns = {k[1:]: v for k, v in path_patterns.items()}
+                else:
+                    next_path_patterns = None
             else:
                 # Filter to paths beginning with relevant attribute
                 next_path_patterns = {
@@ -150,7 +168,10 @@ def _validate_tree_structure(
         )
 
         # Drop sentinel
-        next_path_patterns = {k[1:]: v for k, v in path_patterns.items()}
+        if path_patterns:
+            next_path_patterns = {k[1:]: v for k, v in path_patterns.items()}
+        else:
+            next_path_patterns = None
 
         leaves = {}
         for i, (tree_branch, template_branch) in enumerate(
@@ -186,7 +207,23 @@ def _array_discrepancy_msg(
     obtained_array: np.ndarray,
     expected_array: np.ndarray,
     threshold: int = 100,
-):
+) -> str:
+    """Format detailed discrepancy message for arrays that don't match.
+
+    DISCLAIMER: Logic/messsaging borrows heavily from pytest-regressions
+    https://github.com/ESSS/pytest-regressions/blob/master/src/pytest_regressions/ndarrays_regression.py
+
+    Args:
+        size: Total size of the full arrays.
+        shape: Shape of the full arrays.
+        diff_ids: Indices where arrays differ.
+        obtained_array: Array values that were obtained (only differing elements).
+        expected_array: Array values that were expected (only differing elements).
+        threshold: Maximum number of individual differences to display.
+
+    Returns:
+        Formatted error message with statistics and individual differences.
+    """
     # Summary
     error_msg = f"Shape: {shape}\n"
     pct = 100 * len(diff_ids) / size
@@ -251,13 +288,31 @@ def _array_discrepancy_msg(
 
 def regress_test_case(
     api_module: ModuleType,
-    endpoint_functions: dict[str:Callable],
-    test_spec: Path,
+    endpoint_functions: dict[str, Callable],
+    test_spec: dict,
     *,
     base_dir: Path | None = None,
     threshold: int = 100,
 ) -> None:
-    """Run a single regression test from a .test.json file, raises AssertionError on failure."""
+    """Run a single regression test from a test specification.
+
+    Args:
+        api_module: Module containing the Tesseract API.
+        endpoint_functions: Dict mapping endpoint names to endpoint functions.
+        test_spec: Test specification dict loaded from JSON file. Expected keys:
+            - endpoint: Name of the endpoint to test.
+            - inputs: Input data conforming to InputSchema.
+            - expected_outputs: Expected output data (required if no exception expected).
+            - expected_exception: Optional exception type name (e.g., "ValueError").
+            - expected_exception_regex: Optional regex pattern to match exception message.
+            - atol: Optional absolute tolerance for numeric comparisons (default: 1e-8).
+            - rtol: Optional relative tolerance for numeric comparisons (default: 1e-5).
+        base_dir: Optional base directory for resolving relative paths in schemas.
+        threshold: Maximum number of array discrepancies to display in error messages.
+
+    Raises:
+        AssertionError: If the test fails (output mismatch, wrong exception, etc.).
+    """
     assert test_spec["endpoint"] in endpoint_functions, (
         f"Endpoint {test_spec['endpoint']} not found in {api_module.__name__}\n"
         f"  Available endpoints: {list(endpoint_functions.keys())}"
@@ -366,8 +421,6 @@ def regress_test_case(
     atol = test_spec.get("atol", 1e-8)
     rtol = test_spec.get("rtol", 1e-5)
 
-    # DISCLAIMER: Logic/messsaging borrows heavily from pytest-regressions
-    # https://github.com/ESSS/pytest-regressions/blob/master/src/pytest_regressions/ndarrays_regression.py
     discrepancies = []
     for path, (obtained_val, expected_val) in obtained_expected_flat.items():
         is_inexact_numeric = False
@@ -427,23 +480,42 @@ def regress_test_case(
                 )
     if discrepancies:
         raise AssertionError(
-            "Values are not sufficiently close" + "\n\n".join(discrepancies)
+            "Values are not sufficiently close.\n\n" + "\n\n".join(discrepancies)
         )
 
 
 def iter_regression_tests(
     api_module: ModuleType,
-    *test_case_paths: Path,  # Unpacked with type hint
+    *test_case_paths: Path,
     base_dir: Path | None = None,
     threshold: int = 100,
 ) -> Iterator[RegressionTestResult]:
-    """Ieratively run regression tests from multiple test case paths.
+    """Iteratively run regression tests from multiple test case paths.
+
+    This function yields test results as they complete, allowing for streaming
+    progress indicators (e.g., pytest-like ".....F...E..x" output).
 
     Args:
         api_module: Module containing the Tesseract API.
         *test_case_paths: Paths to .json test files or directories containing them.
-        base_dir: Optional base directory for resolving relative paths.
-        threshold: How many array discrepancies to display
+            Directories are recursively searched for .json files.
+        base_dir: Optional base directory for resolving relative paths in schemas.
+        threshold: Maximum number of array discrepancies to display in error messages.
+
+    Yields:
+        RegressionTestResult for each test case, with status "passed", "failed", or "error".
+
+    Raises:
+        ValueError: If no test files are found or paths are invalid.
+        FileNotFoundError: If a specified path does not exist.
+
+    Example:
+        >>> import my_tesseract_module
+        >>> for result in iter_regression_tests(my_tesseract_module, Path("tests/")):
+        ...     if result.status == "passed":
+        ...         print(f"✓ {result.test_file.name}")
+        ...     else:
+        ...         print(f"✗ {result.test_file.name}: {result.message}")
     """
     # Get available endpoints
     endpoint_functions = {func.__name__: func for func in create_endpoints(api_module)}
