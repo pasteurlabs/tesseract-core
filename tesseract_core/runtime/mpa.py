@@ -215,8 +215,10 @@ class MLflowBackend(BaseBackend):
         self.mlflow.log_artifact(local_path)
 
     def start_run(self) -> None:
-        """Start a new MLflow run."""
-        self.mlflow.start_run()
+        """Start a new MLflow run with optional extra arguments from config."""
+        config = get_config()
+        run_extra_args = config.mlflow_run_extra_args
+        self.mlflow.start_run(**run_extra_args)
 
     def end_run(self) -> None:
         """End the current MLflow run."""
