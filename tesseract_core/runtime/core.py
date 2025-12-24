@@ -1,6 +1,7 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import base64
 import importlib.util
 import os
 import sys
@@ -9,8 +10,9 @@ from contextlib import contextmanager
 from io import TextIOBase
 from pathlib import Path
 from types import ModuleType
-from typing import Any, TextIO
+from typing import Any, Literal, TextIO
 
+import numpy as np
 from pydantic import BaseModel
 
 from .config import get_config
@@ -19,6 +21,15 @@ from .schema_generation import (
     create_apply_schema,
     create_autodiff_schema,
 )
+from .testing.common import get_input_schema
+
+
+class RegressOutputSchema(BaseModel):
+    """Output schema for the regress endpoint."""
+
+    status: Literal["passed", "failed", "error"]
+    message: str
+    endpoint: str
 
 
 @contextmanager
@@ -247,5 +258,213 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
             return AbstractEvalOutputSchema.model_validate(out)
 
         endpoints.append(abstract_eval)
+
+    from tesseract_core.runtime.testing.regression import TestSpec, regress_test_case
+
+    def regress(payload: TestSpec) -> RegressOutputSchema:
+        """Run a single regression test against a Tesseract endpoint.
+
+        Tests an endpoint by calling it with specified inputs and comparing outputs
+        against expected values or verifying expected exceptions are raised.
+
+        Args:
+            payload: Test specification containing:
+                - endpoint: Name of endpoint to test (e.g., "apply", "jacobian")
+                - inputs: Input data for the endpoint
+                - expected_outputs: Expected output data (mutually exclusive with expected_exception)
+                - expected_exception: Expected exception type or name (mutually exclusive with expected_outputs)
+                - expected_exception_regex: Optional regex pattern for exception message
+                - atol: Absolute tolerance for numeric comparisons (default: 1e-8)
+                - rtol: Relative tolerance for numeric comparisons (default: 1e-5)
+
+        Returns:
+            RegressOutputSchema with:
+                - status: "passed" | "failed" | "error"
+                - message: Empty for passed tests, error details for failed/error
+                - endpoint: Name of the tested endpoint
+
+        Note:
+            This endpoint is designed for testing and CI/CD workflows.
+            All outcomes return HTTP 200 with status in the response body regardless of success/failure.
+        """
+        config = get_config()
+        base_dir = Path(config.input_path) if config.input_path else None
+
+        try:
+            regress_test_case(
+                api_module,
+                endpoint_functions={func.__name__: func for func in endpoints},
+                test_spec=payload,
+                base_dir=base_dir,
+                threshold=100,
+            )
+            return RegressOutputSchema(
+                status="passed",
+                message="",
+                endpoint=payload.endpoint,
+            )
+        except AssertionError as e:
+            return RegressOutputSchema(
+                status="failed",
+                message=str(e),
+                endpoint=payload.endpoint,
+            )
+        except Exception as e:
+            return RegressOutputSchema(
+                status="error",
+                message=f"{type(e).__name__}: {e}",
+                endpoint=payload.endpoint,
+            )
+
+    endpoints.append(regress)
+
+    def gen_test_spec(payload: dict) -> TestSpec:
+        """Generate a test specification by running an endpoint and capturing outputs.
+
+        Auto-detects the endpoint from payload structure, validates inputs,
+        executes the endpoint, and returns a complete TestSpec ready to save as a test file.
+
+        Args:
+            payload: Input data dict with structure matching one of:
+                - apply: {"inputs": {...}}
+                - jacobian: {"inputs": {...}, "jac_inputs": [...], "jac_outputs": [...]}
+                - jvp: {"inputs": {...}, "jvp_inputs": [...], "jvp_outputs": [...], "tangent_vector": {...}}
+                - vjp: {"inputs": {...}, "vjp_inputs": [...], "vjp_outputs": [...], "cotangent_vector": {...}}
+
+        Returns:
+            TestSpec with:
+                - endpoint: Auto-detected endpoint name
+                - inputs: Original input payload
+                - expected_outputs: Outputs from endpoint execution (arrays encoded as json+base64)
+                - atol/rtol: Default tolerances
+
+        Raises:
+            ValueError: If endpoint cannot be detected from payload structure
+            ValidationError: If payload doesn't match detected endpoint's InputSchema
+
+        Example:
+            >>> # From Python SDK
+            >>> test_spec = tess.run_tesseract(
+            ...     "gen_test_spec", {"inputs": {"a": [1, 2], "b": [3, 4], "s": 1}}
+            ... )
+            >>> # Save to file
+            >>> with open("test_case.json", "w") as f:
+            ...     json.dump(test_spec, f, indent=2)
+        """
+        from tesseract_core.runtime.testing.regression import TestSpec
+
+        def encode_arrays(obj: Any):
+            """Recursively encode numpy arrays to json+base64 format."""
+            if isinstance(obj, np.ndarray):
+                return {
+                    "object_type": "array",
+                    "shape": list(obj.shape),
+                    "dtype": str(obj.dtype),
+                    "data": {
+                        "buffer": base64.b64encode(obj.tobytes()).decode("ascii"),
+                        "encoding": "base64",
+                    },
+                }
+            elif isinstance(obj, (np.integer, np.floating, np.bool_)):
+                # Encode numpy scalars as arrays with empty shape
+                arr = np.array(obj)
+                return {
+                    "object_type": "array",
+                    "shape": [],
+                    "dtype": str(arr.dtype),
+                    "data": {
+                        "buffer": base64.b64encode(arr.tobytes()).decode("ascii"),
+                        "encoding": "base64",
+                    },
+                }
+            elif isinstance(obj, dict):
+                return {k: encode_arrays(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [encode_arrays(v) for v in obj]
+            else:
+                return obj
+
+        # Auto-detect endpoint from payload structure (lazy detection)
+        if "jac_inputs" in payload:
+            detected_endpoint = "jacobian"
+        elif "jvp_inputs" in payload:
+            detected_endpoint = "jacobian_vector_product"
+        elif "vjp_inputs" in payload:
+            detected_endpoint = "vector_jacobian_product"
+        elif "inputs" in payload:
+            detected_endpoint = "apply"
+        else:
+            raise ValueError(
+                f"Cannot detect endpoint from payload keys: {list(payload.keys())}. "
+                f"Expected one of: 'inputs' (apply), 'jac_inputs' (jacobian), "
+                f"'jvp_inputs' (jvp), 'vjp_inputs' (vjp)"
+            )
+
+        # Build dict of available endpoint functions
+        endpoint_functions = {func.__name__: func for func in endpoints}
+
+        # Check if endpoint is available
+        if detected_endpoint not in endpoint_functions:
+            available = [
+                name
+                for name in endpoint_functions.keys()
+                if name not in ["health", "regress", "gen_test_spec"]
+            ]
+            raise ValueError(
+                f"Detected endpoint '{detected_endpoint}' is not available in this Tesseract. "
+                f"Available endpoints: {available}"
+            )
+
+        endpoint_func = endpoint_functions[detected_endpoint]
+
+        # Validate payload and execute endpoint, capturing any exceptions
+        InputSchema = get_input_schema(endpoint_func)
+        try:
+            # Validate inputs
+            validated_payload = InputSchema.model_validate(payload)
+
+            # Execute endpoint and prepare context for model_dump based on endpoint type
+            result = endpoint_func(validated_payload)
+
+            # Build context for model_dump - some endpoints need special keys
+            dump_context = {}
+            if detected_endpoint == "jacobian":
+                dump_context = {
+                    "output_keys": payload.get("jac_outputs", []),
+                    "input_keys": payload.get("jac_inputs", []),
+                }
+            elif detected_endpoint == "jacobian_vector_product":
+                dump_context["output_keys"] = payload.get("jvp_outputs", [])
+            elif detected_endpoint == "vector_jacobian_product":
+                dump_context["input_keys"] = payload.get("vjp_inputs", [])
+
+            outputs = (
+                result.model_dump(context=dump_context)
+                if dump_context
+                else result.model_dump()
+            )
+
+            # Encode arrays in outputs to preserve dtype information
+            encoded_outputs = encode_arrays(outputs)
+
+            # Success case - return TestSpec with expected_outputs
+            return TestSpec(
+                endpoint=detected_endpoint,
+                inputs=payload,
+                expected_outputs=encoded_outputs,
+                atol=1e-8,
+                rtol=1e-5,
+            )
+        except Exception as e:
+            # Exception case (from validation or execution) - return TestSpec with expected_exception
+            return TestSpec(
+                endpoint=detected_endpoint,
+                inputs=payload,
+                expected_exception=type(e),
+                atol=1e-8,
+                rtol=1e-5,
+            )
+
+    endpoints.append(gen_test_spec)
 
     return endpoints
