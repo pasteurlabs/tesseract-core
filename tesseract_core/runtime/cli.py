@@ -37,12 +37,10 @@ from tesseract_core.runtime.file_interactions import (
     read_from_path,
     write_to_path,
 )
-from tesseract_core.runtime.finite_differences import (
-    check_gradients as check_gradients_,
-)
 from tesseract_core.runtime.mpa import start_run
 from tesseract_core.runtime.serve import create_rest_api
 from tesseract_core.runtime.serve import serve as serve_
+from tesseract_core.runtime.testing.finite_differences import iter_gradient_checks
 
 CONFIG_FIELDS = {
     str(field_name): field.annotation
@@ -311,7 +309,7 @@ def check_gradients(
     api_module = get_tesseract_api()
     inputs = _parse_payload(payload)
 
-    result_iter = check_gradients_(
+    result_iter = iter_gradient_checks(
         api_module,
         inputs,
         base_dir=Path(config.input_path) if config.input_path else None,
@@ -355,6 +353,53 @@ def check_gradients(
         sys.exit(1)
 
 
+# @app.command("regress")
+# def regress_command(*test_paths):
+#     """Run regression tests."""
+#     config = get_config()
+#     api_module = get_tesseract_api()
+
+#     is_interrupt = False
+#     results = []
+#     try:
+#         for result in iter_regression_tests(
+#             api_module,
+#             *test_paths,
+#             base_dir=Path(config.input_path) if config.input_path else None,
+#         ):
+#             results.append(result)
+#             # Print progress indicator
+#             if result.status == "passed":
+#                 typer.echo(".", nl=False)
+#             elif result.status == "failed":
+#                 typer.echo("F", nl=False)
+#             elif result.status == "error":
+#                 typer.echo("E", nl=False)
+#         typer.echo("\n")
+#     except BaseException as e:
+#         # Sometimes, Pydantic re-raises exceptions as Pydantic<...>Exception so we check the string representation
+#         is_interrupt = isinstance(e, KeyboardInterrupt) or "KeyboardInterrupt" in str(e)
+#         if not is_interrupt:
+#             raise
+#         typer.echo("\n\n⚠️ Interrupted by user ⚠️")
+
+#     # Show failures (whether completed or interrupted)
+#     failures = [r for r in results if r.status != "passed"]
+#     if failures:
+#         for result in failures:
+#             typer.echo(
+#                 f"⚠️ {result.status.upper()}: {result.test_file} (endpoint={result.endpoint}) ⚠️\n"
+#             )
+#             typer.echo(result.error_message)
+#             typer.echo("\n")
+
+#         typer.echo(f"❌ {len(failures)}/{len(results)} regression tests failed ❌")
+#         sys.exit(1 if not is_interrupt else 130)
+#     else:
+#         if not is_interrupt:
+#             typer.echo(f"✅ All {len(results)} tests passed ✅")
+
+
 @app.command("serve")
 def serve(
     host: Annotated[str, typer.Option(help="Host IP address")] = "127.0.0.1",
@@ -395,16 +440,21 @@ def _create_user_defined_cli_command(
 
         if InputSchema is not None:
             payload = kwargs["payload"]
-            try:
-                user_function_args["payload"] = InputSchema.model_validate(
-                    payload,
-                    context={"base_dir": input_path},
-                )
-            except ValidationError as e:
-                raise click.BadParameter(
-                    str(e),
-                    param_hint="payload",
-                ) from e
+            # Only validate if InputSchema is a BaseModel (not plain dict)
+            if InputSchema is not dict:
+                try:
+                    user_function_args["payload"] = InputSchema.model_validate(
+                        payload,
+                        context={"base_dir": input_path},
+                    )
+                except ValidationError as e:
+                    raise click.BadParameter(
+                        str(e),
+                        param_hint="payload",
+                    ) from e
+            else:
+                # For dict InputSchema (e.g., gen_test_spec), pass payload directly
+                user_function_args["payload"] = payload
 
         if output_path:
             Path(output_path).mkdir(parents=True, exist_ok=True)
