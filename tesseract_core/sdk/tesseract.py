@@ -472,11 +472,13 @@ class Tesseract:
 
         Example:
             >>> tess = Tesseract.from_tesseract_api("path/to/tesseract_api.py")
-            >>> tess.regress({
-            ...     "endpoint": "apply",
-            ...     "inputs": {"a": [1, 2], "b": [3, 4]},
-            ...     "expected_outputs": {"result": [4, 6]},
-            ... })
+            >>> tess.regress(
+            ...     {
+            ...         "endpoint": "apply",
+            ...         "inputs": {"a": [1, 2], "b": [3, 4]},
+            ...         "expected_outputs": {"result": [4, 6]},
+            ...     }
+            ... )
         """
         result = self._client.run_tesseract("regress", test_spec, run_id=None)
 
@@ -702,8 +704,11 @@ class LocalClient:
         InputSchema = func.__annotations__.get("payload", None)
         OutputSchema = func.__annotations__.get("return", None)
 
-        if InputSchema is not None:
+        # Only validate if InputSchema is a BaseModel (not plain dict)
+        if InputSchema is not None and InputSchema is not dict:
             parsed_payload = InputSchema.model_validate(payload)
+        elif payload is not None:
+            parsed_payload = payload
         else:
             parsed_payload = None
 

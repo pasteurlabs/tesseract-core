@@ -19,6 +19,7 @@ from .schema_generation import (
     create_apply_schema,
     create_autodiff_schema,
 )
+from .testing.common import get_input_schema
 
 
 class RegressOutputSchema(BaseModel):
@@ -314,5 +315,102 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
             )
 
     endpoints.append(regress)
+
+    def gen_test_spec(payload: dict) -> TestSpec:
+        """Generate a test specification by running an endpoint and capturing outputs.
+
+        Auto-detects the endpoint from payload structure, validates inputs,
+        executes the endpoint, and returns a complete TestSpec ready to save as a test file.
+
+        Args:
+            payload: Input data dict with structure matching one of:
+                - apply: {"inputs": {...}}
+                - jacobian: {"inputs": {...}, "jac_inputs": [...], "jac_outputs": [...]}
+                - jvp: {"inputs": {...}, "jvp_inputs": [...], "jvp_outputs": [...], "tangent_vector": {...}}
+                - vjp: {"inputs": {...}, "vjp_inputs": [...], "vjp_outputs": [...], "cotangent_vector": {...}}
+
+        Returns:
+            TestSpec with:
+                - endpoint: Auto-detected endpoint name
+                - inputs: Original input payload
+                - expected_outputs: Outputs from endpoint execution
+                - atol/rtol: Default tolerances
+
+        Raises:
+            ValueError: If endpoint cannot be detected from payload structure
+            ValidationError: If payload doesn't match detected endpoint's InputSchema
+
+        Example:
+            >>> # From Python SDK
+            >>> test_spec = tess.run_tesseract(
+            ...     "gen_test_spec", {"inputs": {"a": [1, 2], "b": [3, 4], "s": 1}}
+            ... )
+            >>> # Save to file
+            >>> with open("test_case.json", "w") as f:
+            ...     json.dump(test_spec, f, indent=2)
+        """
+        from tesseract_core.runtime.testing.regression import TestSpec
+
+        # Auto-detect endpoint from payload structure (lazy detection)
+        if "jac_inputs" in payload:
+            detected_endpoint = "jacobian"
+        elif "jvp_inputs" in payload:
+            detected_endpoint = "jacobian_vector_product"
+        elif "vjp_inputs" in payload:
+            detected_endpoint = "vector_jacobian_product"
+        elif "inputs" in payload:
+            detected_endpoint = "apply"
+        else:
+            raise ValueError(
+                f"Cannot detect endpoint from payload keys: {list(payload.keys())}. "
+                f"Expected one of: 'inputs' (apply), 'jac_inputs' (jacobian), "
+                f"'jvp_inputs' (jvp), 'vjp_inputs' (vjp)"
+            )
+
+        # Build dict of available endpoint functions
+        endpoint_functions = {func.__name__: func for func in endpoints}
+
+        # Check if endpoint is available
+        if detected_endpoint not in endpoint_functions:
+            available = [
+                name
+                for name in endpoint_functions.keys()
+                if name not in ["health", "regress", "gen_test_spec"]
+            ]
+            raise ValueError(
+                f"Detected endpoint '{detected_endpoint}' is not available in this Tesseract. "
+                f"Available endpoints: {available}"
+            )
+
+        endpoint_func = endpoint_functions[detected_endpoint]
+
+        # Validate payload and execute endpoint, capturing any exceptions
+        InputSchema = get_input_schema(endpoint_func)
+        try:
+            # Validate inputs
+            validated_payload = InputSchema.model_validate(payload)
+
+            # Execute endpoint
+            outputs = endpoint_func(validated_payload).model_dump()
+
+            # Success case - return TestSpec with expected_outputs
+            return TestSpec(
+                endpoint=detected_endpoint,
+                inputs=payload,
+                expected_outputs=outputs,
+                atol=1e-8,
+                rtol=1e-5,
+            )
+        except Exception as e:
+            # Exception case (from validation or execution) - return TestSpec with expected_exception
+            return TestSpec(
+                endpoint=detected_endpoint,
+                inputs=payload,
+                expected_exception=type(e),
+                atol=1e-8,
+                rtol=1e-5,
+            )
+
+    endpoints.append(gen_test_spec)
 
     return endpoints

@@ -196,9 +196,7 @@ class TestRegressTestCase:
                     "s": 2,
                 }
             },
-            expected_outputs={
-                "result": np.array([6.0, 9.0, 12.0], dtype=np.float32)
-            },
+            expected_outputs={"result": np.array([6.0, 9.0, 12.0], dtype=np.float32)},
         )
 
         # Should not raise
@@ -260,7 +258,9 @@ class TestRegressTestCase:
         with pytest.raises(
             AssertionError, match="inputs do not conform to InputSchema"
         ):
-            regress_test_case(dummy_tesseract_module, endpoints, TestSpec(**test_spec_dict))
+            regress_test_case(
+                dummy_tesseract_module, endpoints, TestSpec(**test_spec_dict)
+            )
 
     def test_unexpected_exception(self, dummy_tesseract_module):
         """Test that unexpected exceptions are propagated."""
@@ -361,8 +361,9 @@ class TestTestSpec:
 
     def test_invalid_exception_type(self):
         """Test that invalid exception types raise errors."""
-        from tesseract_core.runtime.testing.regression import TestSpec
         from typeguard import TypeCheckError
+
+        from tesseract_core.runtime.testing.regression import TestSpec
 
         # Unknown exception name
         with pytest.raises(ValueError, match="Unknown exception type"):

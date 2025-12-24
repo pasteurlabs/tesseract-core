@@ -438,3 +438,180 @@ def test_ad_endpoint_bad_tangent(testmodule, endpoint_name, failure_mode):
     with pytest.raises(ValidationError, match=msg):
         inputs = EndpointSchema.model_validate(inputs)
         endpoint_func(inputs)
+
+
+class TestGenTestSpec:
+    """Tests for gen_test_spec endpoint."""
+
+    def test_detects_apply_endpoint(self, dummy_tesseract_module):
+        """Test that gen_test_spec correctly detects apply endpoint."""
+        from tesseract_core.runtime.core import create_endpoints
+
+        endpoints_list = create_endpoints(dummy_tesseract_module)
+        gen_test_spec = next(f for f in endpoints_list if f.__name__ == "gen_test_spec")
+
+        payload = {
+            "inputs": {
+                "a": np.array([1.0, 2.0], dtype=np.float32),
+                "b": np.array([3.0, 4.0], dtype=np.float32),
+                "s": 1,
+            }
+        }
+
+        result = gen_test_spec(payload)
+
+        assert result.endpoint == "apply"
+        assert result.inputs == payload
+        assert result.expected_outputs is not None
+        assert "result" in result.expected_outputs
+        assert result.atol == 1e-8
+        assert result.rtol == 1e-5
+
+    def test_detects_jacobian_endpoint(self, dummy_tesseract_module):
+        """Test that gen_test_spec correctly detects jacobian endpoint."""
+        from tesseract_core.runtime.core import create_endpoints
+
+        endpoints_list = create_endpoints(dummy_tesseract_module)
+        gen_test_spec = next(f for f in endpoints_list if f.__name__ == "gen_test_spec")
+
+        payload = {
+            "inputs": {
+                "a": np.array([1.0, 2.0], dtype=np.float32),
+                "b": np.array([3.0, 4.0], dtype=np.float32),
+                "s": 1,
+            },
+            "jac_inputs": ["a"],
+            "jac_outputs": ["result"],
+        }
+
+        result = gen_test_spec(payload)
+
+        assert result.endpoint == "jacobian"
+        assert result.expected_outputs is not None
+
+    def test_invalid_payload_structure(self, dummy_tesseract_module):
+        """Test that gen_test_spec raises error for invalid payload structure."""
+        from tesseract_core.runtime.core import create_endpoints
+
+        endpoints_list = create_endpoints(dummy_tesseract_module)
+        gen_test_spec = next(f for f in endpoints_list if f.__name__ == "gen_test_spec")
+
+        # Missing 'inputs' field
+        payload = {"foo": "bar"}
+
+        with pytest.raises(
+            ValueError, match="Cannot detect endpoint from payload keys"
+        ):
+            gen_test_spec(payload)
+
+    def test_validates_against_input_schema(self, dummy_tesseract_module):
+        """Test that gen_test_spec validates payload against InputSchema."""
+        from pydantic import ValidationError
+
+        from tesseract_core.runtime.core import create_endpoints
+
+        endpoints_list = create_endpoints(dummy_tesseract_module)
+        gen_test_spec = next(f for f in endpoints_list if f.__name__ == "gen_test_spec")
+
+        # Invalid inputs - missing required field
+        payload = {
+            "inputs": {
+                "a": np.array([1.0, 2.0], dtype=np.float32),
+                # Missing 'b' and 's'
+            }
+        }
+
+        # Should capture the ValidationError as expected_exception
+        test_spec = gen_test_spec(payload)
+        assert test_spec.expected_exception is ValidationError
+        assert test_spec.expected_outputs is None
+
+    def test_outputs_match_endpoint_execution(self, dummy_tesseract_module):
+        """Test that generated outputs match what the endpoint actually returns."""
+        from tesseract_core.runtime.core import create_endpoints
+
+        endpoints_list = create_endpoints(dummy_tesseract_module)
+        gen_test_spec = next(f for f in endpoints_list if f.__name__ == "gen_test_spec")
+        apply_func = next(f for f in endpoints_list if f.__name__ == "apply")
+
+        payload = {
+            "inputs": {
+                "a": np.array([1.0, 2.0], dtype=np.float32),
+                "b": np.array([3.0, 4.0], dtype=np.float32),
+                "s": 2,
+            }
+        }
+
+        # Generate test spec
+        test_spec = gen_test_spec(payload)
+
+        # Call apply endpoint directly
+        from tesseract_core.runtime.testing.common import get_input_schema
+
+        InputSchema = get_input_schema(apply_func)
+        validated = InputSchema.model_validate(payload)
+        direct_output = apply_func(validated).model_dump()
+
+        # Outputs should match
+        assert set(test_spec.expected_outputs.keys()) == set(direct_output.keys())
+        np.testing.assert_array_equal(
+            test_spec.expected_outputs["result"], direct_output["result"]
+        )
+
+    def test_generated_spec_passes_regress(self, dummy_tesseract_module):
+        """Test that generated TestSpec passes regress endpoint."""
+        from tesseract_core.runtime.core import create_endpoints
+
+        endpoints_list = create_endpoints(dummy_tesseract_module)
+        gen_test_spec = next(f for f in endpoints_list if f.__name__ == "gen_test_spec")
+        regress_func = next(f for f in endpoints_list if f.__name__ == "regress")
+
+        payload = {
+            "inputs": {
+                "a": np.array([1.0, 2.0, 3.0], dtype=np.float32),
+                "b": np.array([4.0, 5.0, 6.0], dtype=np.float32),
+                "s": 2,
+            }
+        }
+
+        # Generate test spec
+        test_spec = gen_test_spec(payload)
+
+        # Run regress with the generated spec - should not raise
+        result = regress_func(test_spec)
+
+        assert result.status == "passed"
+        assert result.message == ""
+        assert result.endpoint == "apply"
+
+    def test_captures_exception_as_expected_exception(self, dummy_tesseract_module):
+        """Test that gen_test_spec captures exceptions as expected_exception."""
+        from pydantic import ValidationError
+
+        from tesseract_core.runtime.core import create_endpoints
+
+        endpoints_list = create_endpoints(dummy_tesseract_module)
+        gen_test_spec = next(f for f in endpoints_list if f.__name__ == "gen_test_spec")
+        regress_func = next(f for f in endpoints_list if f.__name__ == "regress")
+
+        # Payload with mismatched shapes - will trigger ValidationError
+        payload = {
+            "inputs": {
+                "a": np.array([1.0, 2.0], dtype=np.float32),
+                "b": np.array([3.0, 4.0, 5.0], dtype=np.float32),  # Wrong shape
+                "s": 2,
+            }
+        }
+
+        # Generate test spec - should capture the exception
+        test_spec = gen_test_spec(payload)
+
+        # Should have expected_exception, not expected_outputs
+        assert test_spec.expected_exception is ValidationError
+        assert test_spec.expected_outputs is None
+        assert test_spec.endpoint == "apply"
+
+        # The generated spec should pass regress (exception is expected)
+        result = regress_func(test_spec)
+        assert result.status == "passed"
+        assert result.endpoint == "apply"

@@ -38,7 +38,9 @@ class TestSpec(BaseModel):
 
     @field_validator("expected_exception", mode="before")
     @classmethod
-    def parse_exception_type(cls, v: str | type[Exception] | None) -> type[Exception] | None:
+    def parse_exception_type(
+        cls, v: str | type[Exception] | None
+    ) -> type[Exception] | None:
         """Parse exception from string or type.
 
         Allows JSON files to specify exceptions as strings (e.g., "ValueError")
@@ -378,7 +380,9 @@ def regress_test_case(
     endpoint_func = endpoint_functions[test_spec.endpoint]
 
     # Get expected exception (already a type from TestSpec)
-    expected_exception = test_spec.expected_exception if test_spec.expected_exception else _NoException
+    expected_exception = (
+        test_spec.expected_exception if test_spec.expected_exception else _NoException
+    )
     expected_exception_regex = test_spec.expected_exception_regex
 
     # Read and validate expected_outputs when no exception expected
