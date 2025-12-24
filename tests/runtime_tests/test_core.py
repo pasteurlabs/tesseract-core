@@ -526,38 +526,6 @@ class TestGenTestSpec:
         assert test_spec.expected_exception is ValidationError
         assert test_spec.expected_outputs is None
 
-    def test_outputs_match_endpoint_execution(self, dummy_tesseract_module):
-        """Test that generated outputs match what the endpoint actually returns."""
-        from tesseract_core.runtime.core import create_endpoints
-
-        endpoints_list = create_endpoints(dummy_tesseract_module)
-        gen_test_spec = next(f for f in endpoints_list if f.__name__ == "gen_test_spec")
-        apply_func = next(f for f in endpoints_list if f.__name__ == "apply")
-
-        payload = {
-            "inputs": {
-                "a": np.array([1.0, 2.0], dtype=np.float32),
-                "b": np.array([3.0, 4.0], dtype=np.float32),
-                "s": 2,
-            }
-        }
-
-        # Generate test spec
-        test_spec = gen_test_spec(payload)
-
-        # Call apply endpoint directly
-        from tesseract_core.runtime.testing.common import get_input_schema
-
-        InputSchema = get_input_schema(apply_func)
-        validated = InputSchema.model_validate(payload)
-        direct_output = apply_func(validated).model_dump()
-
-        # Outputs should match
-        assert set(test_spec.expected_outputs.keys()) == set(direct_output.keys())
-        np.testing.assert_array_equal(
-            test_spec.expected_outputs["result"], direct_output["result"]
-        )
-
     def test_generated_spec_passes_regress(self, dummy_tesseract_module):
         """Test that generated TestSpec passes regress endpoint."""
         from tesseract_core.runtime.core import create_endpoints
