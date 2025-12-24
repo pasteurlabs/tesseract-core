@@ -11,7 +11,13 @@ from types import ModuleType
 from typing import Any, Literal, NamedTuple
 
 import numpy as np
-from pydantic import BaseModel, ValidationError, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ValidationError,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 from ..core import create_endpoints
 from ..schema_generation import DICT_INDEX_SENTINEL, get_all_model_path_patterns
@@ -78,6 +84,24 @@ class TestSpec(BaseModel):
             )
 
         return self
+
+    @model_serializer
+    def serialize_model(self) -> dict:
+        """Custom serializer to handle exception types.
+
+        Arrays should already be encoded in json+base64 format by gen_test_spec.
+        """
+        return {
+            "endpoint": self.endpoint,
+            "inputs": self.inputs,
+            "expected_outputs": self.expected_outputs,
+            "expected_exception": self.expected_exception.__name__
+            if self.expected_exception is not None
+            else None,
+            "expected_exception_regex": self.expected_exception_regex,
+            "atol": self.atol,
+            "rtol": self.rtol,
+        }
 
 
 class RegressionTestResult(NamedTuple):
@@ -390,9 +414,20 @@ def regress_test_case(
         expected_outputs = test_spec.expected_outputs
 
         OutputSchema = get_output_schema(endpoint_func)
+
+        # Build context for validation - some endpoints need special keys
+        validation_context = {"base_dir": base_dir}
+        if test_spec.endpoint == "jacobian":
+            validation_context["output_keys"] = test_spec.inputs.get("jac_outputs", [])
+            validation_context["input_keys"] = test_spec.inputs.get("jac_inputs", [])
+        elif test_spec.endpoint == "jacobian_vector_product":
+            validation_context["output_keys"] = test_spec.inputs.get("jvp_outputs", [])
+        elif test_spec.endpoint == "vector_jacobian_product":
+            validation_context["input_keys"] = test_spec.inputs.get("vjp_inputs", [])
+
         try:
             expected_outputs = OutputSchema.model_validate(
-                expected_outputs, context={"base_dir": base_dir}
+                expected_outputs, context=validation_context
             ).model_dump()
         except ValidationError as e:
             error_str = "\n".join(f"  {line}" for line in str(e).splitlines())
@@ -402,7 +437,7 @@ def regress_test_case(
             ) from None
 
     # Try to validate inputs and run endpoint, catching the expected exception
-    InputSchema = get_input_schema(endpoint_functions["apply"])
+    InputSchema = get_input_schema(endpoint_func)
     try:
         loaded_inputs = InputSchema.model_validate(
             test_spec.inputs, context={"base_dir": base_dir}

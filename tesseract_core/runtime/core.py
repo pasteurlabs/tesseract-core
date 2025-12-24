@@ -1,6 +1,7 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import base64
 import importlib.util
 import os
 import sys
@@ -11,6 +12,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, Literal, TextIO
 
+import numpy as np
 from pydantic import BaseModel
 
 from .config import get_config
@@ -333,7 +335,7 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
             TestSpec with:
                 - endpoint: Auto-detected endpoint name
                 - inputs: Original input payload
-                - expected_outputs: Outputs from endpoint execution
+                - expected_outputs: Outputs from endpoint execution (arrays encoded as json+base64)
                 - atol/rtol: Default tolerances
 
         Raises:
@@ -350,6 +352,37 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
             ...     json.dump(test_spec, f, indent=2)
         """
         from tesseract_core.runtime.testing.regression import TestSpec
+
+        def encode_arrays(obj: Any):
+            """Recursively encode numpy arrays to json+base64 format."""
+            if isinstance(obj, np.ndarray):
+                return {
+                    "object_type": "array",
+                    "shape": list(obj.shape),
+                    "dtype": str(obj.dtype),
+                    "data": {
+                        "buffer": base64.b64encode(obj.tobytes()).decode("ascii"),
+                        "encoding": "base64",
+                    },
+                }
+            elif isinstance(obj, (np.integer, np.floating, np.bool_)):
+                # Encode numpy scalars as arrays with empty shape
+                arr = np.array(obj)
+                return {
+                    "object_type": "array",
+                    "shape": [],
+                    "dtype": str(arr.dtype),
+                    "data": {
+                        "buffer": base64.b64encode(arr.tobytes()).decode("ascii"),
+                        "encoding": "base64",
+                    },
+                }
+            elif isinstance(obj, dict):
+                return {k: encode_arrays(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [encode_arrays(v) for v in obj]
+            else:
+                return obj
 
         # Auto-detect endpoint from payload structure (lazy detection)
         if "jac_inputs" in payload:
@@ -390,14 +423,35 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
             # Validate inputs
             validated_payload = InputSchema.model_validate(payload)
 
-            # Execute endpoint
-            outputs = endpoint_func(validated_payload).model_dump()
+            # Execute endpoint and prepare context for model_dump based on endpoint type
+            result = endpoint_func(validated_payload)
+
+            # Build context for model_dump - some endpoints need special keys
+            dump_context = {}
+            if detected_endpoint == "jacobian":
+                dump_context = {
+                    "output_keys": payload.get("jac_outputs", []),
+                    "input_keys": payload.get("jac_inputs", []),
+                }
+            elif detected_endpoint == "jacobian_vector_product":
+                dump_context["output_keys"] = payload.get("jvp_outputs", [])
+            elif detected_endpoint == "vector_jacobian_product":
+                dump_context["input_keys"] = payload.get("vjp_inputs", [])
+
+            outputs = (
+                result.model_dump(context=dump_context)
+                if dump_context
+                else result.model_dump()
+            )
+
+            # Encode arrays in outputs to preserve dtype information
+            encoded_outputs = encode_arrays(outputs)
 
             # Success case - return TestSpec with expected_outputs
             return TestSpec(
                 endpoint=detected_endpoint,
                 inputs=payload,
-                expected_outputs=outputs,
+                expected_outputs=encoded_outputs,
                 atol=1e-8,
                 rtol=1e-5,
             )
