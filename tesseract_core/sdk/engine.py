@@ -487,6 +487,7 @@ def serve(
     debug: bool = False,
     num_workers: int = 1,
     user: str | None = None,
+    memory: str | None = None,
     input_path: str | Path | None = None,
     output_path: str | Path | None = None,
     output_format: Literal["json", "json+base64", "json+binref"] | None = None,
@@ -510,6 +511,7 @@ def serve(
         num_workers: number of workers to use for serving the Tesseracts.
         user: user to run the Tesseracts as, e.g. '1000' or '1000:1000' (uid:gid).
               Defaults to the current user.
+        memory: Memory limit for the container (e.g., "512m", "2g"). Minimum allowed is 6m.
         input_path: Input path to read input files from, such as local directory or S3 URI.
         output_path: Output path to write output files to, such as local directory or S3 URI.
         output_format: Output format to use for the results.
@@ -603,6 +605,7 @@ def serve(
         detach=True,
         volumes=parsed_volumes,
         user=user,
+        memory=memory,
         environment=environment,
         extra_args=extra_args,
     )
@@ -771,6 +774,7 @@ def run_tesseract(
     environment: dict[str, str] | None = None,
     network: str | None = None,
     user: str | None = None,
+    memory: str | None = None,
     input_path: str | Path | None = None,
     output_path: str | Path | None = None,
     output_format: Literal["json", "json+base64", "json+binref"] | None = None,
@@ -791,6 +795,7 @@ def run_tesseract(
         network: name of the Docker network to connect the container to.
         user: user to run the Tesseract as, e.g. '1000' or '1000:1000' (uid:gid).
             Defaults to the current user.
+        memory: Memory limit for the container (e.g., "512m", "2g"). Minimum allowed is 6m.
         input_path: Input path to read input files from, such as local directory or S3 URI.
         output_path: Output path to write output files to, such as local directory or S3 URI.
         output_format: Format of the output.
@@ -871,6 +876,7 @@ def run_tesseract(
         remove=True,
         stderr=True,
         user=user,
+        memory=memory,
         extra_args=extra_args,
     )
     assert isinstance(result, tuple)
