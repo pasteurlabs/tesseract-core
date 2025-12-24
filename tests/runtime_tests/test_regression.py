@@ -181,24 +181,25 @@ class TestRegressTestCase:
     def test_success(self, dummy_tesseract_module):
         """Test regress_test_case with matching inputs/outputs."""
         from tesseract_core.runtime.core import create_endpoints
+        from tesseract_core.runtime.testing.regression import TestSpec
 
         endpoints = {
             func.__name__: func for func in create_endpoints(dummy_tesseract_module)
         }
 
-        test_spec = {
-            "endpoint": "apply",
-            "inputs": {
+        test_spec = TestSpec(
+            endpoint="apply",
+            inputs={
                 "inputs": {
                     "a": np.array([1.0, 2.0, 3.0], dtype=np.float32),
                     "b": np.array([4.0, 5.0, 6.0], dtype=np.float32),
                     "s": 2,
                 }
             },
-            "expected_outputs": {
+            expected_outputs={
                 "result": np.array([6.0, 9.0, 12.0], dtype=np.float32)
             },
-        }
+        )
 
         # Should not raise
         regress_test_case(dummy_tesseract_module, endpoints, test_spec)
@@ -206,24 +207,25 @@ class TestRegressTestCase:
     def test_value_mismatch(self, dummy_tesseract_module):
         """Test that value mismatches raise AssertionError."""
         from tesseract_core.runtime.core import create_endpoints
+        from tesseract_core.runtime.testing.regression import TestSpec
 
         endpoints = {
             func.__name__: func for func in create_endpoints(dummy_tesseract_module)
         }
 
-        test_spec = {
-            "endpoint": "apply",
-            "inputs": {
+        test_spec = TestSpec(
+            endpoint="apply",
+            inputs={
                 "inputs": {
                     "a": np.array([1.0, 2.0], dtype=np.float32),
                     "b": np.array([4.0, 5.0], dtype=np.float32),
                     "s": 2,
                 }
             },
-            "expected_outputs": {
+            expected_outputs={
                 "result": np.array([999.0, 999.0], dtype=np.float32)  # Wrong values
             },
-        }
+        )
 
         with pytest.raises(AssertionError, match="Values are not sufficiently close"):
             regress_test_case(dummy_tesseract_module, endpoints, test_spec)
@@ -231,12 +233,14 @@ class TestRegressTestCase:
     def test_expected_exception(self, dummy_tesseract_module):
         """Test that expected exceptions pass the test."""
         from tesseract_core.runtime.core import create_endpoints
+        from tesseract_core.runtime.testing.regression import TestSpec
 
         endpoints = {
             func.__name__: func for func in create_endpoints(dummy_tesseract_module)
         }
 
-        test_spec = {
+        # Store pre-validated dict for easy mutation
+        test_spec_dict = {
             "endpoint": "apply",
             "inputs": {
                 "inputs": {
@@ -249,26 +253,27 @@ class TestRegressTestCase:
         }
 
         # Should not raise (test passes because exception was expected)
-        regress_test_case(dummy_tesseract_module, endpoints, test_spec)
+        regress_test_case(dummy_tesseract_module, endpoints, TestSpec(**test_spec_dict))
 
         # Wrong expected exception - should raise AssertionError about wrong exception type
-        test_spec["expected_exception"] = "IndexError"
+        test_spec_dict["expected_exception"] = "IndexError"
         with pytest.raises(
             AssertionError, match="inputs do not conform to InputSchema"
         ):
-            regress_test_case(dummy_tesseract_module, endpoints, test_spec)
+            regress_test_case(dummy_tesseract_module, endpoints, TestSpec(**test_spec_dict))
 
     def test_unexpected_exception(self, dummy_tesseract_module):
         """Test that unexpected exceptions are propagated."""
         from tesseract_core.runtime.core import create_endpoints
+        from tesseract_core.runtime.testing.regression import TestSpec
 
         endpoints = {
             func.__name__: func for func in create_endpoints(dummy_tesseract_module)
         }
 
-        test_spec = {
-            "endpoint": "apply",
-            "inputs": {
+        test_spec = TestSpec(
+            endpoint="apply",
+            inputs={
                 "inputs": {
                     "a": np.array([1.0, 2.0]),
                     "b": np.array([4.0]),  # Wrong shape - triggers AssertionError
@@ -276,11 +281,104 @@ class TestRegressTestCase:
                 }
             },
             # No expected_exception specified
-            "expected_outputs": {"result": np.array([1.0])},
-        }
+            expected_outputs={"result": np.array([1.0])},
+        )
 
         with pytest.raises(AssertionError):
             regress_test_case(dummy_tesseract_module, endpoints, test_spec)
+
+
+class TestTestSpec:
+    """Tests for TestSpec validation."""
+
+    def test_requires_exactly_one_outcome(self):
+        """Test that TestSpec requires exactly one of expected_outputs or expected_exception."""
+        from tesseract_core.runtime.testing.regression import TestSpec
+
+        # Both provided - should raise
+        with pytest.raises(ValueError, match="Cannot specify both"):
+            TestSpec(
+                endpoint="apply",
+                inputs={"a": 1},
+                expected_outputs={"result": 2},
+                expected_exception=ValueError,
+            )
+
+        # Neither provided - should raise
+        with pytest.raises(ValueError, match="Must specify either"):
+            TestSpec(
+                endpoint="apply",
+                inputs={"a": 1},
+            )
+
+        # Only expected_outputs - should pass
+        spec = TestSpec(
+            endpoint="apply",
+            inputs={"a": 1},
+            expected_outputs={"result": 2},
+        )
+        assert spec.expected_outputs == {"result": 2}
+        assert spec.expected_exception is None
+
+        # Only expected_exception - should pass
+        spec = TestSpec(
+            endpoint="apply",
+            inputs={"a": 1},
+            expected_exception=ValueError,
+        )
+        assert spec.expected_exception is ValueError
+        assert spec.expected_outputs is None
+
+    def test_parses_exception_from_string(self):
+        """Test that TestSpec can parse exception types from strings."""
+        from tesseract_core.runtime.testing.regression import TestSpec
+
+        # String exception name
+        spec = TestSpec(
+            endpoint="apply",
+            inputs={"a": 1},
+            expected_exception="ValueError",
+        )
+        assert spec.expected_exception is ValueError
+
+        # Exception type directly
+        spec = TestSpec(
+            endpoint="apply",
+            inputs={"a": 1},
+            expected_exception=ValueError,
+        )
+        assert spec.expected_exception is ValueError
+
+        # ValidationError (from pydantic)
+        spec = TestSpec(
+            endpoint="apply",
+            inputs={"a": 1},
+            expected_exception="ValidationError",
+        )
+        from pydantic import ValidationError
+
+        assert spec.expected_exception is ValidationError
+
+    def test_invalid_exception_type(self):
+        """Test that invalid exception types raise errors."""
+        from tesseract_core.runtime.testing.regression import TestSpec
+        from typeguard import TypeCheckError
+
+        # Unknown exception name
+        with pytest.raises(ValueError, match="Unknown exception type"):
+            TestSpec(
+                endpoint="apply",
+                inputs={"a": 1},
+                expected_exception="NonExistentException",
+            )
+
+        # Invalid type (not string or type) - caught by typeguard before Pydantic
+        with pytest.raises(TypeCheckError):
+            TestSpec(
+                endpoint="apply",
+                inputs={"a": 1},
+                expected_exception=123,
+            )
 
 
 class TestIterRegressionTests:

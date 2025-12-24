@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from io import TextIOBase
 from pathlib import Path
 from types import ModuleType
-from typing import Any, TextIO
+from typing import Any, Literal, TextIO
 
 from pydantic import BaseModel
 
@@ -19,6 +19,14 @@ from .schema_generation import (
     create_apply_schema,
     create_autodiff_schema,
 )
+
+
+class RegressOutputSchema(BaseModel):
+    """Output schema for the regress endpoint."""
+
+    status: Literal["passed", "failed", "error"]
+    message: str
+    endpoint: str
 
 
 @contextmanager
@@ -247,5 +255,64 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
             return AbstractEvalOutputSchema.model_validate(out)
 
         endpoints.append(abstract_eval)
+
+    from tesseract_core.runtime.testing.regression import TestSpec, regress_test_case
+
+    def regress(payload: TestSpec) -> RegressOutputSchema:
+        """Run a single regression test against a Tesseract endpoint.
+
+        Tests an endpoint by calling it with specified inputs and comparing outputs
+        against expected values or verifying expected exceptions are raised.
+
+        Args:
+            payload: Test specification containing:
+                - endpoint: Name of endpoint to test (e.g., "apply", "jacobian")
+                - inputs: Input data for the endpoint
+                - expected_outputs: Expected output data (mutually exclusive with expected_exception)
+                - expected_exception: Expected exception type or name (mutually exclusive with expected_outputs)
+                - expected_exception_regex: Optional regex pattern for exception message
+                - atol: Absolute tolerance for numeric comparisons (default: 1e-8)
+                - rtol: Relative tolerance for numeric comparisons (default: 1e-5)
+
+        Returns:
+            RegressOutputSchema with:
+                - status: "passed" | "failed" | "error"
+                - message: Empty for passed tests, error details for failed/error
+                - endpoint: Name of the tested endpoint
+
+        Note:
+            This endpoint is designed for testing and CI/CD workflows.
+            All outcomes return HTTP 200 with status in the response body regardless of success/failure.
+        """
+        config = get_config()
+        base_dir = Path(config.input_path) if config.input_path else None
+
+        try:
+            regress_test_case(
+                api_module,
+                endpoint_functions={func.__name__: func for func in endpoints},
+                test_spec=payload,
+                base_dir=base_dir,
+                threshold=100,
+            )
+            return RegressOutputSchema(
+                status="passed",
+                message="",
+                endpoint=payload.endpoint,
+            )
+        except AssertionError as e:
+            return RegressOutputSchema(
+                status="failed",
+                message=str(e),
+                endpoint=payload.endpoint,
+            )
+        except Exception as e:
+            return RegressOutputSchema(
+                status="error",
+                message=f"{type(e).__name__}: {e}",
+                endpoint=payload.endpoint,
+            )
+
+    endpoints.append(regress)
 
     return endpoints

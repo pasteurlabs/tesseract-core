@@ -11,13 +11,71 @@ from types import ModuleType
 from typing import Any, Literal, NamedTuple
 
 import numpy as np
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError, field_validator, model_validator
 
 from ..core import create_endpoints
 from ..schema_generation import DICT_INDEX_SENTINEL, get_all_model_path_patterns
 from .common import get_input_schema, get_output_schema
 
 ROWFORMAT = "{:>15s}  {:>20s}  {:>20s}  {:>20s}\n"
+
+
+class TestSpec(BaseModel):
+    """Test specification for a single regression test.
+
+    Must provide exactly one of:
+    - expected_outputs: For testing successful execution
+    - expected_exception: For testing exception handling
+    """
+
+    endpoint: str
+    inputs: dict
+    expected_outputs: dict | None = None
+    expected_exception: type[Exception] | None = None
+    expected_exception_regex: str | None = None
+    atol: float = 1e-8
+    rtol: float = 1e-5
+
+    @field_validator("expected_exception", mode="before")
+    @classmethod
+    def parse_exception_type(cls, v: str | type[Exception] | None) -> type[Exception] | None:
+        """Parse exception from string or type.
+
+        Allows JSON files to specify exceptions as strings (e.g., "ValueError")
+        while Python code can pass exception types directly.
+        """
+        if v is None or isinstance(v, type):
+            return v
+
+        if not isinstance(v, str):
+            raise ValueError(
+                f"expected_exception must be a string or exception type, got {type(v).__name__}"
+            )
+
+        # Use existing _parse_exception_type helper
+        # But return None for _NoException sentinel
+        parsed = _parse_exception_type(v)
+        return None if parsed is _NoException else parsed
+
+    @model_validator(mode="after")
+    def validate_expected_outcome(self) -> "TestSpec":
+        """Ensure exactly one of expected_outputs or expected_exception is provided."""
+        has_outputs = self.expected_outputs is not None
+        has_exception = self.expected_exception is not None
+
+        if has_outputs and has_exception:
+            raise ValueError(
+                "Cannot specify both 'expected_outputs' and 'expected_exception'. "
+                "Provide exactly one."
+            )
+
+        if not has_outputs and not has_exception:
+            raise ValueError(
+                "Must specify either 'expected_outputs' or 'expected_exception'. "
+                "Provide exactly one."
+            )
+
+        return self
 
 
 class RegressionTestResult(NamedTuple):
@@ -289,7 +347,7 @@ def _array_discrepancy_msg(
 def regress_test_case(
     api_module: ModuleType,
     endpoint_functions: dict[str, Callable],
-    test_spec: dict,
+    test_spec: TestSpec,
     *,
     base_dir: Path | None = None,
     threshold: int = 100,
@@ -299,11 +357,11 @@ def regress_test_case(
     Args:
         api_module: Module containing the Tesseract API.
         endpoint_functions: Dict mapping endpoint names to endpoint functions.
-        test_spec: Test specification dict loaded from JSON file. Expected keys:
+        test_spec: Test specification as a TestSpec model with fields:
             - endpoint: Name of the endpoint to test.
             - inputs: Input data conforming to InputSchema.
             - expected_outputs: Expected output data (required if no exception expected).
-            - expected_exception: Optional exception type name (e.g., "ValueError").
+            - expected_exception: Optional exception type (e.g., ValueError, ValidationError).
             - expected_exception_regex: Optional regex pattern to match exception message.
             - atol: Optional absolute tolerance for numeric comparisons (default: 1e-8).
             - rtol: Optional relative tolerance for numeric comparisons (default: 1e-5).
@@ -313,29 +371,19 @@ def regress_test_case(
     Raises:
         AssertionError: If the test fails (output mismatch, wrong exception, etc.).
     """
-    assert test_spec["endpoint"] in endpoint_functions, (
-        f"Endpoint {test_spec['endpoint']} not found in {api_module.__name__}\n"
+    assert test_spec.endpoint in endpoint_functions, (
+        f"Endpoint {test_spec.endpoint} not found in {api_module.__name__}\n"
         f"  Available endpoints: {list(endpoint_functions.keys())}"
     )
-    endpoint_func = endpoint_functions[test_spec["endpoint"]]
+    endpoint_func = endpoint_functions[test_spec.endpoint]
 
-    # Parse expected exception
-    expected_exception = _parse_exception_type(test_spec.get("expected_exception"))
-    expected_exception_regex = test_spec.get("expected_exception_regex")
-
-    if expected_exception_regex is not None and not isinstance(
-        expected_exception_regex, str
-    ):
-        raise AssertionError(
-            f"expected_exception_regex must be a string, got {type(expected_exception_regex).__name__}."
-        )
+    # Get expected exception (already a type from TestSpec)
+    expected_exception = test_spec.expected_exception if test_spec.expected_exception else _NoException
+    expected_exception_regex = test_spec.expected_exception_regex
 
     # Read and validate expected_outputs when no exception expected
     if expected_exception is _NoException:
-        assert "expected_outputs" in test_spec, (
-            "expected_outputs missing when no exception expected"
-        )
-        expected_outputs = test_spec["expected_outputs"]
+        expected_outputs = test_spec.expected_outputs
 
         OutputSchema = get_output_schema(endpoint_func)
         try:
@@ -349,14 +397,11 @@ def regress_test_case(
                 f"(perhaps the OutputSchema has recently changed?):\n{error_str}"
             ) from None
 
-    # Load + dump inputs to ensure they are valid + normalized
-    assert "inputs" in test_spec, "inputs missing"
-
     # Try to validate inputs and run endpoint, catching the expected exception
     InputSchema = get_input_schema(endpoint_functions["apply"])
     try:
         loaded_inputs = InputSchema.model_validate(
-            test_spec["inputs"], context={"base_dir": base_dir}
+            test_spec.inputs, context={"base_dir": base_dir}
         )
     except expected_exception as e:
         if expected_exception_regex:
@@ -418,8 +463,8 @@ def regress_test_case(
         obtained_outputs, expected_outputs, path_patterns
     )
 
-    atol = test_spec.get("atol", 1e-8)
-    rtol = test_spec.get("rtol", 1e-5)
+    atol = test_spec.atol
+    rtol = test_spec.rtol
 
     discrepancies = []
     for path, (obtained_val, expected_val) in obtained_expected_flat.items():
@@ -562,7 +607,7 @@ def iter_regression_tests(
             regress_test_case(
                 api_module,
                 endpoint_functions,
-                spec,
+                TestSpec(**spec),
                 base_dir=base_dir,
                 threshold=threshold,
             )
