@@ -66,12 +66,12 @@ As an alternative to the MLflow setup we provide, you can point your Tesseract t
 $ tesseract serve --env=TESSERACT_MLFLOW_TRACKING_URI="..."  metrics
 ````
 
-Note that if your MLFlow server uses basic auth, you need to populate the `TESSERACT_MLFLOW_TRACKING_USERNAME` and
-`TESSERACT_MLFLOW_TRACKING_PASSWORD` for the Tesseract to be able to authenticate to it.
+Note that if your MLFlow server uses basic auth, you need to populate the `MLFLOW_TRACKING_USERNAME` and
+`MLFLOW_TRACKING_PASSWORD` for the Tesseract to be able to authenticate to it.
 
 ```bash
 $ tesseract serve --env=TESSERACT_MLFLOW_TRACKING_URI="..." \
-    --env=TESSERACT_MLFLOW_TRACKING_USERNAME="..." --env=TESSERACT_MLFLOW_TRACKING_PASSWORD="..." \
+    --env=MLFLOW_TRACKING_USERNAME="..." --env=MLFLOW_TRACKING_PASSWORD="..." \
     metrics
 ````
 
