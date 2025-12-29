@@ -1,0 +1,1 @@
+{"endpoint":"jacobian_vector_product","inputs":{"inputs":{"x":0.0,"y":0.0},"jvp_inputs":["x","y"],"jvp_outputs":["result"],"tangent_vector":{"x":1.0,"y":0.0}},"expected_outputs":{"result":-2.0},"expected_exception":null,"expected_exception_regex":null,"atol":1e-8,"rtol":0.00001}

@@ -1,8 +1,10 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+from typing import Self
+
 import numpy as np
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from tesseract_core.runtime import Array, Differentiable, Float32
 
@@ -19,6 +21,15 @@ class InputSchema(BaseModel):
         description="True if the output should be normalized, False otherwise.",
         default=False,
     )
+
+    @model_validator(mode="after")
+    def validate_shape_inputs(self) -> Self:
+        if self.a.shape != self.b.shape:
+            raise ValueError(
+                f"a and b must have the same shape. "
+                f"Got {self.a.shape} and {self.b.shape} instead."
+            )
+        return self
 
 
 class OutputSchema(BaseModel):

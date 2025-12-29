@@ -346,6 +346,23 @@ def create_abstract_eval_schema(
     return AbstractInputSchema, AbstractOutputSchema
 
 
+def get_all_model_path_patterns(schema: type[BaseModel]) -> dict[tuple, type]:
+    """Return a dictionary mapping all path patterns to their types.
+
+    For containers (dict, list), the path will include sentinels and map to the container's inner type.
+    For model fields, maps to the field's type.
+    For leaves (primitives, arrays), maps to the actual type.
+    """
+    path_to_type = {}
+
+    def add_path(obj: T, path: tuple) -> T:
+        path_to_type[path] = obj
+        return obj
+
+    apply_function_to_model_tree(schema, add_path)
+    return path_to_type
+
+
 def _get_diffable_arrays(schema: type[BaseModel]) -> dict[tuple, Any]:
     """Return a dictionary mapping path patterns of differentiable arrays to their types."""
     diffable_paths = {}
