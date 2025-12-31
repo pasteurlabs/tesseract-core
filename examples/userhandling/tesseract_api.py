@@ -60,32 +60,3 @@ def apply(inputs: InputSchema) -> OutputSchema:
         home=pw_entry.pw_dir,
         shell=pw_entry.pw_shell,
     )
-
-
-#
-# Optional endpoints
-#
-
-# import numpy as np
-
-# def jacobian(inputs: InputSchema, jac_inputs: set[str], jac_outputs: set[str]):
-#     return {}
-
-# def jacobian_vector_product(
-#     inputs: InputSchema,
-#     jvp_inputs: set[str],
-#     jvp_outputs: set[str],
-#     tangent_vector: dict[str, np.typing.ArrayLike]
-# ) -> dict[str, np.typing.ArrayLike]:
-#     return {}
-
-# def vector_jacobian_product(
-#     inputs: InputSchema,
-#     vjp_inputs: set[str],
-#     vjp_outputs: set[str],
-#     cotangent_vector: dict[str, np.typing.ArrayLike]
-# ) -> dict[str, np.typing.ArrayLike]:
-#     return {}
-
-# def abstract_eval(abstract_inputs):
-#     return {}

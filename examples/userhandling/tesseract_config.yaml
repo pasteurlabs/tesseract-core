@@ -3,25 +3,7 @@
 
 name: "userhandler"
 version: "unknown"
-description: ""
+description: "A simple Tesseract that fails if the current OS user doesn't have a valid /etc/passwd entry"
 
 build_config:
-  # Base image to use for the container, must be Ubuntu or Debian-based
-  # base_image: "debian:bookworm-slim"
-
-  # Platform to build the container for. In general, images can only be executed
-  # on the platform they were built for.
   target_platform: "native"
-
-  # Additional packages to install in the container (via apt-get)
-  # extra_packages:
-  #  - package_name
-
-  # Data to copy into the container, relative to the project root
-  # package_data:
-  #  - [path/to/source, path/to/destination]
-
-  # Additional Dockerfile commands to run during the build process
-  # custom_build_steps:
-  #  - |
-  #   RUN echo "Hello, World!"
