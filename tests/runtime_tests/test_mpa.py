@@ -9,6 +9,7 @@ import os
 import sqlite3
 
 import pytest
+from pydantic import ValidationError
 
 from tesseract_core.runtime import mpa
 from tesseract_core.runtime.config import update_config
@@ -206,90 +207,41 @@ def test_mlflow_log_calls(tmpdir):
         assert artifact_found
 
 
-def test_build_tracking_uri_with_credentials():
+def test_mlflow_run_extra_args(mocker):
+    """Test passing a dict with basic tags."""
     pytest.importorskip("mlflow")
-    update_config(
-        mlflow_tracking_uri="http://localhost:5000",
-        mlflow_tracking_username="testuser",
-        mlflow_tracking_password="testpass",
-    )
-    tracking_uri = mpa.MLflowBackend._build_tracking_uri()
-    assert tracking_uri == "http://testuser:testpass@localhost:5000"
+
+    kwargs = {"tags": {"env": "prod", "team": "ml"}}
+    kwargs_str = repr(kwargs)
+
+    update_config(mlflow_run_extra_args=kwargs_str)
+    mocked_mlflow = mocker.Mock()
+
+    backend = mpa.MLflowBackend()
+    backend.mlflow = mocked_mlflow
+
+    # Make sure kwargs are forwarded correctly to mlflow.start_run
+    backend.start_run()
+    mocked_mlflow.start_run.assert_called_with(**kwargs)
 
 
-def test_build_tracking_uri_without_credentials():
-    pytest.importorskip("mlflow")
-    update_config(
-        mlflow_tracking_uri="http://localhost:5000",
-        mlflow_tracking_username="",
-        mlflow_tracking_password="",
-    )
-    tracking_uri = mpa.MLflowBackend._build_tracking_uri()
-    assert tracking_uri == "http://localhost:5000"
+def test_mlflow_run_extra_args_parsing():
+    # This is actually a test for config.py but we add it here for now
 
+    with pytest.raises(ValidationError):
+        # Not a valid Python object
+        update_config(mlflow_run_extra_args="{'unbalanced dict': True")
 
-def test_build_tracking_uri_url_encoded_credentials():
-    pytest.importorskip("mlflow")
-    update_config(
-        mlflow_tracking_uri="https://mlflow.example.com",
-        mlflow_tracking_username="user@example.com",
-        mlflow_tracking_password="p@ss:w0rd!",
-    )
-    tracking_uri = mpa.MLflowBackend._build_tracking_uri()
-    assert (
-        tracking_uri == "https://user%40example.com:p%40ss%3Aw0rd%21@mlflow.example.com"
-    )
+    with pytest.raises(ValidationError):
+        # Not a dict
+        update_config(mlflow_run_extra_args="['this is a list']")
 
+    with pytest.raises(ValidationError):
+        # Not str keys
+        update_config(mlflow_run_extra_args="{0: 'hey there'}")
 
-def test_build_tracking_uri_with_path_and_query():
-    pytest.importorskip("mlflow")
-    update_config(
-        mlflow_tracking_uri="http://localhost:5000/api/mlflow?param=value",
-        mlflow_tracking_username="testuser",
-        mlflow_tracking_password="testpass",
-    )
-    tracking_uri = mpa.MLflowBackend._build_tracking_uri()
-    assert (
-        tracking_uri == "http://testuser:testpass@localhost:5000/api/mlflow?param=value"
-    )
+    # All good
+    update_config(mlflow_run_extra_args="{'hey there': 'general kenobi'}")
 
-
-def test_build_tracking_uri_username_without_password():
-    pytest.importorskip("mlflow")
-    update_config(
-        mlflow_tracking_uri="http://localhost:5000",
-        mlflow_tracking_username="testuser",
-        mlflow_tracking_password="",
-    )
-    with pytest.raises(
-        RuntimeError,
-        match="If one of TESSERACT_MLFLOW_TRACKING_USERNAME and TESSERACT_MLFLOW_TRACKING_PASSWORD is defined",
-    ):
-        mpa.MLflowBackend._build_tracking_uri()
-
-
-def test_build_tracking_uri_password_without_username():
-    pytest.importorskip("mlflow")
-    update_config(
-        mlflow_tracking_uri="http://localhost:5000",
-        mlflow_tracking_username="",
-        mlflow_tracking_password="testpass",
-    )
-    with pytest.raises(
-        RuntimeError,
-        match="If one of TESSERACT_MLFLOW_TRACKING_USERNAME and TESSERACT_MLFLOW_TRACKING_PASSWORD is defined",
-    ):
-        mpa.MLflowBackend._build_tracking_uri()
-
-
-def test_build_tracking_uri_sqlite_ignores_credentials():
-    pytest.importorskip("mlflow")
-    update_config(
-        mlflow_tracking_uri="sqlite:///mlflow.db",
-        mlflow_tracking_username="testuser",
-        mlflow_tracking_password="testpass",
-    )
-    tracking_uri = mpa.MLflowBackend._build_tracking_uri()
-    assert "testuser" not in tracking_uri
-    assert "testpass" not in tracking_uri
-    assert tracking_uri.startswith("sqlite:///")
+    # Passing dicts directly is fine, too
+    update_config(mlflow_run_extra_args={"hey there": "general kenobi"})
