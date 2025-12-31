@@ -558,6 +558,17 @@ def serve(
             ),
         ),
     ] = None,
+    memory: Annotated[
+        str | None,
+        typer.Option(
+            "--memory",
+            "-m",
+            help=(
+                "Memory limit for the container (e.g., '512m', '2g'). "
+                "Minimum allowed value is 6m (6 megabytes)."
+            ),
+        ),
+    ] = None,
     input_path: Annotated[
         str | None,
         typer.Option(
@@ -618,6 +629,7 @@ def serve(
             debug=debug,
             num_workers=num_workers,
             user=user,
+            memory=memory,
             input_path=input_path,
             output_path=output_path,
             output_format=_enum_to_val(output_format),
@@ -968,6 +980,17 @@ def run_container(
             ),
         ),
     ] = None,
+    memory: Annotated[
+        str | None,
+        typer.Option(
+            "--memory",
+            "-m",
+            help=(
+                "Memory limit for the container (e.g., '512m', '2g'). "
+                "Minimum allowed value is 6m (6 megabytes)."
+            ),
+        ),
+    ] = None,
     invoke_help: Annotated[
         bool,
         typer.Option(
@@ -1042,6 +1065,7 @@ def run_container(
             environment=parsed_environment,
             network=network,
             user=user,
+            memory=memory,
         )
 
     except ImageNotFound as e:

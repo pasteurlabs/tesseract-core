@@ -572,6 +572,7 @@ class Containers:
         stdout: bool = True,
         stderr: bool = False,
         user: str | None = None,
+        memory: str | None = None,
         extra_args: list_[str] | None = None,  # noqa: UP006
     ) -> Container | tuple[bytes, bytes] | bytes:
         """Run a command in a container from an image.
@@ -595,6 +596,7 @@ class Containers:
             stdout: If True, return stdout.
             stderr: If True, return stderr.
             environment: Environment variables to set in the container.
+            memory: Memory limit for the container (e.g., "512m", "2g"). Minimum allowed is 6m.
             extra_args: Additional arguments to pass to the `docker run` CLI command.
 
         Returns:
@@ -624,6 +626,9 @@ class Containers:
 
         if user:
             optional_args.extend(["-u", user])
+
+        if memory:
+            optional_args.extend(["--memory", memory])
 
         if device_requests:
             gpus_str = ",".join(device_requests)
