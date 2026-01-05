@@ -1,67 +1,72 @@
+import shutil
 from pathlib import Path
 
 from tesseract_core import Tesseract
 
 if __name__ == "__main__":
     # Ensure output folder exists
-    local_outputs = Path(__file__).parent.resolve() / "outputs"
-    local_outputs.mkdir(parents=True, exist_ok=True)
-
-    here = Path("/tesseract/")
-    CONFIG = here / "inputs/config.yaml"
-    SIM_FOLDER = here / "inputs/Ansys_Runs"
+    here = Path(__file__).parent.resolve()
     OUTPUT_DIR = here / "outputs"
-    DATASET_FOLDER = OUTPUT_DIR / "dataset"
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    CONFIG = "config.yaml"
+    SIM_FOLDER = "Ansys_Runs"
+    DATASET_FOLDER = "dataset"
 
     # DATASET TESSERACT
     inputs = {
-        "config": str(CONFIG),
-        "sim_folder": str(SIM_FOLDER),
-        "dataset_folder": str(DATASET_FOLDER),
+        "config": CONFIG,
+        "sim_folder": SIM_FOLDER,
+        "dataset_folder": DATASET_FOLDER,
     }
 
     qoi_dataset = Tesseract.from_image(
-        "qoi_dataset",
-        volumes=["./inputs:/tesseract/inputs:ro", "./outputs:/tesseract/outputs:rw"],
+        "qoi_dataset", input_path="./inputs", output_path="./outputs"
     )
 
     with qoi_dataset:
         outputs = qoi_dataset.apply(inputs)
 
     # TRAINING TESSERACT
-    inputs = {"config": str(CONFIG), "data_folder": str(DATASET_FOLDER)}
-
-    qoi_train = Tesseract.from_image(
-        "qoi_train",
-        volumes=["./inputs:/tesseract/inputs:ro", "./outputs:/tesseract/outputs:rw"],
+    # Copy outputs to input folder
+    shutil.copytree(
+        here / "outputs" / DATASET_FOLDER,
+        here / "inputs" / DATASET_FOLDER,
+        dirs_exist_ok=True,
     )
 
+    inputs = {"config": CONFIG, "data_folder": DATASET_FOLDER}
+
+    qoi_train = Tesseract.from_image(
+        "qoi_train", input_path="./inputs", output_path="./outputs"
+    )
     with qoi_train:
         outputs = qoi_train.apply(inputs)
 
     # INFERENCE TESSERACT
 
     # Find the latest experiment_hybrid model
-    models_dir = local_outputs / "models"
+    models_dir = OUTPUT_DIR / "models"
     experiment_dirs = sorted(models_dir.glob("experiment_hybrid_*"))
     latest_experiment = experiment_dirs[-1]
-    model_files = list((latest_experiment / "models").glob("*.pkl"))
+    model_file = next(iter((latest_experiment / "models").glob("*.pkl")))
 
-    # Get relative paths from the project root
-    project_root = Path(__file__).parent.resolve()
-    TRAINED_MODEL = here / model_files[0].relative_to(project_root)
-    SCALER = here / (latest_experiment / "scaler.pkl").relative_to(project_root)
+    TRAINED_MODEL = model_file.name
+    SCALER = "scaler.pkl"
+
+    # Copy outputs to input folder
+    shutil.copy(model_file, here / "inputs" / TRAINED_MODEL)
+    shutil.copy(latest_experiment / SCALER, here / "inputs" / SCALER)
 
     inputs = {
-        "config": str(CONFIG),
-        "data_folder": str(DATASET_FOLDER),
-        "trained_model": str(TRAINED_MODEL),
-        "scaler": str(SCALER),
+        "config": CONFIG,
+        "data_folder": DATASET_FOLDER,
+        "trained_model": TRAINED_MODEL,
+        "scaler": SCALER,
     }
 
     qoi_inference = Tesseract.from_image(
-        "qoi_inference",
-        volumes=["./inputs:/tesseract/inputs:ro", "./outputs:/tesseract/outputs:rw"],
+        "qoi_inference", input_path="./inputs", output_path="./outputs"
     )
 
     with qoi_inference:
