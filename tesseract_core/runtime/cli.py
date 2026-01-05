@@ -141,6 +141,10 @@ def make_callback() -> Callable:
         if get_origin(field_type) is Literal:
             field_type = make_choice_enum(f"{field_name}Choices", get_args(field_type))
 
+        if get_origin(field_type) is dict:
+            # Dicts are parsed as strings
+            field_type = str
+
         params.append(
             inspect.Parameter(
                 field_name,

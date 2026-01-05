@@ -163,13 +163,23 @@ class MLflowBackend(BaseBackend):
         mlflow_tracking_uri = config.mlflow_tracking_uri
         if mlflow_tracking_uri.startswith(("http://", "https://")):
             try:
-                response = requests.get(mlflow_tracking_uri, timeout=5)
+                # Check for MLflow credentials in environment variables
+                username = os.environ.get("MLFLOW_TRACKING_USERNAME")
+                password = os.environ.get("MLFLOW_TRACKING_PASSWORD")
+
+                auth = None
+                if username and password:
+                    auth = (username, password)
+
+                response = requests.get(mlflow_tracking_uri, timeout=5, auth=auth)
                 response.raise_for_status()
             except requests.RequestException as e:
                 raise RuntimeError(
                     f"Failed to connect to MLflow tracking server at {mlflow_tracking_uri}. "
                     "Please make sure an MLflow server is running and TESSERACT_MLFLOW_TRACKING_URI is set correctly, "
-                    "or switch to file-based logging by setting TESSERACT_MLFLOW_TRACKING_URI to an empty string."
+                    "or switch to file-based logging by setting TESSERACT_MLFLOW_TRACKING_URI to an empty string. "
+                    "If your MLflow server has authentication enabled, please make sure that "
+                    "MLFLOW_TRACKING_USERNAME and MLFLOW_TRACKING_PASSWORD are set correctly."
                 ) from e
 
     def log_parameter(self, key: str, value: Any) -> None:
@@ -185,8 +195,10 @@ class MLflowBackend(BaseBackend):
         self.mlflow.log_artifact(local_path)
 
     def start_run(self) -> None:
-        """Start a new MLflow run."""
-        self.mlflow.start_run()
+        """Start a new MLflow run with optional extra arguments from config."""
+        config = get_config()
+        run_extra_args = config.mlflow_run_extra_args
+        self.mlflow.start_run(**run_extra_args)
 
     def end_run(self) -> None:
         """End the current MLflow run."""
