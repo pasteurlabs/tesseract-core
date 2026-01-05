@@ -2,7 +2,7 @@
 #    uv export --frozen --color never --no-emit-project --no-hashes
 annotated-types==0.7.0
     # via pydantic
-certifi==2025.11.12
+certifi==2026.1.4
     # via requests
 charset-normalizer==3.4.4
     # via requests
