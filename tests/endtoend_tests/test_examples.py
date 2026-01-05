@@ -92,7 +92,14 @@ TEST_CASES = {
     "empty": Config(
         test_with_random_inputs=True,
         sample_requests=[
-            SampleRequest(endpoint="apply", payload={"inputs": {}}),
+            SampleRequest(
+                endpoint="apply",
+                payload=json.loads(
+                    (
+                        EXAMPLES_DIR / "empty/test_cases_inputs/example_input.json"
+                    ).read_text()
+                ),
+            ),
         ],
     ),
     "py310": Config(
@@ -103,7 +110,11 @@ TEST_CASES = {
         sample_requests=[
             SampleRequest(
                 endpoint="apply",
-                payload={"inputs": {"name": "Ozzy"}},
+                payload=json.loads(
+                    (
+                        EXAMPLES_DIR / "helloworld/test_cases_inputs/example_input.json"
+                    ).read_text()
+                ),
                 output_contains_pattern="Hello Ozzy!",
             ),
         ],
@@ -113,7 +124,12 @@ TEST_CASES = {
         sample_requests=[
             SampleRequest(
                 endpoint="apply",
-                payload={"inputs": {"name": "Ozzy"}},
+                payload=json.loads(
+                    (
+                        EXAMPLES_DIR
+                        / "pip_custom_step/test_cases_inputs/example_input.json"
+                    ).read_text()
+                ),
                 output_contains_pattern="Hello Ozzy!",
             ),
         ],
@@ -123,13 +139,12 @@ TEST_CASES = {
         sample_requests=[
             SampleRequest(
                 endpoint="apply",
-                payload={
-                    "inputs": {
-                        "vertices": encode_array(
-                            [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]]
-                        )
-                    }
-                },
+                payload=json.loads(
+                    (
+                        EXAMPLES_DIR
+                        / "pyvista-arm64/test_cases_inputs/example_input.json"
+                    ).read_text()
+                ),
                 output_contains_pattern="pv_mesh",
             ),
         ],
@@ -139,7 +154,12 @@ TEST_CASES = {
         sample_requests=[
             SampleRequest(
                 endpoint="apply",
-                payload={"inputs": {"name": "Ozzy"}},
+                payload=json.loads(
+                    (
+                        EXAMPLES_DIR
+                        / "localpackage/test_cases_inputs/example_input.json"
+                    ).read_text()
+                ),
                 output_contains_pattern="Hello Ozzy!\\nGoodbye Ozzy!",
             ),
         ],
@@ -151,7 +171,7 @@ TEST_CASES = {
                 endpoint="apply",
                 payload=json.loads(
                     (
-                        EXAMPLES_DIR / "vectoradd/test_cases/example_input.json"
+                        EXAMPLES_DIR / "vectoradd/test_cases_inputs/example_input.json"
                     ).read_text()
                 ),
                 output_contains_pattern=[encode_array([5.0, 7.0, 9.0], as_json=True)],
@@ -161,7 +181,7 @@ TEST_CASES = {
                 payload=json.loads(
                     (
                         EXAMPLES_DIR
-                        / "vectoradd/test_cases/example_jacobian_input.json"
+                        / "vectoradd/test_cases_inputs/example_jacobian_input.json"
                     ).read_text()
                 ),
                 output_contains_pattern=['"s":', '"a":'],
@@ -171,7 +191,7 @@ TEST_CASES = {
                 payload=json.loads(
                     (
                         EXAMPLES_DIR
-                        / "vectoradd/test_cases/badInputs_jacobian_input.json"
+                        / "vectoradd/test_cases_inputs/badInputs_jacobian_input.json"
                     ).read_text()
                 ),
                 expected_status_code=422,
@@ -182,7 +202,7 @@ TEST_CASES = {
                 payload=json.loads(
                     (
                         EXAMPLES_DIR
-                        / "vectoradd/test_cases/badOutputs_jacobian_input.json"
+                        / "vectoradd/test_cases_inputs/badOutputs_jacobian_input.json"
                     ).read_text()
                 ),
                 expected_status_code=422,
@@ -193,7 +213,7 @@ TEST_CASES = {
                 payload=json.loads(
                     (
                         EXAMPLES_DIR
-                        / "vectoradd/test_cases/example_checkgradients_input.json"
+                        / "vectoradd/test_cases_inputs/example_checkgradients_input.json"
                     ).read_text()
                 ),
             ),
@@ -206,7 +226,8 @@ TEST_CASES = {
                 endpoint="apply",
                 payload=json.loads(
                     (
-                        EXAMPLES_DIR / "vectoradd_jax/test_cases/example_input.json"
+                        EXAMPLES_DIR
+                        / "vectoradd_jax/test_cases_inputs/example_input.json"
                     ).read_text()
                 ),
                 output_contains_array=np.array([7.0, 11.0, 15.0], dtype="float32"),
@@ -216,7 +237,7 @@ TEST_CASES = {
                 payload=json.loads(
                     (
                         EXAMPLES_DIR
-                        / "vectoradd_jax/test_cases/example_abstract_input.json"
+                        / "vectoradd_jax/test_cases_inputs/example_abstract_input.json"
                     ).read_text()
                 ),
             ),
@@ -224,7 +245,7 @@ TEST_CASES = {
                 endpoint="apply",
                 payload=json.loads(
                     (
-                        EXAMPLES_DIR / "vectoradd_jax/test_cases/bad_input.json"
+                        EXAMPLES_DIR / "vectoradd_jax/test_cases_inputs/bad_input.json"
                     ).read_text()
                 ),
                 expected_status_code=422,
@@ -235,7 +256,7 @@ TEST_CASES = {
                 payload=json.loads(
                     (
                         EXAMPLES_DIR
-                        / "vectoradd_jax/test_cases/example_jacobian_input.json"
+                        / "vectoradd_jax/test_cases_inputs/example_jacobian_input.json"
                     ).read_text()
                 ),
                 output_contains_pattern=['"a.s":', '"a.v":'],
@@ -246,7 +267,7 @@ TEST_CASES = {
                 payload=json.loads(
                     (
                         EXAMPLES_DIR
-                        / "vectoradd_jax/test_cases/wrtVector_jvp_input.json"
+                        / "vectoradd_jax/test_cases_inputs/wrtVector_jvp_input.json"
                     ).read_text()
                 ),
                 output_contains_array=np.array([0.2, 0.4, 0.6], dtype="float32"),
@@ -256,7 +277,7 @@ TEST_CASES = {
                 payload=json.loads(
                     (
                         EXAMPLES_DIR
-                        / "vectoradd_jax/test_cases/wrtScalar_jvp_input.json"
+                        / "vectoradd_jax/test_cases_inputs/wrtScalar_jvp_input.json"
                     ).read_text()
                 ),
                 output_contains_array=np.array([0.5, 1.0, 1.5], dtype="float32"),
@@ -266,7 +287,7 @@ TEST_CASES = {
                 payload=json.loads(
                     (
                         EXAMPLES_DIR
-                        / "vectoradd_jax/test_cases/wrtVector_vjp_input.json"
+                        / "vectoradd_jax/test_cases_inputs/wrtVector_vjp_input.json"
                     ).read_text()
                 ),
                 output_contains_array=np.array([0.2, 0.4, 0.6], dtype="float32"),
@@ -276,7 +297,7 @@ TEST_CASES = {
                 payload=json.loads(
                     (
                         EXAMPLES_DIR
-                        / "vectoradd_jax/test_cases/wrtScalar_vjp_input.json"
+                        / "vectoradd_jax/test_cases_inputs/wrtScalar_vjp_input.json"
                     ).read_text()
                 ),
                 output_contains_array=np.array([1.4], dtype="float32"),
@@ -286,7 +307,7 @@ TEST_CASES = {
                 payload=json.loads(
                     (
                         EXAMPLES_DIR
-                        / "vectoradd_jax/test_cases/example_checkgradients_input.json"
+                        / "vectoradd_jax/test_cases_inputs/example_checkgradients_input.json"
                     ).read_text()
                 ),
             ),
@@ -299,7 +320,8 @@ TEST_CASES = {
                 endpoint="apply",
                 payload=json.loads(
                     (
-                        EXAMPLES_DIR / "vectoradd_torch/test_cases/example_input.json"
+                        EXAMPLES_DIR
+                        / "vectoradd_torch/test_cases_inputs/example_input.json"
                     ).read_text()
                 ),
                 output_contains_array=np.array([7.0, 11.0, 15.0], dtype="float32"),
@@ -308,7 +330,8 @@ TEST_CASES = {
                 endpoint="apply",
                 payload=json.loads(
                     (
-                        EXAMPLES_DIR / "vectoradd_torch/test_cases/bad_input.json"
+                        EXAMPLES_DIR
+                        / "vectoradd_torch/test_cases_inputs/bad_input.json"
                     ).read_text()
                 ),
                 expected_status_code=422,
@@ -319,7 +342,7 @@ TEST_CASES = {
                 payload=json.loads(
                     (
                         EXAMPLES_DIR
-                        / "vectoradd_torch/test_cases/example_jacobian_input.json"
+                        / "vectoradd_torch/test_cases_inputs/example_jacobian_input.json"
                     ).read_text()
                 ),
                 output_contains_pattern=['"a.s":', '"a.v":'],
@@ -330,7 +353,7 @@ TEST_CASES = {
                 payload=json.loads(
                     (
                         EXAMPLES_DIR
-                        / "vectoradd_torch/test_cases/wrtVector_jvp_input.json"
+                        / "vectoradd_torch/test_cases_inputs/wrtVector_jvp_input.json"
                     ).read_text()
                 ),
                 output_contains_array=np.array([0.2, 0.4, 0.6], dtype="float32"),
@@ -340,7 +363,7 @@ TEST_CASES = {
                 payload=json.loads(
                     (
                         EXAMPLES_DIR
-                        / "vectoradd_torch/test_cases/wrtScalar_jvp_input.json"
+                        / "vectoradd_torch/test_cases_inputs/wrtScalar_jvp_input.json"
                     ).read_text()
                 ),
                 output_contains_array=np.array([0.5, 1.0, 1.5], dtype="float32"),
@@ -350,7 +373,7 @@ TEST_CASES = {
                 payload=json.loads(
                     (
                         EXAMPLES_DIR
-                        / "vectoradd_torch/test_cases/wrtVector_vjp_input.json"
+                        / "vectoradd_torch/test_cases_inputs/wrtVector_vjp_input.json"
                     ).read_text()
                 ),
                 output_contains_array=np.array([0.2, 0.4, 0.6], dtype="float32"),
@@ -360,7 +383,7 @@ TEST_CASES = {
                 payload=json.loads(
                     (
                         EXAMPLES_DIR
-                        / "vectoradd_torch/test_cases/wrtScalar_vjp_input.json"
+                        / "vectoradd_torch/test_cases_inputs/wrtScalar_vjp_input.json"
                     ).read_text()
                 ),
                 output_contains_array=np.array([1.4], dtype="float32"),
@@ -374,7 +397,7 @@ TEST_CASES = {
                 endpoint="apply",
                 payload=json.loads(
                     (
-                        EXAMPLES_DIR / "univariate/test_cases/example_input.json"
+                        EXAMPLES_DIR / "univariate/test_cases_inputs/example_input.json"
                     ).read_text()
                 ),
                 output_contains_array=np.array([1.0], dtype="float64"),
@@ -383,7 +406,8 @@ TEST_CASES = {
                 endpoint="jacobian",
                 payload=json.loads(
                     (
-                        EXAMPLES_DIR / "univariate/test_cases/wrtX_jacobian_input.json"
+                        EXAMPLES_DIR
+                        / "univariate/test_cases_inputs/wrtX_jacobian_input.json"
                     ).read_text()
                 ),
                 output_contains_pattern=[
@@ -394,7 +418,8 @@ TEST_CASES = {
                 endpoint="jacobian",
                 payload=json.loads(
                     (
-                        EXAMPLES_DIR / "univariate/test_cases/wrtY_jacobian_input.json"
+                        EXAMPLES_DIR
+                        / "univariate/test_cases_inputs/wrtY_jacobian_input.json"
                     ).read_text()
                 ),
                 output_contains_pattern=[
@@ -405,7 +430,8 @@ TEST_CASES = {
                 endpoint="jacobian",
                 payload=json.loads(
                     (
-                        EXAMPLES_DIR / "univariate/test_cases/bad_jacobian_input.json"
+                        EXAMPLES_DIR
+                        / "univariate/test_cases_inputs/bad_jacobian_input.json"
                     ).read_text()
                 ),
                 expected_status_code=422,
@@ -415,7 +441,8 @@ TEST_CASES = {
                 endpoint="jacobian_vector_product",
                 payload=json.loads(
                     (
-                        EXAMPLES_DIR / "univariate/test_cases/example_jvp_input.json"
+                        EXAMPLES_DIR
+                        / "univariate/test_cases_inputs/example_jvp_input.json"
                     ).read_text()
                 ),
                 output_contains_pattern=f'"result":{encode_array(np.float32(-2.0), as_json=True)}',
@@ -424,7 +451,8 @@ TEST_CASES = {
                 endpoint="vector_jacobian_product",
                 payload=json.loads(
                     (
-                        EXAMPLES_DIR / "univariate/test_cases/example_vjp_input.json"
+                        EXAMPLES_DIR
+                        / "univariate/test_cases_inputs/example_vjp_input.json"
                     ).read_text()
                 ),
                 output_contains_pattern=[
@@ -437,7 +465,7 @@ TEST_CASES = {
                 payload=json.loads(
                     (
                         EXAMPLES_DIR
-                        / "univariate/test_cases/example_checkgradients_input.json"
+                        / "univariate/test_cases_inputs/example_checkgradients_input.json"
                     ).read_text()
                 ),
             ),
@@ -456,7 +484,7 @@ TEST_CASES = {
                 endpoint="apply",
                 payload=json.loads(
                     (
-                        EXAMPLES_DIR / "meshstats/test_cases/example_input.json"
+                        EXAMPLES_DIR / "meshstats/test_cases_inputs/example_input.json"
                     ).read_text()
                 ),
                 output_contains_pattern=encode_array(
@@ -468,7 +496,7 @@ TEST_CASES = {
                 payload=json.loads(
                     (
                         EXAMPLES_DIR
-                        / "meshstats/test_cases/example_abstract_input.json"
+                        / "meshstats/test_cases_inputs/example_abstract_input.json"
                     ).read_text()
                 ),
                 output_contains_pattern='"shape":[3],"dtype":"float32"',
@@ -478,7 +506,7 @@ TEST_CASES = {
                 payload=json.loads(
                     (
                         EXAMPLES_DIR
-                        / "meshstats/test_cases/example_jacobian_input.json"
+                        / "meshstats/test_cases_inputs/example_jacobian_input.json"
                     ).read_text()
                 ),
                 output_contains_pattern='"shape":[3,5,3]',
@@ -488,7 +516,7 @@ TEST_CASES = {
                 payload=json.loads(
                     (
                         EXAMPLES_DIR
-                        / "meshstats/test_cases/example_checkgradients_input.json"
+                        / "meshstats/test_cases_inputs/example_checkgradients_input.json"
                     ).read_text()
                 ),
             ),
@@ -499,22 +527,23 @@ TEST_CASES = {
         sample_requests=[
             SampleRequest(
                 endpoint="apply",
-                payload={
-                    "inputs": {
-                        "data": "@/tesseract/input_data/sample_*.json",
-                    },
-                },
+                payload=json.loads(
+                    (
+                        EXAMPLES_DIR / "dataloader/test_cases_inputs/example_input.json"
+                    ).read_text()
+                ),
                 output_contains_pattern=[
                     '{"data":[{"object_type":"array","shape":[3,3],"dtype":"float32","data":{"buffer":',
                 ],
             ),
             SampleRequest(
                 endpoint="check-gradients",
-                payload={
-                    "inputs": {
-                        "data": "@/tesseract/input_data/sample_*.json",
-                    },
-                },
+                payload=json.loads(
+                    (
+                        EXAMPLES_DIR
+                        / "dataloader/test_cases_inputs/example_checkgradients_input.json"
+                    ).read_text()
+                ),
             ),
         ],
         volume_mounts=["testdata:/tesseract/input_data:ro"],
@@ -524,7 +553,11 @@ TEST_CASES = {
         sample_requests=[
             SampleRequest(
                 endpoint="apply",
-                payload={"inputs": {"message": "Hey!"}},
+                payload=json.loads(
+                    (
+                        EXAMPLES_DIR / "conda/test_cases_inputs/example_input.json"
+                    ).read_text()
+                ),
                 output_contains_pattern=[r'{"cowsays":"  ____\n| Hey! |\n  ====\n'],
             )
         ],
@@ -534,7 +567,12 @@ TEST_CASES = {
         sample_requests=[
             SampleRequest(
                 endpoint="apply",
-                payload={"inputs": {}},
+                payload=json.loads(
+                    (
+                        EXAMPLES_DIR
+                        / "required_files/test_cases_inputs/example_input.json"
+                    ).read_text()
+                ),
                 output_contains_pattern=[r'{"a":1.0,"b":100.0}'],
             ),
         ],
@@ -545,22 +583,12 @@ TEST_CASES = {
         sample_requests=[
             SampleRequest(
                 endpoint="apply",
-                payload={
-                    "inputs": {
-                        "data": [
-                            "sample_0.json",
-                            "sample_1.json",
-                            "sample_2.json",
-                            "sample_3.json",
-                            "sample_4.json",
-                            "sample_5.json",
-                            "sample_6.json",
-                            "sample_7.json",
-                            "sample_8.json",
-                            "sample_9.json",
-                        ]
-                    }
-                },
+                payload=json.loads(
+                    (
+                        EXAMPLES_DIR
+                        / "filereference/test_cases_inputs/example_input.json"
+                    ).read_text()
+                ),
                 output_contains_pattern=["sample_0.copy"],
             )
         ],
@@ -572,7 +600,11 @@ TEST_CASES = {
         sample_requests=[
             SampleRequest(
                 endpoint="apply",
-                payload={"inputs": {}},
+                payload=json.loads(
+                    (
+                        EXAMPLES_DIR / "metrics/test_cases_inputs/example_input.json"
+                    ).read_text()
+                ),
                 # Just verify it runs without error - output will be empty
             ),
         ],
@@ -582,16 +614,11 @@ TEST_CASES = {
         sample_requests=[
             SampleRequest(
                 endpoint="apply",
-                payload={
-                    "inputs": {
-                        "Q": encode_array(np.eye(2)),
-                        "q": encode_array(np.ones(2)),
-                        "G": encode_array(np.array([[-1.0, 1.0]]).reshape((1, 2))),
-                        "h": encode_array(np.array([-1]).reshape((1,))),
-                        "target_kappa": 1e-1,
-                        "solver_tol": 1e-4,
-                    }
-                },
+                payload=json.loads(
+                    (
+                        EXAMPLES_DIR / "qp_solve/test_cases_inputs/example_input.json"
+                    ).read_text()
+                ),
                 output_contains_array=np.array([-0.5, -1.5], dtype="float32"),
             )
         ],

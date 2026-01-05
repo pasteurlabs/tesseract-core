@@ -1,0 +1,42 @@
+{
+  "inputs": {
+    "Q": {
+      "object_type": "array",
+      "shape": [2, 2],
+      "dtype": "float64",
+      "data": {
+        "buffer": "AAAAAAAA8D8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPDw/w==",
+        "encoding": "base64"
+      }
+    },
+    "q": {
+      "object_type": "array",
+      "shape": [2],
+      "dtype": "float64",
+      "data": {
+        "buffer": "AAAAAAAA8D8AAAAAAAD8Pw==",
+        "encoding": "base64"
+      }
+    },
+    "G": {
+      "object_type": "array",
+      "shape": [1, 2],
+      "dtype": "float64",
+      "data": {
+        "buffer": "AAAAAAAA8L8AAAAAAAD8Pw==",
+        "encoding": "base64"
+      }
+    },
+    "h": {
+      "object_type": "array",
+      "shape": [1],
+      "dtype": "float64",
+      "data": {
+        "buffer": "AAAAAAAA8L8=",
+        "encoding": "base64"
+      }
+    },
+    "target_kappa": 0.1,
+    "solver_tol": 0.0001
+  }
+}
