@@ -2,37 +2,47 @@
   "inputs": {
     "Q": {
       "object_type": "array",
-      "shape": [2, 2],
+      "shape": [
+        2,
+        2
+      ],
       "dtype": "float64",
       "data": {
-        "buffer": "AAAAAAAA8D8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPDw/w==",
+        "buffer": "AAAAAAAA8D8AAAAAAAAAAAAAAAAAAAAAAAAAAAAA8D8=",
         "encoding": "base64"
       }
     },
     "q": {
       "object_type": "array",
-      "shape": [2],
+      "shape": [
+        2
+      ],
       "dtype": "float64",
       "data": {
-        "buffer": "AAAAAAAA8D8AAAAAAAD8Pw==",
+        "buffer": "AAAAAAAA8D8AAAAAAADwPw==",
         "encoding": "base64"
       }
     },
     "G": {
       "object_type": "array",
-      "shape": [1, 2],
+      "shape": [
+        1,
+        2
+      ],
       "dtype": "float64",
       "data": {
-        "buffer": "AAAAAAAA8L8AAAAAAAD8Pw==",
+        "buffer": "AAAAAAAA8L8AAAAAAADwPw==",
         "encoding": "base64"
       }
     },
     "h": {
       "object_type": "array",
-      "shape": [1],
-      "dtype": "float64",
+      "shape": [
+        1
+      ],
+      "dtype": "int64",
       "data": {
-        "buffer": "AAAAAAAA8L8=",
+        "buffer": "//////////8=",
         "encoding": "base64"
       }
     },
