@@ -21,6 +21,7 @@ $ tesseract list
 If the output is an empty table, that's okay! The CLI is functioning correctly, there are simply no components available yet.
 
 (installation-docker)=
+
 ## Installing Docker
 
 [Docker Desktop](https://www.docker.com/products/docker-desktop/) ships with everything you need to run Tesseract Core, including the Docker Engine CLI, Docker Compose, and Docker Buildx. It also includes a GUI for managing containers and images.
@@ -43,6 +44,7 @@ Using `sudo tesseract` may bypass active virtual environments and shadow the `te
 ```
 
 (installation-podman)=
+
 ## Using alternative container engines (such as podman)
 
 The choice of container engine can be customised with the environment variable `TESSERACT_DOCKER_EXECUTABLE`. Tesseracts currently support container engines that have API's consistent with the `docker` CLI (e.g. `podman`). Assuming `podman` is already installed on your system and permissions are set up to allow running as a non-root user (typically the default), all that is required is to set the environment variable accordingly.
@@ -53,6 +55,7 @@ $ echo "export TESSERACT_DOCKER_EXECUTABLE=podman" >> ~/.bashrc
 ```
 
 (installation-runtime)=
+
 ## Runtime installation
 
 Invoking the Tesseract Runtime directly without Docker can be useful for debugging during Tesseract creation and non-containerized deployment (see [here](#tr-without-docker)). To install it, run:
@@ -66,14 +69,17 @@ Some shells use `[` and `]` as special characters, and might error out on the `p
 ```
 
 (installation-issues)=
+
 ## Common issues
 
 (windows-support)=
+
 ### Windows support
 
 Tesseract is fully supported on Windows via the Windows Subsystem for Linux (WSL). For guidance, please refer to the [official documentation](https://docs.microsoft.com/en-us/windows/wsl/).
 
 (exe-conflicts)=
+
 ### Conflicting executables
 
 This is not the only software called "Tesseract". Sometimes, this leads to multiple executables with the same name, for example if you also have [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) installed. In that case, you may encounter the following error:
@@ -117,6 +123,7 @@ $ sudo usermod -aG docker $USER
 Then, log out and back in to apply the changes.
 
 (installation-dev)=
+
 ## Development installation
 
 If you would like to install everything you need for dev work on Tesseract itself (editable source, runtime + dependencies for tests), run this instead:

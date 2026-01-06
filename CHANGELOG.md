@@ -51,7 +51,7 @@ All notable changes to this project will be documented in this file.
 - Require name and version to be non-empty in TesseractConfig (#336)
 - Strip trailing slash from URL's passed to Tesseract HTTP client (#340)
 - Handling of tree_transforms edge cases (#331)
-- *(sdk)* Cast sets to tuples in Pytorch template when used as positional args (#347)
+- _(sdk)_ Cast sets to tuples in Pytorch template when used as positional args (#347)
 - Use host port as api port (#330)
 - Allow digits in the pre-release semver tag (#355)
 
@@ -80,7 +80,7 @@ All notable changes to this project will be documented in this file.
 - [**breaking**] Drop msgpack support (#303)
 - Introduce job ID to control the location of output logs / artifacts (#314)
 - Also print text logs to stderr (#311)
-- Add experimental `require_file` function to mark externally mounted files as required at runtime  (#261)
+- Add experimental `require_file` function to mark externally mounted files as required at runtime (#261)
 
 ### Bug Fixes
 
@@ -144,7 +144,7 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
-- *(sdk)* Expose no compose in Python API (#223)
+- _(sdk)_ Expose no compose in Python API (#223)
 - [**breaking**] Enable remote debugging (#184)
 - Add --service-names argument to `tesseract serve` so served Tesseracts can be reached by name (#206)
 - Allow skipping checks by passing `--skip-checks` flag to the tesseract build command (#233)
@@ -173,8 +173,8 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
-- *(cli)* Add serve --no-compose and other missing cli options (#161)
-- *(sdk)* Make docker executable and build args configurable (#162)
+- _(cli)_ Add serve --no-compose and other missing cli options (#161)
+- _(sdk)_ Make docker executable and build args configurable (#162)
 - More comprehensive validation of input and output schema during `tesseract-runtime check` (#170)
 - Add ability to configure host IP during `tesseract serve` (#185)
 
@@ -198,7 +198,7 @@ All notable changes to this project will be documented in this file.
 ### Features
 
 - [**breaking**] Remove docker_py usage in favor of custom client that uses Docker CLI (#33)
-- *(sdk)* Allow users to serve Tesseracts using multiple worker processes (#135)
+- _(sdk)_ Allow users to serve Tesseracts using multiple worker processes (#135)
 
 ### Documentation
 
@@ -209,7 +209,7 @@ All notable changes to this project will be documented in this file.
 ### Bug Fixes
 
 - Fixed typos in jax recipe (#134)
-- *(sdk)* Various improvements to SDK UX (#136)
+- _(sdk)_ Various improvements to SDK UX (#136)
 
 ## [0.8.4] - 2025-04-17
 
