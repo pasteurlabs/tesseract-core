@@ -133,8 +133,10 @@ def served_tesseract_module(dummy_tesseract_location):
     yield vecadd
 
 
+# gen_test_spec endpoint not supported in Python API
 @pytest.mark.parametrize(
-    "endpoint_name", sorted(expected_endpoints | {"openapi_schema"})
+    "endpoint_name",
+    sorted((expected_endpoints | {"openapi_schema"}) - {"gen_test_spec"}),
 )
 def test_all_endpoints(
     endpoint_name,
@@ -168,6 +170,37 @@ def test_all_endpoints(
             "abstract_inputs": {
                 "a": {"shape": [2], "dtype": "float32"},
                 "b": {"shape": [2], "dtype": "float32"},
+            }
+        }
+    elif endpoint_name == "regress":
+        inputs = {
+            "test_spec": {
+                "endpoint": "apply",
+                "inputs": {
+                    "inputs": {
+                        "a": {
+                            "object_type": "array",
+                            "shape": [3],
+                            "dtype": "int64",
+                            "data": {
+                                "buffer": "AQAAAAAAAAACAAAAAAAAAAMAAAAAAAAA",
+                                "encoding": "base64",
+                            },
+                        },
+                        "b": {
+                            "object_type": "array",
+                            "shape": [3],
+                            "dtype": "int64",
+                            "data": {
+                                "buffer": "BAAAAAAAAAAFAAAAAAAAAAYAAAAAAAAA",
+                                "encoding": "base64",
+                            },
+                        },
+                    }
+                },
+                "expected_outputs": {"result": [7.0, 11.0, 15.0]},
+                "atol": 1e-8,
+                "rtol": 0.00001,
             }
         }
     else:
