@@ -18,6 +18,8 @@ expected_endpoints = {
     "abstract_eval",
     "jacobian_vector_product",
     "vector_jacobian_product",
+    "regress",
+    "gen_test_spec",
 }
 
 
