@@ -26,6 +26,16 @@ from .common import get_input_schema, get_output_schema
 ROWFORMAT = "{:>15s}  {:>20s}  {:>20s}  {:>20s}\n"
 
 
+class TestCliConfig(BaseModel):
+    """CLI configuration overrides for test execution.
+
+    Contains original CLI arguments passed to gen-test-spec.
+    Only includes safe config options that don't pose security risks.
+    """
+
+    input_path: str | None = None  # Original --input-path CLI arg
+
+
 class TestSpec(BaseModel):
     """Test specification for a single regression test.
 
@@ -41,6 +51,7 @@ class TestSpec(BaseModel):
     expected_exception_regex: str | None = None
     atol: float = 1e-8
     rtol: float = 1e-5
+    cli_config: TestCliConfig | None = None
 
     @field_validator("expected_exception", mode="before")
     @classmethod
@@ -91,7 +102,7 @@ class TestSpec(BaseModel):
 
         Arrays should already be encoded in json+base64 format by gen_test_spec.
         """
-        return {
+        result = {
             "endpoint": self.endpoint,
             "inputs": self.inputs,
             "expected_outputs": self.expected_outputs,
@@ -102,6 +113,12 @@ class TestSpec(BaseModel):
             "atol": self.atol,
             "rtol": self.rtol,
         }
+
+        # Only include cli_config if present
+        if self.cli_config is not None:
+            result["cli_config"] = self.cli_config.model_dump(exclude_none=True)
+
+        return result
 
 
 class RegressionTestResult(NamedTuple):

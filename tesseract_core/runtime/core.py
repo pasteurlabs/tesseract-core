@@ -3,6 +3,7 @@
 
 import base64
 import importlib.util
+import json
 import os
 import sys
 from collections.abc import Callable, Generator
@@ -288,7 +289,14 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
             All outcomes return HTTP 200 with status in the response body regardless of success/failure.
         """
         config = get_config()
-        base_dir = Path(config.input_path) if config.input_path else None
+
+        # Use cli_config from TestSpec if present, fallback to current config
+        if payload.cli_config and payload.cli_config.input_path:
+            effective_input_path = payload.cli_config.input_path
+        else:
+            effective_input_path = config.input_path
+
+        base_dir = Path(effective_input_path) if effective_input_path else None
 
         try:
             regress_test_case(
@@ -351,7 +359,7 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
             >>> with open("test_case.json", "w") as f:
             ...     json.dump(test_spec, f, indent=2)
         """
-        from tesseract_core.runtime.testing.regression import TestSpec
+        from tesseract_core.runtime.testing.regression import TestCliConfig, TestSpec
 
         def encode_arrays(obj: Any):
             """Recursively encode numpy arrays to json+base64 format."""
@@ -383,6 +391,21 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
                 return [encode_arrays(v) for v in obj]
             else:
                 return obj
+
+        # Capture CLI config if provided via environment variable
+        cli_config = None
+        cli_config_json = os.environ.get("TESSERACT_CLI_CONFIG")
+        if cli_config_json:
+            try:
+                cli_config_dict = json.loads(cli_config_json)
+                # Only include fields that are present in the dict
+                cli_config = TestCliConfig(**cli_config_dict)
+            except (json.JSONDecodeError, TypeError) as e:
+                # Log warning but don't fail - CLI config is optional
+                print(
+                    f"Warning: Failed to parse TESSERACT_CLI_CONFIG: {e}",
+                    file=sys.stderr,
+                )
 
         # Auto-detect endpoint from payload structure (lazy detection)
         if "jac_inputs" in payload:
@@ -454,6 +477,7 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
                 expected_outputs=encoded_outputs,
                 atol=1e-8,
                 rtol=1e-5,
+                cli_config=cli_config,
             )
         except Exception as e:
             # Exception case (from validation or execution) - return TestSpec with expected_exception
@@ -463,6 +487,7 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
                 expected_exception=type(e),
                 atol=1e-8,
                 rtol=1e-5,
+                cli_config=cli_config,
             )
 
     endpoints.append(gen_test_spec)
