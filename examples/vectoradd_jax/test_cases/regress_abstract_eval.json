@@ -1,1 +1,20 @@
-{"endpoint":"apply","inputs":{"inputs":{"a":{"v":{"shape":[3],"dtype":"float32"},"s":{"shape":[],"dtype":"float32"}},"b":{"v":{"shape":[3],"dtype":"float32"},"s":{"shape":[],"dtype":"float32"}}}},"expected_outputs":null,"expected_exception":"ValidationError","expected_exception_regex":null,"atol":1e-8,"rtol":0.00001}
+{
+  "endpoint": "apply",
+  "inputs": {
+    "inputs": {
+      "a": {
+        "v": { "shape": [3], "dtype": "float32" },
+        "s": { "shape": [], "dtype": "float32" }
+      },
+      "b": {
+        "v": { "shape": [3], "dtype": "float32" },
+        "s": { "shape": [], "dtype": "float32" }
+      }
+    }
+  },
+  "expected_outputs": null,
+  "expected_exception": "ValidationError",
+  "expected_exception_regex": null,
+  "atol": 1e-8,
+  "rtol": 0.00001
+}

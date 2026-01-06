@@ -5,10 +5,7 @@
       "n_cells": 2,
       "points": {
         "object_type": "array",
-        "shape": [
-          5,
-          3
-        ],
+        "shape": [5, 3],
         "dtype": "float64",
         "data": {
           "buffer": "AAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAA8D8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADwPwAAAAAAAAAAAAAAAAAA8D8AAAAAAADwPwAAAAAAAAAAAAAAAAAA4D8AAAAAAADgPwAAAAAAAPA/",
@@ -17,9 +14,7 @@
       },
       "num_points_per_cell": {
         "object_type": "array",
-        "shape": [
-          2
-        ],
+        "shape": [2],
         "dtype": "int64",
         "data": {
           "buffer": "BAAAAAAAAAAEAAAAAAAAAA==",
@@ -28,9 +23,7 @@
       },
       "cell_connectivity": {
         "object_type": "array",
-        "shape": [
-          8
-        ],
+        "shape": [8],
         "dtype": "int64",
         "data": {
           "buffer": "AAAAAAAAAAABAAAAAAAAAAIAAAAAAAAAAwAAAAAAAAABAAAAAAAAAAIAAAAAAAAAAwAAAAAAAAAEAAAAAAAAAA==",
@@ -40,10 +33,7 @@
       "cell_data": {
         "temperature": {
           "object_type": "array",
-          "shape": [
-            2,
-            2
-          ],
+          "shape": [2, 2],
           "dtype": "float64",
           "data": {
             "buffer": "AAAAAAAAWUAAAAAAAEBaQAAAAAAAgFtAAAAAAADAXEA=",
@@ -52,10 +42,7 @@
         },
         "pressure": {
           "object_type": "array",
-          "shape": [
-            2,
-            2
-          ],
+          "shape": [2, 2],
           "dtype": "float64",
           "data": {
             "buffer": "AAAAAAAA8D8zMzMzMzPzP5qZmZmZmfE/zczMzMzM9D8=",
@@ -66,10 +53,7 @@
       "point_data": {
         "displacement": {
           "object_type": "array",
-          "shape": [
-            5,
-            3
-          ],
+          "shape": [5, 3],
           "dtype": "float64",
           "data": {
             "buffer": "AAAAAAAAAACamZmZmZm5P5qZmZmZmck/mpmZmZmZuT8AAAAAAAAAAJqZmZmZmck/mpmZmZmZyT+amZmZmZm5PwAAAAAAAAAAmpmZmZmZuT+amZmZmZnJP5qZmZmZmbk/mpmZmZmZyT+amZmZmZm5P5qZmZmZmbk/",
@@ -78,10 +62,7 @@
         },
         "velocity": {
           "object_type": "array",
-          "shape": [
-            5,
-            3
-          ],
+          "shape": [5, 3],
           "dtype": "float64",
           "data": {
             "buffer": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAmpmZmZmZuT8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACamZmZmZm5PwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJqZmZmZmbk/mpmZmZmZuT+amZmZmZm5P5qZmZmZmbk/",

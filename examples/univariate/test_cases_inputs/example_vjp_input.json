@@ -3,13 +3,8 @@
     "x": 0.0,
     "y": 0.0
   },
-  "vjp_inputs": [
-    "x",
-    "y"
-  ],
-  "vjp_outputs": [
-    "result"
-  ],
+  "vjp_inputs": ["x", "y"],
+  "vjp_outputs": ["result"],
   "cotangent_vector": {
     "result": 1.0
   }

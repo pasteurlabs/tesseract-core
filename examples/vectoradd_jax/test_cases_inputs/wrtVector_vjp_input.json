@@ -3,9 +3,7 @@
     "a": {
       "v": {
         "object_type": "array",
-        "shape": [
-          3
-        ],
+        "shape": [3],
         "dtype": "float64",
         "data": {
           "buffer": "AAAAAAAA8D8AAAAAAAAAQAAAAAAAAAhA",
@@ -17,9 +15,7 @@
     "b": {
       "v": {
         "object_type": "array",
-        "shape": [
-          3
-        ],
+        "shape": [3],
         "dtype": "float64",
         "data": {
           "buffer": "AAAAAAAAEEAAAAAAAAAUQAAAAAAAABhA",
@@ -29,18 +25,12 @@
       "s": 1
     }
   },
-  "vjp_inputs": [
-    "a.v"
-  ],
-  "vjp_outputs": [
-    "vector_add.result"
-  ],
+  "vjp_inputs": ["a.v"],
+  "vjp_outputs": ["vector_add.result"],
   "cotangent_vector": {
     "vector_add.result": {
       "object_type": "array",
-      "shape": [
-        3
-      ],
+      "shape": [3],
       "dtype": "float64",
       "data": {
         "buffer": "mpmZmZmZuT+amZmZmZnJPzMzMzMzM9M/",

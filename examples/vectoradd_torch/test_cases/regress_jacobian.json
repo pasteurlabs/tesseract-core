@@ -1,1 +1,56 @@
-{"endpoint":"jacobian","inputs":{"inputs":{"a":{"v":{"object_type":"array","shape":[3],"dtype":"int64","data":{"buffer":"AQAAAAAAAAACAAAAAAAAAAMAAAAAAAAA","encoding":"base64"}},"s":2},"b":{"v":{"object_type":"array","shape":[3],"dtype":"int64","data":{"buffer":"BAAAAAAAAAAFAAAAAAAAAAYAAAAAAAAA","encoding":"base64"}},"s":1}},"jac_inputs":["a.s","a.v"],"jac_outputs":["vector_add.result"]},"expected_outputs":{"vector_add.result":{"a.v":[[2.0,0.0,0.0],[0.0,2.0,0.0],[0.0,0.0,2.0]],"a.s":[1.0,2.0,3.0]}},"expected_exception":null,"expected_exception_regex":null,"atol":1e-8,"rtol":0.00001}
+{
+  "endpoint": "jacobian",
+  "inputs": {
+    "inputs": {
+      "a": {
+        "v": {
+          "object_type": "array",
+          "shape": [3],
+          "dtype": "int64",
+          "data": {
+            "buffer": "AQAAAAAAAAACAAAAAAAAAAMAAAAAAAAA",
+            "encoding": "base64"
+          }
+        },
+        "s": 2
+      },
+      "b": {
+        "v": {
+          "object_type": "array",
+          "shape": [3],
+          "dtype": "int64",
+          "data": {
+            "buffer": "BAAAAAAAAAAFAAAAAAAAAAYAAAAAAAAA",
+            "encoding": "base64"
+          }
+        },
+        "s": 1
+      }
+    },
+    "jac_inputs": ["a.s", "a.v"],
+    "jac_outputs": ["vector_add.result"]
+  },
+  "expected_outputs": {
+    "vector_add.result": {
+      "a.v": {
+        "object_type": "array",
+        "shape": [3, 3],
+        "dtype": "float32",
+        "data": {
+          "buffer": "AAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABA",
+          "encoding": "base64"
+        }
+      },
+      "a.s": {
+        "object_type": "array",
+        "shape": [3],
+        "dtype": "float32",
+        "data": { "buffer": "AACAPwAAAEAAAEBA", "encoding": "base64" }
+      }
+    }
+  },
+  "expected_exception": null,
+  "expected_exception_regex": null,
+  "atol": 1e-8,
+  "rtol": 0.00001
+}

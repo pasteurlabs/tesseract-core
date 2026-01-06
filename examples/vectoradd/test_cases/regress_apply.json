@@ -1,1 +1,30 @@
-{"endpoint":"apply","inputs":{"inputs":{"a":{"object_type":"array","shape":[3],"dtype":"int64","data":{"buffer":"AQAAAAAAAAACAAAAAAAAAAMAAAAAAAAA","encoding":"base64"}},"b":{"object_type":"array","shape":[3],"dtype":"int64","data":{"buffer":"BAAAAAAAAAAFAAAAAAAAAAYAAAAAAAAA","encoding":"base64"}}}},"expected_outputs":{"result":[5.0,7.0,9.0]},"expected_exception":null,"expected_exception_regex":null,"atol":1e-8,"rtol":0.00001}
+{
+  "endpoint": "apply",
+  "inputs": {
+    "inputs": {
+      "a": {
+        "object_type": "array",
+        "shape": [3],
+        "dtype": "int64",
+        "data": {
+          "buffer": "AQAAAAAAAAACAAAAAAAAAAMAAAAAAAAA",
+          "encoding": "base64"
+        }
+      },
+      "b": {
+        "object_type": "array",
+        "shape": [3],
+        "dtype": "int64",
+        "data": {
+          "buffer": "BAAAAAAAAAAFAAAAAAAAAAYAAAAAAAAA",
+          "encoding": "base64"
+        }
+      }
+    }
+  },
+  "expected_outputs": { "result": [5.0, 7.0, 9.0] },
+  "expected_exception": null,
+  "expected_exception_regex": null,
+  "atol": 1e-8,
+  "rtol": 0.00001
+}

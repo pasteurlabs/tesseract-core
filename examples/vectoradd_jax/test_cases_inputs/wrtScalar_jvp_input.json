@@ -3,9 +3,7 @@
     "a": {
       "v": {
         "object_type": "array",
-        "shape": [
-          3
-        ],
+        "shape": [3],
         "dtype": "int64",
         "data": {
           "buffer": "AQAAAAAAAAACAAAAAAAAAAMAAAAAAAAA",
@@ -17,9 +15,7 @@
     "b": {
       "v": {
         "object_type": "array",
-        "shape": [
-          3
-        ],
+        "shape": [3],
         "dtype": "int64",
         "data": {
           "buffer": "BAAAAAAAAAAFAAAAAAAAAAYAAAAAAAAA",
@@ -29,12 +25,8 @@
       "s": 1
     }
   },
-  "jvp_inputs": [
-    "a.s"
-  ],
-  "jvp_outputs": [
-    "vector_add.result"
-  ],
+  "jvp_inputs": ["a.s"],
+  "jvp_outputs": ["vector_add.result"],
   "tangent_vector": {
     "a.s": 0.5
   }

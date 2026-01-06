@@ -2,10 +2,7 @@
   "inputs": {
     "Q": {
       "object_type": "array",
-      "shape": [
-        2,
-        2
-      ],
+      "shape": [2, 2],
       "dtype": "float64",
       "data": {
         "buffer": "AAAAAAAA8D8AAAAAAAAAAAAAAAAAAAAAAAAAAAAA8D8=",
@@ -14,9 +11,7 @@
     },
     "q": {
       "object_type": "array",
-      "shape": [
-        2
-      ],
+      "shape": [2],
       "dtype": "float64",
       "data": {
         "buffer": "AAAAAAAA8D8AAAAAAADwPw==",
@@ -25,10 +20,7 @@
     },
     "G": {
       "object_type": "array",
-      "shape": [
-        1,
-        2
-      ],
+      "shape": [1, 2],
       "dtype": "float64",
       "data": {
         "buffer": "AAAAAAAA8L8AAAAAAADwPw==",
@@ -37,9 +29,7 @@
     },
     "h": {
       "object_type": "array",
-      "shape": [
-        1
-      ],
+      "shape": [1],
       "dtype": "int64",
       "data": {
         "buffer": "//////////8=",

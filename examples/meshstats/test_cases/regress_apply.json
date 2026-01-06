@@ -1,1 +1,85 @@
-{"endpoint":"apply","inputs":{"inputs":{"mesh":{"n_points":5,"n_cells":2,"points":{"object_type":"array","shape":[5,3],"dtype":"float64","data":{"buffer":"AAAAAAAAAAAAAAAAANCEQAAAAAAAAAAAAAAAAAAA8D8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADwPwAAAAAAAAAAAAAAAAAA8D8AAAAAAADwPwAAAAAAAAAAAAAAAAAA4D8AAAAAAADgPwAAAAAAAPA/","encoding":"base64"}},"num_points_per_cell":{"object_type":"array","shape":[2],"dtype":"int64","data":{"buffer":"BAAAAAAAAAAEAAAAAAAAAA==","encoding":"base64"}},"cell_connectivity":{"object_type":"array","shape":[8],"dtype":"int64","data":{"buffer":"AAAAAAAAAAABAAAAAAAAAAIAAAAAAAAAAwAAAAAAAAABAAAAAAAAAAIAAAAAAAAAAwAAAAAAAAAEAAAAAAAAAA==","encoding":"base64"}},"cell_data":{"temperature":{"object_type":"array","shape":[2,2],"dtype":"float64","data":{"buffer":"AAAAAAAAWUAAAAAAAEBaQAAAAAAAgFtAAAAAAADAXEA=","encoding":"base64"}},"pressure":{"object_type":"array","shape":[2,2],"dtype":"float64","data":{"buffer":"AAAAAAAA8D8zMzMzMzPzP5qZmZmZmfE/zczMzMzM9D8=","encoding":"base64"}}},"point_data":{"displacement":{"object_type":"array","shape":[5,3],"dtype":"float64","data":{"buffer":"AAAAAAAAAACamZmZmZm5P5qZmZmZmck/mpmZmZmZuT8AAAAAAAAAAJqZmZmZmck/mpmZmZmZyT+amZmZmZm5PwAAAAAAAAAAmpmZmZmZuT+amZmZmZnJP5qZmZmZmbk/mpmZmZmZyT+amZmZmZm5P5qZmZmZmbk/","encoding":"base64"}},"velocity":{"object_type":"array","shape":[5,3],"dtype":"float64","data":{"buffer":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAmpmZmZmZuT8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACamZmZmZm5PwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJqZmZmZmbk/mpmZmZmZuT+amZmZmZm5P5qZmZmZmbk/","encoding":"base64"}}}}}},"expected_outputs":{"statistics":{"first_point_coordinates":[0.0,666.0,0.0],"barycenter":[0.5,133.6999969482422,0.20000000298023224]}},"expected_exception":null,"expected_exception_regex":null,"atol":1e-8,"rtol":0.00001}
+{
+  "endpoint": "apply",
+  "inputs": {
+    "inputs": {
+      "mesh": {
+        "n_points": 5,
+        "n_cells": 2,
+        "points": {
+          "object_type": "array",
+          "shape": [5, 3],
+          "dtype": "float64",
+          "data": {
+            "buffer": "AAAAAAAAAAAAAAAAANCEQAAAAAAAAAAAAAAAAAAA8D8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADwPwAAAAAAAAAAAAAAAAAA8D8AAAAAAADwPwAAAAAAAAAAAAAAAAAA4D8AAAAAAADgPwAAAAAAAPA/",
+            "encoding": "base64"
+          }
+        },
+        "num_points_per_cell": {
+          "object_type": "array",
+          "shape": [2],
+          "dtype": "int64",
+          "data": { "buffer": "BAAAAAAAAAAEAAAAAAAAAA==", "encoding": "base64" }
+        },
+        "cell_connectivity": {
+          "object_type": "array",
+          "shape": [8],
+          "dtype": "int64",
+          "data": {
+            "buffer": "AAAAAAAAAAABAAAAAAAAAAIAAAAAAAAAAwAAAAAAAAABAAAAAAAAAAIAAAAAAAAAAwAAAAAAAAAEAAAAAAAAAA==",
+            "encoding": "base64"
+          }
+        },
+        "cell_data": {
+          "temperature": {
+            "object_type": "array",
+            "shape": [2, 2],
+            "dtype": "float64",
+            "data": {
+              "buffer": "AAAAAAAAWUAAAAAAAEBaQAAAAAAAgFtAAAAAAADAXEA=",
+              "encoding": "base64"
+            }
+          },
+          "pressure": {
+            "object_type": "array",
+            "shape": [2, 2],
+            "dtype": "float64",
+            "data": {
+              "buffer": "AAAAAAAA8D8zMzMzMzPzP5qZmZmZmfE/zczMzMzM9D8=",
+              "encoding": "base64"
+            }
+          }
+        },
+        "point_data": {
+          "displacement": {
+            "object_type": "array",
+            "shape": [5, 3],
+            "dtype": "float64",
+            "data": {
+              "buffer": "AAAAAAAAAACamZmZmZm5P5qZmZmZmck/mpmZmZmZuT8AAAAAAAAAAJqZmZmZmck/mpmZmZmZyT+amZmZmZm5PwAAAAAAAAAAmpmZmZmZuT+amZmZmZnJP5qZmZmZmbk/mpmZmZmZyT+amZmZmZm5P5qZmZmZmbk/",
+              "encoding": "base64"
+            }
+          },
+          "velocity": {
+            "object_type": "array",
+            "shape": [5, 3],
+            "dtype": "float64",
+            "data": {
+              "buffer": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAmpmZmZmZuT8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACamZmZmZm5PwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJqZmZmZmbk/mpmZmZmZuT+amZmZmZm5P5qZmZmZmbk/",
+              "encoding": "base64"
+            }
+          }
+        }
+      }
+    }
+  },
+  "expected_outputs": {
+    "statistics": {
+      "first_point_coordinates": [0.0, 666.0, 0.0],
+      "barycenter": [0.5, 133.6999969482422, 0.20000000298023224]
+    }
+  },
+  "expected_exception": null,
+  "expected_exception_regex": null,
+  "atol": 1e-8,
+  "rtol": 0.00001
+}

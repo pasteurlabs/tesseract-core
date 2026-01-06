@@ -3,10 +3,6 @@
     "x": 0.0,
     "y": 0.0
   },
-  "jac_inputs": [
-    "x"
-  ],
-  "jac_outputs": [
-    "result"
-  ]
+  "jac_inputs": ["x"],
+  "jac_outputs": ["result"]
 }

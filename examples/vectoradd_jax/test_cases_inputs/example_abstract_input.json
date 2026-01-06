@@ -2,9 +2,7 @@
   "inputs": {
     "a": {
       "v": {
-        "shape": [
-          3
-        ],
+        "shape": [3],
         "dtype": "float32"
       },
       "s": {
@@ -14,9 +12,7 @@
     },
     "b": {
       "v": {
-        "shape": [
-          3
-        ],
+        "shape": [3],
         "dtype": "float32"
       },
       "s": {

@@ -1,1 +1,32 @@
-{"endpoint":"jacobian","inputs":{"inputs":{"a":{"object_type":"array","shape":[3],"dtype":"int64","data":{"buffer":"AQAAAAAAAAACAAAAAAAAAAMAAAAAAAAA","encoding":"base64"}},"b":{"object_type":"array","shape":[3],"dtype":"int64","data":{"buffer":"BAAAAAAAAAAFAAAAAAAAAAYAAAAAAAAA","encoding":"base64"}}},"jac_inputs":["invalid","inputs"],"jac_outputs":["result"]},"expected_outputs":null,"expected_exception":"ValidationError","expected_exception_regex":null,"atol":1e-8,"rtol":0.00001}
+{
+  "endpoint": "jacobian",
+  "inputs": {
+    "inputs": {
+      "a": {
+        "object_type": "array",
+        "shape": [3],
+        "dtype": "int64",
+        "data": {
+          "buffer": "AQAAAAAAAAACAAAAAAAAAAMAAAAAAAAA",
+          "encoding": "base64"
+        }
+      },
+      "b": {
+        "object_type": "array",
+        "shape": [3],
+        "dtype": "int64",
+        "data": {
+          "buffer": "BAAAAAAAAAAFAAAAAAAAAAYAAAAAAAAA",
+          "encoding": "base64"
+        }
+      }
+    },
+    "jac_inputs": ["invalid", "inputs"],
+    "jac_outputs": ["result"]
+  },
+  "expected_outputs": null,
+  "expected_exception": "ValidationError",
+  "expected_exception_regex": null,
+  "atol": 1e-8,
+  "rtol": 0.00001
+}

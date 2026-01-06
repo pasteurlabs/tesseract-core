@@ -3,9 +3,7 @@
     "a": {
       "v": {
         "object_type": "array",
-        "shape": [
-          3
-        ],
+        "shape": [3],
         "dtype": "int64",
         "data": {
           "buffer": "AQAAAAAAAAACAAAAAAAAAAMAAAAAAAAA",
@@ -17,9 +15,7 @@
     "b": {
       "v": {
         "object_type": "array",
-        "shape": [
-          3
-        ],
+        "shape": [3],
         "dtype": "int64",
         "data": {
           "buffer": "BAAAAAAAAAAFAAAAAAAAAAYAAAAAAAAA",
@@ -29,11 +25,6 @@
       "s": 1
     }
   },
-  "jac_inputs": [
-    "a.s",
-    "a.v"
-  ],
-  "jac_outputs": [
-    "vector_add.result"
-  ]
+  "jac_inputs": ["a.s", "a.v"],
+  "jac_outputs": ["vector_add.result"]
 }
