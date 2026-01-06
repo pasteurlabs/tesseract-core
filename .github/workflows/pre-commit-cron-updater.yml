@@ -1,67 +1,67 @@
 name: Auto update pre-commit hooks
 
 on:
-  workflow_dispatch:  # Allows manual trigger
+  workflow_dispatch: # Allows manual trigger
 
   schedule:
-    - cron:  '0 0 * * 1'  # 12AM only on Mondays
+    - cron: "0 0 * * 1" # 12AM only on Mondays
 
 jobs:
   auto-update-hooks:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v6
+      - name: Checkout code
+        uses: actions/checkout@v6
 
-    - uses: actions/setup-python@v6
-      with:
+      - uses: actions/setup-python@v6
+        with:
           python-version-file: "pyproject.toml"
 
-    - name: Install pre-commit
-      run: pip install pre-commit
+      - name: Install pre-commit
+        run: pip install pre-commit
 
-    - name: Run pre-commit autoupdate
-      run: pre-commit autoupdate
+      - name: Run pre-commit autoupdate
+        run: pre-commit autoupdate
 
-    - name: Detect if changes were made
-      id: git-diff
-      run: |
-        changes=false
-        git diff --exit-code || changes=true
-        echo "update_done=$changes" >> $GITHUB_OUTPUT
+      - name: Detect if changes were made
+        id: git-diff
+        run: |
+          changes=false
+          git diff --exit-code || changes=true
+          echo "update_done=$changes" >> $GITHUB_OUTPUT
 
-    - name: Run pre-commit
-      id: pre-commit
-      if: steps.git-diff.outputs.update_done == 'true'
-      run: |
-        # Run twice so we only fail if there are non-fixable issues
-        rc=0
-        pre-commit run --all-files || true
-        pre-commit run --all-files > /tmp/pre-commit.log || rc=$?
+      - name: Run pre-commit
+        id: pre-commit
+        if: steps.git-diff.outputs.update_done == 'true'
+        run: |
+          # Run twice so we only fail if there are non-fixable issues
+          rc=0
+          pre-commit run --all-files || true
+          pre-commit run --all-files > /tmp/pre-commit.log || rc=$?
 
-        # Add log as step output
-        echo "pre-commit-log<<EOF" > $GITHUB_OUTPUT
-        cat /tmp/pre-commit.log >> $GITHUB_OUTPUT
-        echo "EOF" >> $GITHUB_OUTPUT
+          # Add log as step output
+          echo "pre-commit-log<<EOF" > $GITHUB_OUTPUT
+          cat /tmp/pre-commit.log >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
-        # Add linting outcome as step output
-        if [ $rc -eq 0 ]; then
-          echo "pre-commit-outcome=success" >> $GITHUB_OUTPUT
-        else
-          echo "pre-commit-outcome=failure" >> $GITHUB_OUTPUT
-        fi
+          # Add linting outcome as step output
+          if [ $rc -eq 0 ]; then
+            echo "pre-commit-outcome=success" >> $GITHUB_OUTPUT
+          else
+            echo "pre-commit-outcome=failure" >> $GITHUB_OUTPUT
+          fi
 
-    # Distinguish 3 cases:
-    # 1. No changes were made -> do nothing (steps below are skipped)
-    # 2. Changes were made and pre-commit ran successfully -> create PR
-    # 3. Changes were made but pre-commit failed -> create PR with draft status
+      # Distinguish 3 cases:
+      # 1. No changes were made -> do nothing (steps below are skipped)
+      # 2. Changes were made and pre-commit ran successfully -> create PR
+      # 3. Changes were made but pre-commit failed -> create PR with draft status
 
-    - name: Create Pull Request (all good)
-      id: create-pr-ok
-      if: steps.pre-commit.outputs.pre-commit-outcome == 'success'
-      uses: peter-evans/create-pull-request@v8
-      with:
+      - name: Create Pull Request (all good)
+        id: create-pr-ok
+        if: steps.pre-commit.outputs.pre-commit-outcome == 'success'
+        uses: peter-evans/create-pull-request@v8
+        with:
           token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
           committer: PasteurBot <${{ vars.PL_PASTEURBOT_EMAIL }}>
           author: PasteurBot <${{ vars.PL_PASTEURBOT_EMAIL }}>
@@ -72,18 +72,18 @@ jobs:
           body: |
             Pre-commit hooks have been updated successfully without conflicts.
 
-    - name: Enable auto-merge
-      if: steps.create-pr-ok.outputs.pull-request-operation == 'created'
-      uses: peter-evans/enable-pull-request-automerge@v3
-      with:
+      - name: Enable auto-merge
+        if: steps.create-pr-ok.outputs.pull-request-operation == 'created'
+        uses: peter-evans/enable-pull-request-automerge@v3
+        with:
           token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
           pull-request-number: ${{ steps.create-pr-ok.outputs.pull-request-number }}
           merge-method: squash
 
-    - name: Create Pull Request (conflicts)
-      if: steps.pre-commit.outputs.pre-commit-outcome == 'failure'
-      uses: peter-evans/create-pull-request@v8
-      with:
+      - name: Create Pull Request (conflicts)
+        if: steps.pre-commit.outputs.pre-commit-outcome == 'failure'
+        uses: peter-evans/create-pull-request@v8
+        with:
           token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
           committer: PasteurBot <${{ vars.PL_PASTEURBOT_EMAIL }}>
           author: PasteurBot <${{ vars.PL_PASTEURBOT_EMAIL }}>

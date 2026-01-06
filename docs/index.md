@@ -35,24 +35,25 @@ There are several ways in which users interact with Tesseracts, for example:
 
 ::::{tab-set}
 :::{tab-item} Features
+
 - **Self-documenting** – Tesseracts announce their interfaces, so that users can inspect them without needing to read the source code, and perform static validation without running the code.
 - **Auto-validating** – When data reaches a Tesseract, it is automatically validated against the schema, so that internal logic can be sure that the data is in the expected format.
-- **Autodiff-native** – Tesseracts support [Differentiable Programming](content/introduction/differentiable-programming), meaning that they can be used in gradient-based optimization algorithms – or not, since exposing derivatives is *strictly optional*.
+- **Autodiff-native** – Tesseracts support [Differentiable Programming](content/introduction/differentiable-programming), meaning that they can be used in gradient-based optimization algorithms – or not, since exposing derivatives is _strictly optional_.
 - **Batteries included** – Tesseracts ship with a containerized runtime, which can be run on a variety of platforms, and exposes the Tesseract's functionality via a command line interface (CLI) and a REST API.
-:::
-:::{tab-item} Restrictions
+  :::
+  :::{tab-item} Restrictions
 - **Python first** – Although Tesseracts may use any software under the hood, Tesseracts always use Python as glue between the Tesseract runtime and the wrapped functionality. This also means that support for working with Python projects is more mature than other languages.
 - **Single entrypoint** – Tesseracts have a single entrypoint, `apply`, which wraps a software functionality of the Tesseract creator's choice. When exposing N entrypoints of a software, users need to create N distinct Tesseracts.
 - **Context-free** – Tesseracts are not aware of outer-loop orchestration or runtime details.
 - **Runtime overhead** – Tesseracts are primarily designed for compute kernels and data transformations that run at least several seconds, so they may not be the best choice for workloads with very low latency requirements.
-:::
-::::
+  :::
+  ::::
 
 ## Why Tesseracts?
 
 Tesseracts are primarily useful for managing **diversity**.
 
-- **Diversity of roles** *(within a team)* – The job of the software creator ends when it is packaged as a Tesseract. Users creating pipelines can focus on the high-level logic of their application, and not worry about the low-level details of how the components are implemented. Team members requesting data can inspect interfaces, docs, and schemas but don't need to dive into implementations.
+- **Diversity of roles** _(within a team)_ – The job of the software creator ends when it is packaged as a Tesseract. Users creating pipelines can focus on the high-level logic of their application, and not worry about the low-level details of how the components are implemented. Team members requesting data can inspect interfaces, docs, and schemas but don't need to dive into implementations.
 
 - **Diversity of workloads** – By enforcing a standardized way to define interfaces, software components will work together as long as they are passed inputs that adhere to the expected schema. The comprehensive auto-generated schemas make it possible to build composable data pipelines with minimal friction.
 
@@ -61,7 +62,6 @@ Tesseracts are primarily useful for managing **diversity**.
 - **Diversity of hardware** – Components do not need to be executed on the same hardware to work together in a shared pipeline, including end-to-end autodiff.
 
 If you're a single developer working with a single software stack in a single environment – you might not need Tesseracts. Everyone else, read on!
-
 
 ```{toctree}
 :caption: Introduction

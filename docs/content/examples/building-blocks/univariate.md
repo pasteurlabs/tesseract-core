@@ -1,6 +1,7 @@
 # Univariate Rosenbrock function
 
 ## Context
+
 Example that wraps the univariate [Rosenbrock function](https://en.wikipedia.org/wiki/Rosenbrock_function), which is a common test problem for optimization algorithms. Defines a Tesseract that has all optional endpoints implemented, including `apply`, `abstract_eval`, `jacobian`, `jacobian_vector_product`, and `vector_jacobian_product`.
 
 ```{seealso}

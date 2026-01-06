@@ -6,9 +6,9 @@ This directory contains an example Tesseract configuration and scripts demonstra
 
 The main entry point of this demo is `optimization.ipynb`. The evolution of the mesh over the optimization on two different initial conditions can be seen here:
 
-| Grid IC | Random IC |
-|----------|----------|
-| ![Workflow](imgs/mesh_grid_adam.gif)    | ![Workflow](imgs/mesh_rnd_adam.gif)     |
+| Grid IC                              | Random IC                           |
+| ------------------------------------ | ----------------------------------- |
+| ![Workflow](imgs/mesh_grid_adam.gif) | ![Workflow](imgs/mesh_rnd_adam.gif) |
 
 where the loss decay is plotted here:
 
@@ -17,18 +17,16 @@ where the loss decay is plotted here:
 > [!TIP]
 > In `optimization_os.ipynb` we provide an alternative workflow that is relying on the open-source FEM solver [JAX-FEM](https://github.com/deepmodeling/jax-fem), and does not require an active Ansys license.
 
-
-
-| Mesh | Loss |
-|----------|----------|
-| ![Workflow](imgs/mesh_optim.gif)    | ![Workflow](imgs/loss_os.png)     |
-
+| Mesh                             | Loss                          |
+| -------------------------------- | ----------------------------- |
+| ![Workflow](imgs/mesh_optim.gif) | ![Workflow](imgs/loss_os.png) |
 
 ## Get Started
 
 ### Prerequisites
 
 A Windows machine A with:
+
 1. Ansys SpaceClaim + MAPDL installed with an active license.
 2. Python with a virtual environment (e.g. via conda, venv).
 3. Two open ports.
@@ -39,6 +37,7 @@ A Windows machine A with:
 ```
 
 A machine B, ideally running linux, with:
+
 1. Docker installed and running.
 2. Python with a virtual environment (e.g. via conda, venv).
 
@@ -55,6 +54,7 @@ Clone this repository, navigate to `demo/_showcase/ansys-shapeopt/spaceclaim` an
 ```bash
 $ tesseract-runtime serve --port <port_number_1> --host 0.0.0.0
 ```
+
 Note that we do not build a Tesseract Docker image for SpaceClaim in this example. Instead, we use an existing SpaceClaim installation directly from the host machine. More details about this Tesseract can be found [here](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/examples/ansys_integration/spaceclaim_tess.html).
 
 ### PyMAPDL Server

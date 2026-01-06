@@ -10,23 +10,27 @@ knowledge of tesseracts, so we suggest you to read at least the
 
 In order to start creating a Tesseract in your current directory,
 you can run
+
 ```bash
 $ tesseract init
 ```
+
 and follow the prompt to specify a name for your tesseract.
 (Alternatively, you can use the option `--name` to provide this inline.)
 This will create three files in the current directory:
-  -  `tesseract_api.py`, a python module where you should implement
-     the core computations in the Tesseract.
-  -  `tesseract_config.yaml`, a `yaml` file where you can specify metadata, such as Tesseract name and version, various build options, such as
-     which base Docker image to use, define custom steps in building the Tesseract, access to external data, and so on.
-  -  `tesseract_requirements.txt`, a text file where you can specify the (Python)
-     dependencies of your Tesseract. It should be in the
-     [requirements file format](https://pip.pypa.io/en/stable/reference/requirements-file-format/).
+
+- `tesseract_api.py`, a python module where you should implement
+  the core computations in the Tesseract.
+- `tesseract_config.yaml`, a `yaml` file where you can specify metadata, such as Tesseract name and version, various build options, such as
+  which base Docker image to use, define custom steps in building the Tesseract, access to external data, and so on.
+- `tesseract_requirements.txt`, a text file where you can specify the (Python)
+  dependencies of your Tesseract. It should be in the
+  [requirements file format](https://pip.pypa.io/en/stable/reference/requirements-file-format/).
 
 If you want to create these files in some other path, you can use the `--target-dir [DIRECTORY]`
 option.
 Other options include:
+
 - `--recipe` allows you to use ready-made templates that generate pre-configured Tesseract configurations for common scenarios (such as generating autodiff endpoints from JAX functions).
 - `--help` will print help regarding CLI usage and list all currently available recipes.
 
@@ -138,8 +142,8 @@ is defined in the `tesseract_config.yaml` file, and it is `helloworld`.
 By default it will be tagged with both the version specified there (`1.0.0`) and `latest`,
 so the full name of the tesseract we just built is `helloworld:1.0.0` or `helloworld:latest`.
 
-
 ### Viewing Built Tesseracts
+
 In order to view all locally available Tesseracts, you can run the following command:
 
 ```bash
@@ -210,11 +214,12 @@ class InputSchema(BaseModel):
 ```
 
 (tr-create-diff)=
+
 ## Differentiability
 
 A key feature of Tesseracts is their ability to expose endpoints for calculating various kinds of derivatives when the operation they implement is differentiable, which in turn makes it possible to combine multiple Tesseracts into automatically differentiable workflows! This is advantageous in multiple contexts: shape optimization, model calibration, and so on.
 
-Keeping with one of Tesseract's key foci being *validation*, the type annotation {py:class}`tesseract_core.runtime.Differentiable` is introduced to mark outputs that can be differentiated, and inputs that can be differentiated with respect to.
+Keeping with one of Tesseract's key foci being _validation_, the type annotation {py:class}`tesseract_core.runtime.Differentiable` is introduced to mark outputs that can be differentiated, and inputs that can be differentiated with respect to.
 All outputs marked as `Differentiable` will be considered differentiable with respect to
 all inputs marked as `Differentiable`.
 Attempting to differentiate (with respect to) an output/input (e.g. by passing `jac_inputs=["non_differentiable_arg"]` to the `jacobian` endpoint) will raise a validation error even before the endpoint is invoked.
@@ -251,9 +256,9 @@ in general to implement whatever method works best for you.
 Check the [page on Autodiff](tr-autodiff) for more details on how to implement the differential
 endpoints like `jacobian`, `jacobian_vector_product`, and so on.
 
-
-[^1]: We often refer to "a Tesseract's input schema" to indicate the input of the Tesseract's
-`apply` function. This should not lead to confusion, as there is only one core
-functionality in a Tesseract, the one implemented in `apply`. All the other
-functions in a Tesseract (`jacobian`, `jacobian_vector_product`, ...) are just derivatives of `apply`, and their schemas are adapted automatically
-from the schema of `apply`.
+[^1]:
+    We often refer to "a Tesseract's input schema" to indicate the input of the Tesseract's
+    `apply` function. This should not lead to confusion, as there is only one core
+    functionality in a Tesseract, the one implemented in `apply`. All the other
+    functions in a Tesseract (`jacobian`, `jacobian_vector_product`, ...) are just derivatives of `apply`, and their schemas are adapted automatically
+    from the schema of `apply`.

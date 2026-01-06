@@ -1,4 +1,5 @@
 (tr-runtime-api)=
+
 # `tesseract_core.runtime` Python API
 
 The `tesseract_core.runtime` Python module contains some useful utilities to create and extend `tesseract_api.py` files. It is available in all Tesseract container images.
@@ -66,7 +67,6 @@ The `tesseract_core.runtime` Python module contains some useful utilities to cre
 
    Complex128 scalar array. Equivalent to ``Array[(), Complex128]``.
 ```
-
 
 ## `tesseract_core.runtime.experimental`
 

@@ -5,6 +5,7 @@ This showcase demonstrates an end-to-end workflow for building QoI-based surroga
 ## Overview
 
 This workflow implements a **QoI-based surrogate modeling pipeline** that:
+
 1. Processes Ansys simulation runs (CAD files + simulation results)
 2. Extracts point clouds, CAD parameters, boundary conditions, and Quantities of Interest (QoI)
 3. Trains hybrid ML models (PointNet + Random Forest) to predict QoI
@@ -32,6 +33,7 @@ The workflow consists of three Tesseract components:
 |   (Inference)    |  -> Generates QoI predictions
 +------------------+
 ```
+
 ## Input Data
 
 The workflow expects **Ansys simulation runs** in the following structure:
@@ -49,6 +51,7 @@ inputs/Ansys_Runs/
 ```
 
 Each simulation run directory should contain:
+
 - **CAD file** (`.stl` format): 3D geometry for point cloud sampling
 - **Boundary condition data**: Parameters varied across simulations
 - **CAD parameters**: Parameters used during the CAD design process
@@ -57,6 +60,7 @@ Each simulation run directory should contain:
 ## Configuration
 
 Each component uses a `config.yaml` file in `inputs/config.yaml` that specifies:
+
 - Point cloud sampling strategy
 - Parameter extraction rules
 - QoI definitions
@@ -77,11 +81,13 @@ python workflow.py
 ```
 
 This will:
+
 1. Process all Ansys runs into NPZ datasets
 2. Train QoI-based surrogate models on the dataset
 3. Run inference using the latest trained model
 
 **Output locations:**
+
 - Dataset: `outputs/dataset/*.npz`
 - Models: `outputs/models/experiment_hybrid_YYYYMMDD_HHMMSS/`
 - Predictions: `outputs/predictions_YYYYMMDD_HHMMSS.csv`
@@ -99,6 +105,7 @@ python main.py
 ```
 
 **What it does:**
+
 - Samples point clouds from CAD files (`.stl`)
 - Extracts boundary condition parameters
 - Extracts CAD sketch design parameters
@@ -118,6 +125,7 @@ python main.py
 ```
 
 **What it does:**
+
 - Loads NPZ dataset files
 - Creates train/val/test splits
 - Fits data scaler
@@ -126,6 +134,7 @@ python main.py
 - Saves trained models and scalers
 
 **Outputs:**
+
 - `outputs/models/experiment_hybrid_YYYYMMDD_HHMMSS/`
   - `models/hybrid_pointnet_small.pkl` - Trained model weights
   - `scaler.pkl` - Data normalization scaler
@@ -143,10 +152,12 @@ python main.py
 ```
 
 **What it does:**
+
 - Loads trained model and scaler
 - Processes input geometries
 - Generates QoI predictions
 - Saves predictions to CSV
 
 **Outputs:**
+
 - `outputs/predictions_YYYYMMDD_HHMMSS.csv`

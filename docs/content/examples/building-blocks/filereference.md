@@ -5,7 +5,6 @@
 Tesseract that mounts input and output directories as datasets.
 To be used for Tesseracts with large inputs and/or outputs.
 
-
 ## Example Tesseract (`examples/filereference`)
 
 Using `InputFileReference` and `OutputFileReference` you can
@@ -28,8 +27,8 @@ and resolve paths correctly in both `tesseract-runtime` and `tesseract run` call
 :language: python
 ```
 
-
 For the `tesseract-runtime` command, paths are relative to the local input/output paths:
+
 ```bash
 tesseract-runtime apply \
     --input-path ./testdata \
@@ -40,6 +39,7 @@ tesseract-runtime apply \
 For the `tesseract run` command, the file
 reference schemas resolve to the mounted input/output folders inside the
 Tesseract:
+
 ```bash
 tesseract run filereference apply \
     --input-path ./testdata \

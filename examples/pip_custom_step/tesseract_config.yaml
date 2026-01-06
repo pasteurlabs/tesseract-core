@@ -20,4 +20,4 @@ build_config:
 
   # Additional Dockerfile commands to run during the build process
   custom_build_steps:
-   - RUN pip install numpy
+    - RUN pip install numpy
