@@ -53,6 +53,8 @@ def test_Tesseract_from_tesseract_api(dummy_tesseract_location, dummy_tesseract_
         "vector_jacobian_product",
         "health",
         "abstract_eval",
+        "regress",
+        "gen_test_spec",
     ]
 
     t = Tesseract.from_tesseract_api(dummy_tesseract_location / "tesseract_api.py")
@@ -397,15 +399,3 @@ def test_gen_test_spec_local(dummy_tesseract_package):
     # Verify it actually passes the regress test
     regress_result = tess._client.run_tesseract("regress", result)
     assert regress_result["status"] == "passed"
-
-
-@pytest.mark.skip(reason="Requires building Docker image - tested in integration tests")
-def test_regress_http():
-    """Test regress() with HTTPClient.
-
-    This test would build a Docker image and test the HTTP client.
-    The regress endpoint works via HTTP since it's exposed through FastAPI,
-    and the Python SDK's regress() method calls run_tesseract() which works
-    for both LocalClient and HTTPClient.
-    """
-    pass
