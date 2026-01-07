@@ -8,8 +8,8 @@ build_config:
   target_platform: "linux/arm64"
 
   extra_packages:
-     - python3-vtk9
-     - python3-venv
+    - python3-vtk9
+    - python3-venv
 
   custom_build_steps:
     - |

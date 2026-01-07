@@ -11,7 +11,6 @@ lorenz_tesseract.md
 
 (cards-clickable)=
 
-
 :::{card} 4D-Variational Data Assimilation for a Chaotic Dynamical System
 :link: data-assimilation-4dvar.html
 

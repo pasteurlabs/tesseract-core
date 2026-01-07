@@ -1,7 +1,7 @@
 services:
   mlflow-init:
     image: alpine:latest
-    user: "0:0"  # Run as root to fix volume permissions
+    user: "0:0" # Run as root to fix volume permissions
     command: |
       sh -c "
         echo 'Initializing MLflow volume permissions...'
