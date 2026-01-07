@@ -130,6 +130,9 @@ class MLflowBackend(BaseBackend):
 
     def __init__(self, base_dir: str | None = None) -> None:
         super().__init__(base_dir)
+        os.environ["GIT_PYTHON_REFRESH"] = (
+            "quiet"  # Suppress potential MLflow git warnings
+        )
 
         config = get_config()
         tracking_uri = config.mlflow_tracking_uri
