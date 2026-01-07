@@ -1,7 +1,6 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-import base64
 import importlib.util
 import json
 import os
@@ -13,7 +12,6 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, Literal, TextIO
 
-import numpy as np
 from pydantic import BaseModel
 
 from .config import get_config
@@ -361,36 +359,20 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
         """
         from tesseract_core.runtime.testing.regression import TestCliConfig, TestSpec
 
-        def encode_arrays(obj: Any):
-            """Recursively encode numpy arrays to json+base64 format."""
-            if isinstance(obj, np.ndarray):
-                return {
-                    "object_type": "array",
-                    "shape": list(obj.shape),
-                    "dtype": str(obj.dtype),
-                    "data": {
-                        "buffer": base64.b64encode(obj.tobytes()).decode("ascii"),
-                        "encoding": "base64",
-                    },
-                }
-            elif isinstance(obj, (np.integer, np.floating, np.bool_)):
-                # Encode numpy scalars as arrays with empty shape
-                arr = np.array(obj)
-                return {
-                    "object_type": "array",
-                    "shape": [],
-                    "dtype": str(arr.dtype),
-                    "data": {
-                        "buffer": base64.b64encode(arr.tobytes()).decode("ascii"),
-                        "encoding": "base64",
-                    },
-                }
-            elif isinstance(obj, dict):
-                return {k: encode_arrays(v) for k, v in obj.items()}
-            elif isinstance(obj, list):
-                return [encode_arrays(v) for v in obj]
-            else:
-                return obj
+        # Get output_format from config to determine array encoding
+        config = get_config()
+        output_format = config.output_format  # "json", "json+base64", or "json+binref"
+
+        # Extract array encoding from output_format
+        if output_format == "json":
+            array_encoding = "json"
+        elif output_format == "json+base64":
+            array_encoding = "base64"
+        elif output_format == "json+binref":
+            array_encoding = "binref"
+        else:
+            # Fallback - shouldn't happen due to Literal type validation
+            array_encoding = "json"
 
         # Capture CLI config if provided via environment variable
         cli_config = None
@@ -407,6 +389,41 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
                     file=sys.stderr,
                 )
 
+        def is_abstract_eval_payload(payload_data: dict) -> bool:
+            """Check if payload contains only shape/dtype specs (abstract_eval) vs actual data (apply)."""
+            # First check if abstract_eval is even supported
+            if not hasattr(api_module, "abstract_eval"):
+                return False
+
+            found_shapedtype = False
+
+            def has_only_shapedtype(obj: Any) -> bool:
+                """Recursively check if all array-like objects only have shape/dtype, no data."""
+                nonlocal found_shapedtype
+                if isinstance(obj, dict):
+                    # Check if this looks like a ShapeDType object
+                    if "shape" in obj and "dtype" in obj:
+                        # If it has 'data' or 'buffer', it's actual array data (not abstract)
+                        if "data" in obj or "buffer" in obj:
+                            return False
+                        # If it only has shape/dtype (and maybe other metadata), it's abstract
+                        found_shapedtype = True
+                        return True
+                    # Recurse into nested dicts
+                    return all(has_only_shapedtype(v) for v in obj.values())
+                elif isinstance(obj, list):
+                    # Lists might contain primitives (OK) or dicts (recurse)
+                    return all(has_only_shapedtype(item) for item in obj)
+                else:
+                    # Primitives (strings, numbers, etc.) are fine in either context
+                    return True
+
+            # Only return True if we found at least one ShapeDType object
+            # (otherwise it's just primitives, which is apply not abstract_eval)
+            return (
+                has_only_shapedtype(payload_data.get("inputs", {})) and found_shapedtype
+            )
+
         # Auto-detect endpoint from payload structure (lazy detection)
         if "jac_inputs" in payload:
             detected_endpoint = "jacobian"
@@ -415,11 +432,15 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
         elif "vjp_inputs" in payload:
             detected_endpoint = "vector_jacobian_product"
         elif "inputs" in payload:
-            detected_endpoint = "apply"
+            # Check if it's abstract_eval based on content (shape/dtype only vs actual data)
+            if is_abstract_eval_payload(payload):
+                detected_endpoint = "abstract_eval"
+            else:
+                detected_endpoint = "apply"
         else:
             raise ValueError(
                 f"Cannot detect endpoint from payload keys: {list(payload.keys())}. "
-                f"Expected one of: 'inputs' (apply), 'jac_inputs' (jacobian), "
+                f"Expected one of: 'inputs' (apply/abstract_eval), 'jac_inputs' (jacobian), "
                 f"'jvp_inputs' (jvp), 'vjp_inputs' (vjp)"
             )
 
@@ -450,31 +471,30 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
             result = endpoint_func(validated_payload)
 
             # Build context for model_dump - some endpoints need special keys
-            dump_context = {}
+            dump_context = {
+                "array_encoding": array_encoding
+            }  # Always include array_encoding
             if detected_endpoint == "jacobian":
-                dump_context = {
-                    "output_keys": payload.get("jac_outputs", []),
-                    "input_keys": payload.get("jac_inputs", []),
-                }
+                dump_context.update(
+                    {
+                        "output_keys": payload.get("jac_outputs", []),
+                        "input_keys": payload.get("jac_inputs", []),
+                    }
+                )
             elif detected_endpoint == "jacobian_vector_product":
                 dump_context["output_keys"] = payload.get("jvp_outputs", [])
             elif detected_endpoint == "vector_jacobian_product":
                 dump_context["input_keys"] = payload.get("vjp_inputs", [])
 
-            outputs = (
-                result.model_dump(context=dump_context)
-                if dump_context
-                else result.model_dump()
-            )
-
-            # Encode arrays in outputs to preserve dtype information
-            encoded_outputs = encode_arrays(outputs)
+            # Always pass context (now that it always has array_encoding)
+            # Use mode="json" to trigger JSON serialization where array_encoding is applied
+            outputs = result.model_dump(mode="json", context=dump_context)
 
             # Success case - return TestSpec with expected_outputs
             return TestSpec(
                 endpoint=detected_endpoint,
                 inputs=payload,
-                expected_outputs=encoded_outputs,
+                expected_outputs=outputs,
                 atol=1e-8,
                 rtol=1e-5,
                 cli_config=cli_config,
