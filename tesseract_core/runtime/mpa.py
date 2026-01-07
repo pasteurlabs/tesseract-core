@@ -154,7 +154,7 @@ class MLflowBackend(BaseBackend):
             username = os.environ.get("MLFLOW_TRACKING_USERNAME")
             password = os.environ.get("MLFLOW_TRACKING_PASSWORD")
 
-            if bool(username) != bool(password):
+            if (username and not password) or (password and not username):
                 raise RuntimeError(
                     "If one of MLFLOW_TRACKING_USERNAME and MLFLOW_TRACKING_PASSWORD is defined, "
                     "both must be defined."
