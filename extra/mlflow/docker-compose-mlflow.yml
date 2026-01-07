@@ -23,12 +23,12 @@ services:
       --serve-artifacts
       --artifacts-destination file:///mlflow-data/mlruns/mlartifacts
       --host 0.0.0.0
-      --allowed-hosts "mlflow-server:5000,localhost:*"
+      --allowed-hosts "mlflow-server:5000,localhost:*,host.docker.internal:*"
       --port 5000
     volumes:
       - mlflow-data:/mlflow-data:rw
     ports:
-      - "5000"
+      - 5000:5000
     depends_on:
       mlflow-init:
         condition: service_completed_successfully
