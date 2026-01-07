@@ -150,3 +150,57 @@ python main.py
 
 **Outputs:**
 - `outputs/predictions_YYYYMMDD_HHMMSS.csv`
+
+
+### GPU Acceleration
+
+By default, this workflow runs on CPU, which is sufficient for the included sample dataset (5 samples). For larger datasets or production workloads, GPU acceleration is recommended for the `qoi_train` and `qoi_inference` components.
+
+#### Prerequisites
+
+- NVIDIA GPU with CUDA support
+- NVIDIA Container Toolkit installed on the host system
+
+#### Configuration Steps
+
+**1. Update Base Image**
+
+Modify the `tesseract_config.yaml` file in both `qoi_train` and `qoi_inference` components to use a CUDA-enabled base image:
+
+```yaml
+build_config:
+  base_image: "nvidia/cuda:12.8.1-runtime-ubuntu24.04"
+  # ... rest of configuration
+```
+
+**2. Configure PyTorch with CUDA Support**
+
+Update the `scripts/pyproject.toml` file in both components to install GPU-enabled PyTorch packages:
+
+```toml
+dependencies = [
+    "torch",
+    "torchvision",
+    # ... other dependencies
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
+torchvision = { index = "pytorch-cu128" }
+```
+
+**3. Enable GPU Access During Execution**
+
+When running the workflow, use the `--gpus` flag to grant GPU access to the containers:
+
+```bash
+tesseract run --gpus all qoi_train
+tesseract run --gpus all qoi_inference
+```
+
+For more details on GPU configuration options, see the [Tesseract CLI documentation](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/api/tesseract-cli.html#cmdoption-tesseract-run-gpus).

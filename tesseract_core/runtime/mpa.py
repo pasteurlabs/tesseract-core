@@ -16,7 +16,7 @@ from datetime import datetime
 from io import UnsupportedOperation
 from pathlib import Path
 from typing import Any
-from urllib.parse import ParseResult, quote, urlparse, urlunparse
+from urllib.parse import urlparse
 
 import mlflow
 import requests
@@ -131,13 +131,6 @@ class MLflowBackend(BaseBackend):
     def __init__(self, base_dir: str | None = None) -> None:
         super().__init__(base_dir)
 
-        tracking_uri = MLflowBackend._build_tracking_uri()
-        mlflow.set_tracking_uri(tracking_uri)
-        self._ensure_mlflow_reachable(tracking_uri)
-
-    @staticmethod
-    def _build_tracking_uri() -> str:
-        """Build the MLflow tracking URI with embedded credentials if provided."""
         config = get_config()
         tracking_uri = config.mlflow_tracking_uri
 
@@ -151,38 +144,35 @@ class MLflowBackend(BaseBackend):
                 f"MLflow logging only supports accessing MLflow via HTTP/HTTPS (got URI scheme: {parsed.scheme})"
             )
 
-        username = config.mlflow_tracking_username
-        password = config.mlflow_tracking_password
+        self._ensure_mlflow_reachable(tracking_uri)
+        mlflow.set_tracking_uri(tracking_uri)
 
-        if bool(username) != bool(password):
-            raise RuntimeError(
-                "If one of TESSERACT_MLFLOW_TRACKING_USERNAME and TESSERACT_MLFLOW_TRACKING_PASSWORD is defined, "
-                "both must be defined."
-            )
-
-        if username and password:
-            # Reconstruct URI with embedded credentials
-            urlparts = parsed._asdict()
-            urlparts["netloc"] = f"{quote(username)}:{quote(password)}@{parsed.netloc}"
-            parsed = ParseResult(**urlparts)
-
-        return urlunparse(parsed)
-
-    def _ensure_mlflow_reachable(self, tracking_uri: str) -> None:
+    def _ensure_mlflow_reachable(self, mlflow_tracking_uri: str) -> None:
         """Check if the MLflow tracking server is reachable."""
         try:
-            response = requests.get(tracking_uri, timeout=5)
+            # Check for MLflow credentials in environment variables
+            username = os.environ.get("MLFLOW_TRACKING_USERNAME")
+            password = os.environ.get("MLFLOW_TRACKING_PASSWORD")
+
+            if bool(username) != bool(password):
+                raise RuntimeError(
+                    "If one of MLFLOW_TRACKING_USERNAME and MLFLOW_TRACKING_PASSWORD is defined, "
+                    "both must be defined."
+                )
+
+            auth = None
+            if username and password:
+                auth = (username, password)
+
+            response = requests.get(mlflow_tracking_uri, timeout=5, auth=auth)
             response.raise_for_status()
         except requests.RequestException as e:
-            # Don't expose credentials in error message - use the original URI
-            config = get_config()
-            display_uri = config.mlflow_tracking_uri
             raise RuntimeError(
-                f"Failed to connect to MLflow tracking server at {display_uri}. "
+                f"Failed to connect to MLflow tracking server at {mlflow_tracking_uri}. "
                 "Please make sure an MLflow server is running and TESSERACT_MLFLOW_TRACKING_URI is set correctly, "
-                "or switch to file-based logging by setting TESSERACT_MLFLOW_TRACKING_URI to an empty string."
-                "If your MLflow server has authentication enabled, please make sure that"
-                "TESSERACT_MLFLOW_TRACKING_USERNAME and TESSERACT_MLFLOW_TRACKING_PASSWORD are set correctly."
+                "or switch to file-based logging by setting TESSERACT_MLFLOW_TRACKING_URI to an empty string. "
+                "If your MLflow server has authentication enabled, please make sure that "
+                "MLFLOW_TRACKING_USERNAME and MLFLOW_TRACKING_PASSWORD are set correctly."
             ) from e
 
     def log_parameter(self, key: str, value: Any) -> None:

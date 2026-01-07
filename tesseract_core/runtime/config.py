@@ -34,8 +34,6 @@ class RuntimeConfig(BaseModel):
     output_format: supported_format_type = "json"
     output_file: str = ""
     mlflow_tracking_uri: str = ""
-    mlflow_tracking_username: str = ""
-    mlflow_tracking_password: str = ""
     mlflow_run_extra_args: Annotated[dict[str, Any], BeforeValidator(_eval_str)] = (
         Field(default_factory=dict)
     )
