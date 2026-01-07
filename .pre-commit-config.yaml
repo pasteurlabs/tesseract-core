@@ -87,3 +87,4 @@ repos:
     hooks:
       - id: prettier
         types_or: [json, yaml, markdown]
+        exclude: CHANGELOG.md
