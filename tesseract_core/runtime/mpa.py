@@ -141,7 +141,7 @@ class MLflowBackend(BaseBackend):
         parsed = urlparse(tracking_uri)
         if parsed.scheme not in ("http", "https"):
             raise ValueError(
-                f"MLflow logging only supports accessing MLflow via HTTP/HTTPS (got URI scheme: {parsed.scheme})"
+                f"Tesseract only supports accessing MLflow server via HTTP/HTTPS (got URI scheme: {parsed.scheme})"
             )
 
         self._ensure_mlflow_reachable(tracking_uri)
