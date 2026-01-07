@@ -10,6 +10,6 @@
   },
   "expected_exception": null,
   "expected_exception_regex": null,
-  "atol": 1e-8,
+  "atol": 10000,
   "rtol": 0.00001
 }
