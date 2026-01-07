@@ -840,6 +840,8 @@ def run_tesseract(
         cli_config = {}
         if input_path:
             cli_config["input_path"] = str(input_path)
+        if volumes:
+            cli_config["volume_mounts"] = volumes
         # Future: add output_path, etc. here
 
         if cli_config:  # Only set if non-empty

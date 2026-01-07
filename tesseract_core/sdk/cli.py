@@ -1063,6 +1063,28 @@ def run_container(
                         else:
                             input_path = config_input_path
 
+                    # Use cli_config.volume_mounts if user didn't provide -v
+                    # Resolve relative source paths relative to the test spec's directory
+                    if volume is None and "volume_mounts" in cli_config:
+                        volume = []
+                        test_spec_dir = test_spec_path.parent
+                        tesseract_root = test_spec_dir.parent
+
+                        for vol_mount in cli_config["volume_mounts"]:
+                            # Parse volume mount (format: source:target or source:target:mode)
+                            parts = vol_mount.split(":")
+                            if len(parts) >= 2:
+                                source = parts[0]
+                                # Resolve relative source paths
+                                if not Path(source).is_absolute():
+                                    source = str(tesseract_root / source)
+                                # Reconstruct volume mount with resolved source
+                                parts[0] = source
+                                volume.append(":".join(parts))
+                            else:
+                                # Invalid format, skip
+                                pass
+
                     # Future: Use cli_config.output_path if user didn't provide -o
                     # if output_path is None and "output_path" in cli_config:
                     #     output_path = cli_config["output_path"]
