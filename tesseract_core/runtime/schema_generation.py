@@ -85,7 +85,7 @@ def apply_function_to_model_tree(
     ["a", SEQ_INDEX_SENTINEL, DICT_INDEX_SENTINEL].
     """
     if default_model_config is None:
-        default_model_config = Schema.model_config.copy()
+        default_model_config = {}
 
     seen_models = set()
 
@@ -135,6 +135,10 @@ def apply_function_to_model_tree(
             # in the pydantic model definition
             model_config = ConfigDict(**default_model_config)
             model_config.update(treeobj.model_config)
+
+            # Make sure that reconstructed RootModels don't contain unsupported 'extra' config.
+            if safe_issubclass(treeobj, RootModel):
+                model_config.pop("extra", None)
 
             return create_model(
                 f"{model_prefix}{treeobj.__name__}",
@@ -260,11 +264,13 @@ def create_apply_schema(
         InputSchema,
         lambda x, _: x,
         model_prefix="Apply_",
+        default_model_config=dict(extra="forbid"),
     )
     OutputSchema = apply_function_to_model_tree(
         OutputSchema,
         lambda x, _: x,
         model_prefix="Apply_",
+        default_model_config=dict(extra="forbid"),
     )
 
     class ApplyInputSchema(BaseModel):

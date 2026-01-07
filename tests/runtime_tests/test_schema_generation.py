@@ -25,6 +25,10 @@ class SubModel(BaseModel):
     bar: list[Differentiable[Array[..., Int64]]]
 
 
+class SubRootModel(RootModel):
+    root: Float32
+
+
 class NestedModel(BaseModel):
     testdiffarr: Differentiable[Array[(5, None), Float64]]
     testfoo: list[SubModel] | None
@@ -33,7 +37,7 @@ class NestedModel(BaseModel):
     testset: set[int]
     testtuple: tuple[int, str]
     testlazysequence: LazySequence[tuple[str, Differentiable[Array[(None,), Float32]]]]
-    model_config = ConfigDict(extra="forbid")
+    testrootmodel: SubRootModel
 
 
 def make_array(shape, dtype):
@@ -64,6 +68,7 @@ testinput = NestedModel(
         ("a", make_array((3,), "float32")),
         ("b", make_array((4,), "float32")),
     ],
+    testrootmodel=2.3,
 ).model_dump(
     mode="json",
     # This encoding simplifies how replace_arrays works.
@@ -85,13 +90,10 @@ testinput_arrays_only = {
 
 
 def test_create_apply_schema():
-    class SubRootModel(RootModel):
-        root: int
-
-    InputSchema, OutputSchema = create_apply_schema(NestedModel, SubRootModel)
+    InputSchema, OutputSchema = create_apply_schema(NestedModel, NestedModel)
 
     InputSchema.model_validate({"inputs": testinput})
-    OutputSchema.model_validate(42)
+    OutputSchema.model_validate(testinput)
 
     # Extra keys
     with pytest.raises(ValidationError):
@@ -111,6 +113,10 @@ def test_create_apply_schema():
     with pytest.raises(ValidationError):
         inp["testfoo"][0] = {"foo": 1, "bar": [1, 2, 3], "extra": 1}
         InputSchema.model_validate({"inputs": inp})
+
+    # Extra keys (output)
+    with pytest.raises(ValidationError):
+        OutputSchema.model_validate({**testinput, "foo": 1})
 
 
 def test_create_abstract_eval_schema():
