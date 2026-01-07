@@ -8,7 +8,7 @@ from typing import Annotated, Optional
 
 import numpy as np
 import pytest
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, RootModel, ValidationError
 
 from tesseract_core.runtime import Array, Differentiable, Float32, Float64, Int64, UInt8
 from tesseract_core.runtime.experimental import LazySequence
@@ -33,6 +33,7 @@ class NestedModel(BaseModel):
     testset: set[int]
     testtuple: tuple[int, str]
     testlazysequence: LazySequence[tuple[str, Differentiable[Array[(None,), Float32]]]]
+    model_config = ConfigDict(extra="forbid")
 
 
 def make_array(shape, dtype):
@@ -84,10 +85,13 @@ testinput_arrays_only = {
 
 
 def test_create_apply_schema():
-    InputSchema, OutputSchema = create_apply_schema(NestedModel, NestedModel)
+    class SubRootModel(RootModel):
+        root: int
+
+    InputSchema, OutputSchema = create_apply_schema(NestedModel, SubRootModel)
 
     InputSchema.model_validate({"inputs": testinput})
-    OutputSchema.model_validate(testinput)
+    OutputSchema.model_validate(42)
 
     # Extra keys
     with pytest.raises(ValidationError):
@@ -107,10 +111,6 @@ def test_create_apply_schema():
     with pytest.raises(ValidationError):
         inp["testfoo"][0] = {"foo": 1, "bar": [1, 2, 3], "extra": 1}
         InputSchema.model_validate({"inputs": inp})
-
-    # Extra keys (output)
-    with pytest.raises(ValidationError):
-        OutputSchema.model_validate({**testinput, "foo": 1})
 
 
 def test_create_abstract_eval_schema():

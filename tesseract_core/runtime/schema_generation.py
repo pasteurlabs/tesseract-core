@@ -85,7 +85,7 @@ def apply_function_to_model_tree(
     ["a", SEQ_INDEX_SENTINEL, DICT_INDEX_SENTINEL].
     """
     if default_model_config is None:
-        default_model_config = {}
+        default_model_config = Schema.model_config.copy()
 
     seen_models = set()
 
@@ -260,13 +260,11 @@ def create_apply_schema(
         InputSchema,
         lambda x, _: x,
         model_prefix="Apply_",
-        default_model_config=dict(extra="forbid"),
     )
     OutputSchema = apply_function_to_model_tree(
         OutputSchema,
         lambda x, _: x,
         model_prefix="Apply_",
-        default_model_config=dict(extra="forbid"),
     )
 
     class ApplyInputSchema(BaseModel):
