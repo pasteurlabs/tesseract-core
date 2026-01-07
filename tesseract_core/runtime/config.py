@@ -1,13 +1,24 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import ast
 import os
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, FilePath
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, FilePath
 
 from tesseract_core.runtime.file_interactions import supported_format_type
+
+
+def _eval_str(obj: Any) -> Any:
+    """Evaluate a string into the corresponding Python object."""
+    if isinstance(obj, str):
+        try:
+            return ast.literal_eval(obj)
+        except SyntaxError as exc:
+            raise ValueError("Could not parse string as Python object") from exc
+    return obj
 
 
 class RuntimeConfig(BaseModel):
@@ -23,8 +34,9 @@ class RuntimeConfig(BaseModel):
     output_format: supported_format_type = "json"
     output_file: str = ""
     mlflow_tracking_uri: str = ""
-    mlflow_tracking_username: str = ""
-    mlflow_tracking_password: str = ""
+    mlflow_run_extra_args: Annotated[dict[str, Any], BeforeValidator(_eval_str)] = (
+        Field(default_factory=dict)
+    )
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 

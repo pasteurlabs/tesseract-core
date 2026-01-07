@@ -215,11 +215,13 @@ def prepare_build_context(
 
     template_dir = get_template_dir()
 
+    extra_files = [template_dir / "entrypoint.sh", template_dir / "addmeplease.c"]
+
     requirement_config = user_config.build_config.requirements
-    copy(
-        template_dir / requirement_config._build_script,
-        context_dir / "__tesseract_source__" / requirement_config._build_script,
-    )
+    extra_files.append(template_dir / requirement_config._build_script)
+
+    for path in extra_files:
+        copy(path, context_dir / path.relative_to(template_dir))
 
     # When building from a requirements.txt we support local dependencies.
     # We separate local dep. lines from the requirements.txt and copy the

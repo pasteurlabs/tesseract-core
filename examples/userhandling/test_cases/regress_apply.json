@@ -1,0 +1,15 @@
+{
+  "endpoint": "apply",
+  "inputs": { "inputs": {} },
+  "expected_outputs": {
+    "uid": 501,
+    "gid": 20,
+    "username": "tesseract-user",
+    "home": "/tesseract",
+    "shell": "/bin/bash"
+  },
+  "expected_exception": null,
+  "expected_exception_regex": null,
+  "atol": 1e-8,
+  "rtol": 0.00001
+}

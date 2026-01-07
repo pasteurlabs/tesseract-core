@@ -68,12 +68,39 @@ As an alternative to the MLflow setup we provide, you can point your Tesseract t
 $ tesseract serve --env=TESSERACT_MLFLOW_TRACKING_URI="..."  metrics
 ```
 
-Note that if your MLFlow server uses basic auth, you need to populate the `TESSERACT_MLFLOW_TRACKING_USERNAME` and
-`TESSERACT_MLFLOW_TRACKING_PASSWORD` for the Tesseract to be able to authenticate to it.
+Note that if your MLFlow server uses basic auth, you need to set the `MLFLOW_TRACKING_USERNAME` and
+`MLFLOW_TRACKING_PASSWORD` env variables for the Tesseract to be able to authenticate to it.
 
 ```bash
 $ tesseract serve --env=TESSERACT_MLFLOW_TRACKING_URI="..." \
-    --env=TESSERACT_MLFLOW_TRACKING_USERNAME="..." --env=TESSERACT_MLFLOW_TRACKING_PASSWORD="..." \
+    --env=MLFLOW_TRACKING_USERNAME="..." --env=MLFLOW_TRACKING_PASSWORD="..." \
+    metrics
+```
+
+If you wish to pass additional parameters to the MLflow run (such as tags, run name, or description), you can do so via the `TESSERACT_MLFLOW_RUN_EXTRA_ARGS` environment variable. This accepts a Python dictionary string that is passed directly to `mlflow.start_run()`. See supported
+parameters in the [mlflow documentation](https://mlflow.org/docs/latest/api_reference/python_api/mlflow.html#mlflow.start_run).
+
+**Example: Setting tags only**
+
+```bash
+$ tesseract serve --env=TESSERACT_MLFLOW_TRACKING_URI="..." \
+    --env=TESSERACT_MLFLOW_RUN_EXTRA_ARGS='{"tags": {"key1": "value1", "key2": "value2"}}' \
+    metrics
+```
+
+**Example: Setting run name and tags**
+
+```bash
+$ tesseract serve --env=TESSERACT_MLFLOW_TRACKING_URI="..." \
+    --env=TESSERACT_MLFLOW_RUN_EXTRA_ARGS='{"run_name": "my_experiment", "tags": {"env": "production"}}' \
+    metrics
+```
+
+**Example: Multiple parameters**
+
+```bash
+$ tesseract serve --env=TESSERACT_MLFLOW_TRACKING_URI="..." \
+    --env=TESSERACT_MLFLOW_RUN_EXTRA_ARGS='{"run_name": "test_run", "description": "Testing new feature", "tags": {"version": "1.0"}}' \
     metrics
 ```
 

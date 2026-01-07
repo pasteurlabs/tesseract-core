@@ -1,4 +1,1 @@
-#torch
-#scikit-learn
-pyyaml
 ./scripts
