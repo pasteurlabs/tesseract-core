@@ -3,5 +3,5 @@ version: "0.0.1"
 description: ""
 
 build_config:
-    package_data:
-      - ["goodbyeworld.py", "goodbyeworld.py"]
+  package_data:
+    - ["goodbyeworld.py", "goodbyeworld.py"]

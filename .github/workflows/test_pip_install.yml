@@ -1,13 +1,13 @@
 name: Test installation via pip
 
 on:
-    # run on PRs for validation
-    pull_request:
+  # run on PRs for validation
+  pull_request:
 
 jobs:
   test-pip-install:
     name: "Test pip install"
-    runs-on: '${{ matrix.os }}'
+    runs-on: "${{ matrix.os }}"
     strategy:
       matrix:
         os:

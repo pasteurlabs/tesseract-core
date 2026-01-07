@@ -13,13 +13,16 @@ you can make Tesseracts return base64-encoded arrays by setting the format to `j
 ::::{tab-set}
 :::{tab-item} CLI
 :sync: cli
+
 ```bash
 $ tesseract run vectoradd apply -f "json+base64" @examples/vectoradd/example_inputs_b64.json
 {"result":{"object_type":"array","shape":[3],"dtype":"float64","data":{"buffer":"AAAAAAAALEAAAAAAAAA2QAAAAAAAAD5A","encoding":"base64"}}}
 ```
+
 :::
 :::{tab-item} REST API
 :sync: http
+
 ```bash
 $ curl \
   -H "Accept: application/json+base64" \
@@ -28,6 +31,7 @@ $ curl \
   http://<tesseract-address>:<port>/apply
 {"result":{"object_type":"array","shape":[3],"dtype":"float64","data":{"buffer":"AAAAAAAALEAAAAAAAAA2QAAAAAAAAD5A","encoding":"base64"}}}
 ```
+
 :::
 ::::
 
@@ -40,6 +44,7 @@ encodings in Tesseracts.
 ::::{tab-set}
 :::{tab-item} CLI
 :sync: cli
+
 ```bash
 $ tesseract run vectoradd apply -f "json+binref" -o /tmp/output @examples/vectoradd/example_inputs.json
 
@@ -49,12 +54,14 @@ $ ls /tmp/output
 $ cat /tmp/output/results.json
 {"result":{"object_type":"array","shape":[3],"dtype":"float64","data":{"buffer":"7796fb36-849a-42ce-8288-a07426111f0c.bin:0","encoding":"binref"}}}
 ```
+
 :::
 :::{tab-item} REST API
 :sync: http
 
 To access the `.bin` files that are written when using the `json+binref` format, make sure
-to specify `--output-path` when serving your Tesseract. Otherwise the `.bin` files will only be accessible *inside* the Tesseract (under `/tesseract/output_path`).
+to specify `--output-path` when serving your Tesseract. Otherwise the `.bin` files will only be accessible _inside_ the Tesseract (under `/tesseract/output_path`).
+
 ```bash
 $ tesseract serve <tesseract-name> --output-path /tmp/output
 $ curl \
@@ -63,6 +70,7 @@ $ curl \
   -d @examples/vectoradd/example_inputs.json \
   http://<tesseract-address>:<port>/apply
 ```
+
 The references to `.bin` files are relative to the `--output-path` you specified when serving the Tesseract.
 :::
 ::::
