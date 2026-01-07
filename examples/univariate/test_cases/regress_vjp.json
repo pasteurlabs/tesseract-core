@@ -6,7 +6,20 @@
     "vjp_outputs": ["result"],
     "cotangent_vector": { "result": 1.0 }
   },
-  "expected_outputs": { "y": 0.0, "x": -2.0 },
+  "expected_outputs": {
+    "x": {
+      "object_type": "array",
+      "shape": [],
+      "dtype": "float32",
+      "data": { "buffer": "AAAAwA==", "encoding": "base64" }
+    },
+    "y": {
+      "object_type": "array",
+      "shape": [],
+      "dtype": "float32",
+      "data": { "buffer": "AAAAAA==", "encoding": "base64" }
+    }
+  },
   "expected_exception": null,
   "expected_exception_regex": null,
   "atol": 1e-8,

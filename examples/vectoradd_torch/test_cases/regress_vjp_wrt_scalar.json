@@ -41,7 +41,14 @@
       }
     }
   },
-  "expected_outputs": { "a.s": 1.4000000953674316 },
+  "expected_outputs": {
+    "a.s": {
+      "object_type": "array",
+      "shape": [],
+      "dtype": "float32",
+      "data": { "buffer": "NDOzPw==", "encoding": "base64" }
+    }
+  },
   "expected_exception": null,
   "expected_exception_regex": null,
   "atol": 1e-8,

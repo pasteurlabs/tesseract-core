@@ -42,9 +42,12 @@
     }
   },
   "expected_outputs": {
-    "vector_add.result": [
-      0.20000000298023224, 0.4000000059604645, 0.6000000238418579
-    ]
+    "vector_add.result": {
+      "object_type": "array",
+      "shape": [3],
+      "dtype": "float32",
+      "data": { "buffer": "zcxMPs3MzD6amRk/", "encoding": "base64" }
+    }
   },
   "expected_exception": null,
   "expected_exception_regex": null,

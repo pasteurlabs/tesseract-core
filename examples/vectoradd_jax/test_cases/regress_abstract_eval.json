@@ -1,5 +1,5 @@
 {
-  "endpoint": "apply",
+  "endpoint": "abstract_eval",
   "inputs": {
     "inputs": {
       "a": {
@@ -12,8 +12,17 @@
       }
     }
   },
-  "expected_outputs": null,
-  "expected_exception": "ValidationError",
+  "expected_outputs": {
+    "vector_add": {
+      "result": { "shape": [3], "dtype": "float32" },
+      "normed_result": { "shape": [3], "dtype": "float32" }
+    },
+    "vector_min": {
+      "result": { "shape": [3], "dtype": "float32" },
+      "normed_result": { "shape": [3], "dtype": "float32" }
+    }
+  },
+  "expected_exception": null,
   "expected_exception_regex": null,
   "atol": 1e-8,
   "rtol": 0.00001

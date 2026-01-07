@@ -1,7 +1,7 @@
 {
   "endpoint": "apply",
-  "inputs": { "inputs": { "x": 0.0, "y": 0.0 } },
-  "expected_outputs": { "result": 1.0 },
+  "inputs": { "inputs": { "name": "Ozzy" } },
+  "expected_outputs": { "message": "Hello Ozzy!\nGoodbye Ozzy!" },
   "expected_exception": null,
   "expected_exception_regex": null,
   "atol": 1e-8,

@@ -41,7 +41,17 @@
       }
     }
   },
-  "expected_outputs": { "vector_add.result": [0.2, 0.4, 0.6] },
+  "expected_outputs": {
+    "vector_add.result": {
+      "object_type": "array",
+      "shape": [3],
+      "dtype": "float64",
+      "data": {
+        "buffer": "mpmZmZmZyT+amZmZmZnZPzMzMzMzM+M/",
+        "encoding": "base64"
+      }
+    }
+  },
   "expected_exception": null,
   "expected_exception_regex": null,
   "atol": 1e-8,

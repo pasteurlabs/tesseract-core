@@ -32,12 +32,21 @@
   },
   "expected_outputs": {
     "vector_add.result": {
-      "a.s": [1.0, 2.0, 3.0],
-      "a.v": [
-        [2.0, 0.0, 0.0],
-        [0.0, 2.0, 0.0],
-        [0.0, 0.0, 2.0]
-      ]
+      "a.s": {
+        "object_type": "array",
+        "shape": [3],
+        "dtype": "float32",
+        "data": { "buffer": "AACAPwAAAEAAAEBA", "encoding": "base64" }
+      },
+      "a.v": {
+        "object_type": "array",
+        "shape": [3, 3],
+        "dtype": "float32",
+        "data": {
+          "buffer": "AAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABA",
+          "encoding": "base64"
+        }
+      }
     }
   },
   "expected_exception": null,

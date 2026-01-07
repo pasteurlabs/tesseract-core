@@ -30,16 +30,32 @@
   },
   "expected_outputs": {
     "vector_add": {
-      "result": [7.0, 11.0, 15.0],
-      "normed_result": [
-        0.3522082269191742, 0.5534700751304626, 0.7547318935394287
-      ]
+      "result": {
+        "object_type": "array",
+        "shape": [3],
+        "dtype": "float32",
+        "data": { "buffer": "AADgQAAAMEEAAHBB", "encoding": "base64" }
+      },
+      "normed_result": {
+        "object_type": "array",
+        "shape": [3],
+        "dtype": "float32",
+        "data": { "buffer": "o1S0PjewDT8cNkE/", "encoding": "base64" }
+      }
     },
     "vector_min": {
-      "result": [-1.0, 1.0, 3.0],
-      "normed_result": [
-        -0.30151134729385376, 0.30151134729385376, 0.9045339822769165
-      ]
+      "result": {
+        "object_type": "array",
+        "shape": [3],
+        "dtype": "float32",
+        "data": { "buffer": "AACAvwAAgD8AAEBA", "encoding": "base64" }
+      },
+      "normed_result": {
+        "object_type": "array",
+        "shape": [3],
+        "dtype": "float32",
+        "data": { "buffer": "sl+avrJfmj6Kj2c/", "encoding": "base64" }
+      }
     }
   },
   "expected_exception": null,

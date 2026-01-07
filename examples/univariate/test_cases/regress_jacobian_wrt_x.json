@@ -5,7 +5,16 @@
     "jac_inputs": ["x"],
     "jac_outputs": ["result"]
   },
-  "expected_outputs": { "result": { "x": -2.0 } },
+  "expected_outputs": {
+    "result": {
+      "x": {
+        "object_type": "array",
+        "shape": [],
+        "dtype": "float32",
+        "data": { "buffer": "AAAAwA==", "encoding": "base64" }
+      }
+    }
+  },
   "expected_exception": null,
   "expected_exception_regex": null,
   "atol": 1e-8,

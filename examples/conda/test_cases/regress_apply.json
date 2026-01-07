@@ -1,0 +1,11 @@
+{
+  "endpoint": "apply",
+  "inputs": { "inputs": { "message": "Hey!" } },
+  "expected_outputs": {
+    "cowsays": "  ____\n| Hey! |\n  ====\n    \\\n     \\\n       ^__^\n       (oo)\\_______\n       (__)\\       )\\/\\\n           ||----w |\n           ||     ||"
+  },
+  "expected_exception": null,
+  "expected_exception_regex": null,
+  "atol": 1e-8,
+  "rtol": 0.00001
+}

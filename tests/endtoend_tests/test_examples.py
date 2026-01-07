@@ -19,7 +19,7 @@ import numpy as np
 import numpy.typing as npt
 import pytest
 import requests
-from common import build_tesseract, encode_array, image_exists
+from common import build_tesseract, image_exists
 
 EXAMPLES_DIR = Path(__file__).parent.parent.parent / "examples"
 
@@ -69,19 +69,9 @@ def assert_contains_array_allclose(
 
 
 @dataclass
-class SampleRequest:
-    endpoint: str
-    payload: dict
-    expected_status_code: int = 200
-    output_contains_pattern: str | list[str] | None = None
-    output_contains_array: npt.ArrayLike | None = None
-    output_format: str = "json+base64"
-
-
-@dataclass
 class Config:
     test_with_random_inputs: bool = False
-    sample_requests: list[SampleRequest] = None
+    check_gradients: bool = False
     volume_mounts: list[str] = None
     input_path: str = None
     output_path: str = None
@@ -89,543 +79,28 @@ class Config:
 
 # Add config and test cases for specific unit Tesseracts here
 TEST_CASES = {
-    "empty": Config(
-        test_with_random_inputs=True,
-        sample_requests=[
-            SampleRequest(
-                endpoint="apply",
-                payload=json.loads(
-                    (
-                        EXAMPLES_DIR / "empty/test_cases_inputs/example_input.json"
-                    ).read_text()
-                ),
-            ),
-        ],
-    ),
-    "py310": Config(
-        test_with_random_inputs=True,
-    ),
-    "helloworld": Config(
-        test_with_random_inputs=True,
-        sample_requests=[
-            SampleRequest(
-                endpoint="apply",
-                payload=json.loads(
-                    (
-                        EXAMPLES_DIR / "helloworld/test_cases_inputs/example_input.json"
-                    ).read_text()
-                ),
-                output_contains_pattern="Hello Ozzy!",
-            ),
-        ],
-    ),
-    "pip_custom_step": Config(
-        test_with_random_inputs=True,
-        sample_requests=[
-            SampleRequest(
-                endpoint="apply",
-                payload=json.loads(
-                    (
-                        EXAMPLES_DIR
-                        / "pip_custom_step/test_cases_inputs/example_input.json"
-                    ).read_text()
-                ),
-                output_contains_pattern="Hello Ozzy!",
-            ),
-        ],
-    ),
-    "pyvista-arm64": Config(
-        test_with_random_inputs=True,
-        sample_requests=[
-            SampleRequest(
-                endpoint="apply",
-                payload=json.loads(
-                    (
-                        EXAMPLES_DIR
-                        / "pyvista-arm64/test_cases_inputs/example_input.json"
-                    ).read_text()
-                ),
-                output_contains_pattern="pv_mesh",
-            ),
-        ],
-    ),
-    "localpackage": Config(
-        test_with_random_inputs=True,
-        sample_requests=[
-            SampleRequest(
-                endpoint="apply",
-                payload=json.loads(
-                    (
-                        EXAMPLES_DIR
-                        / "localpackage/test_cases_inputs/example_input.json"
-                    ).read_text()
-                ),
-                output_contains_pattern="Hello Ozzy!\\nGoodbye Ozzy!",
-            ),
-        ],
-    ),
-    "vectoradd": Config(
-        test_with_random_inputs=True,
-        sample_requests=[
-            SampleRequest(
-                endpoint="apply",
-                payload=json.loads(
-                    (
-                        EXAMPLES_DIR / "vectoradd/test_cases_inputs/example_input.json"
-                    ).read_text()
-                ),
-                output_contains_pattern=[encode_array([5.0, 7.0, 9.0], as_json=True)],
-            ),
-            SampleRequest(
-                endpoint="jacobian",
-                payload=json.loads(
-                    (
-                        EXAMPLES_DIR
-                        / "vectoradd/test_cases_inputs/example_jacobian_input.json"
-                    ).read_text()
-                ),
-                output_contains_pattern=['"s":', '"a":'],
-            ),
-            SampleRequest(
-                endpoint="jacobian",
-                payload=json.loads(
-                    (
-                        EXAMPLES_DIR
-                        / "vectoradd/test_cases_inputs/badInputs_jacobian_input.json"
-                    ).read_text()
-                ),
-                expected_status_code=422,
-                output_contains_pattern="Input should be",
-            ),
-            SampleRequest(
-                endpoint="jacobian",
-                payload=json.loads(
-                    (
-                        EXAMPLES_DIR
-                        / "vectoradd/test_cases_inputs/badOutputs_jacobian_input.json"
-                    ).read_text()
-                ),
-                expected_status_code=422,
-                output_contains_pattern="Input should be",
-            ),
-            SampleRequest(
-                endpoint="check-gradients",
-                payload=json.loads(
-                    (
-                        EXAMPLES_DIR
-                        / "vectoradd/test_cases_inputs/example_checkgradients_input.json"
-                    ).read_text()
-                ),
-            ),
-        ],
-    ),
-    "vectoradd_jax": Config(
-        test_with_random_inputs=True,
-        sample_requests=[
-            SampleRequest(
-                endpoint="apply",
-                payload=json.loads(
-                    (
-                        EXAMPLES_DIR
-                        / "vectoradd_jax/test_cases_inputs/example_input.json"
-                    ).read_text()
-                ),
-                output_contains_array=np.array([7.0, 11.0, 15.0], dtype="float32"),
-            ),
-            SampleRequest(
-                endpoint="abstract_eval",
-                payload=json.loads(
-                    (
-                        EXAMPLES_DIR
-                        / "vectoradd_jax/test_cases_inputs/example_abstract_input.json"
-                    ).read_text()
-                ),
-            ),
-            SampleRequest(
-                endpoint="apply",
-                payload=json.loads(
-                    (
-                        EXAMPLES_DIR / "vectoradd_jax/test_cases_inputs/bad_input.json"
-                    ).read_text()
-                ),
-                expected_status_code=422,
-                output_contains_pattern="missing",
-            ),
-            SampleRequest(
-                endpoint="jacobian",
-                payload=json.loads(
-                    (
-                        EXAMPLES_DIR
-                        / "vectoradd_jax/test_cases_inputs/example_jacobian_input.json"
-                    ).read_text()
-                ),
-                output_contains_pattern=['"a.s":', '"a.v":'],
-                output_contains_array=np.array([[1, 2, 3]], dtype="float32"),
-            ),
-            SampleRequest(
-                endpoint="jacobian_vector_product",
-                payload=json.loads(
-                    (
-                        EXAMPLES_DIR
-                        / "vectoradd_jax/test_cases_inputs/wrtVector_jvp_input.json"
-                    ).read_text()
-                ),
-                output_contains_array=np.array([0.2, 0.4, 0.6], dtype="float32"),
-            ),
-            SampleRequest(
-                endpoint="jacobian_vector_product",
-                payload=json.loads(
-                    (
-                        EXAMPLES_DIR
-                        / "vectoradd_jax/test_cases_inputs/wrtScalar_jvp_input.json"
-                    ).read_text()
-                ),
-                output_contains_array=np.array([0.5, 1.0, 1.5], dtype="float32"),
-            ),
-            SampleRequest(
-                endpoint="vector_jacobian_product",
-                payload=json.loads(
-                    (
-                        EXAMPLES_DIR
-                        / "vectoradd_jax/test_cases_inputs/wrtVector_vjp_input.json"
-                    ).read_text()
-                ),
-                output_contains_array=np.array([0.2, 0.4, 0.6], dtype="float32"),
-            ),
-            SampleRequest(
-                endpoint="vector_jacobian_product",
-                payload=json.loads(
-                    (
-                        EXAMPLES_DIR
-                        / "vectoradd_jax/test_cases_inputs/wrtScalar_vjp_input.json"
-                    ).read_text()
-                ),
-                output_contains_array=np.array([1.4], dtype="float32"),
-            ),
-            SampleRequest(
-                endpoint="check-gradients",
-                payload=json.loads(
-                    (
-                        EXAMPLES_DIR
-                        / "vectoradd_jax/test_cases_inputs/example_checkgradients_input.json"
-                    ).read_text()
-                ),
-            ),
-        ],
-    ),
-    "vectoradd_torch": Config(
-        test_with_random_inputs=True,
-        sample_requests=[
-            SampleRequest(
-                endpoint="apply",
-                payload=json.loads(
-                    (
-                        EXAMPLES_DIR
-                        / "vectoradd_torch/test_cases_inputs/example_input.json"
-                    ).read_text()
-                ),
-                output_contains_array=np.array([7.0, 11.0, 15.0], dtype="float32"),
-            ),
-            SampleRequest(
-                endpoint="apply",
-                payload=json.loads(
-                    (
-                        EXAMPLES_DIR
-                        / "vectoradd_torch/test_cases_inputs/bad_input.json"
-                    ).read_text()
-                ),
-                expected_status_code=422,
-                output_contains_pattern="missing",
-            ),
-            SampleRequest(
-                endpoint="jacobian",
-                payload=json.loads(
-                    (
-                        EXAMPLES_DIR
-                        / "vectoradd_torch/test_cases_inputs/example_jacobian_input.json"
-                    ).read_text()
-                ),
-                output_contains_pattern=['"a.s":', '"a.v":'],
-                output_contains_array=np.array([[1, 2, 3]], dtype="float32"),
-            ),
-            SampleRequest(
-                endpoint="jacobian_vector_product",
-                payload=json.loads(
-                    (
-                        EXAMPLES_DIR
-                        / "vectoradd_torch/test_cases_inputs/wrtVector_jvp_input.json"
-                    ).read_text()
-                ),
-                output_contains_array=np.array([0.2, 0.4, 0.6], dtype="float32"),
-            ),
-            SampleRequest(
-                endpoint="jacobian_vector_product",
-                payload=json.loads(
-                    (
-                        EXAMPLES_DIR
-                        / "vectoradd_torch/test_cases_inputs/wrtScalar_jvp_input.json"
-                    ).read_text()
-                ),
-                output_contains_array=np.array([0.5, 1.0, 1.5], dtype="float32"),
-            ),
-            SampleRequest(
-                endpoint="vector_jacobian_product",
-                payload=json.loads(
-                    (
-                        EXAMPLES_DIR
-                        / "vectoradd_torch/test_cases_inputs/wrtVector_vjp_input.json"
-                    ).read_text()
-                ),
-                output_contains_array=np.array([0.2, 0.4, 0.6], dtype="float32"),
-            ),
-            SampleRequest(
-                endpoint="vector_jacobian_product",
-                payload=json.loads(
-                    (
-                        EXAMPLES_DIR
-                        / "vectoradd_torch/test_cases_inputs/wrtScalar_vjp_input.json"
-                    ).read_text()
-                ),
-                output_contains_array=np.array([1.4], dtype="float32"),
-            ),
-        ],
-    ),
-    "univariate": Config(
-        test_with_random_inputs=True,
-        sample_requests=[
-            SampleRequest(
-                endpoint="apply",
-                payload=json.loads(
-                    (
-                        EXAMPLES_DIR / "univariate/test_cases_inputs/example_input.json"
-                    ).read_text()
-                ),
-                output_contains_array=np.array([1.0], dtype="float64"),
-            ),
-            SampleRequest(
-                endpoint="jacobian",
-                payload=json.loads(
-                    (
-                        EXAMPLES_DIR
-                        / "univariate/test_cases_inputs/wrtX_jacobian_input.json"
-                    ).read_text()
-                ),
-                output_contains_pattern=[
-                    f'"result":{{"x":{encode_array(np.float32(-2.0), as_json=True)}}}'
-                ],
-            ),
-            SampleRequest(
-                endpoint="jacobian",
-                payload=json.loads(
-                    (
-                        EXAMPLES_DIR
-                        / "univariate/test_cases_inputs/wrtY_jacobian_input.json"
-                    ).read_text()
-                ),
-                output_contains_pattern=[
-                    f'"result":{{"y":{encode_array(np.float32(0.0), as_json=True)}}}'
-                ],
-            ),
-            SampleRequest(
-                endpoint="jacobian",
-                payload=json.loads(
-                    (
-                        EXAMPLES_DIR
-                        / "univariate/test_cases_inputs/bad_jacobian_input.json"
-                    ).read_text()
-                ),
-                expected_status_code=422,
-                output_contains_pattern="Input should be",
-            ),
-            SampleRequest(
-                endpoint="jacobian_vector_product",
-                payload=json.loads(
-                    (
-                        EXAMPLES_DIR
-                        / "univariate/test_cases_inputs/example_jvp_input.json"
-                    ).read_text()
-                ),
-                output_contains_pattern=f'"result":{encode_array(np.float32(-2.0), as_json=True)}',
-            ),
-            SampleRequest(
-                endpoint="vector_jacobian_product",
-                payload=json.loads(
-                    (
-                        EXAMPLES_DIR
-                        / "univariate/test_cases_inputs/example_vjp_input.json"
-                    ).read_text()
-                ),
-                output_contains_pattern=[
-                    f'"x":{encode_array(np.float32(-2.0), as_json=True)}',
-                    f'"y":{encode_array(np.float32(0.0), as_json=True)}',
-                ],
-            ),
-            SampleRequest(
-                endpoint="check-gradients",
-                payload=json.loads(
-                    (
-                        EXAMPLES_DIR
-                        / "univariate/test_cases_inputs/example_checkgradients_input.json"
-                    ).read_text()
-                ),
-            ),
-        ],
-    ),
-    "package_data": Config(
-        test_with_random_inputs=True,
-    ),
-    "cuda": Config(
-        test_with_random_inputs=True,
-    ),
-    "meshstats": Config(
-        test_with_random_inputs=False,
-        sample_requests=[
-            SampleRequest(
-                endpoint="apply",
-                payload=json.loads(
-                    (
-                        EXAMPLES_DIR / "meshstats/test_cases_inputs/example_input.json"
-                    ).read_text()
-                ),
-                output_contains_pattern=encode_array(
-                    np.array([0.0, 666.0, 0.0], dtype="float32"), as_json=True
-                ),
-            ),
-            SampleRequest(
-                endpoint="abstract_eval",
-                payload=json.loads(
-                    (
-                        EXAMPLES_DIR
-                        / "meshstats/test_cases_inputs/example_abstract_input.json"
-                    ).read_text()
-                ),
-                output_contains_pattern='"shape":[3],"dtype":"float32"',
-            ),
-            SampleRequest(
-                endpoint="jacobian",
-                payload=json.loads(
-                    (
-                        EXAMPLES_DIR
-                        / "meshstats/test_cases_inputs/example_jacobian_input.json"
-                    ).read_text()
-                ),
-                output_contains_pattern='"shape":[3,5,3]',
-            ),
-            SampleRequest(
-                endpoint="check-gradients",
-                payload=json.loads(
-                    (
-                        EXAMPLES_DIR
-                        / "meshstats/test_cases_inputs/example_checkgradients_input.json"
-                    ).read_text()
-                ),
-            ),
-        ],
-    ),
+    "empty": Config(test_with_random_inputs=True),
+    "py310": Config(test_with_random_inputs=True),
+    "helloworld": Config(test_with_random_inputs=True),
+    "pip_custom_step": Config(test_with_random_inputs=True),
+    "pyvista-arm64": Config(test_with_random_inputs=True),
+    "localpackage": Config(test_with_random_inputs=True),
+    "vectoradd": Config(test_with_random_inputs=True),
+    "vectoradd_jax": Config(test_with_random_inputs=True, check_gradients=True),
+    "vectoradd_torch": Config(test_with_random_inputs=True),
+    "univariate": Config(test_with_random_inputs=True, check_gradients=True),
+    "package_data": Config(test_with_random_inputs=True),
+    "cuda": Config(test_with_random_inputs=True),
+    "meshstats": Config(check_gradients=True),
     "dataloader": Config(
-        test_with_random_inputs=False,
-        sample_requests=[
-            SampleRequest(
-                endpoint="apply",
-                payload=json.loads(
-                    (
-                        EXAMPLES_DIR / "dataloader/test_cases_inputs/example_input.json"
-                    ).read_text()
-                ),
-                output_contains_pattern=[
-                    '{"data":[{"object_type":"array","shape":[3,3],"dtype":"float32","data":{"buffer":',
-                ],
-            ),
-            SampleRequest(
-                endpoint="check-gradients",
-                payload=json.loads(
-                    (
-                        EXAMPLES_DIR
-                        / "dataloader/test_cases_inputs/example_checkgradients_input.json"
-                    ).read_text()
-                ),
-            ),
-        ],
-        volume_mounts=["testdata:/tesseract/input_data:ro"],
+        check_gradients=True, volume_mounts=["testdata:/tesseract/input_data:ro"]
     ),
-    "conda": Config(
-        test_with_random_inputs=False,
-        sample_requests=[
-            SampleRequest(
-                endpoint="apply",
-                payload=json.loads(
-                    (
-                        EXAMPLES_DIR / "conda/test_cases_inputs/example_input.json"
-                    ).read_text()
-                ),
-                output_contains_pattern=[r'{"cowsays":"  ____\n| Hey! |\n  ====\n'],
-            )
-        ],
-    ),
-    "required_files": Config(
-        test_with_random_inputs=False,
-        sample_requests=[
-            SampleRequest(
-                endpoint="apply",
-                payload=json.loads(
-                    (
-                        EXAMPLES_DIR
-                        / "required_files/test_cases_inputs/example_input.json"
-                    ).read_text()
-                ),
-                output_contains_pattern=[r'{"a":1.0,"b":100.0}'],
-            ),
-        ],
-        input_path="input",
-    ),
-    "filereference": Config(
-        test_with_random_inputs=False,
-        sample_requests=[
-            SampleRequest(
-                endpoint="apply",
-                payload=json.loads(
-                    (
-                        EXAMPLES_DIR
-                        / "filereference/test_cases_inputs/example_input.json"
-                    ).read_text()
-                ),
-                output_contains_pattern=["sample_0.copy"],
-            )
-        ],
-        input_path="testdata",
-        output_path="output",
-    ),
-    "metrics": Config(
-        test_with_random_inputs=True,
-        sample_requests=[
-            SampleRequest(
-                endpoint="apply",
-                payload=json.loads(
-                    (
-                        EXAMPLES_DIR / "metrics/test_cases_inputs/example_input.json"
-                    ).read_text()
-                ),
-                # Just verify it runs without error - output will be empty
-            ),
-        ],
-    ),
-    "qp_solve": Config(
-        test_with_random_inputs=False,
-        sample_requests=[
-            SampleRequest(
-                endpoint="apply",
-                payload=json.loads(
-                    (
-                        EXAMPLES_DIR / "qp_solve/test_cases_inputs/example_input.json"
-                    ).read_text()
-                ),
-                output_contains_array=np.array([-0.5, -1.5], dtype="float32"),
-            )
-        ],
-    ),
-    "tesseractreference": Config(  # Can't test requests standalone; needs target Tesseract. Covered in separate test.
-        test_with_random_inputs=False, sample_requests=[]
-    ),
+    "conda": Config(),
+    "required_files": Config(input_path="input"),
+    "filereference": Config(input_path="testdata", output_path="output"),
+    "metrics": Config(test_with_random_inputs=True),
+    "qp_solve": Config(),
+    "tesseractreference": Config(),  # Can't test requests standalone; needs target Tesseract. Covered in separate test.
 }
 
 
@@ -790,58 +265,59 @@ def test_unit_tesseract_endtoend(
         )
         assert result.exit_code == 0, result.output
 
-    if unit_tesseract_config.sample_requests:
-        for request in unit_tesseract_config.sample_requests:
-            print(f"Running request: {request}")
-            cli_cmd = request.endpoint.replace("_", "-")
+    # Stage 2.5: Test regress endpoint with test case files
+    test_cases_dir = unit_tesseract_path / "test_cases"
+    if test_cases_dir.exists() and test_cases_dir.is_dir():
+        test_files = sorted(test_cases_dir.glob("*.json"))
+        for test_file_path in test_files:
+            test_file = test_file_path.relative_to(unit_tesseract_path)
+            print(f"Running regress test: {test_file}")
 
-            if cli_cmd == "check-gradients":
-                args = [
-                    "run",
-                    img_name,
-                    cli_cmd,
-                    json.dumps(request.payload),
-                ]
-            else:
-                args = [
-                    "run",
-                    img_name,
-                    *mount_args,
-                    cli_cmd,
-                    json.dumps(request.payload),
-                    *io_args,
-                    "--output-format",
-                    request.output_format,
-                ]
+            args = [
+                "run",
+                img_name,
+                *mount_args,
+                "regress",
+                f"@{test_file_path}",
+                *io_args,
+            ]
 
             result = cli_runner.invoke(app, args, env={"TERM": "dumb"})
-            if request.expected_status_code == 200:
-                print_debug_info(result)
-                assert result.exit_code == 0, result.exception
-                if cli_cmd in ("check-gradients",):
-                    # Result is text
-                    output = result.stdout
-                else:
-                    # Result is JSON output
-                    output = json_normalize(result.stdout)
-            else:
-                # Result is an error message
-                assert result.exit_code != 0
-                assert result.exc_info is not None
-                output = "".join(traceback.format_exception(*result.exc_info))
+            print_debug_info(result)
+            assert result.exit_code == 0, result.exception
 
-            if request.output_contains_pattern is not None:
-                patterns = request.output_contains_pattern
-                if isinstance(patterns, str):
-                    patterns = [patterns]
+            # Parse regress response
+            regress_result = json.loads(result.stdout)
+            assert regress_result["status"] == "passed", (
+                f"Regress test failed for {test_file}:\n"
+                f"  Endpoint: {regress_result['endpoint']}\n"
+                f"  Message: {regress_result['message']}"
+            )
 
-                for pattern in patterns:
-                    assert pattern in output
+    if unit_tesseract_config.check_gradients:
+        checkgradients_input = (
+            unit_tesseract_path / "test_cases_inputs/example_checkgradients_input.json"
+        )
+        if checkgradients_input.exists():
+            print(f"Running check-gradients test: {checkgradients_input}")
 
-            if request.output_contains_array is not None:
-                array = request.output_contains_array
-                output_json = json.loads(output)
-                assert_contains_array_allclose(output_json, array)
+            with open(checkgradients_input) as f:
+                payload = json.load(f)
+
+            args = [
+                "run",
+                img_name,
+                *mount_args,
+                "check-gradients",
+                json.dumps(payload),
+            ]
+
+            result = cli_runner.invoke(app, args, env={"TERM": "dumb"})
+            print_debug_info(result)
+            assert result.exit_code == 0, result.exception
+            # Verify check-gradients passed (check stdout or stderr for success indicators)
+            output_text = result.stdout + result.stderr
+            assert "passed" in output_text.lower() or "✅" in output_text
 
     # Stage 3: Test HTTP server
     run_res = cli_runner.invoke(
@@ -876,33 +352,3 @@ def test_unit_tesseract_endtoend(
             f"http://localhost:{free_port}/apply", json=payload_from_schema
         )
         assert response.status_code == 200, response.text
-
-    sample_requests = unit_tesseract_config.sample_requests or []
-    for request in sample_requests:
-        if request.endpoint in ("check-gradients",):
-            # Not supported in HTTP mode
-            continue
-
-        headers = {
-            "Accept": f"application/{request.output_format}",
-        }
-        response = requests.post(
-            f"http://localhost:{free_port}/{request.endpoint}",
-            json=request.payload,
-            headers=headers,
-        )
-        output = response.text
-        assert response.status_code == request.expected_status_code, output
-
-        if request.output_contains_pattern is not None:
-            patterns = request.output_contains_pattern
-            if isinstance(patterns, str):
-                patterns = [patterns]
-
-            for pattern in patterns:
-                assert pattern in output
-
-        if request.output_contains_array is not None:
-            array = request.output_contains_array
-            output_json = json.loads(output)
-            assert_contains_array_allclose(output_json, array)

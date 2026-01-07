@@ -31,7 +31,14 @@
     "jvp_outputs": ["vector_add.result"],
     "tangent_vector": { "a.s": 0.5 }
   },
-  "expected_outputs": { "vector_add.result": [0.5, 1.0, 1.5] },
+  "expected_outputs": {
+    "vector_add.result": {
+      "object_type": "array",
+      "shape": [3],
+      "dtype": "float32",
+      "data": { "buffer": "AAAAPwAAgD8AAMA/", "encoding": "base64" }
+    }
+  },
   "expected_exception": null,
   "expected_exception_regex": null,
   "atol": 1e-8,
