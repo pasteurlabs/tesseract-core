@@ -7,6 +7,7 @@ import socket
 import numpy as np
 import pytest
 from common import build_tesseract, image_exists
+from pydantic import ValidationError
 
 from tesseract_core import Tesseract
 from tesseract_core.sdk import engine
@@ -91,18 +92,14 @@ def test_apply(built_image_name, dummy_tesseract_location, free_port, output_for
 
 
 def test_apply_with_error(built_image_name):
-    # pass two inputs with different shapes, which raises an internal error
+    # pass two inputs with different shapes, which raises a validation error
     inputs = {"a": [1, 2, 3], "b": [3, 4], "s": 1}
 
     with Tesseract.from_image(built_image_name) as vecadd:
-        with pytest.raises(RuntimeError) as excinfo:
+        with pytest.raises(ValidationError) as excinfo:
             vecadd.apply(inputs)
 
-    assert "assert a.shape == b.shape" in str(excinfo.value)
-
-    # get logs
-    logs = vecadd.server_logs()
-    assert "assert a.shape == b.shape" in logs
+    assert "a and b must have the same shape" in str(excinfo.value)
 
 
 @pytest.fixture(scope="module")
