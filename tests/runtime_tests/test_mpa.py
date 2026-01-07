@@ -189,93 +189,16 @@ def test_mlflow_backend_creation_fails_with_unreachable_server(dummy_mlflow_serv
         mpa._create_backend(None)
 
 
-def test_build_tracking_uri_with_credentials(dummy_mlflow_server):
-    update_config(
-        mlflow_tracking_uri=dummy_mlflow_server,
-        mlflow_tracking_username="testuser",
-        mlflow_tracking_password="testpass",
-    )
-    tracking_uri = mpa.MLflowBackend._build_tracking_uri()
-    # Extract host:port from dummy_mlflow_server
-    expected_uri = dummy_mlflow_server.replace("http://", "http://testuser:testpass@")
-    assert tracking_uri == expected_uri
-
-
-def test_build_tracking_uri_without_credentials(dummy_mlflow_server):
-    update_config(
-        mlflow_tracking_uri=dummy_mlflow_server,
-        mlflow_tracking_username="",
-        mlflow_tracking_password="",
-    )
-    tracking_uri = mpa.MLflowBackend._build_tracking_uri()
-    assert tracking_uri == dummy_mlflow_server
-
-
-def test_build_tracking_uri_url_encoded_credentials(dummy_mlflow_server):
-    # Use a dummy HTTPS URL for testing URL encoding
-    dummy_https_url = dummy_mlflow_server.replace("http://", "https://")
-    update_config(
-        mlflow_tracking_uri=dummy_https_url,
-        mlflow_tracking_username="user@example.com",
-        mlflow_tracking_password="p@ss:w0rd!",
-    )
-    tracking_uri = mpa.MLflowBackend._build_tracking_uri()
-    # Verify that special characters are URL-encoded
-    assert "user%40example.com" in tracking_uri
-    assert "p%40ss%3Aw0rd%21" in tracking_uri
-
-
-def test_build_tracking_uri_with_path_and_query(dummy_mlflow_server):
-    # Add path and query to dummy server URL
-    uri_with_path = f"{dummy_mlflow_server}/api/mlflow?param=value"
-    update_config(
-        mlflow_tracking_uri=uri_with_path,
-        mlflow_tracking_username="testuser",
-        mlflow_tracking_password="testpass",
-    )
-    tracking_uri = mpa.MLflowBackend._build_tracking_uri()
-    # Verify credentials are inserted correctly with path and query preserved
-    assert "testuser:testpass@" in tracking_uri
-    assert "/api/mlflow?param=value" in tracking_uri
-
-
-def test_build_tracking_uri_username_without_password(dummy_mlflow_server):
-    update_config(
-        mlflow_tracking_uri=dummy_mlflow_server,
-        mlflow_tracking_username="testuser",
-        mlflow_tracking_password="",
-    )
-    with pytest.raises(
-        RuntimeError,
-        match="If one of TESSERACT_MLFLOW_TRACKING_USERNAME and TESSERACT_MLFLOW_TRACKING_PASSWORD is defined",
-    ):
-        mpa.MLflowBackend._build_tracking_uri()
-
-
-def test_build_tracking_uri_password_without_username(dummy_mlflow_server):
-    update_config(
-        mlflow_tracking_uri=dummy_mlflow_server,
-        mlflow_tracking_username="",
-        mlflow_tracking_password="testpass",
-    )
-    with pytest.raises(
-        RuntimeError,
-        match="If one of TESSERACT_MLFLOW_TRACKING_USERNAME and TESSERACT_MLFLOW_TRACKING_PASSWORD is defined",
-    ):
-        mpa.MLflowBackend._build_tracking_uri()
-
-
-def test_build_tracking_uri_non_http_scheme_raises_error():
+def test_mlflow_non_http_scheme_raises_error(mocker):
     """Test that non-HTTP/HTTPS schemes raise an error."""
-    update_config(
-        mlflow_tracking_uri="sqlite:///mlflow.db",
-        mlflow_tracking_username="",
-        mlflow_tracking_password="",
-    )
+    # Mock to avoid actually trying to reach the server
+    mocker.patch.object(mpa.MLflowBackend, "_ensure_mlflow_reachable")
+
+    update_config(mlflow_tracking_uri="sqlite:///mlflow.db")
     with pytest.raises(
         ValueError, match="MLflow logging only supports accessing MLflow via HTTP/HTTPS"
     ):
-        mpa.MLflowBackend._build_tracking_uri()
+        mpa.MLflowBackend()
 
 
 def test_mlflow_run_extra_args(mocker, dummy_mlflow_server):
