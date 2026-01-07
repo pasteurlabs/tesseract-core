@@ -180,28 +180,36 @@ def test_log_artifact_missing_file():
         backend.log_artifact("non_existent_file.txt")
 
 
-def test_mlflow_backend_creation_fails_with_unreachable_server(dummy_mlflow_server):
-    """Test that MLflowBackend creation fails when server returns 400."""
-    update_config(mlflow_tracking_uri=dummy_mlflow_server)
+def test_mlflow_backend_creation_fails_with_unreachable_server():
+    """Test that MLflowBackend creation fails when server is unreachable."""
+    update_config(mlflow_tracking_uri="https://unreachable")
     with pytest.raises(
-        RuntimeError, match="Failed to connect to MLflow tracking server"
+        RuntimeError,
+        match="Failed to connect to MLflow tracking server at https://unreachable",
     ):
         mpa._create_backend(None)
 
 
-def test_mlflow_non_http_scheme_raises_error(mocker):
-    """Test that non-HTTP/HTTPS schemes raise an error."""
-    # Mock to avoid actually trying to reach the server
-    mocker.patch.object(mpa.MLflowBackend, "_ensure_mlflow_reachable")
+def test_mlflow_backend_creation_fails_with_bad_response(dummy_mlflow_server):
+    """Test that MLflowBackend creation fails when server returns 400."""
+    update_config(mlflow_tracking_uri=dummy_mlflow_server)
+    with pytest.raises(
+        RuntimeError, match="returned an error response: 400 Bad Request"
+    ):
+        mpa._create_backend(None)
 
+
+def test_mlflow_non_http_scheme_raises_error(dummy_mlflow_server):
+    """Test that non-HTTP/HTTPS schemes raise an error."""
     update_config(mlflow_tracking_uri="sqlite:///mlflow.db")
     with pytest.raises(
-        ValueError, match="MLflow logging only supports accessing MLflow via HTTP/HTTPS"
+        ValueError,
+        match="Tesseract only supports accessing MLflow server via HTTP/HTTPS",
     ):
         mpa.MLflowBackend()
 
 
-def test_mlflow_run_extra_args(mocker, dummy_mlflow_server):
+def test_mlflow_run_extra_args(mocker, mlflow_server):
     """Test passing a dict with basic tags."""
     pytest.importorskip("mlflow")
 
@@ -211,12 +219,7 @@ def test_mlflow_run_extra_args(mocker, dummy_mlflow_server):
     # Mock the mlflow module to avoid actual MLflow calls
     mocked_mlflow = mocker.patch("tesseract_core.runtime.mpa.mlflow")
 
-    # Mock the reachability check since dummy server returns 400
-    mocker.patch.object(mpa.MLflowBackend, "_ensure_mlflow_reachable")
-
-    update_config(
-        mlflow_tracking_uri=dummy_mlflow_server, mlflow_run_extra_args=kwargs_str
-    )
+    update_config(mlflow_tracking_uri=mlflow_server, mlflow_run_extra_args=kwargs_str)
 
     backend = mpa.MLflowBackend()
 

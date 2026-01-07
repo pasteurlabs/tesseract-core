@@ -149,30 +149,40 @@ class MLflowBackend(BaseBackend):
 
     def _ensure_mlflow_reachable(self, mlflow_tracking_uri: str) -> None:
         """Check if the MLflow tracking server is reachable."""
+        # Check for MLflow credentials in environment variables
+        username = os.environ.get("MLFLOW_TRACKING_USERNAME")
+        password = os.environ.get("MLFLOW_TRACKING_PASSWORD")
+
+        if (username and not password) or (password and not username):
+            raise RuntimeError(
+                "If one of MLFLOW_TRACKING_USERNAME and MLFLOW_TRACKING_PASSWORD is defined, "
+                "both must be defined."
+            )
+
+        auth = None
+        if username and password:
+            auth = (username, password)
+
         try:
-            # Check for MLflow credentials in environment variables
-            username = os.environ.get("MLFLOW_TRACKING_USERNAME")
-            password = os.environ.get("MLFLOW_TRACKING_PASSWORD")
-
-            if (username and not password) or (password and not username):
-                raise RuntimeError(
-                    "If one of MLFLOW_TRACKING_USERNAME and MLFLOW_TRACKING_PASSWORD is defined, "
-                    "both must be defined."
-                )
-
-            auth = None
-            if username and password:
-                auth = (username, password)
-
             response = requests.get(mlflow_tracking_uri, timeout=5, auth=auth)
             response.raise_for_status()
+        except requests.HTTPError as e:
+            raise RuntimeError(
+                f"MLflow tracking server at {mlflow_tracking_uri} returned an error response: "
+                f"{e.response.status_code} {e.response.reason}. "
+                "Please check that the server is configured correctly. "
+                "If your MLflow server has authentication enabled, please make sure that "
+                "MLFLOW_TRACKING_USERNAME and MLFLOW_TRACKING_PASSWORD are set correctly. "
+                "To switch to file-based logging instead, set TESSERACT_MLFLOW_TRACKING_URI "
+                "to an empty string."
+            ) from e
         except requests.RequestException as e:
             raise RuntimeError(
                 f"Failed to connect to MLflow tracking server at {mlflow_tracking_uri}. "
-                "Please make sure an MLflow server is running and TESSERACT_MLFLOW_TRACKING_URI is set correctly, "
-                "or switch to file-based logging by setting TESSERACT_MLFLOW_TRACKING_URI to an empty string. "
-                "If your MLflow server has authentication enabled, please make sure that "
-                "MLFLOW_TRACKING_USERNAME and MLFLOW_TRACKING_PASSWORD are set correctly."
+                "Please make sure an MLflow server is running at this address and "
+                "TESSERACT_MLFLOW_TRACKING_URI is set correctly. "
+                "To switch to file-based logging instead, set TESSERACT_MLFLOW_TRACKING_URI "
+                "to an empty string."
             ) from e
 
     def log_parameter(self, key: str, value: Any) -> None:
