@@ -9,6 +9,8 @@ All notable changes to this project will be documented in this file.
 - *(sdk)* Change default Python SDK `output_format` to b64 for performance reasons (#422)
 - Add ability to specify mlflow tag for tesseract (#426)
 - Remove unused tesseract-dir option and fixture (#436)
+- Expose docker memory limit to CLI and Python API (#429)
+- Add mlflow as default (#428)
 
 ### Bug Fixes
 
