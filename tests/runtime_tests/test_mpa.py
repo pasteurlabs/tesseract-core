@@ -211,8 +211,6 @@ def test_mlflow_non_http_scheme_raises_error(dummy_mlflow_server):
 
 def test_mlflow_run_extra_args(mocker, mlflow_server):
     """Test passing a dict with basic tags."""
-    pytest.importorskip("mlflow")
-
     kwargs = {"tags": {"env": "prod", "team": "ml"}}
     kwargs_str = repr(kwargs)
 
