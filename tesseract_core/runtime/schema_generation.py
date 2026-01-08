@@ -136,6 +136,10 @@ def apply_function_to_model_tree(
             model_config = ConfigDict(**default_model_config)
             model_config.update(treeobj.model_config)
 
+            # Make sure that reconstructed RootModels don't contain unsupported 'extra' config.
+            if safe_issubclass(treeobj, RootModel):
+                model_config.pop("extra", None)
+
             return create_model(
                 f"{model_prefix}{treeobj.__name__}",
                 **new_fields,

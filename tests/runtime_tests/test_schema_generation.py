@@ -8,7 +8,7 @@ from typing import Annotated, Optional
 
 import numpy as np
 import pytest
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, RootModel, ValidationError
 
 from tesseract_core.runtime import Array, Differentiable, Float32, Float64, Int64, UInt8
 from tesseract_core.runtime.experimental import LazySequence
@@ -25,6 +25,10 @@ class SubModel(BaseModel):
     bar: list[Differentiable[Array[..., Int64]]]
 
 
+class SubRootModel(RootModel):
+    root: Float32
+
+
 class NestedModel(BaseModel):
     testdiffarr: Differentiable[Array[(5, None), Float64]]
     testfoo: list[SubModel] | None
@@ -33,6 +37,7 @@ class NestedModel(BaseModel):
     testset: set[int]
     testtuple: tuple[int, str]
     testlazysequence: LazySequence[tuple[str, Differentiable[Array[(None,), Float32]]]]
+    testrootmodel: SubRootModel
 
 
 def make_array(shape, dtype):
@@ -63,6 +68,7 @@ testinput = NestedModel(
         ("a", make_array((3,), "float32")),
         ("b", make_array((4,), "float32")),
     ],
+    testrootmodel=2.3,
 ).model_dump(
     mode="json",
     # This encoding simplifies how replace_arrays works.
