@@ -89,7 +89,9 @@ def build_tesseract(
     print_debug_info(result)
     assert result.exit_code == 0, result.exception
 
-    image_tag = json.loads(result.stdout.strip())[0]
+    # Parse the last line of stdout which contains the JSON array of image tags
+    stdout_lines = result.stdout.strip().split("\n")
+    image_tag = json.loads(stdout_lines[-1])[0]
 
     # This raise an error if the image does not exist
     client.images.get(image_tag)
