@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.3.0] - 2026-01-08
+
+### Features
+
+- *(sdk)* Change default Python SDK `output_format` to b64 for performance reasons (#422)
+- Add ability to specify mlflow tag for tesseract (#426)
+- Remove unused tesseract-dir option and fixture (#436)
+- Expose docker memory limit to CLI and Python API (#429)
+- Add mlflow as default (#428)
+
+### Bug Fixes
+
+- Add port to serve command in multi-helloworld readme (#421)
+- Reachability check uses mlflow username/password if provided (#416)
+- Use mlflow env variables directly for mlflow auth (#434)
+- Ensure container users always exist (#427)
+- Allow `RootModel`s in apply schema endpoints (#440)
+
+### Documentation
+
+- Point SI definition to pasteurlabs technology (#413)
+- Add mlflow auth information to docs (#417)
+- Update docstring and tesseract input/output handling (#412)
+
 ## [1.2.0] - 2025-12-04
 
 ### Features

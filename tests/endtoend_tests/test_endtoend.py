@@ -6,12 +6,12 @@
 import json
 import os
 import shutil
-import sqlite3
 import subprocess
 import uuid
 from pathlib import Path
 from textwrap import dedent
 
+import mlflow
 import numpy as np
 import pytest
 import requests
@@ -202,6 +202,27 @@ def test_tesseract_run_stdout(cli_runner, built_image_name):
             raise
 
 
+def test_run_with_memory(cli_runner, built_image_name):
+    """Ensure we can run a Tesseract command with memory limits."""
+    run_res = cli_runner.invoke(
+        app,
+        [
+            "run",
+            built_image_name,
+            "health",
+            "--memory",
+            "512m",
+        ],
+        catch_exceptions=False,
+    )
+    assert run_res.exit_code == 0, run_res.stderr
+    assert run_res.stdout
+
+    # Verify the command executed successfully
+    result = json.loads(run_res.stdout)
+    assert result["status"] == "ok"
+
+
 @pytest.mark.parametrize("user", [None, "root", "1000:1000"])
 def test_run_as_user(cli_runner, docker_client, built_image_name, user, docker_cleanup):
     """Ensure we can run a basic Tesseract image as any user."""
@@ -231,6 +252,39 @@ def test_run_as_user(cli_runner, docker_client, built_image_name, user, docker_c
 
     assert exit_code == 0
     assert output.decode("utf-8").strip() == str(expected_user)
+
+
+@pytest.mark.parametrize("memory", ["512m", "1g", "256m"])
+def test_serve_with_memory(
+    cli_runner, docker_client, built_image_name, memory, docker_cleanup
+):
+    """Ensure we can serve a Tesseract with memory limits."""
+    run_res = cli_runner.invoke(
+        app,
+        [
+            "serve",
+            built_image_name,
+            "--memory",
+            memory,
+        ],
+        catch_exceptions=False,
+    )
+    assert run_res.exit_code == 0, run_res.stderr
+
+    serve_meta = json.loads(run_res.stdout)
+    container = docker_client.containers.get(serve_meta["container_name"])
+    docker_cleanup["containers"].append(container)
+
+    # Verify memory limit was set on container
+    container_inspect = docker_client.containers.get(container.id)
+    memory_limit = container_inspect.attrs["HostConfig"]["Memory"]
+
+    # Convert memory string to bytes for comparison
+    memory_value = int(memory[:-1])
+    memory_unit = memory[-1].lower()
+    expected_bytes = memory_value * (1024**2 if memory_unit == "m" else 1024**3)
+
+    assert memory_limit == expected_bytes
 
 
 def test_tesseract_serve_pipeline(
@@ -1089,26 +1143,27 @@ def test_mpa_file_backend(tmpdir, mpa_test_image):
         assert artifact_data == "Test artifact content"
 
 
-@pytest.mark.parametrize("user", [None, "root", "12579:12579"])
-def test_mpa_mlflow_backend(mpa_test_image, tmpdir, user):
-    """Test the MPA (Metrics, Parameters, and Artifacts) submodule with MLflow backend."""
-    if user not in (None, "root"):
-        Path(tmpdir).chmod(0o777)
+def test_mpa_mlflow_backend(mlflow_server, mpa_test_image):
+    """Test the MPA (Metrics, Parameters, and Artifacts) submodule with MLflow backend, using a local MLflow server."""
+    # Hardcode some values specific to docker-compose config in extra/mlflow/mlflow-docker-compose.yaml
 
-    # Point MLflow to a local directory
+    # Inside containers, tracking URIs look like http://{service_name}:{internal_port}
+    mlflow_server_local = "http://mlflow-server:5000"
+    # Network name as specified in MLflow docker compose config
+    network_name = "tesseract-mlflow-server"
+
+    # Run the Tesseract, logging to running MLflow server
     run_cmd = [
         "tesseract",
         "run",
+        "--network",
+        network_name,
         "--env",
-        "TESSERACT_MLFLOW_TRACKING_URI=mlflow.db",
-        *(["--user", user] if user else []),
+        f"TESSERACT_MLFLOW_TRACKING_URI={mlflow_server_local}",
         mpa_test_image,
         "apply",
         '{"inputs": {}}',
-        "--output-path",
-        tmpdir,
     ]
-
     run_res = subprocess.run(
         run_cmd,
         capture_output=True,
@@ -1116,36 +1171,46 @@ def test_mpa_mlflow_backend(mpa_test_image, tmpdir, user):
     )
     assert run_res.returncode == 0, run_res.stderr
 
-    # Check for MLflow database file
-    mlflow_db_path = Path(tmpdir) / "mlflow.db"
-    assert mlflow_db_path.exists(), "Expected MLflow database file to exist"
+    # Use MLflow client to verify content was logged
+    mlflow.set_tracking_uri(mlflow_server)
 
-    # Query the database to verify content was logged
-    with sqlite3.connect(str(mlflow_db_path)) as conn:
-        cursor = conn.cursor()
+    # Get the most recent run (the one we just created)
+    from mlflow.tracking import MlflowClient
 
-        # Check parameters were logged
-        cursor.execute("SELECT key, value FROM params")
-        params = dict(cursor.fetchall())
-        assert params["test_parameter"] == "test_param"
-        assert params["steps_config"] == "5"  # MLflow stores params as strings
+    client = MlflowClient()
 
-        # Check metrics were logged
-        cursor.execute("SELECT key, value, step FROM metrics ORDER BY step")
-        metrics = cursor.fetchall()
-        assert len(metrics) == 5
+    # Get the default experiment (experiment_id="0")
+    experiment = client.get_experiment("0")
+    assert experiment is not None, "Default experiment not found"
 
-        # Verify some of the squared_step values
-        squared_metrics = [m for m in metrics if m[0] == "squared_step"]
-        assert len(squared_metrics) == 5
-        assert squared_metrics[0] == ("squared_step", 0.0, 0)
-        assert squared_metrics[1] == ("squared_step", 1.0, 1)
-        assert squared_metrics[4] == ("squared_step", 16.0, 4)
+    runs = client.search_runs(experiment_ids=[experiment.experiment_id])
+    assert len(runs) > 0, "No runs found in MLflow"
 
-        # Check artifacts were logged (MLflow stores artifact info in runs table)
-        cursor.execute("SELECT artifact_uri FROM runs")
-        artifact_uris = [row[0] for row in cursor.fetchall()]
-        assert len(artifact_uris) > 0  # At least one run with artifacts
+    # Get the most recent run
+    print(runs)
+    run = runs[0]
+    run_id = run.info.run_id
+
+    # Check parameters were logged
+    params = run.data.params
+    assert params["test_parameter"] == "test_param"
+    assert params["steps_config"] == "5"  # MLflow stores params as strings
+
+    # Check metrics were logged
+    metrics_history = client.get_metric_history(run_id, "squared_step")
+    assert len(metrics_history) == 5
+
+    # Verify some of the squared_step values
+    assert metrics_history[0].value == 0.0
+    assert metrics_history[0].step == 0
+    assert metrics_history[1].value == 1.0
+    assert metrics_history[1].step == 1
+    assert metrics_history[4].value == 16.0
+    assert metrics_history[4].step == 4
+
+    # Check artifacts were logged
+    artifacts = client.list_artifacts(run_id)
+    assert len(artifacts) > 0, "Expected at least one artifact to be logged"
 
 
 def test_multi_helloworld_endtoend(
