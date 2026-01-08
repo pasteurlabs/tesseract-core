@@ -13,9 +13,9 @@ dependencies:
   - python-gmsh==4.13.1
   - pip
   - pip:
-    - setuptools
-    - wheel
-    - fenics-basix==0.9.0
-    - pyfiglet==1.0.3
-    - jax[cpu]==0.5.3
-    - jax-fem==0.0.9
+      - setuptools
+      - wheel
+      - fenics-basix==0.9.0
+      - pyfiglet==1.0.3
+      - jax[cpu]==0.5.3
+      - jax-fem==0.0.9

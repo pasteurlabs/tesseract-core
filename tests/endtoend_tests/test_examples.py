@@ -791,6 +791,19 @@ TEST_CASES = {
     "tesseractreference": Config(  # Can't test requests standalone; needs target Tesseract. Covered in separate test.
         test_with_random_inputs=False, sample_requests=[]
     ),
+    "userhandling": Config(
+        test_with_random_inputs=False,
+        sample_requests=[
+            SampleRequest(
+                endpoint="apply",
+                payload={"inputs": {}},
+                output_contains_pattern=[
+                    '"home":"/tesseract"',
+                    '"username":"tesseract-user"',
+                ],
+            )
+        ],
+    ),
 }
 
 

@@ -207,8 +207,8 @@ jobs:
         unit-tesseract: ${{ fromJson(needs.get-e2e-matrix.outputs.matrix) }}
 
         exclude:
-        - arch: x64
-          unit-tesseract: "pyvista-arm64"
+          - arch: x64
+            unit-tesseract: "pyvista-arm64"
 
         include:
           # Test on arm to ensure compatibility with Apple M1 chips
@@ -351,7 +351,6 @@ jobs:
         run: |
           uv pip install jupyter
           uv run --no-sync jupyter nbconvert --to notebook --execute demo.ipynb
-
 
   all-ok:
     if: always()

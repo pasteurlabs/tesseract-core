@@ -5,6 +5,7 @@ This showcase demonstrates an end-to-end workflow for building QoI-based surroga
 ## Overview
 
 This workflow implements a **QoI-based surrogate modeling pipeline** that:
+
 1. Processes Ansys simulation runs (CAD files + simulation results)
 2. Extracts point clouds, CAD parameters, boundary conditions, and Quantities of Interest (QoI)
 3. Trains hybrid ML models (PointNet + Random Forest) to predict QoI
@@ -32,6 +33,7 @@ The workflow consists of three Tesseract components:
 |   (Inference)    |  -> Generates QoI predictions
 +------------------+
 ```
+
 ## Input Data
 
 The workflow expects **Ansys simulation runs** in the following structure:
@@ -49,6 +51,7 @@ inputs/Ansys_Runs/
 ```
 
 Each simulation run directory should contain:
+
 - **CAD file** (`.stl` format): 3D geometry for point cloud sampling
 - **Boundary condition data**: Parameters varied across simulations
 - **CAD parameters**: Parameters used during the CAD design process
@@ -57,6 +60,7 @@ Each simulation run directory should contain:
 ## Configuration
 
 Each component uses a `config.yaml` file in `inputs/config.yaml` that specifies:
+
 - Point cloud sampling strategy
 - Parameter extraction rules
 - QoI definitions
@@ -77,11 +81,13 @@ python workflow.py
 ```
 
 This will:
+
 1. Process all Ansys runs into NPZ datasets
 2. Train QoI-based surrogate models on the dataset
 3. Run inference using the latest trained model
 
 **Output locations:**
+
 - Dataset: `outputs/dataset/*.npz`
 - Models: `outputs/models/experiment_hybrid_YYYYMMDD_HHMMSS/`
 - Predictions: `outputs/predictions_YYYYMMDD_HHMMSS.csv`
@@ -99,6 +105,7 @@ python main.py
 ```
 
 **What it does:**
+
 - Samples point clouds from CAD files (`.stl`)
 - Extracts boundary condition parameters
 - Extracts CAD sketch design parameters
@@ -118,6 +125,7 @@ python main.py
 ```
 
 **What it does:**
+
 - Loads NPZ dataset files
 - Creates train/val/test splits
 - Fits data scaler
@@ -126,6 +134,7 @@ python main.py
 - Saves trained models and scalers
 
 **Outputs:**
+
 - `outputs/models/experiment_hybrid_YYYYMMDD_HHMMSS/`
   - `models/hybrid_pointnet_small.pkl` - Trained model weights
   - `scaler.pkl` - Data normalization scaler
@@ -143,10 +152,65 @@ python main.py
 ```
 
 **What it does:**
+
 - Loads trained model and scaler
 - Processes input geometries
 - Generates QoI predictions
 - Saves predictions to CSV
 
 **Outputs:**
+
 - `outputs/predictions_YYYYMMDD_HHMMSS.csv`
+
+### GPU Acceleration
+
+By default, this workflow runs on CPU, which is sufficient for the included sample dataset (5 samples). For larger datasets or production workloads, GPU acceleration is recommended for the `qoi_train` and `qoi_inference` components.
+
+#### Prerequisites
+
+- NVIDIA GPU with CUDA support
+- NVIDIA Container Toolkit installed on the host system
+
+#### Configuration Steps
+
+**1. Update Base Image**
+
+Modify the `tesseract_config.yaml` file in both `qoi_train` and `qoi_inference` components to use a CUDA-enabled base image:
+
+```yaml
+build_config:
+  base_image: "nvidia/cuda:12.8.1-runtime-ubuntu24.04"
+  # ... rest of configuration
+```
+
+**2. Configure PyTorch with CUDA Support**
+
+Update the `scripts/pyproject.toml` file in both components to install GPU-enabled PyTorch packages:
+
+```toml
+dependencies = [
+    "torch",
+    "torchvision",
+    # ... other dependencies
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
+torchvision = { index = "pytorch-cu128" }
+```
+
+**3. Enable GPU Access During Execution**
+
+When running the workflow, use the `--gpus` flag to grant GPU access to the containers:
+
+```bash
+tesseract run --gpus all qoi_train
+tesseract run --gpus all qoi_inference
+```
+
+For more details on GPU configuration options, see the [Tesseract CLI documentation](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/api/tesseract-cli.html#cmdoption-tesseract-run-gpus).

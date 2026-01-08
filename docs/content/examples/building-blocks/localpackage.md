@@ -1,13 +1,14 @@
 # Installing local Python modules into a Tesseract
 
 ## Context
+
 Sometimes it might be necessary to bundle local Python modules into a Tesseract.
 
 There are 2 ways to do this:
 
 1. Make them a proper Python package with `pyproject.toml` and add the local path to the `tesseract_requirements.txt` file.
-Both absolute and relative paths work, but in case they are relative paths, they should be
-relative to the Tesseract's root folder (i.e., the one which contains the `tesseract_api.py` file).
+   Both absolute and relative paths work, but in case they are relative paths, they should be
+   relative to the Tesseract's root folder (i.e., the one which contains the `tesseract_api.py` file).
 2. Just put them as `.py` files next to `tesseract_api.py` and add them to `build_config.package_data` (see also [packagedata.md]) in `tesseract_config.yaml` to make sure they're being included in container builds.
 
 ## Example Tesseract
@@ -81,11 +82,13 @@ Successfully downloaded cowsay
 ```
 
 We can then specify it as a local dependency in `tesseract_requirements.txt` by adding the following line:
+
 ```
 ./cowsay-6.1-py3-none-any.whl
 ```
 
 Finally, let's build the Tesseract, and verify it works
+
 ```bash
 $ tesseract build mytess
  [i] Building image ...

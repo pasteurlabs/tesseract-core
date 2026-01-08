@@ -177,7 +177,7 @@ Now that we have defined the Tesseract we can use it. From within the Tesseract'
 $ tesseract-runtime serve --host 0.0.0.0 --port 443
 ```
 
-We can now test the Tesseract manually by sending an HTTP request for two grid fin geometries either from the same computer, as shown here, or via the network. __Make sure to change the URL IP and port to reflect your setup, along with the SpaceClaim.exe path__:
+We can now test the Tesseract manually by sending an HTTP request for two grid fin geometries either from the same computer, as shown here, or via the network. **Make sure to change the URL IP and port to reflect your setup, along with the SpaceClaim.exe path**:
 
 ```bash
 # Bash

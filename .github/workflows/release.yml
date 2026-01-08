@@ -14,7 +14,7 @@ on:
   # Case 2: release PR is being updated -> update changelog
   push:
     branches:
-      - 'bot/release/*'
+      - "bot/release/*"
 
   # Case 3: release PR is merged -> create a new release
   pull_request:
@@ -60,23 +60,23 @@ jobs:
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v8
         with:
-            token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
-            committer: PasteurBot <${{ vars.PL_PASTEURBOT_EMAIL }}>
-            author: PasteurBot <${{ vars.PL_PASTEURBOT_EMAIL }}>
-            commit-message: "chore: update changelog"
-            title: "chore: 🚢 release ${{ steps.generate_changelog.outputs.new_version }}"
-            branch: bot/release/${{ steps.generate_changelog.outputs.new_version }}
-            draft: false
-            base: main
-            add-paths: CHANGELOG.md
-            body: |
-              This PR contains the generated changelog for the release ${{ steps.generate_changelog.outputs.new_version }}.
+          token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
+          committer: PasteurBot <${{ vars.PL_PASTEURBOT_EMAIL }}>
+          author: PasteurBot <${{ vars.PL_PASTEURBOT_EMAIL }}>
+          commit-message: "chore: update changelog"
+          title: "chore: 🚢 release ${{ steps.generate_changelog.outputs.new_version }}"
+          branch: bot/release/${{ steps.generate_changelog.outputs.new_version }}
+          draft: false
+          base: main
+          add-paths: CHANGELOG.md
+          body: |
+            This PR contains the generated changelog for the release ${{ steps.generate_changelog.outputs.new_version }}.
 
-              ⚠️ **Merging this PR will immediately trigger a new release**. ⚠️
+            ⚠️ **Merging this PR will immediately trigger a new release**. ⚠️
 
-              To specify additional release notes, please edit this comment after the following line.
+            To specify additional release notes, please edit this comment after the following line.
 
-              ---
+            ---
 
   update-pr:
     runs-on: ubuntu-latest

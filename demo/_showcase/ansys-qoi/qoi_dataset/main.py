@@ -4,24 +4,24 @@ from tesseract_core import Tesseract
 
 if __name__ == "__main__":
     # Ensure output folder exists
-    local_outputs = Path(__file__).parent.resolve() / "outputs"
-    local_outputs.mkdir(parents=True, exist_ok=True)
-
-    here = Path("/tesseract/")
-    CONFIG = here / "inputs/config.yaml"
-    SIM_FOLDER = here / "inputs/Ansys_Runs"
+    here = Path(__file__).parent.resolve()
     OUTPUT_DIR = here / "outputs"
-    DATASET_FOLDER = OUTPUT_DIR / "dataset"
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    CONFIG = "config.yaml"
+    SIM_FOLDER = "Ansys_Runs"
+    DATASET_FOLDER = "dataset"
 
     inputs = {
-        "config": str(CONFIG),
-        "sim_folder": str(SIM_FOLDER),
-        "dataset_folder": str(DATASET_FOLDER),
+        "config": CONFIG,
+        "sim_folder": SIM_FOLDER,
+        "dataset_folder": DATASET_FOLDER,
     }
 
     qoi_dataset = Tesseract.from_image(
         "qoi_dataset",
-        volumes=["./inputs:/tesseract/inputs:ro", "./outputs:/tesseract/outputs:rw"],
+        input_path="./inputs",
+        output_path="./outputs",
     )
 
     with qoi_dataset:

@@ -29,7 +29,7 @@ param_expressions:
   design_table:
     enabled: true
     type: "select"
-    expression: ['d13', 'd72', 'd61', 'd34']
+    expression: ["d13", "d72", "d61", "d34"]
 
   bc:
     enabled: true
@@ -44,7 +44,7 @@ qoi_expressions:
   pressure_ratio:
     enabled: false
     type: "ratio"
-    numerator: ["area_pressure_outlet", "outlet"]  # Patterns to match in QoI names
+    numerator: ["area_pressure_outlet", "outlet"] # Patterns to match in QoI names
     denominator: ["area_pressure_inlet", "inlet"]
 
   pressure_drop:
@@ -71,7 +71,7 @@ qoi_expressions:
   velocity_uniformity:
     enabled: false
     type: "select"
-    patterns: ["p1-plane_area_velocity_uniformity"]  # Select specific QoI by pattern
+    patterns: ["p1-plane_area_velocity_uniformity"] # Select specific QoI by pattern
 
   custom_metric:
     enabled: false
@@ -81,7 +81,12 @@ qoi_expressions:
   all_metrics:
     enabled: true
     type: "select"
-    patterns: ['inlet_all_pressure', 'outlet_all_pressure', 'p2-plane_all_pressure', 'p3-plane_all_pressure']  # Use all QoIs as separate metrics
+    patterns: [
+        "inlet_all_pressure",
+        "outlet_all_pressure",
+        "p2-plane_all_pressure",
+        "p3-plane_all_pressure",
+      ] # Use all QoIs as separate metrics
 
 random_seed: 70
 
