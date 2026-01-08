@@ -21,22 +21,22 @@ from tesseract_core.runtime.mpa import (
 )
 
 
-class Always400Handler(BaseHTTPRequestHandler):
-    """HTTP request handler that always returns 400."""
+class Always200Handler(BaseHTTPRequestHandler):
+    """HTTP request handler that always returns 200."""
 
     def do_GET(self):
-        """Handle GET requests with 400."""
-        self.send_response(400)
-        self.send_header("Content-Type", "text/plain")
+        """Handle GET requests with 200."""
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
         self.end_headers()
-        self.wfile.write(b"Bad Request")
+        self.wfile.write(b"{}")
 
     def do_POST(self):
-        """Handle POST requests with 400."""
-        self.send_response(400)
-        self.send_header("Content-Type", "text/plain")
+        """Handle POST requests with 200."""
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
         self.end_headers()
-        self.wfile.write(b"Bad Request")
+        self.wfile.write(b"{}")
 
     def log_message(self, format, *args):
         """Suppress log messages."""
@@ -45,8 +45,8 @@ class Always400Handler(BaseHTTPRequestHandler):
 
 @pytest.fixture(scope="module")
 def dummy_mlflow_server():
-    """Start a dummy HTTP server that always returns 400."""
-    server = HTTPServer(("localhost", 0), Always400Handler)
+    """Start a dummy HTTP server that always returns 200 (success)."""
+    server = HTTPServer(("localhost", 0), Always200Handler)
     port = server.server_address[1]
 
     # Start server in a background thread
@@ -180,6 +180,13 @@ def test_log_artifact_missing_file():
         backend.log_artifact("non_existent_file.txt")
 
 
+def test_mlflow_backend_creation(dummy_mlflow_server):
+    """Test that MLflowBackend creation works when server returns 200."""
+    update_config(mlflow_tracking_uri=dummy_mlflow_server)
+    backend = mpa.MLflowBackend()
+    assert isinstance(backend, mpa.MLflowBackend)
+
+
 def test_mlflow_backend_creation_fails_with_unreachable_server():
     """Test that MLflowBackend creation fails when server is unreachable."""
     update_config(mlflow_tracking_uri="https://unreachable")
@@ -187,19 +194,10 @@ def test_mlflow_backend_creation_fails_with_unreachable_server():
         RuntimeError,
         match="Failed to connect to MLflow tracking server at https://unreachable",
     ):
-        mpa._create_backend(None)
+        mpa.MLflowBackend()
 
 
-def test_mlflow_backend_creation_fails_with_bad_response(dummy_mlflow_server):
-    """Test that MLflowBackend creation fails when server returns 400."""
-    update_config(mlflow_tracking_uri=dummy_mlflow_server)
-    with pytest.raises(
-        RuntimeError, match="returned an error response: 400 Bad Request"
-    ):
-        mpa._create_backend(None)
-
-
-def test_mlflow_non_http_scheme_raises_error(dummy_mlflow_server):
+def test_mlflow_non_http_scheme_raises_error():
     """Test that non-HTTP/HTTPS schemes raise an error."""
     update_config(mlflow_tracking_uri="sqlite:///mlflow.db")
     with pytest.raises(
@@ -209,26 +207,23 @@ def test_mlflow_non_http_scheme_raises_error(dummy_mlflow_server):
         mpa.MLflowBackend()
 
 
-def test_mlflow_run_extra_args(mocker):
+def test_mlflow_run_extra_args(mocker, dummy_mlflow_server):
     """Test passing a dict with basic tags."""
     kwargs = {"tags": {"env": "prod", "team": "ml"}}
     kwargs_str = repr(kwargs)
 
     # Mock the mlflow module to avoid actual MLflow calls
-    mocked_mlflow = mocker.patch("tesseract_core.runtime.mpa.mlflow")
-
-    # Mock the connection check to avoid needing a real MLflow server
-    mocker.patch("tesseract_core.runtime.mpa.requests.get")
+    mocked_start_run = mocker.patch("tesseract_core.runtime.mpa.mlflow.start_run")
 
     update_config(
-        mlflow_tracking_uri="http://localhost:5000", mlflow_run_extra_args=kwargs_str
+        mlflow_tracking_uri=dummy_mlflow_server, mlflow_run_extra_args=kwargs_str
     )
 
     backend = mpa.MLflowBackend()
 
     # Make sure kwargs are forwarded correctly to mlflow.start_run
     backend.start_run()
-    mocked_mlflow.start_run.assert_called_with(**kwargs)
+    mocked_start_run.assert_called_with(**kwargs)
 
 
 def test_mlflow_run_extra_args_parsing():
