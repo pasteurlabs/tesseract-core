@@ -153,6 +153,19 @@ def test_run_gpu(mocked_docker):
     assert res["device_requests"] == ["all"]
 
 
+def test_run_memory(mocked_docker):
+    """Test running a tesseract with memory limit."""
+    res_out, _ = engine.run_tesseract(
+        "foobar",
+        "apply",
+        ['{"inputs": {"a": [1, 2, 3], "b": [4, 5, 6]}}'],
+        memory="512m",
+    )
+
+    res = json.loads(res_out)
+    assert res["memory"] == "512m"
+
+
 def test_run_tesseract_file_input(mocked_docker, tmpdir):
     """Test running a tesseract with file input / output."""
     outdir = Path(tmpdir) / "output"
@@ -273,6 +286,24 @@ def test_serve_tesseracts(mocked_docker):
 
     # Teardown valid
     engine.teardown(json.loads(container_name_multi_tesseract)["name"])
+
+    # Serve with memory
+    container_name_with_memory, _ = engine.serve("vectoradd", memory="512m")
+    assert container_name_with_memory
+
+    # Teardown valid
+    engine.teardown(json.loads(container_name_with_memory)["name"])
+
+
+def test_serve_memory(mocked_docker):
+    """Test serving a tesseract with memory limit."""
+    res, _ = engine.serve(
+        "foobar",
+        memory="2g",
+    )
+
+    res = json.loads(res)
+    assert res["memory"] == "2g"
 
 
 def test_serve_tesseract_volumes(mocked_docker, tmpdir):

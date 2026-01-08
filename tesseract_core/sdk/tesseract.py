@@ -83,6 +83,7 @@ class Tesseract:
         gpus: list[str] | None = None,
         num_workers: int = 1,
         user: str | None = None,
+        memory: str | None = None,
         input_path: str | Path | None = None,
         output_path: str | Path | None = None,
         output_format: Literal["json", "json+base64"] = "json+base64",
@@ -112,6 +113,7 @@ class Tesseract:
             num_workers: number of workers to use for serving the Tesseracts.
             user: user to run the Tesseracts as, e.g. '1000' or '1000:1000' (uid:gid).
                 Defaults to the current user.
+            memory: Memory limit for the container (e.g., "512m", "2g"). Minimum allowed is 6m.
             input_path: Input path to read input files from, such as local directory or S3 URI.
             output_path: Output path to write output files to, such as local directory or S3 URI.
             output_format: Format to use for the output data (json+binref not yet supported).
@@ -140,6 +142,7 @@ class Tesseract:
             network=network,
             network_alias=network_alias,
             user=user,
+            memory=memory,
             input_path=input_path,
             output_path=output_path,
             output_format=output_format,
