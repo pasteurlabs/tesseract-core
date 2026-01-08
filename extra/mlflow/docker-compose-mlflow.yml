@@ -28,7 +28,7 @@ services:
     volumes:
       - mlflow-data:/mlflow-data:rw
     ports:
-      - 5000:5000
+      - 5000
     depends_on:
       mlflow-init:
         condition: service_completed_successfully

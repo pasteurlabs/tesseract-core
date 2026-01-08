@@ -42,20 +42,10 @@ Alternatively, you can log metrics and artifacts to an MLflow server by setting 
 docker-compose -f extra/mlflow/docker-compose-mlflow.yml up
 ```
 
-This MLflow server shows logged items in the MLflow GUI at `http://localhost:5000`.
-
-Launch the `metrics` example Tesseract with the the following volume mount and `TESSERACT_MLFLOW_TRACKING_URI` to ensure that it connects to that MLflow server. Note that your Tesseract now needs to declare `mlflow` as a required package in its `requirements.txt` file.
-
-MacOS and Windows with Docker Desktop requires the `host.docker.internal` hostname to access services running on the host machine:
+Launch the `metrics` example Tesseract with the the following volume mount, network and `TESSERACT_MLFLOW_TRACKING_URI` to ensure that it connects to that MLflow server.
 
 ```bash
-tesseract serve --env=TESSERACT_MLFLOW_TRACKING_URI=http://host.docker.internal:5000 --volume mlflow-data:/mlflow-data:rw metrics
-```
-
-For Linux, set your Tesseracts to use the host network and access the MLflow server at `localhost`:
-
-```bash
-tesseract serve --env=TESSERACT_MLFLOW_TRACKING_URI=http://localhost:5000 --network=host --volume mlflow-data:/mlflow-data:rw metrics
+tesseract serve --network=tesseract-mlflow-server --env=TESSERACT_MLFLOW_TRACKING_URI=http://mlflow-server:5000 --volume mlflow-data:/mlflow-data:rw metrics
 ```
 
 The same options apply when executing Tesseracts through `tesseract run`.
