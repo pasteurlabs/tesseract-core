@@ -118,6 +118,7 @@ def test_serve_lifecycle(mock_serving, mock_clients):
         network_alias=None,
         host_ip="127.0.0.1",
         user=None,
+        memory=None,
         input_path=None,
         output_path=None,
         output_format="json+base64",
