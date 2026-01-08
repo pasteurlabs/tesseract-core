@@ -1,6 +1,7 @@
 # Interacting with Tesseracts
 
 ## Viewing Running Tesseracts
+
 In order to view all Tesseracts that are running, you can run the following command:
 
 ```bash
@@ -31,21 +32,25 @@ and so on.
 ::::{tab-set}
 :::{tab-item} CLI
 :sync: cli
+
 ```bash
 $ tesseract run vectoradd apply @examples/vectoradd/example_inputs.json
 {"result":{"object_type":"array","shape":[3],"dtype":"float64","data":{"buffer":[5.0,7.0,9.0],"encoding":"json"}}}
 ```
 
 Where the `example_inputs.json` passed as input just contains the following:
+
 ```{literalinclude} ../../../examples/vectoradd/example_inputs.json
 :caption: example_inputs.json
 ```
 
 Notice the `@` before the filename in the command payload. This tells the CLI to read the file and
 use it as input to the Tesseract. You can also provide a JSON string in place of this:
+
 ```bash
 $ tesseract run vectoradd apply '{"inputs": {"a": ..., "b": ...}}'
 ```
+
 This can be useful for small input payloads, but it can become quite cumbersome very quickly.
 
 :::
@@ -55,6 +60,7 @@ Make sure that the Tesseract is running as a service (`docker ps`). Otherwise, l
 it via `tesseract serve vectoradd`.
 
 You can then simply curl its `/apply` endpoint
+
 ```bash
 $ curl http://<tesseract-address>:<port>/apply \ # Replace with actual address
   -H "Content-Type: application/json" \
@@ -63,12 +69,15 @@ $ curl http://<tesseract-address>:<port>/apply \ # Replace with actual address
 ```
 
 Where the payload `example_inputs.json` we POST to the `/apply` endpoint is the following:
+
 ```{literalinclude} ../../../examples/vectoradd/example_inputs.json
 :caption: example_inputs.json
 ```
+
 :::
 :::{tab-item} Python
 :sync: python
+
 ```python
 >>> import numpy as np
 >>> from tesseract_core import Tesseract
@@ -84,7 +93,7 @@ Where the payload `example_inputs.json` we POST to the `/apply` endpoint is the 
 The [Tesseract](#tesseract_core.Tesseract) context manager will spin up
 a Tesseract locally, and tear it down once the context is exited.
 
-```{tip} You can also instantiate a Tesseract object which connects to
+````{tip} You can also instantiate a Tesseract object which connects to
 a remote Tesseract via `Tesseract.from_url(...)`.```
 :::
 ::::
@@ -104,24 +113,30 @@ on the `a` vector, at $a = (1,2,3)$, $b = (4,5,6)$:
 ```bash
 $ tesseract run vectoradd jacobian @examples/vectoradd/example_jacobian_inputs.json
 {"result":{"a":{"object_type":"array","shape":[3,3],"dtype":"float64","data":{"buffer":[[3.0,0.0,0.0],[0.0,3.0,0.0],[0.0,0.0,3.0]],"encoding":"json"}}}}
-```
+````
+
 :::
 :::{tab-item} REST API
 :sync: http
+
 ```bash
 $ curl -d @examples/vectoradd/example_jacobian_inputs.json \
   -H "Content-Type: application/json" \
   http://<tesseract-address>:<port>/jacobian
 {"result":{"a":{"object_type":"array","shape":[3,3],"dtype":"float64","data":{"buffer":[[1.0,0.0,0.0],[0.0,1.0,0.0],[0.0,0.0,1.0]],"encoding":"json"}}}}
 ```
+
 The payload we posted contains information about which inputs and outputs we want to consider
 when computing derivatives:
+
 ```{literalinclude} ../../../examples/vectoradd/example_jacobian_inputs.json
 :caption: example_jacobian_inputs.json
 ```
+
 :::
 :::{tab-item} Python
 :sync: python
+
 ```python
 >>> import numpy as np
 >>> from tesseract_core import Tesseract
@@ -135,6 +150,7 @@ when computing derivatives:
        [0., 1., 0.],
        [0., 0., 1.]])}}
 ```
+
 :::
 ::::
 
@@ -148,6 +164,7 @@ available in a given Tesseract, you can look at the docs at the `/docs` endpoint
 ...     print(vectoradd.available_endpoints)
 ['apply', 'jacobian', 'health']
 ```
+
 :::
 ::::
 
@@ -160,23 +177,29 @@ you can use the following:
 ::::{tab-set}
 :::{tab-item} CLI
 :sync: cli
+
 ```bash
 $ tesseract run vectoradd openapi-schema
 ```
+
 :::
 :::{tab-item} REST API
 :sync: http
+
 ```bash
 $ curl <tesseract-address>:<port>/openapi.json
 ```
+
 :::
 :::{tab-item} Python
 :sync: python
+
 ```python
 >>> from tesseract_core import Tesseract
 >>> with Tesseract(image="vectoradd") as vectoradd:
 >>>     schema = vectoradd.openapi_schema
 ```
+
 :::
 ::::
 

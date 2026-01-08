@@ -1,15 +1,15 @@
 version: 2
 
 updates:
-- package-ecosystem: github-actions
-  directory: "/"
-  schedule:
-    interval: "weekly"
-    day: "monday"
-    timezone: "America/New_York"
-  open-pull-requests-limit: 10
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      timezone: "America/New_York"
+    open-pull-requests-limit: 10
 
-  groups:
-    actions:
-      patterns:
-      - "*"
+    groups:
+      actions:
+        patterns:
+          - "*"
