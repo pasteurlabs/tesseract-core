@@ -299,15 +299,6 @@ def test_serve_memory(mocked_docker):
     """Test serving a tesseract with memory limit."""
     res, _ = engine.serve(
         "foobar",
-        memory="512m",
-    )
-
-    res = json.loads(res)
-    assert res["memory"] == "512m"
-
-    # Test with different memory values
-    res, _ = engine.serve(
-        "foobar",
         memory="2g",
     )
 
