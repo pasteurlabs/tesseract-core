@@ -202,6 +202,27 @@ def test_tesseract_run_stdout(cli_runner, built_image_name):
             raise
 
 
+def test_run_with_memory(cli_runner, built_image_name):
+    """Ensure we can run a Tesseract command with memory limits."""
+    run_res = cli_runner.invoke(
+        app,
+        [
+            "run",
+            built_image_name,
+            "health",
+            "--memory",
+            "512m",
+        ],
+        catch_exceptions=False,
+    )
+    assert run_res.exit_code == 0, run_res.stderr
+    assert run_res.stdout
+
+    # Verify the command executed successfully
+    result = json.loads(run_res.stdout)
+    assert result["status"] == "ok"
+
+
 @pytest.mark.parametrize("user", [None, "root", "1000:1000"])
 def test_run_as_user(cli_runner, docker_client, built_image_name, user, docker_cleanup):
     """Ensure we can run a basic Tesseract image as any user."""
@@ -231,6 +252,39 @@ def test_run_as_user(cli_runner, docker_client, built_image_name, user, docker_c
 
     assert exit_code == 0
     assert output.decode("utf-8").strip() == str(expected_user)
+
+
+@pytest.mark.parametrize("memory", ["512m", "1g", "256m"])
+def test_serve_with_memory(
+    cli_runner, docker_client, built_image_name, memory, docker_cleanup
+):
+    """Ensure we can serve a Tesseract with memory limits."""
+    run_res = cli_runner.invoke(
+        app,
+        [
+            "serve",
+            built_image_name,
+            "--memory",
+            memory,
+        ],
+        catch_exceptions=False,
+    )
+    assert run_res.exit_code == 0, run_res.stderr
+
+    serve_meta = json.loads(run_res.stdout)
+    container = docker_client.containers.get(serve_meta["container_name"])
+    docker_cleanup["containers"].append(container)
+
+    # Verify memory limit was set on container
+    container_inspect = docker_client.containers.get(container.id)
+    memory_limit = container_inspect.attrs["HostConfig"]["Memory"]
+
+    # Convert memory string to bytes for comparison
+    memory_value = int(memory[:-1])
+    memory_unit = memory[-1].lower()
+    expected_bytes = memory_value * (1024**2 if memory_unit == "m" else 1024**3)
+
+    assert memory_limit == expected_bytes
 
 
 def test_tesseract_serve_pipeline(
