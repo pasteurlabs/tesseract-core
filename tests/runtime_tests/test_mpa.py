@@ -209,7 +209,7 @@ def test_mlflow_non_http_scheme_raises_error(dummy_mlflow_server):
         mpa.MLflowBackend()
 
 
-def test_mlflow_run_extra_args(mocker, mlflow_server):
+def test_mlflow_run_extra_args(mocker):
     """Test passing a dict with basic tags."""
     kwargs = {"tags": {"env": "prod", "team": "ml"}}
     kwargs_str = repr(kwargs)
@@ -217,7 +217,12 @@ def test_mlflow_run_extra_args(mocker, mlflow_server):
     # Mock the mlflow module to avoid actual MLflow calls
     mocked_mlflow = mocker.patch("tesseract_core.runtime.mpa.mlflow")
 
-    update_config(mlflow_tracking_uri=mlflow_server, mlflow_run_extra_args=kwargs_str)
+    # Mock the connection check to avoid needing a real MLflow server
+    mocker.patch("tesseract_core.runtime.mpa.requests.get")
+
+    update_config(
+        mlflow_tracking_uri="http://localhost:5000", mlflow_run_extra_args=kwargs_str
+    )
 
     backend = mpa.MLflowBackend()
 
