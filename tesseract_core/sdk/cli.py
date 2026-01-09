@@ -94,7 +94,16 @@ POSSIBLE_CMDS = set(
     re.sub(r"([a-z])([A-Z])", r"\1-\2", object.name).replace("_", "-").lower()
     for object in EXPECTED_OBJECTS
 )
-POSSIBLE_CMDS.update({"health", "openapi-schema", "check", "check-gradients", "serve"})
+POSSIBLE_CMDS.update(
+    {
+        "health",
+        "openapi-schema",
+        "check",
+        "check-gradients",
+        "regress",
+        "serve",
+    }
+)
 
 # All fields in TesseractConfig and TesseractBuildConfig for config override
 POSSIBLE_KEYPATHS = TesseractConfig.model_fields.keys()
@@ -1050,6 +1059,61 @@ def run_container(
 
     if payload is not None:
         args.append(payload)
+
+    # For regress command, extract cli_config from test spec if available
+    # This allows test specs to be self-contained without requiring manual -i/-o flags
+    if cmd == "regress" and payload is not None and payload.startswith("@"):
+        test_spec_path = Path(payload.lstrip("@")).resolve()
+        if test_spec_path.is_file():
+            try:
+                with open(test_spec_path) as f:
+                    test_spec = json.load(f)
+                    cli_config = test_spec.get("cli_config", {})
+
+                    # Use cli_config.input_path if user didn't provide -i
+                    # Resolve relative paths relative to the test spec's directory
+                    if input_path is None and "input_path" in cli_config:
+                        config_input_path = cli_config["input_path"]
+                        # Resolve relative to test spec's parent directory
+                        # (test specs are usually in <tesseract>/test_cases/)
+                        if not Path(config_input_path).is_absolute():
+                            # Assuming test spec is in test_cases/, go up 2 levels to tesseract root
+                            # then resolve the relative path from there
+                            test_spec_dir = test_spec_path.parent
+                            tesseract_root = test_spec_dir.parent
+                            input_path = str(tesseract_root / config_input_path)
+                        else:
+                            input_path = config_input_path
+
+                    # Use cli_config.volume_mounts if user didn't provide -v
+                    # Resolve relative source paths relative to the test spec's directory
+                    if volume is None and "volume_mounts" in cli_config:
+                        volume = []
+                        test_spec_dir = test_spec_path.parent
+                        tesseract_root = test_spec_dir.parent
+
+                        for vol_mount in cli_config["volume_mounts"]:
+                            # Parse volume mount (format: source:target or source:target:mode)
+                            parts = vol_mount.split(":")
+                            if len(parts) >= 2:
+                                source = parts[0]
+                                # Resolve relative source paths
+                                if not Path(source).is_absolute():
+                                    source = str(tesseract_root / source)
+                                # Reconstruct volume mount with resolved source
+                                parts[0] = source
+                                volume.append(":".join(parts))
+                            else:
+                                # Invalid format, skip
+                                pass
+
+                    # Future: Use cli_config.output_path if user didn't provide -o
+                    # if output_path is None and "output_path" in cli_config:
+                    #     output_path = cli_config["output_path"]
+            except (OSError, json.JSONDecodeError, KeyError):
+                # If we can't read cli_config, just continue without it
+                # The test spec will be validated later by the runtime
+                pass
 
     try:
         result_out, result_err = engine.run_tesseract(

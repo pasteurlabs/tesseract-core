@@ -1,0 +1,13 @@
+{
+  "inputs": {
+    "vertices": {
+      "object_type": "array",
+      "shape": [3, 3],
+      "dtype": "float64",
+      "data": {
+        "buffer": "AAAAAAAA8D8AAAAAAAAAQAAAAAAAAAhAAAAAAAAAEEAAAAAAAAAUQAAAAAAAABhAAAAAAAAAHEAAAAAAAAAgQAAAAAAAACJA",
+        "encoding": "base64"
+      }
+    }
+  }
+}
