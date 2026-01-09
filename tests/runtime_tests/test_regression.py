@@ -3,15 +3,12 @@
 
 """Tests for regression testing utilities."""
 
-import json
-
 import numpy as np
 import pytest
 
 from tesseract_core.runtime.testing.regression import (
     _array_discrepancy_msg,
     _validate_tree_structure,
-    iter_regression_tests,
     regress_test_case,
 )
 
@@ -380,49 +377,6 @@ class TestTestSpec:
                 inputs={"a": 1},
                 expected_exception=123,
             )
-
-
-class TestIterRegressionTests:
-    """Tests for iter_regression_tests iterator."""
-
-    def test_multiple_files(self, tmp_path, dummy_tesseract_module):
-        """Test iter_regression_tests with multiple test files."""
-        # Create test files
-        test_dir = tmp_path / "tests"
-        test_dir.mkdir()
-
-        # Passing test - JSON lists will be converted to numpy arrays by Pydantic
-        test1 = test_dir / "test1.json"
-        test1.write_text(
-            json.dumps(
-                {
-                    "endpoint": "apply",
-                    "inputs": {"inputs": {"a": [1.0, 2.0], "b": [3.0, 4.0], "s": 1}},
-                    "expected_outputs": {"result": [4.0, 6.0]},
-                }
-            )
-        )
-
-        # Failing test
-        test2 = test_dir / "test2.json"
-        test2.write_text(
-            json.dumps(
-                {
-                    "endpoint": "apply",
-                    "inputs": {"inputs": {"a": [1.0], "b": [2.0], "s": 1}},
-                    "expected_outputs": {
-                        "result": [999.0]  # Wrong values
-                    },
-                }
-            )
-        )
-
-        results = list(iter_regression_tests(dummy_tesseract_module, test_dir))
-
-        assert len(results) == 2
-        assert results[0].status == "passed"
-        assert results[1].status == "failed"
-        assert "Values are not sufficiently close" in results[1].message
 
 
 class TestArrayDiscrepancyMsg:

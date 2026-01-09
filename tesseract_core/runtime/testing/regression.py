@@ -3,9 +3,8 @@
 
 """Regression testing utilities for Tesseract endpoints."""
 
-import json
 import re
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Literal, NamedTuple
@@ -19,7 +18,6 @@ from pydantic import (
     model_validator,
 )
 
-from ..core import create_endpoints
 from ..schema_generation import DICT_INDEX_SENTINEL, get_all_model_path_patterns
 from .common import get_input_schema, get_output_schema
 
@@ -584,97 +582,3 @@ def regress_test_case(
         raise AssertionError(
             "Values are not sufficiently close.\n\n" + "\n\n".join(discrepancies)
         )
-
-
-def iter_regression_tests(
-    api_module: ModuleType,
-    *test_case_paths: Path,
-    base_dir: Path | None = None,
-    threshold: int = 100,
-) -> Iterator[RegressionTestResult]:
-    """Iteratively run regression tests from multiple test case paths.
-
-    This function yields test results as they complete, allowing for streaming
-    progress indicators (e.g., pytest-like ".....F...E..x" output).
-
-    Args:
-        api_module: Module containing the Tesseract API.
-        *test_case_paths: Paths to .json test files or directories containing them.
-            Directories are recursively searched for .json files.
-        base_dir: Optional base directory for resolving relative paths in schemas.
-        threshold: Maximum number of array discrepancies to display in error messages.
-
-    Yields:
-        RegressionTestResult for each test case, with status "passed", "failed", or "error".
-
-    Raises:
-        ValueError: If no test files are found or paths are invalid.
-        FileNotFoundError: If a specified path does not exist.
-
-    Example:
-        >>> import my_tesseract_module
-        >>> for result in iter_regression_tests(my_tesseract_module, Path("tests/")):
-        ...     if result.status == "passed":
-        ...         print(f"✓ {result.test_file.name}")
-        ...     else:
-        ...         print(f"✗ {result.test_file.name}: {result.message}")
-    """
-    # Get available endpoints
-    endpoint_functions = {func.__name__: func for func in create_endpoints(api_module)}
-
-    # Test for existence and expand directories to json files
-    test_files: list[Path] = []
-    for path in test_case_paths:
-        if path.is_file():
-            if path.suffix == ".json":
-                test_files.append(path)
-            else:
-                raise ValueError(
-                    f"Test case path must be a .json file or directory: {path}"
-                )
-        elif path.is_dir():
-            test_files.extend(sorted(path.glob("*.json")))
-        else:
-            raise FileNotFoundError(f"Test case path does not exist: {path}")
-
-    if not test_files:
-        raise ValueError("No test files found in provided paths")
-
-    for test_file in test_files:
-        try:
-            with open(test_file) as f:
-                spec = json.load(f)
-            endpoint = spec["endpoint"]
-        except KeyError:
-            yield RegressionTestResult(
-                test_file,
-                "unknown",
-                "error",
-                "Endpoint not specified, this is mandatory.",
-            )
-            continue
-        except Exception as e:
-            # If we can't even read the file, report as error
-            yield RegressionTestResult(
-                test_file, "unknown", "error", f"Failed to read test file: {e}"
-            )
-            continue
-
-        try:
-            regress_test_case(
-                api_module,
-                endpoint_functions,
-                TestSpec(**spec),
-                base_dir=base_dir,
-                threshold=threshold,
-            )
-            status = "passed"
-            error_msg = ""
-        except AssertionError as e:
-            status = "failed"
-            error_msg = str(e)
-        except Exception as e:
-            # Unexpected error - bug in test or code
-            status = "error"
-            error_msg = f"{type(e).__name__}: {e}"
-        yield RegressionTestResult(test_file, endpoint, status, error_msg)
