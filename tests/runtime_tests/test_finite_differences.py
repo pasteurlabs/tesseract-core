@@ -3,9 +3,9 @@ from types import ModuleType
 import numpy as np
 import pytest
 from pydantic import BaseModel
+from tesseract_core.runtime.finite_differences import check_gradients
 
 from tesseract_core.runtime import Array, Differentiable, Float32
-from tesseract_core.runtime.testing.finite_differences import iter_gradient_checks
 from tesseract_core.runtime.tree_transforms import get_at_path
 
 
@@ -110,7 +110,7 @@ input_data = {
 def test_check_gradients(input_paths, output_paths, endpoints):
     dummy_module_bad = DummyModule("dummy_module", correct_gradients=False)
 
-    result_iter = iter_gradient_checks(
+    result_iter = check_gradients(
         dummy_module_bad,
         {"inputs": input_data},
         base_dir=None,
@@ -132,7 +132,7 @@ def test_check_gradients(input_paths, output_paths, endpoints):
 
     # Now try again with correct gradients
     dummy_module_good = DummyModule("dummy_module", correct_gradients=True)
-    result_iter = iter_gradient_checks(
+    result_iter = check_gradients(
         dummy_module_good,
         {"inputs": input_data},
         base_dir=None,
