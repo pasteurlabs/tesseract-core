@@ -27,11 +27,6 @@ repos:
       - id: trailing-whitespace
         additional_dependencies: [--isolated]
 
-  - repo: https://github.com/henryiii/validate-pyproject-schema-store
-    rev: 2025.11.21
-    hooks:
-      - id: validate-pyproject
-
   - repo: https://github.com/astral-sh/ruff-pre-commit
     # Ruff version.
     rev: v0.14.9
