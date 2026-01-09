@@ -386,7 +386,7 @@ def check_endpoint_gradients(
     return failures, num_evals
 
 
-def iter_gradient_checks(
+def check_gradients(
     api_module: ModuleType,
     inputs: dict[str, Any],
     *,
