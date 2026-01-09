@@ -457,7 +457,7 @@ def _create_user_defined_cli_command(
                         param_hint="payload",
                     ) from e
             else:
-                # For dict InputSchema (e.g., gen_test_spec), pass payload directly
+                # For dict InputSchema, pass payload directly
                 user_function_args["payload"] = payload
 
         if output_path:

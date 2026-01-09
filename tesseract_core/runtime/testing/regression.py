@@ -29,7 +29,7 @@ ROWFORMAT = "{:>15s}  {:>20s}  {:>20s}  {:>20s}\n"
 class TestCliConfig(BaseModel):
     """CLI configuration overrides for test execution.
 
-    Contains original CLI arguments passed to gen-test-spec.
+    Contains original CLI arguments for test configuration.
     Only includes safe config options that don't pose security risks.
     """
 
@@ -101,7 +101,7 @@ class TestSpec(BaseModel):
     def serialize_model(self) -> dict:
         """Custom serializer to handle exception types.
 
-        Arrays should already be encoded in json+base64 format by gen_test_spec.
+        Arrays should already be encoded in the appropriate format (e.g., json+base64).
         """
         result = {
             "endpoint": self.endpoint,

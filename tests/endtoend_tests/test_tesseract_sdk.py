@@ -20,7 +20,6 @@ expected_endpoints = {
     "jacobian_vector_product",
     "vector_jacobian_product",
     "regress",
-    "gen_test_spec",
 }
 
 
@@ -130,10 +129,9 @@ def served_tesseract_module(dummy_tesseract_location):
     yield vecadd
 
 
-# gen_test_spec endpoint not supported in Python API
 @pytest.mark.parametrize(
     "endpoint_name",
-    sorted((expected_endpoints | {"openapi_schema"}) - {"gen_test_spec"}),
+    sorted(expected_endpoints | {"openapi_schema"}),
 )
 def test_all_endpoints(
     endpoint_name,

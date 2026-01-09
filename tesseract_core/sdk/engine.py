@@ -4,7 +4,6 @@
 """Engine to power Tesseract commands."""
 
 import datetime
-import json
 import linecache
 import logging
 import optparse
@@ -841,18 +840,6 @@ def run_tesseract(
     if environment is None:
         environment = {}
     environment.update(volume_environment)
-
-    # For gen-test-spec, pass CLI config as JSON so it can be captured in TestSpec
-    if command == "gen-test-spec":
-        cli_config = {}
-        if input_path:
-            cli_config["input_path"] = str(input_path)
-        if volumes:
-            cli_config["volume_mounts"] = volumes
-        # Future: add output_path, etc. here
-
-        if cli_config:  # Only set if non-empty
-            environment["TESSERACT_CLI_CONFIG"] = json.dumps(cli_config)
 
     if output_format:
         environment["TESSERACT_OUTPUT_FORMAT"] = output_format

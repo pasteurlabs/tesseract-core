@@ -54,7 +54,6 @@ def test_Tesseract_from_tesseract_api(dummy_tesseract_location, dummy_tesseract_
         "health",
         "abstract_eval",
         "regress",
-        "gen_test_spec",
     ]
 
     t = Tesseract.from_tesseract_api(dummy_tesseract_location / "tesseract_api.py")
@@ -370,33 +369,3 @@ def test_regress_with_exception_type_local(dummy_tesseract_package):
             "expected_exception": ValidationError,  # Type, not string
         }
     )
-
-
-def test_gen_test_spec_local(dummy_tesseract_package):
-    """Test gen_test_spec endpoint via LocalClient."""
-    tess = Tesseract.from_tesseract_api(dummy_tesseract_package / "tesseract_api.py")
-
-    payload = {
-        "inputs": {
-            "a": np.array([1.0, 2.0], dtype=np.float32),
-            "b": np.array([3.0, 4.0], dtype=np.float32),
-            "s": 2,
-        }
-    }
-
-    result = tess._client.run_tesseract("gen_test_spec", payload)
-
-    # Should return a TestSpec-like dict
-    assert result["endpoint"] == "apply"
-    assert result["inputs"] == payload
-    assert "expected_outputs" in result
-    assert "result" in result["expected_outputs"]
-    assert result["atol"] == 1e-8
-    assert result["rtol"] == 1e-5
-
-    # Can be used directly with regress - should not raise
-    tess.regress(result)
-
-    # Verify it actually passes the regress test
-    regress_result = tess._client.run_tesseract("regress", result)
-    assert regress_result["status"] == "passed"

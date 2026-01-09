@@ -100,7 +100,6 @@ POSSIBLE_CMDS.update(
         "openapi-schema",
         "check",
         "check-gradients",
-        "gen-test-spec",
         "regress",
         "serve",
     }
