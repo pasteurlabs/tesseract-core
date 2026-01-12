@@ -1,6 +1,5 @@
 {
   "endpoint": "apply",
-  "inputs": { "inputs": {} },
   "expected_outputs": {
     "uid": 501,
     "gid": 20,
@@ -11,5 +10,8 @@
   "expected_exception": null,
   "expected_exception_regex": null,
   "atol": 10000,
-  "rtol": 0.00001
+  "rtol": 1e-5,
+  "payload": {
+    "inputs": {}
+  }
 }

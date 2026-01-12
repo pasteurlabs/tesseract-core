@@ -1,16 +1,24 @@
 {
   "endpoint": "apply",
-  "inputs": { "inputs": { "x": 0.0, "y": 0.0 } },
   "expected_outputs": {
     "result": {
       "object_type": "array",
       "shape": [],
       "dtype": "float32",
-      "data": { "buffer": "AACAPw==", "encoding": "base64" }
+      "data": {
+        "buffer": "AACAPw==",
+        "encoding": "base64"
+      }
     }
   },
   "expected_exception": null,
   "expected_exception_regex": null,
   "atol": 1e-8,
-  "rtol": 0.00001
+  "rtol": 1e-5,
+  "payload": {
+    "inputs": {
+      "x": 0.0,
+      "y": 0.0
+    }
+  }
 }

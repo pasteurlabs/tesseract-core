@@ -1,6 +1,21 @@
 {
   "endpoint": "apply",
-  "inputs": {
+  "expected_outputs": {
+    "result": {
+      "object_type": "array",
+      "shape": [3],
+      "dtype": "float64",
+      "data": {
+        "buffer": "AAAAAAAAFEAAAAAAAAAcQAAAAAAAACJA",
+        "encoding": "base64"
+      }
+    }
+  },
+  "expected_exception": null,
+  "expected_exception_regex": null,
+  "atol": 1e-8,
+  "rtol": 1e-5,
+  "payload": {
     "inputs": {
       "a": {
         "object_type": "array",
@@ -21,20 +36,5 @@
         }
       }
     }
-  },
-  "expected_outputs": {
-    "result": {
-      "object_type": "array",
-      "shape": [3],
-      "dtype": "float64",
-      "data": {
-        "buffer": "AAAAAAAAFEAAAAAAAAAcQAAAAAAAACJA",
-        "encoding": "base64"
-      }
-    }
-  },
-  "expected_exception": null,
-  "expected_exception_regex": null,
-  "atol": 1e-8,
-  "rtol": 0.00001
+  }
 }

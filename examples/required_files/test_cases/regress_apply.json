@@ -1,10 +1,17 @@
 {
   "endpoint": "apply",
-  "inputs": { "inputs": {} },
-  "expected_outputs": { "a": 1.0, "b": 100.0 },
+  "expected_outputs": {
+    "a": 1.0,
+    "b": 100.0
+  },
   "expected_exception": null,
   "expected_exception_regex": null,
   "atol": 1e-8,
-  "rtol": 0.00001,
-  "cli_config": { "input_path": "input" }
+  "rtol": 1e-5,
+  "cli_config": {
+    "input_path": "input"
+  },
+  "payload": {
+    "inputs": {}
+  }
 }

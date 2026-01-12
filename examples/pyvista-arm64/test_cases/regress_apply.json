@@ -1,18 +1,5 @@
 {
   "endpoint": "apply",
-  "inputs": {
-    "inputs": {
-      "vertices": {
-        "object_type": "array",
-        "shape": [3, 3],
-        "dtype": "float64",
-        "data": {
-          "buffer": "AAAAAAAA8D8AAAAAAAAAQAAAAAAAAAhAAAAAAAAAEEAAAAAAAAAUQAAAAAAAABhAAAAAAAAAHEAAAAAAAAAgQAAAAAAAACJA",
-          "encoding": "base64"
-        }
-      }
-    }
-  },
   "expected_outputs": {
     "pv_mesh": {
       "dimensions": [3, 1, 1],
@@ -25,5 +12,18 @@
   "expected_exception": null,
   "expected_exception_regex": null,
   "atol": 1e-8,
-  "rtol": 0.00001
+  "rtol": 1e-5,
+  "payload": {
+    "inputs": {
+      "vertices": {
+        "object_type": "array",
+        "shape": [3, 3],
+        "dtype": "float64",
+        "data": {
+          "buffer": "AAAAAAAA8D8AAAAAAAAAQAAAAAAAAAhAAAAAAAAAEEAAAAAAAAAUQAAAAAAAABhAAAAAAAAAHEAAAAAAAAAgQAAAAAAAACJA",
+          "encoding": "base64"
+        }
+      }
+    }
+  }
 }

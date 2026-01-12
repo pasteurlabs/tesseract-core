@@ -1,6 +1,11 @@
 {
   "endpoint": "jacobian",
-  "inputs": {
+  "expected_outputs": null,
+  "expected_exception": "ValidationError",
+  "expected_exception_regex": null,
+  "atol": 1e-8,
+  "rtol": 1e-5,
+  "payload": {
     "inputs": {
       "a": {
         "object_type": "array",
@@ -23,10 +28,5 @@
     },
     "jac_inputs": ["invalid", "inputs"],
     "jac_outputs": ["result"]
-  },
-  "expected_outputs": null,
-  "expected_exception": "ValidationError",
-  "expected_exception_regex": null,
-  "atol": 1e-8,
-  "rtol": 0.00001
+  }
 }

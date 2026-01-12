@@ -1,10 +1,5 @@
 {
   "endpoint": "apply",
-  "inputs": {
-    "inputs": {
-      "data": "@/tesseract/input_data/sample_*.json"
-    }
-  },
   "expected_outputs": {
     "data": [
       {
@@ -116,5 +111,10 @@
     "volume_mounts": [
       "/Users/jonathanbrodrick/pasteurcodes/tesseract-core/examples/dataloader/testdata:/tesseract/input_data:ro"
     ]
+  },
+  "payload": {
+    "inputs": {
+      "data": "@/tesseract/input_data/sample_*.json"
+    }
   }
 }

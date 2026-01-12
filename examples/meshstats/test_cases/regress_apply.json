@@ -1,6 +1,16 @@
 {
   "endpoint": "apply",
-  "inputs": {
+  "expected_outputs": {
+    "statistics": {
+      "first_point_coordinates": [0.0, 666.0, 0.0],
+      "barycenter": [0.5, 133.6999969482422, 0.20000000298023224]
+    }
+  },
+  "expected_exception": null,
+  "expected_exception_regex": null,
+  "atol": 1e-8,
+  "rtol": 1e-5,
+  "payload": {
     "inputs": {
       "mesh": {
         "n_points": 5,
@@ -18,7 +28,10 @@
           "object_type": "array",
           "shape": [2],
           "dtype": "int64",
-          "data": { "buffer": "BAAAAAAAAAAEAAAAAAAAAA==", "encoding": "base64" }
+          "data": {
+            "buffer": "BAAAAAAAAAAEAAAAAAAAAA==",
+            "encoding": "base64"
+          }
         },
         "cell_connectivity": {
           "object_type": "array",
@@ -71,15 +84,5 @@
         }
       }
     }
-  },
-  "expected_outputs": {
-    "statistics": {
-      "first_point_coordinates": [0.0, 666.0, 0.0],
-      "barycenter": [0.5, 133.6999969482422, 0.20000000298023224]
-    }
-  },
-  "expected_exception": null,
-  "expected_exception_regex": null,
-  "atol": 1e-8,
-  "rtol": 0.00001
+  }
 }

@@ -1,6 +1,21 @@
 {
   "endpoint": "jacobian_vector_product",
-  "inputs": {
+  "expected_outputs": {
+    "vector_add.result": {
+      "object_type": "array",
+      "shape": [3],
+      "dtype": "float32",
+      "data": {
+        "buffer": "AAAAPwAAgD8AAMA/",
+        "encoding": "base64"
+      }
+    }
+  },
+  "expected_exception": null,
+  "expected_exception_regex": null,
+  "atol": 1e-8,
+  "rtol": 1e-5,
+  "payload": {
     "inputs": {
       "a": {
         "v": {
@@ -29,18 +44,8 @@
     },
     "jvp_inputs": ["a.s"],
     "jvp_outputs": ["vector_add.result"],
-    "tangent_vector": { "a.s": 0.5 }
-  },
-  "expected_outputs": {
-    "vector_add.result": {
-      "object_type": "array",
-      "shape": [3],
-      "dtype": "float32",
-      "data": { "buffer": "AAAAPwAAgD8AAMA/", "encoding": "base64" }
+    "tangent_vector": {
+      "a.s": 0.5
     }
-  },
-  "expected_exception": null,
-  "expected_exception_regex": null,
-  "atol": 1e-8,
-  "rtol": 0.00001
+  }
 }

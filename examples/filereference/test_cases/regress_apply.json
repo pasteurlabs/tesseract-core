@@ -1,21 +1,5 @@
 {
   "endpoint": "apply",
-  "inputs": {
-    "inputs": {
-      "data": [
-        "sample_0.json",
-        "sample_1.json",
-        "sample_2.json",
-        "sample_3.json",
-        "sample_4.json",
-        "sample_5.json",
-        "sample_6.json",
-        "sample_7.json",
-        "sample_8.json",
-        "sample_9.json"
-      ]
-    }
-  },
   "expected_outputs": {
     "data": [
       "sample_0.copy",
@@ -33,6 +17,24 @@
   "expected_exception": null,
   "expected_exception_regex": null,
   "atol": 1e-8,
-  "rtol": 0.00001,
-  "cli_config": { "input_path": "examples/filereference/testdata/" }
+  "rtol": 1e-5,
+  "cli_config": {
+    "input_path": "examples/filereference/testdata/"
+  },
+  "payload": {
+    "inputs": {
+      "data": [
+        "sample_0.json",
+        "sample_1.json",
+        "sample_2.json",
+        "sample_3.json",
+        "sample_4.json",
+        "sample_5.json",
+        "sample_6.json",
+        "sample_7.json",
+        "sample_8.json",
+        "sample_9.json"
+      ]
+    }
+  }
 }

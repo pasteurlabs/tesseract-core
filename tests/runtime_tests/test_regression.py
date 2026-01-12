@@ -186,7 +186,7 @@ class TestRegressTestCase:
 
         test_spec = TestSpec(
             endpoint="apply",
-            inputs={
+            payload={
                 "inputs": {
                     "a": np.array([1.0, 2.0, 3.0], dtype=np.float32),
                     "b": np.array([4.0, 5.0, 6.0], dtype=np.float32),
@@ -210,7 +210,7 @@ class TestRegressTestCase:
 
         test_spec = TestSpec(
             endpoint="apply",
-            inputs={
+            payload={
                 "inputs": {
                     "a": np.array([1.0, 2.0], dtype=np.float32),
                     "b": np.array([4.0, 5.0], dtype=np.float32),
@@ -237,7 +237,7 @@ class TestRegressTestCase:
         # Store pre-validated dict for easy mutation
         test_spec_dict = {
             "endpoint": "apply",
-            "inputs": {
+            "payload": {
                 "inputs": {
                     "a": np.array([1.0, 2.0]),
                     "b": np.array([4.0]),  # Wrong shape - triggers AssertionError
@@ -270,7 +270,7 @@ class TestRegressTestCase:
 
         test_spec = TestSpec(
             endpoint="apply",
-            inputs={
+            payload={
                 "inputs": {
                     "a": np.array([1.0, 2.0]),
                     "b": np.array([4.0]),  # Wrong shape - triggers AssertionError
@@ -296,7 +296,7 @@ class TestTestSpec:
         with pytest.raises(ValueError, match="Cannot specify both"):
             TestSpec(
                 endpoint="apply",
-                inputs={"a": 1},
+                payload={"a": 1},
                 expected_outputs={"result": 2},
                 expected_exception=ValueError,
             )
@@ -305,13 +305,13 @@ class TestTestSpec:
         with pytest.raises(ValueError, match="Must specify either"):
             TestSpec(
                 endpoint="apply",
-                inputs={"a": 1},
+                payload={"a": 1},
             )
 
         # Only expected_outputs - should pass
         spec = TestSpec(
             endpoint="apply",
-            inputs={"a": 1},
+            payload={"a": 1},
             expected_outputs={"result": 2},
         )
         assert spec.expected_outputs == {"result": 2}
@@ -320,7 +320,7 @@ class TestTestSpec:
         # Only expected_exception - should pass
         spec = TestSpec(
             endpoint="apply",
-            inputs={"a": 1},
+            payload={"a": 1},
             expected_exception=ValueError,
         )
         assert spec.expected_exception is ValueError
@@ -333,7 +333,7 @@ class TestTestSpec:
         # String exception name
         spec = TestSpec(
             endpoint="apply",
-            inputs={"a": 1},
+            payload={"a": 1},
             expected_exception="ValueError",
         )
         assert spec.expected_exception is ValueError
@@ -341,7 +341,7 @@ class TestTestSpec:
         # Exception type directly
         spec = TestSpec(
             endpoint="apply",
-            inputs={"a": 1},
+            payload={"a": 1},
             expected_exception=ValueError,
         )
         assert spec.expected_exception is ValueError
@@ -349,7 +349,7 @@ class TestTestSpec:
         # ValidationError (from pydantic)
         spec = TestSpec(
             endpoint="apply",
-            inputs={"a": 1},
+            payload={"a": 1},
             expected_exception="ValidationError",
         )
         from pydantic import ValidationError
@@ -366,7 +366,7 @@ class TestTestSpec:
         with pytest.raises(ValueError, match="Unknown exception type"):
             TestSpec(
                 endpoint="apply",
-                inputs={"a": 1},
+                payload={"a": 1},
                 expected_exception="NonExistentException",
             )
 
@@ -374,7 +374,7 @@ class TestTestSpec:
         with pytest.raises(TypeCheckError):
             TestSpec(
                 endpoint="apply",
-                inputs={"a": 1},
+                payload={"a": 1},
                 expected_exception=123,
             )
 

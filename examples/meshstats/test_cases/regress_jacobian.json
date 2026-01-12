@@ -1,6 +1,37 @@
 {
   "endpoint": "jacobian",
-  "inputs": {
+  "expected_outputs": {
+    "statistics.barycenter": {
+      "mesh.points": [
+        [
+          [0.2, 0.0, 0.0],
+          [0.2, 0.0, 0.0],
+          [0.2, 0.0, 0.0],
+          [0.2, 0.0, 0.0],
+          [0.2, 0.0, 0.0]
+        ],
+        [
+          [0.0, 0.2, 0.0],
+          [0.0, 0.2, 0.0],
+          [0.0, 0.2, 0.0],
+          [0.0, 0.2, 0.0],
+          [0.0, 0.2, 0.0]
+        ],
+        [
+          [0.0, 0.0, 0.2],
+          [0.0, 0.0, 0.2],
+          [0.0, 0.0, 0.2],
+          [0.0, 0.0, 0.2],
+          [0.0, 0.0, 0.2]
+        ]
+      ]
+    }
+  },
+  "expected_exception": null,
+  "expected_exception_regex": null,
+  "atol": 1e-8,
+  "rtol": 1e-5,
+  "payload": {
     "jac_inputs": ["mesh.points"],
     "jac_outputs": ["statistics.barycenter"],
     "inputs": {
@@ -20,7 +51,10 @@
           "object_type": "array",
           "shape": [2],
           "dtype": "int64",
-          "data": { "buffer": "BAAAAAAAAAAEAAAAAAAAAA==", "encoding": "base64" }
+          "data": {
+            "buffer": "BAAAAAAAAAAEAAAAAAAAAA==",
+            "encoding": "base64"
+          }
         },
         "cell_connectivity": {
           "object_type": "array",
@@ -73,36 +107,5 @@
         }
       }
     }
-  },
-  "expected_outputs": {
-    "statistics.barycenter": {
-      "mesh.points": [
-        [
-          [0.2, 0.0, 0.0],
-          [0.2, 0.0, 0.0],
-          [0.2, 0.0, 0.0],
-          [0.2, 0.0, 0.0],
-          [0.2, 0.0, 0.0]
-        ],
-        [
-          [0.0, 0.2, 0.0],
-          [0.0, 0.2, 0.0],
-          [0.0, 0.2, 0.0],
-          [0.0, 0.2, 0.0],
-          [0.0, 0.2, 0.0]
-        ],
-        [
-          [0.0, 0.0, 0.2],
-          [0.0, 0.0, 0.2],
-          [0.0, 0.0, 0.2],
-          [0.0, 0.0, 0.2],
-          [0.0, 0.0, 0.2]
-        ]
-      ]
-    }
-  },
-  "expected_exception": null,
-  "expected_exception_regex": null,
-  "atol": 1e-8,
-  "rtol": 0.00001
+  }
 }

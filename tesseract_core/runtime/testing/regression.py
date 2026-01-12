@@ -44,7 +44,7 @@ class TestSpec(BaseModel):
     """
 
     endpoint: str
-    inputs: dict
+    payload: dict
     expected_outputs: dict | None = None
     expected_exception: type[Exception] | None = None
     expected_exception_regex: str | None = None
@@ -374,7 +374,7 @@ def regress_test_case(
         endpoint_functions: Dict mapping endpoint names to endpoint functions.
         test_spec: Test specification as a TestSpec model with fields:
             - endpoint: Name of the endpoint to test.
-            - inputs: Input data conforming to InputSchema.
+            - payload: Input data conforming to InputSchema.
             - expected_outputs: Expected output data (required if no exception expected).
             - expected_exception: Optional exception type (e.g., ValueError, ValidationError).
             - expected_exception_regex: Optional regex pattern to match exception message.
@@ -407,12 +407,12 @@ def regress_test_case(
         # Build context for validation - some endpoints need special keys
         validation_context = {"base_dir": base_dir}
         if test_spec.endpoint == "jacobian":
-            validation_context["output_keys"] = test_spec.inputs.get("jac_outputs", [])
-            validation_context["input_keys"] = test_spec.inputs.get("jac_inputs", [])
+            validation_context["output_keys"] = test_spec.payload.get("jac_outputs", [])
+            validation_context["input_keys"] = test_spec.payload.get("jac_inputs", [])
         elif test_spec.endpoint == "jacobian_vector_product":
-            validation_context["output_keys"] = test_spec.inputs.get("jvp_outputs", [])
+            validation_context["output_keys"] = test_spec.payload.get("jvp_outputs", [])
         elif test_spec.endpoint == "vector_jacobian_product":
-            validation_context["input_keys"] = test_spec.inputs.get("vjp_inputs", [])
+            validation_context["input_keys"] = test_spec.payload.get("vjp_inputs", [])
 
         try:
             expected_outputs = OutputSchema.model_validate(
@@ -429,7 +429,7 @@ def regress_test_case(
     InputSchema = get_input_schema(endpoint_func)
     try:
         loaded_inputs = InputSchema.model_validate(
-            test_spec.inputs, context={"base_dir": base_dir}
+            test_spec.payload, context={"base_dir": base_dir}
         )
     except expected_exception as e:
         if expected_exception_regex:

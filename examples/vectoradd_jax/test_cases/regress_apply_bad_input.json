@@ -1,9 +1,11 @@
 {
   "endpoint": "apply",
-  "inputs": { "inputs": {} },
   "expected_outputs": null,
   "expected_exception": "ValidationError",
   "expected_exception_regex": null,
   "atol": 1e-8,
-  "rtol": 0.00001
+  "rtol": 1e-5,
+  "payload": {
+    "inputs": {}
+  }
 }
