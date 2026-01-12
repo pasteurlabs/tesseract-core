@@ -14,7 +14,6 @@ from pydantic import (
     BaseModel,
     ValidationError,
     field_validator,
-    model_serializer,
     model_validator,
 )
 
@@ -94,30 +93,6 @@ class TestSpec(BaseModel):
             )
 
         return self
-
-    @model_serializer
-    def serialize_model(self) -> dict:
-        """Custom serializer to handle exception types.
-
-        Arrays should already be encoded in the appropriate format (e.g., json+base64).
-        """
-        result = {
-            "endpoint": self.endpoint,
-            "inputs": self.inputs,
-            "expected_outputs": self.expected_outputs,
-            "expected_exception": self.expected_exception.__name__
-            if self.expected_exception is not None
-            else None,
-            "expected_exception_regex": self.expected_exception_regex,
-            "atol": self.atol,
-            "rtol": self.rtol,
-        }
-
-        # Only include cli_config if present
-        if self.cli_config is not None:
-            result["cli_config"] = self.cli_config.model_dump(exclude_none=True)
-
-        return result
 
 
 class RegressionTestResult(NamedTuple):

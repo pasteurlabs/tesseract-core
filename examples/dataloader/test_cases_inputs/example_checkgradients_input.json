@@ -1,5 +1,0 @@
-{
-  "inputs": {
-    "data": "@/tesseract/input_data/sample_*.json"
-  }
-}
