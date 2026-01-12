@@ -266,7 +266,6 @@ def test_unit_tesseract_endtoend(
         )
         assert result.exit_code == 0, result.output
 
-    # Stage 2.5: Test regress endpoint with test case files
     test_cases_dir = unit_tesseract_path / "test_cases"
     if test_cases_dir.exists() and test_cases_dir.is_dir():
         test_files = sorted(test_cases_dir.glob("*.json"))
@@ -295,6 +294,9 @@ def test_unit_tesseract_endtoend(
                 f"  Message: {regress_result['message']}"
             )
 
+    # check-gradients is a CLI command not a true endpoint
+    # as such the regress endpoint cannot access it directly.
+    # Therefore, we only test with cli_runner (stage 2)
     if unit_tesseract_config.check_gradients:
         checkgradients_input = (
             unit_tesseract_path / "test_cases_inputs/example_checkgradients_input.json"
