@@ -3,6 +3,7 @@
 
 """Regression testing utilities for Tesseract endpoints."""
 
+import builtins
 import re
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
@@ -141,9 +142,6 @@ def _parse_exception_type(exception_name: str | None) -> type[Exception]:
     # Check custom mapping first
     if exception_name in exception_mapping:
         return exception_mapping[exception_name]
-
-    # Try to get from builtins
-    import builtins
 
     if hasattr(builtins, exception_name):
         exc_class = getattr(builtins, exception_name)
