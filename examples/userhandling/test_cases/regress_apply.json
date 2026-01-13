@@ -1,8 +1,8 @@
 {
   "endpoint": "apply",
   "expected_outputs": {
-    "uid": 501,
-    "gid": 20,
+    "uid": 505,
+    "gid": 21,
     "username": "tesseract-user",
     "home": "/tesseract",
     "shell": "/bin/bash"
@@ -13,5 +13,6 @@
   "rtol": 1e-5,
   "payload": {
     "inputs": {}
-  }
+  },
+  "cli_config": { "user": "505:21" }
 }

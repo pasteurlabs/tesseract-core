@@ -1107,6 +1107,10 @@ def run_container(
                                 # Invalid format, skip
                                 pass
 
+                    # Use cli_config.user if user didn't provide --user
+                    if user is None and "user" in cli_config:
+                        user = cli_config["user"]
+
                     # Future: Use cli_config.output_path if user didn't provide -o
                     # if output_path is None and "output_path" in cli_config:
                     #     output_path = cli_config["output_path"]

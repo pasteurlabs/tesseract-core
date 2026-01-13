@@ -33,6 +33,7 @@ class TestCliConfig(BaseModel):
 
     input_path: str | None = None  # Original --input-path CLI arg
     volume_mounts: list[str] | None = None  # Original --volume/-v CLI args
+    user: str | None = None  # Original --user CLI arg
 
 
 class TestSpec(BaseModel):
