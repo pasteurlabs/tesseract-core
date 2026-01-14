@@ -1088,17 +1088,13 @@ def run_container(
                         for vol_mount in cli_config["volume_mounts"]:
                             # Parse volume mount (format: source:target or source:target:mode)
                             parts = vol_mount.split(":")
-                            if len(parts) >= 2:
-                                source = parts[0]
-                                # Resolve relative source paths
-                                if not Path(source).is_absolute():
-                                    source = str(test_spec_path.parent / source)
-                                # Reconstruct volume mount with resolved source
-                                parts[0] = source
-                                volume.append(":".join(parts))
-                            else:
-                                # Invalid format, skip
-                                pass
+                            source = parts[0]
+                            # Resolve relative source paths
+                            if not Path(source).is_absolute():
+                                source = str(test_spec_path.parent / source)
+                            # Reconstruct volume mount with resolved source
+                            parts[0] = source
+                            volume.append(":".join(parts))
 
                     # Use cli_config.user if user didn't provide --user
                     if user is None and "user" in cli_config:
