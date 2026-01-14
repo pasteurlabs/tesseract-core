@@ -311,6 +311,10 @@ class Tesseract:
         Returns:
             a list with all available endpoints for this Tesseract.
         """
+        # For LocalClient, get endpoints directly to include all endpoints (including test)
+        if isinstance(self._client, LocalClient):
+            return sorted(self._client._endpoints.keys())
+        # For HTTPClient, use OpenAPI schema (respects server's debug mode filtering)
         return [endpoint.lstrip("/") for endpoint in self.openapi_schema["paths"]]
 
     @requires_client

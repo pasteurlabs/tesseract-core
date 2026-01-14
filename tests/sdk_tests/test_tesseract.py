@@ -46,15 +46,17 @@ def test_Tesseract_init():
 
 
 def test_Tesseract_from_tesseract_api(dummy_tesseract_location, dummy_tesseract_module):
-    all_endpoints = [
-        "apply",
-        "jacobian",
-        "jacobian_vector_product",
-        "vector_jacobian_product",
-        "health",
-        "abstract_eval",
-        "test",
-    ]
+    all_endpoints = sorted(
+        [
+            "apply",
+            "jacobian",
+            "jacobian_vector_product",
+            "vector_jacobian_product",
+            "health",
+            "abstract_eval",
+            "test",
+        ]
+    )
 
     t = Tesseract.from_tesseract_api(dummy_tesseract_location / "tesseract_api.py")
     endpoints = t.available_endpoints
@@ -317,7 +319,7 @@ def test_regress_success_local(dummy_tesseract_package):
     tess.test(
         {
             "endpoint": "apply",
-            "inputs": {
+            "payload": {
                 "inputs": {
                     "a": np.array([1.0, 2.0], dtype=np.float32),
                     "b": np.array([3.0, 4.0], dtype=np.float32),
@@ -337,7 +339,7 @@ def test_regress_failure_local(dummy_tesseract_package):
         tess.test(
             {
                 "endpoint": "apply",
-                "inputs": {
+                "payload": {
                     "inputs": {
                         "a": np.array([1.0, 2.0], dtype=np.float32),
                         "b": np.array([3.0, 4.0], dtype=np.float32),
@@ -359,7 +361,7 @@ def test_regress_with_exception_type_local(dummy_tesseract_package):
     tess.test(
         {
             "endpoint": "apply",
-            "inputs": {
+            "payload": {
                 "inputs": {
                     "a": np.array([1.0, 2.0], dtype=np.float32),
                     "b": np.array([4.0], dtype=np.float32),  # Wrong shape
