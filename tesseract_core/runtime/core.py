@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from io import TextIOBase
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Literal, TextIO
+from typing import Any, TextIO
 
 from pydantic import BaseModel
 
@@ -19,14 +19,6 @@ from .schema_generation import (
     create_apply_schema,
     create_autodiff_schema,
 )
-
-
-class RegressOutputSchema(BaseModel):
-    """Output schema for the regress endpoint."""
-
-    status: Literal["passed", "failed", "error"]
-    message: str
-    endpoint: str
 
 
 @contextmanager
@@ -272,7 +264,11 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
 
         endpoints.append(abstract_eval)
 
-    from tesseract_core.runtime.testing.regression import TestSpec, regress_test_case
+    from tesseract_core.runtime.testing.regression import (
+        RegressOutputSchema,
+        TestSpec,
+        regress_test_case,
+    )
 
     def regress(payload: TestSpec) -> RegressOutputSchema:
         """Run a single regression test against a Tesseract endpoint.
@@ -303,31 +299,13 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
         config = get_config()
         base_dir = Path(config.input_path) if config.input_path else None
 
-        try:
-            regress_test_case(
-                api_module,
-                endpoint_functions={func.__name__: func for func in endpoints},
-                test_spec=payload,
-                base_dir=base_dir,
-                threshold=100,
-            )
-            return RegressOutputSchema(
-                status="passed",
-                message="",
-                endpoint=payload.endpoint,
-            )
-        except AssertionError as e:
-            return RegressOutputSchema(
-                status="failed",
-                message=str(e),
-                endpoint=payload.endpoint,
-            )
-        except Exception as e:
-            return RegressOutputSchema(
-                status="error",
-                message=f"{type(e).__name__}: {e}",
-                endpoint=payload.endpoint,
-            )
+        return regress_test_case(
+            api_module,
+            endpoint_functions={func.__name__: func for func in endpoints},
+            test_spec=payload,
+            base_dir=base_dir,
+            threshold=100,
+        )
 
     endpoints.append(regress)
 

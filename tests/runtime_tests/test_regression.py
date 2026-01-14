@@ -196,11 +196,12 @@ class TestRegressTestCase:
             expected_outputs={"result": np.array([6.0, 9.0, 12.0], dtype=np.float32)},
         )
 
-        # Should not raise
-        regress_test_case(dummy_tesseract_module, endpoints, test_spec)
+        result = regress_test_case(dummy_tesseract_module, endpoints, test_spec)
+        assert result.status == "passed"
+        assert result.message == ""
 
     def test_value_mismatch(self, dummy_tesseract_module):
-        """Test that value mismatches raise AssertionError."""
+        """Test that value mismatches return failed status."""
         from tesseract_core.runtime.core import create_endpoints
         from tesseract_core.runtime.testing.regression import TestSpec
 
@@ -222,8 +223,9 @@ class TestRegressTestCase:
             },
         )
 
-        with pytest.raises(AssertionError, match="Values are not sufficiently close"):
-            regress_test_case(dummy_tesseract_module, endpoints, test_spec)
+        result = regress_test_case(dummy_tesseract_module, endpoints, test_spec)
+        assert result.status == "failed"
+        assert "Values are not sufficiently close" in result.message
 
     def test_expected_exception(self, dummy_tesseract_module):
         """Test that expected exceptions pass the test."""
@@ -240,27 +242,30 @@ class TestRegressTestCase:
             "payload": {
                 "inputs": {
                     "a": np.array([1.0, 2.0]),
-                    "b": np.array([4.0]),  # Wrong shape - triggers AssertionError
+                    "b": np.array([4.0]),  # Wrong shape - triggers ValidationError
                     "s": 2,
                 }
             },
-            "expected_exception": "ValidationError",
+            "expected_exception": "pydantic.ValidationError",
         }
 
-        # Should not raise (test passes because exception was expected)
-        regress_test_case(dummy_tesseract_module, endpoints, TestSpec(**test_spec_dict))
+        # Test passes because exception was expected
+        result = regress_test_case(
+            dummy_tesseract_module, endpoints, TestSpec(**test_spec_dict)
+        )
+        assert result.status == "passed"
+        assert result.message == ""
 
-        # Wrong expected exception - should raise AssertionError about wrong exception type
+        # Wrong expected exception - should return failed status
         test_spec_dict["expected_exception"] = "IndexError"
-        with pytest.raises(
-            AssertionError, match="inputs do not conform to InputSchema"
-        ):
-            regress_test_case(
-                dummy_tesseract_module, endpoints, TestSpec(**test_spec_dict)
-            )
+        result = regress_test_case(
+            dummy_tesseract_module, endpoints, TestSpec(**test_spec_dict)
+        )
+        assert result.status == "failed"
+        assert "inputs do not conform to InputSchema" in result.message
 
     def test_unexpected_exception(self, dummy_tesseract_module):
-        """Test that unexpected exceptions are propagated."""
+        """Test that unexpected exceptions return failed status."""
         from tesseract_core.runtime.core import create_endpoints
         from tesseract_core.runtime.testing.regression import TestSpec
 
@@ -273,7 +278,7 @@ class TestRegressTestCase:
             payload={
                 "inputs": {
                     "a": np.array([1.0, 2.0]),
-                    "b": np.array([4.0]),  # Wrong shape - triggers AssertionError
+                    "b": np.array([4.0]),  # Wrong shape - triggers ValidationError
                     "s": 2,
                 }
             },
@@ -281,8 +286,9 @@ class TestRegressTestCase:
             expected_outputs={"result": np.array([1.0])},
         )
 
-        with pytest.raises(AssertionError):
-            regress_test_case(dummy_tesseract_module, endpoints, test_spec)
+        result = regress_test_case(dummy_tesseract_module, endpoints, test_spec)
+        assert result.status == "failed"
+        assert "inputs do not conform to InputSchema" in result.message
 
 
 class TestTestSpec:
@@ -350,7 +356,7 @@ class TestTestSpec:
         spec = TestSpec(
             endpoint="apply",
             payload={"a": 1},
-            expected_exception="ValidationError",
+            expected_exception="pydantic.ValidationError",
         )
         from pydantic import ValidationError
 
@@ -362,12 +368,28 @@ class TestTestSpec:
 
         from tesseract_core.runtime.testing.regression import TestSpec
 
-        # Unknown exception name
-        with pytest.raises(ValueError, match="Unknown exception type"):
+        with pytest.raises(
+            ValueError,
+            match=r"Non-builtin exception 'NonExistentException' must be specified in 'packagename.exceptionname'",
+        ):
             TestSpec(
                 endpoint="apply",
                 payload={"a": 1},
                 expected_exception="NonExistentException",
+            )
+
+        with pytest.raises(ValueError, match="Failed to import module"):
+            TestSpec(
+                endpoint="apply",
+                payload={"a": 1},
+                expected_exception="nonexistentpackage.NonExistentException",
+            )
+
+        with pytest.raises(ValueError, match="Module 'pydantic' has no attribute"):
+            TestSpec(
+                endpoint="apply",
+                payload={"a": 1},
+                expected_exception="pydantic.NonExistentException",
             )
 
         # Invalid type (not string or type) - caught by typeguard before Pydantic

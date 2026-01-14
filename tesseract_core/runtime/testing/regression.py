@@ -114,6 +114,23 @@ class RegressionTestResult(NamedTuple):
     message: str | None
 
 
+class RegressOutputSchema(BaseModel):
+    """Output schema for the regress endpoint.
+
+    Attributes:
+        status: Test result status:
+            - "passed": Test passed all validations
+            - "failed": Test failed validation (output mismatch)
+            - "error": Endpoint raised unexpected exception
+        message: Empty for passed tests, error details for failed/error
+        endpoint: Name of the tested endpoint
+    """
+
+    status: Literal["passed", "failed", "error"]
+    message: str
+    endpoint: str
+
+
 class _NoException(Exception):
     """Sentinel exception that cannot be instantiated - represents 'no exception expected'."""
 
@@ -406,7 +423,7 @@ def regress_test_case(
     *,
     base_dir: Path | None = None,
     threshold: int = 100,
-) -> None:
+) -> RegressOutputSchema:
     """Run a single regression test from a test specification.
 
     Args:
@@ -423,28 +440,33 @@ def regress_test_case(
         base_dir: Optional base directory for resolving relative paths in schemas.
         threshold: Maximum number of array discrepancies to display in error messages.
 
-    Raises:
-        AssertionError: If the test fails (output mismatch, wrong exception, etc.).
+    Returns:
+        RegressOutputSchema with status:
+            - "passed": Test passed all validations
+            - "failed": Test failed validation
+            - "error": Endpoint raised unexpected exception
     """
-    assert test_spec.endpoint in endpoint_functions, (
-        f"Endpoint {test_spec.endpoint} not found in {api_module.__name__}\n"
-        f"  Available endpoints: {list(endpoint_functions.keys())}"
-    )
+    if test_spec.endpoint not in endpoint_functions:
+        return RegressOutputSchema(
+            status="failed",
+            message=(
+                f"Endpoint {test_spec.endpoint} not found in {api_module.__name__}\n"
+                f"  Available endpoints: {list(endpoint_functions.keys())}"
+            ),
+            endpoint=test_spec.endpoint,
+        )
     endpoint_func = endpoint_functions[test_spec.endpoint]
 
-    # Get expected exception (already a type from TestSpec)
     expected_exception = (
         test_spec.expected_exception if test_spec.expected_exception else _NoException
     )
     expected_exception_regex = test_spec.expected_exception_regex
 
-    # Read and validate expected_outputs when no exception expected
+    # Validate expected_outputs when no exception expected
     if expected_exception is _NoException:
-        expected_outputs = test_spec.expected_outputs
-
         OutputSchema = get_output_schema(endpoint_func)
 
-        # Build context for validation - some endpoints need special keys
+        # Build context for validation
         validation_context = {"base_dir": base_dir}
         if test_spec.endpoint == "jacobian":
             validation_context["output_keys"] = test_spec.payload.get("jac_outputs", [])
@@ -456,85 +478,119 @@ def regress_test_case(
 
         try:
             expected_outputs = OutputSchema.model_validate(
-                expected_outputs, context=validation_context
+                test_spec.expected_outputs, context=validation_context
             ).model_dump()
         except ValidationError as e:
             error_str = "\n".join(f"  {line}" for line in str(e).splitlines())
-            raise AssertionError(
-                "expected_outputs does not conform to OutputSchema "
-                f"(perhaps the OutputSchema has recently changed?):\n{error_str}"
-            ) from None
+            return RegressOutputSchema(
+                status="failed",
+                message=(
+                    "expected_outputs does not conform to OutputSchema "
+                    f"(perhaps the OutputSchema has recently changed?):\n{error_str}"
+                ),
+                endpoint=test_spec.endpoint,
+            )
 
-    # Try to validate inputs and run endpoint, catching the expected exception
+    # Validate inputs
     InputSchema = get_input_schema(endpoint_func)
     try:
         loaded_inputs = InputSchema.model_validate(
             test_spec.payload, context={"base_dir": base_dir}
         )
     except expected_exception as e:
-        if expected_exception_regex:
-            if not re.search(expected_exception_regex, str(e)):
-                raise AssertionError(
+        if expected_exception_regex and not re.search(expected_exception_regex, str(e)):
+            return RegressOutputSchema(
+                status="failed",
+                message=(
                     f"Exception message does not match regex.\n"
                     f"  Expected pattern: {expected_exception_regex}\n"
                     f"  Actual message: {e}"
-                ) from None
-        # Test passed - exception was as expected
-        return
+                ),
+                endpoint=test_spec.endpoint,
+            )
+        return RegressOutputSchema(
+            status="passed", message="", endpoint=test_spec.endpoint
+        )
     except ValidationError as e:
         # Format each line with 2-space indent
         error_str = "\n".join(f"  {line}" for line in str(e).splitlines())
-        raise AssertionError(
-            "inputs do not conform to InputSchema "
-            f"(perhaps the InputSchema has recently changed?):\n{error_str}"
-        ) from None
+        return RegressOutputSchema(
+            status="failed",
+            message=(
+                "inputs do not conform to InputSchema "
+                f"(perhaps the InputSchema has recently changed?):\n{error_str}"
+            ),
+            endpoint=test_spec.endpoint,
+        )
     except Exception as e:
-        # Got unexpected exception type
         if expected_exception is _NoException:
-            raise
+            return RegressOutputSchema(
+                status="error",
+                message=f"{type(e).__name__}: {e}",
+                endpoint=test_spec.endpoint,
+            )
         else:
-            raise AssertionError(
-                f"Expected {expected_exception}, but got {type(e).__name__}: {e}"
-            ) from None
+            return RegressOutputSchema(
+                status="failed",
+                message=f"Expected {expected_exception.__name__}, but got {type(e).__name__}: {e}",
+                endpoint=test_spec.endpoint,
+            )
 
+    # Call endpoint - only try-except needed for endpoint execution
     try:
         obtained_outputs = endpoint_func(loaded_inputs).model_dump()
-        # If we get here with no exception but expected one, that's a failure
-        if expected_exception is not _NoException:
-            raise AssertionError(
-                f"Expected {expected_exception}, but no exception was raised"
-            ) from None
     except expected_exception as e:
-        if expected_exception_regex:
-            if not re.search(expected_exception_regex, str(e)):
-                raise AssertionError(
+        if expected_exception_regex and not re.search(expected_exception_regex, str(e)):
+            return RegressOutputSchema(
+                status="failed",
+                message=(
                     f"Exception message does not match regex.\n"
                     f"  Expected pattern: {expected_exception_regex}\n"
                     f"  Actual message: {e}"
-                ) from None
-        # Test passed - exception was as expected
-        return
+                ),
+                endpoint=test_spec.endpoint,
+            )
+        return RegressOutputSchema(
+            status="passed", message="", endpoint=test_spec.endpoint
+        )
     except Exception as e:
-        # Got unexpected exception type
         if expected_exception is _NoException:
-            raise
+            return RegressOutputSchema(
+                status="error",
+                message=f"{type(e).__name__}: {e}",
+                endpoint=test_spec.endpoint,
+            )
         else:
-            raise AssertionError(
-                f"Expected {expected_exception}, but got {type(e).__name__}: {e}"
-            ) from None
+            return RegressOutputSchema(
+                status="failed",
+                message=f"Expected {expected_exception.__name__}, but got {type(e).__name__}: {e}",
+                endpoint=test_spec.endpoint,
+            )
 
-    # Validate structure of outputs
-    # The output schema provides a guide to distinguish between dicts (with {keys}) and models (with attributes)
+    # If we expected an exception but didn't get one
+    if expected_exception is not _NoException:
+        return RegressOutputSchema(
+            status="failed",
+            message=f"Expected {expected_exception.__name__}, but no exception was raised",
+            endpoint=test_spec.endpoint,
+        )
+
+    # Validate structure
     path_patterns = get_all_model_path_patterns(OutputSchema)
+    try:
+        obtained_expected_flat = _validate_tree_structure(
+            obtained_outputs, expected_outputs, path_patterns
+        )
+    except AssertionError as e:
+        return RegressOutputSchema(
+            status="failed", message=str(e), endpoint=test_spec.endpoint
+        )
 
-    obtained_expected_flat = _validate_tree_structure(
-        obtained_outputs, expected_outputs, path_patterns
-    )
-
+    # Compare values
     atol = test_spec.atol
     rtol = test_spec.rtol
-
     discrepancies = []
+
     for path, (obtained_val, expected_val) in obtained_expected_flat.items():
         is_inexact_numeric = False
         if isinstance(expected_val, float):
@@ -544,18 +600,13 @@ def regress_test_case(
                 is_inexact_numeric = True
 
         if isinstance(expected_val, np.ndarray) and expected_val.ndim == 0:
-            # convert scalar arrays to np.numbers for simpler discrepancy message logic
             expected_val = expected_val[()]
             obtained_val = obtained_val[()]
 
         if isinstance(expected_val, np.ndarray):
             if is_inexact_numeric:
                 not_close_mask = ~np.isclose(
-                    obtained_val,
-                    expected_val,
-                    equal_nan=True,
-                    atol=atol,
-                    rtol=rtol,
+                    obtained_val, expected_val, equal_nan=True, atol=atol, rtol=rtol
                 )
             else:
                 not_close_mask = obtained_val != expected_val
@@ -591,7 +642,13 @@ def regress_test_case(
                     f"  Obtained: {obtained_val}"
                     f"{difference_if_numeric}"
                 )
+
     if discrepancies:
-        raise AssertionError(
-            "Values are not sufficiently close.\n\n" + "\n\n".join(discrepancies)
+        return RegressOutputSchema(
+            status="failed",
+            message="Values are not sufficiently close.\n\n"
+            + "\n\n".join(discrepancies),
+            endpoint=test_spec.endpoint,
         )
+
+    return RegressOutputSchema(status="passed", message="", endpoint=test_spec.endpoint)
