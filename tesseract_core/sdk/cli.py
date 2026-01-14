@@ -1077,11 +1077,8 @@ def run_container(
                         # Resolve relative to test spec's parent directory
                         # (test specs are usually in <tesseract>/test_cases/)
                         if not Path(config_input_path).is_absolute():
-                            # Assuming test spec is in test_cases/, go up 2 levels to tesseract root
-                            # then resolve the relative path from there
-                            test_spec_dir = test_spec_path.parent
-                            tesseract_root = test_spec_dir.parent
-                            input_path = str(tesseract_root / config_input_path)
+                            # path is assumed to be relative to test spec json file
+                            input_path = str(test_spec_path.parent / config_input_path)
                         else:
                             input_path = config_input_path
 

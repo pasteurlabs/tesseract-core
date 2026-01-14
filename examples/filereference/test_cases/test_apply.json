@@ -19,7 +19,7 @@
   "atol": 1e-8,
   "rtol": 1e-5,
   "cli_config": {
-    "input_path": "examples/filereference/testdata/"
+    "input_path": "testdata/"
   },
   "payload": {
     "inputs": {
