@@ -1074,8 +1074,6 @@ def run_container(
                     # Resolve relative paths relative to the test spec's directory
                     if input_path is None and "input_path" in cli_config:
                         config_input_path = cli_config["input_path"]
-                        # Resolve relative to test spec's parent directory
-                        # (test specs are usually in <tesseract>/test_cases/)
                         if not Path(config_input_path).is_absolute():
                             # path is assumed to be relative to test spec json file
                             input_path = str(test_spec_path.parent / config_input_path)
@@ -1086,8 +1084,6 @@ def run_container(
                     # Resolve relative source paths relative to the test spec's directory
                     if volume is None and "volume_mounts" in cli_config:
                         volume = []
-                        test_spec_dir = test_spec_path.parent
-                        tesseract_root = test_spec_dir.parent
 
                         for vol_mount in cli_config["volume_mounts"]:
                             # Parse volume mount (format: source:target or source:target:mode)
@@ -1096,7 +1092,7 @@ def run_container(
                                 source = parts[0]
                                 # Resolve relative source paths
                                 if not Path(source).is_absolute():
-                                    source = str(tesseract_root / source)
+                                    source = str(test_spec_path.parent / source)
                                 # Reconstruct volume mount with resolved source
                                 parts[0] = source
                                 volume.append(":".join(parts))

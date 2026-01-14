@@ -108,9 +108,7 @@
   "atol": 1e-8,
   "rtol": 1e-5,
   "cli_config": {
-    "volume_mounts": [
-      "/Users/jonathanbrodrick/pasteurcodes/tesseract-core/examples/dataloader/testdata:/tesseract/input_data:ro"
-    ]
+    "volume_mounts": ["../testdata:/tesseract/input_data:ro"]
   },
   "payload": {
     "inputs": {
