@@ -4,6 +4,7 @@
 """Regression testing utilities for Tesseract endpoints."""
 
 import builtins
+import importlib
 import re
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
@@ -126,30 +127,68 @@ def _parse_exception_type(exception_name: str | None) -> type[Exception]:
     """Parse exception name string to exception class.
 
     Args:
-        exception_name: Name of exception (e.g. "ValueError", "ValidationError")
+        exception_name: Name of exception. Must be either:
+            - A builtin exception name (e.g., "ValueError", "TypeError")
+            - A fully qualified exception in format "packagename.exceptionname"
+              (e.g., "pydantic.ValidationError", "requests.exceptions.HTTPError")
 
     Returns:
         Exception class, or NoException if None provided.
+
+    Raises:
+        ValueError: If exception format is invalid or cannot be imported.
     """
     if exception_name is None:
         return _NoException
 
-    # Common exceptions mapping
-    exception_mapping = {
-        "ValidationError": ValidationError,
-        # Add other common non-builtin exceptions here as needed
-    }
-
-    # Check custom mapping first
-    if exception_name in exception_mapping:
-        return exception_mapping[exception_name]
-
+    # Check if it's a builtin exception first
     if hasattr(builtins, exception_name):
         exc_class = getattr(builtins, exception_name)
         if isinstance(exc_class, type) and issubclass(exc_class, BaseException):
             return exc_class
 
-    raise ValueError(f"Unknown exception type: {exception_name}")
+    # For non-builtin exceptions, require packagename.exceptionname format
+    if "." not in exception_name:
+        raise ValueError(
+            f"Non-builtin exception '{exception_name}' must be specified in "
+            f"'packagename.exceptionname' format (e.g., 'pydantic.ValidationError')"
+        )
+
+    # Split into module path and exception class name
+    parts = exception_name.rsplit(".", 1)
+    if len(parts) != 2:
+        raise ValueError(
+            f"Invalid exception format '{exception_name}'. "
+            f"Expected 'packagename.exceptionname'"
+        )
+
+    module_name, class_name = parts
+
+    # Attempt to import the exception from the package
+    try:
+        module = importlib.import_module(module_name)
+    except ImportError as e:
+        raise ValueError(
+            f"Failed to import module '{module_name}' for exception '{exception_name}': {e}"
+        ) from e
+
+    # Get the exception class from the module
+    if not hasattr(module, class_name):
+        raise ValueError(
+            f"Module '{module_name}' has no attribute '{class_name}'. "
+            f"Available attributes: {', '.join(dir(module))}"
+        )
+
+    exc_class = getattr(module, class_name)
+
+    # Verify it's actually an exception class
+    if not (isinstance(exc_class, type) and issubclass(exc_class, BaseException)):
+        raise ValueError(
+            f"'{exception_name}' is not a valid exception class. "
+            f"Found type: {type(exc_class).__name__}"
+        )
+
+    return exc_class
 
 
 def _validate_tree_structure(
