@@ -301,14 +301,7 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
             All outcomes return HTTP 200 with status in the response body regardless of success/failure.
         """
         config = get_config()
-
-        # Use cli_config from TestSpec if present, fallback to current config
-        if payload.cli_config and payload.cli_config.input_path:
-            effective_input_path = payload.cli_config.input_path
-        else:
-            effective_input_path = config.input_path
-
-        base_dir = Path(effective_input_path) if effective_input_path else None
+        base_dir = Path(config.input_path) if config.input_path else None
 
         try:
             regress_test_case(
