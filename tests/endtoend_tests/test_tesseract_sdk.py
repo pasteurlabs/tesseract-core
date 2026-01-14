@@ -171,7 +171,7 @@ def test_all_endpoints(
         inputs = {
             "test_spec": {
                 "endpoint": "apply",
-                "inputs": {
+                "payload": {
                     "inputs": {
                         "a": {
                             "object_type": "array",
