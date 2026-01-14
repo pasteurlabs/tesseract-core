@@ -100,7 +100,7 @@ POSSIBLE_CMDS.update(
         "openapi-schema",
         "check",
         "check-gradients",
-        "regress",
+        "test",
         "serve",
     }
 )
@@ -1060,9 +1060,9 @@ def run_container(
     if payload is not None:
         args.append(payload)
 
-    # For regress command, extract cli_config from test spec if available
+    # For test command, extract cli_config from test spec if available
     # This allows test specs to be self-contained without requiring manual -i/-o flags
-    if cmd == "regress" and payload is not None and payload.startswith("@"):
+    if cmd == "test" and payload is not None and payload.startswith("@"):
         test_spec_path = Path(payload.lstrip("@")).resolve()
         try:
             with open(test_spec_path) as f:

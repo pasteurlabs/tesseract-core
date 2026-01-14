@@ -114,8 +114,8 @@ class RegressionTestResult(NamedTuple):
     message: str | None
 
 
-class RegressOutputSchema(BaseModel):
-    """Output schema for the regress endpoint.
+class TestOutputSchema(BaseModel):
+    """Output schema for the test endpoint.
 
     Attributes:
         status: Test result status:
@@ -423,7 +423,7 @@ def regress_test_case(
     *,
     base_dir: Path | None = None,
     threshold: int = 100,
-) -> RegressOutputSchema:
+) -> TestOutputSchema:
     """Run a single regression test from a test specification.
 
     Args:
@@ -441,13 +441,13 @@ def regress_test_case(
         threshold: Maximum number of array discrepancies to display in error messages.
 
     Returns:
-        RegressOutputSchema with status:
+        TestOutputSchema with status:
             - "passed": Test passed all validations
             - "failed": Test failed validation
             - "error": Endpoint raised unexpected exception
     """
     if test_spec.endpoint not in endpoint_functions:
-        return RegressOutputSchema(
+        return TestOutputSchema(
             status="failed",
             message=(
                 f"Endpoint {test_spec.endpoint} not found in {api_module.__name__}\n"
@@ -482,7 +482,7 @@ def regress_test_case(
             ).model_dump()
         except ValidationError as e:
             error_str = "\n".join(f"  {line}" for line in str(e).splitlines())
-            return RegressOutputSchema(
+            return TestOutputSchema(
                 status="failed",
                 message=(
                     "expected_outputs does not conform to OutputSchema "
@@ -499,7 +499,7 @@ def regress_test_case(
         )
     except expected_exception as e:
         if expected_exception_regex and not re.search(expected_exception_regex, str(e)):
-            return RegressOutputSchema(
+            return TestOutputSchema(
                 status="failed",
                 message=(
                     f"Exception message does not match regex.\n"
@@ -508,13 +508,13 @@ def regress_test_case(
                 ),
                 endpoint=test_spec.endpoint,
             )
-        return RegressOutputSchema(
+        return TestOutputSchema(
             status="passed", message="", endpoint=test_spec.endpoint
         )
     except ValidationError as e:
         # Format each line with 2-space indent
         error_str = "\n".join(f"  {line}" for line in str(e).splitlines())
-        return RegressOutputSchema(
+        return TestOutputSchema(
             status="failed",
             message=(
                 "inputs do not conform to InputSchema "
@@ -524,13 +524,13 @@ def regress_test_case(
         )
     except Exception as e:
         if expected_exception is _NoException:
-            return RegressOutputSchema(
+            return TestOutputSchema(
                 status="error",
                 message=f"{type(e).__name__}: {e}",
                 endpoint=test_spec.endpoint,
             )
         else:
-            return RegressOutputSchema(
+            return TestOutputSchema(
                 status="failed",
                 message=f"Expected {expected_exception.__name__}, but got {type(e).__name__}: {e}",
                 endpoint=test_spec.endpoint,
@@ -541,7 +541,7 @@ def regress_test_case(
         obtained_outputs = endpoint_func(loaded_inputs).model_dump()
     except expected_exception as e:
         if expected_exception_regex and not re.search(expected_exception_regex, str(e)):
-            return RegressOutputSchema(
+            return TestOutputSchema(
                 status="failed",
                 message=(
                     f"Exception message does not match regex.\n"
@@ -550,18 +550,18 @@ def regress_test_case(
                 ),
                 endpoint=test_spec.endpoint,
             )
-        return RegressOutputSchema(
+        return TestOutputSchema(
             status="passed", message="", endpoint=test_spec.endpoint
         )
     except Exception as e:
         if expected_exception is _NoException:
-            return RegressOutputSchema(
+            return TestOutputSchema(
                 status="error",
                 message=f"{type(e).__name__}: {e}",
                 endpoint=test_spec.endpoint,
             )
         else:
-            return RegressOutputSchema(
+            return TestOutputSchema(
                 status="failed",
                 message=f"Expected {expected_exception.__name__}, but got {type(e).__name__}: {e}",
                 endpoint=test_spec.endpoint,
@@ -569,7 +569,7 @@ def regress_test_case(
 
     # If we expected an exception but didn't get one
     if expected_exception is not _NoException:
-        return RegressOutputSchema(
+        return TestOutputSchema(
             status="failed",
             message=f"Expected {expected_exception.__name__}, but no exception was raised",
             endpoint=test_spec.endpoint,
@@ -582,7 +582,7 @@ def regress_test_case(
             obtained_outputs, expected_outputs, path_patterns
         )
     except AssertionError as e:
-        return RegressOutputSchema(
+        return TestOutputSchema(
             status="failed", message=str(e), endpoint=test_spec.endpoint
         )
 
@@ -644,11 +644,11 @@ def regress_test_case(
                 )
 
     if discrepancies:
-        return RegressOutputSchema(
+        return TestOutputSchema(
             status="failed",
             message="Values are not sufficiently close.\n\n"
             + "\n\n".join(discrepancies),
             endpoint=test_spec.endpoint,
         )
 
-    return RegressOutputSchema(status="passed", message="", endpoint=test_spec.endpoint)
+    return TestOutputSchema(status="passed", message="", endpoint=test_spec.endpoint)

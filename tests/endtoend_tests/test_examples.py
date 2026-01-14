@@ -271,13 +271,13 @@ def test_unit_tesseract_endtoend(
         test_files = sorted(test_cases_dir.glob("*.json"))
         for test_file_path in test_files:
             test_file = test_file_path.relative_to(unit_tesseract_path)
-            print(f"Running regress test: {test_file}")
+            print(f"Running test: {test_file}")
 
             args = [
                 "run",
                 img_name,
                 *mount_args,
-                "regress",
+                "test",
                 f"@{test_file_path}",
                 *io_args,
             ]
@@ -286,16 +286,16 @@ def test_unit_tesseract_endtoend(
             print_debug_info(result)
             assert result.exit_code == 0, result.exception
 
-            # Parse regress response
-            regress_result = json.loads(result.stdout)
-            assert regress_result["status"] == "passed", (
-                f"Regress test failed for {test_file}:\n"
-                f"  Endpoint: {regress_result['endpoint']}\n"
-                f"  Message: {regress_result['message']}"
+            # Parse test response
+            test_result = json.loads(result.stdout)
+            assert test_result["status"] == "passed", (
+                f"Test failed for {test_file}:\n"
+                f"  Endpoint: {test_result['endpoint']}\n"
+                f"  Message: {test_result['message']}"
             )
 
     # check-gradients is a CLI command not a true endpoint
-    # as such the regress endpoint cannot access it directly.
+    # as such the test endpoint cannot access it directly.
     # Therefore, we only test with cli_runner (stage 2)
     if unit_tesseract_config.check_gradients:
         checkgradients_input = (

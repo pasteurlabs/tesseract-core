@@ -452,7 +452,7 @@ class Tesseract:
         return self._client.run_tesseract("vector_jacobian_product", payload, run_id)
 
     @requires_client
-    def regress(self, test_spec: dict) -> None:
+    def test(self, test_spec: dict) -> None:
         """Run a regression test, raising AssertionError on failure.
 
         Works with ALL client types (LocalClient, HTTPClient, remote).
@@ -460,7 +460,7 @@ class Tesseract:
         Args:
             test_spec: Test specification dict with keys:
                 - endpoint: Name of endpoint (e.g., "apply", "jacobian")
-                - inputs: Input data dict
+                - payload: Input data dict
                 - expected_outputs: Expected output data dict (if no exception expected)
                 - expected_exception: Optional exception type or name (e.g., ValueError or "ValueError")
                 - expected_exception_regex: Optional regex pattern for exception message
@@ -475,15 +475,15 @@ class Tesseract:
 
         Example:
             >>> tess = Tesseract.from_tesseract_api("path/to/tesseract_api.py")
-            >>> tess.regress(
+            >>> tess.test(
             ...     {
             ...         "endpoint": "apply",
-            ...         "inputs": {"a": [1, 2], "b": [3, 4]},
+            ...         "payload": {"a": [1, 2], "b": [3, 4]},
             ...         "expected_outputs": {"result": [4, 6]},
             ...     }
             ... )
         """
-        result = self._client.run_tesseract("regress", test_spec, run_id=None)
+        result = self._client.run_tesseract("test", test_spec, run_id=None)
 
         # Re-raise errors for pytest compatibility
         if result["status"] == "failed":

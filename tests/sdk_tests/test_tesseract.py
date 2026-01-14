@@ -53,7 +53,7 @@ def test_Tesseract_from_tesseract_api(dummy_tesseract_location, dummy_tesseract_
         "vector_jacobian_product",
         "health",
         "abstract_eval",
-        "regress",
+        "test",
     ]
 
     t = Tesseract.from_tesseract_api(dummy_tesseract_location / "tesseract_api.py")
@@ -314,7 +314,7 @@ def test_regress_success_local(dummy_tesseract_package):
     tess = Tesseract.from_tesseract_api(dummy_tesseract_package / "tesseract_api.py")
 
     # Should not raise
-    tess.regress(
+    tess.test(
         {
             "endpoint": "apply",
             "inputs": {
@@ -334,7 +334,7 @@ def test_regress_failure_local(dummy_tesseract_package):
     tess = Tesseract.from_tesseract_api(dummy_tesseract_package / "tesseract_api.py")
 
     with pytest.raises(AssertionError, match="Values are not sufficiently close"):
-        tess.regress(
+        tess.test(
             {
                 "endpoint": "apply",
                 "inputs": {
@@ -356,7 +356,7 @@ def test_regress_with_exception_type_local(dummy_tesseract_package):
     tess = Tesseract.from_tesseract_api(dummy_tesseract_package / "tesseract_api.py")
 
     # Should not raise - exception type passed directly
-    tess.regress(
+    tess.test(
         {
             "endpoint": "apply",
             "inputs": {

@@ -265,12 +265,12 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
         endpoints.append(abstract_eval)
 
     from tesseract_core.runtime.testing.regression import (
-        RegressOutputSchema,
+        TestOutputSchema,
         TestSpec,
         regress_test_case,
     )
 
-    def regress(payload: TestSpec) -> RegressOutputSchema:
+    def test(payload: TestSpec) -> TestOutputSchema:
         """Run a single regression test against a Tesseract endpoint.
 
         Tests an endpoint by calling it with specified inputs and comparing outputs
@@ -279,7 +279,7 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
         Args:
             payload: Test specification containing:
                 - endpoint: Name of endpoint to test (e.g., "apply", "jacobian")
-                - inputs: Input data for the endpoint
+                - payload: Input data for the endpoint
                 - expected_outputs: Expected output data (mutually exclusive with expected_exception)
                 - expected_exception: Expected exception type or name (mutually exclusive with expected_outputs)
                 - expected_exception_regex: Optional regex pattern for exception message
@@ -287,7 +287,7 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
                 - rtol: Relative tolerance for numeric comparisons (default: 1e-5)
 
         Returns:
-            RegressOutputSchema with:
+            TestOutputSchema with:
                 - status: "passed" | "failed" | "error"
                 - message: Empty for passed tests, error details for failed/error
                 - endpoint: Name of the tested endpoint
@@ -307,6 +307,6 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
             threshold=100,
         )
 
-    endpoints.append(regress)
+    endpoints.append(test)
 
     return endpoints

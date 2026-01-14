@@ -19,7 +19,7 @@ expected_endpoints = {
     "abstract_eval",
     "jacobian_vector_product",
     "vector_jacobian_product",
-    "regress",
+    "test",
 }
 
 
@@ -167,7 +167,7 @@ def test_all_endpoints(
                 "b": {"shape": [2], "dtype": "float32"},
             }
         }
-    elif endpoint_name == "regress":
+    elif endpoint_name == "test":
         inputs = {
             "test_spec": {
                 "endpoint": "apply",
