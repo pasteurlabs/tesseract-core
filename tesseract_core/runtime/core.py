@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import importlib.util
+import logging
 import os
 import sys
 from collections.abc import Callable, Generator
@@ -19,6 +20,8 @@ from .schema_generation import (
     create_apply_schema,
     create_autodiff_schema,
 )
+
+logger = logging.getLogger("tesseract")
 
 
 @contextmanager
@@ -296,6 +299,10 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
             This endpoint is designed for testing and CI/CD workflows.
             All outcomes return HTTP 200 with status in the response body regardless of success/failure.
         """
+        logger.warning(
+            "The 'test' endpoint is experimental and may change, be replaced, or be deprecated in future versions."
+        )
+
         config = get_config()
         base_dir = Path(config.input_path) if config.input_path else None
 
