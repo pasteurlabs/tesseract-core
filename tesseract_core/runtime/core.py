@@ -106,6 +106,22 @@ def get_tesseract_api() -> ModuleType:
     return load_module_from_path(get_config().api_path)
 
 
+def get_input_schema(endpoint_function: Callable) -> type[BaseModel]:
+    """Get the input schema of an endpoint function."""
+    schema = endpoint_function.__annotations__["payload"]
+    if not issubclass(schema, BaseModel):
+        raise AssertionError(f"Expected BaseModel, got {schema}")
+    return schema
+
+
+def get_output_schema(endpoint_function: Callable) -> type[BaseModel]:
+    """Get the output schema of an endpoint function."""
+    schema = endpoint_function.__annotations__["return"]
+    if not issubclass(schema, BaseModel):
+        raise AssertionError(f"Expected BaseModel, got {schema}")
+    return schema
+
+
 def check_tesseract_api(api_module: ModuleType) -> None:
     """Performs basic checks on the Tesseract API module."""
     required_schemas = ("InputSchema", "OutputSchema")

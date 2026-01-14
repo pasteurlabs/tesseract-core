@@ -17,9 +17,8 @@ import numpy as np
 from numpy.typing import ArrayLike
 from rich.progress import Progress
 
-from ..core import create_endpoints
+from ..core import create_endpoints, get_input_schema, get_output_schema
 from ..tree_transforms import get_at_path, set_at_path
-from .common import get_input_schema, get_output_schema
 
 ADEndpointName = Literal[
     "jacobian", "jacobian_vector_product", "vector_jacobian_product"

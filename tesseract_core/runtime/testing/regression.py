@@ -19,8 +19,8 @@ from pydantic import (
     model_validator,
 )
 
+from ..core import get_input_schema, get_output_schema
 from ..schema_generation import DICT_INDEX_SENTINEL, get_all_model_path_patterns
-from .common import get_input_schema, get_output_schema
 
 ROWFORMAT = "{:>15s}  {:>20s}  {:>20s}  {:>20s}\n"
 
