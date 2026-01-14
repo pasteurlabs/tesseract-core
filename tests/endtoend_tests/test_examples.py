@@ -330,6 +330,7 @@ def test_unit_tesseract_endtoend(
             img_name,
             "-p",
             free_port,
+            "--debug",
             *mount_args,
             *io_args,
         ],
