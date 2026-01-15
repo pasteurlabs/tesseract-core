@@ -48,7 +48,7 @@ class TestSpec(BaseModel):
     endpoint: str
     payload: dict
     expected_outputs: dict | None = None
-    expected_exception: type[Exception] | None = None
+    expected_exception: type[BaseException] | None = None
     expected_exception_regex: str | None = None
     atol: float = 1e-8
     rtol: float = 1e-5
@@ -57,8 +57,8 @@ class TestSpec(BaseModel):
     @field_validator("expected_exception", mode="before")
     @classmethod
     def parse_exception_type(
-        cls, v: str | type[Exception] | None
-    ) -> type[Exception] | None:
+        cls, v: str | type[BaseException] | None
+    ) -> type[BaseException] | None:
         """Parse exception from string or type.
 
         Allows JSON files to specify exceptions as strings (e.g., "ValueError")
@@ -140,7 +140,7 @@ class _NoException(Exception):
         )
 
 
-def _parse_exception_type(exception_name: str | None) -> type[Exception]:
+def _parse_exception_type(exception_name: str | None) -> type[BaseException]:
     """Parse exception name string to exception class.
 
     Args:
@@ -172,14 +172,7 @@ def _parse_exception_type(exception_name: str | None) -> type[Exception]:
         )
 
     # Split into module path and exception class name
-    parts = exception_name.rsplit(".", 1)
-    if len(parts) != 2:
-        raise ValueError(
-            f"Invalid exception format '{exception_name}'. "
-            f"Expected 'packagename.exceptionname'"
-        )
-
-    module_name, class_name = parts
+    module_name, class_name = exception_name.rsplit(".", 1)
 
     # Attempt to import the exception from the package
     try:
