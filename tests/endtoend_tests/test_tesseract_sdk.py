@@ -110,7 +110,9 @@ def served_tesseract_remote(built_image_name):
     sock.close()
     # Serve the Tesseract image
     tesseract_url = f"http://localhost:{free_port}"
-    served_tesseract, _ = engine.serve(built_image_name, port=str(free_port))
+    served_tesseract, _ = engine.serve(
+        built_image_name, port=str(free_port), debug=True
+    )
     try:
         yield tesseract_url
     finally:
