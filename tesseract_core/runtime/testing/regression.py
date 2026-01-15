@@ -332,7 +332,7 @@ def _validate_tree_structure(
 
 def _array_discrepancy_msg(
     size: int,
-    shape: tuple[int],
+    shape: tuple[int, ...],
     diff_ids: list | np.ndarray,
     obtained_array: np.ndarray,
     expected_array: np.ndarray,

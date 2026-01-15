@@ -134,7 +134,7 @@ def test_missing_dict_key_fails(complex_tesseract_module, monkeypatch):
 
     result = regress_test_case(complex_tesseract_module, endpoints, test_spec)
     assert result.status == "failed"
-    assert "Unexpected output paths" in result.message
+    assert "Key mismatch at testbar" in result.message
 
 
 def test_list_length_mismatch_fails(complex_tesseract_module, monkeypatch):
@@ -164,7 +164,7 @@ def test_list_length_mismatch_fails(complex_tesseract_module, monkeypatch):
 
     result = regress_test_case(complex_tesseract_module, endpoints, test_spec)
     assert result.status == "failed"
-    assert "output paths" in result.message.lower()
+    assert "Mismatch in length of list at testfoo" in result.message
 
 
 def test_array_value_mismatch_fails(complex_tesseract_module, monkeypatch):
