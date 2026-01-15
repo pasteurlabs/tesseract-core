@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import importlib.util
+import logging
 import os
 import sys
 from collections.abc import Callable, Generator
@@ -19,6 +20,8 @@ from .schema_generation import (
     create_apply_schema,
     create_autodiff_schema,
 )
+
+logger = logging.getLogger("tesseract")
 
 
 @contextmanager
@@ -96,6 +99,22 @@ def get_supported_endpoints(api_module: ModuleType) -> tuple[str, ...]:
 def get_tesseract_api() -> ModuleType:
     """Import tesseract_api.py file."""
     return load_module_from_path(get_config().api_path)
+
+
+def get_input_schema(endpoint_function: Callable) -> type[BaseModel]:
+    """Get the input schema of an endpoint function."""
+    schema = endpoint_function.__annotations__["payload"]
+    if not issubclass(schema, BaseModel):
+        raise AssertionError(f"Expected BaseModel, got {schema}")
+    return schema
+
+
+def get_output_schema(endpoint_function: Callable) -> type[BaseModel]:
+    """Get the output schema of an endpoint function."""
+    schema = endpoint_function.__annotations__["return"]
+    if not issubclass(schema, BaseModel):
+        raise AssertionError(f"Expected BaseModel, got {schema}")
+    return schema
 
 
 def check_tesseract_api(api_module: ModuleType) -> None:
@@ -247,5 +266,54 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
             return AbstractEvalOutputSchema.model_validate(out)
 
         endpoints.append(abstract_eval)
+
+    from tesseract_core.runtime.testing.regression import (
+        TestOutputSchema,
+        TestSpec,
+        regress_test_case,
+    )
+
+    def test(payload: TestSpec) -> TestOutputSchema:
+        """Run a single regression test against a Tesseract endpoint.
+
+        Tests an endpoint by calling it with specified inputs and comparing outputs
+        against expected values or verifying expected exceptions are raised.
+
+        Args:
+            payload: Test specification containing:
+                - endpoint: Name of endpoint to test (e.g., "apply", "jacobian")
+                - payload: Input data for the endpoint
+                - expected_outputs: Expected output data (mutually exclusive with expected_exception)
+                - expected_exception: Expected exception type or name (mutually exclusive with expected_outputs)
+                - expected_exception_regex: Optional regex pattern for exception message
+                - atol: Absolute tolerance for numeric comparisons (default: 1e-8)
+                - rtol: Relative tolerance for numeric comparisons (default: 1e-5)
+
+        Returns:
+            TestOutputSchema with:
+                - status: "passed" | "failed" | "error"
+                - message: Empty for passed tests, error details for failed/error
+                - endpoint: Name of the tested endpoint
+
+        Note:
+            This endpoint is designed for testing and CI/CD workflows.
+            All outcomes return HTTP 200 with status in the response body regardless of success/failure.
+        """
+        logger.warning(
+            "The 'test' endpoint is experimental and may change, be replaced, or be deprecated in future versions."
+        )
+
+        config = get_config()
+        base_dir = Path(config.input_path) if config.input_path else None
+
+        return regress_test_case(
+            api_module,
+            endpoint_functions={func.__name__: func for func in endpoints},
+            test_spec=payload,
+            base_dir=base_dir,
+            threshold=100,
+        )
+
+    endpoints.append(test)
 
     return endpoints

@@ -46,14 +46,17 @@ def test_Tesseract_init():
 
 
 def test_Tesseract_from_tesseract_api(dummy_tesseract_location, dummy_tesseract_module):
-    all_endpoints = [
-        "apply",
-        "jacobian",
-        "jacobian_vector_product",
-        "vector_jacobian_product",
-        "health",
-        "abstract_eval",
-    ]
+    all_endpoints = sorted(
+        [
+            "apply",
+            "jacobian",
+            "jacobian_vector_product",
+            "vector_jacobian_product",
+            "health",
+            "abstract_eval",
+            "test",
+        ]
+    )
 
     t = Tesseract.from_tesseract_api(dummy_tesseract_location / "tesseract_api.py")
     endpoints = t.available_endpoints
@@ -306,3 +309,65 @@ def test_tree_map():
         },
         "f": "hello",
     }
+
+
+def test_regress_success_local(dummy_tesseract_package):
+    """Test regress() with LocalClient."""
+    tess = Tesseract.from_tesseract_api(dummy_tesseract_package / "tesseract_api.py")
+
+    # Should not raise
+    tess.test(
+        {
+            "endpoint": "apply",
+            "payload": {
+                "inputs": {
+                    "a": np.array([1.0, 2.0], dtype=np.float32),
+                    "b": np.array([3.0, 4.0], dtype=np.float32),
+                    "s": 1,
+                }
+            },
+            "expected_outputs": {"result": np.array([4.0, 6.0], dtype=np.float32)},
+        }
+    )
+
+
+def test_regress_failure_local(dummy_tesseract_package):
+    """Test regress() failure with LocalClient."""
+    tess = Tesseract.from_tesseract_api(dummy_tesseract_package / "tesseract_api.py")
+
+    with pytest.raises(AssertionError, match="Values are not sufficiently close"):
+        tess.test(
+            {
+                "endpoint": "apply",
+                "payload": {
+                    "inputs": {
+                        "a": np.array([1.0, 2.0], dtype=np.float32),
+                        "b": np.array([3.0, 4.0], dtype=np.float32),
+                        "s": 1,
+                    }
+                },
+                "expected_outputs": {
+                    "result": np.array([999.0, 999.0], dtype=np.float32)
+                },
+            }
+        )
+
+
+def test_regress_with_exception_type_local(dummy_tesseract_package):
+    """Test regress() with exception type (not string) using LocalClient."""
+    tess = Tesseract.from_tesseract_api(dummy_tesseract_package / "tesseract_api.py")
+
+    # Should not raise - exception type passed directly
+    tess.test(
+        {
+            "endpoint": "apply",
+            "payload": {
+                "inputs": {
+                    "a": np.array([1.0, 2.0], dtype=np.float32),
+                    "b": np.array([4.0], dtype=np.float32),  # Wrong shape
+                    "s": 1,
+                }
+            },
+            "expected_exception": ValidationError,  # Type, not string
+        }
+    )

@@ -311,6 +311,10 @@ class Tesseract:
         Returns:
             a list with all available endpoints for this Tesseract.
         """
+        # For LocalClient, get endpoints directly to include all endpoints (including test)
+        if isinstance(self._client, LocalClient):
+            return sorted(self._client._endpoints.keys())
+        # For HTTPClient, use OpenAPI schema (respects server's debug mode filtering)
         return [endpoint.lstrip("/") for endpoint in self.openapi_schema["paths"]]
 
     @requires_client
@@ -450,6 +454,46 @@ class Tesseract:
             "cotangent_vector": cotangent_vector,
         }
         return self._client.run_tesseract("vector_jacobian_product", payload, run_id)
+
+    @requires_client
+    def test(self, test_spec: dict) -> None:
+        """Run a regression test, raising AssertionError on failure.
+
+        Works with ALL client types (LocalClient, HTTPClient, remote).
+
+        Args:
+            test_spec: Test specification dict with keys:
+                - endpoint: Name of endpoint (e.g., "apply", "jacobian")
+                - payload: Input data dict
+                - expected_outputs: Expected output data dict (if no exception expected)
+                - expected_exception: Optional exception type or name (e.g., ValueError or "ValueError")
+                - expected_exception_regex: Optional regex pattern for exception message
+                - atol: Optional absolute tolerance (default 1e-8)
+                - rtol: Optional relative tolerance (default 1e-5)
+
+            Must provide exactly one of expected_outputs or expected_exception.
+
+        Raises:
+            AssertionError: If test fails (outputs don't match or wrong exception)
+            RuntimeError: If test encounters unexpected error
+
+        Example:
+            >>> tess = Tesseract.from_tesseract_api("path/to/tesseract_api.py")
+            >>> tess.test(
+            ...     {
+            ...         "endpoint": "apply",
+            ...         "payload": {"a": [1, 2], "b": [3, 4]},
+            ...         "expected_outputs": {"result": [4, 6]},
+            ...     }
+            ... )
+        """
+        result = self._client.run_tesseract("test", test_spec, run_id=None)
+
+        # Re-raise errors for pytest compatibility
+        if result["status"] == "failed":
+            raise AssertionError(result["message"])
+        elif result["status"] == "error":
+            raise RuntimeError(result["message"])
 
 
 def _tree_map(func: Callable, tree: Any, is_leaf: Callable | None = None) -> Any:
@@ -667,8 +711,11 @@ class LocalClient:
         InputSchema = func.__annotations__.get("payload", None)
         OutputSchema = func.__annotations__.get("return", None)
 
-        if InputSchema is not None:
+        # Only validate if InputSchema is a BaseModel (not plain dict)
+        if InputSchema is not None and InputSchema is not dict:
             parsed_payload = InputSchema.model_validate(payload)
+        elif payload is not None:
+            parsed_payload = payload
         else:
             parsed_payload = None
 

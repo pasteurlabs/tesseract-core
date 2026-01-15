@@ -94,7 +94,16 @@ POSSIBLE_CMDS = set(
     re.sub(r"([a-z])([A-Z])", r"\1-\2", object.name).replace("_", "-").lower()
     for object in EXPECTED_OBJECTS
 )
-POSSIBLE_CMDS.update({"health", "openapi-schema", "check", "check-gradients", "serve"})
+POSSIBLE_CMDS.update(
+    {
+        "health",
+        "openapi-schema",
+        "check",
+        "check-gradients",
+        "test",
+        "serve",
+    }
+)
 
 # All fields in TesseractConfig and TesseractBuildConfig for config override
 POSSIBLE_KEYPATHS = TesseractConfig.model_fields.keys()
@@ -1050,6 +1059,49 @@ def run_container(
 
     if payload is not None:
         args.append(payload)
+
+    # For test command, extract cli_config from test spec if available
+    # This allows test specs to be self-contained without requiring manual -i/-o flags
+    if cmd == "test" and payload is not None and payload.startswith("@"):
+        test_spec_path = Path(payload.lstrip("@")).resolve()
+        try:
+            with open(test_spec_path) as f:
+                test_spec = json.load(f)
+            cli_config = test_spec.get("cli_config", {})
+        except (OSError, json.JSONDecodeError):
+            # If we can't read cli_config, just continue without it
+            # The test spec will be validated later by the runtime
+            cli_config = {}
+
+        # Use cli_config.input_path if user didn't provide -i
+        # Resolve relative paths relative to the test spec's directory
+        if input_path is None and "input_path" in cli_config:
+            config_input_path = cli_config["input_path"]
+            if not Path(config_input_path).is_absolute():
+                # path is assumed to be relative to test spec json file
+                input_path = str(test_spec_path.parent / config_input_path)
+            else:
+                input_path = config_input_path
+
+        # Use cli_config.volume_mounts if user didn't provide -v
+        # Resolve relative source paths relative to the test spec's directory
+        if volume is None and "volume_mounts" in cli_config:
+            volume = []
+
+            for vol_mount in cli_config["volume_mounts"]:
+                # Parse volume mount (format: source:target or source:target:mode)
+                parts = vol_mount.split(":")
+                source = parts[0]
+                # Resolve relative source paths
+                if not Path(source).is_absolute():
+                    source = str(test_spec_path.parent / source)
+                # Reconstruct volume mount with resolved source
+                parts[0] = source
+                volume.append(":".join(parts))
+
+        # Use cli_config.user if user didn't provide --user
+        if user is None and "user" in cli_config:
+            user = cli_config["user"]
 
     try:
         result_out, result_err = engine.run_tesseract(

@@ -7,6 +7,7 @@ import socket
 import numpy as np
 import pytest
 from common import build_tesseract, image_exists
+from pydantic import ValidationError
 
 from tesseract_core import Tesseract
 from tesseract_core.sdk import engine
@@ -18,6 +19,7 @@ expected_endpoints = {
     "abstract_eval",
     "jacobian_vector_product",
     "vector_jacobian_product",
+    "test",
 }
 
 
@@ -89,18 +91,14 @@ def test_apply(built_image_name, dummy_tesseract_location, free_port, output_for
 
 
 def test_apply_with_error(built_image_name):
-    # pass two inputs with different shapes, which raises an internal error
+    # pass two inputs with different shapes, which raises a validation error
     inputs = {"a": [1, 2, 3], "b": [3, 4], "s": 1}
 
     with Tesseract.from_image(built_image_name) as vecadd:
-        with pytest.raises(RuntimeError) as excinfo:
+        with pytest.raises(ValidationError) as excinfo:
             vecadd.apply(inputs)
 
-    assert "assert a.shape == b.shape" in str(excinfo.value)
-
-    # get logs
-    logs = vecadd.server_logs()
-    assert "assert a.shape == b.shape" in logs
+    assert "a and b must have the same shape" in str(excinfo.value)
 
 
 @pytest.fixture(scope="module")
@@ -112,7 +110,9 @@ def served_tesseract_remote(built_image_name):
     sock.close()
     # Serve the Tesseract image
     tesseract_url = f"http://localhost:{free_port}"
-    served_tesseract, _ = engine.serve(built_image_name, port=str(free_port))
+    served_tesseract, _ = engine.serve(
+        built_image_name, port=str(free_port), debug=True
+    )
     try:
         yield tesseract_url
     finally:
@@ -132,7 +132,8 @@ def served_tesseract_module(dummy_tesseract_location):
 
 
 @pytest.mark.parametrize(
-    "endpoint_name", sorted(expected_endpoints | {"openapi_schema"})
+    "endpoint_name",
+    sorted(expected_endpoints | {"openapi_schema"}),
 )
 def test_all_endpoints(
     endpoint_name,
@@ -166,6 +167,37 @@ def test_all_endpoints(
             "abstract_inputs": {
                 "a": {"shape": [2], "dtype": "float32"},
                 "b": {"shape": [2], "dtype": "float32"},
+            }
+        }
+    elif endpoint_name == "test":
+        inputs = {
+            "test_spec": {
+                "endpoint": "apply",
+                "payload": {
+                    "inputs": {
+                        "a": {
+                            "object_type": "array",
+                            "shape": [3],
+                            "dtype": "int64",
+                            "data": {
+                                "buffer": "AQAAAAAAAAACAAAAAAAAAAMAAAAAAAAA",
+                                "encoding": "base64",
+                            },
+                        },
+                        "b": {
+                            "object_type": "array",
+                            "shape": [3],
+                            "dtype": "int64",
+                            "data": {
+                                "buffer": "BAAAAAAAAAAFAAAAAAAAAAYAAAAAAAAA",
+                                "encoding": "base64",
+                            },
+                        },
+                    }
+                },
+                "expected_outputs": {"result": [7.0, 11.0, 15.0]},
+                "atol": 1e-8,
+                "rtol": 0.00001,
             }
         }
     else:
