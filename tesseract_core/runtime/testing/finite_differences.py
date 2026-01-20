@@ -18,7 +18,7 @@ from numpy.typing import ArrayLike
 from rich.progress import Progress
 
 from ..core import create_endpoints, get_input_schema, get_output_schema
-from ..tree_transforms import get_at_path, set_at_path
+from ..tree_transforms import expand_path_pattern, get_at_path, set_at_path
 
 ADEndpointName = Literal[
     "jacobian", "jacobian_vector_product", "vector_jacobian_product"
@@ -43,48 +43,6 @@ class GradientCheckResult(NamedTuple):
     grad_val: ArrayLike | None
     ref_val: ArrayLike | None
     exception: str | None
-
-
-def expand_path_pattern(path_pattern: str, inputs: dict[str, Any]) -> list[str]:
-    """Expand a path pattern to a list of all matching paths in the given pytree.
-
-    For example, given the path pattern `a.[].{}`, and the inputs `{"a": [{"b": 1}, {"c": 2}]}`,
-    this function would return `["a.[0].{b}", "a.[1].{c}"]`.
-    """
-    parts = path_pattern.split(".")
-
-    def _handle_part(
-        parts: Sequence[str], current_inputs: Any, current_path: list[str]
-    ) -> list[str]:
-        """Recursively expand each part separately."""
-        if not parts:
-            return [".".join(current_path)]
-
-        paths = []
-        part = parts[0]
-
-        if part == "[]":
-            # sequence access
-            for i, _ in enumerate(current_inputs):
-                subpaths = _handle_part(
-                    parts[1:], current_inputs[i], [*current_path, f"[{i}]"]
-                )
-                paths.extend(subpaths)
-        elif part == "{}":
-            # dictionary access
-            for key in current_inputs:
-                subpaths = _handle_part(
-                    parts[1:], current_inputs[key], [*current_path, f"{{{key}}}"]
-                )
-                paths.extend(subpaths)
-        else:
-            subpaths = _handle_part(
-                parts[1:], current_inputs[part], [*current_path, part]
-            )
-            paths.extend(subpaths)
-        return paths
-
-    return _handle_part(parts, inputs, [])
 
 
 def get_differentiable_paths(

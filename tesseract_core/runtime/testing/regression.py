@@ -6,7 +6,7 @@
 import builtins
 import importlib
 import re
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Literal, NamedTuple
@@ -14,13 +14,15 @@ from typing import Any, Literal, NamedTuple
 import numpy as np
 from pydantic import (
     BaseModel,
+    RootModel,
     ValidationError,
     field_validator,
     model_validator,
 )
 
 from ..core import get_input_schema, get_output_schema
-from ..schema_generation import DICT_INDEX_SENTINEL, get_all_model_path_patterns
+from ..schema_generation import get_all_model_paths
+from ..tree_transforms import expand_path_pattern, get_at_path
 
 ROWFORMAT = "{:>15s}  {:>20s}  {:>20s}  {:>20s}\n"
 
@@ -140,6 +142,11 @@ class _NoException(Exception):
         )
 
 
+def _is_leaf_type(obj: Any) -> bool:
+    """Check if an object is a leaf type (not a container)."""
+    return not isinstance(obj, (dict, list, tuple))
+
+
 def _parse_exception_type(exception_name: str | None) -> type[BaseException]:
     """Parse exception name string to exception class.
 
@@ -163,6 +170,11 @@ def _parse_exception_type(exception_name: str | None) -> type[BaseException]:
         exc_class = getattr(builtins, exception_name)
         if isinstance(exc_class, type) and issubclass(exc_class, BaseException):
             return exc_class
+        else:
+            raise ValueError(
+                f"'{exception_name}' is not a valid builtin exception class. "
+                f"Found type: {type(exc_class).__name__}"
+            )
 
     # For non-builtin exceptions, require packagename.exceptionname format
     if "." not in exception_name:
@@ -199,128 +211,6 @@ def _parse_exception_type(exception_name: str | None) -> type[BaseException]:
         )
 
     return exc_class
-
-
-def _validate_tree_structure(
-    tree: Any,
-    template: Any,
-    path_patterns: dict[tuple, type] | None = None,
-    path: tuple[str | object, ...] = (),
-) -> dict[tuple[str, ...], tuple[Any, Any]]:
-    """Recursively validate a tree-like structure against a template and collect leaf values.
-
-    Compares types, dictionary keys, sequence lengths, array shapes and dtypes.
-    Does not compare values, raises AssertionError on first mismatch. Uses schema
-    path patterns to distinguish between dict keys (formatted as "{key}") and model
-    attributes (formatted as "attribute").
-
-    Args:
-        tree: The tree structure to validate (obtained values).
-        template: The template structure to validate against (expected values).
-        path_patterns: Optional schema patterns mapping path tuples to types,
-            used to distinguish dicts from model attributes.
-        path: Current path in the tree traversal (for error messages).
-
-    Returns:
-        Dict mapping path tuples to (tree_leaf, template_leaf) tuples.
-
-    Raises:
-        AssertionError: If structures don't match (type, keys, length, shape, dtype).
-    """
-    assert type(tree) is type(template), (
-        f"Type mismatch at {'.'.join(path)}:\n"
-        f"  Expected: {type(template).__name__}, "
-        f"  Obtained: {type(tree).__name__}"
-    )
-
-    if isinstance(template, Mapping):  # Dictionary-like structure
-        # assume Mapping is a regular dict unless path patterns has specific attribute names
-        # (in which case the dict is just a json representation of a pydantic BaseModel)
-        is_dict = True
-        if path_patterns:
-            arbitrary_key = next(iter(path_patterns.keys()))
-            # If the key is an empty tuple there is a flaw in our logic
-            # Instead of raising an assertion error we let the IndexError
-            # propagate upwards for visibiility
-            is_dict = arbitrary_key[0] == DICT_INDEX_SENTINEL
-
-        key_or_attribute = "key" if is_dict else "optional attribute"
-
-        tree_keys = set(tree.keys())
-        template_keys = set(template.keys())
-
-        assert tree_keys == template_keys, (
-            f"{key_or_attribute.capitalize()} mismatch at {'.'.join(path)}:\n"
-            f"  Missing {key_or_attribute}s: {template_keys - tree_keys}\n"
-            f"  Unexpected {key_or_attribute}s: {tree_keys - template_keys}\n"
-            f"  Matching {key_or_attribute.split(' ')[-1]}s: {template_keys & tree_keys}"
-        )
-
-        leaves = {}
-        for key in template_keys:
-            if is_dict:
-                # Drop sentinel
-                if path_patterns:
-                    next_path_patterns = {k[1:]: v for k, v in path_patterns.items()}
-                else:
-                    next_path_patterns = None
-            else:
-                # Filter to paths beginning with relevant attribute
-                next_path_patterns = {
-                    k[1:]: v
-                    for k, v in path_patterns.items()
-                    if len(k) > 1 and k[0] == key
-                }
-            leaves.update(
-                _validate_tree_structure(
-                    tree[key],
-                    template[key],
-                    next_path_patterns,
-                    (*path, f"{{{key}}}" if is_dict else f"{key}"),
-                )
-            )
-        return leaves
-
-    elif isinstance(template, Sequence) and not isinstance(
-        template, (str, bytes)
-    ):  # List, tuple, etc.
-        assert len(tree) == len(template), (
-            f"Mismatch in length of {type(template).__name__} at {'.'.join(path)}:\n"
-            f"  Expected: {len(template)}\n"
-            f"  Obtained: {len(tree)}"
-        )
-
-        # Drop sentinel
-        if path_patterns:
-            next_path_patterns = {k[1:]: v for k, v in path_patterns.items()}
-        else:
-            next_path_patterns = None
-
-        leaves = {}
-        for i, (tree_branch, template_branch) in enumerate(
-            zip(tree, template, strict=True)
-        ):
-            leaves.update(
-                _validate_tree_structure(
-                    tree_branch, template_branch, next_path_patterns, (*path, f"[{i}]")
-                )
-            )
-        return leaves
-
-    elif isinstance(template, np.ndarray):
-        assert tree.shape == template.shape, (
-            f"Shape mismatch for array at {'.'.join(path)}: \n"
-            f"  Expected: {template.shape}\n"
-            f"  Obtained: {tree.shape}"
-        )
-        assert tree.dtype == template.dtype, (
-            f"dtype mismatch for array at {'.'.join(path)}:\n"
-            f"  Expected: {template.dtype}\n"
-            f"  Obtained: {tree.dtype}"
-        )
-
-    # Validation complete return path to leaf
-    return {path: (tree, template)}
 
 
 def _array_discrepancy_msg(
@@ -407,6 +297,82 @@ def _array_discrepancy_msg(
         )
     error_msg += "\n"
     return error_msg
+
+
+def _compare_values(
+    obtained_val: Any,
+    expected_val: Any,
+    atol: float,
+    rtol: float,
+    threshold: int = 100,
+) -> str | None:
+    """Compare two values (scalars or arrays) for equality within tolerances.
+
+    Returns a formatted discrepancy message if they differ, or None if they match.
+    """
+    if not _is_leaf_type(expected_val) and not _is_leaf_type(obtained_val):
+        # Both are non-leaf types and are compared / recursed into elsewhere.
+        # This can e.g. happen for types like `foo: list[Array[...]] | None`, where
+        # the path `foo` can either point to a leaf (None) or a non-leaf (list).
+        return None
+
+    if _is_leaf_type(expected_val) != _is_leaf_type(obtained_val):
+        return (
+            f"Type mismatch:\n"
+            f"  Expected type: {type(expected_val).__name__}\n"
+            f"  Obtained type: {type(obtained_val).__name__}"
+        )
+
+    is_inexact_numeric = False
+    if isinstance(expected_val, float):
+        is_inexact_numeric = True
+    elif isinstance(expected_val, (np.number, np.ndarray)):
+        if np.issubdtype(expected_val.dtype, np.inexact):
+            is_inexact_numeric = True
+
+    if isinstance(expected_val, np.ndarray) and expected_val.ndim == 0:
+        expected_val = expected_val[()]
+        obtained_val = obtained_val[()]
+
+    if isinstance(expected_val, np.ndarray):
+        if is_inexact_numeric:
+            not_close_mask = ~np.isclose(
+                obtained_val, expected_val, equal_nan=True, atol=atol, rtol=rtol
+            )
+        else:
+            not_close_mask = obtained_val != expected_val
+
+        if np.any(not_close_mask):
+            diff_ids = np.array(np.nonzero(not_close_mask)).T
+            array_msg = _array_discrepancy_msg(
+                expected_val.size,
+                expected_val.shape,
+                diff_ids,
+                obtained_val[not_close_mask],
+                expected_val[not_close_mask],
+                threshold,
+            )
+            return array_msg
+        else:
+            return None
+
+    # Not an array
+    if is_inexact_numeric:
+        close = np.allclose(obtained_val, expected_val, atol=atol, rtol=rtol)
+    else:
+        close = obtained_val == expected_val
+
+    if not close:
+        if isinstance(expected_val, (int, float, np.number)):
+            difference_if_numeric = f"\n  Difference: {obtained_val - expected_val}"
+        else:
+            difference_if_numeric = ""
+
+        return (
+            f"  Expected: {expected_val}\n"
+            f"  Obtained: {obtained_val}"
+            f"{difference_if_numeric}"
+        )
 
 
 def regress_test_case(
@@ -559,82 +525,65 @@ def regress_test_case(
                 message=f"Expected {expected_exception.__name__}, but got {type(e).__name__}: {e}",
                 endpoint=test_spec.endpoint,
             )
-
-    # If we expected an exception but didn't get one
-    if expected_exception is not _NoException:
-        return TestOutputSchema(
-            status="failed",
-            message=f"Expected {expected_exception.__name__}, but no exception was raised",
-            endpoint=test_spec.endpoint,
-        )
+    else:
+        # If we expected an exception but didn't get one
+        if expected_exception is not _NoException:
+            return TestOutputSchema(
+                status="failed",
+                message=f"Expected {expected_exception.__name__}, but no exception was raised",
+                endpoint=test_spec.endpoint,
+            )
 
     # Validate structure
-    path_patterns = get_all_model_path_patterns(OutputSchema)
-    try:
-        obtained_expected_flat = _validate_tree_structure(
-            obtained_outputs, expected_outputs, path_patterns
+    path_patterns = set(get_all_model_paths(OutputSchema))
+    if issubclass(OutputSchema, RootModel):
+        path_patterns = set(
+            pattern[len("root.") :] if pattern.startswith("root.") else pattern
+            for pattern in path_patterns
         )
-    except AssertionError as e:
+
+    actual_paths_expected = set()
+    actual_paths_obtained = set()
+    for path_pattern in path_patterns:
+        actual_paths_expected.update(
+            expand_path_pattern(path_pattern, expected_outputs)
+        )
+        actual_paths_obtained.update(
+            expand_path_pattern(path_pattern, obtained_outputs)
+        )
+
+    if actual_paths_expected != actual_paths_obtained:
+        extra_left = actual_paths_expected - actual_paths_obtained
+        extra_right = actual_paths_obtained - actual_paths_expected
+        msg = "Output structure does not match expected structure.\n"
+        if extra_left:
+            msg += f"  Missing output paths: {['.'.join(p) for p in extra_left]}\n"
+        if extra_right:
+            msg += f"  Unexpected output paths: {['.'.join(p) for p in extra_right]}\n"
         return TestOutputSchema(
-            status="failed", message=str(e), endpoint=test_spec.endpoint
+            status="failed", message=msg, endpoint=test_spec.endpoint
         )
 
     # Compare values
-    atol = test_spec.atol
-    rtol = test_spec.rtol
     discrepancies = []
 
-    for path, (obtained_val, expected_val) in obtained_expected_flat.items():
-        is_inexact_numeric = False
-        if isinstance(expected_val, float):
-            is_inexact_numeric = True
-        elif isinstance(expected_val, (np.number, np.ndarray)):
-            if np.issubdtype(expected_val.dtype, np.inexact):
-                is_inexact_numeric = True
+    print(path_patterns)
+    print(actual_paths_expected)
+    print(actual_paths_obtained)
 
-        if isinstance(expected_val, np.ndarray) and expected_val.ndim == 0:
-            expected_val = expected_val[()]
-            obtained_val = obtained_val[()]
-
-        if isinstance(expected_val, np.ndarray):
-            if is_inexact_numeric:
-                not_close_mask = ~np.isclose(
-                    obtained_val, expected_val, equal_nan=True, atol=atol, rtol=rtol
-                )
-            else:
-                not_close_mask = obtained_val != expected_val
-
-            if np.any(not_close_mask):
-                diff_ids = np.array(np.nonzero(not_close_mask)).T
-                array_msg = _array_discrepancy_msg(
-                    expected_val.size,
-                    expected_val.shape,
-                    diff_ids,
-                    obtained_val[not_close_mask],
-                    expected_val[not_close_mask],
-                    threshold,
-                )
-                discrepancies.append(f"{'.'.join(path)}\n{array_msg}")
-        else:
-            if is_inexact_numeric:
-                close = np.allclose(obtained_val, expected_val, atol=atol, rtol=rtol)
-            else:
-                close = obtained_val == expected_val
-
-            if not close:
-                if isinstance(expected_val, (int, float, np.number)):
-                    difference_if_numeric = (
-                        f"\n  Difference: {obtained_val - expected_val}"
-                    )
-                else:
-                    difference_if_numeric = ""
-
-                discrepancies.append(
-                    f"{'.'.join(path)}:\n"
-                    f"  Expected: {expected_val}\n"
-                    f"  Obtained: {obtained_val}"
-                    f"{difference_if_numeric}"
-                )
+    for path in actual_paths_obtained:
+        obtained_val = get_at_path(obtained_outputs, path)
+        expected_val = get_at_path(expected_outputs, path)
+        msg = _compare_values(
+            obtained_val,
+            expected_val,
+            test_spec.atol,
+            test_spec.rtol,
+            threshold=threshold,
+        )
+        if msg is not None:
+            path_str = ".".join(path)
+            discrepancies.append(f"{path_str}:\n{msg}")
 
     if discrepancies:
         return TestOutputSchema(

@@ -37,8 +37,8 @@ def get_at_path(tree: Any, path: str) -> Any:
 
     Paths can have a structure like `a.b.[0].c.{key}` where:
     - `a` is an attribute / key of the input tree
-    - `b.[0]` is the first element of the list `b`
-    - `c.{key}` is the value of the key `key` in the dictionary `c`
+    - `b.[0]` is the first element of the iterable `b`
+    - `c.{key}` is the value of the key `key` in the mapping `c`
     """
     # Empty path means "the root of the tree"
     if not path:
@@ -53,7 +53,15 @@ def get_at_path(tree: Any, path: str) -> Any:
         key, path = path[0], path[1:]
         method, idx = path_to_index_op(key)
         if method in ("seq", "dict"):
-            return _get_recursive(tree[idx], path)
+            if hasattr(tree, "__getitem__"):
+                return _get_recursive(tree[idx], path)
+            else:
+                # For types like sets that don't support indexing, we have to iterate manually
+                # and hope the ordering is consistent between iterations
+                for i, val in enumerate(tree):
+                    if i == idx:
+                        return _get_recursive(val, path)
+                raise IndexError(f"Index {idx} out of range for {tree}")
         elif method == "getattr":
             if hasattr(tree, key):
                 return _get_recursive(getattr(tree, key), path)
@@ -76,8 +84,8 @@ def set_at_path(tree: Any, values: dict[str, Any]) -> Any:
 
     Paths can have a structure like `a.b.[0].c.{key}` where:
     - `a` is an attribute / key of the input tree
-    - `b.[0]` is the first element of the list `b`
-    - `c.{key}` is the value of the key `key` in the dictionary `c`
+    - `b.[0]` is the first element of the iterable `b`
+    - `c.{key}` is the value of the key `key` in the mapping `c`
     """
     tree = deepcopy(tree)
 
@@ -126,6 +134,48 @@ def flatten_with_paths(
     for path in include_paths:
         out[path] = get_at_path(tree, path)
     return out
+
+
+def expand_path_pattern(path_pattern: str, inputs: dict[str, Any]) -> list[str]:
+    """Expand a path pattern to a list of all matching paths in the given pytree.
+
+    For example, given the path pattern `a.[].{}`, and the inputs `{"a": [{"b": 1}, {"c": 2}]}`,
+    this function would return `["a.[0].{b}", "a.[1].{c}"]`.
+
+    Silently ignores parts of the pattern that do not match the inputs, assuming they are optional.
+    """
+    parts = path_pattern.split(".")
+
+    def _handle_part(
+        parts: Sequence[str], current_inputs: Any, current_path: list[str]
+    ) -> list[str]:
+        """Recursively expand each part separately."""
+        if not parts or not hasattr(current_inputs, "__iter__"):
+            return [".".join(current_path)]
+
+        paths = []
+        part = parts[0]
+
+        if part == "[]":
+            # sequence access
+            for i, val in enumerate(current_inputs):
+                subpaths = _handle_part(parts[1:], val, [*current_path, f"[{i}]"])
+                paths.extend(subpaths)
+        elif part == "{}":
+            # dictionary access
+            for key in current_inputs:
+                subpaths = _handle_part(
+                    parts[1:], current_inputs[key], [*current_path, f"{{{key}}}"]
+                )
+                paths.extend(subpaths)
+        elif part in current_inputs:
+            subpaths = _handle_part(
+                parts[1:], current_inputs[part], [*current_path, part]
+            )
+            paths.extend(subpaths)
+        return paths
+
+    return _handle_part(parts, inputs, [])
 
 
 def filter_func(

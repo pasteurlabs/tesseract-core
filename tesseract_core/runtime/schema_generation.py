@@ -212,6 +212,19 @@ def apply_function_to_model_tree(
     return _recurse_over_model_tree(Schema, [])
 
 
+def _path_to_str(path: Sequence[str | object]) -> str:
+    """Convert a path with sentinels to a string representation."""
+    str_parts = []
+    for part in path:
+        if part is SEQ_INDEX_SENTINEL:
+            str_parts.append("[]")
+        elif part is DICT_INDEX_SENTINEL:
+            str_parts.append("{}")
+        else:
+            str_parts.append(part)
+    return ".".join(str_parts)
+
+
 def _serialize_diffable_arrays(
     obj: dict[tuple, Any],
 ) -> dict[str, dict[str, Any]]:
@@ -232,16 +245,9 @@ def _serialize_diffable_arrays(
             shape = tuple(shape)
 
         # Replace sentinel values with indexing syntax
-        str_parts = []
-        for part in pathtuple:
-            if part is SEQ_INDEX_SENTINEL:
-                str_parts.append("[]")
-            elif part is DICT_INDEX_SENTINEL:
-                str_parts.append("{}")
-            else:
-                str_parts.append(part)
+        key = _path_to_str(pathtuple)
 
-        serialized[".".join(str_parts)] = {
+        serialized[key] = {
             "shape": shape,
             "dtype": dtype,
         }
@@ -257,10 +263,10 @@ def create_apply_schema(
     # what their paths are, and which expected shape / dtype they have.
     # This is used internally and by some official clients, but not advertised as part of the public API,
     # so people should not rely on it.
-    diffable_input_paths = get_all_model_path_patterns(
+    diffable_input_paths = _get_all_model_path_patterns(
         InputSchema, filter_fn=is_differentiable
     )
-    diffable_output_paths = get_all_model_path_patterns(
+    diffable_output_paths = _get_all_model_path_patterns(
         OutputSchema, filter_fn=is_differentiable
     )
 
@@ -354,7 +360,7 @@ def create_abstract_eval_schema(
     return AbstractInputSchema, AbstractOutputSchema
 
 
-def get_all_model_path_patterns(
+def _get_all_model_path_patterns(
     schema: type[BaseModel], filter_fn: Callable[[type], bool] | None = None
 ) -> dict[tuple, type]:
     """Return a dictionary mapping path patterns to their types.
@@ -378,6 +384,21 @@ def get_all_model_path_patterns(
 
     apply_function_to_model_tree(schema, add_path)
     return path_to_type
+
+
+def get_all_model_paths(
+    schema: type[BaseModel], filter_fn: Callable[[type], bool] | None = None
+) -> tuple[str, ...]:
+    """Return all valid paths in the given Pydantic model schema.
+
+    Args:
+        schema: The Pydantic model schema to traverse.
+        filter_fn: Optional predicate to filter which paths to include.
+                   If None, includes all paths. If provided, only includes
+                   paths where filter_fn(type) returns True.
+    """
+    path_to_type = _get_all_model_path_patterns(schema, filter_fn)
+    return tuple(_path_to_str(path) for path in path_to_type.keys())
 
 
 def _path_to_pattern(path: Sequence[str | object]) -> str:
@@ -435,10 +456,10 @@ def create_autodiff_schema(
 
     Returns a tuple (InputSchema, OutputSchema) with the generated schemas.
     """
-    diffable_input_paths = get_all_model_path_patterns(
+    diffable_input_paths = _get_all_model_path_patterns(
         InputSchema, filter_fn=is_differentiable
     )
-    diffable_output_paths = get_all_model_path_patterns(
+    diffable_output_paths = _get_all_model_path_patterns(
         OutputSchema, filter_fn=is_differentiable
     )
 
