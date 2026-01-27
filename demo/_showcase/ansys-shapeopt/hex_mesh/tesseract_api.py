@@ -5,6 +5,7 @@ import jax.numpy as jnp
 
 # import numpy as jnp
 from jax.scipy.interpolate import RegularGridInterpolator
+from scipy.interpolate import griddata
 from pydantic import BaseModel, Field
 
 from tesseract_core.runtime import Array, Differentiable, Float32, Int32, ShapeDType
@@ -563,14 +564,48 @@ def vector_jacobian_product(
     assert vjp_inputs == {"field_values"}
     assert vjp_outputs == {"mesh_cell_values"}
 
-    inputs = inputs.model_dump()
+    # # Use template / AD for backpropagation
+    # inputs = inputs.model_dump()
 
-    filtered_apply = filter_func(apply_fn, inputs, vjp_outputs)
-    _, vjp_func = jax.vjp(
-        filtered_apply, flatten_with_paths(inputs, include_paths=vjp_inputs)
+    # filtered_apply = filter_func(apply_fn, inputs, vjp_outputs)
+    # _, vjp_func = jax.vjp(
+    #     filtered_apply, flatten_with_paths(inputs, include_paths=vjp_inputs)
+    # )
+    # out = vjp_func(cotangent_vector)[0]
+    # return out
+
+    # Or use any map in 3D space that makes sense!
+    Lx = inputs.domain_size[0]
+    Ly = inputs.domain_size[1]
+    Lz = inputs.domain_size[2]
+    pts, cells = generate_mesh(
+        Lx=Lx,
+        Ly=Ly,
+        Lz=Lz,
+        sizing_field=inputs.sizing_field,
+        max_levels=inputs.max_subdivision_levels,
     )
-    out = vjp_func(cotangent_vector)[0]
-    return out
+    cell_centers = jnp.mean(pts[cells], axis=1)
+
+    xs = jnp.linspace(-Lx / 2, Lx / 2, inputs.field_values.shape[0])
+    ys = jnp.linspace(-Ly / 2, Ly / 2, inputs.field_values.shape[1])
+    zs = jnp.linspace(-Lz / 2, Lz / 2, inputs.field_values.shape[2])
+    xs, ys, zs = jnp.meshgrid(xs, ys, zs, indexing='ij')
+
+    field_cotangent_vector = griddata(
+        cell_centers,
+        cotangent_vector["mesh_cell_values"][:cells.shape[0]],
+        (
+            xs,
+            ys,
+            zs
+        ),
+        method="nearest",
+    )
+
+    return {"field_values": field_cotangent_vector.astype(jnp.float32)}
+
+
 
 
 def abstract_eval(abstract_inputs: InputSchema) -> dict[str, ShapeDType]:
