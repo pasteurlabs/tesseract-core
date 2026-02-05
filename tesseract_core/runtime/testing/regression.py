@@ -161,7 +161,7 @@ def _parse_exception_type(exception_name: str | None) -> type[Exception]:
     # Check if it's a builtin exception first
     if hasattr(builtins, exception_name):
         exc_class = getattr(builtins, exception_name)
-        if isinstance(exc_class, type) and issubclass(exc_class, BaseException):
+        if isinstance(exc_class, type) and issubclass(exc_class, Exception):
             return exc_class
 
     # For non-builtin exceptions, require packagename.exceptionname format
@@ -172,14 +172,7 @@ def _parse_exception_type(exception_name: str | None) -> type[Exception]:
         )
 
     # Split into module path and exception class name
-    parts = exception_name.rsplit(".", 1)
-    if len(parts) != 2:
-        raise ValueError(
-            f"Invalid exception format '{exception_name}'. "
-            f"Expected 'packagename.exceptionname'"
-        )
-
-    module_name, class_name = parts
+    module_name, class_name = exception_name.rsplit(".", 1)
 
     # Attempt to import the exception from the package
     try:
@@ -199,7 +192,7 @@ def _parse_exception_type(exception_name: str | None) -> type[Exception]:
     exc_class = getattr(module, class_name)
 
     # Verify it's actually an exception class
-    if not (isinstance(exc_class, type) and issubclass(exc_class, BaseException)):
+    if not (isinstance(exc_class, type) and issubclass(exc_class, Exception)):
         raise ValueError(
             f"'{exception_name}' is not a valid exception class. "
             f"Found type: {type(exc_class).__name__}"
@@ -332,7 +325,7 @@ def _validate_tree_structure(
 
 def _array_discrepancy_msg(
     size: int,
-    shape: tuple[int],
+    shape: tuple[int, ...],
     diff_ids: list | np.ndarray,
     obtained_array: np.ndarray,
     expected_array: np.ndarray,
