@@ -602,150 +602,83 @@ def test_testspec_invalid_exception_type():
 
 
 class TestValidateTreeStructureInternals:
-    """Unit tests for implementation details that affect debugging experience.
+    """Unit tests for implementation details not exposed via public API.
 
-    These tests directly test _validate_tree_structure to verify:
+    These tests directly test _validate_tree_structure internals:
     - Path formatting in error messages
-    - Leaf collection structure
+    - DICT_INDEX_SENTINEL behavior (dict keys vs model attributes)
+    - Leaf collection return value structure
     - Empty container handling
-    - Dict vs model attribute distinction
+
+    Tests for type/key/length mismatches are covered by public API tests.
     """
 
-    def test_path_formatting_dict_keys(self):
-        """Verify dict keys are formatted with braces: {key}."""
-        with pytest.raises(AssertionError, match=r"\{foo\}"):
+    def test_empty_containers(self):
+        """Verify empty containers return empty dicts without raising."""
+        assert _validate_tree_structure({}, {}) == {}
+        assert _validate_tree_structure([], []) == {}
+
+    def test_path_tracking(self):
+        """Test that error messages contain correct path information."""
+        # Deep nesting path - dicts are formatted as {key} when path_patterns=None
+        with pytest.raises(AssertionError, match=r"\{foo\}\.\{bar\}\.\[2\]\.\{x\}"):
             _validate_tree_structure(
-                {"foo": "value"},
-                {"foo": 123},  # Type mismatch to trigger error
+                {"foo": {"bar": [1, 2, {"x": 1}]}},
+                {"foo": {"bar": [1, 2, {"x": "1"}]}},
             )
 
-    def test_path_formatting_list_indices(self):
-        """Verify list indices are formatted with brackets: [idx]."""
-        with pytest.raises(AssertionError, match=r"\[1\]"):
-            _validate_tree_structure(
-                [1, "wrong"],
-                [1, 2],  # Type mismatch at index 1
-            )
+        # List index path
+        with pytest.raises(AssertionError, match=r"\[1\]\.\{b\}"):
+            _validate_tree_structure([{"a": 1}, {"b": 2}], [{"a": 1}, {"b": "2"}])
 
-    def test_path_formatting_nested_structure(self):
-        """Verify nested paths combine dict keys, list indices, and model attrs."""
+    def test_dict_vs_model_formatting(self):
+        """Test that schema patterns distinguish dict keys from model attributes."""
         from tesseract_core.runtime.schema_generation import DICT_INDEX_SENTINEL
 
-        # Path pattern indicating a dict at top level
-        path_patterns = {
-            (DICT_INDEX_SENTINEL, "inner", "value"): float,
-        }
+        # Schema says this is a dict[str, int]
+        path_patterns = {(DICT_INDEX_SENTINEL,): int}
+        tree1 = {"foo": 1, "bar": 2}
+        tree2 = {"foo": 10, "bar": 20}
+        leaves = _validate_tree_structure(tree1, tree2, path_patterns)
 
-        with pytest.raises(AssertionError) as exc_info:
-            _validate_tree_structure(
-                {"key": {"inner": {"value": "wrong"}}},
-                {"key": {"inner": {"value": 1.0}}},
-                path_patterns,
-            )
+        # Dict keys formatted as {key}
+        assert ("{foo}",) in leaves
+        assert ("{bar}",) in leaves
 
-        # Should show dict key in braces
-        assert "{key}" in str(exc_info.value)
+        # Schema says this is a model with attribute "foo"
+        path_patterns = {("foo",): int}
+        tree1 = {"foo": 1}
+        tree2 = {"foo": 10}
+        leaves = _validate_tree_structure(tree1, tree2, path_patterns)
 
-    def test_leaf_collection_returns_correct_structure(self):
-        """Verify leaves dict structure for algorithm correctness."""
-        leaves = _validate_tree_structure(
-            {"scalar": 42, "nested": {"inner": 100}},
-            {"scalar": 42, "nested": {"inner": 100}},
-        )
+        # Model attributes formatted without braces
+        assert ("foo",) in leaves
 
-        # Leaves should contain path tuples mapping to (obtained, expected) tuples
+    def test_leaf_collection(self):
+        """Test that leaf values are collected with correct paths."""
+        tree1 = {"scalar": 42, "array": np.array([1, 2, 3]), "nested": {"inner": 3.14}}
+        tree2 = {"scalar": 100, "array": np.array([4, 5, 6]), "nested": {"inner": 2.71}}
+
+        leaves = _validate_tree_structure(tree1, tree2)
+
+        assert len(leaves) == 3
+        # Dicts are formatted as {key} when path_patterns=None
         assert ("{scalar}",) in leaves
-        assert leaves[("{scalar}",)] == (42, 42)
+        assert ("{array}",) in leaves
         assert ("{nested}", "{inner}") in leaves
-        assert leaves[("{nested}", "{inner}")] == (100, 100)
-
-    def test_leaf_collection_with_lists(self):
-        """Verify list indices appear in leaf paths."""
-        leaves = _validate_tree_structure(
-            [10, 20, 30],
-            [10, 20, 30],
-        )
-
-        assert ("[0]",) in leaves
-        assert ("[1]",) in leaves
-        assert ("[2]",) in leaves
-        assert leaves[("[1]",)] == (20, 20)
-
-    def test_empty_dict_returns_empty_leaves(self):
-        """Verify empty containers return empty dicts without raising."""
-        result = _validate_tree_structure({}, {})
-        assert result == {}
-
-    def test_empty_list_returns_empty_leaves(self):
-        """Verify empty lists return empty dicts without raising."""
-        result = _validate_tree_structure([], [])
-        assert result == {}
-
-    def test_numpy_array_shape_in_path(self):
-        """Verify arrays are treated as leaves and shape mismatches report path."""
-        with pytest.raises(AssertionError, match=r"Shape mismatch.*\{arr\}"):
-            _validate_tree_structure(
-                {"arr": np.array([1, 2, 3])},
-                {"arr": np.array([1, 2])},
-            )
-
-    def test_numpy_array_dtype_mismatch(self):
-        """Verify dtype mismatches are caught and reported."""
-        with pytest.raises(AssertionError, match=r"dtype mismatch"):
-            _validate_tree_structure(
-                {"arr": np.array([1, 2], dtype=np.int32)},
-                {"arr": np.array([1, 2], dtype=np.float64)},
-            )
-
-    def test_type_mismatch_error_format(self):
-        """Verify type mismatch errors include expected and obtained types."""
-        with pytest.raises(AssertionError) as exc_info:
-            _validate_tree_structure(
-                {"value": "string"},
-                {"value": 123},
-            )
-
-        error_msg = str(exc_info.value)
-        assert "Type mismatch" in error_msg
-        assert "Expected:" in error_msg
-        assert "Obtained:" in error_msg
-        assert "int" in error_msg
-        assert "str" in error_msg
-
-    def test_dict_key_mismatch_error_format(self):
-        """Verify key mismatch errors include missing and unexpected keys."""
-        with pytest.raises(AssertionError) as exc_info:
-            _validate_tree_structure(
-                {"a": 1, "b": 2, "extra": 3},
-                {"a": 1, "b": 2, "missing": 4},
-            )
-
-        error_msg = str(exc_info.value)
-        assert "Key mismatch" in error_msg
-        assert "Missing" in error_msg
-        assert "Unexpected" in error_msg
-        assert "missing" in error_msg
-        assert "extra" in error_msg
-
-    def test_list_length_mismatch_error_format(self):
-        """Verify list length errors include expected and obtained lengths."""
-        with pytest.raises(AssertionError) as exc_info:
-            _validate_tree_structure(
-                [1, 2, 3, 4],
-                [1, 2],
-            )
-
-        error_msg = str(exc_info.value)
-        assert "Mismatch in length" in error_msg
-        assert "Expected: 2" in error_msg
-        assert "Obtained: 4" in error_msg
+        assert leaves[("{scalar}",)] == (42, 100)
+        assert leaves[("{nested}", "{inner}")] == (3.14, 2.71)
 
 
 class TestArrayDiscrepancyMsg:
-    """Unit tests for statistics formatting in error messages."""
+    """Unit tests for _array_discrepancy_msg formatting.
 
-    def test_statistics_format_max_mean_median(self):
-        """Verify max/mean/median statistics format for debugging."""
+    Basic shape/count/percentage is covered by test_regress_test_case_array_discrepancy_message.
+    These tests cover statistics and edge cases not in public API tests.
+    """
+
+    def test_statistics_format(self):
+        """Verify max/mean/median statistics are included for numeric arrays."""
         diff_ids = np.array([[0], [1]])
         obtained = np.array([10.0, 20.0])
         expected = np.array([1.0, 2.0])
@@ -763,49 +696,8 @@ class TestArrayDiscrepancyMsg:
         assert "Mean:" in msg
         assert "Median:" in msg
 
-    def test_percentage_calculation(self):
-        """Verify percentage of differing elements is calculated correctly."""
-        diff_ids = np.array([[0], [1]])  # 2 differences
-        obtained = np.array([10.0, 20.0])
-        expected = np.array([1.0, 2.0])
-
-        msg = _array_discrepancy_msg(
-            size=4,  # 4 total elements
-            shape=(4,),
-            diff_ids=diff_ids,
-            obtained_array=obtained,
-            expected_array=expected,
-            threshold=100,
-        )
-
-        # 2 / 4 = 50%
-        assert "2 / 4" in msg
-        assert "50.0%" in msg
-
-    def test_individual_errors_format(self):
-        """Verify individual error table format."""
-        diff_ids = np.array([[0], [2]])
-        obtained = np.array([5.0, 15.0])
-        expected = np.array([1.0, 10.0])
-
-        msg = _array_discrepancy_msg(
-            size=5,
-            shape=(5,),
-            diff_ids=diff_ids,
-            obtained_array=obtained,
-            expected_array=expected,
-            threshold=100,
-        )
-
-        # Table header
-        assert "Index" in msg
-        assert "Obtained" in msg
-        assert "Expected" in msg
-        assert "Difference" in msg
-
     def test_threshold_limits_output(self):
         """Verify threshold limits number of displayed differences."""
-        # More differences than threshold
         num_diffs = 150
         diff_ids = np.array([[i] for i in range(num_diffs)])
         obtained = np.arange(num_diffs, dtype=np.float64)
@@ -817,30 +709,13 @@ class TestArrayDiscrepancyMsg:
             diff_ids=diff_ids,
             obtained_array=obtained,
             expected_array=expected,
-            threshold=100,  # Limit to 100
+            threshold=100,
         )
 
         assert "Only showing first 100 mismatches" in msg
 
-    def test_shape_in_message(self):
-        """Verify shape is included in the message."""
-        diff_ids = np.array([[0, 0], [1, 1]])
-        obtained = np.array([10.0, 20.0])
-        expected = np.array([1.0, 2.0])
-
-        msg = _array_discrepancy_msg(
-            size=9,
-            shape=(3, 3),
-            diff_ids=diff_ids,
-            obtained_array=obtained,
-            expected_array=expected,
-            threshold=100,
-        )
-
-        assert "Shape: (3, 3)" in msg
-
-    def test_relative_errors_when_nonzero_expected(self):
-        """Verify relative error statistics when expected values are nonzero."""
+    def test_relative_errors_handling(self):
+        """Verify relative error stats are shown for nonzero expected values."""
         diff_ids = np.array([[0], [1]])
         obtained = np.array([2.0, 4.0])
         expected = np.array([1.0, 2.0])
@@ -854,7 +729,6 @@ class TestArrayDiscrepancyMsg:
             threshold=100,
         )
 
-        # Should have relative error stats
         assert "abs(obtained - expected) / abs(expected)" in msg
 
     def test_zero_expected_skips_relative_errors(self):
