@@ -14,7 +14,9 @@ idna==3.11
     # via requests
 jinja2==3.1.6
     # via tesseract-core
-markdown-it-py==3.0.0
+markdown-it-py==3.0.0 ; python_full_version < '3.11'
+    # via rich
+markdown-it-py==4.0.0 ; python_full_version >= '3.11'
     # via rich
 markupsafe==3.0.3
     # via jinja2
@@ -22,11 +24,11 @@ mdurl==0.1.2
     # via markdown-it-py
 numpy==2.2.6 ; python_full_version < '3.11'
     # via tesseract-core
-numpy==2.4.1 ; python_full_version >= '3.11'
+numpy==2.4.2 ; python_full_version >= '3.11'
     # via tesseract-core
-pip==25.3
+pip==26.0
     # via tesseract-core
-pydantic==2.12.5
+pydantic==2.12.4
     # via tesseract-core
 pydantic-core==2.41.5
     # via pydantic
@@ -36,7 +38,7 @@ pyyaml==6.0.3
     # via tesseract-core
 requests==2.32.5
     # via tesseract-core
-rich==14.2.0
+rich==14.3.2
     # via
     #   tesseract-core
     #   typer
