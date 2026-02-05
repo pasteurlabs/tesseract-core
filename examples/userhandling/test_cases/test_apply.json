@@ -9,8 +9,6 @@
   },
   "expected_exception": null,
   "expected_exception_regex": null,
-  "atol": 10000,
-  "rtol": 1e-5,
   "payload": {
     "inputs": {}
   },
