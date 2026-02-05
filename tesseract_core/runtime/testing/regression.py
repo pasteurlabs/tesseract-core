@@ -48,7 +48,7 @@ class TestSpec(BaseModel):
     endpoint: str
     payload: dict
     expected_outputs: dict | None = None
-    expected_exception: type[BaseException] | None = None
+    expected_exception: type[Exception] | None = None
     expected_exception_regex: str | None = None
     atol: float = 1e-8
     rtol: float = 1e-5
@@ -57,8 +57,8 @@ class TestSpec(BaseModel):
     @field_validator("expected_exception", mode="before")
     @classmethod
     def parse_exception_type(
-        cls, v: str | type[BaseException] | None
-    ) -> type[BaseException] | None:
+        cls, v: str | type[Exception] | None
+    ) -> type[Exception] | None:
         """Parse exception from string or type.
 
         Allows JSON files to specify exceptions as strings (e.g., "ValueError")
@@ -140,7 +140,7 @@ class _NoException(Exception):
         )
 
 
-def _parse_exception_type(exception_name: str | None) -> type[BaseException]:
+def _parse_exception_type(exception_name: str | None) -> type[Exception]:
     """Parse exception name string to exception class.
 
     Args:
@@ -161,7 +161,7 @@ def _parse_exception_type(exception_name: str | None) -> type[BaseException]:
     # Check if it's a builtin exception first
     if hasattr(builtins, exception_name):
         exc_class = getattr(builtins, exception_name)
-        if isinstance(exc_class, type) and issubclass(exc_class, BaseException):
+        if isinstance(exc_class, type) and issubclass(exc_class, Exception):
             return exc_class
 
     # For non-builtin exceptions, require packagename.exceptionname format
@@ -192,7 +192,7 @@ def _parse_exception_type(exception_name: str | None) -> type[BaseException]:
     exc_class = getattr(module, class_name)
 
     # Verify it's actually an exception class
-    if not (isinstance(exc_class, type) and issubclass(exc_class, BaseException)):
+    if not (isinstance(exc_class, type) and issubclass(exc_class, Exception)):
         raise ValueError(
             f"'{exception_name}' is not a valid exception class. "
             f"Found type: {type(exc_class).__name__}"
