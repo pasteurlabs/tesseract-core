@@ -621,14 +621,14 @@ class TestValidateTreeStructureInternals:
     def test_path_tracking(self):
         """Test that error messages contain correct path information."""
         # Deep nesting path - dicts are formatted as {key} when path_patterns=None
-        with pytest.raises(AssertionError, match=r"\{foo\}\.\{bar\}\.\[2\]\.\{x\}"):
+        with pytest.raises(ValueError, match=r"\{foo\}\.\{bar\}\.\[2\]\.\{x\}"):
             _validate_tree_structure(
                 {"foo": {"bar": [1, 2, {"x": 1}]}},
                 {"foo": {"bar": [1, 2, {"x": "1"}]}},
             )
 
         # List index path
-        with pytest.raises(AssertionError, match=r"\[1\]\.\{b\}"):
+        with pytest.raises(ValueError, match=r"\[1\]\.\{b\}"):
             _validate_tree_structure([{"a": 1}, {"b": 2}], [{"a": 1}, {"b": "2"}])
 
     def test_dict_vs_model_formatting(self):

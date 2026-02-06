@@ -225,13 +225,14 @@ def _validate_tree_structure(
         Dict mapping path tuples to (tree_leaf, template_leaf) tuples.
 
     Raises:
-        AssertionError: If structures don't match (type, keys, length, shape, dtype).
+        ValueError: If structures don't match (type, keys, length, shape, dtype).
     """
-    assert type(tree) is type(template), (
-        f"Type mismatch at {'.'.join(path)}:\n"
-        f"  Expected: {type(template).__name__}, "
-        f"  Obtained: {type(tree).__name__}"
-    )
+    if type(tree) is not type(template):
+        raise ValueError(
+            f"Type mismatch at {'.'.join(path)}:\n"
+            f"  Expected: {type(template).__name__}, "
+            f"  Obtained: {type(tree).__name__}"
+        )
 
     if isinstance(template, Mapping):  # Dictionary-like structure
         # assume Mapping is a regular dict unless path patterns has specific attribute names
@@ -249,12 +250,13 @@ def _validate_tree_structure(
         tree_keys = set(tree.keys())
         template_keys = set(template.keys())
 
-        assert tree_keys == template_keys, (
-            f"{key_or_attribute.capitalize()} mismatch at {'.'.join(path)}:\n"
-            f"  Missing {key_or_attribute}s: {template_keys - tree_keys}\n"
-            f"  Unexpected {key_or_attribute}s: {tree_keys - template_keys}\n"
-            f"  Matching {key_or_attribute.split(' ')[-1]}s: {template_keys & tree_keys}"
-        )
+        if tree_keys != template_keys:
+            raise ValueError(
+                f"{key_or_attribute.capitalize()} mismatch at {'.'.join(path)}:\n"
+                f"  Missing {key_or_attribute}s: {template_keys - tree_keys}\n"
+                f"  Unexpected {key_or_attribute}s: {tree_keys - template_keys}\n"
+                f"  Matching {key_or_attribute.split(' ')[-1]}s: {template_keys & tree_keys}"
+            )
 
         leaves = {}
         for key in template_keys:
@@ -284,11 +286,12 @@ def _validate_tree_structure(
     elif isinstance(template, Sequence) and not isinstance(
         template, (str, bytes)
     ):  # List, tuple, etc.
-        assert len(tree) == len(template), (
-            f"Mismatch in length of {type(template).__name__} at {'.'.join(path)}:\n"
-            f"  Expected: {len(template)}\n"
-            f"  Obtained: {len(tree)}"
-        )
+        if len(tree) != len(template):
+            raise ValueError(
+                f"Mismatch in length of {type(template).__name__} at {'.'.join(path)}:\n"
+                f"  Expected: {len(template)}\n"
+                f"  Obtained: {len(tree)}"
+            )
 
         # Drop sentinel
         if path_patterns:
@@ -308,16 +311,18 @@ def _validate_tree_structure(
         return leaves
 
     elif isinstance(template, np.ndarray):
-        assert tree.shape == template.shape, (
-            f"Shape mismatch for array at {'.'.join(path)}: \n"
-            f"  Expected: {template.shape}\n"
-            f"  Obtained: {tree.shape}"
-        )
-        assert tree.dtype == template.dtype, (
-            f"dtype mismatch for array at {'.'.join(path)}:\n"
-            f"  Expected: {template.dtype}\n"
-            f"  Obtained: {tree.dtype}"
-        )
+        if tree.shape != template.shape:
+            raise ValueError(
+                f"Shape mismatch for array at {'.'.join(path)}: \n"
+                f"  Expected: {template.shape}\n"
+                f"  Obtained: {tree.shape}"
+            )
+        if tree.dtype != template.dtype:
+            raise ValueError(
+                f"dtype mismatch for array at {'.'.join(path)}:\n"
+                f"  Expected: {template.dtype}\n"
+                f"  Obtained: {tree.dtype}"
+            )
 
     # Validation complete return path to leaf
     return {path: (tree, template)}
@@ -574,7 +579,7 @@ def regress_test_case(
         obtained_expected_flat = _validate_tree_structure(
             obtained_outputs, expected_outputs, path_patterns
         )
-    except AssertionError as e:
+    except ValueError as e:
         return TestOutputSchema(
             status="failed", message=str(e), endpoint=test_spec.endpoint
         )
