@@ -711,11 +711,8 @@ class LocalClient:
         InputSchema = func.__annotations__.get("payload", None)
         OutputSchema = func.__annotations__.get("return", None)
 
-        # Only validate if InputSchema is a BaseModel (not plain dict)
-        if InputSchema is not None and InputSchema is not dict:
+        if InputSchema is not None:
             parsed_payload = InputSchema.model_validate(payload)
-        elif payload is not None:
-            parsed_payload = payload
         else:
             parsed_payload = None
 
