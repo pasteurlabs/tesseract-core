@@ -206,7 +206,7 @@ class Tesseract:
         if output_path is not None:
             local_path = engine._resolve_file_path(output_path, make_dir=True)
             update_config(output_path=str(local_path))
-        update_config(output_format=output_format)
+        update_config(output_format=output_format, debug=True)
 
         obj = cls.__new__(cls)
         obj._spawn_config = None
@@ -311,10 +311,6 @@ class Tesseract:
         Returns:
             a list with all available endpoints for this Tesseract.
         """
-        # For LocalClient, get endpoints directly to include all endpoints (including test)
-        if isinstance(self._client, LocalClient):
-            return sorted(self._client._endpoints.keys())
-        # For HTTPClient, use OpenAPI schema (respects server's debug mode filtering)
         return [endpoint.lstrip("/") for endpoint in self.openapi_schema["paths"]]
 
     @requires_client

@@ -59,12 +59,12 @@ def test_Tesseract_from_tesseract_api(dummy_tesseract_location, dummy_tesseract_
     )
 
     t = Tesseract.from_tesseract_api(dummy_tesseract_location / "tesseract_api.py")
-    endpoints = t.available_endpoints
+    endpoints = sorted(t.available_endpoints)
     assert endpoints == all_endpoints
 
     # should also work when importing the module
     t = Tesseract.from_tesseract_api(dummy_tesseract_module)
-    endpoints = t.available_endpoints
+    endpoints = sorted(t.available_endpoints)
     assert endpoints == all_endpoints
 
 
