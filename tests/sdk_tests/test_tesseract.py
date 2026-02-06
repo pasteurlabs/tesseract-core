@@ -311,8 +311,8 @@ def test_tree_map():
     }
 
 
-def test_regress_success_local(dummy_tesseract_package):
-    """Test regress() with LocalClient."""
+def test_test_endpoint_success_local(dummy_tesseract_package):
+    """Test test() endpoint with LocalClient."""
     tess = Tesseract.from_tesseract_api(dummy_tesseract_package / "tesseract_api.py")
 
     # Should not raise
@@ -331,8 +331,8 @@ def test_regress_success_local(dummy_tesseract_package):
     )
 
 
-def test_regress_failure_local(dummy_tesseract_package):
-    """Test regress() failure with LocalClient."""
+def test_test_endpoint_failure_local(dummy_tesseract_package):
+    """Test test() endpoint failure with LocalClient."""
     tess = Tesseract.from_tesseract_api(dummy_tesseract_package / "tesseract_api.py")
 
     with pytest.raises(AssertionError, match="Values are not sufficiently close"):
@@ -353,8 +353,8 @@ def test_regress_failure_local(dummy_tesseract_package):
         )
 
 
-def test_regress_with_exception_type_local(dummy_tesseract_package):
-    """Test regress() with exception type (not string) using LocalClient."""
+def test_test_endpoint_with_exception_type_local(dummy_tesseract_package):
+    """Test test() endpoint with exception type (not string) using LocalClient."""
     tess = Tesseract.from_tesseract_api(dummy_tesseract_package / "tesseract_api.py")
 
     # Should not raise - exception type passed directly
