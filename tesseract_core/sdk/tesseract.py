@@ -455,7 +455,7 @@ class Tesseract:
     def test(self, test_spec: dict) -> None:
         """Run a regression test, raising AssertionError on failure.
 
-        Works with ALL client types (LocalClient, HTTPClient, remote).
+        Works in LocalClient, HTTPClient and remote if served in debug mode.
 
         Args:
             test_spec: Test specification dict with keys:
@@ -483,6 +483,11 @@ class Tesseract:
             ...     }
             ... )
         """
+        if "test" not in self.available_endpoints:
+            raise NotImplementedError(
+                "Test endpoint not available, to expose this Tesseracts must be served in debug mode."
+            )
+
         result = self._client.run_tesseract("test", test_spec, run_id=None)
 
         # Re-raise errors for pytest compatibility
