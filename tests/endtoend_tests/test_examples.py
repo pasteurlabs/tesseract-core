@@ -222,7 +222,7 @@ def test_unit_tesseract_endtoend(
 
     input_schema = _input_schema_from_openapi(openapi_schema)
 
-    mount_args, io_args = [], []
+    mount_args, input_args, output_args = [], [], []
 
     if unit_tesseract_config.volume_mounts:
         for mnt in unit_tesseract_config.volume_mounts:
@@ -235,14 +235,14 @@ def test_unit_tesseract_endtoend(
             mount_args.extend(["--volume", mnt])
 
     if unit_tesseract_config.input_path:
-        io_args.extend(
+        input_args.extend(
             [
                 "--input-path",
                 str(unit_tesseract_path / unit_tesseract_config.input_path),
             ]
         )
     if unit_tesseract_config.output_path:
-        io_args.extend(
+        output_args.extend(
             [
                 "--output-path",
                 str(unit_tesseract_path / unit_tesseract_config.output_path),
@@ -260,7 +260,8 @@ def test_unit_tesseract_endtoend(
                 *mount_args,
                 "apply",
                 json.dumps(random_input),
-                *io_args,
+                *input_args,
+                *output_args,
             ],
             catch_exceptions=False,
         )
@@ -276,10 +277,9 @@ def test_unit_tesseract_endtoend(
             args = [
                 "run",
                 img_name,
-                *mount_args,
                 "test",
                 f"@{test_file_path}",
-                *io_args,
+                *output_args,
             ]
 
             result = cli_runner.invoke(app, args, env={"TERM": "dumb"})
@@ -332,7 +332,8 @@ def test_unit_tesseract_endtoend(
             free_port,
             "--debug",
             *mount_args,
-            *io_args,
+            *input_args,
+            *output_args,
         ],
         catch_exceptions=False,
     )

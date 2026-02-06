@@ -9,7 +9,7 @@
   "atol": 1e-8,
   "rtol": 1e-5,
   "cli_config": {
-    "input_path": "input"
+    "input_path": "../input"
   },
   "payload": {
     "inputs": {}
