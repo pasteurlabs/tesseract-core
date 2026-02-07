@@ -1,0 +1,59 @@
+{
+  "endpoint": "jacobian",
+  "expected_outputs": {
+    "vector_add.result": {
+      "a.s": {
+        "object_type": "array",
+        "shape": [3],
+        "dtype": "float32",
+        "data": {
+          "buffer": "AACAPwAAAEAAAEBA",
+          "encoding": "base64"
+        }
+      },
+      "a.v": {
+        "object_type": "array",
+        "shape": [3, 3],
+        "dtype": "float32",
+        "data": {
+          "buffer": "AAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABA",
+          "encoding": "base64"
+        }
+      }
+    }
+  },
+  "expected_exception": null,
+  "expected_exception_regex": null,
+  "atol": 1e-8,
+  "rtol": 1e-5,
+  "payload": {
+    "inputs": {
+      "a": {
+        "v": {
+          "object_type": "array",
+          "shape": [3],
+          "dtype": "int64",
+          "data": {
+            "buffer": "AQAAAAAAAAACAAAAAAAAAAMAAAAAAAAA",
+            "encoding": "base64"
+          }
+        },
+        "s": 2
+      },
+      "b": {
+        "v": {
+          "object_type": "array",
+          "shape": [3],
+          "dtype": "int64",
+          "data": {
+            "buffer": "BAAAAAAAAAAFAAAAAAAAAAYAAAAAAAAA",
+            "encoding": "base64"
+          }
+        },
+        "s": 1
+      }
+    },
+    "jac_inputs": ["a.s", "a.v"],
+    "jac_outputs": ["vector_add.result"]
+  }
+}

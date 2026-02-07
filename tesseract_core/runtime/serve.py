@@ -106,6 +106,11 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
 
     for endpoint_func in tesseract_endpoints:
         endpoint_name = endpoint_func.__name__
+
+        # Skip test endpoint unless in debug mode
+        if endpoint_name == "test" and not config.debug:
+            continue
+
         wrapped_endpoint = wrap_endpoint(endpoint_func)
         http_methods = ["GET"] if endpoint_name in GET_ENDPOINTS else ["POST"]
         app.add_api_route(f"/{endpoint_name}", wrapped_endpoint, methods=http_methods)

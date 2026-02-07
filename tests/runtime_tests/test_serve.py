@@ -314,6 +314,7 @@ def test_debug_mode(dummy_tesseract_module, monkeypatch):
     assert response.status_code == 500, response.text
     assert response.text == "Internal Server Error"
     assert "This is a test error" not in response.text
+    assert "/test" not in rest_api.openapi()["paths"]
 
     update_config(debug=True, api_path=dummy_tesseract_module.__file__)
     rest_api = create_rest_api(dummy_tesseract_module)
@@ -330,3 +331,4 @@ def test_debug_mode(dummy_tesseract_module, monkeypatch):
     assert response.status_code == 500, response.text
     assert "This is a test error" in response.text
     assert "Traceback" in response.text
+    assert "/test" in rest_api.openapi()["paths"]

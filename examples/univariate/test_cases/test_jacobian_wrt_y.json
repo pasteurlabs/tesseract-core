@@ -1,0 +1,28 @@
+{
+  "endpoint": "jacobian",
+  "expected_outputs": {
+    "result": {
+      "y": {
+        "object_type": "array",
+        "shape": [],
+        "dtype": "float32",
+        "data": {
+          "buffer": "AAAAAA==",
+          "encoding": "base64"
+        }
+      }
+    }
+  },
+  "expected_exception": null,
+  "expected_exception_regex": null,
+  "atol": 1e-8,
+  "rtol": 1e-5,
+  "payload": {
+    "inputs": {
+      "x": 0.0,
+      "y": 0.0
+    },
+    "jac_inputs": ["y"],
+    "jac_outputs": ["result"]
+  }
+}
