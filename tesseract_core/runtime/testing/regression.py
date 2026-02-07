@@ -5,6 +5,7 @@
 
 import builtins
 import importlib
+import logging
 import re
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
@@ -19,10 +20,13 @@ from pydantic import (
     model_validator,
 )
 
+from ..config import get_config
 from ..core import get_input_schema, get_output_schema
 from ..schema_generation import DICT_INDEX_SENTINEL, get_all_model_path_patterns
 
 ROWFORMAT = "{:>15s}  {:>20s}  {:>20s}  {:>20s}\n"
+
+logger = logging.getLogger("tesseract")
 
 
 class TestCliConfig(BaseModel):
@@ -668,3 +672,64 @@ def regress_test_case(
         )
 
     return TestOutputSchema(status="passed", message="", endpoint=test_spec.endpoint)
+
+
+def make_test_endpoint(
+    api_module: ModuleType,
+    endpoints: list[Callable],
+) -> Callable[[TestSpec], TestOutputSchema]:
+    """Create a test endpoint closure for regression testing.
+
+    Args:
+        api_module: Module containing the Tesseract API.
+        endpoints: List of endpoint callables. Captured by reference so the
+            returned closure always sees the current contents (including the
+            ``test`` endpoint itself, which is appended after this factory
+            returns).
+
+    Returns:
+        A ``test`` function suitable for inclusion in the endpoints list.
+    """
+
+    def test(payload: TestSpec) -> TestOutputSchema:
+        """Run a single regression test against a Tesseract endpoint.
+
+        Tests an endpoint by calling it with specified inputs and comparing outputs
+        against expected values or verifying expected exceptions are raised.
+
+        Args:
+            payload: Test specification containing:
+                - endpoint: Name of endpoint to test (e.g., "apply", "jacobian")
+                - payload: Input data for the endpoint
+                - expected_outputs: Expected output data (mutually exclusive with expected_exception)
+                - expected_exception: Expected exception type or name (mutually exclusive with expected_outputs)
+                - expected_exception_regex: Optional regex pattern for exception message
+                - atol: Absolute tolerance for numeric comparisons (default: 1e-8)
+                - rtol: Relative tolerance for numeric comparisons (default: 1e-5)
+
+        Returns:
+            TestOutputSchema with:
+                - status: "passed" | "failed" | "error"
+                - message: Empty for passed tests, error details for failed/error
+                - endpoint: Name of the tested endpoint
+
+        Note:
+            This endpoint is designed for testing and CI/CD workflows.
+            All outcomes return HTTP 200 with status in the response body regardless of success/failure.
+        """
+        logger.warning(
+            "The 'test' endpoint is experimental and may change, be replaced, or be deprecated in future versions."
+        )
+
+        config = get_config()
+        base_dir = Path(config.input_path) if config.input_path else None
+
+        return regress_test_case(
+            api_module,
+            endpoint_functions={func.__name__: func for func in endpoints},
+            test_spec=payload,
+            base_dir=base_dir,
+            threshold=100,
+        )
+
+    return test

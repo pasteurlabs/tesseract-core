@@ -267,53 +267,9 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
 
         endpoints.append(abstract_eval)
 
-    from tesseract_core.runtime.testing.regression import (
-        TestOutputSchema,
-        TestSpec,
-        regress_test_case,
-    )
+    from tesseract_core.runtime.testing.regression import make_test_endpoint
 
-    def test(payload: TestSpec) -> TestOutputSchema:
-        """Run a single regression test against a Tesseract endpoint.
-
-        Tests an endpoint by calling it with specified inputs and comparing outputs
-        against expected values or verifying expected exceptions are raised.
-
-        Args:
-            payload: Test specification containing:
-                - endpoint: Name of endpoint to test (e.g., "apply", "jacobian")
-                - payload: Input data for the endpoint
-                - expected_outputs: Expected output data (mutually exclusive with expected_exception)
-                - expected_exception: Expected exception type or name (mutually exclusive with expected_outputs)
-                - expected_exception_regex: Optional regex pattern for exception message
-                - atol: Absolute tolerance for numeric comparisons (default: 1e-8)
-                - rtol: Relative tolerance for numeric comparisons (default: 1e-5)
-
-        Returns:
-            TestOutputSchema with:
-                - status: "passed" | "failed" | "error"
-                - message: Empty for passed tests, error details for failed/error
-                - endpoint: Name of the tested endpoint
-
-        Note:
-            This endpoint is designed for testing and CI/CD workflows.
-            All outcomes return HTTP 200 with status in the response body regardless of success/failure.
-        """
-        logger.warning(
-            "The 'test' endpoint is experimental and may change, be replaced, or be deprecated in future versions."
-        )
-
-        config = get_config()
-        base_dir = Path(config.input_path) if config.input_path else None
-
-        return regress_test_case(
-            api_module,
-            endpoint_functions={func.__name__: func for func in endpoints},
-            test_spec=payload,
-            base_dir=base_dir,
-            threshold=100,
-        )
-
+    test = make_test_endpoint(api_module, endpoints)
     endpoints.append(test)
 
     return endpoints
