@@ -205,7 +205,7 @@ def _validate_tree_structure(
     tree: Any,
     template: Any,
     path_patterns: dict[tuple, type] | None = None,
-    path: tuple[str | object, ...] = (),
+    path: tuple[str, ...] = (),
 ) -> dict[tuple[str, ...], tuple[Any, Any]]:
     """Recursively validate a tree-like structure against a template and collect leaf values.
 
@@ -267,6 +267,8 @@ def _validate_tree_structure(
                 else:
                     next_path_patterns = None
             else:
+                # is_dict is only False when path_patterns is not None (set at line 246); assert to satisfy pyright
+                assert path_patterns is not None
                 # Filter to paths beginning with relevant attribute
                 next_path_patterns = {
                     k[1:]: v
