@@ -416,6 +416,67 @@ def _array_discrepancy_msg(
     return error_msg
 
 
+def _compare_leaf_values(
+    path: tuple[str, ...],
+    obtained_val: Any,
+    expected_val: Any,
+    atol: float,
+    rtol: float,
+    threshold: int,
+) -> str | None:
+    """Compare a single leaf pair and return a discrepancy message, or None if matching."""
+    is_inexact_numeric = False
+    if isinstance(expected_val, float):
+        is_inexact_numeric = True
+    elif isinstance(expected_val, (np.number, np.ndarray)):
+        if np.issubdtype(expected_val.dtype, np.inexact):
+            is_inexact_numeric = True
+
+    if isinstance(expected_val, np.ndarray) and expected_val.ndim == 0:
+        expected_val = expected_val[()]
+        obtained_val = obtained_val[()]
+
+    if isinstance(expected_val, np.ndarray):
+        if is_inexact_numeric:
+            not_close_mask = ~np.isclose(
+                obtained_val, expected_val, equal_nan=True, atol=atol, rtol=rtol
+            )
+        else:
+            not_close_mask = obtained_val != expected_val
+
+        if np.any(not_close_mask):
+            diff_ids = np.array(np.nonzero(not_close_mask)).T
+            array_msg = _array_discrepancy_msg(
+                expected_val.size,
+                expected_val.shape,
+                diff_ids,
+                obtained_val[not_close_mask],
+                expected_val[not_close_mask],
+                threshold,
+            )
+            return f"{'.'.join(path)}\n{array_msg}"
+    else:
+        if is_inexact_numeric:
+            close = np.allclose(obtained_val, expected_val, atol=atol, rtol=rtol)
+        else:
+            close = obtained_val == expected_val
+
+        if not close:
+            if isinstance(expected_val, (int, float, np.number)):
+                difference_if_numeric = f"\n  Difference: {obtained_val - expected_val}"
+            else:
+                difference_if_numeric = ""
+
+            return (
+                f"{'.'.join(path)}:\n"
+                f"  Expected: {expected_val}\n"
+                f"  Obtained: {obtained_val}"
+                f"{difference_if_numeric}"
+            )
+
+    return None
+
+
 def regress_test_case(
     api_module: ModuleType,
     endpoint_functions: dict[str, Callable],
@@ -592,56 +653,11 @@ def regress_test_case(
     discrepancies = []
 
     for path, (obtained_val, expected_val) in obtained_expected_flat.items():
-        is_inexact_numeric = False
-        if isinstance(expected_val, float):
-            is_inexact_numeric = True
-        elif isinstance(expected_val, (np.number, np.ndarray)):
-            if np.issubdtype(expected_val.dtype, np.inexact):
-                is_inexact_numeric = True
-
-        if isinstance(expected_val, np.ndarray) and expected_val.ndim == 0:
-            expected_val = expected_val[()]
-            obtained_val = obtained_val[()]
-
-        if isinstance(expected_val, np.ndarray):
-            if is_inexact_numeric:
-                not_close_mask = ~np.isclose(
-                    obtained_val, expected_val, equal_nan=True, atol=atol, rtol=rtol
-                )
-            else:
-                not_close_mask = obtained_val != expected_val
-
-            if np.any(not_close_mask):
-                diff_ids = np.array(np.nonzero(not_close_mask)).T
-                array_msg = _array_discrepancy_msg(
-                    expected_val.size,
-                    expected_val.shape,
-                    diff_ids,
-                    obtained_val[not_close_mask],
-                    expected_val[not_close_mask],
-                    threshold,
-                )
-                discrepancies.append(f"{'.'.join(path)}\n{array_msg}")
-        else:
-            if is_inexact_numeric:
-                close = np.allclose(obtained_val, expected_val, atol=atol, rtol=rtol)
-            else:
-                close = obtained_val == expected_val
-
-            if not close:
-                if isinstance(expected_val, (int, float, np.number)):
-                    difference_if_numeric = (
-                        f"\n  Difference: {obtained_val - expected_val}"
-                    )
-                else:
-                    difference_if_numeric = ""
-
-                discrepancies.append(
-                    f"{'.'.join(path)}:\n"
-                    f"  Expected: {expected_val}\n"
-                    f"  Obtained: {obtained_val}"
-                    f"{difference_if_numeric}"
-                )
+        msg = _compare_leaf_values(
+            path, obtained_val, expected_val, atol, rtol, threshold
+        )
+        if msg is not None:
+            discrepancies.append(msg)
 
     if discrepancies:
         return TestOutputSchema(
