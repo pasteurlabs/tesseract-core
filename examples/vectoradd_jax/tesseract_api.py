@@ -106,9 +106,9 @@ def abstract_eval(abstract_inputs):
 
     jax_shapes = jax.eval_shape(wrapped_apply, dynamic_inputs)
     return jax.tree.map(
-        lambda x: {"shape": x.shape, "dtype": str(x.dtype)}
-        if is_shapedtye_struct(x)
-        else x,
+        lambda x: (
+            {"shape": x.shape, "dtype": str(x.dtype)} if is_shapedtye_struct(x) else x
+        ),
         jax_shapes,
         is_leaf=is_shapedtye_struct,
     )
