@@ -833,8 +833,8 @@ def print_debug_info(result):
 
 
 def fix_fake_arrays(fakedata, seed=42):
-    is_array = (
-        lambda x: isinstance(x, dict) and "shape" in x and "dtype" in x and "data" in x
+    is_array = lambda x: (
+        isinstance(x, dict) and "shape" in x and "dtype" in x and "data" in x
     )
     rng = np.random.RandomState(seed)
 

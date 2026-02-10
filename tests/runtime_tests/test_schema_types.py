@@ -256,8 +256,8 @@ def test_model_from_json(tmpdir):
 
 
 def fix_fake_arrays(fakedata, target_shape, seed=42):
-    is_array = (
-        lambda x: isinstance(x, dict) and "shape" in x and "dtype" in x and "data" in x
+    is_array = lambda x: (
+        isinstance(x, dict) and "shape" in x and "dtype" in x and "data" in x
     )
     rng = np.random.RandomState(seed)
 
