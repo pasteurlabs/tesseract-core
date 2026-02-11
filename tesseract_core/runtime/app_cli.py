@@ -10,7 +10,9 @@ formatting on the docstrings to make them more readable.
 """
 
 import copy
+import types
 from textwrap import indent
+from typing import Any, get_args, get_origin
 
 import typer
 
@@ -22,6 +24,62 @@ from tesseract_core.runtime.cli import (
     app as cli_app,
 )
 from tesseract_core.runtime.core import create_endpoints, get_tesseract_api
+
+
+def _format_type_annotation(annotation: type[Any] | types.UnionType) -> str:
+    """Format a type annotation as a human-readable string for documentation.
+
+    Args:
+        annotation: A type annotation from a Pydantic field. Can be a simple type
+            (int, str, etc.), a Union type (str | None), or a generic type (list[str]).
+
+    Returns:
+        A human-readable string representation of the type.
+
+    Examples:
+        int -> "int"
+        str | None -> "optional str"
+        str | float -> "str | float"
+        float | int | None -> "optional float | int"
+    """
+    # Handle simple types with __name__
+    if hasattr(annotation, "__name__"):
+        return annotation.__name__
+
+    # Handle Union types (e.g., str | None, int | float)
+    if isinstance(annotation, types.UnionType):
+        args = get_args(annotation)
+        # Check if None is one of the args
+        none_type = type(None)
+        if none_type in args:
+            # Filter out None and format remaining types
+            non_none_args = [arg for arg in args if arg is not none_type]
+            if len(non_none_args) == 1:
+                # str | None -> "optional str"
+                return f"optional {_format_type_annotation(non_none_args[0])}"
+            else:
+                # float | int | None -> "optional float | int"
+                formatted = " | ".join(
+                    _format_type_annotation(arg) for arg in non_none_args
+                )
+                return f"optional {formatted}"
+        else:
+            # str | float -> "str | float"
+            return " | ".join(_format_type_annotation(arg) for arg in args)
+
+    # Handle typing generics (e.g., list[str], dict[str, int])
+    origin = get_origin(annotation)
+    if origin is not None:
+        args = get_args(annotation)
+        if args:
+            formatted_args = ", ".join(_format_type_annotation(arg) for arg in args)
+            origin_name = getattr(origin, "__name__", str(origin))
+            return f"{origin_name}[{formatted_args}]"
+        return getattr(origin, "__name__", str(origin))
+
+    # Fallback to string representation
+    return str(annotation)
+
 
 tesseract_api = get_tesseract_api()
 
@@ -44,7 +102,7 @@ for func in endpoints:
     if hasattr(input_schema, "model_fields"):
         for field_name, field in input_schema.model_fields.items():
             input_docs.append(
-                f"{field_name} ({field.annotation.__name__}): {field.description}"
+                f"{field_name} ({_format_type_annotation(field.annotation)}): {field.description}"
             )
     if input_docs:
         docstring_parts.append("")
@@ -56,7 +114,7 @@ for func in endpoints:
     if hasattr(output_schema, "model_fields"):
         for field_name, field in output_schema.model_fields.items():
             output_docs.append(
-                f"{field_name} ({field.annotation.__name__}): {field.description}"
+                f"{field_name} ({_format_type_annotation(field.annotation)}): {field.description}"
             )
     if output_docs:
         docstring_parts.append("")

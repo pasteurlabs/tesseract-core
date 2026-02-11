@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import importlib.util
+import logging
 import os
 import sys
 from collections.abc import Callable, Generator
@@ -19,6 +20,8 @@ from .schema_generation import (
     create_apply_schema,
     create_autodiff_schema,
 )
+
+logger = logging.getLogger("tesseract")
 
 
 @contextmanager
@@ -96,6 +99,22 @@ def get_supported_endpoints(api_module: ModuleType) -> tuple[str, ...]:
 def get_tesseract_api() -> ModuleType:
     """Import tesseract_api.py file."""
     return load_module_from_path(get_config().api_path)
+
+
+def get_input_schema(endpoint_function: Callable) -> type[BaseModel]:
+    """Get the input schema of an endpoint function."""
+    schema = endpoint_function.__annotations__["payload"]
+    if not issubclass(schema, BaseModel):
+        raise AssertionError(f"Expected BaseModel, got {schema}")
+    return schema
+
+
+def get_output_schema(endpoint_function: Callable) -> type[BaseModel]:
+    """Get the output schema of an endpoint function."""
+    schema = endpoint_function.__annotations__["return"]
+    if not issubclass(schema, BaseModel):
+        raise AssertionError(f"Expected BaseModel, got {schema}")
+    return schema
 
 
 def check_tesseract_api(api_module: ModuleType) -> None:
@@ -247,5 +266,10 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
             return AbstractEvalOutputSchema.model_validate(out)
 
         endpoints.append(abstract_eval)
+
+    from tesseract_core.runtime.testing.regression import make_test_endpoint
+
+    test = make_test_endpoint(api_module, endpoints)
+    endpoints.append(test)
 
     return endpoints
