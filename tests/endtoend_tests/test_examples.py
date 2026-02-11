@@ -804,6 +804,267 @@ TEST_CASES = {
             )
         ],
     ),
+    "meshstats_finitediff": Config(
+        test_with_random_inputs=False,
+        sample_requests=[
+            SampleRequest(
+                endpoint="apply",
+                payload={
+                    "inputs": {
+                        "mesh": {
+                            "n_points": 5,
+                            "n_cells": 2,
+                            "points": encode_array(
+                                [
+                                    [0.0, 1.0, 0.0],
+                                    [1.0, 0.0, 0.0],
+                                    [0.0, 1.0, 0.0],
+                                    [1.0, 1.0, 0.0],
+                                    [0.5, 0.5, 1.0],
+                                ]
+                            ),
+                            "num_points_per_cell": encode_array([4, 4]),
+                            "cell_connectivity": encode_array([0, 1, 2, 3, 1, 2, 3, 4]),
+                            "cell_data": {
+                                "temperature": encode_array(
+                                    [[100.0, 105.0], [110.0, 115.0]]
+                                ),
+                                "pressure": encode_array([[1.0, 1.2], [1.1, 1.3]]),
+                            },
+                            "point_data": {
+                                "displacement": encode_array(
+                                    [
+                                        [0.0, 0.1, 0.2],
+                                        [0.1, 0.0, 0.2],
+                                        [0.2, 0.1, 0.0],
+                                        [0.1, 0.2, 0.1],
+                                        [0.2, 0.1, 0.1],
+                                    ]
+                                ),
+                                "velocity": encode_array(
+                                    [
+                                        [0.0, 0.0, 0.0],
+                                        [0.1, 0.0, 0.0],
+                                        [0.0, 0.1, 0.0],
+                                        [0.0, 0.0, 0.1],
+                                        [0.1, 0.1, 0.1],
+                                    ]
+                                ),
+                            },
+                        }
+                    },
+                },
+                output_contains_pattern='"first_point_coordinates"',
+            ),
+            # Test jacobian with central finite differences (default)
+            SampleRequest(
+                endpoint="jacobian",
+                payload={
+                    "jac_inputs": ["mesh.points"],
+                    "jac_outputs": ["statistics.barycenter"],
+                    "inputs": {
+                        "mesh": {
+                            "n_points": 5,
+                            "n_cells": 2,
+                            "points": encode_array(
+                                [
+                                    [0.0, 1.0, 0.0],
+                                    [1.0, 0.0, 0.0],
+                                    [0.0, 1.0, 0.0],
+                                    [1.0, 1.0, 0.0],
+                                    [0.5, 0.5, 1.0],
+                                ]
+                            ),
+                            "num_points_per_cell": encode_array([4, 4]),
+                            "cell_connectivity": encode_array([0, 1, 2, 3, 1, 2, 3, 4]),
+                            "cell_data": {
+                                "temperature": encode_array(
+                                    [[100.0, 105.0], [110.0, 115.0]]
+                                ),
+                                "pressure": encode_array([[1.0, 1.2], [1.1, 1.3]]),
+                            },
+                            "point_data": {
+                                "displacement": encode_array(
+                                    [
+                                        [0.0, 0.1, 0.2],
+                                        [0.1, 0.0, 0.2],
+                                        [0.2, 0.1, 0.0],
+                                        [0.1, 0.2, 0.1],
+                                        [0.2, 0.1, 0.1],
+                                    ]
+                                ),
+                                "velocity": encode_array(
+                                    [
+                                        [0.0, 0.0, 0.0],
+                                        [0.1, 0.0, 0.0],
+                                        [0.0, 0.1, 0.0],
+                                        [0.0, 0.0, 0.1],
+                                        [0.1, 0.1, 0.1],
+                                    ]
+                                ),
+                            },
+                        },
+                        "fd_algorithm": "central",
+                    },
+                },
+                output_contains_pattern='"shape":[3,5,3]',
+            ),
+            # Test jacobian with forward finite differences
+            SampleRequest(
+                endpoint="jacobian",
+                payload={
+                    "jac_inputs": ["mesh.points"],
+                    "jac_outputs": ["statistics.barycenter"],
+                    "inputs": {
+                        "mesh": {
+                            "n_points": 5,
+                            "n_cells": 2,
+                            "points": encode_array(
+                                [
+                                    [0.0, 1.0, 0.0],
+                                    [1.0, 0.0, 0.0],
+                                    [0.0, 1.0, 0.0],
+                                    [1.0, 1.0, 0.0],
+                                    [0.5, 0.5, 1.0],
+                                ]
+                            ),
+                            "num_points_per_cell": encode_array([4, 4]),
+                            "cell_connectivity": encode_array([0, 1, 2, 3, 1, 2, 3, 4]),
+                            "cell_data": {
+                                "temperature": encode_array(
+                                    [[100.0, 105.0], [110.0, 115.0]]
+                                ),
+                                "pressure": encode_array([[1.0, 1.2], [1.1, 1.3]]),
+                            },
+                            "point_data": {
+                                "displacement": encode_array(
+                                    [
+                                        [0.0, 0.1, 0.2],
+                                        [0.1, 0.0, 0.2],
+                                        [0.2, 0.1, 0.0],
+                                        [0.1, 0.2, 0.1],
+                                        [0.2, 0.1, 0.1],
+                                    ]
+                                ),
+                                "velocity": encode_array(
+                                    [
+                                        [0.0, 0.0, 0.0],
+                                        [0.1, 0.0, 0.0],
+                                        [0.0, 0.1, 0.0],
+                                        [0.0, 0.0, 0.1],
+                                        [0.1, 0.1, 0.1],
+                                    ]
+                                ),
+                            },
+                        },
+                        "fd_algorithm": "forward",
+                    },
+                },
+                output_contains_pattern='"shape":[3,5,3]',
+            ),
+            # Test jacobian with stochastic (SPSA) finite differences
+            SampleRequest(
+                endpoint="jacobian",
+                payload={
+                    "jac_inputs": ["mesh.points"],
+                    "jac_outputs": ["statistics.barycenter"],
+                    "inputs": {
+                        "mesh": {
+                            "n_points": 5,
+                            "n_cells": 2,
+                            "points": encode_array(
+                                [
+                                    [0.0, 1.0, 0.0],
+                                    [1.0, 0.0, 0.0],
+                                    [0.0, 1.0, 0.0],
+                                    [1.0, 1.0, 0.0],
+                                    [0.5, 0.5, 1.0],
+                                ]
+                            ),
+                            "num_points_per_cell": encode_array([4, 4]),
+                            "cell_connectivity": encode_array([0, 1, 2, 3, 1, 2, 3, 4]),
+                            "cell_data": {
+                                "temperature": encode_array(
+                                    [[100.0, 105.0], [110.0, 115.0]]
+                                ),
+                                "pressure": encode_array([[1.0, 1.2], [1.1, 1.3]]),
+                            },
+                            "point_data": {
+                                "displacement": encode_array(
+                                    [
+                                        [0.0, 0.1, 0.2],
+                                        [0.1, 0.0, 0.2],
+                                        [0.2, 0.1, 0.0],
+                                        [0.1, 0.2, 0.1],
+                                        [0.2, 0.1, 0.1],
+                                    ]
+                                ),
+                                "velocity": encode_array(
+                                    [
+                                        [0.0, 0.0, 0.0],
+                                        [0.1, 0.0, 0.0],
+                                        [0.0, 0.1, 0.0],
+                                        [0.0, 0.0, 0.1],
+                                        [0.1, 0.1, 0.1],
+                                    ]
+                                ),
+                            },
+                        },
+                        "fd_algorithm": "stochastic",
+                    },
+                },
+                output_contains_pattern='"shape":[3,5,3]',
+            ),
+            SampleRequest(
+                endpoint="check-gradients",
+                payload={
+                    "inputs": {
+                        "mesh": {
+                            "n_points": 5,
+                            "n_cells": 2,
+                            "points": encode_array(
+                                [
+                                    [0.0, 1.0, 0.0],
+                                    [1.0, 0.0, 0.0],
+                                    [0.0, 1.0, 0.0],
+                                    [1.0, 1.0, 0.0],
+                                    [0.5, 0.5, 1.0],
+                                ]
+                            ),
+                            "num_points_per_cell": encode_array([4, 4]),
+                            "cell_connectivity": encode_array([0, 1, 2, 3, 1, 2, 3, 4]),
+                            "cell_data": {
+                                "temperature": encode_array(
+                                    [[100.0, 105.0], [110.0, 115.0]]
+                                ),
+                                "pressure": encode_array([[1.0, 1.2], [1.1, 1.3]]),
+                            },
+                            "point_data": {
+                                "displacement": encode_array(
+                                    [
+                                        [0.0, 0.1, 0.2],
+                                        [0.1, 0.0, 0.2],
+                                        [0.2, 0.1, 0.0],
+                                        [0.1, 0.2, 0.1],
+                                        [0.2, 0.1, 0.1],
+                                    ]
+                                ),
+                                "velocity": encode_array(
+                                    [
+                                        [0.0, 0.0, 0.0],
+                                        [0.1, 0.0, 0.0],
+                                        [0.0, 0.1, 0.0],
+                                        [0.0, 0.0, 0.1],
+                                        [0.1, 0.1, 0.1],
+                                    ]
+                                ),
+                            },
+                        }
+                    },
+                },
+            ),
+        ],
+    ),
 }
 
 
