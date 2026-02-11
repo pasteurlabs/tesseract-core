@@ -621,17 +621,10 @@ def finite_difference_jacobian(
         inputs: The input data at which to compute the Jacobian.
         jac_inputs: Set of input paths to differentiate with respect to.
         jac_outputs: Set of output paths to compute derivatives of.
-        algorithm: The finite difference algorithm to use:
-            - ``"central"``: Central differences ``(f(x+eps) - f(x-eps)) / (2*eps)``.
-              Most accurate but requires 2 function evaluations per input element.
-            - ``"forward"``: Forward differences ``(f(x+eps) - f(x)) / eps``.
-              Less accurate but requires only 1 extra function evaluation per input element.
-            - ``"stochastic"``: Simultaneous Perturbation Stochastic Approximation (SPSA).
-              Approximates the full Jacobian using random perturbation directions.
-              Scales better to high-dimensional inputs. See
-              Spall, J. C. (1992), "Multivariate stochastic approximation using a
-              simultaneous perturbation gradient approximation", IEEE Transactions
-              on Automatic Control, 37(3), 332-341.
+        algorithm: The finite difference algorithm to use. Options are
+            ``"central"`` (central differences, most accurate, 2 evaluations per element),
+            ``"forward"`` (forward differences, faster, 1 extra evaluation per element), or
+            ``"stochastic"`` (SPSA algorithm, scales better to high-dimensional inputs).
         eps: Perturbation magnitude for finite differences.
         num_samples: Number of random samples for the stochastic algorithm.
             Only used when ``algorithm="stochastic"``. Defaults to the total number
