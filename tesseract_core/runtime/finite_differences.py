@@ -871,7 +871,7 @@ def finite_difference_jvp(
     jvp_outputs: set[str],
     tangent_vector: dict[str, ArrayLike],
     *,
-    algorithm: Literal["central", "forward"] = "central",
+    algorithm: FDAlgorithm = "central",
     eps: float = 1e-4,
 ) -> dict[str, ArrayLike]:
     """Compute the Jacobian-vector product (JVP) using finite differences.
@@ -879,13 +879,19 @@ def finite_difference_jvp(
     The JVP computes ``J @ v`` where ``J`` is the Jacobian and ``v`` is the tangent vector.
     This is done efficiently using directional derivatives without computing the full Jacobian.
 
+    Note: The ``"stochastic"`` algorithm is treated as ``"central"`` for JVP computation.
+    JVP naturally requires only O(1) function evaluations regardless of input dimension
+    (2 for central, 1 for forward), so stochastic estimation provides no benefit.
+
     Args:
         apply_fn: The Tesseract's apply function with signature ``apply(inputs) -> outputs``.
         inputs: The input data at which to compute the JVP.
         jvp_inputs: Set of input paths to differentiate with respect to.
         jvp_outputs: Set of output paths to compute derivatives of.
         tangent_vector: Dictionary mapping input paths to tangent arrays.
-        algorithm: The finite difference algorithm (``"central"`` or ``"forward"``).
+        algorithm: The finite difference algorithm to use. Options are
+            ``"central"`` (most accurate, default) or ``"forward"`` (faster).
+            The ``"stochastic"`` option is accepted but treated as ``"central"``.
         eps: Perturbation magnitude.
 
     Returns:
@@ -908,6 +914,11 @@ def finite_difference_jvp(
                 )
     """
     inputs_dict = inputs.model_dump()
+
+    # Stochastic algorithm is treated as central for JVP since JVP already
+    # achieves O(1) function evaluations via directional derivatives
+    if algorithm == "stochastic":
+        algorithm = "central"
 
     # Construct directional perturbation
     inputs_plus_dict = inputs_dict.copy()
@@ -956,13 +967,19 @@ def finite_difference_vjp(
     vjp_outputs: set[str],
     cotangent_vector: dict[str, ArrayLike],
     *,
-    algorithm: Literal["central", "forward"] = "central",
+    algorithm: FDAlgorithm = "central",
     eps: float = 1e-4,
+    num_samples: int | None = None,
+    seed: int | None = None,
 ) -> dict[str, ArrayLike]:
     """Compute the vector-Jacobian product (VJP) using finite differences.
 
     The VJP computes ``v @ J`` where ``J`` is the Jacobian and ``v`` is the cotangent vector.
-    Unlike JVP, this requires computing the relevant rows of the Jacobian explicitly.
+
+    Note: For ``"central"`` and ``"forward"`` algorithms, the VJP is computed by
+    explicitly computing the Jacobian rows and contracting with the cotangent vector.
+    This requires O(n_inputs) function evaluations, the same cost as computing the
+    full Jacobian. For high-dimensional inputs, consider using ``algorithm="stochastic"``.
 
     Args:
         apply_fn: The Tesseract's apply function with signature ``apply(inputs) -> outputs``.
@@ -970,8 +987,13 @@ def finite_difference_vjp(
         vjp_inputs: Set of input paths to differentiate with respect to.
         vjp_outputs: Set of output paths to compute derivatives of.
         cotangent_vector: Dictionary mapping output paths to cotangent arrays.
-        algorithm: The finite difference algorithm (``"central"`` or ``"forward"``).
+        algorithm: The finite difference algorithm to use. Options are
+            ``"central"`` (most accurate), ``"forward"`` (faster), or
+            ``"stochastic"`` (SPSA, better for high-dimensional inputs).
         eps: Perturbation magnitude.
+        num_samples: Number of random samples for the stochastic algorithm.
+            Only used when ``algorithm="stochastic"``.
+        seed: Random seed for reproducibility (only used with ``algorithm="stochastic"``).
 
     Returns:
         Dictionary mapping input paths to VJP result arrays.
@@ -1003,46 +1025,155 @@ def finite_difference_vjp(
         in_arr = np.asarray(in_val)
         result[in_path] = np.zeros_like(in_arr, dtype=np.float64)
 
-    # VJP = sum over outputs of cotangent[output] @ J[output, input]
-    # We need to compute each row of J (one per input element) and contract with cotangent
+    if algorithm == "stochastic":
+        _compute_vjp_stochastic(
+            apply_fn,
+            inputs,
+            inputs_dict,
+            vjp_inputs,
+            vjp_outputs,
+            cotangent_vector,
+            result,
+            eps=eps,
+            num_samples=num_samples,
+            seed=seed,
+        )
+    else:
+        # VJP = sum over outputs of cotangent[output] @ J[output, input]
+        # We need to compute each row of J (one per input element) and contract with cotangent
+        for in_path in vjp_inputs:
+            in_val = get_at_path(inputs_dict, in_path)
+            in_arr = np.asarray(in_val)
+            in_shape = in_arr.shape
+
+            indices = list(np.ndindex(in_shape)) if in_shape else [()]
+
+            for idx in indices:
+                # Compute gradient and contract with cotangent for each output
+                vjp_value = 0.0
+                for out_path in vjp_outputs:
+                    if algorithm == "central":
+                        grad = _compute_central_diff_row(
+                            apply_fn,
+                            inputs_dict,
+                            input_schema,
+                            in_path,
+                            out_path,
+                            idx,
+                            eps,
+                        )
+                    else:
+                        grad = _compute_forward_diff_row(
+                            apply_fn,
+                            inputs_dict,
+                            base_outputs,
+                            input_schema,
+                            in_path,
+                            out_path,
+                            idx,
+                            eps,
+                        )
+                    cotangent = np.asarray(cotangent_vector[out_path])
+                    vjp_value += np.sum(cotangent * grad)
+
+                if idx:
+                    result[in_path][idx] = vjp_value
+                else:
+                    result[in_path] = np.float64(vjp_value)
+
+    return result
+
+
+def _compute_vjp_stochastic(
+    apply_fn: Callable,
+    inputs: BaseModel,
+    inputs_dict: dict,
+    vjp_inputs: set[str],
+    vjp_outputs: set[str],
+    cotangent_vector: dict[str, ArrayLike],
+    result: dict[str, np.ndarray],
+    *,
+    eps: float,
+    num_samples: int | None,
+    seed: int | None,
+) -> None:
+    """Compute VJP using Simultaneous Perturbation Stochastic Approximation (SPSA).
+
+    For VJP, we want to compute v @ J for each input, which is:
+        VJP[in_path] = sum over out_path of: cotangent[out_path] @ J[out_path, in_path]
+
+    Using SPSA, we can estimate this efficiently by:
+    1. Generating random perturbation directions delta (Rademacher: ±1)
+    2. Computing output differences: (f(x + eps*delta) - f(x - eps*delta)) / (2*eps)
+    3. Computing gradient estimate: (output_diff · cotangent) / delta
+
+    This requires only 2 function evaluations per sample, regardless of dimension.
+    """
+    rng = np.random.RandomState(seed)
+
+    # Collect input metadata
+    input_info = {}
+    total_input_elements = 0
     for in_path in vjp_inputs:
         in_val = get_at_path(inputs_dict, in_path)
         in_arr = np.asarray(in_val)
-        in_shape = in_arr.shape
+        input_info[in_path] = {
+            "array": in_arr,
+            "shape": in_arr.shape,
+            "size": in_arr.size if in_arr.shape else 1,
+        }
+        total_input_elements += input_info[in_path]["size"]
 
-        indices = list(np.ndindex(in_shape)) if in_shape else [()]
+    # Default number of samples
+    if num_samples is None:
+        num_samples = total_input_elements
 
-        for idx in indices:
-            # Compute gradient and contract with cotangent for each output
-            vjp_value = 0.0
-            for out_path in vjp_outputs:
-                if algorithm == "central":
-                    grad = _compute_central_diff_row(
-                        apply_fn,
-                        inputs_dict,
-                        input_schema,
-                        in_path,
-                        out_path,
-                        idx,
-                        eps,
-                    )
-                else:
-                    grad = _compute_forward_diff_row(
-                        apply_fn,
-                        inputs_dict,
-                        base_outputs,
-                        input_schema,
-                        in_path,
-                        out_path,
-                        idx,
-                        eps,
-                    )
-                cotangent = np.asarray(cotangent_vector[out_path])
-                vjp_value += np.sum(cotangent * grad)
-
-            if idx:
-                result[in_path][idx] = vjp_value
+    # Accumulate VJP estimates
+    for _ in range(num_samples):
+        # Generate random perturbation directions (Rademacher: ±1)
+        perturbations = {}
+        for in_path, info in input_info.items():
+            if info["shape"]:
+                perturbations[in_path] = rng.choice([-1, 1], size=info["shape"]).astype(
+                    np.float64
+                )
             else:
-                result[in_path] = np.float64(vjp_value)
+                perturbations[in_path] = np.float64(rng.choice([-1, 1]))
 
-    return result
+        # Compute perturbed inputs
+        inputs_plus_dict = inputs_dict.copy()
+        inputs_minus_dict = inputs_dict.copy()
+
+        for in_path, delta in perturbations.items():
+            in_arr = input_info[in_path]["array"]
+            inputs_plus_dict = set_at_path(
+                inputs_plus_dict, {in_path: in_arr + eps * delta}
+            )
+            inputs_minus_dict = set_at_path(
+                inputs_minus_dict, {in_path: in_arr - eps * delta}
+            )
+
+        # Evaluate function at perturbed points
+        outputs_plus = apply_fn(
+            type(inputs).model_validate(inputs_plus_dict)
+        ).model_dump()
+        outputs_minus = apply_fn(
+            type(inputs).model_validate(inputs_minus_dict)
+        ).model_dump()
+
+        # Compute weighted output difference (weighted by cotangent)
+        # This is the directional derivative in the direction of the cotangent
+        weighted_output_diff = 0.0
+        for out_path in vjp_outputs:
+            out_plus = np.asarray(get_at_path(outputs_plus, out_path))
+            out_minus = np.asarray(get_at_path(outputs_minus, out_path))
+            output_diff = (out_plus - out_minus) / (2 * eps)
+            cotangent = np.asarray(cotangent_vector[out_path])
+            weighted_output_diff += np.sum(cotangent * output_diff)
+
+        # Update VJP estimate for each input
+        # VJP contribution = weighted_output_diff / delta
+        for in_path in vjp_inputs:
+            delta = perturbations[in_path]
+            vjp_contrib = weighted_output_diff / delta
+            result[in_path] += vjp_contrib / num_samples
