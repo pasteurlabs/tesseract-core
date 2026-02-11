@@ -220,8 +220,8 @@ def test_apply_command_binref(cli, cli_runner, dummy_tesseract_module, tmpdir):
         env={"TERM": "dumb", "COLUMNS": "1000"},
     )
     assert result.exit_code == 2
-    assert "Value error" in result.stderr
-    assert "Failed to decode buffer as binref" in result.stderr
+    assert "validation error" in result.stderr
+    assert "Failed to decode array buffer (binref encoding)" in result.stderr
 
 
 def test_apply_command_noenv(cli, cli_runner, dummy_tesseract_module, monkeypatch):
