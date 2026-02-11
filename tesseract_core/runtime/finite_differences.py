@@ -628,9 +628,9 @@ def finite_difference_jacobian(
               Less accurate but requires only 1 extra function evaluation per input element.
             - ``"stochastic"``: Simultaneous Perturbation Stochastic Approximation (SPSA).
               Approximates the full Jacobian using random perturbation directions.
-              Scales better to high-dimensional inputs. See:
-              Spall, J. C. (1992). Multivariate stochastic approximation using a
-              simultaneous perturbation gradient approximation. IEEE Transactions
+              Scales better to high-dimensional inputs. See
+              Spall, J. C. (1992), "Multivariate stochastic approximation using a
+              simultaneous perturbation gradient approximation", IEEE Transactions
               on Automatic Control, 37(3), 332-341.
         eps: Perturbation magnitude for finite differences.
         num_samples: Number of random samples for the stochastic algorithm.
