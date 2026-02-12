@@ -30,6 +30,11 @@ except ModuleNotFoundError as e:
     sys.exit(1)
 
 # Import public API
+from .finite_differences import (
+    finite_difference_jacobian,
+    finite_difference_jvp,
+    finite_difference_vjp,
+)
 from .schema_types import (
     Array,
     Differentiable,
@@ -62,4 +67,7 @@ __all__ = [
     "UInt16",
     "UInt32",
     "UInt64",
+    "finite_difference_jacobian",
+    "finite_difference_jvp",
+    "finite_difference_vjp",
 ]
