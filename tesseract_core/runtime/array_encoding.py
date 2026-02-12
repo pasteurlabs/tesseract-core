@@ -18,6 +18,7 @@ from pydantic import (
     ValidationInfo,
     create_model,
 )
+from pydantic_core import PydanticCustomError
 
 from tesseract_core.runtime.file_interactions import (
     get_filesize,
@@ -324,8 +325,13 @@ def _coerce_shape_dtype(
         out_shape = arr.shape
     else:
         if len(arr.shape) != len(expected_shape):
-            raise ValueError(
-                f"Dimensionality mismatch: {len(arr.shape)}D array cannot be cast to {len(expected_shape)}D"
+            raise PydanticCustomError(
+                "array_dimensionality_mismatch",
+                "Array has wrong number of dimensions: got {actual_dims}D, expected {expected_dims}D",
+                {
+                    "actual_dims": len(arr.shape),
+                    "expected_dims": len(expected_shape),
+                },
             )
 
         out_shape = tuple(
@@ -338,21 +344,36 @@ def _coerce_shape_dtype(
     try:
         arr = np.broadcast_to(arr, out_shape)
     except ValueError:
-        raise ValueError(
-            f"Shape mismatch: {arr.shape} cannot be cast to {out_shape}"
+        raise PydanticCustomError(
+            "array_shape_mismatch",
+            "Array shape {actual_shape} is incompatible with expected shape {expected_shape}",
+            {
+                "actual_shape": arr.shape,
+                "expected_shape": out_shape,
+            },
         ) from None
 
     if expected_dtype is not None:
         if not np.can_cast(arr.dtype, expected_dtype, casting="same_kind"):
-            raise ValueError(
-                f"Dtype mismatch: {arr.dtype} cannot be cast to {expected_dtype}"
+            raise PydanticCustomError(
+                "array_dtype_mismatch",
+                "Array dtype '{actual_dtype}' cannot be safely cast to '{expected_dtype}'",
+                {
+                    "actual_dtype": str(arr.dtype),
+                    "expected_dtype": expected_dtype,
+                },
             )
         arr = arr.astype(expected_dtype)
 
     allowed_dtypes = [dtype.lower() for dtype in get_args(AllowedDtypes)]
     if arr.dtype.name not in allowed_dtypes:
-        raise ValueError(
-            f"Got invalid dtype: {arr.dtype.name}, expected one of {allowed_dtypes}"
+        raise PydanticCustomError(
+            "array_invalid_dtype",
+            "Array has unsupported dtype '{actual_dtype}'; must be one of: {allowed_dtypes}",
+            {
+                "actual_dtype": arr.dtype.name,
+                "allowed_dtypes": ", ".join(allowed_dtypes),
+            },
         )
 
     if not out_shape:
@@ -370,8 +391,10 @@ def python_to_array(
     if not np.issubdtype(val.dtype, np.number) and not np.issubdtype(
         val.dtype, np.bool_
     ):
-        raise ValueError(
-            f"Could not convert object to numeric NumPy array (got dtype: {val.dtype})"
+        raise PydanticCustomError(
+            "array_non_numeric",
+            "Could not parse value as a numeric array (contains non-numeric data)",
+            {},
         )
     return _coerce_shape_dtype(val, expected_shape, expected_dtype)
 
@@ -405,8 +428,10 @@ def decode_array(
                 val.dtype, np.integer
             ):
                 if np.any(data % 1):
-                    raise ValueError(
-                        f"Expected integer data, but got floating point data: {data}"
+                    raise PydanticCustomError(
+                        "array_expected_integer",
+                        "Expected integer data, but array contains floating point values",
+                        {},
                     )
             data = data.astype(val.dtype, casting="unsafe")
 
@@ -414,8 +439,15 @@ def decode_array(
             # Unreachable
             raise AssertionError(f"Unsupported encoding: {val.data.encoding}")
 
+    except PydanticCustomError:
+        # Re-raise PydanticCustomError directly without wrapping
+        raise
     except Exception as e:
-        raise ValueError(f"Failed to decode buffer as {val.data.encoding}: {e}") from e
+        raise PydanticCustomError(
+            "array_decode_error",
+            "Failed to decode array buffer ({encoding} encoding): {error}",
+            {"encoding": val.data.encoding, "error": str(e)},
+        ) from e
 
     data = _coerce_shape_dtype(data, expected_shape, expected_dtype)
     return data
