@@ -25,18 +25,7 @@ fi
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
         ssh \
-        # Needed to compile addmeplease, and nice to have in general
-        gcc \
-        libc6-dev \
     && rm -rf /var/lib/apt/lists/*
-
-# Copy and compile addmeplease
-COPY "addmeplease.c" /tmp/addmeplease.c
-RUN gcc -o /bin/addmeplease /tmp/addmeplease.c && \
-    rm /tmp/addmeplease.c && \
-    chown root:root /bin/addmeplease && \
-    chmod 4755 /bin/addmeplease && \
-    ls -l /bin/addmeplease
 
 {% if config.build_config.extra_packages %}
 # Install extra packages
@@ -69,11 +58,10 @@ FROM {{ config.build_config.base_image }} AS run_stage
 FROM --platform={{ config.build_config.target_platform }} {{ config.build_config.base_image }} AS run_stage
 {% endif %}
 
-RUN if [ ! -x "$(command -v python3)" ]; then \
-    apt-get update && apt-get install -y --no-install-recommends \
-        python3 \
-        && rm -rf /var/lib/apt/lists/*; \
-    fi
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libnss-wrapper \
+    && { [ -x "$(command -v python3)" ] || apt-get install -y --no-install-recommends python3; } \
+    && rm -rf /var/lib/apt/lists/*
 
 {% if config.build_config.extra_packages %}
 # Install extra packages again since they may include runtime dependencies
@@ -93,7 +81,6 @@ ENV TESSERACT_NAME="{{ config.name | replace('"', '\\"') | replace('\n', '\\n') 
 
 # Copy only necessary files
 COPY --from=build_stage /python-env /python-env
-COPY --from=build_stage /bin/addmeplease /bin/addmeplease
 COPY "entrypoint.sh" /tesseract/entrypoint.sh
 RUN chmod 555 /tesseract/entrypoint.sh
 COPY "{{ tesseract_source_directory }}/tesseract_api.py" ${TESSERACT_API_PATH}
@@ -121,6 +108,10 @@ VOLUME ["/tesseract/input_data", "/tesseract/output_data"]
 
 ENV TESSERACT_INPUT_PATH="/tesseract/input_data"
 ENV TESSERACT_OUTPUT_PATH="/tesseract/output_data"
+
+# Pre-populate libnss_wrapper files from system passwd/group so any uid can
+# append their own entry at runtime without needing to read /etc at all.
+RUN cp /etc/passwd /tmp/passwd && cp /etc/group /tmp/group && chmod 666 /tmp/passwd /tmp/group
 
 # Drop to random non-root user to prevent exploits
 # (this way, we never start the container as root unless specifically requested)
