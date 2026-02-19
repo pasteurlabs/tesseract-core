@@ -12,7 +12,7 @@ RUNTIME_PYPROJECT_PATH = "tesseract_core/runtime/meta/pyproject.toml"
 
 BASE_OPTIONAL_DEPS = {
     "docs": [
-        "sphinx<9",  # TODO: Remove when sphinx-click supports sphinx 9 (https://github.com/click-contrib/sphinx-click/issues/159)
+        "sphinx",
         "sphinx_autodoc_typehints",
         "furo",
         "myst-nb",
