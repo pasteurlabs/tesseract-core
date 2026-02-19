@@ -112,6 +112,9 @@ ENV TESSERACT_OUTPUT_PATH="/tesseract/output_data"
 # Pre-populate libnss_wrapper files from system passwd/group so any uid can
 # append their own entry at runtime without needing to read /etc at all.
 RUN cp /etc/passwd /tmp/passwd && cp /etc/group /tmp/group && chmod 666 /tmp/passwd /tmp/group
+ENV LD_PRELOAD=libnss_wrapper.so \
+    NSS_WRAPPER_PASSWD=/tmp/passwd \
+    NSS_WRAPPER_GROUP=/tmp/group
 
 # Drop to random non-root user to prevent exploits
 # (this way, we never start the container as root unless specifically requested)
