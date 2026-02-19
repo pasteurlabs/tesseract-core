@@ -8,8 +8,10 @@
 # intercepts those lookups via LD_PRELOAD — no privilege escalation required,
 # so this works even with --security-opt no-new-privileges.
 # /tmp/passwd and /tmp/group are pre-seeded from /etc at image build time.
-echo "tesseract-user:x:$(id -u):$(id -g)::/tesseract:/bin/bash" >> /tmp/passwd
-echo "tesseract-group:x:$(id -g):" >> /tmp/group
+grep -q "^tesseract-user:x:$(id -u):" /tmp/passwd || \
+    echo "tesseract-user:x:$(id -u):$(id -g)::/tesseract:/bin/bash" >> /tmp/passwd
+grep -q "^tesseract-group:x:$(id -g):" /tmp/group || \
+    echo "tesseract-group:x:$(id -g):" >> /tmp/group
 export LD_PRELOAD=libnss_wrapper.so
 export NSS_WRAPPER_PASSWD=/tmp/passwd
 export NSS_WRAPPER_GROUP=/tmp/group
