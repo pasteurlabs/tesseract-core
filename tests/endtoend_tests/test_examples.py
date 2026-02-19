@@ -804,6 +804,30 @@ TEST_CASES = {
             )
         ],
     ),
+    "fortran_heat": Config(
+        test_with_random_inputs=False,
+        sample_requests=[
+            SampleRequest(
+                endpoint="apply",
+                payload={
+                    "inputs": {
+                        "n_points": 11,
+                        "n_steps": 10,
+                        "alpha": 0.01,
+                        "length": 1.0,
+                        "dt": 0.001,
+                        "t_left": 100.0,
+                        "t_right": 0.0,
+                    }
+                },
+                output_contains_pattern=[
+                    '"x":',
+                    '"temperature":',
+                    '"final_temperature":',
+                ],
+            ),
+        ],
+    ),
 }
 
 

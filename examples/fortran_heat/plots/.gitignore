@@ -1,0 +1,7 @@
+# Ignore generated visualization outputs
+*.png
+*.gif
+*.mp4
+
+# But track this .gitignore file
+!.gitignore

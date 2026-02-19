@@ -9,6 +9,7 @@
 building-blocks/helloworld.md
 building-blocks/vectoradd.md
 building-blocks/univariate.md
+building-blocks/fortran.md
 building-blocks/packagedata.md
 building-blocks/arm64.md
 building-blocks/localpackage.md
@@ -43,6 +44,12 @@ You can also find these Tesseracts in the `examples` directory of the [code repo
 :link: building-blocks/univariate.html
 
       A Tesseract that wraps the univariate Rosenbrock function, which is a common test problem for optimization algorithms.
+
+:::
+:::{grid-item-card} Fortran Integration
+:link: building-blocks/fortran.html
+
+      Wrapping a Fortran heat equation solver. Demonstrates subprocess-based integration for legacy compiled code.
 
 :::
 :::{grid-item-card} Package Data

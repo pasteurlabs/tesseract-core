@@ -1,0 +1,29 @@
+name: "fortran-heat"
+version: "1.0.0"
+description: |
+  1D transient heat equation solver demonstrating Fortran integration.
+
+  This example shows how to wrap legacy Fortran simulation code as a
+  Tesseract using subprocess-based integration. The solver uses an
+  explicit finite difference scheme to solve the heat equation:
+
+    dT/dt = alpha * d^2T/dx^2
+
+  Industry relevance: thermal analysis of turbine blades, electronics
+  cooling, heat treatment processes, and building physics.
+
+build_config:
+  base_image: "debian:bookworm-slim"
+
+  # Install Fortran compiler
+  extra_packages:
+    - gfortran
+
+  # Copy Fortran source into container
+  package_data:
+    - ["fortran/heat_solver.f90", "fortran/heat_solver.f90"]
+
+  # Compile Fortran code during image build
+  custom_build_steps:
+    - |
+      RUN gfortran -O2 -o /app/fortran/heat_solver /app/fortran/heat_solver.f90
