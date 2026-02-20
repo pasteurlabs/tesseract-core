@@ -46,25 +46,23 @@ def test_Tesseract_init():
 
 
 def test_Tesseract_from_tesseract_api(dummy_tesseract_location, dummy_tesseract_module):
-    all_endpoints = sorted(
-        [
-            "apply",
-            "jacobian",
-            "jacobian_vector_product",
-            "vector_jacobian_product",
-            "health",
-            "abstract_eval",
-            "test",
-        ]
-    )
+    all_endpoints = {
+        "apply",
+        "jacobian",
+        "jacobian_vector_product",
+        "vector_jacobian_product",
+        "health",
+        "abstract_eval",
+        "test",
+    }
 
     t = Tesseract.from_tesseract_api(dummy_tesseract_location / "tesseract_api.py")
-    endpoints = sorted(t.available_endpoints)
+    endpoints = set(t.available_endpoints)
     assert endpoints == all_endpoints
 
     # should also work when importing the module
     t = Tesseract.from_tesseract_api(dummy_tesseract_module)
-    endpoints = sorted(t.available_endpoints)
+    endpoints = set(t.available_endpoints)
     assert endpoints == all_endpoints
 
 
