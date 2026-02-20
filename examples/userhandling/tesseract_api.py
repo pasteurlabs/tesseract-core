@@ -44,7 +44,7 @@ def apply(inputs: InputSchema) -> OutputSchema:
     except KeyError as exc:
         raise RuntimeError(
             f"Current user (UID: {uid}) does not have an entry in /etc/passwd. "
-            "This container should have run addmeplease in the entrypoint."
+            "This container's entrypoint should have set up libnss_wrapper with a passwd entry for this UID."
         ) from exc
 
     if pw_entry.pw_gid != gid:
