@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.4.0] - 2026-02-20
+
+### Features
+
+- Add better validation errors (#471)
+- Add new `test` command to `tesseract run` and `tesseract-runtime` to support regression testing (#411)
+
+### Bug Fixes
+
+- Use libnss_wrapper instead of addmeplease to create a home for any uid:gid specified at runtime (#476)
+
 ## [1.3.0] - 2026-01-08
 
 ### Features
