@@ -3,9 +3,10 @@
 
 import inspect
 import uuid
+from collections.abc import Callable
 from functools import wraps
 from types import ModuleType
-from typing import Annotated, Any, Callable, Optional, Union
+from typing import Annotated, Any
 
 import uvicorn
 from fastapi import FastAPI, Header, Query, Response
@@ -21,7 +22,7 @@ GET_ENDPOINTS = {"health"}
 
 
 def create_response(
-    model: BaseModel, accept: str, base_dir: Optional[str], binref_dir: Optional[str]
+    model: BaseModel, accept: str, base_dir: str | None, binref_dir: str | None
 ) -> Response:
     """Create a response of the format specified by the Accept header."""
     config = get_config()
@@ -62,9 +63,7 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
         ]
 
         @wraps(endpoint_func)
-        async def wrapper(
-            *args: Any, accept: str, run_id: Optional[str], **kwargs: Any
-        ):
+        async def wrapper(*args: Any, accept: str, run_id: str | None, **kwargs: Any):
             if run_id is None:
                 run_id = str(uuid.uuid4())
             output_path = get_config().output_path
@@ -88,13 +87,13 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
                 "accept",
                 inspect.Parameter.POSITIONAL_OR_KEYWORD,
                 default=Header(default=None),
-                annotation=Union[str, None],
+                annotation=str | None,
             )
             run_id = inspect.Parameter(
                 "run_id",
                 inspect.Parameter.POSITIONAL_OR_KEYWORD,
                 default=None,
-                annotation=Annotated[Optional[str], Query(include_in_schema=False)],
+                annotation=Annotated[str | None, Query(include_in_schema=False)],
             )
             # Other header parameters common to computational endpoints
             # could be defined and appended here as well.

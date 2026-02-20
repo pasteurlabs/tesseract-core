@@ -1,5 +1,6 @@
 (tr-autodiff)=
-# Differentiable Programming basics
+
+# Differentiable Programming Basics
 
 [Differentiable Programming](https://en.wikipedia.org/wiki/Differentiable_programming) (DP) is a technique to compute the derivative of a (software) function with respect to its inputs. It is a key ingredient in many optimization algorithms, such as gradient descent, and is widely used in machine learning and scientific computing. Automatic differentiation (autodiff or AD) is a technique to compute the derivative of a function automatically, without the need to manually derive and implement the derivative.
 
@@ -21,6 +22,7 @@ For a rigorous introduction to the current state of the art in AD methods, see [
 ```
 
 (ad-endpoints)=
+
 ## Tesseract AD endpoints
 
 ```{note}
@@ -31,7 +33,7 @@ Tesseracts are free to compute the derivative of their output with respect to th
 
 The `jacobian` endpoint computes the Jacobian matrix $J$ of one or several outputs of the wrapped function $f$ with respect to one or several input variables $x$, at a point $X$.
 
-$$ J_{ij} = \frac{\partial f_i}{\partial x_j} \bigg|_X $$
+$$ J\_{ij} = \frac{\partial f_i}{\partial x_j} \bigg|\_X $$
 
 The Jacobian matrix has one additional axis compared to the input arrays. It is often used in optimization algorithms that require the gradient of the objective function.
 
@@ -116,7 +118,6 @@ In order to do this, the {py:func}`abstract_eval <tesseract_core.runtime.app_cli
 can be implemented. This endpoint accepts the same inputs as the `apply` endpoint, except that
 array arguments are replaced by their shape and dtype (see {py:class}`ShapeDType <tesseract_core.runtime.ShapeDType>`).
 This makes it possible to infer output shapes from input shapes (and non-array arguments) before their actual data is known.
-
 
 #### Example usage
 

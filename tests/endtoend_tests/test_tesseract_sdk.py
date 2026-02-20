@@ -42,12 +42,15 @@ def test_available_endpoints(built_image_name):
         assert set(vecadd.available_endpoints) == expected_endpoints
 
 
-def test_apply(built_image_name, dummy_tesseract_location, free_port):
+@pytest.mark.parametrize("output_format", ["json", "json+base64"])
+def test_apply(built_image_name, dummy_tesseract_location, free_port, output_format):
     inputs = {"a": [1, 2], "b": [3, 4], "s": 1}
 
     # Test URL access
     tesseract_url = f"http://localhost:{free_port}"
-    served_tesseract, _ = engine.serve(built_image_name, port=str(free_port))
+    served_tesseract, _ = engine.serve(
+        built_image_name, port=str(free_port), output_format=output_format
+    )
     try:
         vecadd = Tesseract(tesseract_url)
         out = vecadd.apply(inputs)
@@ -58,14 +61,14 @@ def test_apply(built_image_name, dummy_tesseract_location, free_port):
     np.testing.assert_array_equal(out["result"], np.array([4.0, 6.0]))
 
     # Test from_image (context manager)
-    with Tesseract.from_image(built_image_name) as vecadd:
+    with Tesseract.from_image(built_image_name, output_format=output_format) as vecadd:
         out = vecadd.apply(inputs)
 
     assert set(out.keys()) == {"result"}
     np.testing.assert_array_equal(out["result"], np.array([4.0, 6.0]))
 
     # Test from_image (serve + teardown)
-    vecadd = Tesseract.from_image(built_image_name)
+    vecadd = Tesseract.from_image(built_image_name, output_format=output_format)
     try:
         vecadd.serve()
         out = vecadd.apply(inputs)
@@ -77,7 +80,7 @@ def test_apply(built_image_name, dummy_tesseract_location, free_port):
 
     # Test from_tesseract_api
     with Tesseract.from_tesseract_api(
-        dummy_tesseract_location / "tesseract_api.py"
+        dummy_tesseract_location / "tesseract_api.py", output_format=output_format
     ) as vecadd:
         out = vecadd.apply(inputs)
 
@@ -210,11 +213,11 @@ def test_signature_consistency():
         )
 
 
-def test_logpipe_consistency():
-    """Test that the source code of the two duplicate LogPipe implementations is identical."""
-    from tesseract_core.runtime.logs import LogPipe as RuntimeLogPipe
-    from tesseract_core.sdk.logs import LogPipe as SDKLogPipe
+def test_teepipe_consistency():
+    """Test that the source code of the two duplicate TeePipe implementations is identical."""
+    from tesseract_core.runtime.logs import TeePipe as RuntimeTeePipe
+    from tesseract_core.sdk.logs import TeePipe as SDKTeePipe
 
-    runtime_source = inspect.getsource(RuntimeLogPipe)
-    sdk_source = inspect.getsource(SDKLogPipe)
+    runtime_source = inspect.getsource(RuntimeTeePipe)
+    sdk_source = inspect.getsource(SDKTeePipe)
     assert runtime_source == sdk_source

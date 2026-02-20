@@ -1,0 +1,17 @@
+{
+    "file_series_version": 1.0,
+    "dt": 0.0,
+    "variations": {
+        "d61": 0.8175775294342973,
+        "d13": 1.669428546257675,
+        "d72": 0.5178147602377061,
+        "d34": 1.790388937950774,
+        "mean_velocity": 90.61541323647522
+    },
+    "simulations": [
+        {
+            "time": 0.0,
+            "file": "duct_baffle_report.cas.h5"
+        }
+    ]
+}

@@ -1,5 +1,6 @@
 (tr-quickstart)=
-# Get started
+
+# Get Started
 
 ```{note}
 Please ensure you have a working [installation](installation.md) before proceeding with this tutorial.
@@ -7,7 +8,7 @@ Please ensure you have a working [installation](installation.md) before proceedi
 
 ## Hello Tesseract
 
-The [`tesseract` command line application](../api/tesseract-cli.md) provides tools to build Tesseracts as Docker containers from ``tesseract_api.py`` files. Here, we'll use it to build and invoke a simple Tesseract that greets you by name.
+The [`tesseract` command line application](../api/tesseract-cli.md) provides tools to build Tesseracts as Docker containers from `tesseract_api.py` files. Here, we'll use it to build and invoke a simple Tesseract that greets you by name.
 
 ### Building your first Tesseract
 
@@ -32,13 +33,16 @@ You can interact with any built Tesseract via the command line interface (CLI), 
 ::::{tab-set}
 :::{tab-item} CLI
 :sync: cli
+
 ```bash
 $ tesseract run helloworld apply '{"inputs": {"name": "Osborne"}}'
 {"greeting":"Hello Osborne!"}
 ```
+
 :::
 :::{tab-item} REST API
 :sync: http
+
 ```bash
 $ tesseract serve -p 8080 helloworld
  [i] Waiting for Tesseract containers to start ...
@@ -59,9 +63,11 @@ $ curl -d '{"inputs": {"name": "Osborne"}}' \
 $ tesseract teardown tesseract-9hj8fyxrx073
  [i] Tesseracts are shutdown for Project name: tesseract-9hj8fyxrx073
 ```
+
 :::
 :::{tab-item} Python API
 :sync: python
+
 ```python
 >>> from tesseract_core import Tesseract
 >>>
@@ -69,6 +75,7 @@ $ tesseract teardown tesseract-9hj8fyxrx073
 >>>     helloworld.apply({"name": "Osborne"})
 {'greeting': 'Hello Osborne!'}
 ```
+
 :::
 ::::
 
@@ -77,18 +84,22 @@ Now, have a look at the (auto-generated) CLI and REST API docs for your Tesserac
 ::::{tab-set}
 :::{tab-item} CLI
 :sync: cli
+
 ```bash
 $ tesseract run helloworld --help
 ```
+
 :::
 :::{tab-item} REST API
 :sync: http
+
 ```bash
 $ tesseract apidoc helloworld
  [i] Waiting for Tesseract containers to start ...
  [i] Serving OpenAPI docs for Tesseract helloworld at http://127.0.0.1:59569/docs
  [i]   Press Ctrl+C to stop
 ```
+
 :::
 ::::
 
@@ -97,7 +108,9 @@ $ tesseract apidoc helloworld
 
 The OpenAPI docs for the `vectoradd` Tesseract, documenting its endpoints and valid inputs / outputs.
 ```
+
 (getting-started)=
+
 ## Let's peek under the hood
 
 The folder passed to `tesseract build` contains the files needed to build and run the Tesseract:
@@ -114,9 +127,9 @@ These files are all that's needed to define a Tesseract.
 
 ### `tesseract_api.py`
 
- The `tesseract_api.py` file defines the Tesseract's input and output schemas, and the functions that are being called when we invoke `tesseract run <funcname>`. These are,
- `apply`, `abstract_eval`, `jacobian`, `jacobian_vector_product`, and `vector_jacobian_product` (see [endpoints](../api/endpoints.md)). Out of all of the endpoints you
- can implement, only `apply` is required for a Tesseract to work.
+The `tesseract_api.py` file defines the Tesseract's input and output schemas, and the functions that are being called when we invoke `tesseract run <funcname>`. These are,
+`apply`, `abstract_eval`, `jacobian`, `jacobian_vector_product`, and `vector_jacobian_product` (see [endpoints](../api/endpoints.md)). Out of all of the endpoints you
+can implement, only `apply` is required for a Tesseract to work.
 
 ```{literalinclude} ../../../examples/helloworld/tesseract_api.py
 :pyobject: InputSchema
@@ -135,11 +148,13 @@ For a Tesseract that has all optional endpoints implemented, check out the [Univ
 ```
 
 (quickstart-tr-config)=
+
 ### `tesseract_config.yaml`
 
 `tesseract_config.yaml` contains the Tesseract's metadata, such as its name, description, version, and build configuration.
 
 ```{literalinclude} ../../../examples/helloworld/tesseract_config.yaml
+
 ```
 
 ### `tesseract_requirements.txt`
@@ -151,8 +166,8 @@ The `tesseract_requirements.txt` file is optional. In fact, `tesseract_api.py` i
 ```
 
 ```{literalinclude} ../../../examples/helloworld/tesseract_requirements.txt
-```
 
+```
 
 ## The journey continues...
 

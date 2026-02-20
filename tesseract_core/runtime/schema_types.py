@@ -1,7 +1,6 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-import sys
 from abc import ABCMeta
 from enum import IntEnum
 from functools import partial
@@ -9,8 +8,7 @@ from typing import (
     TYPE_CHECKING,
     Annotated,
     Any,
-    Optional,
-    Union,
+    TypeAlias,
     get_args,
 )
 
@@ -23,7 +21,7 @@ from pydantic import (
     GetJsonSchemaHandler,
 )
 from pydantic.json_schema import JsonSchemaValue
-from pydantic_core import core_schema
+from pydantic_core import PydanticCustomError, ValidationError, core_schema
 
 from tesseract_core.runtime.array_encoding import (
     AllowedDtypes,
@@ -33,15 +31,8 @@ from tesseract_core.runtime.array_encoding import (
     python_to_array,
 )
 
-if sys.version_info < (3, 10):
-    # TypeAlias is not available in Python < 3.10
-    AnnotatedType = type(Annotated[Any, Any])
-    EllipsisType = type(Ellipsis)
-else:
-    from typing import TypeAlias
-
-    AnnotatedType: TypeAlias = type(Annotated[Any, Any])
-    EllipsisType: TypeAlias = type(Ellipsis)
+AnnotatedType: TypeAlias = type(Annotated[Any, Any])
+EllipsisType: TypeAlias = type(Ellipsis)
 
 
 class ArrayFlags(IntEnum):
@@ -62,7 +53,7 @@ class ArrayAnnotationType(ABCMeta):
         MyArray[(2, 3), 'float32']
     """
 
-    expected_shape: Union[tuple[int, ...], EllipsisType]
+    expected_shape: tuple[int, ...] | EllipsisType
     expected_dtype: str
     flags: tuple[ArrayFlags]
 
@@ -95,7 +86,7 @@ class PydanticArrayAnnotation(metaclass=ArrayAnnotationType):
     """
 
     # These are class attributes that must be set when the class is created
-    expected_shape: Union[tuple[int, ...], EllipsisType]
+    expected_shape: tuple[int, ...] | EllipsisType
     expected_dtype: str
     flags: tuple[ArrayFlags]
 
@@ -152,16 +143,59 @@ class PydanticArrayAnnotation(metaclass=ArrayAnnotationType):
             ]
         )
 
+        def _simplify_array_errors(
+            value: Any, handler: core_schema.ValidatorFunctionWrapHandler
+        ) -> Any:
+            """Wrap validator that simplifies array validation errors.
+
+            When array validation fails, this function extracts the most informative
+            error message and re-raises it with a cleaner error type, avoiding the
+            cryptic union branch errors that Pydantic produces by default.
+            """
+            try:
+                return handler(value)
+            except ValidationError as e:
+                # Find the most informative error from the validation errors
+                errors = e.errors()
+                best_error = None
+                for err in errors:
+                    err_type = err.get("type", "")
+                    # Prefer our custom array error types
+                    if err_type.startswith("array_"):
+                        best_error = err
+                        break
+                    # Fall back to value_error types
+                    if err_type == "value_error" and best_error is None:
+                        best_error = err
+
+                if best_error is None:
+                    best_error = errors[-1] if errors else {"msg": "Invalid array"}
+
+                # Re-raise with a cleaner error
+                raise PydanticCustomError(
+                    best_error.get("type", "array_validation_error"),
+                    best_error.get("msg", "Invalid array value"),
+                    best_error.get("ctx", {}),
+                ) from None
+
+        python_union_schema = core_schema.union_schema(
+            [
+                load_from_dict_schema,
+                # when loading from Python, we also allow any array-like object
+                core_schema.no_info_plain_validator_function(python_to_array_),
+            ],
+            mode="left_to_right",
+        )
+
+        # Wrap the union schema to simplify error messages
+        wrapped_python_schema = core_schema.no_info_wrap_validator_function(
+            _simplify_array_errors,
+            python_union_schema,
+        )
+
         return core_schema.json_or_python_schema(
             json_schema=load_from_dict_schema,
-            python_schema=core_schema.union_schema(
-                [
-                    load_from_dict_schema,
-                    # when loading from Python, we also allow any array-like object
-                    core_schema.no_info_plain_validator_function(python_to_array_),
-                ],
-                mode="left_to_right",
-            ),
+            python_schema=wrapped_python_schema,
             serialization=core_schema.plain_serializer_function_ser_schema(
                 encode_array_,
                 info_arg=True,
@@ -235,8 +269,8 @@ class Array:
     def __class_getitem__(
         cls,
         key: tuple[
-            Union[tuple[Optional[int], ...], EllipsisType],
-            Union[ArrayAnnotationType, str, None],
+            tuple[int | None, ...] | EllipsisType,
+            ArrayAnnotationType | str | None,
         ],
     ) -> ArrayAnnotationType:
         """Create a new type annotation based on the given shape and dtype."""
@@ -316,8 +350,8 @@ class ShapeDType(BaseModel):
     def __class_getitem__(
         cls,
         key: tuple[
-            Union[tuple[Optional[int], ...], EllipsisType],
-            Union[AnnotatedType, str, None],
+            tuple[int | None, ...] | EllipsisType,
+            AnnotatedType | str | None,
         ],
     ) -> AnnotatedType:
         expected_shape, _ = _ensure_valid_shapedtype(*key)
@@ -329,14 +363,12 @@ class ShapeDType(BaseModel):
                 if expected_shape is Ellipsis:
                     return shapedtype
 
-                # TODO: replace this check with `zip(... strict=True)`
-                # once we stop supporting 3.9
                 if len(shape) != len(expected_shape):
                     raise ValueError(
                         f"Expected shape: {expected_shape}. Found: {shape}."
                     )
 
-                for actual, expected in zip(shape, expected_shape):
+                for actual, expected in zip(shape, expected_shape, strict=True):
                     if expected is not None and actual != expected:
                         raise ValueError(
                             f"Expected shape: {expected_shape}. Found: {shape}."

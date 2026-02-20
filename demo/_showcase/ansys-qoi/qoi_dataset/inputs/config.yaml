@@ -1,0 +1,137 @@
+name: basic_run
+
+version: v1
+
+point_spec:
+  n_points: 4096
+  sampling_method: poisson
+  sphere_sampling:
+    enabled: false
+    radius: 420
+    centers:
+      - [185, 90, -380]
+      - [2670, 90, -180]
+  sphere_sampling_fraction: 0.75
+
+geometry_params_spec:
+  file: design_table_custom.csv
+
+bc_params_spec:
+  file: metadata.json.series
+  variations: ["mean_velocity"]
+
+param_expressions:
+  point_derived_geom:
+    enabled: true
+    type: "select"
+    expression: ["min", "max", "size", "diag", "max_side", "centroid"]
+
+  design_table:
+    enabled: true
+    type: "select"
+    expression: ["d13", "d72", "d61", "d34"]
+
+  bc:
+    enabled: true
+    type: "select"
+    expression: ["mean_velocity"]
+
+qoi_spec:
+  files:
+    - "all_pressure.txt"
+
+qoi_expressions:
+  pressure_ratio:
+    enabled: false
+    type: "ratio"
+    numerator: ["area_pressure_outlet", "outlet"] # Patterns to match in QoI names
+    denominator: ["area_pressure_inlet", "inlet"]
+
+  pressure_drop:
+    enabled: false
+    type: "difference"
+    minuend: ["area_pressure_inlet", "inlet"]
+    subtrahend: ["area_pressure_outlet", "outlet"]
+
+  total_pressure_loss:
+    enabled: false
+    type: "custom"
+    expression: "1 - outlet_area_total_pressure / inlet_area_total_pressure"
+
+  pressure_delta_part1:
+    enabled: false
+    type: "custom"
+    expression: "1 - p1-plane_area_total_pressure / inlet_area_total_pressure"
+
+  pressure_delta_part2:
+    enabled: false
+    type: "custom"
+    expression: "1 - outlet_area_total_pressure / p1-plane_area_total_pressure"
+
+  velocity_uniformity:
+    enabled: false
+    type: "select"
+    patterns: ["p1-plane_area_velocity_uniformity"] # Select specific QoI by pattern
+
+  custom_metric:
+    enabled: false
+    type: "custom"
+    expression: "area_pressure_outlet / area_pressure_inlet + area_velocity_uniformity"
+
+  all_metrics:
+    enabled: true
+    type: "select"
+    patterns: [
+        "inlet_all_pressure",
+        "outlet_all_pressure",
+        "p2-plane_all_pressure",
+        "p3-plane_all_pressure",
+      ] # Use all QoIs as separate metrics
+
+random_seed: 70
+
+scaling:
+  points: standardize
+  params: normalize
+  qoi: normalize
+  pca_align: true
+
+model_spec:
+  # Params to include
+  include_normals: true
+  include_bc_params: true
+  include_geom_params: true
+  include_point_derived_params: true
+  # Train-val-test split
+  train_ratio: 0.8
+  val_ratio: 0.1
+  test_ratio: 0.1
+  # Model architecture
+  latent_dim: 4
+  param_fusion: concat
+
+# Add hybrid models section
+hybrid_models:
+  # PointNet-based models
+  hybrid_pointnet_small:
+    type: "hybrid_pc_tree"
+    embedder_type: "pointnet"
+    # PointNet params
+    in_dim: 6
+    latent_dim: 6
+    pointnet_hidden_dims: [512, 1024, 2048]
+    embedder_dropout: 0.25
+    # Random Forest params
+    n_estimators: 150
+    max_depth: 15
+    min_samples_split: 5
+    random_state: 42
+
+# Hybrid training settings
+hybrid_training:
+  epochs: 1
+  lr: 0.0003
+  weight_decay: 0.0005
+  patience: 100
+  batch_size: 32
+  gradient_clip_norm: 1.0

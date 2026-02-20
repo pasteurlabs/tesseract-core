@@ -1,10 +1,10 @@
 name: Bump UV lockfile
 
 on:
-  workflow_dispatch:  # Allows manual trigger
+  workflow_dispatch: # Allows manual trigger
 
   schedule:
-    - cron:  '0 0 * * 1'  # 12AM only on Mondays
+    - cron: "0 0 * * 1" # 12AM only on Mondays
 
 jobs:
   bump-lockfile:
@@ -12,7 +12,7 @@ jobs:
 
     steps:
       - name: Set up Git repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -36,7 +36,7 @@ jobs:
           mv uv.lock production.uv.lock
 
       - name: Generate new requirements.txt
-        run : |
+        run: |
           pip install pre-commit
           pre-commit run update-requirements --all-files || true
 
@@ -49,16 +49,16 @@ jobs:
 
       - name: Create Pull Request
         if: steps.git-diff.outputs.update_done == 'true'
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
-            token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
-            committer: PasteurBot <${{ vars.PL_PASTEURBOT_EMAIL }}>
-            author: PasteurBot <${{ vars.PL_PASTEURBOT_EMAIL }}>
-            commit-message: Update dependencies
-            title: "chore: 📦 Update dependencies"
-            branch: _bot/update-deps
-            draft: false
-            base: main
-            body: |
-              This PR updates the lockfile to the latest versions of the dependencies.
-              Please review the changes and merge when ready.
+          token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
+          committer: PasteurBot <${{ vars.PL_PASTEURBOT_EMAIL }}>
+          author: PasteurBot <${{ vars.PL_PASTEURBOT_EMAIL }}>
+          commit-message: Update dependencies
+          title: "chore: 📦 Update dependencies"
+          branch: _bot/update-deps
+          draft: false
+          base: main
+          body: |
+            This PR updates the lockfile to the latest versions of the dependencies.
+            Please review the changes and merge when ready.

@@ -1,4 +1,4 @@
-# Advanced usage
+# Advanced Usage
 
 ## File aliasing
 
@@ -9,14 +9,15 @@ like HTTP, FTP, S3 Buckets, and so on) to a Tesseract via the `@` syntax.
 
 You can mount a folder into a Tesseract with `--input-path`. A The input path is mounted with read-only permissions so a Tesseract will never mutate files located at the input path.
 Paths in a Tesseract's payload have to be relative to `--input-path`:
+
 ```bash
 tesseract run filereference apply \
     --input-path ./testdata \
     --output-path ./output \
     '{"inputs": {"data": ["sample_2.json", "sample_3.json"]}}'
 ```
-See [`examples/filereference`](../examples/building-blocks/filereference)
 
+See [`examples/filereference`](../examples/building-blocks/filereference)
 
 If you want to write the output of a Tesseract to a file,
 you can use the `--output-path` parameter, which also supports any
@@ -32,6 +33,7 @@ $ tesseract run vectoradd apply --output-path /tmp/output @inputs.json
 Tesseracts may log metrics and artifacts (e.g. iteration numbers, VTK files, ...) as demonstrated in the `metrics` example Tesseract.
 
 ```{literalinclude} ../../../examples/metrics/tesseract_api.py
+
 ```
 
 By default, Tesseracts log metrics, parameters and artifacts to a directory `logs` in the Tesseract's `--output-path`. (Note that, when running Tesseracts in a container, the log directory is placed inside the container.)
@@ -42,20 +44,10 @@ Alternatively, you can log metrics and artifacts to an MLflow server by setting 
 docker-compose -f extra/mlflow/docker-compose-mlflow.yml up
 ```
 
-This MLflow server shows logged items in the MLflow GUI at `http://localhost:5000`.
-
-Launch the `metrics` example Tesseract with the the following volume mount and `TESSERACT_MLFLOW_TRACKING_URI` to ensure that it connects to that MLflow server. Note that your Tesseract now needs to declare `mlflow` as a required package in its `requirements.txt` file.
-
-MacOS and Windows with Docker Desktop requires the `host.docker.internal` hostname to access services running on the host machine:
+Launch the `metrics` example Tesseract with the the following volume mount, network and `TESSERACT_MLFLOW_TRACKING_URI` to ensure that it connects to that MLflow server.
 
 ```bash
-tesseract serve --env=TESSERACT_MLFLOW_TRACKING_URI=http://host.docker.internal:5000 --volume mlflow-data:/mlflow-data:rw metrics
-```
-
-For Linux, set your Tesseracts to use the host network and access the MLflow server at `localhost`:
-
-```bash
-tesseract serve --env=TESSERACT_MLFLOW_TRACKING_URI=http://localhost:5000 --network=host --volume mlflow-data:/mlflow-data:rw metrics
+tesseract serve --network=tesseract-mlflow-server --env=TESSERACT_MLFLOW_TRACKING_URI=http://mlflow-server:5000 --volume mlflow-data:/mlflow-data:rw metrics
 ```
 
 The same options apply when executing Tesseracts through `tesseract run`.
@@ -64,7 +56,43 @@ As an alternative to the MLflow setup we provide, you can point your Tesseract t
 
 ```bash
 $ tesseract serve --env=TESSERACT_MLFLOW_TRACKING_URI="..."  metrics
-````
+```
+
+Note that if your MLFlow server uses basic auth, you need to set the `MLFLOW_TRACKING_USERNAME` and
+`MLFLOW_TRACKING_PASSWORD` env variables for the Tesseract to be able to authenticate to it.
+
+```bash
+$ tesseract serve --env=TESSERACT_MLFLOW_TRACKING_URI="..." \
+    --env=MLFLOW_TRACKING_USERNAME="..." --env=MLFLOW_TRACKING_PASSWORD="..." \
+    metrics
+```
+
+If you wish to pass additional parameters to the MLflow run (such as tags, run name, or description), you can do so via the `TESSERACT_MLFLOW_RUN_EXTRA_ARGS` environment variable. This accepts a Python dictionary string that is passed directly to `mlflow.start_run()`. See supported
+parameters in the [mlflow documentation](https://mlflow.org/docs/latest/api_reference/python_api/mlflow.html#mlflow.start_run).
+
+**Example: Setting tags only**
+
+```bash
+$ tesseract serve --env=TESSERACT_MLFLOW_TRACKING_URI="..." \
+    --env=TESSERACT_MLFLOW_RUN_EXTRA_ARGS='{"tags": {"key1": "value1", "key2": "value2"}}' \
+    metrics
+```
+
+**Example: Setting run name and tags**
+
+```bash
+$ tesseract serve --env=TESSERACT_MLFLOW_TRACKING_URI="..." \
+    --env=TESSERACT_MLFLOW_RUN_EXTRA_ARGS='{"run_name": "my_experiment", "tags": {"env": "production"}}' \
+    metrics
+```
+
+**Example: Multiple parameters**
+
+```bash
+$ tesseract serve --env=TESSERACT_MLFLOW_TRACKING_URI="..." \
+    --env=TESSERACT_MLFLOW_RUN_EXTRA_ARGS='{"run_name": "test_run", "description": "Testing new feature", "tags": {"version": "1.0"}}' \
+    metrics
+```
 
 ## Volume mounts and user permissions
 
@@ -95,16 +123,19 @@ using the `--gpus` argument when running a Tesseract command. This allows you to
 enable all available GPUs for a task.
 
 To run Tesseract on a specific GPU, provide its index:
+
 ```bash
 $ tesseract run --gpus 0 helloworld apply '{"inputs": {"name": "Osborne"}}'
 ```
 
 To make all available GPUs accessible, use the `--gpus all` option:
+
 ```bash
 $ tesseract run --gpus all helloworld apply '{"inputs": {"name": "Osborne"}}'
 ```
 
 You can also specify multiple GPUs individually:
+
 ```bash
 $ tesseract run --gpus 0 --gpus 1 helloworld apply '{"inputs": {"name": "Osborne"}}'
 ```
@@ -115,24 +146,26 @@ The GPUs are indexed starting at zero with the same convention as `nvidia-smi`.
 
 Running Tesseracts on high-performance computing clusters can have many use cases including:
 
-* Deployment of a single long-running component of a pipeline on a state-of-the-art GPU.
-* Running an entire optimization workflow on a dedicated compute node
-* Large parameter scans distributed in parallel over a multitude of cores.
+- Deployment of a single long-running component of a pipeline on a state-of-the-art GPU.
+- Running an entire optimization workflow on a dedicated compute node
+- Large parameter scans distributed in parallel over a multitude of cores.
 
 All of this is possible even in scenarios where containerisation options are either unavailable or incompatible by directly using `tesseract-runtime` (which includes a `serve` feature). For more details, please see our [tutorial](https://si-tesseract.discourse.group/t/deploying-and-interacting-with-tesseracts-on-hpc-clusters-using-tesseract-runtime-serve/104), which demonstrates how to launch uncontainerised Tesseracts using SLURM, either as a batch job or for interactive use.
 
 ## Debug mode
 
 `tesseract serve` supports a `--debug` flag; this has two effects:
-  *  Tracebacks from execution are returned in the response body, instead of a generic 500 error.
-     This is useful for debugging and testing, but unsafe for production environments.
-  *  Aside from listening to the usual Tesseract requests, a debugpy server is also started in
-     the container, and the port it's listening to is forwarded to some free port on the host which
-     is displayed in the cli when spinning up a tesseract via `tesseract serve`. This allows you to perform
-     remote debugging sessions.
+
+- Tracebacks from execution are returned in the response body, instead of a generic 500 error.
+  This is useful for debugging and testing, but unsafe for production environments.
+- Aside from listening to the usual Tesseract requests, a debugpy server is also started in
+  the container, and the port it's listening to is forwarded to some free port on the host which
+  is displayed in the cli when spinning up a tesseract via `tesseract serve`. This allows you to perform
+  remote debugging sessions.
 
 In particular, if you are using VScode, here is a sample launch config to attach to a running Tesseract in
 debug mode:
+
 ```json
         {
             "name": "Tesseract: Remote debugger",
@@ -150,6 +183,7 @@ debug mode:
             ],
         },
 ```
+
 (make sure to fill in with the actual port number). After inserting this into the `configurations`
 field of your `launch.json` file, you should be able to attach to the Tesseract being served by clicking on the
 green "play" button at the top left corner of the "Run and Debug" tab.

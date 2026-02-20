@@ -14,7 +14,7 @@ on:
   # Case 2: release PR is being updated -> update changelog
   push:
     branches:
-      - 'bot/release/*'
+      - "bot/release/*"
 
   # Case 3: release PR is merged -> create a new release
   pull_request:
@@ -33,7 +33,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
           fetch-depth: 0
@@ -51,30 +51,32 @@ jobs:
       - name: Generate changelog
         id: generate_changelog
         run: |
-          git-cliff --output CHANGELOG.md --bump
-          new_version=$(git-cliff --bumped-version)
+          bump_type=$(bash .github/workflows/get_bump_type.sh)
+          git-cliff --output CHANGELOG.md --bump $bump_type
+          new_version=$(git-cliff --bumped-version --bump $bump_type)
+
           echo "new_version=$new_version" >> $GITHUB_OUTPUT
 
       - name: Create Pull Request
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
-            token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
-            committer: PasteurBot <${{ vars.PL_PASTEURBOT_EMAIL }}>
-            author: PasteurBot <${{ vars.PL_PASTEURBOT_EMAIL }}>
-            commit-message: "chore: update changelog"
-            title: "chore: 🚢 release ${{ steps.generate_changelog.outputs.new_version }}"
-            branch: bot/release/${{ steps.generate_changelog.outputs.new_version }}
-            draft: false
-            base: main
-            add-paths: CHANGELOG.md
-            body: |
-              This PR contains the generated changelog for the release ${{ steps.generate_changelog.outputs.new_version }}.
+          token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
+          committer: PasteurBot <${{ vars.PL_PASTEURBOT_EMAIL }}>
+          author: PasteurBot <${{ vars.PL_PASTEURBOT_EMAIL }}>
+          commit-message: "chore: update changelog"
+          title: "chore: 🚢 release ${{ steps.generate_changelog.outputs.new_version }}"
+          branch: bot/release/${{ steps.generate_changelog.outputs.new_version }}
+          draft: false
+          base: main
+          add-paths: CHANGELOG.md
+          body: |
+            This PR contains the generated changelog for the release ${{ steps.generate_changelog.outputs.new_version }}.
 
-              ⚠️ **Merging this PR will immediately trigger a new release**. ⚠️
+            ⚠️ **Merging this PR will immediately trigger a new release**. ⚠️
 
-              To specify additional release notes, please edit this comment after the following line.
+            To specify additional release notes, please edit this comment after the following line.
 
-              ---
+            ---
 
   update-pr:
     runs-on: ubuntu-latest
@@ -82,7 +84,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
           fetch-depth: 0
@@ -100,8 +102,10 @@ jobs:
       - name: Generate changelog
         id: generate_changelog
         run: |
-          git-cliff --output CHANGELOG.md --bump
-          new_version=$(git-cliff --bumped-version)
+          bump_type=$(bash .github/workflows/get_bump_type.sh)
+          new_version=$(git-cliff --bumped-version --bump $bump_type)
+          git-cliff --output CHANGELOG.md --bump $bump_type
+
           echo "new_version=$new_version" >> $GITHUB_OUTPUT
 
       - name: Update PR with changelog
@@ -124,7 +128,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
           ref: ${{ github.event.pull_request.merge_commit_sha }}
@@ -146,7 +150,8 @@ jobs:
           current_version=$(gh release view --json tagName --jq '.tagName' || echo "v0.0.0")
           echo "current_version=$current_version" >> $GITHUB_OUTPUT
 
-          new_version=$(git-cliff --bumped-version)
+          bump_type=$(bash .github/workflows/get_bump_type.sh)
+          new_version=$(git-cliff --bumped-version --bump $bump_type)
           echo "new_version=$new_version" >> $GITHUB_OUTPUT
 
       - name: Assemble release notes
@@ -154,7 +159,7 @@ jobs:
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
-          changelog=$(git-cliff --unreleased --bump --latest --strip all)
+          changelog=$(git-cliff --unreleased --latest --strip all)
           # Strip off first line (which is the version number)
           changelog=$(printf "%s" "$changelog" | sed '1d')
 

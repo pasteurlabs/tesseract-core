@@ -4,7 +4,7 @@
 import re
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Annotated, Any, Literal, Optional, Union, get_args
+from typing import Annotated, Any, Literal, get_args
 from uuid import uuid4
 
 import numpy as np
@@ -18,6 +18,7 @@ from pydantic import (
     ValidationInfo,
     create_model,
 )
+from pydantic_core import PydanticCustomError
 
 from tesseract_core.runtime.file_interactions import (
     get_filesize,
@@ -45,8 +46,8 @@ AllowedDtypes = Literal[
     "complex128",
 ]
 EllipsisType = type(Ellipsis)
-ArrayLike = Union[np.ndarray, np.number, np.bool_]
-ShapeType = Union[tuple[Optional[int], ...], EllipsisType]
+ArrayLike = np.ndarray | np.number | np.bool_
+ShapeType = tuple[int | None, ...] | EllipsisType
 
 MAX_BINREF_BUFFER_SIZE = 100 * 1024 * 1024  # 100 MB
 
@@ -94,12 +95,12 @@ class EncodedArrayModel(BaseModel):
     object_type: Literal["array"]
     shape: tuple[PositiveInt, ...]
     dtype: AllowedDtypes
-    data: Union[BinrefArrayData, Base64ArrayData, JsonArrayData]
+    data: BinrefArrayData | Base64ArrayData | JsonArrayData
     model_config = ConfigDict(extra="forbid")
 
 
 def get_array_model(
-    expected_shape: ShapeType, expected_dtype: Optional[str], flags: Sequence[str]
+    expected_shape: ShapeType, expected_dtype: str | None, flags: Sequence[str]
 ) -> type[EncodedArrayModel]:
     """Create a Pydantic model for an encoded array that does validation on the given expected shape and dtype."""
     if expected_dtype is None:
@@ -177,7 +178,7 @@ def get_array_model(
         ),
         # Choose the appropriate data structure based on the encoding
         "data": (
-            Union[BinrefArrayData, Base64ArrayData, JsonArrayData],
+            BinrefArrayData | Base64ArrayData | JsonArrayData,
             Field(discriminator="encoding"),
         ),
         "model_config": (ConfigDict, config),
@@ -203,12 +204,12 @@ def get_array_model(
 
 
 def _dump_binref_arraydict(
-    arr: Union[np.ndarray, np.number, np.bool_],
-    base_dir: Union[Path, str],
-    subdir: Optional[Union[Path, str]],
+    arr: np.ndarray | np.number | np.bool_,
+    base_dir: Path | str,
+    subdir: Path | str | None,
     current_binref_uuid: str,
     max_file_size: int = MAX_BINREF_BUFFER_SIZE,
-) -> tuple[dict[str, Union[str, dict[str, str]]], str]:
+) -> tuple[dict[str, str | dict[str, str]], str]:
     """Dump array to json+binref encoded array dict.
 
     Writes a .bin file and returns json encoded data.
@@ -243,8 +244,8 @@ def _dump_binref_arraydict(
 
 
 def _dump_base64_arraydict(
-    arr: Union[np.ndarray, np.number, np.bool_],
-) -> dict[str, Union[str, dict[str, str]]]:
+    arr: np.ndarray | np.number | np.bool_,
+) -> dict[str, str | dict[str, str]]:
     """Dump array to json+base64 encoded array dict."""
     data = {
         "buffer": pybase64.b64encode(arr.tobytes()).decode(),
@@ -260,8 +261,8 @@ def _dump_base64_arraydict(
 
 
 def _dump_json_arraydict(
-    arr: Union[np.ndarray, np.number, np.bool_],
-) -> dict[str, Union[str, dict[str, str]]]:
+    arr: np.ndarray | np.number | np.bool_,
+) -> dict[str, str | dict[str, str]]:
     """Dump array to json encoded array dict."""
     data = {
         "buffer": arr.tolist(),
@@ -282,7 +283,7 @@ def _load_base64_arraydict(val: dict) -> np.ndarray:
     return np.frombuffer(buffer, dtype=val["dtype"]).reshape(val["shape"])
 
 
-def _load_binref_arraydict(val: dict, base_dir: Union[str, Path, None]) -> np.ndarray:
+def _load_binref_arraydict(val: dict, base_dir: str | Path | None) -> np.ndarray:
     """Load array from json+binref encoded array dict."""
     path_match = re.match(r"^(?P<path>.+?)(\:(?P<offset>\d+))?$", val["data"]["buffer"])
     if not path_match:
@@ -316,7 +317,7 @@ def _load_binref_arraydict(val: dict, base_dir: Union[str, Path, None]) -> np.nd
 
 
 def _coerce_shape_dtype(
-    arr: ArrayLike, expected_shape: ShapeType, expected_dtype: Optional[str]
+    arr: ArrayLike, expected_shape: ShapeType, expected_dtype: str | None
 ) -> ArrayLike:
     """Coerce the shape and dtype of the passed array to the expected values."""
     if expected_shape is Ellipsis:
@@ -324,8 +325,13 @@ def _coerce_shape_dtype(
         out_shape = arr.shape
     else:
         if len(arr.shape) != len(expected_shape):
-            raise ValueError(
-                f"Dimensionality mismatch: {len(arr.shape)}D array cannot be cast to {len(expected_shape)}D"
+            raise PydanticCustomError(
+                "array_dimensionality_mismatch",
+                "Array has wrong number of dimensions: got {actual_dims}D, expected {expected_dims}D",
+                {
+                    "actual_dims": len(arr.shape),
+                    "expected_dims": len(expected_shape),
+                },
             )
 
         out_shape = tuple(
@@ -338,21 +344,36 @@ def _coerce_shape_dtype(
     try:
         arr = np.broadcast_to(arr, out_shape)
     except ValueError:
-        raise ValueError(
-            f"Shape mismatch: {arr.shape} cannot be cast to {out_shape}"
+        raise PydanticCustomError(
+            "array_shape_mismatch",
+            "Array shape {actual_shape} is incompatible with expected shape {expected_shape}",
+            {
+                "actual_shape": arr.shape,
+                "expected_shape": out_shape,
+            },
         ) from None
 
     if expected_dtype is not None:
         if not np.can_cast(arr.dtype, expected_dtype, casting="same_kind"):
-            raise ValueError(
-                f"Dtype mismatch: {arr.dtype} cannot be cast to {expected_dtype}"
+            raise PydanticCustomError(
+                "array_dtype_mismatch",
+                "Array dtype '{actual_dtype}' cannot be safely cast to '{expected_dtype}'",
+                {
+                    "actual_dtype": str(arr.dtype),
+                    "expected_dtype": expected_dtype,
+                },
             )
         arr = arr.astype(expected_dtype)
 
     allowed_dtypes = [dtype.lower() for dtype in get_args(AllowedDtypes)]
     if arr.dtype.name not in allowed_dtypes:
-        raise ValueError(
-            f"Got invalid dtype: {arr.dtype.name}, expected one of {allowed_dtypes}"
+        raise PydanticCustomError(
+            "array_invalid_dtype",
+            "Array has unsupported dtype '{actual_dtype}'; must be one of: {allowed_dtypes}",
+            {
+                "actual_dtype": arr.dtype.name,
+                "allowed_dtypes": ", ".join(allowed_dtypes),
+            },
         )
 
     if not out_shape:
@@ -363,15 +384,17 @@ def _coerce_shape_dtype(
 
 
 def python_to_array(
-    val: Any, expected_shape: ShapeType, expected_dtype: Optional[str]
+    val: Any, expected_shape: ShapeType, expected_dtype: str | None
 ) -> ArrayLike:
     """Convert a Python object to a NumPy array."""
     val = np.asarray(val, order="C")
     if not np.issubdtype(val.dtype, np.number) and not np.issubdtype(
         val.dtype, np.bool_
     ):
-        raise ValueError(
-            f"Could not convert object to numeric NumPy array (got dtype: {val.dtype})"
+        raise PydanticCustomError(
+            "array_non_numeric",
+            "Could not parse value as a numeric array (contains non-numeric data)",
+            {},
         )
     return _coerce_shape_dtype(val, expected_shape, expected_dtype)
 
@@ -380,7 +403,7 @@ def decode_array(
     val: EncodedArrayModel,
     info: ValidationInfo,
     expected_shape: ShapeType,
-    expected_dtype: Optional[str],
+    expected_dtype: str | None,
 ) -> ArrayLike:
     """Decode an EncodedArrayModel to a NumPy array."""
     from tesseract_core.runtime.config import get_config
@@ -405,8 +428,10 @@ def decode_array(
                 val.dtype, np.integer
             ):
                 if np.any(data % 1):
-                    raise ValueError(
-                        f"Expected integer data, but got floating point data: {data}"
+                    raise PydanticCustomError(
+                        "array_expected_integer",
+                        "Expected integer data, but array contains floating point values",
+                        {},
                     )
             data = data.astype(val.dtype, casting="unsafe")
 
@@ -414,16 +439,23 @@ def decode_array(
             # Unreachable
             raise AssertionError(f"Unsupported encoding: {val.data.encoding}")
 
+    except PydanticCustomError:
+        # Re-raise PydanticCustomError directly without wrapping
+        raise
     except Exception as e:
-        raise ValueError(f"Failed to decode buffer as {val.data.encoding}: {e}") from e
+        raise PydanticCustomError(
+            "array_decode_error",
+            "Failed to decode array buffer ({encoding} encoding): {error}",
+            {"encoding": val.data.encoding, "error": str(e)},
+        ) from e
 
     data = _coerce_shape_dtype(data, expected_shape, expected_dtype)
     return data
 
 
 def encode_array(
-    arr: ArrayLike, info: Any, expected_shape: ShapeType, expected_dtype: Optional[str]
-) -> Union[EncodedArrayModel, ArrayLike]:
+    arr: ArrayLike, info: Any, expected_shape: ShapeType, expected_dtype: str | None
+) -> EncodedArrayModel | ArrayLike:
     """Encode a NumPy array as an EncodedArrayModel."""
     from tesseract_core.runtime.config import get_config
 

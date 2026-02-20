@@ -37,6 +37,6 @@ result = minimize(
     callback=lambda xs: trajectory.append(xs.tolist()),
 )
 
-anim = make_animation(*list(zip(*trajectory)))
+anim = make_animation(*list(zip(*trajectory, strict=True)))
 # anim.save("rosenbrock_optimization.gif", writer="pillow", fps=2, dpi=150)
 plt.show()

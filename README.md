@@ -3,7 +3,6 @@
   <img alt="" src="https://github.com/pasteurlabs/tesseract-core/blob/main/docs/static/logo-light.png" width="128" align="right">
 </picture>
 
-
 ### Tesseract Core
 
 Universal, autodiff-native software components for Simulation Intelligence. :package:
@@ -65,9 +64,9 @@ Tesseracts provide built-in support for [differentiable programming](https://doc
 
 > [!TIP]
 > Now you're ready to dive into the [documentation](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/) for more information on
-[installation](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/introduction/installation.html),
-[creating Tesseracts](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/creating-tesseracts/create.html), and
-[invoking them](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/using-tesseracts/use.html).
+> [installation](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/introduction/installation.html),
+> [creating Tesseracts](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/creating-tesseracts/create.html), and
+> [invoking them](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/using-tesseracts/use.html).
 
 ## License
 

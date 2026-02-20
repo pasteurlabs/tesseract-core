@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import re
-import sys
 import types
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from copy import copy
@@ -11,7 +10,6 @@ from typing import (
     Any,
     ClassVar,
     Literal,
-    Optional,
     TypeVar,
     Union,
     get_args,
@@ -46,9 +44,7 @@ T = TypeVar("T")
 
 # Python has funnily enough two union types now. See https://github.com/python/cpython/issues/105499
 # We check against both for compatibility with older versions of Python.
-UNION_TYPES = [Union]
-if sys.version_info >= (3, 10):
-    UNION_TYPES += [types.UnionType]
+UNION_TYPES = [Union, types.UnionType]
 
 
 def _construct_annotated(obj: Any, metadata: Iterable[Any]) -> Any:
@@ -69,7 +65,7 @@ def apply_function_to_model_tree(
     Schema: type[BaseModel],
     func: Callable[[type, tuple], type],
     model_prefix: str = "",
-    default_model_config: Optional[dict[str, Any]] = None,
+    default_model_config: dict[str, Any] | None = None,
 ) -> type[BaseModel]:
     """Apply a function to all leaves of a Pydantic model, recursing into containers + nested models.
 
@@ -140,6 +136,10 @@ def apply_function_to_model_tree(
             model_config = ConfigDict(**default_model_config)
             model_config.update(treeobj.model_config)
 
+            # Make sure that reconstructed RootModels don't contain unsupported 'extra' config.
+            if safe_issubclass(treeobj, RootModel):
+                model_config.pop("extra", None)
+
             return create_model(
                 f"{model_prefix}{treeobj.__name__}",
                 **new_fields,
@@ -171,7 +171,7 @@ def apply_function_to_model_tree(
             if not newargs:
                 return None
 
-            return Union[tuple(newargs)]
+            return Union[tuple(newargs)]  # noqa: UP007
 
         elif safe_issubclass(origin_type, Mapping):
             # Recurse into dict-likes
@@ -309,7 +309,7 @@ def create_abstract_eval_schema(
     fields replaced by ShapeDType objects.
     """
 
-    def replace_array_with_shapedtype(obj: T, _: Any) -> Union[T, type[ShapeDType]]:
+    def replace_array_with_shapedtype(obj: T, _: Any) -> T | type[ShapeDType]:
         if safe_issubclass(obj, PydanticArrayAnnotation):
             return ShapeDType.from_array_type(obj)
         return obj
@@ -363,7 +363,7 @@ def _get_diffable_arrays(schema: type[BaseModel]) -> dict[tuple, Any]:
     return diffable_paths
 
 
-def _path_to_pattern(path: Sequence[Union[str, object]]) -> str:
+def _path_to_pattern(path: Sequence[str | object]) -> str:
     """Return a type describing valid paths for all passed paths."""
     # Check if path includes sequence or dict indexing -- in this case, we can't use the
     # path as a literal and need to use a regex pattern instead.
@@ -434,10 +434,10 @@ def create_autodiff_schema(
         _path_to_pattern(path): obj for path, obj in diffable_output_paths.items()
     }
 
-    diffable_input_type = Union[
+    diffable_input_type = Union[  # noqa: UP007
         tuple(_pattern_to_type(p) for p in diffable_input_patterns)
     ]
-    diffable_output_type = Union[
+    diffable_output_type = Union[  # noqa: UP007
         tuple(_pattern_to_type(p) for p in diffable_output_patterns)
     ]
 
@@ -520,7 +520,7 @@ def create_autodiff_schema(
 
                     if any(
                         s1 != s2
-                        for s1, s2 in zip(got_shape, expected_shape)
+                        for s1, s2 in zip(got_shape, expected_shape, strict=True)
                         if s2 is not None
                     ):
                         raise ValueError(
@@ -550,7 +550,7 @@ def create_autodiff_schema(
 
                 if any(
                     s1 != s2
-                    for s1, s2 in zip(arr.shape, expected_shape)
+                    for s1, s2 in zip(arr.shape, expected_shape, strict=True)
                     if s2 is not None
                 ):
                     raise ValueError(
@@ -577,7 +577,7 @@ def create_autodiff_schema(
 
                 if any(
                     s1 != s2
-                    for s1, s2 in zip(arr.shape, expected_shape)
+                    for s1, s2 in zip(arr.shape, expected_shape, strict=True)
                     if s2 is not None
                 ):
                     raise ValueError(

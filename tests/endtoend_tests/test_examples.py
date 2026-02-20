@@ -93,7 +93,7 @@ TEST_CASES = {
             SampleRequest(endpoint="apply", payload={"inputs": {}}),
         ],
     ),
-    "py39": Config(
+    "py310": Config(
         test_with_random_inputs=True,
     ),
     "helloworld": Config(
@@ -138,7 +138,7 @@ TEST_CASES = {
             SampleRequest(
                 endpoint="apply",
                 payload={"inputs": {"name": "Ozzy"}},
-                output_contains_pattern="Hello Ozzy!",
+                output_contains_pattern="Hello Ozzy!\\nGoodbye Ozzy!",
             ),
         ],
     ),
@@ -769,8 +769,40 @@ TEST_CASES = {
             ),
         ],
     ),
+    "qp_solve": Config(
+        test_with_random_inputs=False,
+        sample_requests=[
+            SampleRequest(
+                endpoint="apply",
+                payload={
+                    "inputs": {
+                        "Q": encode_array(np.eye(2)),
+                        "q": encode_array(np.ones(2)),
+                        "G": encode_array(np.array([[-1.0, 1.0]]).reshape((1, 2))),
+                        "h": encode_array(np.array([-1]).reshape((1,))),
+                        "target_kappa": 1e-1,
+                        "solver_tol": 1e-4,
+                    }
+                },
+                output_contains_array=np.array([-0.5, -1.5], dtype="float32"),
+            )
+        ],
+    ),
     "tesseractreference": Config(  # Can't test requests standalone; needs target Tesseract. Covered in separate test.
         test_with_random_inputs=False, sample_requests=[]
+    ),
+    "userhandling": Config(
+        test_with_random_inputs=False,
+        sample_requests=[
+            SampleRequest(
+                endpoint="apply",
+                payload={"inputs": {}},
+                output_contains_pattern=[
+                    '"home":"/tesseract"',
+                    '"username":"tesseract-user"',
+                ],
+            )
+        ],
     ),
 }
 
@@ -801,8 +833,8 @@ def print_debug_info(result):
 
 
 def fix_fake_arrays(fakedata, seed=42):
-    is_array = (
-        lambda x: isinstance(x, dict) and "shape" in x and "dtype" in x and "data" in x
+    is_array = lambda x: (
+        isinstance(x, dict) and "shape" in x and "dtype" in x and "data" in x
     )
     rng = np.random.RandomState(seed)
 

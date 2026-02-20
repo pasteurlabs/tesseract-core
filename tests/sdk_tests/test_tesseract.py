@@ -116,9 +116,10 @@ def test_serve_lifecycle(mock_serving, mock_clients):
         network_alias=None,
         host_ip="127.0.0.1",
         user=None,
+        memory=None,
         input_path=None,
         output_path=None,
-        output_format="json",
+        output_format="json+base64",
     )
 
     mock_serving["teardown_mock"].assert_called_with("container-id-123")
@@ -249,6 +250,29 @@ def test_encode_array(b64, expected_data):
 def test_decode_array(encoded, expected):
     decoded = _decode_array(encoded)
     np.testing.assert_array_equal(decoded, expected, strict=True)
+
+
+@pytest.mark.parametrize(
+    "dtype",
+    ["float32", "float64", "int32", "int64", "bool"],
+)
+def test_decode_array_various_dtypes(dtype):
+    """Test that _decode_array handles various dtypes correctly with base64 encoding."""
+    # Create test array with appropriate values for each dtype
+    if dtype == "bool":
+        original = np.array([True, False, True], dtype=dtype)
+    else:
+        original = np.array([1, 2, 3], dtype=dtype)
+
+    # Encode using _encode_array with base64
+    encoded = _encode_array(original, b64=True)
+
+    # Decode back
+    decoded = _decode_array(encoded)
+
+    # Verify equivalence
+    np.testing.assert_array_equal(decoded, original, strict=True)
+    assert decoded.dtype == original.dtype
 
 
 def test_tree_map():

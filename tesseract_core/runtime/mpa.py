@@ -15,18 +15,20 @@ from contextvars import ContextVar
 from datetime import datetime
 from io import UnsupportedOperation
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any
+from urllib.parse import urlparse
 
+import mlflow
 import requests
 
 from tesseract_core.runtime.config import get_config
-from tesseract_core.runtime.logs import LogPipe
+from tesseract_core.runtime.logs import TeePipe
 
 
 class BaseBackend(ABC):
     """Base class for MPA backends."""
 
-    def __init__(self, base_dir: Optional[str] = None) -> None:
+    def __init__(self, base_dir: str | None = None) -> None:
         if base_dir is None:
             base_dir = get_config().output_path
         self.log_dir = Path(base_dir) / "logs"
@@ -38,7 +40,7 @@ class BaseBackend(ABC):
         pass
 
     @abstractmethod
-    def log_metric(self, key: str, value: float, step: Optional[int] = None) -> None:
+    def log_metric(self, key: str, value: float, step: int | None = None) -> None:
         """Log a metric."""
         pass
 
@@ -61,7 +63,7 @@ class BaseBackend(ABC):
 class FileBackend(BaseBackend):
     """MPA backend that writes to local files."""
 
-    def __init__(self, base_dir: Optional[str] = None) -> None:
+    def __init__(self, base_dir: str | None = None) -> None:
         super().__init__(base_dir)
         # Initialize log files
         self.params_file = self.log_dir / "parameters.json"
@@ -84,7 +86,7 @@ class FileBackend(BaseBackend):
         with open(self.params_file, "w") as f:
             json.dump(self.parameters, f, indent=2, default=str)
 
-    def log_metric(self, key: str, value: float, step: Optional[int] = None) -> None:
+    def log_metric(self, key: str, value: float, step: int | None = None) -> None:
         """Log a metric to CSV file."""
         timestamp = datetime.now().isoformat()
         step_value = (
@@ -126,74 +128,90 @@ class FileBackend(BaseBackend):
 class MLflowBackend(BaseBackend):
     """MPA backend that writes to an MLflow tracking server."""
 
-    def __init__(self, base_dir: Optional[str] = None) -> None:
+    def __init__(self, base_dir: str | None = None) -> None:
         super().__init__(base_dir)
         os.environ["GIT_PYTHON_REFRESH"] = (
             "quiet"  # Suppress potential MLflow git warnings
         )
 
-        try:
-            import mlflow
-        except ImportError as exc:
-            raise ImportError(
-                "MLflow is required for MLflowBackend but is not installed"
-            ) from exc
-
-        self._ensure_mlflow_reachable()
-        self.mlflow = mlflow
-
         config = get_config()
         tracking_uri = config.mlflow_tracking_uri
 
-        if not tracking_uri.startswith(("http://", "https://")):
-            # If it's a db file URI, convert to local path
-            tracking_uri = tracking_uri.replace("sqlite:///", "")
+        parsed = urlparse(tracking_uri)
+        if not parsed.scheme:
+            tracking_uri = f"https://{tracking_uri}"
 
-            # Relative paths are resolved against the base output path
-            if not Path(tracking_uri).is_absolute():
-                tracking_uri = (Path(get_config().output_path) / tracking_uri).resolve()
+        parsed = urlparse(tracking_uri)
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError(
+                f"Tesseract only supports accessing MLflow server via HTTP/HTTPS (got URI scheme: {parsed.scheme})"
+            )
 
-            tracking_uri = f"sqlite:///{tracking_uri}"
-
+        self._ensure_mlflow_reachable(tracking_uri)
         mlflow.set_tracking_uri(tracking_uri)
 
-    def _ensure_mlflow_reachable(self) -> None:
+    def _ensure_mlflow_reachable(self, mlflow_tracking_uri: str) -> None:
         """Check if the MLflow tracking server is reachable."""
-        config = get_config()
-        mlflow_tracking_uri = config.mlflow_tracking_uri
-        if mlflow_tracking_uri.startswith(("http://", "https://")):
-            try:
-                response = requests.get(mlflow_tracking_uri, timeout=5)
-                response.raise_for_status()
-            except requests.RequestException as e:
-                raise RuntimeError(
-                    f"Failed to connect to MLflow tracking server at {mlflow_tracking_uri}. "
-                    "Please make sure an MLflow server is running and TESSERACT_MLFLOW_TRACKING_URI is set correctly, "
-                    "or switch to file-based logging by setting TESSERACT_MLFLOW_TRACKING_URI to an empty string."
-                ) from e
+        # Check for MLflow credentials in environment variables
+        username = os.environ.get("MLFLOW_TRACKING_USERNAME")
+        password = os.environ.get("MLFLOW_TRACKING_PASSWORD")
+
+        if (username and not password) or (password and not username):
+            raise RuntimeError(
+                "If one of MLFLOW_TRACKING_USERNAME and MLFLOW_TRACKING_PASSWORD is defined, "
+                "both must be defined."
+            )
+
+        auth = None
+        if username and password:
+            auth = (username, password)
+
+        try:
+            response = requests.get(mlflow_tracking_uri, timeout=5, auth=auth)
+            response.raise_for_status()
+        except requests.HTTPError as e:
+            raise RuntimeError(
+                f"MLflow tracking server at {mlflow_tracking_uri} returned an error response: "
+                f"{e.response.status_code} {e.response.reason}. "
+                "Please check that the server is configured correctly. "
+                "If your MLflow server has authentication enabled, please make sure that "
+                "MLFLOW_TRACKING_USERNAME and MLFLOW_TRACKING_PASSWORD are set correctly. "
+                "To switch to file-based logging instead, set TESSERACT_MLFLOW_TRACKING_URI "
+                "to an empty string."
+            ) from e
+        except requests.RequestException as e:
+            raise RuntimeError(
+                f"Failed to connect to MLflow tracking server at {mlflow_tracking_uri}. "
+                "Please make sure an MLflow server is running at this address and "
+                "TESSERACT_MLFLOW_TRACKING_URI is set correctly. "
+                "To switch to file-based logging instead, set TESSERACT_MLFLOW_TRACKING_URI "
+                "to an empty string."
+            ) from e
 
     def log_parameter(self, key: str, value: Any) -> None:
         """Log a parameter to MLflow."""
-        self.mlflow.log_param(key, value)
+        mlflow.log_param(key, value)
 
-    def log_metric(self, key: str, value: float, step: Optional[int] = None) -> None:
+    def log_metric(self, key: str, value: float, step: int | None = None) -> None:
         """Log a metric to MLflow."""
-        self.mlflow.log_metric(key, value, step=step)
+        mlflow.log_metric(key, value, step=step)
 
     def log_artifact(self, local_path: str) -> None:
         """Log an artifact to MLflow."""
-        self.mlflow.log_artifact(local_path)
+        mlflow.log_artifact(local_path)
 
     def start_run(self) -> None:
-        """Start a new MLflow run."""
-        self.mlflow.start_run()
+        """Start a new MLflow run with optional extra arguments from config."""
+        config = get_config()
+        run_extra_args = config.mlflow_run_extra_args
+        mlflow.start_run(**run_extra_args)
 
     def end_run(self) -> None:
         """End the current MLflow run."""
-        self.mlflow.end_run()
+        mlflow.end_run()
 
 
-def _create_backend(base_dir: Optional[str]) -> BaseBackend:
+def _create_backend(base_dir: str | None) -> BaseBackend:
     """Create the appropriate backend based on environment."""
     config = get_config()
     if config.mlflow_tracking_uri:
@@ -222,7 +240,7 @@ def log_parameter(key: str, value: Any) -> None:
     _get_current_backend().log_parameter(key, value)
 
 
-def log_metric(key: str, value: float, step: Optional[int] = None) -> None:
+def log_metric(key: str, value: float, step: int | None = None) -> None:
     """Log a metric to the current run context."""
     _get_current_backend().log_metric(key, value, step)
 
@@ -233,7 +251,7 @@ def log_artifact(local_path: str) -> None:
 
 
 @contextmanager
-def redirect_stdio(logfile: Union[str, Path]) -> Generator[None, None, None]:
+def redirect_stdio(logfile: str | Path) -> Generator[None, None, None]:
     """Context manager for redirecting stdout and stderr to a custom pipe.
 
     Writes messages to both the original stderr and the given logfile.
@@ -261,7 +279,7 @@ def redirect_stdio(logfile: Union[str, Path]) -> Generator[None, None, None]:
         # Use `print` instead of `.write` so we get appropriate newlines and flush behavior
         write_to_stderr = lambda msg: print(msg, file=orig_stderr_file, flush=True)
         write_to_file = lambda msg: print(msg, file=f, flush=True)
-        pipe_fd = stack.enter_context(LogPipe(write_to_stderr, write_to_file))
+        pipe_fd = stack.enter_context(TeePipe(write_to_stderr, write_to_file))
 
         # Redirect file descriptors at OS level
         stack.enter_context(redirect_fd(sys.stdout, pipe_fd))
@@ -270,7 +288,7 @@ def redirect_stdio(logfile: Union[str, Path]) -> Generator[None, None, None]:
 
 
 @contextmanager
-def start_run(base_dir: Optional[str] = None) -> Generator[None, None, None]:
+def start_run(base_dir: str | None = None) -> Generator[None, None, None]:
     """Context manager for starting and ending a run."""
     backend = _create_backend(base_dir)
     token = _current_backend.set(backend)

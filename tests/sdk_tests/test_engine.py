@@ -5,6 +5,8 @@ import json
 import logging
 import os
 import random
+import string
+import threading
 import time
 from pathlib import Path
 
@@ -151,6 +153,19 @@ def test_run_gpu(mocked_docker):
     assert res["device_requests"] == ["all"]
 
 
+def test_run_memory(mocked_docker):
+    """Test running a tesseract with memory limit."""
+    res_out, _ = engine.run_tesseract(
+        "foobar",
+        "apply",
+        ['{"inputs": {"a": [1, 2, 3], "b": [4, 5, 6]}}'],
+        memory="512m",
+    )
+
+    res = json.loads(res_out)
+    assert res["memory"] == "512m"
+
+
 def test_run_tesseract_file_input(mocked_docker, tmpdir):
     """Test running a tesseract with file input / output."""
     outdir = Path(tmpdir) / "output"
@@ -191,6 +206,19 @@ def test_run_tesseract_file_input(mocked_docker, tmpdir):
         "bind": "/path/in/container",
     }
 
+    # test that identical source folders raise an error
+    with pytest.raises(ValueError):
+        res, _ = engine.run_tesseract(
+            "foobar",
+            "apply",
+            [f"@{infile}"],
+            volumes=[
+                f"{tmpdir}:/path/in/container:ro",
+                f"{tmpdir}:/path/in/container2:ro",
+            ],
+            output_path=str(outdir),
+        )
+
     # Test the same but with --input-path
     indir = tmpdir / "input_path"
     indir.mkdir()
@@ -209,6 +237,24 @@ def test_run_tesseract_file_input(mocked_docker, tmpdir):
         "mode": "ro",
         "bind": "/tesseract/input_data",
     }
+
+    with pytest.raises(ValueError):
+        # test that input_path cannot be the same as output_path
+        res, _ = engine.run_tesseract(
+            "foobar",
+            "apply",
+            [f"@{infile}"],
+            input_path=str(indir),
+            output_path=str(indir),
+        )
+
+    with pytest.raises(ValueError):
+        res, _ = engine.run_tesseract(
+            "foobar",
+            "apply",
+            [f"@{infile}"],
+            volumes=[f"{infile}:/some/path:ro"],
+        )
 
 
 def test_get_tesseract_images(mocked_docker):
@@ -240,6 +286,24 @@ def test_serve_tesseracts(mocked_docker):
 
     # Teardown valid
     engine.teardown(json.loads(container_name_multi_tesseract)["name"])
+
+    # Serve with memory
+    container_name_with_memory, _ = engine.serve("vectoradd", memory="512m")
+    assert container_name_with_memory
+
+    # Teardown valid
+    engine.teardown(json.loads(container_name_with_memory)["name"])
+
+
+def test_serve_memory(mocked_docker):
+    """Test serving a tesseract with memory limit."""
+    res, _ = engine.serve(
+        "foobar",
+        memory="2g",
+    )
+
+    res = json.loads(res)
+    assert res["memory"] == "2g"
 
 
 def test_serve_tesseract_volumes(mocked_docker, tmpdir):
@@ -279,6 +343,16 @@ def test_serve_tesseract_volumes(mocked_docker, tmpdir):
             volumes=["/non/existent/path:/path/in/container:ro"],
         )
 
+    with pytest.raises(ValueError):
+        # Test with a volume that has the same source path as another volume
+        engine.serve(
+            "foobar",
+            volumes=[
+                f"{tmpdir}:/path/in/container:ro",
+                f"{tmpdir}:/path/in/container2:ro",
+            ],
+        )
+
     # Test running with input and output paths
     indir = Path(tmpdir / "input_path")
     indir.mkdir()
@@ -296,6 +370,10 @@ def test_serve_tesseract_volumes(mocked_docker, tmpdir):
         "mode": "rw",
         "bind": "/tesseract/output_data",
     }
+
+    with pytest.raises(ValueError):
+        # test that input_path cannot be the same as output_path
+        engine.serve("foobar", input_path=str(indir), output_path=str(indir))
 
 
 def test_needs_docker(mocked_docker, monkeypatch):
@@ -316,31 +394,101 @@ def test_needs_docker(mocked_docker, monkeypatch):
         run_something_with_docker()
 
 
-def test_logpipe(caplog):
+def test_teepipe(caplog):
     # Verify that logging in a separate thread works as intended
-    from tesseract_core.sdk.logs import LogPipe
+    from tesseract_core.sdk.logs import TeePipe, set_logger
+
+    # Disable rich to ensure what we log is what we read
+    set_logger("info", catch_warnings=True, rich_format=False)
 
     logger = logging.getLogger("tesseract")
     caplog.set_level(logging.INFO, logger="tesseract")
 
     logged_lines = []
     for _ in range(100):
-        msg_length = 2 ** random.randint(1, 12)
-        msg = "".join(random.choices("abcdefghijklmnopqrstuvwxyz", k=msg_length))
+        # Make sure to include a few really long lines without breaks
+        if random.random() < 0.1:
+            msg_length = random.randint(1000, 10_000)
+            alphabet = string.ascii_letters + "🤯"
+        else:
+            msg_length = 2 ** random.randint(2, 12)
+            alphabet = string.printable + "🤯"
+        msg = "".join(random.choices(alphabet, k=msg_length))
         logged_lines.append(msg)
 
-    logpipe = LogPipe(logger.info)
-    with logpipe:
-        fd = os.fdopen(logpipe.fileno(), "w", closefd=False)
+    teepipe = TeePipe(logger.info)
+    # Extend grace period to avoid flakes in tests when runners are slow
+    teepipe._grace_period = 1
+    with teepipe:
+        fd = os.fdopen(teepipe.fileno(), "w", closefd=False)
         for line in logged_lines:
             print(line, file=fd)
             time.sleep(random.random() / 100)
-        fd.flush()
+        fd.close()
 
-    assert logpipe.captured_lines == logged_lines
+    expected_lines = []
+    for line in logged_lines:
+        sublines = line.split("\n")
+        expected_lines.extend(sublines)
+
+    assert teepipe.captured_lines == expected_lines
     assert caplog.record_tuples == [
-        ("tesseract", logging.INFO, line) for line in logged_lines
+        ("tesseract", logging.INFO, line) for line in expected_lines
     ]
+
+
+def test_teepipe_early_exit():
+    # Verify that TeePipe can handle early exit without hanging or losing data
+    from tesseract_core.sdk.logs import TeePipe
+
+    logged_lines = []
+    for _ in range(100):
+        # Make sure to include a few really long lines without breaks
+        if random.random() < 0.1:
+            msg_length = random.randint(1000, 10_000)
+            alphabet = string.ascii_letters + "🤯"
+        else:
+            msg_length = 2 ** random.randint(2, 12)
+            alphabet = string.printable + "🤯"
+        msg = "".join(random.choices(alphabet, k=msg_length))
+        logged_lines.append(msg)
+
+    teepipe = TeePipe()
+    # Extend grace period to avoid flakes in tests when runners are slow
+    teepipe._grace_period = 1
+
+    teepipe.start()
+    fd = os.fdopen(teepipe.fileno(), "w", closefd=False)
+
+    def _write_to_pipe():
+        for line in logged_lines:
+            print(line, file=fd, flush=True)
+            time.sleep(random.random() / 100)
+
+        print("end without newline", end="", file=fd, flush=True)
+
+    expected_lines = []
+    for line in logged_lines:
+        sublines = line.split("\n")
+        expected_lines.extend(sublines)
+    expected_lines.append("end without newline")
+
+    writer_thread = threading.Thread(target=_write_to_pipe)
+    writer_thread.start()
+
+    # Wait for the first data to roll in, i.e., thread is up and running
+    while not teepipe.captured_lines:
+        time.sleep(0.01)
+
+    # Sanity check that not all data has been written yet
+    assert len(teepipe.captured_lines) < len(expected_lines)
+
+    # Exit the pipe early before all data is written
+    # This should block until no more data is incoming
+    teepipe.stop()
+
+    assert len(teepipe.captured_lines) == len(expected_lines)
+    assert teepipe.captured_lines == expected_lines
 
 
 def test_parse_requirements(tmpdir):

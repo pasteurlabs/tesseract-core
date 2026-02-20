@@ -1,7 +1,7 @@
 services:
   mlflow-init:
     image: alpine:latest
-    user: "0:0"  # Run as root to fix volume permissions
+    user: "0:0" # Run as root to fix volume permissions
     command: |
       sh -c "
         echo 'Initializing MLflow volume permissions...'
@@ -17,15 +17,30 @@ services:
     image: ghcr.io/mlflow/mlflow:latest
     restart: unless-stopped
     user: 1000:1000
-    command: mlflow server --backend-store-uri sqlite:///mlflow-data/mlflow.db --default-artifact-root file:///mlflow-data/mlruns --host 0.0.0.0 --port 5000
+    command: >
+      mlflow server
+      --backend-store-uri sqlite:///mlflow-data/mlflow.db
+      --serve-artifacts
+      --artifacts-destination file:///mlflow-data/mlruns/mlartifacts
+      --host 0.0.0.0
+      --allowed-hosts "mlflow-server:5000,localhost:*,host.docker.internal:*"
+      --port 5000
     volumes:
-      - mlflow-data:/mlflow-data
+      - mlflow-data:/mlflow-data:rw
     ports:
-      - "5000:5000"
+      - 5000
     depends_on:
       mlflow-init:
         condition: service_completed_successfully
+    networks:
+      - mlflow-network
 
 volumes:
   mlflow-data:
     name: mlflow-data
+
+networks:
+  # Use a deterministic network name so we can attach Tesseract
+  # containers to it more easily
+  mlflow-network:
+    name: tesseract-mlflow-server

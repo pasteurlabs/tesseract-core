@@ -1,14 +1,15 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for the MPA library."""
+"""Tests for the MPA module."""
 
 import csv
 import json
-import os
-import sqlite3
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
+from pydantic import ValidationError
 
 from tesseract_core.runtime import mpa
 from tesseract_core.runtime.config import update_config
@@ -18,6 +19,45 @@ from tesseract_core.runtime.mpa import (
     log_parameter,
     start_run,
 )
+
+
+class Always200Handler(BaseHTTPRequestHandler):
+    """HTTP request handler that always returns 200."""
+
+    def do_GET(self):
+        """Handle GET requests with 200."""
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(b"{}")
+
+    def do_POST(self):
+        """Handle POST requests with 200."""
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(b"{}")
+
+    def log_message(self, format, *args):
+        """Suppress log messages."""
+        pass
+
+
+@pytest.fixture(scope="module")
+def dummy_mlflow_server():
+    """Start a dummy HTTP server that always returns 200 (success)."""
+    server = HTTPServer(("localhost", 0), Always200Handler)
+    port = server.server_address[1]
+
+    # Start server in a background thread
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    server_thread.start()
+
+    try:
+        yield f"http://localhost:{port}"
+    finally:
+        # Shutdown server
+        server.shutdown()
 
 
 def test_start_run_context_manager():
@@ -140,67 +180,69 @@ def test_log_artifact_missing_file():
         backend.log_artifact("non_existent_file.txt")
 
 
-def test_mlflow_backend_creation(tmpdir):
-    """Test that MLflowBackend is created when mlflow_tracking_uri is set."""
-    pytest.importorskip("mlflow")  # Skip if MLflow is not installed
-    mlflow_db_file = tmpdir / "mlflow.db"
-    update_config(mlflow_tracking_uri=f"sqlite:///{mlflow_db_file}")
-    backend = mpa._create_backend(None)
+def test_mlflow_backend_creation(dummy_mlflow_server):
+    """Test that MLflowBackend creation works when server returns 200."""
+    update_config(mlflow_tracking_uri=dummy_mlflow_server)
+    backend = mpa.MLflowBackend()
     assert isinstance(backend, mpa.MLflowBackend)
 
 
-def test_mlflow_log_calls(tmpdir):
-    """Test MLflow backend logging functions with temporary directory."""
-    pytest.importorskip("mlflow")  # Skip if MLflow is not installed
-    mlflow_db_file = tmpdir / "mlflow.db"
-    update_config(mlflow_tracking_uri=f"sqlite:///{mlflow_db_file}")
+def test_mlflow_backend_creation_fails_with_unreachable_server():
+    """Test that MLflowBackend creation fails when server is unreachable."""
+    update_config(mlflow_tracking_uri="https://unreachable")
+    with pytest.raises(
+        RuntimeError,
+        match="Failed to connect to MLflow tracking server at https://unreachable",
+    ):
+        mpa.MLflowBackend()
 
-    with start_run():
-        log_parameter("model_type", "neural_network")
-        log_parameter("epochs", 100)
 
-        log_metric("accuracy", 0.85)
-        log_metric("loss", 0.25, step=1)
+def test_mlflow_non_http_scheme_raises_error():
+    """Test that non-HTTP/HTTPS schemes raise an error."""
+    update_config(mlflow_tracking_uri="sqlite:///mlflow.db")
+    with pytest.raises(
+        ValueError,
+        match="Tesseract only supports accessing MLflow server via HTTP/HTTPS",
+    ):
+        mpa.MLflowBackend()
 
-        artifact_file = tmpdir / "model_config.json"
-        artifact_file.write_text("Test content", encoding="utf-8")
-        log_artifact(str(artifact_file))
 
-    # Verify MLflow database file was created
-    assert mlflow_db_file.exists()
+def test_mlflow_run_extra_args(mocker, dummy_mlflow_server):
+    """Test passing a dict with basic tags."""
+    kwargs = {"tags": {"env": "prod", "team": "ml"}}
+    kwargs_str = repr(kwargs)
 
-    # Query the database to verify content was logged
-    with sqlite3.connect(str(mlflow_db_file)) as conn:
-        cursor = conn.cursor()
+    # Mock the mlflow module to avoid actual MLflow calls
+    mocked_start_run = mocker.patch("tesseract_core.runtime.mpa.mlflow.start_run")
 
-        # Check parameters were logged
-        cursor.execute("SELECT key, value FROM params")
-        params = dict(cursor.fetchall())
-        assert params["model_type"] == "neural_network"
-        assert params["epochs"] == "100"
+    update_config(
+        mlflow_tracking_uri=dummy_mlflow_server, mlflow_run_extra_args=kwargs_str
+    )
 
-        # Check metrics were logged
-        cursor.execute("SELECT key, value, step FROM metrics ORDER BY step")
-        metrics = cursor.fetchall()
-        assert len(metrics) == 2
-        assert metrics[0] == ("accuracy", 0.85, 0)  # step defaults to 0
-        assert metrics[1] == ("loss", 0.25, 1)
+    backend = mpa.MLflowBackend()
 
-        # Check artifacts were logged (MLflow stores artifact info in runs table)
-        cursor.execute("SELECT artifact_uri FROM runs")
-        artifact_uris = [row[0] for row in cursor.fetchall()]
-        assert len(artifact_uris) > 0  # At least one run with artifacts
+    # Make sure kwargs are forwarded correctly to mlflow.start_run
+    backend.start_run()
+    mocked_start_run.assert_called_with(**kwargs)
 
-        # Verify the artifact file was actually copied to the artifact location
-        artifact_found = False
-        for artifact_uri in artifact_uris:
-            if artifact_uri and os.path.exists(artifact_uri):
-                try:
-                    artifact_files = os.listdir(artifact_uri)
-                    if "model_config.json" in artifact_files:
-                        artifact_found = True
-                        break
-                except OSError:
-                    continue
 
-        assert artifact_found
+def test_mlflow_run_extra_args_parsing():
+    # This is actually a test for config.py but we add it here for now
+
+    with pytest.raises(ValidationError):
+        # Not a valid Python object
+        update_config(mlflow_run_extra_args="{'unbalanced dict': True")
+
+    with pytest.raises(ValidationError):
+        # Not a dict
+        update_config(mlflow_run_extra_args="['this is a list']")
+
+    with pytest.raises(ValidationError):
+        # Not str keys
+        update_config(mlflow_run_extra_args="{0: 'hey there'}")
+
+    # All good
+    update_config(mlflow_run_extra_args="{'hey there': 'general kenobi'}")
+
+    # Passing dicts directly is fine, too
+    update_config(mlflow_run_extra_args={"hey there": "general kenobi"})

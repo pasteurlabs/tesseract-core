@@ -2,6 +2,60 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.3.0] - 2026-01-08
+
+### Features
+
+- *(sdk)* Change default Python SDK `output_format` to b64 for performance reasons (#422)
+- Add ability to specify mlflow tag for tesseract (#426)
+- Remove unused tesseract-dir option and fixture (#436)
+- Expose docker memory limit to CLI and Python API (#429)
+- Add mlflow as default (#428)
+
+### Bug Fixes
+
+- Add port to serve command in multi-helloworld readme (#421)
+- Reachability check uses mlflow username/password if provided (#416)
+- Use mlflow env variables directly for mlflow auth (#434)
+- Ensure container users always exist (#427)
+- Allow `RootModel`s in apply schema endpoints (#440)
+
+### Documentation
+
+- Point SI definition to pasteurlabs technology (#413)
+- Add mlflow auth information to docs (#417)
+- Update docstring and tesseract input/output handling (#412)
+
+## [1.2.0] - 2025-12-04
+
+### Features
+
+- Add /tesseract to PYTHONPATH, similar to native execution (#372)
+- Add example for differentiable quadratic programming (QP) solver (#345)
+- Ensure modules next to tesseract_api.py can always be imported (#400)
+- Adding SpaceClaim/PyMAPDL Tesseract example and docs (#403)
+
+### Bug Fixes
+
+- Change docs to recommend mlflow-data volume mount as rw (#379)
+- Pin Python to <3.14 to resolve docs build failure (#390)
+- Switch MLflow tests from deprecated file backend to sqlite (#389)
+- Catch identical mounted volumes (#337)
+- Remove user creation logic, set `HOME` env var instead (#393)
+- Ensure log messages aren't lost when application exits (#392)
+
+### Refactor
+
+- [**breaking**] Replace python 3.9 with 3.10 as oldest supported version (#401)
+
+### Documentation
+
+- Ansys shapeopt showcase (#404)
+- Add Ansys Fluent QoI-based workflow example (#399)
+- Update showcase READMEs to reflect + link to forum posts (#405)
+- Add open-source alternative to Ansys-based shapeopt to showcase folder (#408)
+- Fix Tesseract names in open source shapeopt showcase (#409)
+
 ## [1.1.1] - 2025-10-15
 
 ### Bug Fixes

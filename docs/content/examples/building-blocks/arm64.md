@@ -5,8 +5,8 @@
 Tesseracts use by default an official Python docker image as the base image. Although this covers many useful cases, some system dependencies sometimes require a custom image and extra build steps.
 
 ## Example yaml
-Via `tesseract_config.yaml`, it is possible to somewhat flexibly alter the build process to accomodate different needs. As a concrete example, here's what we had to do internally in order to to build an arm64 Tesseract with PyVista installed as a dependency:
 
+Via `tesseract_config.yaml`, it is possible to somewhat flexibly alter the build process to accomodate different needs. As a concrete example, here's what we had to do internally in order to to build an arm64 Tesseract with PyVista installed as a dependency:
 
 ```{literalinclude} ../../../../examples/pyvista-arm64/tesseract_config.yaml
 :language: yaml

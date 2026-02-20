@@ -16,7 +16,6 @@ from typing import (
     Annotated,
     Any,
     Literal,
-    Optional,
     get_args,
     get_origin,
 )
@@ -142,6 +141,10 @@ def make_callback() -> Callable:
         if get_origin(field_type) is Literal:
             field_type = make_choice_enum(f"{field_name}Choices", get_args(field_type))
 
+        if get_origin(field_type) is dict:
+            # Dicts are parsed as strings
+            field_type = str
+
         params.append(
             inspect.Parameter(
                 field_name,
@@ -219,7 +222,7 @@ def check_gradients(
         ),
     ],
     input_paths: Annotated[
-        Optional[list[str]],
+        list[str] | None,
         typer.Option(
             "--input-paths",
             help="Paths to differentiable inputs to check gradients for.",
@@ -227,7 +230,7 @@ def check_gradients(
         ),
     ] = None,
     output_paths: Annotated[
-        Optional[list[str]],
+        list[str] | None,
         typer.Option(
             "--output-paths",
             help="Paths to differentiable outputs to check gradients for.",
@@ -235,7 +238,7 @@ def check_gradients(
         ),
     ] = None,
     endpoints: Annotated[
-        Optional[list[str]],
+        list[str] | None,
         typer.Option(
             "--endpoints",
             help="Endpoints to check gradients for.",
@@ -275,7 +278,7 @@ def check_gradients(
         ),
     ] = 10,
     seed: Annotated[
-        Optional[int],
+        int | None,
         typer.Option(
             "--seed",
             help="Seed for random number generator. If not set, a random seed is used.",
@@ -367,7 +370,7 @@ def serve(
 
 
 def _create_user_defined_cli_command(
-    app: typer.Typer, user_function: Callable, out_stream: Optional[io.TextIOBase]
+    app: typer.Typer, user_function: Callable, out_stream: io.TextIOBase | None
 ) -> None:
     """Creates a click command which sends requests to Tesseract endpoints.
 
@@ -459,9 +462,7 @@ def _create_user_defined_cli_command(
     decorator(command_func)
 
 
-def _add_user_commands_to_cli(
-    app: typer.Typer, out_stream: Optional[io.IOBase]
-) -> None:
+def _add_user_commands_to_cli(app: typer.Typer, out_stream: io.IOBase | None) -> None:
     tesseract_package = get_tesseract_api()
     endpoints = create_endpoints(tesseract_package)
 

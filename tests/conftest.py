@@ -6,6 +6,7 @@ import os
 import random
 import string
 import subprocess
+import time
 from pathlib import Path
 from shutil import copytree
 from textwrap import indent
@@ -13,6 +14,7 @@ from traceback import format_exception
 from typing import Any
 
 import pytest
+import requests
 
 # NOTE: Do NOT import tesseract_core here, as it will cause typeguard to fail
 
@@ -38,24 +40,6 @@ def pytest_addoption(parser):
         dest="run_endtoend",
         help="Skip end-to-end tests",
     )
-    parser.addoption(
-        "--tesseract-dir",
-        action="store",
-        default=None,
-        dest="tesseract_dir",
-        help="Directory of your tesseract api",
-    )
-
-
-@pytest.fixture
-def tesseract_dir(request):
-    """Return the tesseract directory."""
-    # This is used to set the tesseract_dir fixture
-    # in the pytest_generate_tests function above.
-    tesseract_dir = request.config.getoption("tesseract_dir")
-    if tesseract_dir:
-        return Path(tesseract_dir)
-    return None
 
 
 def pytest_collection_modifyitems(config, items):
@@ -491,3 +475,104 @@ def mocked_docker(monkeypatch):
     monkeypatch.setattr(engine.requests, "get", hacked_get)
 
     yield mock_instance
+
+
+@pytest.fixture(scope="module")
+def mlflow_server():
+    """MLflow server to use in tests."""
+    # Check if docker-compose is available
+    try:
+        result = subprocess.run(
+            ["docker", "compose", "version"],
+            capture_output=True,
+            check=True,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pytest.fail("docker-compose not available")
+
+    # Start MLflow server with unique project name
+    project_name = f"test_mlflow_{int(time.time())}"
+
+    compose_file = (
+        Path(__file__).parent.parent / "extra" / "mlflow" / "docker-compose-mlflow.yml"
+    )
+
+    try:
+        # Start the services
+        subprocess.run(
+            [
+                "docker",
+                "compose",
+                "-f",
+                str(compose_file),
+                "-p",
+                project_name,
+                "up",
+                "-d",
+            ],
+            check=True,
+            capture_output=True,
+        )
+
+        res = subprocess.run(
+            [
+                "docker",
+                "compose",
+                "-f",
+                str(compose_file),
+                "-p",
+                project_name,
+                "ps",
+                "--format",
+                "json",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        service_data = json.loads(res.stdout)
+        service_port = service_data["Publishers"][0]["PublishedPort"]
+
+        # Note: We don't track containers/volumes here because docker-compose down -v
+        # will handle cleanup automatically in the finally block
+
+        # Wait for MLflow to be ready (with timeout)
+        tracking_uri = f"http://localhost:{service_port}"
+        max_wait = 30  # seconds
+        start_time = time.time()
+
+        while time.time() - start_time < max_wait:
+            try:
+                response = requests.get(tracking_uri, timeout=2)
+                if response.status_code == 200:
+                    break
+            except requests.RequestException:
+                pass
+            time.sleep(1)
+        else:
+            pytest.fail(f"MLflow server did not become ready within {max_wait}s")
+
+        yield tracking_uri
+
+    finally:
+        # Get logs for debugging
+        result = subprocess.run(
+            ["docker", "compose", "-f", str(compose_file), "-p", project_name, "logs"],
+            capture_output=True,
+            text=True,
+        )
+        print(result.stdout)
+        # Stop and remove containers
+        subprocess.run(
+            [
+                "docker",
+                "compose",
+                "-f",
+                str(compose_file),
+                "-p",
+                project_name,
+                "down",
+                "-v",
+            ],
+            capture_output=True,
+        )

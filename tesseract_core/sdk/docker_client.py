@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import List as list_  # noqa: UP035
 
 from tesseract_core.sdk.config import get_config
-from tesseract_core.sdk.logs import LogPipe
+from tesseract_core.sdk.logs import TeePipe
 
 logger = logging.getLogger("tesseract")
 
@@ -232,7 +232,7 @@ class Images:
             ssh=ssh,
         )
 
-        out_pipe = LogPipe(logger.debug)
+        out_pipe = TeePipe(logger.debug)
 
         with out_pipe as out_pipe_fd:
             proc = subprocess.run(build_cmd, stdout=out_pipe_fd, stderr=out_pipe_fd)
@@ -572,6 +572,7 @@ class Containers:
         stdout: bool = True,
         stderr: bool = False,
         user: str | None = None,
+        memory: str | None = None,
         extra_args: list_[str] | None = None,  # noqa: UP006
     ) -> Container | tuple[bytes, bytes] | bytes:
         """Run a command in a container from an image.
@@ -595,6 +596,7 @@ class Containers:
             stdout: If True, return stdout.
             stderr: If True, return stderr.
             environment: Environment variables to set in the container.
+            memory: Memory limit for the container (e.g., "512m", "2g"). Minimum allowed is 6m.
             extra_args: Additional arguments to pass to the `docker run` CLI command.
 
         Returns:
@@ -624,6 +626,9 @@ class Containers:
 
         if user:
             optional_args.extend(["-u", user])
+
+        if memory:
+            optional_args.extend(["--memory", memory])
 
         if device_requests:
             gpus_str = ",".join(device_requests)

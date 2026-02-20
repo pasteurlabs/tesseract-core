@@ -1,4 +1,4 @@
-# Tips for defining Tesseract APIs
+# Tips for Defining Tesseract APIs
 
 ## Advanced Pydantic features
 
@@ -54,6 +54,7 @@ In case you run into issues with Pydantic features not listed here, please [open
 ```
 
 (abstract-eval-pydantic)=
+
 ### 🔪 Sharp edge: `abstract_eval` and field validators
 
 A special case are the inputs and outputs to `abstract_eval`, which also keep the full Pydantic schema, albeit with some limitations. In particular, all `Array` types will be replaced by a special object that only keeps the shape and dtype of the array, but not the actual data. Therefore, validators that depend on arrays **must** check for this special object and pass it through:
@@ -78,18 +79,19 @@ class InputSchema(BaseModel):
 
 There are also several options you can provide to `tesseract build` which can be helpful in
 various circumstances:
+
 - The output of the various steps which happen under-the-hood while doing a build will
- only be printed if something fails; this means that your shell might appear unresponsive
- during this process. If you want more detailed information on what's going on during your
- build, and see updates about it in real-time, use `--loglevel debug`.
+  only be printed if something fails; this means that your shell might appear unresponsive
+  during this process. If you want more detailed information on what's going on during your
+  build, and see updates about it in real-time, use `--loglevel debug`.
 - `--config-override` can be used to manually override options specified in the `tesseract_config.yaml`,
- for example: `--config-override build_config.target_platform=linux/arm64`
+  for example: `--config-override build_config.target_platform=linux/arm64`
 - `tesseract build` relies on a `docker build` command to create the Tesseract image. By
- default, the build context is a temporary folder to which all necessary files to build a Tesseract
- are copied to. The option `--build-dir <directory>` allows you to specify a different
- directory where to do this operations. This might be useful to debug issues which
- arise while building a Tesseract, as in `directory` you will see all the context available to
- `docker build` and nothing else.
+  default, the build context is a temporary folder to which all necessary files to build a Tesseract
+  are copied to. The option `--build-dir <directory>` allows you to specify a different
+  directory where to do this operations. This might be useful to debug issues which
+  arise while building a Tesseract, as in `directory` you will see all the context available to
+  `docker build` and nothing else.
 
 ## Building Tesseracts with private dependencies
 
@@ -104,32 +106,34 @@ to the machine that builds the Tesseract.
 There are several steps in the process of building a Tesseract image
 which can be configured via the `tesseract_config.yaml` file, in particular the `build_config` section.
 For example:
-  - By default the base image is `debian:bookworm-slim`.
-    Depending on your specific needs (different python version,
-    preinstalled dependencies, ...), it might be beneficial to
-    specify a different one in `base_image`.
-    There is however the constraint that
-    whatever other image you specify, it must be Ubuntu- or
-    Debian-based.
-  - The default target architecture is "native" (same as the host platform).
-    If you need to build for a specific platform, use e.g. `target_platform: "linux/arm64"`.
-  - As `tesseract_requirements.txt` only allows you to specify Python
-    dependencies, if there are system ones you need to install inside
-    the Tesseract you can do so via the `extra_packages` list. All
-    packages you specify will be installed via `apt-get`.
-  - You can copy data inside a Tesseract via the `package_data` list.
-    The data will be then part of the Tesseract image. This is a
-    good choice for some static artifacts you need to have available
-    for computation, such as the weights of a machine learning model.
-  - If you want to further customize the way the image is built,
-    you can add arbitrary commands to the Dockerfile specifying
-    the build process via the `custom_build_steps` list. Use
-    the same syntax you would use in a Dockerfile. To see where your
-    commands would be added in the build process, have a look at
-    the [Dockerfile template](https://github.com/pasteurlabs/tesseract-core/blob/main/tesseract/templates/Dockerfile.base)
-    `tesseract build` uses by default.
+
+- By default the base image is `debian:bookworm-slim`.
+  Depending on your specific needs (different python version,
+  preinstalled dependencies, ...), it might be beneficial to
+  specify a different one in `base_image`.
+  There is however the constraint that
+  whatever other image you specify, it must be Ubuntu- or
+  Debian-based.
+- The default target architecture is "native" (same as the host platform).
+  If you need to build for a specific platform, use e.g. `target_platform: "linux/arm64"`.
+- As `tesseract_requirements.txt` only allows you to specify Python
+  dependencies, if there are system ones you need to install inside
+  the Tesseract you can do so via the `extra_packages` list. All
+  packages you specify will be installed via `apt-get`.
+- You can copy data inside a Tesseract via the `package_data` list.
+  The data will be then part of the Tesseract image. This is a
+  good choice for some static artifacts you need to have available
+  for computation, such as the weights of a machine learning model.
+- If you want to further customize the way the image is built,
+  you can add arbitrary commands to the Dockerfile specifying
+  the build process via the `custom_build_steps` list. Use
+  the same syntax you would use in a Dockerfile. To see where your
+  commands would be added in the build process, have a look at
+  the [Dockerfile template](https://github.com/pasteurlabs/tesseract-core/blob/main/tesseract/templates/Dockerfile.base)
+  `tesseract build` uses by default.
 
 (tr-without-docker)=
+
 ## Tesseracts without containerization
 
 While developing a Tesseract, the process of building and rebuilding the
@@ -138,21 +142,18 @@ convenient way to speed this up is to just run the code you are developing direc
 in your virtual Python environment.
 
 In order to do so, you should:
-  - Make sure you have a development installation of Tesseract (see <project:#installation-dev>).
-    In particular, calling `which tesseract-runtime` in the Terminal should return a path in your
-    virtual environment.
-  - Install your Tesseract's dependencies via `pip install -r tesseract_requirements.txt`.
-  - Point to the runtime where it can find the `tesseract_api.py` of the Tesseract you are working on.
-    This is done by setting the `TESSERACT_API_PATH` environment variable via
-    `export TESSERACT_API_PATH=/path/to/your/tesseract_api.py`.
+
+- Make sure you have a development installation of Tesseract (see <project:#installation-dev>).
+  In particular, calling `which tesseract-runtime` in the Terminal should return a path in your
+  virtual environment.
+- Install your Tesseract's dependencies via `pip install -r tesseract_requirements.txt`.
+- Point to the runtime where it can find the `tesseract_api.py` of the Tesseract you are working on.
+  This is done by setting the `TESSERACT_API_PATH` environment variable via
+  `export TESSERACT_API_PATH=/path/to/your/tesseract_api.py`.
 
 After that is done, you will be able to use the `tesseract-runtime` command in your shell.
 This is the exact same command that is launched inside Tesseract containers to run their
 various endpoints, and its syntax mirrors the one of `tesseract run`.
-
-```{note}
-When running without containerization, the directory containing `tesseract_api.py` is automatically added to `PYTHONPATH`, allowing you to import additional Python modules from that directory. This behavior matches what happens inside Tesseract containers, where the path containing `tesseract_api.py` is also added to `PYTHONPATH`.
-```
 
 For instance, to call the `apply` function, rather than first building a `helloworld` image and running this command:
 

@@ -1,0 +1,9 @@
+name: "pymapdl"
+version: "0.0.1"
+description: "Evaluate compliance using the SIMP material model"
+
+build_config:
+  extra_packages:
+    - "build-essential"
+    - "libgl1"
+    - "libxrender1"

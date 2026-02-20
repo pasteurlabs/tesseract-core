@@ -1,4 +1,5 @@
 (tr-api)=
+
 # `tesseract_core` Python API
 
 ```{eval-rst}

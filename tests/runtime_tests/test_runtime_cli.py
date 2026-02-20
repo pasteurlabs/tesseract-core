@@ -220,8 +220,8 @@ def test_apply_command_binref(cli, cli_runner, dummy_tesseract_module, tmpdir):
         env={"TERM": "dumb", "COLUMNS": "1000"},
     )
     assert result.exit_code == 2
-    assert "Value error" in result.stderr
-    assert "Failed to decode buffer as binref" in result.stderr
+    assert "validation error" in result.stderr
+    assert "Failed to decode array buffer (binref encoding)" in result.stderr
 
 
 def test_apply_command_noenv(cli, cli_runner, dummy_tesseract_module, monkeypatch):
@@ -569,3 +569,22 @@ def test_check(cli, cli_runner, dummy_tesseract_package):
             f"{schema_name} is not a subclass of pydantic.BaseModel"
             in result.exception.args[0]
         )
+
+
+def test_local_module(cli, cli_runner, dummy_tesseract_package):
+    """Ensure that a .py file next to tesseract_api.py can be imported."""
+    from tesseract_core.runtime.config import update_config
+
+    tesseract_api_file = Path(dummy_tesseract_package) / "tesseract_api.py"
+    with open(tesseract_api_file, "a") as f:
+        f.write("\nimport foo")
+
+    foo_file = Path(dummy_tesseract_package) / "foo.py"
+    with open(foo_file, "w") as f:
+        f.write("print('hey!')")
+
+    update_config(api_path=tesseract_api_file)
+    result = cli_runner.invoke(cli, ["check"], catch_exceptions=True)
+    assert result.exit_code == 0, result.stderr
+    assert "check successful" in result.stdout
+    assert "hey!" in result.stdout

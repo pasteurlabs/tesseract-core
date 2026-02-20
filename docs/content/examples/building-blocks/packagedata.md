@@ -1,9 +1,11 @@
 # Packaging local files into a Tesseract
 
 ## Context
+
 You may need to include local files into your Tesseract, e.g. if we want to load in pretrained model weights, or artifacts that we may need access to. This guide will demonstrate how.
 
 (package-data)=
+
 ## Example Tesseract (examples/package_data)
 
 In this example, we want to include and process `parameters.json` file in our Tesseract.

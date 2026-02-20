@@ -1,0 +1,11 @@
+                         "Surface Integral Report"
+
+           Area-Weighted Average
+                 Static Pressure                 [Pa]
+-------------------------------- --------------------
+                           inlet             33470363
+                          outlet           -23000.331
+                        p2-plane            -590612.2
+                        p3-plane           -602937.39
+                ---------------- --------------------
+                             Net            6413155.8

@@ -1,0 +1,7 @@
+name: hex_mesh
+version: "0.1.0"
+description: |
+  Generates a hex mesh based on a sizing field.
+
+build_config:
+  target_platform: "linux/x86_64"
