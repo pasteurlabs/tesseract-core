@@ -21,7 +21,7 @@ from pydantic import (
     GetJsonSchemaHandler,
 )
 from pydantic.json_schema import JsonSchemaValue
-from pydantic_core import core_schema
+from pydantic_core import PydanticCustomError, ValidationError, core_schema
 
 from tesseract_core.runtime.array_encoding import (
     AllowedDtypes,
@@ -143,16 +143,59 @@ class PydanticArrayAnnotation(metaclass=ArrayAnnotationType):
             ]
         )
 
+        def _simplify_array_errors(
+            value: Any, handler: core_schema.ValidatorFunctionWrapHandler
+        ) -> Any:
+            """Wrap validator that simplifies array validation errors.
+
+            When array validation fails, this function extracts the most informative
+            error message and re-raises it with a cleaner error type, avoiding the
+            cryptic union branch errors that Pydantic produces by default.
+            """
+            try:
+                return handler(value)
+            except ValidationError as e:
+                # Find the most informative error from the validation errors
+                errors = e.errors()
+                best_error = None
+                for err in errors:
+                    err_type = err.get("type", "")
+                    # Prefer our custom array error types
+                    if err_type.startswith("array_"):
+                        best_error = err
+                        break
+                    # Fall back to value_error types
+                    if err_type == "value_error" and best_error is None:
+                        best_error = err
+
+                if best_error is None:
+                    best_error = errors[-1] if errors else {"msg": "Invalid array"}
+
+                # Re-raise with a cleaner error
+                raise PydanticCustomError(
+                    best_error.get("type", "array_validation_error"),
+                    best_error.get("msg", "Invalid array value"),
+                    best_error.get("ctx", {}),
+                ) from None
+
+        python_union_schema = core_schema.union_schema(
+            [
+                load_from_dict_schema,
+                # when loading from Python, we also allow any array-like object
+                core_schema.no_info_plain_validator_function(python_to_array_),
+            ],
+            mode="left_to_right",
+        )
+
+        # Wrap the union schema to simplify error messages
+        wrapped_python_schema = core_schema.no_info_wrap_validator_function(
+            _simplify_array_errors,
+            python_union_schema,
+        )
+
         return core_schema.json_or_python_schema(
             json_schema=load_from_dict_schema,
-            python_schema=core_schema.union_schema(
-                [
-                    load_from_dict_schema,
-                    # when loading from Python, we also allow any array-like object
-                    core_schema.no_info_plain_validator_function(python_to_array_),
-                ],
-                mode="left_to_right",
-            ),
+            python_schema=wrapped_python_schema,
             serialization=core_schema.plain_serializer_function_ser_schema(
                 encode_array_,
                 info_arg=True,

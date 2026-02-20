@@ -256,8 +256,8 @@ def test_model_from_json(tmpdir):
 
 
 def fix_fake_arrays(fakedata, target_shape, seed=42):
-    is_array = (
-        lambda x: isinstance(x, dict) and "shape" in x and "dtype" in x and "data" in x
+    is_array = lambda x: (
+        isinstance(x, dict) and "shape" in x and "dtype" in x and "data" in x
     )
     rng = np.random.RandomState(seed)
 
@@ -475,7 +475,7 @@ def test_dtype_casting():
         "buffer": (arr_int.astype(float) + 1e-6).flatten().tolist(),
         "encoding": "json",
     }
-    with pytest.raises(ValidationError, match="Expected integer data"):
+    with pytest.raises(ValidationError, match=r"Expected integer data.*floating point"):
         MyModel.model_validate(json_payload)
 
     # Case 3: pass NumPy array directly (should work fine)
@@ -487,7 +487,7 @@ def test_dtype_casting():
     # Case 4: pass NumPy array with incompatible dtype (should raise)
     json_payload = json.loads(json_payload_str)
     json_payload["array_int"] = arr_int.astype(np.float32)
-    with pytest.raises(ValidationError, match="cannot be cast"):
+    with pytest.raises(ValidationError, match="cannot be safely cast"):
         MyModel.model_validate(json_payload)
 
     # Case 5: pass JSON data directly (should work fine)
@@ -499,17 +499,21 @@ def test_dtype_casting():
     # Case 6: pass JSON data with incompatible dtype (should raise)
     json_payload = json.loads(json_payload_str)
     json_payload["array_int"] = arr_int.astype(np.float32).tolist()
-    with pytest.raises(ValidationError, match="cannot be cast"):
+    with pytest.raises(ValidationError, match="cannot be safely cast"):
         MyModel.model_validate(json_payload)
 
     # Case 7: Pass non-numeric data (should raise)
     json_payload = json.loads(json_payload_str)
     json_payload["array_int"] = ["a", "b", "c"]
-    with pytest.raises(ValidationError, match="Could not convert object"):
+    with pytest.raises(
+        ValidationError, match="Could not parse value as a numeric array"
+    ):
         MyModel.model_validate(json_payload)
 
     # Case 8: Pass non-numeric Python object (should raise)
     json_payload = json.loads(json_payload_str)
     json_payload["array_int"] = object()
-    with pytest.raises(ValidationError, match="Could not convert object"):
+    with pytest.raises(
+        ValidationError, match="Could not parse value as a numeric array"
+    ):
         MyModel.model_validate(json_payload)
