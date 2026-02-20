@@ -729,7 +729,7 @@ def make_test_endpoint(
             All outcomes return HTTP 200 with status in the response body regardless of success/failure.
         """
         logger.warning(
-            "The 'test' endpoint is experimental and may change, be replaced, or be deprecated in future versions."
+            "The 'test' endpoint is experimental and may change without warning."
         )
 
         config = get_config()
