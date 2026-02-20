@@ -206,7 +206,7 @@ class Tesseract:
         if output_path is not None:
             local_path = engine._resolve_file_path(output_path, make_dir=True)
             update_config(output_path=str(local_path))
-        update_config(output_format=output_format)
+        update_config(output_format=output_format, debug=True)
 
         obj = cls.__new__(cls)
         obj._spawn_config = None
@@ -450,6 +450,51 @@ class Tesseract:
             "cotangent_vector": cotangent_vector,
         }
         return self._client.run_tesseract("vector_jacobian_product", payload, run_id)
+
+    @requires_client
+    def test(self, test_spec: dict) -> None:
+        """Run a regression test, raising AssertionError on failure.
+
+        Works in LocalClient, HTTPClient and remote if served in debug mode.
+
+        Args:
+            test_spec: Test specification dict with keys:
+                - endpoint: Name of endpoint (e.g., "apply", "jacobian")
+                - payload: Input data dict
+                - expected_outputs: Expected output data dict (if no exception expected)
+                - expected_exception: Optional exception type or name (e.g., ValueError or "ValueError")
+                - expected_exception_regex: Optional regex pattern for exception message
+                - atol: Optional absolute tolerance (default 1e-8)
+                - rtol: Optional relative tolerance (default 1e-5)
+
+            Must provide exactly one of expected_outputs or expected_exception.
+
+        Raises:
+            AssertionError: If test fails (outputs don't match or wrong exception)
+            RuntimeError: If test encounters unexpected error
+
+        Example:
+            >>> tess = Tesseract.from_tesseract_api("path/to/tesseract_api.py")
+            >>> tess.test(
+            ...     {
+            ...         "endpoint": "apply",
+            ...         "payload": {"a": [1, 2], "b": [3, 4]},
+            ...         "expected_outputs": {"result": [4, 6]},
+            ...     }
+            ... )
+        """
+        if "test" not in self.available_endpoints:
+            raise NotImplementedError(
+                "Test endpoint not available, to expose this Tesseracts must be served in debug mode."
+            )
+
+        result = self._client.run_tesseract("test", test_spec, run_id=None)
+
+        # Re-raise errors for pytest compatibility
+        if result["status"] == "failed":
+            raise AssertionError(result["message"])
+        elif result["status"] == "error":
+            raise RuntimeError(result["message"])
 
 
 def _tree_map(func: Callable, tree: Any, is_leaf: Callable | None = None) -> Any:

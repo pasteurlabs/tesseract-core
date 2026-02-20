@@ -15,11 +15,10 @@ from typing import (
 
 import numpy as np
 from numpy.typing import ArrayLike
-from pydantic import BaseModel
 from rich.progress import Progress
 
-from .core import create_endpoints
-from .tree_transforms import get_at_path, set_at_path
+from ..core import create_endpoints, get_input_schema, get_output_schema
+from ..tree_transforms import get_at_path, set_at_path
 
 ADEndpointName = Literal[
     "jacobian", "jacobian_vector_product", "vector_jacobian_product"
@@ -44,22 +43,6 @@ class GradientCheckResult(NamedTuple):
     grad_val: ArrayLike | None
     ref_val: ArrayLike | None
     exception: str | None
-
-
-def get_input_schema(endpoint_function: Callable) -> type[BaseModel]:
-    """Get the input schema of an endpoint function."""
-    schema = endpoint_function.__annotations__["payload"]
-    if not issubclass(schema, BaseModel):
-        raise AssertionError(f"Expected BaseModel, got {schema}")
-    return schema
-
-
-def get_output_schema(endpoint_function: Callable) -> type[BaseModel]:
-    """Get the output schema of an endpoint function."""
-    schema = endpoint_function.__annotations__["return"]
-    if not issubclass(schema, BaseModel):
-        raise AssertionError(f"Expected BaseModel, got {schema}")
-    return schema
 
 
 def expand_path_pattern(path_pattern: str, inputs: dict[str, Any]) -> list[str]:
@@ -416,7 +399,7 @@ def check_gradients(
     seed: int | None = None,
     show_progress: bool = True,
 ) -> Iterator[tuple[str, list[GradientCheckResult], int]]:
-    """Check gradients of endpoints against a finite difference approximation.
+    """Returns an iterator that checks gradients of endpoints against a finite difference approximation.
 
     Args:
         api_module: The module containing the Tesseract endpoints.

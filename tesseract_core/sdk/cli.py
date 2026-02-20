@@ -94,7 +94,16 @@ POSSIBLE_CMDS = set(
     re.sub(r"([a-z])([A-Z])", r"\1-\2", object.name).replace("_", "-").lower()
     for object in EXPECTED_OBJECTS
 )
-POSSIBLE_CMDS.update({"health", "openapi-schema", "check", "check-gradients", "serve"})
+POSSIBLE_CMDS.update(
+    {
+        "health",
+        "openapi-schema",
+        "check",
+        "check-gradients",
+        "test",
+        "serve",
+    }
+)
 
 # All fields in TesseractConfig and TesseractBuildConfig for config override
 POSSIBLE_KEYPATHS = TesseractConfig.model_fields.keys()
@@ -853,6 +862,29 @@ def _sanitize_error_output(error_output: str, tesseract_image: str) -> str:
 CmdChoices = make_choice_enum("Cmd", sorted(POSSIBLE_CMDS))
 
 
+def _extract_cli_config(
+    test_spec: dict,
+    base_dir: Path,
+) -> tuple[str | None, list[str], str | None]:
+    """Extracts and resolve (input_path, volume_mounts, user) from a parsed test spec."""
+    cli_config = test_spec.get("cli_config", {})
+
+    if input_path := cli_config.get("input_path"):
+        if not Path(input_path).is_absolute():
+            input_path = str(base_dir / input_path)
+
+    volume_mounts = []
+    for vol_mount in cli_config.get("volume_mounts", []):
+        if not Path(vol_mount.split(":", 1)[0]).is_absolute():
+            volume_mounts.append(str(base_dir / vol_mount))
+        else:
+            volume_mounts.append(vol_mount)
+
+    user = cli_config.get("user")
+
+    return input_path, volume_mounts, user
+
+
 @app.command(
     "run",
     # We implement --help manually to forward the help of the Tesseract container
@@ -1050,6 +1082,34 @@ def run_container(
 
     if payload is not None:
         args.append(payload)
+
+    # For test command, extract cli_config from test spec if available
+    # This allows test specs to be self-contained without requiring manual -i/-o flags
+    if cmd == "test" and payload is not None:
+        if payload.startswith("@"):
+            test_spec_path = Path(payload.lstrip("@")).resolve()
+            try:
+                with open(test_spec_path) as f:
+                    test_spec = json.load(f)
+            except (OSError, json.JSONDecodeError):
+                test_spec = {}
+            base_dir = test_spec_path.parent
+        else:
+            try:
+                test_spec = json.loads(payload)
+            except json.JSONDecodeError:
+                test_spec = {}
+            base_dir = Path.cwd()
+
+        config_input_path, config_volume_mounts, config_user = _extract_cli_config(
+            test_spec, base_dir
+        )
+        if input_path is None:
+            input_path = config_input_path
+        if volume is None:
+            volume = config_volume_mounts
+        if user is None:
+            user = config_user
 
     try:
         result_out, result_err = engine.run_tesseract(
