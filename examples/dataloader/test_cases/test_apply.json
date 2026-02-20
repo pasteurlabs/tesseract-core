@@ -1,0 +1,118 @@
+{
+  "endpoint": "apply",
+  "expected_outputs": {
+    "data": [
+      {
+        "object_type": "array",
+        "shape": [3, 3],
+        "dtype": "float32",
+        "data": {
+          "buffer": "7A+jP3whCj/b06c992QHPXoy0D9Zquk/e0ybP0nAuj8CK4s/",
+          "encoding": "base64"
+        }
+      },
+      {
+        "object_type": "array",
+        "shape": [3, 3],
+        "dtype": "float32",
+        "data": {
+          "buffer": "6GDvP8fb0D9peLM72X7bPweRiT2zyro/Ed+zPkv53D80nYo/",
+          "encoding": "base64"
+        }
+      },
+      {
+        "object_type": "array",
+        "shape": [3, 3],
+        "dtype": "float32",
+        "data": {
+          "buffer": "1nMZP3ZqWD+o/mc9O4h+Pguuqz82rqU/4YmdP2JxRD8mSf8/",
+          "encoding": "base64"
+        }
+      },
+      {
+        "object_type": "array",
+        "shape": [3, 3],
+        "dtype": "float32",
+        "data": {
+          "buffer": "Bhj7P65/rz+AhKY/DD6wP7UgRz+9Voo+drO4P599hj8G2B4/",
+          "encoding": "base64"
+        }
+      },
+      {
+        "object_type": "array",
+        "shape": [3, 3],
+        "dtype": "float32",
+        "data": {
+          "buffer": "ar94P3q14z96He8/7zA3P8dPkj8RzCQ/DCSYP7MCLT9Jgkg/",
+          "encoding": "base64"
+        }
+      },
+      {
+        "object_type": "array",
+        "shape": [3, 3],
+        "dtype": "float32",
+        "data": {
+          "buffer": "BenjPwCc6D4xiZ8/PRAsPiso1T9Gf8k/Qx31PkVh4D8J5e89",
+          "encoding": "base64"
+        }
+      },
+      {
+        "object_type": "array",
+        "shape": [3, 3],
+        "dtype": "float32",
+        "data": {
+          "buffer": "iRcsP9zimT7ikmY/6NvLP3kt7D5KFNU9ayFPPwFHyz683Dk+",
+          "encoding": "base64"
+        }
+      },
+      {
+        "object_type": "array",
+        "shape": [3, 3],
+        "dtype": "float32",
+        "data": {
+          "buffer": "qpCUP7PuGD/bB6w/x03MPlMu8T+47zo/6Q1YPjsNoT8AWu0/",
+          "encoding": "base64"
+        }
+      },
+      {
+        "object_type": "array",
+        "shape": [3, 3],
+        "dtype": "float32",
+        "data": {
+          "buffer": "HXlhPwtg9D9Y8n8/kbdZP0/Gnj+lvv4/+e3yPwmLaz+F+sE/",
+          "encoding": "base64"
+        }
+      },
+      {
+        "object_type": "array",
+        "shape": [4, 3],
+        "dtype": "float32",
+        "data": {
+          "buffer": "MK5+PwCBhz9AKck/xk1UPx4HvD92DbY/d5vuP81haz68oLo/qGvtPwPK9z+38vA8",
+          "encoding": "base64"
+        }
+      }
+    ],
+    "data_sum": {
+      "object_type": "array",
+      "shape": [3],
+      "dtype": "float32",
+      "data": {
+        "buffer": "LYyCQSpYiUFIT3tB",
+        "encoding": "base64"
+      }
+    }
+  },
+  "expected_exception": null,
+  "expected_exception_regex": null,
+  "atol": 1e-8,
+  "rtol": 1e-5,
+  "cli_config": {
+    "volume_mounts": ["../testdata:/tesseract/input_data:ro"]
+  },
+  "payload": {
+    "inputs": {
+      "data": "@/tesseract/input_data/sample_*.json"
+    }
+  }
+}

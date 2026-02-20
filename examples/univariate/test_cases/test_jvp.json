@@ -1,0 +1,30 @@
+{
+  "endpoint": "jacobian_vector_product",
+  "expected_outputs": {
+    "result": {
+      "object_type": "array",
+      "shape": [],
+      "dtype": "float32",
+      "data": {
+        "buffer": "AAAAwA==",
+        "encoding": "base64"
+      }
+    }
+  },
+  "expected_exception": null,
+  "expected_exception_regex": null,
+  "atol": 1e-8,
+  "rtol": 1e-5,
+  "payload": {
+    "inputs": {
+      "x": 0.0,
+      "y": 0.0
+    },
+    "jvp_inputs": ["x", "y"],
+    "jvp_outputs": ["result"],
+    "tangent_vector": {
+      "x": 1.0,
+      "y": 0.0
+    }
+  }
+}

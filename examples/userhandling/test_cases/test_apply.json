@@ -1,0 +1,16 @@
+{
+  "endpoint": "apply",
+  "expected_outputs": {
+    "uid": 505,
+    "gid": 21,
+    "username": "tesseract-user",
+    "home": "/tesseract",
+    "shell": "/bin/bash"
+  },
+  "expected_exception": null,
+  "expected_exception_regex": null,
+  "payload": {
+    "inputs": {}
+  },
+  "cli_config": { "user": "505:21" }
+}

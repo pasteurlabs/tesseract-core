@@ -37,12 +37,12 @@ from tesseract_core.runtime.file_interactions import (
     read_from_path,
     write_to_path,
 )
-from tesseract_core.runtime.finite_differences import (
-    check_gradients as check_gradients_,
-)
 from tesseract_core.runtime.mpa import start_run
 from tesseract_core.runtime.serve import create_rest_api
 from tesseract_core.runtime.serve import serve as serve_
+from tesseract_core.runtime.testing.finite_differences import (
+    check_gradients as check_gradients_,
+)
 
 CONFIG_FIELDS = {
     str(field_name): field.annotation

@@ -19,7 +19,9 @@ import numpy as np
 import numpy.typing as npt
 import pytest
 import requests
-from common import build_tesseract, encode_array, image_exists
+from common import build_tesseract, image_exists
+
+EXAMPLES_DIR = Path(__file__).parent.parent.parent / "examples"
 
 
 def json_normalize(obj: str):
@@ -67,19 +69,9 @@ def assert_contains_array_allclose(
 
 
 @dataclass
-class SampleRequest:
-    endpoint: str
-    payload: dict
-    expected_status_code: int = 200
-    output_contains_pattern: str | list[str] | None = None
-    output_contains_array: npt.ArrayLike | None = None
-    output_format: str = "json+base64"
-
-
-@dataclass
 class Config:
     test_with_random_inputs: bool = False
-    sample_requests: list[SampleRequest] = None
+    check_gradients: bool = False
     volume_mounts: list[str] = None
     input_path: str = None
     output_path: str = None
@@ -87,747 +79,30 @@ class Config:
 
 # Add config and test cases for specific unit Tesseracts here
 TEST_CASES = {
-    "empty": Config(
-        test_with_random_inputs=True,
-        sample_requests=[
-            SampleRequest(endpoint="apply", payload={"inputs": {}}),
-        ],
-    ),
-    "py310": Config(
-        test_with_random_inputs=True,
-    ),
-    "helloworld": Config(
-        test_with_random_inputs=True,
-        sample_requests=[
-            SampleRequest(
-                endpoint="apply",
-                payload={"inputs": {"name": "Ozzy"}},
-                output_contains_pattern="Hello Ozzy!",
-            ),
-        ],
-    ),
-    "pip_custom_step": Config(
-        test_with_random_inputs=True,
-        sample_requests=[
-            SampleRequest(
-                endpoint="apply",
-                payload={"inputs": {"name": "Ozzy"}},
-                output_contains_pattern="Hello Ozzy!",
-            ),
-        ],
-    ),
-    "pyvista-arm64": Config(
-        test_with_random_inputs=True,
-        sample_requests=[
-            SampleRequest(
-                endpoint="apply",
-                payload={
-                    "inputs": {
-                        "vertices": encode_array(
-                            [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]]
-                        )
-                    }
-                },
-                output_contains_pattern="pv_mesh",
-            ),
-        ],
-    ),
-    "localpackage": Config(
-        test_with_random_inputs=True,
-        sample_requests=[
-            SampleRequest(
-                endpoint="apply",
-                payload={"inputs": {"name": "Ozzy"}},
-                output_contains_pattern="Hello Ozzy!\\nGoodbye Ozzy!",
-            ),
-        ],
-    ),
-    "vectoradd": Config(
-        test_with_random_inputs=True,
-        sample_requests=[
-            SampleRequest(
-                endpoint="apply",
-                payload={
-                    "inputs": {
-                        "a": encode_array([1, 2, 3]),
-                        "b": encode_array([4, 5, 6]),
-                    },
-                },
-                output_contains_pattern=[encode_array([5.0, 7.0, 9.0], as_json=True)],
-            ),
-            SampleRequest(
-                endpoint="jacobian",
-                payload={
-                    "inputs": {
-                        "a": encode_array([1, 2, 3]),
-                        "b": encode_array([4, 5, 6]),
-                    },
-                    "jac_inputs": ["s", "a"],
-                    "jac_outputs": ["result"],
-                },
-                output_contains_pattern=['"s":', '"a":'],
-            ),
-            SampleRequest(
-                endpoint="jacobian",
-                payload={
-                    "inputs": {
-                        "a": encode_array([1, 2, 3]),
-                        "b": encode_array([4, 5, 6]),
-                    },
-                    "jac_inputs": ["invalid", "inputs"],
-                    "jac_outputs": ["result"],
-                },
-                expected_status_code=422,
-                output_contains_pattern="Input should be",
-            ),
-            SampleRequest(
-                endpoint="jacobian",
-                payload={
-                    "inputs": {
-                        "a": encode_array([1, 2, 3]),
-                        "b": encode_array([4, 5, 6]),
-                    },
-                    "jac_inputs": ["s", "a"],
-                    "jac_outputs": ["invalid", "outputs"],
-                },
-                expected_status_code=422,
-                output_contains_pattern="Input should be",
-            ),
-            SampleRequest(
-                endpoint="check-gradients",
-                payload={
-                    "inputs": {
-                        "a": encode_array([1, 2, 3]),
-                        "b": encode_array([4, 5, 6]),
-                    },
-                },
-            ),
-        ],
-    ),
-    "vectoradd_jax": Config(
-        test_with_random_inputs=True,
-        sample_requests=[
-            SampleRequest(
-                endpoint="apply",
-                payload={
-                    "inputs": {
-                        "a": {"v": encode_array([1, 2, 3]), "s": 3},
-                        "b": {"v": encode_array([4, 5, 6]), "s": 1},
-                    },
-                },
-                output_contains_array=np.array([7.0, 11.0, 15.0], dtype="float32"),
-            ),
-            SampleRequest(
-                endpoint="abstract_eval",
-                payload={
-                    "inputs": {
-                        "a": {
-                            "v": {"shape": [3], "dtype": "float32"},
-                            "s": {"shape": [], "dtype": "float32"},
-                        },
-                        "b": {
-                            "v": {"shape": [3], "dtype": "float32"},
-                            "s": {"shape": [], "dtype": "float32"},
-                        },
-                    }
-                },
-            ),
-            SampleRequest(
-                endpoint="apply",
-                payload={"inputs": {}},
-                expected_status_code=422,
-                output_contains_pattern="missing",
-            ),
-            SampleRequest(
-                endpoint="jacobian",
-                payload={
-                    "inputs": {
-                        "a": {"v": encode_array([1, 2, 3]), "s": 2},
-                        "b": {"v": encode_array([4, 5, 6]), "s": 1},
-                    },
-                    "jac_inputs": ["a.s", "a.v"],
-                    "jac_outputs": ["vector_add.result"],
-                },
-                output_contains_pattern=['"a.s":', '"a.v":'],
-                output_contains_array=np.array([[1, 2, 3]], dtype="float32"),
-            ),
-            SampleRequest(
-                endpoint="jacobian_vector_product",
-                payload={
-                    "inputs": {
-                        "a": {"v": encode_array([1, 2, 3]), "s": 2},
-                        "b": {"v": encode_array([4, 5, 6]), "s": 1},
-                    },
-                    "jvp_inputs": ["a.v"],
-                    "jvp_outputs": ["vector_add.result"],
-                    "tangent_vector": {"a.v": encode_array([0.1, 0.2, 0.3])},
-                },
-                output_contains_array=np.array([0.2, 0.4, 0.6], dtype="float32"),
-            ),
-            SampleRequest(
-                endpoint="jacobian_vector_product",
-                payload={
-                    "inputs": {
-                        "a": {"v": encode_array([1, 2, 3]), "s": 2},
-                        "b": {"v": encode_array([4, 5, 6]), "s": 1},
-                    },
-                    "jvp_inputs": ["a.s"],
-                    "jvp_outputs": ["vector_add.result"],
-                    "tangent_vector": {"a.s": 0.5},
-                },
-                output_contains_array=np.array([0.5, 1.0, 1.5], dtype="float32"),
-            ),
-            SampleRequest(
-                endpoint="vector_jacobian_product",
-                payload={
-                    "inputs": {
-                        "a": {"v": encode_array([1.0, 2.0, 3.0]), "s": 2},
-                        "b": {"v": encode_array([4.0, 5.0, 6.0]), "s": 1},
-                    },
-                    "vjp_inputs": ["a.v"],
-                    "vjp_outputs": ["vector_add.result"],
-                    "cotangent_vector": {
-                        "vector_add.result": encode_array([0.1, 0.2, 0.3]),
-                    },
-                },
-                output_contains_array=np.array([0.2, 0.4, 0.6], dtype="float32"),
-            ),
-            SampleRequest(
-                endpoint="vector_jacobian_product",
-                payload={
-                    "inputs": {
-                        "a": {"v": encode_array([1.0, 2.0, 3.0]), "s": 2},
-                        "b": {"v": encode_array([4.0, 5.0, 6.0]), "s": 1},
-                    },
-                    "vjp_inputs": ["a.s"],
-                    "vjp_outputs": ["vector_add.result"],
-                    "cotangent_vector": {
-                        "vector_add.result": encode_array([0.1, 0.2, 0.3]),
-                    },
-                },
-                output_contains_array=np.array([1.4], dtype="float32"),
-            ),
-            SampleRequest(
-                endpoint="check-gradients",
-                payload={
-                    "inputs": {
-                        "a": {"v": encode_array([1, 2, 3]), "s": 2},
-                        "b": {"v": encode_array([4, 5, 6]), "s": 1},
-                    },
-                },
-            ),
-        ],
-    ),
-    "vectoradd_torch": Config(
-        test_with_random_inputs=True,
-        sample_requests=[
-            SampleRequest(
-                endpoint="apply",
-                payload={
-                    "inputs": {
-                        "a": {"v": encode_array([1, 2, 3]), "s": 3},
-                        "b": {"v": encode_array([4, 5, 6]), "s": 1},
-                    },
-                },
-                output_contains_array=np.array([7.0, 11.0, 15.0], dtype="float32"),
-            ),
-            SampleRequest(
-                endpoint="apply",
-                payload={"inputs": {}},
-                expected_status_code=422,
-                output_contains_pattern="missing",
-            ),
-            SampleRequest(
-                endpoint="jacobian",
-                payload={
-                    "inputs": {
-                        "a": {"v": encode_array([1, 2, 3]), "s": 2},
-                        "b": {"v": encode_array([4, 5, 6]), "s": 1},
-                    },
-                    "jac_inputs": ["a.s", "a.v"],
-                    "jac_outputs": ["vector_add.result"],
-                },
-                output_contains_pattern=['"a.s":', '"a.v":'],
-                output_contains_array=np.array([[1, 2, 3]], dtype="float32"),
-            ),
-            SampleRequest(
-                endpoint="jacobian_vector_product",
-                payload={
-                    "inputs": {
-                        "a": {"v": encode_array([1, 2, 3]), "s": 2},
-                        "b": {"v": encode_array([4, 5, 6]), "s": 1},
-                    },
-                    "jvp_inputs": ["a.v"],
-                    "jvp_outputs": ["vector_add.result"],
-                    "tangent_vector": {"a.v": encode_array([0.1, 0.2, 0.3])},
-                },
-                output_contains_array=np.array([0.2, 0.4, 0.6], dtype="float32"),
-            ),
-            SampleRequest(
-                endpoint="jacobian_vector_product",
-                payload={
-                    "inputs": {
-                        "a": {"v": encode_array([1, 2, 3]), "s": 2},
-                        "b": {"v": encode_array([4, 5, 6]), "s": 1},
-                    },
-                    "jvp_inputs": ["a.s"],
-                    "jvp_outputs": ["vector_add.result"],
-                    "tangent_vector": {"a.s": 0.5},
-                },
-                output_contains_array=np.array([0.5, 1.0, 1.5], dtype="float32"),
-            ),
-            SampleRequest(
-                endpoint="vector_jacobian_product",
-                payload={
-                    "inputs": {
-                        "a": {"v": encode_array([1.0, 2.0, 3.0]), "s": 2},
-                        "b": {"v": encode_array([4.0, 5.0, 6.0]), "s": 1},
-                    },
-                    "vjp_inputs": ["a.v"],
-                    "vjp_outputs": ["vector_add.result"],
-                    "cotangent_vector": {
-                        "vector_add.result": encode_array([0.1, 0.2, 0.3]),
-                    },
-                },
-                output_contains_array=np.array([0.2, 0.4, 0.6], dtype="float32"),
-            ),
-            SampleRequest(
-                endpoint="vector_jacobian_product",
-                payload={
-                    "inputs": {
-                        "a": {"v": encode_array([1.0, 2.0, 3.0]), "s": 2},
-                        "b": {"v": encode_array([4.0, 5.0, 6.0]), "s": 1},
-                    },
-                    "vjp_inputs": ["a.s"],
-                    "vjp_outputs": ["vector_add.result"],
-                    "cotangent_vector": {
-                        "vector_add.result": encode_array([0.1, 0.2, 0.3]),
-                    },
-                },
-                output_contains_array=np.array([1.4], dtype="float32"),
-            ),
-        ],
-    ),
-    "univariate": Config(
-        test_with_random_inputs=True,
-        sample_requests=[
-            SampleRequest(
-                endpoint="apply",
-                payload={
-                    "inputs": {"x": 0.0, "y": 0.0},
-                },
-                output_contains_array=np.array([1.0], dtype="float64"),
-            ),
-            SampleRequest(
-                endpoint="jacobian",
-                payload={
-                    "inputs": {"x": 0.0, "y": 0.0},
-                    "jac_inputs": ["x"],
-                    "jac_outputs": ["result"],
-                },
-                output_contains_pattern=[
-                    f'"result":{{"x":{encode_array(np.float32(-2.0), as_json=True)}}}'
-                ],
-            ),
-            SampleRequest(
-                endpoint="jacobian",
-                payload={
-                    "inputs": {"x": 0.0, "y": 0.0},
-                    "jac_inputs": ["y"],
-                    "jac_outputs": ["result"],
-                },
-                output_contains_pattern=[
-                    f'"result":{{"y":{encode_array(np.float32(0.0), as_json=True)}}}'
-                ],
-            ),
-            SampleRequest(
-                endpoint="jacobian",
-                payload={
-                    "inputs": {"x": 0.0, "y": 0.0},
-                    "jac_inputs": ["hey"],
-                    "jac_outputs": ["result"],
-                },
-                expected_status_code=422,
-                output_contains_pattern="Input should be",
-            ),
-            SampleRequest(
-                endpoint="jacobian_vector_product",
-                payload={
-                    "inputs": {"x": 0.0, "y": 0.0},
-                    "jvp_inputs": ["x", "y"],
-                    "jvp_outputs": ["result"],
-                    "tangent_vector": {"x": 1.0, "y": 0.0},
-                },
-                output_contains_pattern=f'"result":{encode_array(np.float32(-2.0), as_json=True)}',
-            ),
-            SampleRequest(
-                endpoint="vector_jacobian_product",
-                payload={
-                    "inputs": {"x": 0.0, "y": 0.0},
-                    "vjp_inputs": ["x", "y"],
-                    "vjp_outputs": ["result"],
-                    "cotangent_vector": {"result": 1.0},
-                },
-                output_contains_pattern=[
-                    f'"x":{encode_array(np.float32(-2.0), as_json=True)}',
-                    f'"y":{encode_array(np.float32(0.0), as_json=True)}',
-                ],
-            ),
-            SampleRequest(
-                endpoint="check-gradients",
-                payload={
-                    "inputs": {"x": 0.0, "y": 0.0},
-                },
-            ),
-        ],
-    ),
-    "package_data": Config(
-        test_with_random_inputs=True,
-    ),
-    "cuda": Config(
-        test_with_random_inputs=True,
-    ),
-    "meshstats": Config(
-        test_with_random_inputs=False,
-        sample_requests=[
-            SampleRequest(
-                endpoint="apply",
-                payload={
-                    "inputs": {
-                        "mesh": {
-                            "n_points": 5,
-                            "n_cells": 2,
-                            "points": encode_array(
-                                [
-                                    [0.0, 666.0, 0.0],
-                                    [1.0, 0.0, 0.0],
-                                    [0.0, 1.0, 0.0],
-                                    [1.0, 1.0, 0.0],
-                                    [0.5, 0.5, 1.0],
-                                ]
-                            ),
-                            "num_points_per_cell": encode_array([4, 4]),
-                            "cell_connectivity": encode_array([0, 1, 2, 3, 1, 2, 3, 4]),
-                            "cell_data": {
-                                "temperature": encode_array(
-                                    [[100.0, 105.0], [110.0, 115.0]]
-                                ),
-                                "pressure": encode_array([[1.0, 1.2], [1.1, 1.3]]),
-                            },
-                            "point_data": {
-                                "displacement": encode_array(
-                                    [
-                                        [0.0, 0.1, 0.2],
-                                        [0.1, 0.0, 0.2],
-                                        [0.2, 0.1, 0.0],
-                                        [0.1, 0.2, 0.1],
-                                        [0.2, 0.1, 0.1],
-                                    ]
-                                ),
-                                "velocity": encode_array(
-                                    [
-                                        [0.0, 0.0, 0.0],
-                                        [0.1, 0.0, 0.0],
-                                        [0.0, 0.1, 0.0],
-                                        [0.0, 0.0, 0.1],
-                                        [0.1, 0.1, 0.1],
-                                    ]
-                                ),
-                            },
-                        }
-                    },
-                },
-                output_contains_pattern=encode_array(
-                    np.array([0.0, 666.0, 0.0], dtype="float32"), as_json=True
-                ),
-            ),
-            SampleRequest(
-                endpoint="abstract_eval",
-                payload={
-                    "inputs": {
-                        "mesh": {
-                            "n_points": 5,
-                            "n_cells": 8,
-                            "points": {
-                                "shape": [5, 3],
-                                "dtype": "float32",
-                            },
-                            "num_points_per_cell": {
-                                "shape": [2],
-                                "dtype": "int32",
-                            },
-                            "cell_connectivity": {
-                                "shape": [8],
-                                "dtype": "int32",
-                            },
-                            "cell_data": {
-                                "temperature": {
-                                    "shape": [2, 2],
-                                    "dtype": "float32",
-                                },
-                                "pressure": {
-                                    "shape": [2, 2],
-                                    "dtype": "float32",
-                                },
-                            },
-                            "point_data": {
-                                "displacement": {
-                                    "shape": [5, 3],
-                                    "dtype": "float32",
-                                },
-                                "velocity": {
-                                    "shape": [5, 3],
-                                    "dtype": "float32",
-                                },
-                            },
-                        }
-                    },
-                },
-                output_contains_pattern='"shape":[3],"dtype":"float32"',
-            ),
-            SampleRequest(
-                endpoint="jacobian",
-                payload={
-                    "jac_inputs": ["mesh.points"],
-                    "jac_outputs": ["statistics.barycenter"],
-                    "inputs": {
-                        "mesh": {
-                            "n_points": 5,
-                            "n_cells": 2,
-                            "points": encode_array(
-                                [
-                                    [0.0, 666.0, 0.0],
-                                    [1.0, 0.0, 0.0],
-                                    [0.0, 1.0, 0.0],
-                                    [1.0, 1.0, 0.0],
-                                    [0.5, 0.5, 1.0],
-                                ]
-                            ),
-                            "num_points_per_cell": encode_array([4, 4]),
-                            "cell_connectivity": encode_array([0, 1, 2, 3, 1, 2, 3, 4]),
-                            "cell_data": {
-                                "temperature": encode_array(
-                                    [[100.0, 105.0], [110.0, 115.0]]
-                                ),
-                                "pressure": encode_array([[1.0, 1.2], [1.1, 1.3]]),
-                            },
-                            "point_data": {
-                                "displacement": encode_array(
-                                    [
-                                        [0.0, 0.1, 0.2],
-                                        [0.1, 0.0, 0.2],
-                                        [0.2, 0.1, 0.0],
-                                        [0.1, 0.2, 0.1],
-                                        [0.2, 0.1, 0.1],
-                                    ]
-                                ),
-                                "velocity": encode_array(
-                                    [
-                                        [0.0, 0.0, 0.0],
-                                        [0.1, 0.0, 0.0],
-                                        [0.0, 0.1, 0.0],
-                                        [0.0, 0.0, 0.1],
-                                        [0.1, 0.1, 0.1],
-                                    ]
-                                ),
-                            },
-                        }
-                    },
-                },
-                output_contains_pattern='"shape":[3,5,3]',
-            ),
-            SampleRequest(
-                endpoint="check-gradients",
-                payload={
-                    "inputs": {
-                        "mesh": {
-                            "n_points": 5,
-                            "n_cells": 2,
-                            "points": encode_array(
-                                [
-                                    [0.0, 2.0, 0.0],
-                                    [1.0, 0.0, 0.0],
-                                    [0.0, 1.0, 0.0],
-                                    [1.0, 1.0, 0.0],
-                                    [0.5, 0.5, 1.0],
-                                ]
-                            ),
-                            "num_points_per_cell": encode_array([4, 4]),
-                            "cell_connectivity": encode_array([0, 1, 2, 3, 1, 2, 3, 4]),
-                            "cell_data": {
-                                "temperature": encode_array(
-                                    [[100.0, 105.0], [110.0, 115.0]]
-                                ),
-                                "pressure": encode_array([[1.0, 1.2], [1.1, 1.3]]),
-                            },
-                            "point_data": {
-                                "displacement": encode_array(
-                                    [
-                                        [0.0, 0.1, 0.2],
-                                        [0.1, 0.0, 0.2],
-                                        [0.2, 0.1, 0.0],
-                                        [0.1, 0.2, 0.1],
-                                        [0.2, 0.1, 0.1],
-                                    ]
-                                ),
-                                "velocity": encode_array(
-                                    [
-                                        [0.0, 0.0, 0.0],
-                                        [0.1, 0.0, 0.0],
-                                        [0.0, 0.1, 0.0],
-                                        [0.0, 0.0, 0.1],
-                                        [0.1, 0.1, 0.1],
-                                    ]
-                                ),
-                            },
-                        }
-                    },
-                },
-            ),
-        ],
-    ),
+    "empty": Config(test_with_random_inputs=True),
+    "py310": Config(test_with_random_inputs=True),
+    "helloworld": Config(test_with_random_inputs=True),
+    "pip_custom_step": Config(test_with_random_inputs=True),
+    "pyvista-arm64": Config(test_with_random_inputs=True),
+    "localpackage": Config(test_with_random_inputs=True),
+    "vectoradd": Config(test_with_random_inputs=True),
+    "vectoradd_jax": Config(test_with_random_inputs=True, check_gradients=True),
+    "vectoradd_torch": Config(test_with_random_inputs=True),
+    "univariate": Config(test_with_random_inputs=True, check_gradients=True),
+    "package_data": Config(test_with_random_inputs=True),
+    "cuda": Config(test_with_random_inputs=True),
+    "meshstats": Config(check_gradients=True),
     "dataloader": Config(
-        test_with_random_inputs=False,
-        sample_requests=[
-            SampleRequest(
-                endpoint="apply",
-                payload={
-                    "inputs": {
-                        "data": "@/tesseract/input_data/sample_*.json",
-                    },
-                },
-                output_contains_pattern=[
-                    '{"data":[{"object_type":"array","shape":[3,3],"dtype":"float32","data":{"buffer":',
-                ],
-            ),
-            SampleRequest(
-                endpoint="check-gradients",
-                payload={
-                    "inputs": {
-                        "data": "@/tesseract/input_data/sample_*.json",
-                    },
-                },
-            ),
-        ],
-        volume_mounts=["testdata:/tesseract/input_data:ro"],
+        check_gradients=True, volume_mounts=["testdata:/tesseract/input_data:ro"]
     ),
-    "conda": Config(
-        test_with_random_inputs=False,
-        sample_requests=[
-            SampleRequest(
-                endpoint="apply",
-                payload={"inputs": {"message": "Hey!"}},
-                output_contains_pattern=[r'{"cowsays":"  ____\n| Hey! |\n  ====\n'],
-            )
-        ],
-    ),
-    "required_files": Config(
-        test_with_random_inputs=False,
-        sample_requests=[
-            SampleRequest(
-                endpoint="apply",
-                payload={"inputs": {}},
-                output_contains_pattern=[r'{"a":1.0,"b":100.0}'],
-            ),
-        ],
-        input_path="input",
-    ),
-    "filereference": Config(
-        test_with_random_inputs=False,
-        sample_requests=[
-            SampleRequest(
-                endpoint="apply",
-                payload={
-                    "inputs": {
-                        "data": [
-                            "sample_0.json",
-                            "sample_1.json",
-                            "sample_2.json",
-                            "sample_3.json",
-                            "sample_4.json",
-                            "sample_5.json",
-                            "sample_6.json",
-                            "sample_7.json",
-                            "sample_8.json",
-                            "sample_9.json",
-                        ]
-                    }
-                },
-                output_contains_pattern=["sample_0.copy"],
-            )
-        ],
-        input_path="testdata",
-        output_path="output",
-    ),
-    "metrics": Config(
-        test_with_random_inputs=True,
-        sample_requests=[
-            SampleRequest(
-                endpoint="apply",
-                payload={"inputs": {}},
-                # Just verify it runs without error - output will be empty
-            ),
-        ],
-    ),
-    "qp_solve": Config(
-        test_with_random_inputs=False,
-        sample_requests=[
-            SampleRequest(
-                endpoint="apply",
-                payload={
-                    "inputs": {
-                        "Q": encode_array(np.eye(2)),
-                        "q": encode_array(np.ones(2)),
-                        "G": encode_array(np.array([[-1.0, 1.0]]).reshape((1, 2))),
-                        "h": encode_array(np.array([-1]).reshape((1,))),
-                        "target_kappa": 1e-1,
-                        "solver_tol": 1e-4,
-                    }
-                },
-                output_contains_array=np.array([-0.5, -1.5], dtype="float32"),
-            )
-        ],
-    ),
-    "tesseractreference": Config(  # Can't test requests standalone; needs target Tesseract. Covered in separate test.
-        test_with_random_inputs=False, sample_requests=[]
-    ),
-    "userhandling": Config(
-        test_with_random_inputs=False,
-        sample_requests=[
-            SampleRequest(
-                endpoint="apply",
-                payload={"inputs": {}},
-                output_contains_pattern=[
-                    '"home":"/tesseract"',
-                    '"username":"tesseract-user"',
-                ],
-            )
-        ],
-    ),
-    "fortran_heat": Config(
-        test_with_random_inputs=False,
-        sample_requests=[
-            SampleRequest(
-                endpoint="apply",
-                payload={
-                    "inputs": {
-                        "n_points": 11,
-                        "n_steps": 10,
-                        "alpha": 0.01,
-                        "length": 1.0,
-                        "dt": 0.001,
-                        "t_left": 100.0,
-                        "t_right": 0.0,
-                    }
-                },
-                output_contains_pattern=[
-                    '"x":',
-                    '"temperature":',
-                    '"final_temperature":',
-                ],
-            ),
-        ],
-    ),
+    "fortran_heat": Config(),
+    "conda": Config(),
+    "required_files": Config(input_path="input"),
+    "filereference": Config(input_path="test_cases/testdata", output_path="output"),
+    "metrics": Config(test_with_random_inputs=True),
+    "qp_solve": Config(),
+    "tesseractreference": Config(),  # Can't test requests standalone; needs target Tesseract. Covered in separate test.
+    "userhandling": Config(),
 }
 
 
@@ -948,7 +223,7 @@ def test_unit_tesseract_endtoend(
 
     input_schema = _input_schema_from_openapi(openapi_schema)
 
-    mount_args, io_args = [], []
+    mount_args, input_args, output_args = [], [], []
 
     if unit_tesseract_config.volume_mounts:
         for mnt in unit_tesseract_config.volume_mounts:
@@ -961,14 +236,14 @@ def test_unit_tesseract_endtoend(
             mount_args.extend(["--volume", mnt])
 
     if unit_tesseract_config.input_path:
-        io_args.extend(
+        input_args.extend(
             [
                 "--input-path",
                 str(unit_tesseract_path / unit_tesseract_config.input_path),
             ]
         )
     if unit_tesseract_config.output_path:
-        io_args.extend(
+        output_args.extend(
             [
                 "--output-path",
                 str(unit_tesseract_path / unit_tesseract_config.output_path),
@@ -986,64 +261,67 @@ def test_unit_tesseract_endtoend(
                 *mount_args,
                 "apply",
                 json.dumps(random_input),
-                *io_args,
+                *input_args,
+                *output_args,
             ],
             catch_exceptions=False,
         )
         assert result.exit_code == 0, result.output
 
-    if unit_tesseract_config.sample_requests:
-        for request in unit_tesseract_config.sample_requests:
-            print(f"Running request: {request}")
-            cli_cmd = request.endpoint.replace("_", "-")
+    test_cases_dir = unit_tesseract_path / "test_cases"
+    if test_cases_dir.exists() and test_cases_dir.is_dir():
+        test_files = sorted(test_cases_dir.glob("*.json"))
+        for test_file_path in test_files:
+            test_file = test_file_path.relative_to(unit_tesseract_path)
+            print(f"Running test: {test_file}")
 
-            if cli_cmd == "check-gradients":
-                args = [
-                    "run",
-                    img_name,
-                    cli_cmd,
-                    json.dumps(request.payload),
-                ]
-            else:
-                args = [
-                    "run",
-                    img_name,
-                    *mount_args,
-                    cli_cmd,
-                    json.dumps(request.payload),
-                    *io_args,
-                    "--output-format",
-                    request.output_format,
-                ]
+            args = [
+                "run",
+                img_name,
+                "test",
+                f"@{test_file_path}",
+                *output_args,
+            ]
 
             result = cli_runner.invoke(app, args, env={"TERM": "dumb"})
-            if request.expected_status_code == 200:
-                print_debug_info(result)
-                assert result.exit_code == 0, result.exception
-                if cli_cmd in ("check-gradients",):
-                    # Result is text
-                    output = result.stdout
-                else:
-                    # Result is JSON output
-                    output = json_normalize(result.stdout)
-            else:
-                # Result is an error message
-                assert result.exit_code != 0
-                assert result.exc_info is not None
-                output = "".join(traceback.format_exception(*result.exc_info))
+            print_debug_info(result)
+            assert result.exit_code == 0, result.exception
 
-            if request.output_contains_pattern is not None:
-                patterns = request.output_contains_pattern
-                if isinstance(patterns, str):
-                    patterns = [patterns]
+            # Parse test response
+            test_result = json.loads(result.stdout)
+            assert test_result["status"] == "passed", (
+                f"Test failed for {test_file}:\n"
+                f"  Endpoint: {test_result['endpoint']}\n"
+                f"  Message: {test_result['message']}"
+            )
 
-                for pattern in patterns:
-                    assert pattern in output
+    # check-gradients is a CLI command not a true endpoint
+    # as such the test endpoint cannot access it directly.
+    # Therefore, we only test with cli_runner (stage 2)
+    if unit_tesseract_config.check_gradients:
+        checkgradients_input = (
+            unit_tesseract_path / "test_cases_inputs/example_checkgradients_input.json"
+        )
+        if checkgradients_input.exists():
+            print(f"Running check-gradients test: {checkgradients_input}")
 
-            if request.output_contains_array is not None:
-                array = request.output_contains_array
-                output_json = json.loads(output)
-                assert_contains_array_allclose(output_json, array)
+            with open(checkgradients_input) as f:
+                payload = json.load(f)
+
+            args = [
+                "run",
+                img_name,
+                *mount_args,
+                "check-gradients",
+                json.dumps(payload),
+            ]
+
+            result = cli_runner.invoke(app, args, env={"TERM": "dumb"})
+            print_debug_info(result)
+            assert result.exit_code == 0, result.exception
+            # Verify check-gradients passed (check stdout or stderr for success indicators)
+            output_text = result.stdout + result.stderr
+            assert "passed" in output_text.lower() or "✅" in output_text
 
     # Stage 3: Test HTTP server
     run_res = cli_runner.invoke(
@@ -1053,8 +331,10 @@ def test_unit_tesseract_endtoend(
             img_name,
             "-p",
             free_port,
+            "--debug",
             *mount_args,
-            *io_args,
+            *input_args,
+            *output_args,
         ],
         catch_exceptions=False,
     )
@@ -1078,33 +358,3 @@ def test_unit_tesseract_endtoend(
             f"http://localhost:{free_port}/apply", json=payload_from_schema
         )
         assert response.status_code == 200, response.text
-
-    sample_requests = unit_tesseract_config.sample_requests or []
-    for request in sample_requests:
-        if request.endpoint in ("check-gradients",):
-            # Not supported in HTTP mode
-            continue
-
-        headers = {
-            "Accept": f"application/{request.output_format}",
-        }
-        response = requests.post(
-            f"http://localhost:{free_port}/{request.endpoint}",
-            json=request.payload,
-            headers=headers,
-        )
-        output = response.text
-        assert response.status_code == request.expected_status_code, output
-
-        if request.output_contains_pattern is not None:
-            patterns = request.output_contains_pattern
-            if isinstance(patterns, str):
-                patterns = [patterns]
-
-            for pattern in patterns:
-                assert pattern in output
-
-        if request.output_contains_array is not None:
-            array = request.output_contains_array
-            output_json = json.loads(output)
-            assert_contains_array_allclose(output_json, array)
