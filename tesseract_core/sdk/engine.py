@@ -214,7 +214,7 @@ def prepare_build_context(
 
     template_dir = get_template_dir()
 
-    extra_files = [template_dir / "entrypoint.sh", template_dir / "addmeplease.c"]
+    extra_files = [template_dir / "entrypoint.sh"]
 
     requirement_config = user_config.build_config.requirements
     extra_files.append(template_dir / requirement_config._build_script)
