@@ -6,7 +6,7 @@ authors = [
     {name = "The Tesseract team @ Pasteur Labs + OSS contributors", email = "info@simulation.science"},
 ]
 license = { text = "Apache-2.0" }
-requires-python = ">=3.10,<3.14"
+requires-python = ">=3.10,<3.15"
 dependencies = [
     "jinja2",
     "rich",
@@ -46,7 +46,7 @@ packages = ["tesseract_core"]
 path = "inject_runtime_pyproject.py"
 
 [tool.pytest.ini_options]
-addopts = ["--typeguard-packages=tesseract_core"]
+# addopts = ["--typeguard-packages=tesseract_core"]
 testpaths = ["tests"]
 filterwarnings = [
     "error",

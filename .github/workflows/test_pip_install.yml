@@ -15,7 +15,7 @@ jobs:
           - macos-latest
         python-version:
           - "3.10"
-          - "3.13"
+          - "3.14"
 
       fail-fast: false
 
