@@ -210,13 +210,12 @@ def _validate_tree_structure(
     template: Any,
     path_patterns: dict[tuple, type] | None = None,
     path: tuple[str, ...] = (),
-) -> dict[tuple[str, ...], tuple[Any, Any]]:
+) -> tuple[dict[tuple[str, ...], tuple[Any, Any]], list[str]]:
     """Recursively validate a tree-like structure against a template and collect leaf values.
 
     Compares types, dictionary keys, sequence lengths, array shapes and dtypes.
-    Does not compare values, raises AssertionError on first mismatch. Uses schema
-    path patterns to distinguish between dict keys (formatted as "{key}") and model
-    attributes (formatted as "attribute").
+    Does not compare values. Uses schema path patterns to distinguish between
+    dict keys (formatted as "{key}") and model attributes (formatted as "attribute").
 
     Args:
         tree: The tree structure to validate (obtained values).
@@ -226,16 +225,19 @@ def _validate_tree_structure(
         path: Current path in the tree traversal (for error messages).
 
     Returns:
-        Dict mapping path tuples to (tree_leaf, template_leaf) tuples.
-
-    Raises:
-        ValueError: If structures don't match (type, keys, length, shape, dtype).
+        Tuple of (leaves, errors) where leaves is a dict mapping path tuples to
+        (tree_leaf, template_leaf) tuples, and errors is a list of structural
+        mismatch messages. Both may be non-empty when some subtrees match and
+        others don't.
     """
     if type(tree) is not type(template):
-        raise ValueError(
-            f"Type mismatch at {'.'.join(path)}:\n"
-            f"  Expected: {type(template).__name__}, "
-            f"  Obtained: {type(tree).__name__}"
+        return (
+            {},
+            [
+                f"Type mismatch at {'.'.join(path)}:\n"
+                f"  Expected: {type(template).__name__}, "
+                f"  Obtained: {type(tree).__name__}"
+            ],
         )
 
     if isinstance(template, Mapping):  # Dictionary-like structure
@@ -254,8 +256,9 @@ def _validate_tree_structure(
         tree_keys = set(tree.keys())
         template_keys = set(template.keys())
 
+        errors: list[str] = []
         if tree_keys != template_keys:
-            raise ValueError(
+            errors.append(
                 f"{key_or_attribute.capitalize()} mismatch at {'.'.join(path)}:\n"
                 f"  Missing {key_or_attribute}s: {template_keys - tree_keys}\n"
                 f"  Unexpected {key_or_attribute}s: {tree_keys - template_keys}\n"
@@ -263,7 +266,7 @@ def _validate_tree_structure(
             )
 
         leaves = {}
-        for key in template_keys:
+        for key in template_keys & tree_keys:
             if is_dict:
                 # Drop sentinel
                 if path_patterns:
@@ -279,24 +282,27 @@ def _validate_tree_structure(
                     for k, v in path_patterns.items()
                     if len(k) > 1 and k[0] == key
                 }
-            leaves.update(
-                _validate_tree_structure(
-                    tree[key],
-                    template[key],
-                    next_path_patterns,
-                    (*path, f"{{{key}}}" if is_dict else f"{key}"),
-                )
+            child_leaves, child_errors = _validate_tree_structure(
+                tree[key],
+                template[key],
+                next_path_patterns,
+                (*path, f"{{{key}}}" if is_dict else f"{key}"),
             )
-        return leaves
+            leaves.update(child_leaves)
+            errors.extend(child_errors)
+        return leaves, errors
 
     elif isinstance(template, Sequence) and not isinstance(
         template, (str, bytes)
     ):  # List, tuple, etc.
         if len(tree) != len(template):
-            raise ValueError(
-                f"Mismatch in length of {type(template).__name__} at {'.'.join(path)}:\n"
-                f"  Expected: {len(template)}\n"
-                f"  Obtained: {len(tree)}"
+            return (
+                {},
+                [
+                    f"Mismatch in length of {type(template).__name__} at {'.'.join(path)}:\n"
+                    f"  Expected: {len(template)}\n"
+                    f"  Obtained: {len(tree)}"
+                ],
             )
 
         # Drop sentinel
@@ -306,32 +312,36 @@ def _validate_tree_structure(
             next_path_patterns = None
 
         leaves = {}
+        errors = []
         for i, (tree_branch, template_branch) in enumerate(
             zip(tree, template, strict=True)
         ):
-            leaves.update(
-                _validate_tree_structure(
-                    tree_branch, template_branch, next_path_patterns, (*path, f"[{i}]")
-                )
+            child_leaves, child_errors = _validate_tree_structure(
+                tree_branch, template_branch, next_path_patterns, (*path, f"[{i}]")
             )
-        return leaves
+            leaves.update(child_leaves)
+            errors.extend(child_errors)
+        return leaves, errors
 
     elif isinstance(template, np.ndarray):
+        errors = []
         if tree.shape != template.shape:
-            raise ValueError(
+            errors.append(
                 f"Shape mismatch for array at {'.'.join(path)}: \n"
                 f"  Expected: {template.shape}\n"
                 f"  Obtained: {tree.shape}"
             )
         if tree.dtype != template.dtype:
-            raise ValueError(
+            errors.append(
                 f"dtype mismatch for array at {'.'.join(path)}:\n"
                 f"  Expected: {template.dtype}\n"
                 f"  Obtained: {tree.dtype}"
             )
+        if errors:
+            return {}, errors
 
     # Validation complete return path to leaf
-    return {path: (tree, template)}
+    return {path: (tree, template)}, []
 
 
 def _array_discrepancy_msg(
@@ -642,13 +652,14 @@ def regress_test_case(
 
     # Validate structure
     path_patterns = get_all_model_path_patterns(OutputSchema)
-    try:
-        obtained_expected_flat = _validate_tree_structure(
-            obtained_outputs, expected_outputs, path_patterns
-        )
-    except ValueError as e:
+    obtained_expected_flat, structure_errors = _validate_tree_structure(
+        obtained_outputs, expected_outputs, path_patterns
+    )
+    if structure_errors:
         return TestOutputSchema(
-            status="failed", message=str(e), endpoint=test_spec.endpoint
+            status="failed",
+            message="Structure mismatch.\n\n" + "\n\n".join(structure_errors),
+            endpoint=test_spec.endpoint,
         )
 
     # Compare values

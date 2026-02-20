@@ -615,21 +615,29 @@ class TestValidateTreeStructureInternals:
 
     def test_empty_containers(self):
         """Verify empty containers return empty dicts without raising."""
-        assert _validate_tree_structure({}, {}) == {}
-        assert _validate_tree_structure([], []) == {}
+        leaves, errors = _validate_tree_structure({}, {})
+        assert leaves == {}
+        assert errors == []
+        leaves, errors = _validate_tree_structure([], [])
+        assert leaves == {}
+        assert errors == []
 
     def test_path_tracking(self):
         """Test that error messages contain correct path information."""
         # Deep nesting path - dicts are formatted as {key} when path_patterns=None
-        with pytest.raises(ValueError, match=r"\{foo\}\.\{bar\}\.\[2\]\.\{x\}"):
-            _validate_tree_structure(
-                {"foo": {"bar": [1, 2, {"x": 1}]}},
-                {"foo": {"bar": [1, 2, {"x": "1"}]}},
-            )
+        _, errors = _validate_tree_structure(
+            {"foo": {"bar": [1, 2, {"x": 1}]}},
+            {"foo": {"bar": [1, 2, {"x": "1"}]}},
+        )
+        assert len(errors) == 1
+        assert "{foo}.{bar}.[2].{x}" in errors[0]
 
         # List index path
-        with pytest.raises(ValueError, match=r"\[1\]\.\{b\}"):
-            _validate_tree_structure([{"a": 1}, {"b": 2}], [{"a": 1}, {"b": "2"}])
+        _, errors = _validate_tree_structure(
+            [{"a": 1}, {"b": 2}], [{"a": 1}, {"b": "2"}]
+        )
+        assert len(errors) == 1
+        assert "[1].{b}" in errors[0]
 
     def test_dict_vs_model_formatting(self):
         """Test that schema patterns distinguish dict keys from model attributes."""
@@ -639,28 +647,31 @@ class TestValidateTreeStructureInternals:
         path_patterns = {(DICT_INDEX_SENTINEL,): int}
         tree1 = {"foo": 1, "bar": 2}
         tree2 = {"foo": 10, "bar": 20}
-        leaves = _validate_tree_structure(tree1, tree2, path_patterns)
+        leaves, errors = _validate_tree_structure(tree1, tree2, path_patterns)
 
         # Dict keys formatted as {key}
         assert ("{foo}",) in leaves
         assert ("{bar}",) in leaves
+        assert errors == []
 
         # Schema says this is a model with attribute "foo"
         path_patterns = {("foo",): int}
         tree1 = {"foo": 1}
         tree2 = {"foo": 10}
-        leaves = _validate_tree_structure(tree1, tree2, path_patterns)
+        leaves, errors = _validate_tree_structure(tree1, tree2, path_patterns)
 
         # Model attributes formatted without braces
         assert ("foo",) in leaves
+        assert errors == []
 
     def test_leaf_collection(self):
         """Test that leaf values are collected with correct paths."""
         tree1 = {"scalar": 42, "array": np.array([1, 2, 3]), "nested": {"inner": 3.14}}
         tree2 = {"scalar": 100, "array": np.array([4, 5, 6]), "nested": {"inner": 2.71}}
 
-        leaves = _validate_tree_structure(tree1, tree2)
+        leaves, errors = _validate_tree_structure(tree1, tree2)
 
+        assert errors == []
         assert len(leaves) == 3
         # Dicts are formatted as {key} when path_patterns=None
         assert ("{scalar}",) in leaves
@@ -668,6 +679,23 @@ class TestValidateTreeStructureInternals:
         assert ("{nested}", "{inner}") in leaves
         assert leaves[("{scalar}",)] == (42, 100)
         assert leaves[("{nested}", "{inner}")] == (3.14, 2.71)
+
+    def test_multi_error_collection(self):
+        """Verify sibling subtree errors are all collected."""
+        tree = {"a": [1, 2, 3], "b": "hello"}
+        template = {"a": [1, 2], "b": 42}
+
+        leaves, errors = _validate_tree_structure(tree, template)
+
+        assert leaves == {}
+        assert len(errors) == 2
+        # One error for length mismatch, one for type mismatch
+        length_errors = [e for e in errors if "length" in e.lower()]
+        type_errors = [e for e in errors if "Type mismatch" in e]
+        assert len(length_errors) == 1
+        assert len(type_errors) == 1
+        assert "{a}" in length_errors[0]
+        assert "{b}" in type_errors[0]
 
 
 class TestArrayDiscrepancyMsg:
