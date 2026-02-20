@@ -1,0 +1,77 @@
+{
+  "endpoint": "apply",
+  "expected_outputs": {
+    "vector_add": {
+      "result": {
+        "object_type": "array",
+        "shape": [3],
+        "dtype": "float32",
+        "data": {
+          "buffer": "AADgQAAAMEEAAHBB",
+          "encoding": "base64"
+        }
+      },
+      "normed_result": {
+        "object_type": "array",
+        "shape": [3],
+        "dtype": "float32",
+        "data": {
+          "buffer": "o1S0PjewDT8cNkE/",
+          "encoding": "base64"
+        }
+      }
+    },
+    "vector_min": {
+      "result": {
+        "object_type": "array",
+        "shape": [3],
+        "dtype": "float32",
+        "data": {
+          "buffer": "AACAvwAAgD8AAEBA",
+          "encoding": "base64"
+        }
+      },
+      "normed_result": {
+        "object_type": "array",
+        "shape": [3],
+        "dtype": "float32",
+        "data": {
+          "buffer": "sl+avrJfmj6Kj2c/",
+          "encoding": "base64"
+        }
+      }
+    }
+  },
+  "expected_exception": null,
+  "expected_exception_regex": null,
+  "atol": 1e-8,
+  "rtol": 1e-5,
+  "payload": {
+    "inputs": {
+      "a": {
+        "v": {
+          "object_type": "array",
+          "shape": [3],
+          "dtype": "int64",
+          "data": {
+            "buffer": "AQAAAAAAAAACAAAAAAAAAAMAAAAAAAAA",
+            "encoding": "base64"
+          }
+        },
+        "s": 3
+      },
+      "b": {
+        "v": {
+          "object_type": "array",
+          "shape": [3],
+          "dtype": "int64",
+          "data": {
+            "buffer": "BAAAAAAAAAAFAAAAAAAAAAYAAAAAAAAA",
+            "encoding": "base64"
+          }
+        },
+        "s": 1
+      }
+    }
+  }
+}
