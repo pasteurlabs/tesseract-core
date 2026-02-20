@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 ### Features
 
 - Add better validation errors (#471)
+- Add new `test` command to `tesseract run` and `tesseract-runtime` to support regression testing (#411)
 
 ### Bug Fixes
 
