@@ -109,7 +109,7 @@ class OutputSchema(BaseModel):
 
 def _get_solver_path() -> Path:
     """Get path to the compiled Fortran solver executable."""
-    return Path("/app/fortran/heat_solver")
+    return Path("/tesseract/fortran/heat_solver")
 
 
 def _write_input_file(filepath: Path, inputs: InputSchema) -> None:

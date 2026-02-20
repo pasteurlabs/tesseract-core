@@ -27,7 +27,7 @@ from matplotlib.colors import Normalize
 
 def run_simulation(tesseract, params: dict) -> dict:
     """Run the heat equation simulation with given parameters."""
-    return tesseract.apply({"inputs": params})
+    return tesseract.apply(inputs=params)
 
 
 def plot_temperature_evolution(x, time, temperature, output_path: Path | None = None):

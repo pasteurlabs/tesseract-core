@@ -26,4 +26,4 @@ build_config:
   # Compile Fortran code during image build
   custom_build_steps:
     - |
-      RUN gfortran -O2 -o /app/fortran/heat_solver /app/fortran/heat_solver.f90
+      RUN gfortran -O2 -o /tesseract/fortran/heat_solver /tesseract/fortran/heat_solver.f90
