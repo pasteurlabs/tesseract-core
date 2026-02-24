@@ -5,7 +5,6 @@
 
 import inspect
 import io
-import json
 import os
 import sys
 from collections.abc import Callable, Iterable
@@ -23,6 +22,7 @@ from typing import (
 import click
 import typer
 from pydantic import ValidationError
+from pydantic_core import from_json
 
 import tesseract_core.runtime.experimental
 from tesseract_core.runtime.config import RuntimeConfig, get_config, update_config
@@ -112,7 +112,7 @@ def _parse_payload(value: Any) -> dict[str, Any]:
         except Exception as e:
             raise click.BadParameter(f"Could not read data from path {value}.") from e
 
-    return json.loads(value)
+    return from_json(value)
 
 
 def make_callback() -> Callable:
