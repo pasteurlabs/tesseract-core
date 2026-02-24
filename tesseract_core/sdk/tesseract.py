@@ -52,8 +52,8 @@ class Tesseract:
         warnings.warn(
             "Direct instantiation of Tesseract is deprecated. "
             "Use Tesseract.from_url(), Tesseract.from_image(), or Tesseract.from_tesseract_api() instead.",
-            DeprecationWarning,
-            stacklevel=1,
+            UserWarning,
+            stacklevel=2,
         )
         self._spawn_config = None
         self._serve_context = None
