@@ -574,6 +574,8 @@ class Containers:
         user: str | None = None,
         memory: str | None = None,
         extra_args: list_[str] | None = None,  # noqa: UP006
+        stream_stdout: bool = False,
+        stream_stderr: bool = False,
     ) -> Container | tuple[bytes, bytes] | bytes:
         """Run a command in a container from an image.
 
@@ -598,6 +600,10 @@ class Containers:
             environment: Environment variables to set in the container.
             memory: Memory limit for the container (e.g., "512m", "2g"). Minimum allowed is 6m.
             extra_args: Additional arguments to pass to the `docker run` CLI command.
+            stream_stdout: If True, stream stdout to sys.stdout in real-time instead of
+                    buffering. Cannot be used with detach. (Currently unused, reserved for future use.)
+            stream_stderr: If True, stream stderr to sys.stderr in real-time instead of
+                    buffering. Stdout is still captured and returned. Cannot be used with detach.
 
         Returns:
             Container object if detach is True, otherwise returns list of stdout and stderr.
@@ -645,6 +651,10 @@ class Containers:
             raise ValueError(
                 "Cannot set both remove and detach to True when running a container."
             )
+        if (stream_stdout or stream_stderr) and detach:
+            raise ValueError(
+                "Cannot use stream_stdout or stream_stderr with detach=True."
+            )
         if detach:
             optional_args.append("--detach")
         if remove:
@@ -668,6 +678,62 @@ class Containers:
         ]
 
         logger.debug(f"Running command: {full_cmd}")
+
+        if stream_stderr:
+            # Stream stderr to sys.stderr in real-time, capture stdout
+            import sys
+
+            proc = subprocess.Popen(
+                full_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=False,
+            )
+
+            try:
+                # Stream stderr line by line to sys.stderr
+                stderr_lines = []
+                while True:
+                    line = proc.stderr.readline()
+                    if line:
+                        stderr_lines.append(line)
+                        sys.stderr.buffer.write(line)
+                        sys.stderr.buffer.flush()
+                    elif proc.poll() is not None:
+                        break
+
+                # Read any remaining stderr
+                remaining_stderr = proc.stderr.read()
+                if remaining_stderr:
+                    stderr_lines.append(remaining_stderr)
+                    sys.stderr.buffer.write(remaining_stderr)
+                    sys.stderr.buffer.flush()
+
+                stdout_data = proc.stdout.read()
+                stderr_data = b"".join(stderr_lines)
+                returncode = proc.returncode
+            finally:
+                # Ensure streams are closed
+                proc.stdout.close()
+                proc.stderr.close()
+
+            if returncode != 0:
+                stderr_str = stderr_data.decode("utf-8", errors="ignore")
+                if "repository" in stderr_str:
+                    raise ImageNotFound(stderr_str)
+                raise ContainerError(
+                    None,
+                    returncode,
+                    shlex.join(full_cmd),
+                    image,
+                    stderr_data,
+                )
+
+            if stdout and stderr:
+                return stdout_data, stderr_data
+            if stderr:
+                return stderr_data
+            return stdout_data
 
         result = subprocess.run(
             full_cmd,
