@@ -54,7 +54,7 @@ def test_apply(built_image_name, dummy_tesseract_location, free_port, output_for
         built_image_name, port=str(free_port), output_format=output_format
     )
     try:
-        vecadd = Tesseract(tesseract_url)
+        vecadd = Tesseract.from_url(tesseract_url)
         out = vecadd.apply(inputs)
     finally:
         engine.teardown(served_tesseract)
@@ -214,7 +214,7 @@ def test_all_endpoints(
         out(**inputs)
 
     # Test URL access
-    vecadd = Tesseract(served_tesseract_remote)
+    vecadd = Tesseract.from_url(served_tesseract_remote)
     out = getattr(vecadd, endpoint_name)
     if callable(out):
         out(**inputs)

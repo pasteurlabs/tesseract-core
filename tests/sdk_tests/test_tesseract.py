@@ -48,6 +48,15 @@ def test_Tesseract_init():
         pass
 
 
+def test_Tesseract_from_url():
+    # Instantiate with a url
+    t = Tesseract.from_url("localhost")
+
+    # Using it as a context manager should be a no-op
+    with t:
+        pass
+
+
 def test_Tesseract_from_tesseract_api(dummy_tesseract_location, dummy_tesseract_module):
     all_endpoints = {
         "apply",

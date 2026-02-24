@@ -6,7 +6,7 @@ from scipy.optimize import minimize
 from tesseract_core import Tesseract
 
 # Instantiate python api to the tesseract (read port from logs above)
-tesseract = Tesseract(url="http://localhost:58354")
+tesseract = Tesseract.from_url(url="http://localhost:58354")
 
 
 def rosenbrock(x: np.ndarray) -> float:
