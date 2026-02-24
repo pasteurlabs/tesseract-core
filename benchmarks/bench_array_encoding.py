@@ -21,17 +21,18 @@ from tesseract_core.runtime.array_encoding import (
     encode_array,
 )
 
-# Array sizes to benchmark (number of elements)
+# Default array sizes to benchmark (number of elements)
 # Chosen to represent typical workloads from small parameters to large tensors
-ARRAY_SIZES = [
-    10,  # Tiny: single parameters, small configs
-    100,  # Small: small vectors, configurations
-    1_000,  # Medium: typical vectors
-    10_000,  # Large: larger vectors, small matrices
-    100_000,  # Very large: medium tensors
-    1_000_000,  # Huge: large tensors (1M elements)
-    10_000_000,  # Massive: very large tensors (10M elements)
-    100_000_000,  # Ginormous: very large tensors (100M elements)
+DEFAULT_ARRAY_SIZES = [
+    1,
+    10,
+    100,
+    1000,
+    10_000,
+    100_000,
+    1_000_000,
+    10_000_000,
+    100_000_000,
 ]
 
 # Expected shape and dtype for benchmarks (variable-length 1D float64 arrays)
@@ -63,18 +64,19 @@ def _create_test_array(size: int, dtype: str = "float64") -> np.ndarray:
 
 def benchmark_encoding(
     iterations: int = 50,
-    max_size: int | None = None,
+    array_sizes: list[int] | None = None,
 ) -> BenchmarkSuite:
     """Run encoding benchmarks for all methods and sizes.
 
     Args:
         iterations: Number of iterations per benchmark
-        max_size: Maximum array size to benchmark (None for no limit)
+        array_sizes: Array sizes to benchmark (defaults to DEFAULT_ARRAY_SIZES)
 
     Returns:
         BenchmarkSuite with all results
     """
-    array_sizes = [s for s in ARRAY_SIZES if max_size is None or s <= max_size]
+    if array_sizes is None:
+        array_sizes = DEFAULT_ARRAY_SIZES
 
     suite = BenchmarkSuite(
         name="array_encoding",
@@ -127,18 +129,19 @@ def benchmark_encoding(
 
 def benchmark_decoding(
     iterations: int = 50,
-    max_size: int | None = None,
+    array_sizes: list[int] | None = None,
 ) -> BenchmarkSuite:
     """Run decoding benchmarks for all methods and sizes.
 
     Args:
         iterations: Number of iterations per benchmark
-        max_size: Maximum array size to benchmark (None for no limit)
+        array_sizes: Array sizes to benchmark (defaults to DEFAULT_ARRAY_SIZES)
 
     Returns:
         BenchmarkSuite with all results
     """
-    array_sizes = [s for s in ARRAY_SIZES if max_size is None or s <= max_size]
+    if array_sizes is None:
+        array_sizes = DEFAULT_ARRAY_SIZES
 
     suite = BenchmarkSuite(
         name="array_decoding",
@@ -206,7 +209,7 @@ def benchmark_decoding(
 
 def benchmark_roundtrip(
     iterations: int = 50,
-    max_size: int | None = None,
+    array_sizes: list[int] | None = None,
 ) -> BenchmarkSuite:
     """Run roundtrip (encode + decode) benchmarks.
 
@@ -215,12 +218,13 @@ def benchmark_roundtrip(
 
     Args:
         iterations: Number of iterations per benchmark
-        max_size: Maximum array size to benchmark (None for no limit)
+        array_sizes: Array sizes to benchmark (defaults to DEFAULT_ARRAY_SIZES)
 
     Returns:
         BenchmarkSuite with all results
     """
-    array_sizes = [s for s in ARRAY_SIZES if max_size is None or s <= max_size]
+    if array_sizes is None:
+        array_sizes = DEFAULT_ARRAY_SIZES
 
     suite = BenchmarkSuite(
         name="array_roundtrip",
@@ -286,12 +290,14 @@ def benchmark_roundtrip(
     return suite
 
 
-def run_all(iterations: int = 50, max_size: int | None = None) -> list[BenchmarkSuite]:
+def run_all(
+    iterations: int = 50, array_sizes: list[int] | None = None
+) -> list[BenchmarkSuite]:
     """Run all array encoding benchmarks.
 
     Args:
         iterations: Number of iterations per benchmark
-        max_size: Maximum array size to benchmark (None for no limit)
+        array_sizes: Array sizes to benchmark (defaults to DEFAULT_ARRAY_SIZES)
 
     Returns:
         List of BenchmarkSuites for encoding, decoding, and roundtrip
@@ -299,7 +305,7 @@ def run_all(iterations: int = 50, max_size: int | None = None) -> list[Benchmark
     results = []
     for benchmark_func in [benchmark_encoding, benchmark_decoding, benchmark_roundtrip]:
         print(f"Running {benchmark_func.__name__}...")
-        suite = benchmark_func(iterations=iterations, max_size=max_size)
+        suite = benchmark_func(iterations=iterations, array_sizes=array_sizes)
         results.append(suite)
     return results
 

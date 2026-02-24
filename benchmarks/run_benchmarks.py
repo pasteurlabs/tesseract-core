@@ -11,11 +11,11 @@ Usage:
     python run_benchmarks.py [options]
 
 Options:
-    --iterations N    Number of iterations per benchmark (default: 50)
-    --output PATH     Output JSON file for results
-    --compare PATH    Compare against baseline JSON file
-    --docker          Include containerized benchmarks (requires Docker)
-    --max-size N      Maximum array size to benchmark (useful for CI)
+    --iterations N       Number of iterations per benchmark (default: 50)
+    --output PATH        Output JSON file for results
+    --compare PATH       Compare against baseline JSON file
+    --docker             Include containerized benchmarks (requires Docker)
+    --array-sizes N,...  Comma-separated list of array sizes to benchmark
 """
 
 from __future__ import annotations
@@ -44,21 +44,23 @@ def get_system_info() -> dict:
 
 
 def run_tesseract_benchmarks(
-    iterations: int, include_docker: bool, max_size: int | None = None
+    iterations: int, include_docker: bool, array_sizes: list[int] | None = None
 ) -> list[BenchmarkSuite]:
     """Run Tesseract interaction benchmarks."""
     from bench_tesseract import run_all
 
-    return run_all(iterations, include_containerized=include_docker, max_size=max_size)
+    return run_all(
+        iterations, include_containerized=include_docker, array_sizes=array_sizes
+    )
 
 
 def run_encoding_benchmarks(
-    iterations: int, max_size: int | None = None
+    iterations: int, array_sizes: list[int] | None = None
 ) -> list[BenchmarkSuite]:
     """Run array encoding benchmarks (isolated, for detailed analysis)."""
     from bench_array_encoding import run_all
 
-    return run_all(iterations, max_size=max_size)
+    return run_all(iterations, array_sizes=array_sizes)
 
 
 def merge_suites(suites: list[BenchmarkSuite]) -> BenchmarkSuite:
@@ -130,13 +132,18 @@ def main() -> int:
         help="Output results as markdown table (for CI comments)",
     )
     parser.add_argument(
-        "--max-size",
-        type=int,
+        "--array-sizes",
+        type=str,
         default=None,
-        help="Maximum array size to benchmark (useful for CI to skip large sizes)",
+        help="Comma-separated list of array sizes to benchmark (e.g., '100,10000,1000000')",
     )
 
     args = parser.parse_args()
+
+    # Parse array sizes if provided
+    array_sizes = None
+    if args.array_sizes:
+        array_sizes = [int(s.strip()) for s in args.array_sizes.split(",")]
 
     print(f"Running Tesseract Core benchmarks (iterations={args.iterations})")
     print(f"System: {platform.system()} {platform.release()} ({platform.machine()})")
@@ -146,14 +153,14 @@ def main() -> int:
 
     # Run benchmarks
     if args.encoding_only:
-        suites = run_encoding_benchmarks(args.iterations, max_size=args.max_size)
+        suites = run_encoding_benchmarks(args.iterations, array_sizes=array_sizes)
     else:
         suites = run_tesseract_benchmarks(
             args.iterations,
             include_docker=not args.no_docker,
-            max_size=args.max_size,
+            array_sizes=array_sizes,
         )
-        suites.extend(run_encoding_benchmarks(args.iterations, max_size=args.max_size))
+        suites.extend(run_encoding_benchmarks(args.iterations, array_sizes=array_sizes))
 
     elapsed = time.time() - start_time
     print(f"\nBenchmarks completed in {elapsed:.1f}s")

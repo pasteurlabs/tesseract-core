@@ -30,8 +30,18 @@ from utils import BenchmarkSuite, run_benchmark
 # Path to the no-op tesseract for benchmarking
 NOOP_TESSERACT_PATH = Path(__file__).parent / "tesseract_noop" / "tesseract_api.py"
 
-# Array sizes to benchmark
-ARRAY_SIZES = [10, 100, 1_000, 10_000, 100_000, 1_000_000, 10_000_000, 100_000_000]
+# Default array sizes to benchmark
+DEFAULT_ARRAY_SIZES = [
+    1,
+    10,
+    100,
+    1000,
+    10_000,
+    100_000,
+    1_000_000,
+    10_000_000,
+    100_000_000,
+]
 
 
 def _create_test_array(size: int) -> np.ndarray:
@@ -70,7 +80,7 @@ def _build_noop_tesseract() -> str | None:
 
 
 def benchmark_from_tesseract_api(
-    iterations: int = 50, max_size: int | None = None
+    iterations: int = 50, array_sizes: list[int] | None = None
 ) -> BenchmarkSuite:
     """Benchmark non-containerized Tesseract via from_tesseract_api().
 
@@ -79,7 +89,8 @@ def benchmark_from_tesseract_api(
     """
     from tesseract_core.sdk.tesseract import Tesseract
 
-    array_sizes = [s for s in ARRAY_SIZES if max_size is None or s <= max_size]
+    if array_sizes is None:
+        array_sizes = DEFAULT_ARRAY_SIZES
 
     suite = BenchmarkSuite(
         name="from_tesseract_api",
@@ -94,7 +105,7 @@ def benchmark_from_tesseract_api(
         )
 
         for i, size in enumerate(array_sizes):
-            print(f"  [{i + 1}/{len(ARRAY_SIZES)}] Benchmarking size {size:,}...")
+            print(f"  [{i + 1}/{len(array_sizes)}] Benchmarking size {size:,}...")
             arr = _create_test_array(size)
             inputs = {"data": arr}
 
@@ -112,7 +123,7 @@ def benchmark_from_tesseract_api(
 
 
 def benchmark_containerized_http(
-    iterations: int = 20, max_size: int | None = None
+    iterations: int = 20, array_sizes: list[int] | None = None
 ) -> BenchmarkSuite | None:
     """Benchmark containerized Tesseract via HTTP (Tesseract.from_image).
 
@@ -132,7 +143,8 @@ def benchmark_containerized_http(
         print("Docker not available, skipping containerized HTTP benchmarks")
         return None
 
-    array_sizes = [s for s in ARRAY_SIZES if max_size is None or s <= max_size]
+    if array_sizes is None:
+        array_sizes = DEFAULT_ARRAY_SIZES
 
     suite = BenchmarkSuite(
         name="containerized_http",
@@ -184,7 +196,7 @@ def benchmark_containerized_http(
 
 
 def benchmark_containerized_cli(
-    iterations: int = 10, max_size: int | None = None
+    iterations: int = 10, array_sizes: list[int] | None = None
 ) -> BenchmarkSuite | None:
     """Benchmark containerized Tesseract via CLI (`tesseract run`).
 
@@ -205,7 +217,8 @@ def benchmark_containerized_cli(
         print("Docker not available, skipping containerized CLI benchmarks")
         return None
 
-    array_sizes = [s for s in ARRAY_SIZES if max_size is None or s <= max_size]
+    if array_sizes is None:
+        array_sizes = DEFAULT_ARRAY_SIZES
 
     suite = BenchmarkSuite(
         name="containerized_cli",
@@ -292,14 +305,14 @@ def benchmark_containerized_cli(
 def run_all(
     iterations: int = 50,
     include_containerized: bool = False,
-    max_size: int | None = None,
+    array_sizes: list[int] | None = None,
 ) -> list[BenchmarkSuite]:
     """Run all Tesseract benchmarks.
 
     Args:
         iterations: Number of iterations per benchmark
         include_containerized: Whether to include Docker-based benchmarks
-        max_size: Maximum array size to benchmark (None for no limit)
+        array_sizes: Array sizes to benchmark (defaults to DEFAULT_ARRAY_SIZES)
 
     Returns:
         List of BenchmarkSuites
@@ -313,8 +326,9 @@ def run_all(
     results = []
     for benchmark_func in benchmark_funcs:
         print(f"Running {benchmark_func.__name__}...")
-        suite = benchmark_func(iterations=iterations, max_size=max_size)
-        results.append(suite)
+        suite = benchmark_func(iterations=iterations, array_sizes=array_sizes)
+        if suite is not None:
+            results.append(suite)
     return results
 
 

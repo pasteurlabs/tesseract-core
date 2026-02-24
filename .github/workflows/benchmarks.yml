@@ -55,7 +55,7 @@ jobs:
         run: |
           uv run --no-sync python benchmarks/run_benchmarks.py \
             --iterations 10 \
-            --max-size 1_000_000 \
+            --array-sizes 1,100,10000,1000000 \
             --output current_benchmarks.json
 
       - name: Checkout main branch for baseline
@@ -78,7 +78,7 @@ jobs:
           if [ -f benchmarks/run_benchmarks.py ]; then
             uv run --no-sync python benchmarks/run_benchmarks.py \
               --iterations 10 \
-              --max-size 1_000_000 \
+              --array-sizes 1,100,10000,1000000 \
               --output baseline_benchmarks.json
             echo "exists=true" >> $GITHUB_OUTPUT
           else
