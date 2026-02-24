@@ -73,11 +73,18 @@ jobs:
 
       - name: Run benchmarks on baseline
         if: github.event_name == 'pull_request'
+        id: baseline
         run: |
-          uv run --no-sync python benchmarks/run_benchmarks.py \
-            --iterations 10 \
-            --max-size 1_000_000 \
-            --output baseline_benchmarks.json
+          if [ -f benchmarks/run_benchmarks.py ]; then
+            uv run --no-sync python benchmarks/run_benchmarks.py \
+              --iterations 10 \
+              --max-size 1_000_000 \
+              --output baseline_benchmarks.json
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "::notice::Benchmark script not found in baseline, skipping comparison"
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Checkout PR branch again
         if: github.event_name == 'pull_request'
@@ -86,7 +93,7 @@ jobs:
           git stash pop || true
 
       - name: Generate comparison report
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && steps.baseline.outputs.exists == 'true'
         id: comparison
         run: |
           python .github/scripts/compare_benchmarks.py \
@@ -102,7 +109,7 @@ jobs:
           } >> $GITHUB_OUTPUT
 
       - name: Find existing comment
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && steps.baseline.outputs.exists == 'true'
         uses: peter-evans/find-comment@v3
         id: find-comment
         with:
@@ -111,7 +118,7 @@ jobs:
           body-includes: "## Benchmark Results"
 
       - name: Create or update PR comment
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && steps.baseline.outputs.exists == 'true'
         uses: peter-evans/create-or-update-comment@v4
         with:
           token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
@@ -128,4 +135,5 @@ jobs:
             current_benchmarks.json
             baseline_benchmarks.json
             benchmark_report.md
+          if-no-files-found: ignore
           retention-days: 30

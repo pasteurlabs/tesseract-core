@@ -10,19 +10,36 @@ Usage:
 
 import json
 import sys
+from pathlib import Path
 
 
-def load_results(path: str) -> dict:
-    """Load benchmark results from JSON file."""
+def load_benchmark_file(path: str) -> dict | None:
+    """Load benchmark file including metadata.
+
+    Returns None if the file doesn't exist.
+    """
+    if not Path(path).exists():
+        return None
     with open(path) as f:
-        data = json.load(f)
-    return {r["name"]: r for r in data["results"]}
+        return json.load(f)
 
 
-def generate_report(baseline_path: str, current_path: str) -> str:
-    """Generate markdown comparison report."""
-    baseline = load_results(baseline_path)
-    current = load_results(current_path)
+def generate_report(baseline_path: str, current_path: str) -> str | None:
+    """Generate markdown comparison report.
+
+    Returns None if baseline doesn't exist (no comparison possible).
+    """
+    baseline_data = load_benchmark_file(baseline_path)
+    current_data = load_benchmark_file(current_path)
+
+    if baseline_data is None:
+        return None
+
+    if current_data is None:
+        return "## Benchmark Results\n\n:warning: Current benchmark results not found."
+
+    baseline = {r["name"]: r for r in baseline_data["results"]}
+    current = {r["name"]: r for r in current_data["results"]}
 
     lines = [
         "## Benchmark Results",
@@ -33,8 +50,22 @@ def generate_report(baseline_path: str, current_path: str) -> str:
         "|-----------|----------|---------|--------|--------|",
     ]
 
-    for name in sorted(baseline.keys()):
+    # Find all benchmark names
+    all_names = sorted(set(baseline.keys()) | set(current.keys()))
+
+    for name in all_names:
+        if name not in baseline:
+            # New benchmark, no comparison possible
+            curr_mean = current[name]["mean_time_s"] * 1000
+            lines.append(f"| `{name}` | - | {curr_mean:.3f}ms | new | :new: |")
+            continue
+
         if name not in current:
+            # Removed benchmark
+            base_mean = baseline[name]["mean_time_s"] * 1000
+            lines.append(
+                f"| `{name}` | {base_mean:.3f}ms | - | removed | :wastebasket: |"
+            )
             continue
 
         base_mean = baseline[name]["mean_time_s"] * 1000
@@ -56,15 +87,17 @@ def generate_report(baseline_path: str, current_path: str) -> str:
             f"| `{name}` | {base_mean:.3f}ms | {curr_mean:.3f}ms | {diff_pct:+.1f}% | {status} |"
         )
 
+    # Extract metadata for details section
+    iterations = current_data.get("metadata", {}).get("iterations", "N/A")
+
     lines.extend(
         [
             "",
             "<details>",
             "<summary>Benchmark details</summary>",
             "",
-            "- **Iterations:** 30",
+            f"- **Iterations:** {iterations}",
             "- **Runner:** ubuntu-latest",
-            "- **Suites:** from_tesseract_api, from_tesseract_api_with_output, http_testclient",
             "",
             "</details>",
         ]
@@ -87,6 +120,10 @@ def main() -> int:
     output_path = sys.argv[3]
 
     report = generate_report(baseline_path, current_path)
+
+    if report is None:
+        print("No baseline found, skipping comparison.", file=sys.stderr)
+        return 0
 
     with open(output_path, "w") as f:
         f.write(report)
