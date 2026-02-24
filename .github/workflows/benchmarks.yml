@@ -54,7 +54,8 @@ jobs:
       - name: Run benchmarks on current commit
         run: |
           uv run --no-sync python benchmarks/run_benchmarks.py \
-            --iterations 30 \
+            --iterations 10 \
+            --max-size 1_000_000 \
             --output current_benchmarks.json
 
       - name: Checkout main branch for baseline
@@ -74,7 +75,8 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           uv run --no-sync python benchmarks/run_benchmarks.py \
-            --iterations 30 \
+            --iterations 10 \
+            --max-size 1_000_000 \
             --output baseline_benchmarks.json
 
       - name: Checkout PR branch again

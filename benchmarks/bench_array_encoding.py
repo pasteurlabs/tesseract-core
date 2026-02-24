@@ -63,22 +63,26 @@ def _create_test_array(size: int, dtype: str = "float64") -> np.ndarray:
 
 def benchmark_encoding(
     iterations: int = 50,
+    max_size: int | None = None,
 ) -> BenchmarkSuite:
     """Run encoding benchmarks for all methods and sizes.
 
     Args:
         iterations: Number of iterations per benchmark
+        max_size: Maximum array size to benchmark (None for no limit)
 
     Returns:
         BenchmarkSuite with all results
     """
+    array_sizes = [s for s in ARRAY_SIZES if max_size is None or s <= max_size]
+
     suite = BenchmarkSuite(
         name="array_encoding",
-        metadata={"iterations": iterations, "array_sizes": ARRAY_SIZES},
+        metadata={"iterations": iterations, "array_sizes": array_sizes},
     )
 
-    for i, size in enumerate(ARRAY_SIZES):
-        print(f"  [{i + 1}/{len(ARRAY_SIZES)}] Benchmarking size {size:,}...")
+    for i, size in enumerate(array_sizes):
+        print(f"  [{i + 1}/{len(array_sizes)}] Benchmarking size {size:,}...")
         arr = _create_test_array(size)
 
         # JSON encoding
@@ -123,22 +127,26 @@ def benchmark_encoding(
 
 def benchmark_decoding(
     iterations: int = 50,
+    max_size: int | None = None,
 ) -> BenchmarkSuite:
     """Run decoding benchmarks for all methods and sizes.
 
     Args:
         iterations: Number of iterations per benchmark
+        max_size: Maximum array size to benchmark (None for no limit)
 
     Returns:
         BenchmarkSuite with all results
     """
+    array_sizes = [s for s in ARRAY_SIZES if max_size is None or s <= max_size]
+
     suite = BenchmarkSuite(
         name="array_decoding",
-        metadata={"iterations": iterations, "array_sizes": ARRAY_SIZES},
+        metadata={"iterations": iterations, "array_sizes": array_sizes},
     )
 
-    for i, size in enumerate(ARRAY_SIZES):
-        print(f"  [{i + 1}/{len(ARRAY_SIZES)}] Benchmarking size {size:,}...")
+    for i, size in enumerate(array_sizes):
+        print(f"  [{i + 1}/{len(array_sizes)}] Benchmarking size {size:,}...")
         arr = _create_test_array(size)
 
         # JSON decoding - encode first, then benchmark decoding
@@ -198,6 +206,7 @@ def benchmark_decoding(
 
 def benchmark_roundtrip(
     iterations: int = 50,
+    max_size: int | None = None,
 ) -> BenchmarkSuite:
     """Run roundtrip (encode + decode) benchmarks.
 
@@ -206,17 +215,20 @@ def benchmark_roundtrip(
 
     Args:
         iterations: Number of iterations per benchmark
+        max_size: Maximum array size to benchmark (None for no limit)
 
     Returns:
         BenchmarkSuite with all results
     """
+    array_sizes = [s for s in ARRAY_SIZES if max_size is None or s <= max_size]
+
     suite = BenchmarkSuite(
         name="array_roundtrip",
-        metadata={"iterations": iterations, "array_sizes": ARRAY_SIZES},
+        metadata={"iterations": iterations, "array_sizes": array_sizes},
     )
 
-    for i, size in enumerate(ARRAY_SIZES):
-        print(f"  [{i + 1}/{len(ARRAY_SIZES)}] Benchmarking size {size:,}...")
+    for i, size in enumerate(array_sizes):
+        print(f"  [{i + 1}/{len(array_sizes)}] Benchmarking size {size:,}...")
         arr = _create_test_array(size)
 
         # JSON roundtrip
@@ -274,11 +286,12 @@ def benchmark_roundtrip(
     return suite
 
 
-def run_all(iterations: int = 50) -> list[BenchmarkSuite]:
+def run_all(iterations: int = 50, max_size: int | None = None) -> list[BenchmarkSuite]:
     """Run all array encoding benchmarks.
 
     Args:
         iterations: Number of iterations per benchmark
+        max_size: Maximum array size to benchmark (None for no limit)
 
     Returns:
         List of BenchmarkSuites for encoding, decoding, and roundtrip
@@ -286,7 +299,7 @@ def run_all(iterations: int = 50) -> list[BenchmarkSuite]:
     results = []
     for benchmark_func in [benchmark_encoding, benchmark_decoding, benchmark_roundtrip]:
         print(f"Running {benchmark_func.__name__}...")
-        suite = benchmark_func(iterations=iterations)
+        suite = benchmark_func(iterations=iterations, max_size=max_size)
         results.append(suite)
     return results
 

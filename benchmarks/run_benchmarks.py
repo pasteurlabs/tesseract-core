@@ -15,6 +15,7 @@ Options:
     --output PATH     Output JSON file for results
     --compare PATH    Compare against baseline JSON file
     --docker          Include containerized benchmarks (requires Docker)
+    --max-size N      Maximum array size to benchmark (useful for CI)
 """
 
 from __future__ import annotations
@@ -43,19 +44,21 @@ def get_system_info() -> dict:
 
 
 def run_tesseract_benchmarks(
-    iterations: int, include_docker: bool
+    iterations: int, include_docker: bool, max_size: int | None = None
 ) -> list[BenchmarkSuite]:
     """Run Tesseract interaction benchmarks."""
     from bench_tesseract import run_all
 
-    return run_all(iterations, include_containerized=include_docker)
+    return run_all(iterations, include_containerized=include_docker, max_size=max_size)
 
 
-def run_encoding_benchmarks(iterations: int) -> list[BenchmarkSuite]:
+def run_encoding_benchmarks(
+    iterations: int, max_size: int | None = None
+) -> list[BenchmarkSuite]:
     """Run array encoding benchmarks (isolated, for detailed analysis)."""
     from bench_array_encoding import run_all
 
-    return run_all(iterations)
+    return run_all(iterations, max_size=max_size)
 
 
 def merge_suites(suites: list[BenchmarkSuite]) -> BenchmarkSuite:
@@ -126,6 +129,12 @@ def main() -> int:
         action="store_true",
         help="Output results as markdown table (for CI comments)",
     )
+    parser.add_argument(
+        "--max-size",
+        type=int,
+        default=None,
+        help="Maximum array size to benchmark (useful for CI to skip large sizes)",
+    )
 
     args = parser.parse_args()
 
@@ -137,12 +146,14 @@ def main() -> int:
 
     # Run benchmarks
     if args.encoding_only:
-        suites = run_encoding_benchmarks(args.iterations)
+        suites = run_encoding_benchmarks(args.iterations, max_size=args.max_size)
     else:
         suites = run_tesseract_benchmarks(
-            args.iterations, include_docker=not args.no_docker
+            args.iterations,
+            include_docker=not args.no_docker,
+            max_size=args.max_size,
         )
-        suites.extend(run_encoding_benchmarks(args.iterations))
+        suites.extend(run_encoding_benchmarks(args.iterations, max_size=args.max_size))
 
     elapsed = time.time() - start_time
     print(f"\nBenchmarks completed in {elapsed:.1f}s")
