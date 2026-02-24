@@ -12,7 +12,7 @@ RUNTIME_PYPROJECT_PATH = "tesseract_core/runtime/meta/pyproject.toml"
 
 BASE_OPTIONAL_DEPS = {
     "docs": [
-        "sphinx",
+        "sphinx<9",  # TODO: Remove when https://github.com/click-contrib/sphinx-click/pull/160 is merged",
         "sphinx_autodoc_typehints",
         "furo",
         "myst-nb",
