@@ -105,6 +105,7 @@ jobs:
           {
             echo 'report<<BENCHMARK_REPORT_END'
             cat benchmark_report.md
+            echo ''
             echo 'BENCHMARK_REPORT_END'
           } >> $GITHUB_OUTPUT
 
