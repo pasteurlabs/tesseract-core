@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import atexit
 import base64
-import shutil
 import tempfile
 import traceback
 import uuid
@@ -258,7 +257,7 @@ class Tesseract:
         This will stop the Tesseract server if it is running.
         """
         if self._serve_context is None:
-            # This can happen if __enter__ short-circuits
+            # This can happen if __enter__ short-circuits (e.g., from_tesseract_api)
             return
         self.teardown()
 
@@ -761,6 +760,7 @@ class LocalClient:
     def __init__(
         self, tesseract_api: ModuleType, output_path: Path | None = None
     ) -> None:
+        # Import here to not depend on runtime dependencies globally
         from tesseract_core.runtime.core import create_endpoints
         from tesseract_core.runtime.serve import create_rest_api
 
@@ -768,6 +768,9 @@ class LocalClient:
             func.__name__: func for func in create_endpoints(tesseract_api)
         }
         self._openapi_schema = create_rest_api(tesseract_api).openapi()
+
+        if output_path is None:
+            output_path = Path(tempfile.mkdtemp(prefix="tesseract_output_"))
         self._output_path = output_path
 
     def run_tesseract(
@@ -783,9 +786,9 @@ class LocalClient:
             endpoint: The endpoint to run.
             payload: The payload to send to the endpoint.
             run_id: a string to identify the run.
-            stream_logs: If True, stream logs to stdout. If a callable, stream
-                    logs to that callable. If output_path was not set, a
-                    temporary directory will be used.
+            stream_logs: If True, logs are written to stderr (default behavior).
+                    If a callable, logs are also passed to that callable in
+                    addition to stderr and the log file.
 
         Returns:
             The loaded JSON response from the endpoint, with decoded arrays.
@@ -796,20 +799,9 @@ class LocalClient:
         if endpoint not in self._endpoints:
             raise RuntimeError(f"Endpoint {endpoint} not found in Tesseract API.")
 
-        # Import here to avoid circular imports
-        from tesseract_core.runtime.config import update_config
+        # Import here to not depend on runtime dependencies globally
         from tesseract_core.runtime.file_interactions import join_paths
         from tesseract_core.runtime.mpa import start_run
-
-        # Set up output path for logging
-        temp_dir = None
-        output_path = self._output_path
-
-        if stream_logs and output_path is None:
-            # Use a temp directory if output_path is not set
-            temp_dir = tempfile.mkdtemp(prefix="tesseract_logs_")
-            output_path = Path(temp_dir)
-            update_config(output_path=str(output_path))
 
         func = self._endpoints[endpoint]
         InputSchema = func.__annotations__.get("payload", None)
@@ -823,12 +815,13 @@ class LocalClient:
         # Set up run directory for logging
         if run_id is None:
             run_id = str(uuid.uuid4())
-        rundir = join_paths(str(output_path) if output_path else ".", f"run_{run_id}")
+        rundir = join_paths(str(self._output_path), f"run_{run_id}")
+
+        # Determine log sink from stream_logs parameter
+        log_sink = stream_logs if callable(stream_logs) else None
 
         try:
-            # Note: start_run uses TeePipe which writes to both stderr and the log file,
-            # so we don't need LogStreamer here - output will appear on terminal automatically
-            with start_run(base_dir=rundir):
+            with start_run(base_dir=rundir, log_sink=log_sink):
                 if parsed_payload is not None:
                     result = self._endpoints[endpoint](parsed_payload)
                 else:
@@ -840,9 +833,6 @@ class LocalClient:
             raise RuntimeError(
                 f"{tb}\nError running Tesseract API {endpoint}: {ex} (see above for full traceback)"
             ) from None
-        finally:
-            if temp_dir is not None:
-                shutil.rmtree(temp_dir, ignore_errors=True)
 
         if OutputSchema is not None:
             # Validate via schema, then dump to stay consistent with other clients

@@ -9,7 +9,7 @@ import os
 import shutil
 import sys
 from abc import ABC, abstractmethod
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import ExitStack, contextmanager
 from contextvars import ContextVar
 from datetime import datetime
@@ -251,10 +251,18 @@ def log_artifact(local_path: str) -> None:
 
 
 @contextmanager
-def redirect_stdio(logfile: str | Path) -> Generator[None, None, None]:
+def redirect_stdio(
+    logfile: str | Path,
+    log_sink: Callable[[str], Any] | None = None,
+) -> Generator[None, None, None]:
     """Context manager for redirecting stdout and stderr to a custom pipe.
 
-    Writes messages to both the original stderr and the given logfile.
+    Writes messages to the log file and either stderr or a custom sink.
+
+    Args:
+        logfile: Path to the log file to write to.
+        log_sink: Optional callable that receives each log line. If provided,
+            logs go to the callable instead of stderr. If None, logs go to stderr.
     """
     from tesseract_core.runtime.core import redirect_fd
 
@@ -277,9 +285,17 @@ def redirect_stdio(logfile: str | Path) -> Generator[None, None, None]:
         stack.callback(orig_stderr_file.close)
 
         # Use `print` instead of `.write` so we get appropriate newlines and flush behavior
-        write_to_stderr = lambda msg: print(msg, file=orig_stderr_file, flush=True)
         write_to_file = lambda msg: print(msg, file=f, flush=True)
-        pipe_fd = stack.enter_context(TeePipe(write_to_stderr, write_to_file))
+
+        if log_sink is not None:
+            # Use custom sink instead of stderr
+            sinks = [log_sink, write_to_file]
+        else:
+            # Default: write to stderr
+            write_to_stderr = lambda msg: print(msg, file=orig_stderr_file, flush=True)
+            sinks = [write_to_stderr, write_to_file]
+
+        pipe_fd = stack.enter_context(TeePipe(*sinks))
 
         # Redirect file descriptors at OS level
         stack.enter_context(redirect_fd(sys.stdout, pipe_fd))
@@ -288,8 +304,17 @@ def redirect_stdio(logfile: str | Path) -> Generator[None, None, None]:
 
 
 @contextmanager
-def start_run(base_dir: str | None = None) -> Generator[None, None, None]:
-    """Context manager for starting and ending a run."""
+def start_run(
+    base_dir: str | None = None,
+    log_sink: Callable[[str], Any] | None = None,
+) -> Generator[None, None, None]:
+    """Context manager for starting and ending a run.
+
+    Args:
+        base_dir: Base directory for the run. If None, uses current directory.
+        log_sink: Optional callable that receives each log line. If provided,
+            logs go to the callable instead of stderr. If None, logs go to stderr.
+    """
     backend = _create_backend(base_dir)
     token = _current_backend.set(backend)
     backend.start_run()
@@ -297,7 +322,7 @@ def start_run(base_dir: str | None = None) -> Generator[None, None, None]:
     logfile = backend.log_dir / "tesseract.log"
 
     try:
-        with redirect_stdio(logfile):
+        with redirect_stdio(logfile, log_sink=log_sink):
             yield
     finally:
         backend.end_run()

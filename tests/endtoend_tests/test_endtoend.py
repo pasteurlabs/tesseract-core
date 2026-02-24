@@ -1434,41 +1434,58 @@ def test_tesseractreference_endtoend(
 # ============================================================================
 
 
+LOG_STREAMING_TESSERACT_API = dedent(
+    """
+import os
+import sys
+import time
+from pathlib import Path
+
+from pydantic import BaseModel
+
+
+class InputSchema(BaseModel):
+    num_lines: int = 3
+    signal_dir: str  # Directory where signal files are created
+
+
+class OutputSchema(BaseModel):
+    lines_printed: int
+
+
+def apply(inputs: InputSchema) -> OutputSchema:
+    signal_dir = Path(inputs.signal_dir)
+
+    for i in range(inputs.num_lines):
+        # Print log line
+        print(f"Log line {i}", file=sys.stderr)
+        sys.stderr.flush()
+
+        # Wait for signal file before continuing (except for last line)
+        if i < inputs.num_lines - 1:
+            signal_file = signal_dir / f"continue_{i}.signal"
+            timeout = 10  # seconds
+            start = time.time()
+            while not signal_file.exists():
+                if time.time() - start > timeout:
+                    raise TimeoutError(f"Timed out waiting for {signal_file}")
+                time.sleep(0.01)
+
+    return OutputSchema(lines_printed=inputs.num_lines)
+"""
+)
+
+
 @pytest.fixture(scope="module")
 def log_streaming_test_image(
     cli_runner, dummy_tesseract_location, tmpdir_factory, docker_cleanup_module
 ):
-    """Build a Tesseract that prints logs incrementally for testing log streaming."""
-    tesseract_api = dedent(
-        """
-    import time
-    import sys
-    from pydantic import BaseModel
-
-
-    class InputSchema(BaseModel):
-        num_lines: int = 5
-        delay: float = 0.1
-
-
-    class OutputSchema(BaseModel):
-        lines_printed: int
-
-
-    def apply(inputs: InputSchema) -> OutputSchema:
-        for i in range(inputs.num_lines):
-            print(f"Log line {i}", file=sys.stderr)
-            sys.stderr.flush()
-            time.sleep(inputs.delay)
-        return OutputSchema(lines_printed=inputs.num_lines)
-    """
-    )
-
+    """Build a Tesseract that prints logs and waits for signal files."""
     workdir = tmpdir_factory.mktemp("log_streaming_test_image")
 
     # Write the API file
     with open(workdir / "tesseract_api.py", "w") as f:
-        f.write(tesseract_api)
+        f.write(LOG_STREAMING_TESSERACT_API)
 
     shutil.copy(
         dummy_tesseract_location / "tesseract_config.yaml",
@@ -1498,44 +1515,31 @@ def log_streaming_test_image(
 @pytest.fixture(scope="module")
 def log_streaming_tesseract_api_path(dummy_tesseract_location, tmpdir_factory):
     """Create a tesseract_api.py for testing log streaming with from_tesseract_api."""
-    tesseract_api = dedent(
-        """
-    import time
-    import sys
-    from pydantic import BaseModel
-
-
-    class InputSchema(BaseModel):
-        num_lines: int = 5
-        delay: float = 0.05
-
-
-    class OutputSchema(BaseModel):
-        lines_printed: int
-
-
-    def apply(inputs: InputSchema) -> OutputSchema:
-        for i in range(inputs.num_lines):
-            print(f"Log line {i}", file=sys.stderr)
-            sys.stderr.flush()
-            time.sleep(inputs.delay)
-        return OutputSchema(lines_printed=inputs.num_lines)
-    """
-    )
-
     workdir = tmpdir_factory.mktemp("log_streaming_tesseract_api")
     api_path = Path(str(workdir)) / "tesseract_api.py"
     with open(api_path, "w") as f:
-        f.write(tesseract_api)
+        f.write(LOG_STREAMING_TESSERACT_API)
 
     return api_path
 
 
 def test_log_streaming_sdk_from_image(log_streaming_test_image, tmpdir):
-    """Test log streaming via Python SDK using Tesseract.from_image()."""
+    """Test log streaming via Python SDK using Tesseract.from_image().
+
+    Uses file-based synchronization to prove logs are truly streaming:
+    the Tesseract blocks after each log line until we create a signal file,
+    which we only do after receiving the log via the callback.
+    """
     import threading
 
     from tesseract_core import Tesseract
+
+    output_path = Path(tmpdir)
+    signal_dir = output_path / "signals"
+    signal_dir.mkdir()
+
+    # Container path for signals - output_path is mounted at /tesseract/output_data
+    container_signal_dir = "/tesseract/output_data/signals"
 
     captured_logs = []
     log_lock = threading.Lock()
@@ -1543,30 +1547,41 @@ def test_log_streaming_sdk_from_image(log_streaming_test_image, tmpdir):
     def capture_log(line: str) -> None:
         with log_lock:
             captured_logs.append(line)
-
-    output_path = Path(tmpdir)
+            # When we receive a log line, create the signal file to unblock the Tesseract
+            for i in range(10):  # Check for any log line number
+                if f"Log line {i}" in line:
+                    signal_file = signal_dir / f"continue_{i}.signal"
+                    signal_file.touch()
+                    break
 
     with Tesseract.from_image(
         log_streaming_test_image, output_path=output_path
     ) as tesseract:
         result = tesseract.apply(
-            {"num_lines": 5, "delay": 0.1},
+            {"num_lines": 3, "signal_dir": container_signal_dir},
             stream_logs=capture_log,
         )
 
-    assert result["lines_printed"] == 5
+    assert result["lines_printed"] == 3
 
     # Check that we captured all log lines
-    assert len(captured_logs) == 5
-    for i in range(5):
+    assert len(captured_logs) == 3
+    for i in range(3):
         assert f"Log line {i}" in captured_logs[i]
 
 
 def test_log_streaming_sdk_from_tesseract_api(log_streaming_tesseract_api_path, tmpdir):
-    """Test log streaming via Python SDK using Tesseract.from_tesseract_api()."""
+    """Test log streaming via Python SDK using Tesseract.from_tesseract_api().
+
+    Uses file-based synchronization to prove logs are truly streaming.
+    """
     import threading
 
     from tesseract_core import Tesseract
+
+    output_path = Path(tmpdir)
+    signal_dir = output_path / "signals"
+    signal_dir.mkdir()
 
     captured_logs = []
     log_lock = threading.Lock()
@@ -1574,25 +1589,29 @@ def test_log_streaming_sdk_from_tesseract_api(log_streaming_tesseract_api_path, 
     def capture_log(line: str) -> None:
         with log_lock:
             captured_logs.append(line)
-
-    output_path = Path(tmpdir)
+            # When we receive a log line, create the signal file to unblock the Tesseract
+            for i in range(10):
+                if f"Log line {i}" in line:
+                    signal_file = signal_dir / f"continue_{i}.signal"
+                    signal_file.touch()
+                    break
 
     with Tesseract.from_tesseract_api(
         log_streaming_tesseract_api_path, output_path=output_path
     ) as tesseract:
         result = tesseract.apply(
-            {"num_lines": 5, "delay": 0.05},
+            {"num_lines": 3, "signal_dir": str(signal_dir)},
             stream_logs=capture_log,
         )
 
-    assert result["lines_printed"] == 5
+    assert result["lines_printed"] == 3
 
-    # For from_tesseract_api, logs go to stderr via TeePipe and also to log file
-    # The LogStreamer reads from the log file, so we should see the logs
-    # Note: with from_tesseract_api the logs appear on terminal automatically via TeePipe,
-    # so we may not get them via stream_logs callback when using start_run context manager.
-    # The important thing is that the feature doesn't error and the result is correct.
-    # Let's verify the log file was created at minimum.
+    # Check that we captured all log lines via the callback
+    assert len(captured_logs) == 3
+    for i in range(3):
+        assert f"Log line {i}" in captured_logs[i]
+
+    # Also verify the log file was created
     run_dirs = list(output_path.glob("run_*/"))
     assert len(run_dirs) >= 1
     log_file = run_dirs[0] / "logs" / "tesseract.log"
@@ -1600,16 +1619,27 @@ def test_log_streaming_sdk_from_tesseract_api(log_streaming_tesseract_api_path, 
 
 
 def test_log_streaming_cli(log_streaming_test_image, tmpdir):
-    """Test that CLI streams logs to stderr in real-time (default behavior)."""
+    """Test that CLI streams logs to stderr in real-time (default behavior).
+
+    Uses file-based synchronization to prove logs are truly streaming:
+    the Tesseract blocks after each log line until we create a signal file,
+    which we only do after receiving the log via stderr.
+    """
     import threading
-    import time
 
-    # Use a longer delay to ensure we can observe streaming behavior
-    payload = json.dumps({"inputs": {"num_lines": 5, "delay": 0.2}})
+    output_path = Path(tmpdir)
+    signal_dir = output_path / "signals"
+    signal_dir.mkdir()
 
-    # We'll capture stderr incrementally to verify streaming
-    captured_stderr_chunks = []
-    stderr_lock = threading.Lock()
+    # Container path for signals - output_path is mounted at /tesseract/output_data
+    container_signal_dir = "/tesseract/output_data/signals"
+
+    payload = json.dumps(
+        {"inputs": {"num_lines": 3, "signal_dir": container_signal_dir}}
+    )
+
+    captured_logs = []
+    log_lock = threading.Lock()
 
     def run_tesseract():
         proc = subprocess.Popen(
@@ -1619,6 +1649,8 @@ def test_log_streaming_cli(log_streaming_test_image, tmpdir):
                 log_streaming_test_image,
                 "apply",
                 payload,
+                "-o",
+                str(output_path),
             ],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -1629,8 +1661,15 @@ def test_log_streaming_cli(log_streaming_test_image, tmpdir):
         while True:
             line = proc.stderr.readline()
             if line:
-                with stderr_lock:
-                    captured_stderr_chunks.append((time.time(), line.strip()))
+                line = line.strip()
+                with log_lock:
+                    captured_logs.append(line)
+                # When we receive a log line, create signal file to unblock the Tesseract
+                for i in range(10):
+                    if f"Log line {i}" in line:
+                        signal_file = signal_dir / f"continue_{i}.signal"
+                        signal_file.touch()
+                        break
             elif proc.poll() is not None:
                 break
 
@@ -1638,39 +1677,24 @@ def test_log_streaming_cli(log_streaming_test_image, tmpdir):
         if remaining_stderr:
             for line in remaining_stderr.strip().split("\n"):
                 if line:
-                    with stderr_lock:
-                        captured_stderr_chunks.append((time.time(), line.strip()))
+                    with log_lock:
+                        captured_logs.append(line)
 
         return proc.returncode, stdout
 
-    # Run the tesseract
     returncode, stdout = run_tesseract()
 
-    assert returncode == 0, f"Command failed. Captured stderr: {captured_stderr_chunks}"
+    assert returncode == 0, f"Command failed. Captured logs: {captured_logs}"
     result = json.loads(stdout.strip())
-    assert result["lines_printed"] == 5
+    assert result["lines_printed"] == 3
 
-    # Verify we captured the log lines
-    log_lines = [chunk[1] for chunk in captured_stderr_chunks if "Log line" in chunk[1]]
-    assert len(log_lines) == 5, (
-        f"Expected 5 log lines, got {len(log_lines)}: {log_lines}"
+    # Verify we captured all log lines
+    log_lines = [log for log in captured_logs if "Log line" in log]
+    assert len(log_lines) == 3, (
+        f"Expected 3 log lines, got {len(log_lines)}: {log_lines}"
     )
 
-    for i in range(5):
+    for i in range(3):
         assert any(f"Log line {i}" in line for line in log_lines), (
             f"Missing 'Log line {i}' in {log_lines}"
         )
-
-    # Verify that logs were streamed (not all at once)
-    # Check that there's some time spread between first and last log capture
-    if len(captured_stderr_chunks) >= 2:
-        timestamps = [
-            chunk[0] for chunk in captured_stderr_chunks if "Log line" in chunk[1]
-        ]
-        if len(timestamps) >= 2:
-            time_spread = timestamps[-1] - timestamps[0]
-            # With 5 lines at 0.2s delay, we expect ~0.8s spread
-            assert time_spread > 0.3, (
-                f"Logs don't appear to be streamed (time spread: {time_spread}s). "
-                "Expected logs to arrive incrementally."
-            )
