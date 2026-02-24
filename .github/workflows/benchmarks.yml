@@ -93,7 +93,7 @@ jobs:
           git stash pop || true
 
       - name: Generate comparison report
-        if: github.event_name == 'pull_request' && steps.baseline.outputs.exists == 'true'
+        if: github.event_name == 'pull_request'
         id: comparison
         run: |
           python .github/scripts/compare_benchmarks.py \
@@ -109,7 +109,7 @@ jobs:
           } >> $GITHUB_OUTPUT
 
       - name: Find existing comment
-        if: github.event_name == 'pull_request' && steps.baseline.outputs.exists == 'true'
+        if: github.event_name == 'pull_request'
         uses: peter-evans/find-comment@v3
         id: find-comment
         with:
@@ -118,7 +118,7 @@ jobs:
           body-includes: "## Benchmark Results"
 
       - name: Create or update PR comment
-        if: github.event_name == 'pull_request' && steps.baseline.outputs.exists == 'true'
+        if: github.event_name == 'pull_request'
         uses: peter-evans/create-or-update-comment@v4
         with:
           token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}

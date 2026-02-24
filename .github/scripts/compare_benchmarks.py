@@ -24,22 +24,61 @@ def load_benchmark_file(path: str) -> dict | None:
         return json.load(f)
 
 
+def _generate_current_only_report(current: dict, current_data: dict) -> str:
+    """Generate a report with only current benchmark results (no baseline comparison)."""
+    lines = [
+        "## Benchmark Results",
+        "",
+        ":information_source: No baseline found - showing current results only.",
+        "",
+        "Benchmarks use a no-op Tesseract to measure pure framework overhead.",
+        "",
+        "| Benchmark | Current |",
+        "|-----------|---------|",
+    ]
+
+    for name in sorted(current.keys()):
+        curr_mean = current[name]["mean_time_s"] * 1000
+        lines.append(f"| `{name}` | {curr_mean:.3f}ms |")
+
+    # Extract metadata for details section
+    iterations = current_data.get("metadata", {}).get("iterations", "N/A")
+
+    lines.extend(
+        [
+            "",
+            "<details>",
+            "<summary>Benchmark details</summary>",
+            "",
+            f"- **Iterations:** {iterations}",
+            "- **Runner:** ubuntu-latest",
+            "",
+            "</details>",
+        ]
+    )
+
+    return "\n".join(lines)
+
+
 def generate_report(baseline_path: str, current_path: str) -> str | None:
     """Generate markdown comparison report.
 
-    Returns None if baseline doesn't exist (no comparison possible).
+    Returns None only if current results don't exist.
+    If baseline doesn't exist, generates a report with current results only.
     """
     baseline_data = load_benchmark_file(baseline_path)
     current_data = load_benchmark_file(current_path)
 
-    if baseline_data is None:
+    if current_data is None:
         return None
 
-    if current_data is None:
-        return "## Benchmark Results\n\n:warning: Current benchmark results not found."
+    current = {r["name"]: r for r in current_data["results"]}
+
+    # If no baseline, generate a current-only report
+    if baseline_data is None:
+        return _generate_current_only_report(current, current_data)
 
     baseline = {r["name"]: r for r in baseline_data["results"]}
-    current = {r["name"]: r for r in current_data["results"]}
 
     lines = [
         "## Benchmark Results",
@@ -122,8 +161,8 @@ def main() -> int:
     report = generate_report(baseline_path, current_path)
 
     if report is None:
-        print("No baseline found, skipping comparison.", file=sys.stderr)
-        return 0
+        print("No current benchmark results found.", file=sys.stderr)
+        return 1
 
     with open(output_path, "w") as f:
         f.write(report)
