@@ -38,7 +38,10 @@ def mock_clients(mocker):
 
 def test_Tesseract_init():
     # Instantiate with a url
-    t = Tesseract(url="localhost")
+    with pytest.warns(
+        UserWarning, match="Direct instantiation of Tesseract is deprecated"
+    ):
+        t = Tesseract(url="localhost")
 
     # Using it as a context manager should be a no-op
     with t:
