@@ -103,9 +103,9 @@ jobs:
 
           # Set output as multiline string
           {
-            echo 'report<<EOF'
+            echo 'report<<BENCHMARK_REPORT_END'
             cat benchmark_report.md
-            echo 'EOF'
+            echo 'BENCHMARK_REPORT_END'
           } >> $GITHUB_OUTPUT
 
       - name: Find existing comment
