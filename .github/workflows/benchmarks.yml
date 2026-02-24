@@ -53,7 +53,7 @@ jobs:
 
       - name: Run benchmarks on current commit
         run: |
-          uv run --no-sync python -m benchmarks.run_benchmarks \
+          uv run --no-sync python benchmarks/run_benchmarks.py \
             --iterations 30 \
             --output current_benchmarks.json
 
@@ -73,7 +73,7 @@ jobs:
       - name: Run benchmarks on baseline
         if: github.event_name == 'pull_request'
         run: |
-          uv run --no-sync python -m benchmarks.run_benchmarks \
+          uv run --no-sync python benchmarks/run_benchmarks.py \
             --iterations 30 \
             --output baseline_benchmarks.json
 

@@ -8,7 +8,7 @@ Benchmarks measure real-world Tesseract framework overhead using a no-op
 Tesseract that does nothing but decode inputs and encode outputs.
 
 Usage:
-    python -m benchmarks.run_benchmarks [options]
+    python run_benchmarks.py [options]
 
 Options:
     --iterations N    Number of iterations per benchmark (default: 50)

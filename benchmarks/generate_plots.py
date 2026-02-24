@@ -8,7 +8,7 @@ This script generates plots showing Tesseract overhead for various workload
 sizes, helping users understand if their workload is a good fit.
 
 Usage:
-    python -m benchmarks.generate_plots --benchmark-file PATH [--output-dir PATH]
+    python generate_plots.py --benchmark-file PATH [--output-dir PATH]
 """
 
 from __future__ import annotations
