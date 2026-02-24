@@ -8,7 +8,7 @@ import pytest
 from pydantic import BaseModel, Field
 
 from tesseract_core.runtime import Array, Differentiable, Float64
-from tesseract_core.runtime.finite_differences import (
+from tesseract_core.runtime.experimental import (
     finite_difference_jacobian,
     finite_difference_jvp,
     finite_difference_vjp,
