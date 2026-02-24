@@ -601,9 +601,9 @@ class Containers:
             memory: Memory limit for the container (e.g., "512m", "2g"). Minimum allowed is 6m.
             extra_args: Additional arguments to pass to the `docker run` CLI command.
             stream_stdout: If True, stream stdout to sys.stdout in real-time instead of
-                    buffering. Cannot be used with detach. (Currently unused, reserved for future use.)
+                    buffering. Cannot be used with detach.
             stream_stderr: If True, stream stderr to sys.stderr in real-time instead of
-                    buffering. Stdout is still captured and returned. Cannot be used with detach.
+                    buffering. Cannot be used with detach.
 
         Returns:
             Container object if detach is True, otherwise returns list of stdout and stderr.
