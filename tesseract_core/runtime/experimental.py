@@ -28,6 +28,16 @@ from tesseract_core.runtime.mpa import (
 )
 from tesseract_core.runtime.schema_types import safe_issubclass
 
+# Finite difference utilities for automatic differentiation
+# These provide a simple way to make any Tesseract differentiable without
+# implementing analytical gradients. Note: These are experimental and the API
+# may change in future releases.
+from tesseract_core.runtime.testing.finite_differences import (
+    finite_difference_jacobian,
+    finite_difference_jvp,
+    finite_difference_vjp,
+)
+
 # Flag is modified by runtime.cli based on arguments or during build time
 SKIP_REQUIRED_FILE_CHECK = False
 
@@ -335,6 +345,9 @@ __all__ = [
     "OutputFileReference",
     "PydanticLazySequenceAnnotation",
     "TesseractReference",
+    "finite_difference_jacobian",
+    "finite_difference_jvp",
+    "finite_difference_vjp",
     "log_artifact",
     "log_metric",
     "log_parameter",
