@@ -8,6 +8,7 @@ import shutil
 import tempfile
 import traceback
 import uuid
+import warnings
 from collections.abc import Callable, Mapping, Sequence
 from functools import cached_property, wraps
 from pathlib import Path
@@ -52,6 +53,12 @@ class Tesseract:
     """
 
     def __init__(self, url: str) -> None:
+        warnings.warn(
+            "Direct instantiation of Tesseract is deprecated. "
+            "Use Tesseract.from_url(), Tesseract.from_image(), or Tesseract.from_tesseract_api() instead.",
+            DeprecationWarning,
+            stacklevel=1,
+        )
         self._spawn_config = None
         self._serve_context = None
         self._lastlog = None
@@ -70,7 +77,10 @@ class Tesseract:
             A Tesseract instance.
         """
         obj = cls.__new__(cls)
-        obj.__init__(url)
+        obj._spawn_config = None
+        obj._serve_context = None
+        obj._lastlog = None
+        obj._client = HTTPClient(url)
         return obj
 
     @classmethod
