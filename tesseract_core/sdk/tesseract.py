@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import atexit
 import base64
+import shutil
 import tempfile
 import traceback
 import uuid
-import warnings
 from collections.abc import Callable, Mapping, Sequence
 from functools import cached_property, wraps
 from pathlib import Path
@@ -218,8 +218,6 @@ class Tesseract:
 
         # Apply runtime_config options
         config_kwargs: dict[str, Any] = {"output_format": output_format, "debug": True}
-        if runtime_config is not None:
-            config_kwargs.update(runtime_config)
         update_config(**config_kwargs)
 
         obj = cls.__new__(cls)
@@ -789,9 +787,9 @@ class LocalClient:
             raise RuntimeError(f"Endpoint {endpoint} not found in Tesseract API.")
 
         # Import here to avoid circular imports
+        from tesseract_core.runtime.config import update_config
         from tesseract_core.runtime.file_interactions import join_paths
         from tesseract_core.runtime.mpa import start_run
-        from tesseract_core.runtime.profiler import Profiler
 
         # Set up output path for logging
         temp_dir = None
@@ -799,8 +797,6 @@ class LocalClient:
 
         if stream_logs and output_path is None:
             # Use a temp directory if output_path is not set
-            from tesseract_core.runtime.config import update_config
-
             temp_dir = tempfile.mkdtemp(prefix="tesseract_logs_")
             output_path = Path(temp_dir)
             update_config(output_path=str(output_path))
@@ -819,12 +815,14 @@ class LocalClient:
             run_id = str(uuid.uuid4())
         rundir = join_paths(str(output_path) if output_path else ".", f"run_{run_id}")
 
-        profiler = Profiler()
         try:
-            if parsed_payload is not None:
-                result = self._endpoints[endpoint](parsed_payload)
-            else:
-                result = self._endpoints[endpoint]()
+            # Note: start_run uses TeePipe which writes to both stderr and the log file,
+            # so we don't need LogStreamer here - output will appear on terminal automatically
+            with start_run(base_dir=rundir):
+                if parsed_payload is not None:
+                    result = self._endpoints[endpoint](parsed_payload)
+                else:
+                    result = self._endpoints[endpoint]()
         except Exception as ex:
             # Some clients like Tesseract-JAX swallow tracebacks from re-raised exceptions, so we explicitly
             # format the traceback here to include it in the error message.
@@ -834,8 +832,6 @@ class LocalClient:
             ) from None
         finally:
             if temp_dir is not None:
-                import shutil
-
                 shutil.rmtree(temp_dir, ignore_errors=True)
 
         if OutputSchema is not None:
