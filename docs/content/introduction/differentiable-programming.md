@@ -107,6 +107,55 @@ For a practical introduction to JVPs and VJPs, see [the JAX documentation](https
 
 For more information, see the API reference for the {py:func}`Jacobian-vector product endpoint <tesseract_core.runtime.app_cli.jacobian_vector_product>` and the {py:func}`Vector-Jacobian product endpoint <tesseract_core.runtime.app_cli.vector_jacobian_product>`.
 
+### Finite Difference Gradients (Experimental)
+
+If implementing analytical gradients is too complex or time-consuming, you can use **finite differences**
+to approximate gradients numerically. This is useful for:
+
+- **Prototyping**: Quickly make any Tesseract differentiable without deriving gradients by hand
+- **Complex nested schemas**: When inputs have deeply nested structures that are tedious to differentiate manually
+- **Verification**: Cross-check analytical gradient implementations against numerical approximations
+
+```{warning}
+Finite difference gradients are **experimental** and available in `tesseract_core.runtime.experimental`.
+The API may change in future releases. Numerical differentiation is also less accurate and more
+computationally expensive than analytical methods—use it for prototyping, not production.
+```
+
+#### Available functions
+
+- `finite_difference_jacobian`: Compute the full Jacobian matrix
+- `finite_difference_jvp`: Compute Jacobian-vector products efficiently
+- `finite_difference_vjp`: Compute vector-Jacobian products
+
+#### Algorithms
+
+Three finite difference algorithms are supported:
+
+| Algorithm      | Evaluations | Accuracy | Best for                                      |
+| -------------- | ----------- | -------- | --------------------------------------------- |
+| `"central"`    | 2n          | High     | Default choice, most accurate                 |
+| `"forward"`    | n+1         | Medium   | When function evaluations are expensive       |
+| `"stochastic"` | O(√n)       | Lower    | High-dimensional inputs (1000s of parameters) |
+
+#### Example usage
+
+```python
+from tesseract_core.runtime.experimental import finite_difference_jacobian
+
+def jacobian(inputs, jac_inputs, jac_outputs):
+    return finite_difference_jacobian(
+        apply, inputs, jac_inputs, jac_outputs,
+        algorithm="central",  # or "forward", "stochastic"
+        eps=1e-6,
+    )
+```
+
+```{seealso}
+For a complete example, see the [meshstats_finitediff example](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/meshstats_finitediff)
+in the code repository.
+```
+
 ### Abstract Evaluation
 
 In some scenarios it can be useful to know what the shapes of arrays in the output of a Tesseract will be,

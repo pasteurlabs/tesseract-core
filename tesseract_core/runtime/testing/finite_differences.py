@@ -611,8 +611,9 @@ def finite_difference_jacobian(
             ``"stochastic"`` (SPSA algorithm, scales better to high-dimensional inputs).
         eps: Perturbation magnitude for finite differences.
         num_samples: Number of random samples for the stochastic algorithm.
-            Only used when ``algorithm="stochastic"``. Defaults to the total number
-            of input elements if not specified.
+            Only used when ``algorithm="stochastic"``. Defaults to ``max(10, sqrt(n))``
+            where ``n`` is the total number of input elements, providing O(sqrt(n))
+            cost instead of O(n) for full finite differences.
         seed: Random seed for reproducibility (only used with ``algorithm="stochastic"``).
 
     Returns:
@@ -622,7 +623,7 @@ def finite_difference_jacobian(
     Example:
         In a Tesseract's ``tesseract_api.py``::
 
-            from tesseract_core.runtime import finite_difference_jacobian
+            from tesseract_core.runtime.experimental import finite_difference_jacobian
 
 
             def jacobian(
@@ -633,6 +634,13 @@ def finite_difference_jacobian(
                 return finite_difference_jacobian(
                     apply, inputs, jac_inputs, jac_outputs
                 )
+
+    .. note::
+
+        This function is experimental and its API may change in future releases.
+        It is useful for prototyping or when analytical gradients are difficult
+        to derive, but numerical differentiation is generally less accurate and
+        more computationally expensive than analytical methods.
     """
     inputs_dict = inputs.model_dump()
 
@@ -775,9 +783,11 @@ def _compute_jacobian_stochastic(
         }
         total_input_elements += input_info[in_path]["size"]
 
-    # Default number of samples
+    # Default number of samples: use sqrt(n) which balances cost vs accuracy.
+    # This gives O(sqrt(n)) evaluations instead of O(n) for full FD,
+    # while still providing reasonable gradient estimates.
     if num_samples is None:
-        num_samples = total_input_elements
+        num_samples = max(10, int(np.sqrt(total_input_elements)))
 
     # Collect output shapes
     output_info = {}
@@ -884,7 +894,7 @@ def finite_difference_jvp(
     Example:
         In a Tesseract's ``tesseract_api.py``::
 
-            from tesseract_core.runtime import finite_difference_jvp
+            from tesseract_core.runtime.experimental import finite_difference_jvp
 
 
             def jacobian_vector_product(
@@ -896,6 +906,10 @@ def finite_difference_jvp(
                 return finite_difference_jvp(
                     apply, inputs, jvp_inputs, jvp_outputs, tangent_vector
                 )
+
+    .. note::
+
+        This function is experimental and its API may change in future releases.
     """
     inputs_dict = inputs.model_dump()
 
@@ -976,7 +990,8 @@ def finite_difference_vjp(
             ``"stochastic"`` (SPSA, better for high-dimensional inputs).
         eps: Perturbation magnitude.
         num_samples: Number of random samples for the stochastic algorithm.
-            Only used when ``algorithm="stochastic"``.
+            Only used when ``algorithm="stochastic"``. Defaults to ``max(10, sqrt(n))``
+            where ``n`` is the total number of input elements.
         seed: Random seed for reproducibility (only used with ``algorithm="stochastic"``).
 
     Returns:
@@ -985,7 +1000,7 @@ def finite_difference_vjp(
     Example:
         In a Tesseract's ``tesseract_api.py``::
 
-            from tesseract_core.runtime import finite_difference_vjp
+            from tesseract_core.runtime.experimental import finite_difference_vjp
 
 
             def vector_jacobian_product(
@@ -997,6 +1012,10 @@ def finite_difference_vjp(
                 return finite_difference_vjp(
                     apply, inputs, vjp_inputs, vjp_outputs, cotangent_vector
                 )
+
+    .. note::
+
+        This function is experimental and its API may change in future releases.
     """
     inputs_dict = inputs.model_dump()
     input_schema = type(inputs)
@@ -1108,9 +1127,11 @@ def _compute_vjp_stochastic(
         }
         total_input_elements += input_info[in_path]["size"]
 
-    # Default number of samples
+    # Default number of samples: use sqrt(n) which balances cost vs accuracy.
+    # This gives O(sqrt(n)) evaluations instead of O(n) for full FD,
+    # while still providing reasonable gradient estimates.
     if num_samples is None:
-        num_samples = total_input_elements
+        num_samples = max(10, int(np.sqrt(total_input_elements)))
 
     # Accumulate VJP estimates
     for _ in range(num_samples):

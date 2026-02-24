@@ -22,6 +22,8 @@ from tesseract_core.runtime import (
     Float64,
     Int32,
     ShapeDType,
+)
+from tesseract_core.runtime.experimental import (
     finite_difference_jacobian,
     finite_difference_jvp,
     finite_difference_vjp,

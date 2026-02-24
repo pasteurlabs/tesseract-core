@@ -14,6 +14,7 @@ building-blocks/arm64.md
 building-blocks/localpackage.md
 building-blocks/dataloader.md
 building-blocks/filereference.md
+building-blocks/finitediff.md
 ```
 
 This is a gallery of Tesseract examples that end at the `build` stage of the Tesseract lifecycle, and that can act as starting points to define and build your own Tesseracts.
@@ -75,6 +76,14 @@ You can also find these Tesseracts in the `examples` directory of the [code repo
 
      Tesseract that mounts input and output directories as datasets.
      To be used for Tesseracts with large inputs and/or outputs.
+
+:::
+
+:::{grid-item-card} Finite Difference Gradients
+:link: building-blocks/finitediff.html
+
+     Make any Tesseract differentiable without implementing analytical gradients.
+     Useful for prototyping and complex nested schemas. *(Experimental)*
 
 :::
 
