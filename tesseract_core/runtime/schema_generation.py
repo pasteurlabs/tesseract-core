@@ -257,8 +257,12 @@ def create_apply_schema(
     # what their paths are, and which expected shape / dtype they have.
     # This is used internally and by some official clients, but not advertised as part of the public API,
     # so people should not rely on it.
-    diffable_input_paths = _get_diffable_arrays(InputSchema)
-    diffable_output_paths = _get_diffable_arrays(OutputSchema)
+    diffable_input_paths = get_all_model_path_patterns(
+        InputSchema, filter_fn=is_differentiable
+    )
+    diffable_output_paths = get_all_model_path_patterns(
+        OutputSchema, filter_fn=is_differentiable
+    )
 
     InputSchema = apply_function_to_model_tree(
         InputSchema,
@@ -350,17 +354,30 @@ def create_abstract_eval_schema(
     return AbstractInputSchema, AbstractOutputSchema
 
 
-def _get_diffable_arrays(schema: type[BaseModel]) -> dict[tuple, Any]:
-    """Return a dictionary mapping path patterns of differentiable arrays to their types."""
-    diffable_paths = {}
+def get_all_model_path_patterns(
+    schema: type[BaseModel], filter_fn: Callable[[type], bool] | None = None
+) -> dict[tuple, type]:
+    """Return a dictionary mapping path patterns to their types.
 
-    def add_to_dict_if_diffable(obj: T, path: tuple) -> T:
-        if is_differentiable(obj):
-            diffable_paths[path] = obj
+    For containers (dict, list), the path will include sentinels and map to the container's inner type.
+    For model fields, maps to the field's type.
+    For leaves (primitives, arrays), maps to the actual type.
+
+    Args:
+        schema: The Pydantic model schema to traverse.
+        filter_fn: Optional predicate to filter which paths to include.
+                   If None, includes all paths. If provided, only includes
+                   paths where filter_fn(type) returns True.
+    """
+    path_to_type = {}
+
+    def add_path(obj: T, path: tuple) -> T:
+        if filter_fn is None or filter_fn(obj):
+            path_to_type[path] = obj
         return obj
 
-    apply_function_to_model_tree(schema, add_to_dict_if_diffable)
-    return diffable_paths
+    apply_function_to_model_tree(schema, add_path)
+    return path_to_type
 
 
 def _path_to_pattern(path: Sequence[str | object]) -> str:
@@ -418,8 +435,12 @@ def create_autodiff_schema(
 
     Returns a tuple (InputSchema, OutputSchema) with the generated schemas.
     """
-    diffable_input_paths = _get_diffable_arrays(InputSchema)
-    diffable_output_paths = _get_diffable_arrays(OutputSchema)
+    diffable_input_paths = get_all_model_path_patterns(
+        InputSchema, filter_fn=is_differentiable
+    )
+    diffable_output_paths = get_all_model_path_patterns(
+        OutputSchema, filter_fn=is_differentiable
+    )
 
     if not diffable_input_paths:
         raise RuntimeError("No differentiable inputs found in the input schema")

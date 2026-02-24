@@ -1,0 +1,59 @@
+{
+  "endpoint": "jacobian_vector_product",
+  "expected_outputs": {
+    "vector_add.result": {
+      "object_type": "array",
+      "shape": [3],
+      "dtype": "float64",
+      "data": {
+        "buffer": "mpmZmZmZyT+amZmZmZnZPzMzMzMzM+M/",
+        "encoding": "base64"
+      }
+    }
+  },
+  "expected_exception": null,
+  "expected_exception_regex": null,
+  "atol": 1e-8,
+  "rtol": 1e-5,
+  "payload": {
+    "inputs": {
+      "a": {
+        "v": {
+          "object_type": "array",
+          "shape": [3],
+          "dtype": "int64",
+          "data": {
+            "buffer": "AQAAAAAAAAACAAAAAAAAAAMAAAAAAAAA",
+            "encoding": "base64"
+          }
+        },
+        "s": 2
+      },
+      "b": {
+        "v": {
+          "object_type": "array",
+          "shape": [3],
+          "dtype": "int64",
+          "data": {
+            "buffer": "BAAAAAAAAAAFAAAAAAAAAAYAAAAAAAAA",
+            "encoding": "base64"
+          }
+        },
+        "s": 1
+      }
+    },
+    "jvp_inputs": ["a.v"],
+    "jvp_outputs": ["vector_add.result"],
+    "tangent_vector": {
+      "a.v": {
+        "object_type": "array",
+        "shape": [3],
+        "dtype": "float64",
+        "data": {
+          "buffer": "mpmZmZmZuT+amZmZmZnJPzMzMzMzM9M/",
+          "encoding": "base64"
+        }
+      }
+    }
+  }
+}

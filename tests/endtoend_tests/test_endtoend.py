@@ -836,9 +836,6 @@ def logging_test_image(
     # Write the API file
     with open(workdir / "tesseract_api.py", "w") as f:
         f.write(tesseract_api)
-    # Add mlflow dependency
-    with open(workdir / "tesseract_requirements.txt", "w") as f:
-        f.write("mlflow\n")
 
     shutil.copy(
         dummy_tesseract_location / "tesseract_config.yaml",
