@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import importlib.util
-import logging
+import json
 import os
 import sys
 from collections.abc import Callable, Generator
@@ -12,16 +12,46 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, TextIO
 
+import numpy as np
 from pydantic import BaseModel
 
 from .config import get_config
+from .logs import get_logger, is_tracing_enabled
 from .schema_generation import (
     create_abstract_eval_schema,
     create_apply_schema,
     create_autodiff_schema,
 )
 
-logger = logging.getLogger("tesseract")
+
+def _trace(msg: str, obj: BaseModel) -> None:
+    """Log a trace message with formatted BaseModel, only if tracing is enabled."""
+    if not is_tracing_enabled():
+        return
+
+    def format_array(arr: np.ndarray, max_elements: int = 10) -> str:
+        data_repr = repr(arr.flatten()[:max_elements].tolist())
+        if arr.size > max_elements:
+            data_repr = data_repr[:-1] + ", ...]"
+        return f"Array(shape={arr.shape}, dtype={arr.dtype}, data={data_repr})"
+
+    def format_value(v: Any) -> Any:
+        if isinstance(v, np.ndarray):
+            return format_array(v)
+        elif isinstance(v, dict):
+            return {k: format_value(val) for k, val in v.items()}
+        elif isinstance(v, list):
+            return [format_value(item) for item in v]
+        return v
+
+    formatted_dict = {k: format_value(v) for k, v in obj.model_dump().items()}
+
+    try:
+        formatted = json.dumps(formatted_dict, indent=2, default=str)
+    except (TypeError, ValueError):
+        formatted = repr(formatted_dict)
+
+    get_logger().debug("%s\n%s", msg, formatted)
 
 
 @contextmanager
@@ -181,10 +211,13 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
     @assemble_docstring(api_module.apply)
     def apply(payload: ApplyInputSchema) -> ApplyOutputSchema:
         """Apply the Tesseract to the input data."""
+        _trace("apply() called with inputs:", payload.inputs)
         out = api_module.apply(payload.inputs)
         if isinstance(out, api_module.OutputSchema):
             out = out.model_dump()
-        return ApplyOutputSchema.model_validate(out)
+        result = ApplyOutputSchema.model_validate(out)
+        _trace("apply() returned:", result)
+        return result
 
     endpoints.append(apply)
 
@@ -199,14 +232,17 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
 
             Differentiates ``jac_outputs`` with respect to ``jac_inputs``, at the point ``inputs``.
             """
+            _trace("jacobian() called with payload:", payload)
             out = api_module.jacobian(**dict(payload))
-            return JacobianOutputSchema.model_validate(
+            result = JacobianOutputSchema.model_validate(
                 out,
                 context={
                     "output_keys": payload.jac_outputs,
                     "input_keys": payload.jac_inputs,
                 },
             )
+            _trace("jacobian() returned:", result)
+            return result
 
         endpoints.append(jacobian)
 
@@ -222,10 +258,13 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
             Evaluates the Jacobian vector product between the Jacobian given by ``jvp_outputs``
             with respect to ``jvp_inputs`` at the point ``inputs`` and the given tangent vector.
             """
+            _trace("jacobian_vector_product() called with payload:", payload)
             out = api_module.jacobian_vector_product(**dict(payload))
-            return JVPOutputSchema.model_validate(
+            result = JVPOutputSchema.model_validate(
                 out, context={"output_keys": payload.jvp_outputs}
             )
+            _trace("jacobian_vector_product() returned:", result)
+            return result
 
         endpoints.append(jacobian_vector_product)
 
@@ -241,10 +280,13 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
             Computes the vector Jacobian product between the Jacobian given by ``vjp_outputs``
             with respect to ``vjp_inputs`` at the point ``inputs`` and the given cotangent vector.
             """
+            _trace("vector_jacobian_product() called with payload:", payload)
             out = api_module.vector_jacobian_product(**dict(payload))
-            return VJPOutputSchema.model_validate(
+            result = VJPOutputSchema.model_validate(
                 out, context={"input_keys": payload.vjp_inputs}
             )
+            _trace("vector_jacobian_product() returned:", result)
+            return result
 
         endpoints.append(vector_jacobian_product)
 
@@ -262,8 +304,11 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
         @assemble_docstring(api_module.abstract_eval)
         def abstract_eval(payload: AbstractEvalInputSchema) -> AbstractEvalOutputSchema:
             """Perform abstract evaluation of the Tesseract on the input data."""
+            _trace("abstract_eval() called with inputs:", payload.inputs)
             out = api_module.abstract_eval(payload.inputs)
-            return AbstractEvalOutputSchema.model_validate(out)
+            result = AbstractEvalOutputSchema.model_validate(out)
+            _trace("abstract_eval() returned:", result)
+            return result
 
         endpoints.append(abstract_eval)
 

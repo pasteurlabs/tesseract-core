@@ -8,6 +8,7 @@ import threading
 import time
 import warnings
 from collections.abc import Callable, Iterable
+from pathlib import Path
 from types import ModuleType
 from typing import Any
 

@@ -87,6 +87,7 @@ class Tesseract:
         input_path: str | Path | None = None,
         output_path: str | Path | None = None,
         output_format: Literal["json", "json+base64"] = "json+base64",
+        runtime_config: dict[str, Any] | None = None,
     ) -> Tesseract:
         """Create a Tesseract instance from a Docker image.
 
@@ -118,6 +119,9 @@ class Tesseract:
             output_path: Output path to write output files to, such as local directory or S3 URI.
             output_format: Format to use for the output data (json+binref not yet supported).
                 This has no impact on what is returned to Python and only affects the format that is used internally.
+            runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
+                These are converted to TESSERACT_* environment variables. For example,
+                `{"profiling": True}` enables profiling via TESSERACT_PROFILING=true.
 
         Returns:
             A Tesseract instance.
@@ -126,6 +130,17 @@ class Tesseract:
 
         if environment is None:
             environment = {}
+
+        # Convert runtime_config to TESSERACT_* environment variables
+        if runtime_config is not None:
+            for key, value in runtime_config.items():
+                env_key = f"TESSERACT_{key.upper()}"
+                # Convert Python values to string representation
+                if isinstance(value, bool):
+                    env_value = "1" if value else "0"
+                else:
+                    env_value = str(value)
+                environment[env_key] = env_value
         if volumes is None:
             volumes = []
         if input_path is not None:
@@ -162,6 +177,7 @@ class Tesseract:
         input_path: Path | None = None,
         output_path: Path | None = None,
         output_format: Literal["json", "json+base64"] = "json+base64",
+        runtime_config: dict[str, Any] | None = None,
     ) -> Tesseract:
         """Create a Tesseract instance from a Tesseract API module.
 
@@ -179,6 +195,8 @@ class Tesseract:
                 result with be given relative to this path.
             output_format: Format to use for the output data (json+binref not yet supported).
                 This has no impact on what is returned to Python and only affects the format that is used internally.
+            runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
+                For example, `{"profiling": True}` enables profiling.
 
         Returns:
             A Tesseract instance.
@@ -718,10 +736,21 @@ class LocalClient:
             parsed_payload = None
 
         try:
-            if parsed_payload is not None:
-                result = self._endpoints[endpoint](parsed_payload)
-            else:
-                result = self._endpoints[endpoint]()
+            profiler.start()
+            # Note: start_run uses TeePipe which writes to both stderr and the log file,
+            # so we don't need LogStreamer here - output will appear on terminal automatically
+            with start_run(base_dir=rundir):
+                if parsed_payload is not None:
+                    result = self._endpoints[endpoint](parsed_payload)
+                else:
+                    result = self._endpoints[endpoint]()
+                # Stop profiler and print stats inside start_run context
+                # so they go through stdio redirection to the log file (and stderr)
+                profiler.stop()
+                stats_text = profiler.get_stats()
+                if stats_text:
+                    print("\n--- Profiling Statistics ---")
+                    print(stats_text)
         except Exception as ex:
             # Some clients like Tesseract-JAX swallow tracebacks from re-raised exceptions, so we explicitly
             # format the traceback here to include it in the error message.
