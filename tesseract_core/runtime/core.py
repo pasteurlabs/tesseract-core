@@ -70,7 +70,7 @@ def load_module_from_path(path: Path | str) -> ModuleType:
     module = importlib.util.module_from_spec(spec)
 
     try:
-        sys.path.insert(0, str(module_dir))
+        sys.path.append(str(module_dir))
         # Also update PYTHONPATH in the environment so it propagates to subprocesses
         os.environ["PYTHONPATH"] = os.pathsep.join(sys.path)
         spec.loader.exec_module(module)
