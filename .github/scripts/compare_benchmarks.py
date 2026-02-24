@@ -9,8 +9,41 @@ Usage:
 """
 
 import json
+import re
 import sys
 from pathlib import Path
+
+
+def _parse_benchmark_name(name: str) -> tuple[str, str, int]:
+    """Parse benchmark name into (suite, operation, size) for sorting.
+
+    Examples:
+        "from_tesseract_api/apply_1" -> ("from_tesseract_api", "apply", 1)
+        "array_encoding/encode_json_100" -> ("array_encoding", "encode_json", 100)
+    """
+    # Split into suite and benchmark parts
+    if "/" in name:
+        suite, benchmark = name.split("/", 1)
+    else:
+        suite, benchmark = "", name
+
+    # Extract the numeric size from the end (handles formats like "apply_1,000,000")
+    # Remove commas from numbers first
+    benchmark_cleaned = benchmark.replace(",", "")
+    match = re.search(r"_(\d+)$", benchmark_cleaned)
+    if match:
+        size = int(match.group(1))
+        operation = benchmark_cleaned[: match.start()]
+    else:
+        size = 0
+        operation = benchmark_cleaned
+
+    return (suite, operation, size)
+
+
+def _sort_benchmark_names(names: list[str]) -> list[str]:
+    """Sort benchmark names by suite, then operation, then size numerically."""
+    return sorted(names, key=_parse_benchmark_name)
 
 
 def load_benchmark_file(path: str) -> dict | None:
@@ -37,7 +70,7 @@ def _generate_current_only_report(current: dict, current_data: dict) -> str:
         "|-----------|---------|",
     ]
 
-    for name in sorted(current.keys()):
+    for name in _sort_benchmark_names(list(current.keys())):
         curr_mean = current[name]["mean_time_s"] * 1000
         lines.append(f"| `{name}` | {curr_mean:.3f}ms |")
 
@@ -89,8 +122,8 @@ def generate_report(baseline_path: str, current_path: str) -> str | None:
         "|-----------|----------|---------|--------|--------|",
     ]
 
-    # Find all benchmark names
-    all_names = sorted(set(baseline.keys()) | set(current.keys()))
+    # Find all benchmark names, sorted by suite then size
+    all_names = _sort_benchmark_names(list(set(baseline.keys()) | set(current.keys())))
 
     for name in all_names:
         if name not in baseline:
