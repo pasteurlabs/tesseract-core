@@ -112,6 +112,7 @@ def _parse_payload(value: Any) -> dict[str, Any]:
         except Exception as e:
             raise click.BadParameter(f"Could not read data from path {value}.") from e
 
+    # Use pydantic from_json here because it is much faster, and the payload may be large.
     return from_json(value)
 
 
