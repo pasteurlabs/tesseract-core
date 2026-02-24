@@ -111,6 +111,7 @@ Tesseract Showcase <https://si-tesseract.discourse.group/c/showcase/11>
 :hidden:
 
 content/misc/faq.md
+content/misc/performance.md
 ```
 
 ```{toctree}
