@@ -70,14 +70,16 @@ def load_module_from_path(path: Path | str) -> ModuleType:
     module = importlib.util.module_from_spec(spec)
 
     try:
-        old_path = sys.path
-        sys.path = [str(module_dir), *old_path]
+        sys.path.insert(0, str(module_dir))
+        # Also update PYTHONPATH in the environment so it propagates to subprocesses
+        os.environ["PYTHONPATH"] = os.pathsep.join(sys.path)
         spec.loader.exec_module(module)
     except Exception as exc:
+        # Restore sys.path on failure
+        if str(module_dir) in sys.path:
+            sys.path.remove(str(module_dir))
+        os.environ["PYTHONPATH"] = os.pathsep.join(sys.path)
         raise ImportError(f"Could not load module from {path}") from exc
-    finally:
-        sys.path = old_path
-
     return module
 
 
