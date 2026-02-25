@@ -146,6 +146,9 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
         "vector_jacobian_product",
     }
 
+    # Track schemas that need to be added to components/schemas
+    schemas_to_register: dict[str, dict] = {}
+
     for endpoint_func in tesseract_endpoints:
         endpoint_name = endpoint_func.__name__
 
@@ -158,15 +161,27 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
         if endpoint_name in computational_endpoints:
             # Wrap with profiling and manual serde
             wrapped_endpoint, InputSchema = wrap_computational_endpoint(endpoint_func)
+            # Generate schema and extract $defs for registration
+            full_schema = InputSchema.model_json_schema(
+                ref_template="#/components/schemas/{model}"
+            )
+            # Extract and register $defs as component schemas
+            if "$defs" in full_schema:
+                schemas_to_register.update(full_schema.pop("$defs"))
+
+            # Register the main schema under its title
+            schema_name = full_schema.get(
+                "title", f"{endpoint_name.title()}InputSchema"
+            )
+            schemas_to_register[schema_name] = full_schema
+
             # Use openapi_extra to document the request body schema
             # while accepting raw Request for manual deserialization
             openapi_extra = {
                 "requestBody": {
                     "content": {
                         "application/json": {
-                            "schema": InputSchema.model_json_schema(
-                                ref_template="#/components/schemas/{model}"
-                            )
+                            "schema": {"$ref": f"#/components/schemas/{schema_name}"}
                         }
                     },
                     "required": True,
@@ -180,6 +195,24 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
             )
         else:
             app.add_api_route(f"/{endpoint_name}", endpoint_func, methods=http_methods)
+
+    # Override the OpenAPI schema generation to include our custom schemas
+    original_openapi = app.openapi
+
+    def custom_openapi():
+        if app.openapi_schema:
+            return app.openapi_schema
+        openapi_schema = original_openapi()
+        # Add our schemas to components/schemas
+        if "components" not in openapi_schema:
+            openapi_schema["components"] = {}
+        if "schemas" not in openapi_schema["components"]:
+            openapi_schema["components"]["schemas"] = {}
+        openapi_schema["components"]["schemas"].update(schemas_to_register)
+        app.openapi_schema = openapi_schema
+        return app.openapi_schema
+
+    app.openapi = custom_openapi
 
     return app
 
