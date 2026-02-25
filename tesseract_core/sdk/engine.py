@@ -24,10 +24,13 @@ from jinja2 import Environment, PackageLoader, StrictUndefined
 from .api_parse import TesseractConfig, get_config, validate_tesseract_api
 from .docker_client import (
     APIError,
+    BuildError,
     CLIDockerClient,
     Container,
     ContainerError,
+    Containers,
     Image,
+    Images,
     build_docker_image,
     is_podman,
 )
@@ -418,6 +421,29 @@ def build_tesseract(
 
     logger.debug("Build successful")
     assert image is not None
+
+    if not config.build_config.skip_checks:
+        logger.info("Running sanity check on built image ...")
+        try:
+            Containers.run(
+                tags[0],
+                ["check"],
+                environment={"_TESSERACT_IS_BUILDING": "1"},
+                remove=True,
+                stdout=True,
+                stderr=True,
+            )
+        except ContainerError as exc:
+            logger.error(
+                "Sanity check failed. Removing image tags to prevent use of a broken image."
+            )
+            for tag in tags:
+                try:
+                    Images.remove(tag)
+                except Exception:
+                    pass
+            raise BuildError([exc.stderr.decode("utf-8", errors="ignore")]) from exc
+
     return image
 
 
