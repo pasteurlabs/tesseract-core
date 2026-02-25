@@ -10,6 +10,7 @@ import re
 import shlex
 import subprocess
 from dataclasses import dataclass
+from io import BufferedIOBase
 from pathlib import Path
 
 # store a reference to the list type, which is shadowed by some function names below
@@ -679,92 +680,99 @@ class Containers:
 
         logger.debug(f"Running command: {full_cmd}")
 
-        if stream_stderr:
-            # Stream stderr to sys.stderr in real-time, capture stdout
-            import sys
+        # Use Popen for all cases to enable streaming and proper cleanup
+        import sys
+        import threading
 
-            proc = subprocess.Popen(
-                full_cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=False,
-            )
-
-            try:
-                # Stream stderr line by line to sys.stderr
-                stderr_lines = []
-                while True:
-                    line = proc.stderr.readline()
-                    if line:
-                        stderr_lines.append(line)
-                        sys.stderr.buffer.write(line)
-                        sys.stderr.buffer.flush()
-                    elif proc.poll() is not None:
-                        break
-
-                # Read any remaining stderr
-                remaining_stderr = proc.stderr.read()
-                if remaining_stderr:
-                    stderr_lines.append(remaining_stderr)
-                    sys.stderr.buffer.write(remaining_stderr)
-                    sys.stderr.buffer.flush()
-
-                stdout_data = proc.stdout.read()
-                stderr_data = b"".join(stderr_lines)
-                returncode = proc.returncode
-            finally:
-                # Ensure streams are closed
-                proc.stdout.close()
-                proc.stderr.close()
-
-            if returncode != 0:
-                stderr_str = stderr_data.decode("utf-8", errors="ignore")
-                if "repository" in stderr_str:
-                    raise ImageNotFound(stderr_str)
-                raise ContainerError(
-                    None,
-                    returncode,
-                    shlex.join(full_cmd),
-                    image,
-                    stderr_data,
-                )
-
-            if stdout and stderr:
-                return stdout_data, stderr_data
-            if stderr:
-                return stderr_data
-            return stdout_data
-
-        result = subprocess.run(
+        proc = subprocess.Popen(
             full_cmd,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=False,
-            check=False,
         )
 
-        if result.returncode != 0:
-            stderr_str = result.stderr.decode("utf-8", errors="ignore")
+        stdout_lines: list[bytes] = []
+        stderr_lines: list[bytes] = []
+
+        def read_stream(
+            stream: BufferedIOBase,
+            collected: list[bytes],
+            should_stream: bool,
+            target_buffer: BufferedIOBase,
+        ):
+            """Read from stream, optionally streaming to target."""
+            while True:
+                line = stream.readline()
+                if not line:
+                    break
+                collected.append(line)
+                if should_stream:
+                    target_buffer.write(line)
+                    target_buffer.flush()
+
+        try:
+            # Use threads to read stdout and stderr concurrently to avoid deadlocks
+            stdout_thread = threading.Thread(
+                target=read_stream,
+                args=(proc.stdout, stdout_lines, stream_stdout, sys.stdout.buffer),
+            )
+            stderr_thread = threading.Thread(
+                target=read_stream,
+                args=(proc.stderr, stderr_lines, stream_stderr, sys.stderr.buffer),
+            )
+
+            stdout_thread.start()
+            stderr_thread.start()
+
+            # Wait for process and threads to complete
+            proc.wait()
+            stdout_thread.join()
+            stderr_thread.join()
+
+            stdout_data = b"".join(stdout_lines)
+            stderr_data = b"".join(stderr_lines)
+            returncode = proc.returncode
+
+        except (KeyboardInterrupt, Exception):
+            # Terminate the process on interrupt or exception (unless detached)
+            if not detach:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+            raise
+        finally:
+            # Ensure streams are closed
+            if proc.stdout:
+                proc.stdout.close()
+            if proc.stderr:
+                proc.stderr.close()
+
+        if returncode != 0:
+            stderr_str = stderr_data.decode("utf-8", errors="ignore")
             if "repository" in stderr_str:
                 raise ImageNotFound(stderr_str)
             raise ContainerError(
                 None,
-                result.returncode,
+                returncode,
                 shlex.join(full_cmd),
                 image,
-                result.stderr,
+                stderr_data,
             )
 
         if detach:
             # If detach is True, stdout prints out the container ID of the running container
-            container_id = result.stdout.decode("utf-8", errors="ignore").strip()
+            container_id = stdout_data.decode("utf-8", errors="ignore").strip()
             container_obj = Containers.get(container_id)
             return container_obj
 
         if stdout and stderr:
-            return result.stdout, result.stderr
+            return stdout_data, stderr_data
         if stderr:
-            return result.stderr
-        return result.stdout
+            return stderr_data
+        return stdout_data
 
     @staticmethod
     def _get_containers(
