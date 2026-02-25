@@ -121,12 +121,16 @@ ENV LD_PRELOAD=libnss_wrapper.so \
 USER 9999:9999
 ENV HOME=/tesseract
 
-# Final sanity check to ensure the runtime is installed and tesseract_api.py is valid.
-# Use HOME=/tmp so that libraries (e.g. matplotlib, arviz) do not create cache/config
-# dirs inside /tesseract owned by uid 9999, which would prevent other uids from writing there.
+# Final sanity check to ensure the runtime is installed and tesseract_api.py is valid
 {% if not config.build_config.skip_checks %}
-RUN HOME=/tmp _TESSERACT_IS_BUILDING=1 /tesseract/entrypoint.sh tesseract-runtime check
+RUN _TESSERACT_IS_BUILDING=1 /tesseract/entrypoint.sh tesseract-runtime check
 {% endif %}
+
+# Make sure /tesseract is writable by non-root users, especially important if
+# some folders are created at build time and owned by 9999:9999.
+USER root
+RUN chmod -R 777 /tesseract
+USER 9999:9999
 
 ENTRYPOINT ["/tesseract/entrypoint.sh", "tesseract-runtime"]
 CMD ["--help"]
