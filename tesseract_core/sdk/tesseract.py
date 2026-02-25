@@ -99,6 +99,7 @@ class Tesseract:
         input_path: str | Path | None = None,
         output_path: str | Path | None = None,
         output_format: Literal["json", "json+base64", "json+binref"] = "json+base64",
+        runtime_args: list[str] | None = None,
     ) -> Tesseract:
         """Create a Tesseract instance from a Docker image.
 
@@ -131,6 +132,7 @@ class Tesseract:
                 Required when using json+binref output format.
             output_format: Format to use for the output data. json+binref requires output_path to be set.
                 This has no impact on what is returned to Python and only affects the format that is used internally.
+            runtime_args: Additional arguments to pass to the container runtime (e.g., Docker).
 
         Returns:
             A Tesseract instance.
@@ -162,6 +164,7 @@ class Tesseract:
             port=port,
             host_ip=host_ip,
             debug=True,
+            runtime_args=runtime_args,
         )
         obj._serve_context = None
         obj._lastlog = None

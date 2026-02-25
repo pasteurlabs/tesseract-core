@@ -1330,11 +1330,13 @@ def test_serve_with_network_host_interop(
     assert res.status_code == 200, res.text
 
     # Serve a second Tesseract (with normal networking)
+    # On Linux, host.docker.internal is not available by default, so we need to add it
     serve_res2 = subprocess.run(
         [
             "tesseract",
             "serve",
             built_image_name,
+            "--runtime-args=--add-host=host.docker.internal:host-gateway",
         ],
         capture_output=True,
         text=True,
