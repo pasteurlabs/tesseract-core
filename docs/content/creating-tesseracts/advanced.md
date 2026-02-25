@@ -75,69 +75,6 @@ class InputSchema(BaseModel):
         return v + 1
 ```
 
-### 🔪 Sharp edge: Using `ProcessPoolExecutor` or `multiprocessing`
-
-When using Python's `multiprocessing` module or `concurrent.futures.ProcessPoolExecutor` inside a Tesseract, there are two common pitfalls to avoid:
-
-**1. Create executors at module scope, not inside functions**
-
-On macOS and Windows, Python uses the "spawn" start method to create worker processes by default. This means each worker starts a fresh Python interpreter and re-imports modules. Creating a `ProcessPoolExecutor` inside a function can cause deadlocks during shutdown:
-
-```python
-# ❌ BAD: May hang on shutdown
-def apply(inputs: InputSchema) -> OutputSchema:
-    pool = ProcessPoolExecutor()
-    with pool as executor:
-        results = list(executor.map(my_func, data))
-    return OutputSchema(results=results)
-
-# ✅ GOOD: Create at module scope
-pool = ProcessPoolExecutor()
-
-def apply(inputs: InputSchema) -> OutputSchema:
-    with pool as executor:
-        results = list(executor.map(my_func, data))
-    return OutputSchema(results=results)
-```
-
-**2. Define worker functions in separate modules**
-
-Functions defined in `tesseract_api.py` cannot be pickled for use with multiprocessing because of how the module is loaded. Instead, define your worker functions in a separate module and import them:
-
-```python
-# ❌ BAD: Functions in tesseract_api.py can't be pickled
-def my_worker(x):
-    return x * 2
-
-def apply(inputs: InputSchema) -> OutputSchema:
-    with pool as executor:
-        results = list(executor.map(my_worker, data))  # Pickle error!
-    ...
-
-# ✅ GOOD: Import from a separate module
-# In workers.py:
-def my_worker(x):
-    return x * 2
-
-# In tesseract_api.py:
-from workers import my_worker
-
-def apply(inputs: InputSchema) -> OutputSchema:
-    with pool as executor:
-        results = list(executor.map(my_worker, data))  # Works!
-    ...
-```
-
-Make sure to include the worker module in your `tesseract_config.yaml`:
-
-```yaml
-build_config:
-  package_data:
-    - ["workers.py", "workers.py"]
-```
-
-See [GitHub issue #356](https://github.com/pasteurlabs/tesseract-core/issues/356) for more details.
-
 ## Debugging build failures
 
 There are also several options you can provide to `tesseract build` which can be helpful in

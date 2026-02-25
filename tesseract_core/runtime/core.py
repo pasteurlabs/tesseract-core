@@ -71,14 +71,23 @@ def load_module_from_path(path: Path | str) -> ModuleType:
 
     try:
         sys.path.append(str(module_dir))
+
         # Also update PYTHONPATH in the environment so it propagates to subprocesses
         os.environ["PYTHONPATH"] = os.pathsep.join(sys.path)
+
+        # Register in sys.modules so functions can be pickled for multiprocessing.
+        # This allows pickle to find the module via func.__module__.
+        # Note: This may shadow a user package with the same name, but that's
+        # acceptable since tesseract_api.py is the entry point for the runtime.
+        sys.modules[module_name] = module
+
         spec.loader.exec_module(module)
     except Exception as exc:
         # Restore sys.path on failure
         if str(module_dir) in sys.path:
             sys.path.remove(str(module_dir))
         os.environ["PYTHONPATH"] = os.pathsep.join(sys.path)
+        sys.modules.pop(module_name, None)
         raise ImportError(f"Could not load module from {path}") from exc
     return module
 
