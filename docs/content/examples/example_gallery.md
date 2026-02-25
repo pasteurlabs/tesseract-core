@@ -9,6 +9,7 @@
 building-blocks/helloworld.md
 building-blocks/vectoradd.md
 building-blocks/univariate.md
+building-blocks/fortran.md
 building-blocks/packagedata.md
 building-blocks/arm64.md
 building-blocks/localpackage.md
@@ -47,6 +48,13 @@ Tesseract performing vector addition. Highlighting simple array operations and h
 A Tesseract that wraps the univariate Rosenbrock function, which is a common test problem for optimization algorithms.
 
 [View on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/univariate)
+:::
+:::{grid-item-card} Fortran Integration
+:link: building-blocks/fortran.html
+
+Wrapping a Fortran heat equation solver. Demonstrates subprocess-based integration for legacy compiled code.
+
+[View on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/fortran_heat)
 :::
 :::{grid-item-card} Package Data
 :link: building-blocks/packagedata.html
