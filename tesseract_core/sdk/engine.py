@@ -440,9 +440,12 @@ def build_tesseract(
             for tag in tags:
                 try:
                     Images.remove(tag)
-                except Exception:
-                    pass
+                except Exception as remove_exc:
+                    logger.warning(
+                        f"Failed to remove image tag '{tag}' after failed sanity check: {remove_exc}"
+                    )
             raise BuildError([exc.stderr.decode("utf-8", errors="ignore")]) from exc
+        logger.info("Sanity check passed.")
 
     return image
 
