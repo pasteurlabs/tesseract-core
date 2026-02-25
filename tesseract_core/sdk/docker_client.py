@@ -10,7 +10,7 @@ import re
 import shlex
 import subprocess
 from dataclasses import dataclass
-from io import BufferedIOBase
+from io import IOBase
 from pathlib import Path
 
 # store a reference to the list type, which is shadowed by some function names below
@@ -695,10 +695,10 @@ class Containers:
         stderr_lines: list[bytes] = []
 
         def read_stream(
-            stream: BufferedIOBase,
+            stream: IOBase,
             collected: list[bytes],
             should_stream: bool,
-            target_buffer: BufferedIOBase,
+            target_stream: IOBase,
         ):
             """Read from stream, optionally streaming to target."""
             while True:
@@ -707,18 +707,20 @@ class Containers:
                     break
                 collected.append(line)
                 if should_stream:
-                    target_buffer.write(line)
-                    target_buffer.flush()
+                    # Decode bytes to text for writing to stdout/stderr
+                    # (handles environments like Jupyter where .buffer may not exist)
+                    target_stream.write(line.decode("utf-8", errors="replace"))
+                    target_stream.flush()
 
         try:
             # Use threads to read stdout and stderr concurrently to avoid deadlocks
             stdout_thread = threading.Thread(
                 target=read_stream,
-                args=(proc.stdout, stdout_lines, stream_stdout, sys.stdout.buffer),
+                args=(proc.stdout, stdout_lines, stream_stdout, sys.stdout),
             )
             stderr_thread = threading.Thread(
                 target=read_stream,
-                args=(proc.stderr, stderr_lines, stream_stderr, sys.stderr.buffer),
+                args=(proc.stderr, stderr_lines, stream_stderr, sys.stderr),
             )
 
             stdout_thread.start()
