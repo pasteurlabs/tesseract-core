@@ -119,6 +119,7 @@ ENV LD_PRELOAD=libnss_wrapper.so \
 # Drop to random non-root user to prevent exploits
 # (this way, we never start the container as root unless specifically requested)
 USER 9999:9999
+ENV HOME=/tesseract
 
 # Final sanity check to ensure the runtime is installed and tesseract_api.py is valid
 {% if not config.build_config.skip_checks %}
