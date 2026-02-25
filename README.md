@@ -3,73 +3,106 @@
   <img alt="" src="https://github.com/pasteurlabs/tesseract-core/blob/main/docs/static/logo-light.png" width="128" align="right">
 </picture>
 
-### Tesseract Core
+### Tesseract
 
-Universal, autodiff-native software components for Simulation Intelligence. :package:
+Universal, autodiff-native software components for Simulation Intelligence
 
 [Read the docs](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/) |
 [Report an issue](https://github.com/pasteurlabs/tesseract-core/issues) |
-[Talk to the community](https://si-tesseract.discourse.group/) |
+[Community forum](https://si-tesseract.discourse.group/) |
 [Contribute](https://github.com/pasteurlabs/tesseract-core/blob/main/CONTRIBUTING.md)
 
 ---
 
 [![DOI](https://joss.theoj.org/papers/10.21105/joss.08385/status.svg)](https://doi.org/10.21105/joss.08385)
+[![SciPy](https://img.shields.io/badge/SciPy-2025-blue)](https://proceedings.scipy.org/articles/kvfm5762)
 
-**Tesseract Core** bundles:
+## The problem
 
-1. Tools to define, create, and run Tesseracts, via the `tesseract` CLI and `tesseract_core` Python API.
-2. The Tesseract Runtime, a lightweight, high-performance execution environment for Tesseracts.
+Real-world scientific workflows span multiple tools, languages, and computing environments. You might have a mesh generator in C++, a solver in Julia, and post-processing in Python. Getting these to work together is painful. Getting gradients to flow through them for optimization? Nearly impossible.
 
-## What is a Tesseract?
+Existing autodiff frameworks work great within a single codebase, but fall short when your pipeline crosses framework boundaries or includes legacy/commercial tools.
 
-Tesseracts are components that expose experimental, research-grade software to the world. They are self-contained, self-documenting, and self-executing, via command line and HTTP. They are designed to be easy to create, easy to use, and easy to share, including in a production environment. This repository contains all you need to define your own and execute them.
+## The solution
 
-Tesseracts provide built-in support for [differentiable programming](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/introduction/differentiable-programming.html) by propagating gradient information at the level of individual components, making it easy to build complex, diverse software pipelines that can be optimized end-to-end.
+Tesseract packages scientific software into **self-contained, portable components** that:
+
+- **Run anywhere** — Local machines, cloud, HPC clusters. Same container, same results.
+- **Expose clean interfaces** — CLI, REST API, and Python SDK. No more deciphering undocumented scripts.
+- **Propagate gradients** — Each component can expose derivatives, enabling end-to-end optimization across heterogeneous pipelines.
+- **Self-document** — Schemas, types, and API docs are generated automatically.
+
+## Who is this for?
+
+- **Researchers** building differentiable physics simulations or probabilistic models who need to combine tools from different ecosystems
+- **R&D engineers** packaging research code for use by others, without spending weeks on DevOps
+- **Platform engineers** deploying scientific workloads at scale with consistent interfaces and dependency isolation
+
+## Example: Shape optimization across tools
+
+The [rocket fin optimization case study](https://si-tesseract.discourse.group/t/parametric-shape-optimization-of-rocket-fins-with-ansys-spaceclaim-pyansys-and-tesseract/109) combines three Tesseracts:
+
+```
+[SpaceClaim geometry] → [Mesh + SDF] → [PyMAPDL FEA solver]
+         ↑                                      |
+         └──────── gradients flow back ─────────┘
+```
+
+Each component uses a different differentiation strategy (analytic adjoints, finite differences, JAX autodiff), yet they compose into a single optimizable pipeline. Result: 24% improvement in structural stiffness.
 
 ## Quick start
 
 > [!NOTE]
-> Before proceeding, make sure you have a [working installation of Docker](https://docs.docker.com/engine/install/) and a modern Python installation (Python 3.10+); if you prefer Docker Desktop for your platform, see [our extended installation instructions](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/introduction/installation.html#basic-installation).
+> Requires [Docker](https://docs.docker.com/engine/install/) and Python 3.10+.
 
-1. Install Tesseract Core:
+```bash
+$ pip install tesseract-core
 
-   ```bash
-   $ pip install tesseract-core
-   ```
+# Clone and build an example
+$ git clone https://github.com/pasteurlabs/tesseract-core
+$ tesseract build tesseract-core/examples/vectoradd
 
-2. Build an example Tesseract:
+# Run it
+$ tesseract run vectoradd apply '{"inputs": {"a": [1, 2], "b": [3, 4]}}'
+# → {"result": [4.0, 6.0], ...}
 
-   ```bash
-   $ git clone https://github.com/pasteurlabs/tesseract-core
-   $ tesseract build tesseract-core/examples/vectoradd
-   ```
+# Compute the Jacobian
+$ tesseract run vectoradd jacobian '{"inputs": {"a": [1, 2], "b": [3, 4]}, "jac_inputs": ["a"], "jac_outputs": ["result"]}'
 
-3. Display its API documentation:
-
-   ```bash
-   $ tesseract apidoc vectoradd
-   ```
+# See auto-generated API docs
+$ tesseract apidoc vectoradd
+```
 
 <p align="center">
 <img src="https://github.com/pasteurlabs/tesseract-core/blob/main/docs/img/apidoc-screenshot.png" width="600">
 </p>
 
-4. Run the Tesseract:
+## Core features
 
-   ```bash
-   $ tesseract run vectoradd apply '{"inputs": {"a": [1], "b": [2]}}'
-   {"result":{"object_type":"array","shape":[1],"dtype":"float64","data":{"buffer":[3.0],"encoding":"json"}}}⏎
-   ```
+| Feature               | Description                                                                   |
+| --------------------- | ----------------------------------------------------------------------------- |
+| **Containerized**     | Docker-based packaging ensures reproducibility and dependency isolation       |
+| **Multi-interface**   | CLI, REST API, and Python SDK for the same component                          |
+| **Differentiable**    | First-class support for Jacobians, JVPs, and VJPs across component boundaries |
+| **Schema-validated**  | Pydantic models define explicit input/output contracts                        |
+| **Language-agnostic** | Wrap Python, Julia, C++, or any executable behind a thin Python API           |
 
-> [!TIP]
-> Now you're ready to dive into the [documentation](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/) for more information on
-> [installation](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/introduction/installation.html),
-> [creating Tesseracts](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/creating-tesseracts/create.html), and
-> [invoking them](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/using-tesseracts/use.html).
+## Ecosystem
+
+- **[tesseract-core](https://github.com/pasteurlabs/tesseract-core)** — CLI, Python API, and runtime (this repo)
+- **[tesseract-jax](https://github.com/pasteurlabs/tesseract-jax)** — JAX integration for automatic gradient generation
+- **[tesseract-streamlit](https://github.com/pasteurlabs/tesseract-streamlit)** — Auto-generate interactive web apps from Tesseracts
+
+## Learn more
+
+- [Documentation](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/)
+- [Creating your first Tesseract](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/creating-tesseracts/create.html)
+- [Differentiable programming guide](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/introduction/differentiable-programming.html)
+- [Design patterns](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/creating-tesseracts/design-patterns.html)
+- [Example gallery](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/examples/example_gallery.html)
 
 ## License
 
-Tesseract Core is licensed under the [Apache License 2.0](https://github.com/pasteurlabs/tesseract-core/blob/main/LICENSE) and is free to use, modify, and distribute (under the terms of the license).
+Apache License 2.0. Free to use, modify, and distribute.
 
-Tesseract is a registered trademark of Pasteur Labs, Inc. and may not be used without permission.
+Tesseract is a registered trademark of Pasteur Labs, Inc.
