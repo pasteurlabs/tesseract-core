@@ -271,6 +271,6 @@ def test_apply_with_binref_format(built_image_name, tmp_path):
     assert set(out.keys()) == {"result"}
     np.testing.assert_array_equal(out["result"], np.array([4.0, 6.0]))
 
-    # Verify that binary files were created in the output directory
-    bin_files = list(output_dir.glob("*.bin"))
+    # Verify that binary files were created in the output directory (in run subdirectories)
+    bin_files = list(output_dir.glob("**/*.bin"))
     assert len(bin_files) > 0, "Expected binary output files to be created"
