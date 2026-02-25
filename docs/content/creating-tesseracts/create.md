@@ -125,6 +125,10 @@ description: "A sample Python app"
 If you followed all these steps, congratulations! 🎉 You are ready to
 build your first Tesseract.
 
+```{tip}
+Before building, you can test your Tesseract locally without containers using `tesseract-runtime`. See [Debugging and Development](../debugging.md) for details.
+```
+
 ## Build a Tesseract
 
 In order to build a Tesseract, you can use the `tesseract build` command.

@@ -1,21 +1,27 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-import inspect
+import json
+import logging
 import uuid
 from collections.abc import Callable
-from functools import wraps
 from types import ModuleType
-from typing import Annotated, Any
+from typing import Annotated
 
 import uvicorn
-from fastapi import FastAPI, Header, Query, Response
-from pydantic import BaseModel
+from fastapi import FastAPI, Header, Query, Request, Response
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ValidationError
+from pydantic_core import from_json
 
 from .config import get_config
-from .core import create_endpoints
+from .core import create_endpoints, get_input_schema
 from .file_interactions import SUPPORTED_FORMATS, join_paths, output_to_bytes
 from .mpa import start_run
+from .profiler import Profiler
+
+logger = logging.getLogger("tesseract")
 
 # Endpoints that should use GET instead of POST
 GET_ENDPOINTS = {"health"}
@@ -52,57 +58,96 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
         redoc_url="/docs",
         debug=config.debug,
     )
+
     tesseract_endpoints = create_endpoints(api_module)
 
-    def wrap_endpoint(endpoint_func: Callable):
-        endpoints_to_wrap = [
-            "apply",
-            "jacobian",
-            "jacobian_vector_product",
-            "vector_jacobian_product",
-        ]
+    def wrap_computational_endpoint(
+        endpoint_func: Callable,
+    ) -> tuple[Callable, type[BaseModel]]:
+        """Wrap computational endpoints to add profiling of serde and computation.
 
-        @wraps(endpoint_func)
-        async def wrapper(*args: Any, accept: str, run_id: str | None, **kwargs: Any):
+        For computational endpoints (apply, jacobian, etc.), this wrapper:
+        1. Accepts raw Request body to allow profiling of deserialization
+        2. Uses openapi_extra to preserve OpenAPI schema documentation
+        3. Profiles both deserialization, computation, and serialization
+
+        Returns:
+            A tuple of (wrapped_endpoint, InputSchema) for use with openapi_extra.
+        """
+        # Get the input schema for manual deserialization
+        InputSchema = get_input_schema(endpoint_func)
+
+        async def wrapper(
+            request: Request,
+            accept: Annotated[str | None, Header()] = None,
+            run_id: Annotated[str | None, Query(include_in_schema=False)] = None,
+        ) -> Response:
             if run_id is None:
                 run_id = str(uuid.uuid4())
             output_path = get_config().output_path
             rundir_name = f"run_{run_id}"
             rundir = join_paths(output_path, rundir_name)
-            with start_run(base_dir=rundir):
-                result = endpoint_func(*args, **kwargs)
-            return create_response(
-                result, accept, base_dir=output_path, binref_dir=rundir_name
-            )
+            profiler = Profiler(enabled=get_config().profiling)
 
-        if endpoint_func.__name__ not in endpoints_to_wrap:
-            return endpoint_func
-        else:
-            # wrapper's signature will be the same as endpoint
-            # func's signature. We do however need to change this
-            # in order to add a Header parameter that FastAPI
-            # will understand.
-            original_sig = inspect.signature(endpoint_func)
-            accept = inspect.Parameter(
-                "accept",
-                inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                default=Header(default=None),
-                annotation=str | None,
-            )
-            run_id = inspect.Parameter(
-                "run_id",
-                inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                default=None,
-                annotation=Annotated[str | None, Query(include_in_schema=False)],
-            )
-            # Other header parameters common to computational endpoints
-            # could be defined and appended here as well.
-            new_params = original_sig.parameters.copy()
-            new_params.update({"accept": accept, "run_id": run_id})
-            # Update the signature of the wrapper
-            new_sig = original_sig.replace(parameters=list(new_params.values()))
-            wrapper.__signature__ = new_sig
-            return wrapper
+            raw_body = await request.body()
+
+            with start_run(base_dir=rundir):
+                with profiler:
+                    # Parse JSON first, then validate with model_validate (not model_validate_json)
+                    # to allow array-like inputs (plain Python lists) to be coerced to arrays
+                    try:
+                        json_data = from_json(raw_body)
+                    except json.JSONDecodeError as e:
+                        return JSONResponse(
+                            status_code=422,
+                            content={
+                                "detail": [{"type": "json_invalid", "msg": str(e)}]
+                            },
+                        )
+
+                    try:
+                        payload = InputSchema.model_validate(json_data)
+                    except ValidationError as e:
+                        # Return 422 with validation errors (matches FastAPI's default behavior)
+                        # Use jsonable_encoder to handle non-JSON-serializable values like ValueError
+                        return JSONResponse(
+                            status_code=422,
+                            content={"detail": jsonable_encoder(e.errors())},
+                        )
+
+                    # Run the actual endpoint
+                    result = endpoint_func(payload)
+
+                    # Serialization inside profiler context
+                    resp = create_response(
+                        result, accept, base_dir=output_path, binref_dir=rundir_name
+                    )
+
+                # Stop profiler and print stats inside start_run context
+                # so they go through stdio redirection to the log file
+                stats_text = profiler.get_stats()
+                if stats_text:
+                    print("\n--- Profiling Statistics ---")
+                    print(stats_text)
+
+            return resp
+
+        # Copy over function metadata
+        wrapper.__name__ = endpoint_func.__name__
+        wrapper.__doc__ = endpoint_func.__doc__
+
+        return wrapper, InputSchema
+
+    # Endpoints that need openapi_extra for manual body parsing
+    computational_endpoints = {
+        "apply",
+        "jacobian",
+        "jacobian_vector_product",
+        "vector_jacobian_product",
+    }
+
+    # Track schemas that need to be added to components/schemas
+    schemas_to_register: dict[str, dict] = {}
 
     for endpoint_func in tesseract_endpoints:
         endpoint_name = endpoint_func.__name__
@@ -111,9 +156,63 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
         if endpoint_name == "test" and not config.debug:
             continue
 
-        wrapped_endpoint = wrap_endpoint(endpoint_func)
         http_methods = ["GET"] if endpoint_name in GET_ENDPOINTS else ["POST"]
-        app.add_api_route(f"/{endpoint_name}", wrapped_endpoint, methods=http_methods)
+
+        if endpoint_name in computational_endpoints:
+            # Wrap with profiling and manual serde
+            wrapped_endpoint, InputSchema = wrap_computational_endpoint(endpoint_func)
+            # Generate schema and extract $defs for registration
+            full_schema = InputSchema.model_json_schema(
+                ref_template="#/components/schemas/{model}"
+            )
+            # Extract and register $defs as component schemas
+            if "$defs" in full_schema:
+                schemas_to_register.update(full_schema.pop("$defs"))
+
+            # Register the main schema under its title
+            schema_name = full_schema.get(
+                "title", f"{endpoint_name.title()}InputSchema"
+            )
+            schemas_to_register[schema_name] = full_schema
+
+            # Use openapi_extra to document the request body schema
+            # while accepting raw Request for manual deserialization
+            openapi_extra = {
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {"$ref": f"#/components/schemas/{schema_name}"}
+                        }
+                    },
+                    "required": True,
+                }
+            }
+            app.add_api_route(
+                f"/{endpoint_name}",
+                wrapped_endpoint,
+                methods=http_methods,
+                openapi_extra=openapi_extra,
+            )
+        else:
+            app.add_api_route(f"/{endpoint_name}", endpoint_func, methods=http_methods)
+
+    # Override the OpenAPI schema generation to include our custom schemas
+    original_openapi = app.openapi
+
+    def custom_openapi():
+        if app.openapi_schema:
+            return app.openapi_schema
+        openapi_schema = original_openapi()
+        # Add our schemas to components/schemas
+        if "components" not in openapi_schema:
+            openapi_schema["components"] = {}
+        if "schemas" not in openapi_schema["components"]:
+            openapi_schema["components"]["schemas"] = {}
+        openapi_schema["components"]["schemas"].update(schemas_to_register)
+        app.openapi_schema = openapi_schema
+        return app.openapi_schema
+
+    app.openapi = custom_openapi
 
     return app
 

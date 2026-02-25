@@ -1,11 +1,52 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import logging
 import os
+import sys
 import threading
 import time
 from collections.abc import Callable
 from typing import Any
+
+# Simple logging setup for the runtime module
+_logger: logging.Logger | None = None
+
+
+def is_tracing_enabled() -> bool:
+    """Check if tracing mode is enabled."""
+    from .config import get_config
+
+    return get_config().tracing
+
+
+def get_logger() -> logging.Logger:
+    """Get the runtime logger, initializing it if needed.
+
+    Returns a logger that outputs timestamped messages to stdout.
+    Log level is DEBUG when tracing is enabled, INFO otherwise.
+    """
+    global _logger
+    if _logger is not None:
+        return _logger
+
+    from .config import get_config
+
+    _logger = logging.getLogger("tesseract_runtime")
+    _logger.setLevel(logging.DEBUG)  # Allow all levels, handler controls output
+
+    # Only add handler if not already configured
+    if not _logger.handlers:
+        handler = logging.StreamHandler(sys.stdout)
+        level = logging.DEBUG if get_config().tracing else logging.INFO
+        handler.setLevel(level)
+        formatter = logging.Formatter(
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        )
+        handler.setFormatter(formatter)
+        _logger.addHandler(handler)
+
+    return _logger
 
 
 # NOTE: This is duplicated in `tesseract_core/sdk/logs.py`.

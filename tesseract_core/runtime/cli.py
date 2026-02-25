@@ -38,6 +38,7 @@ from tesseract_core.runtime.file_interactions import (
     write_to_path,
 )
 from tesseract_core.runtime.mpa import start_run
+from tesseract_core.runtime.profiler import Profiler
 from tesseract_core.runtime.serve import create_rest_api
 from tesseract_core.runtime.serve import serve as serve_
 from tesseract_core.runtime.testing.finite_differences import (
@@ -413,8 +414,18 @@ def _create_user_defined_cli_command(
         if output_path:
             Path(output_path).mkdir(parents=True, exist_ok=True)
 
+        profiler = Profiler(enabled=config.profiling)
+
         with start_run(base_dir=output_path):
-            result = user_function(**user_function_args)
+            with profiler:
+                result = user_function(**user_function_args)
+
+            # Print profiling stats inside start_run context
+            # so they go through stdio redirection to the log file
+            stats_text = profiler.get_stats()
+            if stats_text:
+                print("\n--- Profiling Statistics ---")
+                print(stats_text)
 
         result = output_to_bytes(result, output_format, output_path)
 

@@ -807,6 +807,11 @@ def run_tesseract(
     Returns:
         Tuple with the stdout and stderr of the Tesseract.
     """
+    if command == "test":
+        logger.warning(
+            "The 'test' command is experimental and may change without warning."
+        )
+
     if output_format == "json+binref" and output_path is None:
         logger.warning(
             "Consider specifying --output-path when using the 'json+binref' output format "
