@@ -1,6 +1,7 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import json
 import logging
 import uuid
 from collections.abc import Callable
@@ -9,8 +10,10 @@ from typing import Annotated
 
 import uvicorn
 from fastapi import FastAPI, Header, Query, Request, Response
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError
+from pydantic_core import from_json
 
 from .config import get_config
 from .core import create_endpoints, get_input_schema
@@ -90,15 +93,26 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
 
             with start_run(base_dir=rundir):
                 with profiler:
-                    # Manual deserialization inside profiler context
+                    # Parse JSON first, then validate with model_validate (not model_validate_json)
+                    # to allow array-like inputs (plain Python lists) to be coerced to arrays
                     try:
-                        payload = InputSchema.model_validate_json(raw_body)
-                    except ValidationError as e:
-                        # Return 422 with validation errors (matches FastAPI's default behavior)
-                        profiler.stop()
+                        json_data = from_json(raw_body)
+                    except json.JSONDecodeError as e:
                         return JSONResponse(
                             status_code=422,
-                            content={"detail": e.errors()},
+                            content={
+                                "detail": [{"type": "json_invalid", "msg": str(e)}]
+                            },
+                        )
+
+                    try:
+                        payload = InputSchema.model_validate(json_data)
+                    except ValidationError as e:
+                        # Return 422 with validation errors (matches FastAPI's default behavior)
+                        # Use jsonable_encoder to handle non-JSON-serializable values like ValueError
+                        return JSONResponse(
+                            status_code=422,
+                            content={"detail": jsonable_encoder(e.errors())},
                         )
 
                     # Run the actual endpoint
