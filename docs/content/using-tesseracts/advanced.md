@@ -152,42 +152,31 @@ Running Tesseracts on high-performance computing clusters can have many use case
 
 All of this is possible even in scenarios where containerisation options are either unavailable or incompatible by directly using `tesseract-runtime` (which includes a `serve` feature). For more details, please see our [tutorial](https://si-tesseract.discourse.group/t/deploying-and-interacting-with-tesseracts-on-hpc-clusters-using-tesseract-runtime-serve/104), which demonstrates how to launch uncontainerised Tesseracts using SLURM, either as a batch job or for interactive use.
 
-## Debug mode
+(running-without-containers)=
 
-`tesseract serve` supports a `--debug` flag; this has two effects:
+## Running Tesseracts without containers
 
-- Tracebacks from execution are returned in the response body, instead of a generic 500 error.
-  This is useful for debugging and testing, but unsafe for production environments.
-- Aside from listening to the usual Tesseract requests, a debugpy server is also started in
-  the container, and the port it's listening to is forwarded to some free port on the host which
-  is displayed in the cli when spinning up a tesseract via `tesseract serve`. This allows you to perform
-  remote debugging sessions.
+In some environments, containerization may not be available or desirable. You can run Tesseracts directly using the `tesseract-runtime` CLI, which is the same command that runs inside Tesseract containers.
 
-In particular, if you are using VScode, here is a sample launch config to attach to a running Tesseract in
-debug mode:
+To set this up:
 
-```json
-        {
-            "name": "Tesseract: Remote debugger",
-            "type": "debugpy",
-            "request": "attach",
-            "connect": {
-                "host": "localhost",
-                "port": "PORT_NUMBER_HERE"
-            },
-            "pathMappings": [
-                {
-                    "localRoot": "${workspaceFolder}/examples/helloworld",
-                    "remoteRoot": "/tesseract"
-                }
-            ],
-        },
+1. Install tesseract-core in your Python environment (see <project:#installation-dev>).
+2. Install your Tesseract's dependencies: `pip install -r tesseract_requirements.txt`
+3. Set the `TESSERACT_API_PATH` environment variable to point to your `tesseract_api.py`
+
+Then use `tesseract-runtime` instead of `tesseract run`:
+
+```bash
+# Instead of:
+$ tesseract run helloworld apply '{"inputs": {"name": "Tessie"}}'
+
+# Use:
+$ export TESSERACT_API_PATH=/path/to/tesseract_api.py
+$ tesseract-runtime apply '{"inputs": {"name": "Tessie"}}'
 ```
 
-(make sure to fill in with the actual port number). After inserting this into the `configurations`
-field of your `launch.json` file, you should be able to attach to the Tesseract being served by clicking on the
-green "play" button at the top left corner of the "Run and Debug" tab.
+The `tesseract-runtime` CLI supports the same endpoints and options as containerized Tesseracts. Run `tesseract-runtime --help` for details.
 
-![Starting remote debug session in VScode](./remote_debug.png)
-
-For more information on the VSCode debugger, see [this guide](https://code.visualstudio.com/docs/debugtest/debugging).
+```{tip}
+Running without containers is also useful for [debugging and development](../debugging.md#running-tesseracts-without-containerization).
+```

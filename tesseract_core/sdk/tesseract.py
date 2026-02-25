@@ -224,7 +224,12 @@ class Tesseract:
         if output_path is not None:
             local_path = engine._resolve_file_path(output_path, make_dir=True)
             update_config(output_path=str(local_path))
-        update_config(output_format=output_format, debug=True)
+
+        # Apply runtime_config settings
+        config_updates = {"output_format": output_format, "debug": True}
+        if runtime_config is not None:
+            config_updates.update(runtime_config)
+        update_config(**config_updates)
 
         obj = cls.__new__(cls)
         obj._spawn_config = None
@@ -720,6 +725,10 @@ class LocalClient:
         Returns:
             The loaded JSON response from the endpoint, with decoded arrays.
         """
+        from tesseract_core.runtime.config import get_config
+        from tesseract_core.runtime.mpa import start_run
+        from tesseract_core.runtime.profiler import Profiler
+
         if endpoint == "openapi_schema":
             return self._openapi_schema
 
@@ -735,18 +744,20 @@ class LocalClient:
         else:
             parsed_payload = None
 
+        config = get_config()
+        output_path = config.output_path
+        profiler = Profiler(enabled=config.profiling)
+
         try:
-            profiler.start()
-            # Note: start_run uses TeePipe which writes to both stderr and the log file,
-            # so we don't need LogStreamer here - output will appear on terminal automatically
-            with start_run(base_dir=rundir):
-                if parsed_payload is not None:
-                    result = self._endpoints[endpoint](parsed_payload)
-                else:
-                    result = self._endpoints[endpoint]()
-                # Stop profiler and print stats inside start_run context
-                # so they go through stdio redirection to the log file (and stderr)
-                profiler.stop()
+            with start_run(base_dir=output_path):
+                with profiler:
+                    if parsed_payload is not None:
+                        result = self._endpoints[endpoint](parsed_payload)
+                    else:
+                        result = self._endpoints[endpoint]()
+
+                # Print profiling stats inside start_run context
+                # so they go through stdio redirection to the log file
                 stats_text = profiler.get_stats()
                 if stats_text:
                     print("\n--- Profiling Statistics ---")

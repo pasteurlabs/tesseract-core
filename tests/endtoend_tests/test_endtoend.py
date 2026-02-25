@@ -1427,3 +1427,51 @@ def test_tesseractreference_endtoend(
     assert result.returncode == 0, result.stderr
     output_data = json.loads(result.stdout)
     assert output_data["result"] == expected_result
+
+
+def test_profiling(built_image_name, tmpdir):
+    """Test that --profiling flag produces expected output."""
+    payload = '{"inputs": {"a": [1.0, 2.0], "b": [3.0, 4.0], "s": 1.0}}'
+
+    run_res = subprocess.run(
+        [
+            "tesseract",
+            "run",
+            built_image_name,
+            "apply",
+            payload,
+            "--profiling",
+            "--output-path",
+            str(tmpdir / "profiling"),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert run_res.returncode == 0, run_res.stderr
+    # Profiling output should contain statistics header and profiling data
+    assert "--- Profiling Statistics ---" in run_res.stderr
+    assert "By Cumulative Time" in run_res.stderr
+    assert "ncalls" in run_res.stderr  # pstats column header
+
+
+def test_tracing(built_image_name, tmpdir):
+    """Test that --tracing flag produces expected output."""
+    payload = '{"inputs": {"a": [1.0, 2.0], "b": [3.0, 4.0], "s": 1.0}}'
+
+    run_res = subprocess.run(
+        [
+            "tesseract",
+            "run",
+            built_image_name,
+            "apply",
+            payload,
+            "--tracing",
+            "--output-path",
+            str(tmpdir / "tracing"),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert run_res.returncode == 0, run_res.stderr
+    # Tracing output should contain DEBUG level messages from tesseract_runtime logger
+    assert "DEBUG" in run_res.stderr
