@@ -253,3 +253,24 @@ def test_teepipe_consistency():
     runtime_source = inspect.getsource(RuntimeTeePipe)
     sdk_source = inspect.getsource(SDKTeePipe)
     assert runtime_source == sdk_source
+
+
+def test_apply_with_binref_format(built_image_name, tmp_path):
+    """Test that json+binref output format works with Tesseract.from_image (Issue #423)."""
+    inputs = {"a": [1, 2], "b": [3, 4], "s": 1}
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+
+    with Tesseract.from_image(
+        built_image_name,
+        output_path=output_dir,
+        output_format="json+binref",
+    ) as vecadd:
+        out = vecadd.apply(inputs)
+
+    assert set(out.keys()) == {"result"}
+    np.testing.assert_array_equal(out["result"], np.array([4.0, 6.0]))
+
+    # Verify that binary files were created in the output directory
+    bin_files = list(output_dir.glob("*.bin"))
+    assert len(bin_files) > 0, "Expected binary output files to be created"

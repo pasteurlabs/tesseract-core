@@ -1289,6 +1289,75 @@ def test_multi_helloworld_endtoend(
     assert "The helloworld Tesseract says: Hello you!" in result.output
 
 
+@pytest.mark.skipif(
+    os.uname().sysname == "Darwin",
+    reason="network=host binds to Docker VM's network on macOS, not the host's, "
+    "so health checks from the Mac host fail. This test only works on Linux.",
+)
+def test_serve_with_network_host_interop(
+    built_image_name, docker_client, docker_cleanup
+):
+    """Test that a container can access a Tesseract served with network=host (Issue #410).
+
+    This tests the Higher Order Tesseract (HOT) scenario where one containerized
+    Tesseract needs to call another Tesseract that's served with network=host.
+
+    Note: This test is skipped on macOS because Docker Desktop runs containers
+    in a Linux VM. With network=host, containers bind to the VM's network stack,
+    not the Mac's, so the host cannot reach the container on localhost.
+    """
+    # Serve with network=host on a specific port
+    host_port = "18765"
+    serve_res = subprocess.run(
+        [
+            "tesseract",
+            "serve",
+            built_image_name,
+            "--network=host",
+            "--port",
+            host_port,
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert serve_res.returncode == 0, serve_res.stderr
+    serve_meta = json.loads(serve_res.stdout)
+    container_name = serve_meta["container_name"]
+    docker_cleanup["containers"].append(container_name)
+
+    # Verify the Tesseract is reachable from the host
+    res = requests.get(f"http://127.0.0.1:{host_port}/health")
+    assert res.status_code == 200, res.text
+
+    # Serve a second Tesseract (with normal networking)
+    serve_res2 = subprocess.run(
+        [
+            "tesseract",
+            "serve",
+            built_image_name,
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert serve_res2.returncode == 0, serve_res2.stderr
+    serve_meta2 = json.loads(serve_res2.stdout)
+    container_name2 = serve_meta2["container_name"]
+    docker_cleanup["containers"].append(container_name2)
+    container2 = docker_client.containers.get(container_name2)
+
+    # From inside the second container, try to reach the host-networked Tesseract
+    # Use host.docker.internal which resolves to the host from inside containers
+    health_url = f"http://host.docker.internal:{host_port}/health"
+    check_script = (
+        f'import requests; r = requests.get("{health_url}"); '
+        "print(r.status_code); r.raise_for_status()"
+    )
+    returncode, stdout = container2.exec_run(["python", "-c", check_script])
+    assert returncode == 0, (
+        f"Container couldn't reach host-networked Tesseract: {stdout.decode()}"
+    )
+
+
 def test_tesseractreference_endtoend(
     cli_runner,
     docker_client,
