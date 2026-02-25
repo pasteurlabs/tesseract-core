@@ -16,6 +16,7 @@ from jinja2.exceptions import TemplateNotFound
 
 from tesseract_core.sdk import engine
 from tesseract_core.sdk.api_parse import (
+    TesseractBuildConfig,
     TesseractConfig,
     validate_tesseract_api,
 )
@@ -34,6 +35,90 @@ def test_prepare_build_context(tmp_path_factory):
     assert (build_dir / "__tesseract_source__" / "foo").exists()
     assert (build_dir / "__tesseract_runtime__").exists()
     assert (build_dir / "Dockerfile").exists()
+
+
+def test_prepare_build_context_external_package_data(tmp_path_factory):
+    """Test package_data from outside the Tesseract directory is copied correctly."""
+    # Create a parent directory with src and external subdirectories
+    parent_dir = tmp_path_factory.mktemp("parent")
+    src_dir = parent_dir / "tesseract"
+    src_dir.mkdir()
+    (src_dir / "tesseract_api.py").touch()
+
+    # Create external files (sibling to src_dir)
+    external_dir = parent_dir / "external"
+    external_dir.mkdir()
+    external_file = external_dir / "shared_code.py"
+    external_file.write_text("# shared code")
+
+    build_dir = tmp_path_factory.mktemp("build")
+
+    # Configure package_data with relative external path
+    config = TesseractConfig(
+        name="foobar",
+        build_config=TesseractBuildConfig(
+            package_data=[("../external/shared_code.py", "shared_code.py")],
+        ),
+    )
+
+    engine.prepare_build_context(src_dir, build_dir, config)
+
+    # Verify external file was copied to __package_data__
+    assert (build_dir / "__package_data__" / "shared_code.py").exists()
+    assert (
+        build_dir / "__package_data__" / "shared_code.py"
+    ).read_text() == "# shared code"
+
+
+def test_prepare_build_context_package_data_conflict(tmp_path_factory):
+    """Test that package_data with conflicting filenames raises an error."""
+    # Create a parent directory with src and two external subdirectories
+    parent_dir = tmp_path_factory.mktemp("parent")
+    src_dir = parent_dir / "tesseract"
+    src_dir.mkdir()
+    (src_dir / "tesseract_api.py").touch()
+
+    # Create two external directories with files of the same name
+    external_dir1 = parent_dir / "external1"
+    external_dir2 = parent_dir / "external2"
+    external_dir1.mkdir()
+    external_dir2.mkdir()
+    (external_dir1 / "config.yaml").write_text("# config 1")
+    (external_dir2 / "config.yaml").write_text("# config 2")
+
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(
+        name="foobar",
+        build_config=TesseractBuildConfig(
+            package_data=[
+                ("../external1/config.yaml", "config1.yaml"),
+                ("../external2/config.yaml", "config2.yaml"),
+            ],
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="package_data name conflict"):
+        engine.prepare_build_context(src_dir, build_dir, config)
+
+
+def test_prepare_build_context_package_data_not_found(tmp_path_factory):
+    """Test that package_data with non-existent file raises an error."""
+    parent_dir = tmp_path_factory.mktemp("parent")
+    src_dir = parent_dir / "tesseract"
+    src_dir.mkdir()
+    (src_dir / "tesseract_api.py").touch()
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(
+        name="foobar",
+        build_config=TesseractBuildConfig(
+            package_data=[("../nonexistent/file.py", "file.py")],
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="package_data source file not found"):
+        engine.prepare_build_context(src_dir, build_dir, config)
 
 
 @pytest.mark.parametrize("generate_only", [True, False])

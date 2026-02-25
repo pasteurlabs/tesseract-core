@@ -45,6 +45,7 @@ BASE_OPTIONAL_DEPS = {
 
 BASE_SCRIPTS = {
     "tesseract": "tesseract_core.sdk.cli:entrypoint",
+    "tesseract-core": "tesseract_core.sdk.cli:entrypoint",
 }
 
 
