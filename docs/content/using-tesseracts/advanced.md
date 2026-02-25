@@ -178,5 +178,5 @@ $ tesseract-runtime apply '{"inputs": {"name": "Tessie"}}'
 The `tesseract-runtime` CLI supports the same endpoints and options as containerized Tesseracts. Run `tesseract-runtime --help` for details.
 
 ```{tip}
-Running without containers is also useful for [debugging and development](../debugging.md#running-tesseracts-without-containerization).
+Running without containers is also useful for [debugging and development](project:#running-tesseracts-without-containerization).
 ```

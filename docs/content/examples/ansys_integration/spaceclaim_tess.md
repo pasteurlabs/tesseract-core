@@ -1,6 +1,6 @@
 # Wrapping SpaceClaim as a Tesseract
 
-This guide outlines how to wrap Ansys SpaceClaim as a Tesseract. For this, we will use [non-containerized execution](#tr-without-docker) to start an HTTP server that dispatches requests to SpaceClaim through SpaceClaim scripts (`.scscript`).
+This guide outlines how to wrap Ansys SpaceClaim as a Tesseract. For this, we will use [non-containerized execution](project:#running-without-containers) to start an HTTP server that dispatches requests to SpaceClaim through SpaceClaim scripts (`.scscript`).
 
 ```{seealso}
 The full code for this Tesseract can be found under `demo/_showcase/ansys-shapeopt/spaceclaim` in the [Tesseract Core repository](https://github.com/pasteurlabs/tesseract-core/tree/main/demo/_showcase/ansys-shapeopt/spaceclaim).
@@ -47,7 +47,7 @@ To wrap SpaceClaim as a Tesseract, we will have to implement each of these files
 ### Non-containerized usage via `tesseract-runtime`
 
 ```{note}
-**Tesseract without containerization** --- Tesseracts are most commonly used in the form of Docker containers. This is not a neccessary requirement, and any object that adheres to the Tesseract interface is a valid Tesseract (see also [](#tr-without-docker)).
+**Tesseract without containerization** --- Tesseracts are most commonly used in the form of Docker containers. This is not a neccessary requirement, and any object that adheres to the Tesseract interface is a valid Tesseract (see also <project:#running-without-containers>).
 ```
 
 SpaceClaim is typically running directly on a Windows host machine, so instead of using Docker to build an image and spin up a container, we leverage the [Tesseract runtime CLI](../../api/tesseract-runtime-cli) to serve the SpaceClaim Tesseract on bare metal and expose SpaceClaim's functionality over HTTP.
