@@ -210,21 +210,31 @@ tess = Tesseract.from_tesseract_api(
 
 ## Debugging build failures
 
-There are several options you can provide to `tesseract build` which can be helpful in
-various circumstances:
+### Verbose build output
 
-- The output of the various steps which happen under-the-hood while doing a build will
-  only be printed if something fails; this means that your shell might appear unresponsive
-  during this process. If you want more detailed information on what's going on during your
-  build, and see updates about it in real-time, use `--loglevel debug`.
-- `--config-override` can be used to manually override options specified in the `tesseract_config.yaml`,
-  for example: `--config-override build_config.target_platform=linux/arm64`
-- `tesseract build` relies on a `docker build` command to create the Tesseract image. By
-  default, the build context is a temporary folder to which all necessary files to build a Tesseract
-  are copied to. The option `--build-dir <directory>` allows you to specify a different
-  directory where to do this operations. This might be useful to debug issues which
-  arise while building a Tesseract, as in `directory` you will see all the context available to
-  `docker build` and nothing else.
+By default, `tesseract build` only prints output when something fails, which can make your shell appear unresponsive during long builds. To see real-time progress:
+
+```bash
+$ tesseract build --loglevel debug
+```
+
+### Inspecting the build context
+
+`tesseract build` creates a temporary folder containing all files passed to `docker build`. To inspect this context (useful for debugging file inclusion issues):
+
+```bash
+$ tesseract build --build-dir ./debug_build
+```
+
+After running this, `./debug_build` will contain exactly what Docker sees during the build—nothing more, nothing less.
+
+### Overriding configuration
+
+Use `--config-override` to temporarily change settings from `tesseract_config.yaml` without editing the file:
+
+```bash
+$ tesseract build --config-override build_config.target_platform=linux/arm64
+```
 
 ## Debugging tips
 
@@ -238,6 +248,88 @@ various circumstances:
    - Functions with high `tottime` (time spent in the function itself)
    - Functions called many times (`ncalls` column)
    - Unexpected functions appearing in the profile
+
+### Troubleshooting dependencies
+
+Dependency issues are a common source of build and runtime failures. Here's how to diagnose and fix them:
+
+**Testing dependencies locally before building:**
+
+Before running `tesseract build`, verify your dependencies work in a clean environment:
+
+```bash
+# Create a fresh virtual environment
+$ python -m venv test_env
+$ source test_env/bin/activate
+
+# Install only what's in your requirements file
+$ pip install -r tesseract_requirements.txt
+
+# Test that your Tesseract loads
+$ TESSERACT_API_PATH=/path/to/tesseract_api.py tesseract-runtime check
+```
+
+**Common dependency problems:**
+
+- **Missing transitive dependencies**: Your code may depend on a package that's installed as a dependency of something else in your main environment, but not listed in `tesseract_requirements.txt`. The clean environment test above will catch this.
+
+- **Version conflicts**: If you see errors about incompatible versions, use `pip install` with specific version constraints in your requirements file (e.g., `numpy>=1.20,<2.0`).
+
+- **System library dependencies**: Some Python packages require system libraries (e.g., `libgomp` for OpenMP, `libffi` for cffi). If the build succeeds but the container fails at runtime with "library not found" errors, you may need to add system packages via `tesseract_config.yaml`:
+
+  ```yaml
+  build_config:
+    system_packages:
+      - libgomp1
+  ```
+
+### Inspecting containers with Docker
+
+When a Tesseract builds successfully but behaves unexpectedly at runtime, you can use Docker commands to inspect the container state.
+
+**Get a shell inside a running Tesseract:**
+
+```bash
+# First, find the container ID
+$ docker ps
+CONTAINER ID   IMAGE        COMMAND                  ...
+a1b2c3d4e5f6   mytesseract  "uvicorn tesseract..."   ...
+
+# Open an interactive shell
+$ docker exec -it a1b2c3d4e5f6 /bin/bash
+```
+
+From inside the container, you can:
+
+- Check installed packages: `pip list`
+- Verify files are in place: `ls -la /tesseract`
+- Test imports manually: `python -c "import your_module"`
+- Check environment variables: `env | grep TESSERACT`
+
+**Inspect a Tesseract image without running it:**
+
+```bash
+# Start a shell in a new container from the image
+$ docker run -it --entrypoint /bin/bash mytesseract:latest
+```
+
+**View container logs:**
+
+```bash
+# For a running container
+$ docker logs a1b2c3d4e5f6
+
+# Follow logs in real-time
+$ docker logs -f a1b2c3d4e5f6
+```
+
+**Check resource usage:**
+
+```bash
+$ docker stats a1b2c3d4e5f6
+```
+
+This is useful for diagnosing out-of-memory errors or CPU throttling issues.
 
 ### Using Python debuggers
 
