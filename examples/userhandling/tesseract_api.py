@@ -10,6 +10,11 @@ import pwd
 
 from pydantic import BaseModel
 
+# Create this directory at import time (i.e. once at build time via the sanity
+# check step in Dockerfile.base); any later user should be able to read/write it
+_SOME_DIR = "/tesseract/.somedir"
+os.makedirs(_SOME_DIR, exist_ok=True)
+
 #
 # Schemas
 #
@@ -25,6 +30,9 @@ class OutputSchema(BaseModel):
     username: str
     home: str
     shell: str
+    somedir_readable: bool
+    somedir_writable: bool
+    hello_dir_created: bool
 
 
 #
@@ -52,6 +60,18 @@ def apply(inputs: InputSchema) -> OutputSchema:
             f"Current group (GID: {gid}) does not match expected group from /etc/passwd ({pw_entry.pw_gid})."
         )
 
+    # Check read/write permissions on the pre-created directory
+    somedir_readable = os.access(_SOME_DIR, os.R_OK)
+    somedir_writable = os.access(_SOME_DIR, os.W_OK)
+
+    # Try to create a subfolder to confirm write access is real
+    hello_dir = os.path.join(_SOME_DIR, "hello")
+    try:
+        os.makedirs(hello_dir, exist_ok=True)
+        hello_dir_created = True
+    except OSError:
+        hello_dir_created = False
+
     # Return the user information
     return OutputSchema(
         uid=pw_entry.pw_uid,
@@ -59,4 +79,7 @@ def apply(inputs: InputSchema) -> OutputSchema:
         username=pw_entry.pw_name,
         home=pw_entry.pw_dir,
         shell=pw_entry.pw_shell,
+        somedir_readable=somedir_readable,
+        somedir_writable=somedir_writable,
+        hello_dir_created=hello_dir_created,
     )
