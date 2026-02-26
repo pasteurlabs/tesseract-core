@@ -95,6 +95,7 @@ TEST_CASES = {
     "dataloader": Config(
         check_gradients=True, volume_mounts=["testdata:/tesseract/input_data:ro"]
     ),
+    "fortran_heat": Config(),
     "conda": Config(),
     "required_files": Config(input_path="input"),
     "filereference": Config(input_path="test_cases/testdata", output_path="output"),
