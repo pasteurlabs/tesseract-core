@@ -51,16 +51,18 @@ class Tesseract:
     HTTP requests or directly via Python calls to the Tesseract API.
     """
 
+    _spawn_config: dict | None = None
+    _serve_context: dict | None = None
+    _lastlog: str | None = None
+    _client: HTTPClient | LocalClient | None = None
+
     def __init__(self, url: str) -> None:
         warnings.warn(
             "Direct instantiation of Tesseract is deprecated. "
             "Use Tesseract.from_url(), Tesseract.from_image(), or Tesseract.from_tesseract_api() instead.",
-            DeprecationWarning,
-            stacklevel=1,
+            UserWarning,
+            stacklevel=2,
         )
-        self._spawn_config = None
-        self._serve_context = None
-        self._lastlog = None
         self._client = HTTPClient(url)
 
     @classmethod
@@ -76,9 +78,6 @@ class Tesseract:
             A Tesseract instance.
         """
         obj = cls.__new__(cls)
-        obj._spawn_config = None
-        obj._serve_context = None
-        obj._lastlog = None
         obj._client = HTTPClient(url)
         return obj
 
@@ -166,9 +165,6 @@ class Tesseract:
             host_ip=host_ip,
             debug=True,
         )
-        obj._serve_context = None
-        obj._lastlog = None
-        obj._client = None
         return obj
 
     @classmethod
@@ -230,9 +226,6 @@ class Tesseract:
         update_config(**config_kwargs)
 
         obj = cls.__new__(cls)
-        obj._spawn_config = None
-        obj._serve_context = None
-        obj._lastlog = None
         obj._client = LocalClient(tesseract_api, output_path=resolved_output_path)
         return obj
 
