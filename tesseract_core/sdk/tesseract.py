@@ -347,8 +347,6 @@ class Tesseract:
                     in a directory suffixed with this id.
             stream_logs: If True, stream logs to stdout while the endpoint runs.
                     If a callable, stream logs to that callable instead.
-                    For from_image(), requires output_path to be set.
-                    For from_tesseract_api(), uses a temp directory if output_path is not set.
 
         Returns:
             dictionary with the results.
@@ -397,8 +395,6 @@ class Tesseract:
                     in a directory suffixed with this id.
             stream_logs: If True, stream logs to stdout while the endpoint runs.
                     If a callable, stream logs to that callable instead.
-                    For from_image(), requires output_path to be set.
-                    For from_tesseract_api(), uses a temp directory if output_path is not set.
 
         Returns:
             dictionary with the results.
@@ -434,8 +430,6 @@ class Tesseract:
                     in a directory suffixed with this id.
             stream_logs: If True, stream logs to stdout while the endpoint runs.
                     If a callable, stream logs to that callable instead.
-                    For from_image(), requires output_path to be set.
-                    For from_tesseract_api(), uses a temp directory if output_path is not set.
 
         Returns:
             dictionary with the results.
@@ -476,8 +470,6 @@ class Tesseract:
                     in a directory suffixed with this id.
             stream_logs: If True, stream logs to stdout while the endpoint runs.
                     If a callable, stream logs to that callable instead.
-                    For from_image(), requires output_path to be set.
-                    For from_tesseract_api(), uses a temp directory if output_path is not set.
 
         Returns:
             dictionary with the results.
@@ -711,7 +703,7 @@ class HTTPClient:
             run_id: a string to identify the run. Run outputs will be located
                     in a directory suffixed with this id.
             stream_logs: If True, stream logs to stdout. If a callable, stream
-                    logs to that callable. Requires output_path to be set.
+                    logs to that callable.
 
         Returns:
             The loaded JSON response from the endpoint, with decoded arrays.
@@ -780,9 +772,7 @@ class LocalClient:
             endpoint: The endpoint to run.
             payload: The payload to send to the endpoint.
             run_id: a string to identify the run.
-            stream_logs: If True, logs are written to stderr (default behavior).
-                    If a callable, logs are also passed to that callable in
-                    addition to stderr and the log file.
+            stream_logs: If True, stream logs to stdout. If a callable, stream logs to that callable.
 
         Returns:
             The loaded JSON response from the endpoint, with decoded arrays.
