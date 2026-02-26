@@ -1813,3 +1813,88 @@ print("TEST_COMPLETED_SUCCESSFULLY", file=sys.__stderr__)
     assert "TEST_COMPLETED_SUCCESSFULLY" in result.stderr
     # Verify the log was actually printed via the print sink
     assert "Hello from apply!" in result.stdout
+
+
+# Tesseract API with delays between log lines for testing real-time streaming
+TIMED_LOGGING_TESSERACT_API = dedent(
+    """\
+import time
+from pydantic import BaseModel
+
+
+class InputSchema(BaseModel):
+    pass
+
+
+class OutputSchema(BaseModel):
+    message: str
+
+
+def apply(inputs: InputSchema) -> OutputSchema:
+    print("Line 1")
+    time.sleep(0.5)
+    print("Line 2")
+    time.sleep(0.5)
+    print("Line 3")
+    return OutputSchema(message="done")
+"""
+)
+
+
+@pytest.fixture(scope="module")
+def timed_logging_tesseract_api_path(tmpdir_factory):
+    """Create a tesseract_api.py that prints with delays for timing tests."""
+    workdir = tmpdir_factory.mktemp("timed_logging_tesseract_api")
+    api_path = Path(str(workdir)) / "tesseract_api.py"
+    with open(api_path, "w") as f:
+        f.write(TIMED_LOGGING_TESSERACT_API)
+
+    return api_path
+
+
+def test_stream_logs_realtime(timed_logging_tesseract_api_path, tmpdir):
+    """Test that logs are streamed in real-time, not buffered until the end.
+
+    This test verifies that log lines appear incrementally as they are printed,
+    with timing gaps between them, rather than all appearing at once when the
+    tesseract completes.
+    """
+    import time
+
+    from tesseract_core import Tesseract
+
+    output_path = Path(tmpdir)
+    timestamps = []
+
+    def timed_sink(msg):
+        timestamps.append((time.time(), msg))
+
+    with Tesseract.from_tesseract_api(
+        str(timed_logging_tesseract_api_path), output_path=output_path
+    ) as tesseract:
+        start = time.time()
+        result = tesseract.apply({}, stream_logs=timed_sink)
+
+    assert result["message"] == "done"
+
+    # Check we got all 3 log lines
+    log_lines = [(t, m) for t, m in timestamps if "Line" in m]
+    assert len(log_lines) == 3, (
+        f"Expected 3 log lines, got {len(log_lines)}: {log_lines}"
+    )
+
+    # Check that logs arrived incrementally (with gaps between them)
+    # Each line should arrive ~0.5s after the previous one
+    for i in range(1, len(log_lines)):
+        gap = log_lines[i][0] - log_lines[i - 1][0]
+        # Allow some tolerance but ensure there's a real gap (at least 0.3s)
+        assert gap >= 0.3, (
+            f"Gap between line {i} and {i + 1} was only {gap:.3f}s, "
+            f"expected ~0.5s. Logs may not be streaming in real-time."
+        )
+
+    # First log should arrive quickly (within 0.5s of start)
+    first_log_time = log_lines[0][0] - start
+    assert first_log_time < 0.5, (
+        f"First log took {first_log_time:.3f}s to arrive, expected < 0.5s"
+    )
