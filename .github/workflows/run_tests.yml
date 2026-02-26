@@ -83,10 +83,8 @@ jobs:
           uv sync --extra dev --frozen
 
           if [ "${{ matrix.runtime-deps }}" == "oldest" ]; then
-            # replace >= with == in pyproject.toml to install oldest runtime deps
-            sed -i 's/>=/==/g' ./tesseract_core/runtime/meta/pyproject.toml
-            # roll back changes to requires-python
-            sed -i 's/requires-python\s*=\s*\"==/requires-python = \">=/g' ./tesseract_core/runtime/meta/pyproject.toml
+            # replace >= with == in runtime deps section of pyproject.toml to install oldest runtime deps
+            sed -i '/^runtime = \[$/,/^]$/s/>=/==/g' ./pyproject.toml
             uv pip install -e .[runtime]
           fi
 
@@ -100,10 +98,8 @@ jobs:
           uv sync --extra dev --frozen
 
           if [ "${{ matrix.runtime-deps }}" == "oldest" ]; then
-            # replace >= with == in pyproject.toml to install oldest runtime deps
-            sed -i 's/>=/==/g' ./tesseract_core/runtime/meta/pyproject.toml
-            # roll back changes to requires-python
-            sed -i 's/requires-python\s*=\s*\"==/requires-python = \">=/g' ./tesseract_core/runtime/meta/pyproject.toml
+            # replace >= with == in runtime deps section of pyproject.toml to install oldest runtime deps
+            sed -i '/^runtime = \[$/,/^]$/s/>=/==/g' ./pyproject.toml
             uv pip install -e .[runtime]
           fi
 
