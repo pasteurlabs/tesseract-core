@@ -16,13 +16,14 @@ from typing import (
     get_origin,
 )
 
-import numpy as np
 from pydantic import (
     AfterValidator,
     BaseModel,
     ConfigDict,
     Field,
     RootModel,
+    TypeAdapter,
+    ValidationError,
     ValidationInfo,
     create_model,
     field_validator,
@@ -463,13 +464,8 @@ def create_autodiff_schema(
         tuple(_pattern_to_type(p) for p in diffable_output_patterns)
     ]
 
-    def _find_shape_dtype_from_path(path_patterns: dict, concrete_path: str):
-        """Find the expected shape and dtype for a given concrete path from path patterns.
-
-        Returns:
-            A tuple of (expected_shape, expected_dtype) where expected_shape can be
-            a tuple or Ellipsis, and expected_dtype can be a string or None.
-        """
+    def _find_annotation_from_path(path_patterns: dict, concrete_path: str) -> type:
+        """Find the PydanticArrayAnnotation for a given concrete path."""
         for path_pattern, array_type in path_patterns.items():
             if _is_regex_pattern(path_pattern):
                 path_matches = bool(re.match(path_pattern, concrete_path))
@@ -477,167 +473,12 @@ def create_autodiff_schema(
                 path_matches = path_pattern == concrete_path
 
             if path_matches:
-                return array_type.expected_shape, array_type.expected_dtype
+                return array_type
 
         raise ValueError(f"Invalid path: {concrete_path}")
 
     def _find_shape_from_path(path_patterns: dict, concrete_path: str) -> tuple:
-        shape, _ = _find_shape_dtype_from_path(path_patterns, concrete_path)
-        return shape
-
-    def _validate_and_cast_vector(
-        vector: dict,
-        reference_data: Any,
-        path_patterns: dict,
-        vector_name: str,
-    ) -> dict:
-        """Validate shape and cast dtype for tangent/cotangent vectors.
-
-        Args:
-            vector: The tangent or cotangent vector dict (key -> array).
-            reference_data: The reference data to compare shapes against (inputs model or dict).
-            path_patterns: The path patterns dict with expected shapes/dtypes from the schema.
-            vector_name: Name of the vector for error messages ("tangent" or "cotangent").
-
-        Returns:
-            The vector dict with dtypes cast to float if needed.
-        """
-        validated_vector = {}
-        for path, arr in vector.items():
-            # Get reference array from inputs to compare shapes
-            try:
-                ref_arr = get_at_path(reference_data, path)
-            except (LookupError, AttributeError) as exc:
-                raise ValueError(
-                    f"Could not find {vector_name} vector path '{path}' in reference data."
-                ) from exc
-
-            # Handle both numpy arrays and encoded array dicts
-            if hasattr(ref_arr, "shape"):
-                ref_shape = ref_arr.shape
-                ref_dtype = ref_arr.dtype
-            else:
-                # Encoded array dict
-                ref_shape = tuple(ref_arr["shape"])
-                ref_dtype = np.dtype(ref_arr["dtype"])
-
-            if hasattr(arr, "shape"):
-                arr_shape = arr.shape
-                arr_dtype = arr.dtype
-            else:
-                arr_shape = tuple(arr["shape"])
-                arr_dtype = np.dtype(arr["dtype"])
-
-            # Validate shape matches
-            if arr_shape != ref_shape:
-                raise ValueError(
-                    f"{vector_name.title()} vector '{path}' has shape {arr_shape}, "
-                    f"but expected shape {ref_shape} (matching the corresponding array)."
-                )
-
-            # Cast integer dtypes to float for AD compatibility
-            # JAX/AD frameworks require float dtypes for differentiation
-            if np.issubdtype(arr_dtype, np.integer):
-                target_dtype = (
-                    ref_dtype if np.issubdtype(ref_dtype, np.floating) else np.float64
-                )
-                if hasattr(arr, "astype"):
-                    arr = arr.astype(target_dtype)
-                else:
-                    # For encoded arrays, update the dtype field
-                    arr = dict(arr)
-                    arr["dtype"] = str(np.dtype(target_dtype))
-            # Also cast if dtype doesn't match reference (and both are floating)
-            elif np.issubdtype(arr_dtype, np.floating) and np.issubdtype(
-                ref_dtype, np.floating
-            ):
-                if arr_dtype != ref_dtype:
-                    if hasattr(arr, "astype"):
-                        arr = arr.astype(ref_dtype)
-                    else:
-                        arr = dict(arr)
-                        arr["dtype"] = str(ref_dtype)
-
-            validated_vector[path] = arr
-
-        return validated_vector
-
-    def _validate_and_cast_vector_from_schema(
-        vector: dict,
-        path_patterns: dict,
-        vector_name: str,
-    ) -> dict:
-        """Validate shape and cast dtype for cotangent vectors using schema patterns.
-
-        This is used for VJP cotangent vectors where we don't have actual output data
-        to compare against, only the schema-defined shapes and dtypes.
-
-        Args:
-            vector: The cotangent vector dict (key -> array).
-            path_patterns: The path patterns dict with expected shapes/dtypes from the schema.
-            vector_name: Name of the vector for error messages ("cotangent").
-
-        Returns:
-            The vector dict with dtypes cast to float if needed.
-        """
-        validated_vector = {}
-        for path, arr in vector.items():
-            # Get expected shape and dtype from schema patterns
-            expected_shape, expected_dtype = _find_shape_dtype_from_path(
-                path_patterns, path
-            )
-
-            if hasattr(arr, "shape"):
-                arr_shape = arr.shape
-                arr_dtype = arr.dtype
-            else:
-                arr_shape = tuple(arr["shape"])
-                arr_dtype = np.dtype(arr["dtype"])
-
-            # Validate shape matches (if not Ellipsis)
-            if expected_shape is not Ellipsis:
-                # Check dimensionality
-                if len(arr_shape) != len(expected_shape):
-                    raise ValueError(
-                        f"{vector_name.title()} vector '{path}' has {len(arr_shape)} dimensions, "
-                        f"but expected {len(expected_shape)} dimensions."
-                    )
-                # Check each dimension (None means polymorphic/any size)
-                for actual, expected in zip(arr_shape, expected_shape, strict=True):
-                    if expected is not None and actual != expected:
-                        raise ValueError(
-                            f"{vector_name.title()} vector '{path}' has shape {arr_shape}, "
-                            f"but expected shape {expected_shape}."
-                        )
-
-            # Cast integer dtypes to float for AD compatibility
-            if np.issubdtype(arr_dtype, np.integer):
-                if expected_dtype is not None and np.issubdtype(
-                    np.dtype(expected_dtype), np.floating
-                ):
-                    target_dtype = np.dtype(expected_dtype)
-                else:
-                    target_dtype = np.float64
-                if hasattr(arr, "astype"):
-                    arr = arr.astype(target_dtype)
-                else:
-                    arr = dict(arr)
-                    arr["dtype"] = str(target_dtype)
-            # Cast to expected dtype if specified and different
-            elif expected_dtype is not None:
-                expected_np_dtype = np.dtype(expected_dtype)
-                if arr_dtype != expected_np_dtype and np.issubdtype(
-                    arr_dtype, np.floating
-                ):
-                    if hasattr(arr, "astype"):
-                        arr = arr.astype(expected_np_dtype)
-                    else:
-                        arr = dict(arr)
-                        arr["dtype"] = expected_dtype
-
-            validated_vector[path] = arr
-
-        return validated_vector
+        return _find_annotation_from_path(path_patterns, concrete_path).expected_shape
 
     InputSchema = apply_function_to_model_tree(
         InputSchema,
@@ -692,27 +533,15 @@ def create_autodiff_schema(
                     else:
                         expected_shape = (*output_shape, *input_shape)
 
-                    # We allow both encoded and decoded arrays as schema output
-                    if hasattr(arr, "shape"):
-                        got_shape = arr.shape
-                    else:
-                        got_shape = arr["shape"]
-
-                    if len(got_shape) != len(expected_shape):
+                    expected_annotation = Array[expected_shape, str(arr.dtype)]
+                    try:
+                        result[output_path][input_path] = TypeAdapter(
+                            expected_annotation
+                        ).validate_python(arr)
+                    except ValidationError as e:
                         raise ValueError(
-                            f"Jacobian result [{output_path}][{input_path}]: "
-                            f"Expected shape {expected_shape}, got {got_shape}"
-                        )
-
-                    if any(
-                        s1 != s2
-                        for s1, s2 in zip(got_shape, expected_shape, strict=True)
-                        if s2 is not None
-                    ):
-                        raise ValueError(
-                            f"Jacobian result [{output_path}][{input_path}]: "
-                            f"Expected shape {expected_shape}, got {got_shape}"
-                        )
+                            f"Jacobian result [{output_path}][{input_path}]: {e}"
+                        ) from e
 
         elif ad_flavor == "jvp":
             if set(info.context["output_keys"]) != set(result.keys()):
@@ -720,28 +549,15 @@ def create_autodiff_schema(
                     f"Expected keys {info.context['output_keys']} in output; got {set(result.keys())}"
                 )
             for output_path, arr in result.items():
-                output_shape = _find_shape_from_path(
+                expected_annotation = _find_annotation_from_path(
                     diffable_output_patterns, output_path
                 )
-                if output_shape is Ellipsis:
-                    # Everything goes
-                    continue
-
-                expected_shape = output_shape
-
-                if len(arr.shape) != len(expected_shape):
-                    raise ValueError(
-                        f"JVP result [{output_path}]: Expected shape {expected_shape}, got {arr.shape}"
-                    )
-
-                if any(
-                    s1 != s2
-                    for s1, s2 in zip(arr.shape, expected_shape, strict=True)
-                    if s2 is not None
-                ):
-                    raise ValueError(
-                        f"JVP result [{output_path}]: Expected shape {expected_shape}, got {arr.shape}"
-                    )
+                try:
+                    result[output_path] = TypeAdapter(
+                        expected_annotation
+                    ).validate_python(arr)
+                except ValidationError as e:
+                    raise ValueError(f"JVP result [{output_path}]: {e}") from e
 
         elif ad_flavor == "vjp":
             if set(info.context["input_keys"]) != set(result.keys()):
@@ -749,26 +565,15 @@ def create_autodiff_schema(
                     f"Expected keys {info.context['input_keys']} in output; got {set(result.keys())}"
                 )
             for input_path, arr in result.items():
-                input_shape = _find_shape_from_path(diffable_input_patterns, input_path)
-                if input_shape is Ellipsis:
-                    # Everything goes
-                    continue
-
-                expected_shape = input_shape
-
-                if len(arr.shape) != len(expected_shape):
-                    raise ValueError(
-                        f"VJP result [{input_path}]: Expected shape {expected_shape}, got {arr.shape}"
-                    )
-
-                if any(
-                    s1 != s2
-                    for s1, s2 in zip(arr.shape, expected_shape, strict=True)
-                    if s2 is not None
-                ):
-                    raise ValueError(
-                        f"VJP result [{input_path}]: Expected shape {expected_shape}, got {arr.shape}"
-                    )
+                expected_annotation = _find_annotation_from_path(
+                    diffable_input_patterns, input_path
+                )
+                try:
+                    result[input_path] = TypeAdapter(
+                        expected_annotation
+                    ).validate_python(arr)
+                except ValidationError as e:
+                    raise ValueError(f"VJP result [{input_path}]: {e}") from e
 
         return result
 
@@ -848,7 +653,6 @@ def create_autodiff_schema(
                 cls, tangent_vector: dict, info: ValidationInfo
             ) -> dict:
                 """Validate tangent vector keys, shapes, and dtypes."""
-                # Tangent vector needs same keys as jvp_inputs
                 try:
                     if set(tangent_vector.keys()) != info.data["jvp_inputs"]:
                         raise ValueError(
@@ -860,13 +664,25 @@ def create_autodiff_schema(
                         "Unable to validate tangent vector as jvp_inputs either missing or invalid"
                     ) from e
 
-                # Validate shapes and cast dtypes
-                return _validate_and_cast_vector(
-                    tangent_vector,
-                    info.data["inputs"],
-                    diffable_input_patterns,
-                    "tangent",
-                )
+                validated = {}
+                for path, arr in tangent_vector.items():
+                    ref_arr = get_at_path(info.data["inputs"], path)
+                    ref_shape = (
+                        ref_arr.shape
+                        if hasattr(ref_arr, "shape")
+                        else tuple(ref_arr["shape"])
+                    )
+                    annotation = _find_annotation_from_path(
+                        diffable_input_patterns, path
+                    )
+                    exact_annotation = Array[ref_shape, annotation.expected_dtype]
+                    try:
+                        validated[path] = TypeAdapter(exact_annotation).validate_python(
+                            arr
+                        )
+                    except ValidationError as e:
+                        raise ValueError(f"Tangent vector '{path}': {e}") from e
+                return validated
 
         class JVPOutputSchema(RootModel):
             root: Annotated[
@@ -921,21 +737,24 @@ def create_autodiff_schema(
                 try:
                     if set(cotangent_vector.keys()) != info.data["vjp_outputs"]:
                         raise ValueError(
-                            "Expected cotangent vector with keys conforming to vjp_outputs:",
-                            f"{info.data['vjp_outputs']}, got {set(cotangent_vector.keys())}.",
+                            "Expected cotangent vector with keys conforming to vjp_outputs: "
+                            f"{info.data['vjp_outputs']}, got {set(cotangent_vector.keys())}."
                         )
                 except KeyError as e:
                     raise ValueError(
                         "Unable to validate cotangent vector as vjp_outputs either missing or invalid"
                     ) from e
 
-                # Validate shapes and cast dtypes using schema patterns
-                # (we don't have actual outputs to compare against)
-                return _validate_and_cast_vector_from_schema(
-                    cotangent_vector,
-                    diffable_output_patterns,
-                    "cotangent",
-                )
+                validated = {}
+                for path, arr in cotangent_vector.items():
+                    annotation = _find_annotation_from_path(
+                        diffable_output_patterns, path
+                    )
+                    try:
+                        validated[path] = TypeAdapter(annotation).validate_python(arr)
+                    except ValidationError as e:
+                        raise ValueError(f"Cotangent vector '{path}': {e}") from e
+                return validated
 
         class VJPOutputSchema(RootModel):
             root: Annotated[
