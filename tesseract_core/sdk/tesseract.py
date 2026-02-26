@@ -812,11 +812,16 @@ class LocalClient:
         rundir = join_paths(str(self._output_path), f"run_{run_id}")
 
         # Determine log sink from stream_logs parameter
-        log_sink = (
-            stream_logs
-            if callable(stream_logs)
-            else lambda msg: print(msg, file=sys.stderr, flush=True)
-        )
+        if stream_logs is False:
+            log_sink = None
+        elif stream_logs is True:
+            log_sink = lambda msg: print(msg, file=sys.stderr, flush=True)
+        elif callable(stream_logs):
+            log_sink = stream_logs
+        else:
+            raise ValueError(
+                f"Invalid value for stream_logs: {stream_logs}. Must be True, False, or a callable."
+            )
 
         try:
             with start_run(base_dir=rundir, log_sink=log_sink):
