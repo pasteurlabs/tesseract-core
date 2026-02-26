@@ -257,12 +257,11 @@ def redirect_stdio(
 ) -> Generator[None, None, None]:
     """Context manager for redirecting stdout and stderr to a custom pipe.
 
-    Writes messages to the log file and either stderr or a custom sink.
-
     Args:
         logfile: Path to the log file to write to.
         log_sink: Optional callable that receives each log line. If provided,
-            logs go to the callable instead of stderr. If None, logs go to stderr.
+            logs go to the callable and the log file. If None, logs only go
+            to the log file (no terminal output).
     """
     from tesseract_core.runtime.core import redirect_fd
 
@@ -279,7 +278,11 @@ def redirect_stdio(
     with ExitStack() as stack:
         f = stack.enter_context(open(logfile, "w"))
 
-        # Duplicate the original stderr file descriptor before any redirection
+        # Duplicate the original stdout/stderr file descriptors before any redirection
+        orig_stdout_fd = os.dup(sys.stdout.fileno())
+        orig_stdout_file = os.fdopen(orig_stdout_fd, "w")
+        stack.callback(orig_stdout_file.close)
+
         orig_stderr_fd = os.dup(sys.stderr.fileno())
         orig_stderr_file = os.fdopen(orig_stderr_fd, "w")
         stack.callback(orig_stderr_file.close)
@@ -288,12 +291,20 @@ def redirect_stdio(
         write_to_file = lambda msg: print(msg, file=f, flush=True)
 
         if log_sink is not None:
-            # Use custom sink instead of stderr
-            sinks = [log_sink, write_to_file]
+            # Wrap user sink to prevent infinite loops when sink writes to stdout/stderr
+            # (e.g., stream_logs=print would cause infinite recursion otherwise)
+            def safe_sink(msg: str) -> None:
+                old_stdout, old_stderr = sys.stdout, sys.stderr
+                sys.stdout, sys.stderr = orig_stdout_file, orig_stderr_file
+                try:
+                    log_sink(msg)
+                finally:
+                    sys.stdout, sys.stderr = old_stdout, old_stderr
+
+            sinks = [safe_sink, write_to_file]
         else:
-            # Default: write to stderr
-            write_to_stderr = lambda msg: print(msg, file=orig_stderr_file, flush=True)
-            sinks = [write_to_stderr, write_to_file]
+            # No log_sink provided: only write to file (no stderr output)
+            sinks = [write_to_file]
 
         pipe_fd = stack.enter_context(TeePipe(*sinks))
 
@@ -313,7 +324,8 @@ def start_run(
     Args:
         base_dir: Base directory for the run. If None, uses current directory.
         log_sink: Optional callable that receives each log line. If provided,
-            logs go to the callable instead of stderr. If None, logs go to stderr.
+            logs go to the callable and the log file. If None, logs only go
+            to the log file (no terminal output).
     """
     backend = _create_backend(base_dir)
     token = _current_backend.set(backend)

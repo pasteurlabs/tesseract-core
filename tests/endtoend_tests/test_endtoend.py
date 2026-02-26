@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import uuid
 from pathlib import Path
 from textwrap import dedent
@@ -1698,3 +1699,117 @@ def test_log_streaming_cli(log_streaming_test_image, tmpdir):
         assert any(f"Log line {i}" in line for line in log_lines), (
             f"Missing 'Log line {i}' in {log_lines}"
         )
+
+
+# Simple tesseract API for testing stream_logs=False and stream_logs=print
+SIMPLE_LOGGING_TESSERACT_API = dedent(
+    """\
+from pydantic import BaseModel
+
+
+class InputSchema(BaseModel):
+    pass
+
+
+class OutputSchema(BaseModel):
+    message: str
+
+
+def apply(inputs: InputSchema) -> OutputSchema:
+    print("Hello from apply!")
+    return OutputSchema(message="done")
+"""
+)
+
+
+@pytest.fixture(scope="module")
+def simple_logging_tesseract_api_path(tmpdir_factory):
+    """Create a simple tesseract_api.py for testing stream_logs options."""
+    workdir = tmpdir_factory.mktemp("simple_logging_tesseract_api")
+    api_path = Path(str(workdir)) / "tesseract_api.py"
+    with open(api_path, "w") as f:
+        f.write(SIMPLE_LOGGING_TESSERACT_API)
+
+    return api_path
+
+
+def test_stream_logs_false_no_stderr(simple_logging_tesseract_api_path, tmpdir):
+    """Test that stream_logs=False does not print logs to stderr.
+
+    This is a regression test for the issue where logs were always printed
+    to stderr even when stream_logs=False.
+    """
+    # Run in subprocess to capture real stderr (pytest captures it otherwise)
+    test_script = f'''
+import sys
+from pathlib import Path
+from tesseract_core import Tesseract
+
+output_path = Path("{tmpdir}")
+
+with Tesseract.from_tesseract_api(
+    "{simple_logging_tesseract_api_path}", output_path=output_path
+) as tesseract:
+    result = tesseract.apply({{}}, stream_logs=False)
+
+assert result["message"] == "done"
+'''
+
+    result = subprocess.run(
+        [sys.executable, "-c", test_script],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, f"Script failed: {result.stderr}"
+    # The key assertion: stderr should NOT contain log output
+    assert "Hello from apply!" not in result.stderr, (
+        f"Logs should not appear in stderr with stream_logs=False, "
+        f"but got: {result.stderr}"
+    )
+
+    # Verify logs were still written to file
+    run_dirs = list(Path(tmpdir).glob("run_*/"))
+    assert len(run_dirs) >= 1
+    log_file = run_dirs[0] / "logs" / "tesseract.log"
+    assert log_file.exists()
+    log_content = log_file.read_text()
+    assert "Hello from apply!" in log_content
+
+
+def test_stream_logs_print_no_infinite_loop(simple_logging_tesseract_api_path, tmpdir):
+    """Test that stream_logs=print does not cause infinite recursion.
+
+    This is a regression test for the issue where using `print` as the log sink
+    caused infinite recursion because print writes to stdout which was redirected
+    to the pipe being read.
+    """
+    # Run in subprocess with timeout to detect infinite loops
+    test_script = f'''
+import sys
+from pathlib import Path
+from tesseract_core import Tesseract
+
+output_path = Path("{tmpdir}")
+
+with Tesseract.from_tesseract_api(
+    "{simple_logging_tesseract_api_path}", output_path=output_path
+) as tesseract:
+    result = tesseract.apply({{}}, stream_logs=print)
+
+assert result["message"] == "done"
+print("TEST_COMPLETED_SUCCESSFULLY", file=sys.__stderr__)
+'''
+
+    result = subprocess.run(
+        [sys.executable, "-c", test_script],
+        capture_output=True,
+        text=True,
+        timeout=30,  # Should complete quickly; timeout catches infinite loops
+    )
+
+    assert result.returncode == 0, f"Script failed: {result.stderr}"
+    # Verify script completed (didn't hang in infinite loop)
+    assert "TEST_COMPLETED_SUCCESSFULLY" in result.stderr
+    # Verify the log was actually printed via the print sink
+    assert "Hello from apply!" in result.stdout
