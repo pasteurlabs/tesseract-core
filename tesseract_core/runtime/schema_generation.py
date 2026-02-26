@@ -667,11 +667,13 @@ def create_autodiff_schema(
                 validated = {}
                 for path, arr in tangent_vector.items():
                     ref_arr = get_at_path(info.data["inputs"], path)
-                    ref_shape = (
-                        ref_arr.shape
-                        if hasattr(ref_arr, "shape")
-                        else tuple(ref_arr["shape"])
-                    )
+                    if hasattr(ref_arr, "shape"):
+                        ref_shape = ref_arr.shape
+                    elif isinstance(ref_arr, dict):
+                        ref_shape = tuple(ref_arr["shape"])
+                    else:
+                        # Scalar (e.g. Differentiable[Float32])
+                        ref_shape = ()
                     annotation = _find_annotation_from_path(
                         diffable_input_patterns, path
                     )
