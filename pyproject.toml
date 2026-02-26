@@ -20,9 +20,63 @@ dependencies = [
 dynamic = [
     # Injected via hatch-vcs
     "version",
-    # Injected via inject_runtime_pyproject.py
-    "optional-dependencies",
-    "scripts",
+]
+
+[project.scripts]
+tesseract = "tesseract_core.sdk.cli:entrypoint"
+tesseract-runtime = "tesseract_core.runtime.cli:main"
+
+[project.optional-dependencies]
+
+# RUNTIME DEPENDENCIES
+# These are the only dependencies that are installed into Tesseract containers, so may contain duplicates of deps above.
+# They should be kept minimal and stable at all times.
+#
+# NOTE: Upper bounds (<=) on runtime deps are periodically updated via .github/workflows/bump_lockfile.yml,
+# do not edit manually. To add constraints, use other operators (e.g. <, >=, ~=, ==) as needed.
+runtime = [
+    "pydantic<=2.12.5,>=2.10",
+    "fastapi<=0.131.0,>=0.115",
+    "requests<=2.32.5,>=2.32.4",
+    "uvicorn<=0.41.0,>=0.34",
+    "click<=8.3.1,>=8.1",
+    "typer<=0.24.1,>=0.15",
+    "fsspec[http,s3]<=2026.2.0,>=2024.12",
+    "pybase64<=1.4.3,>=1.4",
+    "numpy<=2.4.2,>=1.26",
+    "debugpy<=1.8.20,>=1.8.14",
+    "mlflow-skinny<=3.10.0,>=3.7.0",
+]
+# END RUNTIME DEPENDENCIES
+
+docs = [
+    "sphinx<9",  # TODO: Remove when https://github.com/click-contrib/sphinx-click/pull/160 is merged
+    "sphinx_autodoc_typehints",
+    "furo",
+    "myst-nb",
+    "sphinx_click",
+    "autodoc_pydantic",
+    "sphinx_design",
+    "sphinx_copybutton",
+    "sphinxext_opengraph",
+    "tesseract-core[runtime]",
+]
+dev = [
+    "docker",
+    "fastapi",
+    "httpx",  # required by fastapi test client
+    "jsf",
+    "numpy",
+    "pre-commit",
+    "pytest",
+    "pytest-cov",
+    "pytest-mock",
+    "moto[server]",
+    "aiobotocore>=2.19.0",  # without this pip dependency resolution fails
+    "typeguard",
+    # also add all other extras here
+    "tesseract-core[runtime]",
+    "tesseract-core[docs]",
 ]
 
 [project.urls]
@@ -30,7 +84,7 @@ Homepage = "https://github.com/pasteurlabs/tesseract-core"
 Documentation = "https://docs.pasteurlabs.ai/projects/tesseract-core/latest"
 
 [build-system]
-requires = ["hatchling", "hatch-vcs", "setuptools-scm!=9.0.0", "toml"]
+requires = ["hatchling", "hatch-vcs", "setuptools-scm!=9.0.0"]
 build-backend = "hatchling.build"
 
 [tool.hatch.version]
@@ -42,8 +96,6 @@ version-file = "tesseract_core/_version.py"
 [tool.hatch.build.targets.wheel]
 packages = ["tesseract_core"]
 
-[tool.hatch.metadata.hooks.custom]
-path = "inject_runtime_pyproject.py"
 
 [tool.pytest.ini_options]
 addopts = ["--typeguard-packages=tesseract_core"]
