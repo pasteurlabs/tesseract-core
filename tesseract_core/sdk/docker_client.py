@@ -10,6 +10,7 @@ import re
 import shlex
 import subprocess
 from dataclasses import dataclass
+from io import IOBase
 from pathlib import Path
 
 # store a reference to the list type, which is shadowed by some function names below
@@ -574,6 +575,8 @@ class Containers:
         user: str | None = None,
         memory: str | None = None,
         extra_args: list_[str] | None = None,  # noqa: UP006
+        stream_stdout: bool = False,
+        stream_stderr: bool = False,
     ) -> Container | tuple[bytes, bytes] | bytes:
         """Run a command in a container from an image.
 
@@ -598,6 +601,10 @@ class Containers:
             environment: Environment variables to set in the container.
             memory: Memory limit for the container (e.g., "512m", "2g"). Minimum allowed is 6m.
             extra_args: Additional arguments to pass to the `docker run` CLI command.
+            stream_stdout: If True, stream stdout to sys.stdout in real-time instead of
+                    buffering. Cannot be used with detach.
+            stream_stderr: If True, stream stderr to sys.stderr in real-time instead of
+                    buffering. Cannot be used with detach.
 
         Returns:
             Container object if detach is True, otherwise returns list of stdout and stderr.
@@ -645,6 +652,10 @@ class Containers:
             raise ValueError(
                 "Cannot set both remove and detach to True when running a container."
             )
+        if (stream_stdout or stream_stderr) and detach:
+            raise ValueError(
+                "Cannot use stream_stdout or stream_stderr with detach=True."
+            )
         if detach:
             optional_args.append("--detach")
         if remove:
@@ -669,36 +680,101 @@ class Containers:
 
         logger.debug(f"Running command: {full_cmd}")
 
-        result = subprocess.run(
+        # Use Popen for all cases to enable streaming and proper cleanup
+        import sys
+        import threading
+
+        proc = subprocess.Popen(
             full_cmd,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=False,
-            check=False,
         )
 
-        if result.returncode != 0:
-            stderr_str = result.stderr.decode("utf-8", errors="ignore")
+        stdout_lines: list[bytes] = []
+        stderr_lines: list[bytes] = []
+
+        def read_stream(
+            stream: IOBase,
+            collected: list[bytes],
+            should_stream: bool,
+            target_stream: IOBase,
+        ):
+            """Read from stream, optionally streaming to target."""
+            while True:
+                line = stream.readline()
+                if not line:
+                    break
+                collected.append(line)
+                if should_stream:
+                    # Decode bytes to text for writing to stdout/stderr
+                    # (handles environments like Jupyter where .buffer may not exist)
+                    target_stream.write(line.decode("utf-8", errors="replace"))
+                    target_stream.flush()
+
+        try:
+            # Use threads to read stdout and stderr concurrently to avoid deadlocks
+            stdout_thread = threading.Thread(
+                target=read_stream,
+                args=(proc.stdout, stdout_lines, stream_stdout, sys.stdout),
+            )
+            stderr_thread = threading.Thread(
+                target=read_stream,
+                args=(proc.stderr, stderr_lines, stream_stderr, sys.stderr),
+            )
+
+            stdout_thread.start()
+            stderr_thread.start()
+
+            # Wait for process and threads to complete
+            proc.wait()
+            stdout_thread.join()
+            stderr_thread.join()
+
+            stdout_data = b"".join(stdout_lines)
+            stderr_data = b"".join(stderr_lines)
+            returncode = proc.returncode
+
+        except (KeyboardInterrupt, Exception):
+            # Terminate the process on interrupt or exception (unless detached)
+            if not detach:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+            raise
+        finally:
+            # Ensure streams are closed
+            if proc.stdout:
+                proc.stdout.close()
+            if proc.stderr:
+                proc.stderr.close()
+
+        if returncode != 0:
+            stderr_str = stderr_data.decode("utf-8", errors="ignore")
             if "repository" in stderr_str:
                 raise ImageNotFound(stderr_str)
             raise ContainerError(
                 None,
-                result.returncode,
+                returncode,
                 shlex.join(full_cmd),
                 image,
-                result.stderr,
+                stderr_data,
             )
 
         if detach:
             # If detach is True, stdout prints out the container ID of the running container
-            container_id = result.stdout.decode("utf-8", errors="ignore").strip()
+            container_id = stdout_data.decode("utf-8", errors="ignore").strip()
             container_obj = Containers.get(container_id)
             return container_obj
 
         if stdout and stderr:
-            return result.stdout, result.stderr
+            return stdout_data, stderr_data
         if stderr:
-            return result.stderr
-        return result.stdout
+            return stderr_data
+        return stdout_data
 
     @staticmethod
     def _get_containers(

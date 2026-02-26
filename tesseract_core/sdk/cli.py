@@ -1126,6 +1126,7 @@ def run_container(
             network=network,
             user=user,
             memory=memory,
+            stream_logs=True,  # Always stream for CLI
         )
 
     except ImageNotFound as e:
@@ -1147,8 +1148,9 @@ def run_container(
 
     if invoke_help:
         result_err = _sanitize_error_output(result_err, tesseract_image)
+        typer.echo(result_err, err=True, nl=False)
 
-    typer.echo(result_err, err=True, nl=False)
+    # Logs have already been streamed to stderr, just output stdout (the result)
     typer.echo(result_out, nl=False)
 
 
