@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import atexit
 import base64
+import sys
 import tempfile
 import traceback
 import uuid
@@ -811,7 +812,11 @@ class LocalClient:
         rundir = join_paths(str(self._output_path), f"run_{run_id}")
 
         # Determine log sink from stream_logs parameter
-        log_sink = stream_logs if callable(stream_logs) else None
+        log_sink = (
+            stream_logs
+            if callable(stream_logs)
+            else lambda msg: print(msg, file=sys.stderr, flush=True)
+        )
 
         try:
             with start_run(base_dir=rundir, log_sink=log_sink):
