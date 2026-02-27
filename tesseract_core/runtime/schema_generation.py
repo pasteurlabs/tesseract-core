@@ -490,7 +490,7 @@ def create_autodiff_schema(
     def result_validator(
         result: dict[str, Any], info: ValidationInfo
     ) -> dict[str, Any]:
-        """Validate the result of a Jacobian computation.
+        """Validate the result of an AD endpoint computation.
 
         Since the structure of the result is already validated in core.py, we only need to check the shapes
         to ensure they match what's expected from the schema.
@@ -537,7 +537,7 @@ def create_autodiff_schema(
                     try:
                         result[output_path][input_path] = TypeAdapter(
                             expected_annotation
-                        ).validate_python(arr)
+                        ).validate_python(arr, context=info.context)
                     except ValidationError as e:
                         raise ValueError(
                             f"Jacobian result [{output_path}][{input_path}]: {e}"
@@ -555,7 +555,7 @@ def create_autodiff_schema(
                 try:
                     result[output_path] = TypeAdapter(
                         expected_annotation
-                    ).validate_python(arr)
+                    ).validate_python(arr, context=info.context)
                 except ValidationError as e:
                     raise ValueError(f"JVP result [{output_path}]: {e}") from e
 
@@ -571,7 +571,7 @@ def create_autodiff_schema(
                 try:
                     result[input_path] = TypeAdapter(
                         expected_annotation
-                    ).validate_python(arr)
+                    ).validate_python(arr, context=info.context)
                 except ValidationError as e:
                     raise ValueError(f"VJP result [{input_path}]: {e}") from e
 

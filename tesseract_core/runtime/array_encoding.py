@@ -317,9 +317,26 @@ def _load_binref_arraydict(val: dict, base_dir: str | Path | None) -> np.ndarray
 
 
 def _coerce_shape_dtype(
-    arr: ArrayLike, expected_shape: ShapeType, expected_dtype: str | None
+    arr: ArrayLike,
+    expected_shape: ShapeType,
+    expected_dtype: str | None,
+    context: dict[str, Any] | None = None,
 ) -> ArrayLike:
-    """Coerce the shape and dtype of the passed array to the expected values."""
+    """Coerce the shape and dtype of the passed array to the expected values.
+
+    The behavior can be controlled via the ``context`` dict:
+
+    - ``strict_shapes`` (bool): When True, reject arrays whose shape doesn't
+      match the expected shape exactly (no broadcasting of size-1 dims).
+    - ``strict_types`` (bool): When True, reject arrays whose dtype doesn't
+      match the expected dtype exactly (no same-kind casting).
+    """
+    if context is None:
+        context = {}
+
+    strict_shapes = context.get("strict_shapes", False)
+    strict_types = context.get("strict_types", False)
+
     if expected_shape is Ellipsis:
         # No shape check
         out_shape = arr.shape
@@ -340,6 +357,17 @@ def _coerce_shape_dtype(
             for i in range(len(expected_shape))
         )
 
+    if strict_shapes and arr.shape != out_shape:
+        raise PydanticCustomError(
+            "array_shape_mismatch",
+            "Array shape {actual_shape} does not match expected shape {expected_shape} "
+            "(strict_shapes=True, no broadcasting)",
+            {
+                "actual_shape": arr.shape,
+                "expected_shape": out_shape,
+            },
+        )
+
     # Broadcast the arr to the expected shape and dtype
     try:
         arr = np.broadcast_to(arr, out_shape)
@@ -354,7 +382,18 @@ def _coerce_shape_dtype(
         ) from None
 
     if expected_dtype is not None:
-        if not np.can_cast(arr.dtype, expected_dtype, casting="same_kind"):
+        if strict_types:
+            if str(arr.dtype) != expected_dtype:
+                raise PydanticCustomError(
+                    "array_dtype_mismatch",
+                    "Array dtype '{actual_dtype}' does not match expected dtype '{expected_dtype}' "
+                    "(strict_types=True, no casting)",
+                    {
+                        "actual_dtype": str(arr.dtype),
+                        "expected_dtype": expected_dtype,
+                    },
+                )
+        elif not np.can_cast(arr.dtype, expected_dtype, casting="same_kind"):
             raise PydanticCustomError(
                 "array_dtype_mismatch",
                 "Array dtype '{actual_dtype}' cannot be safely cast to '{expected_dtype}'",
@@ -384,7 +423,10 @@ def _coerce_shape_dtype(
 
 
 def python_to_array(
-    val: Any, expected_shape: ShapeType, expected_dtype: str | None
+    val: Any,
+    info: ValidationInfo,
+    expected_shape: ShapeType,
+    expected_dtype: str | None,
 ) -> ArrayLike:
     """Convert a Python object to a NumPy array."""
     val = np.asarray(val, order="C")
@@ -396,7 +438,8 @@ def python_to_array(
             "Could not parse value as a numeric array (contains non-numeric data)",
             {},
         )
-    return _coerce_shape_dtype(val, expected_shape, expected_dtype)
+    context = info.context if info.context else {}
+    return _coerce_shape_dtype(val, expected_shape, expected_dtype, context)
 
 
 def decode_array(
@@ -449,7 +492,7 @@ def decode_array(
             {"encoding": val.data.encoding, "error": str(e)},
         ) from e
 
-    data = _coerce_shape_dtype(data, expected_shape, expected_dtype)
+    data = _coerce_shape_dtype(data, expected_shape, expected_dtype, context)
     return data
 
 
@@ -460,7 +503,7 @@ def encode_array(
     from tesseract_core.runtime.config import get_config
 
     # Convert to a NumPy array if necessary
-    arr = python_to_array(arr, expected_shape, expected_dtype)
+    arr = python_to_array(arr, info, expected_shape, expected_dtype)
 
     context = info.context if info.context else {}
 

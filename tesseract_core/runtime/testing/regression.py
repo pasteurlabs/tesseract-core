@@ -551,6 +551,10 @@ def regress_test_case(
         elif test_spec.endpoint == "vector_jacobian_product":
             validation_context["input_keys"] = test_spec.payload.get("vjp_inputs", [])
 
+        # Do not cast shapes/dtypes when validating expected_outputs,
+        # since we want to catch mismatches as structural errors
+        validation_context.update({"strict_shapes": True, "strict_types": True})
+
         try:
             expected_outputs = OutputSchema.model_validate(
                 test_spec.expected_outputs, context=validation_context

@@ -463,7 +463,7 @@ def test_regress_test_case_unexpected_exception(dummy_tesseract_module):
                 "s": 2,
             }
         },
-        expected_outputs={"result": np.array([1.0])},
+        expected_outputs={"result": np.array([1.0], dtype="float32")},
     )
 
     result = regress_test_case(dummy_tesseract_module, endpoints, test_spec)
