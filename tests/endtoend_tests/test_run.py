@@ -9,25 +9,9 @@ import subprocess
 import numpy as np
 import pytest
 import requests
-from common import build_tesseract, encode_array, image_exists
+from common import encode_array
 
 from tesseract_core.sdk.cli import app
-
-
-@pytest.fixture(scope="module")
-def built_image_name(
-    docker_client,
-    docker_cleanup_module,
-    shared_dummy_image_name,
-    dummy_tesseract_location,
-):
-    """Build the dummy Tesseract image for the tests."""
-    image_name = build_tesseract(
-        docker_client, dummy_tesseract_location, shared_dummy_image_name
-    )
-    assert image_exists(docker_client, image_name)
-    docker_cleanup_module["images"].append(image_name)
-    yield image_name
 
 
 def test_tesseract_list(cli_runner, built_image_name):
