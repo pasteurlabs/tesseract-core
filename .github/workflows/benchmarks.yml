@@ -1,0 +1,140 @@
+name: Benchmarks
+
+on:
+  pull_request:
+    paths:
+      - "tesseract_core/**"
+      - "benchmarks/**"
+      - ".github/workflows/benchmarks.yml"
+      - ".github/scripts/compare_benchmarks.py"
+
+  push:
+    branches:
+      - main
+    paths:
+      - "tesseract_core/**"
+      - "benchmarks/**"
+      - ".github/workflows/benchmarks.yml"
+      - ".github/scripts/compare_benchmarks.py"
+
+concurrency:
+  group: benchmarks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up Git repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0 # Need full history for main branch comparison
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Restore UV environment
+        run: cp production.uv.lock uv.lock
+
+      - name: Install package
+        run: uv sync --extra dev --frozen
+
+      - name: Run benchmarks on current commit
+        run: |
+          uv run --no-sync python benchmarks/run_benchmarks.py \
+            --iterations 10 \
+            --array-sizes 100,10000,1000000 \
+            --output current_benchmarks.json
+
+      - name: Checkout main branch for baseline
+        if: github.event_name == 'pull_request'
+        run: |
+          git stash --include-untracked || true
+          git checkout ${{ github.event.pull_request.base.sha }}
+
+      - name: Install package (baseline)
+        if: github.event_name == 'pull_request'
+        run: |
+          # Re-install to ensure we have the baseline version
+          cp production.uv.lock uv.lock 2>/dev/null || true
+          uv sync --extra dev --frozen
+
+      - name: Run benchmarks on baseline
+        if: github.event_name == 'pull_request'
+        id: baseline
+        run: |
+          if [ -f benchmarks/run_benchmarks.py ]; then
+            uv run --no-sync python benchmarks/run_benchmarks.py \
+              --iterations 10 \
+              --array-sizes 100,10000,1000000 \
+              --output baseline_benchmarks.json
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "::notice::Benchmark script not found in baseline, skipping comparison"
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Checkout PR branch again
+        if: github.event_name == 'pull_request'
+        run: |
+          git checkout ${{ github.event.pull_request.head.sha }}
+          git stash pop || true
+
+      - name: Generate comparison report
+        if: github.event_name == 'pull_request'
+        id: comparison
+        run: |
+          python .github/scripts/compare_benchmarks.py \
+            baseline_benchmarks.json \
+            current_benchmarks.json \
+            benchmark_report.md
+
+          # Set output as multiline string
+          {
+            echo 'report<<BENCHMARK_REPORT_END'
+            cat benchmark_report.md
+            echo ''
+            echo 'BENCHMARK_REPORT_END'
+          } >> $GITHUB_OUTPUT
+
+      - name: Find existing comment
+        if: github.event_name == 'pull_request'
+        uses: peter-evans/find-comment@v3
+        id: find-comment
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: "PasteurBot"
+          body-includes: "## Benchmark Results"
+
+      - name: Create or update PR comment
+        if: github.event_name == 'pull_request'
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
+          comment-id: ${{ steps.find-comment.outputs.comment-id }}
+          issue-number: ${{ github.event.pull_request.number }}
+          body: ${{ steps.comparison.outputs.report }}
+          edit-mode: replace
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: |
+            current_benchmarks.json
+            baseline_benchmarks.json
+            benchmark_report.md
+          if-no-files-found: ignore
+          retention-days: 30

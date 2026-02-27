@@ -1,0 +1,4 @@
+# Tesseract configuration for benchmark no-op Tesseract
+name: benchmark-noop
+version: "1.0.0"
+description: "No-op Tesseract for benchmarking framework overhead"
