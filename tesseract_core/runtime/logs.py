@@ -3,7 +3,6 @@
 
 import os
 import threading
-import time
 from collections.abc import Callable
 from typing import Any
 
@@ -31,10 +30,8 @@ class TeePipe(threading.Thread):
         super().__init__()
         self._sinks = sinks
         self._fd_read, self._fd_write = os.pipe()
-        self._captured_lines = []
-        self._last_time = time.time()
-        self._is_blocking = threading.Event()
-        self._grace_period = 0.1
+        self._captured_lines: list[str] = []
+        self._fd_write_closed = False
 
     def __enter__(self) -> int:
         """Start the thread and return the write file descriptor of the pipe."""
@@ -42,21 +39,33 @@ class TeePipe(threading.Thread):
         return self.fileno()
 
     def stop(self) -> None:
-        """Close the pipe and join the thread."""
-        # Wait for ongoing streams to dry up
-        # We only continue once the reader has spent some time blocked on reading
-        while True:
-            self._is_blocking.wait(timeout=1)
-            if (time.time() - self._last_time) >= self._grace_period:
-                break
-            time.sleep(self._grace_period / 10)
+        """Close the pipe and wait for the reader thread to drain all data.
 
-        # This will signal EOF to the reader thread
-        os.close(self._fd_write)
-        os.close(self._fd_read)
+        This method is safe to call even if the write fd has already been closed
+        (e.g., via dup2 replacing it). Closing the write end signals EOF to the
+        reader, which will then drain any remaining data from the pipe buffer
+        before exiting.
+        """
+        # Close the write end if not already closed. This signals EOF to reader.
+        # After this, no more data can be written to the pipe, and the reader
+        # will eventually see EOF after draining the kernel pipe buffer.
+        if not self._fd_write_closed:
+            try:
+                os.close(self._fd_write)
+            except OSError:
+                pass  # Already closed
+            self._fd_write_closed = True
 
-        # Use timeout and daemon=True to avoid hanging indefinitely if something goes wrong
-        self.join(timeout=1)
+        # Wait for reader thread to finish. It will exit after hitting EOF
+        # and draining all buffered data. No timeout needed since EOF is
+        # guaranteed once write end is closed.
+        self.join()
+
+        # Now safe to close read end - reader thread has exited
+        try:
+            os.close(self._fd_read)
+        except OSError:
+            pass  # Already closed
 
     def __exit__(self, *args: Any) -> None:
         """Close the pipe and join the thread."""
@@ -68,19 +77,16 @@ class TeePipe(threading.Thread):
 
     def run(self) -> None:
         """Run the thread, pushing every full line of text to the sinks."""
-        line_buffer = []
+        line_buffer: list[bytes] = []
         while True:
-            self._last_time = time.time()
-            self._is_blocking.set()
             try:
-                data = os.read(self._fd_read, 1024)
-                self._is_blocking.clear()
+                data = os.read(self._fd_read, 4096)
             except OSError:
-                # Pipe closed
+                # Read fd was closed externally
                 break
 
             if data == b"":
-                # EOF reached
+                # EOF reached - write end is closed and buffer is drained
                 break
 
             lines = data.split(b"\n")
@@ -90,21 +96,21 @@ class TeePipe(threading.Thread):
                 if i == 0:
                     line = b"".join([*line_buffer, line])
                     line_buffer = []
-                line = line.decode(errors="ignore")
-                self._captured_lines.append(line)
+                decoded = line.decode(errors="ignore")
+                self._captured_lines.append(decoded)
                 for sink in self._sinks:
-                    sink(line)
+                    sink(decoded)
 
             # Accumulate incomplete line
             line_buffer.append(lines[-1])
 
         # Flush incomplete lines at the end of the stream
-        line = b"".join(line_buffer)
-        if line:
-            line = line.decode(errors="ignore")
-            self._captured_lines.append(line)
+        remaining = b"".join(line_buffer)
+        if remaining:
+            decoded = remaining.decode(errors="ignore")
+            self._captured_lines.append(decoded)
             for sink in self._sinks:
-                sink(line)
+                sink(decoded)
 
     @property
     def captured_lines(self) -> list[str]:
