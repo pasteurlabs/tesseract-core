@@ -110,11 +110,18 @@ jobs:
             tar xf wsl-uv-cache.tar -C /
           fi
 
+          # Copy project to WSL native filesystem to avoid slow NTFS I/O
+          # (uv sync creates .venv in cwd, which would be on NTFS otherwise)
+          CHECKOUT_DIR="$(pwd)"
+          rm -rf ~/project
+          cp -r . ~/project
+          cd ~/project
+
           pip install uv
           uv sync --extra dev --frozen
 
           # Save uv cache as tarball for next run
-          tar cf wsl-uv-cache.tar -C / "$(echo $HOME/.cache/uv | sed 's|^/||')"
+          tar cf "$CHECKOUT_DIR/wsl-uv-cache.tar" -C / "$(echo $HOME/.cache/uv | sed 's|^/||')"
 
           if [ "${{ matrix.runtime-deps }}" == "oldest" ]; then
             # replace >= with == in pyproject.toml to install oldest runtime deps
@@ -140,6 +147,8 @@ jobs:
         shell: wsl-bash {0}
         run: |
           export PATH="$HOME/venv/bin:$PATH"
+          CHECKOUT_DIR="$(pwd)"
+          cd ~/project
           uv run --no-sync pytest \
             --skip-endtoend \
             --timeout=300 \
@@ -147,6 +156,8 @@ jobs:
             --cov-report=xml:coverage.xml \
             --cov=tesseract_core \
             --cov-branch
+          # Copy coverage report back to checkout dir for Codecov upload
+          cp coverage.xml "$CHECKOUT_DIR/"
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v5.5.2
@@ -283,11 +294,11 @@ jobs:
         run: |
           uv sync --extra dev --frozen
 
-      - name: Set up Docker Buildx
+      - name: Enable containerd image store
         if: matrix.docker-engine != 'podman'
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-docker-action@v4
         with:
-          driver: docker
+          daemon-config: '{"features":{"containerd-snapshotter":true}}'
 
       - name: Set up Podman
         if: matrix.docker-engine == 'podman'
