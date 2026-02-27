@@ -90,6 +90,13 @@ jobs:
             uv pip install -e .[runtime]
           fi
 
+      - name: Restore WSL uv cache
+        if: runner.os == 'Windows'
+        uses: actions/cache@v4
+        with:
+          path: wsl-uv-cache.tar
+          key: wsl-uv-${{ matrix.python-version }}-${{ hashFiles('production.uv.lock') }}
+
       - name: Install package (Windows)
         if: runner.os == 'Windows'
         shell: wsl-bash {0}
@@ -98,8 +105,16 @@ jobs:
           export UV_LINK_MODE=copy
           export UV_CACHE_DIR="$HOME/.cache/uv"
 
+          # Restore uv cache from tarball (lives on Windows FS, extracted to WSL)
+          if [ -f wsl-uv-cache.tar ]; then
+            tar xf wsl-uv-cache.tar -C /
+          fi
+
           pip install uv
           uv sync --extra dev --frozen
+
+          # Save uv cache as tarball for next run
+          tar cf wsl-uv-cache.tar -C / "$(echo $HOME/.cache/uv | sed 's|^/||')"
 
           if [ "${{ matrix.runtime-deps }}" == "oldest" ]; then
             # replace >= with == in pyproject.toml to install oldest runtime deps
@@ -271,6 +286,8 @@ jobs:
       - name: Set up Docker Buildx
         if: matrix.docker-engine != 'podman'
         uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker
 
       - name: Set up Podman
         if: matrix.docker-engine == 'podman'
