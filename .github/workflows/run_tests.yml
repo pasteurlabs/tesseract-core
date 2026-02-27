@@ -135,6 +135,7 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           uv run --no-sync pytest \
+            -v \
             --skip-endtoend \
             --timeout=300 \
             --cov-report=term-missing:skip-covered \
@@ -150,6 +151,7 @@ jobs:
           CHECKOUT_DIR="$(pwd)"
           cd ~/project
           uv run --no-sync pytest \
+            -v \
             --skip-endtoend \
             --timeout=300 \
             --cov-report=term-missing:skip-covered \
@@ -294,11 +296,9 @@ jobs:
         run: |
           uv sync --extra dev --frozen
 
-      - name: Enable containerd image store
+      - name: Expose GitHub Actions runtime for Docker cache
         if: matrix.docker-engine != 'podman'
-        uses: docker/setup-docker-action@v4
-        with:
-          daemon-config: '{"features":{"containerd-snapshotter":true}}'
+        uses: crazy-max/ghaction-github-runtime@v3
 
       - name: Set up Podman
         if: matrix.docker-engine == 'podman'
