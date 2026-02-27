@@ -286,7 +286,9 @@ def _write_template_file(
     """Write a template to a target directory."""
     template = ENV.get_template(str(recipe / template_name))
 
-    target_file = target_dir / template_name
+    # Strip .j2 extension for the output file
+    output_name = template_name.removesuffix(".j2")
+    target_file = target_dir / output_name
 
     if target_file.exists() and not exist_ok:
         raise FileExistsError(f"File {target_file} already exists")
@@ -303,8 +305,18 @@ def init_api(
     target_dir: Path,
     tesseract_name: str,
     recipe: str = "base",
+    fromfunc_vars: dict | None = None,
+    source_file: Path | None = None,
 ) -> Path:
-    """Create a new empty Tesseract API module at the target location."""
+    """Create a new empty Tesseract API module at the target location.
+
+    Args:
+        target_dir: Directory to create the Tesseract API module in.
+        tesseract_name: Name of the Tesseract.
+        recipe: Recipe to use for template rendering.
+        fromfunc_vars: Optional template variables from --fromfunc analysis.
+        source_file: Optional source file to copy alongside the generated API.
+    """
     from tesseract_core import __version__ as tesseract_version
 
     template_vars = {
@@ -313,11 +325,19 @@ def init_api(
         "name": tesseract_name,
     }
 
+    # Merge fromfunc variables if provided
+    if fromfunc_vars is not None:
+        template_vars.update(fromfunc_vars)
+
     # If target dir does not exist, create it
     Path(target_dir).mkdir(parents=True, exist_ok=True)
 
+    # Copy source file if provided
+    if source_file is not None:
+        copy(source_file, target_dir / source_file.name)
+
     _write_template_file(
-        "tesseract_api.py", target_dir, template_vars, recipe=Path(recipe)
+        "tesseract_api.py.j2", target_dir, template_vars, recipe=Path(recipe)
     )
     _write_template_file(
         "tesseract_config.yaml", target_dir, template_vars, recipe=Path(recipe)

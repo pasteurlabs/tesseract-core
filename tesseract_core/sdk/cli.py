@@ -24,7 +24,7 @@ from pydantic import ValidationError as PydanticValidationError
 from rich.console import Console as RichConsole
 from rich.table import Table as RichTable
 
-from . import engine
+from . import engine, fromfunc
 from .api_parse import (
     EXPECTED_OBJECTS,
     TesseractBuildConfig,
@@ -113,9 +113,9 @@ POSSIBLE_BUILD_CONFIGS = TesseractBuildConfig.model_fields.keys()
 
 # Traverse templates folder to seach for recipes
 AVAILABLE_RECIPES = set()
-for temp_with_path in ENV.list_templates(extensions=["py"]):
+for temp_with_path in ENV.list_templates(extensions=["py.j2"]):
     temp_with_path = Path(temp_with_path)
-    if temp_with_path.name == "tesseract_api.py" and temp_with_path.parent:
+    if temp_with_path.name == "tesseract_api.py.j2" and temp_with_path.parent:
         AVAILABLE_RECIPES.add(str(temp_with_path.parent))
 AVAILABLE_RECIPES = sorted(AVAILABLE_RECIPES)
 
@@ -397,11 +397,61 @@ def init(
             help="Use a pre-configured template to initialize Tesseract API and configuration.",
         ),
     ] = "base",
+    from_func: Annotated[
+        str | None,
+        typer.Option(
+            "--fromfunc",
+            help=(
+                "[Experimental] Auto-generate tesseract_api.py from a type-hinted Python function. "
+                "Format: 'path/to/file.py::function_name'. "
+                "The source file will be copied alongside the generated API. "
+                "This feature is experimental and may change without warning."
+            ),
+            show_default=False,
+        ),
+    ] = None,
 ) -> None:
     """Initialize a new Tesseract API module."""
     recipe: str = _enum_to_val(recipe)
+
+    fromfunc_vars = None
+    source_file = None
+
+    if from_func is not None:
+        try:
+            file_path, func_name = fromfunc.parse_fromfunc_arg(from_func)
+            analysis = fromfunc.analyze_function(file_path, func_name)
+        except ValueError as e:
+            raise typer.BadParameter(str(e), param_hint="--fromfunc") from e
+
+        # Auto-detect recipe from imports if not explicitly set by user
+        if recipe == "base" and analysis.detected_framework is not None:
+            detected_recipe = analysis.detected_framework
+            recipe = detected_recipe
+            logger.info(
+                f"Auto-detected recipe '{recipe}' from imports in '{file_path}'"
+            )
+
+        try:
+            fromfunc_vars = fromfunc.generate_template_vars(analysis, recipe)
+        except ValueError as e:
+            raise typer.BadParameter(str(e), param_hint="--fromfunc") from e
+
+        source_file = analysis.source_file
+
+        logger.warning(
+            "The --fromfunc feature is experimental and may change without warning. "
+            "Please review your generated tesseract_api.py to ensure it is correct."
+        )
+
     logger.info(f"Initializing Tesseract {name} in directory: {target_dir}")
-    engine.init_api(target_dir, name, recipe=recipe)
+    engine.init_api(
+        target_dir,
+        name,
+        recipe=recipe,
+        fromfunc_vars=fromfunc_vars,
+        source_file=source_file,
+    )
 
 
 def _validate_port(port: str | None) -> str | None:
