@@ -296,9 +296,12 @@ jobs:
         run: |
           uv sync --extra dev --frozen
 
-      - name: Expose GitHub Actions runtime for Docker cache
+      - name: Enable containerd image store
         if: matrix.docker-engine != 'podman'
-        uses: crazy-max/ghaction-github-runtime@v3
+        uses: docker/setup-docker-action@v4
+        with:
+          daemon-config: '{"features":{"containerd-snapshotter":true}}'
+          set-host: true
 
       - name: Set up Podman
         if: matrix.docker-engine == 'podman'
