@@ -46,7 +46,7 @@ packages = ["tesseract_core"]
 path = "inject_runtime_pyproject.py"
 
 [tool.pytest.ini_options]
-addopts = ["--typeguard-packages=tesseract_core"]
+addopts = ["--typeguard-packages=tesseract_core", "--durations=10"]
 testpaths = ["tests"]
 filterwarnings = [
     "error",
