@@ -239,7 +239,7 @@ jobs:
     runs-on: ${{ matrix.arch == 'x64' && matrix.os == 'ubuntu-24.04' && 'ubuntu-24.04' || matrix.arch == 'arm' && matrix.os == 'ubuntu-24.04' && 'ubuntu-24.04-arm'}}
 
     env:
-      TESSERACT_DOCKER_BUILD_ARGS: "--cache-from type=gha --cache-to type=gha,mode=max"
+      TESSERACT_DOCKER_BUILD_ARGS: "--cache-from type=gha,scope=${{ matrix.arch }} --cache-to type=gha,mode=max,scope=${{ matrix.arch }}"
 
     defaults:
       run:
@@ -267,6 +267,10 @@ jobs:
       - name: Install package
         run: |
           uv sync --extra dev --frozen
+
+      - name: Set up Docker Buildx
+        if: matrix.docker-engine != 'podman'
+        uses: docker/setup-buildx-action@v3
 
       - name: Set up Podman
         if: matrix.docker-engine == 'podman'
