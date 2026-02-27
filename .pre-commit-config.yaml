@@ -87,7 +87,7 @@ repos:
     hooks:
       - id: prettier
         types_or: [json, yaml, markdown, toml]
-        exclude: CHANGELOG.md
+        exclude: "CHANGELOG.md|^.*templates/.*\\.yaml$"
         additional_dependencies:
           - prettier@3.7.4
           - prettier-plugin-toml@2.0.1

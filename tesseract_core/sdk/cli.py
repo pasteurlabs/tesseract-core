@@ -113,7 +113,7 @@ POSSIBLE_BUILD_CONFIGS = TesseractBuildConfig.model_fields.keys()
 
 # Traverse templates folder to seach for recipes
 AVAILABLE_RECIPES = set()
-for temp_with_path in ENV.list_templates(extensions=["py.j2"]):
+for temp_with_path in ENV.list_templates(extensions=["j2"]):
     temp_with_path = Path(temp_with_path)
     if temp_with_path.name == "tesseract_api.py.j2" and temp_with_path.parent:
         AVAILABLE_RECIPES.add(str(temp_with_path.parent))

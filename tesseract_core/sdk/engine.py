@@ -15,7 +15,7 @@ import time
 from collections.abc import Callable, Collection, Sequence
 from contextlib import closing
 from pathlib import Path
-from shutil import copy, copytree, rmtree
+from shutil import SameFileError, copy, copytree, rmtree
 from typing import TYPE_CHECKING, Any, Literal
 
 import requests
@@ -334,7 +334,11 @@ def init_api(
 
     # Copy source file if provided
     if source_file is not None:
-        copy(source_file, target_dir / source_file.name)
+        try:
+            copy(source_file, target_dir / source_file.name)
+        except SameFileError:
+            pass
+        template_vars["package_data"] = [(source_file.name, source_file.name)]
 
     _write_template_file(
         "tesseract_api.py.j2", target_dir, template_vars, recipe=Path(recipe)
