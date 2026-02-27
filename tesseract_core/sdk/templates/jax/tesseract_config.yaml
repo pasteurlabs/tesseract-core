@@ -18,8 +18,15 @@ build_config:
   #  - package_name
 
   # Data to copy into the container, relative to the project root
+{%- if package_data is defined and package_data %}
+  package_data:
+{%- for src, dst in package_data %}
+    - ["{{ src }}", "{{ dst }}"]
+{%- endfor %}
+{%- else %}
   # package_data:
   #  - [path/to/source, path/to/destination]
+{%- endif %}
 
   # Additional Dockerfile commands to run during the build process
   # custom_build_steps:
