@@ -53,12 +53,6 @@ jobs:
         shell: wsl-bash {0}
         run: |
           curl -LsSf https://astral.sh/uv/install.sh | sh
-          source $HOME/.local/bin/env
-
-          # Place .venv on native ext4 to avoid slow NTFS writes
-          echo "UV_PROJECT_ENVIRONMENT=$HOME/venv" >> $GITHUB_ENV
-          echo "UV_CACHE_DIR=$HOME/.cache/uv" >> $GITHUB_ENV
-          echo "PATH=$HOME/.local/bin:$PATH" >> $GITHUB_ENV
 
       - name: Install package
         if: runner.os != 'Windows'
@@ -77,7 +71,11 @@ jobs:
       - name: Install package (Windows)
         if: runner.os == 'Windows'
         shell: wsl-bash {0}
+        env:
+          UV_PROJECT_ENVIRONMENT: /root/venv
+          UV_CACHE_DIR: /root/.cache/uv
         run: |
+          source "$HOME/.local/bin/env"
           cp production.uv.lock uv.lock
           uv sync --python ${{ matrix.python-version }} --extra dev --frozen
 
@@ -104,7 +102,10 @@ jobs:
       - name: Run test suite (Windows)
         if: runner.os == 'Windows'
         shell: wsl-bash {0}
+        env:
+          UV_PROJECT_ENVIRONMENT: /root/venv
         run: |
+          source "$HOME/.local/bin/env"
           uv run --no-sync pytest \
             -v \
             --skip-endtoend \
@@ -219,9 +220,6 @@ jobs:
 
     runs-on: ${{ matrix.arch == 'x64' && matrix.os == 'ubuntu-24.04' && 'ubuntu-24.04' || matrix.arch == 'arm' && matrix.os == 'ubuntu-24.04' && 'ubuntu-24.04-arm'}}
 
-    env:
-      TESSERACT_DOCKER_BUILD_ARGS: "--cache-from type=gha,scope=${{ matrix.arch }} --cache-to type=gha,mode=max,scope=${{ matrix.arch }}"
-
     defaults:
       run:
         shell: bash -el {0}
@@ -249,41 +247,6 @@ jobs:
         run: |
           uv sync --extra dev --frozen
 
-      - name: Enable containerd image store
-        if: matrix.docker-engine != 'podman'
-        uses: docker/setup-docker-action@v4
-        with:
-          daemon-config: '{"features":{"containerd-snapshotter":true}}'
-          set-host: true
-
-      - name: Verify Docker GHA cache
-        if: matrix.docker-engine != 'podman' && matrix.unit-tesseract == 'base'
-        run: |
-          echo 'FROM alpine:latest' > /tmp/Dockerfile.test
-          echo 'RUN echo hello' >> /tmp/Dockerfile.test
-
-          echo "=== Build 1: populating GHA cache ==="
-          docker buildx build \
-            --cache-to type=gha,mode=max,scope=cache-test \
-            --cache-from type=gha,scope=cache-test \
-            --load -t cache-test:1 -f /tmp/Dockerfile.test /tmp 2>&1
-
-          echo "=== Pruning local BuildKit cache ==="
-          docker buildx prune -af
-
-          echo "=== Build 2: should restore from GHA cache ==="
-          docker buildx build \
-            --cache-from type=gha,scope=cache-test \
-            --load -t cache-test:2 -f /tmp/Dockerfile.test /tmp 2>&1 | tee /tmp/build2.log
-
-          if grep -q "CACHED" /tmp/build2.log; then
-            echo "GHA Docker cache is working"
-          else
-            echo "WARNING: GHA Docker cache is NOT working"
-            cat /tmp/build2.log
-            exit 1
-          fi
-
       - name: Set up Podman
         if: matrix.docker-engine == 'podman'
         run: |
@@ -295,8 +258,6 @@ jobs:
           export DOCKER_HOST=unix:///run/user/1001/podman/podman.sock
           echo "DOCKER_HOST=${DOCKER_HOST}" >> $GITHUB_ENV
           echo "TESSERACT_DOCKER_EXECUTABLE=podman" >> $GITHUB_ENV
-          # Podman doesn't support --cache-from
-          echo "TESSERACT_DOCKER_BUILD_ARGS=" >> $GITHUB_ENV
 
       - name: Run test suite
         run: |
