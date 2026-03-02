@@ -122,11 +122,18 @@ ENV PYTHONUNBUFFERED=1
 # Drop to random non-root user to prevent exploits
 # (this way, we never start the container as root unless specifically requested)
 USER 9999:9999
+ENV HOME=/tesseract
 
 # Final sanity check to ensure the runtime is installed and tesseract_api.py is valid
 {% if not config.build_config.skip_checks %}
 RUN _TESSERACT_IS_BUILDING=1 /tesseract/entrypoint.sh tesseract-runtime check
 {% endif %}
+
+# Make sure /tesseract is writable by non-root users, especially important if
+# some folders are created at build time and owned by 9999:9999.
+USER root
+RUN chmod -R 777 /tesseract
+USER 9999:9999
 
 ENTRYPOINT ["/tesseract/entrypoint.sh", "tesseract-runtime"]
 CMD ["--help"]

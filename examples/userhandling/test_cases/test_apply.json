@@ -5,7 +5,10 @@
     "gid": 21,
     "username": "tesseract-user",
     "home": "/tesseract",
-    "shell": "/bin/bash"
+    "shell": "/bin/bash",
+    "somedir_readable": true,
+    "somedir_writable": true,
+    "hello_dir_created": true
   },
   "expected_exception": null,
   "expected_exception_regex": null,
