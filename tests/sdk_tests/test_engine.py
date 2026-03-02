@@ -491,6 +491,74 @@ def test_teepipe_early_exit():
     assert teepipe.captured_lines == expected_lines
 
 
+def test_log_streamer(tmpdir):
+    # Test that LogStreamer can tail a file and capture lines as they are written
+    from tesseract_core.sdk.logs import LogStreamer
+
+    log_file = Path(tmpdir) / "test.log"
+    captured = []
+
+    streamer = LogStreamer(log_file, captured.append)
+    streamer.start()
+
+    # Write some lines with delays
+    with open(log_file, "w") as f:
+        for i in range(10):
+            f.write(f"line {i}\n")
+            f.flush()
+            time.sleep(0.02)  # Small delay to let streamer pick up
+
+    # Stop and drain
+    streamer.stop()
+
+    assert captured == [f"line {i}" for i in range(10)]
+
+
+def test_log_streamer_waits_for_file(tmpdir):
+    # Test that LogStreamer waits for the file to appear
+    from tesseract_core.sdk.logs import LogStreamer
+
+    log_file = Path(tmpdir) / "delayed.log"
+    captured = []
+
+    streamer = LogStreamer(log_file, captured.append)
+    streamer.start()
+
+    # File doesn't exist yet, streamer should be waiting
+    time.sleep(0.1)
+
+    # Now create the file
+    with open(log_file, "w") as f:
+        f.write("delayed line\n")
+        f.flush()
+
+    time.sleep(0.1)
+    streamer.stop()
+
+    assert captured == ["delayed line"]
+
+
+def test_log_streamer_handles_trailing_content(tmpdir):
+    # Test that LogStreamer handles content without trailing newline
+    from tesseract_core.sdk.logs import LogStreamer
+
+    log_file = Path(tmpdir) / "trailing.log"
+    captured = []
+
+    streamer = LogStreamer(log_file, captured.append)
+    streamer.start()
+
+    with open(log_file, "w") as f:
+        f.write("line 1\n")
+        f.write("no newline at end")
+        f.flush()
+
+    time.sleep(0.1)
+    streamer.stop()
+
+    assert captured == ["line 1", "no newline at end"]
+
+
 def test_parse_requirements(tmpdir):
     reqs = """
     --extra-index-url https://download.pytorch.org/whl/cpu
