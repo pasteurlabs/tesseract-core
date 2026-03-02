@@ -215,6 +215,12 @@ def docker_volume(docker_client):
         volume.remove(force=True)
 
 
+@pytest.fixture(scope="session")
+def docker_cleanup_session(docker_client, request):
+    """Clean up all tesseracts created by the tests after the session exits."""
+    return _docker_cleanup(docker_client, request)
+
+
 @pytest.fixture(scope="module")
 def docker_cleanup_module(docker_client, request):
     """Clean up all tesseracts created by the tests after the module exits."""
@@ -306,6 +312,19 @@ def _docker_cleanup(docker_client, request):
 
     request.addfinalizer(cleanup_func)
     return context
+
+
+@pytest.fixture(scope="session")
+def built_image_name(docker_client, docker_cleanup_session, dummy_tesseract_location):
+    """Build the dummy Tesseract image once for the entire test session."""
+    from endtoend_tests.common import build_tesseract, image_exists
+
+    image_id = "".join(random.choices(string.ascii_lowercase + string.digits, k=16))
+    image_name = f"tmp_tesseract_image_{image_id}"
+    image_tag = build_tesseract(docker_client, dummy_tesseract_location, image_name)
+    assert image_exists(docker_client, image_tag)
+    docker_cleanup_session["images"].append(image_tag)
+    yield image_tag
 
 
 @pytest.fixture

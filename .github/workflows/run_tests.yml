@@ -42,62 +42,29 @@ jobs:
         with:
           distribution: Ubuntu-24.04
 
-      - name: Set up Python
-        if: runner.os != 'Windows'
-        uses: actions/setup-python@v6
-        with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Set up Python (Windows)
-        if: runner.os == 'Windows'
-        shell: wsl-bash {0}
-        run: |
-          python_version=${{ matrix.python-version }}
-          if [ $python_version == "3.12" ]; then
-            # Python 3.12 is the default `python3` in Ubuntu 24.04
-            python_version="3"
-          fi
-
-          export DEBIAN_FRONTEND=noninteractive
-          sudo apt-get update
-          sudo apt-get install -y software-properties-common gnupg2
-          sudo add-apt-repository ppa:deadsnakes/ppa
-          sudo apt-get install -y python3-pip python${python_version} python${python_version}-venv
-
-          python${python_version} -m venv ~/venv
-
-          export PATH="$HOME/venv/bin:$PATH"
-          python -m pip install --upgrade pip
-
       - name: Set up uv
+        if: runner.os != 'Windows'
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
 
-      - name: Restore UV environment
-        run: cp production.uv.lock uv.lock
-
-      - name: Install package
-        if: runner.os != 'Windows'
-        run: |
-          uv sync --extra dev --frozen
-
-          if [ "${{ matrix.runtime-deps }}" == "oldest" ]; then
-            # replace >= with == in pyproject.toml to install oldest runtime deps
-            sed -i 's/>=/==/g' ./tesseract_core/runtime/meta/pyproject.toml
-            # roll back changes to requires-python
-            sed -i 's/requires-python\s*=\s*\"==/requires-python = \">=/g' ./tesseract_core/runtime/meta/pyproject.toml
-            uv pip install -e .[runtime]
-          fi
-
-      - name: Install package (Windows)
+      - name: Set up uv (Windows)
         if: runner.os == 'Windows'
         shell: wsl-bash {0}
         run: |
-          export PATH="$HOME/venv/bin:$PATH"
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          source $HOME/.local/bin/env
 
-          pip install uv
-          uv sync --extra dev --frozen
+          # Place .venv on native ext4 to avoid slow NTFS writes
+          echo "UV_PROJECT_ENVIRONMENT=$HOME/venv" >> $GITHUB_ENV
+          echo "UV_CACHE_DIR=$HOME/.cache/uv" >> $GITHUB_ENV
+          echo "PATH=$HOME/.local/bin:$PATH" >> $GITHUB_ENV
+
+      - name: Install package
+        shell: ${{ runner.os == 'Windows' && 'wsl-bash {0}' || 'bash -e {0}' }}
+        run: |
+          cp production.uv.lock uv.lock
+          uv sync --python ${{ matrix.python-version }} --extra dev --frozen
 
           if [ "${{ matrix.runtime-deps }}" == "oldest" ]; then
             # replace >= with == in pyproject.toml to install oldest runtime deps
@@ -108,22 +75,12 @@ jobs:
           fi
 
       - name: Run test suite
-        if: runner.os != 'Windows'
+        shell: ${{ runner.os == 'Windows' && 'wsl-bash {0}' || 'bash -e {0}' }}
         run: |
           uv run --no-sync pytest \
+            -v \
             --skip-endtoend \
-            --cov-report=term-missing:skip-covered \
-            --cov-report=xml:coverage.xml \
-            --cov=tesseract_core \
-            --cov-branch
-
-      - name: Run test suite (Windows)
-        if: runner.os == 'Windows'
-        shell: wsl-bash {0}
-        run: |
-          export PATH="$HOME/venv/bin:$PATH"
-          uv run --no-sync pytest \
-            --skip-endtoend \
+            --timeout=300 \
             --cov-report=term-missing:skip-covered \
             --cov-report=xml:coverage.xml \
             --cov=tesseract_core \
@@ -235,7 +192,7 @@ jobs:
     runs-on: ${{ matrix.arch == 'x64' && matrix.os == 'ubuntu-24.04' && 'ubuntu-24.04' || matrix.arch == 'arm' && matrix.os == 'ubuntu-24.04' && 'ubuntu-24.04-arm'}}
 
     env:
-      TESSERACT_DOCKER_BUILD_ARGS: "--cache-from type=gha --cache-to type=gha,mode=max"
+      TESSERACT_DOCKER_BUILD_ARGS: "--cache-from type=gha,scope=${{ matrix.arch }} --cache-to type=gha,mode=max,scope=${{ matrix.arch }}"
 
     defaults:
       run:
@@ -264,6 +221,41 @@ jobs:
         run: |
           uv sync --extra dev --frozen
 
+      - name: Enable containerd image store
+        if: matrix.docker-engine != 'podman'
+        uses: docker/setup-docker-action@v4
+        with:
+          daemon-config: '{"features":{"containerd-snapshotter":true}}'
+          set-host: true
+
+      - name: Verify Docker GHA cache
+        if: matrix.docker-engine != 'podman' && matrix.unit-tesseract == 'base'
+        run: |
+          echo 'FROM alpine:latest' > /tmp/Dockerfile.test
+          echo 'RUN echo hello' >> /tmp/Dockerfile.test
+
+          echo "=== Build 1: populating GHA cache ==="
+          docker buildx build \
+            --cache-to type=gha,mode=max,scope=cache-test \
+            --cache-from type=gha,scope=cache-test \
+            --load -t cache-test:1 -f /tmp/Dockerfile.test /tmp 2>&1
+
+          echo "=== Pruning local BuildKit cache ==="
+          docker buildx prune -af
+
+          echo "=== Build 2: should restore from GHA cache ==="
+          docker buildx build \
+            --cache-from type=gha,scope=cache-test \
+            --load -t cache-test:2 -f /tmp/Dockerfile.test /tmp 2>&1 | tee /tmp/build2.log
+
+          if grep -q "CACHED" /tmp/build2.log; then
+            echo "GHA Docker cache is working"
+          else
+            echo "WARNING: GHA Docker cache is NOT working"
+            cat /tmp/build2.log
+            exit 1
+          fi
+
       - name: Set up Podman
         if: matrix.docker-engine == 'podman'
         run: |
@@ -283,6 +275,7 @@ jobs:
           if [ "${{ matrix.unit-tesseract }}" == "base" ]; then
             uv run --no-sync pytest \
               --always-run-endtoend \
+              --timeout=300 \
               --cov-branch \
               --cov-report=term-missing:skip-covered \
               --cov-report=xml:coverage.xml \
@@ -292,6 +285,7 @@ jobs:
           else
             uv run --no-sync pytest \
               --always-run-endtoend \
+              --timeout=300 \
               --cov-branch \
               --cov-report=term-missing:skip-covered \
               --cov-report=xml:coverage.xml \
