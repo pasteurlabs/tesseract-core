@@ -195,7 +195,9 @@ def test_all_endpoints(
                         },
                     }
                 },
-                "expected_outputs": {"result": [7.0, 11.0, 15.0]},
+                "expected_outputs": {
+                    "result": np.array([7.0, 11.0, 15.0], dtype="float32")
+                },
                 "atol": 1e-8,
                 "rtol": 0.00001,
             }
