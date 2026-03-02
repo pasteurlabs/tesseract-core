@@ -6,6 +6,10 @@
 
 Tesseracts natively support DP and autodiff as an optional feature – as long as at least one of the input or output arrays is marked as differentiable, and an [AD endpoint](#ad-endpoints) is implemented, the Tesseract can be differentiated with respect to its inputs.
 
+```{tip}
+If you're using JAX, check out [tesseract-jax](https://github.com/pasteurlabs/tesseract-jax) — a companion package that makes it easy to create Tesseracts from JAX functions with autodiff endpoints generated automatically.
+```
+
 ## Autodiff flavors
 
 There are several ways to compute the derivative of a pipeline of functions with respect to their inputs, and each has its own trade-offs. Tesseracts support both forward-mode and reverse-mode autodiff, as well as the computation of the full Jacobian matrix.

@@ -88,6 +88,50 @@ $ pytest --skip-endtoend
 $ pytest --always-run-endtoend tests/endtoend_tests
 ```
 
+#### Testing philosophy
+
+We follow these principles when writing tests:
+
+- **Prefer end-to-end tests over unit tests** — Tests that exercise real
+  Tesseract builds and invocations catch more bugs than isolated unit tests.
+  When in doubt, write an end-to-end test.
+
+- **Avoid mocks where feasible** — Mocks can hide real integration issues.
+  If a test requires complex mocking to work, consider whether an end-to-end
+  test would be more valuable.
+
+- **Don't test implementation details** — Tests should verify behavior, not
+  internal structure. If refactoring breaks your test but not the actual
+  functionality, the test was too tightly coupled.
+
+- **Be mindful of slow tests** — End-to-end tests that build Tesseracts are
+  slow. Before adding a new one, check if an existing test can be extended,
+  or if a faster unit test would suffice for your specific case.
+
+### Linting and code quality
+
+We use [pre-commit](https://pre-commit.com/) to run linters and formatters
+automatically before each commit. The hooks are configured in
+`.pre-commit-config.yaml` and include:
+
+- **Ruff** — Fast Python linter and formatter (replaces flake8, isort, black)
+- **Various file checks** — Trailing whitespace, YAML validation, etc.
+
+To run all pre-commit hooks manually on all files:
+
+```console
+$ pre-commit run --all-files
+```
+
+To run a specific hook:
+
+```console
+$ pre-commit run ruff --all-files
+```
+
+Pre-commit also handles automatic dependency updates via Dependabot-style
+version bumps. These are configured to run periodically in CI.
+
 ### GitHub workflow
 
 This project uses Git for version control and follows a GitHub workflow. To
