@@ -413,7 +413,9 @@ def _create_user_defined_cli_command(
         if output_path:
             Path(output_path).mkdir(parents=True, exist_ok=True)
 
-        with start_run(base_dir=output_path):
+        # Use stderr sink so logs are streamed when running in container
+        stderr_sink = lambda msg: print(msg, file=sys.stderr, flush=True)
+        with start_run(base_dir=output_path, log_sink=stderr_sink):
             result = user_function(**user_function_args)
 
         result = output_to_bytes(result, output_format, output_path)

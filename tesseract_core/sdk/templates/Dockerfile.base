@@ -116,6 +116,9 @@ ENV LD_PRELOAD=libnss_wrapper.so \
     NSS_WRAPPER_PASSWD=/tmp/passwd \
     NSS_WRAPPER_GROUP=/tmp/group
 
+# Ensure Python output is unbuffered, so logs are visible in real time
+ENV PYTHONUNBUFFERED=1
+
 # Drop to random non-root user to prevent exploits
 # (this way, we never start the container as root unless specifically requested)
 USER 9999:9999

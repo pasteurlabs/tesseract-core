@@ -8,6 +8,7 @@ import threading
 import time
 import warnings
 from collections.abc import Callable, Iterable
+from pathlib import Path
 from types import ModuleType
 from typing import Any
 
@@ -129,6 +130,100 @@ class TeePipe(threading.Thread):
     def captured_lines(self) -> list[str]:
         """Return all lines captured so far."""
         return self._captured_lines
+
+
+class LogStreamer(threading.Thread):
+    """Tail a log file and stream new lines to a sink.
+
+    Runs as a daemon thread, polling the file for new content. Used to provide
+    live log streaming from Tesseract runs.
+
+    Example:
+        >>> streamer = LogStreamer(Path("/tmp/run_123/logs/tesseract.log"), print)
+        >>> streamer.start()
+        >>> # ... run some code that writes to the log file ...
+        >>> streamer.stop()  # Drains remaining content and stops
+    """
+
+    daemon = True
+    _default_poll_interval = 0.001
+
+    def __init__(
+        self,
+        path: Path | str,
+        sink: Callable[[str], Any],
+    ) -> None:
+        """Initialize the LogStreamer.
+
+        Args:
+            path: Path to the log file to tail.
+            sink: Callable that receives each log line.
+            poll_interval: How often to poll for new content (seconds).
+        """
+        super().__init__()
+        self._path = Path(path)
+        self._sink = sink
+        self._current_poll_interval = self._default_poll_interval
+        self._stop_event = threading.Event()
+        self._file_pos = 0
+
+    def stop(self) -> None:
+        """Signal the thread to stop and wait for it to drain remaining content."""
+        self._stop_event.set()
+        self.join()
+
+    def run(self) -> None:
+        """Poll the log file and send new lines to the sink."""
+        line_buffer = ""
+
+        # Wait for file to appear (with polling)
+        while not self._stop_event.is_set() and not self._path.exists():
+            time.sleep(self._current_poll_interval)
+
+        if not self._path.exists():
+            # Stopped before file appeared
+            return
+
+        with open(self._path, encoding="utf-8", errors="replace") as f:
+            while True:
+                # Read any new content
+                new_content = f.read()
+
+                if new_content:
+                    line_buffer += new_content
+
+                    # Process complete lines
+                    while "\n" in line_buffer:
+                        line, line_buffer = line_buffer.split("\n", 1)
+                        self._sink(line)
+
+                    self._current_poll_interval = (
+                        self._default_poll_interval
+                    )  # Reset to default after first read
+                else:
+                    self._current_poll_interval = min(
+                        self._current_poll_interval * 2, 0.1
+                    )  # Exponential backoff up to 100ms
+
+                # Check if we should stop
+                if self._stop_event.is_set():
+                    # Drain any remaining content
+                    new_content = f.read()
+                    if new_content:
+                        line_buffer += new_content
+
+                    # Flush remaining lines
+                    while "\n" in line_buffer:
+                        line, line_buffer = line_buffer.split("\n", 1)
+                        self._sink(line)
+
+                    # Flush any trailing content without newline
+                    if line_buffer:
+                        self._sink(line_buffer)
+
+                    break
+
+                time.sleep(self._current_poll_interval)
 
 
 class RichLogger(logging.Handler):

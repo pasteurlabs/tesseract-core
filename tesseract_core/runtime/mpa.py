@@ -9,7 +9,7 @@ import os
 import shutil
 import sys
 from abc import ABC, abstractmethod
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import ExitStack, contextmanager
 from contextvars import ContextVar
 from datetime import datetime
@@ -251,10 +251,17 @@ def log_artifact(local_path: str) -> None:
 
 
 @contextmanager
-def redirect_stdio(logfile: str | Path) -> Generator[None, None, None]:
+def redirect_stdio(
+    logfile: str | Path,
+    log_sink: Callable[[str], Any] | None = None,
+) -> Generator[None, None, None]:
     """Context manager for redirecting stdout and stderr to a custom pipe.
 
-    Writes messages to both the original stderr and the given logfile.
+    Args:
+        logfile: Path to the log file to write to.
+        log_sink: Optional callable that receives each log line. If provided,
+            logs go to the callable and the log file. If None, logs only go
+            to the log file (no terminal output).
     """
     from tesseract_core.runtime.core import redirect_fd
 
@@ -271,15 +278,35 @@ def redirect_stdio(logfile: str | Path) -> Generator[None, None, None]:
     with ExitStack() as stack:
         f = stack.enter_context(open(logfile, "w"))
 
-        # Duplicate the original stderr file descriptor before any redirection
+        # Duplicate the original stdout/stderr file descriptors before any redirection
+        orig_stdout_fd = os.dup(sys.stdout.fileno())
+        orig_stdout_file = os.fdopen(orig_stdout_fd, "w")
+        stack.callback(orig_stdout_file.close)
+
         orig_stderr_fd = os.dup(sys.stderr.fileno())
         orig_stderr_file = os.fdopen(orig_stderr_fd, "w")
         stack.callback(orig_stderr_file.close)
 
         # Use `print` instead of `.write` so we get appropriate newlines and flush behavior
-        write_to_stderr = lambda msg: print(msg, file=orig_stderr_file, flush=True)
         write_to_file = lambda msg: print(msg, file=f, flush=True)
-        pipe_fd = stack.enter_context(TeePipe(write_to_stderr, write_to_file))
+
+        if log_sink is not None:
+            # Wrap user sink to prevent infinite loops when sink writes to stdout/stderr
+            # (e.g., stream_logs=print would cause infinite recursion otherwise)
+            def safe_sink(msg: str) -> None:
+                old_stdout, old_stderr = sys.stdout, sys.stderr
+                sys.stdout, sys.stderr = orig_stdout_file, orig_stderr_file
+                try:
+                    log_sink(msg)
+                finally:
+                    sys.stdout, sys.stderr = old_stdout, old_stderr
+
+            sinks = [safe_sink, write_to_file]
+        else:
+            # No log_sink provided: only write to file (no stderr output)
+            sinks = [write_to_file]
+
+        pipe_fd = stack.enter_context(TeePipe(*sinks))
 
         # Redirect file descriptors at OS level
         stack.enter_context(redirect_fd(sys.stdout, pipe_fd))
@@ -288,8 +315,18 @@ def redirect_stdio(logfile: str | Path) -> Generator[None, None, None]:
 
 
 @contextmanager
-def start_run(base_dir: str | None = None) -> Generator[None, None, None]:
-    """Context manager for starting and ending a run."""
+def start_run(
+    base_dir: str | None = None,
+    log_sink: Callable[[str], Any] | None = None,
+) -> Generator[None, None, None]:
+    """Context manager for starting and ending a run.
+
+    Args:
+        base_dir: Base directory for the run. If None, uses current directory.
+        log_sink: Optional callable that receives each log line. If provided,
+            logs go to the callable and the log file. If None, logs only go
+            to the log file (no terminal output).
+    """
     backend = _create_backend(base_dir)
     token = _current_backend.set(backend)
     backend.start_run()
@@ -297,7 +334,7 @@ def start_run(base_dir: str | None = None) -> Generator[None, None, None]:
     logfile = backend.log_dir / "tesseract.log"
 
     try:
-        with redirect_stdio(logfile):
+        with redirect_stdio(logfile, log_sink=log_sink):
             yield
     finally:
         backend.end_run()
