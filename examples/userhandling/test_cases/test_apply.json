@@ -4,7 +4,7 @@
     "uid": 505,
     "gid": 21,
     "username": "tesseract-user",
-    "home": "/tesseract",
+    "home": "/home/tesseract-user",
     "shell": "/bin/bash",
     "somedir_readable": true,
     "somedir_writable": true,
@@ -15,5 +15,7 @@
   "payload": {
     "inputs": {}
   },
-  "cli_config": { "user": "505:21" }
+  "cli_config": {
+    "user": "505:21"
+  }
 }
