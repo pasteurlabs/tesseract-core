@@ -48,33 +48,14 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Set up Python (Windows)
-        if: runner.os == 'Windows'
-        shell: wsl-bash {0}
-        run: |
-          python_version=${{ matrix.python-version }}
-          if [ $python_version == "3.12" ]; then
-            # Python 3.12 is the default `python3` in Ubuntu 24.04
-            python_version="3"
-          fi
-
-          export DEBIAN_FRONTEND=noninteractive
-          sudo apt-get update
-          sudo apt-get install -y software-properties-common gnupg2
-          sudo add-apt-repository ppa:deadsnakes/ppa
-          sudo apt-get install -y python3-pip python${python_version} python${python_version}-venv
-
-          python${python_version} -m venv ~/venv
-
-          export PATH="$HOME/venv/bin:$PATH"
-          python -m pip install --upgrade pip
-
       - name: Set up uv
+        if: runner.os != 'Windows'
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
 
       - name: Restore UV environment
+        if: runner.os != 'Windows'
         run: cp production.uv.lock uv.lock
 
       - name: Install package
@@ -101,7 +82,6 @@ jobs:
         if: runner.os == 'Windows'
         shell: wsl-bash {0}
         run: |
-          export PATH="$HOME/venv/bin:$PATH"
           export UV_LINK_MODE=copy
           export UV_CACHE_DIR="$HOME/.cache/uv"
 
@@ -117,8 +97,10 @@ jobs:
           cp -r . ~/project
           cd ~/project
 
-          pip install uv
-          uv sync --extra dev --frozen
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          source $HOME/.local/bin/env
+          cp production.uv.lock uv.lock
+          uv sync --python ${{ matrix.python-version }} --extra dev --frozen
 
           # Save uv cache as tarball for next run
           tar cf "$CHECKOUT_DIR/wsl-uv-cache.tar" -C / "$(echo $HOME/.cache/uv | sed 's|^/||')"
@@ -147,7 +129,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: wsl-bash {0}
         run: |
-          export PATH="$HOME/venv/bin:$PATH"
+          source $HOME/.local/bin/env
           CHECKOUT_DIR="$(pwd)"
           cd ~/project
           uv run --no-sync pytest \
@@ -302,6 +284,32 @@ jobs:
         with:
           daemon-config: '{"features":{"containerd-snapshotter":true}}'
           set-host: true
+
+      - name: Verify Docker GHA cache
+        if: matrix.docker-engine != 'podman' && matrix.unit-tesseract == 'base'
+        run: |
+          echo 'FROM alpine:latest' > /tmp/Dockerfile.test
+          echo 'RUN echo hello' >> /tmp/Dockerfile.test
+
+          echo "=== Build 1: populating cache ==="
+          docker buildx build \
+            --cache-to type=gha,mode=max,scope=cache-test \
+            --cache-from type=gha,scope=cache-test \
+            --load -t cache-test:1 -f /tmp/Dockerfile.test /tmp 2>&1 | tee /tmp/build1.log
+
+          echo "=== Build 2: should hit cache ==="
+          docker buildx build \
+            --cache-to type=gha,mode=max,scope=cache-test \
+            --cache-from type=gha,scope=cache-test \
+            --load -t cache-test:2 -f /tmp/Dockerfile.test /tmp 2>&1 | tee /tmp/build2.log
+
+          if grep -q "CACHED" /tmp/build2.log; then
+            echo "GHA Docker cache is working"
+          else
+            echo "WARNING: GHA Docker cache may not be working"
+            cat /tmp/build2.log
+            exit 1
+          fi
 
       - name: Set up Podman
         if: matrix.docker-engine == 'podman'
