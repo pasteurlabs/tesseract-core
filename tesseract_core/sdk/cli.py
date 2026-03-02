@@ -376,7 +376,7 @@ def init(
         # Guaranteed to be a string by _validate_tesseract_name
         str,
         typer.Option(
-            help="Tesseract name as specified in tesseract_config.yaml. Will be prompted if not provided.",
+            help="Tesseract name as specified in tesseract_config.yaml. Will be empty if not provided.",
             callback=_validate_tesseract_name,
             show_default=False,
         ),
