@@ -61,7 +61,22 @@ jobs:
           echo "PATH=$HOME/.local/bin:$PATH" >> $GITHUB_ENV
 
       - name: Install package
-        shell: ${{ runner.os == 'Windows' && 'wsl-bash {0}' || 'bash -e {0}' }}
+        if: runner.os != 'Windows'
+        run: |
+          cp production.uv.lock uv.lock
+          uv sync --python ${{ matrix.python-version }} --extra dev --frozen
+
+          if [ "${{ matrix.runtime-deps }}" == "oldest" ]; then
+            # replace >= with == in pyproject.toml to install oldest runtime deps
+            sed -i 's/>=/==/g' ./tesseract_core/runtime/meta/pyproject.toml
+            # roll back changes to requires-python
+            sed -i 's/requires-python\s*=\s*\"==/requires-python = \">=/g' ./tesseract_core/runtime/meta/pyproject.toml
+            uv pip install -e .[runtime]
+          fi
+
+      - name: Install package (Windows)
+        if: runner.os == 'Windows'
+        shell: wsl-bash {0}
         run: |
           cp production.uv.lock uv.lock
           uv sync --python ${{ matrix.python-version }} --extra dev --frozen
@@ -75,7 +90,20 @@ jobs:
           fi
 
       - name: Run test suite
-        shell: ${{ runner.os == 'Windows' && 'wsl-bash {0}' || 'bash -e {0}' }}
+        if: runner.os != 'Windows'
+        run: |
+          uv run --no-sync pytest \
+            -v \
+            --skip-endtoend \
+            --timeout=300 \
+            --cov-report=term-missing:skip-covered \
+            --cov-report=xml:coverage.xml \
+            --cov=tesseract_core \
+            --cov-branch
+
+      - name: Run test suite (Windows)
+        if: runner.os == 'Windows'
+        shell: wsl-bash {0}
         run: |
           uv run --no-sync pytest \
             -v \
