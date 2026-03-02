@@ -71,11 +71,10 @@ jobs:
       - name: Install package (Windows)
         if: runner.os == 'Windows'
         shell: wsl-bash {0}
-        env:
-          UV_PROJECT_ENVIRONMENT: /root/venv
-          UV_CACHE_DIR: /root/.cache/uv
         run: |
           source "$HOME/.local/bin/env"
+          export UV_PROJECT_ENVIRONMENT="$HOME/venv"
+          export UV_CACHE_DIR="$HOME/.cache/uv"
           cp production.uv.lock uv.lock
           uv sync --python ${{ matrix.python-version }} --extra dev --frozen
 
@@ -102,10 +101,9 @@ jobs:
       - name: Run test suite (Windows)
         if: runner.os == 'Windows'
         shell: wsl-bash {0}
-        env:
-          UV_PROJECT_ENVIRONMENT: /root/venv
         run: |
           source "$HOME/.local/bin/env"
+          export UV_PROJECT_ENVIRONMENT="$HOME/venv"
           uv run --no-sync pytest \
             -v \
             --skip-endtoend \
