@@ -680,7 +680,7 @@ def create_autodiff_schema(
                     exact_annotation = Array[ref_shape, annotation.expected_dtype]
                     try:
                         validated[path] = TypeAdapter(exact_annotation).validate_python(
-                            arr
+                            arr, context=info.context
                         )
                     except ValidationError as e:
                         raise ValueError(f"Tangent vector '{path}': {e}") from e
@@ -753,7 +753,9 @@ def create_autodiff_schema(
                         diffable_output_patterns, path
                     )
                     try:
-                        validated[path] = TypeAdapter(annotation).validate_python(arr)
+                        validated[path] = TypeAdapter(annotation).validate_python(
+                            arr, context=info.context
+                        )
                     except ValidationError as e:
                         raise ValueError(f"Cotangent vector '{path}': {e}") from e
                 return validated
