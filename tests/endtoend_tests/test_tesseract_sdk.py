@@ -6,7 +6,6 @@ import socket
 
 import numpy as np
 import pytest
-from common import build_tesseract, image_exists
 from pydantic import ValidationError
 
 from tesseract_core import Tesseract
@@ -21,22 +20,6 @@ expected_endpoints = {
     "vector_jacobian_product",
     "test",
 }
-
-
-@pytest.fixture(scope="module")
-def built_image_name(
-    docker_client,
-    shared_dummy_image_name,
-    dummy_tesseract_location,
-    docker_cleanup_module,
-):
-    """Build the dummy Tesseract image for the tests."""
-    image_name = build_tesseract(
-        docker_client, dummy_tesseract_location, shared_dummy_image_name
-    )
-    assert image_exists(docker_client, image_name)
-    docker_cleanup_module["images"].append(image_name)
-    yield image_name
 
 
 def test_available_endpoints(built_image_name):
