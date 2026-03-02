@@ -42,68 +42,29 @@ jobs:
         with:
           distribution: Ubuntu-24.04
 
-      - name: Set up Python
-        if: runner.os != 'Windows'
-        uses: actions/setup-python@v6
-        with:
-          python-version: ${{ matrix.python-version }}
-
       - name: Set up uv
         if: runner.os != 'Windows'
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
 
-      - name: Restore UV environment
-        if: runner.os != 'Windows'
-        run: cp production.uv.lock uv.lock
-
-      - name: Install package
-        if: runner.os != 'Windows'
-        run: |
-          uv sync --extra dev --frozen
-
-          if [ "${{ matrix.runtime-deps }}" == "oldest" ]; then
-            # replace >= with == in pyproject.toml to install oldest runtime deps
-            sed -i 's/>=/==/g' ./tesseract_core/runtime/meta/pyproject.toml
-            # roll back changes to requires-python
-            sed -i 's/requires-python\s*=\s*\"==/requires-python = \">=/g' ./tesseract_core/runtime/meta/pyproject.toml
-            uv pip install -e .[runtime]
-          fi
-
-      - name: Restore WSL uv cache
-        if: runner.os == 'Windows'
-        uses: actions/cache@v4
-        with:
-          path: wsl-uv-cache.tar
-          key: wsl-uv-${{ matrix.python-version }}-${{ hashFiles('production.uv.lock') }}
-
-      - name: Install package (Windows)
+      - name: Set up uv (Windows)
         if: runner.os == 'Windows'
         shell: wsl-bash {0}
         run: |
-          export UV_LINK_MODE=copy
-          export UV_CACHE_DIR="$HOME/.cache/uv"
-
-          # Restore uv cache from tarball (lives on Windows FS, extracted to WSL)
-          if [ -f wsl-uv-cache.tar ]; then
-            tar xf wsl-uv-cache.tar -C /
-          fi
-
-          # Copy project to WSL native filesystem to avoid slow NTFS I/O
-          # (uv sync creates .venv in cwd, which would be on NTFS otherwise)
-          CHECKOUT_DIR="$(pwd)"
-          rm -rf ~/project
-          cp -r . ~/project
-          cd ~/project
-
           curl -LsSf https://astral.sh/uv/install.sh | sh
           source $HOME/.local/bin/env
+
+          # Place .venv on native ext4 to avoid slow NTFS writes
+          echo "UV_PROJECT_ENVIRONMENT=$HOME/venv" >> $GITHUB_ENV
+          echo "UV_CACHE_DIR=$HOME/.cache/uv" >> $GITHUB_ENV
+          echo "PATH=$HOME/.local/bin:$PATH" >> $GITHUB_ENV
+
+      - name: Install package
+        shell: ${{ runner.os == 'Windows' && 'wsl-bash {0}' || 'bash -e {0}' }}
+        run: |
           cp production.uv.lock uv.lock
           uv sync --python ${{ matrix.python-version }} --extra dev --frozen
-
-          # Save uv cache as tarball for next run
-          tar cf "$CHECKOUT_DIR/wsl-uv-cache.tar" -C / "$(echo $HOME/.cache/uv | sed 's|^/||')"
 
           if [ "${{ matrix.runtime-deps }}" == "oldest" ]; then
             # replace >= with == in pyproject.toml to install oldest runtime deps
@@ -114,7 +75,7 @@ jobs:
           fi
 
       - name: Run test suite
-        if: runner.os != 'Windows'
+        shell: ${{ runner.os == 'Windows' && 'wsl-bash {0}' || 'bash -e {0}' }}
         run: |
           uv run --no-sync pytest \
             -v \
@@ -124,24 +85,6 @@ jobs:
             --cov-report=xml:coverage.xml \
             --cov=tesseract_core \
             --cov-branch
-
-      - name: Run test suite (Windows)
-        if: runner.os == 'Windows'
-        shell: wsl-bash {0}
-        run: |
-          source $HOME/.local/bin/env
-          CHECKOUT_DIR="$(pwd)"
-          cd ~/project
-          uv run --no-sync pytest \
-            -v \
-            --skip-endtoend \
-            --timeout=300 \
-            --cov-report=term-missing:skip-covered \
-            --cov-report=xml:coverage.xml \
-            --cov=tesseract_core \
-            --cov-branch
-          # Copy coverage report back to checkout dir for Codecov upload
-          cp coverage.xml "$CHECKOUT_DIR/"
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v5.5.2
@@ -291,22 +234,24 @@ jobs:
           echo 'FROM alpine:latest' > /tmp/Dockerfile.test
           echo 'RUN echo hello' >> /tmp/Dockerfile.test
 
-          echo "=== Build 1: populating cache ==="
+          echo "=== Build 1: populating GHA cache ==="
           docker buildx build \
             --cache-to type=gha,mode=max,scope=cache-test \
             --cache-from type=gha,scope=cache-test \
-            --load -t cache-test:1 -f /tmp/Dockerfile.test /tmp 2>&1 | tee /tmp/build1.log
+            --load -t cache-test:1 -f /tmp/Dockerfile.test /tmp 2>&1
 
-          echo "=== Build 2: should hit cache ==="
+          echo "=== Pruning local BuildKit cache ==="
+          docker buildx prune -af
+
+          echo "=== Build 2: should restore from GHA cache ==="
           docker buildx build \
-            --cache-to type=gha,mode=max,scope=cache-test \
             --cache-from type=gha,scope=cache-test \
             --load -t cache-test:2 -f /tmp/Dockerfile.test /tmp 2>&1 | tee /tmp/build2.log
 
           if grep -q "CACHED" /tmp/build2.log; then
             echo "GHA Docker cache is working"
           else
-            echo "WARNING: GHA Docker cache may not be working"
+            echo "WARNING: GHA Docker cache is NOT working"
             cat /tmp/build2.log
             exit 1
           fi
