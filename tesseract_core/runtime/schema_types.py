@@ -187,18 +187,14 @@ class PydanticArrayAnnotation(metaclass=ArrayAnnotationType):
             mode="left_to_right",
         )
 
-        # Wrap the schemas to simplify error messages
-        wrapped_json_schema = core_schema.no_info_wrap_validator_function(
-            _simplify_array_errors,
-            load_from_dict_schema,
-        )
+        # Wrap union schemas to simplify error messages
         wrapped_python_schema = core_schema.no_info_wrap_validator_function(
             _simplify_array_errors,
             python_union_schema,
         )
 
         return core_schema.json_or_python_schema(
-            json_schema=wrapped_json_schema,
+            json_schema=load_from_dict_schema,
             python_schema=wrapped_python_schema,
             serialization=core_schema.plain_serializer_function_ser_schema(
                 encode_array_,
