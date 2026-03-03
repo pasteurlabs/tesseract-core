@@ -7,7 +7,7 @@ requires-python = ">=3.10"
 # do not edit manually. To add constraints, use other operators (e.g. <, >=, ~=, ==) as needed.
 dependencies = [
     "pydantic<=2.12.5,>=2.10",
-    "fastapi<=0.131.0,>=0.115",
+    "fastapi<=0.135.1,>=0.115",
     "requests<=2.32.5,>=2.32.4",
     "uvicorn<=0.41.0,>=0.34",
     "click<=8.3.1,>=8.1",
