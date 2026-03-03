@@ -4,9 +4,9 @@
     "vector_add.result": {
       "object_type": "array",
       "shape": [3],
-      "dtype": "float64",
+      "dtype": "float32",
       "data": {
-        "buffer": "mpmZmZmZyT+amZmZmZnZPzMzMzMzM+M/",
+        "buffer": "zcxMPs3MzD6amRk/",
         "encoding": "base64"
       }
     }
