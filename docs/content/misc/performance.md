@@ -4,12 +4,13 @@ This page helps you understand the performance characteristics of Tesseract and 
 
 ## Overview
 
-Tesseract adds overhead to your computations through:
+Using Tesseracts adds overhead to your computations through:
 
 1. **Framework overhead** - Pydantic validation, schema processing (~0.5ms)
-2. **HTTP communication** - Request/response handling (~6ms when containerized)
-3. **Data serialization** - Encoding arrays for transport (varies with data size and encoding method)
-4. **Container startup** - One-time cost when starting a containerized Tesseract (~2s)
+2. **HTTP communication** - Request/response handling (~6ms when served locally)
+3. **Data transfer** - Moving data between client and server (depends on data size and network bandwidth)
+4. **Data serialization** - Encoding arrays for transport (varies with data size and encoding method)
+5. **Container startup** - One-time cost when starting a containerized Tesseract (~2s)
 
 For many scientific computing workloads where computations take seconds, minutes, or hours, this overhead is negligible.
 
@@ -25,7 +26,7 @@ For many scientific computing workloads where computations take seconds, minutes
 :alt: Tesseract overhead guidance chart
 :width: 100%
 
-Guidance for three common scenarios, depending on the size of input/output data and the computation time of your Tesseract. Note that non-containerized execution assumes that data is already in-memory, HTTP-based execution includes serialization overhead on server and client, and containerized execution includes container overhead and disk I/O. This is comparing apples to oranges to bananas - trade-offs typically depend on the specific use case, so we recommend running benchmarks with your actual workload to make an informed decision.
+Overhead as percentage of computation time, depending on interaction mode and I/O data size. Non-containerized execution assumes in-memory data, HTTP includes serialization and transfer overhead, and CLI includes container startup and disk I/O. We recommend running benchmarks with your actual workload to make an informed decision.
 ```
 
 <br>
@@ -34,13 +35,13 @@ Guidance for three common scenarios, depending on the size of input/output data 
 
 | Scenario                                       | Recommendation                                                                                                                                                                                                           |
 | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Second-scale workloads on medium-size data** | The sweet spot for containerized HTTP execution, with low overhead execution benefitting from most Tesseract features.                                                                                                   |
-| **Long-running operations on large datasets**  | Use CLI with `json+binref` encoding. The ~2.5s container overhead is negligible for multi-minute runs, and binref allows large arrays to be passed without copies.                                                       |
 | **Tight loops on in-memory data**              | Use `from_tesseract_api()` to bypass all network/container overhead. At ~0.5ms per call, you can run thousands of iterations per second. Requires all dependencies to be available in the same local Python environment. |
+| **Second-scale workloads on medium-size data** | The sweet spot for containerized HTTP execution, with low overhead execution benefitting from most Tesseract features.                                                                                                   |
 | **Cheap operations on small data via HTTP**    | HTTP overhead can dominate when computation is fast. Batch multiple inputs into a single request.                                                                                                                        |
-| **Development and debugging**                  | Use `from_tesseract_api()` for fast iteration, then switch to containerized execution via `from_image()` for final testing.                                                                                              |
+| **Development and debugging**                  | Use `from_tesseract_api()` or `tesseract-runtime serve` for fast iteration, then switch to containerized execution via `from_image()` for final testing.                                                                 |
 | **Shell scripts and one-off runs**             | CLI is convenient but has ~2s overhead per invocation. For multiple calls, keep a container running.                                                                                                                     |
-| **Cheap operations on huge datasets**          | Tesseract may not be the right tool for you. Consider whether you can break your workload into more compute-intensive components, or if a more traditional RPC framework is a better fit.                                |
+| **Long-running operations on large datasets**  | Use CLI with `json+binref` encoding. The ~2.5s container overhead is negligible for multi-minute runs, and binref allows large arrays to be passed without copies.                                                       |
+| **Cheap operations on huge datasets**          | Tesseract may not be the right tool for you. Consider whether you can partition your workload into more compute-intensive components, or if a more traditional RPC framework is a better fit.                            |
 
 ```{seealso}
 See also: {doc}`/content/using-tesseracts/use` for detailed usage examples.
@@ -86,6 +87,10 @@ Command-line interface for containerized execution. Supports binref encoding for
         --output-format json+binref
 ```
 ````
+
+```{tip}
+For development without Docker, you can also use `tesseract-runtime serve` to start a local HTTP server directly, then connect via `Tesseract.from_url()`. See {doc}`/content/api/tesseract-runtime-cli` for details.
+```
 
 <br>
 
@@ -168,8 +173,6 @@ Array data is stored in separate binary files, with JSON containing only referen
 
 ### Which encoding format should I use?
 
-Tesseract supports three encoding formats for array data, each with different trade-offs:
-
 | Format     | Description                                   | Overhead                     | Best For                                                                                         |
 | ---------- | --------------------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------ |
 | **json**   | Arrays encoded as nested JSON lists           | High (5-10x slower)          | Debugging, human-readable output                                                                 |
@@ -191,20 +194,7 @@ See also: {doc}`/content/using-tesseracts/array-encodings` for detailed encoding
 
 ## Optimizing performance
 
-### 1. Choose the right interaction mode
-
-Select the interaction mode that best fits your use case:
-
-```python
-# Development - fastest iteration
-tesseract = Tesseract.from_tesseract_api(my_api_module)
-
-# Production - full isolation
-with Tesseract.from_image("my-tesseract:latest") as tesseract:
-    result = tesseract.apply(inputs)
-```
-
-### 2. Batch small operations
+### 1. Batch small operations
 
 If you have many small operations, batch them into a single request:
 
@@ -217,7 +207,7 @@ If you have many small operations, batch them into a single request:
 results = tesseract.apply({"data": np.stack(items)})
 ```
 
-### 3. Reuse Tesseract instances
+### 2. Reuse Tesseract instances
 
 Container startup is expensive. Reuse instances across calls:
 
@@ -233,7 +223,15 @@ for batch in batches:
         result = tesseract.apply(batch)
 ```
 
-### 4. Use appropriate encoding
+If you're running a script multiple times against the same Tesseract, consider keeping a container running and connecting via `Tesseract.from_url()`:
+
+```python
+# Start once: tesseract serve my-tesseract
+tesseract = Tesseract.from_url("http://localhost:8100")
+result = tesseract.apply(inputs)
+```
+
+### 3. Use appropriate encoding
 
 For large arrays via CLI, consider binref encoding:
 
@@ -246,7 +244,7 @@ tesseract run my-tesseract apply @payload.json \
 
 See {doc}`/content/using-tesseracts/array-encodings` for more details on encoding options.
 
-### 5. Enable profiling for analysis
+### 4. Enable profiling for analysis
 
 Enable profiling to understand where time is spent:
 

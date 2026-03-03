@@ -27,7 +27,12 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from utils import BenchmarkSuite, compare_results, format_comparison_table
+# Allow running from repo root (e.g., python benchmarks/run_benchmarks.py)
+_benchmarks_dir = str(Path(__file__).resolve().parent)
+if _benchmarks_dir not in sys.path:
+    sys.path.insert(0, _benchmarks_dir)
+
+from utils import BenchmarkSuite, compare_results, format_comparison_table  # noqa: E402
 
 
 def get_system_info() -> dict:

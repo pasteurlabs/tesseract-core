@@ -93,6 +93,77 @@ def _generate_current_only_report(current: dict, current_data: dict) -> str:
     return "\n".join(lines)
 
 
+def _compute_comparison(name: str, baseline: dict, current: dict) -> dict:
+    """Compute comparison metrics for a single benchmark.
+
+    Returns a dict with keys: name, base_mean_ms, curr_mean_ms, diff_pct, status.
+    """
+    if name not in baseline:
+        curr_mean = current[name]["mean_time_s"] * 1000
+        return {
+            "name": name,
+            "base_mean_ms": None,
+            "curr_mean_ms": curr_mean,
+            "diff_pct": None,
+            "status": ":new:",
+            "notable": True,
+        }
+
+    if name not in current:
+        base_mean = baseline[name]["mean_time_s"] * 1000
+        return {
+            "name": name,
+            "base_mean_ms": base_mean,
+            "curr_mean_ms": None,
+            "diff_pct": None,
+            "status": ":wastebasket:",
+            "notable": True,
+        }
+
+    base_mean = baseline[name]["mean_time_s"] * 1000
+    curr_mean = current[name]["mean_time_s"] * 1000
+
+    if base_mean > 0:
+        diff_pct = ((curr_mean - base_mean) / base_mean) * 100
+    else:
+        diff_pct = 0
+
+    if diff_pct < -5:
+        status = ":rocket: faster"
+    elif diff_pct > 5:
+        status = ":warning: slower"
+    else:
+        status = ":white_check_mark:"
+
+    notable = abs(diff_pct) > 5
+    return {
+        "name": name,
+        "base_mean_ms": base_mean,
+        "curr_mean_ms": curr_mean,
+        "diff_pct": diff_pct,
+        "status": status,
+        "notable": notable,
+    }
+
+
+def _format_comparison_row(comp: dict) -> str:
+    """Format a single comparison as a markdown table row."""
+    base_str = (
+        f"{comp['base_mean_ms']:.3f}ms" if comp["base_mean_ms"] is not None else "-"
+    )
+    curr_str = (
+        f"{comp['curr_mean_ms']:.3f}ms" if comp["curr_mean_ms"] is not None else "-"
+    )
+    change_str = (
+        f"{comp['diff_pct']:+.1f}%"
+        if comp["diff_pct"] is not None
+        else "new"
+        if comp["status"] == ":new:"
+        else "removed"
+    )
+    return f"| `{comp['name']}` | {base_str} | {curr_str} | {change_str} | {comp['status']} |"
+
+
 def generate_report(baseline_path: str, current_path: str) -> str | None:
     """Generate markdown comparison report.
 
@@ -113,60 +184,69 @@ def generate_report(baseline_path: str, current_path: str) -> str | None:
 
     baseline = {r["name"]: r for r in baseline_data["results"]}
 
+    # Compute all comparisons
+    all_names = _sort_benchmark_names(list(set(baseline.keys()) | set(current.keys())))
+    comparisons = [_compute_comparison(name, baseline, current) for name in all_names]
+
+    notable = [c for c in comparisons if c["notable"]]
+    num_faster = sum(
+        1 for c in comparisons if c["diff_pct"] is not None and c["diff_pct"] < -5
+    )
+    num_slower = sum(
+        1 for c in comparisons if c["diff_pct"] is not None and c["diff_pct"] > 5
+    )
+    num_same = sum(
+        1 for c in comparisons if c["diff_pct"] is not None and abs(c["diff_pct"]) <= 5
+    )
+
     lines = [
         "## Benchmark Results",
         "",
         "Benchmarks use a no-op Tesseract to measure pure framework overhead.",
         "",
-        "| Benchmark | Baseline | Current | Change | Status |",
-        "|-----------|----------|---------|--------|--------|",
+        f":rocket: {num_faster} faster, :warning: {num_slower} slower, :white_check_mark: {num_same} unchanged",
+        "",
     ]
 
-    # Find all benchmark names, sorted by suite then size
-    all_names = _sort_benchmark_names(list(set(baseline.keys()) | set(current.keys())))
-
-    for name in all_names:
-        if name not in baseline:
-            # New benchmark, no comparison possible
-            curr_mean = current[name]["mean_time_s"] * 1000
-            lines.append(f"| `{name}` | - | {curr_mean:.3f}ms | new | :new: |")
-            continue
-
-        if name not in current:
-            # Removed benchmark
-            base_mean = baseline[name]["mean_time_s"] * 1000
-            lines.append(
-                f"| `{name}` | {base_mean:.3f}ms | - | removed | :wastebasket: |"
-            )
-            continue
-
-        base_mean = baseline[name]["mean_time_s"] * 1000
-        curr_mean = current[name]["mean_time_s"] * 1000
-
-        if base_mean > 0:
-            diff_pct = ((curr_mean - base_mean) / base_mean) * 100
-        else:
-            diff_pct = 0
-
-        if diff_pct < -5:
-            status = ":rocket: faster"
-        elif diff_pct > 5:
-            status = ":warning: slower"
-        else:
-            status = ":white_check_mark:"
-
-        lines.append(
-            f"| `{name}` | {base_mean:.3f}ms | {curr_mean:.3f}ms | {diff_pct:+.1f}% | {status} |"
+    # Show notable changes (>5%) prominently
+    if notable:
+        lines.extend(
+            [
+                "### Notable changes",
+                "",
+                "| Benchmark | Baseline | Current | Change | Status |",
+                "|-----------|----------|---------|--------|--------|",
+            ]
         )
+        for comp in notable:
+            lines.append(_format_comparison_row(comp))
+        lines.append("")
+    else:
+        lines.extend(
+            [
+                ":white_check_mark: No significant performance changes detected.",
+                "",
+            ]
+        )
+
+    # Full results in collapsed section
+    lines.extend(
+        [
+            "<details>",
+            "<summary>Full results</summary>",
+            "",
+            "| Benchmark | Baseline | Current | Change | Status |",
+            "|-----------|----------|---------|--------|--------|",
+        ]
+    )
+    for comp in comparisons:
+        lines.append(_format_comparison_row(comp))
 
     # Extract metadata for details section
     iterations = current_data.get("metadata", {}).get("iterations", "N/A")
 
     lines.extend(
         [
-            "",
-            "<details>",
-            "<summary>Benchmark details</summary>",
             "",
             f"- **Iterations:** {iterations}",
             "- **Runner:** ubuntu-latest",

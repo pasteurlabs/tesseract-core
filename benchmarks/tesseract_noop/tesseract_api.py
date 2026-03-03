@@ -32,15 +32,3 @@ def apply(inputs: InputSchema) -> OutputSchema:
     HTTP transport, and deserialization.
     """
     return OutputSchema(result=inputs.data)
-
-
-def jacobian(
-    inputs: InputSchema,
-    jac_inputs: set[str],
-    jac_outputs: set[str],
-) -> dict:
-    """Returns identity Jacobian (derivative of identity is identity)."""
-    import numpy as np
-
-    n = inputs.data.shape[0]
-    return {"result": {"data": np.eye(n)}}
