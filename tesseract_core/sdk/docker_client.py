@@ -9,26 +9,112 @@ import os
 import re
 import shlex
 import subprocess
+import sys
+import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from io import IOBase
 from pathlib import Path
-
-# store a reference to the list type, which is shadowed by some function names below
-from typing import List as list_  # noqa: UP035
+from typing import TextIO, TypeAlias
 
 from tesseract_core.sdk.config import get_config
-from tesseract_core.sdk.logs import TeePipe
 
 logger = logging.getLogger("tesseract")
 
+# store a reference to the list type, which is shadowed by some function names below
+list_: TypeAlias = list
 
-def _get_docker_executable() -> list_[str]:  # noqa: UP006
+
+def _get_docker_executable() -> list_[str]:
     """Get the Docker executable command."""
     config = get_config()
     docker_executable = config.docker_executable
     if isinstance(docker_executable, str):
         return shlex.split(docker_executable)
     return list(docker_executable)
+
+
+def _run_and_stream(
+    cmd: list[str],
+    stdout_sink: Callable[[str], object] | None = None,
+    stderr_sink: Callable[[str], object] | None = None,
+) -> tuple[int, bytes, bytes]:
+    """Run a subprocess, streaming stdout/stderr to optional sinks.
+
+    Each sink receives decoded lines (without trailing newline).
+    Raw bytes are always collected and returned regardless of sinks.
+
+    Returns:
+        (returncode, stdout_bytes, stderr_bytes)
+    """
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=False,
+    )
+
+    stdout_lines: list[bytes] = []
+    stderr_lines: list[bytes] = []
+
+    def _read_stream(
+        stream: IOBase,
+        collected: list[bytes],
+        sink: Callable[[str], object] | None,
+    ) -> None:
+        while True:
+            line = stream.readline()
+            if not line:
+                break
+            collected.append(line)
+            if sink is not None:
+                sink(line.decode("utf-8", errors="replace").rstrip("\n"))
+
+    try:
+        stdout_thread = threading.Thread(
+            target=_read_stream, args=(proc.stdout, stdout_lines, stdout_sink)
+        )
+        stderr_thread = threading.Thread(
+            target=_read_stream, args=(proc.stderr, stderr_lines, stderr_sink)
+        )
+        stdout_thread.start()
+        stderr_thread.start()
+
+        proc.wait()
+        stdout_thread.join()
+        stderr_thread.join()
+    except (KeyboardInterrupt, Exception):
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+        raise
+    finally:
+        if proc.stdout:
+            proc.stdout.close()
+        if proc.stderr:
+            proc.stderr.close()
+
+    return proc.returncode, b"".join(stdout_lines), b"".join(stderr_lines)
+
+
+def _resolve_sink(
+    stream_arg: bool | Callable[[str], object],
+    default_stream: TextIO = sys.stderr,
+) -> Callable[[str], object] | None:
+    """Turn a stream_stdout/stream_stderr value into an optional sink callable."""
+    if stream_arg is False:
+        return None
+    if stream_arg is True:
+
+        def _write(line: str) -> None:
+            default_stream.write(line + "\n")
+            default_stream.flush()
+
+        return _write
+    return stream_arg
 
 
 def _is_valid_docker_tag(tag: str) -> bool:
@@ -132,7 +218,7 @@ class Images:
         return image_obj
 
     @staticmethod
-    def list(tesseract_only: bool = True) -> list_[Image]:  # noqa: UP006
+    def list(tesseract_only: bool = True) -> list_[Image]:
         """Returns the current list of images.
 
         Params:
@@ -167,10 +253,10 @@ class Images:
     @staticmethod
     def _get_buildx_command(
         path: str | Path,
-        tags: list_[str],  # noqa: UP006
+        tags: list_[str],
         dockerfile: str | Path,
         ssh: str | None = None,
-    ) -> list_[str]:  # noqa: UP006
+    ) -> list_[str]:
         """Get the buildx command for building Docker images.
 
         Returns:
@@ -203,7 +289,7 @@ class Images:
     @staticmethod
     def buildx(
         path: str | Path,
-        tags: list_[str],  # noqa: UP006
+        tags: list_[str],
         dockerfile: str | Path,
         ssh: str | None = None,
     ) -> Image:
@@ -233,21 +319,25 @@ class Images:
             ssh=ssh,
         )
 
-        out_pipe = TeePipe(logger.debug)
+        collected: list[str] = []
 
-        with out_pipe as out_pipe_fd:
-            proc = subprocess.run(build_cmd, stdout=out_pipe_fd, stderr=out_pipe_fd)
+        def _collect_and_log(line: str) -> None:
+            collected.append(line)
+            logger.debug(line)
 
-        logs = out_pipe.captured_lines
-        return_code = proc.returncode
+        returncode, _, _ = _run_and_stream(
+            build_cmd,
+            stdout_sink=_collect_and_log,
+            stderr_sink=_collect_and_log,
+        )
 
-        if return_code != 0:
-            raise BuildError(logs)
+        if returncode != 0:
+            raise BuildError(collected)
 
         return Images.get(tags[0])
 
     @staticmethod
-    def _get_images(tesseract_only: bool = True) -> list_[Image]:  # noqa: UP006
+    def _get_images(tesseract_only: bool = True) -> list_[Image]:
         """Gets the list of images by querying Docker CLI.
 
         Params:
@@ -511,7 +601,7 @@ class Containers:
     """Namespace to interface with docker containers."""
 
     @staticmethod
-    def list(all: bool = False, tesseract_only: bool = True) -> list_[Container]:  # noqa: UP006
+    def list(all: bool = False, tesseract_only: bool = True) -> list_[Container]:
         """Returns the current list of containers.
 
         Params:
@@ -562,9 +652,9 @@ class Containers:
     @staticmethod
     def run(
         image: str,
-        command: list_[str],  # noqa: UP006
+        command: list_[str],
         volumes: dict | None = None,
-        device_requests: list_[int | str] | None = None,  # noqa: UP006
+        device_requests: list_[int | str] | None = None,
         environment: dict[str, str] | None = None,
         network: str | None = None,
         detach: bool = False,
@@ -574,9 +664,9 @@ class Containers:
         stderr: bool = False,
         user: str | None = None,
         memory: str | None = None,
-        extra_args: list_[str] | None = None,  # noqa: UP006
-        stream_stdout: bool = False,
-        stream_stderr: bool = False,
+        extra_args: list_[str] | None = None,
+        stream_stdout: bool | Callable[[str], object] = False,
+        stream_stderr: bool | Callable[[str], object] = False,
     ) -> Container | tuple[bytes, bytes] | bytes:
         """Run a command in a container from an image.
 
@@ -601,10 +691,10 @@ class Containers:
             environment: Environment variables to set in the container.
             memory: Memory limit for the container (e.g., "512m", "2g"). Minimum allowed is 6m.
             extra_args: Additional arguments to pass to the `docker run` CLI command.
-            stream_stdout: If True, stream stdout to sys.stdout in real-time instead of
-                    buffering. Cannot be used with detach.
-            stream_stderr: If True, stream stderr to sys.stderr in real-time instead of
-                    buffering. Cannot be used with detach.
+            stream_stdout: If True, stream stdout to sys.stdout in real-time. If a
+                    callable, call it with each line of output. Cannot be used with detach.
+            stream_stderr: If True, stream stderr to sys.stderr in real-time. If a
+                    callable, call it with each line of output. Cannot be used with detach.
 
         Returns:
             Container object if detach is True, otherwise returns list of stdout and stderr.
@@ -680,77 +770,11 @@ class Containers:
 
         logger.debug(f"Running command: {full_cmd}")
 
-        # Use Popen for all cases to enable streaming and proper cleanup
-        import sys
-        import threading
-
-        proc = subprocess.Popen(
+        returncode, stdout_data, stderr_data = _run_and_stream(
             full_cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=False,
+            stdout_sink=_resolve_sink(stream_stdout, sys.stdout),
+            stderr_sink=_resolve_sink(stream_stderr, sys.stderr),
         )
-
-        stdout_lines: list[bytes] = []
-        stderr_lines: list[bytes] = []
-
-        def read_stream(
-            stream: IOBase,
-            collected: list[bytes],
-            should_stream: bool,
-            target_stream: IOBase,
-        ):
-            """Read from stream, optionally streaming to target."""
-            while True:
-                line = stream.readline()
-                if not line:
-                    break
-                collected.append(line)
-                if should_stream:
-                    # Decode bytes to text for writing to stdout/stderr
-                    # (handles environments like Jupyter where .buffer may not exist)
-                    target_stream.write(line.decode("utf-8", errors="replace"))
-                    target_stream.flush()
-
-        try:
-            # Use threads to read stdout and stderr concurrently to avoid deadlocks
-            stdout_thread = threading.Thread(
-                target=read_stream,
-                args=(proc.stdout, stdout_lines, stream_stdout, sys.stdout),
-            )
-            stderr_thread = threading.Thread(
-                target=read_stream,
-                args=(proc.stderr, stderr_lines, stream_stderr, sys.stderr),
-            )
-
-            stdout_thread.start()
-            stderr_thread.start()
-
-            # Wait for process and threads to complete
-            proc.wait()
-            stdout_thread.join()
-            stderr_thread.join()
-
-            stdout_data = b"".join(stdout_lines)
-            stderr_data = b"".join(stderr_lines)
-            returncode = proc.returncode
-
-        except (KeyboardInterrupt, Exception):
-            # Terminate the process on interrupt or exception (unless detached)
-            if not detach:
-                proc.terminate()
-                try:
-                    proc.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-                    proc.wait()
-            raise
-        finally:
-            # Ensure streams are closed
-            if proc.stdout:
-                proc.stdout.close()
-            if proc.stderr:
-                proc.stderr.close()
 
         if returncode != 0:
             stderr_str = stderr_data.decode("utf-8", errors="ignore")
@@ -779,7 +803,7 @@ class Containers:
     @staticmethod
     def _get_containers(
         include_stopped: bool = False, tesseract_only: bool = True
-    ) -> list_[Container]:  # noqa: UP006
+    ) -> list_[Container]:
         """Updates and retrieves the list of containers by querying Docker CLI.
 
         Params:
@@ -940,7 +964,7 @@ class DockerException(Exception):
 class BuildError(DockerException):
     """Raised when a build fails."""
 
-    def __init__(self, build_log: list_[str]) -> None:  # noqa: UP006
+    def __init__(self, build_log: list_[str]) -> None:
         self.build_log = build_log
 
     def __str__(self) -> str:

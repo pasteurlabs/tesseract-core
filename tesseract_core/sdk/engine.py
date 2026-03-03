@@ -882,7 +882,7 @@ def run_tesseract(
         user=user,
         memory=memory,
         extra_args=extra_args,
-        stream_stderr=stream_logs,
+        stream_stderr=logger.info if stream_logs else False,
     )
     assert isinstance(result, tuple)
     stdout, stderr = result

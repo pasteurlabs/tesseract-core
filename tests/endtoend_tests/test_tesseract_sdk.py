@@ -226,13 +226,3 @@ def test_signature_consistency():
             f"Default value mismatch for parameter '{key}': "
             f"{from_image_sig[key].default} != {serve_sig[key].default}"
         )
-
-
-def test_teepipe_consistency():
-    """Test that the source code of the two duplicate TeePipe implementations is identical."""
-    from tesseract_core.runtime.logs import TeePipe as RuntimeTeePipe
-    from tesseract_core.sdk.logs import TeePipe as SDKTeePipe
-
-    runtime_source = inspect.getsource(RuntimeTeePipe)
-    sdk_source = inspect.getsource(SDKTeePipe)
-    assert runtime_source == sdk_source

@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
+import logging
 import re
 import sys
 import time
@@ -1083,6 +1084,8 @@ def run_container(
     if payload is not None:
         args.append(payload)
 
+    loglevel = logger.handlers[0].level
+
     # For test command, extract cli_config from test spec if available
     # This allows test specs to be self-contained without requiring manual -i/-o flags
     if cmd == "test" and payload is not None:
@@ -1139,10 +1142,13 @@ def run_container(
         msg = e.stderr.decode("utf-8").strip()
         if "No such command" in msg:
             error_string = f"Error running Tesseract '{tesseract_image}' \n\n Error: Unimplemented command '{cmd}'.  "
+        elif loglevel in (logging.DEBUG, logging.INFO):
+            error_string = "Error running Tesseract. See logs above for details."
+        elif loglevel == logging.WARNING:
+            logger.warning(msg)
+            error_string = "Error running Tesseract. See logs above for details."
         else:
-            error_string = _sanitize_error_output(
-                f"Error running Tesseract. \n\n{msg}", tesseract_image
-            )
+            error_string = "Error running Tesseract. Run with `--loglevel [debug|info|warning]` for more details."
 
         raise UserError(error_string) from e
 
