@@ -20,7 +20,7 @@ LLMs excel at:
 
 ### Include conventions and an example pattern
 
-LLMs produce the best results when you provide both conventions and a minimal example in the prompt. This is more effective than linking to documentation.
+LLMs produce the best results when you provide both conventions and a minimal example in the prompt. This works regardless of whether the LLM has access to the Tesseract Core codebase — by providing conventions inline, you don't need to rely on the model knowing or being able to read Tesseract Core source code.
 
 ````
 Tesseract conventions:
@@ -263,7 +263,6 @@ Always review and test LLM-generated code:
 - **Differentiable on non-arrays** — `Differentiable` only works with `Array` types (including scalar aliases like `Float32`), not Python's `float` or `int`
 - **Overly complex output** — LLMs with codebase access may generate full JAX implementations with all autodiff endpoints. Say "generate just the schemas and apply function" to get minimal output.
 - **Wrong dtype** — Use `Float32` unless you need double precision. Don't use Python's `float` for outputs.
-- **Linking to docs doesn't help much** — Providing inline conventions and a code example in your prompt works better than linking to documentation.
 
 ### Iterate on the design
 
@@ -293,5 +292,5 @@ Here's my JAX function: ...
 ```
 
 ```{seealso}
-For JAX-specific utilities, see [tesseract-jax](https://github.com/pasteurlabs/tesseract-jax) which provides helpers for automatically generating autodiff endpoints from JAX functions.
+[tesseract-jax](https://github.com/pasteurlabs/tesseract-jax) allows you to embed Tesseracts as JAX primitives into end-to-end differentiable programs, and provides helpers for automatically generating autodiff endpoints from JAX functions.
 ```

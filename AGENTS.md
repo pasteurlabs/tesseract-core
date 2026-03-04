@@ -12,7 +12,7 @@ This file contains counter-intuitive aspects of the Tesseract codebase that AI a
 - **Prefer end-to-end tests over unit tests.** Tests that build and run real Tesseracts catch more bugs than mocked unit tests.
 - **Avoid mocks.** If you need complex mocking, write an end-to-end test instead.
 - **Don't test implementation details.** Tests should verify behavior, not internal structure.
-- **Be mindful of slow tests.** End-to-end tests are slow. Check if an existing test can be extended before adding a new one.
+- **Be mindful of slow tests.** End-to-end tests are slow. Check if an existing test can be extended before adding a new one, especially if adding new Docker images to build.
 - **Don't add mocks for Docker.** Tests that need Docker should be marked as end-to-end tests and skipped in fast test runs.
 - **Rarely test exceptions.** Only test exception handling when control flow is complex or the error message is critical for UX. Don't write tests that just verify an exception is raised.
 - **Never skip or disable tests without asking.** If a test is failing and you want to skip it, ask the user first. Don't add `@pytest.skip`, `@pytest.mark.xfail`, or comment out tests without explicit approval.

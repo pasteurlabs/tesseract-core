@@ -9,7 +9,7 @@ Tesseracts are most useful when you need to:
 - **Share software across teams** — Package your code so others can use it without understanding implementation details
 - **Combine heterogeneous software** — Integrate components written in different languages/frameworks into a unified pipeline
 - **Deploy to diverse hardware** — Run the same component on different machines (local, cloud, HPC) without modification
-- **Enable gradient-based optimization** — Expose derivatives for use in optimization or calibration workflows
+- **Enable gradient-based optimization** — Expose derivatives for use in optimization or calibration workflows, and mix differentiation strategies (finite differences, analytic adjoints, automatic differentiation) across components in the same pipeline
 - **Ensure reproducibility** — Capture dependencies and environment in a container for consistent execution
 
 ## When NOT to use a Tesseract
@@ -48,43 +48,6 @@ Think about the **natural unit of work** that makes sense to share. A Tesseract 
 2. Represents a meaningful computation (not just a utility function)
 3. Could reasonably be owned and maintained by one person or team
 4. Takes at least a few seconds to run (to amortize container overhead)
-
-## Example: Simulation workflow
-
-Consider a CFD simulation workflow with these steps:
-
-1. Generate mesh from CAD geometry
-2. Run CFD solver
-3. Post-process results
-4. Visualize output
-
-**Option A: One Tesseract**
-
-```
-CAD → [Mesh + Solve + Post-process + Visualize] → Report
-```
-
-Pros: Simple to deploy, no intermediate data transfer
-Cons: Can't swap solver, can't run meshing on CPU while solving on GPU
-
-**Option B: Four Tesseracts**
-
-```
-CAD → [Mesh] → [Solve] → [Post-process] → [Visualize] → Report
-```
-
-Pros: Maximum flexibility, clear ownership
-Cons: Data transfer overhead, more complex orchestration
-
-**Option C: Two Tesseracts (recommended)**
-
-```
-CAD → [Mesh] → [Solve + Post-process + Visualize] → Report
-```
-
-Pros: Separates geometry (often CPU-bound, different expertise) from simulation (often GPU-bound, different team), minimal data transfer for tightly coupled steps
-
-The right choice depends on your team structure, hardware constraints, and reuse patterns. When in doubt, start with fewer Tesseracts and split them later if needed — it's easier to break apart than to combine.
 
 ## Designing good interfaces
 
@@ -127,6 +90,43 @@ class SolverInput(BaseModel):
     boundary_conditions: BoundaryConditions
 ```
 
+## Example: Simulation workflow
+
+Consider a CFD simulation workflow with these steps:
+
+1. Generate mesh from CAD geometry
+2. Run CFD solver
+3. Post-process results
+4. Visualize output
+
+**Option A: One Tesseract**
+
+```
+CAD → [Mesh + Solve + Post-process + Visualize] → Report
+```
+
+Pros: Simple to deploy, no intermediate data transfer
+Cons: Can't swap solver, can't run meshing on CPU while solving on GPU
+
+**Option B: Four Tesseracts**
+
+```
+CAD → [Mesh] → [Solve] → [Post-process] → [Visualize] → Report
+```
+
+Pros: Maximum flexibility, clear ownership
+Cons: Data transfer overhead, more complex orchestration
+
+**Option C: Two Tesseracts (recommended)**
+
+```
+CAD → [Mesh] → [Solve + Post-process + Visualize] → Report
+```
+
+Pros: Separates geometry (often CPU-bound, different expertise) from simulation (often GPU-bound, different team), minimal data transfer for tightly coupled steps
+
+The right choice depends on your team structure, hardware constraints, and reuse patterns. When in doubt, start with fewer Tesseracts and split them later if needed — it's easier to break apart than to combine.
+
 ## Common anti-patterns
 
 ### The "kitchen sink" Tesseract
@@ -137,9 +137,9 @@ Don't create a single Tesseract that does everything your project needs. This de
 
 Don't wrap trivial operations like `add(a, b)` as Tesseracts. The overhead isn't justified, and such operations should just be regular functions in your pipeline code.
 
-### Ignoring the single-entrypoint design
+### Overloading a single Tesseract with mode flags
 
-Tesseracts have one `apply` function. If you need multiple entrypoints, create multiple Tesseracts. Don't try to work around this with mode flags:
+Tesseracts have one `apply` function. While mode flags can be acceptable in some cases, the default should be to create separate Tesseracts for distinct operations:
 
 ```python
 # Anti-pattern: mode switching

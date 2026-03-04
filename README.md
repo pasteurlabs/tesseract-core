@@ -3,7 +3,7 @@
   <img alt="" src="https://github.com/pasteurlabs/tesseract-core/blob/main/docs/static/logo-light.png" width="128" align="right">
 </picture>
 
-### Tesseract
+### Tesseract Core
 
 Universal, autodiff-native software components for Simulation Intelligence
 
@@ -34,7 +34,7 @@ Tesseract packages scientific software into **self-contained, portable component
 
 ## Who is this for?
 
-- **Researchers** building differentiable physics simulations or probabilistic models who need to combine tools from different ecosystems
+- **Researchers** interfacing with (differentiable) simulators or probabilistic models, or who need to combine tools from different ecosystems
 - **R&D engineers** packaging research code for use by others, without spending weeks on DevOps
 - **Platform engineers** deploying scientific workloads at scale with consistent interfaces and dependency isolation
 
@@ -90,7 +90,7 @@ $ tesseract apidoc vectoradd
 ## Ecosystem
 
 - **[tesseract-core](https://github.com/pasteurlabs/tesseract-core)** — CLI, Python API, and runtime (this repo)
-- **[tesseract-jax](https://github.com/pasteurlabs/tesseract-jax)** — JAX integration for automatic gradient generation
+- **[tesseract-jax](https://github.com/pasteurlabs/tesseract-jax)** — Embed Tesseracts as JAX primitives into end-to-end differentiable JAX programs
 - **[tesseract-streamlit](https://github.com/pasteurlabs/tesseract-streamlit)** — Auto-generate interactive web apps from Tesseracts
 
 ## Learn more
@@ -103,6 +103,6 @@ $ tesseract apidoc vectoradd
 
 ## License
 
-Apache License 2.0. Free to use, modify, and distribute.
+Tesseract Core is licensed under the [Apache License 2.0](https://github.com/pasteurlabs/tesseract-core/blob/main/LICENSE) and is free to use, modify, and distribute (under the terms of the license).
 
-Tesseract is a registered trademark of Pasteur Labs, Inc.
+Tesseract is a registered trademark of Pasteur Labs, Inc. and may not be used without permission.

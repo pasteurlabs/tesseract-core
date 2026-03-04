@@ -1,6 +1,6 @@
-# Tesseract
+# Tesseract Core
 
-Universal, autodiff-native software components for Simulation Intelligence
+Universal, autodiff-native software components for [Simulation Intelligence](#what-is-si)
 
 ```{seealso}
 Already convinced? 👉 See how to [Get started](content/introduction/get-started.md) instead.
@@ -23,7 +23,7 @@ Tesseract packages scientific software into **self-contained, portable component
 
 ## Who is this for?
 
-- **Researchers** building differentiable physics simulations or probabilistic models who need to combine tools from different ecosystems
+- **Researchers** interfacing with (differentiable) simulators or probabilistic models, or who need to combine tools from different ecosystems
 - **R&D engineers** packaging research code for use by others, without spending weeks on DevOps
 - **Platform engineers** deploying scientific workloads at scale with consistent interfaces and dependency isolation
 
@@ -82,7 +82,7 @@ If you're a single developer working with a single software stack in a single en
 
 Tesseract Core is the foundation of the Tesseract ecosystem. Additional packages extend its capabilities:
 
-- **[tesseract-jax](https://github.com/pasteurlabs/tesseract-jax)** — Utilities for creating JAX-based Tesseracts with automatic differentiation support. If you're using JAX, this package makes it easy to expose JAX functions as Tesseracts with autodiff endpoints generated automatically.
+- **[tesseract-jax](https://github.com/pasteurlabs/tesseract-jax)** — Embed Tesseracts as JAX primitives into end-to-end differentiable programs.
 - **[tesseract-streamlit](https://github.com/pasteurlabs/tesseract-streamlit)** — Auto-generate interactive Streamlit web apps from running Tesseracts. Instantly create UIs for your components without writing frontend code.
 
 ```{toctree}
