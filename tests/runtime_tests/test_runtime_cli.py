@@ -588,3 +588,61 @@ def test_local_module(cli, cli_runner, dummy_tesseract_package):
     assert result.exit_code == 0, result.stderr
     assert "check successful" in result.stdout
     assert "hey!" in result.stdout
+
+
+def test_pythonpath_propagates_to_subprocesses(dummy_tesseract_package):
+    """Ensure PYTHONPATH is set so subprocesses can import local modules.
+
+    This e.g. is important for multiprocessing use cases where worker processes
+    need to import functions from modules next to tesseract_api.py.
+    See https://github.com/pasteurlabs/tesseract-core/issues/356
+    """
+    tesseract_api_file = Path(dummy_tesseract_package) / "tesseract_api.py"
+
+    # Create a helper module that will be imported by the subprocess
+    helper_file = Path(dummy_tesseract_package) / "helper_module.py"
+    with open(helper_file, "w") as f:
+        f.write("MAGIC_VALUE = 42\n")
+
+    # Create a tesseract_api.py that spawns a subprocess to verify PYTHONPATH
+    with open(tesseract_api_file, "w") as f:
+        f.write("""\
+import subprocess
+import sys
+from pydantic import BaseModel
+
+class InputSchema(BaseModel):
+    pass
+
+class OutputSchema(BaseModel):
+    value: int
+
+def apply(inputs: InputSchema) -> OutputSchema:
+    # Spawn a subprocess that tries to import the local helper module
+    # This will fail if PYTHONPATH doesn't include the tesseract directory
+    result = subprocess.run(
+        [sys.executable, "-c", "import helper_module; print(helper_module.MAGIC_VALUE)"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"Subprocess failed: {result.stderr}")
+    return OutputSchema(value=int(result.stdout.strip()))
+""")
+
+    # Run the apply command via subprocess to simulate real CLI usage
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "tesseract_core.runtime.cli",
+            "apply",
+            '{"inputs": {}}',
+        ],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "TESSERACT_API_PATH": str(tesseract_api_file)},
+    )
+    assert result.returncode == 0, f"CLI failed: {result.stderr}"
+    output = json.loads(result.stdout)
+    assert output["value"] == 42
