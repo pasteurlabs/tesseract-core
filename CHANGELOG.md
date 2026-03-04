@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.0] - 2026-03-04
+
+### Features
+
+- Deprecate `Tesseract(url)` constructor in favor of `Tesseract.from_url` (#486)
+- Add live streaming of logs (#482)
+- Validation of (co)tangents (#493)
+- Add profile and trace mode, plus debugging guide (#484)
+
+### Bug Fixes
+
+- Better multiprocessing support from within `tesseract_api.py` (#488)
+- Ensure deprecration warning is actually visible (#487)
+- Ensure $HOME is set in Tesseracts and has appropriate permissions (#490)
+
+### Documentation
+
+- Add Fortran heat equation example (#477)
+- Tesseract init doesn't prompt if name not provided (#501)
+
 ## [1.4.0] - 2026-02-20
 
 ### Features
