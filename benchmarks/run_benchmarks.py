@@ -52,12 +52,10 @@ if _benchmarks_dir not in sys.path:
 
 from utils import BenchmarkSuite, compare_results, format_comparison_table  # noqa: E402
 
-from tesseract_core.runtime.profiler import Profiler  # noqa: E402
-
 # Registry of available benchmark suites.
 # Each entry maps a suite name to a factory that returns the runner function.
 # Using factories (lambdas) to avoid importing bench modules at top level.
-SuiteRunner = Callable[[int, list[int] | None], BenchmarkSuite | None]
+SuiteRunner = Callable[[int, list[int] | None, bool], BenchmarkSuite | None]
 
 SUITE_REGISTRY: dict[str, Callable[[], SuiteRunner]] = {
     "from_tesseract_api": lambda: (
@@ -193,13 +191,14 @@ def main() -> int:
 
     for suite_name in selected_suites:
         runner = SUITE_REGISTRY[suite_name]()
-        profiler = Profiler(enabled=args.profile)
         print(f"\nRunning {suite_name}...")
-        with profiler:
-            result = runner(iterations=args.iterations, array_sizes=array_sizes)
+        result = runner(
+            iterations=args.iterations,
+            array_sizes=array_sizes,
+            profile=args.profile,
+        )
         if result is not None:
             suites.append(result)
-        profiler.print_stats()
 
     elapsed = time.time() - start_time
     print(f"\nBenchmarks completed in {elapsed:.1f}s")

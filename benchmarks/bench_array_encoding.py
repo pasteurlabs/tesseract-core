@@ -48,12 +48,14 @@ def _create_test_array(size: int, dtype: str = "float64") -> np.ndarray:
 def benchmark_encoding(
     iterations: int = 50,
     array_sizes: list[int] | None = None,
+    profile: bool = False,
 ) -> BenchmarkSuite:
     """Run encoding benchmarks for all methods and sizes.
 
     Args:
         iterations: Number of iterations per benchmark
         array_sizes: Array sizes to benchmark (defaults to DEFAULT_ARRAY_SIZES)
+        profile: Whether to profile each invocation with cProfile
 
     Returns:
         BenchmarkSuite with all results
@@ -78,6 +80,7 @@ def benchmark_encoding(
                     context={"array_encoding": "json"}
                 ),
                 iterations=iterations,
+                profile=profile,
             )
             suite.add_result(result)
 
@@ -88,6 +91,7 @@ def benchmark_encoding(
                 context={"array_encoding": "base64"}
             ),
             iterations=iterations,
+            profile=profile,
         )
         suite.add_result(result)
 
@@ -99,6 +103,7 @@ def benchmark_encoding(
                     context={"array_encoding": "binref", "base_dir": d}
                 ),
                 iterations=iterations,
+                profile=profile,
             )
             suite.add_result(result)
 
@@ -108,12 +113,14 @@ def benchmark_encoding(
 def benchmark_decoding(
     iterations: int = 50,
     array_sizes: list[int] | None = None,
+    profile: bool = False,
 ) -> BenchmarkSuite:
     """Run decoding benchmarks for all methods and sizes.
 
     Args:
         iterations: Number of iterations per benchmark
         array_sizes: Array sizes to benchmark (defaults to DEFAULT_ARRAY_SIZES)
+        profile: Whether to profile each invocation with cProfile
 
     Returns:
         BenchmarkSuite with all results
@@ -137,6 +144,7 @@ def benchmark_decoding(
                 name=f"decode_json_{size:,}",
                 func=lambda s=json_encoded: ArrayModel.model_validate_json(s),
                 iterations=iterations,
+                profile=profile,
             )
             suite.add_result(result)
 
@@ -146,6 +154,7 @@ def benchmark_decoding(
             name=f"decode_base64_{size:,}",
             func=lambda s=base64_encoded: ArrayModel.model_validate_json(s),
             iterations=iterations,
+            profile=profile,
         )
         suite.add_result(result)
 
@@ -160,6 +169,7 @@ def benchmark_decoding(
                     s, context={"base_dir": d}
                 ),
                 iterations=iterations,
+                profile=profile,
             )
             suite.add_result(result)
 
@@ -169,6 +179,7 @@ def benchmark_decoding(
 def benchmark_roundtrip(
     iterations: int = 50,
     array_sizes: list[int] | None = None,
+    profile: bool = False,
 ) -> BenchmarkSuite:
     """Run roundtrip (encode + decode) benchmarks.
 
@@ -178,6 +189,7 @@ def benchmark_roundtrip(
     Args:
         iterations: Number of iterations per benchmark
         array_sizes: Array sizes to benchmark (defaults to DEFAULT_ARRAY_SIZES)
+        profile: Whether to profile each invocation with cProfile
 
     Returns:
         BenchmarkSuite with all results
@@ -205,6 +217,7 @@ def benchmark_roundtrip(
                 name=f"roundtrip_json_{size:,}",
                 func=json_roundtrip,
                 iterations=iterations,
+                profile=profile,
             )
             suite.add_result(result)
 
@@ -217,6 +230,7 @@ def benchmark_roundtrip(
             name=f"roundtrip_base64_{size:,}",
             func=base64_roundtrip,
             iterations=iterations,
+            profile=profile,
         )
         suite.add_result(result)
 
@@ -237,6 +251,7 @@ def benchmark_roundtrip(
                 name=f"roundtrip_binref_{size:,}",
                 func=binref_roundtrip,
                 iterations=iterations,
+                profile=profile,
             )
             suite.add_result(result)
 
@@ -244,13 +259,16 @@ def benchmark_roundtrip(
 
 
 def run_all(
-    iterations: int = 50, array_sizes: list[int] | None = None
+    iterations: int = 50,
+    array_sizes: list[int] | None = None,
+    profile: bool = False,
 ) -> list[BenchmarkSuite]:
     """Run all array encoding benchmarks.
 
     Args:
         iterations: Number of iterations per benchmark
         array_sizes: Array sizes to benchmark (defaults to DEFAULT_ARRAY_SIZES)
+        profile: Whether to profile each invocation with cProfile
 
     Returns:
         List of BenchmarkSuites for encoding, decoding, and roundtrip
@@ -258,7 +276,9 @@ def run_all(
     results = []
     for benchmark_func in [benchmark_encoding, benchmark_decoding, benchmark_roundtrip]:
         print(f"Running {benchmark_func.__name__}...")
-        suite = benchmark_func(iterations=iterations, array_sizes=array_sizes)
+        suite = benchmark_func(
+            iterations=iterations, array_sizes=array_sizes, profile=profile
+        )
         results.append(suite)
     return results
 

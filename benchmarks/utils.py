@@ -46,6 +46,7 @@ def run_benchmark(
     func: Callable[[], Any],
     iterations: int = 100,
     warmup: int = 5,
+    profile: bool = False,
 ) -> BenchmarkResult:
     """Run a benchmark and return results.
 
@@ -54,21 +55,31 @@ def run_benchmark(
         func: Function to benchmark (no arguments)
         iterations: Number of iterations to run
         warmup: Number of warmup iterations (not counted)
+        profile: Whether to profile each invocation with cProfile
 
     Returns:
         BenchmarkResult with timing statistics
     """
+    from tesseract_core.runtime.profiler import Profiler
+
     # Warmup
     for _ in range(warmup):
         func()
 
     # Timed iterations
+    profiler = Profiler(enabled=profile)
     times: list[float] = []
-    for _ in range(iterations):
-        start = time.perf_counter()
-        func()
-        end = time.perf_counter()
-        times.append(end - start)
+    with profiler:
+        for _ in range(iterations):
+            start = time.perf_counter()
+            func()
+            end = time.perf_counter()
+            times.append(end - start)
+
+    stats_text = profiler.get_stats()
+    if stats_text:
+        print(f"\n--- Profile: {name} ---")
+        print(stats_text)
 
     total_time = sum(times)
     mean_time = statistics.mean(times)

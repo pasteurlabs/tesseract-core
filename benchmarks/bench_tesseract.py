@@ -80,7 +80,9 @@ def _build_noop_tesseract() -> str | None:
 
 
 def benchmark_from_tesseract_api(
-    iterations: int = 50, array_sizes: list[int] | None = None
+    iterations: int = 50,
+    array_sizes: list[int] | None = None,
+    profile: bool = False,
 ) -> BenchmarkSuite:
     """Benchmark non-containerized Tesseract via from_tesseract_api().
 
@@ -99,9 +101,11 @@ def benchmark_from_tesseract_api(
 
     with tempfile.TemporaryDirectory() as tmpdir:
         # Create tesseract once (includes schema generation overhead)
+        runtime_config = {"profiling": True} if profile else None
         tesseract = Tesseract.from_tesseract_api(
             NOOP_TESSERACT_PATH,
             output_path=Path(tmpdir),
+            runtime_config=runtime_config,
         )
 
         for i, size in enumerate(array_sizes):
@@ -116,6 +120,7 @@ def benchmark_from_tesseract_api(
                 name=f"apply_{size:,}",
                 func=call_apply,
                 iterations=iterations,
+                profile=profile,
             )
             suite.add_result(result)
 
@@ -123,7 +128,9 @@ def benchmark_from_tesseract_api(
 
 
 def benchmark_containerized_http(
-    iterations: int = 20, array_sizes: list[int] | None = None
+    iterations: int = 20,
+    array_sizes: list[int] | None = None,
+    profile: bool = False,
 ) -> BenchmarkSuite | None:
     """Benchmark containerized Tesseract via HTTP (Tesseract.from_image).
 
@@ -161,8 +168,11 @@ def benchmark_containerized_http(
 
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
+            runtime_config = {"profiling": True} if profile else None
             with Tesseract.from_image(
-                image_name, output_path=Path(tmpdir)
+                image_name,
+                output_path=Path(tmpdir),
+                runtime_config=runtime_config,
             ) as tesseract:
                 # Warmup - first request is slow due to container startup
                 _ = tesseract.health()
@@ -185,6 +195,7 @@ def benchmark_containerized_http(
                         func=call_apply,
                         iterations=iterations,
                         warmup=2,
+                        profile=profile,
                     )
                     suite.add_result(result)
 
@@ -196,7 +207,9 @@ def benchmark_containerized_http(
 
 
 def benchmark_containerized_cli(
-    iterations: int = 10, array_sizes: list[int] | None = None
+    iterations: int = 10,
+    array_sizes: list[int] | None = None,
+    profile: bool = False,
 ) -> BenchmarkSuite | None:
     """Benchmark containerized Tesseract via CLI (`tesseract run`).
 
@@ -268,22 +281,29 @@ def benchmark_containerized_cli(
             payload_file.write_text(json.dumps(payload))
 
             def run_cli(
-                img=image_name, pf=payload_file, indir=input_dir, outdir=output_dir
+                img=image_name,
+                pf=payload_file,
+                indir=input_dir,
+                outdir=output_dir,
+                do_profile=profile,
             ):
+                cmd = [
+                    "tesseract",
+                    "run",
+                    img,
+                    "apply",
+                    f"@{pf}",
+                    "--input-path",
+                    str(indir),
+                    "--output-path",
+                    str(outdir),
+                    "--output-format",
+                    "json+binref",
+                ]
+                if do_profile:
+                    cmd.append("--profiling")
                 result = subprocess.run(
-                    [
-                        "tesseract",
-                        "run",
-                        img,
-                        "apply",
-                        f"@{pf}",
-                        "--input-path",
-                        str(indir),
-                        "--output-path",
-                        str(outdir),
-                        "--output-format",
-                        "json+binref",
-                    ],
+                    cmd,
                     capture_output=True,
                     text=True,
                 )
@@ -296,6 +316,7 @@ def benchmark_containerized_cli(
                 func=run_cli,
                 iterations=iterations,
                 warmup=1,
+                profile=profile,
             )
             suite.add_result(result)
 
