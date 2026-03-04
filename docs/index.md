@@ -110,6 +110,7 @@ Tesseract Showcase <https://si-tesseract.discourse.group/c/showcase/11>
 :maxdepth: 2
 :hidden:
 
+content/debugging.md
 content/misc/faq.md
 ```
 
