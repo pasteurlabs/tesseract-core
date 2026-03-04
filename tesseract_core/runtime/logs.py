@@ -28,10 +28,11 @@ def get_logger() -> logging.Logger:
     logger = logging.getLogger("tesseract_runtime")
     logger.setLevel(logging.DEBUG)  # Allow all levels, handler controls output
 
+    level = logging.DEBUG if get_config().tracing else logging.INFO
+
     # Only add handler if not already configured
     if not logger.handlers:
         handler = logging.StreamHandler(sys.stdout)
-        level = logging.DEBUG if get_config().tracing else logging.INFO
         formatter = logging.Formatter(
             "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
         )
