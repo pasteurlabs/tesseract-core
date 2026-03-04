@@ -75,24 +75,6 @@ class InputSchema(BaseModel):
         return v + 1
 ```
 
-## Debugging build failures
-
-There are also several options you can provide to `tesseract build` which can be helpful in
-various circumstances:
-
-- The output of the various steps which happen under-the-hood while doing a build will
-  only be printed if something fails; this means that your shell might appear unresponsive
-  during this process. If you want more detailed information on what's going on during your
-  build, and see updates about it in real-time, use `--loglevel debug`.
-- `--config-override` can be used to manually override options specified in the `tesseract_config.yaml`,
-  for example: `--config-override build_config.target_platform=linux/arm64`
-- `tesseract build` relies on a `docker build` command to create the Tesseract image. By
-  default, the build context is a temporary folder to which all necessary files to build a Tesseract
-  are copied to. The option `--build-dir <directory>` allows you to specify a different
-  directory where to do this operations. This might be useful to debug issues which
-  arise while building a Tesseract, as in `directory` you will see all the context available to
-  `docker build` and nothing else.
-
 ## Building Tesseracts with private dependencies
 
 In case you have some dependencies in `tesseract_requirements.txt` for which you need to
@@ -131,44 +113,6 @@ For example:
   commands would be added in the build process, have a look at
   the [Dockerfile template](https://github.com/pasteurlabs/tesseract-core/blob/main/tesseract/templates/Dockerfile.base)
   `tesseract build` uses by default.
-
-(tr-without-docker)=
-
-## Tesseracts without containerization
-
-While developing a Tesseract, the process of building and rebuilding the
-tesseract image for quick local tests can be very time-consuming. The fastest and most
-convenient way to speed this up is to just run the code you are developing directly
-in your virtual Python environment.
-
-In order to do so, you should:
-
-- Make sure you have a development installation of Tesseract (see <project:#installation-dev>).
-  In particular, calling `which tesseract-runtime` in the Terminal should return a path in your
-  virtual environment.
-- Install your Tesseract's dependencies via `pip install -r tesseract_requirements.txt`.
-- Point to the runtime where it can find the `tesseract_api.py` of the Tesseract you are working on.
-  This is done by setting the `TESSERACT_API_PATH` environment variable via
-  `export TESSERACT_API_PATH=/path/to/your/tesseract_api.py`.
-
-After that is done, you will be able to use the `tesseract-runtime` command in your shell.
-This is the exact same command that is launched inside Tesseract containers to run their
-various endpoints, and its syntax mirrors the one of `tesseract run`.
-
-For instance, to call the `apply` function, rather than first building a `helloworld` image and running this command:
-
-```bash
-$ tesseract run helloworld apply '{"inputs": {"name": "Tessie"}}'
-```
-
-You can use:
-
-```bash
-$ tesseract-runtime apply '{"inputs": {"name": "Tessie"}}'
-```
-
-More info on usage is contained in `tesseract-runtime --help` (and in its subcommands,
-like `tesseract-runtime apply --help`).
 
 ## Creating a Tesseract from a Python package
 
