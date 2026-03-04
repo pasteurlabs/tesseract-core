@@ -425,10 +425,7 @@ def _create_user_defined_cli_command(
 
             # Print profiling stats inside start_run context
             # so they go through stdio redirection to the log file
-            stats_text = profiler.get_stats()
-            if stats_text:
-                print("\n--- Profiling Statistics ---")
-                print(stats_text)
+            profiler.print_stats()
 
         result = output_to_bytes(result, output_format, output_path)
 

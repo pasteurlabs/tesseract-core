@@ -287,7 +287,7 @@ $ TESSERACT_API_PATH=/path/to/tesseract_api.py tesseract-runtime check
 
 When a Tesseract builds successfully but behaves unexpectedly at runtime, you can use Docker commands to inspect the container state.
 
-**Get a shell inside a running Tesseract:**
+**Get a shell inside a served Tesseract:**
 
 ```bash
 # First, find the container ID
@@ -306,7 +306,7 @@ From inside the container, you can:
 - Test imports manually: `python -c "import your_module"`
 - Check environment variables: `env | grep TESSERACT`
 
-**Inspect a Tesseract image without running it:**
+**Run commands within a Tesseract image interactively:**
 
 ```bash
 # Start a shell in a new container from the image

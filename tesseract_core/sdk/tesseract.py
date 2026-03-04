@@ -848,10 +848,7 @@ class LocalClient:
 
                 # Print profiling stats inside start_run context
                 # so they go through stdio redirection to the configured sink
-                stats_text = profiler.get_stats()
-                if stats_text:
-                    print("\n--- Profiling Statistics ---")
-                    print(stats_text)
+                profiler.print_stats()
         except Exception as ex:
             # Some clients like Tesseract-JAX swallow tracebacks from re-raised exceptions, so we explicitly
             # format the traceback here to include it in the error message.

@@ -36,8 +36,7 @@ class Profiler:
         with Profiler() as profiler:
             # code to profile
             pass
-        if profiler.enabled:
-            print(profiler.get_stats())
+        profiler.print_stats()
     """
 
     def __init__(self, enabled: bool | None = None) -> None:
@@ -98,11 +97,23 @@ class Profiler:
         stats.stats = filtered_stats
 
         # Recalculate total calls and time
-        stats.total_calls = sum(v[0] for v in filtered_stats.values())
+        # Stats values are tuples of (pcalls, ncalls, tottime, cumtime, callers)
         stats.prim_calls = sum(v[0] for v in filtered_stats.values())
+        stats.total_calls = sum(v[1] for v in filtered_stats.values())
         stats.total_tt = sum(v[2] for v in filtered_stats.values())
 
         return stats
+
+    def print_stats(self, limit: int = 30) -> None:
+        """Print profiling statistics if profiling was enabled.
+
+        Args:
+            limit: Maximum number of entries to include per report.
+        """
+        stats_text = self.get_stats(limit=limit)
+        if stats_text:
+            print("\n--- Profiling Statistics ---")
+            print(stats_text)
 
     def get_stats(self, limit: int = 30) -> str:
         """Get profiling statistics as a formatted string.
