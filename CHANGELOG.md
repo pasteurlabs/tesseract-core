@@ -18,6 +18,10 @@ All notable changes to this project will be documented in this file.
 - Ensure $HOME is set in Tesseracts and has appropriate permissions (#490)
 - Relax permissions on `/tmp` inside Tesseracts after build-time check (#506)
 
+### Refactor
+
+- Simplify runtime dependency handling (#495)
+
 ### Documentation
 
 - Add Fortran heat equation example (#477)
