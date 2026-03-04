@@ -10,12 +10,29 @@ Tesseract that does nothing but decode inputs and encode outputs.
 Usage:
     python run_benchmarks.py [options]
 
-Options:
-    --iterations N       Number of iterations per benchmark (default: 50)
-    --output PATH        Output JSON file for results
-    --compare PATH       Compare against baseline JSON file
-    --docker             Include containerized benchmarks (requires Docker)
-    --array-sizes N,...  Comma-separated list of array sizes to benchmark
+Examples:
+    # Run all benchmarks (requires Docker)
+    python run_benchmarks.py
+
+    # Run only the HTTP interaction benchmark
+    python run_benchmarks.py --suite containerized_http
+
+    # Run only encoding benchmarks during development (no Docker needed)
+    python run_benchmarks.py --suite array_encoding --suite array_roundtrip
+
+    # Profile the encoding roundtrip to find bottlenecks
+    python run_benchmarks.py --suite array_roundtrip --profile -n 10 --array-sizes 1000000
+
+    # Run specific array sizes with fewer iterations
+    python run_benchmarks.py --suite array_encoding -n 10 --array-sizes 100,10000
+
+Available suites:
+    from_tesseract_api   Non-containerized Tesseract via direct Python calls
+    containerized_http   Containerized Tesseract via HTTP (requires Docker)
+    containerized_cli    Containerized Tesseract via CLI (requires Docker)
+    array_encoding       Array serialization (model_dump_json)
+    array_decoding       Array deserialization (model_validate_json)
+    array_roundtrip      Full encode + decode roundtrip
 """
 
 from __future__ import annotations
@@ -24,6 +41,7 @@ import argparse
 import platform
 import sys
 import time
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -33,6 +51,30 @@ if _benchmarks_dir not in sys.path:
     sys.path.insert(0, _benchmarks_dir)
 
 from utils import BenchmarkSuite, compare_results, format_comparison_table  # noqa: E402
+
+from tesseract_core.runtime.profiler import Profiler  # noqa: E402
+
+# Registry of available benchmark suites.
+# Each entry maps a suite name to a factory that returns the runner function.
+# Using factories (lambdas) to avoid importing bench modules at top level.
+SuiteRunner = Callable[[int, list[int] | None], BenchmarkSuite | None]
+
+SUITE_REGISTRY: dict[str, Callable[[], SuiteRunner]] = {
+    "from_tesseract_api": lambda: (
+        __import__("bench_tesseract").benchmark_from_tesseract_api
+    ),
+    "containerized_http": lambda: (
+        __import__("bench_tesseract").benchmark_containerized_http
+    ),
+    "containerized_cli": lambda: (
+        __import__("bench_tesseract").benchmark_containerized_cli
+    ),
+    "array_encoding": lambda: __import__("bench_array_encoding").benchmark_encoding,
+    "array_decoding": lambda: __import__("bench_array_encoding").benchmark_decoding,
+    "array_roundtrip": lambda: __import__("bench_array_encoding").benchmark_roundtrip,
+}
+
+AVAILABLE_SUITES = list(SUITE_REGISTRY.keys())
 
 
 def get_system_info() -> dict:
@@ -46,26 +88,6 @@ def get_system_info() -> dict:
         "python_version": platform.python_version(),
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
-
-
-def run_tesseract_benchmarks(
-    iterations: int, include_docker: bool, array_sizes: list[int] | None = None
-) -> list[BenchmarkSuite]:
-    """Run Tesseract interaction benchmarks."""
-    from bench_tesseract import run_all
-
-    return run_all(
-        iterations, include_containerized=include_docker, array_sizes=array_sizes
-    )
-
-
-def run_encoding_benchmarks(
-    iterations: int, array_sizes: list[int] | None = None
-) -> list[BenchmarkSuite]:
-    """Run array encoding benchmarks (isolated, for detailed analysis)."""
-    from bench_array_encoding import run_all
-
-    return run_all(iterations, array_sizes=array_sizes)
 
 
 def merge_suites(suites: list[BenchmarkSuite]) -> BenchmarkSuite:
@@ -121,14 +143,20 @@ def main() -> int:
         help="Compare against baseline JSON file",
     )
     parser.add_argument(
-        "--no-docker",
-        action="store_true",
-        help="Exclude containerized benchmarks (requires Docker)",
+        "--suite",
+        "-s",
+        type=str,
+        action="append",
+        choices=AVAILABLE_SUITES,
+        help=(
+            "Which benchmark suite(s) to run. Can be specified multiple times. "
+            "Defaults to all suites."
+        ),
     )
     parser.add_argument(
-        "--encoding-only",
+        "--profile",
         action="store_true",
-        help="Only run encoding benchmarks (for detailed analysis)",
+        help="Enable cProfile profiling and print stats after each suite (useful for finding bottlenecks)",
     )
     parser.add_argument(
         "--markdown",
@@ -145,27 +173,33 @@ def main() -> int:
 
     args = parser.parse_args()
 
+    # Default to all suites if none specified
+    selected_suites = args.suite or AVAILABLE_SUITES
+
     # Parse array sizes if provided
     array_sizes = None
     if args.array_sizes:
         array_sizes = [int(s.strip()) for s in args.array_sizes.split(",")]
 
     print(f"Running Tesseract Core benchmarks (iterations={args.iterations})")
+    print(f"Suites: {', '.join(selected_suites)}")
     print(f"System: {platform.system()} {platform.release()} ({platform.machine()})")
     print(f"Python: {platform.python_version()}")
 
     start_time = time.time()
 
-    # Run benchmarks
-    if args.encoding_only:
-        suites = run_encoding_benchmarks(args.iterations, array_sizes=array_sizes)
-    else:
-        suites = run_tesseract_benchmarks(
-            args.iterations,
-            include_docker=not args.no_docker,
-            array_sizes=array_sizes,
-        )
-        suites.extend(run_encoding_benchmarks(args.iterations, array_sizes=array_sizes))
+    # Run selected benchmarks
+    suites: list[BenchmarkSuite] = []
+
+    for suite_name in selected_suites:
+        runner = SUITE_REGISTRY[suite_name]()
+        profiler = Profiler(enabled=args.profile)
+        print(f"\nRunning {suite_name}...")
+        with profiler:
+            result = runner(iterations=args.iterations, array_sizes=array_sizes)
+        if result is not None:
+            suites.append(result)
+        profiler.print_stats()
 
     elapsed = time.time() - start_time
     print(f"\nBenchmarks completed in {elapsed:.1f}s")

@@ -39,13 +39,20 @@ Overhead as percentage of computation time, depending on interaction mode and I/
 
 The guidance plot shows overhead curves for three interaction modes at three representative I/O sizes (1kB, 1MB, 1GB). Each combination represents a typical usage pattern:
 
-| Mode (color)                                   | What it measures                                                                                                                       | Typical use case                                       |
-| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| **Non-containerized, in-memory** (green)       | Direct Python calls with {doc}`non-containerized usage </content/using-tesseracts/use>`. No Docker, no HTTP — only framework overhead. | Development, tight loops, performance-critical paths   |
-| **Containerized, json+base64 via HTTP** (blue) | Full Docker + HTTP stack, {doc}`served via HTTP </content/using-tesseracts/use>`. Includes serialization and network transfer.         | Production, CI/CD, multi-language environments         |
-| **Containerized, json+binref via CLI** (red)   | CLI invocation via `tesseract run`. Includes container startup and disk I/O, but avoids base64 bloat.                                  | Shell scripts, one-off runs, pipelines with large data |
+| Mode (color)                                   | What it measures                                                                                                            | Typical use case                                       |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| **Non-containerized, in-memory** (green)       | Direct Python calls via `Tesseract.from_tesseract_api`. Passes data as in-memory Python objects without Docker or HTTP.     | Development, tight loops, performance-critical paths   |
+| **Containerized, json+base64 via HTTP** (blue) | Full Docker + HTTP stack, served via HTTP (e.g. `tesseract serve`). Includes serialization and network transfer.            | Production, CI/CD, multi-language environments         |
+| **Containerized, json+binref via CLI** (red)   | CLI invocation via `tesseract run`. Includes container startup and disk I/O, but avoids transferring data over the network. | Shell scripts, one-off runs, pipelines with large data |
 
 The three I/O sizes (dotted = 1kB, dashed = 1MB, solid = 1GB) show how data volume shifts the overhead curve. For small data, the fixed costs (HTTP roundtrip, container startup) dominate. For large data, transfer and serialization take over.
+
+```{figure} /img/benchmark_overhead.png
+:alt: Tesseract overhead by interaction mode
+:width: 80%
+
+Overhead comparison across interaction modes for different array sizes. Uses a no-op Tesseract that does nothing but decode and encode data, isolating framework overhead.
+```
 
 ### Rules of thumb by use case
 
@@ -58,15 +65,6 @@ The three I/O sizes (dotted = 1kB, dashed = 1MB, solid = 1GB) show how data volu
 | **Shell scripts and one-off runs**             | CLI is convenient but has ~2s overhead per invocation. For multiple calls, keep a container running.                                                                                                                                                                 |
 | **Long-running operations on large datasets**  | Use CLI with `json+binref` encoding. The ~2.5s container overhead is negligible for multi-minute runs, and binref allows large arrays to be passed between Tesseracts without expensive copies.                                                                      |
 | **Cheap operations on huge datasets**          | Tesseract may not be the right tool for you. Consider whether you can partition your workload into more compute-intensive components, or if a more traditional RPC framework is a better fit.                                                                        |
-
-## Benchmarking typical scenarios
-
-```{figure} /img/benchmark_overhead.png
-:alt: Tesseract overhead by interaction mode
-:width: 80%
-
-Overhead comparison across interaction modes for different array sizes. Uses a no-op Tesseract that does nothing but decode and encode data, isolating framework overhead.
-```
 
 ## Optimizing performance
 
