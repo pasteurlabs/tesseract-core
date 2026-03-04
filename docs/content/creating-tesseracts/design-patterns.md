@@ -40,15 +40,6 @@ One of the most common questions is: _"Should I make one big Tesseract or many s
 - You want to swap out implementations (e.g., different solvers for the same interface)
 - Components are reusable across multiple workflows
 
-### A practical rule of thumb
-
-Think about the **natural unit of work** that makes sense to share. A Tesseract should wrap functionality that:
-
-1. Has a clear, well-defined interface (inputs and outputs)
-2. Represents a meaningful computation (not just a utility function)
-3. Could reasonably be owned and maintained by one person or team
-4. Takes at least a few seconds to run (to amortize container overhead)
-
 ## Designing good interfaces
 
 ### Keep schemas focused
@@ -132,10 +123,6 @@ The right choice depends on your team structure, hardware constraints, and reuse
 ### The "kitchen sink" Tesseract
 
 Don't create a single Tesseract that does everything your project needs. This defeats the purpose of modularity and makes it hard to maintain or reuse.
-
-### The "micro-Tesseract"
-
-Don't wrap trivial operations like `add(a, b)` as Tesseracts. The overhead isn't justified, and such operations should just be regular functions in your pipeline code.
 
 ### Overloading a single Tesseract with mode flags
 

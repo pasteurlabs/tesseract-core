@@ -256,14 +256,6 @@ Always review and test LLM-generated code:
 3. Test with real inputs before building the Tesseract
 4. Run `tesseract build` to catch any issues early
 
-### Common issues to watch for
-
-- **Missing imports** — LLMs may forget `from tesseract_core.runtime import ...`
-- **Wrong array syntax** — Should be `Array[(3,), Float32]` not `Array[3, Float32]`. Note the tuple.
-- **Differentiable on non-arrays** — `Differentiable` only works with `Array` types (including scalar aliases like `Float32`), not Python's `float` or `int`
-- **Overly complex output** — LLMs with codebase access may generate full JAX implementations with all autodiff endpoints. Say "generate just the schemas and apply function" to get minimal output.
-- **Wrong dtype** — Use `Float32` unless you need double precision. Don't use Python's `float` for outputs.
-
 ### Iterate on the design
 
 Use the LLM as a pair programming partner:
