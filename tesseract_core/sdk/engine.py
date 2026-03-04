@@ -158,7 +158,7 @@ def get_runtime_dependencies() -> list[str]:
     from packaging.requirements import Requirement
 
     deps = []
-    for req_str in requires("tesseract-core") or []:
+    for req_str in sorted(requires("tesseract-core") or []):
         req = Requirement(req_str)
         # Check if this requirement is for the 'runtime' extra
         if req.marker and req.marker.evaluate({"extra": "runtime"}):
