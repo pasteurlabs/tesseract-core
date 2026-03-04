@@ -3,7 +3,7 @@
 
 """CLI tests that do not require a running Docker daemon.
 
-(Those go in endtoend_tests/test_endtoend.py.)
+(Those go in endtoend_tests/.)
 """
 
 import os
