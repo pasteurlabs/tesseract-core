@@ -134,7 +134,7 @@ RUN _TESSERACT_IS_BUILDING=1 /tesseract/entrypoint.sh tesseract-runtime check
 # Make sure /tesseract, /home/tesseract-user, and /tmp are writable by non-root users,
 # especially important if some folders are created at build time and owned by 9999:9999.
 USER root
-RUN chmod -R 777 /tesseract
+RUN chmod -R 777 /tesseract && chmod 555 /tesseract/tesseract_api.py
 RUN chmod -R 777 /home/tesseract-user
 RUN chmod -R 777 /tmp
 USER 9999:9999
