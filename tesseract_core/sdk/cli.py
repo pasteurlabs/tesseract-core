@@ -1023,6 +1023,20 @@ def run_container(
             ),
         ),
     ] = None,
+    profiling: Annotated[
+        bool,
+        typer.Option(
+            "--profiling",
+            help="Enable profiling to measure execution time of functions.",
+        ),
+    ] = False,
+    tracing: Annotated[
+        bool,
+        typer.Option(
+            "--tracing",
+            help="Enable tracing for detailed debug output.",
+        ),
+    ] = False,
     invoke_help: Annotated[
         bool,
         typer.Option(
@@ -1075,6 +1089,12 @@ def run_container(
                 "Environment variables must be in the format 'key=value'.",
                 param_hint="env",
             ) from ex
+
+    # Add profiling and tracing flags as environment variables
+    if profiling:
+        parsed_environment["TESSERACT_PROFILING"] = "1"
+    if tracing:
+        parsed_environment["TESSERACT_TRACING"] = "1"
 
     args = []
     if invoke_help:
