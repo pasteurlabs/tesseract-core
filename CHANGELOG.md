@@ -16,6 +16,7 @@ All notable changes to this project will be documented in this file.
 - Better multiprocessing support from within `tesseract_api.py` (#488)
 - Ensure deprecration warning is actually visible (#487)
 - Ensure $HOME is set in Tesseracts and has appropriate permissions (#490)
+- Relax permissions on `/tmp` inside Tesseracts after build-time check (#506)
 
 ### Documentation
 
