@@ -136,7 +136,7 @@ RUN _TESSERACT_IS_BUILDING=1 /tesseract/entrypoint.sh tesseract-runtime check
 USER root
 RUN chmod -R 777 /tesseract
 RUN chmod -R 777 /home/tesseract-user
-RUN chmodd -R 777 /tmp
+RUN chmod -R 777 /tmp
 USER 9999:9999
 
 ENTRYPOINT ["/tesseract/entrypoint.sh", "tesseract-runtime"]
