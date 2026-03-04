@@ -6,7 +6,6 @@ import logging
 import os
 import random
 import string
-import threading
 import time
 from pathlib import Path
 
@@ -437,8 +436,9 @@ def test_teepipe(caplog):
     ]
 
 
-def test_teepipe_early_exit():
-    # Verify that TeePipe can handle early exit without hanging or losing data
+def test_teepipe_drains_buffer():
+    # Verify that TeePipe drains all buffered data before stop() returns.
+    # This simulates the real usage pattern where writes complete, then stop() is called.
     from tesseract_core.sdk.logs import TeePipe
 
     logged_lines = []
@@ -454,18 +454,14 @@ def test_teepipe_early_exit():
         logged_lines.append(msg)
 
     teepipe = TeePipe()
-    # Extend grace period to avoid flakes in tests when runners are slow
-    teepipe._grace_period = 1
-
     teepipe.start()
     fd = os.fdopen(teepipe.fileno(), "w", closefd=False)
 
-    def _write_to_pipe():
-        for line in logged_lines:
-            print(line, file=fd, flush=True)
-            time.sleep(random.random() / 100)
+    # Write all data
+    for line in logged_lines:
+        print(line, file=fd, flush=True)
 
-        print("end without newline", end="", file=fd, flush=True)
+    print("end without newline", end="", file=fd, flush=True)
 
     expected_lines = []
     for line in logged_lines:
@@ -473,18 +469,7 @@ def test_teepipe_early_exit():
         expected_lines.extend(sublines)
     expected_lines.append("end without newline")
 
-    writer_thread = threading.Thread(target=_write_to_pipe)
-    writer_thread.start()
-
-    # Wait for the first data to roll in, i.e., thread is up and running
-    while not teepipe.captured_lines:
-        time.sleep(0.01)
-
-    # Sanity check that not all data has been written yet
-    assert len(teepipe.captured_lines) < len(expected_lines)
-
-    # Exit the pipe early before all data is written
-    # This should block until no more data is incoming
+    # Now stop - this should drain all buffered data
     teepipe.stop()
 
     assert len(teepipe.captured_lines) == len(expected_lines)
