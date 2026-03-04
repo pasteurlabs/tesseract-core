@@ -517,3 +517,93 @@ def test_dtype_casting():
         ValidationError, match="Could not parse value as a numeric array"
     ):
         MyModel.model_validate(json_payload)
+
+
+def test_strict_types():
+    """strict_types rejects same-kind casting, accepts exact match."""
+    # Rejects castable dtype (int32 -> int64)
+    with pytest.raises(ValidationError, match="strict_types=True, no casting"):
+        MyModel.model_validate(
+            {
+                "array_int": np.array([[1, 2, 3], [4, 5, 6]], dtype=np.int32),
+                "array_float": arr_float,
+                "array_bool": arr_bool,
+                "scalar_int": scalar_int,
+            },
+            context={"strict_types": True},
+        )
+
+    # Also rejects via JSON-encoded path
+    json_payload = json.loads(
+        MyModel(
+            array_int=arr_int,
+            array_float=arr_float,
+            array_bool=arr_bool,
+            scalar_int=scalar_int,
+        ).model_dump_json()
+    )
+    json_payload["array_int"]["dtype"] = "int32"
+    with pytest.raises(ValidationError, match="strict_types=True, no casting"):
+        MyModel.model_validate(json_payload, context={"strict_types": True})
+
+    # Exact dtypes pass
+    model = MyModel.model_validate(
+        {
+            "array_int": arr_int,
+            "array_float": arr_float,
+            "array_bool": arr_bool,
+            "scalar_int": scalar_int,
+        },
+        context={"strict_types": True},
+    )
+    assert np.array_equal(model.array_int, arr_int)
+
+
+def test_strict_shapes():
+    """strict_shapes rejects broadcasting, accepts exact match and polymorphic dims."""
+
+    class BroadcastModel(BaseModel):
+        arr: Array[(2, 3), Int64]
+
+    # Rejects broadcastable shape (1, 3) -> (2, 3)
+    with pytest.raises(ValidationError, match="strict_shapes=True, no broadcasting"):
+        BroadcastModel.model_validate(
+            {"arr": np.array([[1, 2, 3]], dtype=np.int64)},
+            context={"strict_shapes": True},
+        )
+
+    # Also rejects via JSON-encoded path
+    json_payload = {
+        "arr": {
+            "object_type": "array",
+            "shape": [1, 3],
+            "dtype": "int64",
+            "data": {"buffer": [1, 2, 3], "encoding": "json"},
+        }
+    }
+    with pytest.raises(ValidationError, match="strict_shapes=True, no broadcasting"):
+        BroadcastModel.model_validate(json_payload, context={"strict_shapes": True})
+
+    # Exact shapes pass
+    model = MyModel.model_validate(
+        {
+            "array_int": arr_int,
+            "array_float": arr_float,
+            "array_bool": arr_bool,
+            "scalar_int": scalar_int,
+        },
+        context={"strict_shapes": True},
+    )
+    assert model.array_int.shape == (2, 3)
+
+    # Polymorphic dims (None) are unaffected — (2, 3) matches (None, 3)
+    model = MyModel.model_validate(
+        {
+            "array_int": arr_int,
+            "array_float": np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]),
+            "array_bool": arr_bool,
+            "scalar_int": scalar_int,
+        },
+        context={"strict_shapes": True},
+    )
+    assert model.array_float.shape == (2, 3)

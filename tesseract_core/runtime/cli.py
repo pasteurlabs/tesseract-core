@@ -414,9 +414,12 @@ def _create_user_defined_cli_command(
         if output_path:
             Path(output_path).mkdir(parents=True, exist_ok=True)
 
+        # Use stderr sink so logs are streamed when running in container
+        stderr_sink = lambda msg: print(msg, file=sys.stderr, flush=True)
+
         profiler = Profiler(enabled=config.profiling)
 
-        with start_run(base_dir=output_path):
+        with start_run(base_dir=output_path, log_sink=stderr_sink):
             with profiler:
                 result = user_function(**user_function_args)
 

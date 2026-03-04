@@ -33,6 +33,7 @@ BASE_OPTIONAL_DEPS = {
         "pytest",
         "pytest-cov",
         "pytest-mock",
+        "pytest-timeout",
         "moto[server]",
         "aiobotocore>=2.19.0",  # without this pip dependency resolution fails
         "typeguard",
