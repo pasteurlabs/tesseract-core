@@ -5,7 +5,6 @@
 
 import builtins
 import importlib
-import logging
 import re
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
@@ -25,8 +24,6 @@ from ..core import get_input_schema, get_output_schema
 from ..schema_generation import DICT_INDEX_SENTINEL, get_all_model_path_patterns
 
 ROWFORMAT = "{:>15s}  {:>20s}  {:>20s}  {:>20s}\n"
-
-logger = logging.getLogger("tesseract")
 
 
 class TestCliConfig(BaseModel):
@@ -551,6 +548,10 @@ def regress_test_case(
         elif test_spec.endpoint == "vector_jacobian_product":
             validation_context["input_keys"] = test_spec.payload.get("vjp_inputs", [])
 
+        # Do not cast shapes/dtypes when validating expected_outputs,
+        # since we want to catch mismatches as structural errors
+        validation_context.update({"strict_shapes": True, "strict_types": True})
+
         try:
             expected_outputs = OutputSchema.model_validate(
                 test_spec.expected_outputs, context=validation_context
@@ -728,10 +729,6 @@ def make_test_endpoint(
             This endpoint is designed for testing and CI/CD workflows.
             All outcomes return HTTP 200 with status in the response body regardless of success/failure.
         """
-        logger.warning(
-            "The 'test' endpoint is experimental and may change without warning."
-        )
-
         config = get_config()
         base_dir = Path(config.input_path) if config.input_path else None
 

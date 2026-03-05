@@ -182,12 +182,12 @@ class PydanticArrayAnnotation(metaclass=ArrayAnnotationType):
             [
                 load_from_dict_schema,
                 # when loading from Python, we also allow any array-like object
-                core_schema.no_info_plain_validator_function(python_to_array_),
+                core_schema.with_info_plain_validator_function(python_to_array_),
             ],
             mode="left_to_right",
         )
 
-        # Wrap the union schema to simplify error messages
+        # Wrap union schemas to simplify error messages
         wrapped_python_schema = core_schema.no_info_wrap_validator_function(
             _simplify_array_errors,
             python_union_schema,

@@ -38,7 +38,19 @@ def mock_clients(mocker):
 
 def test_Tesseract_init():
     # Instantiate with a url
-    t = Tesseract(url="localhost")
+    with pytest.warns(
+        UserWarning, match="Direct instantiation of Tesseract is deprecated"
+    ):
+        t = Tesseract(url="localhost")
+
+    # Using it as a context manager should be a no-op
+    with t:
+        pass
+
+
+def test_Tesseract_from_url():
+    # Instantiate with a url
+    t = Tesseract.from_url("localhost")
 
     # Using it as a context manager should be a no-op
     with t:
@@ -105,24 +117,34 @@ def test_serve_lifecycle(mock_serving, mock_clients):
     with t:
         pass
 
-    mock_serving["serve_mock"].assert_called_with(
-        image_name="sometesseract:0.2.3",
-        port=None,
-        volumes=[],
-        environment={},
-        gpus=None,
-        debug=True,
-        num_workers=1,
-        network=None,
-        network_alias=None,
-        host_ip="127.0.0.1",
-        user=None,
-        memory=None,
-        input_path=None,
-        output_path=None,
-        output_format="json+base64",
-        runtime_args=None,
-    )
+    mock_serving["serve_mock"].assert_called_once()
+    call_kwargs = mock_serving["serve_mock"].call_args.kwargs
+
+    expected_kwargs = {
+        "image_name": "sometesseract:0.2.3",
+        "port": None,
+        "volumes": [],
+        "environment": {},
+        "gpus": None,
+        "debug": True,
+        "num_workers": 1,
+        "network": None,
+        "network_alias": None,
+        "host_ip": "127.0.0.1",
+        "user": None,
+        "memory": None,
+        "input_path": None,
+        "output_format": "json+base64",
+        "runtime_args": None,
+    }
+
+    for key, expected_value in expected_kwargs.items():
+        assert call_kwargs[key] == expected_value, f"Mismatch for {key!r}"
+
+    # Output_path is auto-created as a temp directory
+    assert call_kwargs["output_path"].is_dir()
+    # Check that no unexpected kwargs were passed
+    assert call_kwargs.keys() == expected_kwargs.keys() | {"output_path"}
 
     mock_serving["teardown_mock"].assert_called_with("container-id-123")
 

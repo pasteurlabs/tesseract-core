@@ -2,8 +2,24 @@
   "endpoint": "apply",
   "expected_outputs": {
     "statistics": {
-      "first_point_coordinates": [0.0, 666.0, 0.0],
-      "barycenter": [0.5, 133.6999969482422, 0.20000000298023224]
+      "first_point_coordinates": {
+        "object_type": "array",
+        "shape": [3],
+        "dtype": "float32",
+        "data": {
+          "buffer": "AAAAAACAJkQAAAAA",
+          "encoding": "base64"
+        }
+      },
+      "barycenter": {
+        "object_type": "array",
+        "shape": [3],
+        "dtype": "float32",
+        "data": {
+          "buffer": "AAAAPzOzBUPNzEw+",
+          "encoding": "base64"
+        }
+      }
     }
   },
   "expected_exception": null,

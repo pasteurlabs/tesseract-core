@@ -58,7 +58,7 @@ $ echo "export TESSERACT_DOCKER_EXECUTABLE=podman" >> ~/.bashrc
 
 ## Runtime installation
 
-Invoking the Tesseract Runtime directly without Docker can be useful for debugging during Tesseract creation and non-containerized deployment (see [here](#tr-without-docker)). To install it, run:
+Invoking the Tesseract Runtime directly without Docker can be useful for debugging during Tesseract creation and non-containerized deployment (see <project:#running-without-containers>). To install it, run:
 
 ```bash
 $ pip install tesseract-core[runtime]

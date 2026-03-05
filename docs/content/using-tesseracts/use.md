@@ -160,7 +160,7 @@ To know which optional endpoints such as `jacobian`, `jacobian_vector_product`, 
 available in a given Tesseract, you can look at the docs at the `/docs` endpoint of a running Tesseract service, use `tesseract apidoc`, or use the [Tesseract Python API](#tesseract_core.Tesseract.available_endpoints):
 
 ```python
->>> with Tesseract(image="vectoradd") as vectoradd:
+>>> with Tesseract.from_image("vectoradd") as vectoradd:
 ...     print(vectoradd.available_endpoints)
 ['apply', 'jacobian', 'health']
 ```
@@ -196,7 +196,7 @@ $ curl <tesseract-address>:<port>/openapi.json
 
 ```python
 >>> from tesseract_core import Tesseract
->>> with Tesseract(image="vectoradd") as vectoradd:
+>>> with Tesseract.from_image("vectoradd") as vectoradd:
 >>>     schema = vectoradd.openapi_schema
 ```
 
