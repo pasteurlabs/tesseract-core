@@ -118,9 +118,8 @@ to approximate gradients numerically. This is useful for prototyping, complex ne
 verification of analytical gradient implementations.
 
 ```{warning}
-Finite difference gradients are **experimental** and available in `tesseract_core.runtime.experimental`.
-The API may change in future releases. Numerical differentiation is less accurate and more
-computationally expensive than analytical methods.
+Numerical differentiation is less accurate and more
+computationally expensive than analytical methods or automatic differentiation. Use with caution, especially for high-dimensional inputs.
 ```
 
 ```{seealso}
