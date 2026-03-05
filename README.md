@@ -5,7 +5,7 @@
 
 ### Tesseract Core
 
-Universal, autodiff-native software components for Simulation Intelligence
+Universal, autodiff-native software components for [Simulation Intelligence](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/misc/faq.html#what-is-simulation-intelligence) 📦
 
 [Read the docs](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/) |
 [Report an issue](https://github.com/pasteurlabs/tesseract-core/issues) |
@@ -19,7 +19,7 @@ Universal, autodiff-native software components for Simulation Intelligence
 
 ## The problem
 
-Real-world scientific workflows span multiple tools, languages, and computing environments. You might have a mesh generator in C++, a solver in Julia, and post-processing in Python. Getting these to work together is painful. Getting gradients to flow through them for optimization? Nearly impossible.
+Real-world scientific workflows span multiple tools, languages, and computing environments. You might have a mesh generator in C++, a solver in Julia, and post-processing in Python. Getting these to work together is painful. Getting gradients to flow through them for optimization is nearly impossible.
 
 Existing autodiff frameworks work great within a single codebase, but fall short when your pipeline crosses framework boundaries or includes legacy/commercial tools.
 
@@ -48,7 +48,7 @@ The [rocket fin optimization case study](https://si-tesseract.discourse.group/t/
          └──────── gradients flow back ─────────┘
 ```
 
-Each component uses a different differentiation strategy (analytic adjoints, finite differences, JAX autodiff), yet they compose into a single optimizable pipeline. Result: 24% improvement in structural stiffness.
+Each component uses a different differentiation strategy (analytic adjoints, finite differences, JAX autodiff), yet they compose into a single optimizable pipeline.
 
 ## Quick start
 
@@ -79,13 +79,11 @@ $ tesseract apidoc vectoradd
 
 ## Core features
 
-| Feature               | Description                                                                   |
-| --------------------- | ----------------------------------------------------------------------------- |
-| **Containerized**     | Docker-based packaging ensures reproducibility and dependency isolation       |
-| **Multi-interface**   | CLI, REST API, and Python SDK for the same component                          |
-| **Differentiable**    | First-class support for Jacobians, JVPs, and VJPs across component boundaries |
-| **Schema-validated**  | Pydantic models define explicit input/output contracts                        |
-| **Language-agnostic** | Wrap Python, Julia, C++, or any executable behind a thin Python API           |
+- **Containerized** — Docker-based packaging ensures reproducibility and dependency isolation
+- **Multi-interface** — CLI, REST API, and Python SDK for the same component
+- **Differentiable** — First-class support for Jacobians, JVPs, and VJPs across component and network boundaries
+- **Schema-validated** — Pydantic models define explicit input/output contracts
+- **Language-agnostic** — Wrap Python, Julia, C++, or any executable behind a thin Python API
 
 ## Ecosystem
 

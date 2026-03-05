@@ -1,6 +1,6 @@
 # Tesseract Core
 
-Universal, autodiff-native software components for [Simulation Intelligence](#what-is-si)
+Universal, autodiff-native software components for [Simulation Intelligence](#what-is-si) 📦
 
 ```{seealso}
 Already convinced? 👉 See how to [Get started](content/introduction/get-started.md) instead.
@@ -8,7 +8,7 @@ Already convinced? 👉 See how to [Get started](content/introduction/get-starte
 
 ## The problem
 
-Real-world scientific workflows span multiple tools, languages, and computing environments. You might have a mesh generator in C++, a solver in Julia, and post-processing in Python. Getting these to work together is painful. Getting [gradients to flow through them](content/introduction/differentiable-programming) for optimization? Nearly impossible.
+Real-world scientific workflows span multiple tools, languages, and computing environments. You might have a mesh generator in C++, a solver in Julia, and post-processing in Python. Getting these to work together is painful. Getting [gradients to flow through them](content/introduction/differentiable-programming) for optimization is nearly impossible.
 
 Existing autodiff frameworks work great within a single codebase, but fall short when your pipeline crosses framework boundaries or includes legacy or commercial tools.
 
