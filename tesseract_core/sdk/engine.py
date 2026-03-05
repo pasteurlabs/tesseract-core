@@ -585,11 +585,8 @@ def serve(
     input_path: str | Path | None = None,
     output_path: str | Path | None = None,
     output_format: Literal["json", "json+base64", "json+binref"] | None = None,
-<<<<<<< dion/issue-sprint
     docker_args: list[str] | None = None,
-=======
     runtime_config: dict[str, Any] | None = None,
->>>>>>> main
 ) -> tuple:
     """Serve one or more Tesseract images.
 
@@ -614,13 +611,10 @@ def serve(
         input_path: Input path to read input files from, such as local directory or S3 URI.
         output_path: Output path to write output files to, such as local directory or S3 URI.
         output_format: Output format to use for the results.
-<<<<<<< dion/issue-sprint
         docker_args: Additional arguments to pass to the container runtime (e.g., Docker).
-=======
         runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
             These are converted to TESSERACT_* environment variables. For example,
             ``{"profiling": True}`` sets ``TESSERACT_PROFILING=1``.
->>>>>>> main
 
     Returns:
         A tuple of the Tesseract container name and the port it is serving on.
