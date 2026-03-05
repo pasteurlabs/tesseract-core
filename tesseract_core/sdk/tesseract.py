@@ -56,6 +56,7 @@ class Tesseract:
     _serve_context: dict | None = None
     _lastlog: str | None = None
     _client: HTTPClient | LocalClient | None = None
+    _stream_logs: bool | Callable[[str], Any] = False
 
     def __init__(self, url: str) -> None:
         warnings.warn(
@@ -101,6 +102,7 @@ class Tesseract:
         output_path: str | Path | None = None,
         output_format: Literal["json", "json+base64"] = "json+base64",
         runtime_config: dict[str, Any] | None = None,
+        stream_logs: bool | Callable[[str], Any] = False,
     ) -> Tesseract:
         """Create a Tesseract instance from a Docker image.
 
@@ -135,6 +137,8 @@ class Tesseract:
             runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
                 These are converted to TESSERACT_* environment variables. For example,
                 `{"profiling": True}` enables profiling via TESSERACT_PROFILING=true.
+            stream_logs: If True, stream logs to stdout while endpoints run.
+                If a callable, stream logs to that callable instead.
 
         Returns:
             A Tesseract instance.
@@ -164,6 +168,7 @@ class Tesseract:
             # Auto-create temp directory for output (enables stream_logs without explicit output_path)
             output_path = Path(tempfile.mkdtemp(prefix="tesseract_output_"))
 
+        obj._stream_logs = stream_logs
         obj._spawn_config = dict(
             image_name=image_name,
             volumes=volumes,
@@ -191,6 +196,7 @@ class Tesseract:
         output_path: Path | None = None,
         output_format: Literal["json", "json+base64"] = "json+base64",
         runtime_config: dict[str, Any] | None = None,
+        stream_logs: bool | Callable[[str], Any] = False,
     ) -> Tesseract:
         """Create a Tesseract instance from a Tesseract API module.
 
@@ -210,6 +216,8 @@ class Tesseract:
                 This has no impact on what is returned to Python and only affects the format that is used internally.
             runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
                 For example, `{"profiling": True}` enables profiling.
+            stream_logs: If True, stream logs to stdout while endpoints run.
+                If a callable, stream logs to that callable instead.
 
         Returns:
             A Tesseract instance.
@@ -247,6 +255,7 @@ class Tesseract:
         update_config(**config_kwargs)
 
         obj = cls.__new__(cls)
+        obj._stream_logs = stream_logs
         obj._client = LocalClient(tesseract_api, output_path=resolved_output_path)
         return obj
 
@@ -357,7 +366,6 @@ class Tesseract:
         self,
         inputs: dict,
         run_id: str | None = None,
-        stream_logs: bool | Callable[[str], Any] = False,
     ) -> dict:
         """Run apply endpoint.
 
@@ -365,14 +373,12 @@ class Tesseract:
             inputs: a dictionary with the inputs.
             run_id: a string to identify the run. Run outputs will be located
                     in a directory suffixed with this id.
-            stream_logs: If True, stream logs to stdout while the endpoint runs.
-                    If a callable, stream logs to that callable instead.
 
         Returns:
             dictionary with the results.
         """
         payload = {"inputs": inputs}
-        return self._client.run_tesseract("apply", payload, run_id, stream_logs)
+        return self._client.run_tesseract("apply", payload, run_id, self._stream_logs)
 
     @requires_client
     def abstract_eval(self, abstract_inputs: dict) -> dict:
@@ -403,7 +409,6 @@ class Tesseract:
         jac_inputs: list[str],
         jac_outputs: list[str],
         run_id: str | None = None,
-        stream_logs: bool | Callable[[str], Any] = False,
     ) -> dict:
         """Calculate the Jacobian of (some of the) outputs w.r.t. (some of the) inputs.
 
@@ -413,8 +418,6 @@ class Tesseract:
             jac_outputs: Outputs which will be differentiated.
             run_id: a string to identify the run. Run outputs will be located
                     in a directory suffixed with this id.
-            stream_logs: If True, stream logs to stdout while the endpoint runs.
-                    If a callable, stream logs to that callable instead.
 
         Returns:
             dictionary with the results.
@@ -427,7 +430,9 @@ class Tesseract:
             "jac_inputs": jac_inputs,
             "jac_outputs": jac_outputs,
         }
-        return self._client.run_tesseract("jacobian", payload, run_id, stream_logs)
+        return self._client.run_tesseract(
+            "jacobian", payload, run_id, self._stream_logs
+        )
 
     @requires_client
     def jacobian_vector_product(
@@ -437,7 +442,6 @@ class Tesseract:
         jvp_outputs: list[str],
         tangent_vector: dict,
         run_id: str | None = None,
-        stream_logs: bool | Callable[[str], Any] = False,
     ) -> dict:
         """Calculate the Jacobian Vector Product (JVP) of (some of the) outputs w.r.t. (some of the) inputs.
 
@@ -448,8 +452,6 @@ class Tesseract:
             tangent_vector: Element of the tangent space to multiply with the Jacobian.
             run_id: a string to identify the run. Run outputs will be located
                     in a directory suffixed with this id.
-            stream_logs: If True, stream logs to stdout while the endpoint runs.
-                    If a callable, stream logs to that callable instead.
 
         Returns:
             dictionary with the results.
@@ -466,7 +468,7 @@ class Tesseract:
             "tangent_vector": tangent_vector,
         }
         return self._client.run_tesseract(
-            "jacobian_vector_product", payload, run_id, stream_logs
+            "jacobian_vector_product", payload, run_id, self._stream_logs
         )
 
     @requires_client
@@ -477,7 +479,6 @@ class Tesseract:
         vjp_outputs: list[str],
         cotangent_vector: dict,
         run_id: str | None = None,
-        stream_logs: bool | Callable[[str], Any] = False,
     ) -> dict:
         """Calculate the Vector Jacobian Product (VJP) of (some of the) outputs w.r.t. (some of the) inputs.
 
@@ -488,8 +489,6 @@ class Tesseract:
             cotangent_vector: Element of the cotangent space to multiply with the Jacobian.
             run_id: a string to identify the run. Run outputs will be located
                     in a directory suffixed with this id.
-            stream_logs: If True, stream logs to stdout while the endpoint runs.
-                    If a callable, stream logs to that callable instead.
 
         Returns:
             dictionary with the results.
@@ -506,7 +505,7 @@ class Tesseract:
             "cotangent_vector": cotangent_vector,
         }
         return self._client.run_tesseract(
-            "vector_jacobian_product", payload, run_id, stream_logs
+            "vector_jacobian_product", payload, run_id, self._stream_logs
         )
 
     @requires_client
@@ -749,8 +748,17 @@ class HTTPClient:
             # output_path is always set by from_image (uses temp dir if not specified)
             assert self._output_path is not None
             log_path = self._output_path / f"run_{run_id}" / "logs" / "tesseract.log"
-            sink = print if stream_logs is True else stream_logs
-            log_streamer = LogStreamer(log_path, sink)
+
+            # Determine log sink from stream_logs parameter
+            if callable(stream_logs):
+                log_sink = stream_logs
+            elif stream_logs is True:
+                log_sink = lambda msg: print(msg, file=sys.stderr, flush=True)
+            else:
+                raise ValueError(
+                    f"Invalid value for stream_logs: {stream_logs}. Must be True, False, or a callable."
+                )
+            log_streamer = LogStreamer(log_path, log_sink)
             log_streamer.start()
 
         try:
