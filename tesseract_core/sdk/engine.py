@@ -147,6 +147,31 @@ def get_runtime_dir() -> Path:
     return Path(tesseract_core.__file__).parent / "runtime"
 
 
+def get_runtime_dependencies() -> list[str]:
+    """Get the runtime dependencies from the installed tesseract-core package.
+
+    This retrieves dependencies declared under the 'runtime' extra without
+    requiring that extra to be installed.
+    """
+    from importlib.metadata import requires
+
+    from packaging.requirements import Requirement
+
+    deps = []
+    for req_str in sorted(requires("tesseract-core") or []):
+        req = Requirement(req_str)
+        # Check if this requirement is for the 'runtime' extra
+        if req.marker and req.marker.evaluate({"extra": "runtime"}):
+            # Reconstruct the requirement string without the marker
+            dep_str = req.name
+            if req.extras:
+                dep_str += f"[{','.join(sorted(req.extras))}]"
+            if req.specifier:
+                dep_str += str(req.specifier)
+            deps.append(dep_str)
+    return deps
+
+
 def get_template_dir() -> Path:
     """Get the template directory for the Tesseract runtime."""
     import tesseract_core
@@ -265,8 +290,24 @@ def prepare_build_context(
         context_dir / "__tesseract_runtime__" / "tesseract_core" / "runtime",
         ignore=_ignore_pycache,
     )
+    # Copy meta files (except Jinja templates, which we render)
+    from tesseract_core import __version__ as tesseract_version
+
     for metafile in (runtime_source_dir / "meta").glob("*"):
-        copy(metafile, context_dir / "__tesseract_runtime__")
+        if metafile.suffix == ".jinja":
+            # Render Jinja template
+            target_name = metafile.stem  # Remove .jinja suffix
+            template_content = metafile.read_text()
+            from jinja2 import Template
+
+            template = Template(template_content)
+            rendered = template.render(
+                runtime_dependencies=get_runtime_dependencies(),
+                version=tesseract_version,
+            )
+            (context_dir / "__tesseract_runtime__" / target_name).write_text(rendered)
+        else:
+            copy(metafile, context_dir / "__tesseract_runtime__")
 
     # Docker requires a .dockerignore file to be at the root of the build context
     dockerignore_path = runtime_source_dir / "meta" / ".dockerignore"
@@ -493,6 +534,7 @@ def serve(
     input_path: str | Path | None = None,
     output_path: str | Path | None = None,
     output_format: Literal["json", "json+base64", "json+binref"] | None = None,
+    runtime_config: dict[str, Any] | None = None,
 ) -> tuple:
     """Serve one or more Tesseract images.
 
@@ -517,6 +559,9 @@ def serve(
         input_path: Input path to read input files from, such as local directory or S3 URI.
         output_path: Output path to write output files to, such as local directory or S3 URI.
         output_format: Output format to use for the results.
+        runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
+            These are converted to TESSERACT_* environment variables. For example,
+            ``{"profiling": True}`` sets ``TESSERACT_PROFILING=1``.
 
     Returns:
         A tuple of the Tesseract container name and the port it is serving on.
@@ -548,6 +593,16 @@ def serve(
     if environment is None:
         environment = {}
     environment.update(volume_environment)
+
+    # Convert runtime_config to TESSERACT_* environment variables
+    if runtime_config is not None:
+        for key, value in runtime_config.items():
+            env_key = f"TESSERACT_{key.upper()}"
+            if isinstance(value, bool):
+                env_value = "1" if value else "0"
+            else:
+                env_value = str(value)
+            environment[env_key] = env_value
 
     if output_format:
         environment["TESSERACT_OUTPUT_FORMAT"] = output_format
@@ -809,6 +864,11 @@ def run_tesseract(
     Returns:
         Tuple with the stdout and stderr of the Tesseract.
     """
+    if command == "test":
+        logger.warning(
+            "The 'test' command is experimental and may change without warning."
+        )
+
     if output_format == "json+binref" and output_path is None:
         logger.warning(
             "Consider specifying --output-path when using the 'json+binref' output format "
