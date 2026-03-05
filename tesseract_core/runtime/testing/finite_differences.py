@@ -686,7 +686,7 @@ def finite_difference_jacobian(
             jac_outputs,
             result,
             eps=eps,
-            use_central=(algorithm == "central"),
+            algorithm=algorithm,
         )
 
     return result
@@ -702,7 +702,7 @@ def _compute_jacobian_elementwise(
     result: dict[str, dict[str, ArrayLike]],
     *,
     eps: float,
-    use_central: bool,
+    algorithm: FDAlgorithm,
 ) -> None:
     """Compute Jacobian by perturbing each input element individually."""
     input_schema = type(inputs)
@@ -717,7 +717,7 @@ def _compute_jacobian_elementwise(
 
         for idx in indices:
             for out_path in jac_outputs:
-                if use_central:
+                if algorithm == "central":
                     grad = _compute_central_diff_row(
                         apply_fn,
                         inputs_dict,
@@ -765,8 +765,8 @@ def _compute_jacobian_stochastic(
     2. Computing the gradient approximation using these directions
     3. Averaging over multiple samples to reduce variance
 
-    The key insight is that SPSA requires only 2 function evaluations per sample,
-    regardless of the input dimension, making it efficient for high-dimensional inputs.
+    SPSA requires only 2 function evaluations per sample, regardless of the input
+    dimension, making it efficient for high-dimensional inputs.
     """
     rng = np.random.RandomState(seed)
 
@@ -788,6 +788,22 @@ def _compute_jacobian_stochastic(
     # while still providing reasonable gradient estimates.
     if num_samples is None:
         num_samples = max(10, int(np.sqrt(total_input_elements)))
+
+    # If num_samples >= total_input_elements, stochastic is no cheaper than
+    # elementwise but less accurate. Fall back to central differences.
+    if num_samples >= total_input_elements:
+        _compute_jacobian_elementwise(
+            apply_fn,
+            inputs,
+            inputs_dict,
+            base_outputs,
+            jac_inputs,
+            jac_outputs,
+            result,
+            eps=eps,
+            algorithm="central",
+        )
+        return
 
     # Collect output shapes
     output_info = {}
@@ -1103,7 +1119,7 @@ def _compute_vjp_stochastic(
     """Compute VJP using Simultaneous Perturbation Stochastic Approximation (SPSA).
 
     For VJP, we want to compute v @ J for each input, which is:
-        VJP[in_path] = sum over out_path of: cotangent[out_path] @ J[out_path, in_path]
+        VJP[in_path] = sum over out_path of: cotangent[out_path] * J[out_path, in_path]
 
     Using SPSA, we can estimate this efficiently by:
     1. Generating random perturbation directions delta (Rademacher: ±1)
@@ -1132,6 +1148,35 @@ def _compute_vjp_stochastic(
     # while still providing reasonable gradient estimates.
     if num_samples is None:
         num_samples = max(10, int(np.sqrt(total_input_elements)))
+
+    # If num_samples >= total_input_elements, stochastic is no cheaper than
+    # elementwise but less accurate. Fall back to central differences.
+    if num_samples >= total_input_elements:
+        input_schema = type(inputs)
+        for in_path in vjp_inputs:
+            in_val = get_at_path(inputs_dict, in_path)
+            in_arr = np.asarray(in_val)
+            in_shape = in_arr.shape
+            indices = list(np.ndindex(in_shape)) if in_shape else [()]
+            for idx in indices:
+                vjp_value = 0.0
+                for out_path in vjp_outputs:
+                    grad = _compute_central_diff_row(
+                        apply_fn,
+                        inputs_dict,
+                        input_schema,
+                        in_path,
+                        out_path,
+                        idx,
+                        eps,
+                    )
+                    cotangent = np.asarray(cotangent_vector[out_path])
+                    vjp_value += np.sum(cotangent * grad)
+                if idx:
+                    result[in_path][idx] = vjp_value
+                else:
+                    result[in_path] = np.float64(vjp_value)
+        return
 
     # Accumulate VJP estimates
     for _ in range(num_samples):

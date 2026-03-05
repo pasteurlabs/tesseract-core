@@ -99,12 +99,55 @@ class TestFiniteDifferenceJacobian:
             seed=42,
         )
 
+        # Verify against analytic Jacobian
         expected_jac_a = np.eye(3) * 2.0
-        # Stochastic has higher variance, so use looser tolerance
         assert np.allclose(jac["result"]["a"], expected_jac_a, atol=0.1)
 
+    def test_jacobian_stochastic_convergence(self):
+        """Test that stochastic Jacobian error decreases with more samples.
+
+        Uses a higher-dimensional input so that the stochastic algorithm doesn't
+        fall back to elementwise (which would give exact results regardless of
+        num_samples).
+        """
+
+        class HighDimInput(BaseModel):
+            x: Differentiable[Array[(20,), Float64]]
+
+        class HighDimOutput(BaseModel):
+            y: Differentiable[Array[(20,), Float64]]
+
+        def square_apply(inputs: HighDimInput) -> HighDimOutput:
+            return HighDimOutput(y=inputs.x**2)
+
+        inputs = HighDimInput(x=np.arange(1.0, 21.0, dtype=np.float64))
+        # Analytic Jacobian: d(x^2)/dx = diag(2*x)
+        expected_jac = np.diag(2.0 * np.arange(1.0, 21.0))
+
+        sample_counts = [5, 50, 500]
+        errors = []
+
+        for n in sample_counts:
+            jac = finite_difference_jacobian(
+                square_apply,
+                inputs,
+                jac_inputs={"x"},
+                jac_outputs={"y"},
+                algorithm="stochastic",
+                eps=1e-4,
+                num_samples=n,
+                seed=42,
+            )
+            error = np.max(np.abs(jac["y"]["x"] - expected_jac))
+            errors.append(error)
+
+        # Error should decrease as num_samples increases
+        assert errors[-1] < errors[0], (
+            f"Error did not decrease with more samples: {list(zip(sample_counts, errors, strict=True))}"
+        )
+
     def test_nonlinear_jacobian(self, simple_inputs):
-        """Test Jacobian computation on a non-linear function."""
+        """Test Jacobian computation on a non-linear function against analytic Jacobian."""
         jac = finite_difference_jacobian(
             nonlinear_apply,
             simple_inputs,
@@ -118,16 +161,22 @@ class TestFiniteDifferenceJacobian:
         assert jac["result"]["a"].shape == (3, 3)
         assert jac["result"]["s"].shape == (3,)
 
-        # Verify against numerical check with different eps
-        jac_check = finite_difference_jacobian(
-            nonlinear_apply,
-            simple_inputs,
-            jac_inputs={"a", "s"},
-            jac_outputs={"result"},
-            algorithm="central",
-            eps=1e-5,
-        )
-        assert np.allclose(jac["result"]["a"], jac_check["result"]["a"], rtol=0.01)
+        # Compute analytic Jacobian for result = v / |v| where v = s*a + b
+        a = simple_inputs.a
+        b = simple_inputs.b
+        s = simple_inputs.s
+        v = s * a + b
+        norm_v = np.linalg.norm(v)
+        # d(v/|v|)/dv = (I - v v^T / |v|^2) / |v|
+        identity = np.eye(3)
+        analytic_jac_v = (identity - np.outer(v, v) / norm_v**2) / norm_v
+        # d(result)/d(a) = d(result)/d(v) * d(v)/d(a) = analytic_jac_v * s
+        analytic_jac_a = analytic_jac_v * s
+        # d(result)/d(s) = d(result)/d(v) * d(v)/d(s) = analytic_jac_v @ a
+        analytic_jac_s = analytic_jac_v @ a
+
+        assert np.allclose(jac["result"]["a"], analytic_jac_a, atol=1e-5)
+        assert np.allclose(jac["result"]["s"], analytic_jac_s, atol=1e-5)
 
     def test_partial_inputs_outputs(self, simple_inputs):
         """Test computing Jacobian for only a subset of inputs/outputs."""

@@ -19,10 +19,11 @@ Finite differences are useful when:
 
 ## Trade-offs
 
-| Approach               | Pros                                | Cons                                     |
-| ---------------------- | ----------------------------------- | ---------------------------------------- |
-| **Analytical**         | Accurate, efficient                 | Requires manual implementation           |
-| **Finite Differences** | No manual work, works with any code | Less accurate, more function evaluations |
+| Approach                          | Pros                                | Cons                                     |
+| --------------------------------- | ----------------------------------- | ---------------------------------------- |
+| **Auto-diff (e.g. JAX, PyTorch)** | Accurate, efficient, automatic      | Requires compatible framework            |
+| **Analytical**                    | Accurate, efficient                 | Requires manual implementation           |
+| **Finite Differences**            | No manual work, works with any code | Less accurate, more function evaluations |
 
 ## The example: meshstats_finitediff
 
@@ -46,7 +47,7 @@ class VolumetricMeshData(BaseModel):
 
 ### Implementing gradients with finite differences
 
-The key insight is that you can implement all three AD endpoints (`jacobian`, `jacobian_vector_product`,
+You can implement all three AD endpoints (`jacobian`, `jacobian_vector_product`,
 `vector_jacobian_product`) with just a few lines of code:
 
 ```python
@@ -82,13 +83,29 @@ def vector_jacobian_product(inputs, vjp_inputs, vjp_outputs, cotangent_vector):
 
 The `algorithm` parameter controls the finite difference method:
 
-| Algorithm      | Function Evaluations | Accuracy | Use case                                    |
-| -------------- | -------------------- | -------- | ------------------------------------------- |
-| `"central"`    | 2n                   | Highest  | Default choice                              |
-| `"forward"`    | n + 1                | Medium   | When evaluations are expensive              |
-| `"stochastic"` | O(√n)                | Lower    | High-dimensional inputs (1000s+ parameters) |
+| Algorithm      | Function Evaluations | Accuracy     | Use case                                    |
+| -------------- | -------------------- | ------------ | ------------------------------------------- |
+| `"central"`    | 2n                   | Second-order | Default choice                              |
+| `"forward"`    | n + 1                | First-order  | When evaluations are expensive              |
+| `"stochastic"` | O(√n)                | Approximate  | High-dimensional inputs (1000s+ parameters) |
 
-where `n` is the total number of input elements being differentiated.
+where `n` is the number of array elements in the input that we're differentiating with respect to.
+
+The `"stochastic"` algorithm uses
+[Simultaneous Perturbation Stochastic Approximation (SPSA)](https://en.wikipedia.org/wiki/Simultaneous_perturbation_stochastic_approximation),
+which estimates the Jacobian using random perturbation directions. It requires only
+2 function evaluations per sample regardless of input dimension, making it useful when
+the number of input dimensions is very large. The resulting gradient estimates are
+unbiased, which makes them suitable for use with first-order SGD-family optimizers.
+They may not be suitable for applications requiring precise Jacobian values (e.g.,
+Newton-type methods).
+
+```{note}
+All three algorithms use a single scalar `eps` for the perturbation magnitude.
+This means accuracy may degrade for inputs where the magnitudes of Jacobian entries
+vary by many orders of magnitude (e.g., physical applications with unnormalized inputs).
+If this is a concern, consider normalizing your inputs or implementing analytical gradients.
+```
 
 ### Making the algorithm configurable
 
