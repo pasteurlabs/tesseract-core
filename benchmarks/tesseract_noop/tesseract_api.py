@@ -10,19 +10,19 @@ computation contaminating the results.
 
 from pydantic import BaseModel
 
-from tesseract_core.runtime import Array, Differentiable, Float64
+from tesseract_core.runtime import Array, Float64
 
 
 class InputSchema(BaseModel):
     """Input schema with a single array."""
 
-    data: Differentiable[Array[(None,), Float64]]
+    data: Array[(None,), Float64]
 
 
 class OutputSchema(BaseModel):
     """Output schema returning the same array."""
 
-    result: Differentiable[Array[(None,), Float64]]
+    result: Array[(None,), Float64]
 
 
 def apply(inputs: InputSchema) -> OutputSchema:

@@ -13,6 +13,9 @@ import re
 import sys
 from pathlib import Path
 
+# Percentage change threshold for flagging a benchmark as notable.
+NOTABLE_THRESHOLD_PCT = 5
+
 
 def _parse_benchmark_name(name: str) -> tuple[str, str, int]:
     """Parse benchmark name into (suite, operation, size) for sorting.
@@ -58,21 +61,25 @@ def load_benchmark_file(path: str) -> dict | None:
 
 
 def _generate_current_only_report(current: dict, current_data: dict) -> str:
-    """Generate a report with only current benchmark results (no baseline comparison)."""
+    """Generate a report when no baseline exists, marking every benchmark as new."""
+    all_names = _sort_benchmark_names(list(current.keys()))
+    comparisons = [
+        _compute_comparison(name, baseline={}, current=current) for name in all_names
+    ]
+
     lines = [
         "## Benchmark Results",
         "",
-        ":information_source: No baseline found - showing current results only.",
+        ":information_source: No baseline found — all benchmarks marked as new.",
         "",
         "Benchmarks use a no-op Tesseract to measure pure framework overhead.",
         "",
-        "| Benchmark | Current |",
-        "|-----------|---------|",
+        "| Benchmark | Baseline | Current | Change | Status |",
+        "|-----------|----------|---------|--------|--------|",
     ]
 
-    for name in _sort_benchmark_names(list(current.keys())):
-        curr_mean = current[name]["mean_time_s"] * 1000
-        lines.append(f"| `{name}` | {curr_mean:.3f}ms |")
+    for comp in comparisons:
+        lines.append(_format_comparison_row(comp))
 
     # Extract metadata for details section
     iterations = current_data.get("metadata", {}).get("iterations", "N/A")
@@ -128,14 +135,14 @@ def _compute_comparison(name: str, baseline: dict, current: dict) -> dict:
     else:
         diff_pct = 0
 
-    if diff_pct < -5:
+    if diff_pct < -NOTABLE_THRESHOLD_PCT:
         status = ":rocket: faster"
-    elif diff_pct > 5:
+    elif diff_pct > NOTABLE_THRESHOLD_PCT:
         status = ":warning: slower"
     else:
         status = ":white_check_mark:"
 
-    notable = abs(diff_pct) > 5
+    notable = abs(diff_pct) > NOTABLE_THRESHOLD_PCT
     return {
         "name": name,
         "base_mean_ms": base_mean,
@@ -190,13 +197,19 @@ def generate_report(baseline_path: str, current_path: str) -> str | None:
 
     notable = [c for c in comparisons if c["notable"]]
     num_faster = sum(
-        1 for c in comparisons if c["diff_pct"] is not None and c["diff_pct"] < -5
+        1
+        for c in comparisons
+        if c["diff_pct"] is not None and c["diff_pct"] < -NOTABLE_THRESHOLD_PCT
     )
     num_slower = sum(
-        1 for c in comparisons if c["diff_pct"] is not None and c["diff_pct"] > 5
+        1
+        for c in comparisons
+        if c["diff_pct"] is not None and c["diff_pct"] > NOTABLE_THRESHOLD_PCT
     )
     num_same = sum(
-        1 for c in comparisons if c["diff_pct"] is not None and abs(c["diff_pct"]) <= 5
+        1
+        for c in comparisons
+        if c["diff_pct"] is not None and abs(c["diff_pct"]) <= NOTABLE_THRESHOLD_PCT
     )
 
     lines = [
@@ -208,7 +221,7 @@ def generate_report(baseline_path: str, current_path: str) -> str | None:
         "",
     ]
 
-    # Show notable changes (>5%) prominently
+    # Show notable changes prominently
     if notable:
         lines.extend(
             [
