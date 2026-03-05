@@ -1,4 +1,4 @@
-# Debugging guide
+# Debugging Guide
 
 This page covers strategies for interactive development and debugging of Tesseracts.
 
