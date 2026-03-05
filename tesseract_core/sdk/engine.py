@@ -585,7 +585,7 @@ def serve(
     input_path: str | Path | None = None,
     output_path: str | Path | None = None,
     output_format: Literal["json", "json+base64", "json+binref"] | None = None,
-    runtime_args: list[str] | None = None,
+    docker_args: list[str] | None = None,
 ) -> tuple:
     """Serve one or more Tesseract images.
 
@@ -610,7 +610,7 @@ def serve(
         input_path: Input path to read input files from, such as local directory or S3 URI.
         output_path: Output path to write output files to, such as local directory or S3 URI.
         output_format: Output format to use for the results.
-        runtime_args: Additional arguments to pass to the container runtime (e.g., Docker).
+        docker_args: Additional arguments to pass to the container runtime (e.g., Docker).
 
     Returns:
         A tuple of the Tesseract container name and the port it is serving on.
@@ -699,8 +699,8 @@ def serve(
             raise ValueError("Network must be specified if network_alias is provided")
         extra_args.extend(["--network-alias", network_alias])
 
-    if runtime_args:
-        extra_args.extend(runtime_args)
+    if docker_args:
+        extra_args.extend(docker_args)
 
     container = docker_client.containers.run(
         image=image_name,
