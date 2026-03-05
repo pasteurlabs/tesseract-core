@@ -218,13 +218,64 @@ def prepare_build_context(
 
     copytree(src_dir, context_dir / "__tesseract_source__")
 
+    # Handle package_data paths that reference files outside the Tesseract directory
+    # These need to be copied into the build context and their paths rewritten
+    package_data_dir = context_dir / "__package_data__"
+    resolved_package_data = []
+    if user_config.build_config.package_data:
+        for source_path, target_path in user_config.build_config.package_data:
+            # Resolve the source path relative to the Tesseract directory
+            resolved_source = (src_dir / source_path).resolve()
+
+            # Check if the path goes outside the Tesseract directory
+            if resolved_source.is_relative_to(src_dir.resolve()):
+                # Path is within src_dir, use as-is
+                resolved_package_data.append((source_path, target_path))
+            else:
+                # Path is outside src_dir, copy to __package_data__ directory
+                if not resolved_source.exists():
+                    raise RuntimeError(
+                        f"package_data source file not found: {source_path} "
+                        f"(resolved to {resolved_source})"
+                    )
+
+                # Create a unique name for the copied file/directory
+                dest_name = resolved_source.name
+                dest_path = package_data_dir / dest_name
+
+                # Check for name collisions - raise an error if detected
+                if dest_path.exists():
+                    raise RuntimeError(
+                        f"package_data name conflict: '{dest_name}' would be copied "
+                        f"multiple times. Please use unique filenames for external "
+                        f"package_data entries."
+                    )
+
+                package_data_dir.mkdir(parents=True, exist_ok=True)
+                if resolved_source.is_file():
+                    copy(resolved_source, dest_path)
+                else:
+                    copytree(resolved_source, dest_path)
+
+                # Use the path relative to build context for Docker COPY
+                resolved_package_data.append(
+                    (f"../__package_data__/{dest_name}", target_path)
+                )
+
     template_name = "Dockerfile.base"
     template = ENV.get_template(template_name)
+
+    # Replace the package_data in config with resolved paths
+    resolved_config = user_config.model_copy(deep=True)
+    if resolved_package_data:
+        resolved_config.build_config = resolved_config.build_config.model_copy(
+            update={"package_data": tuple(resolved_package_data)}
+        )
 
     template_values = {
         "tesseract_source_directory": "__tesseract_source__",
         "tesseract_runtime_location": "__tesseract_runtime__",
-        "config": user_config,
+        "config": resolved_config,
         "use_ssh_mount": use_ssh_mount,
     }
 
@@ -534,6 +585,7 @@ def serve(
     input_path: str | Path | None = None,
     output_path: str | Path | None = None,
     output_format: Literal["json", "json+base64", "json+binref"] | None = None,
+    docker_args: list[str] | None = None,
     runtime_config: dict[str, Any] | None = None,
 ) -> tuple:
     """Serve one or more Tesseract images.
@@ -559,6 +611,7 @@ def serve(
         input_path: Input path to read input files from, such as local directory or S3 URI.
         output_path: Output path to write output files to, such as local directory or S3 URI.
         output_format: Output format to use for the results.
+        docker_args: Additional arguments to pass to the container runtime (e.g., Docker).
         runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
             These are converted to TESSERACT_* environment variables. For example,
             ``{"profiling": True}`` sets ``TESSERACT_PROFILING=1``.
@@ -627,15 +680,22 @@ def serve(
     # Always bind to all interfaces inside the container
     args.extend(["--host", "0.0.0.0"])
 
-    if host_ip == "0.0.0.0":
+    # When using host network, no port mapping is needed (container binds directly to host ports)
+    # and we should always ping on localhost
+    if network == "host":
         ping_ip = "127.0.0.1"
+        port_mappings = None
     else:
-        ping_ip = host_ip
+        if host_ip == "0.0.0.0":
+            ping_ip = "127.0.0.1"
+        else:
+            ping_ip = host_ip
+        port_mappings = {f"{host_ip}:{port}": container_api_port}
 
-    port_mappings = {f"{host_ip}:{port}": container_api_port}
     if debug:
         debugpy_port = str(get_free_port())
-        port_mappings[f"{host_ip}:{debugpy_port}"] = container_debugpy_port
+        if port_mappings is not None:
+            port_mappings[f"{host_ip}:{debugpy_port}"] = container_debugpy_port
         environment["TESSERACT_DEBUG"] = "1"
 
     extra_args = [
@@ -652,6 +712,9 @@ def serve(
         if network is None:
             raise ValueError("Network must be specified if network_alias is provided")
         extra_args.extend(["--network-alias", network_alias])
+
+    if docker_args:
+        extra_args.extend(docker_args)
 
     container = docker_client.containers.run(
         image=image_name,
@@ -836,6 +899,7 @@ def run_tesseract(
     output_path: str | Path | None = None,
     output_format: Literal["json", "json+base64", "json+binref"] | None = None,
     output_file: str | None = None,
+    docker_args: list[str] | None = None,
     stream_logs: bool = False,
 ) -> tuple[str, str]:
     """Start a Tesseract and execute a given command.
@@ -859,6 +923,7 @@ def run_tesseract(
         output_format: Format of the output.
         output_file: If specified, the output will be written to this file within output_path
             instead of stdout.
+        docker_args: Additional arguments to pass to the container runtime (e.g., Docker).
         stream_logs: If True, stream logs to stderr in real-time. Requires output_path to be set.
 
     Returns:
@@ -926,6 +991,9 @@ def run_tesseract(
     extra_args = []
     if is_podman():
         extra_args.extend(["--userns", "keep-id"])
+
+    if docker_args:
+        extra_args.extend(docker_args)
 
     # Run the container, optionally streaming stderr to the terminal
     result = docker_client.containers.run(

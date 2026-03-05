@@ -53,6 +53,45 @@ class InputSchema(BaseModel):
 In case you run into issues with Pydantic features not listed here, please [open an issue](https://github.com/pasteurlabs/tesseract-core/issues/new/choose).
 ```
 
+(x86-vs-arm)=
+
+### 🔪 Sharp edge: x86 vs ARM architecture on Apple Silicon
+
+If you're using a Mac with Apple Silicon (M1, M2, M3, or M4 chip), you may encounter architecture incompatibilities when building or running Tesseracts. This is because Apple Silicon uses the ARM64 architecture, while many Docker images and Python packages are built for x86_64 (also known as AMD64).
+
+**Common symptoms:**
+
+- Build failures with errors mentioning "platform mismatch" or "exec format error"
+- Runtime errors like `exec /tesseract/entrypoint.sh: exec format error`
+- Slow performance due to Rosetta 2 emulation
+- Package installation failures in `tesseract_requirements.txt`
+
+**Solutions:**
+
+1. **Build x86_64 images for sharing or compatibility (recommended):** If you intend to share Tesseracts with others, deploy to x86_64 servers, or are running into difficulties with missing ARM64 wheels, build for x86_64. Edit your `tesseract_config.yaml`:
+
+   ```yaml
+   # tesseract_config.yaml
+   build_config:
+     target_platform: linux/amd64 # Build for x86_64
+   ```
+
+   Note this uses QEMU emulation and will be slower to build, but produces images that work everywhere.
+
+2. **Build for your native architecture (for local development):** By default, Tesseract builds for your native platform. If you only need to run locally, this is faster. You can explicitly set it in `tesseract_config.yaml`:
+
+   ```yaml
+   # tesseract_config.yaml
+   build_config:
+     target_platform: linux/arm64 # Explicitly set for Apple Silicon
+   ```
+
+3. **Use ARM-compatible base images:** Some base images don't have ARM64 variants. Check that your base image supports ARM64 (e.g., `python:3.11-slim` supports both architectures).
+
+4. **Handle packages without ARM64 wheels:** Some Python packages don't provide pre-built ARM64 wheels. You can install build dependencies (`extra_packages: [build-essential, gcc]`), use conda (`venv_backend: conda`), or pin to versions with ARM64 support. Alternatively, build for x86_64 as described above.
+
+To verify the architecture of a built Tesseract image: `docker inspect --format='{{.Architecture}}' my_tesseract:latest`
+
 (abstract-eval-pydantic)=
 
 ### 🔪 Sharp edge: `abstract_eval` and field validators

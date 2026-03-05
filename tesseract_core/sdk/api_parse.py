@@ -118,7 +118,8 @@ class TesseractBuildConfig(BaseModel, validate_assignment=True):
         (),
         description=(
             "Additional files to copy into the Docker image, in the format ``(source, destination)``. "
-            "Source paths are relative to the Tesseract directory."
+            "Source paths are relative to the Tesseract directory. "
+            "Paths can reference files outside the Tesseract directory using ``../`` (e.g., ``../shared_code.py``)."
         ),
     )
     custom_build_steps: tuple[StrictStr, ...] | None = Field(
