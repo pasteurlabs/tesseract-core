@@ -6,7 +6,7 @@ on:
       - "tesseract_core/**"
       - "benchmarks/**"
       - ".github/workflows/benchmarks.yml"
-      - ".github/scripts/compare_benchmarks.py"
+      - "benchmarks/compare_benchmarks.py"
 
   push:
     branches:
@@ -15,7 +15,7 @@ on:
       - "tesseract_core/**"
       - "benchmarks/**"
       - ".github/workflows/benchmarks.yml"
-      - ".github/scripts/compare_benchmarks.py"
+      - "benchmarks/compare_benchmarks.py"
 
 concurrency:
   group: benchmarks-${{ github.event.pull_request.number || github.ref }}
@@ -96,7 +96,7 @@ jobs:
         if: github.event_name == 'pull_request'
         id: comparison
         run: |
-          python .github/scripts/compare_benchmarks.py \
+          python benchmarks/compare_benchmarks.py \
             baseline_benchmarks.json \
             current_benchmarks.json \
             benchmark_report.md

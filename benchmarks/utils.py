@@ -11,8 +11,15 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
+
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+
+def create_test_array(size: int, dtype: str = "float64") -> np.ndarray:
+    """Create a random test array of given size."""
+    return np.random.default_rng().standard_normal(size).astype(dtype)
 
 
 @dataclass
@@ -142,84 +149,3 @@ class BenchmarkSuite:
                 )
             )
         return suite
-
-
-def compare_results(
-    baseline: BenchmarkSuite, current: BenchmarkSuite
-) -> dict[str, dict[str, float]]:
-    """Compare two benchmark suites and return relative speedups.
-
-    Args:
-        baseline: Baseline benchmark results
-        current: Current benchmark results
-
-    Returns:
-        Dictionary mapping benchmark name to comparison metrics:
-        - speedup: >1 means current is faster, <1 means slower
-        - baseline_mean_s: baseline mean time
-        - current_mean_s: current mean time
-        - diff_pct: percentage difference (negative = faster)
-    """
-    baseline_by_name = {r.name: r for r in baseline.results}
-    current_by_name = {r.name: r for r in current.results}
-
-    comparisons: dict[str, dict[str, float]] = {}
-    for name in baseline_by_name:
-        if name in current_by_name:
-            base_mean = baseline_by_name[name].mean_time_s
-            curr_mean = current_by_name[name].mean_time_s
-
-            if curr_mean > 0:
-                speedup = base_mean / curr_mean
-            else:
-                speedup = float("inf")
-
-            diff_pct = (
-                ((curr_mean - base_mean) / base_mean) * 100 if base_mean > 0 else 0
-            )
-
-            comparisons[name] = {
-                "speedup": speedup,
-                "baseline_mean_s": base_mean,
-                "current_mean_s": curr_mean,
-                "diff_pct": diff_pct,
-            }
-
-    return comparisons
-
-
-def format_comparison_table(comparisons: dict[str, dict[str, float]]) -> str:
-    """Format comparison results as a markdown table.
-
-    Args:
-        comparisons: Output from compare_results()
-
-    Returns:
-        Markdown-formatted table
-    """
-    lines = [
-        "| Benchmark | Baseline | Current | Change | Status |",
-        "|-----------|----------|---------|--------|--------|",
-    ]
-
-    for name, comp in sorted(comparisons.items()):
-        baseline_ms = comp["baseline_mean_s"] * 1000
-        current_ms = comp["current_mean_s"] * 1000
-        diff_pct = comp["diff_pct"]
-
-        # Determine status emoji
-        if diff_pct < -5:
-            status = ":rocket: faster"
-        elif diff_pct > 5:
-            status = ":warning: slower"
-        else:
-            status = ":white_check_mark: ~same"
-
-        # Format change with sign
-        change_str = f"{diff_pct:+.1f}%"
-
-        lines.append(
-            f"| {name} | {baseline_ms:.3f}ms | {current_ms:.3f}ms | {change_str} | {status} |"
-        )
-
-    return "\n".join(lines)

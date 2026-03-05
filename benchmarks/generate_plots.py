@@ -15,10 +15,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 
+import matplotlib.patheffects as pe
 import matplotlib.pyplot as plt
 import numpy as np
+
+_outline = [pe.withStroke(linewidth=3, foreground="white")]
+
+
+here = os.path.dirname(os.path.abspath(__file__))
 
 
 def load_benchmark_results(benchmark_file: Path) -> dict:
@@ -91,10 +98,11 @@ def generate_guidance_plot(output_path: Path, benchmark_results: dict) -> None:
     containerized_cli_data = extract_suite_data(benchmark_results, "containerized_cli")
 
     # Use same categories as overhead plot with consistent colors
+    # Colorblind-safe palette (blue / orange / purple)
     modes = [
-        ("Non-containerized, in-memory", from_api_data, "#2ecc71"),
-        ("Containerized, json+base64 via HTTP", containerized_http_data, "#3498db"),
-        ("Containerized, json+binref via CLI", containerized_cli_data, "#e74c3c"),
+        ("Non-containerized, in-memory", from_api_data, "#0072B2"),
+        ("Containerized, json+base64 via HTTP", containerized_http_data, "#E69F00"),
+        ("Containerized, json+binref via CLI", containerized_cli_data, "#9467BD"),
     ]
 
     # Representative I/O sizes with different linestyles
@@ -108,15 +116,15 @@ def generate_guidance_plot(output_path: Path, benchmark_results: dict) -> None:
         if not mode_data:
             continue
 
-        for size, linestyle in io_sizes:
-            # Get actual overhead from benchmarks
-            available = sorted(mode_data.keys())
-            array_size = size // 8  # Convert bytes to number of float64 elements
-            closest = min(available, key=lambda x: abs(x - array_size))
-            overhead_ms = mode_data[closest]
+        # Fit linear model: overhead_ms = intercept + slope * array_size
+        # This captures both constant overhead and per-element scaling
+        sizes_arr = np.array(sorted(mode_data.keys()), dtype=float)
+        times_arr = np.array([mode_data[int(s)] for s in sizes_arr])
+        slope, intercept = np.polyfit(sizes_arr, times_arr, 1)
 
-            # Scale overhead linearly to match target
-            overhead_ms *= array_size / closest
+        for size, linestyle in io_sizes:
+            array_size = size // 8  # Convert bytes to number of float64 elements
+            overhead_ms = max(0.0, intercept + slope * array_size)
 
             data_label = _size_to_label(size)
 
@@ -131,37 +139,40 @@ def generate_guidance_plot(output_path: Path, benchmark_results: dict) -> None:
                 linestyle=linestyle,
             )
 
-    # Add guidance regions
-    ax.axhspan(0, 10, alpha=0.15, color="green")
-    ax.axhspan(10, 50, alpha=0.15, color="yellow")
-    ax.axhspan(50, 100, alpha=0.15, color="red")
+    # Add guidance regions (colorblind-safe)
+    ax.axhspan(0, 10, alpha=0.15, color="#0072B2")
+    ax.axhspan(10, 50, alpha=0.15, color="#E69F00")
+    ax.axhspan(50, 100, alpha=0.15, color="#D55E00")
 
     ax.text(
         1.2e-4,
         5,
         "Excellent fit (<10% overhead)",
         fontsize=10,
-        color="darkgreen",
+        color="#0072B2",
         ha="left",
         va="center",
+        path_effects=_outline,
     )
     ax.text(
         1.2e-4,
         30,
         "Good fit (10-50% overhead)",
         fontsize=10,
-        color="darkorange",
+        color="#E69F00",
         ha="left",
         va="center",
+        path_effects=_outline,
     )
     ax.text(
         1.2e-4,
         75,
         "Consider alternatives (>50%)",
         fontsize=10,
-        color="darkred",
+        color="#D55E00",
         ha="left",
         va="center",
+        path_effects=_outline,
     )
 
     # Add human-readable time markers
@@ -172,8 +183,8 @@ def generate_guidance_plot(output_path: Path, benchmark_results: dict) -> None:
         (3600, "1hr"),
     ]
     for time_s, label in time_markers:
-        ax.axvline(x=time_s, color="gray", linestyle="-", linewidth=0.8, alpha=0.5)
-        ax.text(time_s, 102, label, fontsize=9, ha="center", va="bottom", color="gray")
+        ax.axvline(x=time_s, color="0.4", linestyle="-", linewidth=0.8, alpha=0.5)
+        ax.text(time_s, 101, label, fontsize=9, ha="center", va="bottom", color="black")
 
     ax.set_xlabel("Computation Time (s)", fontsize=12)
     ax.set_ylabel("Tesseract Overhead (%)", fontsize=12)
@@ -186,6 +197,7 @@ def generate_guidance_plot(output_path: Path, benchmark_results: dict) -> None:
         ha="center",
         va="center",
         transform=ax.transAxes,
+        path_effects=_outline,
     )
     ax.legend(loc="upper center", fontsize=8, ncol=3)
     ax.grid(True, alpha=0.3)
@@ -238,21 +250,38 @@ def generate_encoding_comparison_plot(
     x = np.arange(len(sizes))
     width = 0.25
 
-    bars1 = ax.bar(x - width, json_times, width, label="JSON", color="#e74c3c")
-    bars2 = ax.bar(x, base64_times, width, label="Base64", color="#3498db")
-    bars3 = ax.bar(x + width, binref_times, width, label="Binref", color="#2ecc71")
+    bars1 = ax.bar(x - width, json_times, width, label="JSON", color="#D55E00")
+    bars2 = ax.bar(x, base64_times, width, label="Base64", color="#0072B2")
+    bars3 = ax.bar(x + width, binref_times, width, label="Binref", color="#009E73")
 
     ax.set_xlabel("Array Size (elements)", fontsize=12)
-    ax.set_ylabel("Roundtrip Time (ms)", fontsize=12)
-    ax.set_title(
-        "Array Encoding Performance\n(Encode + Decode roundtrip, lower is better)",
-        fontsize=14,
+    ax.set_title("Array Encoding Performance", fontsize=18, pad=30)
+    ax.text(
+        0.5,
+        1.04,
+        "Encode + Decode roundtrip, lower is better",
+        fontsize=12,
+        ha="center",
+        va="center",
+        transform=ax.transAxes,
+        path_effects=_outline,
     )
     ax.set_xticks(x)
     ax.set_xticklabels(size_labels)
-    ax.legend()
-    ax.grid(True, alpha=0.3, axis="y")
+    ax.legend(
+        loc="upper left",
+        title="Encoding",
+        title_fontproperties={"weight": "600"},
+        facecolor="white",
+        edgecolor="white",
+        alignment="left",
+    )
     ax.set_yscale("log")
+    ax.tick_params(axis="y", which="both", left=False, labelleft=False)
+    ax.set_axisbelow(True)
+    ax.grid(True, alpha=0.3, axis="y", which="major")
+    for spine in ("left", "top", "right"):
+        ax.spines[spine].set_visible(False)
 
     # Add value labels on bars
     def add_labels(bars):
@@ -267,6 +296,7 @@ def generate_encoding_comparison_plot(
                     ha="center",
                     va="bottom",
                     fontsize=8,
+                    path_effects=_outline,
                 )
 
     add_labels(bars1)
@@ -311,35 +341,52 @@ def generate_overhead_comparison_plot(
         from_api,
         width,
         label="Non-containerized, in-memory",
-        color="#2ecc71",
+        color="#0072B2",
     )
     bars2 = ax.bar(
         x,
         containerized_http,
         width,
         label="Containerized, json+base64 via HTTP",
-        color="#3498db",
+        color="#E69F00",
     )
     bars3 = ax.bar(
         x + width,
         containerized_cli,
         width,
         label="Containerized, json+binref via CLI",
-        color="#e74c3c",
+        color="#9467BD",
     )
 
     ax.set_xlabel("Array Size (elements)", fontsize=12)
-    ax.set_ylabel("Overhead (ms)", fontsize=12)
-    ax.set_title(
-        "Tesseract Overhead by Interaction Mode\n(No-op Tesseract, lower is better)",
-        fontsize=14,
+    ax.set_title("Tesseract Overhead by Interaction Mode", fontsize=18, pad=30)
+    ax.text(
+        0.5,
+        1.04,
+        "No-op Tesseract, lower is better",
+        fontsize=12,
+        ha="center",
+        va="center",
+        transform=ax.transAxes,
+        path_effects=_outline,
     )
     ax.set_xticks(x)
     ax.set_xticklabels(size_labels)
     ax.set_yscale("log")
-    ax.set_ylim(1e-1, 1e5)
-    ax.legend(loc="upper left")
-    ax.grid(True, alpha=0.3, axis="y")
+    ax.set_ylim(1e-1, 2e5)
+    ax.legend(
+        loc="upper left",
+        title="Interaction mode",
+        title_fontproperties={"weight": "600"},
+        facecolor="white",
+        edgecolor="white",
+        alignment="left",
+    )
+    ax.tick_params(axis="y", which="both", left=False, labelleft=False)
+    ax.set_axisbelow(True)
+    ax.grid(True, alpha=0.3, axis="y", which="major")
+    for spine in ("left", "top", "right"):
+        ax.spines[spine].set_visible(False)
 
     # Add value labels on bars
     def add_labels(bars):
@@ -354,6 +401,7 @@ def generate_overhead_comparison_plot(
                     ha="center",
                     va="bottom",
                     fontsize=8,
+                    path_effects=_outline,
                 )
 
     add_labels(bars1)
@@ -380,7 +428,7 @@ def main() -> None:
     parser.add_argument(
         "--output-dir",
         type=str,
-        default="docs/img",
+        default=os.path.join(here, "plots"),
         help="Output directory for plots",
     )
 

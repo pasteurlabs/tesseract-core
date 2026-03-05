@@ -13,9 +13,8 @@ from __future__ import annotations
 
 import tempfile
 
-import numpy as np
 from pydantic import BaseModel
-from utils import BenchmarkSuite, run_benchmark
+from utils import BenchmarkSuite, create_test_array, run_benchmark
 
 from tesseract_core.runtime.schema_types import Array, Float64
 
@@ -38,11 +37,6 @@ class ArrayModel(BaseModel):
     """Minimal model with a single variable-length float64 array field."""
 
     data: Array[(None,), Float64]
-
-
-def _create_test_array(size: int, dtype: str = "float64") -> np.ndarray:
-    """Create a test array of given size."""
-    return np.random.default_rng().standard_normal(size).astype(dtype)
 
 
 def benchmark_encoding(
@@ -70,7 +64,7 @@ def benchmark_encoding(
 
     for i, size in enumerate(array_sizes):
         print(f"  [{i + 1}/{len(array_sizes)}] Benchmarking size {size:,}...")
-        model = ArrayModel(data=_create_test_array(size))
+        model = ArrayModel(data=create_test_array(size))
 
         # JSON encoding
         if size < 20_000_000:  # JSON encoding becomes impractical at very large sizes
@@ -135,7 +129,7 @@ def benchmark_decoding(
 
     for i, size in enumerate(array_sizes):
         print(f"  [{i + 1}/{len(array_sizes)}] Benchmarking size {size:,}...")
-        model = ArrayModel(data=_create_test_array(size))
+        model = ArrayModel(data=create_test_array(size))
 
         # JSON decoding - encode first, then benchmark decoding
         if size < 20_000_000:  # JSON decoding becomes impractical at very large sizes
@@ -204,7 +198,7 @@ def benchmark_roundtrip(
 
     for i, size in enumerate(array_sizes):
         print(f"  [{i + 1}/{len(array_sizes)}] Benchmarking size {size:,}...")
-        model = ArrayModel(data=_create_test_array(size))
+        model = ArrayModel(data=create_test_array(size))
 
         # JSON roundtrip
         if size < 20_000_000:  # JSON roundtrip becomes impractical at very large sizes

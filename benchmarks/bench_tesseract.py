@@ -24,8 +24,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-import numpy as np
-from utils import BenchmarkSuite, run_benchmark
+from utils import BenchmarkSuite, create_test_array, run_benchmark
 
 # Path to the no-op tesseract for benchmarking
 NOOP_TESSERACT_PATH = Path(__file__).parent / "tesseract_noop" / "tesseract_api.py"
@@ -42,11 +41,6 @@ DEFAULT_ARRAY_SIZES = [
     10_000_000,
     100_000_000,
 ]
-
-
-def _create_test_array(size: int) -> np.ndarray:
-    """Create a test array of given size."""
-    return np.random.default_rng().standard_normal(size).astype("float64")
 
 
 def _build_noop_tesseract() -> str | None:
@@ -110,11 +104,11 @@ def benchmark_from_tesseract_api(
 
         for i, size in enumerate(array_sizes):
             print(f"  [{i + 1}/{len(array_sizes)}] Benchmarking size {size:,}...")
-            arr = _create_test_array(size)
+            arr = create_test_array(size)
             inputs = {"data": arr}
 
             def call_apply(t=tesseract, inp=inputs):
-                return t.apply(inp)
+                return t.apply(inp, stream_logs=profile)
 
             result = run_benchmark(
                 name=f"apply_{size:,}",
@@ -131,6 +125,7 @@ def benchmark_containerized_http(
     iterations: int = 20,
     array_sizes: list[int] | None = None,
     profile: bool = False,
+    image_name: str | None = None,
 ) -> BenchmarkSuite | None:
     """Benchmark containerized Tesseract via HTTP (Tesseract.from_image).
 
@@ -158,8 +153,9 @@ def benchmark_containerized_http(
         metadata={"iterations": iterations, "array_sizes": array_sizes},
     )
 
-    # Build the benchmark tesseract image
-    image_name = _build_noop_tesseract()
+    # Build the benchmark tesseract image if not provided
+    if image_name is None:
+        image_name = _build_noop_tesseract()
     if image_name is None:
         print(
             "Failed to build benchmark tesseract, skipping containerized HTTP benchmarks"
@@ -184,11 +180,11 @@ def benchmark_containerized_http(
                     print(
                         f"  [{i + 1}/{len(array_sizes)}] Benchmarking size {size:,}..."
                     )
-                    arr = _create_test_array(size)
+                    arr = create_test_array(size)
                     inputs = {"data": arr}
 
                     def call_apply(t=tesseract, inp=inputs):
-                        return t.apply(inp)
+                        return t.apply(inp, stream_logs=profile)
 
                     result = run_benchmark(
                         name=f"apply_{size:,}",
@@ -210,6 +206,7 @@ def benchmark_containerized_cli(
     iterations: int = 10,
     array_sizes: list[int] | None = None,
     profile: bool = False,
+    image_name: str | None = None,
 ) -> BenchmarkSuite | None:
     """Benchmark containerized Tesseract via CLI (`tesseract run`).
 
@@ -238,7 +235,8 @@ def benchmark_containerized_cli(
         metadata={"iterations": iterations, "array_sizes": array_sizes},
     )
 
-    image_name = _build_noop_tesseract()
+    if image_name is None:
+        image_name = _build_noop_tesseract()
     if image_name is None:
         print(
             "Failed to build benchmark tesseract, skipping containerized CLI benchmarks"
@@ -254,7 +252,7 @@ def benchmark_containerized_cli(
 
         for i, size in enumerate(array_sizes):
             print(f"  [{i + 1}/{len(array_sizes)}] Benchmarking size {size:,}...")
-            arr = _create_test_array(size)
+            arr = create_test_array(size)
 
             # Write array to binary file for binref encoding
             bin_filename = f"{uuid.uuid4()}.bin"
@@ -338,18 +336,30 @@ def run_all(
     Returns:
         List of BenchmarkSuites
     """
-    benchmark_funcs = [benchmark_from_tesseract_api]
-    if include_containerized:
-        benchmark_funcs.extend(
-            [benchmark_containerized_http, benchmark_containerized_cli]
-        )
-
     results = []
-    for benchmark_func in benchmark_funcs:
-        print(f"Running {benchmark_func.__name__}...")
-        suite = benchmark_func(iterations=iterations, array_sizes=array_sizes)
-        if suite is not None:
-            results.append(suite)
+
+    print("Running benchmark_from_tesseract_api...")
+    suite = benchmark_from_tesseract_api(iterations=iterations, array_sizes=array_sizes)
+    if suite is not None:
+        results.append(suite)
+
+    if include_containerized:
+        # Build image once and reuse for both containerized benchmarks
+        image_name = _build_noop_tesseract()
+
+        for benchmark_func in [
+            benchmark_containerized_http,
+            benchmark_containerized_cli,
+        ]:
+            print(f"Running {benchmark_func.__name__}...")
+            suite = benchmark_func(
+                iterations=iterations,
+                array_sizes=array_sizes,
+                image_name=image_name,
+            )
+            if suite is not None:
+                results.append(suite)
+
     return results
 
 

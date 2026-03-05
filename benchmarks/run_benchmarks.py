@@ -10,6 +10,15 @@ Tesseract that does nothing but decode inputs and encode outputs.
 Usage:
     python run_benchmarks.py [options]
 
+Options (all optional):
+    -n, --iterations N       Number of iterations per benchmark (default: 50)
+    -s, --suite SUITE        Which suite(s) to run; repeatable (default: all)
+    -o, --output FILE        Save results to JSON file
+    -c, --compare FILE       Compare against a baseline JSON file
+    -m, --markdown           Output results as markdown table
+    --array-sizes SIZES      Comma-separated array sizes (default: 1..100M)
+    --profile                Enable cProfile profiling output
+
 Examples:
     # Run all benchmarks (requires Docker)
     python run_benchmarks.py
@@ -50,7 +59,7 @@ _benchmarks_dir = str(Path(__file__).resolve().parent)
 if _benchmarks_dir not in sys.path:
     sys.path.insert(0, _benchmarks_dir)
 
-from utils import BenchmarkSuite, compare_results, format_comparison_table  # noqa: E402
+from utils import BenchmarkSuite  # noqa: E402
 
 # Registry of available benchmark suites.
 # Each entry maps a suite name to a factory that returns the runner function.
@@ -219,24 +228,17 @@ def main() -> int:
 
     # Compare against baseline if provided
     if args.compare:
-        baseline_path = Path(args.compare)
-        if baseline_path.exists():
-            baseline = BenchmarkSuite.load_json(str(baseline_path))
-            comparisons = compare_results(baseline, combined)
+        from compare_benchmarks import generate_report
 
-            if args.markdown:
-                print("\n## Benchmark Results\n")
-                print(format_comparison_table(comparisons))
-            else:
-                print("\n" + "=" * 60)
-                print("Comparison against baseline")
-                print("=" * 60)
-                for name, comp in sorted(comparisons.items()):
-                    diff_pct = comp["diff_pct"]
-                    status = "🚀" if diff_pct < -5 else ("⚠️" if diff_pct > 5 else "✓")
-                    print(f"  {name:40s} {diff_pct:+6.1f}% {status}")
-        else:
+        baseline_path = Path(args.compare)
+        if not baseline_path.exists():
             print(f"Warning: Baseline file not found: {baseline_path}")
+        elif args.output:
+            report = generate_report(str(baseline_path), args.output)
+            if report:
+                print(f"\n{report}")
+        else:
+            print("Warning: --compare requires --output to save current results first")
 
     return 0
 
