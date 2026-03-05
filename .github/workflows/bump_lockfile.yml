@@ -27,7 +27,7 @@ jobs:
       - name: Update runtime dependencies
         run: |
           pip install toml packaging
-          python .github/workflows/update_runtime_deps.py tesseract_core/runtime/meta/pyproject.toml
+          python .github/workflows/update_runtime_deps.py pyproject.toml
 
       - name: Update lockfile
         run: |
