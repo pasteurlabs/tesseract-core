@@ -116,6 +116,58 @@ $ tesseract serve --env=MY_ENV_VARIABLE="some value" helloworld
 $ tesseract run --env=MY_ENV_VARIABLE="some value" helloworld apply '{"inputs": {"name": "Osborne"}}'
 ```
 
+## Parallelism and worker processes
+
+By default, Tesseracts run with a single worker process. When handling multiple concurrent requests, you can increase the number of workers using the `--num-workers` argument to `tesseract serve` or the `num_workers` parameter in the Python SDK. (This option is not available for `tesseract run`, which processes a single request and exits.)
+
+Each worker runs as a separate process (using multiprocessing under the hood), so they are not affected by the GIL but also don't share in-process state.
+
+### When to use multiple workers
+
+Multiple workers are useful when:
+
+- **Handling concurrent requests** — If multiple clients will call your Tesseract simultaneously, each worker can handle one request at a time. With a single worker, requests are processed sequentially.
+- **CPU-bound computations** — If your Tesseract performs CPU-intensive work and you have multiple cores available, multiple workers can process requests in parallel.
+- **Batch processing** — When processing many independent inputs, you can submit them concurrently and let workers handle them in parallel.
+
+### When NOT to use multiple workers
+
+Stick with a single worker when:
+
+- **GPU-bound computations** — GPUs typically can't run multiple processes efficiently. If your Tesseract uses a GPU, multiple workers will compete for GPU resources and may cause out-of-memory errors or slowdowns.
+- **High memory usage** — Each worker loads its own copy of the model/data into memory. If your Tesseract uses 4GB of RAM, 4 workers will use 16GB total.
+- **Stateful operations** — Workers don't share state. If your computation requires shared state between requests, multiple workers won't work correctly.
+
+### CLI usage
+
+```bash
+# Serve with 4 worker processes
+$ tesseract serve --num-workers 4 my-tesseract
+```
+
+### Python SDK usage
+
+```python
+from concurrent.futures import ThreadPoolExecutor
+from tesseract_core import Tesseract
+
+# Serve with multiple workers
+with Tesseract.from_image("my-tesseract", num_workers=4) as t:
+    # Process requests concurrently using threads
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        results = list(executor.map(t.apply, batch))
+```
+
+### Choosing the right number of workers
+
+A reasonable starting point:
+
+- For CPU-bound Tesseracts: `num_workers = number of CPU cores`
+- For I/O-bound Tesseracts (e.g., calling external APIs): `num_workers = 2 * number of CPU cores`
+- For GPU-bound Tesseracts: `num_workers = 1` (or match the number of GPUs if using `--gpus`)
+
+Monitor memory usage and adjust accordingly. More workers isn't always better—context switching overhead can reduce throughput if you use too many.
+
 ## Using GPUs
 
 To leverage GPU support in your Tesseract environment, you can specify which NVIDIA GPU(s) to make available
