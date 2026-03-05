@@ -135,7 +135,7 @@ def test_serve_lifecycle(mock_serving, mock_clients):
         "memory": None,
         "input_path": None,
         "output_format": "json+base64",
-        "runtime_args": None,
+        "docker_args": None,
     }
 
     for key, expected_value in expected_kwargs.items():

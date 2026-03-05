@@ -885,7 +885,7 @@ def run_tesseract(
     output_path: str | Path | None = None,
     output_format: Literal["json", "json+base64", "json+binref"] | None = None,
     output_file: str | None = None,
-    runtime_args: list[str] | None = None,
+    docker_args: list[str] | None = None,
     stream_logs: bool = False,
 ) -> tuple[str, str]:
     """Start a Tesseract and execute a given command.
@@ -909,7 +909,7 @@ def run_tesseract(
         output_format: Format of the output.
         output_file: If specified, the output will be written to this file within output_path
             instead of stdout.
-        runtime_args: Additional arguments to pass to the container runtime (e.g., Docker).
+        docker_args: Additional arguments to pass to the container runtime (e.g., Docker).
         stream_logs: If True, stream logs to stderr in real-time. Requires output_path to be set.
 
     Returns:
@@ -978,8 +978,8 @@ def run_tesseract(
     if is_podman():
         extra_args.extend(["--userns", "keep-id"])
 
-    if runtime_args:
-        extra_args.extend(runtime_args)
+    if docker_args:
+        extra_args.extend(docker_args)
 
     # Run the container, optionally streaming stderr to the terminal
     result = docker_client.containers.run(

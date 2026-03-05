@@ -608,7 +608,7 @@ def serve(
             help=("Output format to use for the Tesseract."),
         ),
     ] = None,
-    runtime_args: Annotated[
+    docker_args: Annotated[
         list[str] | None,
         typer.Option(
             "--runtime-args",
@@ -654,7 +654,7 @@ def serve(
             input_path=input_path,
             output_path=output_path,
             output_format=_enum_to_val(output_format),
-            runtime_args=runtime_args,
+            docker_args=docker_args,
         )
     except RuntimeError as ex:
         raise UserError(
@@ -1036,7 +1036,7 @@ def run_container(
             ),
         ),
     ] = None,
-    runtime_args: Annotated[
+    docker_args: Annotated[
         list[str] | None,
         typer.Option(
             "--runtime-args",
@@ -1188,7 +1188,7 @@ def run_container(
             network=network,
             user=user,
             memory=memory,
-            runtime_args=runtime_args,
+            docker_args=docker_args,
             stream_logs=True,  # Always stream for CLI
         )
 
