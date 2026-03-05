@@ -534,6 +534,7 @@ def serve(
     input_path: str | Path | None = None,
     output_path: str | Path | None = None,
     output_format: Literal["json", "json+base64", "json+binref"] | None = None,
+    runtime_config: dict[str, Any] | None = None,
 ) -> tuple:
     """Serve one or more Tesseract images.
 
@@ -558,6 +559,9 @@ def serve(
         input_path: Input path to read input files from, such as local directory or S3 URI.
         output_path: Output path to write output files to, such as local directory or S3 URI.
         output_format: Output format to use for the results.
+        runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
+            These are converted to TESSERACT_* environment variables. For example,
+            ``{"profiling": True}`` sets ``TESSERACT_PROFILING=1``.
 
     Returns:
         A tuple of the Tesseract container name and the port it is serving on.
@@ -589,6 +593,16 @@ def serve(
     if environment is None:
         environment = {}
     environment.update(volume_environment)
+
+    # Convert runtime_config to TESSERACT_* environment variables
+    if runtime_config is not None:
+        for key, value in runtime_config.items():
+            env_key = f"TESSERACT_{key.upper()}"
+            if isinstance(value, bool):
+                env_value = "1" if value else "0"
+            else:
+                env_value = str(value)
+            environment[env_key] = env_value
 
     if output_format:
         environment["TESSERACT_OUTPUT_FORMAT"] = output_format
