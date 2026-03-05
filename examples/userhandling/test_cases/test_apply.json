@@ -4,13 +4,18 @@
     "uid": 505,
     "gid": 21,
     "username": "tesseract-user",
-    "home": "/tesseract",
-    "shell": "/bin/bash"
+    "home": "/home/tesseract-user",
+    "shell": "/bin/bash",
+    "somedir_readable": true,
+    "somedir_writable": true,
+    "hello_dir_created": true
   },
   "expected_exception": null,
   "expected_exception_regex": null,
   "payload": {
     "inputs": {}
   },
-  "cli_config": { "user": "505:21" }
+  "cli_config": {
+    "user": "505:21"
+  }
 }

@@ -6,7 +6,6 @@ import socket
 
 import numpy as np
 import pytest
-from common import build_tesseract, image_exists
 from pydantic import ValidationError
 
 from tesseract_core import Tesseract
@@ -21,22 +20,6 @@ expected_endpoints = {
     "vector_jacobian_product",
     "test",
 }
-
-
-@pytest.fixture(scope="module")
-def built_image_name(
-    docker_client,
-    shared_dummy_image_name,
-    dummy_tesseract_location,
-    docker_cleanup_module,
-):
-    """Build the dummy Tesseract image for the tests."""
-    image_name = build_tesseract(
-        docker_client, dummy_tesseract_location, shared_dummy_image_name
-    )
-    assert image_exists(docker_client, image_name)
-    docker_cleanup_module["images"].append(image_name)
-    yield image_name
 
 
 def test_available_endpoints(built_image_name):
@@ -54,7 +37,7 @@ def test_apply(built_image_name, dummy_tesseract_location, free_port, output_for
         built_image_name, port=str(free_port), output_format=output_format
     )
     try:
-        vecadd = Tesseract(tesseract_url)
+        vecadd = Tesseract.from_url(tesseract_url)
         out = vecadd.apply(inputs)
     finally:
         engine.teardown(served_tesseract)
@@ -195,7 +178,9 @@ def test_all_endpoints(
                         },
                     }
                 },
-                "expected_outputs": {"result": [7.0, 11.0, 15.0]},
+                "expected_outputs": {
+                    "result": np.array([7.0, 11.0, 15.0], dtype="float32")
+                },
                 "atol": 1e-8,
                 "rtol": 0.00001,
             }
@@ -214,7 +199,7 @@ def test_all_endpoints(
         out(**inputs)
 
     # Test URL access
-    vecadd = Tesseract(served_tesseract_remote)
+    vecadd = Tesseract.from_url(served_tesseract_remote)
     out = getattr(vecadd, endpoint_name)
     if callable(out):
         out(**inputs)
@@ -227,6 +212,8 @@ def test_signature_consistency():
         "debug",
         # setting output format is not meaningful (arrays are decoded automatically)
         "output_format",
+        # stream_logs is SDK-only for streaming logs to a callback
+        "stream_logs",
     ]
 
     from_image_sig = dict(inspect.signature(Tesseract.from_image).parameters)

@@ -376,7 +376,7 @@ def init(
         # Guaranteed to be a string by _validate_tesseract_name
         str,
         typer.Option(
-            help="Tesseract name as specified in tesseract_config.yaml. Will be prompted if not provided.",
+            help="Tesseract name as specified in tesseract_config.yaml. Will be empty if not provided.",
             callback=_validate_tesseract_name,
             show_default=False,
         ),
@@ -1023,6 +1023,20 @@ def run_container(
             ),
         ),
     ] = None,
+    profiling: Annotated[
+        bool,
+        typer.Option(
+            "--profiling",
+            help="Enable profiling to measure execution time of functions.",
+        ),
+    ] = False,
+    tracing: Annotated[
+        bool,
+        typer.Option(
+            "--tracing",
+            help="Enable tracing for detailed debug output.",
+        ),
+    ] = False,
     invoke_help: Annotated[
         bool,
         typer.Option(
@@ -1076,6 +1090,12 @@ def run_container(
                 param_hint="env",
             ) from ex
 
+    # Add profiling and tracing flags as environment variables
+    if profiling:
+        parsed_environment["TESSERACT_PROFILING"] = "1"
+    if tracing:
+        parsed_environment["TESSERACT_TRACING"] = "1"
+
     args = []
     if invoke_help:
         args.append("--help")
@@ -1126,6 +1146,7 @@ def run_container(
             network=network,
             user=user,
             memory=memory,
+            stream_logs=True,  # Always stream for CLI
         )
 
     except ImageNotFound as e:
@@ -1147,8 +1168,9 @@ def run_container(
 
     if invoke_help:
         result_err = _sanitize_error_output(result_err, tesseract_image)
+        typer.echo(result_err, err=True, nl=False)
 
-    typer.echo(result_err, err=True, nl=False)
+    # Logs have already been streamed to stderr, just output stdout (the result)
     typer.echo(result_out, nl=False)
 
 

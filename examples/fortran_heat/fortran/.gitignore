@@ -1,0 +1,4 @@
+# Ignore compiled Fortran binaries
+heat_solver
+*.o
+*.mod
