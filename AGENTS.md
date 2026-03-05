@@ -4,7 +4,7 @@ This file contains counter-intuitive aspects of the Tesseract codebase that AI a
 
 ## Environment setup
 
-- **Use `uv` for dependency management.** Install with `uv pip install -e .[dev]`. This is faster and more reliable than plain pip.
+- **Use `uv` for dependency management.** Install with `uv pip install -e ".[dev]"`. This is faster and more reliable than plain pip.
 - **Run `pre-commit install`** after cloning to set up git hooks.
 
 ## Testing
@@ -13,6 +13,7 @@ This file contains counter-intuitive aspects of the Tesseract codebase that AI a
 - **Avoid mocks.** If you need complex mocking, write an end-to-end test instead.
 - **Don't test implementation details.** Tests should verify behavior, not internal structure.
 - **Be mindful of slow tests.** End-to-end tests are slow. Check if an existing test can be extended before adding a new one, especially if adding new Docker images to build.
+- **Fast tests vs end-to-end tests.** Tests in `tests/endtoend_tests/` require Docker and are skipped automatically when Docker isn't available (or via `--skip-endtoend`). Other tests in `tests/` are fast and don't require Docker. Use fast tests for quick iteration during development.
 - **Don't add mocks for Docker.** Tests that need Docker should be marked as end-to-end tests and skipped in fast test runs.
 - **Rarely test exceptions.** Only test exception handling when control flow is complex or the error message is critical for UX. Don't write tests that just verify an exception is raised.
 - **Never skip or disable tests without asking.** If a test is failing and you want to skip it, ask the user first. Don't add `@pytest.skip`, `@pytest.mark.xfail`, or comment out tests without explicit approval.

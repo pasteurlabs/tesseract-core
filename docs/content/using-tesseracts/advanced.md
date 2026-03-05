@@ -118,7 +118,7 @@ $ tesseract run --env=MY_ENV_VARIABLE="some value" helloworld apply '{"inputs": 
 
 ## Parallelism and worker processes
 
-By default, Tesseracts run with a single worker process. For CPU-bound workloads or when handling multiple concurrent requests, you can increase the number of workers using the `--num-workers` argument to `tesseract serve` or the `num_workers` parameter in the Python SDK.
+By default, Tesseracts run with a single worker process. When handling multiple concurrent requests, you can increase the number of workers using the `--num-workers` argument to `tesseract serve` or the `num_workers` parameter in the Python SDK. (This option is not available for `tesseract run`, which processes a single request and exits.)
 
 Each worker runs as a separate process (using multiprocessing under the hood), so they are not affected by the GIL but also don't share in-process state.
 

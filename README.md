@@ -83,13 +83,13 @@ $ tesseract apidoc vectoradd
 - **Multi-interface** — CLI, REST API, and Python SDK for the same component
 - **Differentiable** — First-class support for Jacobians, JVPs, and VJPs across component and network boundaries
 - **Schema-validated** — Pydantic models define explicit input/output contracts
-- **Language-agnostic** — Wrap Python, Julia, C++, or any executable behind a thin Python API
+- **Language-agnostic** — Wrap Python, Julia, C++, [Fortran](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/examples/building-blocks/fortran.html), or any executable behind a thin Python API
 
 ## Ecosystem
 
 - **[tesseract-core](https://github.com/pasteurlabs/tesseract-core)** — CLI, Python API, and runtime (this repo)
-- **[tesseract-jax](https://github.com/pasteurlabs/tesseract-jax)** — Embed Tesseracts as JAX primitives into end-to-end differentiable JAX programs
-- **[tesseract-streamlit](https://github.com/pasteurlabs/tesseract-streamlit)** — Auto-generate interactive web apps from Tesseracts
+- **[Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax)** — Embed Tesseracts as JAX primitives into end-to-end differentiable JAX programs
+- **[Tesseract-Streamlit](https://github.com/pasteurlabs/tesseract-streamlit)** — Auto-generate interactive web apps from Tesseracts
 
 ## Learn more
 

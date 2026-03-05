@@ -96,7 +96,7 @@ Consider a CFD simulation workflow with these steps:
 CAD → [Mesh + Solve + Post-process + Visualize] → Report
 ```
 
-Pros: Simple to deploy, no intermediate data transfer
+Pros: Simple to deploy, no intermediate data transfer\
 Cons: Can't swap solver, can't run meshing on CPU while solving on GPU
 
 **Option B: Four Tesseracts**
@@ -105,7 +105,7 @@ Cons: Can't swap solver, can't run meshing on CPU while solving on GPU
 CAD → [Mesh] → [Solve] → [Post-process] → [Visualize] → Report
 ```
 
-Pros: Maximum flexibility, clear ownership
+Pros: Maximum flexibility, clear ownership\
 Cons: Data transfer overhead, more complex orchestration
 
 **Option C: Two Tesseracts (recommended)**

@@ -44,7 +44,7 @@ There are several ways to interact with Tesseracts:
 1. **Define** entrypoints in `tesseract_api.py`
 2. **Build** a container with `tesseract build`
 3. **Serve** via HTTP with `tesseract serve`
-4. **Invoke** via CLI, HTTP, or the [Python API](content/api/tesseract-api.md)
+4. **Invoke** via CLI, HTTP, or the [Python SDK](content/api/tesseract-api.md)
 
 ## Features and restrictions
 
@@ -70,7 +70,7 @@ Tesseracts help you manage **diversity** in scientific computing:
 
 - **Diversity of roles** — The software creator's job ends when code is packaged as a Tesseract. Pipeline builders focus on high-level logic. Team members can inspect interfaces and schemas without diving into implementations.
 
-- **Diversity of software** — Components can use any framework or language: PyTorch, JAX, C++, Julia, or shell scripts. A thin Python wrapper (`tesseract_api.py`) connects everything.
+- **Diversity of software** — Components can use any framework or language: PyTorch, JAX, C++, [Fortran](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/examples/building-blocks/fortran.html), Julia, or shell scripts. A thin Python wrapper (`tesseract_api.py`) connects everything.
 
 - **Diversity of hardware** — Components don't need to run on the same machine. Distribute work across GPUs, CPUs, and clusters while maintaining end-to-end differentiability.
 
@@ -82,8 +82,8 @@ If you're a single developer working with a single software stack in a single en
 
 Tesseract Core is the foundation of the Tesseract ecosystem. Additional packages extend its capabilities:
 
-- **[tesseract-jax](https://github.com/pasteurlabs/tesseract-jax)** — Embed Tesseracts as JAX primitives into end-to-end differentiable programs.
-- **[tesseract-streamlit](https://github.com/pasteurlabs/tesseract-streamlit)** — Auto-generate interactive Streamlit web apps from running Tesseracts. Instantly create UIs for your components without writing frontend code.
+- **[Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax)** — Embed Tesseracts as JAX primitives into end-to-end differentiable programs.
+- **[Tesseract-Streamlit](https://github.com/pasteurlabs/tesseract-streamlit)** — Auto-generate interactive Streamlit web apps from running Tesseracts. Instantly create UIs for your components without writing frontend code.
 
 ```{toctree}
 :caption: Introduction
