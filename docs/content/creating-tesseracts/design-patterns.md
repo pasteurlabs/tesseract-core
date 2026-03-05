@@ -1,4 +1,4 @@
-# Tesseract Design Patterns
+# Design Patterns
 
 This page provides guidance on common questions around Tesseract design: what should (and shouldn't) be a Tesseract, and how to structure your workflow.
 
