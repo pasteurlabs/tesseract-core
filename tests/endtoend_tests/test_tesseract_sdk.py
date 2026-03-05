@@ -212,8 +212,8 @@ def test_signature_consistency():
         "debug",
         # setting output format is not meaningful (arrays are decoded automatically)
         "output_format",
-        # runtime_config is SDK-only for setting tesseract runtime options
-        "runtime_config",
+        # stream_logs is SDK-only for streaming logs to a callback
+        "stream_logs",
     ]
 
     from_image_sig = dict(inspect.signature(Tesseract.from_image).parameters)

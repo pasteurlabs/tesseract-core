@@ -148,16 +148,6 @@ class Tesseract:
         if environment is None:
             environment = {}
 
-        # Convert runtime_config to TESSERACT_* environment variables
-        if runtime_config is not None:
-            for key, value in runtime_config.items():
-                env_key = f"TESSERACT_{key.upper()}"
-                # Convert Python values to string representation
-                if isinstance(value, bool):
-                    env_value = "1" if value else "0"
-                else:
-                    env_value = str(value)
-                environment[env_key] = env_value
         if volumes is None:
             volumes = []
         if input_path is not None:
@@ -182,6 +172,7 @@ class Tesseract:
             input_path=input_path,
             output_path=output_path,
             output_format=output_format,
+            runtime_config=runtime_config,
             port=port,
             host_ip=host_ip,
             debug=True,
