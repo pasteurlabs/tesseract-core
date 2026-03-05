@@ -27,6 +27,7 @@ All notable changes to this project will be documented in this file.
 
 - Add Fortran heat equation example (#477)
 - Tesseract init doesn't prompt if name not provided (#501)
+- Documentation mega issue sprint (#492)
 
 ## [1.4.0] - 2026-02-20
 
