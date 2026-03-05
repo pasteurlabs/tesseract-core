@@ -13,6 +13,10 @@ from torch.utils._pytree import tree_map
 
 from tesseract_core.runtime import Differentiable, Float32
 from tesseract_core.runtime.tree_transforms import filter_func, flatten_with_paths
+{% if extra_imports is defined and extra_imports %}
+
+{{extra_imports}}
+{% endif %}
 
 #
 # Schemata
@@ -20,11 +24,19 @@ from tesseract_core.runtime.tree_transforms import filter_func, flatten_with_pat
 
 
 class InputSchema(BaseModel):
+{% if input_schema_fields is defined and input_schema_fields %}
+{{input_schema_fields}}
+{% else %}
     example: Differentiable[Float32]
+{% endif %}
 
 
 class OutputSchema(BaseModel):
+{% if output_schema_fields is defined and output_schema_fields %}
+{{output_schema_fields}}
+{% else %}
     example: Differentiable[Float32]
+{% endif %}
 
 
 #
@@ -36,10 +48,14 @@ class OutputSchema(BaseModel):
 # take/return a single pytree as an input/output conforming respectively
 # to Input/OutputSchema
 def evaluate(inputs: Any) -> Any:
+{% if evaluate_body is defined and evaluate_body %}
+{{evaluate_body}}
+{% else %}
     return {
         "example": inputs["example"] + inputs["b"],
         "c": inputs["example"] * inputs["b"],
     }
+{% endif %}
 
 
 def apply(inputs: InputSchema) -> OutputSchema:
