@@ -147,3 +147,6 @@ uv.lock.bak
 
 # Logs folders written by tests
 logs/
+
+# Claude Code
+.claude/
