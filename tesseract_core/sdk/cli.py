@@ -608,6 +608,16 @@ def serve(
             help=("Output format to use for the Tesseract."),
         ),
     ] = None,
+    autodiff_fallbacks: Annotated[
+        bool,
+        typer.Option(
+            "--autodiff-fallbacks",
+            help=(
+                "Automatically derive missing autodiff endpoints (jacobian, jvp, vjp) "
+                "from whichever are defined."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Serve one or more Tesseract images.
 
@@ -642,6 +652,7 @@ def serve(
             input_path=input_path,
             output_path=output_path,
             output_format=_enum_to_val(output_format),
+            autodiff_fallbacks=autodiff_fallbacks,
         )
     except RuntimeError as ex:
         raise UserError(
@@ -1037,6 +1048,16 @@ def run_container(
             help="Enable tracing for detailed debug output.",
         ),
     ] = False,
+    autodiff_fallbacks: Annotated[
+        bool,
+        typer.Option(
+            "--autodiff-fallbacks",
+            help=(
+                "Automatically derive missing autodiff endpoints (jacobian, jvp, vjp) "
+                "from whichever are defined."
+            ),
+        ),
+    ] = False,
     invoke_help: Annotated[
         bool,
         typer.Option(
@@ -1147,6 +1168,7 @@ def run_container(
             user=user,
             memory=memory,
             stream_logs=True,  # Always stream for CLI
+            autodiff_fallbacks=autodiff_fallbacks,
         )
 
     except ImageNotFound as e:
