@@ -535,6 +535,7 @@ def serve(
     output_path: str | Path | None = None,
     output_format: Literal["json", "json+base64", "json+binref"] | None = None,
     runtime_config: dict[str, Any] | None = None,
+    autodiff_fallbacks: bool = False,
 ) -> tuple:
     """Serve one or more Tesseract images.
 
@@ -655,7 +656,7 @@ def serve(
 
     container = docker_client.containers.run(
         image=image_name,
-        command=["serve", *args],
+        command=[*( ["--autodiff-fallbacks"] if autodiff_fallbacks else []), "serve", *args],
         device_requests=gpus,
         ports=port_mappings,
         network=network,
@@ -837,6 +838,7 @@ def run_tesseract(
     output_format: Literal["json", "json+base64", "json+binref"] | None = None,
     output_file: str | None = None,
     stream_logs: bool = False,
+    autodiff_fallbacks: bool = False,
 ) -> tuple[str, str]:
     """Start a Tesseract and execute a given command.
 
@@ -910,6 +912,9 @@ def run_tesseract(
         environment["TESSERACT_OUTPUT_FILE"] = output_file
 
     cmd = []
+
+    if autodiff_fallbacks:
+        cmd.append("--autodiff-fallbacks")
 
     if command:
         cmd.append(command)
