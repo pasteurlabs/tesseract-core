@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.1] - 2026-03-09
+
+### Bug Fixes
+
+- Add missing dep, test default install (no extras) + basic usage on CI (#514)
+
 ## [1.5.0] - 2026-03-05
 
 ### Features

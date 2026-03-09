@@ -16,6 +16,7 @@ dependencies = [
     "numpy",
     "requests>=2.32.4",
     "pip",
+    "packaging",
 ]
 dynamic = [
     # Injected via hatch-vcs

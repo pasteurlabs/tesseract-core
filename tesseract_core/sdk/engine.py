@@ -14,12 +14,14 @@ import tempfile
 import time
 from collections.abc import Callable, Collection, Sequence
 from contextlib import closing
+from importlib.metadata import requires
 from pathlib import Path
 from shutil import copy, copytree, rmtree
 from typing import TYPE_CHECKING, Any, Literal
 
 import requests
 from jinja2 import Environment, PackageLoader, StrictUndefined
+from packaging.requirements import Requirement
 
 from .api_parse import TesseractConfig, get_config, validate_tesseract_api
 from .docker_client import (
@@ -153,10 +155,6 @@ def get_runtime_dependencies() -> list[str]:
     This retrieves dependencies declared under the 'runtime' extra without
     requiring that extra to be installed.
     """
-    from importlib.metadata import requires
-
-    from packaging.requirements import Requirement
-
     deps = []
     for req_str in sorted(requires("tesseract-core") or []):
         req = Requirement(req_str)
