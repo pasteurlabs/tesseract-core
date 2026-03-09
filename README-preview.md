@@ -33,12 +33,6 @@ Tesseract packages scientific software into **self-contained, portable component
 - **Propagate gradients** — Each component can expose derivatives, enabling end-to-end optimization across heterogeneous pipelines.
 - **Self-document** — Schemas, types, and API docs are generated automatically.
 
-<p align="center">
-<img src="docs/img/demo.gif" width="720" alt="Demo: init, edit, build, and run a Tesseract">
-<br>
-<em>Creating a Tesseract from scratch: init, edit, build, and run.</em>
-</p>
-
 ## Who is this for?
 
 - **Researchers** interfacing with (differentiable) simulators or probabilistic models, or who need to combine tools from different ecosystems
@@ -47,13 +41,9 @@ Tesseract packages scientific software into **self-contained, portable component
 
 ## Example: Shape optimization across tools
 
-<p align="center">
 <a href="https://si-tesseract.discourse.group/t/parametric-shape-optimization-of-rocket-fins-with-ansys-spaceclaim-pyansys-and-tesseract/109">
-<img src="docs/img/bracket_final.png" width="500" alt="Topology-optimized bracket produced by a differentiable Tesseract pipeline">
+<img src="docs/img/bracket_final.png" width="280" align="right" alt="Topology-optimized bracket produced by a differentiable Tesseract pipeline">
 </a>
-<br>
-<em>Topology-optimized bracket produced by a multi-tool differentiable Tesseract pipeline.</em>
-</p>
 
 The [rocket fin optimization case study](https://si-tesseract.discourse.group/t/parametric-shape-optimization-of-rocket-fins-with-ansys-spaceclaim-pyansys-and-tesseract/109) combines three Tesseracts:
 
@@ -66,6 +56,12 @@ The [rocket fin optimization case study](https://si-tesseract.discourse.group/t/
 Each component uses a different differentiation strategy (analytic adjoints, finite differences, JAX autodiff), yet they compose into a single optimizable pipeline that [is one `jax.grad` call away](https://github.com/pasteurlabs/tesseract-jax) from end-to-end gradients.
 
 ## Quick start
+
+<p align="center">
+<img src="docs/img/demo.gif" width="720" alt="Demo: init, edit, build, and run a Tesseract">
+<br>
+<em>Creating a Tesseract from scratch: init, edit, build, and run.</em>
+</p>
 
 > [!NOTE]
 > Requires [Docker](https://docs.docker.com/engine/install/) and Python 3.10+.
