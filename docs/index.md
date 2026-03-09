@@ -86,10 +86,11 @@ Tesseracts help you manage **diversity** in scientific computing:
 
 If you're a single developer working with a single software stack in a single environment, you might not need Tesseracts. Everyone else, read on!
 
-## Ecosystem
+## The Ecosystem
 
 Tesseract Core is the foundation of the Tesseract ecosystem. Additional packages extend its capabilities:
 
+- **[Tesseract Core](https://github.com/pasteurlabs/tesseract-core)** — CLI, Python API, and runtime.
 - **[Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax)** — Embed Tesseracts as JAX primitives into end-to-end differentiable programs.
 - **[Tesseract-Streamlit](https://github.com/pasteurlabs/tesseract-streamlit)** — Auto-generate interactive Streamlit web apps from running Tesseracts. Instantly create UIs for your components without writing frontend code.
 
