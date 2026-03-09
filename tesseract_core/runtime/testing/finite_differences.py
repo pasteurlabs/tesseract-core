@@ -727,7 +727,7 @@ def _compute_jacobian_elementwise(
                         idx,
                         eps,
                     )
-                else:
+                elif algorithm == "forward":
                     grad = _compute_forward_diff_row(
                         apply_fn,
                         inputs_dict,
@@ -738,6 +738,8 @@ def _compute_jacobian_elementwise(
                         idx,
                         eps,
                     )
+                else:
+                    raise ValueError(f"Unknown algorithm {algorithm}")
 
                 if idx:
                     result[out_path][in_path][(Ellipsis, *idx)] = grad
@@ -820,12 +822,10 @@ def _compute_jacobian_stochastic(
         # Generate random perturbation directions (Rademacher: ±1)
         perturbations = {}
         for in_path, info in input_info.items():
-            if info["shape"]:
-                perturbations[in_path] = rng.choice([-1, 1], size=info["shape"]).astype(
-                    np.float64
-                )
-            else:
-                perturbations[in_path] = np.float64(rng.choice([-1, 1]))
+            perturbation_size = None if info["shape"] == () else info["shape"]
+            perturbations[in_path] = rng.choice(
+                np.array([-1, 1], dtype=np.float64), size=perturbation_size
+            )
 
         # Compute perturbed inputs
         inputs_plus_dict = inputs_dict.copy()
@@ -1081,7 +1081,7 @@ def finite_difference_vjp(
                             idx,
                             eps,
                         )
-                    else:
+                    elif algorithm == "forward":
                         grad = _compute_forward_diff_row(
                             apply_fn,
                             inputs_dict,
@@ -1092,6 +1092,8 @@ def finite_difference_vjp(
                             idx,
                             eps,
                         )
+                    else:
+                        raise ValueError(f"Unknown algorithm {algorithm}")
                     cotangent = np.asarray(cotangent_vector[out_path])
                     vjp_value += np.sum(cotangent * grad)
 
@@ -1183,12 +1185,10 @@ def _compute_vjp_stochastic(
         # Generate random perturbation directions (Rademacher: ±1)
         perturbations = {}
         for in_path, info in input_info.items():
-            if info["shape"]:
-                perturbations[in_path] = rng.choice([-1, 1], size=info["shape"]).astype(
-                    np.float64
-                )
-            else:
-                perturbations[in_path] = np.float64(rng.choice([-1, 1]))
+            perturbation_size = None if info["shape"] == () else info["shape"]
+            perturbations[in_path] = rng.choice(
+                np.array([-1, 1], dtype=np.float64), size=perturbation_size
+            )
 
         # Compute perturbed inputs
         inputs_plus_dict = inputs_dict.copy()
