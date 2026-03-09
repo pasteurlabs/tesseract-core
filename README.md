@@ -8,6 +8,7 @@
 Universal, autodiff-native software components for [Simulation Intelligence](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/misc/faq.html#what-is-simulation-intelligence) 📦
 
 [Read the docs](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/) |
+[Showcases & tutorials](https://si-tesseract.discourse.group/c/showcase/11) |
 [Report an issue](https://github.com/pasteurlabs/tesseract-core/issues) |
 [Community forum](https://si-tesseract.discourse.group/) |
 [Contribute](https://github.com/pasteurlabs/tesseract-core/blob/main/CONTRIBUTING.md)
@@ -32,6 +33,12 @@ Tesseract packages scientific software into **self-contained, portable component
 - **Propagate gradients** — Each component can expose derivatives, enabling end-to-end optimization across heterogeneous pipelines.
 - **Self-document** — Schemas, types, and API docs are generated automatically.
 
+<p align="center">
+<img src="https://github.com/pasteurlabs/tesseract-core/blob/main/docs/img/demo.gif" width="720" alt="Demo: init, edit, build, and run a Tesseract">
+<br>
+<em>Creating a Tesseract from scratch: init, edit, build, and run.</em>
+</p>
+
 ## Who is this for?
 
 - **Researchers** interfacing with (differentiable) simulators or probabilistic models, or who need to combine tools from different ecosystems
@@ -39,6 +46,14 @@ Tesseract packages scientific software into **self-contained, portable component
 - **Platform engineers** deploying scientific workloads at scale with consistent interfaces and dependency isolation
 
 ## Example: Shape optimization across tools
+
+<p align="center">
+<a href="https://si-tesseract.discourse.group/t/parametric-shape-optimization-of-rocket-fins-with-ansys-spaceclaim-pyansys-and-tesseract/109">
+<img src="https://github.com/pasteurlabs/tesseract-core/blob/main/docs/img/bracket_final.png" width="500" alt="Topology-optimized bracket produced by a differentiable Tesseract pipeline">
+</a>
+<br>
+<em>Topology-optimized bracket produced by a multi-tool differentiable Tesseract pipeline.</em>
+</p>
 
 The [rocket fin optimization case study](https://si-tesseract.discourse.group/t/parametric-shape-optimization-of-rocket-fins-with-ansys-spaceclaim-pyansys-and-tesseract/109) combines three Tesseracts:
 
@@ -48,12 +63,14 @@ The [rocket fin optimization case study](https://si-tesseract.discourse.group/t/
          └──────── gradients flow back ─────────┘
 ```
 
-Each component uses a different differentiation strategy (analytic adjoints, finite differences, JAX autodiff), yet they compose into a single optimizable pipeline.
+Each component uses a different differentiation strategy (analytic adjoints, finite differences, JAX autodiff), yet they compose into a single optimizable pipeline that is one [`jax.grad` call away](https://github.com/pasteurlabs/tesseract-jax) from end-to-end gradients.
 
 ## Quick start
 
 > [!NOTE]
 > Requires [Docker](https://docs.docker.com/engine/install/) and Python 3.10+.
+
+**CLI:**
 
 ```bash
 $ pip install tesseract-core
@@ -68,14 +85,17 @@ $ tesseract run vectoradd apply '{"inputs": {"a": [1, 2], "b": [3, 4]}}'
 
 # Compute the Jacobian
 $ tesseract run vectoradd jacobian '{"inputs": {"a": [1, 2], "b": [3, 4]}, "jac_inputs": ["a"], "jac_outputs": ["result"]}'
-
-# See auto-generated API docs
-$ tesseract apidoc vectoradd
 ```
 
-<p align="center">
-<img src="https://github.com/pasteurlabs/tesseract-core/blob/main/docs/img/apidoc-screenshot.png" width="600">
-</p>
+**Python SDK:**
+
+```python
+from tesseract_core import Tesseract
+
+with Tesseract.from_image("vectoradd") as t:
+    result = t.apply({"a": [1, 2], "b": [3, 4]})
+    jac = t.jacobian({"a": [1, 2], "b": [3, 4]}, jac_inputs=["a"], jac_outputs=["result"])
+```
 
 ## Core features
 
@@ -84,6 +104,11 @@ $ tesseract apidoc vectoradd
 - **Differentiable** — First-class support for Jacobians, JVPs, and VJPs across component and network boundaries
 - **Schema-validated** — Pydantic models define explicit input/output contracts
 - **Language-agnostic** — Wrap Python, Julia, C++, [Fortran](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/examples/building-blocks/fortran.html), or any executable behind a thin Python API
+- **Self-documenting** — Auto-generated API docs and schemas for every Tesseract (`tesseract apidoc <name>`)
+
+<p align="center">
+<img src="https://github.com/pasteurlabs/tesseract-core/blob/main/docs/img/apidoc-screenshot.png" width="600">
+</p>
 
 ## Ecosystem
 
@@ -98,6 +123,25 @@ $ tesseract apidoc vectoradd
 - [Differentiable programming guide](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/introduction/differentiable-programming.html)
 - [Design patterns](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/creating-tesseracts/design-patterns.html)
 - [Example gallery](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/examples/example_gallery.html)
+
+## Citing Tesseract
+
+If you use Tesseract in your research, please cite:
+
+```bibtex
+@article{TesseractCore,
+  doi = {10.21105/joss.08385},
+  url = {https://doi.org/10.21105/joss.08385},
+  year = {2025},
+  publisher = {The Open Journal},
+  volume = {10},
+  number = {111},
+  pages = {8385},
+  author = {Häfner, Dion and Lavin, Alexander},
+  title = {Tesseract Core: Universal, autodiff-native software components for Simulation Intelligence},
+  journal = {Journal of Open Source Software}
+}
+```
 
 ## License
 

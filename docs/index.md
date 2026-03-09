@@ -21,6 +21,14 @@ Tesseract packages scientific software into **self-contained, portable component
 - **Propagate gradients** — Each component can expose derivatives, enabling end-to-end optimization across heterogeneous pipelines.
 - **Self-document** — Schemas, types, and API docs are generated automatically.
 
+```{figure} img/demo.gif
+:alt: Demo: init, edit, build, and run a Tesseract
+:width: 720px
+:align: center
+
+Creating a Tesseract from scratch: init, edit, build, and run.
+```
+
 ## Who is this for?
 
 - **Researchers** interfacing with (differentiable) simulators or probabilistic models, or who need to combine tools from different ecosystems
@@ -84,6 +92,25 @@ Tesseract Core is the foundation of the Tesseract ecosystem. Additional packages
 
 - **[Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax)** — Embed Tesseracts as JAX primitives into end-to-end differentiable programs.
 - **[Tesseract-Streamlit](https://github.com/pasteurlabs/tesseract-streamlit)** — Auto-generate interactive Streamlit web apps from running Tesseracts. Instantly create UIs for your components without writing frontend code.
+
+## Citing Tesseract
+
+If you use Tesseract in your research, please cite:
+
+```bibtex
+@article{TesseractCore,
+  doi = {10.21105/joss.08385},
+  url = {https://doi.org/10.21105/joss.08385},
+  year = {2025},
+  publisher = {The Open Journal},
+  volume = {10},
+  number = {111},
+  pages = {8385},
+  author = {Häfner, Dion and Lavin, Alexander},
+  title = {Tesseract Core: Universal, autodiff-native software components for Simulation Intelligence},
+  journal = {Journal of Open Source Software}
+}
+```
 
 ```{toctree}
 :caption: Introduction
