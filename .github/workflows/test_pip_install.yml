@@ -16,6 +16,13 @@ jobs:
         python-version:
           - "3.10"
           - "3.13"
+        dependencies:
+          - "pinned"
+
+        include:
+          - os: ubuntu-latest
+            python-version: "3.13"
+            dependencies: "latest"
 
       fail-fast: false
 
@@ -30,9 +37,22 @@ jobs:
 
       - name: Install package
         run: |
-          pip install -r requirements.txt
-          pip install --no-deps .
+          if [ "${{ matrix.dependencies }}" = "pinned" ]; then
+            echo "Using pinned dependencies"
+            pip install -r requirements.txt
+            pip install --no-deps .
+          else
+            echo "Using latest dependencies"
+            pip install .
+          fi
 
-      - name: Ensure CLI is usable (no missing deps)
+      - name: Ensure CLI is available
         run: |
           tesseract --help
+
+      - name: Ensure basic workflow works
+        # Docker is only available on Linux
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        run: |
+          tesseract build examples/helloworld
+          tesseract run helloworld apply '{"inputs": {"name": "GitHub Actions"}}'
