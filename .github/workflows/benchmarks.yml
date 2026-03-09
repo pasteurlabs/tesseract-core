@@ -91,7 +91,7 @@ jobs:
         id: comparison
         run: |
           python benchmarks/compare_benchmarks.py \
-            baseline_benchmarks.json \
+            baseline/baseline_benchmarks.json \
             current_benchmarks.json \
             benchmark_report.md
 
@@ -128,7 +128,7 @@ jobs:
           name: benchmark-results
           path: |
             current_benchmarks.json
-            baseline_benchmarks.json
+            baseline/baseline_benchmarks.json
             benchmark_report.md
           if-no-files-found: ignore
           retention-days: 30
