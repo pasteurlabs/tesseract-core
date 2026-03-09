@@ -46,8 +46,13 @@ jobs:
             pip install .
           fi
 
-      - name: Ensure basic workflow works
+      - name: Ensure CLI is available
         run: |
           tesseract --help
+
+      - name: Ensure basic workflow works
+        # Docker is only available on Linux
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        run: |
           tesseract build examples/helloworld
           tesseract run helloworld apply '{"inputs": {"name": "GitHub Actions"}}'
