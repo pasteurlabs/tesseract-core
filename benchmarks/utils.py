@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import json
 import statistics
 import time
 from typing import TYPE_CHECKING, Any
@@ -99,15 +98,3 @@ class BenchmarkSuite(BaseModel):
     def add_result(self, result: BenchmarkResult) -> None:
         """Add a benchmark result to the suite."""
         self.results.append(result)
-
-    def save_json(self, path: str) -> None:
-        """Save results to JSON file."""
-        with open(path, "w") as f:
-            f.write(self.model_dump_json(indent=2))
-
-    @classmethod
-    def load_json(cls, path: str) -> BenchmarkSuite:
-        """Load results from JSON file."""
-        with open(path) as f:
-            data = json.load(f)
-        return cls.model_validate(data)

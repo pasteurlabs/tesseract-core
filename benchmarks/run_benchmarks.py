@@ -223,7 +223,7 @@ def main() -> int:
     combined.metadata["elapsed_seconds"] = elapsed
 
     if args.output:
-        combined.save_json(args.output)
+        Path(args.output).write_text(combined.model_dump_json(indent=2))
         print(f"\nResults saved to {args.output}")
 
     # Compare against baseline if provided
