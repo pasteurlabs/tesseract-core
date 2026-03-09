@@ -17,6 +17,11 @@ from pathlib import Path
 NOTABLE_THRESHOLD_PCT = 5
 
 
+def _get_median_ms(result: dict) -> float:
+    """Get median time in ms, falling back to mean for older result files."""
+    return result.get("median_time_s", result["mean_time_s"]) * 1000
+
+
 def _parse_benchmark_name(name: str) -> tuple[str, str, int]:
     """Parse benchmark name into (suite, operation, size) for sorting.
 
@@ -49,11 +54,18 @@ def _sort_benchmark_names(names: list[str]) -> list[str]:
     return sorted(names, key=_parse_benchmark_name)
 
 
-def load_benchmark_file(path: str) -> dict | None:
-    """Load benchmark file including metadata.
+def _get_runner_description(data: dict) -> str:
+    """Get a runner description from benchmark metadata."""
+    system = data.get("metadata", {}).get("system", {})
+    platform = system.get("platform", "")
+    version = system.get("platform_release", "")
+    arch = system.get("architecture", "")
+    parts = [p for p in (platform, version, arch) if p]
+    return " ".join(parts) if parts else "unknown"
 
-    Returns None if the file doesn't exist.
-    """
+
+def _load_benchmark_file(path: str) -> dict | None:
+    """Load benchmark file, returning None if it doesn't exist."""
     if not Path(path).exists():
         return None
     with open(path) as f:
@@ -83,6 +95,7 @@ def _generate_current_only_report(current: dict, current_data: dict) -> str:
 
     # Extract metadata for details section
     iterations = current_data.get("metadata", {}).get("iterations", "N/A")
+    runner = _get_runner_description(current_data)
 
     lines.extend(
         [
@@ -91,7 +104,7 @@ def _generate_current_only_report(current: dict, current_data: dict) -> str:
             "<summary>Benchmark details</summary>",
             "",
             f"- **Iterations:** {iterations}",
-            "- **Runner:** ubuntu-latest",
+            f"- **Runner:** {runner}",
             "",
             "</details>",
         ]
@@ -103,35 +116,35 @@ def _generate_current_only_report(current: dict, current_data: dict) -> str:
 def _compute_comparison(name: str, baseline: dict, current: dict) -> dict:
     """Compute comparison metrics for a single benchmark.
 
-    Returns a dict with keys: name, base_mean_ms, curr_mean_ms, diff_pct, status.
+    Returns a dict with keys: name, base_median_ms, curr_median_ms, diff_pct, status.
     """
     if name not in baseline:
-        curr_mean = current[name]["mean_time_s"] * 1000
+        curr_median = _get_median_ms(current[name])
         return {
             "name": name,
-            "base_mean_ms": None,
-            "curr_mean_ms": curr_mean,
+            "base_median_ms": None,
+            "curr_median_ms": curr_median,
             "diff_pct": None,
             "status": ":new:",
             "notable": True,
         }
 
     if name not in current:
-        base_mean = baseline[name]["mean_time_s"] * 1000
+        base_median = _get_median_ms(baseline[name])
         return {
             "name": name,
-            "base_mean_ms": base_mean,
-            "curr_mean_ms": None,
+            "base_median_ms": base_median,
+            "curr_median_ms": None,
             "diff_pct": None,
             "status": ":wastebasket:",
             "notable": True,
         }
 
-    base_mean = baseline[name]["mean_time_s"] * 1000
-    curr_mean = current[name]["mean_time_s"] * 1000
+    base_median = _get_median_ms(baseline[name])
+    curr_median = _get_median_ms(current[name])
 
-    if base_mean > 0:
-        diff_pct = ((curr_mean - base_mean) / base_mean) * 100
+    if base_median > 0:
+        diff_pct = ((curr_median - base_median) / base_median) * 100
     else:
         diff_pct = 0
 
@@ -145,8 +158,8 @@ def _compute_comparison(name: str, baseline: dict, current: dict) -> dict:
     notable = abs(diff_pct) > NOTABLE_THRESHOLD_PCT
     return {
         "name": name,
-        "base_mean_ms": base_mean,
-        "curr_mean_ms": curr_mean,
+        "base_median_ms": base_median,
+        "curr_median_ms": curr_median,
         "diff_pct": diff_pct,
         "status": status,
         "notable": notable,
@@ -156,10 +169,10 @@ def _compute_comparison(name: str, baseline: dict, current: dict) -> dict:
 def _format_comparison_row(comp: dict) -> str:
     """Format a single comparison as a markdown table row."""
     base_str = (
-        f"{comp['base_mean_ms']:.3f}ms" if comp["base_mean_ms"] is not None else "-"
+        f"{comp['base_median_ms']:.3f}ms" if comp["base_median_ms"] is not None else "-"
     )
     curr_str = (
-        f"{comp['curr_mean_ms']:.3f}ms" if comp["curr_mean_ms"] is not None else "-"
+        f"{comp['curr_median_ms']:.3f}ms" if comp["curr_median_ms"] is not None else "-"
     )
     change_str = (
         f"{comp['diff_pct']:+.1f}%"
@@ -177,8 +190,8 @@ def generate_report(baseline_path: str, current_path: str) -> str | None:
     Returns None only if current results don't exist.
     If baseline doesn't exist, generates a report with current results only.
     """
-    baseline_data = load_benchmark_file(baseline_path)
-    current_data = load_benchmark_file(current_path)
+    baseline_data = _load_benchmark_file(baseline_path)
+    current_data = _load_benchmark_file(current_path)
 
     if current_data is None:
         return None
@@ -196,21 +209,10 @@ def generate_report(baseline_path: str, current_path: str) -> str | None:
     comparisons = [_compute_comparison(name, baseline, current) for name in all_names]
 
     notable = [c for c in comparisons if c["notable"]]
-    num_faster = sum(
-        1
-        for c in comparisons
-        if c["diff_pct"] is not None and c["diff_pct"] < -NOTABLE_THRESHOLD_PCT
-    )
-    num_slower = sum(
-        1
-        for c in comparisons
-        if c["diff_pct"] is not None and c["diff_pct"] > NOTABLE_THRESHOLD_PCT
-    )
-    num_same = sum(
-        1
-        for c in comparisons
-        if c["diff_pct"] is not None and abs(c["diff_pct"]) <= NOTABLE_THRESHOLD_PCT
-    )
+    diffs = [c["diff_pct"] for c in comparisons if c["diff_pct"] is not None]
+    num_faster = sum(1 for d in diffs if d < -NOTABLE_THRESHOLD_PCT)
+    num_slower = sum(1 for d in diffs if d > NOTABLE_THRESHOLD_PCT)
+    num_same = sum(1 for d in diffs if abs(d) <= NOTABLE_THRESHOLD_PCT)
 
     lines = [
         "## Benchmark Results",
@@ -257,12 +259,13 @@ def generate_report(baseline_path: str, current_path: str) -> str | None:
 
     # Extract metadata for details section
     iterations = current_data.get("metadata", {}).get("iterations", "N/A")
+    runner = _get_runner_description(current_data)
 
     lines.extend(
         [
             "",
             f"- **Iterations:** {iterations}",
-            "- **Runner:** ubuntu-latest",
+            f"- **Runner:** {runner}",
             "",
             "</details>",
         ]
@@ -284,14 +287,25 @@ def main() -> int:
     current_path = sys.argv[2]
     output_path = sys.argv[3]
 
+    if not Path(current_path).exists():
+        print(f"Current benchmark file not found: {current_path}", file=sys.stderr)
+        return 1
+
     report = generate_report(baseline_path, current_path)
 
     if report is None:
-        print("No current benchmark results found.", file=sys.stderr)
+        print(
+            f"Failed to generate report (current={current_path}, baseline={baseline_path})",
+            file=sys.stderr,
+        )
         return 1
 
-    with open(output_path, "w") as f:
-        f.write(report)
+    try:
+        with open(output_path, "w") as f:
+            f.write(report)
+    except OSError as e:
+        print(f"Failed to write report to {output_path}: {e}", file=sys.stderr)
+        return 1
 
     print(report)
     return 0

@@ -100,6 +100,7 @@ def benchmark_from_tesseract_api(
             NOOP_TESSERACT_PATH,
             output_path=Path(tmpdir),
             runtime_config=runtime_config,
+            stream_logs=profile,
         )
 
         for i, size in enumerate(array_sizes):
@@ -108,7 +109,7 @@ def benchmark_from_tesseract_api(
             inputs = {"data": arr}
 
             def call_apply(t=tesseract, inp=inputs):
-                return t.apply(inp, stream_logs=profile)
+                return t.apply(inp)
 
             result = run_benchmark(
                 name=f"apply_{size:,}",
@@ -169,6 +170,7 @@ def benchmark_containerized_http(
                 image_name,
                 output_path=Path(tmpdir),
                 runtime_config=runtime_config,
+                stream_logs=profile,
             ) as tesseract:
                 # Warmup - first request is slow due to container startup
                 _ = tesseract.health()
@@ -184,7 +186,7 @@ def benchmark_containerized_http(
                     inputs = {"data": arr}
 
                     def call_apply(t=tesseract, inp=inputs):
-                        return t.apply(inp, stream_logs=profile)
+                        return t.apply(inp)
 
                     result = run_benchmark(
                         name=f"apply_{size:,}",

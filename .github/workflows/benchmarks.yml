@@ -32,8 +32,6 @@ jobs:
     steps:
       - name: Set up Git repository
         uses: actions/checkout@v6
-        with:
-          fetch-depth: 0 # Need full history for main branch comparison
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -58,22 +56,24 @@ jobs:
             --array-sizes 100,10000,1000000 \
             --output current_benchmarks.json
 
-      - name: Checkout main branch for baseline
+      - name: Check out baseline branch
         if: github.event_name == 'pull_request'
-        run: |
-          git stash --include-untracked || true
-          git checkout ${{ github.event.pull_request.base.sha }}
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          path: baseline
 
       - name: Install package (baseline)
         if: github.event_name == 'pull_request'
+        working-directory: baseline
         run: |
-          # Re-install to ensure we have the baseline version
           cp production.uv.lock uv.lock 2>/dev/null || true
           uv sync --extra dev --frozen
 
       - name: Run benchmarks on baseline
         if: github.event_name == 'pull_request'
         id: baseline
+        working-directory: baseline
         run: |
           if [ -f benchmarks/run_benchmarks.py ]; then
             uv run --no-sync python benchmarks/run_benchmarks.py \
@@ -85,12 +85,6 @@ jobs:
             echo "::notice::Benchmark script not found in baseline, skipping comparison"
             echo "exists=false" >> $GITHUB_OUTPUT
           fi
-
-      - name: Checkout PR branch again
-        if: github.event_name == 'pull_request'
-        run: |
-          git checkout ${{ github.event.pull_request.head.sha }}
-          git stash pop || true
 
       - name: Generate comparison report
         if: github.event_name == 'pull_request'

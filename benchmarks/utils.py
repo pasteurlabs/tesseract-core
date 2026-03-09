@@ -8,10 +8,10 @@ from __future__ import annotations
 import json
 import statistics
 import time
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
+from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -22,37 +22,25 @@ def create_test_array(size: int, dtype: str = "float64") -> np.ndarray:
     return np.random.default_rng().standard_normal(size).astype(dtype)
 
 
-@dataclass
-class BenchmarkResult:
+class BenchmarkResult(BaseModel):
     """Result of a single benchmark."""
 
     name: str
     iterations: int
     total_time_s: float
     mean_time_s: float
+    median_time_s: float
     std_time_s: float
     min_time_s: float
     max_time_s: float
-    times_s: list[float] = field(default_factory=list, repr=False)
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary for JSON serialization."""
-        return {
-            "name": self.name,
-            "iterations": self.iterations,
-            "total_time_s": self.total_time_s,
-            "mean_time_s": self.mean_time_s,
-            "std_time_s": self.std_time_s,
-            "min_time_s": self.min_time_s,
-            "max_time_s": self.max_time_s,
-        }
+    times_s: list[float] = Field(default_factory=list, exclude=True)
 
 
 def run_benchmark(
     name: str,
     func: Callable[[], Any],
     iterations: int = 100,
-    warmup: int = 5,
+    warmup: int = 2,
     profile: bool = False,
 ) -> BenchmarkResult:
     """Run a benchmark and return results.
@@ -88,64 +76,38 @@ def run_benchmark(
         print(f"\n--- Profile: {name} ---")
         print(stats_text)
 
-    total_time = sum(times)
-    mean_time = statistics.mean(times)
-    std_time = statistics.stdev(times) if len(times) > 1 else 0.0
-
     return BenchmarkResult(
         name=name,
         iterations=iterations,
-        total_time_s=total_time,
-        mean_time_s=mean_time,
-        std_time_s=std_time,
+        total_time_s=sum(times),
+        mean_time_s=statistics.mean(times),
+        median_time_s=statistics.median(times),
+        std_time_s=statistics.stdev(times) if len(times) > 1 else 0.0,
         min_time_s=min(times),
         max_time_s=max(times),
         times_s=times,
     )
 
 
-@dataclass
-class BenchmarkSuite:
+class BenchmarkSuite(BaseModel):
     """Collection of benchmark results."""
 
     name: str
-    results: list[BenchmarkResult] = field(default_factory=list)
-    metadata: dict[str, Any] = field(default_factory=dict)
+    results: list[BenchmarkResult] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     def add_result(self, result: BenchmarkResult) -> None:
         """Add a benchmark result to the suite."""
         self.results.append(result)
 
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary for JSON serialization."""
-        return {
-            "name": self.name,
-            "metadata": self.metadata,
-            "results": [r.to_dict() for r in self.results],
-        }
-
     def save_json(self, path: str) -> None:
         """Save results to JSON file."""
         with open(path, "w") as f:
-            json.dump(self.to_dict(), f, indent=2)
+            f.write(self.model_dump_json(indent=2))
 
     @classmethod
     def load_json(cls, path: str) -> BenchmarkSuite:
         """Load results from JSON file."""
         with open(path) as f:
             data = json.load(f)
-
-        suite = cls(name=data["name"], metadata=data.get("metadata", {}))
-        for r in data["results"]:
-            suite.results.append(
-                BenchmarkResult(
-                    name=r["name"],
-                    iterations=r["iterations"],
-                    total_time_s=r["total_time_s"],
-                    mean_time_s=r["mean_time_s"],
-                    std_time_s=r["std_time_s"],
-                    min_time_s=r["min_time_s"],
-                    max_time_s=r["max_time_s"],
-                )
-            )
-        return suite
+        return cls.model_validate(data)

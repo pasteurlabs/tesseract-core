@@ -12,6 +12,7 @@ than calling encode_array / decode_array directly.
 from __future__ import annotations
 
 import tempfile
+from functools import partial
 
 from pydantic import BaseModel
 from utils import BenchmarkSuite, create_test_array, run_benchmark
@@ -39,21 +40,25 @@ class ArrayModel(BaseModel):
     data: Array[(None,), Float64]
 
 
+def _encode(model: BaseModel, encoding: str, **context: str) -> str:
+    return model.model_dump_json(context={"array_encoding": encoding, **context})
+
+
+def _decode(encoded: str, **context: str) -> ArrayModel:
+    return ArrayModel.model_validate_json(encoded, context=context)
+
+
+def _roundtrip(model: BaseModel, encoding: str, **context: str) -> ArrayModel:
+    encoded = model.model_dump_json(context={"array_encoding": encoding, **context})
+    return ArrayModel.model_validate_json(encoded, context=context)
+
+
 def benchmark_encoding(
     iterations: int = 50,
     array_sizes: list[int] | None = None,
     profile: bool = False,
 ) -> BenchmarkSuite:
-    """Run encoding benchmarks for all methods and sizes.
-
-    Args:
-        iterations: Number of iterations per benchmark
-        array_sizes: Array sizes to benchmark (defaults to DEFAULT_ARRAY_SIZES)
-        profile: Whether to profile each invocation with cProfile
-
-    Returns:
-        BenchmarkSuite with all results
-    """
+    """Run encoding benchmarks for all methods and sizes."""
     if array_sizes is None:
         array_sizes = DEFAULT_ARRAY_SIZES
 
@@ -66,40 +71,28 @@ def benchmark_encoding(
         print(f"  [{i + 1}/{len(array_sizes)}] Benchmarking size {size:,}...")
         model = ArrayModel(data=create_test_array(size))
 
-        # JSON encoding
-        if size < 20_000_000:  # JSON encoding becomes impractical at very large sizes
-            result = run_benchmark(
-                name=f"encode_json_{size:,}",
-                func=lambda m=model: m.model_dump_json(
-                    context={"array_encoding": "json"}
-                ),
-                iterations=iterations,
-                profile=profile,
-            )
-            suite.add_result(result)
+        encodings: list[str] = [
+            "json",
+            "base64",
+            "binref",
+        ]
+        if size > 20_000_000:
+            encodings.remove(
+                "json"
+            )  # Skip JSON for very large arrays to avoid excessive compute
 
-        # Base64 encoding
-        result = run_benchmark(
-            name=f"encode_base64_{size:,}",
-            func=lambda m=model: m.model_dump_json(
-                context={"array_encoding": "base64"}
-            ),
-            iterations=iterations,
-            profile=profile,
-        )
-        suite.add_result(result)
-
-        # Binref encoding (needs temp directory)
         with tempfile.TemporaryDirectory() as tmpdir:
-            result = run_benchmark(
-                name=f"encode_binref_{size:,}",
-                func=lambda m=model, d=tmpdir: m.model_dump_json(
-                    context={"array_encoding": "binref", "base_dir": d}
-                ),
-                iterations=iterations,
-                profile=profile,
-            )
-            suite.add_result(result)
+            for encoding in encodings:
+                ctx = {}
+                if encoding == "binref":
+                    ctx["base_dir"] = tmpdir
+                result = run_benchmark(
+                    name=f"encode_{encoding}_{size:,}",
+                    func=partial(_encode, model, encoding, **ctx),
+                    iterations=iterations,
+                    profile=profile,
+                )
+                suite.add_result(result)
 
     return suite
 
@@ -109,16 +102,7 @@ def benchmark_decoding(
     array_sizes: list[int] | None = None,
     profile: bool = False,
 ) -> BenchmarkSuite:
-    """Run decoding benchmarks for all methods and sizes.
-
-    Args:
-        iterations: Number of iterations per benchmark
-        array_sizes: Array sizes to benchmark (defaults to DEFAULT_ARRAY_SIZES)
-        profile: Whether to profile each invocation with cProfile
-
-    Returns:
-        BenchmarkSuite with all results
-    """
+    """Run decoding benchmarks for all methods and sizes."""
     if array_sizes is None:
         array_sizes = DEFAULT_ARRAY_SIZES
 
@@ -131,41 +115,26 @@ def benchmark_decoding(
         print(f"  [{i + 1}/{len(array_sizes)}] Benchmarking size {size:,}...")
         model = ArrayModel(data=create_test_array(size))
 
-        # JSON decoding - encode first, then benchmark decoding
-        if size < 20_000_000:  # JSON decoding becomes impractical at very large sizes
-            json_encoded = model.model_dump_json(context={"array_encoding": "json"})
-            result = run_benchmark(
-                name=f"decode_json_{size:,}",
-                func=lambda s=json_encoded: ArrayModel.model_validate_json(s),
-                iterations=iterations,
-                profile=profile,
-            )
-            suite.add_result(result)
+        encodings: list[str] = ["json", "base64", "binref"]
+        if size > 20_000_000:
+            encodings.remove(
+                "json"
+            )  # Skip JSON for very large arrays to avoid excessive compute
 
-        # Base64 decoding
-        base64_encoded = model.model_dump_json(context={"array_encoding": "base64"})
-        result = run_benchmark(
-            name=f"decode_base64_{size:,}",
-            func=lambda s=base64_encoded: ArrayModel.model_validate_json(s),
-            iterations=iterations,
-            profile=profile,
-        )
-        suite.add_result(result)
-
-        # Binref decoding (needs temp directory with pre-written file)
         with tempfile.TemporaryDirectory() as tmpdir:
-            binref_encoded = model.model_dump_json(
-                context={"array_encoding": "binref", "base_dir": tmpdir}
-            )
-            result = run_benchmark(
-                name=f"decode_binref_{size:,}",
-                func=lambda s=binref_encoded, d=tmpdir: ArrayModel.model_validate_json(
-                    s, context={"base_dir": d}
-                ),
-                iterations=iterations,
-                profile=profile,
-            )
-            suite.add_result(result)
+            for encoding in encodings:
+                ctx: dict[str, str] = {}
+                if encoding == "binref":
+                    ctx["base_dir"] = tmpdir
+
+                encoded = _encode(model, encoding, **ctx)
+                result = run_benchmark(
+                    name=f"decode_{encoding}_{size:,}",
+                    func=partial(_decode, encoded, **ctx),
+                    iterations=iterations,
+                    profile=profile,
+                )
+                suite.add_result(result)
 
     return suite
 
@@ -175,19 +144,7 @@ def benchmark_roundtrip(
     array_sizes: list[int] | None = None,
     profile: bool = False,
 ) -> BenchmarkSuite:
-    """Run roundtrip (encode + decode) benchmarks.
-
-    This measures the full serialization overhead that a Tesseract
-    invocation would experience.
-
-    Args:
-        iterations: Number of iterations per benchmark
-        array_sizes: Array sizes to benchmark (defaults to DEFAULT_ARRAY_SIZES)
-        profile: Whether to profile each invocation with cProfile
-
-    Returns:
-        BenchmarkSuite with all results
-    """
+    """Run roundtrip (encode + decode) benchmarks."""
     if array_sizes is None:
         array_sizes = DEFAULT_ARRAY_SIZES
 
@@ -200,54 +157,25 @@ def benchmark_roundtrip(
         print(f"  [{i + 1}/{len(array_sizes)}] Benchmarking size {size:,}...")
         model = ArrayModel(data=create_test_array(size))
 
-        # JSON roundtrip
-        if size < 20_000_000:  # JSON roundtrip becomes impractical at very large sizes
+        encodings: list[str] = ["json", "base64", "binref"]
+        if size > 20_000_000:
+            encodings.remove(
+                "json"
+            )  # Skip JSON for very large arrays to avoid excessive compute
 
-            def json_roundtrip(m: ArrayModel = model) -> ArrayModel:
-                encoded = m.model_dump_json(context={"array_encoding": "json"})
-                return ArrayModel.model_validate_json(encoded)
-
-            result = run_benchmark(
-                name=f"roundtrip_json_{size:,}",
-                func=json_roundtrip,
-                iterations=iterations,
-                profile=profile,
-            )
-            suite.add_result(result)
-
-        # Base64 roundtrip
-        def base64_roundtrip(m: ArrayModel = model) -> ArrayModel:
-            encoded = m.model_dump_json(context={"array_encoding": "base64"})
-            return ArrayModel.model_validate_json(encoded)
-
-        result = run_benchmark(
-            name=f"roundtrip_base64_{size:,}",
-            func=base64_roundtrip,
-            iterations=iterations,
-            profile=profile,
-        )
-        suite.add_result(result)
-
-        # Binref roundtrip
         with tempfile.TemporaryDirectory() as tmpdir:
+            for encoding in encodings:
+                ctx: dict[str, str] = {}
+                if encoding == "binref":
+                    ctx["base_dir"] = tmpdir
 
-            def binref_roundtrip(
-                m: ArrayModel = model, base: str = tmpdir
-            ) -> ArrayModel:
-                encoded = m.model_dump_json(
-                    context={"array_encoding": "binref", "base_dir": base}
+                result = run_benchmark(
+                    name=f"roundtrip_{encoding}_{size:,}",
+                    func=partial(_roundtrip, model, encoding, **ctx),
+                    iterations=iterations,
+                    profile=profile,
                 )
-                return ArrayModel.model_validate_json(
-                    encoded, context={"base_dir": base}
-                )
-
-            result = run_benchmark(
-                name=f"roundtrip_binref_{size:,}",
-                func=binref_roundtrip,
-                iterations=iterations,
-                profile=profile,
-            )
-            suite.add_result(result)
+                suite.add_result(result)
 
     return suite
 
@@ -257,16 +185,7 @@ def run_all(
     array_sizes: list[int] | None = None,
     profile: bool = False,
 ) -> list[BenchmarkSuite]:
-    """Run all array encoding benchmarks.
-
-    Args:
-        iterations: Number of iterations per benchmark
-        array_sizes: Array sizes to benchmark (defaults to DEFAULT_ARRAY_SIZES)
-        profile: Whether to profile each invocation with cProfile
-
-    Returns:
-        List of BenchmarkSuites for encoding, decoding, and roundtrip
-    """
+    """Run all array encoding benchmarks."""
     results = []
     for benchmark_func in [benchmark_encoding, benchmark_decoding, benchmark_roundtrip]:
         print(f"Running {benchmark_func.__name__}...")
