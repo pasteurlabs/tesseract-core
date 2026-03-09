@@ -1035,7 +1035,6 @@ def finite_difference_vjp(
     """
     inputs_dict = inputs.model_dump()
     input_schema = type(inputs)
-    base_outputs = apply_fn(inputs).model_dump()
 
     # Initialize result
     result: dict[str, np.ndarray] = {}
@@ -1058,6 +1057,9 @@ def finite_difference_vjp(
             seed=seed,
         )
     else:
+        # Only needed for forward differences
+        base_outputs = apply_fn(inputs).model_dump() if algorithm == "forward" else None
+
         # VJP = sum over outputs of cotangent[output] @ J[output, input]
         # We need to compute each row of J (one per input element) and contract with cotangent
         for in_path in vjp_inputs:
