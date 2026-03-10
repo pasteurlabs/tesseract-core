@@ -154,7 +154,7 @@ def jacobian_from_vjp(
 
     Returns:
         dict[str, dict[str, np.ndarray]] with structure {output_path: {input_path: array}}
-        where each array has shape (*output_shape, *input_shape).
+        where each array has shape ``(*output_shape, *input_shape)``.
     """
     raw_outputs = apply_fn(inputs=inputs)
     outputs_dict = (
@@ -214,7 +214,7 @@ def jacobian_from_jvp(
 
     Returns:
         dict[str, dict[str, np.ndarray]] with structure {output_path: {input_path: array}}
-        where each array has shape (*output_shape, *input_shape).
+        where each array has shape ``(*output_shape, *input_shape)``.
     """
     raw_outputs = apply_fn(inputs=inputs)
     outputs_dict = (
