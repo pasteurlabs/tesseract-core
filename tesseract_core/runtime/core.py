@@ -232,11 +232,7 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
 
     endpoints.append(apply)
 
-    has_jac = "jacobian" in supported_functions
-    has_jvp = "jacobian_vector_product" in supported_functions
-    has_vjp = "vector_jacobian_product" in supported_functions
-
-    if has_jac:
+    if "jacobian" in supported_functions:
         JacobianInputSchema, JacobianOutputSchema = create_autodiff_schema(
             api_module.InputSchema, api_module.OutputSchema, ad_flavor="jacobian"
         )
@@ -261,7 +257,7 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
 
         endpoints.append(jacobian)
 
-    if has_jvp:
+    if "jacobian_vector_product" in supported_functions:
         JVPInputSchema, JVPOutputSchema = create_autodiff_schema(
             api_module.InputSchema, api_module.OutputSchema, ad_flavor="jvp"
         )
@@ -283,14 +279,14 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
 
         endpoints.append(jacobian_vector_product)
 
-    if has_vjp:
+    if "vector_jacobian_product" in supported_functions:
         VJPInputSchema, VJPOutputSchema = create_autodiff_schema(
             api_module.InputSchema, api_module.OutputSchema, ad_flavor="vjp"
         )
 
         @assemble_docstring(api_module.vector_jacobian_product)
         def vector_jacobian_product(payload: VJPInputSchema) -> VJPOutputSchema:
-            """Compute the vector Jacobian product of the Tesseract at the input data.
+            """Compute the Jacobian vector product of the Tesseract at the input data.
 
             Computes the vector Jacobian product between the Jacobian given by ``vjp_outputs``
             with respect to ``vjp_inputs`` at the point ``inputs`` and the given cotangent vector.

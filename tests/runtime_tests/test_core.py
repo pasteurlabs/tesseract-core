@@ -438,4 +438,3 @@ def test_ad_endpoint_bad_tangent(testmodule, endpoint_name, failure_mode):
     with pytest.raises(ValidationError, match=msg):
         inputs = EndpointSchema.model_validate(inputs)
         endpoint_func(inputs)
-
