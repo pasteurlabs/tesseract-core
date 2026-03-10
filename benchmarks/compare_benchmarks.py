@@ -5,9 +5,10 @@
 """Compare benchmark results and generate a markdown report.
 
 Usage:
-    python compare_benchmarks.py baseline.json current.json output.md
+    python compare_benchmarks.py --current current.json --output output.md [--baseline baseline.json]
 """
 
+import argparse
 import json
 import re
 import sys
@@ -64,9 +65,9 @@ def _get_runner_description(data: dict) -> str:
     return " ".join(parts) if parts else "unknown"
 
 
-def _load_benchmark_file(path: str) -> dict | None:
+def _load_benchmark_file(path: str | None) -> dict | None:
     """Load benchmark file, returning None if it doesn't exist."""
-    if not Path(path).exists():
+    if path is None or not Path(path).exists():
         return None
     with open(path) as f:
         return json.load(f)
@@ -184,7 +185,7 @@ def _format_comparison_row(comp: dict) -> str:
     return f"| `{comp['name']}` | {base_str} | {curr_str} | {change_str} | {comp['status']} |"
 
 
-def generate_report(baseline_path: str, current_path: str) -> str | None:
+def generate_report(baseline_path: str | None, current_path: str) -> str | None:
     """Generate markdown comparison report.
 
     Returns None only if current results don't exist.
@@ -276,35 +277,30 @@ def generate_report(baseline_path: str, current_path: str) -> str | None:
 
 def main() -> int:
     """Main function to compare benchmarks and generate report."""
-    if len(sys.argv) != 4:
-        print(
-            f"Usage: {sys.argv[0]} baseline.json current.json output.md",
-            file=sys.stderr,
-        )
+    parser = argparse.ArgumentParser(description="Compare benchmark results.")
+    parser.add_argument("--baseline", default=None, help="Baseline benchmark JSON file")
+    parser.add_argument("--current", required=True, help="Current benchmark JSON file")
+    parser.add_argument("--output", required=True, help="Output markdown report path")
+    args = parser.parse_args()
+
+    if not Path(args.current).exists():
+        print(f"Current benchmark file not found: {args.current}", file=sys.stderr)
         return 1
 
-    baseline_path = sys.argv[1]
-    current_path = sys.argv[2]
-    output_path = sys.argv[3]
-
-    if not Path(current_path).exists():
-        print(f"Current benchmark file not found: {current_path}", file=sys.stderr)
-        return 1
-
-    report = generate_report(baseline_path, current_path)
+    report = generate_report(args.baseline, args.current)
 
     if report is None:
         print(
-            f"Failed to generate report (current={current_path}, baseline={baseline_path})",
+            f"Failed to generate report (current={args.current}, baseline={args.baseline})",
             file=sys.stderr,
         )
         return 1
 
     try:
-        with open(output_path, "w") as f:
+        with open(args.output, "w") as f:
             f.write(report)
     except OSError as e:
-        print(f"Failed to write report to {output_path}: {e}", file=sys.stderr)
+        print(f"Failed to write report to {args.output}: {e}", file=sys.stderr)
         return 1
 
     print(report)

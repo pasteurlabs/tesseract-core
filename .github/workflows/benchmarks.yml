@@ -91,24 +91,37 @@ jobs:
         run: |
           if [ ! -f benchmarks/run_benchmarks.py ]; then
             echo "::notice::Benchmark script not found in baseline, skipping comparison"
-            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "has_baseline=false" >> $GITHUB_OUTPUT
             exit 0
           fi
 
+          rc=0
           uv run --no-sync python benchmarks/run_benchmarks.py \
             ${BENCHMARK_OPTS} \
-            --output baseline_benchmarks.json
+            --output baseline_benchmarks.json \
+            || rc=$?
 
-          echo "exists=true" >> $GITHUB_OUTPUT
+          if [ "$rc" != "0" ]; then
+            echo "::warning::Baseline benchmark run failed, skipping comparison"
+            echo "has_baseline=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "has_baseline=true" >> $GITHUB_OUTPUT
 
       - name: Generate comparison report
         if: github.event_name == 'pull_request'
         id: comparison
         run: |
+          baseline_flag=""
+          if [ "${{ steps.baseline.outputs.has_baseline }}" = "true" ]; then
+            baseline_flag="--baseline baseline/baseline_benchmarks.json"
+          fi
+
           python benchmarks/compare_benchmarks.py \
-            baseline/baseline_benchmarks.json \
-            current_benchmarks.json \
-            benchmark_report.md
+            $baseline_flag \
+            --current current_benchmarks.json \
+            --output benchmark_report.md
 
           # Set output as multiline string
           {
