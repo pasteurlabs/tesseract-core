@@ -34,7 +34,7 @@ env:
   # Set to "true" to use the PR's benchmark scripts for baseline runs.
   # Useful when the benchmark harness itself has changed and the baseline
   # branch doesn't have the new CLI flags yet.  Remove once main is updated.
-  USE_HEAD_BENCHMARKS: "true"
+  USE_HEAD_BENCHMARKS: "false"
 
 jobs:
   benchmark:
