@@ -39,7 +39,6 @@ class RuntimeConfig(BaseModel):
     )
     profiling: bool = False
     tracing: bool = False
-    autodiff_fallbacks: bool = False
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 

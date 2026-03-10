@@ -7,7 +7,6 @@ import os
 import sys
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
-from functools import partial
 from io import TextIOBase
 from pathlib import Path
 from types import ModuleType
@@ -16,12 +15,6 @@ from typing import Any, TextIO
 import numpy as np
 from pydantic import BaseModel
 
-from .autodiff_fallbacks import (
-    jacobian_from_jvp,
-    jacobian_from_vjp,
-    jvp_from_jacobian,
-    vjp_from_jacobian,
-)
 from .config import get_config
 from .logs import get_logger, is_tracing_enabled
 from .schema_generation import (
@@ -242,27 +235,20 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
     has_jac = "jacobian" in supported_functions
     has_jvp = "jacobian_vector_product" in supported_functions
     has_vjp = "vector_jacobian_product" in supported_functions
-    autodiff = get_config().autodiff_fallbacks
 
-    if has_jac or (autodiff and (has_vjp or has_jvp)):
+    if has_jac:
         JacobianInputSchema, JacobianOutputSchema = create_autodiff_schema(
             api_module.InputSchema, api_module.OutputSchema, ad_flavor="jacobian"
         )
 
-        if has_jac:
-            _jac_fn = api_module.jacobian
-        elif has_vjp:
-            _jac_fn = partial(jacobian_from_vjp, api_module.vector_jacobian_product, api_module.apply)
-        else:
-            _jac_fn = partial(jacobian_from_jvp, api_module.jacobian_vector_product, api_module.apply)
-
+        @assemble_docstring(api_module.jacobian)
         def jacobian(payload: JacobianInputSchema) -> JacobianOutputSchema:
             """Computes the Jacobian of the Tesseract.
 
             Differentiates ``jac_outputs`` with respect to ``jac_inputs``, at the point ``inputs``.
             """
             _trace("jacobian() called with payload:", payload)
-            out = _jac_fn(**dict(payload))
+            out = api_module.jacobian(**dict(payload))
             result = JacobianOutputSchema.model_validate(
                 out,
                 context={
@@ -273,17 +259,14 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
             _trace("jacobian() returned:", result)
             return result
 
-        if has_jac:
-            jacobian = assemble_docstring(api_module.jacobian)(jacobian)
         endpoints.append(jacobian)
 
-    if has_jvp or (autodiff and has_jac):
+    if has_jvp:
         JVPInputSchema, JVPOutputSchema = create_autodiff_schema(
             api_module.InputSchema, api_module.OutputSchema, ad_flavor="jvp"
         )
 
-        _jvp_fn = api_module.jacobian_vector_product if has_jvp else partial(jvp_from_jacobian, api_module.jacobian)
-
+        @assemble_docstring(api_module.jacobian_vector_product)
         def jacobian_vector_product(payload: JVPInputSchema) -> JVPOutputSchema:
             """Compute the Jacobian vector product of the Tesseract at the input data.
 
@@ -291,26 +274,21 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
             with respect to ``jvp_inputs`` at the point ``inputs`` and the given tangent vector.
             """
             _trace("jacobian_vector_product() called with payload:", payload)
-            out = _jvp_fn(**dict(payload))
+            out = api_module.jacobian_vector_product(**dict(payload))
             result = JVPOutputSchema.model_validate(
                 out, context={"output_keys": payload.jvp_outputs}
             )
             _trace("jacobian_vector_product() returned:", result)
             return result
 
-        if has_jvp:
-            jacobian_vector_product = assemble_docstring(api_module.jacobian_vector_product)(
-                jacobian_vector_product
-            )
         endpoints.append(jacobian_vector_product)
 
-    if has_vjp or (autodiff and has_jac):
+    if has_vjp:
         VJPInputSchema, VJPOutputSchema = create_autodiff_schema(
             api_module.InputSchema, api_module.OutputSchema, ad_flavor="vjp"
         )
 
-        _vjp_fn = api_module.vector_jacobian_product if has_vjp else partial(vjp_from_jacobian, api_module.jacobian)
-
+        @assemble_docstring(api_module.vector_jacobian_product)
         def vector_jacobian_product(payload: VJPInputSchema) -> VJPOutputSchema:
             """Compute the vector Jacobian product of the Tesseract at the input data.
 
@@ -318,17 +296,13 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
             with respect to ``vjp_inputs`` at the point ``inputs`` and the given cotangent vector.
             """
             _trace("vector_jacobian_product() called with payload:", payload)
-            out = _vjp_fn(**dict(payload))
+            out = api_module.vector_jacobian_product(**dict(payload))
             result = VJPOutputSchema.model_validate(
                 out, context={"input_keys": payload.vjp_inputs}
             )
             _trace("vector_jacobian_product() returned:", result)
             return result
 
-        if has_vjp:
-            vector_jacobian_product = assemble_docstring(api_module.vector_jacobian_product)(
-                vector_jacobian_product
-            )
         endpoints.append(vector_jacobian_product)
 
     def health() -> dict[str, Any]:
