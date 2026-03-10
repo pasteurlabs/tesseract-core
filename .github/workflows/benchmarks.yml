@@ -25,6 +25,12 @@ permissions:
   contents: read
   pull-requests: write
 
+env:
+  BENCHMARK_OPTS: >
+    --array-sizes 100,10000,1000000
+    --min-duration 1
+    --min-iterations 2
+
 jobs:
   benchmark:
     runs-on: ubuntu-latest
@@ -52,8 +58,7 @@ jobs:
       - name: Run benchmarks on current commit
         run: |
           uv run --no-sync python benchmarks/run_benchmarks.py \
-            --iterations 10 \
-            --array-sizes 100,10000,1000000 \
+            ${BENCHMARK_OPTS} \
             --output current_benchmarks.json
 
       - name: Check out baseline branch
@@ -77,8 +82,7 @@ jobs:
         run: |
           if [ -f benchmarks/run_benchmarks.py ]; then
             uv run --no-sync python benchmarks/run_benchmarks.py \
-              --iterations 10 \
-              --array-sizes 100,10000,1000000 \
+              ${BENCHMARK_OPTS} \
               --output baseline_benchmarks.json
             echo "exists=true" >> $GITHUB_OUTPUT
           else
