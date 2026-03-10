@@ -31,9 +31,9 @@ Creating a Tesseract from scratch: init, edit, build, and run.
 
 ## Who is this for?
 
-- **Researchers** interfacing with (differentiable) simulators or probabilistic models, or who need to combine tools from different ecosystems
-- **R&D engineers** packaging research code for use by others, without spending weeks on DevOps
-- **Platform engineers** deploying scientific workloads at scale with consistent interfaces and dependency isolation
+- **Researchers** interfacing with (differentiable) simulators or probabilistic models, or who need to combine tools from different ecosystems.
+- **R&D engineers** packaging research code for use by others, without spending weeks on DevOps.
+- **Platform engineers** deploying scientific workloads at scale with consistent interfaces and dependency isolation.
 
 ## How it works
 
