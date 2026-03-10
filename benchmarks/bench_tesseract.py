@@ -24,7 +24,12 @@ import sys
 import tempfile
 from pathlib import Path
 
-from utils import BenchmarkSuite, create_test_array, run_benchmark
+from utils import (
+    DEFAULT_MIN_DURATION_S,
+    BenchmarkSuite,
+    create_test_array,
+    run_benchmark,
+)
 
 # Path to the no-op tesseract for benchmarking
 NOOP_TESSERACT_PATH = Path(__file__).parent / "tesseract_noop" / "tesseract_api.py"
@@ -74,9 +79,10 @@ def _build_noop_tesseract() -> str | None:
 
 
 def benchmark_from_tesseract_api(
-    iterations: int = 50,
+    min_iterations: int | None = None,
     array_sizes: list[int] | None = None,
     profile: bool = False,
+    min_duration_s: float = DEFAULT_MIN_DURATION_S,
 ) -> BenchmarkSuite:
     """Benchmark non-containerized Tesseract via from_tesseract_api().
 
@@ -90,7 +96,7 @@ def benchmark_from_tesseract_api(
 
     suite = BenchmarkSuite(
         name="from_tesseract_api",
-        metadata={"iterations": iterations, "array_sizes": array_sizes},
+        metadata={"min_iterations": min_iterations, "array_sizes": array_sizes},
     )
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -114,8 +120,9 @@ def benchmark_from_tesseract_api(
             result = run_benchmark(
                 name=f"apply_{size:,}",
                 func=call_apply,
-                iterations=iterations,
+                min_iterations=min_iterations,
                 profile=profile,
+                min_duration_s=min_duration_s,
             )
             suite.add_result(result)
 
@@ -123,9 +130,10 @@ def benchmark_from_tesseract_api(
 
 
 def benchmark_containerized_http(
-    iterations: int = 20,
+    min_iterations: int | None = None,
     array_sizes: list[int] | None = None,
     profile: bool = False,
+    min_duration_s: float = DEFAULT_MIN_DURATION_S,
     image_name: str | None = None,
 ) -> BenchmarkSuite | None:
     """Benchmark containerized Tesseract via HTTP (Tesseract.from_image).
@@ -151,7 +159,7 @@ def benchmark_containerized_http(
 
     suite = BenchmarkSuite(
         name="containerized_http",
-        metadata={"iterations": iterations, "array_sizes": array_sizes},
+        metadata={"min_iterations": min_iterations, "array_sizes": array_sizes},
     )
 
     # Build the benchmark tesseract image if not provided
@@ -191,9 +199,10 @@ def benchmark_containerized_http(
                     result = run_benchmark(
                         name=f"apply_{size:,}",
                         func=call_apply,
-                        iterations=iterations,
+                        min_iterations=min_iterations,
                         warmup=2,
                         profile=profile,
+                        min_duration_s=min_duration_s,
                     )
                     suite.add_result(result)
 
@@ -205,9 +214,10 @@ def benchmark_containerized_http(
 
 
 def benchmark_containerized_cli(
-    iterations: int = 10,
+    min_iterations: int | None = None,
     array_sizes: list[int] | None = None,
     profile: bool = False,
+    min_duration_s: float = DEFAULT_MIN_DURATION_S,
     image_name: str | None = None,
 ) -> BenchmarkSuite | None:
     """Benchmark containerized Tesseract via CLI (`tesseract run`).
@@ -234,7 +244,7 @@ def benchmark_containerized_cli(
 
     suite = BenchmarkSuite(
         name="containerized_cli",
-        metadata={"iterations": iterations, "array_sizes": array_sizes},
+        metadata={"min_iterations": min_iterations, "array_sizes": array_sizes},
     )
 
     if image_name is None:
@@ -314,9 +324,10 @@ def benchmark_containerized_cli(
             result = run_benchmark(
                 name=f"apply_{size:,}",
                 func=run_cli,
-                iterations=iterations,
+                min_iterations=min_iterations,
                 warmup=1,
                 profile=profile,
+                min_duration_s=min_duration_s,
             )
             suite.add_result(result)
 
@@ -324,16 +335,18 @@ def benchmark_containerized_cli(
 
 
 def run_all(
-    iterations: int = 50,
+    min_iterations: int | None = None,
     include_containerized: bool = False,
     array_sizes: list[int] | None = None,
+    min_duration_s: float = DEFAULT_MIN_DURATION_S,
 ) -> list[BenchmarkSuite]:
     """Run all Tesseract benchmarks.
 
     Args:
-        iterations: Number of iterations per benchmark
+        min_iterations: Minimum iterations per benchmark (None = auto-calibrate only)
         include_containerized: Whether to include Docker-based benchmarks
         array_sizes: Array sizes to benchmark (defaults to DEFAULT_ARRAY_SIZES)
+        min_duration_s: Minimum duration per case when auto-calibrating
 
     Returns:
         List of BenchmarkSuites
@@ -341,7 +354,11 @@ def run_all(
     results = []
 
     print("Running benchmark_from_tesseract_api...")
-    suite = benchmark_from_tesseract_api(iterations=iterations, array_sizes=array_sizes)
+    suite = benchmark_from_tesseract_api(
+        min_iterations=min_iterations,
+        array_sizes=array_sizes,
+        min_duration_s=min_duration_s,
+    )
     if suite is not None:
         results.append(suite)
 
@@ -355,9 +372,10 @@ def run_all(
         ]:
             print(f"Running {benchmark_func.__name__}...")
             suite = benchmark_func(
-                iterations=iterations,
+                min_iterations=min_iterations,
                 array_sizes=array_sizes,
                 image_name=image_name,
+                min_duration_s=min_duration_s,
             )
             if suite is not None:
                 results.append(suite)
@@ -366,13 +384,15 @@ def run_all(
 
 
 if __name__ == "__main__":
-    iterations = int(sys.argv[1]) if len(sys.argv) > 1 else 50
+    min_iterations: int | None = int(sys.argv[1]) if len(sys.argv) > 1 else None
     exclude_docker = "--no-docker" in sys.argv
 
     print(
-        f"Running Tesseract benchmarks (iterations={iterations}, docker={not exclude_docker})..."
+        f"Running Tesseract benchmarks (min_iterations={min_iterations}, docker={not exclude_docker})..."
     )
-    suites = run_all(iterations, include_containerized=not exclude_docker)
+    suites = run_all(
+        min_iterations=min_iterations, include_containerized=not exclude_docker
+    )
 
     for suite in suites:
         print(f"\n=== {suite.name} ===")

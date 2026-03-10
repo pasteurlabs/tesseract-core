@@ -15,7 +15,12 @@ import tempfile
 from functools import partial
 
 from pydantic import BaseModel
-from utils import BenchmarkSuite, create_test_array, run_benchmark
+from utils import (
+    DEFAULT_MIN_DURATION_S,
+    BenchmarkSuite,
+    create_test_array,
+    run_benchmark,
+)
 
 from tesseract_core.runtime.schema_types import Array, Float64
 
@@ -54,9 +59,10 @@ def _roundtrip(model: BaseModel, encoding: str, **context: str) -> ArrayModel:
 
 
 def benchmark_encoding(
-    iterations: int = 50,
+    min_iterations: int | None = None,
     array_sizes: list[int] | None = None,
     profile: bool = False,
+    min_duration_s: float = DEFAULT_MIN_DURATION_S,
 ) -> BenchmarkSuite:
     """Run encoding benchmarks for all methods and sizes."""
     if array_sizes is None:
@@ -64,7 +70,7 @@ def benchmark_encoding(
 
     suite = BenchmarkSuite(
         name="array_encoding",
-        metadata={"iterations": iterations, "array_sizes": array_sizes},
+        metadata={"min_iterations": min_iterations, "array_sizes": array_sizes},
     )
 
     for i, size in enumerate(array_sizes):
@@ -89,8 +95,9 @@ def benchmark_encoding(
                 result = run_benchmark(
                     name=f"encode_{encoding}_{size:,}",
                     func=partial(_encode, model, encoding, **ctx),
-                    iterations=iterations,
+                    min_iterations=min_iterations,
                     profile=profile,
+                    min_duration_s=min_duration_s,
                 )
                 suite.add_result(result)
 
@@ -98,9 +105,10 @@ def benchmark_encoding(
 
 
 def benchmark_decoding(
-    iterations: int = 50,
+    min_iterations: int | None = None,
     array_sizes: list[int] | None = None,
     profile: bool = False,
+    min_duration_s: float = DEFAULT_MIN_DURATION_S,
 ) -> BenchmarkSuite:
     """Run decoding benchmarks for all methods and sizes."""
     if array_sizes is None:
@@ -108,7 +116,7 @@ def benchmark_decoding(
 
     suite = BenchmarkSuite(
         name="array_decoding",
-        metadata={"iterations": iterations, "array_sizes": array_sizes},
+        metadata={"min_iterations": min_iterations, "array_sizes": array_sizes},
     )
 
     for i, size in enumerate(array_sizes):
@@ -131,8 +139,9 @@ def benchmark_decoding(
                 result = run_benchmark(
                     name=f"decode_{encoding}_{size:,}",
                     func=partial(_decode, encoded, **ctx),
-                    iterations=iterations,
+                    min_iterations=min_iterations,
                     profile=profile,
+                    min_duration_s=min_duration_s,
                 )
                 suite.add_result(result)
 
@@ -140,9 +149,10 @@ def benchmark_decoding(
 
 
 def benchmark_roundtrip(
-    iterations: int = 50,
+    min_iterations: int | None = None,
     array_sizes: list[int] | None = None,
     profile: bool = False,
+    min_duration_s: float = DEFAULT_MIN_DURATION_S,
 ) -> BenchmarkSuite:
     """Run roundtrip (encode + decode) benchmarks."""
     if array_sizes is None:
@@ -150,7 +160,7 @@ def benchmark_roundtrip(
 
     suite = BenchmarkSuite(
         name="array_roundtrip",
-        metadata={"iterations": iterations, "array_sizes": array_sizes},
+        metadata={"min_iterations": min_iterations, "array_sizes": array_sizes},
     )
 
     for i, size in enumerate(array_sizes):
@@ -172,8 +182,9 @@ def benchmark_roundtrip(
                 result = run_benchmark(
                     name=f"roundtrip_{encoding}_{size:,}",
                     func=partial(_roundtrip, model, encoding, **ctx),
-                    iterations=iterations,
+                    min_iterations=min_iterations,
                     profile=profile,
+                    min_duration_s=min_duration_s,
                 )
                 suite.add_result(result)
 
@@ -181,16 +192,20 @@ def benchmark_roundtrip(
 
 
 def run_all(
-    iterations: int = 50,
+    min_iterations: int | None = None,
     array_sizes: list[int] | None = None,
     profile: bool = False,
+    min_duration_s: float = DEFAULT_MIN_DURATION_S,
 ) -> list[BenchmarkSuite]:
     """Run all array encoding benchmarks."""
     results = []
     for benchmark_func in [benchmark_encoding, benchmark_decoding, benchmark_roundtrip]:
         print(f"Running {benchmark_func.__name__}...")
         suite = benchmark_func(
-            iterations=iterations, array_sizes=array_sizes, profile=profile
+            min_iterations=min_iterations,
+            array_sizes=array_sizes,
+            profile=profile,
+            min_duration_s=min_duration_s,
         )
         results.append(suite)
     return results
@@ -199,10 +214,10 @@ def run_all(
 if __name__ == "__main__":
     import sys
 
-    iterations = int(sys.argv[1]) if len(sys.argv) > 1 else 50
+    min_iterations: int | None = int(sys.argv[1]) if len(sys.argv) > 1 else None
 
     print("Running array encoding benchmarks...")
-    suites = run_all(iterations)
+    suites = run_all(min_iterations=min_iterations)
 
     for suite in suites:
         print(f"\n=== {suite.name} ===")
