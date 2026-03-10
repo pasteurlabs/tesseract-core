@@ -11,8 +11,7 @@ Usage:
     python run_benchmarks.py [options]
 
 Options (all optional):
-    -n, --min-iterations N   Minimum iteration count per case
-    --min-duration SECS      Min duration per case in seconds (default: 0.1)
+    -n, --iterations N       Number of iterations per benchmark (default: 50)
     -s, --suite SUITE        Which suite(s) to run; repeatable (default: all)
     -o, --output FILE        Save results to JSON file
     -c, --compare FILE       Compare against a baseline JSON file
@@ -31,10 +30,10 @@ Examples:
     python run_benchmarks.py --suite array_encoding --suite array_roundtrip
 
     # Profile the encoding roundtrip to find bottlenecks
-    python run_benchmarks.py --suite array_roundtrip --profile --array-sizes 1000000
+    python run_benchmarks.py --suite array_roundtrip --profile -n 10 --array-sizes 1000000
 
-    # Run specific array sizes with a longer minimum duration
-    python run_benchmarks.py --suite array_encoding --min-duration 0.5 --array-sizes 100,10000
+    # Run specific array sizes with fewer iterations
+    python run_benchmarks.py --suite array_encoding -n 10 --array-sizes 100,10000
 
 Available suites:
     from_tesseract_api   Non-containerized Tesseract via direct Python calls
@@ -60,14 +59,12 @@ _benchmarks_dir = str(Path(__file__).resolve().parent)
 if _benchmarks_dir not in sys.path:
     sys.path.insert(0, _benchmarks_dir)
 
-from utils import DEFAULT_MIN_DURATION_S, BenchmarkSuite  # noqa: E402
+from utils import BenchmarkSuite  # noqa: E402
 
 # Registry of available benchmark suites.
 # Each entry maps a suite name to a factory that returns the runner function.
 # Using factories (lambdas) to avoid importing bench modules at top level.
-SuiteRunner = Callable[
-    [int | None, list[int] | None, bool, float], BenchmarkSuite | None
-]
+SuiteRunner = Callable[[int, list[int] | None, bool], BenchmarkSuite | None]
 
 SUITE_REGISTRY: dict[str, Callable[[], SuiteRunner]] = {
     "from_tesseract_api": lambda: (
@@ -134,25 +131,11 @@ def main() -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "--min-iterations",
+        "--iterations",
         "-n",
         type=int,
-        default=None,
-        help=(
-            "Minimum number of iterations per benchmark case. "
-            "The actual count may be higher if needed to reach --min-duration. "
-            "By default, iterations are auto-calibrated from warmup timings."
-        ),
-    )
-    parser.add_argument(
-        "--min-duration",
-        type=float,
-        default=DEFAULT_MIN_DURATION_S,
-        help=(
-            f"Minimum duration in seconds for each benchmark case "
-            f"(default: {DEFAULT_MIN_DURATION_S}). "
-            f"Iterations are auto-calibrated from warmup timings to meet this target."
-        ),
+        default=50,
+        help="Number of iterations per benchmark (default: 50)",
     )
     parser.add_argument(
         "--output",
@@ -205,17 +188,7 @@ def main() -> int:
     if args.array_sizes:
         array_sizes = [int(s.strip()) for s in args.array_sizes.split(",")]
 
-    if args.min_iterations is not None:
-        print(
-            f"Running Tesseract Core benchmarks "
-            f"(min_iterations={args.min_iterations}, "
-            f"min_duration={args.min_duration}s per case)"
-        )
-    else:
-        print(
-            f"Running Tesseract Core benchmarks "
-            f"(min_duration={args.min_duration}s per case)"
-        )
+    print(f"Running Tesseract Core benchmarks (iterations={args.iterations})")
     print(f"Suites: {', '.join(selected_suites)}")
     print(f"System: {platform.system()} {platform.release()} ({platform.machine()})")
     print(f"Python: {platform.python_version()}")
@@ -229,10 +202,9 @@ def main() -> int:
         runner = SUITE_REGISTRY[suite_name]()
         print(f"\nRunning {suite_name}...")
         result = runner(
-            min_iterations=args.min_iterations,
+            iterations=args.iterations,
             array_sizes=array_sizes,
             profile=args.profile,
-            min_duration_s=args.min_duration,
         )
         if result is not None:
             suites.append(result)
@@ -247,8 +219,7 @@ def main() -> int:
     # Merge and save results
     combined = merge_suites(suites)
     combined.metadata["system"] = get_system_info()
-    combined.metadata["min_iterations"] = args.min_iterations
-    combined.metadata["min_duration_s"] = args.min_duration
+    combined.metadata["iterations"] = args.iterations
     combined.metadata["elapsed_seconds"] = elapsed
 
     if args.output:

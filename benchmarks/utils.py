@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import math
 import statistics
 import time
 from typing import TYPE_CHECKING, Any
@@ -15,11 +14,6 @@ from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
-# Minimum total benchmark duration in seconds.  run_benchmark uses warmup
-# timings to estimate iterations so that the timed phase lasts at least this
-# long.  Can be overridden per-call via the *min_duration_s* parameter.
-DEFAULT_MIN_DURATION_S = 0.1
 
 
 def create_test_array(size: int, dtype: str = "float64") -> np.ndarray:
@@ -44,47 +38,27 @@ class BenchmarkResult(BaseModel):
 def run_benchmark(
     name: str,
     func: Callable[[], Any],
-    min_iterations: int | None = None,
+    iterations: int = 100,
     warmup: int = 2,
     profile: bool = False,
-    min_duration_s: float = DEFAULT_MIN_DURATION_S,
 ) -> BenchmarkResult:
     """Run a benchmark and return results.
-
-    The number of iterations is determined automatically from warmup timings
-    so that the timed phase runs for at least *min_duration_s* seconds.  If
-    *min_iterations* is given, at least that many iterations will be run.
 
     Args:
         name: Name of the benchmark
         func: Function to benchmark (no arguments)
-        min_iterations: Minimum number of timed iterations.  The actual count
-            may be higher to satisfy *min_duration_s*.
+        iterations: Number of iterations to run
         warmup: Number of warmup iterations (not counted)
         profile: Whether to profile each invocation with cProfile
-        min_duration_s: Target minimum total duration for the timed phase.
 
     Returns:
         BenchmarkResult with timing statistics
     """
     from tesseract_core.runtime.profiler import Profiler
 
-    # Warmup — also used to estimate per-call time for auto-calibration.
-    warmup_times: list[float] = []
+    # Warmup
     for _ in range(warmup):
-        start = time.perf_counter()
         func()
-        warmup_times.append(time.perf_counter() - start)
-
-    # Estimate iterations from warmup timings.
-    estimated_per_call = statistics.mean(warmup_times) if warmup_times else 0.0
-    if estimated_per_call > 0:
-        calibrated = max(1, math.ceil(min_duration_s / estimated_per_call))
-    else:
-        # Function is effectively instant; use a sensible fallback.
-        calibrated = max(1, math.ceil(min_duration_s / 1e-6))
-
-    iterations = max(calibrated, min_iterations or 0)
 
     # Timed iterations
     profiler = Profiler(enabled=profile)
