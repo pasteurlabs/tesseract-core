@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import atexit
 import base64
+import sys
+import tempfile
 import traceback
+import uuid
 import warnings
 from collections.abc import Callable, Mapping, Sequence
 from functools import cached_property, wraps
@@ -19,6 +22,7 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 from pydantic_core import InitErrorDetails
 
 from . import engine
+from .logs import LogStreamer
 
 PathLike = str | Path
 
@@ -48,16 +52,19 @@ class Tesseract:
     HTTP requests or directly via Python calls to the Tesseract API.
     """
 
+    _spawn_config: dict | None = None
+    _serve_context: dict | None = None
+    _lastlog: str | None = None
+    _client: HTTPClient | LocalClient | None = None
+    _stream_logs: bool | Callable[[str], Any] = False
+
     def __init__(self, url: str) -> None:
         warnings.warn(
             "Direct instantiation of Tesseract is deprecated. "
             "Use Tesseract.from_url(), Tesseract.from_image(), or Tesseract.from_tesseract_api() instead.",
-            DeprecationWarning,
-            stacklevel=1,
+            UserWarning,
+            stacklevel=2,
         )
-        self._spawn_config = None
-        self._serve_context = None
-        self._lastlog = None
         self._client = HTTPClient(url)
 
     @classmethod
@@ -73,9 +80,6 @@ class Tesseract:
             A Tesseract instance.
         """
         obj = cls.__new__(cls)
-        obj._spawn_config = None
-        obj._serve_context = None
-        obj._lastlog = None
         obj._client = HTTPClient(url)
         return obj
 
@@ -97,6 +101,8 @@ class Tesseract:
         input_path: str | Path | None = None,
         output_path: str | Path | None = None,
         output_format: Literal["json", "json+base64"] = "json+base64",
+        runtime_config: dict[str, Any] | None = None,
+        stream_logs: bool | Callable[[str], Any] = False,
     ) -> Tesseract:
         """Create a Tesseract instance from a Docker image.
 
@@ -128,6 +134,11 @@ class Tesseract:
             output_path: Output path to write output files to, such as local directory or S3 URI.
             output_format: Format to use for the output data (json+binref not yet supported).
                 This has no impact on what is returned to Python and only affects the format that is used internally.
+            runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
+                These are converted to TESSERACT_* environment variables. For example,
+                `{"profiling": True}` enables profiling via TESSERACT_PROFILING=true.
+            stream_logs: If True, stream logs to stdout while endpoints run.
+                If a callable, stream logs to that callable instead.
 
         Returns:
             A Tesseract instance.
@@ -136,13 +147,18 @@ class Tesseract:
 
         if environment is None:
             environment = {}
+
         if volumes is None:
             volumes = []
         if input_path is not None:
             input_path = Path(input_path).resolve()
         if output_path is not None:
             output_path = Path(output_path).resolve()
+        else:
+            # Auto-create temp directory for output (enables stream_logs without explicit output_path)
+            output_path = Path(tempfile.mkdtemp(prefix="tesseract_output_"))
 
+        obj._stream_logs = stream_logs
         obj._spawn_config = dict(
             image_name=image_name,
             volumes=volumes,
@@ -156,13 +172,11 @@ class Tesseract:
             input_path=input_path,
             output_path=output_path,
             output_format=output_format,
+            runtime_config=runtime_config,
             port=port,
             host_ip=host_ip,
             debug=True,
         )
-        obj._serve_context = None
-        obj._lastlog = None
-        obj._client = None
         return obj
 
     @classmethod
@@ -172,6 +186,8 @@ class Tesseract:
         input_path: Path | None = None,
         output_path: Path | None = None,
         output_format: Literal["json", "json+base64"] = "json+base64",
+        runtime_config: dict[str, Any] | None = None,
+        stream_logs: bool | Callable[[str], Any] = False,
     ) -> Tesseract:
         """Create a Tesseract instance from a Tesseract API module.
 
@@ -189,6 +205,10 @@ class Tesseract:
                 result with be given relative to this path.
             output_format: Format to use for the output data (json+binref not yet supported).
                 This has no impact on what is returned to Python and only affects the format that is used internally.
+            runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
+                For example, `{"profiling": True}` enables profiling.
+            stream_logs: If True, stream logs to stdout while endpoints run.
+                If a callable, stream logs to that callable instead.
 
         Returns:
             A Tesseract instance.
@@ -213,16 +233,21 @@ class Tesseract:
 
         if input_path is not None:
             update_config(input_path=str(input_path.resolve()))
+
+        resolved_output_path = None
         if output_path is not None:
-            local_path = engine._resolve_file_path(output_path, make_dir=True)
-            update_config(output_path=str(local_path))
-        update_config(output_format=output_format, debug=True)
+            resolved_output_path = engine._resolve_file_path(output_path, make_dir=True)
+            update_config(output_path=str(resolved_output_path))
+
+        # Apply runtime_config options
+        config_kwargs: dict[str, Any] = {"output_format": output_format, "debug": True}
+        if runtime_config is not None:
+            config_kwargs.update(runtime_config)
+        update_config(**config_kwargs)
 
         obj = cls.__new__(cls)
-        obj._spawn_config = None
-        obj._serve_context = None
-        obj._lastlog = None
-        obj._client = LocalClient(tesseract_api)
+        obj._stream_logs = stream_logs
+        obj._client = LocalClient(tesseract_api, output_path=resolved_output_path)
         return obj
 
     def __enter__(self) -> Tesseract:
@@ -246,7 +271,7 @@ class Tesseract:
         This will stop the Tesseract server if it is running.
         """
         if self._serve_context is None:
-            # This can happen if __enter__ short-circuits
+            # This can happen if __enter__ short-circuits (e.g., from_tesseract_api)
             return
         self.teardown()
 
@@ -279,7 +304,11 @@ class Tesseract:
         )
         host_ip = self._spawn_config["host_ip"]
         self._lastlog = None
-        self._client = HTTPClient(f"http://{host_ip}:{container.host_port}")
+        output_path = self._spawn_config.get("output_path")
+        self._client = HTTPClient(
+            f"http://{host_ip}:{container.host_port}",
+            output_path=Path(output_path) if output_path else None,
+        )
         atexit.register(self.teardown)
 
     def teardown(self) -> None:
@@ -324,7 +353,11 @@ class Tesseract:
         return [endpoint.lstrip("/") for endpoint in self.openapi_schema["paths"]]
 
     @requires_client
-    def apply(self, inputs: dict, run_id: str | None = None) -> dict:
+    def apply(
+        self,
+        inputs: dict,
+        run_id: str | None = None,
+    ) -> dict:
         """Run apply endpoint.
 
         Args:
@@ -336,7 +369,7 @@ class Tesseract:
             dictionary with the results.
         """
         payload = {"inputs": inputs}
-        return self._client.run_tesseract("apply", payload, run_id)
+        return self._client.run_tesseract("apply", payload, run_id, self._stream_logs)
 
     @requires_client
     def abstract_eval(self, abstract_inputs: dict) -> dict:
@@ -388,7 +421,9 @@ class Tesseract:
             "jac_inputs": jac_inputs,
             "jac_outputs": jac_outputs,
         }
-        return self._client.run_tesseract("jacobian", payload, run_id)
+        return self._client.run_tesseract(
+            "jacobian", payload, run_id, self._stream_logs
+        )
 
     @requires_client
     def jacobian_vector_product(
@@ -423,7 +458,9 @@ class Tesseract:
             "jvp_outputs": jvp_outputs,
             "tangent_vector": tangent_vector,
         }
-        return self._client.run_tesseract("jacobian_vector_product", payload, run_id)
+        return self._client.run_tesseract(
+            "jacobian_vector_product", payload, run_id, self._stream_logs
+        )
 
     @requires_client
     def vector_jacobian_product(
@@ -444,7 +481,6 @@ class Tesseract:
             run_id: a string to identify the run. Run outputs will be located
                     in a directory suffixed with this id.
 
-
         Returns:
             dictionary with the results.
         """
@@ -459,7 +495,9 @@ class Tesseract:
             "vjp_outputs": vjp_outputs,
             "cotangent_vector": cotangent_vector,
         }
-        return self._client.run_tesseract("vector_jacobian_product", payload, run_id)
+        return self._client.run_tesseract(
+            "vector_jacobian_product", payload, run_id, self._stream_logs
+        )
 
     @requires_client
     def test(self, test_spec: dict) -> None:
@@ -567,8 +605,9 @@ def _decode_array(encoded_arr: dict) -> np.ndarray:
 class HTTPClient:
     """HTTP Client for Tesseracts."""
 
-    def __init__(self, url: str) -> None:
+    def __init__(self, url: str, output_path: Path | None = None) -> None:
         self._url = self._sanitize_url(url)
+        self._output_path = output_path
 
     @staticmethod
     def _sanitize_url(url: str) -> str:
@@ -660,7 +699,11 @@ class HTTPClient:
         return data
 
     def run_tesseract(
-        self, endpoint: str, payload: dict | None = None, run_id: str | None = None
+        self,
+        endpoint: str,
+        payload: dict | None = None,
+        run_id: str | None = None,
+        stream_logs: bool | Callable[[str], Any] = False,
     ) -> dict:
         """Run a Tesseract endpoint.
 
@@ -669,6 +712,8 @@ class HTTPClient:
             payload: The payload to send to the endpoint.
             run_id: a string to identify the run. Run outputs will be located
                     in a directory suffixed with this id.
+            stream_logs: If True, stream logs to stdout. If a callable, stream
+                    logs to that callable.
 
         Returns:
             The loaded JSON response from the endpoint, with decoded arrays.
@@ -684,13 +729,43 @@ class HTTPClient:
         if endpoint == "openapi_schema":
             endpoint = "openapi.json"
 
-        return self._request(endpoint, method, payload, run_id)
+        # Set up log streaming if requested
+        log_streamer = None
+        if stream_logs:
+            # Generate run_id if not provided so we know the log file path
+            if run_id is None:
+                run_id = str(uuid.uuid4())
+
+            # output_path is always set by from_image (uses temp dir if not specified)
+            assert self._output_path is not None
+            log_path = self._output_path / f"run_{run_id}" / "logs" / "tesseract.log"
+
+            # Determine log sink from stream_logs parameter
+            if callable(stream_logs):
+                log_sink = stream_logs
+            elif stream_logs is True:
+                log_sink = lambda msg: print(msg, file=sys.stderr, flush=True)
+            else:
+                raise ValueError(
+                    f"Invalid value for stream_logs: {stream_logs}. Must be True, False, or a callable."
+                )
+            log_streamer = LogStreamer(log_path, log_sink)
+            log_streamer.start()
+
+        try:
+            return self._request(endpoint, method, payload, run_id)
+        finally:
+            if log_streamer is not None:
+                log_streamer.stop()
 
 
 class LocalClient:
     """Local Client for Tesseracts."""
 
-    def __init__(self, tesseract_api: ModuleType) -> None:
+    def __init__(
+        self, tesseract_api: ModuleType, output_path: Path | None = None
+    ) -> None:
+        # Import here to not depend on runtime dependencies globally
         from tesseract_core.runtime.core import create_endpoints
         from tesseract_core.runtime.serve import create_rest_api
 
@@ -699,8 +774,16 @@ class LocalClient:
         }
         self._openapi_schema = create_rest_api(tesseract_api).openapi()
 
+        if output_path is None:
+            output_path = Path(tempfile.mkdtemp(prefix="tesseract_output_"))
+        self._output_path = output_path
+
     def run_tesseract(
-        self, endpoint: str, payload: dict | None = None, run_id: str | None = None
+        self,
+        endpoint: str,
+        payload: dict | None = None,
+        run_id: str | None = None,
+        stream_logs: bool | Callable[[str], Any] = False,
     ) -> dict:
         """Run a Tesseract endpoint.
 
@@ -708,6 +791,7 @@ class LocalClient:
             endpoint: The endpoint to run.
             payload: The payload to send to the endpoint.
             run_id: a string to identify the run.
+            stream_logs: If True, stream logs to stdout. If a callable, stream logs to that callable.
 
         Returns:
             The loaded JSON response from the endpoint, with decoded arrays.
@@ -718,6 +802,12 @@ class LocalClient:
         if endpoint not in self._endpoints:
             raise RuntimeError(f"Endpoint {endpoint} not found in Tesseract API.")
 
+        # Import here to not depend on runtime dependencies globally
+        from tesseract_core.runtime.config import get_config
+        from tesseract_core.runtime.file_interactions import join_paths
+        from tesseract_core.runtime.mpa import start_run
+        from tesseract_core.runtime.profiler import Profiler
+
         func = self._endpoints[endpoint]
         InputSchema = func.__annotations__.get("payload", None)
         OutputSchema = func.__annotations__.get("return", None)
@@ -727,11 +817,37 @@ class LocalClient:
         else:
             parsed_payload = None
 
+        # Set up run directory for logging
+        if run_id is None:
+            run_id = str(uuid.uuid4())
+        rundir = join_paths(str(self._output_path), f"run_{run_id}")
+
+        # Determine log sink from stream_logs parameter
+        if stream_logs is False:
+            log_sink = None
+        elif stream_logs is True:
+            log_sink = lambda msg: print(msg, file=sys.stderr, flush=True)
+        elif callable(stream_logs):
+            log_sink = stream_logs
+        else:
+            raise ValueError(
+                f"Invalid value for stream_logs: {stream_logs}. Must be True, False, or a callable."
+            )
+
+        # Set up profiler
+        profiler = Profiler(enabled=get_config().profiling)
+
         try:
-            if parsed_payload is not None:
-                result = self._endpoints[endpoint](parsed_payload)
-            else:
-                result = self._endpoints[endpoint]()
+            with start_run(base_dir=rundir, log_sink=log_sink):
+                with profiler:
+                    if parsed_payload is not None:
+                        result = self._endpoints[endpoint](parsed_payload)
+                    else:
+                        result = self._endpoints[endpoint]()
+
+                # Print profiling stats inside start_run context
+                # so they go through stdio redirection to the configured sink
+                profiler.print_stats()
         except Exception as ex:
             # Some clients like Tesseract-JAX swallow tracebacks from re-raised exceptions, so we explicitly
             # format the traceback here to include it in the error message.

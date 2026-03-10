@@ -16,6 +16,7 @@ from .config import get_config
 from .core import create_endpoints
 from .file_interactions import SUPPORTED_FORMATS, join_paths, output_to_bytes
 from .mpa import start_run
+from .profiler import Profiler
 
 # Endpoints that should use GET instead of POST
 GET_ENDPOINTS = {"health"}
@@ -69,8 +70,14 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
             output_path = get_config().output_path
             rundir_name = f"run_{run_id}"
             rundir = join_paths(output_path, rundir_name)
+            profiler = Profiler()
             with start_run(base_dir=rundir):
-                result = endpoint_func(*args, **kwargs)
+                with profiler:
+                    result = endpoint_func(*args, **kwargs)
+
+                # Print profiling stats inside start_run context
+                # so they go through stdio redirection to the log file
+                profiler.print_stats()
             return create_response(
                 result, accept, base_dir=output_path, binref_dir=rundir_name
             )

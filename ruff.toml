@@ -46,6 +46,7 @@ ignore = [
 # Ignore missing docstrings and type annotations for selected directories
 "docs/*" = ["D101", "D102", "D103", "D106", "ANN"]
 "tests/*" = ["D101", "D102", "D103", "D106", "ANN"]
+"benchmarks/*" = ["D101", "D102", "D103", "D106", "ANN"]
 "examples/**/*" = ["D101", "D102", "D103", "D106", "ANN"]
 "tesseract_core/sdk/templates/*" = ["D101", "D102", "D103", "D106", "ANN"]
 

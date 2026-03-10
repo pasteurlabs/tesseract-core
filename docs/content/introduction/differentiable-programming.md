@@ -6,6 +6,10 @@
 
 Tesseracts natively support DP and autodiff as an optional feature – as long as at least one of the input or output arrays is marked as differentiable, and an [AD endpoint](#ad-endpoints) is implemented, the Tesseract can be differentiated with respect to its inputs.
 
+```{tip}
+If you're using JAX, check out [Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax) — a companion package that makes it easy to create Tesseracts from JAX functions with autodiff endpoints generated automatically.
+```
+
 ## Autodiff flavors
 
 There are several ways to compute the derivative of a pipeline of functions with respect to their inputs, and each has its own trade-offs. Tesseracts support both forward-mode and reverse-mode autodiff, as well as the computation of the full Jacobian matrix.
@@ -106,6 +110,21 @@ For a practical introduction to JVPs and VJPs, see [the JAX documentation](https
 ```
 
 For more information, see the API reference for the {py:func}`Jacobian-vector product endpoint <tesseract_core.runtime.app_cli.jacobian_vector_product>` and the {py:func}`Vector-Jacobian product endpoint <tesseract_core.runtime.app_cli.vector_jacobian_product>`.
+
+### Finite Difference Gradients (Experimental)
+
+If implementing analytical gradients is too complex or time-consuming, you can use **finite differences**
+to approximate gradients numerically. This is useful for prototyping, complex nested schemas, and
+verification of analytical gradient implementations.
+
+```{warning}
+Numerical differentiation is less accurate and more
+computationally expensive than analytical methods or automatic differentiation. Use with caution, especially for high-dimensional inputs.
+```
+
+```{seealso}
+For a full guide on finite difference algorithms and a complete example, see {doc}`/content/examples/building-blocks/finitediff`.
+```
 
 ### Abstract Evaluation
 

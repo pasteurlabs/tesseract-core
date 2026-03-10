@@ -2,14 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # create a temp directory to work in
-import os
-
-# Check if HOME is writable, if not, set it to /tmp
-if "HOME" not in os.environ or not os.access(os.environ.get("HOME", ""), os.W_OK):
-    os.environ["HOME"] = "/tmp"
-
-
 import logging
+import os
 import tempfile
 import time
 from collections.abc import Callable
