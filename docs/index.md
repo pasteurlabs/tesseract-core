@@ -120,7 +120,6 @@ If you use Tesseract in your research, please cite:
 
 content/introduction/installation.md
 content/introduction/get-started.md
-content/introduction/differentiable-programming.md
 Tesseract User Forums <https://si-tesseract.discourse.group/>
 ```
 
@@ -162,7 +161,8 @@ Tesseract Showcase <https://si-tesseract.discourse.group/c/showcase/11>
 :maxdepth: 2
 :hidden:
 
-content/debugging.md
+content/misc/differentiable-programming.md
+content/misc/debugging.md
 content/misc/faq.md
 ```
 
