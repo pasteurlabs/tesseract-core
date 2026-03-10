@@ -55,6 +55,9 @@ The [rocket fin optimization case study](https://si-tesseract.discourse.group/t/
 
 Each component uses a different differentiation strategy (analytic adjoints, finite differences, JAX autodiff), yet they compose into a single optimizable pipeline that [is one `jax.grad` call away](https://github.com/pasteurlabs/tesseract-jax) from end-to-end gradients.
 
+> [!TIP]
+> More examples in the [example gallery](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/examples/example_gallery.html) and [community showcases](https://si-tesseract.discourse.group/c/showcase/11).
+
 ## Quick start
 
 <p align="center">
