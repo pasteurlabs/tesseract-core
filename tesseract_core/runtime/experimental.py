@@ -50,6 +50,7 @@ def vjp_from_jacobian(
     vjp_inputs: set[str],
     vjp_outputs: set[str],
     cotangent_vector: dict[str, Any],
+    diagonal: bool = False,
 ) -> dict[str, Any]:
     """Compute VJP as v^T @ J using the full Jacobian.
 
@@ -59,6 +60,14 @@ def vjp_from_jacobian(
         vjp_inputs: set[str] of input path strings to differentiate w.r.t.
         vjp_outputs: set[str] of output path strings to differentiate.
         cotangent_vector: dict mapping output paths to cotangent arrays.
+        diagonal: If True, assume each Jacobian block is diagonal (i.e. all
+            off-diagonal entries are zero) and compute the product using an
+            elementwise multiply against the diagonal instead of a full
+            tensordot. This is the correct choice when the primal computation
+            consists entirely of elementwise or in-place operations, so that
+            each output element depends only on the corresponding input element.
+            The caller is responsible for ensuring the assumption holds;
+            no validation is performed. Requires dy_shape == dx_shape.
 
     Returns:
         dict mapping input paths to gradient arrays.
@@ -70,7 +79,11 @@ def vjp_from_jacobian(
         for dy in vjp_outputs:
             J = np.asarray(jac[dy][dx])  # shape: (*dy_shape, *dx_shape)
             v = np.asarray(cotangent_vector[dy])  # shape: (*dy_shape)
-            term = np.tensordot(v, J, axes=v.ndim)
+            if diagonal:
+                diag = np.diag(J.reshape(v.size, v.size))
+                term = diag.reshape(v.shape) * v
+            else:
+                term = np.tensordot(v, J, axes=v.ndim)
             grad = term if grad is None else grad + term
         out[dx] = grad
     return out
@@ -82,6 +95,7 @@ def jvp_from_jacobian(
     jvp_inputs: set[str],
     jvp_outputs: set[str],
     tangent_vector: dict[str, Any],
+    diagonal: bool = False,
 ) -> dict[str, Any]:
     """Compute JVP as J @ t using the full Jacobian.
 
@@ -91,6 +105,14 @@ def jvp_from_jacobian(
         jvp_inputs: set[str] of input path strings.
         jvp_outputs: set[str] of output path strings.
         tangent_vector: dict mapping input paths to tangent arrays.
+        diagonal: If True, assume each Jacobian block is diagonal (i.e. all
+            off-diagonal entries are zero) and compute the product using an
+            elementwise multiply against the diagonal instead of a full
+            tensordot. This is the correct choice when the primal computation
+            consists entirely of elementwise or in-place operations, so that
+            each output element depends only on the corresponding input element.
+            The caller is responsible for ensuring the assumption holds;
+            no validation is performed. Requires dy_shape == dx_shape.
 
     Returns:
         dict mapping output paths to JVP result arrays.
@@ -102,7 +124,11 @@ def jvp_from_jacobian(
         for dx in jvp_inputs:
             J = np.asarray(jac[dy][dx])  # shape: (*dy_shape, *dx_shape)
             t = np.asarray(tangent_vector[dx])  # shape: (*dx_shape)
-            term = np.tensordot(J, t, axes=t.ndim)
+            if diagonal:
+                diag = np.diag(J.reshape(t.size, t.size))
+                term = diag.reshape(t.shape) * t
+            else:
+                term = np.tensordot(J, t, axes=t.ndim)
             result = term if result is None else result + term
         out[dy] = result
     return out

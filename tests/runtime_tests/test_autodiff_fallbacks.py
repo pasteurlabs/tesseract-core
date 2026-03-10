@@ -247,3 +247,108 @@ def test_jacobian_derived_from_vjp_via_experimental_helper(
     )
     result = endpoint_func(payload)
     np.testing.assert_allclose(np.asarray(result.root["y"]["x"]), _A, atol=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# Fixture: elementwise squaring f(x) = x², Jacobian is diag(2x)
+# ---------------------------------------------------------------------------
+
+_elem_input = {"x": np.array([1.0, 2.0, 3.0], dtype=np.float32)}
+_elem_tangent = {"x": np.array([0.5, 1.0, 2.0], dtype=np.float32)}
+_elem_cotangent = {"y": np.array([1.0, 0.5, 0.25], dtype=np.float32)}
+
+
+@pytest.fixture
+def module_elementwise():
+    """Module with f(x) = x² (elementwise); Jacobian is diag(2x)."""
+
+    class _InputSchema(BaseModel):
+        x: Differentiable[Array[(3,), Float32]]
+
+    class _OutputSchema(BaseModel):
+        y: Differentiable[Array[(3,), Float32]]
+
+    class ElementwiseModule(ModuleType):
+        @property
+        def InputSchema(self):
+            return _InputSchema
+
+        @property
+        def OutputSchema(self):
+            return _OutputSchema
+
+        def apply(self, inputs):
+            x = np.asarray(inputs.x)
+            return _OutputSchema(y=x**2)
+
+        def jacobian(self, inputs, jac_inputs, jac_outputs):
+            x = np.asarray(inputs.x)
+            return {"y": {"x": np.diag(2 * x)}}
+
+        def jacobian_vector_product(
+            self, inputs, jvp_inputs, jvp_outputs, tangent_vector
+        ):
+            return jvp_from_jacobian(
+                self.jacobian,
+                inputs,
+                jvp_inputs,
+                jvp_outputs,
+                tangent_vector,
+                diagonal=True,
+            )
+
+        def vector_jacobian_product(
+            self, inputs, vjp_inputs, vjp_outputs, cotangent_vector
+        ):
+            return vjp_from_jacobian(
+                self.jacobian,
+                inputs,
+                vjp_inputs,
+                vjp_outputs,
+                cotangent_vector,
+                diagonal=True,
+            )
+
+    return ElementwiseModule("ElementwiseModule")
+
+
+def test_jvp_diagonal(module_elementwise):
+    endpoints = create_endpoints(module_elementwise)
+    endpoint_func, EndpointSchema, _ = _find_endpoint(
+        endpoints, "jacobian_vector_product"
+    )
+
+    payload = EndpointSchema.model_validate(
+        {
+            "inputs": _elem_input,
+            "jvp_inputs": {"x"},
+            "jvp_outputs": {"y"},
+            "tangent_vector": _elem_tangent,
+        }
+    )
+    result = endpoint_func(payload)
+    x = np.asarray(_elem_input["x"])
+    t = np.asarray(_elem_tangent["x"])
+    expected = 2 * x * t
+    np.testing.assert_allclose(np.asarray(result.root["y"]), expected)
+
+
+def test_vjp_diagonal(module_elementwise):
+    endpoints = create_endpoints(module_elementwise)
+    endpoint_func, EndpointSchema, _ = _find_endpoint(
+        endpoints, "vector_jacobian_product"
+    )
+
+    payload = EndpointSchema.model_validate(
+        {
+            "inputs": _elem_input,
+            "vjp_inputs": {"x"},
+            "vjp_outputs": {"y"},
+            "cotangent_vector": _elem_cotangent,
+        }
+    )
+    result = endpoint_func(payload)
+    x = np.asarray(_elem_input["x"])
+    v = np.asarray(_elem_cotangent["y"])
+    expected = 2 * x * v
+    np.testing.assert_allclose(np.asarray(result.root["x"]), expected)
