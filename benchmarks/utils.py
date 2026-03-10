@@ -77,7 +77,7 @@ def run_benchmark(
         warmup_times.append(time.perf_counter() - start)
 
     # Estimate iterations from warmup timings.
-    estimated_per_call = statistics.mean(warmup_times) if warmup_times else 0.0
+    estimated_per_call = statistics.median(warmup_times) if warmup_times else 0.0
     if estimated_per_call > 0:
         calibrated = max(1, math.ceil(min_duration_s / estimated_per_call))
     else:
