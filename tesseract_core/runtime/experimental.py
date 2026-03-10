@@ -73,20 +73,19 @@ def vjp_from_jacobian(
         dict mapping input paths to gradient arrays.
     """
     jac = jacobian_fn(inputs=inputs, jac_inputs=vjp_inputs, jac_outputs=vjp_outputs)
-    out = {}
-    for dx in vjp_inputs:
-        grad = None
-        for dy in vjp_outputs:
-            J = np.asarray(jac[dy][dx])  # shape: (*dy_shape, *dx_shape)
-            v = np.asarray(cotangent_vector[dy])  # shape: (*dy_shape)
-            if diagonal:
-                diag = np.diag(J.reshape(v.size, v.size))
-                term = diag.reshape(v.shape) * v
-            else:
-                term = np.tensordot(v, J, axes=v.ndim)
-            grad = term if grad is None else grad + term
-        out[dx] = grad
-    return out
+
+    def contract(J: np.ndarray, v: np.ndarray) -> np.ndarray:
+        if diagonal:
+            return np.diag(J.reshape(v.size, v.size)).reshape(v.shape) * v
+        return np.tensordot(v, J, axes=v.ndim)
+
+    return {
+        dx: sum(
+            contract(np.asarray(jac[dy][dx]), np.asarray(cotangent_vector[dy]))
+            for dy in vjp_outputs
+        )
+        for dx in vjp_inputs
+    }
 
 
 def jvp_from_jacobian(
@@ -118,20 +117,19 @@ def jvp_from_jacobian(
         dict mapping output paths to JVP result arrays.
     """
     jac = jacobian_fn(inputs=inputs, jac_inputs=jvp_inputs, jac_outputs=jvp_outputs)
-    out = {}
-    for dy in jvp_outputs:
-        result = None
-        for dx in jvp_inputs:
-            J = np.asarray(jac[dy][dx])  # shape: (*dy_shape, *dx_shape)
-            t = np.asarray(tangent_vector[dx])  # shape: (*dx_shape)
-            if diagonal:
-                diag = np.diag(J.reshape(t.size, t.size))
-                term = diag.reshape(t.shape) * t
-            else:
-                term = np.tensordot(J, t, axes=t.ndim)
-            result = term if result is None else result + term
-        out[dy] = result
-    return out
+
+    def contract(J: np.ndarray, t: np.ndarray) -> np.ndarray:
+        if diagonal:
+            return np.diag(J.reshape(t.size, t.size)).reshape(t.shape) * t
+        return np.tensordot(J, t, axes=t.ndim)
+
+    return {
+        dy: sum(
+            contract(np.asarray(jac[dy][dx]), np.asarray(tangent_vector[dx]))
+            for dx in jvp_inputs
+        )
+        for dy in jvp_outputs
+    }
 
 
 def jacobian_from_vjp(
@@ -161,33 +159,31 @@ def jacobian_from_vjp(
         raw_outputs.model_dump() if hasattr(raw_outputs, "model_dump") else raw_outputs
     )
 
-    jac = {}
-    output_vals = {}
-    for dy in jac_outputs:
-        dy_val = np.asarray(get_at_path(outputs_dict, dy))
-        output_vals[dy] = dy_val
-        jac[dy] = {}
-        for dx in jac_inputs:
-            dx_val = np.asarray(get_at_path(inputs, dx))
-            jac[dy][dx] = np.zeros((*dy_val.shape, *dx_val.shape), dtype=dy_val.dtype)
+    out_vals = {dy: np.asarray(get_at_path(outputs_dict, dy)) for dy in jac_outputs}
+    in_vals = {dx: np.asarray(get_at_path(inputs, dx)) for dx in jac_inputs}
+    jac = {
+        dy: {
+            dx: np.zeros((*v.shape, *in_vals[dx].shape), dtype=v.dtype)
+            for dx in jac_inputs
+        }
+        for dy, v in out_vals.items()
+    }
 
-    for dy in jac_outputs:
-        dy_val = output_vals[dy]
-        dy_shape = dy_val.shape
-        for nd_idx in np.ndindex(*dy_shape) if dy_shape else [()]:
-            cotangent = {dy: np.zeros_like(dy_val)}
-            if dy_shape:
-                cotangent[dy][nd_idx] = 1.0
+    for dy, dy_val in out_vals.items():
+        for nd_idx in np.ndindex(*dy_val.shape) if dy_val.shape else [()]:
+            e = np.zeros_like(dy_val)
+            if dy_val.shape:
+                e[nd_idx] = 1.0
             else:
-                cotangent[dy] = np.array(1.0, dtype=dy_val.dtype)
+                e = np.ones((), dtype=dy_val.dtype)
             grad = vjp_fn(
                 inputs=inputs,
                 vjp_inputs=jac_inputs,
                 vjp_outputs={dy},
-                cotangent_vector=cotangent,
+                cotangent_vector={dy: e},
             )
             for dx in jac_inputs:
-                if dy_shape:
+                if dy_val.shape:
                     jac[dy][dx][nd_idx] = np.asarray(grad[dx])
                 else:
                     jac[dy][dx] = np.asarray(grad[dx])
@@ -221,32 +217,32 @@ def jacobian_from_jvp(
         raw_outputs.model_dump() if hasattr(raw_outputs, "model_dump") else raw_outputs
     )
 
-    jac = {}
-    for dy in jac_outputs:
-        dy_val = np.asarray(get_at_path(outputs_dict, dy))
-        jac[dy] = {}
-        for dx in jac_inputs:
-            dx_val = np.asarray(get_at_path(inputs, dx))
-            jac[dy][dx] = np.zeros((*dy_val.shape, *dx_val.shape), dtype=dy_val.dtype)
+    out_vals = {dy: np.asarray(get_at_path(outputs_dict, dy)) for dy in jac_outputs}
+    in_vals = {dx: np.asarray(get_at_path(inputs, dx)) for dx in jac_inputs}
+    jac = {
+        dy: {
+            dx: np.zeros((*v.shape, *in_vals[dx].shape), dtype=v.dtype)
+            for dx in jac_inputs
+        }
+        for dy, v in out_vals.items()
+    }
 
-    for dx in jac_inputs:
-        dx_val = np.asarray(get_at_path(inputs, dx))
-        dx_shape = dx_val.shape
-        for nd_idx in np.ndindex(*dx_shape) if dx_shape else [()]:
-            tangent = {dx: np.zeros_like(dx_val)}
-            if dx_shape:
-                tangent[dx][nd_idx] = 1.0
+    for dx, dx_val in in_vals.items():
+        for nd_idx in np.ndindex(*dx_val.shape) if dx_val.shape else [()]:
+            e = np.zeros_like(dx_val)
+            if dx_val.shape:
+                e[nd_idx] = 1.0
             else:
-                tangent[dx] = np.array(1.0, dtype=dx_val.dtype)
+                e = np.ones((), dtype=dx_val.dtype)
             result = jvp_fn(
                 inputs=inputs,
                 jvp_inputs={dx},
                 jvp_outputs=jac_outputs,
-                tangent_vector=tangent,
+                tangent_vector={dx: e},
             )
             for dy in jac_outputs:
                 dy_result = np.asarray(result[dy])
-                if dx_shape:
+                if dx_val.shape:
                     jac[dy][dx][(..., *nd_idx)] = dy_result
                 else:
                     jac[dy][dx] = dy_result
