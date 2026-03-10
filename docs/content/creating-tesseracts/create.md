@@ -126,7 +126,7 @@ If you followed all these steps, congratulations! 🎉 You are ready to
 build your first Tesseract.
 
 ```{tip}
-Before building, you can test your Tesseract locally without containers using `tesseract-runtime`. See [Debugging and Development](../debugging.md) for details.
+Before building, you can test your Tesseract locally without containers using `tesseract-runtime`. See [Debugging and Development](../misc/debugging.md) for details.
 ```
 
 ## Build a Tesseract

@@ -118,6 +118,10 @@ Pros: Separates geometry (often CPU-bound, different expertise) from simulation 
 
 The right choice depends on your team structure, hardware constraints, and reuse patterns. When in doubt, start with fewer Tesseracts and split them later if needed — it's easier to break apart than to combine.
 
+```{seealso}
+For a real-world example of multi-Tesseract composition, see the [QoI-based Workflows with Ansys Fluent](https://si-tesseract.discourse.group/t/qoi-based-workflows-with-ansys-fluent-and-tesseract/110) showcase, which demonstrates chaining geometry, solver, and post-processing Tesseracts into a unified pipeline.
+```
+
 ## Common anti-patterns
 
 ### The "kitchen sink" Tesseract
