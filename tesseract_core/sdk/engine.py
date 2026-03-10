@@ -223,6 +223,13 @@ def prepare_build_context(
     package_data_dir = context_dir / "__package_data__"
     resolved_package_data = []
     if user_config.build_config.package_data:
+        target_paths = [t for _, t in user_config.build_config.package_data]
+        duplicates = {t for t in target_paths if target_paths.count(t) > 1}
+        if duplicates:
+            raise RuntimeError(
+                f"package_data has duplicate target path(s): {', '.join(sorted(duplicates))}"
+            )
+
         for source_path, target_path in user_config.build_config.package_data:
             # Resolve the source path relative to the Tesseract directory
             resolved_source = (src_dir / source_path).resolve()
@@ -239,17 +246,16 @@ def prepare_build_context(
                         f"(resolved to {resolved_source})"
                     )
 
-                # Create a unique name for the copied file/directory
+                # Create a unique name for the copied file/directory,
+                # using an incrementing counter to avoid collisions
                 dest_name = resolved_source.name
                 dest_path = package_data_dir / dest_name
-
-                # Check for name collisions - raise an error if detected
-                if dest_path.exists():
-                    raise RuntimeError(
-                        f"package_data name conflict: '{dest_name}' would be copied "
-                        f"multiple times. Please use unique filenames for external "
-                        f"package_data entries."
-                    )
+                counter = 1
+                while dest_path.exists():
+                    stem = resolved_source.stem
+                    dest_name = f"{stem}_{counter}{resolved_source.suffix}"
+                    dest_path = package_data_dir / dest_name
+                    counter += 1
 
                 package_data_dir.mkdir(parents=True, exist_ok=True)
                 if resolved_source.is_file():
@@ -685,11 +691,11 @@ def serve(
     if network == "host":
         ping_ip = "127.0.0.1"
         port_mappings = None
+    elif host_ip == "0.0.0.0":
+        ping_ip = "127.0.0.1"
+        port_mappings = {f"{host_ip}:{port}": container_api_port}
     else:
-        if host_ip == "0.0.0.0":
-            ping_ip = "127.0.0.1"
-        else:
-            ping_ip = host_ip
+        ping_ip = host_ip
         port_mappings = {f"{host_ip}:{port}": container_api_port}
 
     if debug:

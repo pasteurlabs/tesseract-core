@@ -70,8 +70,8 @@ def test_prepare_build_context_external_package_data(tmp_path_factory):
     ).read_text() == "# shared code"
 
 
-def test_prepare_build_context_package_data_conflict(tmp_path_factory):
-    """Test that package_data with conflicting filenames raises an error."""
+def test_prepare_build_context_package_data_same_basename(tmp_path_factory):
+    """Test that package_data with same source filenames but different targets works."""
     # Create a parent directory with src and two external subdirectories
     parent_dir = tmp_path_factory.mktemp("parent")
     src_dir = parent_dir / "tesseract"
@@ -98,8 +98,29 @@ def test_prepare_build_context_package_data_conflict(tmp_path_factory):
         ),
     )
 
-    with pytest.raises(RuntimeError, match="package_data name conflict"):
-        engine.prepare_build_context(src_dir, build_dir, config)
+    engine.prepare_build_context(src_dir, build_dir, config)
+
+    # Both files should be copied into the build context
+    package_data_dir = build_dir / "__package_data__"
+    assert (package_data_dir / "config.yaml").exists()
+    assert (package_data_dir / "config_1.yaml").exists()
+    assert (package_data_dir / "config.yaml").read_text() == "# config 1"
+    assert (package_data_dir / "config_1.yaml").read_text() == "# config 2"
+
+    # Duplicate target paths should raise an error
+    config_dup = TesseractConfig(
+        name="foobar",
+        build_config=TesseractBuildConfig(
+            package_data=[
+                ("../external1/config.yaml", "same_target.yaml"),
+                ("../external2/config.yaml", "same_target.yaml"),
+            ],
+        ),
+    )
+
+    build_dir2 = tmp_path_factory.mktemp("build2")
+    with pytest.raises(RuntimeError, match="duplicate target path"):
+        engine.prepare_build_context(src_dir, build_dir2, config_dup)
 
 
 def test_prepare_build_context_package_data_not_found(tmp_path_factory):

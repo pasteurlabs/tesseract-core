@@ -57,7 +57,7 @@ In case you run into issues with Pydantic features not listed here, please [open
 
 ### 🔪 Sharp edge: x86 vs ARM architecture on Apple Silicon
 
-If you're using a Mac with Apple Silicon (M1, M2, M3, or M4 chip), you may encounter architecture incompatibilities when building or running Tesseracts. This is because Apple Silicon uses the ARM64 architecture, while many Docker images and Python packages are built for x86_64 (also known as AMD64).
+If you're using a Mac, your system uses the ARM64 processor architecture, while many Docker images and Python packages are built for x86_64 (also known as AMD64). This can lead to architecture incompatibilities when building or running Tesseracts.
 
 **Common symptoms:**
 
@@ -65,6 +65,7 @@ If you're using a Mac with Apple Silicon (M1, M2, M3, or M4 chip), you may encou
 - Runtime errors like `exec /tesseract/entrypoint.sh: exec format error`
 - Slow performance due to Rosetta 2 emulation
 - Package installation failures in `tesseract_requirements.txt`
+- A Python package fails to install because it doesn't provide a pre-built Linux ARM64 wheel
 
 **Solutions:**
 
@@ -88,7 +89,19 @@ If you're using a Mac with Apple Silicon (M1, M2, M3, or M4 chip), you may encou
 
 3. **Use ARM-compatible base images:** Some base images don't have ARM64 variants. Check that your base image supports ARM64 (e.g., `python:3.11-slim` supports both architectures).
 
-4. **Handle packages without ARM64 wheels:** Some Python packages don't provide pre-built ARM64 wheels. You can install build dependencies (`extra_packages: [build-essential, gcc]`), use conda (`venv_backend: conda`), or pin to versions with ARM64 support. Alternatively, build for x86_64 as described above.
+4. **Handle packages without Linux ARM64 wheels:** Some Python packages don't provide pre-built wheels for Linux ARM64. Note that a macOS ARM64 wheel is not sufficient here, since Tesseracts run in Linux containers.
+
+   One solution is to include the system packages required to build the wheel from source during the `tesseract build` step by specifying the `extra_packages` build option. Common required packages may include `build-essential`, `gcc`, or `nvidia-cuda-toolkit`:
+
+   ```yaml
+   # tesseract_config.yaml
+   build_config:
+     extra_packages:
+       - build-essential
+       - gcc
+   ```
+
+   Other options include using conda (`venv_backend: conda`) or pinning to a version that has ARM64 support. Alternatively, build for x86_64 as described above.
 
 To verify the architecture of a built Tesseract image: `docker inspect --format='{{.Architecture}}' my_tesseract:latest`
 
@@ -145,6 +158,8 @@ For example:
   The data will be then part of the Tesseract image. This is a
   good choice for some static artifacts you need to have available
   for computation, such as the weights of a machine learning model.
+  Source paths may reference files outside the Tesseract directory (e.g., `../data/weights.bin`),
+  but external entries must have unique target paths.
 - If you want to further customize the way the image is built,
   you can add arbitrary commands to the Dockerfile specifying
   the build process via the `custom_build_steps` list. Use

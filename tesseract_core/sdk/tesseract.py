@@ -79,6 +79,9 @@ class Tesseract:
             url: The URL of the Tesseract instance.
             server_output_path: Path where binary output files are stored when using json+binref.
                 Required when the Tesseract is served with --output-format=json+binref.
+                Must be a path accessible from the client machine (e.g., via a shared or
+                mounted filesystem), since the server writes .bin files there and the
+                client reads them from the same path.
 
         Returns:
             A Tesseract instance.

@@ -5,6 +5,7 @@
 
 import json
 import re
+import shlex
 import sys
 import time
 import webbrowser
@@ -609,14 +610,14 @@ def serve(
         ),
     ] = None,
     docker_args: Annotated[
-        list[str] | None,
+        str | None,
         typer.Option(
             "--runtime-args",
             help=(
                 "Additional arguments to pass to the underlying container runtime (e.g., Docker). "
-                "Can be specified multiple times. Example: --runtime-args '--shm-size=1g' --runtime-args '--cpus=2'"
+                "Example: --runtime-args '--shm-size=1g --cpus=2'"
             ),
-            metavar="ARG",
+            metavar="ARGS",
             show_default=False,
         ),
     ] = None,
@@ -654,7 +655,7 @@ def serve(
             input_path=input_path,
             output_path=output_path,
             output_format=_enum_to_val(output_format),
-            docker_args=docker_args,
+            docker_args=shlex.split(docker_args) if docker_args else None,
         )
     except RuntimeError as ex:
         raise UserError(
@@ -1037,27 +1038,26 @@ def run_container(
         ),
     ] = None,
     docker_args: Annotated[
-        list[str] | None,
+        str | None,
         typer.Option(
             "--runtime-args",
             help=(
                 "Additional arguments to pass to the underlying container runtime (e.g., Docker). "
-                "Can be specified multiple times. Example: --runtime-args '--shm-size=1g' --runtime-args '--cpus=2'"
+                "Example: --runtime-args '--shm-size=1g --cpus=2'"
             ),
-            metavar="ARG",
+            metavar="ARGS",
             show_default=False,
         ),
     ] = None,
     cmd_args: Annotated[
-        list[str] | None,
+        str | None,
         typer.Option(
             "--cmd-args",
             help=(
                 "Additional arguments to pass to the Tesseract command inside the container. "
-                "Can be specified multiple times. "
-                "Example: --cmd-args '--seed=42' --cmd-args '--eps=1e-5' for check-gradients."
+                "Example: --cmd-args '--seed=42 --eps=1e-5' for check-gradients."
             ),
-            metavar="ARG",
+            metavar="ARGS",
             show_default=False,
         ),
     ] = None,
@@ -1140,7 +1140,7 @@ def run_container(
 
     # Add cmd_args before payload so they appear as options to the command
     if cmd_args:
-        args.extend(cmd_args)
+        args.extend(shlex.split(cmd_args))
 
     if payload is not None:
         args.append(payload)
@@ -1188,7 +1188,7 @@ def run_container(
             network=network,
             user=user,
             memory=memory,
-            docker_args=docker_args,
+            docker_args=shlex.split(docker_args) if docker_args else None,
             stream_logs=True,  # Always stream for CLI
         )
 
