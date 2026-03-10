@@ -2,7 +2,7 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Compare benchmark results and generate a markdown report.
+"""Compare pytest-benchmark JSON results and generate a markdown report.
 
 Usage:
     python compare_benchmarks.py --current current.json --output output.md [--baseline baseline.json]
@@ -18,26 +18,64 @@ from pathlib import Path
 NOTABLE_THRESHOLD_PCT = 10
 
 
-def _get_median_ms(result: dict) -> float:
-    """Get median time in ms, falling back to mean for older result files."""
-    return result.get("median_time_s", result["mean_time_s"]) * 1000
+def _get_median_ms(bench: dict) -> float:
+    """Get median time in ms from a pytest-benchmark entry."""
+    return bench["stats"]["median"] * 1000
 
 
-def _parse_benchmark_name(name: str) -> tuple[str, str, int]:
-    """Parse benchmark name into (suite, operation, size) for sorting.
+def _short_name(bench: dict) -> str:
+    """Derive a short display name from a pytest-benchmark entry.
+
+    Maps pytest-benchmark names like:
+        "test_from_tesseract_api[1,000]" -> "from_tesseract_api/apply_1,000"
+        "test_encoding[json_100]"        -> "array_encoding/encode_json_100"
+        "test_decoding[base64_10,000]"   -> "array_decoding/decode_base64_10,000"
+        "test_roundtrip[binref_1,000]"   -> "array_roundtrip/roundtrip_binref_1,000"
+        "test_containerized_http[100]"   -> "containerized_http/apply_100"
+        "test_containerized_cli[100]"    -> "containerized_cli/apply_100"
+    """
+    name = bench["name"]
+
+    # Extract test function name and params from "test_func[params]"
+    m = re.match(r"test_(\w+)\[(.+)\]$", name)
+    if not m:
+        return name
+
+    func, params = m.group(1), m.group(2)
+
+    # Tesseract apply benchmarks: test_from_tesseract_api[size] etc.
+    tesseract_funcs = {
+        "from_tesseract_api": "from_tesseract_api",
+        "containerized_http": "containerized_http",
+        "containerized_cli": "containerized_cli",
+    }
+    if func in tesseract_funcs:
+        return f"{tesseract_funcs[func]}/apply_{params}"
+
+    # Array encoding benchmarks: test_encoding[json_100] etc.
+    encoding_funcs = {
+        "encoding": "array_encoding/encode",
+        "decoding": "array_decoding/decode",
+        "roundtrip": "array_roundtrip/roundtrip",
+    }
+    if func in encoding_funcs:
+        return f"{encoding_funcs[func]}_{params}"
+
+    return name
+
+
+def _parse_short_name(name: str) -> tuple[str, str, int]:
+    """Parse short name into (suite, operation, size) for sorting.
 
     Examples:
         "from_tesseract_api/apply_1" -> ("from_tesseract_api", "apply", 1)
         "array_encoding/encode_json_100" -> ("array_encoding", "encode_json", 100)
     """
-    # Split into suite and benchmark parts
     if "/" in name:
         suite, benchmark = name.split("/", 1)
     else:
         suite, benchmark = "", name
 
-    # Extract the numeric size from the end (handles formats like "apply_1,000,000")
-    # Remove commas from numbers first
     benchmark_cleaned = benchmark.replace(",", "")
     match = re.search(r"_(\d+)$", benchmark_cleaned)
     if match:
@@ -50,18 +88,18 @@ def _parse_benchmark_name(name: str) -> tuple[str, str, int]:
     return (suite, operation, size)
 
 
-def _sort_benchmark_names(names: list[str]) -> list[str]:
+def _sort_names(names: list[str]) -> list[str]:
     """Sort benchmark names by suite, then operation, then size numerically."""
-    return sorted(names, key=_parse_benchmark_name)
+    return sorted(names, key=_parse_short_name)
 
 
 def _get_runner_description(data: dict) -> str:
-    """Get a runner description from benchmark metadata."""
-    system = data.get("metadata", {}).get("system", {})
-    platform = system.get("platform", "")
-    version = system.get("platform_release", "")
-    arch = system.get("architecture", "")
-    parts = [p for p in (platform, version, arch) if p]
+    """Get a runner description from pytest-benchmark machine_info."""
+    machine = data.get("machine_info", {})
+    system = machine.get("system", "")
+    release = machine.get("release", "")
+    machine_arch = machine.get("machine", "")
+    parts = [p for p in (system, release, machine_arch) if p]
     return " ".join(parts) if parts else "unknown"
 
 
@@ -73,52 +111,17 @@ def _load_benchmark_file(path: str | None) -> dict | None:
         return json.load(f)
 
 
-def _generate_current_only_report(current: dict, current_data: dict) -> str:
-    """Generate a report when no baseline exists, marking every benchmark as new."""
-    all_names = _sort_benchmark_names(list(current.keys()))
-    comparisons = [
-        _compute_comparison(name, baseline={}, current=current) for name in all_names
-    ]
-
-    lines = [
-        "## Benchmark Results",
-        "",
-        ":information_source: No baseline found — all benchmarks marked as new.",
-        "",
-        "Benchmarks use a no-op Tesseract to measure pure framework overhead.",
-        "",
-        "| Benchmark | Baseline | Current | Change | Status |",
-        "|-----------|----------|---------|--------|--------|",
-    ]
-
-    for comp in comparisons:
-        lines.append(_format_comparison_row(comp))
-
-    # Extract metadata for details section
-    iterations = current_data.get("metadata", {}).get("iterations", "N/A")
-    runner = _get_runner_description(current_data)
-
-    lines.extend(
-        [
-            "",
-            "<details>",
-            "<summary>Benchmark details</summary>",
-            "",
-            f"- **Iterations:** {iterations}",
-            f"- **Runner:** {runner}",
-            "",
-            "</details>",
-        ]
-    )
-
-    return "\n".join(lines)
+def _index_benchmarks(data: dict) -> dict[str, dict]:
+    """Index benchmarks by short name, keyed to their stats."""
+    result = {}
+    for bench in data.get("benchmarks", []):
+        name = _short_name(bench)
+        result[name] = bench
+    return result
 
 
 def _compute_comparison(name: str, baseline: dict, current: dict) -> dict:
-    """Compute comparison metrics for a single benchmark.
-
-    Returns a dict with keys: name, base_median_ms, curr_median_ms, diff_pct, status.
-    """
+    """Compute comparison metrics for a single benchmark."""
     if name not in baseline:
         curr_median = _get_median_ms(current[name])
         return {
@@ -147,7 +150,7 @@ def _compute_comparison(name: str, baseline: dict, current: dict) -> dict:
     if base_median > 0:
         diff_pct = ((curr_median - base_median) / base_median) * 100
     else:
-        diff_pct = 0
+        diff_pct = 0.0
 
     if diff_pct < -NOTABLE_THRESHOLD_PCT:
         status = ":rocket: faster"
@@ -185,6 +188,43 @@ def _format_comparison_row(comp: dict) -> str:
     return f"| `{comp['name']}` | {base_str} | {curr_str} | {change_str} | {comp['status']} |"
 
 
+def _generate_current_only_report(current: dict[str, dict], current_data: dict) -> str:
+    """Generate a report when no baseline exists, marking every benchmark as new."""
+    all_names = _sort_names(list(current.keys()))
+    comparisons = [
+        _compute_comparison(name, baseline={}, current=current) for name in all_names
+    ]
+
+    lines = [
+        "## Benchmark Results",
+        "",
+        ":information_source: No baseline found — all benchmarks marked as new.",
+        "",
+        "Benchmarks use a no-op Tesseract to measure pure framework overhead.",
+        "",
+        "| Benchmark | Baseline | Current | Change | Status |",
+        "|-----------|----------|---------|--------|--------|",
+    ]
+
+    for comp in comparisons:
+        lines.append(_format_comparison_row(comp))
+
+    runner = _get_runner_description(current_data)
+    lines.extend(
+        [
+            "",
+            "<details>",
+            "<summary>Benchmark details</summary>",
+            "",
+            f"- **Runner:** {runner}",
+            "",
+            "</details>",
+        ]
+    )
+
+    return "\n".join(lines)
+
+
 def generate_report(baseline_path: str | None, current_path: str) -> str | None:
     """Generate markdown comparison report.
 
@@ -197,16 +237,14 @@ def generate_report(baseline_path: str | None, current_path: str) -> str | None:
     if current_data is None:
         return None
 
-    current = {r["name"]: r for r in current_data["results"]}
+    current = _index_benchmarks(current_data)
 
-    # If no baseline, generate a current-only report
     if baseline_data is None:
         return _generate_current_only_report(current, current_data)
 
-    baseline = {r["name"]: r for r in baseline_data["results"]}
+    baseline = _index_benchmarks(baseline_data)
 
-    # Compute all comparisons
-    all_names = _sort_benchmark_names(list(set(baseline.keys()) | set(current.keys())))
+    all_names = _sort_names(list(set(baseline.keys()) | set(current.keys())))
     comparisons = [_compute_comparison(name, baseline, current) for name in all_names]
 
     notable = [c for c in comparisons if c["notable"]]
@@ -224,7 +262,6 @@ def generate_report(baseline_path: str | None, current_path: str) -> str | None:
         "",
     ]
 
-    # Show notable changes prominently
     if notable:
         lines.extend(
             [
@@ -245,7 +282,6 @@ def generate_report(baseline_path: str | None, current_path: str) -> str | None:
             ]
         )
 
-    # Full results in collapsed section
     lines.extend(
         [
             "<details>",
@@ -258,14 +294,10 @@ def generate_report(baseline_path: str | None, current_path: str) -> str | None:
     for comp in comparisons:
         lines.append(_format_comparison_row(comp))
 
-    # Extract metadata for details section
-    iterations = current_data.get("metadata", {}).get("iterations", "N/A")
     runner = _get_runner_description(current_data)
-
     lines.extend(
         [
             "",
-            f"- **Iterations:** {iterations}",
             f"- **Runner:** {runner}",
             "",
             "</details>",

@@ -2,7 +2,7 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Generate performance plots for documentation.
+"""Generate performance plots from pytest-benchmark JSON output.
 
 This script generates plots showing Tesseract overhead for various workload
 sizes, helping users understand if their workload is a good fit.
@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 
 import matplotlib.patheffects as pe
@@ -23,7 +24,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 _outline = [pe.withStroke(linewidth=3, foreground="white")]
-
 
 here = os.path.dirname(os.path.abspath(__file__))
 
@@ -34,27 +34,74 @@ def load_benchmark_results(benchmark_file: Path) -> dict:
         return json.load(f)
 
 
+def _parse_benchmark_name(name: str) -> tuple[str, str]:
+    """Parse a pytest-benchmark name into (test_func, params).
+
+    Example: "test_from_tesseract_api[1,000]" -> ("from_tesseract_api", "1,000")
+    """
+    m = re.match(r"test_(\w+)\[(.+)\]$", name)
+    if not m:
+        return (name, "")
+    return m.group(1), m.group(2)
+
+
 def extract_suite_data(results: dict, suite_name: str) -> dict[int, float]:
-    """Extract mean times by array size for a given suite.
+    """Extract mean times by array size for a given Tesseract suite.
 
     Returns dict mapping array size to mean time in ms.
     """
+    # Map suite names to test function names
+    func_map = {
+        "from_tesseract_api": "from_tesseract_api",
+        "containerized_http": "containerized_http",
+        "containerized_cli": "containerized_cli",
+    }
+    target_func = func_map.get(suite_name)
+    if target_func is None:
+        return {}
+
     data = {}
-    for result in results.get("results", []):
-        name = result["name"]
-        if name.startswith(f"{suite_name}/apply_"):
-            size_str = name.split("apply_")[1]
-            size = int(size_str.replace(",", ""))
-            mean_time_ms = result["mean_time_s"] * 1000
+    for bench in results.get("benchmarks", []):
+        func, params = _parse_benchmark_name(bench["name"])
+        if func == target_func:
+            size = int(params.replace(",", ""))
+            mean_time_ms = bench["stats"]["mean"] * 1000
             data[size] = mean_time_ms
+    return data
+
+
+def extract_encoding_data(
+    results: dict,
+) -> dict[str, dict[int, float]]:
+    """Extract roundtrip encoding data by method and size.
+
+    Returns dict mapping encoding method to {size: mean_time_ms}.
+    """
+    data: dict[str, dict[int, float]] = {}
+    for bench in results.get("benchmarks", []):
+        func, params = _parse_benchmark_name(bench["name"])
+        if func != "roundtrip":
+            continue
+
+        # params is like "json_100" or "base64_1,000,000"
+        parts = params.rsplit("_", 1)
+        if len(parts) != 2:
+            continue
+
+        method, size_str = parts
+        size = int(size_str.replace(",", ""))
+        mean_time_ms = bench["stats"]["mean"] * 1000
+
+        if method not in data:
+            data[method] = {}
+        data[method][size] = mean_time_ms
+
     return data
 
 
 def _format_time_label(time_ms: float) -> str:
     """Format time in ms with appropriate precision for bar labels."""
-    if time_ms >= 1000:
-        return f"{time_ms:.0f}"
-    elif time_ms >= 100:
+    if time_ms >= 100:
         return f"{time_ms:.0f}"
     elif time_ms >= 10:
         return f"{time_ms:.1f}"
@@ -90,14 +137,12 @@ def generate_guidance_plot(output_path: Path, benchmark_results: dict) -> None:
 
     computation_times = np.logspace(-4, 4, 100)
 
-    # Extract overhead values from benchmark results for all three modes
     from_api_data = extract_suite_data(benchmark_results, "from_tesseract_api")
     containerized_http_data = extract_suite_data(
         benchmark_results, "containerized_http"
     )
     containerized_cli_data = extract_suite_data(benchmark_results, "containerized_cli")
 
-    # Use same categories as overhead plot with consistent colors
     # Colorblind-safe palette (blue / orange / purple)
     modes = [
         ("Non-containerized, in-memory", from_api_data, "#0072B2"),
@@ -105,7 +150,6 @@ def generate_guidance_plot(output_path: Path, benchmark_results: dict) -> None:
         ("Containerized, json+binref via CLI", containerized_cli_data, "#9467BD"),
     ]
 
-    # Representative I/O sizes with different linestyles
     io_sizes = [
         (1024, ":"),  # 1kB, dotted line
         (1024 * 1024, "--"),  # 1MB, dashed line
@@ -116,8 +160,6 @@ def generate_guidance_plot(output_path: Path, benchmark_results: dict) -> None:
         if not mode_data:
             continue
 
-        # Fit linear model: overhead_ms = intercept + slope * array_size
-        # This captures both constant overhead and per-element scaling
         sizes_arr = np.array(sorted(mode_data.keys()), dtype=float)
         times_arr = np.array([mode_data[int(s)] for s in sizes_arr])
         slope, intercept = np.polyfit(sizes_arr, times_arr, 1)
@@ -128,7 +170,6 @@ def generate_guidance_plot(output_path: Path, benchmark_results: dict) -> None:
 
             data_label = _size_to_label(size)
 
-            # Plot overhead percentage curve
             overhead_pct = (overhead_ms / computation_times * 1e-3) * 100
             ax.semilogx(
                 computation_times,
@@ -175,7 +216,6 @@ def generate_guidance_plot(output_path: Path, benchmark_results: dict) -> None:
         path_effects=_outline,
     )
 
-    # Add human-readable time markers
     time_markers = [
         (1e-3, "1ms"),
         (1, "1s"),
@@ -221,23 +261,10 @@ def generate_encoding_comparison_plot(
     """
     _, ax = plt.subplots(figsize=(10, 6))
 
-    # Array sizes to display
     sizes = [10, 100, 1000, 10000, 100000, 1000000, 10000000]
     size_labels = ["10", "100", "1K", "10K", "100K", "1M", "10M"]
 
-    # Extract roundtrip data (most representative of real usage)
-    roundtrip_data = {}
-    for result in benchmark_results.get("results", []):
-        name = result["name"]
-        if name.startswith("array_roundtrip/roundtrip_"):
-            # Parse: array_roundtrip/roundtrip_{method}_{size}
-            parts = name.split("roundtrip_")[1]
-            method, size_str = parts.rsplit("_", 1)
-            size = int(size_str.replace(",", ""))
-            mean_time_ms = result["mean_time_s"] * 1000
-            if method not in roundtrip_data:
-                roundtrip_data[method] = {}
-            roundtrip_data[method][size] = mean_time_ms
+    roundtrip_data = extract_encoding_data(benchmark_results)
 
     if not roundtrip_data:
         print(f"Warning: No array encoding data found, skipping {output_path}")
@@ -283,7 +310,6 @@ def generate_encoding_comparison_plot(
     for spine in ("left", "top", "right"):
         ax.spines[spine].set_visible(False)
 
-    # Add value labels on bars
     def add_labels(bars):
         for bar in bars:
             height = bar.get_height()
@@ -319,7 +345,6 @@ def generate_overhead_comparison_plot(
     """
     _, ax = plt.subplots(figsize=(10, 6))
 
-    # Array sizes to display
     sizes = [10, 100, 1000, 10000, 100000, 1000000, 10000000, 100000000]
     size_labels = ["10", "100", "1K", "10K", "100K", "1M", "10M", "100M"]
 
@@ -388,7 +413,6 @@ def generate_overhead_comparison_plot(
     for spine in ("left", "top", "right"):
         ax.spines[spine].set_visible(False)
 
-    # Add value labels on bars
     def add_labels(bars):
         for bar in bars:
             height = bar.get_height()
@@ -423,7 +447,7 @@ def main() -> None:
     parser.add_argument(
         "benchmark_file",
         type=str,
-        help="Path to benchmark results JSON file",
+        help="Path to pytest-benchmark JSON results file",
     )
     parser.add_argument(
         "--output-dir",
