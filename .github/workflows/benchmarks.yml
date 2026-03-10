@@ -31,6 +31,11 @@ env:
     --min-duration 1
     --min-iterations 2
 
+  # Set to "true" to use the PR's benchmark scripts for baseline runs.
+  # Useful when the benchmark harness itself has changed and the baseline
+  # branch doesn't have the new CLI flags yet.  Remove once main is updated.
+  USE_HEAD_BENCHMARKS: "true"
+
 jobs:
   benchmark:
     runs-on: ubuntu-latest
@@ -75,20 +80,26 @@ jobs:
           cp production.uv.lock uv.lock 2>/dev/null || true
           uv sync --extra dev --frozen
 
+      - name: Use PR benchmark scripts for baseline
+        if: github.event_name == 'pull_request' && env.USE_HEAD_BENCHMARKS == 'true'
+        run: cp -r benchmarks/* baseline/benchmarks/
+
       - name: Run benchmarks on baseline
         if: github.event_name == 'pull_request'
         id: baseline
         working-directory: baseline
         run: |
-          if [ -f benchmarks/run_benchmarks.py ]; then
-            uv run --no-sync python benchmarks/run_benchmarks.py \
-              ${BENCHMARK_OPTS} \
-              --output baseline_benchmarks.json
-            echo "exists=true" >> $GITHUB_OUTPUT
-          else
+          if [ ! -f benchmarks/run_benchmarks.py ]; then
             echo "::notice::Benchmark script not found in baseline, skipping comparison"
             echo "exists=false" >> $GITHUB_OUTPUT
+            exit 0
           fi
+
+          uv run --no-sync python benchmarks/run_benchmarks.py \
+            ${BENCHMARK_OPTS} \
+            --output baseline_benchmarks.json
+
+          echo "exists=true" >> $GITHUB_OUTPUT
 
       - name: Generate comparison report
         if: github.event_name == 'pull_request'
