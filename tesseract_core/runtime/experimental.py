@@ -4,8 +4,6 @@
 import json
 from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
-
-import numpy as np
 from typing import (
     Annotated,
     Any,
@@ -13,6 +11,7 @@ from typing import (
     get_origin,
 )
 
+import numpy as np
 from pydantic import (
     AfterValidator,
     GetCoreSchemaHandler,
@@ -29,7 +28,6 @@ from tesseract_core.runtime.mpa import (
     log_parameter,
 )
 from tesseract_core.runtime.schema_types import safe_issubclass
-from tesseract_core.runtime.tree_transforms import get_at_path
 
 # Finite difference utilities for automatic differentiation
 # These provide a simple way to make any Tesseract differentiable without
@@ -40,13 +38,19 @@ from tesseract_core.runtime.testing.finite_differences import (
     finite_difference_jvp,
     finite_difference_vjp,
 )
-
+from tesseract_core.runtime.tree_transforms import get_at_path
 
 # Autodiff fallback utilities for deriving missing autodiff endpoints from existing ones.
 # These are experimental and the API may change in future releases.
 
 
-def vjp_from_jacobian(jacobian_fn, inputs, vjp_inputs, vjp_outputs, cotangent_vector):
+def vjp_from_jacobian(
+    jacobian_fn: Callable,
+    inputs: Any,
+    vjp_inputs: set[str],
+    vjp_outputs: set[str],
+    cotangent_vector: dict[str, Any],
+) -> dict[str, Any]:
     """Compute VJP as v^T @ J using the full Jacobian.
 
     Args:
@@ -64,15 +68,21 @@ def vjp_from_jacobian(jacobian_fn, inputs, vjp_inputs, vjp_outputs, cotangent_ve
     for dx in vjp_inputs:
         grad = None
         for dy in vjp_outputs:
-            J = np.asarray(jac[dy][dx])           # shape: (*dy_shape, *dx_shape)
-            v = np.asarray(cotangent_vector[dy])   # shape: (*dy_shape)
+            J = np.asarray(jac[dy][dx])  # shape: (*dy_shape, *dx_shape)
+            v = np.asarray(cotangent_vector[dy])  # shape: (*dy_shape)
             term = np.tensordot(v, J, axes=v.ndim)
             grad = term if grad is None else grad + term
         out[dx] = grad
     return out
 
 
-def jvp_from_jacobian(jacobian_fn, inputs, jvp_inputs, jvp_outputs, tangent_vector):
+def jvp_from_jacobian(
+    jacobian_fn: Callable,
+    inputs: Any,
+    jvp_inputs: set[str],
+    jvp_outputs: set[str],
+    tangent_vector: dict[str, Any],
+) -> dict[str, Any]:
     """Compute JVP as J @ t using the full Jacobian.
 
     Args:
@@ -90,15 +100,21 @@ def jvp_from_jacobian(jacobian_fn, inputs, jvp_inputs, jvp_outputs, tangent_vect
     for dy in jvp_outputs:
         result = None
         for dx in jvp_inputs:
-            J = np.asarray(jac[dy][dx])         # shape: (*dy_shape, *dx_shape)
-            t = np.asarray(tangent_vector[dx])   # shape: (*dx_shape)
+            J = np.asarray(jac[dy][dx])  # shape: (*dy_shape, *dx_shape)
+            t = np.asarray(tangent_vector[dx])  # shape: (*dx_shape)
             term = np.tensordot(J, t, axes=t.ndim)
             result = term if result is None else result + term
         out[dy] = result
     return out
 
 
-def jacobian_from_vjp(vjp_fn, apply_fn, inputs, jac_inputs, jac_outputs):
+def jacobian_from_vjp(
+    vjp_fn: Callable,
+    apply_fn: Callable,
+    inputs: Any,
+    jac_inputs: set[str],
+    jac_outputs: set[str],
+) -> dict[str, dict[str, Any]]:
     """Compute the Jacobian by calling VJP with one-hot cotangent vectors.
 
     Requires M calls to VJP, where M is the total number of output elements.
@@ -115,7 +131,9 @@ def jacobian_from_vjp(vjp_fn, apply_fn, inputs, jac_inputs, jac_outputs):
         where each array has shape (*output_shape, *input_shape).
     """
     raw_outputs = apply_fn(inputs=inputs)
-    outputs_dict = raw_outputs.model_dump() if hasattr(raw_outputs, "model_dump") else raw_outputs
+    outputs_dict = (
+        raw_outputs.model_dump() if hasattr(raw_outputs, "model_dump") else raw_outputs
+    )
 
     jac = {}
     output_vals = {}
@@ -130,7 +148,7 @@ def jacobian_from_vjp(vjp_fn, apply_fn, inputs, jac_inputs, jac_outputs):
     for dy in jac_outputs:
         dy_val = output_vals[dy]
         dy_shape = dy_val.shape
-        for nd_idx in (np.ndindex(*dy_shape) if dy_shape else [()]):
+        for nd_idx in np.ndindex(*dy_shape) if dy_shape else [()]:
             cotangent = {dy: np.zeros_like(dy_val)}
             if dy_shape:
                 cotangent[dy][nd_idx] = 1.0
@@ -150,7 +168,13 @@ def jacobian_from_vjp(vjp_fn, apply_fn, inputs, jac_inputs, jac_outputs):
     return jac
 
 
-def jacobian_from_jvp(jvp_fn, apply_fn, inputs, jac_inputs, jac_outputs):
+def jacobian_from_jvp(
+    jvp_fn: Callable,
+    apply_fn: Callable,
+    inputs: Any,
+    jac_inputs: set[str],
+    jac_outputs: set[str],
+) -> dict[str, dict[str, Any]]:
     """Compute the Jacobian by calling JVP with one-hot tangent vectors.
 
     Requires N calls to JVP, where N is the total number of input elements.
@@ -167,7 +191,9 @@ def jacobian_from_jvp(jvp_fn, apply_fn, inputs, jac_inputs, jac_outputs):
         where each array has shape (*output_shape, *input_shape).
     """
     raw_outputs = apply_fn(inputs=inputs)
-    outputs_dict = raw_outputs.model_dump() if hasattr(raw_outputs, "model_dump") else raw_outputs
+    outputs_dict = (
+        raw_outputs.model_dump() if hasattr(raw_outputs, "model_dump") else raw_outputs
+    )
 
     jac = {}
     for dy in jac_outputs:
@@ -180,7 +206,7 @@ def jacobian_from_jvp(jvp_fn, apply_fn, inputs, jac_inputs, jac_outputs):
     for dx in jac_inputs:
         dx_val = np.asarray(get_at_path(inputs, dx))
         dx_shape = dx_val.shape
-        for nd_idx in (np.ndindex(*dx_shape) if dx_shape else [()]):
+        for nd_idx in np.ndindex(*dx_shape) if dx_shape else [()]:
             tangent = {dx: np.zeros_like(dx_val)}
             if dx_shape:
                 tangent[dx][nd_idx] = 1.0
@@ -195,7 +221,7 @@ def jacobian_from_jvp(jvp_fn, apply_fn, inputs, jac_inputs, jac_outputs):
             for dy in jac_outputs:
                 dy_result = np.asarray(result[dy])
                 if dx_shape:
-                    jac[dy][dx][(...,) + nd_idx] = dy_result
+                    jac[dy][dx][(..., *nd_idx)] = dy_result
                 else:
                     jac[dy][dx] = dy_result
     return jac
@@ -514,10 +540,9 @@ __all__ = [
     "jacobian_from_jvp",
     "jacobian_from_vjp",
     "jvp_from_jacobian",
-    "vjp_from_jacobian",
     "log_artifact",
     "log_metric",
     "log_parameter",
     "require_file",
+    "vjp_from_jacobian",
 ]
-

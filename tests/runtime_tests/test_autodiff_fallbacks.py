@@ -23,7 +23,7 @@ from tesseract_core.runtime.experimental import (
     vjp_from_jacobian,
 )
 
-# A fixed 2×3 linear map: f(x) = A @ x, Jacobian is A everywhere.
+# A fixed 2x3 linear map: f(x) = A @ x, Jacobian is A everywhere.
 _A = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=np.float32)
 
 _linear_input = {"x": np.array([1.0, 0.0, 0.0], dtype=np.float32)}
@@ -70,18 +70,28 @@ def module_jac_with_derived_jvp_vjp():
         def jacobian(self, inputs, jac_inputs, jac_outputs):
             return {"y": {"x": _A.copy()}}
 
-        def jacobian_vector_product(self, inputs, jvp_inputs, jvp_outputs, tangent_vector):
-            return jvp_from_jacobian(self.jacobian, inputs, jvp_inputs, jvp_outputs, tangent_vector)
+        def jacobian_vector_product(
+            self, inputs, jvp_inputs, jvp_outputs, tangent_vector
+        ):
+            return jvp_from_jacobian(
+                self.jacobian, inputs, jvp_inputs, jvp_outputs, tangent_vector
+            )
 
-        def vector_jacobian_product(self, inputs, vjp_inputs, vjp_outputs, cotangent_vector):
-            return vjp_from_jacobian(self.jacobian, inputs, vjp_inputs, vjp_outputs, cotangent_vector)
+        def vector_jacobian_product(
+            self, inputs, vjp_inputs, vjp_outputs, cotangent_vector
+        ):
+            return vjp_from_jacobian(
+                self.jacobian, inputs, vjp_inputs, vjp_outputs, cotangent_vector
+            )
 
     return LinearModule("LinearModule")
 
 
 def test_jvp_via_experimental_helper(module_jac_with_derived_jvp_vjp):
     endpoints = create_endpoints(module_jac_with_derived_jvp_vjp)
-    endpoint_func, EndpointSchema, _ = _find_endpoint(endpoints, "jacobian_vector_product")
+    endpoint_func, EndpointSchema, _ = _find_endpoint(
+        endpoints, "jacobian_vector_product"
+    )
 
     payload = EndpointSchema.model_validate(
         {
@@ -98,7 +108,9 @@ def test_jvp_via_experimental_helper(module_jac_with_derived_jvp_vjp):
 
 def test_vjp_via_experimental_helper(module_jac_with_derived_jvp_vjp):
     endpoints = create_endpoints(module_jac_with_derived_jvp_vjp)
-    endpoint_func, EndpointSchema, _ = _find_endpoint(endpoints, "vector_jacobian_product")
+    endpoint_func, EndpointSchema, _ = _find_endpoint(
+        endpoints, "vector_jacobian_product"
+    )
 
     payload = EndpointSchema.model_validate(
         {
@@ -140,19 +152,27 @@ def module_jvp_with_derived_jacobian():
         def apply(self, inputs):
             return _OutputSchema(y=_A @ np.asarray(inputs.x))
 
-        def jacobian_vector_product(self, inputs, jvp_inputs, jvp_outputs, tangent_vector):
+        def jacobian_vector_product(
+            self, inputs, jvp_inputs, jvp_outputs, tangent_vector
+        ):
             t = np.asarray(tangent_vector["x"])
             return {"y": _A @ t}
 
         def jacobian(self, inputs, jac_inputs, jac_outputs):
             return jacobian_from_jvp(
-                self.jacobian_vector_product, self.apply, inputs, jac_inputs, jac_outputs
+                self.jacobian_vector_product,
+                self.apply,
+                inputs,
+                jac_inputs,
+                jac_outputs,
             )
 
     return LinearModule("LinearModule")
 
 
-def test_jacobian_derived_from_jvp_via_experimental_helper(module_jvp_with_derived_jacobian):
+def test_jacobian_derived_from_jvp_via_experimental_helper(
+    module_jvp_with_derived_jacobian,
+):
     endpoints = create_endpoints(module_jvp_with_derived_jacobian)
     endpoint_func, EndpointSchema, _ = _find_endpoint(endpoints, "jacobian")
 
@@ -194,19 +214,27 @@ def module_vjp_with_derived_jacobian():
         def apply(self, inputs):
             return _OutputSchema(y=_A @ np.asarray(inputs.x))
 
-        def vector_jacobian_product(self, inputs, vjp_inputs, vjp_outputs, cotangent_vector):
+        def vector_jacobian_product(
+            self, inputs, vjp_inputs, vjp_outputs, cotangent_vector
+        ):
             v = np.asarray(cotangent_vector["y"])
             return {"x": _A.T @ v}
 
         def jacobian(self, inputs, jac_inputs, jac_outputs):
             return jacobian_from_vjp(
-                self.vector_jacobian_product, self.apply, inputs, jac_inputs, jac_outputs
+                self.vector_jacobian_product,
+                self.apply,
+                inputs,
+                jac_inputs,
+                jac_outputs,
             )
 
     return LinearModule("LinearModule")
 
 
-def test_jacobian_derived_from_vjp_via_experimental_helper(module_vjp_with_derived_jacobian):
+def test_jacobian_derived_from_vjp_via_experimental_helper(
+    module_vjp_with_derived_jacobian,
+):
     endpoints = create_endpoints(module_vjp_with_derived_jacobian)
     endpoint_func, EndpointSchema, _ = _find_endpoint(endpoints, "jacobian")
 
