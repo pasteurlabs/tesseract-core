@@ -42,7 +42,7 @@ Tesseract packages scientific software into **self-contained, portable component
 ## Example: Shape optimization across tools
 
 <a href="https://si-tesseract.discourse.group/t/parametric-shape-optimization-of-rocket-fins-with-ansys-spaceclaim-pyansys-and-tesseract/109">
-<img src="https://github.com/pasteurlabs/tesseract-core/blob/main/docs/img/bracket_final.png" width="280" align="right" alt="Topology-optimized bracket produced by a differentiable Tesseract pipeline">
+<img src="https://github.com/pasteurlabs/tesseract-core/blob/main/docs/img/bracket_final.png" width="280" align="right" alt="Topology-optimized bracket produced by a differentiable Tesseract pipeline" title="Topology-optimized bracket produced by a multi-tool differentiable Tesseract pipeline.">
 </a>
 
 The [rocket fin optimization case study](https://si-tesseract.discourse.group/t/parametric-shape-optimization-of-rocket-fins-with-ansys-spaceclaim-pyansys-and-tesseract/109) combines three Tesseracts:
@@ -104,7 +104,9 @@ with Tesseract.from_image("vectoradd") as t:
 - **Self-documenting** — Auto-generated API docs and schemas for every Tesseract (`tesseract apidoc <name>`).
 
 <p align="center">
-<img src="https://github.com/pasteurlabs/tesseract-core/blob/main/docs/img/apidoc-screenshot.png" width="600">
+<img src="https://github.com/pasteurlabs/tesseract-core/blob/main/docs/img/apidoc-screenshot.png" width="600" alt="Auto-generated API documentation for a Tesseract">
+<br>
+<em>Auto-generated API documentation (<code>tesseract apidoc</code>).</em>
 </p>
 
 ## The Ecosystem
