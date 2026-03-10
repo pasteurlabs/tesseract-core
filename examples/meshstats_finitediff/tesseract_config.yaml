@@ -1,0 +1,10 @@
+name: meshstats_finitediff
+version: "1.0.0"
+description: |
+  Example Tesseract demonstrating finite difference gradient computation on mesh data.
+  This is a variant of the meshstats example that uses finite_difference_jacobian,
+  finite_difference_jvp, and finite_difference_vjp instead of hand-written gradients.
+
+build_config:
+  package_data: []
+  custom_build_steps: []
