@@ -111,6 +111,21 @@ For a practical introduction to JVPs and VJPs, see [the JAX documentation](https
 
 For more information, see the API reference for the {py:func}`Jacobian-vector product endpoint <tesseract_core.runtime.app_cli.jacobian_vector_product>` and the {py:func}`Vector-Jacobian product endpoint <tesseract_core.runtime.app_cli.vector_jacobian_product>`.
 
+### Finite Difference Gradients (Experimental)
+
+If implementing analytical gradients is too complex or time-consuming, you can use **finite differences**
+to approximate gradients numerically. This is useful for prototyping, complex nested schemas, and
+verification of analytical gradient implementations.
+
+```{warning}
+Numerical differentiation is less accurate and more
+computationally expensive than analytical methods or automatic differentiation. Use with caution, especially for high-dimensional inputs.
+```
+
+```{seealso}
+For a full guide on finite difference algorithms and a complete example, see {doc}`/content/examples/building-blocks/finitediff`.
+```
+
 ### Abstract Evaluation
 
 In some scenarios it can be useful to know what the shapes of arrays in the output of a Tesseract will be,
