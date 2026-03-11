@@ -14,6 +14,28 @@ lorenz_tesseract.md
 For more community-contributed examples, check out the [Tesseract Showcase](https://si-tesseract.discourse.group/c/showcase/11) on the forum.
 ```
 
+## Data assimilation demo
+
+A complete 4D-Variational data assimilation scheme for a chaotic dynamical system, built with differentiable Tesseracts.
+
+(cards-clickable)=
+
+::::{grid} 2
+:gutter: 2
+
+:::{grid-item-card} 4D-Var Data Assimilation
+:link: data-assimilation-4dvar.html
+
+Full walkthrough of a 4D-Var scheme using a differentiable Lorenz-96 Tesseract — from building the Tesseract to running the optimization loop.
+:::
+:::{grid-item-card} Lorenz Tesseract
+:link: lorenz_tesseract.html
+
+Detailed implementation of the JAX-based Lorenz-96 solver Tesseract used in the 4D-Var demo.
+:::
+
+::::
+
 ## Optimization tutorials
 
 These tutorials walk through complete optimization workflows using Tesseracts with different autodiff frameworks:
@@ -35,28 +57,6 @@ End-to-end function minimization using PyTorch autodiff.
 :link: https://si-tesseract.discourse.group/t/jax-auto-diff-templates-gaussian-radial-basis-function-fitting/51
 
 Gaussian radial basis function fitting with JAX automatic differentiation.
-:::
-
-::::
-
-## Data assimilation demo
-
-A complete 4D-Variational data assimilation scheme for a chaotic dynamical system, built with differentiable Tesseracts.
-
-(cards-clickable)=
-
-::::{grid} 2
-:gutter: 2
-
-:::{grid-item-card} 4D-Var Data Assimilation
-:link: data-assimilation-4dvar.html
-
-Full walkthrough of a 4D-Var scheme using a differentiable Lorenz-96 Tesseract — from building the Tesseract to running the optimization loop.
-:::
-:::{grid-item-card} Lorenz Tesseract
-:link: lorenz_tesseract.html
-
-Detailed implementation of the JAX-based Lorenz-96 solver Tesseract used in the 4D-Var demo.
 :::
 
 ::::
