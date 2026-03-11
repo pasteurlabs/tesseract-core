@@ -11,6 +11,7 @@ than calling encode_array / decode_array directly.
 
 from __future__ import annotations
 
+import os
 import tempfile
 
 import pytest
@@ -57,6 +58,12 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
         metafunc.parametrize("encoding_and_size", params, ids=ids)
 
 
+def _clear_dir(path: str) -> None:
+    """Remove all files in a directory (but not the directory itself)."""
+    for f in os.listdir(path):
+        os.remove(os.path.join(path, f))
+
+
 def test_encoding(benchmark, encoding_and_size):
     encoding, size = encoding_and_size
     model = ArrayModel(data=create_test_array(size))
@@ -66,7 +73,17 @@ def test_encoding(benchmark, encoding_and_size):
         if encoding == "binref":
             ctx["base_dir"] = tmpdir
 
-        benchmark(model.model_dump_json, context=ctx)
+            def setup():
+                _clear_dir(tmpdir)
+
+            benchmark.pedantic(
+                model.model_dump_json,
+                kwargs={"context": ctx},
+                setup=setup,
+                rounds=100,
+            )
+        else:
+            benchmark(model.model_dump_json, context=ctx)
 
 
 def test_decoding(benchmark, encoding_and_size):
@@ -80,7 +97,23 @@ def test_decoding(benchmark, encoding_and_size):
 
         encoded = model.model_dump_json(context={"array_encoding": encoding, **ctx})
 
-        benchmark(ArrayModel.model_validate_json, encoded, context=ctx)
+        if encoding == "binref":
+            # binref filenames are random UUIDs, so we must re-encode in setup
+            # and pass the fresh payload to the decode call via a mutable wrapper.
+            payload = [encoded]
+
+            def setup():
+                _clear_dir(tmpdir)
+                payload[0] = model.model_dump_json(
+                    context={"array_encoding": encoding, **ctx}
+                )
+
+            def decode():
+                ArrayModel.model_validate_json(payload[0], context=ctx)
+
+            benchmark.pedantic(decode, setup=setup, rounds=100)
+        else:
+            benchmark(ArrayModel.model_validate_json, encoded, context=ctx)
 
 
 def test_roundtrip(benchmark, encoding_and_size):
@@ -96,4 +129,11 @@ def test_roundtrip(benchmark, encoding_and_size):
             enc = model.model_dump_json(context={"array_encoding": encoding, **ctx})
             ArrayModel.model_validate_json(enc, context=ctx)
 
-        benchmark(roundtrip)
+        if encoding == "binref":
+
+            def setup():
+                _clear_dir(tmpdir)
+
+            benchmark.pedantic(roundtrip, setup=setup, rounds=100)
+        else:
+            benchmark(roundtrip)
