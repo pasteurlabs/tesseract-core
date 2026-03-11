@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import subprocess
 import tempfile
+import time
 import uuid
 from pathlib import Path
 
@@ -150,4 +151,16 @@ def test_containerized_cli(benchmark, noop_tesseract_image, array_size):
                 raise RuntimeError(f"CLI failed: {result.stderr}")
             return result
 
-        benchmark(run_cli)
+        def wait_for_docker_cleanup():
+            """Let Docker fully release resources before the next cold start."""
+            time.sleep(2)
+
+        # Each invocation spawns a full container. We want clean cold-start
+        # timings, so sleep between rounds to let Docker clean up.
+        benchmark.pedantic(
+            run_cli,
+            setup=wait_for_docker_cleanup,
+            rounds=3,
+            warmup_rounds=1,
+            iterations=1,
+        )

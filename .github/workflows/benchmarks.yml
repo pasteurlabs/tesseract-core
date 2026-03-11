@@ -25,12 +25,6 @@ permissions:
 
 env:
   BENCHMARK_OPTS: >
-    --benchmark-json benchmarks.json
-    --benchmark-disable-gc
-    --benchmark-warmup=on
-    --benchmark-min-rounds=2
-    -p no:typeguard
-    --override-ini="addopts="
     --array-sizes 100,10000,1000000
 
 jobs:
