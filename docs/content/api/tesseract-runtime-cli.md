@@ -1,4 +1,4 @@
-# `tesseract-runtime` Command Line Application
+# CLI Reference (`tesseract-runtime`)
 
 This is the command line interface of the Tesseract runtime that is bundled with each Tesseract container.
 

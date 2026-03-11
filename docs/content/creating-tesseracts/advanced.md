@@ -85,57 +85,19 @@ to the machine that builds the Tesseract.
 
 ## Customizing the build process
 
-The `build_config` section of `tesseract_config.yaml` controls how the Tesseract image is built. See also the [full config schema](../api/config.md).
+The `build_config` section of [`tesseract_config.yaml`](../api/config.md) controls how the Tesseract image is built. Common reasons to customize it:
 
-### `base_image`
+- **Your code needs system libraries** (e.g., `gfortran`, `libgomp1`) — use `extra_packages` to install them via `apt-get`.
+- **You need a specific Python version or GPU drivers** — override `base_image` (must be Debian-based).
+- **You're deploying to a different architecture** (e.g., ARM64 on AWS Graviton) — set `target_platform`.
+- **Your Tesseract needs data files at runtime** (model weights, config files) — use `package_data` to copy them into the image.
+- **None of the above cover your case** — use `custom_build_steps` to inject arbitrary Dockerfile commands. See the [Dockerfile template](https://github.com/pasteurlabs/tesseract-core/blob/main/tesseract_core/sdk/templates/Dockerfile.base) for where these are injected.
 
-The default base image is `debian:bookworm-slim`. You can specify a different one if you need a specific Python version or preinstalled dependencies. The image must be Ubuntu- or Debian-based.
-
-```yaml
-build_config:
-  base_image: "python:3.11-slim-bookworm"
+```{seealso}
+For the full list of options and their defaults, see the [`TesseractBuildConfig` schema](../api/config.md#schema).
 ```
 
-### `target_platform`
-
-The default target architecture is "native" (same as the host). To cross-compile:
-
-```yaml
-build_config:
-  target_platform: "linux/arm64"
-```
-
-### `extra_packages`
-
-System dependencies not covered by `tesseract_requirements.txt` can be installed via `apt-get`:
-
-```yaml
-build_config:
-  extra_packages:
-    - libgomp1
-    - gfortran
-```
-
-### `package_data`
-
-Copy static files (model weights, lookup tables, etc.) into the Tesseract image:
-
-```yaml
-build_config:
-  package_data:
-    - "weights/*.pt"
-    - "data/config.json"
-```
-
-### `custom_build_steps`
-
-Arbitrary Dockerfile commands for anything the above options don't cover. See the [Dockerfile template](https://github.com/pasteurlabs/tesseract-core/blob/main/tesseract_core/sdk/templates/Dockerfile.base) for where these are injected.
-
-```yaml
-build_config:
-  custom_build_steps:
-    - "RUN apt-get update && apt-get install -y cmake"
-```
+For worked examples, see the [Package Data](../examples/building-blocks/packagedata.md), [Pyvista on ARM64](../examples/building-blocks/arm64.md), and [Fortran Integration](../examples/building-blocks/fortran.md) building blocks.
 
 ## Creating a Tesseract from a Python package
 

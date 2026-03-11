@@ -1,6 +1,6 @@
 (tr-runtime-api)=
 
-# `tesseract_core.runtime` Python API
+# Python API (`tesseract_core.runtime`)
 
 The `tesseract_core.runtime` Python module contains some useful utilities to create and extend `tesseract_api.py` files. It is available in all Tesseract container images.
 

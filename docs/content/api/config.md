@@ -1,4 +1,4 @@
-# Configuration via `tesseract_config.yaml`
+# Configuration (`tesseract_config.yaml`)
 
 The `tesseract_config.yaml` file contains a Tesseract's metadata, such as its name, description, version, and build configuration.
 

@@ -167,13 +167,20 @@ content/misc/debugging.md
 ```
 
 ```{toctree}
-:caption: API Reference
+:caption: API Reference — SDK
 :maxdepth: 2
 :hidden:
 
 content/api/tesseract-cli.md
 content/api/tesseract-api.md
 content/api/config.md
+```
+
+```{toctree}
+:caption: API Reference — Runtime
+:maxdepth: 2
+:hidden:
+
 content/api/endpoints.md
 content/api/tesseract-runtime-cli.md
 content/api/tesseract-runtime-api.md
