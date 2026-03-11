@@ -58,6 +58,15 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
         metafunc.parametrize("encoding_and_size", params, ids=ids)
 
 
+def _binref_rounds(size: int) -> int:
+    """Scale rounds inversely with array size: more rounds for smaller, faster arrays."""
+    if size <= 1_000:
+        return 10_000
+    if size <= 100_000:
+        return 1000
+    return 100
+
+
 def _clear_dir(path: str) -> None:
     """Remove all files in a directory (but not the directory itself)."""
     for f in os.listdir(path):
@@ -80,7 +89,7 @@ def test_encoding(benchmark, encoding_and_size):
                 model.model_dump_json,
                 kwargs={"context": ctx},
                 setup=setup,
-                rounds=100,
+                rounds=_binref_rounds(size),
             )
         else:
             benchmark(model.model_dump_json, context=ctx)
@@ -111,7 +120,7 @@ def test_decoding(benchmark, encoding_and_size):
             def decode():
                 ArrayModel.model_validate_json(payload[0], context=ctx)
 
-            benchmark.pedantic(decode, setup=setup, rounds=100)
+            benchmark.pedantic(decode, setup=setup, rounds=_binref_rounds(size))
         else:
             benchmark(ArrayModel.model_validate_json, encoded, context=ctx)
 
@@ -134,6 +143,6 @@ def test_roundtrip(benchmark, encoding_and_size):
             def setup():
                 _clear_dir(tmpdir)
 
-            benchmark.pedantic(roundtrip, setup=setup, rounds=100)
+            benchmark.pedantic(roundtrip, setup=setup, rounds=_binref_rounds(size))
         else:
             benchmark(roundtrip)
