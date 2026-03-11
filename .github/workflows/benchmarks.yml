@@ -27,6 +27,11 @@ env:
   BENCHMARK_OPTS: >
     --array-sizes 100,10000,1000000
 
+  # Set to "true" to use the PR's benchmark scripts for baseline runs.
+  # Useful when the benchmark harness itself has changed and the baseline
+  # branch doesn't have the new CLI flags yet.  Remove once main is updated.
+  USE_HEAD_BENCHMARKS: "true"
+
 jobs:
   benchmark:
     runs-on: ubuntu-latest
@@ -70,6 +75,10 @@ jobs:
         run: |
           cp production.uv.lock uv.lock 2>/dev/null || true
           uv sync --extra dev --frozen
+
+      - name: Use PR benchmark scripts for baseline
+        if: github.event_name == 'pull_request' && env.USE_HEAD_BENCHMARKS == 'true'
+        run: cp -r benchmarks/* baseline/benchmarks/
 
       - name: Run benchmarks on baseline
         if: github.event_name == 'pull_request'
