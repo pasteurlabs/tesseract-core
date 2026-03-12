@@ -29,7 +29,7 @@ def _short_name(bench: dict) -> str:
     Maps pytest-benchmark names like:
         "test_from_tesseract_api[1,000]" -> "api/apply_1,000"
         "test_containerized_http[100]"   -> "http/apply_100"
-        "test_containerized_cli[100]"             -> "cli/apply_100"
+        "test_containerized_cli[100]"    -> "cli/apply_100"
         "test_encoding[json_100]"        -> "encoding/json_100"
         "test_decoding[base64_10,000]"   -> "decoding/base64_10,000"
         "test_roundtrip[binref_1,000]"   -> "roundtrip/binref_1,000"

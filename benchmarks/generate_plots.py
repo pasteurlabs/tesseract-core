@@ -46,17 +46,16 @@ def _parse_benchmark_name(name: str) -> tuple[str, str]:
 
 
 def extract_suite_data(results: dict, suite_name: str) -> dict[int, float]:
-    """Extract mean times by array size for a given Tesseract suite.
+    """Extract median times by array size for a given Tesseract suite.
 
-    Returns dict mapping array size to mean time in ms.
+    Returns dict mapping array size to median time in ms.
     """
     # Map suite names to test function names
-    func_map = {
-        "from_tesseract_api": "from_tesseract_api",
-        "containerized_http": "containerized_http",
-        "containerized_cli": "containerized_cli",
-    }
-    target_func = func_map.get(suite_name)
+    suite_names = ("from_tesseract_api", "containerized_http", "containerized_cli")
+    if suite_name not in suite_names:
+        return {}
+
+    target_func = suite_name
     if target_func is None:
         return {}
 
@@ -65,8 +64,8 @@ def extract_suite_data(results: dict, suite_name: str) -> dict[int, float]:
         func, params = _parse_benchmark_name(bench["name"])
         if func == target_func:
             size = int(params.replace(",", ""))
-            mean_time_ms = bench["stats"]["mean"] * 1000
-            data[size] = mean_time_ms
+            median_time_ms = bench["stats"]["median"] * 1000
+            data[size] = median_time_ms
     return data
 
 
@@ -75,7 +74,7 @@ def extract_encoding_data(
 ) -> dict[str, dict[int, float]]:
     """Extract roundtrip encoding data by method and size.
 
-    Returns dict mapping encoding method to {size: mean_time_ms}.
+    Returns dict mapping encoding method to {size: median_time_ms}.
     """
     data: dict[str, dict[int, float]] = {}
     for bench in results.get("benchmarks", []):
@@ -90,11 +89,11 @@ def extract_encoding_data(
 
         method, size_str = parts
         size = int(size_str.replace(",", ""))
-        mean_time_ms = bench["stats"]["mean"] * 1000
+        median_time_ms = bench["stats"]["median"] * 1000
 
         if method not in data:
             data[method] = {}
-        data[method][size] = mean_time_ms
+        data[method][size] = median_time_ms
 
     return data
 

@@ -67,7 +67,6 @@ jobs:
         working-directory: baseline
         run: |
           cp -r ../benchmarks/* benchmarks/
-          uv pip install pytest-benchmark
 
       - name: Run benchmarks on baseline
         if: github.event_name == 'pull_request'
