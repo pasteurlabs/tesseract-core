@@ -73,6 +73,7 @@ dev = [
     "pytest",
     "pytest-cov",
     "pytest-mock",
+    "pytest-benchmark",
     "pytest-timeout",
     "moto[server]",
     "aiobotocore>=2.19.0",  # without this pip dependency resolution fails
