@@ -1040,22 +1040,23 @@ def run_container(
     docker_args: Annotated[
         str | None,
         typer.Option(
-            "--runtime-args",
+            "--docker-args",
             help=(
                 "Additional arguments to pass to the underlying container runtime (e.g., Docker). "
-                "Example: --runtime-args '--shm-size=1g --cpus=2'"
+                "Example: --docker-args '--shm-size=1g --cpus=2'"
             ),
             metavar="ARGS",
             show_default=False,
         ),
     ] = None,
-    cmd_args: Annotated[
+    runtime_args: Annotated[
         str | None,
         typer.Option(
-            "--cmd-args",
+            "--runtime-args",
             help=(
-                "Additional arguments to pass to the Tesseract command inside the container. "
-                "Example: --cmd-args '--seed=42 --eps=1e-5' for check-gradients."
+                "Additional arguments to pass to the `tesseract-runtime` command inside the container. "
+                "Example: --runtime-args '--seed=42 --eps=1e-5' to pass optional arguments to "
+                "`tesseract-runtime check-gradients`."
             ),
             metavar="ARGS",
             show_default=False,
@@ -1138,9 +1139,9 @@ def run_container(
     if invoke_help:
         args.append("--help")
 
-    # Add cmd_args before payload so they appear as options to the command
-    if cmd_args:
-        args.extend(shlex.split(cmd_args))
+    # Add runtime_args before payload so they appear as options to the command
+    if runtime_args:
+        args.extend(shlex.split(runtime_args))
 
     if payload is not None:
         args.append(payload)
