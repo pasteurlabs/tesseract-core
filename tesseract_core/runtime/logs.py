@@ -68,7 +68,6 @@ class TeePipe(threading.Thread):
         self._sinks = sinks
         self._fd_read, self._fd_write = os.pipe()
         self._captured_lines: list[str] = []
-        self._fd_write_closed = False
 
     def __enter__(self) -> int:
         """Start the thread and return the write file descriptor of the pipe."""
@@ -83,15 +82,13 @@ class TeePipe(threading.Thread):
         reader, which will then drain any remaining data from the pipe buffer
         before exiting.
         """
-        # Close the write end if not already closed. This signals EOF to reader.
+        # Close the write end. This signals EOF to reader.
         # After this, no more data can be written to the pipe, and the reader
         # will eventually see EOF after draining the kernel pipe buffer.
-        if not self._fd_write_closed:
-            try:
-                os.close(self._fd_write)
-            except OSError:
-                pass  # Already closed
-            self._fd_write_closed = True
+        try:
+            os.close(self._fd_write)
+        except OSError:
+            pass  # Already closed
 
         # Wait for reader thread to finish. It will exit after hitting EOF
         # and draining all buffered data. No timeout needed since EOF is
