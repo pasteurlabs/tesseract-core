@@ -11,7 +11,6 @@ from typing import (
     get_origin,
 )
 
-import numpy as np
 from pydantic import (
     AfterValidator,
     GetCoreSchemaHandler,
@@ -21,6 +20,10 @@ from pydantic import (
 from pydantic.json_schema import JsonSchemaValue
 from pydantic_core import CoreSchema, SchemaSerializer, SchemaValidator, core_schema
 
+from tesseract_core.runtime.ad_endpoint_derivation import (
+    jvp_from_jacobian,
+    vjp_from_jacobian,
+)
 from tesseract_core.runtime.file_interactions import PathLike, parent_path
 from tesseract_core.runtime.mpa import (
     log_artifact,
@@ -38,216 +41,6 @@ from tesseract_core.runtime.testing.finite_differences import (
     finite_difference_jvp,
     finite_difference_vjp,
 )
-from tesseract_core.runtime.tree_transforms import get_at_path
-
-# Autodiff fallback utilities for deriving missing autodiff endpoints from existing ones.
-# These are experimental and the API may change in future releases.
-
-
-def vjp_from_jacobian(
-    jacobian_fn: Callable,
-    inputs: Any,
-    vjp_inputs: set[str],
-    vjp_outputs: set[str],
-    cotangent_vector: dict[str, Any],
-    diagonal: bool = False,
-) -> dict[str, Any]:
-    """Compute VJP as v^T @ J using the full Jacobian.
-
-    Args:
-        jacobian_fn: The api_module.jacobian callable.
-        inputs: Validated InputSchema instance.
-        vjp_inputs: set[str] of input path strings to differentiate w.r.t.
-        vjp_outputs: set[str] of output path strings to differentiate.
-        cotangent_vector: dict mapping output paths to cotangent arrays.
-        diagonal: If True, assume each Jacobian block is diagonal (i.e. all
-            off-diagonal entries are zero) and compute the product using an
-            elementwise multiply against the diagonal instead of a full
-            tensordot. This is the correct choice when the primal computation
-            consists entirely of elementwise or in-place operations, so that
-            each output element depends only on the corresponding input element.
-            The caller is responsible for ensuring the assumption holds;
-            no validation is performed. Requires dy_shape == dx_shape.
-
-    Returns:
-        dict mapping input paths to gradient arrays.
-    """
-    jac = jacobian_fn(inputs=inputs, jac_inputs=vjp_inputs, jac_outputs=vjp_outputs)
-
-    def contract(J: np.ndarray, v: np.ndarray) -> np.ndarray:
-        if diagonal:
-            return np.diag(J.reshape(v.size, v.size)).reshape(v.shape) * v
-        return np.tensordot(v, J, axes=v.ndim)
-
-    return {
-        dx: sum(
-            contract(np.asarray(jac[dy][dx]), np.asarray(cotangent_vector[dy]))
-            for dy in vjp_outputs
-        )
-        for dx in vjp_inputs
-    }
-
-
-def jvp_from_jacobian(
-    jacobian_fn: Callable,
-    inputs: Any,
-    jvp_inputs: set[str],
-    jvp_outputs: set[str],
-    tangent_vector: dict[str, Any],
-    diagonal: bool = False,
-) -> dict[str, Any]:
-    """Compute JVP as J @ t using the full Jacobian.
-
-    Args:
-        jacobian_fn: The api_module.jacobian callable.
-        inputs: Validated InputSchema instance.
-        jvp_inputs: set[str] of input path strings.
-        jvp_outputs: set[str] of output path strings.
-        tangent_vector: dict mapping input paths to tangent arrays.
-        diagonal: If True, assume each Jacobian block is diagonal (i.e. all
-            off-diagonal entries are zero) and compute the product using an
-            elementwise multiply against the diagonal instead of a full
-            tensordot. This is the correct choice when the primal computation
-            consists entirely of elementwise or in-place operations, so that
-            each output element depends only on the corresponding input element.
-            The caller is responsible for ensuring the assumption holds;
-            no validation is performed. Requires dy_shape == dx_shape.
-
-    Returns:
-        dict mapping output paths to JVP result arrays.
-    """
-    jac = jacobian_fn(inputs=inputs, jac_inputs=jvp_inputs, jac_outputs=jvp_outputs)
-
-    def contract(J: np.ndarray, t: np.ndarray) -> np.ndarray:
-        if diagonal:
-            return np.diag(J.reshape(t.size, t.size)).reshape(t.shape) * t
-        return np.tensordot(J, t, axes=t.ndim)
-
-    return {
-        dy: sum(
-            contract(np.asarray(jac[dy][dx]), np.asarray(tangent_vector[dx]))
-            for dx in jvp_inputs
-        )
-        for dy in jvp_outputs
-    }
-
-
-def jacobian_from_vjp(
-    vjp_fn: Callable,
-    apply_fn: Callable,
-    inputs: Any,
-    jac_inputs: set[str],
-    jac_outputs: set[str],
-) -> dict[str, dict[str, Any]]:
-    """Compute the Jacobian by calling VJP with one-hot cotangent vectors.
-
-    Requires M calls to VJP, where M is the total number of output elements.
-
-    Args:
-        vjp_fn: The api_module.vector_jacobian_product callable.
-        apply_fn: The api_module.apply callable (used to determine output shapes).
-        inputs: Validated InputSchema instance.
-        jac_inputs: set[str] of input path strings.
-        jac_outputs: set[str] of output path strings.
-
-    Returns:
-        dict[str, dict[str, np.ndarray]] with structure {output_path: {input_path: array}}
-        where each array has shape ``(*output_shape, *input_shape)``.
-    """
-    raw_outputs = apply_fn(inputs=inputs)
-    outputs_dict = (
-        raw_outputs.model_dump() if hasattr(raw_outputs, "model_dump") else raw_outputs
-    )
-
-    out_vals = {dy: np.asarray(get_at_path(outputs_dict, dy)) for dy in jac_outputs}
-    in_vals = {dx: np.asarray(get_at_path(inputs, dx)) for dx in jac_inputs}
-    jac = {
-        dy: {
-            dx: np.zeros((*v.shape, *in_vals[dx].shape), dtype=v.dtype)
-            for dx in jac_inputs
-        }
-        for dy, v in out_vals.items()
-    }
-
-    for dy, dy_val in out_vals.items():
-        for nd_idx in np.ndindex(*dy_val.shape) if dy_val.shape else [()]:
-            e = np.zeros_like(dy_val)
-            if dy_val.shape:
-                e[nd_idx] = 1.0
-            else:
-                e = np.ones((), dtype=dy_val.dtype)
-            grad = vjp_fn(
-                inputs=inputs,
-                vjp_inputs=jac_inputs,
-                vjp_outputs={dy},
-                cotangent_vector={dy: e},
-            )
-            for dx in jac_inputs:
-                if dy_val.shape:
-                    jac[dy][dx][nd_idx] = np.asarray(grad[dx])
-                else:
-                    jac[dy][dx] = np.asarray(grad[dx])
-    return jac
-
-
-def jacobian_from_jvp(
-    jvp_fn: Callable,
-    apply_fn: Callable,
-    inputs: Any,
-    jac_inputs: set[str],
-    jac_outputs: set[str],
-) -> dict[str, dict[str, Any]]:
-    """Compute the Jacobian by calling JVP with one-hot tangent vectors.
-
-    Requires N calls to JVP, where N is the total number of input elements.
-
-    Args:
-        jvp_fn: The api_module.jacobian_vector_product callable.
-        apply_fn: The api_module.apply callable (used to determine output shapes).
-        inputs: Validated InputSchema instance.
-        jac_inputs: set[str] of input path strings.
-        jac_outputs: set[str] of output path strings.
-
-    Returns:
-        dict[str, dict[str, np.ndarray]] with structure {output_path: {input_path: array}}
-        where each array has shape ``(*output_shape, *input_shape)``.
-    """
-    raw_outputs = apply_fn(inputs=inputs)
-    outputs_dict = (
-        raw_outputs.model_dump() if hasattr(raw_outputs, "model_dump") else raw_outputs
-    )
-
-    out_vals = {dy: np.asarray(get_at_path(outputs_dict, dy)) for dy in jac_outputs}
-    in_vals = {dx: np.asarray(get_at_path(inputs, dx)) for dx in jac_inputs}
-    jac = {
-        dy: {
-            dx: np.zeros((*v.shape, *in_vals[dx].shape), dtype=v.dtype)
-            for dx in jac_inputs
-        }
-        for dy, v in out_vals.items()
-    }
-
-    for dx, dx_val in in_vals.items():
-        for nd_idx in np.ndindex(*dx_val.shape) if dx_val.shape else [()]:
-            e = np.zeros_like(dx_val)
-            if dx_val.shape:
-                e[nd_idx] = 1.0
-            else:
-                e = np.ones((), dtype=dx_val.dtype)
-            result = jvp_fn(
-                inputs=inputs,
-                jvp_inputs={dx},
-                jvp_outputs=jac_outputs,
-                tangent_vector={dx: e},
-            )
-            for dy in jac_outputs:
-                dy_result = np.asarray(result[dy])
-                if dx_val.shape:
-                    jac[dy][dx][(..., *nd_idx)] = dy_result
-                else:
-                    jac[dy][dx] = dy_result
-    return jac
-
 
 # Flag is modified by runtime.cli based on arguments or during build time
 SKIP_REQUIRED_FILE_CHECK = False
@@ -559,8 +352,6 @@ __all__ = [
     "finite_difference_jacobian",
     "finite_difference_jvp",
     "finite_difference_vjp",
-    "jacobian_from_jvp",
-    "jacobian_from_vjp",
     "jvp_from_jacobian",
     "log_artifact",
     "log_metric",

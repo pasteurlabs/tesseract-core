@@ -111,6 +111,18 @@ For a practical introduction to JVPs and VJPs, see [the JAX documentation](https
 
 For more information, see the API reference for the {py:func}`Jacobian-vector product endpoint <tesseract_core.runtime.app_cli.jacobian_vector_product>` and the {py:func}`Vector-Jacobian product endpoint <tesseract_core.runtime.app_cli.vector_jacobian_product>`.
 
+### AD Endpoint Derivation Fallbacks (Experimental)
+
+If you have already implemented one AD endpoint but need the others, you can derive
+them automatically using the experimental fallback helpers:
+
+- Derive **JVP** or **VJP** from an existing `jacobian` with `jvp_from_jacobian` / `vjp_from_jacobian`
+
+```{seealso}
+For a practical guide with full examples and cost trade-offs, see
+{doc}`/content/examples/building-blocks/ad-fallbacks`.
+```
+
 ### Finite Difference Gradients (Experimental)
 
 If implementing analytical gradients is too complex or time-consuming, you can use **finite differences**
