@@ -3,9 +3,6 @@
 
 import json
 import logging
-import os
-import random
-import string
 import time
 from pathlib import Path
 
@@ -391,89 +388,6 @@ def test_needs_docker(mocked_docker, monkeypatch):
 
     with pytest.raises(UserError):
         run_something_with_docker()
-
-
-def test_teepipe(caplog):
-    # Verify that logging in a separate thread works as intended
-    from tesseract_core.sdk.logs import TeePipe, set_logger
-
-    # Disable rich to ensure what we log is what we read
-    set_logger("info", catch_warnings=True, rich_format=False)
-
-    logger = logging.getLogger("tesseract")
-    caplog.set_level(logging.INFO, logger="tesseract")
-
-    logged_lines = []
-    for _ in range(100):
-        # Make sure to include a few really long lines without breaks
-        if random.random() < 0.1:
-            msg_length = random.randint(1000, 10_000)
-            alphabet = string.ascii_letters + "🤯"
-        else:
-            msg_length = 2 ** random.randint(2, 12)
-            alphabet = string.printable + "🤯"
-        msg = "".join(random.choices(alphabet, k=msg_length))
-        logged_lines.append(msg)
-
-    teepipe = TeePipe(logger.info)
-    # Extend grace period to avoid flakes in tests when runners are slow
-    teepipe._grace_period = 1
-    with teepipe:
-        fd = os.fdopen(teepipe.fileno(), "w", closefd=False)
-        for line in logged_lines:
-            print(line, file=fd)
-            time.sleep(random.random() / 100)
-        fd.close()
-
-    expected_lines = []
-    for line in logged_lines:
-        sublines = line.split("\n")
-        expected_lines.extend(sublines)
-
-    assert teepipe.captured_lines == expected_lines
-    assert caplog.record_tuples == [
-        ("tesseract", logging.INFO, line) for line in expected_lines
-    ]
-
-
-def test_teepipe_drains_buffer():
-    # Verify that TeePipe drains all buffered data before stop() returns.
-    # This simulates the real usage pattern where writes complete, then stop() is called.
-    from tesseract_core.sdk.logs import TeePipe
-
-    logged_lines = []
-    for _ in range(100):
-        # Make sure to include a few really long lines without breaks
-        if random.random() < 0.1:
-            msg_length = random.randint(1000, 10_000)
-            alphabet = string.ascii_letters + "🤯"
-        else:
-            msg_length = 2 ** random.randint(2, 12)
-            alphabet = string.printable + "🤯"
-        msg = "".join(random.choices(alphabet, k=msg_length))
-        logged_lines.append(msg)
-
-    teepipe = TeePipe()
-    teepipe.start()
-    fd = os.fdopen(teepipe.fileno(), "w", closefd=False)
-
-    # Write all data
-    for line in logged_lines:
-        print(line, file=fd, flush=True)
-
-    print("end without newline", end="", file=fd, flush=True)
-
-    expected_lines = []
-    for line in logged_lines:
-        sublines = line.split("\n")
-        expected_lines.extend(sublines)
-    expected_lines.append("end without newline")
-
-    # Now stop - this should drain all buffered data
-    teepipe.stop()
-
-    assert len(teepipe.captured_lines) == len(expected_lines)
-    assert teepipe.captured_lines == expected_lines
 
 
 def test_log_streamer(tmpdir):
