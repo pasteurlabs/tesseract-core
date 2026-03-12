@@ -15,6 +15,7 @@ from pydantic import (
     Field,
     JsonValue,
     PositiveInt,
+    StrictStr,
     ValidationInfo,
     create_model,
 )
@@ -60,7 +61,7 @@ class Base64ArrayData(BaseModel):
     """Data structure for base64 encoded binary buffers."""
 
     buffer: Annotated[
-        str,
+        StrictStr,
         Field(
             description="Base64 encoded binary buffer",
             examples=["<base64 encoded string>"],
@@ -73,7 +74,7 @@ class Base64ArrayData(BaseModel):
 class BinrefArrayData(BaseModel):
     """Data structure that dumps array data to binary file."""
 
-    buffer: str = Field(pattern=r"^.+?(\:\d+)?$")
+    buffer: StrictStr = Field(pattern=r"^.+?(\:\d+)?$")
     encoding: Literal["binref"]
     model_config = ConfigDict(extra="forbid")
 
@@ -203,6 +204,11 @@ def get_array_model(
     return out
 
 
+def _fast_tobytes(arr: np.ndarray) -> bytes:
+    """Convert a NumPy array to bytes without copying if possible."""
+    return np.ascontiguousarray(arr).data
+
+
 def _dump_binref_arraydict(
     arr: np.ndarray | np.number | np.bool_,
     base_dir: Path | str,
@@ -230,10 +236,12 @@ def _dump_binref_arraydict(
             target_name = join_paths(subdir, target_name)
         target_path = join_paths(base_dir, target_name)
 
-    write_to_path(arr.tobytes(), target_path, append=True)
+    write_to_path(_fast_tobytes(arr), target_path, append=True)
     offset = current_size
 
-    data = {"buffer": f"{target_name}:{offset}", "encoding": "binref"}
+    data = BinrefArrayData.model_construct(
+        buffer=f"{target_name}:{offset}", encoding="binref"
+    )
     arraydict = {
         "object_type": "array",
         "shape": arr.shape,
@@ -245,36 +253,34 @@ def _dump_binref_arraydict(
 
 def _dump_base64_arraydict(
     arr: np.ndarray | np.number | np.bool_,
-) -> dict[str, str | dict[str, str]]:
+) -> dict[str, str | Base64ArrayData]:
     """Dump array to json+base64 encoded array dict."""
-    data = {
-        "buffer": pybase64.b64encode(arr.tobytes()).decode(),
-        "encoding": "base64",
-    }
-    arraydict = {
+    data = Base64ArrayData.model_construct(
+        buffer=pybase64.b64encode_as_string(_fast_tobytes(arr)),
+        encoding="base64",
+    )
+    return {
         "object_type": "array",
         "shape": arr.shape,
         "dtype": arr.dtype.name,
         "data": data,
     }
-    return arraydict
 
 
 def _dump_json_arraydict(
     arr: np.ndarray | np.number | np.bool_,
-) -> dict[str, str | dict[str, str]]:
+) -> dict[str, str | JsonArrayData]:
     """Dump array to json encoded array dict."""
-    data = {
-        "buffer": arr.tolist(),
-        "encoding": "json",
-    }
-    arraydict = {
+    data = JsonArrayData.model_construct(
+        buffer=arr.tolist(),
+        encoding="json",
+    )
+    return {
         "object_type": "array",
         "shape": arr.shape,
         "dtype": arr.dtype.name,
         "data": data,
     }
-    return arraydict
 
 
 def _load_base64_arraydict(val: dict) -> np.ndarray:
@@ -331,6 +337,11 @@ def _coerce_shape_dtype(
     - ``strict_types`` (bool): When True, reject arrays whose dtype doesn't
       match the expected dtype exactly (no same-kind casting).
     """
+    # NOTE: When making changes here, be mindful that this function is called on
+    # every array validation, and inefficient code here can cause significant performance
+    # issues, especially for large arrays. In particular, avoid any operations that copy the
+    # array data (like astype or tolist) unless necessary.
+
     if context is None:
         context = {}
 
@@ -402,7 +413,7 @@ def _coerce_shape_dtype(
                     "expected_dtype": expected_dtype,
                 },
             )
-        arr = arr.astype(expected_dtype)
+        arr = arr.astype(expected_dtype, copy=False)
 
     allowed_dtypes = [dtype.lower() for dtype in get_args(AllowedDtypes)]
     if arr.dtype.name not in allowed_dtypes:
@@ -476,7 +487,7 @@ def decode_array(
                         "Expected integer data, but array contains floating point values",
                         {},
                     )
-            data = data.astype(val.dtype, casting="unsafe")
+            data = data.astype(val.dtype, casting="unsafe", copy=False)
 
         else:
             # Unreachable
@@ -531,4 +542,6 @@ def encode_array(
         # Unreachable
         raise AssertionError(f"Unsupported encoding: {array_encoding}")
 
-    return EncodedArrayModel.model_validate(data)
+    # Important: use model_construct here to skip validation, since the data is already validated
+    # and validation would be expensive (needs to touch every list element for json encoding)
+    return EncodedArrayModel.model_construct(**data)
