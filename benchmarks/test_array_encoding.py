@@ -30,18 +30,6 @@ class ArrayModel(BaseModel):
 ENCODINGS = ["json", "base64", "binref"]
 
 
-def _encodings_for_size(size: int) -> list[str]:
-    """Return applicable encodings for a given array size."""
-    if size > 20_000_000:
-        return [e for e in ENCODINGS if e != "json"]
-    return ENCODINGS
-
-
-def _encoding_params(sizes: list[int]) -> list[tuple[str, int]]:
-    """Generate (encoding, size) pairs, skipping json for very large arrays."""
-    return [(enc, size) for size in sizes for enc in _encodings_for_size(size)]
-
-
 def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     """Dynamically parametrize tests based on --array-sizes."""
     if "encoding_and_size" in metafunc.fixturenames:
@@ -53,22 +41,24 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
 
             sizes = DEFAULT_ARRAY_SIZES
 
-        params = _encoding_params(sizes)
+        params = [(enc, size) for size in sizes for enc in ENCODINGS]
         ids = [f"{enc}_{size:,}" for enc, size in params]
         metafunc.parametrize("encoding_and_size", params, ids=ids)
 
 
 def _binref_rounds(size: int) -> int:
     """Scale rounds inversely with array size: more rounds for smaller, faster arrays."""
-    if size <= 1_000:
-        return 10_000
-    if size <= 100_000:
-        return 1000
-    return 100
+    return max(100, min(int(1e7 / size), 10_000))
 
 
 def _clear_dir(path: str) -> None:
-    """Remove all files in a directory (but not the directory itself)."""
+    """Remove all files in a directory (but not the directory itself).
+
+    Required for binref benchmarks: each round writes a new file with a random
+    UUID name. Without clearing, hundreds of MBs of stale files accumulate
+    (e.g. 500 rounds x 100k arrays = ~380 MB). This can also increase jitter,
+    though the effect is not consistently reproducible.
+    """
     for f in os.listdir(path):
         os.remove(os.path.join(path, f))
 

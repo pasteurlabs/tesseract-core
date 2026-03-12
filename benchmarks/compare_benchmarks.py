@@ -27,12 +27,12 @@ def _short_name(bench: dict) -> str:
     """Derive a short display name from a pytest-benchmark entry.
 
     Maps pytest-benchmark names like:
-        "test_from_tesseract_api[1,000]" -> "from_tesseract_api/apply_1,000"
-        "test_encoding[json_100]"        -> "array_encoding/encode_json_100"
-        "test_decoding[base64_10,000]"   -> "array_decoding/decode_base64_10,000"
-        "test_roundtrip[binref_1,000]"   -> "array_roundtrip/roundtrip_binref_1,000"
-        "test_containerized_http[100]"   -> "containerized_http/apply_100"
-        "test_containerized_cli[100]"    -> "containerized_cli/apply_100"
+        "test_from_tesseract_api[1,000]" -> "api/apply_1,000"
+        "test_containerized_http[100]"   -> "http/apply_100"
+        "test_containerized_cli[100]"             -> "cli/apply_100"
+        "test_encoding[json_100]"        -> "encoding/json_100"
+        "test_decoding[base64_10,000]"   -> "decoding/base64_10,000"
+        "test_roundtrip[binref_1,000]"   -> "roundtrip/binref_1,000"
     """
     name = bench["name"]
 
@@ -43,23 +43,17 @@ def _short_name(bench: dict) -> str:
 
     func, params = m.group(1), m.group(2)
 
-    # Tesseract apply benchmarks: test_from_tesseract_api[size] etc.
-    tesseract_funcs = {
-        "from_tesseract_api": "from_tesseract_api",
-        "containerized_http": "containerized_http",
-        "containerized_cli": "containerized_cli",
-    }
-    if func in tesseract_funcs:
-        return f"{tesseract_funcs[func]}/apply_{params}"
+    # Tesseract apply benchmarks
+    if func == "from_tesseract_api":
+        return f"api/apply_{params}"
+    if func == "containerized_http":
+        return f"http/apply_{params}"
+    if func == "containerized_cli":
+        return f"cli/apply_{params}"
 
     # Array encoding benchmarks: test_encoding[json_100] etc.
-    encoding_funcs = {
-        "encoding": "array_encoding/encode",
-        "decoding": "array_decoding/decode",
-        "roundtrip": "array_roundtrip/roundtrip",
-    }
-    if func in encoding_funcs:
-        return f"{encoding_funcs[func]}_{params}"
+    if func in ("encoding", "decoding", "roundtrip"):
+        return f"{func}/{params}"
 
     return name
 
@@ -68,8 +62,8 @@ def _parse_short_name(name: str) -> tuple[str, str, int]:
     """Parse short name into (suite, operation, size) for sorting.
 
     Examples:
-        "from_tesseract_api/apply_1" -> ("from_tesseract_api", "apply", 1)
-        "array_encoding/encode_json_100" -> ("array_encoding", "encode_json", 100)
+        "api/apply_1,000" -> ("api", "apply", 1000)
+        "encoding/json_100" -> ("encoding", "json", 100)
     """
     if "/" in name:
         suite, benchmark = name.split("/", 1)

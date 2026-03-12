@@ -14,18 +14,9 @@ import pytest
 # Path to the no-op tesseract for benchmarking
 NOOP_TESSERACT_PATH = Path(__file__).parent / "tesseract_noop" / "tesseract_api.py"
 
-# Default array sizes when --array-sizes is not specified
-DEFAULT_ARRAY_SIZES = [
-    1,
-    10,
-    100,
-    1_000,
-    10_000,
-    100_000,
-    1_000_000,
-    10_000_000,
-    100_000_000,
-]
+# Default array sizes when --array-sizes is not specified.
+# Kept small for CI; pass --array-sizes for more thorough local runs.
+DEFAULT_ARRAY_SIZES = [100, 10_000, 1_000_000]
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -81,22 +72,18 @@ def noop_tesseract_image() -> str | None:
     """Build the no-op tesseract image once per session. Returns image name or None."""
     tesseract_dir = NOOP_TESSERACT_PATH.parent
     image_name = "benchmark-noop:latest"
-    try:
-        result = subprocess.run(
-            [
-                "tesseract",
-                "build",
-                str(tesseract_dir),
-                "--config-override",
-                "name=benchmark-noop",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=300,
-        )
-        if result.returncode != 0:
-            pytest.skip(f"Failed to build noop tesseract: {result.stderr}")
-        return image_name
-    except Exception as e:
-        pytest.skip(f"Failed to build noop tesseract: {e}")
-        return None  # unreachable, but keeps type checker happy
+    result = subprocess.run(
+        [
+            "tesseract",
+            "build",
+            str(tesseract_dir),
+            "--config-override",
+            "name=benchmark-noop",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    if result.returncode != 0:
+        pytest.skip(f"Failed to build noop tesseract: {result.stderr}")
+    return image_name

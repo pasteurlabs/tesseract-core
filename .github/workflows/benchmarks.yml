@@ -24,9 +24,6 @@ permissions:
   pull-requests: write
 
 env:
-  BENCHMARK_OPTS: >
-    --array-sizes 100,10000,1000000
-
   # Set to "true" to use the PR's benchmark scripts for baseline runs.
   # Useful when the benchmark harness itself has changed and the baseline
   # branch doesn't have the new CLI flags yet.  Remove once main is updated.
@@ -59,7 +56,6 @@ jobs:
       - name: Run benchmarks on current commit
         run: |
           uv run --no-sync pytest benchmarks/ \
-            ${BENCHMARK_OPTS} \
             --benchmark-json current_benchmarks.json
 
       - name: Check out baseline branch
@@ -90,7 +86,6 @@ jobs:
         run: |
           rc=0
           uv run --no-sync pytest benchmarks/ \
-            ${BENCHMARK_OPTS} \
             --benchmark-json baseline_benchmarks.json \
             || rc=$?
 

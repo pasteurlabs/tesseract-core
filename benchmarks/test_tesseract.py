@@ -26,7 +26,7 @@ import uuid
 from pathlib import Path
 
 import pytest
-from conftest import NOOP_TESSERACT_PATH, create_test_array
+from conftest import DEFAULT_ARRAY_SIZES, NOOP_TESSERACT_PATH, create_test_array
 
 
 def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
@@ -36,14 +36,7 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
         if raw:
             sizes = [int(s.strip()) for s in raw.split(",")]
         else:
-            from conftest import DEFAULT_ARRAY_SIZES
-
             sizes = DEFAULT_ARRAY_SIZES
-
-        # Filter out very large sizes for containerized benchmarks
-        test_name = metafunc.function.__name__
-        if test_name in ("test_containerized_http", "test_containerized_cli"):
-            sizes = [s for s in sizes if s <= 20_000_000]
 
         ids = [f"{size:,}" for size in sizes]
         metafunc.parametrize("array_size", sizes, ids=ids)
@@ -62,14 +55,6 @@ def tesseract_api_instance(tmp_path_factory):
     return tesseract
 
 
-def test_from_tesseract_api(benchmark, tesseract_api_instance, array_size):
-    """Benchmark non-containerized Tesseract via from_tesseract_api()."""
-    arr = create_test_array(array_size)
-    inputs = {"data": arr}
-
-    benchmark(tesseract_api_instance.apply, inputs)
-
-
 @pytest.fixture(scope="module")
 def http_tesseract_instance(tmp_path_factory, noop_tesseract_image):
     """Create a containerized HTTP Tesseract, reused across the module."""
@@ -85,6 +70,14 @@ def http_tesseract_instance(tmp_path_factory, noop_tesseract_image):
     tesseract.health()
     yield tesseract
     cm.__exit__(None, None, None)
+
+
+def test_from_tesseract_api(benchmark, tesseract_api_instance, array_size):
+    """Benchmark non-containerized Tesseract via from_tesseract_api()."""
+    arr = create_test_array(array_size)
+    inputs = {"data": arr}
+
+    benchmark(tesseract_api_instance.apply, inputs)
 
 
 @pytest.mark.docker
