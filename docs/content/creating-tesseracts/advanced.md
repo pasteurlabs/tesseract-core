@@ -85,34 +85,19 @@ to the machine that builds the Tesseract.
 
 ## Customizing the build process
 
-There are several steps in the process of building a Tesseract image
-which can be configured via the `tesseract_config.yaml` file, in particular the `build_config` section.
-For example:
+The `build_config` section of [`tesseract_config.yaml`](../api/config.md) controls how the Tesseract image is built. Common reasons to customize it:
 
-- By default the base image is `debian:bookworm-slim`.
-  Depending on your specific needs (different python version,
-  preinstalled dependencies, ...), it might be beneficial to
-  specify a different one in `base_image`.
-  There is however the constraint that
-  whatever other image you specify, it must be Ubuntu- or
-  Debian-based.
-- The default target architecture is "native" (same as the host platform).
-  If you need to build for a specific platform, use e.g. `target_platform: "linux/arm64"`.
-- As `tesseract_requirements.txt` only allows you to specify Python
-  dependencies, if there are system ones you need to install inside
-  the Tesseract you can do so via the `extra_packages` list. All
-  packages you specify will be installed via `apt-get`.
-- You can copy data inside a Tesseract via the `package_data` list.
-  The data will be then part of the Tesseract image. This is a
-  good choice for some static artifacts you need to have available
-  for computation, such as the weights of a machine learning model.
-- If you want to further customize the way the image is built,
-  you can add arbitrary commands to the Dockerfile specifying
-  the build process via the `custom_build_steps` list. Use
-  the same syntax you would use in a Dockerfile. To see where your
-  commands would be added in the build process, have a look at
-  the [Dockerfile template](https://github.com/pasteurlabs/tesseract-core/blob/main/tesseract/templates/Dockerfile.base)
-  `tesseract build` uses by default.
+- **Your code needs system libraries** (e.g., `gfortran`, `libgomp1`) — use `extra_packages` to install them via `apt-get`.
+- **You need a specific Python version or GPU drivers** — override `base_image` (must be Debian-based).
+- **You're deploying to a different architecture** (e.g., ARM64 on AWS Graviton) — set `target_platform`.
+- **Your Tesseract needs data files at runtime** (model weights, config files) — use `package_data` to copy them into the image.
+- **None of the above cover your case** — use `custom_build_steps` to inject arbitrary Dockerfile commands. See the [Dockerfile template](https://github.com/pasteurlabs/tesseract-core/blob/main/tesseract_core/sdk/templates/Dockerfile.base) for where these are injected.
+
+```{seealso}
+For the full list of options and their defaults, see the [Configuration reference](../api/config.md).
+```
+
+For worked examples, see the [Package Data](../examples/building-blocks/packagedata.md), [Pyvista on ARM64](../examples/building-blocks/arm64.md), and [Fortran Integration](../examples/building-blocks/fortran.md) building blocks.
 
 ## Creating a Tesseract from a Python package
 
@@ -120,4 +105,4 @@ Sometimes it is useful to create a Tesseract from an already-existing
 Python package. In order to do so, you can run `tesseract init` in the root folder of
 your package (i.e., where `setup.py` and `requirements.txt` would be). Import your package
 as needed in `tesseract_api.py`, and specify the dependencies you need at runtime in
-`tesseract_requirements.py`.
+`tesseract_requirements.txt`.

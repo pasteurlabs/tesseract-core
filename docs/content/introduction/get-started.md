@@ -60,8 +60,8 @@ $ curl -d '{"inputs": {"name": "Osborne"}}' \
        http://127.0.0.1:8080/apply
 {"greeting":"Hello Osborne!"}
 
-$ tesseract teardown tesseract-9hj8fyxrx073
- [i] Tesseracts are shutdown for Project name: tesseract-9hj8fyxrx073
+$ tesseract teardown tesseract-u7um375qt6dj5
+ [i] Tesseracts are shutdown for Project name: tesseract-u7um375qt6dj5
 ```
 
 :::
@@ -80,7 +80,7 @@ $ tesseract teardown tesseract-9hj8fyxrx073
 ::::
 
 ```{tip}
-For faster iteration during development, you can run Tesseracts without building containers. See [Debugging and Development](../debugging.md) for tips on local development workflows.
+For faster iteration during development, you can run Tesseracts without building containers. See [Debugging and Development](../misc/debugging.md) for tips on local development workflows.
 ```
 
 Now, have a look at the (auto-generated) CLI and REST API docs for your Tesseract:
@@ -110,7 +110,7 @@ $ tesseract apidoc helloworld
 ```{figure} /img/apidoc-screenshot.png
 :scale: 33%
 
-The OpenAPI docs for the `vectoradd` Tesseract, documenting its endpoints and valid inputs / outputs.
+The OpenAPI docs for the `helloworld` Tesseract, documenting its endpoints and valid inputs / outputs.
 ```
 
 (getting-started)=
@@ -179,3 +179,9 @@ Now, you're ready to learn more, depending on your needs:
 
 - [](../creating-tesseracts/create.md)
 - [](../using-tesseracts/use.md)
+
+Or jump straight into end-to-end tutorials that show Tesseracts in optimization workflows:
+
+- [JAX Rosenbrock function minimization](https://si-tesseract.discourse.group/t/jax-based-rosenbrock-function-minimization/48)
+- [PyTorch Rosenbrock function minimization](https://si-tesseract.discourse.group/t/pytorch-based-rosenbrock-function-minimization/44)
+- [JAX RBF fitting with autodiff](https://si-tesseract.discourse.group/t/jax-auto-diff-templates-gaussian-radial-basis-function-fitting/51)

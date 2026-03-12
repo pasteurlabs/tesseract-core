@@ -1,6 +1,6 @@
 (tr-api)=
 
-# `tesseract_core` Python API
+# Python API (`tesseract_core`)
 
 ```{eval-rst}
 .. automodule:: tesseract_core

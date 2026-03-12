@@ -1,4 +1,0 @@
-# Include all files here that should be part of source distributions
-include requirements.txt
-include README.md
-recursive-include examples *

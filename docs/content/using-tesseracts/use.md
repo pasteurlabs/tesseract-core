@@ -93,8 +93,11 @@ Where the payload `example_inputs.json` we POST to the `/apply` endpoint is the 
 The [Tesseract](#tesseract_core.Tesseract) context manager will spin up
 a Tesseract locally, and tear it down once the context is exited.
 
-````{tip} You can also instantiate a Tesseract object which connects to
-a remote Tesseract via `Tesseract.from_url(...)`.```
+```{tip}
+You can also instantiate a Tesseract object which connects to
+a remote Tesseract via `Tesseract.from_url(...)`.
+```
+
 :::
 ::::
 
@@ -110,10 +113,11 @@ on the `a` vector, at $a = (1,2,3)$, $b = (4,5,6)$:
 ::::{tab-set}
 :::{tab-item} CLI
 :sync: cli
+
 ```bash
 $ tesseract run vectoradd jacobian @examples/vectoradd/example_jacobian_inputs.json
-{"result":{"a":{"object_type":"array","shape":[3,3],"dtype":"float64","data":{"buffer":[[3.0,0.0,0.0],[0.0,3.0,0.0],[0.0,0.0,3.0]],"encoding":"json"}}}}
-````
+{"result":{"a":{"object_type":"array","shape":[3,3],"dtype":"float64","data":{"buffer":[[1.0,0.0,0.0],[0.0,1.0,0.0],[0.0,0.0,1.0]],"encoding":"json"}}}}
+```
 
 :::
 :::{tab-item} REST API
@@ -164,9 +168,6 @@ available in a given Tesseract, you can look at the docs at the `/docs` endpoint
 ...     print(vectoradd.available_endpoints)
 ['apply', 'jacobian', 'health']
 ```
-
-:::
-::::
 
 ## OpenAPI schemas for programmatic parsing
 
