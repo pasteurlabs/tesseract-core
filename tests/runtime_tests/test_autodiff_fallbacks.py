@@ -1,21 +1,10 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Integration tests for autodiff fallback helpers in tesseract_core.runtime.experimental.
-
-Each test fixture defines a mock Tesseract API module that explicitly calls the
-experimental helpers to derive missing autodiff endpoints — mirroring how a user
-would opt in to this functionality inside their own tesseract_api.py.
-"""
-
-from types import ModuleType
+"""Unit tests for autodiff fallback helpers in tesseract_core.runtime.experimental."""
 
 import numpy as np
-import pytest
-from pydantic import BaseModel
 
-from tesseract_core.runtime import Array, Differentiable, Float32
-from tesseract_core.runtime.core import create_endpoints
 from tesseract_core.runtime.experimental import (
     jvp_from_jacobian,
     vjp_from_jacobian,
@@ -24,100 +13,27 @@ from tesseract_core.runtime.experimental import (
 # A fixed 2x3 linear map: f(x) = A @ x, Jacobian is A everywhere.
 _A = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=np.float32)
 
-_linear_input = {"x": np.array([1.0, 0.0, 0.0], dtype=np.float32)}
-_linear_tangent = {"x": np.array([0.0, 1.0, 0.0], dtype=np.float32)}
-_linear_cotangent = {"y": np.array([1.0, 0.0], dtype=np.float32)}
+
+def _jacobian_fn(inputs, jac_inputs, jac_outputs):
+    return {"y": {"x": _A.copy()}}
 
 
-def _find_endpoint(endpoint_list, endpoint_name):
-    for endpoint in endpoint_list:
-        if endpoint.__name__ == endpoint_name:
-            input_schema = endpoint.__annotations__.get("payload", None)
-            output_schema = endpoint.__annotations__.get("return", None)
-            return endpoint, input_schema, output_schema
-    raise ValueError(f"Endpoint {endpoint_name} not found.")
+_inputs = object()  # opaque; jacobian_fn ignores it
+_jvp_inputs = {"x"}
+_jvp_outputs = {"y"}
+_tangent = {"x": np.array([0.0, 1.0, 0.0], dtype=np.float32)}
+_cotangent = {"y": np.array([1.0, 0.0], dtype=np.float32)}
 
 
-# ---------------------------------------------------------------------------
-# Fixture: jacobian defined analytically; jvp and vjp use experimental helpers
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def module_jac_with_derived_jvp_vjp():
-    """Module defines jacobian analytically and derives jvp/vjp via experimental helpers."""
-
-    class _InputSchema(BaseModel):
-        x: Differentiable[Array[(3,), Float32]]
-
-    class _OutputSchema(BaseModel):
-        y: Differentiable[Array[(2,), Float32]]
-
-    class LinearModule(ModuleType):
-        @property
-        def InputSchema(self):
-            return _InputSchema
-
-        @property
-        def OutputSchema(self):
-            return _OutputSchema
-
-        def apply(self, inputs):
-            return _OutputSchema(y=_A @ np.asarray(inputs.x))
-
-        def jacobian(self, inputs, jac_inputs, jac_outputs):
-            return {"y": {"x": _A.copy()}}
-
-        def jacobian_vector_product(
-            self, inputs, jvp_inputs, jvp_outputs, tangent_vector
-        ):
-            return jvp_from_jacobian(
-                self.jacobian, inputs, jvp_inputs, jvp_outputs, tangent_vector
-            )
-
-        def vector_jacobian_product(
-            self, inputs, vjp_inputs, vjp_outputs, cotangent_vector
-        ):
-            return vjp_from_jacobian(
-                self.jacobian, inputs, vjp_inputs, vjp_outputs, cotangent_vector
-            )
-
-    return LinearModule("LinearModule")
-
-
-def test_jvp_via_experimental_helper(module_jac_with_derived_jvp_vjp):
-    endpoints = create_endpoints(module_jac_with_derived_jvp_vjp)
-    endpoint_func, EndpointSchema, _ = _find_endpoint(
-        endpoints, "jacobian_vector_product"
+def test_jvp_from_jacobian():
+    result = jvp_from_jacobian(
+        _jacobian_fn, _inputs, _jvp_inputs, _jvp_outputs, _tangent
     )
+    np.testing.assert_allclose(result["y"], _A @ _tangent["x"])
 
-    payload = EndpointSchema.model_validate(
-        {
-            "inputs": _linear_input,
-            "jvp_inputs": {"x"},
-            "jvp_outputs": {"y"},
-            "tangent_vector": _linear_tangent,
-        }
+
+def test_vjp_from_jacobian():
+    result = vjp_from_jacobian(
+        _jacobian_fn, _inputs, _jvp_inputs, _jvp_outputs, _cotangent
     )
-    result = endpoint_func(payload)
-    expected = _A @ _linear_tangent["x"]
-    np.testing.assert_allclose(np.asarray(result.root["y"]), expected)
-
-
-def test_vjp_via_experimental_helper(module_jac_with_derived_jvp_vjp):
-    endpoints = create_endpoints(module_jac_with_derived_jvp_vjp)
-    endpoint_func, EndpointSchema, _ = _find_endpoint(
-        endpoints, "vector_jacobian_product"
-    )
-
-    payload = EndpointSchema.model_validate(
-        {
-            "inputs": _linear_input,
-            "vjp_inputs": {"x"},
-            "vjp_outputs": {"y"},
-            "cotangent_vector": _linear_cotangent,
-        }
-    )
-    result = endpoint_func(payload)
-    expected = _A.T @ _linear_cotangent["y"]
-    np.testing.assert_allclose(np.asarray(result.root["x"]), expected)
+    np.testing.assert_allclose(result["x"], _A.T @ _cotangent["y"])
