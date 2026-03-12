@@ -232,16 +232,6 @@ def test_signature_consistency():
         )
 
 
-def test_teepipe_consistency():
-    """Test that the source code of the two duplicate TeePipe implementations is identical."""
-    from tesseract_core.runtime.logs import TeePipe as RuntimeTeePipe
-    from tesseract_core.sdk.logs import TeePipe as SDKTeePipe
-
-    runtime_source = inspect.getsource(RuntimeTeePipe)
-    sdk_source = inspect.getsource(SDKTeePipe)
-    assert runtime_source == sdk_source
-
-
 def test_apply_with_binref_format(built_image_name, tmp_path):
     """Test that json+binref output format works with Tesseract.from_image (Issue #423)."""
     inputs = {"a": [1, 2], "b": [3, 4], "s": 1}

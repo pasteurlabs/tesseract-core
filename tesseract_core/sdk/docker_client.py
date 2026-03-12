@@ -9,15 +9,17 @@ import os
 import re
 import shlex
 import subprocess
+import sys
+import threading
 from dataclasses import dataclass
 from io import IOBase
 from pathlib import Path
+from typing import Any
 
 # store a reference to the list type, which is shadowed by some function names below
 from typing import List as list_  # noqa: UP035
 
 from tesseract_core.sdk.config import get_config
-from tesseract_core.sdk.logs import TeePipe
 
 logger = logging.getLogger("tesseract")
 
@@ -29,6 +31,94 @@ def _get_docker_executable() -> list_[str]:  # noqa: UP006
     if isinstance(docker_executable, str):
         return shlex.split(docker_executable)
     return list(docker_executable)
+
+
+def _read_stream(
+    stream: IOBase,
+    collected: list[bytes],
+    echo_to: Any = None,
+) -> None:
+    """Read lines from a subprocess stream, collecting output and optionally echoing.
+
+    Args:
+        stream: The subprocess pipe to read from.
+        collected: List to append raw byte lines to.
+        echo_to: If provided, decoded lines are written to this stream in real-time.
+    """
+    while True:
+        line = stream.readline()
+        if not line:
+            break
+        collected.append(line)
+        if echo_to is not None:
+            echo_to.write(line.decode("utf-8", errors="replace"))
+            echo_to.flush()
+
+
+def _run_process(
+    cmd: list[str],
+    *,
+    merge_stderr: bool = False,
+    stream_stdout: Any = None,
+    stream_stderr: Any = None,
+) -> tuple[int, bytes, bytes]:
+    """Run a subprocess with threaded stream reading.
+
+    Args:
+        cmd: Command to execute.
+        merge_stderr: If True, redirect stderr into stdout (subprocess.STDOUT).
+        stream_stdout: If provided, echo stdout lines to this stream in real-time.
+        stream_stderr: If provided, echo stderr lines to this stream in real-time.
+
+    Returns:
+        Tuple of (returncode, stdout_bytes, stderr_bytes).
+    """
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT if merge_stderr else subprocess.PIPE,
+        text=False,
+    )
+
+    stdout_lines: list[bytes] = []
+    stderr_lines: list[bytes] = []
+
+    try:
+        stdout_thread = threading.Thread(
+            target=_read_stream,
+            args=(proc.stdout, stdout_lines, stream_stdout),
+        )
+        stdout_thread.start()
+
+        if not merge_stderr and proc.stderr is not None:
+            stderr_thread = threading.Thread(
+                target=_read_stream,
+                args=(proc.stderr, stderr_lines, stream_stderr),
+            )
+            stderr_thread.start()
+        else:
+            stderr_thread = None
+
+        proc.wait()
+        stdout_thread.join()
+        if stderr_thread is not None:
+            stderr_thread.join()
+
+    except (KeyboardInterrupt, Exception):
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+        raise
+    finally:
+        if proc.stdout:
+            proc.stdout.close()
+        if proc.stderr:
+            proc.stderr.close()
+
+    return proc.returncode, b"".join(stdout_lines), b"".join(stderr_lines)
 
 
 def _is_valid_docker_tag(tag: str) -> bool:
@@ -233,15 +323,10 @@ class Images:
             ssh=ssh,
         )
 
-        out_pipe = TeePipe(logger.debug)
+        returncode, stdout_data, _ = _run_process(build_cmd, merge_stderr=True)
 
-        with out_pipe as out_pipe_fd:
-            proc = subprocess.run(build_cmd, stdout=out_pipe_fd, stderr=out_pipe_fd)
-
-        logs = out_pipe.captured_lines
-        return_code = proc.returncode
-
-        if return_code != 0:
+        if returncode != 0:
+            logs = stdout_data.decode("utf-8", errors="replace").splitlines()
             raise BuildError(logs)
 
         return Images.get(tags[0])
@@ -680,77 +765,11 @@ class Containers:
 
         logger.debug(f"Running command: {full_cmd}")
 
-        # Use Popen for all cases to enable streaming and proper cleanup
-        import sys
-        import threading
-
-        proc = subprocess.Popen(
+        returncode, stdout_data, stderr_data = _run_process(
             full_cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=False,
+            stream_stdout=sys.stdout if stream_stdout else None,
+            stream_stderr=sys.stderr if stream_stderr else None,
         )
-
-        stdout_lines: list[bytes] = []
-        stderr_lines: list[bytes] = []
-
-        def read_stream(
-            stream: IOBase,
-            collected: list[bytes],
-            should_stream: bool,
-            target_stream: IOBase,
-        ):
-            """Read from stream, optionally streaming to target."""
-            while True:
-                line = stream.readline()
-                if not line:
-                    break
-                collected.append(line)
-                if should_stream:
-                    # Decode bytes to text for writing to stdout/stderr
-                    # (handles environments like Jupyter where .buffer may not exist)
-                    target_stream.write(line.decode("utf-8", errors="replace"))
-                    target_stream.flush()
-
-        try:
-            # Use threads to read stdout and stderr concurrently to avoid deadlocks
-            stdout_thread = threading.Thread(
-                target=read_stream,
-                args=(proc.stdout, stdout_lines, stream_stdout, sys.stdout),
-            )
-            stderr_thread = threading.Thread(
-                target=read_stream,
-                args=(proc.stderr, stderr_lines, stream_stderr, sys.stderr),
-            )
-
-            stdout_thread.start()
-            stderr_thread.start()
-
-            # Wait for process and threads to complete
-            proc.wait()
-            stdout_thread.join()
-            stderr_thread.join()
-
-            stdout_data = b"".join(stdout_lines)
-            stderr_data = b"".join(stderr_lines)
-            returncode = proc.returncode
-
-        except (KeyboardInterrupt, Exception):
-            # Terminate the process on interrupt or exception (unless detached)
-            if not detach:
-                proc.terminate()
-                try:
-                    proc.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-                    proc.wait()
-            raise
-        finally:
-            # Ensure streams are closed
-            if proc.stdout:
-                proc.stdout.close()
-            if proc.stderr:
-                proc.stderr.close()
 
         if returncode != 0:
             stderr_str = stderr_data.decode("utf-8", errors="ignore")
