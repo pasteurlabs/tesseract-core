@@ -199,6 +199,7 @@ class PydanticArrayAnnotation(metaclass=ArrayAnnotationType):
             serialization=core_schema.plain_serializer_function_ser_schema(
                 encode_array_,
                 info_arg=True,
+                return_schema=array_schema,
             ),
         )
 
