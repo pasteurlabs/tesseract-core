@@ -93,9 +93,9 @@ def jacobian(inputs, jac_inputs, jac_outputs):
     )
 ```
 
-## Full source code
+## Example code
 
-The complete example is the `univariate_adfallbacks` Tesseract — a variant of
+A concrete example is the `univariate_adfallbacks` Tesseract — a variant of
 [univariate](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/univariate)
 (Rosenbrock function) where the Jacobian is computed via JAX and JVP/VJP are derived
 automatically using `jvp_from_jacobian` and `vjp_from_jacobian`.
