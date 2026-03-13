@@ -5,6 +5,10 @@ name: "{{name}}"
 version: "0.1.0"
 description: ""
 
+# Arbitrary user-defined metadata
+# metadata:
+#   key: value
+
 build_config:
   # Base image to use for the container, must be Ubuntu or Debian-based
   # base_image: "debian:bookworm-slim"
