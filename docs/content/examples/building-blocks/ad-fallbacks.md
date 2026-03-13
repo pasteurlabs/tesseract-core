@@ -1,4 +1,4 @@
-# AD Endpoint Derivation Fallbacks
+# Deriving AD Endpoints from Each Other
 
 This guide shows how to derive missing autodiff endpoints from ones you have already
 implemented, using the experimental AD fallback helpers.
