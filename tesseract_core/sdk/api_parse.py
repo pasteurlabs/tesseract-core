@@ -4,7 +4,7 @@
 import ast
 import re
 from pathlib import Path
-from typing import Annotated, Literal, NamedTuple
+from typing import Annotated, Any, Literal, NamedTuple
 
 import yaml
 from pydantic import (
@@ -166,6 +166,10 @@ class TesseractConfig(BaseModel, validate_assignment=True):
     build_config: OptionalBuildConfig = Field(
         default_factory=TesseractBuildConfig,
         description="Configuration options for building the Tesseract.",
+    )
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Arbitrary user-defined metadata.",
     )
 
     model_config = ConfigDict(extra="forbid")
