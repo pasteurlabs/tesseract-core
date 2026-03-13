@@ -6,16 +6,10 @@ on:
       - "tesseract_core/**"
       - "benchmarks/**"
       - ".github/workflows/benchmarks.yml"
-      - "benchmarks/compare_benchmarks.py"
 
   push:
     branches:
       - main
-    paths:
-      - "tesseract_core/**"
-      - "benchmarks/**"
-      - ".github/workflows/benchmarks.yml"
-      - "benchmarks/compare_benchmarks.py"
 
 concurrency:
   group: benchmarks-${{ github.event.pull_request.number || github.ref }}
@@ -51,10 +45,8 @@ jobs:
 
       - name: Run benchmarks on current commit
         run: |
-          uv run --no-sync python benchmarks/run_benchmarks.py \
-            --iterations 10 \
-            --array-sizes 100,10000,1000000 \
-            --output current_benchmarks.json
+          uv run --no-sync pytest benchmarks/ \
+            --benchmark-json current_benchmarks.json
 
       - name: Check out baseline branch
         if: github.event_name == 'pull_request'
@@ -70,30 +62,43 @@ jobs:
           cp production.uv.lock uv.lock 2>/dev/null || true
           uv sync --extra dev --frozen
 
+      - name: Use PR benchmark scripts for baseline
+        if: github.event_name == 'pull_request'
+        working-directory: baseline
+        run: |
+          cp -r ../benchmarks/* benchmarks/
+
       - name: Run benchmarks on baseline
         if: github.event_name == 'pull_request'
         id: baseline
         working-directory: baseline
         run: |
-          if [ -f benchmarks/run_benchmarks.py ]; then
-            uv run --no-sync python benchmarks/run_benchmarks.py \
-              --iterations 10 \
-              --array-sizes 100,10000,1000000 \
-              --output baseline_benchmarks.json
-            echo "exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "::notice::Benchmark script not found in baseline, skipping comparison"
-            echo "exists=false" >> $GITHUB_OUTPUT
+          rc=0
+          uv run --no-sync pytest benchmarks/ \
+            --benchmark-json baseline_benchmarks.json \
+            || rc=$?
+
+          if [ "$rc" != "0" ]; then
+            echo "::warning::Baseline benchmark run failed, skipping comparison"
+            echo "has_baseline=false" >> $GITHUB_OUTPUT
+            exit 0
           fi
+
+          echo "has_baseline=true" >> $GITHUB_OUTPUT
 
       - name: Generate comparison report
         if: github.event_name == 'pull_request'
         id: comparison
         run: |
+          baseline_flag=""
+          if [ "${{ steps.baseline.outputs.has_baseline }}" = "true" ]; then
+            baseline_flag="--baseline baseline/baseline_benchmarks.json"
+          fi
+
           python benchmarks/compare_benchmarks.py \
-            baseline/baseline_benchmarks.json \
-            current_benchmarks.json \
-            benchmark_report.md
+            $baseline_flag \
+            --current current_benchmarks.json \
+            --output benchmark_report.md
 
           # Set output as multiline string
           {

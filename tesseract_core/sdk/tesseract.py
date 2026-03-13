@@ -58,29 +58,36 @@ class Tesseract:
     _client: HTTPClient | LocalClient | None = None
     _stream_logs: bool | Callable[[str], Any] = False
 
-    def __init__(self, url: str) -> None:
+    def __init__(self, url: str, server_output_path: str | Path | None = None) -> None:
         warnings.warn(
             "Direct instantiation of Tesseract is deprecated. "
             "Use Tesseract.from_url(), Tesseract.from_image(), or Tesseract.from_tesseract_api() instead.",
             UserWarning,
             stacklevel=2,
         )
-        self._client = HTTPClient(url)
+        self._client = HTTPClient(url, output_path=server_output_path)
 
     @classmethod
-    def from_url(cls, url: str) -> Tesseract:
+    def from_url(
+        cls, url: str, server_output_path: str | Path | None = None
+    ) -> Tesseract:
         """Create a Tesseract instance from a URL.
 
         This is useful for connecting to a remote Tesseract instance.
 
         Args:
             url: The URL of the Tesseract instance.
+            server_output_path: Path where binary output files are stored when using json+binref.
+                Required when the Tesseract is served with --output-format=json+binref.
+                Must be a path accessible from the client machine (e.g., via a shared or
+                mounted filesystem), since the server writes .bin files there and the
+                client reads them from the same path.
 
         Returns:
             A Tesseract instance.
         """
         obj = cls.__new__(cls)
-        obj._client = HTTPClient(url)
+        obj._client = HTTPClient(url, output_path=server_output_path)
         return obj
 
     @classmethod
@@ -100,7 +107,8 @@ class Tesseract:
         memory: str | None = None,
         input_path: str | Path | None = None,
         output_path: str | Path | None = None,
-        output_format: Literal["json", "json+base64"] = "json+base64",
+        output_format: Literal["json", "json+base64", "json+binref"] = "json+base64",
+        docker_args: list[str] | None = None,
         runtime_config: dict[str, Any] | None = None,
         stream_logs: bool | Callable[[str], Any] = False,
     ) -> Tesseract:
@@ -132,8 +140,10 @@ class Tesseract:
             memory: Memory limit for the container (e.g., "512m", "2g"). Minimum allowed is 6m.
             input_path: Input path to read input files from, such as local directory or S3 URI.
             output_path: Output path to write output files to, such as local directory or S3 URI.
-            output_format: Format to use for the output data (json+binref not yet supported).
+                Required when using json+binref output format.
+            output_format: Format to use for the output data. json+binref requires output_path to be set.
                 This has no impact on what is returned to Python and only affects the format that is used internally.
+            docker_args: Additional arguments to pass to the container runtime (e.g., Docker).
             runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
                 These are converted to TESSERACT_* environment variables. For example,
                 `{"profiling": True}` enables profiling via TESSERACT_PROFILING=true.
@@ -176,6 +186,7 @@ class Tesseract:
             port=port,
             host_ip=host_ip,
             debug=True,
+            docker_args=docker_args,
         )
         return obj
 
@@ -185,7 +196,7 @@ class Tesseract:
         tesseract_api: str | Path | ModuleType,
         input_path: Path | None = None,
         output_path: Path | None = None,
-        output_format: Literal["json", "json+base64"] = "json+base64",
+        output_format: Literal["json", "json+base64", "json+binref"] = "json+base64",
         runtime_config: dict[str, Any] | None = None,
         stream_logs: bool | Callable[[str], Any] = False,
     ) -> Tesseract:
@@ -202,8 +213,8 @@ class Tesseract:
             input_path: Path of input directory. All paths in the tesseract
                 payload have to be relative to this path.
             output_path: Path of output directory. All paths in the tesseract
-                result with be given relative to this path.
-            output_format: Format to use for the output data (json+binref not yet supported).
+                result with be given relative to this path. Required when using json+binref.
+            output_format: Format to use for the output data. json+binref requires output_path.
                 This has no impact on what is returned to Python and only affects the format that is used internally.
             runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
                 For example, `{"profiling": True}` enables profiling.
@@ -580,32 +591,68 @@ def _encode_array(arr: np.ndarray, b64: bool = True) -> dict:
     }
 
 
-def _decode_array(encoded_arr: dict) -> np.ndarray:
-    if "data" in encoded_arr:
-        if encoded_arr["data"]["encoding"] == "base64":
-            data = base64.b64decode(encoded_arr["data"]["buffer"])
-            arr = np.frombuffer(data, dtype=encoded_arr["dtype"])
-        elif encoded_arr["data"]["encoding"] in ["json", "raw"]:
-            arr = np.array(encoded_arr["data"]["buffer"], dtype=encoded_arr["dtype"])
-        elif encoded_arr["data"]["encoding"] == "binref":
-            # This failure mode could be reached with Tesseract served with `--output-format=json+binref`
-            raise ValueError(
-                "Python SDK does not yet support json+binref output format."
-            )
-        else:
-            raise ValueError(
-                f"Unexpected array encoding {encoded_arr['data']['encoding']}. Cannot decode."
-            )
-    else:
+def _decode_array(
+    encoded_arr: dict, output_path: str | Path | None = None
+) -> np.ndarray:
+    import re
+
+    if "data" not in encoded_arr:
         raise ValueError("Encoded array does not contain 'data' key. Cannot decode.")
-    arr = arr.reshape(encoded_arr["shape"])
+
+    encoding = encoded_arr["data"]["encoding"]
+    dtype = np.dtype(encoded_arr["dtype"])
+    shape = tuple(encoded_arr["shape"])
+
+    if encoding == "base64":
+        data = base64.b64decode(encoded_arr["data"]["buffer"])
+        arr = np.frombuffer(data, dtype=dtype)
+    elif encoding in ["json", "raw"]:
+        arr = np.array(encoded_arr["data"]["buffer"], dtype=dtype)
+    elif encoding == "binref":
+        buffer_spec = encoded_arr["data"]["buffer"]
+        # Parse the buffer spec which has format: path[:offset]
+        path_match = re.match(r"^(?P<path>.+?)(\:(?P<offset>\d+))?$", buffer_spec)
+        if not path_match:
+            raise ValueError(
+                f"Invalid binref path format: {buffer_spec}. "
+                "Expected format is '<path>[:<offset>]'."
+            )
+        bufferpath = path_match.group("path")
+        offset = int(path_match.group("offset") or 0)
+
+        # Calculate the number of bytes to read
+        size = 1 if len(shape) == 0 else int(np.prod(shape))
+        num_bytes = size * dtype.itemsize
+
+        # Resolve the path
+        if output_path is not None:
+            full_path = Path(output_path) / bufferpath
+        else:
+            full_path = Path(bufferpath)
+
+        if not full_path.exists():
+            raise ValueError(
+                f"Binary file not found: {full_path}. "
+                "Make sure output_path is set when using json+binref encoding."
+            )
+
+        # Read the binary data
+        with open(full_path, "rb") as f:
+            f.seek(offset)
+            data = f.read(num_bytes)
+
+        arr = np.frombuffer(data, dtype=dtype)
+    else:
+        raise ValueError(f"Unexpected array encoding {encoding}. Cannot decode.")
+
+    arr = arr.reshape(shape)
     return arr
 
 
 class HTTPClient:
     """HTTP Client for Tesseracts."""
 
-    def __init__(self, url: str, output_path: Path | None = None) -> None:
+    def __init__(self, url: str, output_path: str | Path | None = None) -> None:
         self._url = self._sanitize_url(url)
         self._output_path = output_path
 
@@ -690,8 +737,12 @@ class HTTPClient:
             "jacobian_vector_product",
             "vector_jacobian_product",
         ]:
+            # Create a decoder with the output_path bound
+            def decode_with_path(arr: dict) -> np.ndarray:
+                return _decode_array(arr, output_path=self._output_path)
+
             data = _tree_map(
-                _decode_array,
+                decode_with_path,
                 data,
                 is_leaf=lambda x: type(x) is dict and "shape" in x,
             )
