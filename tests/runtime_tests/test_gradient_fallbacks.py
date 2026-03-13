@@ -1,7 +1,7 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Unit tests for autodiff fallback helpers in tesseract_core.runtime.experimental."""
+"""Unit tests for gradient fallback helpers in tesseract_core.runtime.experimental."""
 
 import numpy as np
 import pytest

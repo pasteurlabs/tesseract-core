@@ -5,7 +5,7 @@ implemented, using the experimental AD fallback helpers.
 
 ```{warning}
 This feature is **experimental** and available in `tesseract_core.runtime.experimental`.
-The API may change in future releases. 
+The API may change in future releases.
 ```
 
 ```{warning}
@@ -22,8 +22,8 @@ additional gradient code.
 
 ## Deriving JVP and VJP from the Jacobian
 
-If you have a `jacobian` implementation (e.g. produced by an AD framework), you can
-derive JVP and VJP from it:
+If you have a `jacobian` implementation (e.g. through an analytical derivation or a
+simulation adjoint), you can derive JVP and VJP from it:
 
 ```python
 from tesseract_core.runtime.experimental import jvp_from_jacobian, vjp_from_jacobian
