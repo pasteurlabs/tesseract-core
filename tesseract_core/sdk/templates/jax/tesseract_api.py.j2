@@ -12,6 +12,10 @@ from pydantic import BaseModel
 
 from tesseract_core.runtime import Differentiable, Float32
 from tesseract_core.runtime.tree_transforms import filter_func, flatten_with_paths
+{% if extra_imports is defined and extra_imports %}
+
+{{extra_imports}}
+{% endif %}
 
 #
 # Schemata
@@ -27,11 +31,19 @@ from tesseract_core.runtime.tree_transforms import filter_func, flatten_with_pat
 
 
 class InputSchema(BaseModel):
+{% if input_schema_fields is defined and input_schema_fields %}
+{{input_schema_fields}}
+{% else %}
     example: Differentiable[Float32]
+{% endif %}
 
 
 class OutputSchema(BaseModel):
+{% if output_schema_fields is defined and output_schema_fields %}
+{{output_schema_fields}}
+{% else %}
     example: Differentiable[Float32]
+{% endif %}
 
 
 #
@@ -44,7 +56,11 @@ class OutputSchema(BaseModel):
 # to Input/OutputSchema
 @eqx.filter_jit
 def apply_jit(inputs: dict) -> dict:
+{% if apply_jit_body is defined and apply_jit_body %}
+{{apply_jit_body}}
+{% else %}
     return inputs
+{% endif %}
 
 
 def apply(inputs: InputSchema) -> OutputSchema:

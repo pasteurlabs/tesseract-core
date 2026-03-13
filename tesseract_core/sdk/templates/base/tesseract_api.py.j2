@@ -6,6 +6,10 @@
 
 
 from pydantic import BaseModel
+{% if extra_imports is defined and extra_imports %}
+
+{{extra_imports}}
+{% endif %}
 
 #
 # Schemas
@@ -13,11 +17,19 @@ from pydantic import BaseModel
 
 
 class InputSchema(BaseModel):
+{% if input_schema_fields is defined and input_schema_fields %}
+{{input_schema_fields}}
+{% else %}
     pass
+{% endif %}
 
 
 class OutputSchema(BaseModel):
+{% if output_schema_fields is defined and output_schema_fields %}
+{{output_schema_fields}}
+{% else %}
     pass
+{% endif %}
 
 
 #
@@ -26,7 +38,11 @@ class OutputSchema(BaseModel):
 
 
 def apply(inputs: InputSchema) -> OutputSchema:
+{% if apply_body is defined and apply_body %}
+{{apply_body}}
+{% else %}
     return OutputSchema()
+{% endif %}
 
 
 #
