@@ -79,7 +79,7 @@ ENV TESSERACT_NAME="{{ config.name | replace('"', '\\"') | replace('\n', '\\n') 
     TESSERACT_DESCRIPTION="{{ config.description | replace('"', '\\"') | replace('\n', '\\n') }}" \
     TESSERACT_API_PATH="/tesseract/tesseract_api.py"
 
-LABEL ai.pasteurlabs.tesseract.metadata="{{ config.metadata | tojson | replace('"', '\\"') }}"
+LABEL ai.pasteurlabs.tesseract.metadata="{{ config.metadata | tojson | replace('\\', '\\\\') | replace('"', '\\"') }}"
 
 # Copy only necessary files
 COPY --from=build_stage /python-env /python-env
