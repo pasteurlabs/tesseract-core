@@ -317,9 +317,10 @@ def get_config(src_dir: Path) -> TesseractConfig:
 
 def get_non_base_fields_in_tesseract_config() -> list[tuple[str, type]]:
     """Gets fields in Tesseract Config that are not a base fields."""
-    base_fields = (str, int, float, bool, bytes)
+    base_fields = (str, int, float, bool, bytes, dict)
     non_base_fields = []
     for field_name, field_info in TesseractConfig.model_fields.items():
-        if field_info.annotation not in base_fields:
+        origin = getattr(field_info.annotation, "__origin__", field_info.annotation)
+        if origin not in base_fields:
             non_base_fields.append((field_name, field_info.annotation))
     return non_base_fields
