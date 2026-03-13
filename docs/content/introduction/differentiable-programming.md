@@ -117,6 +117,7 @@ If you have already implemented one AD endpoint but need the others, you can der
 them automatically using the experimental fallback helpers:
 
 - Derive **JVP** or **VJP** from an existing `jacobian` with `jvp_from_jacobian` / `vjp_from_jacobian`
+- Derive the full **Jacobian** from an existing JVP or VJP with `jacobian_from_jvp` / `jacobian_from_vjp`
 
 ```{seealso}
 For a practical guide with full examples and cost trade-offs, see
