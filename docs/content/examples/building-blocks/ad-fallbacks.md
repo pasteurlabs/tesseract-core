@@ -5,9 +5,11 @@ implemented, using the experimental AD fallback helpers.
 
 ```{warning}
 This feature is **experimental** and available in `tesseract_core.runtime.experimental`.
-The API may change in future releases. All four helpers materialise the **full Jacobian
-matrix** at some point, which can be expensive for high-dimensional inputs or outputs.
-Use them when the derived endpoint is not on the hot path of your workflow.
+The API may change in future releases. 
+```
+
+```{warning}
+All four helpers materialise the **full Jacobian matrix**, which can be expensive for high-dimensional inputs or outputs and often defeats the purpose of using JVPs/VJPs. Use with caution.
 ```
 
 ## Overview
