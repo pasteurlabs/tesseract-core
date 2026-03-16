@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import inspect
+import time
 import uuid
 from collections.abc import Callable
 from functools import wraps
@@ -17,6 +18,57 @@ from .core import create_endpoints
 from .file_interactions import SUPPORTED_FORMATS, join_paths, output_to_bytes
 from .mpa import start_run
 from .profiler import Profiler
+
+
+class BodyTimingMiddleware:
+    """ASGI middleware that measures body receive time vs processing time.
+
+    Emits headers:
+      - Server-Timing: total;dur=<ms>
+      - X-Server-Body-Receive-Ms: time to read the full request body
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        # Wrap receive to measure how long body reads take
+        body_receive_ns = 0
+        body_done = False
+
+        async def timed_receive():
+            nonlocal body_receive_ns, body_done
+            if body_done:
+                return await receive()
+            t0 = time.perf_counter_ns()
+            msg = await receive()
+            t1 = time.perf_counter_ns()
+            body_receive_ns += t1 - t0
+            if msg.get("type") == "http.request" and not msg.get("more_body", False):
+                body_done = True
+            return msg
+
+        t_start = time.perf_counter_ns()
+
+        # Wrap send to inject timing headers into the response
+        async def timed_send(message):
+            if message["type"] == "http.response.start":
+                elapsed_ms = (time.perf_counter_ns() - t_start) / 1e6
+                body_ms = body_receive_ns / 1e6
+                headers = list(message.get("headers", []))
+                headers.append(
+                    (b"server-timing", f"total;dur={elapsed_ms:.3f}".encode())
+                )
+                headers.append((b"x-server-body-receive-ms", f"{body_ms:.3f}".encode()))
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, timed_receive, timed_send)
+
 
 # Endpoints that should use GET instead of POST
 GET_ENDPOINTS = {"health"}
@@ -53,6 +105,7 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
         redoc_url="/docs",
         debug=config.debug,
     )
+    app.add_middleware(BodyTimingMiddleware)
     tesseract_endpoints = create_endpoints(api_module)
 
     def wrap_endpoint(endpoint_func: Callable):
@@ -71,6 +124,10 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
             rundir_name = f"run_{run_id}"
             rundir = join_paths(output_path, rundir_name)
             profiler = Profiler()
+
+            # Time endpoint execution (includes pydantic input validation
+            # which already happened in FastAPI before this function is called)
+            t_compute_start = time.perf_counter()
             with start_run(base_dir=rundir):
                 with profiler:
                     result = endpoint_func(*args, **kwargs)
@@ -78,9 +135,20 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
                 # Print profiling stats inside start_run context
                 # so they go through stdio redirection to the log file
                 profiler.print_stats()
-            return create_response(
+            t_compute_end = time.perf_counter()
+
+            # Time response serialization
+            t_serialize_start = time.perf_counter()
+            resp = create_response(
                 result, accept, base_dir=output_path, binref_dir=rundir_name
             )
+            t_serialize_end = time.perf_counter()
+
+            compute_ms = (t_compute_end - t_compute_start) * 1000
+            serialize_ms = (t_serialize_end - t_serialize_start) * 1000
+            resp.headers["X-Server-Compute-Ms"] = f"{compute_ms:.3f}"
+            resp.headers["X-Server-Serialize-Ms"] = f"{serialize_ms:.3f}"
+            return resp
 
         if endpoint_func.__name__ not in endpoints_to_wrap:
             return endpoint_func
