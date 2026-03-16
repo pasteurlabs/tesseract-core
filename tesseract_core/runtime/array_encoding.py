@@ -215,10 +215,10 @@ def _dump_binref_arraydict(
     subdir: Path | str | None,
     current_binref_uuid: str,
     max_file_size: int = MAX_BINREF_BUFFER_SIZE,
-) -> tuple[dict[str, str | dict[str, str]], str]:
+) -> tuple[dict, str]:
     """Dump array to json+binref encoded array dict.
 
-    Writes a .bin file and returns json encoded data.
+    Writes a .bin file and returns a plain dict (no Pydantic models).
     """
     target_name = f"{current_binref_uuid}.bin"
     if subdir is not None:
@@ -239,47 +239,35 @@ def _dump_binref_arraydict(
     write_to_path(_fast_tobytes(arr), target_path, append=True)
     offset = current_size
 
-    data = BinrefArrayData.model_construct(
-        buffer=f"{target_name}:{offset}", encoding="binref"
-    )
     arraydict = {
         "object_type": "array",
-        "shape": arr.shape,
+        "shape": list(arr.shape),
         "dtype": arr.dtype.name,
-        "data": data,
+        "data": {"buffer": f"{target_name}:{offset}", "encoding": "binref"},
     }
     return arraydict, current_binref_uuid
 
 
-def _dump_base64_arraydict(
-    arr: ArrayLike,
-) -> dict[str, str | Base64ArrayData]:
-    """Dump array to json+base64 encoded array dict."""
-    data = Base64ArrayData.model_construct(
-        buffer=pybase64.b64encode_as_string(_fast_tobytes(arr)),
-        encoding="base64",
-    )
+def _dump_base64_arraydict(arr: ArrayLike) -> dict:
+    """Dump array to json+base64 encoded array dict (plain dict, no Pydantic models)."""
     return {
         "object_type": "array",
-        "shape": arr.shape,
+        "shape": list(arr.shape),
         "dtype": arr.dtype.name,
-        "data": data,
+        "data": {
+            "buffer": pybase64.b64encode_as_string(_fast_tobytes(arr)),
+            "encoding": "base64",
+        },
     }
 
 
-def _dump_json_arraydict(
-    arr: ArrayLike,
-) -> dict[str, str | JsonArrayData]:
-    """Dump array to json encoded array dict."""
-    data = JsonArrayData.model_construct(
-        buffer=arr.tolist(),
-        encoding="json",
-    )
+def _dump_json_arraydict(arr: ArrayLike) -> dict:
+    """Dump array to json encoded array dict (plain dict, no Pydantic models)."""
     return {
         "object_type": "array",
-        "shape": arr.shape,
+        "shape": list(arr.shape),
         "dtype": arr.dtype.name,
-        "data": data,
+        "data": {"buffer": arr.tolist(), "encoding": "json"},
     }
 
 
@@ -509,8 +497,15 @@ def decode_array(
 
 def encode_array(
     arr: ArrayLike, info: Any, expected_shape: ShapeType, expected_dtype: str | None
-) -> EncodedArrayModel | ArrayLike:
-    """Encode a NumPy array as an EncodedArrayModel."""
+) -> dict | ArrayLike:
+    """Encode a NumPy array for serialization.
+
+    In JSON mode, returns a plain dict (not an EncodedArrayModel) to bypass
+    Pydantic's union serialization which is O(n * variants) due to
+    https://github.com/pydantic/pydantic/issues/12912.
+
+    In Python mode, returns the raw array as-is.
+    """
     from tesseract_core.runtime.config import get_config
 
     # Convert to a NumPy array if necessary
@@ -524,7 +519,7 @@ def encode_array(
 
     array_encoding = context.get("array_encoding", "json")
     if array_encoding == "base64":
-        data = _dump_base64_arraydict(arr)
+        return _dump_base64_arraydict(arr)
     elif array_encoding == "binref":
         base_dir = context.get("base_dir", get_config().output_path)
         subdir = context.get("binref_dir", None)
@@ -536,12 +531,9 @@ def encode_array(
             max_file_size=context.get("max_file_size", MAX_BINREF_BUFFER_SIZE),
         )
         context["__binref_uuid"] = new_binref_uuid
+        return data
     elif array_encoding == "json":
-        data = _dump_json_arraydict(arr)
+        return _dump_json_arraydict(arr)
     else:
         # Unreachable
         raise AssertionError(f"Unsupported encoding: {array_encoding}")
-
-    # Important: use model_construct here to skip validation, since the data is already validated
-    # and validation would be expensive (needs to touch every list element for json encoding)
-    return EncodedArrayModel.model_construct(**data)

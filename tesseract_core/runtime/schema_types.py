@@ -137,7 +137,7 @@ class PydanticArrayAnnotation(metaclass=ArrayAnnotationType):
                     serialization=core_schema.plain_serializer_function_ser_schema(
                         encode_array_,
                         info_arg=True,
-                        return_schema=array_schema,
+                        # No return_schema — see comment below.
                     ),
                 ),
             ]
@@ -199,10 +199,12 @@ class PydanticArrayAnnotation(metaclass=ArrayAnnotationType):
             serialization=core_schema.plain_serializer_function_ser_schema(
                 encode_array_,
                 info_arg=True,
-                # No return_schema here: in Python mode the serializer returns
-                # a raw ndarray (not an EncodedArrayModel), so declaring
-                # return_schema=array_schema would cause a spurious
-                # PydanticSerializationUnexpectedValue warning on model_dump().
+                # No return_schema: encode_array returns plain dicts (JSON mode)
+                # or raw ndarrays (Python mode), deliberately bypassing Pydantic's
+                # union serialization which is O(n * variants) for discriminated
+                # unions (https://github.com/pydantic/pydantic/issues/12912).
+                # The JSON schema is still correct — it's derived from
+                # array_schema via the validator chain above.
             ),
         )
 
@@ -210,7 +212,21 @@ class PydanticArrayAnnotation(metaclass=ArrayAnnotationType):
     def __get_pydantic_json_schema__(
         cls, _core_schema: core_schema.CoreSchema, handler: GetJsonSchemaHandler
     ) -> JsonSchemaValue:
-        """This method is called by Pydantic to get the JSON schema for the annotated type."""
+        """This method is called by Pydantic to get the JSON schema for the annotated type.
+
+        Because the outer serializer has no return_schema (to bypass Pydantic's
+        slow union serialization — see pydantic/pydantic#12912), Pydantic cannot
+        infer the JSON schema from the serialization chain automatically.  We
+        resolve this by pointing the JSON-schema generator at the validation-side
+        ``array_schema`` (step 0 of the chain), which *is* a full Pydantic model
+        and therefore produces the correct JSON schema.
+        """
+        # _core_schema is a json_or_python_schema whose json_schema branch is a
+        # chain_schema [array_schema, decode_validator].  We want the JSON schema
+        # derived from array_schema (the EncodedArrayModel).
+        json_branch = _core_schema.get("json_schema", _core_schema)
+        if json_branch.get("type") == "chain":
+            return handler(json_branch["steps"][0])
         return handler(_core_schema)
 
 
