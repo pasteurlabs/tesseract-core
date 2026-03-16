@@ -24,11 +24,11 @@ Tesseract packages scientific software into **self-contained, portable component
 - **Self-document** — Schemas, types, and API docs are generated automatically.
 
 ```{figure} img/demo.gif
-:alt: Demo: init, edit, build, and run a Tesseract
+:alt: Demo: install, build, and run a Tesseract in under a minute
 :width: 720px
 :align: center
 
-Creating a Tesseract from scratch: init, edit, build, and run.
+Getting started: install, build an example, and run it.
 ```
 
 ## Who is this for?

@@ -61,9 +61,9 @@ Each component uses a different differentiation strategy (analytic adjoints, fin
 ## Quick start
 
 <p align="center">
-<img src="docs/img/demo.gif" width="720" alt="Demo: init, edit, build, and run a Tesseract">
+<img src="docs/img/demo.gif" width="720" alt="Demo: install, build, and run a Tesseract in under a minute">
 <br>
-<em>Creating a Tesseract from scratch: init, edit, build, and run.</em>
+<em>Getting started: install, build an example, and run it.</em>
 </p>
 
 > [!NOTE]
