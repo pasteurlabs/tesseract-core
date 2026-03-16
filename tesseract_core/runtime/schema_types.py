@@ -199,7 +199,10 @@ class PydanticArrayAnnotation(metaclass=ArrayAnnotationType):
             serialization=core_schema.plain_serializer_function_ser_schema(
                 encode_array_,
                 info_arg=True,
-                return_schema=array_schema,
+                # No return_schema here: in Python mode the serializer returns
+                # a raw ndarray (not an EncodedArrayModel), so declaring
+                # return_schema=array_schema would cause a spurious
+                # PydanticSerializationUnexpectedValue warning on model_dump().
             ),
         )
 

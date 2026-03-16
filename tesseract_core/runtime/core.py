@@ -225,8 +225,10 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
         _trace("apply() called with inputs:", payload.inputs)
         out = api_module.apply(payload.inputs)
         if isinstance(out, api_module.OutputSchema):
-            out = out.model_dump()
-        result = ApplyOutputSchema.model_validate(out)
+            # Assume the output is already validated by the user's code, so we can skip validation
+            result = ApplyOutputSchema.model_construct(root=out)
+        else:
+            result = ApplyOutputSchema.model_validate(out)
         _trace("apply() returned:", result)
         return result
 

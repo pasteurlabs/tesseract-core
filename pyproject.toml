@@ -17,6 +17,7 @@ dependencies = [
     "requests>=2.32.4",
     "pip",
     "packaging",
+    "pybase64",
 ]
 dynamic = [
     # Injected via hatch-vcs

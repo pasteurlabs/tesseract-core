@@ -4,7 +4,7 @@
 import re
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Annotated, Any, Literal, get_args
+from typing import Annotated, Any, Literal, TypeAlias, get_args
 from uuid import uuid4
 
 import numpy as np
@@ -46,9 +46,9 @@ AllowedDtypes = Literal[
     "complex64",
     "complex128",
 ]
-EllipsisType = type(Ellipsis)
-ArrayLike = np.ndarray | np.number | np.bool_
-ShapeType = tuple[int | None, ...] | EllipsisType
+EllipsisType: TypeAlias = type(Ellipsis)
+ArrayLike: TypeAlias = np.ndarray | np.number | np.bool_
+ShapeType: TypeAlias = tuple[int | None, ...] | EllipsisType
 
 MAX_BINREF_BUFFER_SIZE = 100 * 1024 * 1024  # 100 MB
 
@@ -204,13 +204,13 @@ def get_array_model(
     return out
 
 
-def _fast_tobytes(arr: np.ndarray) -> bytes:
+def _fast_tobytes(arr: ArrayLike) -> bytes:
     """Convert a NumPy array to bytes without copying if possible."""
     return np.ascontiguousarray(arr).data
 
 
 def _dump_binref_arraydict(
-    arr: np.ndarray | np.number | np.bool_,
+    arr: ArrayLike,
     base_dir: Path | str,
     subdir: Path | str | None,
     current_binref_uuid: str,
@@ -252,7 +252,7 @@ def _dump_binref_arraydict(
 
 
 def _dump_base64_arraydict(
-    arr: np.ndarray | np.number | np.bool_,
+    arr: ArrayLike,
 ) -> dict[str, str | Base64ArrayData]:
     """Dump array to json+base64 encoded array dict."""
     data = Base64ArrayData.model_construct(
@@ -268,7 +268,7 @@ def _dump_base64_arraydict(
 
 
 def _dump_json_arraydict(
-    arr: np.ndarray | np.number | np.bool_,
+    arr: ArrayLike,
 ) -> dict[str, str | JsonArrayData]:
     """Dump array to json encoded array dict."""
     data = JsonArrayData.model_construct(
