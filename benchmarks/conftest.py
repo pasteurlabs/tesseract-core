@@ -15,8 +15,7 @@ import pytest
 NOOP_TESSERACT_PATH = Path(__file__).parent / "tesseract_noop" / "tesseract_api.py"
 
 # Default array sizes when --array-sizes is not specified.
-# Kept small for CI; pass --array-sizes for more thorough local runs.
-DEFAULT_ARRAY_SIZES = [100, 10_000, 1_000_000]
+DEFAULT_ARRAY_SIZES = [1000, 100_000, 10_000_000]
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
