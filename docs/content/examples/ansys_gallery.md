@@ -26,12 +26,14 @@ You can find the code for all Ansys Tesseracts in the `demo/_showcase` directory
 
 A Tesseract that wraps SpaceClaim for CAD geometry creation.
 
+[View on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/demo/_showcase/ansys-shapeopt/spaceclaim)
 :::
 :::{grid-item-card} MAPDL
 :link: ansys_integration/pymapdl_tess.html
 
 A differentiable Tesseract that wraps the MAPDL solver via PyMAPDL with an analytic adjoint, for use in SIMP topology optimization.
 
+[View on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/demo/_showcase/ansys-shapeopt/pymapdl)
 :::
 
 ::::

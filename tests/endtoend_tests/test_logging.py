@@ -614,11 +614,10 @@ def test_log_streaming_sdk_from_image(log_streaming_test_image, tmpdir):
                     break
 
     with Tesseract.from_image(
-        log_streaming_test_image, output_path=output_path
+        log_streaming_test_image, output_path=output_path, stream_logs=capture_log
     ) as tesseract:
         result = tesseract.apply(
             {"num_lines": 3, "signal_dir": container_signal_dir},
-            stream_logs=capture_log,
         )
 
     assert result["lines_printed"] == 3
@@ -656,11 +655,12 @@ def test_log_streaming_sdk_from_tesseract_api(log_streaming_tesseract_api_path, 
                     break
 
     with Tesseract.from_tesseract_api(
-        log_streaming_tesseract_api_path, output_path=output_path
+        log_streaming_tesseract_api_path,
+        output_path=output_path,
+        stream_logs=capture_log,
     ) as tesseract:
         result = tesseract.apply(
             {"num_lines": 3, "signal_dir": str(signal_dir)},
-            stream_logs=capture_log,
         )
 
     assert result["lines_printed"] == 3
@@ -774,9 +774,9 @@ from tesseract_core import Tesseract
 output_path = Path("{tmpdir}")
 
 with Tesseract.from_tesseract_api(
-    "{simple_logging_tesseract_api_path}", output_path=output_path
+    "{simple_logging_tesseract_api_path}", output_path=output_path, stream_logs=False
 ) as tesseract:
-    result = tesseract.apply({{}}, stream_logs=False)
+    result = tesseract.apply({{}})
 
 assert result["message"] == "done"
 '''
@@ -819,9 +819,9 @@ from tesseract_core import Tesseract
 output_path = Path("{tmpdir}")
 
 with Tesseract.from_tesseract_api(
-    "{simple_logging_tesseract_api_path}", output_path=output_path
+    "{simple_logging_tesseract_api_path}", output_path=output_path, stream_logs=print
 ) as tesseract:
-    result = tesseract.apply({{}}, stream_logs=print)
+    result = tesseract.apply({{}})
 
 assert result["message"] == "done"
 print("TEST_COMPLETED_SUCCESSFULLY", file=sys.__stderr__)
@@ -859,10 +859,12 @@ def test_stream_logs_realtime(timed_logging_tesseract_api_path, tmpdir):
         timestamps.append((time.time(), msg))
 
     with Tesseract.from_tesseract_api(
-        str(timed_logging_tesseract_api_path), output_path=output_path
+        str(timed_logging_tesseract_api_path),
+        output_path=output_path,
+        stream_logs=timed_sink,
     ) as tesseract:
         start = time.time()
-        result = tesseract.apply({}, stream_logs=timed_sink)
+        result = tesseract.apply({})
 
     assert result["message"] == "done"
 
