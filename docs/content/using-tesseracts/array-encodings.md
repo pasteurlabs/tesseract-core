@@ -66,6 +66,13 @@ Array data is stored in separate binary files, with JSON containing only referen
 
 The encoding format also affects performance — see {doc}`/content/misc/performance` for details.
 
+```{figure} /img/benchmark_encoding.png
+:alt: Encoding performance comparison
+:width: 80%
+
+Serialization and transfer overhead by encoding format and array size.
+```
+
 ## Using base64 encoding
 
 By default, Tesseracts return array data as human-readable JSON lists. To use base64 encoding instead, set the format to `json+base64`:

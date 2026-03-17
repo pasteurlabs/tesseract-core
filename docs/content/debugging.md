@@ -125,6 +125,8 @@ tess = Tesseract.from_tesseract_api(
 )
 ```
 
+(understanding-profiling-output)=
+
 ### Understanding profiling output
 
 When profiling is enabled, you'll see output like this after each endpoint call:
