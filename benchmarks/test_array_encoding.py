@@ -5,8 +5,8 @@
 
 Tests the performance of json, base64, and binref encoding methods
 for arrays of varying sizes, exercising the same codepaths used by the
-runtime server (output_to_bytes for encoding, model_validate_json for
-decoding).
+runtime server (output_to_bytes for encoding, from_json + model_validate
+for decoding).
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ import tempfile
 import pytest
 from conftest import create_test_array
 from pydantic import BaseModel
+from pydantic_core import from_json
 
 from tesseract_core.runtime.file_interactions import (
     output_to_bytes,
@@ -96,6 +97,12 @@ def test_encoding(benchmark, encoding_and_size):
             benchmark(output_to_bytes, model, fmt)
 
 
+def _decode_payload(encoded: bytes, ctx: dict[str, str]) -> ArrayModel:
+    """Decode using the same path as serve.py: from_json (jiter) + model_validate."""
+    json_data = from_json(encoded)
+    return ArrayModel.model_validate(json_data, context=ctx)
+
+
 def test_decoding(benchmark, encoding_and_size):
     encoding, size = encoding_and_size
     model = ArrayModel(data=create_test_array(size))
@@ -118,11 +125,11 @@ def test_decoding(benchmark, encoding_and_size):
                 payload[0] = output_to_bytes(model, fmt, base_dir=tmpdir)
 
             def decode():
-                ArrayModel.model_validate_json(payload[0], context=ctx)
+                _decode_payload(payload[0], ctx)
 
             benchmark.pedantic(decode, setup=setup, rounds=_binref_rounds(size))
         else:
-            benchmark(ArrayModel.model_validate_json, encoded, context=ctx)
+            benchmark(_decode_payload, encoded, ctx)
 
 
 def test_roundtrip(benchmark, encoding_and_size):
@@ -137,7 +144,7 @@ def test_roundtrip(benchmark, encoding_and_size):
 
         def roundtrip():
             enc = output_to_bytes(model, fmt, base_dir=tmpdir)
-            ArrayModel.model_validate_json(enc, context=ctx)
+            _decode_payload(enc, ctx)
 
         if encoding == "binref":
 
