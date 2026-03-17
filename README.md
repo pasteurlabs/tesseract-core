@@ -72,19 +72,25 @@ Each component uses a different differentiation strategy (analytic adjoints, fin
 **CLI:**
 
 ```bash
+# Install Tesseract Core
 $ pip install tesseract-core
 
-# Clone and build an example
-$ git clone https://github.com/pasteurlabs/tesseract-core
-$ tesseract build tesseract-core/examples/vectoradd
+# Create a new project in the current directory
+$ tesseract init --name my-tesseract
+
+# Edit `tesseract_api.py`, or download an example
+$ curl -so ./tesseract_api.py https://raw.githubusercontent.com/pasteurlabs/tesseract-core/main/examples/vectoradd/tesseract_api.py
+
+# Build it into a container
+$ tesseract build .
 
 # Run it
-$ tesseract run vectoradd apply '{"inputs": {"a": [1, 2], "b": [3, 4]}}'
-# → {"result": ...}
+$ tesseract run my-tesseract apply '{"inputs": {"a": [1, 2, 3], "b": [10, 20, 30]}}'
+# → {"result": [11, 22, 33]}
 
 # Compute the Jacobian
-$ tesseract run vectoradd jacobian '{"inputs": {"a": [1, 2], "b": [3, 4]}, "jac_inputs": ["a"], "jac_outputs": ["result"]}'
-# → {"result": {"a": ..., "b": ...}, ...}
+$ tesseract run my-tesseract jacobian '{"inputs": {"a": [1, 2, 3], "b": [10, 20, 30]}, "jac_inputs": ["a"], "jac_outputs": ["result"]}'
+# → {"result": {"a": [[1, 0, 0], [0, 1, 0], [0, 0, 1]]}}
 ```
 
 **Python SDK:**
@@ -92,9 +98,9 @@ $ tesseract run vectoradd jacobian '{"inputs": {"a": [1, 2], "b": [3, 4]}, "jac_
 ```python
 from tesseract_core import Tesseract
 
-with Tesseract.from_image("vectoradd") as t:
-    result = t.apply({"a": [1, 2], "b": [3, 4]})
-    jac = t.jacobian({"a": [1, 2], "b": [3, 4]}, jac_inputs=["a"], jac_outputs=["result"])
+with Tesseract.from_image("my-tesseract") as t:
+    result = t.apply({"a": [1, 2, 3], "b": [10, 20, 30]})
+    jac = t.jacobian({"a": [1, 2, 3], "b": [10, 20, 30]}, jac_inputs=["a"], jac_outputs=["result"])
 ```
 
 ## Core features

@@ -31,6 +31,9 @@ Sleep 1s
 Type "python3 -m venv /tmp/demo-venv && VIRTUAL_ENV_DISABLE_PROMPT=1 source /tmp/demo-venv/bin/activate && pip install -q --upgrade pip tesseract-core && tesseract --help"
 Enter
 Sleep 10s
+Type "tesseract build examples/helloworld"
+Enter
+Sleep 15s
 Type "mkdir /tmp/my-tesseract && cd /tmp/my-tesseract"
 Enter
 Type "clear"
@@ -100,6 +103,6 @@ Sleep 3s
 Enter
 Enter
 
-Type "# No go and build your own!"
+Type "# Now go and build your own!"
 Enter
 Sleep 10s
