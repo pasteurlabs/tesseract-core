@@ -59,7 +59,7 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
 
 def _binref_rounds(size: int) -> int:
     """Scale rounds inversely with array size: more rounds for smaller, faster arrays."""
-    return max(100, min(int(1e7 / size), 10_000))
+    return max(10, min(int(1e7 / size), 10_000))
 
 
 def _clear_dir(path: str) -> None:

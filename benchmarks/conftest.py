@@ -84,5 +84,5 @@ def noop_tesseract_image() -> str | None:
         timeout=300,
     )
     if result.returncode != 0:
-        pytest.skip(f"Failed to build noop tesseract: {result.stderr}")
+        pytest.fail(f"Failed to build noop tesseract: {result.stderr}")
     return image_name
