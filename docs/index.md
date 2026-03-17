@@ -1,6 +1,8 @@
+(what-is-si)=
+
 # Tesseract Core
 
-Universal, autodiff-native software components for [Simulation Intelligence](#what-is-si) 📦
+Universal, autodiff-native software components for [Simulation Intelligence](https://arxiv.org/abs/2112.03235) 📦
 
 ```{seealso}
 Already convinced? 👉 See how to [Get started](content/introduction/get-started.md) instead.
@@ -8,7 +10,7 @@ Already convinced? 👉 See how to [Get started](content/introduction/get-starte
 
 ## The problem
 
-Real-world scientific workflows span multiple tools, languages, and computing environments. You might have a mesh generator in C++, a solver in Julia, and post-processing in Python. Getting these to work together is painful. Getting [gradients to flow through them](content/introduction/differentiable-programming) for optimization is nearly impossible.
+Real-world scientific workflows span multiple tools, languages, and computing environments. You might have a mesh generator in C++, a solver in Julia, and post-processing in Python. Getting these to work together is painful. Getting [gradients to flow through them](content/misc/differentiable-programming) for optimization is nearly impossible.
 
 Existing autodiff frameworks work great within a single codebase, but fall short when your pipeline crosses framework boundaries or includes legacy or commercial tools.
 
@@ -21,11 +23,19 @@ Tesseract packages scientific software into **self-contained, portable component
 - **Propagate gradients** — Each component can expose derivatives, enabling end-to-end optimization across heterogeneous pipelines.
 - **Self-document** — Schemas, types, and API docs are generated automatically.
 
+```{figure} img/demo.gif
+:alt: Demo: install, build, and run a Tesseract in under a minute
+:width: 720px
+:align: center
+
+Getting started: install, build an example, and run it.
+```
+
 ## Who is this for?
 
-- **Researchers** interfacing with (differentiable) simulators or probabilistic models, or who need to combine tools from different ecosystems
-- **R&D engineers** packaging research code for use by others, without spending weeks on DevOps
-- **Platform engineers** deploying scientific workloads at scale with consistent interfaces and dependency isolation
+- **Researchers** interfacing with (differentiable) simulators or probabilistic models, or who need to combine tools from different ecosystems.
+- **R&D engineers** packaging research code for use by others, without spending weeks on DevOps.
+- **Platform engineers** deploying scientific workloads at scale with consistent interfaces and dependency isolation.
 
 ## How it works
 
@@ -53,7 +63,7 @@ There are several ways to interact with Tesseracts:
 
 - **Self-documenting** – Tesseracts announce their interfaces, so that users can inspect them without needing to read the source code, and perform static validation without running the code.
 - **Auto-validating** – When data reaches a Tesseract, it is automatically validated against the schema, so that internal logic can be sure that the data is in the expected format.
-- **Autodiff-native** – Tesseracts support [Differentiable Programming](content/introduction/differentiable-programming), meaning that they can be used in gradient-based optimization algorithms – or not, since exposing derivatives is _strictly optional_.
+- **Autodiff-native** – Tesseracts support [Differentiable Programming](content/misc/differentiable-programming), meaning that they can be used in gradient-based optimization algorithms – or not, since exposing derivatives is _strictly optional_.
 - **Batteries included** – Tesseracts ship with a containerized runtime, which can be run on a variety of platforms, and exposes the Tesseract's functionality via a command line interface (CLI) and a REST API.
   :::
   :::{tab-item} Restrictions
@@ -70,7 +80,7 @@ Tesseracts help you manage **diversity** in scientific computing:
 
 - **Diversity of roles** — The software creator's job ends when code is packaged as a Tesseract. Pipeline builders focus on high-level logic. Team members can inspect interfaces and schemas without diving into implementations.
 
-- **Diversity of software** — Components can use any framework or language: PyTorch, JAX, C++, [Fortran](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/examples/building-blocks/fortran.html), Julia, or shell scripts. A thin Python wrapper (`tesseract_api.py`) connects everything.
+- **Diversity of software** — Components can use any framework or language: PyTorch, JAX, C++, [Fortran](content/examples/building-blocks/fortran.md), Julia, or shell scripts. A thin Python wrapper (`tesseract_api.py`) connects everything.
 
 - **Diversity of hardware** — Components don't need to run on the same machine. Distribute work across GPUs, CPUs, and clusters while maintaining end-to-end differentiability.
 
@@ -78,12 +88,32 @@ Tesseracts help you manage **diversity** in scientific computing:
 
 If you're a single developer working with a single software stack in a single environment, you might not need Tesseracts. Everyone else, read on!
 
-## Ecosystem
+## The Ecosystem
 
 Tesseract Core is the foundation of the Tesseract ecosystem. Additional packages extend its capabilities:
 
+- **[Tesseract Core](https://github.com/pasteurlabs/tesseract-core)** — CLI, Python API, and runtime.
 - **[Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax)** — Embed Tesseracts as JAX primitives into end-to-end differentiable programs.
 - **[Tesseract-Streamlit](https://github.com/pasteurlabs/tesseract-streamlit)** — Auto-generate interactive Streamlit web apps from running Tesseracts. Instantly create UIs for your components without writing frontend code.
+
+## Citing Tesseract
+
+If you use Tesseract in your research, please cite:
+
+```bibtex
+@article{TesseractCore,
+  doi = {10.21105/joss.08385},
+  url = {https://doi.org/10.21105/joss.08385},
+  year = {2025},
+  publisher = {The Open Journal},
+  volume = {10},
+  number = {111},
+  pages = {8385},
+  author = {Häfner, Dion and Lavin, Alexander},
+  title = {Tesseract Core: Universal, autodiff-native software components for Simulation Intelligence},
+  journal = {Journal of Open Source Software}
+}
+```
 
 ```{toctree}
 :caption: Introduction
@@ -92,7 +122,6 @@ Tesseract Core is the foundation of the Tesseract ecosystem. Additional packages
 
 content/introduction/installation.md
 content/introduction/get-started.md
-content/introduction/differentiable-programming.md
 Tesseract User Forums <https://si-tesseract.discourse.group/>
 ```
 
@@ -103,8 +132,8 @@ Tesseract User Forums <https://si-tesseract.discourse.group/>
 
 content/creating-tesseracts/create.md
 content/creating-tesseracts/design-patterns.md
-content/creating-tesseracts/llm-assistance.md
 content/creating-tesseracts/advanced.md
+content/creating-tesseracts/llm-assistance.md
 content/creating-tesseracts/deploy.md
 ```
 
@@ -126,7 +155,6 @@ content/using-tesseracts/advanced.md
 content/examples/example_gallery.md
 content/examples/ansys_gallery.md
 content/demo/demo.md
-Tesseract Showcase <https://si-tesseract.discourse.group/c/showcase/11>
 ```
 
 ```{toctree}
@@ -134,19 +162,26 @@ Tesseract Showcase <https://si-tesseract.discourse.group/c/showcase/11>
 :maxdepth: 2
 :hidden:
 
-content/debugging.md
-content/misc/faq.md
+content/misc/differentiable-programming.md
+content/misc/debugging.md
 ```
 
 ```{toctree}
-:caption: API Reference
+:caption: API Reference — SDK
 :maxdepth: 2
 :hidden:
 
-content/api/config.md
-content/api/endpoints.md
 content/api/tesseract-cli.md
 content/api/tesseract-api.md
+content/api/config.md
+```
+
+```{toctree}
+:caption: API Reference — Runtime
+:maxdepth: 2
+:hidden:
+
+content/api/endpoints.md
 content/api/tesseract-runtime-cli.md
 content/api/tesseract-runtime-api.md
 ```

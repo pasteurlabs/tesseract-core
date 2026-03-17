@@ -24,7 +24,7 @@ This is a gallery of Tesseract examples that end at the `build` stage of the Tes
 You can also find these Tesseracts in the `examples` directory of the [code repository](https://github.com/pasteurlabs/tesseract-core).
 
 ```{important}
-**Beyond the Build**: The real magic happens long after building a Tesseract. For some example applications that *use* Tesseracts in workflows, check out the [Demo](../demo/demo.md) and [Community Showcase](https://si-tesseract.discourse.group/c/showcase/11).
+**Beyond the Build**: The real magic happens long after building a Tesseract. For some example applications that *use* Tesseracts in workflows, check out the [Demos & Tutorials](../demo/demo.md) and [Community Showcase](https://si-tesseract.discourse.group/c/showcase/11).
 ```
 
 ::::{grid} 2
@@ -73,7 +73,7 @@ A guide showcasing how to use custom build steps to install pyvista within an AR
 [View on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/pyvista-arm64)
 :::
 :::{grid-item-card} Local Dependencies
-:link: building-blocks/localdependency.html
+:link: building-blocks/localpackage.html
 
 A guide on installing local Python packages into a Tesseract.
 
