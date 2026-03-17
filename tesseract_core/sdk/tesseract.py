@@ -20,7 +20,7 @@ import orjson
 import pybase64
 import requests
 from pydantic import BaseModel, TypeAdapter, ValidationError
-from pydantic_core import InitErrorDetails, from_json
+from pydantic_core import InitErrorDetails
 
 from . import engine
 from .logs import LogStreamer
@@ -705,7 +705,7 @@ class HTTPClient:
         if response.status_code == requests.codes.unprocessable_entity:
             # Try and raise a more helpful error if the response is a Pydantic error
             try:
-                data = from_json(response.content)
+                data = orjson.loads(response.content)
             except requests.JSONDecodeError:
                 # Is not a Pydantic error
                 data = {}
@@ -737,7 +737,7 @@ class HTTPClient:
                 f"Error {response.status_code} from Tesseract: {response.text}"
             )
 
-        data = from_json(response.content)
+        data = orjson.loads(response.content)
 
         if endpoint in [
             "apply",

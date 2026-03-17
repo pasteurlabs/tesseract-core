@@ -14,10 +14,10 @@ from __future__ import annotations
 import os
 import tempfile
 
+import orjson
 import pytest
 from conftest import create_test_array
 from pydantic import BaseModel
-from pydantic_core import from_json
 
 from tesseract_core.runtime.file_interactions import (
     output_to_bytes,
@@ -99,7 +99,7 @@ def test_encoding(benchmark, encoding_and_size):
 
 def _decode_payload(encoded: bytes, ctx: dict[str, str]) -> ArrayModel:
     """Decode using the same path as serve.py: from_json (jiter) + model_validate."""
-    json_data = from_json(encoded)
+    json_data = orjson.loads(encoded)
     return ArrayModel.model_validate(json_data, context=ctx)
 
 

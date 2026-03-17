@@ -7,12 +7,12 @@ from collections.abc import Callable
 from types import ModuleType
 from typing import Annotated
 
+import orjson
 import uvicorn
 from fastapi import FastAPI, Header, Query, Request, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError
-from pydantic_core import from_json
 
 from .config import get_config
 from .core import create_endpoints, get_input_schema
@@ -105,7 +105,7 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
             with start_run(base_dir=rundir):
                 with profiler:
                     try:
-                        json_data = from_json(raw_body)
+                        json_data = orjson.loads(raw_body)
                     except json.JSONDecodeError as e:
                         return JSONResponse(
                             status_code=422,

@@ -20,9 +20,9 @@ from typing import (
 )
 
 import click
+import orjson
 import typer
 from pydantic import ValidationError
-from pydantic_core import from_json
 
 import tesseract_core.runtime.experimental
 from tesseract_core.runtime.config import RuntimeConfig, get_config, update_config
@@ -114,7 +114,7 @@ def _parse_payload(value: Any) -> dict[str, Any]:
             raise click.BadParameter(f"Could not read data from path {value}.") from e
 
     # Use pydantic from_json here because it is much faster, and the payload may be large.
-    return from_json(value)
+    return orjson.loads(value)
 
 
 def make_callback() -> Callable:
