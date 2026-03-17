@@ -53,6 +53,58 @@ class InputSchema(BaseModel):
 In case you run into issues with Pydantic features not listed here, please [open an issue](https://github.com/pasteurlabs/tesseract-core/issues/new/choose).
 ```
 
+(x86-vs-arm)=
+
+### 🔪 Sharp edge: x86 vs ARM architecture on Apple Silicon
+
+If you're using a Mac, your system uses the ARM64 processor architecture, while many Docker images and Python packages are built for x86_64 (also known as AMD64). This can lead to architecture incompatibilities when building or running Tesseracts.
+
+**Common symptoms:**
+
+- Build failures with errors mentioning "platform mismatch" or "exec format error"
+- Runtime errors like `exec /tesseract/entrypoint.sh: exec format error`
+- Slow performance due to Rosetta 2 emulation
+- Package installation failures in `tesseract_requirements.txt`
+- A Python package fails to install because it doesn't provide a pre-built Linux ARM64 wheel
+
+**Solutions:**
+
+1. **Build x86_64 images for sharing or compatibility (recommended):** If you intend to share Tesseracts with others, deploy to x86_64 servers, or are running into difficulties with missing ARM64 wheels, build for x86_64. Edit your `tesseract_config.yaml`:
+
+   ```yaml
+   # tesseract_config.yaml
+   build_config:
+     target_platform: linux/amd64 # Build for x86_64
+   ```
+
+   Note this uses QEMU emulation and will be slower to build, but produces images that work everywhere.
+
+2. **Build for your native architecture (for local development):** By default, Tesseract builds for your native platform. If you only need to run locally, this is faster. You can explicitly set it in `tesseract_config.yaml`:
+
+   ```yaml
+   # tesseract_config.yaml
+   build_config:
+     target_platform: linux/arm64 # Explicitly set for Apple Silicon
+   ```
+
+3. **Use ARM-compatible base images:** Some base images don't have ARM64 variants. Check that your base image supports ARM64 (e.g., `python:3.11-slim` supports both architectures).
+
+4. **Handle packages without Linux ARM64 wheels:** Some Python packages don't provide pre-built wheels for Linux ARM64. Note that a macOS ARM64 wheel is not sufficient here, since Tesseracts run in Linux containers.
+
+   One solution is to include the system packages required to build the wheel from source during the `tesseract build` step by specifying the `extra_packages` build option. Common required packages may include `build-essential`, `gcc`, or `nvidia-cuda-toolkit`:
+
+   ```yaml
+   # tesseract_config.yaml
+   build_config:
+     extra_packages:
+       - build-essential
+       - gcc
+   ```
+
+   Other options include using conda (`venv_backend: conda`) or pinning to a version that has ARM64 support. Alternatively, build for x86_64 as described above.
+
+To verify the architecture of a built Tesseract image: `docker inspect --format='{{.Architecture}}' my_tesseract:latest`
+
 (abstract-eval-pydantic)=
 
 ### 🔪 Sharp edge: `abstract_eval` and field validators

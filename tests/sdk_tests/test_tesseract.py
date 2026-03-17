@@ -119,22 +119,33 @@ def test_serve_lifecycle(mock_serving, mock_clients):
 
     mock_serving["serve_mock"].assert_called_once()
     call_kwargs = mock_serving["serve_mock"].call_args.kwargs
-    assert call_kwargs["image_name"] == "sometesseract:0.2.3"
-    assert call_kwargs["port"] is None
-    assert call_kwargs["volumes"] == []
-    assert call_kwargs["environment"] == {}
-    assert call_kwargs["gpus"] is None
-    assert call_kwargs["debug"] is True
-    assert call_kwargs["num_workers"] == 1
-    assert call_kwargs["network"] is None
-    assert call_kwargs["network_alias"] is None
-    assert call_kwargs["host_ip"] == "127.0.0.1"
-    assert call_kwargs["user"] is None
-    assert call_kwargs["memory"] is None
-    assert call_kwargs["input_path"] is None
-    # output_path is now auto-created as a temp directory
+
+    expected_kwargs = {
+        "image_name": "sometesseract:0.2.3",
+        "port": None,
+        "volumes": [],
+        "environment": {},
+        "gpus": None,
+        "debug": True,
+        "num_workers": 1,
+        "network": None,
+        "network_alias": None,
+        "host_ip": "127.0.0.1",
+        "user": None,
+        "memory": None,
+        "input_path": None,
+        "output_format": "json+base64",
+        "docker_args": None,
+        "runtime_config": None,
+    }
+
+    for key, expected_value in expected_kwargs.items():
+        assert call_kwargs[key] == expected_value, f"Mismatch for {key!r}"
+
+    # Output_path is auto-created as a temp directory
     assert call_kwargs["output_path"].is_dir()
-    assert call_kwargs["output_format"] == "json+base64"
+    # Check that no unexpected kwargs were passed
+    assert call_kwargs.keys() == expected_kwargs.keys() | {"output_path"}
 
     mock_serving["teardown_mock"].assert_called_with("container-id-123")
 

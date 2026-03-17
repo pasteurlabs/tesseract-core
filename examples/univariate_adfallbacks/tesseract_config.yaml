@@ -1,0 +1,6 @@
+name: univariate_adfallbacks
+version: "0.1.0"
+description: |
+  Variant of the univariate (Rosenbrock) example demonstrating AD endpoint derivation
+  fallbacks. The Jacobian is implemented analytically via JAX; JVP and VJP are derived
+  automatically using jvp_from_jacobian and vjp_from_jacobian.
