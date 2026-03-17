@@ -27,7 +27,7 @@ If the output is an empty table, that's okay! The CLI is functioning correctly, 
 [Docker Desktop](https://www.docker.com/products/docker-desktop/) ships with everything you need to run Tesseract Core, including the Docker Engine CLI, Docker Compose, and Docker Buildx. It also includes a GUI for managing containers and images.
 It is available for Windows, macOS, and Linux for Debian and Fedora based distros.
 
-If your system is not supported by Docker Desktop, or you prefer a more minimal setup, you will need to install the [`docker` engine CLI](https://docs.docker.com/engine/install/) together with the following plug in:
+If your system is not supported by Docker Desktop, or you prefer a more minimal setup, you will need to install the [`docker` engine CLI](https://docs.docker.com/engine/install/) together with the following plugin:
 
 1. [`docker-buildx`](https://github.com/docker/buildx)
 
@@ -65,7 +65,7 @@ $ pip install tesseract-core[runtime]
 ```
 
 ```{warning}
-Some shells use `[` and `]` as special characters, and might error out on the `pip install` line above. If that happens, consider escaping these characters, e.g. `-e .\[dev\]`, or enclosing them in double quotes, e.g. `-e ".[dev]"`.
+Some shells use `[` and `]` as special characters, and might error out on the `pip install` line above. If that happens, consider escaping these characters, e.g. `tesseract-core\[runtime\]`, or enclosing them in double quotes, e.g. `"tesseract-core[runtime]"`.
 ```
 
 (installation-issues)=

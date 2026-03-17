@@ -160,7 +160,7 @@ This basic example does not implement autodiff endpoints. To make a Tesseract fu
 1. Wrap types with `Differentiable[...]`
 2. Implement `jacobian`, `jacobian_vector_product`, and/or `vector_jacobian_product` functions
 
-See the [differentiable programming guide](../introduction/differentiable-programming.md) and [Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax) for how to add autodiff support.
+See the [differentiable programming guide](../misc/differentiable-programming.md) and [Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax) for how to add autodiff support.
 ```
 
 ## Example: Converting existing code

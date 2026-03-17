@@ -66,7 +66,7 @@ This interpolation scheme penalizes intermediate densities, encouraging binary (
 ### Vector-Jacobian product endpoint
 
 ```{seealso}
-For more information on differentiable programming in general and vector-Jacobian products specifically, see [](../../introduction/differentiable-programming.md).
+For more information on differentiable programming in general and vector-Jacobian products specifically, see [](../../misc/differentiable-programming.md).
 ```
 
 For compliance minimization, the adjoint solution equals the negative displacement field. This allows computing sensitivities analytically without an explicit adjoint solve:

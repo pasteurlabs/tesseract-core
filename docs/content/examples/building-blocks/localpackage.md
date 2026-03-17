@@ -9,7 +9,7 @@ There are 2 ways to do this:
 1. Make them a proper Python package with `pyproject.toml` and add the local path to the `tesseract_requirements.txt` file.
    Both absolute and relative paths work, but in case they are relative paths, they should be
    relative to the Tesseract's root folder (i.e., the one which contains the `tesseract_api.py` file).
-2. Just put them as `.py` files next to `tesseract_api.py` and add them to `build_config.package_data` (see also [packagedata.md]) in `tesseract_config.yaml` to make sure they're being included in container builds.
+2. Just put them as `.py` files next to `tesseract_api.py` and add them to `build_config.package_data` (see also [](packagedata.md)) in `tesseract_config.yaml` to make sure they're being included in container builds.
 
 ## Example Tesseract
 
