@@ -1,46 +1,31 @@
 # Creating Tesseracts
 
-In this page you will find instructions on how to create your own
-tesseracts, starting from a very basic example and then building on
-top of it with some advanced patterns. All this requires some basic
-knowledge of tesseracts, so we suggest you to read at least the
-[Quickstart page](tr-quickstart) beforehand.
+This page walks through creating your own Tesseracts, starting from a basic example and building up to advanced patterns. We recommend reading the [Get Started page](tr-quickstart) first.
 
 ## Initialize a new Tesseract
 
-In order to start creating a Tesseract in your current directory,
-you can run
+Run the following to scaffold a new Tesseract in the current directory:
 
 ```bash
 $ tesseract init
 ```
 
-and follow the prompt to specify a name for your tesseract.
-(Alternatively, you can use the option `--name` to provide this inline.)
-This will create three files in the current directory:
+Follow the prompt to specify a name (or pass `--name` inline). This creates three files:
 
-- `tesseract_api.py`, a python module where you should implement
-  the core computations in the Tesseract.
-- `tesseract_config.yaml`, a `yaml` file where you can specify metadata, such as Tesseract name and version, various build options, such as
-  which base Docker image to use, define custom steps in building the Tesseract, access to external data, and so on.
-- `tesseract_requirements.txt`, a text file where you can specify the (Python)
-  dependencies of your Tesseract. It should be in the
-  [requirements file format](https://pip.pypa.io/en/stable/reference/requirements-file-format/).
+- `tesseract_api.py` — Python module defining the Tesseract's computations.
+- `tesseract_config.yaml` — metadata (name, version), build options (base image, custom build steps, external data), and more.
+- `tesseract_requirements.txt` — Python dependencies in [pip requirements file format](https://pip.pypa.io/en/stable/reference/requirements-file-format/).
 
-If you want to create these files in some other path, you can use the `--target-dir [DIRECTORY]`
-option.
-Other options include:
+Use `--target-dir [DIRECTORY]` to create these files elsewhere. Other useful options:
 
-- `--recipe` allows you to use ready-made templates that generate pre-configured Tesseract configurations for common scenarios (such as generating autodiff endpoints from JAX functions).
-- `--help` will print help regarding CLI usage and list all currently available recipes.
+- `--recipe` — use a ready-made template for common scenarios (e.g., generating gradient endpoints from JAX functions).
+- `--help` — list all available options and recipes.
 
 ## Define a simple Tesseract
 
-The `tesseract_api.py` produced by `tesseract init` contains some boilerplate code
-which can guide you. Let's follow it section by section and pretend we want to implement
-a very simple `helloworld` Tesseract: one that accepts a string `name` and returns `"Hello {name}!"`.
+The generated `tesseract_api.py` contains boilerplate code to guide you. Let's walk through it section by section, implementing a simple `helloworld` Tesseract that accepts a `name` and returns `"Hello {name}!"`.
 
-The first section in `tesseract_api.py` looks like this:
+The first section defines the input and output schemas:
 
 ```python
 class InputSchema(BaseModel):
@@ -51,9 +36,7 @@ class OutputSchema(BaseModel):
     pass
 ```
 
-This is where you can define the input and output schemas of the Tesseract[^1] via
-[pydantic](https://docs.pydantic.dev/latest/). As we want `helloworld` to accept a string
-and return one, we can edit this section as follows:
+Input and output schemas are defined as [Pydantic](https://docs.pydantic.dev/latest/) models[^1]. For `helloworld`, we need a string in and a string out:
 
 ```python
 class InputSchema(BaseModel):
@@ -65,26 +48,16 @@ class OutputSchema(BaseModel):
     greeting: str = Field(description="A greeting!")
 ```
 
-Providing field descriptions is not mandatory, but if you do,
-they will be included in live docs and in the generated schemas
-themselves. This is useful to end users, so in general we recommend to
-write them. You can also set default values, validators (both for each field individually
-and at the model level), and so on. Have a look at
-[pydantic's docs](https://docs.pydantic.dev/latest/) to know more.
+Field descriptions are optional but recommended — they appear in the auto-generated docs and schemas. You can also use default values, validators, and other Pydantic features (see [Pydantic docs](https://docs.pydantic.dev/latest/)).
 
-Just below the schemas you will find the section where required
-endpoints are defined:
+Below the schemas, you'll find the required endpoints:
 
 ```python
 def apply(inputs: InputSchema) -> OutputSchema:
     ...
 ```
 
-These must always be present, with no exception, for every Tesseract. Right now,
-only `apply` is required.
-
-In the `apply` function instead we define the calculation we want our Tesseract
-to implement. In `helloworld`'s case, this is simply:
+Currently, only `apply` is required. This is where you define the Tesseract's core computation. For `helloworld`:
 
 ```python
 def apply(inputs: InputSchema) -> OutputSchema:
@@ -93,11 +66,10 @@ def apply(inputs: InputSchema) -> OutputSchema:
 ```
 
 ```{note}
-The docstring of `apply` (as well as all others that you implement in
-`tesseract_api.py`) will be available to your Tesseract's users.
+Docstrings on `apply` (and other endpoints) are included in the auto-generated docs.
 ```
 
-The last section in `tesseract_api.py` contains templates for optional endpoints:
+The last section contains templates for optional endpoints:
 
 ```python
 # def jacobian(inputs: InputSchema, jac_inputs: set[str], jac_outputs: set[str]):
@@ -106,15 +78,13 @@ The last section in `tesseract_api.py` contains templates for optional endpoints
 ...
 ```
 
-You can leave it untouched for this example, as the operation we are
-implementing is not differentiable.
+Leave these untouched for now — `helloworld` is not differentiable.
 
 ```{tip}
-For a Tesseract that has all optional endpoints implemented, check out the [Univariate example](../examples/building-blocks/univariate.md).
+For a Tesseract with all optional endpoints implemented, see the [Univariate example](../examples/building-blocks/univariate.md).
 ```
 
-Finally, we can set the name of this Tesseract and its version in
-`tesseract_config.yaml`.
+Finally, set the name and version in `tesseract_config.yaml`:
 
 ```yaml
 name: "helloworld"
@@ -122,39 +92,31 @@ version: "1.0.0"
 description: "A sample Python app"
 ```
 
-If you followed all these steps, congratulations! 🎉 You are ready to
-build your first Tesseract.
+You're now ready to build your first Tesseract.
 
 ```{tip}
-Before building, you can test your Tesseract locally without containers using `tesseract-runtime`. See [Debugging and Development](../misc/debugging.md) for details.
+Before building, you can test locally without containers using `tesseract-runtime`. See [Debugging and Development](../misc/debugging.md) for details.
 ```
 
 ## Build a Tesseract
 
-In order to build a Tesseract, you can use the `tesseract build` command.
-For the `helloworld` Tesseract we defined above, assuming that our
-current directory is where `tesseract_api.py` is located,
-the full command would be:
+To build, run `tesseract build` from the directory containing `tesseract_api.py`:
 
 ```
 $ tesseract build .
 ```
 
-This is to be interpreted as "build the Tesseract which is located in
-the current directory". The name of the Tesseract
-is defined in the `tesseract_config.yaml` file, and it is `helloworld`.
-By default it will be tagged with both the version specified there (`1.0.0`) and `latest`,
-so the full name of the tesseract we just built is `helloworld:1.0.0` or `helloworld:latest`.
+The Tesseract name comes from `tesseract_config.yaml`. By default, the image is tagged with both the specified version (`1.0.0`) and `latest`, so you can reference it as `helloworld:1.0.0` or `helloworld:latest`.
 
-### Viewing Built Tesseracts
+### View built Tesseracts
 
-In order to view all locally available Tesseracts, you can run the following command:
+To list all locally available Tesseracts:
 
 ```bash
 $ tesseract list
 ```
 
-The output will be a table of Tesseracts images with their ID, name, version, and description:
+The output is a table of Tesseract images with their ID, name, version, and description:
 
 ```bash
 ┏━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
@@ -166,9 +128,7 @@ The output will be a table of Tesseracts images with their ID, name, version, an
 
 ## Arrays in the schema
 
-In scientific computing, one of the most important data
-structures are N-dimensional arrays. For these, you should use
-the `tesseract_core.runtime.Array` type annotation:
+N-dimensional arrays are central to scientific computing. Use the `tesseract_core.runtime.Array` type annotation to define them:
 
 ```python
 from tesseract_core.runtime import Array, Float32
@@ -189,21 +149,14 @@ class InputSchema(BaseModel):
     )
 ```
 
-The first parameter of `Array` is the `shape`, while the second is the `dtype`, for both of them you can use the same convention as numpy's `ndarray`.
-Within a Tesseract, the variables marked as `Array` will be cast to `numpy.ndarray` objects of the given `dtype` and `shape`, so you can rely
-on numpy's broadcasting rules and operators. In this example, `r @ x + s` would be a valid expression to use in `apply` and similar endpoints, which
-corresponds to multiplying the `r` matrix with the `x` vector, and then adding the scalar `s` (broadcasted to match the vector's dimension) to that.
+The first parameter is the `shape`, the second is the `dtype` — both follow NumPy conventions.
+Inside a Tesseract, `Array` fields are cast to `numpy.ndarray` objects with the given dtype and shape, so standard NumPy operations work directly. For example, `r @ x + s` would multiply the matrix `r` by the vector `x` and add the broadcasted scalar `s`.
 
-For scalar values you can use `tesseract_core.runtime.Float32`, `tesseract_core.runtime.Float64`, `tesseract_core.runtime.Int32`,
-and so on (see [tesseract_core.runtime API documentation](../api/tesseract-runtime-api.md) for a comprehensive list).
-You could use just `float`, but you would not be able to make use of the autodiff features which
-we show in [the Differentiability section](tr-create-diff).
+For scalars, use `tesseract_core.runtime.Float32`, `Float64`, `Int32`, etc. (see the [runtime API reference](../api/tesseract-runtime-api.md) for the full list). Plain `float` works but does not support the [differentiability features](tr-create-diff) described below.
 
 ## Nested schemas
 
-As both `InputSchema` and `OutputSchema` are pydantic `BaseModel`s,
-they support nesting other `BaseModel`s within them. This can be useful
-to create data structures that are convenient to work with:
+Since `InputSchema` and `OutputSchema` are Pydantic `BaseModel`s, they support nesting other models within them:
 
 ```python
 class Mesh(BaseModel):
@@ -217,16 +170,83 @@ class InputSchema(BaseModel):
     propeller_shape: Mesh
 ```
 
+## Dicts and lists in schemas
+
+Schemas support `dict` and `list` containers for variable-length collections or dynamically keyed data.
+
+### Dicts
+
+Use `dict[str, ...]` to define a dictionary with string keys:
+
+```python
+class InputSchema(BaseModel):
+    params: dict[str, Differentiable[Array[(None,), Float32]]] = Field(
+        description="A dictionary of parameter arrays, e.g. {'x': array, 'y': array}.",
+    )
+```
+
+Inside `apply`, dict fields are accessed by key:
+
+```python
+def apply(inputs: InputSchema) -> OutputSchema:
+    x = inputs.params["x"]
+    y = inputs.params["y"]
+    ...
+```
+
+### Lists
+
+Use `list[...]` to define a list of values:
+
+```python
+class InputSchema(BaseModel):
+    coefficients: list[Differentiable[Array[(None,), Float32]]] = Field(
+        description="A list of coefficient arrays.",
+    )
+```
+
+Inside `apply`, list fields are accessed by index:
+
+```python
+def apply(inputs: InputSchema) -> OutputSchema:
+    c0 = inputs.coefficients[0]
+    c1 = inputs.coefficients[1]
+    ...
+```
+
+### Combining dicts, lists, and nested models
+
+These containers can be freely nested and combined with `BaseModel` subclasses:
+
+```python
+class NestedParams(BaseModel):
+    z: Differentiable[Array[(5,), Float32]]
+    gamma: dict[str, Differentiable[Array[(None,), Float32]]]
+
+
+class InputSchema(BaseModel):
+    alpha: dict[str, Differentiable[Array[(None,), Float32]]]
+    beta: NestedParams
+    delta: list[Differentiable[Array[(None,), Float32]]]
+
+
+class OutputSchema(BaseModel):
+    result: Differentiable[Array[(3,), Float32]]
+    result_dict: dict[str, Differentiable[Array[(None,), Float32]]]
+    result_list: list[Differentiable[Array[(None,), Float32]]]
+```
+
+```{tip}
+Dicts and lists also work with non-differentiable types (e.g. `dict[str, Array[(None,), Float32]]`), and with non-array types (e.g. `dict[str, str]`, `list[int]`).
+```
+
 (tr-create-diff)=
 
 ## Differentiability
 
-A key feature of Tesseracts is their ability to expose endpoints for calculating various kinds of derivatives when the operation they implement is differentiable, which in turn makes it possible to combine multiple Tesseracts into automatically differentiable workflows! This is advantageous in multiple contexts: shape optimization, model calibration, and so on.
+Tesseracts can expose endpoints for computing derivatives, making it possible to compose multiple Tesseracts into automatically differentiable workflows for shape optimization, model calibration, and more.
 
-Keeping with one of Tesseract's key foci being _validation_, the type annotation {py:class}`tesseract_core.runtime.Differentiable` is introduced to mark outputs that can be differentiated, and inputs that can be differentiated with respect to.
-All outputs marked as `Differentiable` will be considered differentiable with respect to
-all inputs marked as `Differentiable`.
-Attempting to differentiate (with respect to) an output/input (e.g. by passing `jac_inputs=["non_differentiable_arg"]` to the `jacobian` endpoint) will raise a validation error even before the endpoint is invoked.
+The {py:class}`tesseract_core.runtime.Differentiable` type annotation marks which inputs can be differentiated with respect to, and which outputs can be differentiated. All `Differentiable` outputs are considered differentiable with respect to all `Differentiable` inputs. Passing a non-differentiable field (e.g., `jac_inputs=["non_differentiable_arg"]`) raises a validation error before the endpoint runs.
 
 For example:
 
@@ -244,25 +264,12 @@ class OutputSchema(BaseModel):
     b: int
 ```
 
-Here, it will be possible in principle to differentiate `a` in the Tesseract's output with respect to the scalar
-parameter `x` and with respect to each of the components of the matrix `r` -- but not with respect to `s`.
+Here, output `a` can be differentiated with respect to the scalar `x` and the matrix `r`, but not `s`.
 
 ```{warning}
-`Differentiable` can only be used on {py:class}`tesseract_core.runtime.Array` types, which includes aliases for
-rank 0 tensors like {py:class}`Float64 <tesseract_core.runtime.Float64>`. Do not use it on
-Python base types -- things like `Differentiable[float]` will trigger errors.
+`Differentiable` can only wrap {py:class}`tesseract_core.runtime.Array` types (including rank-0 aliases like {py:class}`Float64 <tesseract_core.runtime.Float64>`). Using it on Python base types (e.g., `Differentiable[float]`) will raise an error.
 ```
 
-Aside from marking the parameters with respect to which your Tesseract is differentiable, one also
-must implement the logic for how the derivatives shall be calculated. If you are using an autodiff
-framework like `jax` or `pytorch`, these implementations will mostly be one-liners, but you are free
-in general to implement whatever method works best for you.
-Check the [page on Autodiff](tr-autodiff) for more details on how to implement the differential
-endpoints like `jacobian`, `jacobian_vector_product`, and so on.
+Beyond marking fields, you also need to implement the derivative logic. With autodiff frameworks like JAX or PyTorch, these are usually one-liners. See [Differentiable Programming](tr-autodiff) for details on implementing `jacobian`, `jacobian_vector_product`, and `vector_jacobian_product`.
 
-[^1]:
-    We often refer to "a Tesseract's input schema" to indicate the input of the Tesseract's
-    `apply` function. This should not lead to confusion, as there is only one core
-    functionality in a Tesseract, the one implemented in `apply`. All the other
-    functions in a Tesseract (`jacobian`, `jacobian_vector_product`, ...) are just derivatives of `apply`, and their schemas are adapted automatically
-    from the schema of `apply`.
+[^1]: "A Tesseract's input schema" refers to the input of its `apply` function. The other endpoints (`jacobian`, `jacobian_vector_product`, ...) are derivatives of `apply`, and their schemas are derived automatically.

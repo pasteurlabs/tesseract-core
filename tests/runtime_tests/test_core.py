@@ -221,7 +221,7 @@ def test_schemas_contain_diffable_paths_extra(testmodule):
 
 
 @pytest.mark.parametrize(
-    "ad_inout",
+    "gradient_inout",
     [
         # Valid combinations for jac_inputs and jac_outputs
         ({"array_seq.[0]", "array_dict.{a}", "scalar_diff"}, {"result_seq.[0]"}),
@@ -234,30 +234,30 @@ def test_schemas_contain_diffable_paths_extra(testmodule):
 @pytest.mark.parametrize(
     "endpoint_name", ["jacobian", "jacobian_vector_product", "vector_jacobian_product"]
 )
-def test_ad_endpoint(testmodule, ad_inout, endpoint_name):
+def test_gradient_endpoint(testmodule, gradient_inout, endpoint_name):
     endpoints = create_endpoints(testmodule)
 
     endpoint_func, EndpointSchema, _ = _find_endpoint(endpoints, endpoint_name)
     assert endpoint_func.__name__ == endpoint_name
 
-    ad_inp, ad_out = ad_inout
+    grad_inp, grad_out = gradient_inout
 
     if endpoint_name == "jacobian":
-        inputs = {"inputs": test_input, "jac_inputs": ad_inp, "jac_outputs": ad_out}
+        inputs = {"inputs": test_input, "jac_inputs": grad_inp, "jac_outputs": grad_out}
     elif endpoint_name == "jacobian_vector_product":
-        tangent_vector = {k: get_at_path(test_input, k) for k in ad_inp}
+        tangent_vector = {k: get_at_path(test_input, k) for k in grad_inp}
         inputs = {
             "inputs": test_input,
-            "jvp_inputs": ad_inp,
-            "jvp_outputs": ad_out,
+            "jvp_inputs": grad_inp,
+            "jvp_outputs": grad_out,
             "tangent_vector": tangent_vector,
         }
     elif endpoint_name == "vector_jacobian_product":
-        cotangent_vector = {k: get_at_path(test_output, k) for k in ad_out}
+        cotangent_vector = {k: get_at_path(test_output, k) for k in grad_out}
         inputs = {
             "inputs": test_input,
-            "vjp_inputs": ad_inp,
-            "vjp_outputs": ad_out,
+            "vjp_inputs": grad_inp,
+            "vjp_outputs": grad_out,
             "cotangent_vector": cotangent_vector,
         }
 
@@ -267,7 +267,7 @@ def test_ad_endpoint(testmodule, ad_inout, endpoint_name):
 
 
 @pytest.mark.parametrize(
-    "ad_inout_invalid",
+    "gradient_inout_invalid",
     [
         # -- Invalid jac_inputs, valid jac_outputs --
         # Unknown keys
@@ -338,19 +338,19 @@ def test_ad_endpoint(testmodule, ad_inout, endpoint_name):
 @pytest.mark.parametrize(
     "endpoint_name", ["jacobian", "jacobian_vector_product", "vector_jacobian_product"]
 )
-def test_ad_endpoint_invalid(testmodule, ad_inout_invalid, endpoint_name):
+def test_gradient_endpoint_invalid(testmodule, gradient_inout_invalid, endpoint_name):
     endpoints = create_endpoints(testmodule)
 
     endpoint_func, EndpointSchema, _ = _find_endpoint(endpoints, endpoint_name)
     assert endpoint_func.__name__ == endpoint_name
 
-    msg, ad_inp, ad_out = ad_inout_invalid
+    msg, grad_inp, grad_out = gradient_inout_invalid
 
     if endpoint_name == "jacobian":
-        inputs = {"inputs": test_input, "jac_inputs": ad_inp, "jac_outputs": ad_out}
+        inputs = {"inputs": test_input, "jac_inputs": grad_inp, "jac_outputs": grad_out}
     elif endpoint_name == "jacobian_vector_product":
         tangent_vector = {}
-        for k in ad_inp:
+        for k in grad_inp:
             try:
                 tangent_vector[k] = get_at_path(test_input, k)
             except (KeyError, ValueError, IndexError):
@@ -358,13 +358,13 @@ def test_ad_endpoint_invalid(testmodule, ad_inout_invalid, endpoint_name):
                 tangent_vector[k] = np.ones(10)
         inputs = {
             "inputs": test_input,
-            "jvp_inputs": ad_inp,
-            "jvp_outputs": ad_out,
+            "jvp_inputs": grad_inp,
+            "jvp_outputs": grad_out,
             "tangent_vector": tangent_vector,
         }
     elif endpoint_name == "vector_jacobian_product":
         cotangent_vector = {}
-        for k in ad_out:
+        for k in grad_out:
             try:
                 cotangent_vector[k] = get_at_path(test_output, k)
             except (KeyError, ValueError, IndexError):
@@ -372,8 +372,8 @@ def test_ad_endpoint_invalid(testmodule, ad_inout_invalid, endpoint_name):
                 cotangent_vector[k] = np.ones(10)
         inputs = {
             "inputs": test_input,
-            "vjp_inputs": ad_inp,
-            "vjp_outputs": ad_out,
+            "vjp_inputs": grad_inp,
+            "vjp_outputs": grad_out,
             "cotangent_vector": cotangent_vector,
         }
 
@@ -388,31 +388,31 @@ def test_ad_endpoint_invalid(testmodule, ad_inout_invalid, endpoint_name):
     "endpoint_name", ["jacobian_vector_product", "vector_jacobian_product"]
 )
 @pytest.mark.parametrize("failure_mode", ["missing", "extra", "invalid"])
-def test_ad_endpoint_bad_tangent(testmodule, endpoint_name, failure_mode):
+def test_gradient_endpoint_bad_tangent(testmodule, endpoint_name, failure_mode):
     endpoints = create_endpoints(testmodule)
 
     endpoint_func, EndpointSchema, _ = _find_endpoint(endpoints, endpoint_name)
     assert endpoint_func.__name__ == endpoint_name
 
-    ad_inp = {"array_seq.[0]", "array_dict.{a}", "scalar_diff"}
-    ad_out = {"result_seq.[0]"}
+    grad_inp = {"array_seq.[0]", "array_dict.{a}", "scalar_diff"}
+    grad_out = {"result_seq.[0]"}
 
     if endpoint_name == "jacobian_vector_product":
         if failure_mode == "missing":
             tangent_vector = {}
             msg = "Expected tangent vector with keys"
         elif failure_mode == "extra":
-            tangent_vector = {k: get_at_path(test_input, k) for k in ad_inp}
+            tangent_vector = {k: get_at_path(test_input, k) for k in grad_inp}
             tangent_vector["invalid_key"] = np.ones(10)
             msg = "String should match pattern"
         elif failure_mode == "invalid":
-            tangent_vector = {k: "ahoy" for k in ad_inp}
+            tangent_vector = {k: "ahoy" for k in grad_inp}
             msg = "Could not parse value as a numeric array"
 
         inputs = {
             "inputs": test_input,
-            "jvp_inputs": ad_inp,
-            "jvp_outputs": ad_out,
+            "jvp_inputs": grad_inp,
+            "jvp_outputs": grad_out,
             "tangent_vector": tangent_vector,
         }
 
@@ -421,17 +421,17 @@ def test_ad_endpoint_bad_tangent(testmodule, endpoint_name, failure_mode):
             cotangent_vector = {}
             msg = "Expected cotangent vector with keys"
         elif failure_mode == "extra":
-            cotangent_vector = {k: get_at_path(test_output, k) for k in ad_out}
+            cotangent_vector = {k: get_at_path(test_output, k) for k in grad_out}
             cotangent_vector["invalid_key"] = np.ones(10)
             msg = "String should match pattern"
         elif failure_mode == "invalid":
-            cotangent_vector = {k: "ahoy" for k in ad_out}
+            cotangent_vector = {k: "ahoy" for k in grad_out}
             msg = "Could not parse value as a numeric array"
 
         inputs = {
             "inputs": test_input,
-            "vjp_inputs": ad_inp,
-            "vjp_outputs": ad_out,
+            "vjp_inputs": grad_inp,
+            "vjp_outputs": grad_out,
             "cotangent_vector": cotangent_vector,
         }
 

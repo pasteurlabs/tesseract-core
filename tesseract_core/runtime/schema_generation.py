@@ -428,12 +428,12 @@ def input_path_validator(path: str, info: ValidationInfo) -> str:
     return path
 
 
-def create_autodiff_schema(
+def create_gradient_schema(
     InputSchema: type[BaseModel],
     OutputSchema: type[BaseModel],
-    ad_flavor: Literal["jacobian", "jvp", "vjp"],
+    gradient_type: Literal["jacobian", "jvp", "vjp"],
 ) -> tuple[type[BaseModel], type[BaseModel]]:
-    """Generate the input / outputs schemas for AD endpoints like /jacobian, /jacobian_vector_product, etc.
+    """Generate the input / outputs schemas for gradient endpoints like /jacobian, /jacobian_vector_product, etc.
 
     Returns a tuple (InputSchema, OutputSchema) with the generated schemas.
     """
@@ -483,19 +483,19 @@ def create_autodiff_schema(
     InputSchema = apply_function_to_model_tree(
         InputSchema,
         lambda x, _: x,
-        model_prefix=f"{ad_flavor.title()}_",
+        model_prefix=f"{gradient_type.title()}_",
         default_model_config=dict(extra="forbid"),
     )
 
     def result_validator(
         result: dict[str, Any], info: ValidationInfo
     ) -> dict[str, Any]:
-        """Validate the result of an AD endpoint computation.
+        """Validate the result of a gradient endpoint computation.
 
         Since the structure of the result is already validated in core.py, we only need to check the shapes
         to ensure they match what's expected from the schema.
         """
-        if ad_flavor == "jacobian":
+        if gradient_type == "jacobian":
             if set(info.context["output_keys"]) != set(result.keys()):
                 raise ValueError(
                     "Error when validating output of jacobian:\n"
@@ -543,7 +543,7 @@ def create_autodiff_schema(
                             f"Jacobian result [{output_path}][{input_path}]: {e}"
                         ) from e
 
-        elif ad_flavor == "jvp":
+        elif gradient_type == "jvp":
             if set(info.context["output_keys"]) != set(result.keys()):
                 raise ValueError(
                     f"Expected keys {info.context['output_keys']} in output; got {set(result.keys())}"
@@ -559,7 +559,7 @@ def create_autodiff_schema(
                 except ValidationError as e:
                     raise ValueError(f"JVP result [{output_path}]: {e}") from e
 
-        elif ad_flavor == "vjp":
+        elif gradient_type == "vjp":
             if set(info.context["input_keys"]) != set(result.keys()):
                 raise ValueError(
                     f"Expected keys {info.context['input_keys']} in output; got {set(result.keys())}"
@@ -580,7 +580,7 @@ def create_autodiff_schema(
     # NOTE (dh): Literal[somevar] is marked as an error by Pylance, but this doesn't throw a runtime error, so I'd
     # prefer to keep this instead of introducing more arcane hacks to create Literal types at runtime.
 
-    if ad_flavor == "jacobian":
+    if gradient_type == "jacobian":
 
         class JacobianInputSchema(BaseModel):
             inputs: InputSchema = Field(
@@ -619,7 +619,7 @@ def create_autodiff_schema(
         InputSchema = JacobianInputSchema
         OutputSchema = JacobianOutputSchema
 
-    elif ad_flavor == "jvp":
+    elif gradient_type == "jvp":
 
         class JVPInputSchema(BaseModel):
             inputs: InputSchema = Field(
@@ -702,7 +702,7 @@ def create_autodiff_schema(
         InputSchema = JVPInputSchema
         OutputSchema = JVPOutputSchema
 
-    elif ad_flavor == "vjp":
+    elif gradient_type == "vjp":
 
         class VJPInputSchema(BaseModel):
             inputs: InputSchema = Field(

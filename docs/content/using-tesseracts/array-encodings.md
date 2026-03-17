@@ -1,7 +1,7 @@
 # Array Encodings
 
 ```{note}
-This section is only relevant to CLI or REST API usage; if you are using the Python API you can ignore
+This section is only relevant to CLI or REST API usage; if you are using the Python SDK you can ignore
 this section, as in the Python client everything is base64 encoded under the hood.
 ```
 

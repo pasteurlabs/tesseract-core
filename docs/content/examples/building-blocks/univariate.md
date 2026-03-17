@@ -47,7 +47,7 @@ For the Jacobian, we exploit the fact that the `rosenbrock` function is traceabl
 :language: python
 ```
 
-### Other AD endpoints
+### Other gradient endpoints
 
 We define the JVP (Jacobian-vector product) and VJP (vector-Jacobian product) endpoints by summing over rows / columns of the Jacobian matrix. That is, we call `jacobian` under the hood, then multiply the resulting Jacobian matrix by the (tangent / cotangent) vector input.
 

@@ -298,9 +298,9 @@ def check_gradients(
     """Check gradients of endpoints against a finite difference approximation.
 
     \b
-    This is an automated way to check the correctness of the gradients of the different AD endpoints
+    This is an automated way to check the correctness of the gradients of the different gradient endpoints
     (jacobian, jacobian_vector_product, vector_jacobian_product) of a ``tesseract_api.py`` module.
-    It will sample random indices and compare the gradients computed by the AD endpoints with the
+    It will sample random indices and compare the gradients computed by the gradient endpoints with the
     finite difference approximation.
 
     \b
