@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Literal, get_args
 
 import fsspec
+import orjson
 from pydantic import TypeAdapter
 
 PathLike = str | Path
@@ -26,27 +27,28 @@ def output_to_bytes(
     """
     ObjSchema = TypeAdapter(type(obj))
     if format == "json":
-        return ObjSchema.dump_json(
-            obj, context={"array_encoding": "json"}, exclude_unset=True
-        )
+        context = {"array_encoding": "json"}
     elif format == "json+base64":
-        return ObjSchema.dump_json(
-            obj, context={"array_encoding": "base64"}, exclude_unset=True
-        )
+        context = {"array_encoding": "base64"}
     elif format == "json+binref":
-        return ObjSchema.dump_json(
-            obj,
-            context={
-                "array_encoding": "binref",
-                "base_dir": base_dir,
-                "binref_dir": binref_dir,
-            },
-            exclude_unset=True,
+        context = {
+            "array_encoding": "binref",
+            "base_dir": base_dir,
+            "binref_dir": binref_dir,
+        }
+    else:
+        raise ValueError(
+            f"Unsupported format {format} (must be one of {SUPPORTED_FORMATS})"
         )
 
-    raise ValueError(
-        f"Unsupported format {format} (must be one of {SUPPORTED_FORMATS})"
+    # Two-phase serialization to bypass serde_json's slow UTF-8 scanning
+    # on large base64 strings (https://github.com/pydantic/pydantic/issues/12911).
+    # Phase 1: run Pydantic serializers (encode_array, etc.) → plain Python dict.
+    # Phase 2: orjson serializes the dict to JSON bytes (~4x faster than serde_json).
+    python_dict = ObjSchema.dump_python(
+        obj, mode="json", context=context, exclude_unset=True
     )
+    return orjson.dumps(python_dict)
 
 
 def read_from_path(path: PathLike, offset: int = 0, length: int = -1) -> bytes:

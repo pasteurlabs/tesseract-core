@@ -16,10 +16,11 @@ from typing import Any, Literal
 from urllib.parse import urlparse, urlunparse
 
 import numpy as np
+import orjson
 import pybase64
 import requests
 from pydantic import BaseModel, TypeAdapter, ValidationError
-from pydantic_core import InitErrorDetails, from_json, to_json
+from pydantic_core import InitErrorDetails, from_json
 
 from . import engine
 from .logs import LogStreamer
@@ -698,7 +699,7 @@ class HTTPClient:
 
         params = {"run_id": run_id} if run_id is not None else {}
         response = self._session.request(
-            method=method, url=url, data=to_json(encoded_payload), params=params
+            method=method, url=url, data=orjson.dumps(encoded_payload), params=params
         )
 
         if response.status_code == requests.codes.unprocessable_entity:
