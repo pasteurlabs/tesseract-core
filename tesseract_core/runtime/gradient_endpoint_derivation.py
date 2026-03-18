@@ -1,7 +1,7 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# Autodiff fallback utilities for deriving missing autodiff endpoints from existing ones.
+# Gradient fallback utilities for deriving missing gradient endpoints from existing ones.
 # These are experimental and the API may change in future releases.
 
 from collections.abc import Callable

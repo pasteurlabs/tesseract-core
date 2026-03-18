@@ -1,7 +1,7 @@
-# Deriving AD Endpoints from Each Other
+# Deriving Gradient Endpoints from Each Other
 
-This guide shows how to derive missing autodiff endpoints from ones you have already
-implemented, using the experimental AD fallback helpers.
+This guide shows how to derive missing gradient endpoints from ones you have already
+implemented, using the experimental fallback helpers.
 
 ```{warning}
 This feature is **experimental** and available in `tesseract_core.runtime.experimental`.
@@ -14,7 +14,7 @@ All four helpers materialise the **full Jacobian matrix**, which can be expensiv
 
 ## Overview
 
-Tesseracts expose up to three AD endpoints — `jacobian`, `jacobian_vector_product`
+Tesseracts expose up to three gradient endpoints — `jacobian`, `jacobian_vector_product`
 (JVP), and `vector_jacobian_product` (VJP). The helpers `jvp_from_jacobian`,
 `vjp_from_jacobian`, `jacobian_from_jvp`, and `jacobian_from_vjp` let you derive any
 one of these endpoints from another you have already implemented, without writing
@@ -95,17 +95,17 @@ def jacobian(inputs, jac_inputs, jac_outputs):
 
 ## Example code
 
-A concrete example is the `univariate_adfallbacks` Tesseract — a variant of
+A concrete example is the `univariate_gradient_fallbacks` Tesseract — a variant of
 [univariate](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/univariate)
 (Rosenbrock function) where the Jacobian is computed via JAX and JVP/VJP are derived
 automatically using `jvp_from_jacobian` and `vjp_from_jacobian`.
 
-```{literalinclude} ../../../../examples/univariate_adfallbacks/tesseract_api.py
+```{literalinclude} ../../../../examples/univariate_gradient_fallbacks/tesseract_api.py
 :language: python
 :caption: tesseract_api.py
 ```
 
-```{literalinclude} ../../../../examples/univariate_adfallbacks/tesseract_config.yaml
+```{literalinclude} ../../../../examples/univariate_gradient_fallbacks/tesseract_config.yaml
 :language: yaml
 :caption: tesseract_config.yaml
 ```
@@ -114,6 +114,6 @@ automatically using `jvp_from_jacobian` and `vjp_from_jacobian`.
 
 - {ref}`tr-autodiff` for background on differentiable programming in Tesseracts
 - {doc}`/content/examples/building-blocks/finitediff` for a gradient-free alternative
-  when you have no AD endpoint at all
+  when you have no gradient endpoint at all
 - The [univariate example](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/univariate)
   for the version with manually implemented JVP and VJP

@@ -16,7 +16,7 @@ from tesseract_core.runtime.schema_generation import (
     apply_function_to_model_tree,
     create_abstract_eval_schema,
     create_apply_schema,
-    create_autodiff_schema,
+    create_gradient_schema,
 )
 
 
@@ -156,7 +156,7 @@ def test_create_jacobian_schema():
         },
     }
 
-    InputSchema, OutputSchema = create_autodiff_schema(
+    InputSchema, OutputSchema = create_gradient_schema(
         NestedModel, NestedModel, "jacobian"
     )
 
@@ -241,7 +241,7 @@ def test_create_jvp_schema():
     testoutput = {
         "testdiffarr": testinput["testdiffarr"],
     }
-    InputSchema, OutputSchema = create_autodiff_schema(NestedModel, NestedModel, "jvp")
+    InputSchema, OutputSchema = create_gradient_schema(NestedModel, NestedModel, "jvp")
 
     valid_jvp_input = {
         "inputs": testinput,
@@ -350,7 +350,7 @@ def test_create_vjp_schema():
         "testdiffarr": testinput["testdiffarr"],
     }
 
-    InputSchema, OutputSchema = create_autodiff_schema(NestedModel, NestedModel, "vjp")
+    InputSchema, OutputSchema = create_gradient_schema(NestedModel, NestedModel, "vjp")
 
     valid_vjp_input = {
         "inputs": testinput,
@@ -446,7 +446,7 @@ def test_create_vjp_schema():
 
 def test_jvp_tangent_vector_shape_validation():
     """Test that tangent vector shapes are validated against input shapes."""
-    InputSchema, _ = create_autodiff_schema(NestedModel, NestedModel, "jvp")
+    InputSchema, _ = create_gradient_schema(NestedModel, NestedModel, "jvp")
 
     valid_jvp_input = {
         "inputs": testinput,
@@ -470,7 +470,7 @@ def test_jvp_tangent_vector_shape_validation():
 
 def test_jvp_tangent_vector_dtype_casting():
     """Test that integer tangent vectors are cast to float for AD compatibility."""
-    InputSchema, _ = create_autodiff_schema(NestedModel, NestedModel, "jvp")
+    InputSchema, _ = create_gradient_schema(NestedModel, NestedModel, "jvp")
 
     # Create input with integer dtype tangent vector (same shape as testdiffarr: 5x6)
     int_tangent = make_array((5, 6), "int32")
@@ -491,7 +491,7 @@ def test_jvp_tangent_vector_dtype_casting():
 
 def test_vjp_cotangent_vector_shape_validation():
     """Test that cotangent vector shapes are validated against schema patterns."""
-    InputSchema, _ = create_autodiff_schema(NestedModel, NestedModel, "vjp")
+    InputSchema, _ = create_gradient_schema(NestedModel, NestedModel, "vjp")
 
     valid_vjp_input = {
         "inputs": testinput,
@@ -515,7 +515,7 @@ def test_vjp_cotangent_vector_shape_validation():
 
 def test_vjp_cotangent_vector_dtype_casting():
     """Test that integer cotangent vectors are cast to float for AD compatibility."""
-    InputSchema, _ = create_autodiff_schema(NestedModel, NestedModel, "vjp")
+    InputSchema, _ = create_gradient_schema(NestedModel, NestedModel, "vjp")
 
     # Create input with integer dtype cotangent vector (same shape as testdiffarr: 5x6)
     int_cotangent = make_array((5, 6), "int32")
@@ -571,7 +571,7 @@ def test_recursive_model():
         create_apply_schema(RecursiveModel, RecursiveModel)
 
 
-@pytest.mark.parametrize("endpoint", ["apply", "abstract_eval", "autodiff"])
+@pytest.mark.parametrize("endpoint", ["apply", "abstract_eval", "gradient"])
 def test_fancy_pydantic_model(endpoint):
     # Define a model with some fancy features
     from pydantic import AfterValidator, Field, computed_field, model_validator
@@ -705,9 +705,9 @@ def test_fancy_pydantic_model(endpoint):
                 }
             )
 
-    elif endpoint == "autodiff":
-        AutodiffSchema, _ = create_autodiff_schema(InputSchema, InputSchema, "jacobian")
-        parsed_inputs = AutodiffSchema.model_validate(
+    elif endpoint == "gradient":
+        GradientSchema, _ = create_gradient_schema(InputSchema, InputSchema, "jacobian")
+        parsed_inputs = GradientSchema.model_validate(
             {
                 "inputs": valid_data,
                 "jac_inputs": ["myarray"],
@@ -722,7 +722,7 @@ def test_fancy_pydantic_model(endpoint):
 
         # trigger field validator
         with pytest.raises(ValidationError, match="greater_than"):
-            AutodiffSchema.model_validate(
+            GradientSchema.model_validate(
                 {
                     "inputs": {
                         "someint": -1,
@@ -734,7 +734,7 @@ def test_fancy_pydantic_model(endpoint):
             )
 
         with pytest.raises(ValidationError, match="sum"):
-            AutodiffSchema.model_validate(
+            GradientSchema.model_validate(
                 {
                     "inputs": {
                         "someint": 1,
@@ -752,7 +752,7 @@ def test_fancy_pydantic_model(endpoint):
 
         # trigger model validator
         with pytest.raises(ValidationError, match="sum"):
-            AutodiffSchema.model_validate(
+            GradientSchema.model_validate(
                 {
                     "inputs": {
                         "someint": 10,
@@ -775,7 +775,7 @@ def test_json_schema(endpoint):
             NestedModel, NestedModel
         )
     else:
-        InputSchema, OutputSchema = create_autodiff_schema(
+        InputSchema, OutputSchema = create_gradient_schema(
             NestedModel, NestedModel, endpoint
         )
 

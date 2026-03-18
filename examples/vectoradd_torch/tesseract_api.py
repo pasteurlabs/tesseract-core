@@ -104,7 +104,7 @@ def apply(inputs: InputSchema) -> OutputSchema:
 
 
 #
-# Pytorch-handled AD endpoints (no need to modify)
+# Pytorch-handled gradient endpoints (no need to modify)
 #
 
 

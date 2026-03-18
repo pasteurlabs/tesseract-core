@@ -1,10 +1,10 @@
 # Deploying Tesseracts
 
-Since Tesseracts built via `tesseract build` are regular Docker images, they can be shared, pushed / pulled, and deployed like any other container.
+Tesseracts built via `tesseract build` are standard Docker images, so they can be shared, pushed, pulled, and deployed like any other container.
 
-## Using Docker tools to work with Tesseracts
+## Using Docker tools
 
-Built Tesseracts are Docker images of the same name as the Tesseract. You can use any Docker command to work with them. For example:
+Built Tesseracts are Docker images named after the Tesseract. Standard Docker commands work directly:
 
 ```bash
 # Invoke a Tesseract via `docker run`
@@ -41,42 +41,40 @@ $ docker run vectoradd serve
 ...
 ```
 
-This provides fine-grained control over the Tesseract image, and allows you to use any container-aware tooling to manage and deploy them.
+This gives you fine-grained control over Tesseract images and lets you use any container-aware tooling.
 
 ```{tip}
-As the `podman` API is fully compatible with `docker`, the above should still work if `docker` is replaced with `podman`.
+Since `podman` has a `docker`-compatible CLI, all commands above work with `podman` as well.
 ```
 
-## Example: Deploying a Tesseract on [Azure Virtual Machines](https://azure.microsoft.com/en-us/products/virtual-machines)
+## Example: Deploying on [Azure Virtual Machines](https://azure.microsoft.com/en-us/products/virtual-machines)
 
 ```{note}
-This example assumes you already have an Azure account and know your way around cloud infrastructure. Using Azure Virtual Machines is just one of many ways to deploy Tesseracts. Accessing cloud resources may incur costs.
+This example assumes you have an Azure account and are familiar with cloud infrastructure. Using Azure VMs is just one of many deployment options. Cloud resources may incur costs.
 ```
 
-The general process to deploy a Tesseract on an Azure Virtual Machine is as follows:
+The general process:
 
 1. Push the Tesseract image to Azure Container Registry.
-2. Instantiate a new virtual machine.
-3. Setup Docker on the VM.
-4. Optionally setup Nvidia drivers and CUDA toolkit.
-5. Pull the Tesseract Image in the virtual machine.
-6. Start the Tesseract container via `docker run serve`, listening on port `8000`.
+2. Create a virtual machine.
+3. Install Docker on the VM.
+4. (Optional) Install NVIDIA drivers and the CUDA toolkit.
+5. Pull the Tesseract image on the VM.
+6. Start the container via `docker run serve`, listening on port `8000`.
 
-This process is illustrated within the following Bash script: {download}`create-vm-azure.sh </downloads/create-vm-azure.sh>`.
+A reference script is available here: {download}`create-vm-azure.sh </downloads/create-vm-azure.sh>`.
 
 ```{warning}
-This script will likely not work out of the box for your setup and contains placeholders for actual resources, endpoints, and credentials. It assumes you have a resource group, VNet, Subnet, and Azure Container Registry set up.
+This script contains placeholders and will not work out of the box. It assumes you have a resource group, VNet, Subnet, and Azure Container Registry already configured.
 ```
 
-Download the script, populate the variables at the beginning about your infrastructure accordingly, and run it:
+Populate the variables at the top of the script and run it:
 
 ```console
 $ bash create-vm-azure.sh vectoradd:latest
 ```
 
-This Bash script assumes you have Docker installed and authenticated to your
-Azure Container Registry. To login into the Container Registry, use the `az`
-CLI:
+The script assumes Docker is installed locally and authenticated to your Azure Container Registry:
 
 ```console
 $ az login
@@ -85,9 +83,11 @@ $ az acr login --name <registry-name>
 
 ## Deploying without a container engine
 
-If your system does not have access to a compatible container engine, deployment is still possible using `tesseract-runtime serve`. This command has all the same functionality as `tesseract serve` and `docker run myimage serve` and can be queried in the same way (e.g. with `curl` or using the Python API via [`Tesseract.from_url`](#Tesseract.from_url)). This enables deployment without building an image, but does need to be run from a virtual Python environment consistent with `tesseract_requirements.txt` and `tesseract_config.yaml` as documented in [Tesseracts without containerization](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/creating-tesseracts/advanced.html#tesseracts-without-containerization). For a fully-worked example of how to use this on HPC clusters, see our dedicated [tutorial](https://si-tesseract.discourse.group/t/deploying-and-interacting-with-tesseracts-on-hpc-clusters-using-tesseract-runtime-serve/104).
+If no container engine is available, you can deploy using `tesseract-runtime serve`. This provides the same functionality as `tesseract serve` and `docker run myimage serve`, and can be queried the same way (e.g., with `curl` or via [`Tesseract.from_url`](#Tesseract.from_url) in the Python SDK).
 
-Example usage:
+This approach requires a Python environment with the dependencies from `tesseract_requirements.txt` installed, as documented in [Running Tesseracts without containers](running-without-containers). For a complete HPC example, see the [HPC deployment tutorial](https://si-tesseract.discourse.group/t/deploying-and-interacting-with-tesseracts-on-hpc-clusters-using-tesseract-runtime-serve/104).
+
+Example:
 
 ```bash
 $ pip install -r tesseract_requirements.txt

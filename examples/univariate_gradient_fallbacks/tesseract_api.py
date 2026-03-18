@@ -1,7 +1,7 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Example Tesseract demonstrating AD endpoint derivation fallbacks.
+"""Example Tesseract demonstrating gradient endpoint derivation fallbacks.
 
 This example shows how to use jvp_from_jacobian and vjp_from_jacobian to
 automatically derive the JVP and VJP endpoints from an existing Jacobian
