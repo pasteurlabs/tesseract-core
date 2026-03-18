@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import atexit
-import base64
 import sys
 import tempfile
 import traceback
@@ -17,9 +16,11 @@ from typing import Any, Literal
 from urllib.parse import urlparse, urlunparse
 
 import numpy as np
+import orjson
+import pybase64
 import requests
 from pydantic import BaseModel, TypeAdapter, ValidationError
-from pydantic_core import InitErrorDetails
+from pydantic_core import InitErrorDetails, from_json
 
 from . import engine
 from .logs import LogStreamer
@@ -572,10 +573,15 @@ def _tree_map(func: Callable, tree: Any, is_leaf: Callable | None = None) -> Any
     return tree
 
 
+def _fast_tobytes(arr: np.ndarray) -> memoryview:
+    """Convert a numpy array to bytes without copying if possible."""
+    return np.ascontiguousarray(arr).data
+
+
 def _encode_array(arr: np.ndarray, b64: bool = True) -> dict:
     if b64:
         data = {
-            "buffer": base64.b64encode(arr.tobytes()).decode(),
+            "buffer": pybase64.b64encode_as_string(_fast_tobytes(arr)),
             "encoding": "base64",
         }
     else:
@@ -604,7 +610,7 @@ def _decode_array(
     shape = tuple(encoded_arr["shape"])
 
     if encoding == "base64":
-        data = base64.b64decode(encoded_arr["data"]["buffer"])
+        data = pybase64.b64decode(encoded_arr["data"]["buffer"])
         arr = np.frombuffer(data, dtype=dtype)
     elif encoding in ["json", "raw"]:
         arr = np.array(encoded_arr["data"]["buffer"], dtype=dtype)
@@ -655,6 +661,8 @@ class HTTPClient:
     def __init__(self, url: str, output_path: str | Path | None = None) -> None:
         self._url = self._sanitize_url(url)
         self._output_path = output_path
+        self._session = requests.Session()
+        self._session.headers["Content-Type"] = "application/json"
 
     @staticmethod
     def _sanitize_url(url: str) -> str:
@@ -690,14 +698,14 @@ class HTTPClient:
             encoded_payload = None
 
         params = {"run_id": run_id} if run_id is not None else {}
-        response = requests.request(
-            method=method, url=url, json=encoded_payload, params=params
+        response = self._session.request(
+            method=method, url=url, data=orjson.dumps(encoded_payload), params=params
         )
 
         if response.status_code == requests.codes.unprocessable_entity:
             # Try and raise a more helpful error if the response is a Pydantic error
             try:
-                data = response.json()
+                data = from_json(response.content)
             except requests.JSONDecodeError:
                 # Is not a Pydantic error
                 data = {}
@@ -729,7 +737,7 @@ class HTTPClient:
                 f"Error {response.status_code} from Tesseract: {response.text}"
             )
 
-        data = response.json()
+        data = from_json(response.content)
 
         if endpoint in [
             "apply",

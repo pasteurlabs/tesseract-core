@@ -224,6 +224,9 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
         """Apply the Tesseract to the input data."""
         _trace("apply() called with inputs:", payload.inputs)
         out = api_module.apply(payload.inputs)
+        # NOTE: If the output schema has custom validators, they are effectively triggered
+        # twice (once in the user code, once in the endpoint wrapper). This is not ideal but
+        # should be the lesser evil to ensure validation of the final output.
         if isinstance(out, api_module.OutputSchema):
             out = out.model_dump()
         result = ApplyOutputSchema.model_validate(out)

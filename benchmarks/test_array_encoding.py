@@ -1,12 +1,12 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Benchmarks for array encoding and decoding via pydantic model serde.
+"""Benchmarks for array encoding and decoding.
 
 Tests the performance of json, base64, and binref encoding methods
-for arrays of varying sizes, exercising the full pydantic serialization
-and validation codepath (model_dump_json / model_validate_json) rather
-than calling encode_array / decode_array directly.
+for arrays of varying sizes, exercising the same codepaths used by the
+runtime server (output_to_bytes for encoding, model_validate_json for
+decoding).
 """
 
 from __future__ import annotations
@@ -18,6 +18,10 @@ import pytest
 from conftest import create_test_array
 from pydantic import BaseModel
 
+from tesseract_core.runtime.file_interactions import (
+    output_to_bytes,
+    supported_format_type,
+)
 from tesseract_core.runtime.schema_types import Array, Float64
 
 
@@ -28,6 +32,13 @@ class ArrayModel(BaseModel):
 
 
 ENCODINGS = ["json", "base64", "binref"]
+
+# Maps short encoding name to the format string used by output_to_bytes
+_ENCODING_TO_FORMAT: dict[str, supported_format_type] = {
+    "json": "json",
+    "base64": "json+base64",
+    "binref": "json+binref",
+}
 
 
 def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
@@ -48,7 +59,7 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
 
 def _binref_rounds(size: int) -> int:
     """Scale rounds inversely with array size: more rounds for smaller, faster arrays."""
-    return max(100, min(int(1e7 / size), 10_000))
+    return max(10, min(int(1e7 / size), 10_000))
 
 
 def _clear_dir(path: str) -> None:
@@ -66,35 +77,36 @@ def _clear_dir(path: str) -> None:
 def test_encoding(benchmark, encoding_and_size):
     encoding, size = encoding_and_size
     model = ArrayModel(data=create_test_array(size))
+    fmt = _ENCODING_TO_FORMAT[encoding]
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        ctx = {"array_encoding": encoding}
         if encoding == "binref":
-            ctx["base_dir"] = tmpdir
 
             def setup():
                 _clear_dir(tmpdir)
 
             benchmark.pedantic(
-                model.model_dump_json,
-                kwargs={"context": ctx},
+                output_to_bytes,
+                args=(model, fmt),
+                kwargs={"base_dir": tmpdir},
                 setup=setup,
                 rounds=_binref_rounds(size),
             )
         else:
-            benchmark(model.model_dump_json, context=ctx)
+            benchmark(output_to_bytes, model, fmt)
 
 
 def test_decoding(benchmark, encoding_and_size):
     encoding, size = encoding_and_size
     model = ArrayModel(data=create_test_array(size))
+    fmt = _ENCODING_TO_FORMAT[encoding]
 
     with tempfile.TemporaryDirectory() as tmpdir:
         ctx: dict[str, str] = {}
         if encoding == "binref":
             ctx["base_dir"] = tmpdir
 
-        encoded = model.model_dump_json(context={"array_encoding": encoding, **ctx})
+        encoded = output_to_bytes(model, fmt, base_dir=tmpdir)
 
         if encoding == "binref":
             # binref filenames are random UUIDs, so we must re-encode in setup
@@ -103,9 +115,7 @@ def test_decoding(benchmark, encoding_and_size):
 
             def setup():
                 _clear_dir(tmpdir)
-                payload[0] = model.model_dump_json(
-                    context={"array_encoding": encoding, **ctx}
-                )
+                payload[0] = output_to_bytes(model, fmt, base_dir=tmpdir)
 
             def decode():
                 ArrayModel.model_validate_json(payload[0], context=ctx)
@@ -118,6 +128,7 @@ def test_decoding(benchmark, encoding_and_size):
 def test_roundtrip(benchmark, encoding_and_size):
     encoding, size = encoding_and_size
     model = ArrayModel(data=create_test_array(size))
+    fmt = _ENCODING_TO_FORMAT[encoding]
 
     with tempfile.TemporaryDirectory() as tmpdir:
         ctx: dict[str, str] = {}
@@ -125,7 +136,7 @@ def test_roundtrip(benchmark, encoding_and_size):
             ctx["base_dir"] = tmpdir
 
         def roundtrip():
-            enc = model.model_dump_json(context={"array_encoding": encoding, **ctx})
+            enc = output_to_bytes(model, fmt, base_dir=tmpdir)
             ArrayModel.model_validate_json(enc, context=ctx)
 
         if encoding == "binref":
