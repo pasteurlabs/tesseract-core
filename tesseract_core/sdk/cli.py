@@ -31,7 +31,7 @@ from .api_parse import (
     TesseractBuildConfig,
     TesseractConfig,
     ValidationError,
-    get_non_base_fields_in_tesseract_config,
+    get_submodel_fields_in_tesseract_config,
 )
 from .config import get_config
 from .docker_client import (
@@ -108,8 +108,8 @@ POSSIBLE_CMDS.update(
 
 # All fields in TesseractConfig and TesseractBuildConfig for config override
 POSSIBLE_KEYPATHS = TesseractConfig.model_fields.keys()
-# Check that the only field that has nested fields is build_config
-assert len(get_non_base_fields_in_tesseract_config()) == 1
+# Check that the only field that has nested models is build_config
+assert len(get_submodel_fields_in_tesseract_config()) == 1
 POSSIBLE_BUILD_CONFIGS = TesseractBuildConfig.model_fields.keys()
 
 # Traverse templates folder to seach for recipes

@@ -101,6 +101,30 @@ def test_invalid_config_error(tmp_path, valid_tesseract_api, valid_tesseract_con
         validate_tesseract_api(tmp_path)
 
 
+def test_config_with_metadata(tmp_path, valid_tesseract_api, valid_tesseract_config):
+    _write_tesseract_api_to_file(valid_tesseract_api, tmp_path)
+
+    config_with_metadata = yaml.safe_load(valid_tesseract_config)
+    config_with_metadata["metadata"] = {
+        "tags": ["ml", "physics"],
+        "nested": {"key": "value"},
+    }
+    _write_tesseract_config_to_file(yaml.dump(config_with_metadata), tmp_path)
+    validate_tesseract_api(tmp_path)
+
+
+def test_config_metadata_defaults_to_empty(
+    tmp_path, valid_tesseract_api, valid_tesseract_config
+):
+    _write_tesseract_api_to_file(valid_tesseract_api, tmp_path)
+    _write_tesseract_config_to_file(valid_tesseract_config, tmp_path)
+
+    from tesseract_core.sdk.api_parse import get_config
+
+    config = get_config(tmp_path)
+    assert config.metadata == {}
+
+
 def test_api_not_defined_raises_filenotfound():
     path = Path("/non/existent/path")
 
