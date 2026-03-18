@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 import numpy as np
+import orjson
 import pytest
 from pydantic import ValidationError
 
@@ -162,11 +163,12 @@ def test_serve_lifecycle(mock_serving, mock_clients):
 )
 def test_HTTPClient_run_tesseract(mocker, run_id):
     mock_response = mocker.Mock()
-    mock_response.json.return_value = {"result": [4, 4, 4]}
-    mock_response.raise_for_status = mocker.Mock()
+    mock_response.content = b'{"result": [4, 4, 4]}'
+    mock_response.ok = True
+    mock_response.status_code = 200
 
     mocked_request = mocker.patch(
-        "requests.request",
+        "requests.Session.request",
         return_value=mock_response,
     )
 
@@ -179,14 +181,13 @@ def test_HTTPClient_run_tesseract(mocker, run_id):
     mocked_request.assert_called_with(
         method="POST",
         url="http://somehost/apply",
-        json={"inputs": {"a": 1}},
+        data=orjson.dumps({"inputs": {"a": 1}}),
         params=expected_params,
     )
 
 
 def test_HTTPClient_run_tesseract_raises_validation_error(mocker):
-    mock_response = mocker.Mock()
-    mock_response.json.return_value = {
+    error_detail = {
         "detail": [
             {
                 "type": "missing",
@@ -215,10 +216,12 @@ def test_HTTPClient_run_tesseract_raises_validation_error(mocker):
             },
         ]
     }
+    mock_response = mocker.Mock()
+    mock_response.content = orjson.dumps(error_detail)
     mock_response.status_code = 422
 
     mocker.patch(
-        "requests.request",
+        "requests.Session.request",
         return_value=mock_response,
     )
 
