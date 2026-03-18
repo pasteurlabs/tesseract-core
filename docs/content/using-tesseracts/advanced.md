@@ -98,6 +98,28 @@ $ tesseract serve --env=TESSERACT_MLFLOW_TRACKING_URI="..." \
     metrics
 ```
 
+## Networking and Interactions between Tesseracts
+
+Tesseracts can be connected to shared Docker networks, allowing them to communicate with each other and with other services at runtime. A common use case is composing multiple Tesseracts into a pipeline, where one Tesseract calls another via its REST API using `Tesseract.from_url()`. A working end-to-end example of this pattern is available in [`examples/_multi-tesseract/multi-helloworld`](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/_multi-tesseract/multi-helloworld).
+
+You can create a Docker network and attach Tesseracts to it using the `--network` flag.
+
+```bash
+$ docker network create my_network
+$ tesseract serve "my-tesseract:latest" --network my_network --network-alias my-tesseract --port 8000
+```
+
+The `serve` command prints container metadata to `stdout`, including the Tesseract's IP address and port on each connected network. The `--network-alias` argument assigns a DNS name so other containers on the same network can reach it by name (e.g. `http://my-tesseract:8000`) rather than by IP. Note that the port is assigned randomly if left unspecified.
+
+Some setups create networks automatically. For example, the MLflow docker-compose setup described above creates the `tesseract-mlflow-server` network, which is why the example `tesseract serve` command there can reference it directly.
+
+
+**A note on `--network=host`:**
+
+`--network=host` makes a container share the host's network stack, which can be a convenient alternative to creating an explicit Docker network. However, it does not work correctly on all platforms. On macOS and Windows, Docker Desktop runs the Docker daemon inside a lightweight VM. The "host" from the daemon's perspective is that VM, not your actual machine, so `--network=host` gives the container access to the VM's network rather than your host's. This means services running on your machine are not reachable via `localhost` from inside the container, and the pattern of calling Tesseracts by host address will not work as expected. 
+
+At the moment `--network=host` works as intended only on Linux, where the Docker daemon runs directly on the host. Alternatives to Docker Desktop that run the daemon more natively, such as [Colima](https://github.com/abiosoft/colima), may also support host networking correctly. For cross-platform workflows, prefer creating an explicit Docker network as shown above.
+
 ## Volume mounts and user permissions
 
 When mounting a volume into a Tesseract container, default behavior depends on the Docker engine being used. Specifically, Docker Desktop, Docker Engine, and Podman have different ways of handling user permissions for mounted volumes.
