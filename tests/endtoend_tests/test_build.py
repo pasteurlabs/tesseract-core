@@ -168,3 +168,21 @@ def test_tarball_install(cli_runner, dummy_tesseract_package, docker_cleanup):
 
     img_tag = json.loads(result.stdout)[0]
     docker_cleanup["images"].append(img_tag)
+
+
+def test_metadata_label(built_image_name):
+    """Test that metadata from tesseract_config.yaml is stored as a Docker label."""
+    result = subprocess.run(
+        [
+            "docker",
+            "inspect",
+            "--format",
+            '{{ index .Config.Labels "ai.pasteurlabs.tesseract.metadata" }}',
+            built_image_name,
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+    label_data = json.loads(result.stdout.strip())
+    assert label_data == {"tags": ["ml", "physics"], "nested": {"key": "value"}}
