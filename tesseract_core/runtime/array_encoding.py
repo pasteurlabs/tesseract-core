@@ -49,6 +49,7 @@ AllowedDtypes = Literal[
 EllipsisType: TypeAlias = type(Ellipsis)
 ArrayLike: TypeAlias = np.ndarray | np.number | np.bool_
 ShapeType: TypeAlias = tuple[int | None, ...] | EllipsisType
+ArrayDict: TypeAlias = dict[str, Any]
 
 MAX_BINREF_BUFFER_SIZE = 100 * 1024 * 1024  # 100 MB
 
@@ -215,11 +216,8 @@ def _dump_binref_arraydict(
     subdir: Path | str | None,
     current_binref_uuid: str,
     max_file_size: int = MAX_BINREF_BUFFER_SIZE,
-) -> tuple[dict, str]:
-    """Dump array to json+binref encoded array dict.
-
-    Writes a .bin file and returns a plain dict (no Pydantic models).
-    """
+) -> tuple[ArrayDict, str]:
+    """Dump array to json+binref encoded array dict."""
     target_name = f"{current_binref_uuid}.bin"
     if subdir is not None:
         target_name = join_paths(subdir, target_name)
@@ -248,7 +246,7 @@ def _dump_binref_arraydict(
     return arraydict, current_binref_uuid
 
 
-def _dump_base64_arraydict(arr: ArrayLike) -> dict:
+def _dump_base64_arraydict(arr: ArrayLike) -> ArrayDict:
     """Dump array to json+base64 encoded array dict (plain dict, no Pydantic models)."""
     return {
         "object_type": "array",
@@ -261,7 +259,7 @@ def _dump_base64_arraydict(arr: ArrayLike) -> dict:
     }
 
 
-def _dump_json_arraydict(arr: ArrayLike) -> dict:
+def _dump_json_arraydict(arr: ArrayLike) -> ArrayDict:
     """Dump array to json encoded array dict (plain dict, no Pydantic models)."""
     return {
         "object_type": "array",
@@ -271,13 +269,13 @@ def _dump_json_arraydict(arr: ArrayLike) -> dict:
     }
 
 
-def _load_base64_arraydict(val: dict) -> np.ndarray:
+def _load_base64_arraydict(val: ArrayDict) -> np.ndarray:
     """Load array from json+base64 encoded array dict."""
     buffer = pybase64.b64decode(val["data"]["buffer"], validate=True)
     return np.frombuffer(buffer, dtype=val["dtype"]).reshape(val["shape"])
 
 
-def _load_binref_arraydict(val: dict, base_dir: str | Path | None) -> np.ndarray:
+def _load_binref_arraydict(val: ArrayDict, base_dir: str | Path | None) -> np.ndarray:
     """Load array from json+binref encoded array dict."""
     path_match = re.match(r"^(?P<path>.+?)(\:(?P<offset>\d+))?$", val["data"]["buffer"])
     if not path_match:
@@ -497,12 +495,8 @@ def decode_array(
 
 def encode_array(
     arr: ArrayLike, info: Any, expected_shape: ShapeType, expected_dtype: str | None
-) -> dict | ArrayLike:
+) -> ArrayDict | ArrayLike:
     """Encode a NumPy array for serialization.
-
-    In JSON mode, returns a plain dict (not an EncodedArrayModel) to bypass
-    Pydantic's union serialization which is O(n * variants) due to
-    https://github.com/pydantic/pydantic/issues/12912.
 
     In Python mode, returns the raw array as-is.
     """

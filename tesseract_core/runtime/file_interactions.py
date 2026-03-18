@@ -43,7 +43,7 @@ def output_to_bytes(
 
     # Two-phase serialization to bypass serde_json's slow UTF-8 scanning
     # on large base64 strings (https://github.com/pydantic/pydantic/issues/12911).
-    # Phase 1: run Pydantic serializers (encode_array, etc.) → plain Python dict.
+    # Phase 1: run Pydantic serializers (encode_array, etc.) -> plain Python dict.
     # Phase 2: orjson serializes the dict to JSON bytes (~4x faster than serde_json).
     python_dict = ObjSchema.dump_python(
         obj, mode="json", context=context, exclude_unset=True
