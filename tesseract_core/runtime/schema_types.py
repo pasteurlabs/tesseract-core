@@ -193,7 +193,7 @@ class PydanticArrayAnnotation(metaclass=ArrayAnnotationType):
             python_union_schema,
         )
 
-        return core_schema.json_or_python_schema(
+        result = core_schema.json_or_python_schema(
             json_schema=load_from_dict_schema,
             python_schema=wrapped_python_schema,
             serialization=core_schema.plain_serializer_function_ser_schema(
@@ -204,9 +204,13 @@ class PydanticArrayAnnotation(metaclass=ArrayAnnotationType):
                 # union serialization which is slow for discriminated
                 # unions (https://github.com/pydantic/pydantic/issues/12912).
                 # The JSON schema is still correct — it's derived from
-                # array_schema via the validator chain above.
+                # array_schema via __get_pydantic_json_schema__ below.
             ),
         )
+        # Stash array_schema in metadata so __get_pydantic_json_schema__ can
+        # retrieve it without digging into chain schema internals.
+        result["metadata"] = {"array_schema": array_schema}
+        return result
 
     @classmethod
     def __get_pydantic_json_schema__(
@@ -216,13 +220,9 @@ class PydanticArrayAnnotation(metaclass=ArrayAnnotationType):
         # Because the outer serializer has no return_schema (to bypass Pydantic's
         # slow union serialization — see pydantic/pydantic#12912), Pydantic cannot
         # infer the JSON schema from the serialization chain automatically.  We
-        # resolve this by pointing the JSON-schema generator at the validation-side
-        # ``array_schema`` (step 0 of the chain), which *is* a full Pydantic model
-        # and therefore produces the correct JSON schema.
-        json_branch = _core_schema.get("json_schema", _core_schema)
-        if json_branch.get("type") == "chain":
-            return handler(json_branch["steps"][0])
-        return handler(_core_schema)
+        # retrieve the array_schema stashed in metadata by __get_pydantic_core_schema__,
+        # which *is* a full Pydantic model and produces the correct JSON schema.
+        return handler(_core_schema["metadata"]["array_schema"])
 
 
 class Array:

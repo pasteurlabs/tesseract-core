@@ -1,9 +1,9 @@
 from types import SimpleNamespace
 
 import numpy as np
+import orjson
 import pytest
 from pydantic import ValidationError
-from pydantic_core import to_json
 
 from tesseract_core import Tesseract
 from tesseract_core.sdk.tesseract import (
@@ -181,7 +181,7 @@ def test_HTTPClient_run_tesseract(mocker, run_id):
     mocked_request.assert_called_with(
         method="POST",
         url="http://somehost/apply",
-        data=to_json({"inputs": {"a": 1}}),
+        data=orjson.dumps({"inputs": {"a": 1}}),
         params=expected_params,
     )
 
@@ -217,7 +217,7 @@ def test_HTTPClient_run_tesseract_raises_validation_error(mocker):
         ]
     }
     mock_response = mocker.Mock()
-    mock_response.content = to_json(error_detail)
+    mock_response.content = orjson.dumps(error_detail)
     mock_response.status_code = 422
 
     mocker.patch(

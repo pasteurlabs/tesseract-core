@@ -4,7 +4,7 @@
 import re
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Annotated, Any, Literal, TypeAlias, get_args
+from typing import Annotated, Any, Literal, TypeAlias, TypedDict, get_args
 from uuid import uuid4
 
 import numpy as np
@@ -46,10 +46,20 @@ AllowedDtypes = Literal[
     "complex64",
     "complex128",
 ]
+
 EllipsisType: TypeAlias = type(Ellipsis)
 ArrayLike: TypeAlias = np.ndarray | np.number | np.bool_
 ShapeType: TypeAlias = tuple[int | None, ...] | EllipsisType
-ArrayDict: TypeAlias = dict[str, Any]
+
+
+class ArrayDict(TypedDict):
+    """TypedDict for the JSON representation of an encoded array."""
+
+    object_type: str
+    shape: Sequence[int]
+    dtype: str
+    data: dict[str, Any]
+
 
 MAX_BINREF_BUFFER_SIZE = 100 * 1024 * 1024  # 100 MB
 
