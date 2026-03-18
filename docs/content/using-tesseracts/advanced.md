@@ -113,10 +113,9 @@ The `serve` command prints container metadata to `stdout`, including the Tessera
 
 Some setups create networks automatically. For example, the MLflow docker-compose setup described above creates the `tesseract-mlflow-server` network, which is why the example `tesseract serve` command there can reference it directly.
 
-
 **A note on `--network=host`:**
 
-`--network=host` makes a container share the host's network stack, which can be a convenient alternative to creating an explicit Docker network. However, it does not work correctly on all platforms. On macOS and Windows, Docker Desktop runs the Docker daemon inside a lightweight VM. The "host" from the daemon's perspective is that VM, not your actual machine, so `--network=host` gives the container access to the VM's network rather than your host's. This means services running on your machine are not reachable via `localhost` from inside the container, and the pattern of calling Tesseracts by host address will not work as expected. 
+`--network=host` makes a container share the host's network stack, which can be a convenient alternative to creating an explicit Docker network. However, it does not work correctly on all platforms. On macOS and Windows, Docker Desktop runs the Docker daemon inside a lightweight VM. The "host" from the daemon's perspective is that VM, not your actual machine, so `--network=host` gives the container access to the VM's network rather than your host's. This means services running on your machine are not reachable via `localhost` from inside the container, and the pattern of calling Tesseracts by host address will not work as expected.
 
 At the moment `--network=host` works as intended only on Linux, where the Docker daemon runs directly on the host. Alternatives to Docker Desktop that run the daemon more natively, such as [Colima](https://github.com/abiosoft/colima), may also support host networking correctly. For cross-platform workflows, prefer creating an explicit Docker network as shown above.
 
