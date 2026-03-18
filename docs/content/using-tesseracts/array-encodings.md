@@ -64,7 +64,7 @@ Array data is stored in separate binary files, with JSON containing only referen
 | **base64** | Binary data encoded as base64 strings in JSON | General-purpose default for HTTP transport                                                       |
 | **binref** | References to binary files on disk            | Large arrays (>10MB), when disk I/O is preferable over HTTP, when data is written to disk anyway |
 
-The encoding format also affects performance — see {doc}`/content/misc/performance` for details.
+The chart below shows how encoding format affects serialization and transfer overhead as array size grows. For more on overall Tesseract performance trade-offs, see {doc}`/content/misc/performance`.
 
 ```{figure} /img/benchmark_encoding.png
 :alt: Encoding performance comparison
@@ -73,9 +73,11 @@ The encoding format also affects performance — see {doc}`/content/misc/perform
 Serialization and transfer overhead by encoding format and array size.
 ```
 
-## Using base64 encoding
+## Usage
 
-By default, Tesseracts return array data as human-readable JSON lists. To use base64 encoding instead, set the format to `json+base64`:
+The default format is `json`. To use a different encoding, set the format flag:
+
+### base64
 
 ::::{tab-set}
 :::{tab-item} CLI
@@ -102,13 +104,9 @@ $ curl \
 :::
 ::::
 
-## Using binref encoding
+### binref
 
-For large payloads you can use the `json+binref` format, which dumps a
-`.json` with references to a `.bin` file that contains the array data as raw binary. This
-avoids dealing with otherwise huge JSON files, and provides a powerful way to lazily load binary data with [LazySequence](#tesseract_core.runtime.experimental.LazySequence). Check out the [`Array`
-docstring](#tesseract_core.runtime.Array) for details on how to use different array
-encodings in Tesseracts.
+The `json+binref` format stores array data in separate `.bin` files and puts only references in the JSON. This enables lazy loading via [LazySequence](#tesseract_core.runtime.experimental.LazySequence). See the [`Array` docstring](#tesseract_core.runtime.Array) for more details.
 
 ::::{tab-set}
 :::{tab-item} CLI
@@ -128,8 +126,7 @@ $ cat /tmp/output/results.json
 :::{tab-item} REST API
 :sync: http
 
-To access the `.bin` files that are written when using the `json+binref` format, make sure
-to specify `--output-path` when serving your Tesseract. Otherwise the `.bin` files will only be accessible _inside_ the Tesseract (under `/tesseract/output_path`).
+Specify `--output-path` when serving so the `.bin` files are accessible on the host. Otherwise they're only available inside the container (under `/tesseract/output_path`).
 
 ```bash
 $ tesseract serve <tesseract-name> --output-path /tmp/output
@@ -140,6 +137,6 @@ $ curl \
   http://<tesseract-address>:<port>/apply
 ```
 
-The references to `.bin` files are relative to the `--output-path` you specified when serving the Tesseract.
+The `.bin` file references are relative to the `--output-path`.
 :::
 ::::

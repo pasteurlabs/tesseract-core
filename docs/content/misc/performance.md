@@ -41,26 +41,7 @@ Benchmark with representative inputs to understand the trade-offs for your use c
 Advice in this section is specific to the benchmarking scenario described above. Your mileage will vary based on your setup and workload.
 ```
 
-<br>
-
-```{figure} /img/benchmark_guidance.png
-:alt: Tesseract overhead guidance chart
-:width: 100%
-
-Overhead as percentage of computation time, depending on interaction mode and I/O data size, for the benchmark scenario (local Tesseract with fast network and disk).
-```
-
-<br>
-
-The guidance plot shows overhead curves for three interaction modes at three representative I/O sizes (1kB, 1MB, 1GB). Each combination represents a typical usage pattern:
-
-| Mode (color)                                   | What it measures                                                                                                            | Typical use case                                       |
-| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| **Non-containerized, in-memory** (green)       | Direct Python calls via `Tesseract.from_tesseract_api`. Passes data as in-memory Python objects without Docker or HTTP.     | Development, tight loops, performance-critical paths   |
-| **Containerized, json+base64 via HTTP** (blue) | Full Docker + HTTP stack, served via HTTP (e.g. `tesseract serve`). Includes serialization and network transfer.            | Production, CI/CD, multi-language environments         |
-| **Containerized, json+binref via CLI** (red)   | CLI invocation via `tesseract run`. Includes container startup and disk I/O, but avoids transferring data over the network. | Shell scripts, one-off runs, pipelines with large data |
-
-The three I/O sizes (dotted = 1kB, dashed = 1MB, solid = 1GB) show how data volume shifts the overhead curve. For small data, the fixed costs (HTTP roundtrip, container startup) dominate. For large data, transfer and serialization take over.
+The following chart shows absolute overhead (in milliseconds) for each interaction mode across a range of array sizes, using a no-op Tesseract that does nothing but decode and encode data:
 
 ```{figure} /img/benchmark_overhead.png
 :alt: Tesseract overhead by interaction mode
@@ -68,6 +49,23 @@ The three I/O sizes (dotted = 1kB, dashed = 1MB, solid = 1GB) show how data volu
 
 Overhead comparison across interaction modes for different array sizes. Uses a no-op Tesseract that does nothing but decode and encode data, isolating framework overhead.
 ```
+
+| Mode (color)                                     | What it measures                                                                                                            | Typical use case                                       |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| **Non-containerized, in-memory** (blue)          | Direct Python calls via `Tesseract.from_tesseract_api`. Passes data as in-memory Python objects without Docker or HTTP.     | Development, tight loops, performance-critical paths   |
+| **Containerized, json+base64 via HTTP** (orange) | Full Docker + HTTP stack, served via HTTP (e.g. `tesseract serve`). Includes serialization and network transfer.            | Production, CI/CD, multi-language environments         |
+| **Containerized, json+binref via CLI** (purple)  | CLI invocation via `tesseract run`. Includes container startup and disk I/O, but avoids transferring data over the network. | Shell scripts, one-off runs, pipelines with large data |
+
+The guidance chart below puts these numbers in context by showing overhead as a percentage of computation time, for three representative I/O sizes (dotted = 1kB, dashed = 1MB, solid = 1GB). For small data, fixed costs (HTTP roundtrip, container startup) dominate. For large data, transfer and serialization take over.
+
+```{figure} /img/benchmark_guidance.png
+:alt: Tesseract overhead guidance chart
+:width: 95%
+
+Overhead as percentage of computation time, depending on interaction mode and I/O data size, for the benchmark scenario (local Tesseract with fast network and disk).
+```
+
+(rules-of-thumb-by-use-case)=
 
 ### Rules of thumb by use case
 
@@ -132,4 +130,19 @@ result = tesseract.apply(inputs)
 
 ### 4. Profile to find bottlenecks
 
-Enable profiling to understand where time is spent. See {doc}`/content/debugging` for how to enable and interpret profiling output.
+Enable profiling to see where time is spent:
+
+```bash
+tesseract run myimage apply '{"inputs": {...}}' --profiling
+```
+
+Or via the Python SDK:
+
+```python
+tess = Tesseract.from_tesseract_api(
+    "/path/to/tesseract_api.py",
+    runtime_config={"profiling": True}
+)
+```
+
+See {ref}`profiling` in the debugging guide for more usage examples and how to interpret the output.
