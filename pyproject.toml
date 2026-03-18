@@ -100,6 +100,14 @@ version-file = "tesseract_core/_version.py"
 [tool.hatch.build.targets.wheel]
 packages = ["tesseract_core"]
 
+[tool.hatch.build.targets.sdist]
+include = [
+    "tesseract_core/",
+    "examples/",
+    "requirements.txt",
+    "README.md",
+    "LICENSE",
+]
 
 [tool.pytest.ini_options]
 addopts = ["--typeguard-packages=tesseract_core", "--durations=10"]
@@ -133,3 +141,67 @@ ignore_errors = true
 omit = [
     "tesseract_core/_version.py",
 ]
+
+[tool.ruff]
+# Set to the lowest supported Python version.
+target-version = "py310"
+
+# Set the target line length for formatting.
+line-length = 88
+
+# Exclude a variety of commonly ignored directories.
+extend-exclude = [
+    ".venv",
+    "_version.py",
+]
+
+# Also lint/format Jupyter Notebooks.
+extend-include = ["*.ipynb"]
+
+src = ["."]
+
+[tool.ruff.lint]
+# Select and/or ignore rules for linting.
+# Full list of available rules: https://docs.astral.sh/ruff/rules/
+extend-select = [
+    "ANN", # Type annotations
+    "B", # Flake8 bugbear
+    "D", # Pydocstyle
+    "E", # Pycodestyle errors
+    "F", # Pyflakes
+    "I", # Isort
+    "NPY", # Numpy
+    "RUF", # Ruff-specific rules
+    "UP", # Pyupgrade
+    "W", # Pycodestyle warnings
+]
+ignore = [
+    "E731", # Do not assign a lambda expression, use a def
+    "D100", # Pydocstyle: missing docstring in public module
+    "D104", # Pydocstyle: missing docstring in public package
+    "D105", # Pydocstyle: missing docstring in magic method
+    "D107", # Pydocstyle: missing docstring in __init__
+    "D203", # Pydocstyle: one blank line before class' docstring. Conflicts with D211
+    "D213", # Pydocstyle: multiline docstring summary start on 2nd line. Conflicts with D212
+    "ANN202", # Type annotations: allow missing return type for private functions
+    "ANN401", # Type annotations: allow Any
+]
+
+[tool.ruff.lint.extend-per-file-ignores]
+# Ignore missing docstrings and type annotations for selected directories
+"docs/*" = ["D101", "D102", "D103", "D106", "ANN"]
+"tests/*" = ["D101", "D102", "D103", "D106", "ANN"]
+"benchmarks/*" = ["D101", "D102", "D103", "D106", "ANN"]
+"examples/**/*" = ["D101", "D102", "D103", "D106", "ANN"]
+"tesseract_core/sdk/templates/*" = ["D101", "D102", "D103", "D106", "ANN"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.pycodestyle]
+max-line-length = 120 # Allow some flexibility in line lengths: up to 120 cols
+max-doc-length = 120
+
+[tool.ruff.format]
+# Enable reformatting of code snippets in docstrings.
+docstring-code-format = true

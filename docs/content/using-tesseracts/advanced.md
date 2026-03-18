@@ -7,7 +7,7 @@ passing data from local disk
 (or any [fsspec-compatible](https://filesystem-spec.readthedocs.io/en/latest/) resource,
 like HTTP, FTP, S3 Buckets, and so on) to a Tesseract via the `@` syntax.
 
-You can mount a folder into a Tesseract with `--input-path`. A The input path is mounted with read-only permissions so a Tesseract will never mutate files located at the input path.
+You can mount a folder into a Tesseract with `--input-path`. The input path is mounted with read-only permissions so a Tesseract will never mutate files located at the input path.
 Paths in a Tesseract's payload have to be relative to `--input-path`:
 
 ```bash
@@ -26,6 +26,10 @@ target path:
 
 ```bash
 $ tesseract run vectoradd apply --output-path /tmp/output @inputs.json
+```
+
+```{seealso}
+For handling large datasets that don't fit in memory, see the [out-of-core dataloading tutorial](https://si-tesseract.discourse.group/t/out-of-core-dataloading/52) which demonstrates streaming data through Tesseracts using file references and volume mounts.
 ```
 
 ## Logging metrics and artifacts

@@ -43,15 +43,15 @@ $ docker run vectoradd serve
 
 This provides fine-grained control over the Tesseract image, and allows you to use any container-aware tooling to manage and deploy them.
 
-```{tip}  As the `podman`API is fully compatible with`docker`, the above should still work if `docker`is replaced with`podman`.
-
-````
+```{tip}
+As the `podman` API is fully compatible with `docker`, the above should still work if `docker` is replaced with `podman`.
+```
 
 ## Example: Deploying a Tesseract on [Azure Virtual Machines](https://azure.microsoft.com/en-us/products/virtual-machines)
 
 ```{note}
 This example assumes you already have an Azure account and know your way around cloud infrastructure. Using Azure Virtual Machines is just one of many ways to deploy Tesseracts. Accessing cloud resources may incur costs.
-````
+```
 
 The general process to deploy a Tesseract on an Azure Virtual Machine is as follows:
 

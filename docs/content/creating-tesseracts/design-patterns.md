@@ -1,4 +1,4 @@
-# Tesseract Design Patterns
+# Design Patterns
 
 This page provides guidance on common questions around Tesseract design: what should (and shouldn't) be a Tesseract, and how to structure your workflow.
 
@@ -117,6 +117,10 @@ CAD → [Mesh] → [Solve + Post-process + Visualize] → Report
 Pros: Separates geometry (often CPU-bound, different expertise) from simulation (often GPU-bound, different team), minimal data transfer for tightly coupled steps
 
 The right choice depends on your team structure, hardware constraints, and reuse patterns. When in doubt, start with fewer Tesseracts and split them later if needed — it's easier to break apart than to combine.
+
+```{seealso}
+For a real-world example of multi-Tesseract composition, see the [QoI-based Workflows with Ansys Fluent](https://si-tesseract.discourse.group/t/qoi-based-workflows-with-ansys-fluent-and-tesseract/110) showcase, which demonstrates chaining geometry, solver, and post-processing Tesseracts into a unified pipeline.
+```
 
 ## Common anti-patterns
 
