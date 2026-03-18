@@ -571,7 +571,7 @@ def test_recursive_model():
         create_apply_schema(RecursiveModel, RecursiveModel)
 
 
-@pytest.mark.parametrize("endpoint", ["apply", "abstract_eval", "autodiff"])
+@pytest.mark.parametrize("endpoint", ["apply", "abstract_eval", "gradient"])
 def test_fancy_pydantic_model(endpoint):
     # Define a model with some fancy features
     from pydantic import AfterValidator, Field, computed_field, model_validator
@@ -705,9 +705,9 @@ def test_fancy_pydantic_model(endpoint):
                 }
             )
 
-    elif endpoint == "autodiff":
-        AutodiffSchema, _ = create_gradient_schema(InputSchema, InputSchema, "jacobian")
-        parsed_inputs = AutodiffSchema.model_validate(
+    elif endpoint == "gradient":
+        GradientSchema, _ = create_gradient_schema(InputSchema, InputSchema, "jacobian")
+        parsed_inputs = GradientSchema.model_validate(
             {
                 "inputs": valid_data,
                 "jac_inputs": ["myarray"],
@@ -722,7 +722,7 @@ def test_fancy_pydantic_model(endpoint):
 
         # trigger field validator
         with pytest.raises(ValidationError, match="greater_than"):
-            AutodiffSchema.model_validate(
+            GradientSchema.model_validate(
                 {
                     "inputs": {
                         "someint": -1,
@@ -734,7 +734,7 @@ def test_fancy_pydantic_model(endpoint):
             )
 
         with pytest.raises(ValidationError, match="sum"):
-            AutodiffSchema.model_validate(
+            GradientSchema.model_validate(
                 {
                     "inputs": {
                         "someint": 1,
@@ -752,7 +752,7 @@ def test_fancy_pydantic_model(endpoint):
 
         # trigger model validator
         with pytest.raises(ValidationError, match="sum"):
-            AutodiffSchema.model_validate(
+            GradientSchema.model_validate(
                 {
                     "inputs": {
                         "someint": 10,

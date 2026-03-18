@@ -4,13 +4,13 @@ This page walks through creating your own Tesseracts, starting from a basic exam
 
 ## Initialize a new Tesseract
 
-Run the following to scaffold a new Tesseract in the current directory:
+Run the following to initialize everything needed to define a new Tesseract in the current directory:
 
 ```bash
-$ tesseract init
+$ tesseract init --name my_tesseract
 ```
 
-Follow the prompt to specify a name (or pass `--name` inline). This creates three files:
+This creates three files:
 
 - `tesseract_api.py` — Python module defining the Tesseract's computations.
 - `tesseract_config.yaml` — metadata (name, version), build options (base image, custom build steps, external data), and more.
