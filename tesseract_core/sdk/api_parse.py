@@ -169,7 +169,8 @@ class TesseractConfig(BaseModel, validate_assignment=True):
     )
     metadata: dict[str, Any] = Field(
         default_factory=dict,
-        description="Arbitrary user-defined metadata. This will also be stored as a Docker label on the built image.",
+        description="Arbitrary user-defined metadata. "
+        "This will be stored as a Docker label (ai.pasteurlabs.tesseract.metadata).",
     )
 
     model_config = ConfigDict(extra="forbid")
