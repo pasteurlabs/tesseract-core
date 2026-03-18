@@ -315,7 +315,7 @@ def get_config(src_dir: Path) -> TesseractConfig:
         raise ValidationError(f"Invalid configuration: {err}") from err
 
 
-def get_non_base_fields_in_tesseract_config() -> list[tuple[str, type]]:
+def get_submodel_fields_in_tesseract_config() -> list[tuple[str, type]]:
     """Gets fields in TesseractConfig that are Pydantic sub-models."""
     non_base_fields = []
     for field_name, field_info in TesseractConfig.model_fields.items():
