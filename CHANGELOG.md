@@ -15,6 +15,7 @@ All notable changes to this project will be documented in this file.
 
 - Remove fixed 100ms runtime overhead for every call (#485)
 - Reduce performance overhead, especially in array encoding/decoding (#522)
+- Rendering of custom validation errors over HTTP (#534)
 
 ### Documentation
 
