@@ -332,3 +332,38 @@ def test_debug_mode(dummy_tesseract_module, monkeypatch):
     assert "This is a test error" in response.text
     assert "Traceback" in response.text
     assert "/test" in rest_api.openapi()["paths"]
+
+
+def test_custom_validation_error_over_http(dummy_tesseract_module):
+    """Custom array validation errors are properly reconstructed as ValidationErrors via the SDK."""
+    from pydantic import ValidationError as PydanticValidationError
+
+    from tesseract_core import Tesseract
+
+    rest_api = create_rest_api(dummy_tesseract_module)
+    test_client = TestClient(rest_api, raise_server_exceptions=False)
+
+    tess = Tesseract.from_url("http://testserver")
+    test_client.headers["Content-Type"] = "application/json"
+    tess._client._session = test_client
+
+    # Send a properly structured encoded array with non-numeric data in the buffer
+    # to trigger a custom PydanticCustomError (array_decode_error) on the server
+    non_numeric_array = {
+        "object_type": "array",
+        "shape": [2],
+        "dtype": "float32",
+        "data": {"buffer": ["not", "numeric"], "encoding": "json"},
+    }
+    valid_array = {
+        "object_type": "array",
+        "shape": [2],
+        "dtype": "float32",
+        "data": {"buffer": [1, 2], "encoding": "json"},
+    }
+
+    with pytest.raises(PydanticValidationError) as exc_info:
+        tess.apply({"a": non_numeric_array, "b": valid_array, "s": 1})
+
+    err_types = {e["type"] for e in exc_info.value.errors()}
+    assert "array_decode_error" in err_types
