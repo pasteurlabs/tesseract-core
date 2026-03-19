@@ -5,11 +5,14 @@
 
 from __future__ import annotations
 
+import functools
 import subprocess
 from pathlib import Path
 
 import numpy as np
 import pytest
+
+from tesseract_core.sdk.docker_client import CLIDockerClient
 
 # Path to the no-op tesseract for benchmarking
 NOOP_TESSERACT_PATH = Path(__file__).parent / "tesseract_noop" / "tesseract_api.py"
@@ -30,23 +33,19 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line("markers", "docker: requires Docker")
 
 
-def pytest_collection_modifyitems(
-    config: pytest.Config, items: list[pytest.Item]
-) -> None:
-    """Skip Docker-dependent benchmarks when Docker is not available."""
-    docker_available = _check_docker()
-    if docker_available:
+@pytest.fixture(autouse=True)
+def _require_docker_if_marked(request: pytest.FixtureRequest) -> None:
+    """Fail Docker-marked benchmarks when Docker is not available."""
+    if "docker" not in request.keywords:
         return
-
-    skip_docker = pytest.mark.skip(reason="Docker not available")
-    for item in items:
-        if "docker" in item.keywords:
-            item.add_marker(skip_docker)
+    if not _check_docker():
+        pytest.fail("Docker is required for this benchmark but is not available")
 
 
+@functools.cache
 def _check_docker() -> bool:
     try:
-        subprocess.run(["docker", "info"], capture_output=True, check=True, timeout=10)
+        CLIDockerClient().info()
         return True
     except Exception:
         return False
