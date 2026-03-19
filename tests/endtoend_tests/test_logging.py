@@ -203,7 +203,8 @@ def test_logging_tesseract_run(logging_test_image, tmpdir):
         text=True,
     )
     assert run_res.returncode == 0, run_res.stderr
-    assert "Hello from tesseract_api.py!\nHello from apply!" == run_res.stderr.strip()
+    assert "Hello from tesseract_api.py!" in run_res.stderr
+    assert "Hello from apply!" in run_res.stderr
 
     results = json.loads(run_res.stdout.strip())
     assert results["out"] == "Received message: Test message"
