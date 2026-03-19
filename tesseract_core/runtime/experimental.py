@@ -21,6 +21,12 @@ from pydantic.json_schema import JsonSchemaValue
 from pydantic_core import CoreSchema, SchemaSerializer, SchemaValidator, core_schema
 
 from tesseract_core.runtime.file_interactions import PathLike, parent_path
+from tesseract_core.runtime.gradient_endpoint_derivation import (
+    jacobian_from_jvp,
+    jacobian_from_vjp,
+    jvp_from_jacobian,
+    vjp_from_jacobian,
+)
 from tesseract_core.runtime.mpa import (
     log_artifact,
     log_metric,
@@ -348,8 +354,12 @@ __all__ = [
     "finite_difference_jacobian",
     "finite_difference_jvp",
     "finite_difference_vjp",
+    "jacobian_from_jvp",
+    "jacobian_from_vjp",
+    "jvp_from_jacobian",
     "log_artifact",
     "log_metric",
     "log_parameter",
     "require_file",
+    "vjp_from_jacobian",
 ]

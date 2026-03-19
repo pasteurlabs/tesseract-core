@@ -53,6 +53,58 @@ class InputSchema(BaseModel):
 In case you run into issues with Pydantic features not listed here, please [open an issue](https://github.com/pasteurlabs/tesseract-core/issues/new/choose).
 ```
 
+(x86-vs-arm)=
+
+### 🔪 Sharp edge: x86 vs ARM architecture on Apple Silicon
+
+If you're using a Mac, your system uses the ARM64 processor architecture, while many Docker images and Python packages are built for x86_64 (also known as AMD64). This can lead to architecture incompatibilities when building or running Tesseracts.
+
+**Common symptoms:**
+
+- Build failures with errors mentioning "platform mismatch" or "exec format error"
+- Runtime errors like `exec /tesseract/entrypoint.sh: exec format error`
+- Slow performance due to Rosetta 2 emulation
+- Package installation failures in `tesseract_requirements.txt`
+- A Python package fails to install because it doesn't provide a pre-built Linux ARM64 wheel
+
+**Solutions:**
+
+1. **Build x86_64 images for sharing or compatibility (recommended):** If you intend to share Tesseracts with others, deploy to x86_64 servers, or are running into difficulties with missing ARM64 wheels, build for x86_64. Edit your `tesseract_config.yaml`:
+
+   ```yaml
+   # tesseract_config.yaml
+   build_config:
+     target_platform: linux/amd64 # Build for x86_64
+   ```
+
+   Note this uses QEMU emulation and will be slower to build, but produces images that work everywhere.
+
+2. **Build for your native architecture (for local development):** By default, Tesseract builds for your native platform. If you only need to run locally, this is faster. You can explicitly set it in `tesseract_config.yaml`:
+
+   ```yaml
+   # tesseract_config.yaml
+   build_config:
+     target_platform: linux/arm64 # Explicitly set for Apple Silicon
+   ```
+
+3. **Use ARM-compatible base images:** Some base images don't have ARM64 variants. Check that your base image supports ARM64 (e.g., `python:3.11-slim` supports both architectures).
+
+4. **Handle packages without Linux ARM64 wheels:** Some Python packages don't provide pre-built wheels for Linux ARM64. Note that a macOS ARM64 wheel is not sufficient here, since Tesseracts run in Linux containers.
+
+   One solution is to include the system packages required to build the wheel from source during the `tesseract build` step by specifying the `extra_packages` build option. Common required packages may include `build-essential`, `gcc`, or `nvidia-cuda-toolkit`:
+
+   ```yaml
+   # tesseract_config.yaml
+   build_config:
+     extra_packages:
+       - build-essential
+       - gcc
+   ```
+
+   Other options include using conda (`venv_backend: conda`) or pinning to a version that has ARM64 support. Alternatively, build for x86_64 as described above.
+
+To verify the architecture of a built Tesseract image: `docker inspect --format='{{.Architecture}}' my_tesseract:latest`
+
 (abstract-eval-pydantic)=
 
 ### 🔪 Sharp edge: `abstract_eval` and field validators
@@ -85,34 +137,19 @@ to the machine that builds the Tesseract.
 
 ## Customizing the build process
 
-There are several steps in the process of building a Tesseract image
-which can be configured via the `tesseract_config.yaml` file, in particular the `build_config` section.
-For example:
+The `build_config` section of [`tesseract_config.yaml`](../api/config.md) controls how the Tesseract image is built. Common reasons to customize it:
 
-- By default the base image is `debian:bookworm-slim`.
-  Depending on your specific needs (different python version,
-  preinstalled dependencies, ...), it might be beneficial to
-  specify a different one in `base_image`.
-  There is however the constraint that
-  whatever other image you specify, it must be Ubuntu- or
-  Debian-based.
-- The default target architecture is "native" (same as the host platform).
-  If you need to build for a specific platform, use e.g. `target_platform: "linux/arm64"`.
-- As `tesseract_requirements.txt` only allows you to specify Python
-  dependencies, if there are system ones you need to install inside
-  the Tesseract you can do so via the `extra_packages` list. All
-  packages you specify will be installed via `apt-get`.
-- You can copy data inside a Tesseract via the `package_data` list.
-  The data will be then part of the Tesseract image. This is a
-  good choice for some static artifacts you need to have available
-  for computation, such as the weights of a machine learning model.
-- If you want to further customize the way the image is built,
-  you can add arbitrary commands to the Dockerfile specifying
-  the build process via the `custom_build_steps` list. Use
-  the same syntax you would use in a Dockerfile. To see where your
-  commands would be added in the build process, have a look at
-  the [Dockerfile template](https://github.com/pasteurlabs/tesseract-core/blob/main/tesseract/templates/Dockerfile.base)
-  `tesseract build` uses by default.
+- **Your code needs system libraries** (e.g., `gfortran`, `libgomp1`) — use `extra_packages` to install them via `apt-get`.
+- **You need a specific Python version or GPU drivers** — override `base_image` (must be Debian-based).
+- **You're deploying to a different architecture** (e.g., ARM64 on AWS Graviton) — set `target_platform`.
+- **Your Tesseract needs data files at runtime** (model weights, config files) — use `package_data` to copy them into the image.
+- **None of the above cover your case** — use `custom_build_steps` to inject arbitrary Dockerfile commands. See the [Dockerfile template](https://github.com/pasteurlabs/tesseract-core/blob/main/tesseract_core/sdk/templates/Dockerfile.base) for where these are injected.
+
+```{seealso}
+For the full list of options and their defaults, see the [Configuration reference](../api/config.md).
+```
+
+For worked examples, see the [Package Data](../examples/building-blocks/packagedata.md), [Pyvista on ARM64](../examples/building-blocks/arm64.md), and [Fortran Integration](../examples/building-blocks/fortran.md) building blocks.
 
 ## Creating a Tesseract from a Python package
 
@@ -120,4 +157,4 @@ Sometimes it is useful to create a Tesseract from an already-existing
 Python package. In order to do so, you can run `tesseract init` in the root folder of
 your package (i.e., where `setup.py` and `requirements.txt` would be). Import your package
 as needed in `tesseract_api.py`, and specify the dependencies you need at runtime in
-`tesseract_requirements.py`.
+`tesseract_requirements.txt`.

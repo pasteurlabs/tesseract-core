@@ -21,7 +21,7 @@ from rich.progress import Progress
 from ..core import create_endpoints, get_input_schema, get_output_schema
 from ..tree_transforms import get_at_path, set_at_path
 
-ADEndpointName = Literal[
+GradientEndpointName = Literal[
     "jacobian", "jacobian_vector_product", "vector_jacobian_product"
 ]
 
@@ -483,7 +483,7 @@ def check_gradients(
     input_paths: Sequence[str] | None = None,
     output_paths: Sequence[str] | None = None,
     base_dir: Path | None = None,
-    endpoints: Sequence[ADEndpointName] | None = None,
+    endpoints: Sequence[GradientEndpointName] | None = None,
     max_evals: int = 1000,
     eps: float = 1e-4,
     rtol: float = 0.1,
@@ -498,7 +498,7 @@ def check_gradients(
         input_paths: The input paths to check. If not provided, all differentiable paths are checked.
         output_paths: The output paths to check. If not provided, all differentiable paths are checked.
         base_dir: The base directory to resolve relative paths.
-        endpoints: The AD endpoints to check. If not provided, all available endpoints are checked.
+        endpoints: The gradient endpoints to check. If not provided, all available endpoints are checked.
         max_evals: The target number of ``apply`` evaluations to perform.
         eps: The epsilon to use for finite differences, as a fraction of the maximum absolute value of each input.
         rtol: The relative tolerance to use for comparison.
@@ -517,11 +517,11 @@ def check_gradients(
     available_endpoints = [
         func_name
         for func_name in endpoint_functions
-        if func_name in get_args(ADEndpointName)
+        if func_name in get_args(GradientEndpointName)
     ]
 
     if not available_endpoints:
-        raise ValueError(f"No AD endpoints found in {api_module.__name__}")
+        raise ValueError(f"No gradient endpoints found in {api_module.__name__}")
 
     if not endpoints:
         endpoints = available_endpoints

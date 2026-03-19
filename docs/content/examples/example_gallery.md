@@ -16,6 +16,7 @@ building-blocks/localpackage.md
 building-blocks/dataloader.md
 building-blocks/filereference.md
 building-blocks/finitediff.md
+building-blocks/gradient-fallbacks.md
 ```
 
 This is a gallery of Tesseract examples that end at the `build` stage of the Tesseract lifecycle, and that can act as starting points to define and build your own Tesseracts.
@@ -23,7 +24,7 @@ This is a gallery of Tesseract examples that end at the `build` stage of the Tes
 You can also find these Tesseracts in the `examples` directory of the [code repository](https://github.com/pasteurlabs/tesseract-core).
 
 ```{important}
-**Beyond the Build**: The real magic happens long after building a Tesseract. For some example applications that *use* Tesseracts in workflows, check out the [Demo](../demo/demo.md) and [Community Showcase](https://si-tesseract.discourse.group/c/showcase/11).
+**Beyond the Build**: The real magic happens long after building a Tesseract. For some example applications that *use* Tesseracts in workflows, check out the [Demos & Tutorials](../demo/demo.md) and [Community Showcase](https://si-tesseract.discourse.group/c/showcase/11).
 ```
 
 ::::{grid} 2
@@ -39,7 +40,7 @@ A simple "hello world" Tesseract.
 :::{grid-item-card} VectorAdd
 :link: building-blocks/vectoradd.html
 
-Tesseract performing vector addition. Highlighting simple array operations and how to use the Tesseract Python API.
+Tesseract performing vector addition. Highlighting simple array operations and how to use the Tesseract Python SDK.
 
 [View on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/vectoradd)
 :::
@@ -72,7 +73,7 @@ A guide showcasing how to use custom build steps to install pyvista within an AR
 [View on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/pyvista-arm64)
 :::
 :::{grid-item-card} Local Dependencies
-:link: building-blocks/localdependency.html
+:link: building-blocks/localpackage.html
 
 A guide on installing local Python packages into a Tesseract.
 
@@ -98,9 +99,20 @@ To be used for Tesseracts with large inputs and/or outputs.
 :::{grid-item-card} Finite Difference Gradients
 :link: building-blocks/finitediff.html
 
-     Make any Tesseract differentiable without implementing analytical gradients.
-     Useful for prototyping and complex nested schemas. *(Experimental)*
+Make any Tesseract differentiable without implementing analytical gradients.
+Useful for prototyping and complex nested schemas. _(Experimental)_
 
+[View on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/meshstats_finitediff)
+
+:::
+
+:::{grid-item-card} Gradient Endpoint Derivation Fallbacks
+:link: building-blocks/gradient-fallbacks.html
+
+Derive missing gradient endpoints (JVP, VJP, Jacobian) from ones you have
+already implemented. _(Experimental)_
+
+[View on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/univariate_gradient_fallbacks)
 :::
 
 ::::

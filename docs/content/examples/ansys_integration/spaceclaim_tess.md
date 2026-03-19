@@ -106,7 +106,7 @@ This particular choice of inputs and outputs is motivated in our [rocket fin opt
 
 #### Input schema
 
-This Tesseract accepts multiple goemetry parameters to create `N` grid fin geometries simulatanously. That way, we hide the startup latency of SpaceClaim when requesting a large number of geometries.
+This Tesseract accepts multiple geometry parameters to create `N` grid fin geometries simultaneously. That way, we hide the startup latency of SpaceClaim when requesting a large number of geometries.
 
 The `InputSchema` class looks like this:
 
@@ -222,4 +222,4 @@ Grid fin geometry shown with randomised beam locations.
 
 Invoking SpaceClaim via HTTP is only the start of the Tesseract journey.
 
-For example, by using finite difference approximations under the hood, we can make the resulting geometry [differentiable](../../introduction/differentiable-programming.md) with respect to the design parameters. For a concrete demonstration of end-to-end shape optimization in action, please have a look at our [rocket fin optimization showcase](https://si-tesseract.discourse.group/t/parametric-shape-optimization-of-rocket-fins-with-ansys-spaceclaim-and-pyansys/109).
+For example, by using finite difference approximations under the hood, we can make the resulting geometry [differentiable](../../misc/differentiable-programming.md) with respect to the design parameters. For a concrete demonstration of end-to-end shape optimization in action, please have a look at our [rocket fin optimization showcase](https://si-tesseract.discourse.group/t/parametric-shape-optimization-of-rocket-fins-with-ansys-spaceclaim-and-pyansys/109).

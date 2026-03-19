@@ -65,7 +65,7 @@ def apply(inputs: InputSchema) -> OutputSchema:
 
 
 #
-# Jax-handled AD endpoints (no need to modify)
+# Jax-handled gradient endpoints (no need to modify)
 #
 
 

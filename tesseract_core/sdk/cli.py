@@ -5,6 +5,7 @@
 
 import json
 import re
+import shlex
 import sys
 import time
 import webbrowser
@@ -30,7 +31,7 @@ from .api_parse import (
     TesseractBuildConfig,
     TesseractConfig,
     ValidationError,
-    get_non_base_fields_in_tesseract_config,
+    get_submodel_fields_in_tesseract_config,
 )
 from .config import get_config
 from .docker_client import (
@@ -107,8 +108,8 @@ POSSIBLE_CMDS.update(
 
 # All fields in TesseractConfig and TesseractBuildConfig for config override
 POSSIBLE_KEYPATHS = TesseractConfig.model_fields.keys()
-# Check that the only field that has nested fields is build_config
-assert len(get_non_base_fields_in_tesseract_config()) == 1
+# Check that the only field that has nested models is build_config
+assert len(get_submodel_fields_in_tesseract_config()) == 1
 POSSIBLE_BUILD_CONFIGS = TesseractBuildConfig.model_fields.keys()
 
 # Traverse templates folder to seach for recipes
@@ -608,6 +609,18 @@ def serve(
             help=("Output format to use for the Tesseract."),
         ),
     ] = None,
+    docker_args: Annotated[
+        str | None,
+        typer.Option(
+            "--runtime-args",
+            help=(
+                "Additional arguments to pass to the underlying container runtime (e.g., Docker). "
+                "Example: --runtime-args '--shm-size=1g --cpus=2'"
+            ),
+            metavar="ARGS",
+            show_default=False,
+        ),
+    ] = None,
 ) -> None:
     """Serve one or more Tesseract images.
 
@@ -642,6 +655,7 @@ def serve(
             input_path=input_path,
             output_path=output_path,
             output_format=_enum_to_val(output_format),
+            docker_args=shlex.split(docker_args) if docker_args else None,
         )
     except RuntimeError as ex:
         raise UserError(
@@ -1023,6 +1037,31 @@ def run_container(
             ),
         ),
     ] = None,
+    docker_args: Annotated[
+        str | None,
+        typer.Option(
+            "--docker-args",
+            help=(
+                "Additional arguments to pass to the underlying container runtime (e.g., Docker). "
+                "Example: --docker-args '--shm-size=1g --cpus=2'"
+            ),
+            metavar="ARGS",
+            show_default=False,
+        ),
+    ] = None,
+    runtime_args: Annotated[
+        str | None,
+        typer.Option(
+            "--runtime-args",
+            help=(
+                "Additional arguments to pass to the `tesseract-runtime` command inside the container. "
+                "Example: --runtime-args '--seed=42 --eps=1e-5' to pass optional arguments to "
+                "`tesseract-runtime check-gradients`."
+            ),
+            metavar="ARGS",
+            show_default=False,
+        ),
+    ] = None,
     profiling: Annotated[
         bool,
         typer.Option(
@@ -1100,6 +1139,10 @@ def run_container(
     if invoke_help:
         args.append("--help")
 
+    # Add runtime_args before payload so they appear as options to the command
+    if runtime_args:
+        args.extend(shlex.split(runtime_args))
+
     if payload is not None:
         args.append(payload)
 
@@ -1146,6 +1189,7 @@ def run_container(
             network=network,
             user=user,
             memory=memory,
+            docker_args=shlex.split(docker_args) if docker_args else None,
             stream_logs=True,  # Always stream for CLI
         )
 

@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 import numpy as np
+import orjson
 import pytest
 from pydantic import ValidationError
 
@@ -119,22 +120,33 @@ def test_serve_lifecycle(mock_serving, mock_clients):
 
     mock_serving["serve_mock"].assert_called_once()
     call_kwargs = mock_serving["serve_mock"].call_args.kwargs
-    assert call_kwargs["image_name"] == "sometesseract:0.2.3"
-    assert call_kwargs["port"] is None
-    assert call_kwargs["volumes"] == []
-    assert call_kwargs["environment"] == {}
-    assert call_kwargs["gpus"] is None
-    assert call_kwargs["debug"] is True
-    assert call_kwargs["num_workers"] == 1
-    assert call_kwargs["network"] is None
-    assert call_kwargs["network_alias"] is None
-    assert call_kwargs["host_ip"] == "127.0.0.1"
-    assert call_kwargs["user"] is None
-    assert call_kwargs["memory"] is None
-    assert call_kwargs["input_path"] is None
-    # output_path is now auto-created as a temp directory
+
+    expected_kwargs = {
+        "image_name": "sometesseract:0.2.3",
+        "port": None,
+        "volumes": [],
+        "environment": {},
+        "gpus": None,
+        "debug": True,
+        "num_workers": 1,
+        "network": None,
+        "network_alias": None,
+        "host_ip": "127.0.0.1",
+        "user": None,
+        "memory": None,
+        "input_path": None,
+        "output_format": "json+base64",
+        "docker_args": None,
+        "runtime_config": None,
+    }
+
+    for key, expected_value in expected_kwargs.items():
+        assert call_kwargs[key] == expected_value, f"Mismatch for {key!r}"
+
+    # Output_path is auto-created as a temp directory
     assert call_kwargs["output_path"].is_dir()
-    assert call_kwargs["output_format"] == "json+base64"
+    # Check that no unexpected kwargs were passed
+    assert call_kwargs.keys() == expected_kwargs.keys() | {"output_path"}
 
     mock_serving["teardown_mock"].assert_called_with("container-id-123")
 
@@ -151,11 +163,12 @@ def test_serve_lifecycle(mock_serving, mock_clients):
 )
 def test_HTTPClient_run_tesseract(mocker, run_id):
     mock_response = mocker.Mock()
-    mock_response.json.return_value = {"result": [4, 4, 4]}
-    mock_response.raise_for_status = mocker.Mock()
+    mock_response.content = b'{"result": [4, 4, 4]}'
+    mock_response.ok = True
+    mock_response.status_code = 200
 
     mocked_request = mocker.patch(
-        "requests.request",
+        "requests.Session.request",
         return_value=mock_response,
     )
 
@@ -168,14 +181,13 @@ def test_HTTPClient_run_tesseract(mocker, run_id):
     mocked_request.assert_called_with(
         method="POST",
         url="http://somehost/apply",
-        json={"inputs": {"a": 1}},
+        data=orjson.dumps({"inputs": {"a": 1}}),
         params=expected_params,
     )
 
 
 def test_HTTPClient_run_tesseract_raises_validation_error(mocker):
-    mock_response = mocker.Mock()
-    mock_response.json.return_value = {
+    error_detail = {
         "detail": [
             {
                 "type": "missing",
@@ -204,10 +216,12 @@ def test_HTTPClient_run_tesseract_raises_validation_error(mocker):
             },
         ]
     }
+    mock_response = mocker.Mock()
+    mock_response.content = orjson.dumps(error_detail)
     mock_response.status_code = 422
 
     mocker.patch(
-        "requests.request",
+        "requests.Session.request",
         return_value=mock_response,
     )
 
