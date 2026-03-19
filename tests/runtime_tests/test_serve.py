@@ -344,6 +344,7 @@ def test_custom_validation_error_over_http(dummy_tesseract_module):
     test_client = TestClient(rest_api, raise_server_exceptions=False)
 
     tess = Tesseract.from_url("http://testserver")
+    test_client.headers["Content-Type"] = "application/json"
     tess._client._session = test_client
 
     # Send a properly structured encoded array with non-numeric data in the buffer
