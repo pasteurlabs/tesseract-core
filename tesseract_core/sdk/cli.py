@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
+import logging
 import re
 import shlex
 import sys
@@ -1190,7 +1191,7 @@ def run_container(
             user=user,
             memory=memory,
             docker_args=shlex.split(docker_args) if docker_args else None,
-            stream_logs=True,  # Always stream for CLI
+            stream_logs=logger.info,  # Stream logs via logger
         )
 
     except ImageNotFound as e:
@@ -1204,9 +1205,20 @@ def run_container(
         if "No such command" in msg:
             error_string = f"Error running Tesseract '{tesseract_image}' \n\n Error: Unimplemented command '{cmd}'.  "
         else:
-            error_string = _sanitize_error_output(
-                f"Error running Tesseract. \n\n{msg}", tesseract_image
-            )
+            loglevel = logging.getLogger("tesseract").handlers[0].level
+            if loglevel <= logging.INFO:
+                # Errors already streamed via logger.info, don't repeat them
+                error_string = "Error running Tesseract."
+            elif loglevel == logging.WARNING:
+                # Re-emit errors at warning level so they're visible
+                logger.warning(msg)
+                error_string = "Error running Tesseract."
+            else:
+                # Logs are squelched, tell user how to see them
+                error_string = (
+                    "Error running Tesseract. "
+                    "Run with `--loglevel info` for more details."
+                )
 
         raise UserError(error_string) from e
 

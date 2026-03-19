@@ -43,7 +43,8 @@ def _read_stream(
     Args:
         stream: The subprocess pipe to read from.
         collected: List to append raw byte lines to.
-        echo_to: If provided, decoded lines are written to this stream in real-time.
+        echo_to: If provided, decoded lines are echoed in real-time. Can be a file-like
+            object (with .write/.flush) or a callable that accepts a string.
     """
     while True:
         line = stream.readline()
@@ -51,8 +52,12 @@ def _read_stream(
             break
         collected.append(line)
         if echo_to is not None:
-            echo_to.write(line.decode("utf-8", errors="replace"))
-            echo_to.flush()
+            decoded = line.decode("utf-8", errors="replace")
+            if callable(echo_to) and not hasattr(echo_to, "write"):
+                echo_to(decoded.rstrip("\n"))
+            else:
+                echo_to.write(decoded)
+                echo_to.flush()
 
 
 def _run_process(
@@ -661,7 +666,7 @@ class Containers:
         memory: str | None = None,
         extra_args: list_[str] | None = None,  # noqa: UP006
         stream_stdout: bool = False,
-        stream_stderr: bool = False,
+        stream_stderr: bool | Any = False,
     ) -> Container | tuple[bytes, bytes] | bytes:
         """Run a command in a container from an image.
 
@@ -688,8 +693,9 @@ class Containers:
             extra_args: Additional arguments to pass to the `docker run` CLI command.
             stream_stdout: If True, stream stdout to sys.stdout in real-time instead of
                     buffering. Cannot be used with detach.
-            stream_stderr: If True, stream stderr to sys.stderr in real-time instead of
-                    buffering. Cannot be used with detach.
+            stream_stderr: If True, stream stderr to sys.stderr in real-time. Can also be
+                    a callable that accepts a string to use as a custom sink.
+                    Cannot be used with detach.
 
         Returns:
             Container object if detach is True, otherwise returns list of stdout and stderr.
@@ -768,7 +774,11 @@ class Containers:
         returncode, stdout_data, stderr_data = _run_process(
             full_cmd,
             stream_stdout=sys.stdout if stream_stdout else None,
-            stream_stderr=sys.stderr if stream_stderr else None,
+            stream_stderr=(
+                stream_stderr
+                if callable(stream_stderr)
+                else (sys.stderr if stream_stderr else None)
+            ),
         )
 
         if returncode != 0:
