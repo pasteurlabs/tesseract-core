@@ -470,3 +470,29 @@ class TestHTTPClientValidationErrors:
         assert err["type"] == "array_non_numeric"
         assert err["loc"] == ("body", "inputs", "x")
         assert "numeric array" in err["msg"]
+
+    def test_custom_error_type_with_ctx(self):
+        """Custom error types with context are properly reconstructed."""
+        response = _make_mock_response(
+            422,
+            {
+                "detail": [
+                    {
+                        "type": "array_decode_error",
+                        "loc": ["body", "inputs", "a"],
+                        "msg": "Failed to decode array buffer (json encoding): some error",
+                        "input": None,
+                        "ctx": {"error": "could not convert string to float"},
+                    }
+                ]
+            },
+        )
+        tess = _make_tesseract_with_mock_response(response)
+
+        with pytest.raises(ValidationError) as exc_info:
+            tess.apply({"inputs": {}})
+
+        assert exc_info.value.error_count() == 1
+        err = exc_info.value.errors()[0]
+        assert err["type"] == "array_decode_error"
+        assert err["loc"] == ("body", "inputs", "a")
