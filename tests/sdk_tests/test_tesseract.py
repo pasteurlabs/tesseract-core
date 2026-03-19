@@ -1,8 +1,10 @@
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import numpy as np
 import orjson
 import pytest
+import requests
 from pydantic import ValidationError
 
 from tesseract_core import Tesseract
@@ -396,3 +398,75 @@ def test_test_endpoint_with_exception_type_local(dummy_tesseract_package):
             "expected_exception": ValidationError,  # Type, not string
         }
     )
+
+
+def _make_mock_response(status_code, json_data):
+    """Create a mock requests.Response with the given status code and JSON body."""
+    resp = Mock(spec=requests.Response)
+    resp.status_code = status_code
+    resp.ok = status_code < 400
+    resp.content = orjson.dumps(json_data)
+    resp.text = orjson.dumps(json_data).decode()
+    return resp
+
+
+def _make_tesseract_with_mock_response(response):
+    """Create a Tesseract.from_url instance with a mocked HTTP session."""
+    tess = Tesseract.from_url("http://localhost:1234")
+    tess._client._session = Mock()
+    tess._client._session.request.return_value = response
+    return tess
+
+
+class TestHTTPClientValidationErrors:
+    """Test that Tesseract raises proper ValidationErrors for 422 responses over HTTP."""
+
+    def test_builtin_error_type(self):
+        """Built-in Pydantic error types are properly reconstructed."""
+        response = _make_mock_response(
+            422,
+            {
+                "detail": [
+                    {
+                        "type": "missing",
+                        "loc": ["body", "inputs"],
+                        "msg": "Field required",
+                        "input": None,
+                    }
+                ]
+            },
+        )
+        tess = _make_tesseract_with_mock_response(response)
+
+        with pytest.raises(ValidationError) as exc_info:
+            tess.apply({"inputs": {}})
+
+        assert exc_info.value.error_count() == 1
+        err = exc_info.value.errors()[0]
+        assert err["loc"] == ("body", "inputs")
+
+    def test_custom_error_type(self):
+        """Custom error types (e.g. from PydanticCustomError) don't crash."""
+        response = _make_mock_response(
+            422,
+            {
+                "detail": [
+                    {
+                        "type": "array_non_numeric",
+                        "loc": ["body", "inputs", "x"],
+                        "msg": "Could not parse value as a numeric array",
+                        "input": "hello",
+                    }
+                ]
+            },
+        )
+        tess = _make_tesseract_with_mock_response(response)
+
+        with pytest.raises(ValidationError) as exc_info:
+            tess.apply({"inputs": {}})
+
+        assert exc_info.value.error_count() == 1
+        err = exc_info.value.errors()[0]
+        assert err["type"] == "array_non_numeric"
+        assert err["loc"] == ("body", "inputs", "x")
+        assert "numeric array" in err["msg"]

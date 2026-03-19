@@ -332,3 +332,22 @@ def test_debug_mode(dummy_tesseract_module, monkeypatch):
     assert "This is a test error" in response.text
     assert "Traceback" in response.text
     assert "/test" in rest_api.openapi()["paths"]
+
+
+def test_array_validation_error_over_http(dummy_tesseract_module):
+    """Non-numeric array inputs return a proper ValidationError via the SDK over HTTP."""
+    from pydantic import ValidationError as PydanticValidationError
+
+    from tesseract_core import Tesseract
+
+    rest_api = create_rest_api(dummy_tesseract_module)
+    test_client = TestClient(rest_api, raise_server_exceptions=False)
+
+    tess = Tesseract.from_url("http://testserver")
+    tess._client._session = test_client
+
+    with pytest.raises(PydanticValidationError) as exc_info:
+        tess.apply({"a": ["not", "numeric"], "b": [1, 2], "s": 1})
+
+    err_types = {e["type"] for e in exc_info.value.errors()}
+    assert "array_non_numeric" in err_types
