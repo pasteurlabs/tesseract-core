@@ -115,9 +115,30 @@ Some setups create networks automatically. For example, the MLflow docker-compos
 
 **A note on `--network=host`:**
 
-`--network=host` makes a container share the host's network stack, which can be a convenient alternative to creating an explicit Docker network. However, it does not work correctly on all platforms. On macOS and Windows, Docker Desktop runs the Docker daemon inside a lightweight VM. The "host" from the daemon's perspective is that VM, not your actual machine, so `--network=host` gives the container access to the VM's network rather than your host's. This means services running on your machine are not reachable via `localhost` from inside the container, and the pattern of calling Tesseracts by host address will not work as expected.
+Setting `--network=host` makes a container share the host's network stack, bypassing network isolation. Whether it works as expected depends on how Docker is running on your system.
 
-At the moment `--network=host` works as intended only on Linux, where the Docker daemon runs directly on the host. Alternatives to Docker Desktop that run the daemon more natively, such as [Colima](https://github.com/abiosoft/colima), may also support host networking correctly. For cross-platform workflows, prefer creating an explicit Docker network as shown above.
+Docker Engine on Linux runs the daemon directly on the host OS, so `--network=host` gives the container access to the host's network namespace, including `localhost`. This is the only platform that supports sharing the full network stack.
+
+Docker Desktop runs the Docker daemon inside a lightweight Linux VM. Here `--network=host` refers to the network stack of the VM, not your actual machine. As a result services on your machine's `localhost` are not reachable from inside the container. Docker Desktop >=4.34 added opt-in support for host networking (Settings > Resources > Network > "Enable host networking"), but only works at the TCP/UDP level and does not give access to the host's network namespace. For more details check out the [Docker documentation](https://docs.docker.com/engine/network/drivers/host/).
+
+To verify whether outbound network access works in your environment, you can use the [`examples/ping`](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/ping) Tesseract, which fetches a URL and reports whether it was reachable:
+
+```bash
+$ tesseract build ./examples/ping
+$ tesseract run ping:latest apply '{"inputs": {"url": "https://pasteurlabs.ai/"}}'
+```
+
+To specifically test if `--network=host` works, start a local webserver and check whether containers can reach it. First set up the server:
+
+```bash
+$ python3 -m http.server 9999
+```
+
+Then, while the server is running, target the ping Tesseract at it:
+
+```bash
+$ tesseract run --network=host ping:latest apply '{"inputs": {"url": "http://localhost:9999"}}'
+```
 
 ## Volume mounts and user permissions
 
