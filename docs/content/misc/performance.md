@@ -5,7 +5,7 @@
 Using Tesseracts adds overhead to your computations through:
 
 1. **Container startup** (~2s) — One-time cost when starting a containerized Tesseract.
-2. **HTTP communication** (~2.5ms) — Request/response handling per call.
+2. **HTTP communication** (~2.5ms locally, up to ~50-100ms+ in cloud setups) — Request/response handling per call.
 3. **Data transfer** — Moving data between client and server (depends on data size and network bandwidth).
 4. **Data serialization** — Encoding arrays for transport (depends on data size and encoding format).
 5. **Framework overhead** (~0.5ms) — Internal machinery, schema processing. Present even in non-containerized mode.
@@ -62,7 +62,7 @@ The guidance chart below puts these numbers in context by showing overhead as a 
 :alt: Tesseract overhead guidance chart
 :width: 95%
 
-Overhead as percentage of computation time, depending on interaction mode and I/O data size, for the benchmark scenario (local Tesseract with fast network and disk).
+Overhead as percentage of computation time, depending on interaction mode and I/O data size, for the benchmark scenario (local Tesseract with fast network and disk). Some lines overlap where modes have similar performance characteristics: non-containerized usage across all data sizes, and CLI usage for all but the largest data sizes.
 ```
 
 (rules-of-thumb-by-use-case)=
@@ -75,10 +75,10 @@ Advice in this section is specific to the benchmarking scenario described above.
 
 | Scenario                                       | Recommendation                                                                                                                                                                                                                                                            |
 | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Tight loops on in-memory data**              | Consider {doc}`non-containerized execution </content/using-tesseracts/use>` to bypass all network/container overhead. At ~0.5ms per call, you can run thousands of iterations per second. Requires all dependencies to be available in the same local Python environment. |
 | **Second-scale workloads on medium-size data** | The sweet spot for containerized HTTP execution, with low overhead benefitting from most Tesseract features.                                                                                                                                                              |
-| **Cheap operations on small data via HTTP**    | HTTP overhead (~2.5ms) can dominate when computation is fast. Batch multiple inputs into a single request.                                                                                                                                                                |
 | **Development and debugging**                  | Use {doc}`non-containerized execution </content/using-tesseracts/use>` or {doc}`tesseract-runtime serve </content/creating-tesseracts/deploy>` for fast iteration, then switch to containerized HTTP for final testing.                                                   |
+| **Cheap operations on small data via HTTP**    | HTTP overhead (~2.5ms) can dominate when computation is fast. Batch multiple inputs into a single request.                                                                                                                                                                |
+| **Tight loops on in-memory data**              | Consider {doc}`non-containerized execution </content/using-tesseracts/use>` to bypass all network/container overhead. At ~0.5ms per call, you can run thousands of iterations per second. Requires all dependencies to be available in the same local Python environment. |
 | **Shell scripts and one-off runs**             | CLI is convenient but has ~2s overhead per invocation from container startup. For multiple calls, keep a container running.                                                                                                                                               |
 | **Long-running operations on large datasets**  | Use CLI with `json+binref` encoding. The ~2s container overhead is negligible for multi-minute runs, and binref allows large arrays to be passed between Tesseracts without expensive copies.                                                                             |
 | **Cheap operations on huge datasets**          | Serialization and transfer will dominate. Try partitioning your workload so each Tesseract call does more compute per byte of I/O, or use binref to avoid redundant data copies between pipeline stages.                                                                  |
@@ -103,6 +103,8 @@ for item in items:
 # ✅ Prefer: Batch into one call
 results = tesseract.apply({"data": np.stack(items)})
 ```
+
+Note that your Tesseract's `apply` function must be written to accept batched inputs (e.g., arrays with a leading batch axis) for this to work.
 
 ### 3. Reuse Tesseract instances
 
@@ -133,6 +135,7 @@ result = tesseract.apply(inputs)
 Enable profiling to see where time is spent:
 
 ```bash
+# Via CLI
 tesseract run myimage apply '{"inputs": {...}}' --profiling
 ```
 
