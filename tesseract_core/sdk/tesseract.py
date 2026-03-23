@@ -20,7 +20,7 @@ import orjson
 import pybase64
 import requests
 from pydantic import BaseModel, TypeAdapter, ValidationError
-from pydantic_core import InitErrorDetails, from_json
+from pydantic_core import InitErrorDetails, PydanticCustomError, from_json
 
 from . import engine
 from .logs import LogStreamer
@@ -712,19 +712,14 @@ class HTTPClient:
             if "detail" in data:
                 errors = []
                 for e in data["detail"]:
-                    ctx = e.get("ctx", {})
-                    if not ctx.get("error") and e.get("msg"):
-                        # Hacky, but msg contains info like "Value error, ...",
-                        # which will be prepended to the message anyway by pydantic.
-                        # This way, we remove whatever is before the first comma.
-                        msg = e["msg"].partition(", ")[2]
-                        ctx["error"] = msg
-
                     error = InitErrorDetails(
-                        type=e["type"],
+                        type=PydanticCustomError(
+                            e["type"],
+                            e.get("msg", ""),
+                            e.get("ctx"),
+                        ),
                         loc=tuple(e["loc"]),
                         input=e.get("input"),
-                        ctx=ctx,
                     )
                     errors.append(error)
 
