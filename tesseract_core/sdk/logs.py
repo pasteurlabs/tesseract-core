@@ -153,7 +153,10 @@ class RichLogger(logging.Handler):
 
         if self._rich_tracebacks and _exc_info:
             self._console.print(
-                Traceback.from_exception(*_exc_info, suppress=self._tracebacks_suppress)
+                Traceback.from_exception(
+                    *_exc_info, suppress=self._tracebacks_suppress
+                ),
+                soft_wrap=True,
             )
 
 
