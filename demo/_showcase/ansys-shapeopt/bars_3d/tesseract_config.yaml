@@ -6,4 +6,4 @@ description: |
   Parameters are expected to define the control points and radii of piecewise linear tubes in 3D space.
 
 build_config:
-  target_platform: "linux/x86_64"
+  target_platform: "native"
