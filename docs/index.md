@@ -146,6 +146,7 @@ content/using-tesseracts/advanced.md
 
 content/misc/differentiable-programming.md
 content/misc/debugging.md
+content/misc/performance.md
 ```
 
 ```{toctree}

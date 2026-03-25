@@ -96,6 +96,8 @@ green "play" button at the top left corner of the "Run and Debug" tab.
 
 For more information on the VSCode debugger, see [this guide](https://code.visualstudio.com/docs/debugtest/debugging).
 
+(profiling)=
+
 ## Profiling
 
 Tesseract includes built-in profiling support to help identify performance bottlenecks. When profiling is enabled, the runtime collects CPU profiling statistics using Python's `cProfile` module and reports them after each endpoint execution.
@@ -124,6 +126,8 @@ tess = Tesseract.from_tesseract_api(
     runtime_config={"profiling": True}
 )
 ```
+
+(understanding-profiling-output)=
 
 ### Understanding profiling output
 

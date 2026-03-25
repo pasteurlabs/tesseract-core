@@ -161,11 +161,16 @@ def generate_guidance_plot(output_path: Path, benchmark_results: dict) -> None:
 
         sizes_arr = np.array(sorted(mode_data.keys()), dtype=float)
         times_arr = np.array([mode_data[int(s)] for s in sizes_arr])
-        slope, intercept = np.polyfit(sizes_arr, times_arr, 1)
+        # Affine model: overhead = intercept + slope * size
+        # Use min observed time as intercept (fixed overhead floor),
+        # then fit slope through the residuals.
+        intercept = float(np.min(times_arr))
+        residuals = times_arr - intercept
+        slope = float(np.dot(sizes_arr, residuals) / np.dot(sizes_arr, sizes_arr))
 
         for size, linestyle in io_sizes:
             array_size = size // 8  # Convert bytes to number of float64 elements
-            overhead_ms = max(0.0, intercept + slope * array_size)
+            overhead_ms = intercept + slope * array_size
 
             data_label = _size_to_label(size)
 
