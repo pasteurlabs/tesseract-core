@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.6.0] - 2026-03-19
+
+### Features
+
+- Add experimental finite difference functionality for auto-generated AD endpoints (#469)
+- Issue mega sprint - allow package_data outside root, cli alias `tesseract-core`, flags to pass arguments to `docker run` and `tesseract runtime`, `json+binref` support in SDK, better support for `tesseract serve --network host` (#491)
+- Add gradient fallback helpers (`tesseract_core.runtime.experimental.vjp_from_jacobian`, ...) for deriving AD endpoints from each other (#511)
+- Add optional metadata field in tesseract_config.yaml (#523)
+
+### Bug Fixes
+
+- Remove fixed 100ms runtime overhead for every call (#485)
+- Reduce performance overhead, especially in array encoding/decoding (#522)
+- Rendering of custom validation errors over HTTP (#534)
+
+### Documentation
+
+- Editing and restructuring of docs, README, and landing page (#510)
+- More restructurings and polish (#529)
+
 ## [1.5.1] - 2026-03-09
 
 ### Bug Fixes
