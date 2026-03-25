@@ -183,7 +183,7 @@ def set_logger(
         class PrefixFormatter(logging.Formatter):
             def format(self, record: Any, *args: Any) -> Any:
                 record.levelprefix = LEVEL_PREFIX.get(record.levelname, "")
-                record.msg = escape(str(record.msg))
+                record.msg = escape(record.msg)
                 return super().format(record, *args)
 
         fmt = "{levelprefix!s}{message!s}"
