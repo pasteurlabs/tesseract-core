@@ -904,7 +904,7 @@ def run_tesseract(
     output_format: Literal["json", "json+base64", "json+binref"] | None = None,
     output_file: str | None = None,
     docker_args: list[str] | None = None,
-    stream_logs: bool | Any = False,
+    stream_logs: bool | Callable[[str], None] = False,
 ) -> tuple[str, str]:
     """Start a Tesseract and execute a given command.
 
@@ -928,7 +928,7 @@ def run_tesseract(
         output_file: If specified, the output will be written to this file within output_path
             instead of stdout.
         docker_args: Additional arguments to pass to the container runtime (e.g., Docker).
-        stream_logs: If truthy, stream logs in real-time. Can be True (streams to stderr)
+        stream_logs: If set, stream logs in real-time. Can be True (streams to stderr)
             or a callable that accepts a string (e.g., logger.info).
 
     Returns:
