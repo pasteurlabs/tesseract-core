@@ -207,17 +207,26 @@ class Images:
             text=True,
         )
 
-        # docker inspect can fail when Docker Desktop is in Resource Saver
+        # `docker inspect` can fail when Docker Desktop is in Resource Saver
         # mode, which caches metadata and may return stale results. Running a
         # container reliably wakes the Docker VM, so we attempt a no-op run
         # and retry the inspect.
         if inspect_result.returncode != 0:
             logger.debug(
-                f"docker inspect failed for {image_id_or_name}, "
+                f"`docker inspect` failed for {image_id_or_name}, "
                 "attempting to wake Docker Desktop and retrying."
             )
             wake_result = subprocess.run(
-                [*docker, "run", "--rm", "--entrypoint", "true", str(image_id_or_name)],
+                [
+                    *docker,
+                    "run",
+                    "--rm",
+                    "--entrypoint",
+                    "true",
+                    "--pull",
+                    "never",
+                    str(image_id_or_name),
+                ],
                 capture_output=True,
             )
             if wake_result.returncode != 0:
