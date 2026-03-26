@@ -3,6 +3,7 @@
 
 """End-to-end tests for multi-Tesseract workflows."""
 
+import gc
 import json
 import os
 import subprocess
@@ -11,8 +12,6 @@ from common import build_tesseract, image_exists
 
 from tesseract_core.sdk.cli import app
 from tesseract_core.sdk.config import get_config
-
-NUM_IMAGE_REF_ITERATIONS = 3
 
 
 def test_multi_helloworld_endtoend(
@@ -236,60 +235,24 @@ def test_tesseractreference_endtoend(
 
 def test_tesseractreference_image_does_not_leak_containers(
     docker_client,
-    unit_tesseracts_parent_dir,
-    dummy_image_name,
-    docker_cleanup,
+    built_image_name,
 ):
-    """Tesseract.serve() registers an atexit handler via atexit.register(self.teardown).
+    """TesseractReference type="image" must not leak containers after the reference is dropped."""
+    from pydantic import TypeAdapter
 
-    This bound method holds a strong reference to the Tesseract object, preventing it
-    from being garbage collected. In a loop, each iteration's Tesseract (and its
-    container) stays alive until process exit, accumulating containers.
+    from tesseract_core.runtime.experimental import TesseractReference
 
-    This matters for TesseractReference type="image", which calls
-    Tesseract.from_image().serve() during Pydantic validation. In an optimization loop,
-    a new container is spawned per iteration and none are collected until the process ends.
-    """
-    from tesseract_core import Tesseract
-
-    # Build helloworld image
-    helloworld_img_name = build_tesseract(
-        docker_client,
-        unit_tesseracts_parent_dir / "helloworld",
-        dummy_image_name + "_helloworld",
-        tag="sometag",
-    )
-    docker_cleanup["images"].append(helloworld_img_name)
+    ta = TypeAdapter(TesseractReference)
 
     containers_before = set(c.id for c in docker_client.containers.list())
 
-    # Simulate what happens in an optimization loop: each iteration creates
-    # a Tesseract from image, serves it, uses it, and should clean it up.
-    leaked_containers = []
-    for i in range(NUM_IMAGE_REF_ITERATIONS):
-        tess = Tesseract.from_image(helloworld_img_name)
-        tess.serve()
+    ref = ta.validate_python({"type": "image", "ref": built_image_name})
+    result = ref.apply({"a": [1.0, 2.0], "b": [3.0, 4.0]})
+    assert "result" in result
 
-        # Use it
-        result = tess.apply({"name": f"iteration_{i}"})
-        assert "greeting" in result
-
-        # A well-behaved API should clean up after itself, but currently
-        # there's no automatic teardown. Track what was created.
-        leaked_containers.append(tess._serve_context["container_name"])
+    del ref
+    gc.collect()
 
     containers_after = set(c.id for c in docker_client.containers.list())
     leaked = containers_after - containers_before
-
-    # Clean up for test hygiene
-    for name in leaked_containers:
-        try:
-            docker_client.containers.get(name).remove(force=True)
-        except Exception:
-            pass
-
-    assert len(leaked) == 0, (
-        f"Leaked {len(leaked)} container(s) across {NUM_IMAGE_REF_ITERATIONS} "
-        f"iterations. Each TesseractReference type='image' spawns a container "
-        f"that is never cleaned up within the same process."
-    )
+    assert len(leaked) == 0, f"Leaked {len(leaked)} container(s)"

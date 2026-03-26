@@ -104,6 +104,21 @@ def test_Tesseract_from_image(mock_serving, mock_clients):
         t.teardown()
 
 
+def test_del_tesseract_triggers_teardown(mock_serving):
+    """Deleting a served Tesseract must tear down its container via weakref.finalize."""
+    import gc
+
+    teardown_mock = mock_serving["teardown_mock"]
+
+    t = Tesseract.from_image("sometesseract:0.2.3")
+    t.serve()
+    assert teardown_mock.call_count == 0
+
+    del t
+    gc.collect()
+    assert teardown_mock.call_count == 1
+
+
 def test_Tesseract_schema_method(mocker, mock_serving):
     mocked_run = mocker.patch("tesseract_core.sdk.tesseract.HTTPClient.run_tesseract")
     mocked_run.return_value = {"#defs": {"some": "stuff"}}
@@ -499,12 +514,11 @@ class TestHTTPClientValidationErrors:
 
 
 def test_stale_keepalive_connection_is_handled(free_port):
-    """When uvicorn closes an idle keep-alive connection, the next request on the same session must succeed.
+    """HTTPClient retries once when a stale keep-alive connection causes ConnectionError.
 
-    This is a deterministic reproduction of a race condition: we set timeout_keep_alive=0 so the server
-    closes connections immediately, then monkeypatch urllib3's is_connected to return True
-    (simulating the check passing just before the server's FIN arrives). Without proper handling,
-    requests.Session raises ConnectionError on the stale socket.
+    This is a deterministic reproduction of a race condition: we set timeout_keep_alive=0
+    so the server closes connections immediately, then monkeypatch urllib3's is_connected
+    to return True (simulating the check passing just before the server's FIN arrives).
     """
     import threading
     import time
@@ -512,6 +526,8 @@ def test_stale_keepalive_connection_is_handled(free_port):
     import uvicorn
     from fastapi import FastAPI
     from urllib3.connection import HTTPConnection
+
+    from tesseract_core.sdk.tesseract import HTTPClient
 
     test_app = FastAPI()
 
@@ -525,14 +541,12 @@ def test_stale_keepalive_connection_is_handled(free_port):
             host="127.0.0.1",
             port=free_port,
             log_level="error",
-            # Close idle connections immediately to guarantee staleness
             timeout_keep_alive=0,
         )
     )
     server_thread = threading.Thread(target=server.run, daemon=True)
     server_thread.start()
 
-    # Wait for server to be ready
     url = f"http://127.0.0.1:{free_port}"
     for _ in range(50):
         try:
@@ -542,22 +556,22 @@ def test_stale_keepalive_connection_is_handled(free_port):
             time.sleep(0.1)
 
     try:
-        session = requests.Session()
-        r = session.get(f"{url}/health", timeout=5)
-        assert r.status_code == 200
+        client = HTTPClient(url)
 
-        # Server has closed the connection (timeout_keep_alive=0).
-        # Wait a moment to ensure the FIN has been sent.
+        # First request establishes a keep-alive connection
+        result = client._request("health")
+        assert result == {"status": "ok"}
+
+        # Server has closed the connection (timeout_keep_alive=0)
         time.sleep(0.1)
 
         # Simulate the race: make urllib3 think the connection is still alive
-        # so it tries to reuse the dead socket instead of opening a new one.
         original_prop = HTTPConnection.is_connected.fget
         HTTPConnection.is_connected = property(lambda self: True)
         try:
-            # This must not raise ConnectionError
-            r = session.get(f"{url}/health", timeout=5)
-            assert r.status_code == 200
+            # HTTPClient must retry internally, not raise ConnectionError
+            result = client._request("health")
+            assert result == {"status": "ok"}
         finally:
             HTTPConnection.is_connected = property(original_prop)
     finally:
