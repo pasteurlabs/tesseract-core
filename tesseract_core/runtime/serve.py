@@ -138,8 +138,7 @@ def serve(host: str, port: int, num_workers: int) -> None:
         host=host,
         port=port,
         workers=num_workers,
-        # Increase from uvicorn's default of 5s to avoid a race condition
-        # where requests.Session reuses a connection that the server has
-        # just closed, causing sporadic ConnectionErrors.
-        timeout_keep_alive=300,
+        # Increase from uvicorn's default of 5s to accomodate for
+        # longer-running endpoints and avoid unnecessary timeouts in those cases.
+        timeout_keep_alive=60,
     )

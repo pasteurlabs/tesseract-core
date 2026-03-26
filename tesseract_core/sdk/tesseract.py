@@ -321,11 +321,8 @@ class Tesseract:
             f"http://{host_ip}:{container.host_port}",
             output_path=Path(output_path) if output_path else None,
         )
-        # Use weakref.finalize instead of atexit.register(self.teardown) so
-        # that the reference to self doesn't prevent garbage collection.
-        # The atexit handler kept Tesseract objects alive until process exit,
-        # causing container leaks in loops (e.g., optimization with
-        # TesseractReference type="image").
+        # Ensure that the Tesseract is torn down once the object is garbage collected,
+        # to avoid orphaned containers if the user forgets to call .teardown()
         self._atexit_finalizer = weakref.finalize(self, engine.teardown, container_name)
 
     def teardown(self) -> None:
