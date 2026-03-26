@@ -2,12 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
-import atexit
 import sys
 import tempfile
 import traceback
 import uuid
 import warnings
+import weakref
 from collections.abc import Callable, Mapping, Sequence
 from functools import cached_property, wraps
 from pathlib import Path
@@ -321,7 +321,12 @@ class Tesseract:
             f"http://{host_ip}:{container.host_port}",
             output_path=Path(output_path) if output_path else None,
         )
-        atexit.register(self.teardown)
+        # Use weakref.finalize instead of atexit.register(self.teardown) so
+        # that the reference to self doesn't prevent garbage collection.
+        # The atexit handler kept Tesseract objects alive until process exit,
+        # causing container leaks in loops (e.g., optimization with
+        # TesseractReference type="image").
+        self._atexit_finalizer = weakref.finalize(self, engine.teardown, container_name)
 
     def teardown(self) -> None:
         """Teardown the Tesseract.
@@ -334,15 +339,7 @@ class Tesseract:
         engine.teardown(self._serve_context["container_name"])
         self._client = None
         self._serve_context = None
-        atexit.unregister(self.teardown)
-
-    def __del__(self) -> None:
-        """Destructor for the Tesseract class.
-
-        This will teardown the Tesseract if it is being served.
-        """
-        if self._serve_context is not None:
-            self.teardown()
+        self._atexit_finalizer.detach()
 
     @cached_property
     @requires_client
@@ -698,9 +695,19 @@ class HTTPClient:
             encoded_payload = None
 
         params = {"run_id": run_id} if run_id is not None else {}
-        response = self._session.request(
-            method=method, url=url, data=orjson.dumps(encoded_payload), params=params
-        )
+        data = orjson.dumps(encoded_payload)
+        try:
+            response = self._session.request(
+                method=method, url=url, data=data, params=params
+            )
+        except requests.ConnectionError:
+            # Retry once on stale keep-alive connections. There is a race
+            # between urllib3's is_connection_dropped check and the server
+            # closing idle connections (uvicorn timeout_keep_alive) that
+            # can cause ConnectionError on an otherwise healthy server.
+            response = self._session.request(
+                method=method, url=url, data=data, params=params
+            )
 
         if response.status_code == requests.codes.unprocessable_entity:
             # Try and raise a more helpful error if the response is a Pydantic error

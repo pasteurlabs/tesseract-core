@@ -30,6 +30,7 @@ from .docker_client import (
     Container,
     ContainerError,
     Image,
+    NotFound,
     build_docker_image,
     is_podman,
 )
@@ -545,7 +546,7 @@ def teardown(
         try:
             docker_client.containers.get(container_id)
             return True
-        except ContainerError:
+        except (ContainerError, NotFound):
             return False
 
     for container_id in container_ids:

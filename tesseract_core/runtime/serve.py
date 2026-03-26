@@ -134,5 +134,12 @@ def serve(host: str, port: int, num_workers: int) -> None:
         debugpy.listen(("0.0.0.0", 5678))
 
     uvicorn.run(
-        "tesseract_core.runtime.app_http:app", host=host, port=port, workers=num_workers
+        "tesseract_core.runtime.app_http:app",
+        host=host,
+        port=port,
+        workers=num_workers,
+        # Increase from uvicorn's default of 5s to avoid a race condition
+        # where requests.Session reuses a connection that the server has
+        # just closed, causing sporadic ConnectionErrors.
+        timeout_keep_alive=300,
     )
