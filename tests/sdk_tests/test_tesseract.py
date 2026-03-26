@@ -496,3 +496,70 @@ class TestHTTPClientValidationErrors:
         err = exc_info.value.errors()[0]
         assert err["type"] == "array_decode_error"
         assert err["loc"] == ("body", "inputs", "a")
+
+
+def test_stale_keepalive_connection_is_handled(free_port):
+    """When uvicorn closes an idle keep-alive connection, the next request on the same session must succeed.
+
+    This is a deterministic reproduction of a race condition: we set timeout_keep_alive=0 so the server
+    closes connections immediately, then monkeypatch urllib3's is_connected to return True
+    (simulating the check passing just before the server's FIN arrives). Without proper handling,
+    requests.Session raises ConnectionError on the stale socket.
+    """
+    import threading
+    import time
+
+    import uvicorn
+    from fastapi import FastAPI
+    from urllib3.connection import HTTPConnection
+
+    test_app = FastAPI()
+
+    @test_app.get("/health")
+    def health():
+        return {"status": "ok"}
+
+    server = uvicorn.Server(
+        uvicorn.Config(
+            test_app,
+            host="127.0.0.1",
+            port=free_port,
+            log_level="error",
+            # Close idle connections immediately to guarantee staleness
+            timeout_keep_alive=0,
+        )
+    )
+    server_thread = threading.Thread(target=server.run, daemon=True)
+    server_thread.start()
+
+    # Wait for server to be ready
+    url = f"http://127.0.0.1:{free_port}"
+    for _ in range(50):
+        try:
+            requests.get(f"{url}/health", timeout=1)
+            break
+        except requests.ConnectionError:
+            time.sleep(0.1)
+
+    try:
+        session = requests.Session()
+        r = session.get(f"{url}/health", timeout=5)
+        assert r.status_code == 200
+
+        # Server has closed the connection (timeout_keep_alive=0).
+        # Wait a moment to ensure the FIN has been sent.
+        time.sleep(0.1)
+
+        # Simulate the race: make urllib3 think the connection is still alive
+        # so it tries to reuse the dead socket instead of opening a new one.
+        original_prop = HTTPConnection.is_connected.fget
+        HTTPConnection.is_connected = property(lambda self: True)
+        try:
+            # This must not raise ConnectionError
+            r = session.get(f"{url}/health", timeout=5)
+            assert r.status_code == 200
+        finally:
+            HTTPConnection.is_connected = property(original_prop)
+    finally:
+        server.should_exit = True
+        server_thread.join(timeout=5)
