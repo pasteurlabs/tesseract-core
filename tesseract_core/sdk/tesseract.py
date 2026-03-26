@@ -321,9 +321,20 @@ class Tesseract:
             f"http://{host_ip}:{container.host_port}",
             output_path=Path(output_path) if output_path else None,
         )
+
         # Ensure that the Tesseract is torn down once the object is garbage collected,
         # to avoid orphaned containers if the user forgets to call .teardown()
-        self._atexit_finalizer = weakref.finalize(self, engine.teardown, container_name)
+        def _silent_teardown(name: str) -> None:
+            from tesseract_core.sdk.docker_client import NotFound
+
+            try:
+                engine.teardown(name)
+            except NotFound:
+                pass
+
+        self._atexit_finalizer = weakref.finalize(
+            self, _silent_teardown, container_name
+        )
 
     def teardown(self) -> None:
         """Teardown the Tesseract.

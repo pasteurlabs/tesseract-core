@@ -28,9 +28,7 @@ from .docker_client import (
     APIError,
     CLIDockerClient,
     Container,
-    ContainerError,
     Image,
-    NotFound,
     build_docker_image,
     is_podman,
 )
@@ -542,25 +540,16 @@ def teardown(
     if isinstance(container_ids, str):
         container_ids = [container_ids]
 
-    def _is_container_id(container_id: str) -> bool:
-        try:
-            docker_client.containers.get(container_id)
-            return True
-        except (ContainerError, NotFound):
-            return False
+    # Validate all container IDs exist before removing any
+    containers = {
+        # containers.get raises NotFound if any container ID is invalid, preventing partial teardown
+        cid: docker_client.containers.get(cid)
+        for cid in container_ids
+    }
 
-    for container_id in container_ids:
-        if _is_container_id(container_id):
-            container = docker_client.containers.get(container_id)
-            container.remove(force=True)
-            logger.info(
-                f"Tesseract is shutdown for Docker container ID: {container_id}"
-            )
-        else:
-            raise ValueError(
-                f"A Docker container with ID {container_id} cannot be found, "
-                "use `tesseract ps` to find container ID"
-            )
+    for container_id, container in containers.items():
+        container.remove(force=True)
+        logger.info(f"Tesseract is shutdown for Docker container ID: {container_id}")
 
 
 def get_tesseract_containers() -> list[Container]:
