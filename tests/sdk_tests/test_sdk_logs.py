@@ -5,9 +5,10 @@ import io
 import logging
 import sys
 
+import pytest
 from rich.console import Console
 
-from tesseract_core.sdk.logs import RichLogger
+from tesseract_core.sdk.logs import RichLogger, set_logger
 
 
 def test_rich_logger_traceback_not_truncated_when_piped():
@@ -46,3 +47,10 @@ def test_rich_logger_traceback_not_truncated_when_piped():
     assert len(matching_lines) == 1, (
         f"Expected the full error message on one line, but got:\n{output}"
     )
+
+
+@pytest.mark.parametrize("msg", [{}, {"key": "value"}, [1, 2, 3], 42])
+def test_logger_accepts_nonstring_messages(msg):
+    logger = set_logger("INFO", rich_format=True)
+    # Should not raise — vanilla logging accepts any object as msg
+    logger.info(msg)
