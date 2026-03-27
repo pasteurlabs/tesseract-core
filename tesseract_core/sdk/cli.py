@@ -845,7 +845,10 @@ def teardown(
             f"Internal Docker error occurred while tearing down Tesseracts: {ex}"
         ) from ex
     except NotFound as ex:
-        raise UserError(f"Tesseract Project ID not found: {ex}") from ex
+        raise UserError(
+            f"Tesseract container not found: {ex}\n"
+            "Use `tesseract ps` to list running containers."
+        ) from ex
 
 
 def _sanitize_error_output(error_output: str, tesseract_image: str) -> str:

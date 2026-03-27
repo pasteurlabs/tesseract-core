@@ -134,5 +134,12 @@ def serve(host: str, port: int, num_workers: int) -> None:
         debugpy.listen(("0.0.0.0", 5678))
 
     uvicorn.run(
-        "tesseract_core.runtime.app_http:app", host=host, port=port, workers=num_workers
+        "tesseract_core.runtime.app_http:app",
+        host=host,
+        port=port,
+        workers=num_workers,
+        # Increase from uvicorn's default of 5s to account for the fact that Tesseract endpoints
+        # tend to run longer than your average HTTP request. A higher value means that the server
+        # will wait longer before closing idle connections, so we can avoid the overhead of reconnecting.
+        timeout_keep_alive=60,
     )
