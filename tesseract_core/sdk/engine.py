@@ -431,6 +431,7 @@ def build_tesseract(
     inject_ssh: bool = False,
     config_override: dict[tuple[str, ...], Any] | None = None,
     generate_only: bool = False,
+    stream_logs: Callable[[str], None] | None = None,
 ) -> Image | Path:
     """Build a new Tesseract from a context directory.
 
@@ -444,6 +445,7 @@ def build_tesseract(
         inject_ssh: whether or not to forward SSH agent when building the image.
         config_override: overrides for configuration options in the Tesseract.
         generate_only: only generate the build context but do not build the image.
+        stream_logs: if provided, stream build output lines to this callable in real-time.
 
     Returns:
         Image object representing the built Tesseract image,
@@ -497,6 +499,7 @@ def build_tesseract(
             dockerfile=context_dir / "Dockerfile",
             inject_ssh=inject_ssh,
             print_and_exit=generate_only,
+            stream_logs=stream_logs,
         )
     finally:
         if not keep_build_dir:

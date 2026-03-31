@@ -344,11 +344,23 @@ def build_image(
                 inject_ssh=forward_ssh_agent,
                 config_override=parsed_config_override,
                 generate_only=generate_only,
+                stream_logs=logger.debug,
             )
     except BuildError as e:
-        # raise from None to Avoid overly long tracebacks,
-        # all the information is in the printed logs / exception str already
-        raise UserError(f"Error building Tesseract: {e}") from None
+        loglevel = logging.getLogger("tesseract").handlers[0].level
+        error_string = "Error building Tesseract."
+        if loglevel <= logging.DEBUG:
+            # Build logs already streamed via logger.debug
+            pass
+        elif loglevel <= logging.ERROR:
+            # Re-emit build log at error level so it's visible
+            logger.error("\n".join(e.build_log))
+        else:
+            error_string = (
+                "Error building Tesseract. "
+                "Run with `--loglevel debug` for more details."
+            )
+        raise UserError(error_string) from None
     except APIError as e:
         raise UserError(f"Docker server error: {e}") from e
     except TypeError as e:
@@ -1209,13 +1221,13 @@ def run_container(
             error_string = f"Error running Tesseract '{tesseract_image}' \n\n Error: Unimplemented command '{cmd}'.  "
         else:
             loglevel = logging.getLogger("tesseract").handlers[0].level
+            error_string = "Error running Tesseract."
             if loglevel <= logging.INFO:
                 # Errors already streamed via logger.info, don't repeat them
-                error_string = "Error running Tesseract."
-            elif loglevel == logging.WARNING:
-                # Re-emit errors at warning level so they're visible
-                logger.warning(msg)
-                error_string = "Error running Tesseract."
+                pass
+            elif loglevel <= logging.ERROR:
+                # Re-emit errors at error level so they're visible
+                logger.error(msg)
             else:
                 # Logs are squelched, tell user how to see them
                 error_string = (

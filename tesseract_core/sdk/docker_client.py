@@ -331,6 +331,7 @@ class Images:
         tags: list_[str],  # noqa: UP006
         dockerfile: str | Path,
         ssh: str | None = None,
+        stream_logs: Any = None,
     ) -> Image:
         """Build a Docker image from a Dockerfile using BuildKit.
 
@@ -358,7 +359,9 @@ class Images:
             ssh=ssh,
         )
 
-        returncode, stdout_data, _ = _run_process(build_cmd, merge_stderr=True)
+        returncode, stdout_data, _ = _run_process(
+            build_cmd, merge_stderr=True, stream_stdout=stream_logs
+        )
 
         if returncode != 0:
             logs = stdout_data.decode("utf-8", errors="replace").splitlines()
@@ -1146,6 +1149,7 @@ def build_docker_image(
     dockerfile: str | Path,
     inject_ssh: bool = False,
     print_and_exit: bool = False,
+    stream_logs: Any = None,
 ) -> Image | None:
     """Build a Docker image from a Dockerfile using BuildKit.
 
@@ -1155,6 +1159,7 @@ def build_docker_image(
         dockerfile: path within the build context to the Dockerfile.
         inject_ssh: If True, inject SSH keys into the build.
         print_and_exit: If True, log the build command and exit without building.
+        stream_logs: If provided, stream build output lines to this callable in real-time.
 
     Returns:
         Built Image object if print_and_exit is False, otherwise None.
@@ -1183,4 +1188,4 @@ def build_docker_image(
         )
         return None
 
-    return client.images.buildx(**build_args)
+    return client.images.buildx(**build_args, stream_logs=stream_logs)
