@@ -31,7 +31,7 @@ from .api_parse import (
     TesseractBuildConfig,
     TesseractConfig,
     ValidationError,
-    get_non_base_fields_in_tesseract_config,
+    get_submodel_fields_in_tesseract_config,
 )
 from .config import get_config
 from .docker_client import (
@@ -108,8 +108,8 @@ POSSIBLE_CMDS.update(
 
 # All fields in TesseractConfig and TesseractBuildConfig for config override
 POSSIBLE_KEYPATHS = TesseractConfig.model_fields.keys()
-# Check that the only field that has nested fields is build_config
-assert len(get_non_base_fields_in_tesseract_config()) == 1
+# Check that the only field that has nested models is build_config
+assert len(get_submodel_fields_in_tesseract_config()) == 1
 POSSIBLE_BUILD_CONFIGS = TesseractBuildConfig.model_fields.keys()
 
 # Traverse templates folder to seach for recipes
@@ -844,7 +844,10 @@ def teardown(
             f"Internal Docker error occurred while tearing down Tesseracts: {ex}"
         ) from ex
     except NotFound as ex:
-        raise UserError(f"Tesseract Project ID not found: {ex}") from ex
+        raise UserError(
+            f"Tesseract container not found: {ex}\n"
+            "Use `tesseract ps` to list running containers."
+        ) from ex
 
 
 def _sanitize_error_output(error_output: str, tesseract_image: str) -> str:

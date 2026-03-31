@@ -20,7 +20,7 @@ from .logs import get_logger, is_tracing_enabled
 from .schema_generation import (
     create_abstract_eval_schema,
     create_apply_schema,
-    create_autodiff_schema,
+    create_gradient_schema,
 )
 
 
@@ -224,6 +224,9 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
         """Apply the Tesseract to the input data."""
         _trace("apply() called with inputs:", payload.inputs)
         out = api_module.apply(payload.inputs)
+        # NOTE: If the output schema has custom validators, they are effectively triggered
+        # twice (once in the user code, once in the endpoint wrapper). This is not ideal but
+        # should be the lesser evil to ensure validation of the final output.
         if isinstance(out, api_module.OutputSchema):
             out = out.model_dump()
         result = ApplyOutputSchema.model_validate(out)
@@ -233,8 +236,8 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
     endpoints.append(apply)
 
     if "jacobian" in supported_functions:
-        JacobianInputSchema, JacobianOutputSchema = create_autodiff_schema(
-            api_module.InputSchema, api_module.OutputSchema, ad_flavor="jacobian"
+        JacobianInputSchema, JacobianOutputSchema = create_gradient_schema(
+            api_module.InputSchema, api_module.OutputSchema, gradient_type="jacobian"
         )
 
         @assemble_docstring(api_module.jacobian)
@@ -258,8 +261,8 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
         endpoints.append(jacobian)
 
     if "jacobian_vector_product" in supported_functions:
-        JVPInputSchema, JVPOutputSchema = create_autodiff_schema(
-            api_module.InputSchema, api_module.OutputSchema, ad_flavor="jvp"
+        JVPInputSchema, JVPOutputSchema = create_gradient_schema(
+            api_module.InputSchema, api_module.OutputSchema, gradient_type="jvp"
         )
 
         @assemble_docstring(api_module.jacobian_vector_product)
@@ -280,8 +283,8 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
         endpoints.append(jacobian_vector_product)
 
     if "vector_jacobian_product" in supported_functions:
-        VJPInputSchema, VJPOutputSchema = create_autodiff_schema(
-            api_module.InputSchema, api_module.OutputSchema, ad_flavor="vjp"
+        VJPInputSchema, VJPOutputSchema = create_gradient_schema(
+            api_module.InputSchema, api_module.OutputSchema, gradient_type="vjp"
         )
 
         @assemble_docstring(api_module.vector_jacobian_product)

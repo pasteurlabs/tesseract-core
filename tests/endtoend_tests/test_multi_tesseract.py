@@ -3,6 +3,7 @@
 
 """End-to-end tests for multi-Tesseract workflows."""
 
+import gc
 import json
 import os
 import subprocess
@@ -230,3 +231,28 @@ def test_tesseractreference_endtoend(
     assert result.returncode == 0, result.stderr
     output_data = json.loads(result.stdout)
     assert output_data["result"] == expected_result
+
+
+def test_tesseractreference_image_does_not_leak_containers(
+    docker_client,
+    built_image_name,
+):
+    """TesseractReference type="image" must not leak containers after the reference is dropped."""
+    from pydantic import TypeAdapter
+
+    from tesseract_core.runtime.experimental import TesseractReference
+
+    ta = TypeAdapter(TesseractReference)
+
+    containers_before = set(c.id for c in docker_client.containers.list())
+
+    ref = ta.validate_python({"type": "image", "ref": built_image_name})
+    result = ref.apply({"a": [1.0, 2.0], "b": [3.0, 4.0]})
+    assert "result" in result
+
+    del ref
+    gc.collect()
+
+    containers_after = set(c.id for c in docker_client.containers.list())
+    leaked = containers_after - containers_before
+    assert len(leaked) == 0, f"Leaked {len(leaked)} container(s)"

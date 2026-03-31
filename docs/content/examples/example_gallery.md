@@ -16,7 +16,7 @@ building-blocks/localpackage.md
 building-blocks/dataloader.md
 building-blocks/filereference.md
 building-blocks/finitediff.md
-building-blocks/ad-fallbacks.md
+building-blocks/gradient-fallbacks.md
 ```
 
 This is a gallery of Tesseract examples that end at the `build` stage of the Tesseract lifecycle, and that can act as starting points to define and build your own Tesseracts.
@@ -40,7 +40,7 @@ A simple "hello world" Tesseract.
 :::{grid-item-card} VectorAdd
 :link: building-blocks/vectoradd.html
 
-Tesseract performing vector addition. Highlighting simple array operations and how to use the Tesseract Python API.
+Tesseract performing vector addition. Highlighting simple array operations and how to use the Tesseract Python SDK.
 
 [View on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/vectoradd)
 :::
@@ -99,18 +99,20 @@ To be used for Tesseracts with large inputs and/or outputs.
 :::{grid-item-card} Finite Difference Gradients
 :link: building-blocks/finitediff.html
 
-     Make any Tesseract differentiable without implementing analytical gradients.
-     Useful for prototyping and complex nested schemas. *(Experimental)*
+Make any Tesseract differentiable without implementing analytical gradients.
+Useful for prototyping and complex nested schemas. _(Experimental)_
+
+[View on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/meshstats_finitediff)
 
 :::
 
-:::{grid-item-card} AD Endpoint Derivation Fallbacks
-:link: building-blocks/ad-fallbacks.html
+:::{grid-item-card} Gradient Endpoint Derivation Fallbacks
+:link: building-blocks/gradient-fallbacks.html
 
-     Derive missing autodiff endpoints (JVP, VJP, Jacobian) from ones you have
-     already implemented. *(Experimental)*
+Derive missing gradient endpoints (JVP, VJP, Jacobian) from ones you have
+already implemented. _(Experimental)_
 
-[View on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/univariate_adfallbacks)
+[View on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/univariate_gradient_fallbacks)
 :::
 
 ::::

@@ -398,6 +398,19 @@ def test_volume_uid_permissions(
     assert stdout == b"hello\n"
 
 
+def test_get_image_not_found(docker_client):
+    """Test that getting a nonexistent image raises ImageNotFound.
+
+    This exercises the wakeup-and-retry logic: both `docker inspect` and the
+    no-op `docker run` fail for a genuinely missing image, so we get a clean
+    ImageNotFound rather than hanging or retrying forever.
+    """
+    with pytest.raises(ImageNotFound, match="not found"):
+        docker_client.images.get(
+            "this-image-does-not-exist:never", tesseract_only=False
+        )
+
+
 def test_is_podman():
     """Test is_podman function.
 

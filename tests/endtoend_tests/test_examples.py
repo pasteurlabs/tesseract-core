@@ -89,7 +89,7 @@ TEST_CASES = {
     "vectoradd_jax": Config(test_with_random_inputs=True, check_gradients=True),
     "vectoradd_torch": Config(test_with_random_inputs=True),
     "univariate": Config(test_with_random_inputs=True, check_gradients=True),
-    "univariate_adfallbacks": Config(
+    "univariate_gradient_fallbacks": Config(
         test_with_random_inputs=True, check_gradients=True
     ),
     "package_data": Config(test_with_random_inputs=True),

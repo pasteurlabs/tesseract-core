@@ -8,6 +8,9 @@ End-to-end examples that show Tesseracts in action — from optimization workflo
 
 data-assimilation-4dvar.ipynb
 lorenz_tesseract.md
+JAX Rosenbrock Minimization <https://si-tesseract.discourse.group/t/jax-based-rosenbrock-function-minimization/48>
+PyTorch Rosenbrock Minimization <https://si-tesseract.discourse.group/t/pytorch-based-rosenbrock-function-minimization/44>
+JAX RBF Fitting <https://si-tesseract.discourse.group/t/jax-auto-diff-templates-gaussian-radial-basis-function-fitting/51>
 ```
 
 ```{tip}

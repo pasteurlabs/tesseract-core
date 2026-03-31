@@ -3,51 +3,53 @@
 ## Basic installation
 
 ```{note}
-Before proceeding, make sure you have a working installation of Docker ([Docker Desktop](https://www.docker.com/products/docker-desktop/) or [Docker Engine](#installation-docker)) and a modern Python installation (Python 3.10+), ideally in a [virtual environment](https://packaging.python.org/en/latest/guides/installing-using-pip-and-virtual-environments/).
+Before proceeding, make sure you have:
+- A working installation of Docker ([Docker Desktop](https://www.docker.com/products/docker-desktop/) or [Docker Engine](#installation-docker))
+- Python 3.10+, ideally in a [virtual environment](https://packaging.python.org/en/latest/guides/installing-using-pip-and-virtual-environments/)
 ```
 
-The simplest way to install Tesseract Core is via `pip`:
+Install Tesseract Core via `pip`:
 
 ```bash
 $ pip install tesseract-core
 ```
 
-Then, verify everything is working as intended:
+Then, verify the installation:
 
 ```bash
 $ tesseract list
 ```
 
-If the output is an empty table, that's okay! The CLI is functioning correctly, there are simply no components available yet.
+If the output is an empty table, that's expected — the CLI is working correctly, you just don't have any Tesseracts built yet.
 
 (installation-docker)=
 
 ## Installing Docker
 
-[Docker Desktop](https://www.docker.com/products/docker-desktop/) ships with everything you need to run Tesseract Core, including the Docker Engine CLI, Docker Compose, and Docker Buildx. It also includes a GUI for managing containers and images.
-It is available for Windows, macOS, and Linux for Debian and Fedora based distros.
+[Docker Desktop](https://www.docker.com/products/docker-desktop/) ships with everything you need, including the Docker Engine CLI, Docker Compose, and Docker Buildx.
+It is available for Windows, macOS, and Linux (Debian- and Fedora-based distros).
 
-If your system is not supported by Docker Desktop, or you prefer a more minimal setup, you will need to install the [`docker` engine CLI](https://docs.docker.com/engine/install/) together with the following plugin:
+If your system is not supported by Docker Desktop, or you prefer a more minimal setup, install the [`docker` engine CLI](https://docs.docker.com/engine/install/) together with [`docker-buildx`](https://github.com/docker/buildx).
 
-1. [`docker-buildx`](https://github.com/docker/buildx)
+### Running Docker without `sudo`
 
-To use Tesseract without `sudo`, you will need to add your user to the `docker` group. See [Linux post-installation steps for Docker Engine > Manage Docker as a non-root user](https://docs.docker.com/engine/install/linux-postinstall/#manage-docker-as-a-non-root-user), or run:
+To use Tesseract without `sudo`, add your user to the `docker` group (see [Docker post-install docs](https://docs.docker.com/engine/install/linux-postinstall/#manage-docker-as-a-non-root-user)):
 
 ```bash
 $ sudo usermod -aG docker $USER
 ```
 
-Then, log out and back in to apply the changes.
+Then log out and back in to apply the changes.
 
 ```{warning}
-Using `sudo tesseract` may bypass active virtual environments and shadow the `tesseract` command with [conflicting executables](#exe-conflicts). To avoid this, make sure you're using the correct `tesseract` executable, or add your user to the `docker` group (and omit `sudo`).
+Using `sudo tesseract` may bypass your virtual environment and shadow the `tesseract` command with [conflicting executables](#exe-conflicts). Instead, add your user to the `docker` group and omit `sudo`.
 ```
 
 (installation-podman)=
 
-## Using alternative container engines (such as podman)
+## Using alternative container engines
 
-The choice of container engine can be customised with the environment variable `TESSERACT_DOCKER_EXECUTABLE`. Tesseracts currently support container engines that have API's consistent with the `docker` CLI (e.g. `podman`). Assuming `podman` is already installed on your system and permissions are set up to allow running as a non-root user (typically the default), all that is required is to set the environment variable accordingly.
+The container engine can be configured with the `TESSERACT_DOCKER_EXECUTABLE` environment variable. Any engine with a `docker`-compatible CLI (e.g. `podman`) is supported.
 
 ```bash
 $ export TESSERACT_DOCKER_EXECUTABLE=podman
@@ -58,14 +60,14 @@ $ echo "export TESSERACT_DOCKER_EXECUTABLE=podman" >> ~/.bashrc
 
 ## Runtime installation
 
-Invoking the Tesseract Runtime directly without Docker can be useful for debugging during Tesseract creation and non-containerized deployment (see <project:#running-without-containers>). To install it, run:
+Installing the Tesseract Runtime directly (without Docker) is useful for debugging during Tesseract creation and for non-containerized deployment (see {ref}`running-without-containers`). To install it:
 
 ```bash
 $ pip install tesseract-core[runtime]
 ```
 
-```{warning}
-Some shells use `[` and `]` as special characters, and might error out on the `pip install` line above. If that happens, consider escaping these characters, e.g. `tesseract-core\[runtime\]`, or enclosing them in double quotes, e.g. `"tesseract-core[runtime]"`.
+```{tip}
+Some shells treat `[` and `]` as special characters. If the command above fails, escape them (`tesseract-core\[runtime\]`) or use quotes (`"tesseract-core[runtime]"`).
 ```
 
 (installation-issues)=
@@ -76,13 +78,13 @@ Some shells use `[` and `]` as special characters, and might error out on the `p
 
 ### Windows support
 
-Tesseract is fully supported on Windows via the Windows Subsystem for Linux (WSL). For guidance, please refer to the [official documentation](https://docs.microsoft.com/en-us/windows/wsl/).
+Tesseract is fully supported on Windows via the Windows Subsystem for Linux (WSL). See the [official WSL documentation](https://docs.microsoft.com/en-us/windows/wsl/) for setup instructions.
 
 (exe-conflicts)=
 
 ### Conflicting executables
 
-This is not the only software called "Tesseract". Sometimes, this leads to multiple executables with the same name, for example if you also have [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) installed. In that case, you may encounter the following error:
+Other software shares the "Tesseract" name (notably [Tesseract OCR](https://github.com/tesseract-ocr/tesseract)). If both are installed, you may see errors like:
 
 ```
 $ tesseract build examples/vectoradd/ vectoradd
@@ -92,13 +94,13 @@ Error in findFileFormatStream: failed to read first 12 bytes of file
 Error during processing.
 ```
 
-To avoid it, we always recommend to use Tesseract in a separate Python virtual environment. Nevertheless, this error can still happen if you are a `zsh` shell user due to its way of caching paths to executables. If that's the case, consider refreshing the shell's executable cache with
+We recommend always using a dedicated Python virtual environment. If you use `zsh`, you may also need to refresh the shell's executable cache:
 
 ```bash
 $ hash -r
 ```
 
-You can always confirm what executable the command `tesseract` corresponds with
+To confirm which executable `tesseract` resolves to:
 
 ```bash
 $ which tesseract
@@ -106,27 +108,20 @@ $ which tesseract
 
 ### Missing user privileges
 
-If you lack permissions to access the Docker daemon, running e.g. `tesseract build` will result in the following exception:
+If you lack permissions to access the Docker daemon, commands like `tesseract build` will fail:
 
 ```bash
 $ tesseract build examples/helloworld
 RuntimeError: Could not reach Docker daemon, check if it is running. See logs for details.
 ```
 
-You can resolve this by adding your user to the `docker` group.
-See [Linux post-installation steps for Docker Engine > Manage Docker as a non-root user](https://docs.docker.com/engine/install/linux-postinstall/#manage-docker-as-a-non-root-user), or run:
-
-```bash
-$ sudo usermod -aG docker $USER
-```
-
-Then, log out and back in to apply the changes.
+Resolve this by adding your user to the `docker` group as described in [Running Docker without sudo](#installation-docker).
 
 (installation-dev)=
 
 ## Development installation
 
-If you would like to install everything you need for dev work on Tesseract itself (editable source, runtime + dependencies for tests), run this instead:
+To install everything needed for development on Tesseract Core itself (editable source, runtime, and test dependencies):
 
 ```bash
 $ git clone git@github.com:pasteurlabs/tesseract-core.git

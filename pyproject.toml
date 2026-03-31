@@ -17,6 +17,8 @@ dependencies = [
     "requests>=2.32.4",
     "pip",
     "packaging",
+    "pybase64",
+    "orjson",
 ]
 dynamic = [
     # Injected via hatch-vcs
@@ -38,14 +40,15 @@ tesseract-runtime = "tesseract_core.runtime.cli:main"
 # do not edit manually. To add constraints, use other operators (e.g. <, >=, ~=, ==) as needed.
 runtime = [
     "pydantic<=2.12.5,>=2.10",
-    "fastapi<=0.135.1,>=0.115",
-    "requests<=2.32.5,>=2.32.4",
-    "uvicorn<=0.41.0,>=0.34",
+    "fastapi<=0.135.2,>=0.115",
+    "requests<=2.33.0,>=2.32.4",
+    "uvicorn<=0.42.0,>=0.34",
     "click<=8.3.1,>=8.1",
     "typer<=0.24.1,>=0.15",
-    "fsspec[http,s3]<=2026.2.0,>=2024.12",
+    "fsspec[http,s3]<=2026.3.0,>=2024.12",
     "pybase64<=1.4.3,>=1.4",
-    "numpy<=2.4.3,>=1.26",
+    "orjson<=3.11.7,>=3.10",
+    "numpy<=2.4.4,>=1.26",
     "debugpy<=1.8.20,>=1.8.14",
     "mlflow-skinny<=3.10.1,>=3.7.0",
 ]

@@ -3,14 +3,14 @@
 # Get Started
 
 ```{note}
-Please ensure you have a working [installation](installation.md) before proceeding with this tutorial.
+Make sure you have a working [installation](installation.md) before proceeding.
 ```
 
 ## Hello Tesseract
 
-The [`tesseract` command line application](../api/tesseract-cli.md) provides tools to build Tesseracts as Docker containers from `tesseract_api.py` files. Here, we'll use it to build and invoke a simple Tesseract that greets you by name.
+The [`tesseract` CLI](../api/tesseract-cli.md) builds Tesseracts as Docker containers from `tesseract_api.py` files. Here, we'll build and invoke a simple Tesseract that greets you by name.
 
-### Building your first Tesseract
+### Build your first Tesseract
 
 Download the {download}`Tesseract examples </downloads/examples.zip>` and run the following command from where you unpacked the archive:
 
@@ -21,14 +21,14 @@ $ tesseract build examples/helloworld
 ```
 
 ```{tip}
-Having issues building Tesseracts? Check out [common issues](#installation-issues) with the installation process.
+Having trouble? Check [common issues](#installation-issues) for solutions.
 ```
 
-Congratulations! You've just built your first Tesseract, which is now available as a Docker image on your system.
+Your first Tesseract is now available as a Docker image on your system.
 
-### Running your Tesseract
+### Run your Tesseract
 
-You can interact with any built Tesseract via the command line interface (CLI), the REST API, or through the [Python API](../api/tesseract-api.md) (which uses CLI / REST under the hood). Try the commands below to see your Tesseract in action:
+You can interact with any built Tesseract via the CLI, the REST API, or the [Python SDK](../api/tesseract-api.md):
 
 ::::{tab-set}
 :::{tab-item} CLI
@@ -65,7 +65,7 @@ $ tesseract teardown tesseract-u7um375qt6dj5
 ```
 
 :::
-:::{tab-item} Python API
+:::{tab-item} Python SDK
 :sync: python
 
 ```python
@@ -80,10 +80,10 @@ $ tesseract teardown tesseract-u7um375qt6dj5
 ::::
 
 ```{tip}
-For faster iteration during development, you can run Tesseracts without building containers. See [Debugging and Development](../misc/debugging.md) for tips on local development workflows.
+For faster iteration during development, you can run Tesseracts without building containers. See [Debugging and Development](../misc/debugging.md) for details.
 ```
 
-Now, have a look at the (auto-generated) CLI and REST API docs for your Tesseract:
+Each Tesseract auto-generates CLI and REST API docs. To view them:
 
 ::::{tab-set}
 :::{tab-item} CLI
@@ -115,9 +115,9 @@ The OpenAPI docs for the `helloworld` Tesseract, documenting its endpoints and v
 
 (getting-started)=
 
-## Let's peek under the hood
+## Under the hood
 
-The folder passed to `tesseract build` contains the files needed to build and run the Tesseract:
+The folder passed to `tesseract build` contains three files:
 
 ```bash
 $ tree examples/helloworld
@@ -127,13 +127,11 @@ examples/helloworld
 └── tesseract_requirements.txt
 ```
 
-These files are all that's needed to define a Tesseract.
+These are all that's needed to define a Tesseract.
 
 ### `tesseract_api.py`
 
-The `tesseract_api.py` file defines the Tesseract's input and output schemas, and the functions that are being called when we invoke `tesseract run <funcname>`. These are,
-`apply`, `abstract_eval`, `jacobian`, `jacobian_vector_product`, and `vector_jacobian_product` (see [endpoints](../api/endpoints.md)). Out of all of the endpoints you
-can implement, only `apply` is required for a Tesseract to work.
+This file defines the Tesseract's input and output schemas, along with the endpoint functions: `apply`, `abstract_eval`, `jacobian`, `jacobian_vector_product`, and `vector_jacobian_product` (see [endpoints](../api/endpoints.md)). Only `apply` is required.
 
 ```{literalinclude} ../../../examples/helloworld/tesseract_api.py
 :pyobject: InputSchema
@@ -155,7 +153,7 @@ For a Tesseract that has all optional endpoints implemented, check out the [Univ
 
 ### `tesseract_config.yaml`
 
-`tesseract_config.yaml` contains the Tesseract's metadata, such as its name, description, version, and build configuration.
+Contains metadata such as the Tesseract's name, description, version, and build configuration.
 
 ```{literalinclude} ../../../examples/helloworld/tesseract_config.yaml
 
@@ -163,24 +161,24 @@ For a Tesseract that has all optional endpoints implemented, check out the [Univ
 
 ### `tesseract_requirements.txt`
 
-`tesseract_requirements.txt` lists the Python packages required to build and run the Tesseract.
+Lists the Python packages needed to build and run the Tesseract, in [pip requirements file format](https://pip.pypa.io/en/stable/reference/requirements-file-format/).
 
 ```{note}
-The `tesseract_requirements.txt` file is optional. In fact, `tesseract_api.py` is free to invoke functions that are not written in Python at all. In this case, use the `build_config` section in [`tesseract_config.yaml`](quickstart-tr-config) to provide data files and install the necessary dependencies.
+This file is optional. `tesseract_api.py` can invoke functions written in any language. In that case, use the `build_config` section in [`tesseract_config.yaml`](quickstart-tr-config) to provide data files and install dependencies.
 ```
 
 ```{literalinclude} ../../../examples/helloworld/tesseract_requirements.txt
 
 ```
 
-## The journey continues...
+## Next steps
 
-Now, you're ready to learn more, depending on your needs:
+Depending on your needs:
 
-- [](../creating-tesseracts/create.md)
-- [](../using-tesseracts/use.md)
+- [](../creating-tesseracts/create.md) — define schemas, implement endpoints, and build Tesseracts
+- [](../using-tesseracts/use.md) — invoke Tesseracts and work with their outputs
 
-Or jump straight into end-to-end tutorials that show Tesseracts in optimization workflows:
+Or jump into end-to-end tutorials:
 
 - [JAX Rosenbrock function minimization](https://si-tesseract.discourse.group/t/jax-based-rosenbrock-function-minimization/48)
 - [PyTorch Rosenbrock function minimization](https://si-tesseract.discourse.group/t/pytorch-based-rosenbrock-function-minimization/44)

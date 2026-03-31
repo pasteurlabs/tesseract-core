@@ -47,7 +47,7 @@ class VolumetricMeshData(BaseModel):
 
 ### Implementing gradients with finite differences
 
-You can implement all three AD endpoints (`jacobian`, `jacobian_vector_product`,
+You can implement all three gradient endpoints (`jacobian`, `jacobian_vector_product`,
 `vector_jacobian_product`) with just a few lines of code:
 
 ```python

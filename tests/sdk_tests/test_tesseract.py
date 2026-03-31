@@ -1,7 +1,10 @@
 from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 import numpy as np
+import orjson
 import pytest
+import requests
 from pydantic import ValidationError
 
 from tesseract_core import Tesseract
@@ -101,6 +104,21 @@ def test_Tesseract_from_image(mock_serving, mock_clients):
         t.teardown()
 
 
+def test_del_tesseract_triggers_teardown(mock_serving):
+    """Deleting a served Tesseract must tear down its container via weakref.finalize."""
+    import gc
+
+    teardown_mock = mock_serving["teardown_mock"]
+
+    t = Tesseract.from_image("sometesseract:0.2.3")
+    t.serve()
+    assert teardown_mock.call_count == 0
+
+    del t
+    gc.collect()
+    assert teardown_mock.call_count == 1
+
+
 def test_Tesseract_schema_method(mocker, mock_serving):
     mocked_run = mocker.patch("tesseract_core.sdk.tesseract.HTTPClient.run_tesseract")
     mocked_run.return_value = {"#defs": {"some": "stuff"}}
@@ -162,11 +180,12 @@ def test_serve_lifecycle(mock_serving, mock_clients):
 )
 def test_HTTPClient_run_tesseract(mocker, run_id):
     mock_response = mocker.Mock()
-    mock_response.json.return_value = {"result": [4, 4, 4]}
-    mock_response.raise_for_status = mocker.Mock()
+    mock_response.content = b'{"result": [4, 4, 4]}'
+    mock_response.ok = True
+    mock_response.status_code = 200
 
     mocked_request = mocker.patch(
-        "requests.request",
+        "requests.Session.request",
         return_value=mock_response,
     )
 
@@ -179,14 +198,13 @@ def test_HTTPClient_run_tesseract(mocker, run_id):
     mocked_request.assert_called_with(
         method="POST",
         url="http://somehost/apply",
-        json={"inputs": {"a": 1}},
+        data=orjson.dumps({"inputs": {"a": 1}}),
         params=expected_params,
     )
 
 
 def test_HTTPClient_run_tesseract_raises_validation_error(mocker):
-    mock_response = mocker.Mock()
-    mock_response.json.return_value = {
+    error_detail = {
         "detail": [
             {
                 "type": "missing",
@@ -215,10 +233,12 @@ def test_HTTPClient_run_tesseract_raises_validation_error(mocker):
             },
         ]
     }
+    mock_response = mocker.Mock()
+    mock_response.content = orjson.dumps(error_detail)
     mock_response.status_code = 422
 
     mocker.patch(
-        "requests.request",
+        "requests.Session.request",
         return_value=mock_response,
     )
 
@@ -393,3 +413,174 @@ def test_test_endpoint_with_exception_type_local(dummy_tesseract_package):
             "expected_exception": ValidationError,  # Type, not string
         }
     )
+
+
+def _make_mock_response(status_code, json_data):
+    """Create a mock requests.Response with the given status code and JSON body."""
+    resp = Mock(spec=requests.Response)
+    resp.status_code = status_code
+    resp.ok = status_code < 400
+    resp.content = orjson.dumps(json_data)
+    resp.text = orjson.dumps(json_data).decode()
+    return resp
+
+
+def _make_tesseract_with_mock_response(response):
+    """Create a Tesseract.from_url instance with a mocked HTTP session."""
+    tess = Tesseract.from_url("http://localhost:1234")
+    tess._client._session = Mock()
+    tess._client._session.request.return_value = response
+    return tess
+
+
+class TestHTTPClientValidationErrors:
+    """Test that Tesseract raises proper ValidationErrors for 422 responses over HTTP."""
+
+    def test_builtin_error_type(self):
+        """Built-in Pydantic error types are properly reconstructed."""
+        response = _make_mock_response(
+            422,
+            {
+                "detail": [
+                    {
+                        "type": "missing",
+                        "loc": ["body", "inputs"],
+                        "msg": "Field required",
+                        "input": None,
+                    }
+                ]
+            },
+        )
+        tess = _make_tesseract_with_mock_response(response)
+
+        with pytest.raises(ValidationError) as exc_info:
+            tess.apply({"inputs": {}})
+
+        assert exc_info.value.error_count() == 1
+        err = exc_info.value.errors()[0]
+        assert err["loc"] == ("body", "inputs")
+
+    def test_custom_error_type(self):
+        """Custom error types (e.g. from PydanticCustomError) don't crash."""
+        response = _make_mock_response(
+            422,
+            {
+                "detail": [
+                    {
+                        "type": "array_non_numeric",
+                        "loc": ["body", "inputs", "x"],
+                        "msg": "Could not parse value as a numeric array",
+                        "input": "hello",
+                    }
+                ]
+            },
+        )
+        tess = _make_tesseract_with_mock_response(response)
+
+        with pytest.raises(ValidationError) as exc_info:
+            tess.apply({"inputs": {}})
+
+        assert exc_info.value.error_count() == 1
+        err = exc_info.value.errors()[0]
+        assert err["type"] == "array_non_numeric"
+        assert err["loc"] == ("body", "inputs", "x")
+        assert "numeric array" in err["msg"]
+
+    def test_custom_error_type_with_ctx(self):
+        """Custom error types with context are properly reconstructed."""
+        response = _make_mock_response(
+            422,
+            {
+                "detail": [
+                    {
+                        "type": "array_decode_error",
+                        "loc": ["body", "inputs", "a"],
+                        "msg": "Failed to decode array buffer (json encoding): some error",
+                        "input": None,
+                        "ctx": {"error": "could not convert string to float"},
+                    }
+                ]
+            },
+        )
+        tess = _make_tesseract_with_mock_response(response)
+
+        with pytest.raises(ValidationError) as exc_info:
+            tess.apply({"inputs": {}})
+
+        assert exc_info.value.error_count() == 1
+        err = exc_info.value.errors()[0]
+        assert err["type"] == "array_decode_error"
+        assert err["loc"] == ("body", "inputs", "a")
+
+
+def test_stale_keepalive_connection_is_handled(free_port, monkeypatch):
+    """HTTPClient retries once when a stale keep-alive connection causes ConnectionError.
+
+    We force a stale connection by setting timeout_keep_alive=0, then monkeypatch
+    urllib3's is_connected to lie once (simulating the race where the staleness check
+    passes just before the server's FIN arrives).
+    """
+    import threading
+    import time
+
+    import uvicorn
+    from fastapi import FastAPI
+    from urllib3.connection import HTTPConnection
+
+    app = FastAPI()
+    app.get("/health")(lambda: {"status": "ok"})
+
+    server = uvicorn.Server(
+        uvicorn.Config(
+            app,
+            host="127.0.0.1",
+            port=free_port,
+            log_level="error",
+            timeout_keep_alive=0,
+        )
+    )
+    server_thread = threading.Thread(target=server.run, daemon=True)
+    server_thread.start()
+
+    url = f"http://127.0.0.1:{free_port}"
+    for _ in range(50):
+        try:
+            requests.get(f"{url}/health", timeout=1)
+            break
+        except requests.ConnectionError:
+            time.sleep(0.1)
+    else:
+        pytest.fail("Server did not start in time")
+
+    try:
+        client = HTTPClient(url)
+
+        # Ensure connection is established and in keep-alive pool
+        client._request("health")
+
+        # Sleep to ensure the server has closed the connection due to timeout_keep_alive=0
+        time.sleep(0.1)
+
+        # Make is_connected lie once (stale socket looks alive), then restore
+        original = HTTPConnection.is_connected.fget
+        call_count = 0
+
+        def _lie_once(self):
+            nonlocal call_count
+            call_count += 1
+            return True if call_count == 1 else original(self)
+
+        monkeypatch.setattr(HTTPConnection, "is_connected", property(_lie_once))
+
+        with patch.object(
+            client._session, "request", wraps=client._session.request
+        ) as mock:
+            result = client._request("health")
+
+        assert result == {"status": "ok"}
+
+        # Ensure that the request was retried once after the ConnectionError from the stale connection
+        assert mock.call_count == 2
+    finally:
+        server.should_exit = True
+        server_thread.join(timeout=5)

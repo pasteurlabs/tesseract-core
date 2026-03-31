@@ -42,7 +42,7 @@ Tesseract packages scientific software into **self-contained, portable component
 ## Example: Shape optimization across tools
 
 <a href="https://si-tesseract.discourse.group/t/parametric-shape-optimization-of-rocket-fins-with-ansys-spaceclaim-pyansys-and-tesseract/109">
-<img src="https://github.com/pasteurlabs/tesseract-core/blob/main/docs/img/bracket_final.png" width="280" align="right" alt="Topology-optimized bracket produced by a differentiable Tesseract pipeline" title="Topology-optimized bracket produced by a multi-tool differentiable Tesseract pipeline.">
+<img src="https://github.com/pasteurlabs/tesseract-core/blob/main/docs/img/bracket_final.png" width="200" align="right" alt="Topology-optimized bracket produced by a differentiable Tesseract pipeline" title="Topology-optimized bracket produced by a multi-tool differentiable Tesseract pipeline.">
 </a>
 
 The [rocket fin optimization case study](https://si-tesseract.discourse.group/t/parametric-shape-optimization-of-rocket-fins-with-ansys-spaceclaim-pyansys-and-tesseract/109) combines three Tesseracts:
@@ -120,7 +120,7 @@ with Tesseract.from_image("my-tesseract") as t:
 
 ## The Ecosystem
 
-- **[Tesseract Core](https://github.com/pasteurlabs/tesseract-core)** — CLI, Python API, and runtime (this repo).
+- **[Tesseract Core](https://github.com/pasteurlabs/tesseract-core)** — CLI, Python SDK, and runtime (this repo).
 - **[Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax)** — Embed Tesseracts as JAX primitives into end-to-end differentiable JAX programs.
 - **[Tesseract-Streamlit](https://github.com/pasteurlabs/tesseract-streamlit)** — Auto-generate interactive web apps from Tesseracts.
 

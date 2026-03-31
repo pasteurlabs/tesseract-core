@@ -23,14 +23,6 @@ Tesseract packages scientific software into **self-contained, portable component
 - **Propagate gradients** — Each component can expose derivatives, enabling end-to-end optimization across heterogeneous pipelines.
 - **Self-document** — Schemas, types, and API docs are generated automatically.
 
-```{figure} img/demo.gif
-:alt: Demo: install, build, and run a Tesseract in under a minute
-:width: 720px
-:align: center
-
-Getting started: install, build an example, and run it.
-```
-
 ## Who is this for?
 
 - **Researchers** interfacing with (differentiable) simulators or probabilistic models, or who need to combine tools from different ecosystems.
@@ -92,7 +84,7 @@ If you're a single developer working with a single software stack in a single en
 
 Tesseract Core is the foundation of the Tesseract ecosystem. Additional packages extend its capabilities:
 
-- **[Tesseract Core](https://github.com/pasteurlabs/tesseract-core)** — CLI, Python API, and runtime.
+- **[Tesseract Core](https://github.com/pasteurlabs/tesseract-core)** — CLI, Python SDK, and runtime.
 - **[Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax)** — Embed Tesseracts as JAX primitives into end-to-end differentiable programs.
 - **[Tesseract-Streamlit](https://github.com/pasteurlabs/tesseract-streamlit)** — Auto-generate interactive Streamlit web apps from running Tesseracts. Instantly create UIs for your components without writing frontend code.
 
@@ -148,6 +140,16 @@ content/using-tesseracts/advanced.md
 ```
 
 ```{toctree}
+:caption: Learning resources
+:maxdepth: 2
+:hidden:
+
+content/misc/differentiable-programming.md
+content/misc/debugging.md
+content/misc/performance.md
+```
+
+```{toctree}
 :caption: Examples
 :maxdepth: 2
 :hidden:
@@ -155,15 +157,6 @@ content/using-tesseracts/advanced.md
 content/examples/example_gallery.md
 content/examples/ansys_gallery.md
 content/demo/demo.md
-```
-
-```{toctree}
-:caption: Misc
-:maxdepth: 2
-:hidden:
-
-content/misc/differentiable-programming.md
-content/misc/debugging.md
 ```
 
 ```{toctree}
