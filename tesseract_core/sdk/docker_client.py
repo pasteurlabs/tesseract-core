@@ -11,10 +11,11 @@ import shlex
 import subprocess
 import sys
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from io import IOBase
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeAlias
 
 # store a reference to the list type, which is shadowed by some function names below
 from typing import List as list_  # noqa: UP035
@@ -22,6 +23,8 @@ from typing import List as list_  # noqa: UP035
 from tesseract_core.sdk.config import get_config
 
 logger = logging.getLogger("tesseract")
+
+BoolOrCallable: TypeAlias = bool | Callable[[str], Any]
 
 
 def _get_docker_executable() -> list_[str]:  # noqa: UP006
@@ -31,6 +34,25 @@ def _get_docker_executable() -> list_[str]:  # noqa: UP006
     if isinstance(docker_executable, str):
         return shlex.split(docker_executable)
     return list(docker_executable)
+
+
+def _get_io_callable(
+    stream: BoolOrCallable,
+    default_stream: Callable[[str], Any],
+) -> Callable[[str], Any] | None:
+    """Get the IO streams for stdout and stderr based on the provided parameters."""
+    if stream is False:
+        target_stream = None
+    elif stream is True:
+        target_stream = default_stream
+    elif callable(stream):
+        target_stream = stream
+    else:
+        raise ValueError(
+            "stream_stdout/stream_stderr must be a boolean or a callable that accepts a string."
+        )
+
+    return target_stream
 
 
 def _read_stream(
@@ -64,8 +86,8 @@ def _run_process(
     cmd: list[str],
     *,
     merge_stderr: bool = False,
-    stream_stdout: Any = None,
-    stream_stderr: Any = None,
+    stream_stdout: Callable[[str], Any] | None = None,
+    stream_stderr: Callable[[str], Any] | None = None,
 ) -> tuple[int, bytes, bytes]:
     """Run a subprocess with threaded stream reading.
 
@@ -331,7 +353,7 @@ class Images:
         tags: list_[str],  # noqa: UP006
         dockerfile: str | Path,
         ssh: str | None = None,
-        stream_logs: Any = None,
+        stream_logs: BoolOrCallable = False,
     ) -> Image:
         """Build a Docker image from a Dockerfile using BuildKit.
 
@@ -340,6 +362,9 @@ class Images:
             tag: The name of the image to build.
             dockerfile: path within the build context to the Dockerfile.
             ssh: If not None, pass given argument to buildx --ssh command.
+            stream_logs: If True, stream build logs to sys.stdout in real-time instead of
+                    buffering. Can also be a callable that accepts a string to use as a custom
+                    sink.
 
         Returns:
             Built Image object.
@@ -360,7 +385,9 @@ class Images:
         )
 
         returncode, stdout_data, _ = _run_process(
-            build_cmd, merge_stderr=True, stream_stdout=stream_logs
+            build_cmd,
+            merge_stderr=True,
+            stream_stdout=_get_io_callable(stream_logs, sys.stdout.write),
         )
 
         if returncode != 0:
@@ -698,8 +725,8 @@ class Containers:
         user: str | None = None,
         memory: str | None = None,
         extra_args: list_[str] | None = None,  # noqa: UP006
-        stream_stdout: bool = False,
-        stream_stderr: bool | Any = False,
+        stream_stdout: BoolOrCallable = False,
+        stream_stderr: BoolOrCallable = False,
     ) -> Container | tuple[bytes, bytes] | bytes:
         """Run a command in a container from an image.
 
@@ -806,12 +833,8 @@ class Containers:
 
         returncode, stdout_data, stderr_data = _run_process(
             full_cmd,
-            stream_stdout=sys.stdout if stream_stdout else None,
-            stream_stderr=(
-                stream_stderr
-                if callable(stream_stderr)
-                else (sys.stderr if stream_stderr else None)
-            ),
+            stream_stdout=_get_io_callable(stream_stdout, sys.stdout.write),
+            stream_stderr=_get_io_callable(stream_stderr, sys.stderr.write),
         )
 
         if returncode != 0:
