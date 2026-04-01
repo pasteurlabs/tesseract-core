@@ -66,6 +66,9 @@ docs = [
     "sphinxext_opengraph",
     "tesseract-core[runtime]",
 ]
+torch = [
+    "torch>=2.0",
+]
 dev = [
     "docker",
     "fastapi",
