@@ -1,8 +1,8 @@
--e ../../../[runtime]
-tesseract-jax>=0.2.3
-jax>=0.8.1
-matplotlib
-optax>=0.2.6
-pyvista
-imageio
-mmapy
+tesseract-core[runtime]==1.6.0
+tesseract-jax==0.2.3
+jax==0.9.2
+optax==0.2.8
+matplotlib==3.10.8
+pyvista==0.47.1
+imageio==2.37.3
+mmapy==0.3.1

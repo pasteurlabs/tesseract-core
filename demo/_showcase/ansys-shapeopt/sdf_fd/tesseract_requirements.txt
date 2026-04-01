@@ -1,5 +1,6 @@
-numpy
-pyvista
-manifold3d
-trimesh
-pysdf
+# tesseract-core[runtime]==1.6.0
+numpy==2.4.3
+pyvista==0.47.1
+manifold3d==3.4.1
+trimesh==4.11.5
+pysdf==0.1.9
