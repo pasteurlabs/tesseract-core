@@ -1172,7 +1172,7 @@ def build_docker_image(
     dockerfile: str | Path,
     inject_ssh: bool = False,
     print_and_exit: bool = False,
-    stream_logs: Any = None,
+    stream_logs: BoolOrCallable = False,
 ) -> Image | None:
     """Build a Docker image from a Dockerfile using BuildKit.
 
@@ -1182,7 +1182,8 @@ def build_docker_image(
         dockerfile: path within the build context to the Dockerfile.
         inject_ssh: If True, inject SSH keys into the build.
         print_and_exit: If True, log the build command and exit without building.
-        stream_logs: If provided, stream build output lines to this callable in real-time.
+        stream_logs: If True, stream build logs to sys.stdout in real-time instead of buffering.
+            Can also be a callable that accepts a string to use as a custom sink.
 
     Returns:
         Built Image object if print_and_exit is False, otherwise None.
