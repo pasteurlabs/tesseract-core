@@ -1,4 +1,4 @@
-# tesseract-core[runtime]==1.6.0
+tesseract-core[runtime]==1.6.0
 numpy==2.4.3
 pyvista==0.47.1
 manifold3d==3.4.1
