@@ -577,12 +577,17 @@ def _ensure_network_exists(network: str) -> None:
     Params:
         network: The network name to create.
     """
-    if network not in _BUILTIN_NETWORKS:
-        try:
-            docker_client.networks.get(network)
-        except NotFound:
-            logger.info("Network '%s' not found, creating it.", network)
-            docker_client.networks.create(network)
+    if network in _BUILTIN_NETWORKS:
+        return
+    try:
+        docker_client.networks.get(network)
+    except NotFound:
+        create_network = True
+    else:
+        create_network = False
+    if create_network:
+        logger.info("Network '%s' not found, creating it.", network)
+        docker_client.networks.create(network)
 
 
 def serve(
