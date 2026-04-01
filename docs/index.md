@@ -136,6 +136,7 @@ content/creating-tesseracts/deploy.md
 
 content/using-tesseracts/use.md
 content/using-tesseracts/array-encodings.md
+content/using-tesseracts/pytorch.md
 content/using-tesseracts/advanced.md
 ```
 
