@@ -2,6 +2,10 @@
 
 This file contains counter-intuitive aspects of the Tesseract codebase that AI agents should know.
 
+## General Principles
+
+- **Read the codebase before proposing an architecture or approach.** Do not speculate about capabilities or patterns - look at the actual code.
+
 ## Environment setup
 
 - **Use `uv` for dependency management.** Install with `uv pip install -e ".[dev]"`. This is faster and more reliable than plain pip.
@@ -17,6 +21,10 @@ This file contains counter-intuitive aspects of the Tesseract codebase that AI a
 - **Don't add mocks for Docker.** Tests that need Docker should be marked as end-to-end tests and skipped in fast test runs.
 - **Rarely test exceptions.** Only test exception handling when control flow is complex or the error message is critical for UX. Don't write tests that just verify an exception is raised.
 - **Never skip or disable tests without asking.** If a test is failing and you want to skip it, ask the user first. Don't add `@pytest.skip`, `@pytest.mark.xfail`, or comment out tests without explicit approval.
+
+## Code Quality
+
+- **Always run tests and verify code works end-to-end before presenting it as complete.** Do not wait for the user to ask 'did you test this?'
 
 ## Code style
 
