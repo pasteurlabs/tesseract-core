@@ -2,15 +2,15 @@
 
 # Tesseract Core
 
-Universal, autodiff-native software components for [Simulation Intelligence](https://arxiv.org/abs/2112.03235) 📦
+Universal, autodiff-native software components for [Simulation Intelligence](https://arxiv.org/abs/2112.03235)
 
 ```{seealso}
-Already convinced? 👉 See how to [Get started](content/introduction/get-started.md) instead.
+Already convinced? See how to [Get started](get-started.md) instead.
 ```
 
 ## The problem
 
-Real-world scientific workflows span multiple tools, languages, and computing environments. You might have a mesh generator in C++, a solver in Julia, and post-processing in Python. Getting these to work together is painful. Getting [gradients to flow through them](content/misc/differentiable-programming) for optimization is nearly impossible.
+Real-world scientific workflows span multiple tools, languages, and computing environments. You might have a mesh generator in C++, a solver in Julia, and post-processing in Python. Getting these to work together is painful. Getting [gradients to flow through them](../misc/differentiable-programming) for optimization is nearly impossible.
 
 Existing autodiff frameworks work great within a single codebase, but fall short when your pipeline crosses framework boundaries or includes legacy or commercial tools.
 
@@ -31,7 +31,7 @@ Tesseract packages scientific software into **self-contained, portable component
 
 ## How it works
 
-```{figure} img/tesseract-interfaces.png
+```{figure} ../../img/tesseract-interfaces.png
 :alt: Tesseract interfaces
 :width: 250px
 :align: right
@@ -39,14 +39,14 @@ Tesseract packages scientific software into **self-contained, portable component
 <small>Internal and external interfaces of a Tesseract.</small>
 ```
 
-Every Tesseract has a primary entrypoint, `apply`, which wraps a software functionality of your choice. All other [endpoints](content/api/endpoints.md) relate to this entrypoint: `abstract_eval` returns output structure, `jacobian` computes derivatives, and so on.
+Every Tesseract has a primary entrypoint, `apply`, which wraps a software functionality of your choice. All other [endpoints](../api/endpoints.md) relate to this entrypoint: `abstract_eval` returns output structure, `jacobian` computes derivatives, and so on.
 
 There are several ways to interact with Tesseracts:
 
 1. **Define** entrypoints in `tesseract_api.py`
 2. **Build** a container with `tesseract build`
 3. **Serve** via HTTP with `tesseract serve`
-4. **Invoke** via CLI, HTTP, or the [Python SDK](content/api/tesseract-api.md)
+4. **Invoke** via CLI, HTTP, or the [Python SDK](../api/tesseract-api.md)
 
 ## Features and restrictions
 
@@ -55,7 +55,7 @@ There are several ways to interact with Tesseracts:
 
 - **Self-documenting** – Tesseracts announce their interfaces, so that users can inspect them without needing to read the source code, and perform static validation without running the code.
 - **Auto-validating** – When data reaches a Tesseract, it is automatically validated against the schema, so that internal logic can be sure that the data is in the expected format.
-- **Autodiff-native** – Tesseracts support [Differentiable Programming](content/misc/differentiable-programming), meaning that they can be used in gradient-based optimization algorithms – or not, since exposing derivatives is _strictly optional_.
+- **Autodiff-native** – Tesseracts support [Differentiable Programming](../misc/differentiable-programming), meaning that they can be used in gradient-based optimization algorithms – or not, since exposing derivatives is _strictly optional_.
 - **Batteries included** – Tesseracts ship with a containerized runtime, which can be run on a variety of platforms, and exposes the Tesseract's functionality via a command line interface (CLI) and a REST API.
   :::
   :::{tab-item} Restrictions
@@ -72,7 +72,7 @@ Tesseracts help you manage **diversity** in scientific computing:
 
 - **Diversity of roles** — The software creator's job ends when code is packaged as a Tesseract. Pipeline builders focus on high-level logic. Team members can inspect interfaces and schemas without diving into implementations.
 
-- **Diversity of software** — Components can use any framework or language: PyTorch, JAX, C++, [Fortran](content/examples/building-blocks/fortran.md), Julia, or shell scripts. A thin Python wrapper (`tesseract_api.py`) connects everything.
+- **Diversity of software** — Components can use any framework or language: PyTorch, JAX, C++, [Fortran](../examples/building-blocks/fortran.md), Julia, or shell scripts. A thin Python wrapper (`tesseract_api.py`) connects everything.
 
 - **Diversity of hardware** — Components don't need to run on the same machine. Distribute work across GPUs, CPUs, and clusters while maintaining end-to-end differentiability.
 
@@ -112,9 +112,10 @@ If you use Tesseract in your research, please cite:
 :maxdepth: 2
 :hidden:
 
-content/introduction/installation.md
-content/introduction/get-started.md
+installation.md
+get-started.md
 Tesseract User Forums <https://si-tesseract.discourse.group/>
+Changelog <https://github.com/pasteurlabs/tesseract-core/releases>
 ```
 
 ```{toctree}
@@ -122,11 +123,11 @@ Tesseract User Forums <https://si-tesseract.discourse.group/>
 :maxdepth: 2
 :hidden:
 
-content/creating-tesseracts/create.md
-content/creating-tesseracts/design-patterns.md
-content/creating-tesseracts/advanced.md
-content/creating-tesseracts/llm-assistance.md
-content/creating-tesseracts/deploy.md
+../creating-tesseracts/create.md
+../creating-tesseracts/design-patterns.md
+../creating-tesseracts/advanced.md
+../creating-tesseracts/llm-assistance.md
+../creating-tesseracts/deploy.md
 ```
 
 ```{toctree}
@@ -134,29 +135,43 @@ content/creating-tesseracts/deploy.md
 :maxdepth: 2
 :hidden:
 
-content/using-tesseracts/use.md
-content/using-tesseracts/array-encodings.md
-content/using-tesseracts/advanced.md
+../using-tesseracts/use.md
+../using-tesseracts/array-encodings.md
+../using-tesseracts/advanced.md
 ```
 
 ```{toctree}
-:caption: Learning resources
+:caption: Demos & Tutorials
 :maxdepth: 2
 :hidden:
 
-content/misc/differentiable-programming.md
-content/misc/debugging.md
-content/misc/performance.md
+../demo/demo.md
+../examples/example_gallery.md
+../examples/ansys_gallery.md
 ```
 
 ```{toctree}
-:caption: Examples
+:caption: Guides
 :maxdepth: 2
 :hidden:
 
-content/examples/example_gallery.md
-content/examples/ansys_gallery.md
-content/demo/demo.md
+../misc/differentiable-programming.md
+../misc/debugging.md
+../misc/performance.md
+```
+
+```{toctree}
+:caption: Blog
+:maxdepth: 2
+:hidden:
+
+../blog/index.md
+../blog/tesseract-for-researchers.md
+../blog/tesseract-for-rse.md
+../blog/tesseract-for-rnd-engineers.md
+../blog/tesseract-for-platform-engineers.md
+../blog/2026-03-28-welcome.md
+../blog/2026-03-15-differentiable-pipelines.md
 ```
 
 ```{toctree}
@@ -164,9 +179,9 @@ content/demo/demo.md
 :maxdepth: 2
 :hidden:
 
-content/api/tesseract-cli.md
-content/api/tesseract-api.md
-content/api/config.md
+../api/tesseract-cli.md
+../api/tesseract-api.md
+../api/config.md
 ```
 
 ```{toctree}
@@ -174,7 +189,7 @@ content/api/config.md
 :maxdepth: 2
 :hidden:
 
-content/api/endpoints.md
-content/api/tesseract-runtime-cli.md
-content/api/tesseract-runtime-api.md
+../api/endpoints.md
+../api/tesseract-runtime-cli.md
+../api/tesseract-runtime-api.md
 ```
