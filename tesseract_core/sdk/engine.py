@@ -432,6 +432,7 @@ def build_tesseract(
     inject_ssh: bool = False,
     config_override: dict[tuple[str, ...], Any] | None = None,
     generate_only: bool = False,
+    stream_logs: Callable[[str], Any] | bool = False,
 ) -> Image | Path:
     """Build a new Tesseract from a context directory.
 
@@ -445,6 +446,8 @@ def build_tesseract(
         inject_ssh: whether or not to forward SSH agent when building the image.
         config_override: overrides for configuration options in the Tesseract.
         generate_only: only generate the build context but do not build the image.
+        stream_logs: if True, stream build logs to stderr. If a callable is provided,
+            it will be called with each log line.
 
     Returns:
         Image object representing the built Tesseract image,
@@ -498,6 +501,7 @@ def build_tesseract(
             dockerfile=context_dir / "Dockerfile",
             inject_ssh=inject_ssh,
             print_and_exit=generate_only,
+            stream_logs=stream_logs,
         )
     finally:
         if not keep_build_dir:
@@ -916,7 +920,7 @@ def run_tesseract(
     output_format: Literal["json", "json+base64", "json+binref"] | None = None,
     output_file: str | None = None,
     docker_args: list[str] | None = None,
-    stream_logs: bool = False,
+    stream_logs: bool | Callable[[str], None] = False,
 ) -> tuple[str, str]:
     """Start a Tesseract and execute a given command.
 
@@ -940,7 +944,8 @@ def run_tesseract(
         output_file: If specified, the output will be written to this file within output_path
             instead of stdout.
         docker_args: Additional arguments to pass to the container runtime (e.g., Docker).
-        stream_logs: If True, stream logs to stderr in real-time. Requires output_path to be set.
+        stream_logs: If set, stream logs in real-time. Can be True (streams to stderr)
+            or a callable that accepts a string (e.g., logger.info).
 
     Returns:
         Tuple with the stdout and stderr of the Tesseract.
