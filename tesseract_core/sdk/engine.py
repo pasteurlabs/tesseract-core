@@ -29,6 +29,7 @@ from .docker_client import (
     CLIDockerClient,
     Container,
     Image,
+    NotFound,
     build_docker_image,
     is_podman,
 )
@@ -431,6 +432,7 @@ def build_tesseract(
     inject_ssh: bool = False,
     config_override: dict[tuple[str, ...], Any] | None = None,
     generate_only: bool = False,
+    stream_logs: Callable[[str], Any] | bool = False,
 ) -> Image | Path:
     """Build a new Tesseract from a context directory.
 
@@ -444,6 +446,8 @@ def build_tesseract(
         inject_ssh: whether or not to forward SSH agent when building the image.
         config_override: overrides for configuration options in the Tesseract.
         generate_only: only generate the build context but do not build the image.
+        stream_logs: if True, stream build logs to stderr. If a callable is provided,
+            it will be called with each log line.
 
     Returns:
         Image object representing the built Tesseract image,
@@ -497,6 +501,7 @@ def build_tesseract(
             dockerfile=context_dir / "Dockerfile",
             inject_ssh=inject_ssh,
             print_and_exit=generate_only,
+            stream_logs=stream_logs,
         )
     finally:
         if not keep_build_dir:
@@ -560,6 +565,29 @@ def get_tesseract_containers() -> list[Container]:
 def get_tesseract_images() -> list[Image]:
     """Get Tesseract images."""
     return docker_client.images.list()
+
+
+# Built-in Docker/Podman networks that can/should not be created.
+_BUILTIN_NETWORKS = {"host", "bridge", "none"}
+
+
+def _ensure_network_exists(network: str) -> None:
+    """Create the Docker network if it does not exist yet.
+
+    Params:
+        network: The network name to create.
+    """
+    if network in _BUILTIN_NETWORKS:
+        return
+    try:
+        docker_client.networks.get(network)
+    except NotFound:
+        create_network = True
+    else:
+        create_network = False
+    if create_network:
+        logger.info("Network '%s' not found, creating it.", network)
+        docker_client.networks.create(network)
 
 
 def serve(
@@ -709,6 +737,9 @@ def serve(
 
     if docker_args:
         extra_args.extend(docker_args)
+
+    if network is not None:
+        _ensure_network_exists(network)
 
     container = docker_client.containers.run(
         image=image_name,
@@ -894,7 +925,7 @@ def run_tesseract(
     output_format: Literal["json", "json+base64", "json+binref"] | None = None,
     output_file: str | None = None,
     docker_args: list[str] | None = None,
-    stream_logs: bool = False,
+    stream_logs: bool | Callable[[str], None] = False,
 ) -> tuple[str, str]:
     """Start a Tesseract and execute a given command.
 
@@ -918,7 +949,8 @@ def run_tesseract(
         output_file: If specified, the output will be written to this file within output_path
             instead of stdout.
         docker_args: Additional arguments to pass to the container runtime (e.g., Docker).
-        stream_logs: If True, stream logs to stderr in real-time. Requires output_path to be set.
+        stream_logs: If set, stream logs in real-time. Can be True (streams to stderr)
+            or a callable that accepts a string (e.g., logger.info).
 
     Returns:
         Tuple with the stdout and stderr of the Tesseract.
@@ -988,6 +1020,9 @@ def run_tesseract(
 
     if docker_args:
         extra_args.extend(docker_args)
+
+    if network is not None:
+        _ensure_network_exists(network)
 
     # Run the container, optionally streaming stderr to the terminal
     result = docker_client.containers.run(

@@ -468,7 +468,9 @@ def test_stdout_redirect_subprocess(tmpdir, target):
         f.write("\n".join(testscript))
 
     # Use subprocess since pytest messes with stdout/stderr
-    result = subprocess.run([sys.executable, testscript_path], capture_output=True)
+    result = subprocess.run(
+        [sys.executable, "-W", "ignore", testscript_path], capture_output=True
+    )
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert result.stdout == b"stdout\n" * 4
 
