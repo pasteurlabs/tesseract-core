@@ -12,7 +12,7 @@ from collections.abc import Callable, Mapping, Sequence
 from functools import cached_property, wraps
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Literal
+from typing import Any, Literal, TypeAlias
 from urllib.parse import urlparse, urlunparse
 
 import numpy as np
@@ -25,7 +25,8 @@ from pydantic_core import InitErrorDetails, PydanticCustomError, from_json
 from . import engine
 from .logs import LogStreamer
 
-PathLike = str | Path
+PathLike: TypeAlias = str | Path
+BoolOrCallable: TypeAlias = bool | Callable[[str], Any]
 
 
 def requires_client(func: Callable) -> Callable:
@@ -57,7 +58,7 @@ class Tesseract:
     _serve_context: dict | None = None
     _lastlog: str | None = None
     _client: HTTPClient | LocalClient | None = None
-    _stream_logs: bool | Callable[[str], Any] = False
+    _stream_logs: BoolOrCallable = False
 
     def __init__(self, url: str, server_output_path: str | Path | None = None) -> None:
         warnings.warn(
@@ -111,7 +112,7 @@ class Tesseract:
         output_format: Literal["json", "json+base64", "json+binref"] = "json+base64",
         docker_args: list[str] | None = None,
         runtime_config: dict[str, Any] | None = None,
-        stream_logs: bool | Callable[[str], Any] = False,
+        stream_logs: BoolOrCallable = False,
     ) -> Tesseract:
         """Create a Tesseract instance from a Docker image.
 
@@ -199,7 +200,7 @@ class Tesseract:
         output_path: Path | None = None,
         output_format: Literal["json", "json+base64", "json+binref"] = "json+base64",
         runtime_config: dict[str, Any] | None = None,
-        stream_logs: bool | Callable[[str], Any] = False,
+        stream_logs: BoolOrCallable = False,
     ) -> Tesseract:
         """Create a Tesseract instance from a Tesseract API module.
 
@@ -772,7 +773,7 @@ class HTTPClient:
         endpoint: str,
         payload: dict | None = None,
         run_id: str | None = None,
-        stream_logs: bool | Callable[[str], Any] = False,
+        stream_logs: BoolOrCallable = False,
     ) -> dict:
         """Run a Tesseract endpoint.
 
@@ -852,7 +853,7 @@ class LocalClient:
         endpoint: str,
         payload: dict | None = None,
         run_id: str | None = None,
-        stream_logs: bool | Callable[[str], Any] = False,
+        stream_logs: BoolOrCallable = False,
     ) -> dict:
         """Run a Tesseract endpoint.
 
