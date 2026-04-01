@@ -1,0 +1,8 @@
+# Tesseract configuration file
+
+name: "lorenz-finitediff"
+version: "0.1.0"
+description: "Lorenz 96 Tesseract with finite-difference gradients (opaque simulator scenario)"
+
+build_config:
+  target_platform: "native"
