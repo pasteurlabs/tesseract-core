@@ -1,0 +1,28 @@
+name: "julia-diffeq"
+version: "1.0.0"
+description: |
+  Lotka-Volterra ODE solver using Julia's DifferentialEquations.jl with
+  gradient endpoints via SciMLSensitivity adjoint methods.
+
+  Demonstrates wrapping a Julia solver as a differentiable Tesseract that
+  Python consumers can call — with gradients — without installing Julia.
+
+build_config:
+  base_image: "julia:1.11-bookworm"
+
+  # Copy Julia project and solver source into the container
+  package_data:
+    - ["julia/", "julia/"]
+
+  custom_build_steps:
+    # Use a shared Julia depot so packages are accessible to any runtime user.
+    - "ENV JULIA_DEPOT_PATH=/tesseract/.julia"
+    # Ensure precompiled cache is portable across CPUs of the same architecture.
+    # x86_64 value matches the generic Julia binaries; aarch64 uses just "generic".
+    # See https://github.com/JuliaCI/julia-buildkite/blob/4b6932992f/utilities/build_envs.sh#L23-L31
+    - 'RUN if [ "$(uname -m)" = "x86_64" ]; then export JULIA_CPU_TARGET="generic;sandybridge,-xsaveopt,clone_all;haswell,-rdrnd,base(1)"; else export JULIA_CPU_TARGET="generic"; fi && mkdir -p /tesseract/.julia && julia --project=/tesseract/julia -e "import Pkg; Pkg.instantiate(); Pkg.precompile()"'
+    - "RUN chmod -R 777 /tesseract/.julia"
+    # Tell JuliaCall to use the system Julia and skip its own package management.
+    # JULIA_PKG_PRECOMPILE_AUTO=0 prevents Julia from recompiling packages at
+    # runtime when the container UID differs from the build UID.
+    - "ENV PYTHON_JULIACALL_EXE=/usr/local/julia/bin/julia PYTHON_JULIACALL_PROJECT=/tesseract/julia PYTHON_JULIAPKG_OFFLINE=yes JULIA_PKG_PRECOMPILE_AUTO=0"
