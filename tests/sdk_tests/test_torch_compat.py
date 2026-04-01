@@ -11,12 +11,8 @@ import torch.autograd.forward_ad as fwAD
 from tesseract_core import Tesseract
 from tesseract_core.torch_compat import apply_tesseract
 
-QUADRATIC_API = (
-    Path(__file__).parent.parent.parent
-    / "demo"
-    / "torch-primitive"
-    / "quadratic_tesseract"
-    / "tesseract_api.py"
+UNIVARIATE_API = (
+    Path(__file__).parent.parent.parent / "examples" / "univariate" / "tesseract_api.py"
 )
 
 MESHSTATS_API = (
@@ -28,8 +24,8 @@ MESHSTATS_API = (
 
 
 @pytest.fixture(scope="module")
-def quadratic():
-    return Tesseract.from_tesseract_api(QUADRATIC_API)
+def univariate():
+    return Tesseract.from_tesseract_api(UNIVARIATE_API)
 
 
 @pytest.fixture(scope="module")
@@ -38,86 +34,78 @@ def meshstats():
 
 
 class TestFlatSchema:
-    """Tests with the quadratic Tesseract (flat input/output schema)."""
+    """Tests with the univariate Tesseract (flat scalar input/output schema).
 
-    def test_forward_pass(self, quadratic):
-        x = torch.tensor([1.0, 2.0, 3.0])
-        A = torch.eye(3, dtype=torch.float32)
-        b = torch.zeros(3, dtype=torch.float32)
+    univariate computes the Rosenbrock function: result = (a - x)^2 + b*(y - x^2)^2
+    Default: a=1, b=100. Differentiable inputs: x, y.
+    """
 
-        result = apply_tesseract(quadratic, {"x": x, "A": A, "b": b})
+    def test_forward_pass(self, univariate):
+        x = torch.tensor(1.0)
+        y = torch.tensor(1.0)
 
-        assert "y" in result
-        assert torch.allclose(result["y"], torch.tensor([1.0, 4.0, 9.0]))
+        result = apply_tesseract(univariate, {"x": x, "y": y})
 
-    def test_backward_pass(self, quadratic):
-        x = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
-        A = torch.eye(3, dtype=torch.float32, requires_grad=True)
-        b = torch.zeros(3, dtype=torch.float32, requires_grad=True)
+        assert "result" in result
+        # (1-1)^2 + 100*(1-1)^2 = 0
+        assert torch.allclose(result["result"], torch.tensor(0.0))
 
-        result = apply_tesseract(quadratic, {"x": x, "A": A, "b": b})
-        result["y"].sum().backward()
+    def test_backward_pass(self, univariate):
+        x = torch.tensor(0.0, requires_grad=True)
+        y = torch.tensor(0.0, requires_grad=True)
 
-        assert torch.allclose(x.grad, torch.tensor([2.0, 4.0, 6.0]))
-        assert torch.allclose(b.grad, torch.ones(3))
-        # dy/dA = outer(ones, x^2) since cotangent is ones
-        expected_A_grad = torch.tensor([[1.0, 4.0, 9.0]] * 3)
-        assert torch.allclose(A.grad, expected_A_grad)
+        result = apply_tesseract(univariate, {"x": x, "y": y})
+        result["result"].backward()
 
-    def test_autograd_grad(self, quadratic):
-        x = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
+        # f = (1-x)^2 + 100*(y-x^2)^2 at (0,0): f=1
+        # df/dx = -2(1-x) - 400*x*(y-x^2) = -2 at (0,0)
+        # df/dy = 200*(y-x^2) = 0 at (0,0)
+        assert torch.allclose(x.grad, torch.tensor(-2.0))
+        assert torch.allclose(y.grad, torch.tensor(0.0))
 
-        result = apply_tesseract(
-            quadratic,
-            {
-                "x": x,
-                "A": np.eye(3, dtype=np.float32),
-                "b": np.zeros(3, dtype=np.float32),
-            },
-        )
-        y = result["y"]
+    def test_autograd_grad(self, univariate):
+        x = torch.tensor(0.0, requires_grad=True)
+        y = torch.tensor(0.0, requires_grad=True)
 
-        (grad_y0,) = torch.autograd.grad(y[0], x, retain_graph=True)
-        (grad_y1,) = torch.autograd.grad(y[1], x, retain_graph=True)
-        (grad_y2,) = torch.autograd.grad(y[2], x)
+        result = apply_tesseract(univariate, {"x": x, "y": y})
 
-        assert torch.allclose(grad_y0, torch.tensor([2.0, 0.0, 0.0]))
-        assert torch.allclose(grad_y1, torch.tensor([0.0, 4.0, 0.0]))
-        assert torch.allclose(grad_y2, torch.tensor([0.0, 0.0, 6.0]))
+        (grad_x,) = torch.autograd.grad(result["result"], x, retain_graph=True)
+        (grad_y,) = torch.autograd.grad(result["result"], y)
 
-    def test_forward_mode_jvp(self, quadratic):
-        x = torch.tensor([1.0, 2.0, 3.0])
-        A = torch.eye(3, dtype=torch.float32)
-        b = torch.zeros(3, dtype=torch.float32)
-        tangent_x = torch.tensor([1.0, 0.0, 0.0])
+        assert torch.allclose(grad_x, torch.tensor(-2.0))
+        assert torch.allclose(grad_y, torch.tensor(0.0))
+
+    def test_forward_mode_jvp(self, univariate):
+        x = torch.tensor(0.0)
+        y = torch.tensor(0.0)
+        tangent_x = torch.tensor(1.0)
 
         with fwAD.dual_level():
             x_dual = fwAD.make_dual(x, tangent_x)
-            result = apply_tesseract(quadratic, {"x": x_dual, "A": A, "b": b})
-            primal, tangent_out = fwAD.unpack_dual(result["y"])
+            result = apply_tesseract(univariate, {"x": x_dual, "y": y})
+            primal, tangent_out = fwAD.unpack_dual(result["result"])
 
-        assert torch.allclose(primal, torch.tensor([1.0, 4.0, 9.0]))
-        assert torch.allclose(tangent_out, torch.tensor([2.0, 0.0, 0.0]))
+        assert torch.allclose(primal, torch.tensor(1.0))
+        # tangent = df/dx * tangent_x = -2 * 1 = -2
+        assert torch.allclose(tangent_out, torch.tensor(-2.0))
 
-    def test_gradients_match_native_pytorch(self, quadratic):
+    def test_gradients_match_native_pytorch(self, univariate):
         """Verify gradients match PyTorch's own autodiff for the same math."""
-        x = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
-        A = torch.eye(3, dtype=torch.float32, requires_grad=True)
-        b = torch.zeros(3, dtype=torch.float32, requires_grad=True)
+        x = torch.tensor(3.0, requires_grad=True)
+        y = torch.tensor(5.0, requires_grad=True)
 
-        result = apply_tesseract(quadratic, {"x": x, "A": A, "b": b})
-        result["y"].sum().backward()
+        result = apply_tesseract(univariate, {"x": x, "y": y})
+        result["result"].backward()
 
         # Reference: native PyTorch
-        x_ref = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
-        A_ref = torch.eye(3, dtype=torch.float32, requires_grad=True)
-        b_ref = torch.zeros(3, dtype=torch.float32, requires_grad=True)
-        y_ref = A_ref @ (x_ref**2) + b_ref
-        y_ref.sum().backward()
+        x_ref = torch.tensor(3.0, requires_grad=True)
+        y_ref = torch.tensor(5.0, requires_grad=True)
+        a, b = 1.0, 100.0
+        y_native = (a - x_ref) ** 2 + b * (y_ref - x_ref**2) ** 2
+        y_native.backward()
 
         assert torch.allclose(x.grad, x_ref.grad)
-        assert torch.allclose(A.grad, A_ref.grad)
-        assert torch.allclose(b.grad, b_ref.grad)
+        assert torch.allclose(y.grad, y_ref.grad)
 
 
 class TestNestedSchema:
