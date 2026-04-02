@@ -1016,6 +1016,60 @@ class Volumes:
         return result.stdout.strip().split("\n")
 
 
+class Networks:
+    """Namespace for functions to interface with Docker networks."""
+
+    @staticmethod
+    def get(name: str) -> dict:
+        """Get metadata for a Docker network.
+
+        Params:
+            name: The name of the network to get.
+
+        Returns:
+            The network metadata dict.
+
+        Raises:
+            NotFound: If the network does not exist.
+        """
+        docker = _get_docker_executable()
+        try:
+            result = subprocess.run(
+                [*docker, "network", "inspect", name],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            json_dict = json.loads(result.stdout)
+        except subprocess.CalledProcessError as ex:
+            raise NotFound(f"Network {name} not found: {ex}") from ex
+        if not json_dict:
+            raise NotFound(f"Network {name} not found.")
+        return json_dict[0]
+
+    @staticmethod
+    def create(name: str) -> dict:
+        """Create a Docker network.
+
+        Params:
+            name: The name of the network to create.
+
+        Returns:
+            The created network metadata dict.
+        """
+        docker = _get_docker_executable()
+        try:
+            subprocess.run(
+                [*docker, "network", "create", name],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            return Networks.get(name)
+        except subprocess.CalledProcessError as ex:
+            raise APIError(f"Error creating network {name}: {ex}") from ex
+
+
 class DockerException(Exception):
     """Base class for Docker CLI exceptions."""
 
@@ -1087,6 +1141,7 @@ class CLIDockerClient:
         self.containers = Containers()
         self.images = Images()
         self.volumes = Volumes()
+        self.networks = Networks()
 
     @staticmethod
     def info() -> tuple:

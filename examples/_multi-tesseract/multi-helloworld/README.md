@@ -9,14 +9,6 @@ $ tesseract build ./examples/helloworld
 $ tesseract build ./examples/_multi-tesseract/multi-helloworld
 ```
 
-### Create Network
-
-Next, we create a network by running:
-
-```bash
-$ docker network create my_network
-```
-
 ## Python API Instructions
 
 This example can be executed using the Tesseract Python API or CLI. To run the example using the Python API, simply execute the Python script:
@@ -36,7 +28,7 @@ To serve the Tesseract, run:
 $ tesseract serve "helloworld:latest" --network my_network --network-alias helloworld --port 8000
 ```
 
-This command will print relevant container metadata to `stdout`. Importantly, the container metadata tells us the Tesseract's IP address for each network it is connected to. In our case, the helloworld Tesseract is connected to `my_network` and is reachable at `172.19.0.2:8000`. The `network-alias` argument allows us to create more human-readable addresses, in this example `--network-alias helloworld` also makes the Tesseract available at `http://helloworld:8000`.
+This command serves the tesseract and prints relevant container metadata to `stdout`. Importantly, the container metadata tells us the Tesseract's IP address for each network it is connected to. In our case, the helloworld Tesseract is connected to `my_network` and is reachable at `172.19.0.2:8000`. If the network provided via the `--network` option does not exist, it is created automatically. The `network-alias` argument allows us to create more human-readable addresses, in this example `--network-alias helloworld` also makes the Tesseract available at `http://helloworld:8000`.
 
 ```
  [i] Serving Tesseract at http://127.0.0.1:53385
