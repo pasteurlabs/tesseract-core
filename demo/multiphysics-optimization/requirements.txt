@@ -1,0 +1,5 @@
+jax[cpu]==0.5.2
+equinox
+matplotlib
+scipy
+tesseract-core
