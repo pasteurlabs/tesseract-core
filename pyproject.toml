@@ -66,6 +66,9 @@ docs = [
     "sphinxext_opengraph",
     "tesseract-core[runtime]",
 ]
+torch = [
+    "torch>=2.0",
+]
 dev = [
     "docker",
     "fastapi",
@@ -84,6 +87,7 @@ dev = [
     # also add all other extras here
     "tesseract-core[runtime]",
     "tesseract-core[docs]",
+    "tesseract-core[torch]",
 ]
 
 [project.urls]
