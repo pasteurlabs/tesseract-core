@@ -22,7 +22,7 @@ import mlflow
 import requests
 
 from tesseract_core.runtime.config import get_config
-from tesseract_core.runtime.logs import TeePipe
+from tesseract_core.runtime.logs import LogStreamer
 
 
 class BaseBackend(ABC):
@@ -255,7 +255,17 @@ def redirect_stdio(
     logfile: str | Path,
     log_sink: Callable[[str], Any] | None = None,
 ) -> Generator[None, None, None]:
-    """Context manager for redirecting stdout and stderr to a custom pipe.
+    """Context manager for redirecting stdout and stderr to a log file.
+
+    Both stdout and stderr are redirected at the OS level (via ``dup2``) to a
+    regular file.  This is safe for foreign runtimes (Julia, CUDA, MPI, …)
+    that write to fd 1 / fd 2 from their own threads — regular-file writes
+    never block on buffer pressure, unlike ``os.pipe()`` which can deadlock
+    when the kernel buffer fills and the Python reader thread is starved by
+    the GIL.
+
+    If *log_sink* is provided, a :class:`LogStreamer` thread tails the log
+    file and forwards each line to the sink in near-real-time.
 
     Args:
         logfile: Path to the log file to write to.
@@ -278,7 +288,8 @@ def redirect_stdio(
     with ExitStack() as stack:
         f = stack.enter_context(open(logfile, "w"))
 
-        # Duplicate the original stdout/stderr file descriptors before any redirection
+        # Duplicate the original stdout/stderr fds before any redirection so
+        # that the log_sink can write to the real streams without recursion.
         orig_stdout_fd = os.dup(sys.stdout.fileno())
         orig_stdout_file = os.fdopen(orig_stdout_fd, "w")
         stack.callback(orig_stdout_file.close)
@@ -287,12 +298,16 @@ def redirect_stdio(
         orig_stderr_file = os.fdopen(orig_stderr_fd, "w")
         stack.callback(orig_stderr_file.close)
 
-        # Use `print` instead of `.write` so we get appropriate newlines and flush behavior
-        write_to_file = lambda msg: print(msg, file=f, flush=True)
+        # Redirect both stdout and stderr to the log file at the OS level.
+        # Using the same underlying file description (f.fileno()) for both
+        # means the kernel serialises writes — giving proper interleaving,
+        # the same as shell `cmd > log 2>&1`.
+        stack.enter_context(redirect_fd(sys.stdout, f.fileno()))
+        stack.enter_context(redirect_fd(sys.stderr, f.fileno()))
 
         if log_sink is not None:
-            # Wrap user sink to prevent infinite loops when sink writes to stdout/stderr
-            # (e.g., stream_logs=print would cause infinite recursion otherwise)
+            # Wrap the user sink so it writes to the *original* stdout/stderr,
+            # preventing infinite recursion when the sink itself prints.
             def safe_sink(msg: str) -> None:
                 old_stdout, old_stderr = sys.stdout, sys.stderr
                 sys.stdout, sys.stderr = orig_stdout_file, orig_stderr_file
@@ -301,16 +316,15 @@ def redirect_stdio(
                 finally:
                     sys.stdout, sys.stderr = old_stdout, old_stderr
 
-            sinks = [safe_sink, write_to_file]
-        else:
-            # No log_sink provided: only write to file (no stderr output)
-            sinks = [write_to_file]
+            streamer = LogStreamer(logfile, safe_sink)
+            streamer.start()
+            # Register in this order so LIFO cleanup does:
+            #   1. flush Python buffers → data lands in logfile
+            #   2. stop streamer → drains remaining logfile content
+            stack.callback(streamer.stop)
+            stack.callback(sys.stderr.flush)
+            stack.callback(sys.stdout.flush)
 
-        pipe_fd = stack.enter_context(TeePipe(*sinks))
-
-        # Redirect file descriptors at OS level
-        stack.enter_context(redirect_fd(sys.stdout, pipe_fd))
-        stack.enter_context(redirect_fd(sys.stderr, pipe_fd))
         yield
 
 
