@@ -1,12 +1,24 @@
 name: "bandedblock-cholmod"
 version: "0.1.0"
-description: "Differentiable sparse CHOLMOD solver for SPD block systems with tridiagonal blocks, using Julia Enzyme AD"
+description: |
+  Differentiable sparse CHOLMOD solver for SPD block systems with
+  tridiagonal blocks. Uses Julia's LinearSolve.jl with Enzyme AD.
+
+  Demonstrates wrapping a Julia sparse solver as a differentiable Tesseract
+  that Python consumers can call — with gradients — without installing Julia.
 
 build_config:
-  target_platform: "native"
+  base_image: "julia:1.11-bookworm"
+
+  # Copy Julia project and solver source into the container
+  package_data:
+    - ["julia/", "julia/"]
 
   custom_build_steps:
-    - |
-      RUN apt-get update && apt-get install -y curl && \
-          curl -fsSL https://install.julialang.org | sh -s -- -y && \
-          /root/.juliaup/bin/julia -e 'using Pkg; Pkg.add(["Enzyme", "LinearSolve"])'
+    # Use a shared Julia depot so packages are accessible to any runtime user.
+    - "ENV JULIA_DEPOT_PATH=/tesseract/.julia"
+    # Ensure precompiled cache is portable across CPUs of the same architecture.
+    - 'RUN if [ "$(uname -m)" = "x86_64" ]; then export JULIA_CPU_TARGET="generic;sandybridge,-xsaveopt,clone_all;haswell,-rdrnd,base(1)"; else export JULIA_CPU_TARGET="generic"; fi && mkdir -p /tesseract/.julia && julia --project=/tesseract/julia -e "import Pkg; Pkg.instantiate(); Pkg.precompile()"'
+    - "RUN chmod -R 777 /tesseract/.julia"
+    # Tell JuliaCall to use the system Julia and skip its own package management.
+    - "ENV PYTHON_JULIACALL_EXE=/usr/local/julia/bin/julia PYTHON_JULIACALL_PROJECT=/tesseract/julia PYTHON_JULIAPKG_OFFLINE=yes JULIA_PKG_PRECOMPILE_AUTO=0"

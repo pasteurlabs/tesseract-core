@@ -49,8 +49,8 @@ from tesseract_core.runtime.tree_transforms import get_at_path
 # ---------------------------------------------------------------------------
 
 _here = Path(__file__).parent
-jl.include(str(_here / "apply.jl"))
-jl.include(str(_here / "enzyme_wrappers.jl"))
+jl.include(str(_here / "julia" / "enzyme_wrappers.jl"))
+jl.include(str(_here / "julia" / "apply.jl"))
 
 
 # ---------------------------------------------------------------------------

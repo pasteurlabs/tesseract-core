@@ -5,31 +5,25 @@ name: "{{name}}"
 version: "0.1.0"
 description: ""
 
-# Arbitrary user-defined metadata
-# metadata:
-#   key: value
-
 build_config:
-  # Base image to use for the container, must be Ubuntu or Debian-based
-  # base_image: "debian:bookworm-slim"
+  # Use the official Julia base image (includes Julia + stdlib)
+  base_image: "julia:1.11-bookworm"
 
   # Platform to build the container for. In general, images can only be executed
   # on the platform they were built for.
   target_platform: "native"
 
-  # Additional packages to install in the container (via apt-get)
-  # Julia is installed via custom_build_steps below
-  # extra_packages:
-  #  - package_name
+  # Copy Julia project and solver source into the container
+  package_data:
+    - ["julia/", "julia/"]
 
-  # Data to copy into the container, relative to the project root
-  # package_data:
-  #  - [path/to/source, path/to/destination]
-
-  # Install Julia and precompile packages in the container
   custom_build_steps:
-    - |
-      RUN apt-get update && apt-get install -y curl && \
-          curl -fsSL https://install.julialang.org | sh -s -- -y && \
-          /root/.juliaup/bin/julia -e 'using Pkg; Pkg.add(["Enzyme"])'
-    # TODO: Add your Julia packages to the Pkg.add list above
+    # Use a shared Julia depot so packages are accessible to any runtime user.
+    - "ENV JULIA_DEPOT_PATH=/tesseract/.julia"
+    # Ensure precompiled cache is portable across CPUs of the same architecture.
+    - 'RUN if [ "$(uname -m)" = "x86_64" ]; then export JULIA_CPU_TARGET="generic;sandybridge,-xsaveopt,clone_all;haswell,-rdrnd,base(1)"; else export JULIA_CPU_TARGET="generic"; fi && mkdir -p /tesseract/.julia && julia --project=/tesseract/julia -e "import Pkg; Pkg.instantiate(); Pkg.precompile()"'
+    - "RUN chmod -R 777 /tesseract/.julia"
+    # Tell JuliaCall to use the system Julia and skip its own package management.
+    # JULIA_PKG_PRECOMPILE_AUTO=0 prevents Julia from recompiling packages at
+    # runtime when the container UID differs from the build UID.
+    - "ENV PYTHON_JULIACALL_EXE=/usr/local/julia/bin/julia PYTHON_JULIACALL_PROJECT=/tesseract/julia PYTHON_JULIAPKG_OFFLINE=yes JULIA_PKG_PRECOMPILE_AUTO=0"
