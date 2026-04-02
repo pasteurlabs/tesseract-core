@@ -422,6 +422,13 @@ def init_api(
         "tesseract_requirements.txt", target_dir, template_vars, recipe=Path(recipe)
     )
 
+    # Julia recipe: copy Julia source files
+    if recipe == "julia":
+        _write_template_file("apply.jl", target_dir, template_vars, recipe=Path(recipe))
+        _write_template_file(
+            "enzyme_wrappers.jl", target_dir, template_vars, recipe=Path(recipe)
+        )
+
     return target_dir / "tesseract_api.py"
 
 

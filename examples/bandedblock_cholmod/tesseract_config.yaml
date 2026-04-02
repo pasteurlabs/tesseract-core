@@ -1,0 +1,12 @@
+name: "bandedblock-cholmod"
+version: "0.1.0"
+description: "Differentiable sparse CHOLMOD solver for SPD block systems with tridiagonal blocks, using Julia Enzyme AD"
+
+build_config:
+  target_platform: "native"
+
+  custom_build_steps:
+    - |
+      RUN apt-get update && apt-get install -y curl && \
+          curl -fsSL https://install.julialang.org | sh -s -- -y && \
+          /root/.juliaup/bin/julia -e 'using Pkg; Pkg.add(["Enzyme", "LinearSolve"])'

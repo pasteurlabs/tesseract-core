@@ -58,6 +58,11 @@ def expand_path_pattern(path_pattern: str, inputs: dict[str, Any]) -> list[str]:
         parts: Sequence[str], current_inputs: Any, current_path: list[str]
     ) -> list[str]:
         """Recursively expand each part separately."""
+        if current_inputs is None:
+            # None means this branch doesn't exist (e.g. None entry in a
+            # list, or an Optional field that is absent). No paths here.
+            return []
+
         if not parts:
             return [".".join(current_path)]
 
@@ -79,9 +84,12 @@ def expand_path_pattern(path_pattern: str, inputs: dict[str, Any]) -> list[str]:
                 )
                 paths.extend(subpaths)
         else:
-            subpaths = _handle_part(
-                parts[1:], current_inputs[part], [*current_path, part]
+            value = (
+                current_inputs.get(part)
+                if isinstance(current_inputs, dict)
+                else getattr(current_inputs, part, None)
             )
+            subpaths = _handle_part(parts[1:], value, [*current_path, part])
             paths.extend(subpaths)
         return paths
 
