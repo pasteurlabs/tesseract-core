@@ -1,0 +1,6 @@
+name: "burgers-solver"
+version: "0.1.0"
+description: "1D Burgers equation solver with pluggable neural viscosity closure"
+
+build_config:
+  target_platform: "native"
