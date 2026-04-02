@@ -10,11 +10,15 @@ from tesseract_core import Tesseract
 
 try:
     import torch
+except ImportError:
+    HAS_TORCH = False
+else:
     import torch.autograd.forward_ad as fwAD
 
     from tesseract_core.torch_compat import apply_tesseract
-except ImportError:
-    pass
+
+    HAS_TORCH = True
+
 
 MESHSTATS_API = (
     Path(__file__).parent.parent.parent
@@ -22,6 +26,12 @@ MESHSTATS_API = (
     / "meshstats_finitediff"
     / "tesseract_api.py"
 )
+
+
+@pytest.fixture(scope="module", autouse=True)
+def needs_torch():
+    if not HAS_TORCH:
+        pytest.fail("PyTorch is not installed.")
 
 
 @pytest.fixture(scope="module")
@@ -48,7 +58,7 @@ def _make_inputs(requires_grad: bool = False):
     }, points
 
 
-def test_forward_pass(self, meshstats):
+def test_forward_pass(meshstats):
     inputs, _ = _make_inputs()
     result = apply_tesseract(meshstats, inputs)
 
@@ -67,7 +77,7 @@ def test_forward_pass(self, meshstats):
     )
 
 
-def test_output_types(self, meshstats):
+def test_output_types(meshstats):
     inputs, _ = _make_inputs()
     result = apply_tesseract(meshstats, inputs)
 
@@ -75,7 +85,7 @@ def test_output_types(self, meshstats):
     assert isinstance(result["statistics"]["first_point_coordinates"], torch.Tensor)
 
 
-def test_backward_pass(self, meshstats):
+def test_backward_pass(meshstats):
     inputs, points = _make_inputs(requires_grad=True)
     result = apply_tesseract(meshstats, inputs)
 
@@ -87,7 +97,7 @@ def test_backward_pass(self, meshstats):
     assert torch.allclose(points.grad, expected_grad, atol=1e-4)
 
 
-def test_autograd_grad(self, meshstats):
+def test_autograd_grad(meshstats):
     inputs, points = _make_inputs(requires_grad=True)
     result = apply_tesseract(meshstats, inputs)
 
@@ -100,7 +110,7 @@ def test_autograd_grad(self, meshstats):
     assert torch.allclose(grad_points, expected_grad, atol=1e-4)
 
 
-def test_forward_mode_jvp(self, meshstats):
+def test_forward_mode_jvp(meshstats):
     points = torch.tensor(
         [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]],
         dtype=torch.float32,
