@@ -10,13 +10,13 @@ from pydantic import BaseModel, Field
 from torch.utils._pytree import tree_map
 
 from tesseract_core.runtime.config import get_config
-from tesseract_core.runtime.experimental import InputFileReference, OutputFileReference
+from tesseract_core.runtime.experimental import InputPathReference, OutputPathReference
 
 
 class InputSchema(BaseModel):
     """Input schema for QoI dataset generation."""
 
-    config: InputFileReference = Field(description="Configuration file")
+    config: InputPathReference = Field(description="Configuration file")
 
     sim_folder: str = Field(
         description="Folder path containing Ansys Fluent simulations with CAD files and QoI reports",
@@ -30,7 +30,7 @@ class InputSchema(BaseModel):
 class OutputSchema(BaseModel):
     """Output schema for QoI dataset generation."""
 
-    data: list[OutputFileReference] = Field(
+    data: list[OutputPathReference] = Field(
         description="List of npz files containing point cloud data, simulation parameters and QoI (if available)",
     )
 

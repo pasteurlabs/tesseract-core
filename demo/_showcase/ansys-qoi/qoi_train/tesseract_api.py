@@ -13,13 +13,13 @@ from pydantic import BaseModel, Field
 from torch.utils._pytree import tree_map
 
 from tesseract_core.runtime.config import get_config
-from tesseract_core.runtime.experimental import InputFileReference, OutputFileReference
+from tesseract_core.runtime.experimental import InputPathReference, OutputPathReference
 
 
 class InputSchema(BaseModel):
     """Input schema for QoI model training."""
 
-    config: InputFileReference = Field(description="Configuration file")
+    config: InputPathReference = Field(description="Configuration file")
 
     data_folder: str = Field(
         description="Folder containing npz files containing point cloud data information, "
@@ -30,10 +30,10 @@ class InputSchema(BaseModel):
 class OutputSchema(BaseModel):
     """Output schema for QoI model training."""
 
-    trained_models: list[OutputFileReference] = Field(
+    trained_models: list[OutputPathReference] = Field(
         description="Pickle file containing weights of trained model"
     )
-    scalers: list[OutputFileReference] = Field(
+    scalers: list[OutputPathReference] = Field(
         description="Pickle file containing the scaling method for the dataset"
     )
 
@@ -44,7 +44,7 @@ def evaluate(inputs: Any) -> Any:
     from process.scaler import ScalingPipeline
     from process.train import train_hybrid_models
 
-    # Convert all inputs to Path objects (handles strings, InputFileReference, and Path)
+    # Convert all inputs to Path objects (handles strings, InputPathReference, and Path)
     config = get_config()
     input_base = Path(config.input_path)
     output_base = Path(config.output_path)

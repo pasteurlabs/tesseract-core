@@ -226,8 +226,6 @@ def _resolve_input_path(path: Path) -> Path:
         )
     if not tess_path.exists():
         raise FileNotFoundError(f"Input path {tess_path} does not exist.")
-    if not tess_path.is_file():
-        raise ValueError(f"Input path {tess_path} is not a file.")
     return tess_path
 
 
@@ -241,8 +239,8 @@ def _strip_output_path(path: Path) -> Path:
         return path
 
 
-InputFileReference = Annotated[Path, AfterValidator(_resolve_input_path)]
-OutputFileReference = Annotated[Path, AfterValidator(_strip_output_path)]
+InputPathReference = Annotated[Path, AfterValidator(_resolve_input_path)]
+OutputPathReference = Annotated[Path, AfterValidator(_strip_output_path)]
 
 
 def require_file(file_path: PathLike) -> Path:
@@ -346,9 +344,9 @@ class TesseractReference:
 
 
 __all__ = [
-    "InputFileReference",
+    "InputPathReference",
     "LazySequence",
-    "OutputFileReference",
+    "OutputPathReference",
     "PydanticLazySequenceAnnotation",
     "TesseractReference",
     "finite_difference_jacobian",

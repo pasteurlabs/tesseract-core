@@ -8,17 +8,17 @@ from pydantic import BaseModel
 
 from tesseract_core.runtime.config import get_config
 from tesseract_core.runtime.experimental import (
-    InputFileReference,
-    OutputFileReference,
+    InputPathReference,
+    OutputPathReference,
 )
 
 
 class InputSchema(BaseModel):
-    data: list[InputFileReference]
+    data: list[InputPathReference]
 
 
 class OutputSchema(BaseModel):
-    data: list[OutputFileReference]
+    data: list[OutputPathReference]
 
 
 def apply(inputs: InputSchema) -> OutputSchema:
