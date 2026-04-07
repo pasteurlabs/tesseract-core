@@ -16,21 +16,21 @@ from torch.utils._pytree import tree_map
 
 from tesseract_core.runtime import Array, Float32
 from tesseract_core.runtime.config import get_config
-from tesseract_core.runtime.experimental import InputPathReference
+from tesseract_core.runtime.experimental import InputFileReference
 
 
 class InputSchema(BaseModel):
     """Input schema for QoI model inference."""
 
-    config: InputPathReference = Field(description="Configuration file")
+    config: InputFileReference = Field(description="Configuration file")
 
     data_folder: str = Field(
         description="Folder containing npz files with point cloud data and simulation parameters"
     )
-    trained_model: InputPathReference = Field(
+    trained_model: InputFileReference = Field(
         description="Pickle file containing weights of trained model"
     )
-    scaler: InputPathReference = Field(
+    scaler: InputFileReference = Field(
         description="Pickle file containing the scaling method for the dataset"
     )
 

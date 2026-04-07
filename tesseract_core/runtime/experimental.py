@@ -229,6 +229,20 @@ def _resolve_input_path(path: Path) -> Path:
     return tess_path
 
 
+def _resolve_input_file(path: Path) -> Path:
+    tess_path = _resolve_input_path(path)
+    if not tess_path.is_file():
+        raise ValueError(f"Input path {tess_path} is not a file.")
+    return tess_path
+
+
+def _resolve_input_dir(path: Path) -> Path:
+    tess_path = _resolve_input_path(path)
+    if not tess_path.is_dir():
+        raise ValueError(f"Input path {tess_path} is not a directory.")
+    return tess_path
+
+
 def _strip_output_path(path: Path) -> Path:
     from tesseract_core.runtime.config import get_config
 
@@ -239,8 +253,40 @@ def _strip_output_path(path: Path) -> Path:
         return path
 
 
-InputPathReference = Annotated[Path, AfterValidator(_resolve_input_path)]
-OutputPathReference = Annotated[Path, AfterValidator(_strip_output_path)]
+def _strip_output_file(path: Path) -> Path:
+    from tesseract_core.runtime.config import get_config
+
+    output_path = get_config().output_path
+    if path.is_relative_to(output_path):
+        if not path.is_file():
+            raise ValueError(f"Output path {path} is not a file.")
+        return path.relative_to(output_path)
+    else:
+        full_path = Path(output_path) / path
+        if not full_path.is_file():
+            raise ValueError(f"Output path {full_path} is not a file.")
+        return path
+
+
+def _strip_output_dir(path: Path) -> Path:
+    from tesseract_core.runtime.config import get_config
+
+    output_path = get_config().output_path
+    if path.is_relative_to(output_path):
+        if not path.is_dir():
+            raise ValueError(f"Output path {path} is not a directory.")
+        return path.relative_to(output_path)
+    else:
+        full_path = Path(output_path) / path
+        if not full_path.is_dir():
+            raise ValueError(f"Output path {full_path} is not a directory.")
+        return path
+
+
+InputFileReference = Annotated[Path, AfterValidator(_resolve_input_file)]
+InputDirectoryReference = Annotated[Path, AfterValidator(_resolve_input_dir)]
+OutputFileReference = Annotated[Path, AfterValidator(_strip_output_file)]
+OutputDirectoryReference = Annotated[Path, AfterValidator(_strip_output_dir)]
 
 
 def require_file(file_path: PathLike) -> Path:
@@ -344,9 +390,11 @@ class TesseractReference:
 
 
 __all__ = [
-    "InputPathReference",
+    "InputDirectoryReference",
+    "InputFileReference",
     "LazySequence",
-    "OutputPathReference",
+    "OutputDirectoryReference",
+    "OutputFileReference",
     "PydanticLazySequenceAnnotation",
     "TesseractReference",
     "finite_difference_jacobian",

@@ -1,0 +1,24 @@
+{
+  "endpoint": "apply",
+  "expected_outputs": {
+    "dirs": [
+      "sample_dir_0",
+      "sample_dir_1"
+    ]
+  },
+  "expected_exception": null,
+  "expected_exception_regex": null,
+  "atol": 1e-8,
+  "rtol": 1e-5,
+  "cli_config": {
+    "input_path": "testdata/"
+  },
+  "payload": {
+    "inputs": {
+      "dirs": [
+        "sample_dir_0",
+        "sample_dir_1"
+      ]
+    }
+  }
+}
