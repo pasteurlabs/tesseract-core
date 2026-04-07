@@ -20,6 +20,7 @@ from pydantic import (
 from pydantic.json_schema import JsonSchemaValue
 from pydantic_core import CoreSchema, SchemaSerializer, SchemaValidator, core_schema
 
+from tesseract_core.runtime.config import get_config
 from tesseract_core.runtime.file_interactions import PathLike, parent_path
 from tesseract_core.runtime.gradient_endpoint_derivation import (
     jacobian_from_jvp,
@@ -236,47 +237,37 @@ def _resolve_input_file(path: Path) -> Path:
     return tess_path
 
 
-def _resolve_input_dir(path: Path) -> Path:
-    tess_path = _resolve_input_path(path)
-    if not tess_path.is_dir():
-        raise ValueError(f"Input path {tess_path} is not a directory.")
-    return tess_path
+def _strip_output_path(path: Path) -> Path:
+    from tesseract_core.runtime.config import get_config
+
+    output_path = get_config().output_path
+    if path.is_relative_to(output_path):
+        return path.relative_to(output_path)
+    else:
+        return path
 
 
 def _strip_output_file(path: Path) -> Path:
-    from tesseract_core.runtime.config import get_config
-
-    output_path = get_config().output_path
-    if path.is_relative_to(output_path):
-        if not path.is_file():
-            raise ValueError(f"Output path {path} is not a file.")
-        return path.relative_to(output_path)
-    else:
-        full_path = Path(output_path) / path
-        if not full_path.is_file():
-            raise ValueError(f"Output path {full_path} is not a file.")
-        return path
+    stripped = _strip_output_path(path)
+    full_path = Path(get_config().output_path) / stripped
+    if not full_path.is_file():
+        raise ValueError(f"Output path {full_path} is not a file.")
+    return stripped
 
 
-def _strip_output_dir(path: Path) -> Path:
-    from tesseract_core.runtime.config import get_config
+def _strip_output_exists(path: Path) -> Path:
+    stripped = _strip_output_path(path)
+    full_path = Path(get_config().output_path) / stripped
+    if not full_path.exists():
+        raise ValueError(f"Output path {full_path} does not exist.")
+    return stripped
 
-    output_path = get_config().output_path
-    if path.is_relative_to(output_path):
-        if not path.is_dir():
-            raise ValueError(f"Output path {path} is not a directory.")
-        return path.relative_to(output_path)
-    else:
-        full_path = Path(output_path) / path
-        if not full_path.is_dir():
-            raise ValueError(f"Output path {full_path} is not a directory.")
-        return path
 
+InputPathReference = Annotated[Path, AfterValidator(_resolve_input_path)]
+OutputPathReference = Annotated[Path, AfterValidator(_strip_output_exists)]
 
 InputFileReference = Annotated[Path, AfterValidator(_resolve_input_file)]
-InputDirectoryReference = Annotated[Path, AfterValidator(_resolve_input_dir)]
 OutputFileReference = Annotated[Path, AfterValidator(_strip_output_file)]
-OutputDirectoryReference = Annotated[Path, AfterValidator(_strip_output_dir)]
 
 
 def require_file(file_path: PathLike) -> Path:
@@ -380,11 +371,11 @@ class TesseractReference:
 
 
 __all__ = [
-    "InputDirectoryReference",
     "InputFileReference",
+    "InputPathReference",
     "LazySequence",
-    "OutputDirectoryReference",
     "OutputFileReference",
+    "OutputPathReference",
     "PydanticLazySequenceAnnotation",
     "TesseractReference",
     "finite_difference_jacobian",

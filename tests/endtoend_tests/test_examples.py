@@ -102,10 +102,7 @@ TEST_CASES = {
     "fortran_heat": Config(),
     "conda": Config(),
     "required_files": Config(input_path="input"),
-    "filereference": Config(input_path="test_cases/testdata", output_path="output"),
-    "directoryreference": Config(
-        input_path="test_cases/testdata", output_path="output"
-    ),
+    "pathreference": Config(input_path="test_cases/testdata", output_path="output"),
     "metrics": Config(test_with_random_inputs=True),
     "qp_solve": Config(),
     "tesseractreference": Config(),  # Can't test requests standalone; needs target Tesseract. Covered in separate test.

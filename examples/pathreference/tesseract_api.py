@@ -8,27 +8,30 @@ from pydantic import BaseModel
 
 from tesseract_core.runtime.config import get_config
 from tesseract_core.runtime.experimental import (
-    InputDirectoryReference,
-    OutputDirectoryReference,
+    InputPathReference,
+    OutputPathReference,
 )
 
 
 class InputSchema(BaseModel):
-    dirs: list[InputDirectoryReference]
+    paths: list[InputPathReference]
 
 
 class OutputSchema(BaseModel):
-    dirs: list[OutputDirectoryReference]
+    paths: list[OutputPathReference]
 
 
 def apply(inputs: InputSchema) -> OutputSchema:
     output_path = Path(get_config().output_path)
     result = []
-    for src in inputs.dirs:
-        # src is an absolute Path to the input directory
-        dest = output_path / src.name
-        if dest.exists():
-            shutil.rmtree(dest)
-        shutil.copytree(src, dest)
+    for src in inputs.paths:
+        if src.is_dir():
+            dest = output_path / src.name
+            if dest.exists():
+                shutil.rmtree(dest)
+            shutil.copytree(src, dest)
+        else:
+            dest = output_path / src.with_suffix(".copy").name
+            shutil.copy(src, dest)
         result.append(dest)
-    return OutputSchema(dirs=result)
+    return OutputSchema(paths=result)

@@ -1,0 +1,10 @@
+name: pathreference
+version: "1.0.0"
+description: |
+  Tesseract that copies input files and directories to the output directory.
+  Demonstrates InputPathReference and OutputPathReference, which accept both
+  files and directories.
+
+build_config:
+  package_data: []
+  custom_build_steps: []

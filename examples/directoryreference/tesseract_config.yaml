@@ -1,9 +1,0 @@
-name: directoryreference
-version: "1.0.0"
-description: |
-  Tesseract that copies input directories to the output directory.
-  Demonstrates InputDirectoryReference and OutputDirectoryReference.
-
-build_config:
-  package_data: []
-  custom_build_steps: []

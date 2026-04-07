@@ -11,7 +11,8 @@
       "sample_6.copy",
       "sample_7.copy",
       "sample_8.copy",
-      "sample_9.copy"
+      "sample_9.copy",
+      "sample_dir"
     ]
   },
   "expected_exception": null,
@@ -33,7 +34,8 @@
         "sample_6.json",
         "sample_7.json",
         "sample_8.json",
-        "sample_9.json"
+        "sample_9.json",
+        "sample_dir"
       ]
     }
   }
