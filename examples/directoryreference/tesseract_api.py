@@ -27,6 +27,8 @@ def apply(inputs: InputSchema) -> OutputSchema:
     for src in inputs.dirs:
         # src is an absolute Path to the input directory
         dest = output_path / src.name
+        if dest.exists():
+            shutil.rmtree(dest)
         shutil.copytree(src, dest)
         result.append(dest)
     return OutputSchema(dirs=result)
