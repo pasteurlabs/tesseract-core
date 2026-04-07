@@ -93,16 +93,13 @@ $ tesseract serve --env=TESSERACT_MLFLOW_TRACKING_URI="..." \
 
 Tesseracts can be connected to shared Docker networks, allowing them to communicate with each other and with other services at runtime. A common use case is composing multiple Tesseracts into a pipeline, where one Tesseract calls another via its REST API using `Tesseract.from_url()`. A working end-to-end example of this pattern is available in [`examples/_multi-tesseract/multi-helloworld`](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/_multi-tesseract/multi-helloworld).
 
-You can create a Docker network and attach Tesseracts to it using the `--network` flag.
+You can attach Tesseracts to a named Docker network using the `--network` flag. The network is created automatically if it does not already exist.
 
 ```bash
-$ docker network create my_network
 $ tesseract serve "my-tesseract:latest" --network my_network --network-alias my-tesseract --port 8000
 ```
 
-The `serve` command prints container metadata to `stdout`, including the Tesseract's IP address and port on each connected network. The `--network-alias` argument assigns a DNS name so other containers on the same network can reach it by name (e.g. `http://my-tesseract:8000`) rather than by IP. Note that the port is assigned randomly if left unspecified.
-
-Some setups create networks automatically. For example, the MLflow docker-compose setup described above creates the `tesseract-mlflow-server` network, which is why the example `tesseract serve` command there can reference it directly.
+The `serve` command prints container metadata to `stdout`, including the Tesseract's IP address and port on each connected network. The `--network-alias` argument assigns a hostname so other containers on the same network can reach it by name (e.g. `http://my-tesseract:8000`) rather than by IP. Note that the port is assigned randomly if left unspecified.
 
 **A note on `--network=host`:**
 
@@ -111,25 +108,6 @@ Setting `--network=host` makes a container share the host's network stack, bypas
 Docker Engine on Linux runs the daemon directly on the host OS, so `--network=host` gives the container access to the host's network namespace, including `localhost`. This is the only platform that supports sharing the full network stack.
 
 Docker Desktop runs the Docker daemon inside a lightweight Linux VM. Here `--network=host` refers to the network stack of the VM, not your actual machine. As a result services on your machine's `localhost` are not reachable from inside the container. Docker Desktop >=4.34 added opt-in support for host networking (Settings > Resources > Network > "Enable host networking"), but only works at the TCP/UDP level and does not give access to the host's network namespace. For more details check out the [Docker documentation](https://docs.docker.com/engine/network/drivers/host/).
-
-To verify whether outbound network access works in your environment, you can use the [`examples/ping`](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/ping) Tesseract, which fetches a URL and reports whether it was reachable:
-
-```bash
-$ tesseract build ./examples/ping
-$ tesseract run ping:latest apply '{"inputs": {"url": "https://pasteurlabs.ai/"}}'
-```
-
-To specifically test if `--network=host` works, start a local webserver and check whether containers can reach it. First set up the server:
-
-```bash
-$ python3 -m http.server 9999
-```
-
-Then, while the server is running, target the ping Tesseract at it:
-
-```bash
-$ tesseract run --network=host ping:latest apply '{"inputs": {"url": "http://localhost:9999"}}'
-```
 
 ## Volume mounts and user permissions
 

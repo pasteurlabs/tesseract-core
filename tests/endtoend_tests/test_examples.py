@@ -107,7 +107,6 @@ TEST_CASES = {
     "qp_solve": Config(),
     "tesseractreference": Config(),  # Can't test requests standalone; needs target Tesseract. Covered in separate test.
     "userhandling": Config(),
-    "ping": Config(),
 }
 
 
