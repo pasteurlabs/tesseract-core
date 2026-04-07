@@ -243,16 +243,6 @@ def _resolve_input_dir(path: Path) -> Path:
     return tess_path
 
 
-def _strip_output_path(path: Path) -> Path:
-    from tesseract_core.runtime.config import get_config
-
-    output_path = get_config().output_path
-    if path.is_relative_to(output_path):
-        return path.relative_to(output_path)
-    else:
-        return path
-
-
 def _strip_output_file(path: Path) -> Path:
     from tesseract_core.runtime.config import get_config
 
