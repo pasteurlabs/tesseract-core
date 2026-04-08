@@ -5,6 +5,7 @@ import re
 import types
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from copy import copy
+from pathlib import Path
 from typing import (
     Annotated,
     Any,
@@ -255,6 +256,8 @@ def create_apply_schema(
     InputSchema: type[BaseModel], OutputSchema: type[BaseModel]
 ) -> tuple[type[BaseModel], type[BaseModel]]:
     """Create the input / output schemas for the /apply endpoint."""
+    from .experimental import InputPathReference, OutputPathReference
+
     # We add metadata to the input and output schemas to indicate which fields are differentiable,
     # what their paths are, and which expected shape / dtype they have.
     # This is used internally and by some official clients, but not advertised as part of the public API,
@@ -268,13 +271,13 @@ def create_apply_schema(
 
     InputSchema = apply_function_to_model_tree(
         InputSchema,
-        lambda x, _: x,
+        lambda x, _: InputPathReference if x is Path else x,
         model_prefix="Apply_",
         default_model_config=dict(extra="forbid"),
     )
     OutputSchema = apply_function_to_model_tree(
         OutputSchema,
-        lambda x, _: x,
+        lambda x, _: OutputPathReference if x is Path else x,
         model_prefix="Apply_",
         default_model_config=dict(extra="forbid"),
     )
