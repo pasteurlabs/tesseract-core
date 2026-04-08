@@ -822,10 +822,13 @@ def runtime_config(tmp_path):
     """Fixture providing a real RuntimeConfig with temp input/output dirs.
 
     Patches get_config() so that path-resolution validators use these dirs.
-    Tests access paths via Path(runtime_config.input_path) / Path(runtime_config.output_path),
-    mirroring how apply() accesses them: Path(get_config().output_path).
+    Restores the original config state on teardown.
     """
+    import tesseract_core.runtime.config as _cfg_mod
     from tesseract_core.runtime.config import get_config, update_config
+
+    original_config = _cfg_mod._current_config
+    original_overrides = _cfg_mod._config_overrides.copy()
 
     input_dir = tmp_path / "inputs"
     output_dir = tmp_path / "outputs"
@@ -833,7 +836,10 @@ def runtime_config(tmp_path):
     output_dir.mkdir()
 
     update_config(input_path=str(input_dir), output_path=str(output_dir))
-    return get_config()
+    yield get_config()
+
+    _cfg_mod._current_config = original_config
+    _cfg_mod._config_overrides = original_overrides
 
 
 # --- Input: basic resolution ---
@@ -857,30 +863,20 @@ def test_input_relative_path_resolved_to_absolute(runtime_config):
     assert result.inputs.file.is_absolute()
 
 
-def test_input_nonexistent_path_raises(runtime_config):
-    """FileNotFoundError when the referenced file does not exist.
-
-    Note: Pydantic only wraps ValueError/AssertionError in ValidationError;
-    FileNotFoundError propagates directly.
-    """
-
+@pytest.mark.parametrize(
+    "path,exc,match",
+    [
+        ("missing.txt", FileNotFoundError, "does not exist"),
+        ("../../etc/passwd", ValidationError, "relative to"),
+    ],
+)
+def test_input_invalid_path_raises(runtime_config, path, exc, match):
     class InputSchema(BaseModel):
         file: Path
 
     ApplyInput, _ = create_apply_schema(InputSchema, InputSchema)
-    with pytest.raises(FileNotFoundError, match="does not exist"):
-        ApplyInput.model_validate({"inputs": {"file": "missing.txt"}})
-
-
-def test_input_path_traversal_rejected(runtime_config):
-    """Path traversal (../../etc/passwd) is rejected."""
-
-    class InputSchema(BaseModel):
-        file: Path
-
-    ApplyInput, _ = create_apply_schema(InputSchema, InputSchema)
-    with pytest.raises(ValidationError, match="relative to"):
-        ApplyInput.model_validate({"inputs": {"file": "../../etc/passwd"}})
+    with pytest.raises(exc, match=match):
+        ApplyInput.model_validate({"inputs": {"file": path}})
 
 
 # --- Input: container and optional types ---
