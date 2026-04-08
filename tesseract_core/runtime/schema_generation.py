@@ -43,6 +43,67 @@ from .tree_transforms import get_at_path
 SEQ_INDEX_SENTINEL = object()
 DICT_INDEX_SENTINEL = object()
 
+
+def _resolve_input_path(path: Path) -> Path:
+    from tesseract_core.runtime.config import get_config
+
+    input_path = get_config().input_path
+    tess_path = (input_path / path).resolve()
+    if str(input_path) not in str(tess_path):
+        raise ValueError(
+            f"Invalid input file reference: {path}. "
+            f"Expected path to be relative to {input_path}, but got {tess_path}. "
+            "File references have to be relative to --input-path."
+        )
+    if not tess_path.exists():
+        raise FileNotFoundError(f"Input path {tess_path} does not exist.")
+    return tess_path
+
+
+def _strip_output_path(path: Path) -> Path:
+    from tesseract_core.runtime.config import get_config
+
+    output_path = get_config().output_path
+    if path.is_relative_to(output_path):
+        return path.relative_to(output_path)
+    else:
+        return path
+
+
+def _strip_output_exists(path: Path) -> Path:
+    from tesseract_core.runtime.config import get_config
+
+    stripped = _strip_output_path(path)
+    full_path = Path(get_config().output_path) / stripped
+    if not full_path.exists():
+        raise ValueError(f"Output path {full_path} does not exist.")
+    return stripped
+
+
+def _is_annotated_path(x: Any) -> bool:
+    def _core_type(ttype: Any) -> Any:
+        while _is_annotated(ttype):
+            ttype = ttype.__origin__
+        return ttype
+
+    return _is_annotated(x) and _core_type(x) is Path
+
+
+def _inject_input_path_validator(x: Any, _: tuple) -> Any:
+    if x is Path:
+        # Wrap with _resolve_input_path as the INNERMOST validator so that
+        # it runs before all user validators (if any)
+        return Annotated[Path, AfterValidator(_resolve_input_path)]
+    return x
+
+
+def _inject_output_path_validator(x: Any, _: Any) -> Any:
+    # x is either bare Path or Annotated[Path, *user_validators]
+    # Wrap with _strip_output_exists as the OUTERMOST validator so user validators
+    # run first (on absolute paths) and stripping happens last.
+    return Annotated[x, AfterValidator(_strip_output_exists)]
+
+
 T = TypeVar("T")
 
 # Python has funnily enough two union types now. See https://github.com/python/cpython/issues/105499
@@ -266,11 +327,6 @@ def create_apply_schema(
     InputSchema: type[BaseModel], OutputSchema: type[BaseModel]
 ) -> tuple[type[BaseModel], type[BaseModel]]:
     """Create the input / output schemas for the /apply endpoint."""
-    from tesseract_core.runtime.experimental import (
-        _resolve_input_path,
-        _strip_output_exists,
-    )
-
     # We add metadata to the input and output schemas to indicate which fields are differentiable,
     # what their paths are, and which expected shape / dtype they have.
     # This is used internally and by some official clients, but not advertised as part of the public API,
@@ -282,41 +338,19 @@ def create_apply_schema(
         OutputSchema, filter_fn=is_differentiable
     )
 
-    def resolve_input_path(x: Any, _: tuple) -> Any:
-        if x is Path:
-            # Wrap with _resolve_input_path as the INNERMOST validator so that
-            # it runs before all user validators (if any)
-            return Annotated[Path, AfterValidator(_resolve_input_path)]
-        return x
-
     InputSchema = apply_function_to_model_tree(
         InputSchema,
-        resolve_input_path,
+        _inject_input_path_validator,
         model_prefix="Apply_",
         default_model_config=dict(extra="forbid"),
     )
 
-    def is_annotated_path(x: Any) -> bool:
-        def _core_type(ttype: Any) -> Any:
-            while _is_annotated(ttype):
-                ttype = ttype.__origin__
-            return ttype
-
-        return _is_annotated(x) and _core_type(x) is Path
-
-    def strip_output_path(x: Any, _: Any) -> Any:
-        # x is either bare Path or Annotated[Path, *user_validators]
-        # Wrap with _strip_output_path as the OUTERMOST validator so user validators
-        # run first (on absolute paths) and stripping happens last.
-        # return Annotated[x, AfterValidator(_strip_output_exists)]
-        return Annotated[x, AfterValidator(_strip_output_exists)]
-
     OutputSchema = apply_function_to_model_tree(
         OutputSchema,
-        strip_output_path,
+        _inject_output_path_validator,
         model_prefix="Apply_",
         default_model_config=dict(extra="forbid"),
-        is_leaf=is_annotated_path,
+        is_leaf=_is_annotated_path,
     )
 
     class ApplyInputSchema(BaseModel):

@@ -255,14 +255,6 @@ def _strip_output_file(path: Path) -> Path:
     return stripped
 
 
-def _strip_output_exists(path: Path) -> Path:
-    stripped = _strip_output_path(path)
-    full_path = Path(get_config().output_path) / stripped
-    if not full_path.exists():
-        raise ValueError(f"Output path {full_path} does not exist.")
-    return stripped
-
-
 InputFileReference = Annotated[Path, AfterValidator(_resolve_input_file)]
 OutputFileReference = Annotated[Path, AfterValidator(_strip_output_file)]
 
