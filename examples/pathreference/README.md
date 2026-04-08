@@ -9,23 +9,28 @@ Pydantic validators on top of the built-in path-handling behaviour.
 When you annotate a field with `Path`, the schema generation layer automatically
 injects path-handling validators at runtime.
 
-**Input `Path` fields**
+**Input `Path` fields** — caller sends a relative string, `apply` receives an absolute `Path`:
 
-- Accept a _relative_ path string from the caller.
-- Resolve it to an absolute path under the configured `--input-path`.
-- Reject any path that would escape `input_path` (path traversal protection).
-- Raise `FileNotFoundError` if the resolved path does not exist.
-- Accept both files **and** directories (use `InputFileReference` for files only).
+```
+caller sends       →  "sample_8.json"
+built-in resolves  →  Path("/tesseract/input_data/sample_8.json")   (checked: exists)
+apply sees         →  Path("/tesseract/input_data/sample_8.json")
+```
 
-**Output `Path` fields**
+- Rejects any path that would escape `input_path` (path traversal protection).
+- Raises `FileNotFoundError` if the resolved path does not exist.
+- Accepts both files **and** directories (use `InputFileReference` for files only).
 
-- Accept the absolute path your `apply` function produces (e.g. `output_path / name`).
-- Strip the `output_path` prefix, returning a _relative_ path to the caller.
-- Raise `ValueError` if the path does not exist inside `output_path`.
-- Accept both files **and** directories (use `OutputFileReference` for files only).
+**Output `Path` fields** — `apply` returns an absolute `Path`, caller receives a relative string:
 
-So from the caller's perspective, both inputs and outputs are relative path strings;
-the runtime handles all absolute-path resolution transparently.
+```
+apply returns      →  Path("/tesseract/output_data/sample_8.copy")
+built-in strips    →  Path("sample_8.copy")                          (checked: exists)
+caller receives    →  "sample_8.copy"
+```
+
+- Raises `ValueError` if the path does not exist inside `output_path`.
+- Accepts both files **and** directories (use `OutputFileReference` for files only).
 
 ## Composing user-defined validators
 
@@ -40,6 +45,8 @@ def has_bin_sidecar(path: Path) -> Path:
         if name is not None:
             bin = path.parent / name
             assert bin.exists(), f"Expected .bin file for json {path} not found at {bin}"
+    else:
+        raise ValueError(f"{path} does not exist or is not a file.")
     return path
 
 class InputSchema(BaseModel):
@@ -50,17 +57,21 @@ The built-in path validators run at different points depending on direction:
 
 **Input fields** — built-in validator runs **first**, user validators run after:
 
-1. Raw string (e.g. `"sample_8.json"`) is resolved to an absolute path and checked
-   for existence by the built-in input validator.
-2. The resolved absolute `Path` is passed to `has_bin_sidecar`, which checks that
-   the referenced `.bin` sidecar is present beside it.
+```
+"sample_8.json"
+  → built-in         →  Path("/tesseract/input_data/sample_8.json")   (resolved + existence check)
+  → has_bin_sidecar  →  Path("/tesseract/input_data/sample_8.json")   (checks .bin sidecar present)
+  → apply receives   →  Path("/tesseract/input_data/sample_8.json")
+```
 
 **Output fields** — user validators run **first**, built-in validator runs after:
 
-1. The absolute `Path` returned by `apply` (e.g. `output_path / "sample_8.copy"`)
-   is passed to `has_bin_sidecar`, which checks the `.bin` sidecar was also copied.
-2. The built-in output validator then confirms the path exists inside `output_path`
-   and strips the prefix, returning a relative path to the caller.
+```
+apply returns  →  Path("/tesseract/output_data/sample_8.copy")
+  → has_bin_sidecar  →  Path("/tesseract/output_data/sample_8.copy")   (checks .bin sidecar was copied)
+  → built-in         →  Path("sample_8.copy")                          (existence check + prefix stripped)
+  → caller receives  →  "sample_8.copy"
+```
 
 This example uses output validators to confirm that `apply` copied the sidecar
 `.bin` file alongside each JSON file.
