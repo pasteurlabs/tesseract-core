@@ -21,7 +21,6 @@ def bin_reference(path: Path) -> str | None:
 
 
 def has_bin_sidecar(path: Path) -> Path:
-    print(path)
     """Pydantic validator to check for .bin file next to any json file that references one."""
     if path.is_file():
         name = bin_reference(path)

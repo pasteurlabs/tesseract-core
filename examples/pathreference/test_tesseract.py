@@ -6,7 +6,7 @@ from rich import print
 from tesseract_core import Tesseract
 
 
-def _clean():
+def clean():
     # delete before copy
     if output_path.exists():
         shutil.rmtree(output_path)
@@ -23,10 +23,7 @@ paths = [
     "sample_dir",
 ]
 
-expected = ["sample_file.copy", "sample_dir"]
-
-
-_clean()
+clean()
 with Tesseract.from_tesseract_api(
     "tesseract_api.py", input_path=input_path, output_path=output_path, stream_logs=True
 ) as tess:
@@ -38,7 +35,7 @@ with Tesseract.from_tesseract_api(
     assert len(list(output_path.glob("*.bin"))) == 1
 
 
-_clean()
+clean()
 with Tesseract.from_image(
     "pathreference", input_path=input_path, output_path=output_path, stream_logs=True
 ) as tess:

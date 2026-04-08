@@ -1,7 +1,7 @@
 {
   "endpoint": "apply",
   "expected_outputs": {
-    "data": [
+    "paths": [
       "sample_0.copy",
       "sample_1.copy",
       "sample_2.copy",
@@ -24,7 +24,7 @@
   },
   "payload": {
     "inputs": {
-      "data": [
+      "paths": [
         "sample_0.json",
         "sample_1.json",
         "sample_2.json",

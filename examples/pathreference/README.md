@@ -19,7 +19,7 @@ class OutputSchema(BaseModel):
 
 **`InputPathReference`** (inputs)
 
-- Accepts a *relative* path string from the caller.
+- Accepts a _relative_ path string from the caller.
 - Resolves it to an absolute path under the configured `--input-path`.
 - Rejects any path that would escape `input_path` (path traversal protection).
 - Raises `FileNotFoundError` if the resolved path does not exist.
@@ -28,7 +28,7 @@ class OutputSchema(BaseModel):
 **`OutputPathReference`** (outputs)
 
 - Accepts the absolute path your `apply` function produces (e.g. `output_path / name`).
-- Strips the `output_path` prefix, returning a *relative* path to the caller.
+- Strips the `output_path` prefix, returning a _relative_ path to the caller.
 - Raises `ValueError` if the path does not exist inside `output_path`.
 - Accepts both files **and** directories (use `OutputFileReference` for files only).
 
@@ -37,7 +37,7 @@ the runtime handles all absolute-path resolution transparently.
 
 ## Composing user-defined validators
 
-`AfterValidator`s placed on a `Path`-annotated field are preserved and run *after*
+`AfterValidator`s placed on a `Path`-annotated field are preserved and run _after_
 the built-in path resolution. The user validator therefore always receives an
 already-resolved, validated absolute `Path`:
 
@@ -70,12 +70,12 @@ This example uses it to confirm that `apply` also copied the sidecar `.bin` file
 
 The test dataset (`test_cases/testdata/`) contains:
 
-| File | Array encoding |
-|------|---------------|
-| `sample_0.json`, `sample_3.json`, `sample_6.json`, `sample_9.json` | `json` (inline) |
-| `sample_1.json`, `sample_4.json`, `sample_7.json` | `base64` (inline) |
-| `sample_2.json`, `sample_5.json`, `sample_8.json` | `binref` (references the shared `.bin` sidecar) |
-| `sample_dir/` | directory containing `data.json` |
+| File                                                               | Array encoding                                  |
+| ------------------------------------------------------------------ | ----------------------------------------------- |
+| `sample_0.json`, `sample_3.json`, `sample_6.json`, `sample_9.json` | `json` (inline)                                 |
+| `sample_1.json`, `sample_4.json`, `sample_7.json`                  | `base64` (inline)                               |
+| `sample_2.json`, `sample_5.json`, `sample_8.json`                  | `binref` (references the shared `.bin` sidecar) |
+| `sample_dir/`                                                      | directory containing `data.json`                |
 
 `generate_data.py` re-creates this dataset using a fixed RNG seed.
 
