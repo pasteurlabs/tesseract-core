@@ -4,15 +4,19 @@
 import json
 from collections.abc import Iterable
 from copy import deepcopy
+from pathlib import Path
 from typing import Annotated, Optional
 
 import numpy as np
 import pytest
-from pydantic import BaseModel, ConfigDict, RootModel, ValidationError
+from pydantic import AfterValidator, BaseModel, ConfigDict, RootModel, ValidationError
 
 from tesseract_core.runtime import Array, Differentiable, Float32, Float64, Int64, UInt8
 from tesseract_core.runtime.experimental import LazySequence
 from tesseract_core.runtime.schema_generation import (
+    _inject_output_path_validator,
+    _is_annotated_path,
+    _strip_output_exists,
     apply_function_to_model_tree,
     create_abstract_eval_schema,
     create_apply_schema,
@@ -809,3 +813,271 @@ def test_model_config_extra_forbid():
 
     with pytest.raises(ValidationError):
         ApplyParent.model_validate({"child": {"x": "foo"}, "extra": 1})
+
+
+# =============================================================================
+# Path resolution tests (automatic path handling in Input/OutputSchema)
+# =============================================================================
+
+
+@pytest.fixture
+def path_config(tmp_path):
+    """Temp input/output dirs with get_config patched to point at them."""
+    from tesseract_core.runtime.config import update_config
+
+    input_dir = tmp_path / "inputs"
+    output_dir = tmp_path / "outputs"
+    input_dir.mkdir()
+    output_dir.mkdir()
+    update_config(input_path=str(input_dir), output_path=str(output_dir))
+    return input_dir, output_dir
+
+
+# --- Input: basic resolution ---
+
+
+def test_input_relative_path_resolved_to_absolute(path_config):
+    """Caller sends relative string → apply() receives absolute Path under input_path."""
+    input_dir, _ = path_config
+    (input_dir / "data.txt").touch()
+    (input_dir / "mydir").mkdir()
+
+    class InputSchema(BaseModel):
+        file: Path
+        folder: Path
+
+    ApplyInput, _ = create_apply_schema(InputSchema, InputSchema)
+    result = ApplyInput.model_validate(
+        {"inputs": {"file": "data.txt", "folder": "mydir"}}
+    )
+    assert result.inputs.file == input_dir / "data.txt"
+    assert result.inputs.file.is_absolute()
+
+
+def test_input_nonexistent_path_raises(path_config):
+    """FileNotFoundError when the referenced file does not exist.
+
+    Note: Pydantic only wraps ValueError/AssertionError in ValidationError;
+    FileNotFoundError propagates directly.
+    """
+
+    class InputSchema(BaseModel):
+        file: Path
+
+    ApplyInput, _ = create_apply_schema(InputSchema, InputSchema)
+    with pytest.raises(FileNotFoundError, match="does not exist"):
+        ApplyInput.model_validate({"inputs": {"file": "missing.txt"}})
+
+
+def test_input_path_traversal_rejected(path_config):
+    """Path traversal (../../etc/passwd) is rejected."""
+
+    class InputSchema(BaseModel):
+        file: Path
+
+    ApplyInput, _ = create_apply_schema(InputSchema, InputSchema)
+    with pytest.raises(ValidationError, match="relative to"):
+        ApplyInput.model_validate({"inputs": {"file": "../../etc/passwd"}})
+
+
+# --- Input: container and optional types ---
+
+
+def test_input_list_of_paths_all_resolved(path_config):
+    """list[Path] — every entry is resolved to an absolute path."""
+    input_dir, _ = path_config
+    (input_dir / "a.txt").touch()
+    (input_dir / "b.txt").touch()
+
+    class InputSchema(BaseModel):
+        files: list[Path]
+
+    ApplyInput, _ = create_apply_schema(InputSchema, InputSchema)
+    result = ApplyInput.model_validate({"inputs": {"files": ["a.txt", "b.txt"]}})
+    assert result.inputs.files == [input_dir / "a.txt", input_dir / "b.txt"]
+
+
+def test_input_optional_path(path_config):
+    input_dir, _ = path_config
+
+    class InputSchema(BaseModel):
+        file: Path | None = None
+
+    # None works
+    ApplyInput, _ = create_apply_schema(InputSchema, InputSchema)
+    result = ApplyInput.model_validate({"inputs": {"file": None}})
+    assert result.inputs.file is None
+
+    # Path as well
+    (input_dir / "data.txt").touch()
+    ApplyInput, _ = create_apply_schema(InputSchema, InputSchema)
+    result = ApplyInput.model_validate({"inputs": {"file": "data.txt"}})
+    assert result.inputs.file == input_dir / "data.txt"
+
+
+# --- Input: user validators ---
+
+
+def test_input_user_validator_receives_absolute_path(path_config):
+    """AfterValidator on an input Path field receives the already-resolved absolute path.
+
+    From the README:
+        "sample_8.json"
+          → built-in resolves → Path("/tesseract/input_data/sample_8.json")
+          → user validator   → Path("/tesseract/input_data/sample_8.json")
+    """
+    input_dir, _ = path_config
+    (input_dir / "data.txt").touch()
+
+    seen: list[Path] = []
+
+    def record(path: Path) -> Path:
+        seen.append(path)
+        return path
+
+    class InputSchema(BaseModel):
+        file: Annotated[Path, AfterValidator(record)]
+
+    ApplyInput, _ = create_apply_schema(InputSchema, InputSchema)
+    ApplyInput.model_validate({"inputs": {"file": "data.txt"}})
+
+    assert len(seen) == 1
+    assert seen[0] == input_dir / "data.txt"
+    assert seen[0].is_absolute()
+
+
+def test_input_nested_model_path_resolved(path_config):
+    """Path fields inside nested models are resolved."""
+    input_dir, _ = path_config
+    (input_dir / "nested.txt").touch()
+
+    class Inner(BaseModel):
+        file: Path
+
+    class InputSchema(BaseModel):
+        inner: Inner
+
+    ApplyInput, _ = create_apply_schema(InputSchema, InputSchema)
+    result = ApplyInput.model_validate({"inputs": {"inner": {"file": "nested.txt"}}})
+    assert result.inputs.inner.file == input_dir / "nested.txt"
+
+
+# --- Output: basic stripping ---
+
+
+def test_output_absolute_path_stripped_to_relative(path_config):
+    """apply() returns absolute Path → caller receives relative Path.
+
+    From the README:
+        apply returns  →  Path("/tesseract/output_data/sample_8.copy")
+        built-in strips → Path("sample_8.copy")
+        caller receives → "sample_8.copy"
+    """
+    _, output_dir = path_config
+    (output_dir / "result.txt").touch()
+
+    class OutputSchema(BaseModel):
+        result: Path
+
+    _, ApplyOutput = create_apply_schema(OutputSchema, OutputSchema)
+    out = ApplyOutput.model_validate({"result": output_dir / "result.txt"})
+    assert out.root.result == Path("result.txt")
+    assert not out.root.result.is_absolute()
+
+
+def test_output_nonexistent_path_raises(path_config):
+    """ValueError when the output path does not exist."""
+    _, output_dir = path_config
+
+    class OutputSchema(BaseModel):
+        result: Path
+
+    _, ApplyOutput = create_apply_schema(OutputSchema, OutputSchema)
+    with pytest.raises(ValidationError, match="does not exist"):
+        ApplyOutput.model_validate({"result": output_dir / "ghost.txt"})
+
+
+def test_output_list_of_paths_all_stripped(path_config):
+    """list[Path] — all output paths stripped to relative."""
+    _, output_dir = path_config
+    (output_dir / "a.out").touch()
+    (output_dir / "b.out").touch()
+
+    class OutputSchema(BaseModel):
+        files: list[Path]
+
+    _, ApplyOutput = create_apply_schema(OutputSchema, OutputSchema)
+    out = ApplyOutput.model_validate(
+        {"files": [output_dir / "a.out", output_dir / "b.out"]}
+    )
+    assert out.root.files == [Path("a.out"), Path("b.out")]
+
+
+# --- Output: user validators ---
+
+
+def test_output_user_validator_receives_absolute_path(path_config):
+    """AfterValidator on an output Path field receives the absolute path before stripping.
+
+    From the README:
+        apply returns    → Path("/tesseract/output_data/sample_8.copy")
+          → user validator → Path("/tesseract/output_data/sample_8.copy")  ← absolute
+          → built-in       → Path("sample_8.copy")                          ← stripped
+    """
+    _, output_dir = path_config
+    output_file = output_dir / "result.txt"
+    output_file.touch()
+
+    seen: list[Path] = []
+
+    def record(path: Path) -> Path:
+        seen.append(path)
+        return path
+
+    class OutputSchema(BaseModel):
+        result: Annotated[Path, AfterValidator(record)]
+
+    _, ApplyOutput = create_apply_schema(OutputSchema, OutputSchema)
+    out = ApplyOutput.model_validate({"result": output_file})
+
+    assert len(seen) == 1
+    assert seen[0] == output_file  # absolute, not yet stripped
+    assert out.root.result == Path("result.txt")  # final result is stripped
+
+
+# --- Regression: non-Path fields must not receive path validators ---
+
+
+def test_output_path_validator_only_on_path_fields():
+    """Regression: _inject_output_path_validator must not apply to non-Path fields.
+
+    Previously the validator was injected on every leaf type, causing
+    AttributeError when validating str/ndarray output fields.
+    """
+
+    class MixedOutput(BaseModel):
+        name: str
+        value: int
+        tagged_path: Annotated[Path, "some_meta"]
+
+    Result = apply_function_to_model_tree(
+        MixedOutput,
+        _inject_output_path_validator,
+        is_leaf=_is_annotated_path,
+    )
+
+    # Non-Path fields must have no _strip_output_exists injected
+    for field_name in ("name", "value"):
+        for m in Result.model_fields[field_name].metadata:
+            if isinstance(m, AfterValidator):
+                assert m.func is not _strip_output_exists, (
+                    f"_strip_output_exists must not be injected on non-Path field '{field_name}'"
+                )
+
+    # Annotated[Path, ...] field must have the validator (stored in Pydantic field metadata)
+    path_validators = [
+        m
+        for m in Result.model_fields["tagged_path"].metadata
+        if isinstance(m, AfterValidator)
+    ]
+    assert any(v.func is _strip_output_exists for v in path_validators)

@@ -98,6 +98,8 @@ def _inject_input_path_validator(x: Any, _: tuple) -> Any:
 
 
 def _inject_output_path_validator(x: Any, _: Any) -> Any:
+    if x is not Path and not _is_annotated_path(x):
+        return x
     # x is either bare Path or Annotated[Path, *user_validators]
     # Wrap with _strip_output_exists as the OUTERMOST validator so user validators
     # run first (on absolute paths) and stripping happens last.
