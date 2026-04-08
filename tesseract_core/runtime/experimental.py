@@ -263,9 +263,6 @@ def _strip_output_exists(path: Path) -> Path:
     return stripped
 
 
-InputPathReference = Annotated[Path, AfterValidator(_resolve_input_path)]
-OutputPathReference = Annotated[Path, AfterValidator(_strip_output_exists)]
-
 InputFileReference = Annotated[Path, AfterValidator(_resolve_input_file)]
 OutputFileReference = Annotated[Path, AfterValidator(_strip_output_file)]
 
@@ -372,10 +369,8 @@ class TesseractReference:
 
 __all__ = [
     "InputFileReference",
-    "InputPathReference",
     "LazySequence",
     "OutputFileReference",
-    "OutputPathReference",
     "PydanticLazySequenceAnnotation",
     "TesseractReference",
     "finite_difference_jacobian",

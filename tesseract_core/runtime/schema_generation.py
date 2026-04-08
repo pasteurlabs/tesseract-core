@@ -266,7 +266,7 @@ def create_apply_schema(
     InputSchema: type[BaseModel], OutputSchema: type[BaseModel]
 ) -> tuple[type[BaseModel], type[BaseModel]]:
     """Create the input / output schemas for the /apply endpoint."""
-    from .experimental import (
+    from tesseract_core.runtime.experimental import (
         _resolve_input_path,
         _strip_output_exists,
     )
@@ -282,7 +282,7 @@ def create_apply_schema(
         OutputSchema, filter_fn=is_differentiable
     )
 
-    def input_path_reference(x: Any, _: tuple) -> Any:
+    def resolve_input_path(x: Any, _: tuple) -> Any:
         if x is Path:
             # Wrap with _resolve_input_path as the INNERMOST validator so that
             # it runs before all user validators (if any)
@@ -291,7 +291,7 @@ def create_apply_schema(
 
     InputSchema = apply_function_to_model_tree(
         InputSchema,
-        input_path_reference,
+        resolve_input_path,
         model_prefix="Apply_",
         default_model_config=dict(extra="forbid"),
     )
@@ -304,7 +304,7 @@ def create_apply_schema(
 
         return _is_annotated(x) and _core_type(x) is Path
 
-    def output_path_reference(x: Any, _: Any) -> Any:
+    def strip_output_path(x: Any, _: Any) -> Any:
         # x is either bare Path or Annotated[Path, *user_validators]
         # Wrap with _strip_output_path as the OUTERMOST validator so user validators
         # run first (on absolute paths) and stripping happens last.
@@ -313,7 +313,7 @@ def create_apply_schema(
 
     OutputSchema = apply_function_to_model_tree(
         OutputSchema,
-        output_path_reference,
+        strip_output_path,
         model_prefix="Apply_",
         default_model_config=dict(extra="forbid"),
         is_leaf=is_annotated_path,

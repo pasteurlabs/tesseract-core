@@ -7,39 +7,30 @@ Pydantic validators on top of the built-in path-handling behaviour.
 ## What `Path` does in a schema
 
 When you annotate a field with `Path`, the schema generation layer automatically
-replaces it with `InputPathReference` on inputs and `OutputPathReference` on outputs.
+injects path-handling validators at runtime.
 
-```python
-class InputSchema(BaseModel):
-    paths: list[Path]          # → list[InputPathReference] at runtime
+**Input `Path` fields**
 
-class OutputSchema(BaseModel):
-    paths: list[Path]          # → list[OutputPathReference] at runtime
-```
+- Accept a _relative_ path string from the caller.
+- Resolve it to an absolute path under the configured `--input-path`.
+- Reject any path that would escape `input_path` (path traversal protection).
+- Raise `FileNotFoundError` if the resolved path does not exist.
+- Accept both files **and** directories (use `InputFileReference` for files only).
 
-**`InputPathReference`** (inputs)
+**Output `Path` fields**
 
-- Accepts a _relative_ path string from the caller.
-- Resolves it to an absolute path under the configured `--input-path`.
-- Rejects any path that would escape `input_path` (path traversal protection).
-- Raises `FileNotFoundError` if the resolved path does not exist.
-- Accepts both files **and** directories (use `InputFileReference` for files only).
-
-**`OutputPathReference`** (outputs)
-
-- Accepts the absolute path your `apply` function produces (e.g. `output_path / name`).
-- Strips the `output_path` prefix, returning a _relative_ path to the caller.
-- Raises `ValueError` if the path does not exist inside `output_path`.
-- Accepts both files **and** directories (use `OutputFileReference` for files only).
+- Accept the absolute path your `apply` function produces (e.g. `output_path / name`).
+- Strip the `output_path` prefix, returning a _relative_ path to the caller.
+- Raise `ValueError` if the path does not exist inside `output_path`.
+- Accept both files **and** directories (use `OutputFileReference` for files only).
 
 So from the caller's perspective, both inputs and outputs are relative path strings;
 the runtime handles all absolute-path resolution transparently.
 
 ## Composing user-defined validators
 
-`AfterValidator`s placed on a `Path`-annotated field are preserved and run _after_
-the built-in path resolution. The user validator therefore always receives an
-already-resolved, validated absolute `Path`:
+`AfterValidator`s placed on a `Path`-annotated field are preserved, and in both
+cases the user validator receives an already-resolved **absolute** `Path`:
 
 ```python
 def has_bin_sidecar(path: Path) -> Path:
@@ -48,23 +39,31 @@ def has_bin_sidecar(path: Path) -> Path:
         name = bin_reference(path)
         if name is not None:
             bin = path.parent / name
-            assert bin.exists(), f"Expected .bin file for json {json} not found at {bin}"
+            assert bin.exists(), f"Expected .bin file for json {path} not found at {bin}"
     return path
 
 class InputSchema(BaseModel):
     paths: list[Annotated[Path, AfterValidator(has_bin_sidecar)]]
 ```
 
-Execution order for each element of `paths`:
+The built-in path validators run at different points depending on direction:
 
-1. Raw string (e.g. `"sample_8.json"`) is validated by `InputPathReference`:
-   resolves → `/abs/input_path/sample_8.json`, checks it exists.
-2. The resolved `Path` is passed to `next_to_binary_path`, which reads the JSON
-   and checks that the referenced `.bin` sidecar is present beside it.
+**Input fields** — built-in validator runs **first**, user validators run after:
 
-The same pattern applies to `OutputSchema`: the validator runs after
-`OutputPathReference` has verified the output file exists and stripped the prefix.
-This example uses it to confirm that `apply` also copied the sidecar `.bin` file.
+1. Raw string (e.g. `"sample_8.json"`) is resolved to an absolute path and checked
+   for existence by the built-in input validator.
+2. The resolved absolute `Path` is passed to `has_bin_sidecar`, which checks that
+   the referenced `.bin` sidecar is present beside it.
+
+**Output fields** — user validators run **first**, built-in validator runs after:
+
+1. The absolute `Path` returned by `apply` (e.g. `output_path / "sample_8.copy"`)
+   is passed to `has_bin_sidecar`, which checks the `.bin` sidecar was also copied.
+2. The built-in output validator then confirms the path exists inside `output_path`
+   and strips the prefix, returning a relative path to the caller.
+
+This example uses output validators to confirm that `apply` copied the sidecar
+`.bin` file alongside each JSON file.
 
 ## Test data
 
