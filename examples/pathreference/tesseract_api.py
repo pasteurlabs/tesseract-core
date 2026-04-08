@@ -29,6 +29,10 @@ def has_bin_sidecar(path: Path) -> Path:
             assert bin.exists(), (
                 f"Expected .bin file for json {json} not found at {bin}"
             )
+    elif path.is_dir():
+        return path
+    else:
+        raise ValueError(f"{path} does not exist.")
     return path
 
 

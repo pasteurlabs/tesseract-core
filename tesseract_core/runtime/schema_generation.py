@@ -69,6 +69,7 @@ def apply_function_to_model_tree(
     func: Callable[[type, tuple], type],
     model_prefix: str = "",
     default_model_config: dict[str, Any] | None = None,
+    is_leaf: Callable[[Any], bool] | None = None,
 ) -> type[BaseModel]:
     """Apply a function to all leaves of a Pydantic model, recursing into containers + nested models.
 
@@ -86,6 +87,11 @@ def apply_function_to_model_tree(
 
     The path to the field "a" would be ["a"], and the path to the int type would be
     ["a", SEQ_INDEX_SENTINEL, DICT_INDEX_SENTINEL].
+
+    The optional ``is_leaf`` predicate, if provided, is checked first: when it returns
+    True for a node, ``func`` is called on that node immediately without further recursion.
+    This allows callers to treat compound types (e.g. ``Annotated[Path, ...]``) as atomic
+    leaves.
     """
     if default_model_config is None:
         default_model_config = {}
@@ -93,6 +99,10 @@ def apply_function_to_model_tree(
     seen_models = set()
 
     def _recurse_over_model_tree(treeobj: Any, path: list[str]) -> Any:
+        # If the caller says this node is a leaf, apply func immediately
+        if is_leaf is not None and is_leaf(treeobj):
+            return func(treeobj, tuple(path))
+
         # Get the origin type of the annotation, e.g. List for List[int]
         origin_type = get_origin(treeobj)
         deprecated_types = ["List", "Dict", "Set", "FrozenSet", "Tuple"]
@@ -256,7 +266,10 @@ def create_apply_schema(
     InputSchema: type[BaseModel], OutputSchema: type[BaseModel]
 ) -> tuple[type[BaseModel], type[BaseModel]]:
     """Create the input / output schemas for the /apply endpoint."""
-    from .experimental import InputPathReference, OutputPathReference
+    from .experimental import (
+        _resolve_input_path,
+        _strip_output_exists,
+    )
 
     # We add metadata to the input and output schemas to indicate which fields are differentiable,
     # what their paths are, and which expected shape / dtype they have.
@@ -269,17 +282,41 @@ def create_apply_schema(
         OutputSchema, filter_fn=is_differentiable
     )
 
+    def input_path_reference(x: Any, _: tuple) -> Any:
+        if x is Path:
+            # Wrap with _resolve_input_path as the INNERMOST validator so that
+            # it runs before all user validators (if any)
+            return Annotated[Path, AfterValidator(_resolve_input_path)]
+        return x
+
     InputSchema = apply_function_to_model_tree(
         InputSchema,
-        lambda x, _: InputPathReference if x is Path else x,
+        input_path_reference,
         model_prefix="Apply_",
         default_model_config=dict(extra="forbid"),
     )
+
+    def is_annotated_path(x: Any) -> bool:
+        def _core_type(ttype: Any) -> Any:
+            while _is_annotated(ttype):
+                ttype = ttype.__origin__
+            return ttype
+
+        return _is_annotated(x) and _core_type(x) is Path
+
+    def output_path_reference(x: Any, _: Any) -> Any:
+        # x is either bare Path or Annotated[Path, *user_validators]
+        # Wrap with _strip_output_path as the OUTERMOST validator so user validators
+        # run first (on absolute paths) and stripping happens last.
+        # return Annotated[x, AfterValidator(_strip_output_exists)]
+        return Annotated[x, AfterValidator(_strip_output_exists)]
+
     OutputSchema = apply_function_to_model_tree(
         OutputSchema,
-        lambda x, _: OutputPathReference if x is Path else x,
+        output_path_reference,
         model_prefix="Apply_",
         default_model_config=dict(extra="forbid"),
+        is_leaf=is_annotated_path,
     )
 
     class ApplyInputSchema(BaseModel):
