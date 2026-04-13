@@ -265,7 +265,7 @@ def create_apply_schema(
     InputSchema: type[BaseModel], OutputSchema: type[BaseModel]
 ) -> tuple[type[BaseModel], type[BaseModel]]:
     """Create the input / output schemas for the /apply endpoint."""
-    from .experimental import TesseractPath, resolve_input_path, strip_output_path
+    from .experimental import TesseractPath, _resolve_input_path, _strip_output_path
 
     def _core_type(obj: Any) -> Any:
         return get_args(obj)[0] if _is_annotated(obj) else obj
@@ -274,7 +274,7 @@ def create_apply_schema(
         if x is TesseractPath:
             # Wrap with _resolve_input_path as the INNERMOST validator so that
             # it runs before all user validators (if any)
-            return Annotated[Path, AfterValidator(resolve_input_path)]
+            return Annotated[Path, AfterValidator(_resolve_input_path)]
         return x
 
     def _inject_output_path_validator(x: Any, _: Any) -> Any:
@@ -282,7 +282,7 @@ def create_apply_schema(
             # x is either bare TesseractPath or Annotated[TesseractPath, *user_validators]
             # Wrap with _strip_output_path as the OUTERMOST validator so user validators
             # run first (on absolute paths) and stripping happens last.
-            return Annotated[x, AfterValidator(strip_output_path)]
+            return Annotated[x, AfterValidator(_strip_output_path)]
         return x
 
     # We add metadata to the input and output schemas to indicate which fields are differentiable,

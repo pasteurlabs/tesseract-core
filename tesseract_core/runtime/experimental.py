@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
+import warnings
 from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
 from typing import (
@@ -226,7 +227,7 @@ to opt into automatic path resolution (inputs) and stripping (outputs).
 """
 
 
-def resolve_input_path(path: Path) -> Path:
+def _resolve_input_path(path: Path) -> Path:
     """Resolve a relative path against RuntimeConfig().input_path.
 
     Validates that the resolved path stays within the input directory and exists.
@@ -248,7 +249,7 @@ def resolve_input_path(path: Path) -> Path:
     return tess_path
 
 
-def strip_output_path(path: Path) -> Path:
+def _strip_output_path(path: Path) -> Path:
     """Strip RuntimeConfig().output_path prefix from a path.
 
     If the path is relative to the output directory, returns the relative portion.
@@ -277,16 +278,26 @@ def strip_output_path(path: Path) -> Path:
 
 
 def _resolve_input_file(path: Path) -> Path:
-    tess_path = resolve_input_path(path)
+    warnings.warn(
+        "InputFileReference is deprecated, use TesseractPath instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    tess_path = _resolve_input_path(path)
     if not tess_path.is_file():
         raise ValueError(f"Input path {tess_path} is not a file.")
     return tess_path
 
 
 def _strip_output_file(path: Path) -> Path:
+    warnings.warn(
+        "OutputFileReference is deprecated, use TesseractPath instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     if not path.is_file():
         raise ValueError(f"Output path {path} is not a file.")
-    stripped = strip_output_path(path)
+    stripped = _strip_output_path(path)
     return stripped
 
 
@@ -303,7 +314,7 @@ def require_file(file_path: PathLike) -> Path:
     if SKIP_REQUIRED_FILE_CHECK:
         return Path(file_path)
 
-    file_path = resolve_input_path(Path(file_path))
+    file_path = _resolve_input_path(Path(file_path))
 
     if not file_path.is_file():
         raise FileNotFoundError(f"Required file not found: {file_path}")
