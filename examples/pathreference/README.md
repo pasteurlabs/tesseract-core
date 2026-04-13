@@ -1,15 +1,15 @@
 # Path Reference Example
 
 A Tesseract that copies files and directories from `input_path` to `output_path`.
-It demonstrates how to use `Path` in Tesseract schemas and how to compose custom
-Pydantic validators on top of the built-in path-handling behaviour.
+It demonstrates how to use `TesseractPath` in Tesseract schemas and how to compose
+custom Pydantic validators on top of the built-in path-handling behaviour.
 
-## What `Path` does in a schema
+## What `TesseractPath` does in a schema
 
-When you annotate a field with `Path`, the schema generation layer automatically
-injects path-handling validators at runtime.
+When you annotate a field with `TesseractPath`, the schema generation layer
+automatically injects path-handling validators at runtime.
 
-**Input `Path` fields** — caller sends a relative string, `apply` receives an absolute `Path`:
+**Input `TesseractPath` fields** — caller sends a relative string, `apply` receives an absolute `Path`:
 
 ```
 caller sends       →  "sample_8.json"
@@ -19,9 +19,8 @@ apply sees         →  Path("/tesseract/input_data/sample_8.json")
 
 - Rejects any path that would escape `input_path` (path traversal protection).
 - Raises `FileNotFoundError` if the resolved path does not exist.
-- Accepts both files **and** directories (use `InputFileReference` for files only).
 
-**Output `Path` fields** — `apply` returns an absolute `Path`, caller receives a relative string:
+**Output `TesseractPath` fields** — `apply` returns an absolute `Path`, caller receives a relative string:
 
 ```
 apply returns      →  Path("/tesseract/output_data/sample_8.copy")
@@ -30,17 +29,16 @@ caller receives    →  "sample_8.copy"
 ```
 
 - Raises `ValueError` if the path does not exist inside `output_path`.
-- Accepts both files **and** directories (use `OutputFileReference` for files only).
 
 ## Composing user-defined validators
 
-`AfterValidator`s placed on a `Path`-annotated field are preserved, and in both
-cases the user validator receives an already-resolved **absolute** `Path`:
+`AfterValidator`s placed on a `TesseractPath`-annotated field are preserved, and
+in both cases you receive an already-resolved **absolute** `Path` in your Tesseract endpoints:
 
 ```python
 def has_bin_sidecar(path: Path) -> Path:
     """Check that any binref JSON has its .bin sidecar present."""
-    if path.is_file():
+    if path.is_file(): # <-- absolute path starting with /tesseract/input_data
         name = bin_reference(path)
         if name is not None:
             bin = path.parent / name
@@ -50,7 +48,7 @@ def has_bin_sidecar(path: Path) -> Path:
     return path
 
 class InputSchema(BaseModel):
-    paths: list[Annotated[Path, AfterValidator(has_bin_sidecar)]]
+    paths: list[Annotated[TesseractPath, AfterValidator(has_bin_sidecar)]]
 ```
 
 The built-in path validators run at different points depending on direction:
@@ -88,14 +86,3 @@ The test dataset (`test_cases/testdata/`) contains:
 | `sample_dir/`                                                      | directory containing `data.json`                |
 
 `generate_data.py` re-creates this dataset using a fixed RNG seed.
-
-## Running
-
-```bash
-# local (no Docker)
-uv run python test_tesseract.py
-
-# build Docker image first, then re-run
-uv run tesseract build .
-uv run python test_tesseract.py
-```
