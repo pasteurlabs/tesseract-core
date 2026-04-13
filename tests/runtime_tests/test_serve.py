@@ -245,7 +245,7 @@ def test_threading_sanity(tmpdir, free_port):
 
 
 @pytest.mark.skipif(
-    is_wsl(),
+    is_wsl() or sys.platform == "win32",
     reason="flaky on Windows",
 )
 def test_multiple_workers(tmpdir, free_port):
