@@ -380,7 +380,7 @@ def _write_template_file(
     exist_ok: bool = False,
 ):
     """Write a template to a target directory."""
-    template = ENV.get_template(str(recipe / template_name))
+    template = ENV.get_template((recipe / template_name).as_posix())
 
     target_file = target_dir / template_name
 
@@ -1001,9 +1001,7 @@ def run_tesseract(
             if not local_path.is_file():
                 raise RuntimeError(f"Path {local_path} provided as input is not a file")
 
-            path_in_container = os.path.join(
-                "/tesseract", f"payload{local_path.suffix}"
-            )
+            path_in_container = f"/tesseract/payload{local_path.suffix}"
             file_inputs.append((local_path, path_in_container))
 
     parsed_volumes, volume_environment = _prepare_and_validate_volumes(

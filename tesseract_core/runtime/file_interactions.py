@@ -99,8 +99,12 @@ def join_paths(base: PathLike, other: PathLike) -> str:
 
     If the other path is an absolute URL, return it as is.
     """
+    # Coerce to str to avoid "Cannot mix str and non-str arguments"
+    # when mixing PurePosixPath / PureWindowsPath on Windows
+    base = str(base)
+    other = str(other)
     if is_absolute_path(other):
-        return str(other)
+        return other
     if is_url(base):
         return urllib.parse.urljoin(base, other)
     return Path(base).joinpath(other).as_posix()

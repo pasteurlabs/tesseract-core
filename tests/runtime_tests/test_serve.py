@@ -66,6 +66,7 @@ def model_to_json(model):
 
 @contextmanager
 def serve_in_subprocess(api_file, port, num_workers=1, timeout=30.0):
+    proc = None
     try:
         proc = subprocess.Popen(
             [
@@ -98,11 +99,12 @@ def serve_in_subprocess(api_file, port, num_workers=1, timeout=30.0):
         yield f"http://localhost:{port}"
 
     finally:
-        proc.terminate()
-        stdout, stderr = proc.communicate()
-        print(stdout.decode())
-        print(stderr.decode())
-        proc.wait(timeout=5)
+        if proc is not None:
+            proc.terminate()
+            stdout, stderr = proc.communicate()
+            print(stdout.decode())
+            print(stderr.decode())
+            proc.wait(timeout=5)
 
 
 @pytest.fixture
