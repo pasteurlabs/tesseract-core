@@ -30,6 +30,7 @@ from pydantic import (
     field_validator,
 )
 
+from .file_interactions import resolve_input_path, strip_output_path
 from .schema_types import (
     Array,
     PydanticArrayAnnotation,
@@ -62,65 +63,24 @@ def _is_annotated(obj: Any) -> bool:
     return get_origin(obj) is Annotated
 
 
-def _core_type(ttype: Any) -> Any:
-    while _is_annotated(ttype):
-        ttype = ttype.__origin__
-    return ttype
-
-
-def _resolve_input_path(path: Path) -> Path:
-    from tesseract_core.runtime.config import get_config
-
-    input_path = get_config().input_path
-    tess_path = (input_path / path).resolve()
-    if str(input_path) not in str(tess_path):
-        raise ValueError(
-            f"Invalid input file reference: {path}. "
-            f"Expected path to be relative to {input_path}, but got {tess_path}. "
-            "File references have to be relative to --input-path."
-        )
-    if not tess_path.exists():
-        raise FileNotFoundError(f"Input path {tess_path} does not exist.")
-    return tess_path
-
-
-def _strip_output_path(path: Path) -> Path:
-    from tesseract_core.runtime.config import get_config
-
-    output_path = get_config().output_path
-    if path.is_relative_to(output_path):
-        if not path.exists():
-            raise ValueError(f"Output path {path} does not exist inside Tesseract")
-        return path.relative_to(output_path)
-    else:
-        full_path = output_path / path
-        if not full_path.exists():
-            if path.exists():
-                raise ValueError(
-                    f"Output path {path} is not in {output_path}. "
-                    f"All output data must be copied to `--output-path` ({output_path})."
-                )
-            else:
-                raise ValueError(
-                    f"Output path {path} is not in {output_path} or Tesseract root"
-                )
-        return path
+def _core_type(obj: Any) -> Any:
+    return get_args(obj)[0] if _is_annotated(obj) else obj
 
 
 def _inject_input_path_validator(x: Any, _: tuple) -> Any:
     if x is Path:
-        # Wrap with _resolve_input_path as the INNERMOST validator so that
+        # Wrap with resolve_input_path as the INNERMOST validator so that
         # it runs before all user validators (if any)
-        return Annotated[Path, AfterValidator(_resolve_input_path)]
+        return Annotated[Path, AfterValidator(resolve_input_path)]
     return x
 
 
 def _inject_output_path_validator(x: Any, _: Any) -> Any:
     if _core_type(x) is Path:
         # x is either bare Path or Annotated[Path, *user_validators]
-        # Wrap with _strip_output_path as the OUTERMOST validator so user validators
+        # Wrap with strip_output_path as the OUTERMOST validator so user validators
         # run first (on absolute paths) and stripping happens last.
-        return Annotated[x, AfterValidator(_strip_output_path)]
+        return Annotated[x, AfterValidator(strip_output_path)]
     return x
 
 
@@ -150,8 +110,9 @@ def apply_function_to_model_tree(
 
     The optional ``is_leaf`` predicate, if provided, is checked first: when it returns
     True for a node, ``func`` is called on that node immediately without further recursion.
-    This allows callers to treat compound types (e.g. ``Annotated[Path, ...]``) as atomic
-    leaves.
+    This allows callers to treat compound types (e.g. ``Annotated[Path, ...]``)
+    as levaes of the model tree. Useful for cases where metadata order in ``Annotated``
+    is important - as is the case for composing ``AfterValidator`` validators.
     """
     if default_model_config is None:
         default_model_config = {}

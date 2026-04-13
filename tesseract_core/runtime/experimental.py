@@ -24,6 +24,8 @@ from tesseract_core.runtime.config import get_config
 from tesseract_core.runtime.file_interactions import (
     PathLike,
     parent_path,
+    resolve_input_path,
+    strip_output_path,
 )
 from tesseract_core.runtime.gradient_endpoint_derivation import (
     jacobian_from_jvp,
@@ -35,10 +37,6 @@ from tesseract_core.runtime.mpa import (
     log_artifact,
     log_metric,
     log_parameter,
-)
-from tesseract_core.runtime.schema_generation import (
-    _resolve_input_path,
-    _strip_output_path,
 )
 from tesseract_core.runtime.schema_types import safe_issubclass
 
@@ -222,14 +220,14 @@ class PydanticLazySequenceAnnotation:
 
 
 def _resolve_input_file(path: Path) -> Path:
-    tess_path = _resolve_input_path(path)
+    tess_path = resolve_input_path(path)
     if not tess_path.is_file():
         raise ValueError(f"Input path {tess_path} is not a file.")
     return tess_path
 
 
 def _strip_output_file(path: Path) -> Path:
-    stripped = _strip_output_path(path)
+    stripped = strip_output_path(path)
     full_path = Path(get_config().output_path) / stripped
     if not full_path.is_file():
         raise ValueError(f"Output path {full_path} is not a file.")
@@ -249,7 +247,7 @@ def require_file(file_path: PathLike) -> Path:
     if SKIP_REQUIRED_FILE_CHECK:
         return Path(file_path)
 
-    file_path = _resolve_input_path(Path(file_path))
+    file_path = resolve_input_path(Path(file_path))
 
     if not file_path.is_file():
         raise FileNotFoundError(f"Required file not found: {file_path}")
