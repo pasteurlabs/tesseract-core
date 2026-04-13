@@ -161,20 +161,6 @@ Changelog <https://github.com/pasteurlabs/tesseract-core/releases>
 ```
 
 ```{toctree}
-:caption: Blog
-:maxdepth: 2
-:hidden:
-
-../blog/index.md
-../blog/tesseract-for-researchers.md
-../blog/tesseract-for-rse.md
-../blog/tesseract-for-rnd-engineers.md
-../blog/tesseract-for-platform-engineers.md
-../blog/2026-03-28-welcome.md
-../blog/2026-03-15-differentiable-pipelines.md
-```
-
-```{toctree}
 :caption: API Reference — SDK
 :maxdepth: 2
 :hidden:

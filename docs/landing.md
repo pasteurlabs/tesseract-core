@@ -78,11 +78,11 @@ Fortran, C++, Julia, JAX, PyTorch, or shell scripts.
 Python is the interface layer; your solver stays in its native language.
 :::
 
-:::{grid-item-card} PyTorch & JAX native
+:::{grid-item-card} JAX native
 :class-card: feature-card
 
-Every Tesseract becomes a `torch.autograd.Function` or a JAX primitive,
-with full support for `grad`, `jit`, `vmap`, and `.backward()`.
+Every Tesseract becomes a JAX primitive,
+with full support for `grad`, `jit`, and `vmap`.
 :::
 
 :::{grid-item-card} Self-documenting
@@ -164,27 +164,12 @@ $ tesseract run my-tesseract jacobian \
 ```python
 from tesseract_core import Tesseract
 
-t = Tesseract("my-tesseract")
+t = Tesseract.from_image("my-tesseract")
 result = t.apply(inputs={"x": [3.0]})
 # result["y"] => array([9.0])
 
 jac = t.jacobian(inputs={"x": [3.0]})
 # jac["y"]["x"] => array([[6.0]])
-```
-
-:::
-:::{tab-item} PyTorch
-
-```python
-from tesseract_core.torch_compat import (
-    apply_tesseract,
-)
-
-out = apply_tesseract(t, {"x": x_tensor})
-# out["y"] => tensor([9.0])
-
-out["y"].backward()
-# x_tensor.grad => tensor([6.0])
 ```
 
 :::
@@ -255,56 +240,6 @@ parameters with gradients across both.
 :::{div} landing-cta
 {bdg-ref-primary-line}`All demos & tutorials <content/demo/demo>`
 :::
-
-:::{div} landing-divider
-:::
-
-## Is Tesseract for me?
-
-::::{grid} 1 2 4 4
-:gutter: 3
-
-:::{grid-item-card} Researchers
-:link: content/blog/tesseract-for-researchers
-:link-type: doc
-:class-card: persona-card
-:img-top: \_static/icon-researcher.svg
-:class-img-top: persona-icon
-
-Differentiable simulation, probabilistic inference, cross-framework gradient composition.
-:::
-
-:::{grid-item-card} Research Software Engineers
-:link: content/blog/tesseract-for-rse
-:link-type: doc
-:class-card: persona-card
-:img-top: \_static/icon-rse.svg
-:class-img-top: persona-icon
-
-Typed interface contracts, reproducibility, multi-group solver coupling.
-:::
-
-:::{grid-item-card} R&D Engineers
-:link: content/blog/tesseract-for-rnd-engineers
-:link-type: doc
-:class-card: persona-card
-:img-top: \_static/icon-rnd.svg
-:class-img-top: persona-icon
-
-From research prototype to production pipeline without writing Dockerfiles.
-:::
-
-:::{grid-item-card} Platform Engineers
-:link: content/blog/tesseract-for-platform-engineers
-:link-type: doc
-:class-card: persona-card
-:img-top: \_static/icon-platform.svg
-:class-img-top: persona-icon
-
-Uniform deployment contracts for scientific workloads.
-:::
-
-::::
 
 :::{div} landing-divider
 :::
@@ -381,7 +316,6 @@ feature proposals.
 **Community**
 
 - [Forums](https://si-tesseract.discourse.group/)
-- {doc}`Blog <content/blog/index>`
 - [GitHub](https://github.com/pasteurlabs/tesseract-core)
 - [Contributing](https://github.com/pasteurlabs/tesseract-core/blob/main/CONTRIBUTING.md)
 - [Code of Conduct](https://github.com/pasteurlabs/tesseract-core/blob/main/CODE_OF_CONDUCT.md)
