@@ -46,7 +46,7 @@ pyyaml==6.0.3
     # via tesseract-core
 requests==2.33.1
     # via tesseract-core
-rich==14.3.3
+rich==15.0.0
     # via
     #   tesseract-core
     #   typer
