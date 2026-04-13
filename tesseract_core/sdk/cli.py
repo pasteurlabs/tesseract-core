@@ -903,9 +903,12 @@ def _extract_cli_config(
         if not Path(input_path).is_absolute():
             input_path = str(base_dir / input_path)
 
+    from tesseract_core.sdk.engine import _split_volume_spec
+
     volume_mounts = []
     for vol_mount in cli_config.get("volume_mounts", []):
-        if not Path(vol_mount.split(":", 1)[0]).is_absolute():
+        source = _split_volume_spec(vol_mount)[0]
+        if not Path(source).is_absolute():
             volume_mounts.append(str(base_dir / vol_mount))
         else:
             volume_mounts.append(vol_mount)

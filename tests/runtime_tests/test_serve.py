@@ -5,7 +5,6 @@ import base64
 import json
 import os
 import platform
-import signal
 import subprocess
 import sys
 import time
@@ -99,7 +98,7 @@ def serve_in_subprocess(api_file, port, num_workers=1, timeout=30.0):
         yield f"http://localhost:{port}"
 
     finally:
-        proc.send_signal(signal.SIGINT)
+        proc.terminate()
         stdout, stderr = proc.communicate()
         print(stdout.decode())
         print(stderr.decode())

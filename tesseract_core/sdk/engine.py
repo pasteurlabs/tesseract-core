@@ -803,7 +803,30 @@ def serve(
 
 def _is_local_volume(volume: str) -> bool:
     """Check if a volume is a local path."""
+    # Windows absolute paths like C:\foo
+    if (
+        len(volume) >= 3
+        and volume[0].isalpha()
+        and volume[1] == ":"
+        and volume[2] in ("/", "\\")
+    ):
+        return True
     return "/" in volume or "." in volume
+
+
+def _split_volume_spec(volume_spec: str) -> list[str]:
+    r"""Split a volume spec string on colons, respecting Windows drive letters.
+
+    E.g., ``C:\\foo:/bar:ro`` -> ``['C:\\foo', '/bar', 'ro']``
+         ``/foo:/bar:ro``    -> ``['/foo', '/bar', 'ro']``
+    """
+    # Check for Windows drive letter prefix (e.g., "C:")
+    if len(volume_spec) >= 2 and volume_spec[0].isalpha() and volume_spec[1] == ":":
+        rest = volume_spec[2:]
+        parts = rest.split(":")
+        parts[0] = volume_spec[:2] + parts[0]
+        return parts
+    return volume_spec.split(":")
 
 
 def _parse_volumes(volume_specs: list[str]) -> dict[str, dict[str, str]]:
@@ -814,7 +837,7 @@ def _parse_volumes(volume_specs: list[str]) -> dict[str, dict[str, str]]:
     """
 
     def _parse_volume_spec(volume_spec: str):
-        args = volume_spec.split(":")
+        args = _split_volume_spec(volume_spec)
         if len(args) == 2:
             source, target = args
             mode = "ro"
