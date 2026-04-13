@@ -75,7 +75,7 @@ def serve_in_subprocess(api_file, port, num_workers=1, timeout=30.0):
                 "from tesseract_core.runtime.serve import serve; "
                 f"serve(host='localhost', port={port}, num_workers={num_workers})",
             ],
-            env=dict(os.environ, TESSERACT_API_PATH=api_file),
+            env=dict(os.environ, TESSERACT_API_PATH=str(api_file)),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )

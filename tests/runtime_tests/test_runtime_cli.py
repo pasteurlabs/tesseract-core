@@ -472,17 +472,19 @@ def test_stdout_redirect_subprocess(tmpdir, target):
         [sys.executable, "-W", "ignore", testscript_path], capture_output=True
     )
     assert result.returncode == 0, (result.stdout, result.stderr)
-    assert result.stdout == b"stdout\n" * 4
+    stdout = result.stdout.replace(b"\r\n", b"\n")
+    stderr = result.stderr.replace(b"\r\n", b"\n")
+    assert stdout == b"stdout\n" * 4
 
     if target == "file":
-        assert result.stderr == b"stderr\n" * 3
+        assert stderr == b"stderr\n" * 3
         # Find the log file
         log_file = tmpdir / "test_output.log"
         with open(log_file, "rb") as f:
             log_content = f.read()
-        assert log_content == b"stderr\n" * 2
+        assert log_content.replace(b"\r\n", b"\n") == b"stderr\n" * 2
     else:
-        assert result.stderr == b"stderr\n" * 5
+        assert stderr == b"stderr\n" * 5
 
 
 def test_suggestion_on_misspelled_command(cli, cli_runner):
