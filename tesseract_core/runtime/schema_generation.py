@@ -30,7 +30,6 @@ from pydantic import (
     field_validator,
 )
 
-from .file_interactions import resolve_input_path, strip_output_path
 from .schema_types import (
     Array,
     PydanticArrayAnnotation,
@@ -61,27 +60,6 @@ def _construct_annotated(obj: Any, metadata: Iterable[Any]) -> Any:
 
 def _is_annotated(obj: Any) -> bool:
     return get_origin(obj) is Annotated
-
-
-def _core_type(obj: Any) -> Any:
-    return get_args(obj)[0] if _is_annotated(obj) else obj
-
-
-def _inject_input_path_validator(x: Any, _: tuple) -> Any:
-    if x is Path:
-        # Wrap with resolve_input_path as the INNERMOST validator so that
-        # it runs before all user validators (if any)
-        return Annotated[Path, AfterValidator(resolve_input_path)]
-    return x
-
-
-def _inject_output_path_validator(x: Any, _: Any) -> Any:
-    if _core_type(x) is Path:
-        # x is either bare Path or Annotated[Path, *user_validators]
-        # Wrap with strip_output_path as the OUTERMOST validator so user validators
-        # run first (on absolute paths) and stripping happens last.
-        return Annotated[x, AfterValidator(strip_output_path)]
-    return x
 
 
 def apply_function_to_model_tree(
@@ -287,6 +265,26 @@ def create_apply_schema(
     InputSchema: type[BaseModel], OutputSchema: type[BaseModel]
 ) -> tuple[type[BaseModel], type[BaseModel]]:
     """Create the input / output schemas for the /apply endpoint."""
+    from .experimental import TesseractPath, resolve_input_path, strip_output_path
+
+    def _core_type(obj: Any) -> Any:
+        return get_args(obj)[0] if _is_annotated(obj) else obj
+
+    def _inject_input_path_validator(x: Any, _: tuple) -> Any:
+        if x is TesseractPath:
+            # Wrap with _resolve_input_path as the INNERMOST validator so that
+            # it runs before all user validators (if any)
+            return Annotated[Path, AfterValidator(resolve_input_path)]
+        return x
+
+    def _inject_output_path_validator(x: Any, _: Any) -> Any:
+        if _core_type(x) is TesseractPath:
+            # x is either bare TesseractPath or Annotated[TesseractPath, *user_validators]
+            # Wrap with _strip_output_path as the OUTERMOST validator so user validators
+            # run first (on absolute paths) and stripping happens last.
+            return Annotated[x, AfterValidator(strip_output_path)]
+        return x
+
     # We add metadata to the input and output schemas to indicate which fields are differentiable,
     # what their paths are, and which expected shape / dtype they have.
     # This is used internally and by some official clients, but not advertised as part of the public API,
@@ -310,7 +308,7 @@ def create_apply_schema(
         _inject_output_path_validator,
         model_prefix="Apply_",
         default_model_config=dict(extra="forbid"),
-        is_leaf=lambda x: _core_type(x) is Path,
+        is_leaf=lambda x: _core_type(x) is TesseractPath,
     )
 
     class ApplyInputSchema(BaseModel):

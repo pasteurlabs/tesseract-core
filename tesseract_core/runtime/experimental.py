@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import (
     Annotated,
     Any,
+    NewType,
     get_args,
     get_origin,
 )
@@ -24,8 +25,6 @@ from tesseract_core.runtime.config import get_config
 from tesseract_core.runtime.file_interactions import (
     PathLike,
     parent_path,
-    resolve_input_path,
-    strip_output_path,
 )
 from tesseract_core.runtime.gradient_endpoint_derivation import (
     jacobian_from_jvp,
@@ -219,6 +218,64 @@ class PydanticLazySequenceAnnotation:
         return handler(_core_schema)
 
 
+TesseractPath = NewType("TesseractPath", Path)
+"""Path type for Tesseract input/output schemas.
+
+Use this instead of ``pathlib.Path`` in your ``InputSchema`` and ``OutputSchema``
+to opt into automatic path resolution (inputs) and stripping (outputs).
+"""
+
+
+def resolve_input_path(path: Path) -> Path:
+    """Resolve a relative path against RuntimeConfig().input_path.
+
+    Validates that the resolved path stays within the input directory and exists.
+
+    Raises:
+        ValueError: If the path escapes the input directory.
+        FileNotFoundError: If the resolved path does not exist.
+    """
+    input_path = get_config().input_path
+    tess_path = (input_path / path).resolve()
+    if str(input_path) not in str(tess_path):
+        raise ValueError(
+            f"Invalid input file reference: {path}. "
+            f"Expected path to be relative to {input_path}, but got {tess_path}. "
+            "File references have to be relative to --input-path."
+        )
+    if not tess_path.exists():
+        raise FileNotFoundError(f"Input path {tess_path} does not exist.")
+    return tess_path
+
+
+def strip_output_path(path: Path) -> Path:
+    """Strip RuntimeConfig().output_path prefix from a path.
+
+    If the path is relative to the output directory, returns the relative portion.
+
+    Raises:
+        ValueError: If the path does not exist or is outside the output directory.
+    """
+    output_path = get_config().output_path
+    if path.is_relative_to(output_path):
+        if not path.exists():
+            raise ValueError(f"Output path {path} does not exist inside Tesseract")
+        return path.relative_to(output_path)
+    else:
+        full_path = output_path / path
+        if not full_path.exists():
+            if path.exists():
+                raise ValueError(
+                    f"Output path {path} is not in {output_path}. "
+                    f"All output data must be copied to `--output-path` ({output_path})."
+                )
+            else:
+                raise ValueError(
+                    f"Output path {path} is not in {output_path} or Tesseract root"
+                )
+        return path
+
+
 def _resolve_input_file(path: Path) -> Path:
     tess_path = resolve_input_path(path)
     if not tess_path.is_file():
@@ -227,10 +284,9 @@ def _resolve_input_file(path: Path) -> Path:
 
 
 def _strip_output_file(path: Path) -> Path:
+    if not path.is_file():
+        raise ValueError(f"Output path {path} is not a file.")
     stripped = strip_output_path(path)
-    full_path = Path(get_config().output_path) / stripped
-    if not full_path.is_file():
-        raise ValueError(f"Output path {full_path} is not a file.")
     return stripped
 
 
@@ -343,6 +399,7 @@ __all__ = [
     "LazySequence",
     "OutputFileReference",
     "PydanticLazySequenceAnnotation",
+    "TesseractPath",
     "TesseractReference",
     "finite_difference_jacobian",
     "finite_difference_jvp",
