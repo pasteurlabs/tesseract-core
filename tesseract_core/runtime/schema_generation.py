@@ -43,6 +43,30 @@ from .tree_transforms import get_at_path
 SEQ_INDEX_SENTINEL = object()
 DICT_INDEX_SENTINEL = object()
 
+T = TypeVar("T")
+
+# Python has funnily enough two union types now. See https://github.com/python/cpython/issues/105499
+# We check against both for compatibility with older versions of Python.
+UNION_TYPES = [Union, types.UnionType]
+
+
+def _construct_annotated(obj: Any, metadata: Iterable[Any]) -> Any:
+    out = obj
+    # Exploit that repeated Annotated applications are flattened
+    for meta in metadata:
+        out = Annotated[out, meta]
+    return out
+
+
+def _is_annotated(obj: Any) -> bool:
+    return get_origin(obj) is Annotated
+
+
+def _core_type(ttype: Any) -> Any:
+    while _is_annotated(ttype):
+        ttype = ttype.__origin__
+    return ttype
+
 
 def _resolve_input_path(path: Path) -> Path:
     from tesseract_core.runtime.config import get_config
@@ -65,28 +89,22 @@ def _strip_output_path(path: Path) -> Path:
 
     output_path = get_config().output_path
     if path.is_relative_to(output_path):
+        if not path.exists():
+            raise ValueError(f"Output path {path} does not exist inside Tesseract")
         return path.relative_to(output_path)
     else:
+        full_path = output_path / path
+        if not full_path.exists():
+            if path.exists():
+                raise ValueError(
+                    f"Output path {path} is not in {output_path}. "
+                    f"All output data must be copied to `--output-path` ({output_path})."
+                )
+            else:
+                raise ValueError(
+                    f"Output path {path} is not in {output_path} or Tesseract root"
+                )
         return path
-
-
-def _strip_output_exists(path: Path) -> Path:
-    from tesseract_core.runtime.config import get_config
-
-    stripped = _strip_output_path(path)
-    full_path = Path(get_config().output_path) / stripped
-    if not full_path.exists():
-        raise ValueError(f"Output path {full_path} does not exist.")
-    return stripped
-
-
-def _is_annotated_path(x: Any) -> bool:
-    def _core_type(ttype: Any) -> Any:
-        while _is_annotated(ttype):
-            ttype = ttype.__origin__
-        return ttype
-
-    return _is_annotated(x) and _core_type(x) is Path
 
 
 def _inject_input_path_validator(x: Any, _: tuple) -> Any:
@@ -98,33 +116,12 @@ def _inject_input_path_validator(x: Any, _: tuple) -> Any:
 
 
 def _inject_output_path_validator(x: Any, _: Any) -> Any:
-    if x is not Path and not _is_annotated_path(x):
-        return x
-    # x is either bare Path or Annotated[Path, *user_validators]
-    # Wrap with _strip_output_exists as the OUTERMOST validator so user validators
-    # run first (on absolute paths) and stripping happens last.
-    return Annotated[x, AfterValidator(_strip_output_exists)]
-
-
-T = TypeVar("T")
-
-# Python has funnily enough two union types now. See https://github.com/python/cpython/issues/105499
-# We check against both for compatibility with older versions of Python.
-UNION_TYPES = [Union, types.UnionType]
-
-
-def _construct_annotated(obj: Any, metadata: Iterable[Any]) -> Any:
-    """Construct an Annotated type with the given metadata."""
-    out = obj
-    # Exploit that repeated Annotated applications are flattened
-    for meta in metadata:
-        out = Annotated[out, meta]
-    return out
-
-
-def _is_annotated(obj: Any) -> bool:
-    """Check if an object is typing.Annotated or typing_extensions.Annotated."""
-    return get_origin(obj) is Annotated
+    if _core_type(x) is Path:
+        # x is either bare Path or Annotated[Path, *user_validators]
+        # Wrap with _strip_output_path as the OUTERMOST validator so user validators
+        # run first (on absolute paths) and stripping happens last.
+        return Annotated[x, AfterValidator(_strip_output_path)]
+    return x
 
 
 def apply_function_to_model_tree(
@@ -352,7 +349,7 @@ def create_apply_schema(
         _inject_output_path_validator,
         model_prefix="Apply_",
         default_model_config=dict(extra="forbid"),
-        is_leaf=_is_annotated_path,
+        is_leaf=lambda x: _core_type(x) is Path,
     )
 
     class ApplyInputSchema(BaseModel):
