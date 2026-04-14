@@ -99,9 +99,10 @@ ogp_site_url = "https://docs.pasteurlabs.ai/projects/tesseract-core/latest/"
 ogp_site_name = "Tesseract"
 ogp_description_length = 200
 ogp_type = "article"
-ogp_image = (
-    "https://docs.pasteurlabs.ai/projects/tesseract-core/latest/_static/logo-light.png"
-)
+ogp_social_cards = {
+    "image": "static/logo-dark.png",
+    "line_color": "#d946ef",
+}
 
 
 # -- Custom directives ----------------------------------------------------

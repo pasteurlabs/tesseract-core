@@ -63,7 +63,7 @@ docs = [
     "autodoc_pydantic",
     "sphinx_design",
     "sphinx_copybutton",
-    "sphinxext_opengraph",
+    "sphinxext_opengraph[social_cards]",
     "tesseract-core[runtime]",
 ]
 dev = [
