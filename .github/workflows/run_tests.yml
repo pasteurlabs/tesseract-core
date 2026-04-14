@@ -323,6 +323,11 @@ jobs:
         run: |
           uv sync --extra dev --frozen
 
+      - name: Install demo requirements
+        working-directory: demo/${{matrix.demo}}
+        run: |
+          uv pip install -r requirements.txt
+
       - name: Run demos
         working-directory: demo/${{matrix.demo}}
         run: |

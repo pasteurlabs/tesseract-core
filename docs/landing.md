@@ -206,6 +206,8 @@ grad_fn = jax.grad(
 :link: content/demo/data-assimilation
 :link-type: doc
 :class-card: demo-card
+:img-top: static/demo-data-assimilation.svg
+:class-img-top: demo-schematic
 
 A complete 4D-Variational data assimilation scheme for a chaotic dynamical
 system (Lorenz-96), built with a differentiable JAX Tesseract.
