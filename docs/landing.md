@@ -202,37 +202,35 @@ grad_fn = jax.grad(
 ::::{grid} 1 2 3 3
 :gutter: 3
 
-:::{grid-item-card} Bayesian Inference
-:link: content/demo/bayesian-inference
+:::{grid-item-card} 4D-Var Data Assimilation
+:link: content/demo/data-assimilation
 :link-type: doc
 :class-card: demo-card
-:img-top: \_static/demo-bayesian.svg
-:class-img-top: demo-schematic
 
-Use a Tesseract as the forward model inside a NumPyro probabilistic
-programming workflow, with full posterior inference over simulator parameters.
+A complete 4D-Variational data assimilation scheme for a chaotic dynamical
+system (Lorenz-96), built with a differentiable JAX Tesseract.
 :::
 
-:::{grid-item-card} Learned Closures
-:link: content/demo/learned-closure
+:::{grid-item-card} CFD Flow Optimization
+:link: content/demo/cfd-optimization
 :link-type: doc
 :class-card: demo-card
-:img-top: \_static/demo-learned-closure.svg
+:img-top: static/demo-cfd.svg
 :class-img-top: demo-schematic
 
-Train a neural network end-to-end _through_ a PDE solver, with gradients
-flowing across two independent Tesseracts.
+Optimize initial conditions of a 2D Navier-Stokes simulation so the
+vorticity evolves into a target image, via a JAX-CFD Tesseract.
 :::
 
-:::{grid-item-card} Multiphysics Optimization
-:link: content/demo/multiphysics-optimization
+:::{grid-item-card} FEM Shape Optimization
+:link: content/demo/fem-shape-optimization
 :link-type: doc
 :class-card: demo-card
-:img-top: \_static/demo-multiphysics.svg
+:img-top: static/demo-fem-shapeopt.svg
 :class-img-top: demo-schematic
 
-Couple a thermal solver and a structural solver, then optimize design
-parameters with gradients across both.
+Compose a geometry Tesseract with a FEM solver Tesseract for end-to-end
+parametric structural optimization.
 :::
 
 ::::

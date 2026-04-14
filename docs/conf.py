@@ -145,8 +145,13 @@ def setup(app) -> None:
 # Do not execute notebooks during build (just take existing output)
 nb_execution_mode = "off"
 
-# Copy example notebooks to auto_examples folder on every build
+# Copy example notebooks and their companion files to the docs folder on every build
+_COMPANION_EXTS = {".png", ".gif", ".jpg", ".jpeg", ".svg"}
 for example_notebook in Path("../demo").glob("*/demo.ipynb"):
     # Copy the example notebook to the docs folder
     dest = (Path("content/demo") / example_notebook.parent.name).with_suffix(".ipynb")
     shutil.copyfile(example_notebook, dest)
+    # Copy companion images so relative references in the notebook resolve
+    for companion in example_notebook.parent.iterdir():
+        if companion.suffix.lower() in _COMPANION_EXTS:
+            shutil.copyfile(companion, Path("content/demo") / companion.name)
