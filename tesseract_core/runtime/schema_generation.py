@@ -5,7 +5,6 @@ import re
 import types
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from copy import copy
-from pathlib import Path
 from typing import (
     Annotated,
     Any,
@@ -51,6 +50,7 @@ UNION_TYPES = [Union, types.UnionType]
 
 
 def _construct_annotated(obj: Any, metadata: Iterable[Any]) -> Any:
+    """Construct an Annotated type with the given metadata."""
     out = obj
     # Exploit that repeated Annotated applications are flattened
     for meta in metadata:
@@ -59,6 +59,7 @@ def _construct_annotated(obj: Any, metadata: Iterable[Any]) -> Any:
 
 
 def _is_annotated(obj: Any) -> bool:
+    """Check if an object is typing.Annotated or typing_extensions.Annotated."""
     return get_origin(obj) is Annotated
 
 
@@ -67,7 +68,6 @@ def apply_function_to_model_tree(
     func: Callable[[type, tuple], type],
     model_prefix: str = "",
     default_model_config: dict[str, Any] | None = None,
-    is_leaf: Callable[[Any], bool] | None = None,
 ) -> type[BaseModel]:
     """Apply a function to all leaves of a Pydantic model, recursing into containers + nested models.
 
@@ -85,12 +85,6 @@ def apply_function_to_model_tree(
 
     The path to the field "a" would be ["a"], and the path to the int type would be
     ["a", SEQ_INDEX_SENTINEL, DICT_INDEX_SENTINEL].
-
-    The optional ``is_leaf`` predicate, if provided, is checked first: when it returns
-    True for a node, ``func`` is called on that node immediately without further recursion.
-    This allows callers to treat compound types (e.g. ``Annotated[Path, ...]``)
-    as levaes of the model tree. Useful for cases where metadata order in ``Annotated``
-    is important - as is the case for composing ``AfterValidator`` validators.
     """
     if default_model_config is None:
         default_model_config = {}
@@ -98,10 +92,6 @@ def apply_function_to_model_tree(
     seen_models = set()
 
     def _recurse_over_model_tree(treeobj: Any, path: list[str]) -> Any:
-        # If the caller says this node is a leaf, apply func immediately
-        if is_leaf is not None and is_leaf(treeobj):
-            return func(treeobj, tuple(path))
-
         # Get the origin type of the annotation, e.g. List for List[int]
         origin_type = get_origin(treeobj)
         deprecated_types = ["List", "Dict", "Set", "FrozenSet", "Tuple"]
@@ -265,26 +255,6 @@ def create_apply_schema(
     InputSchema: type[BaseModel], OutputSchema: type[BaseModel]
 ) -> tuple[type[BaseModel], type[BaseModel]]:
     """Create the input / output schemas for the /apply endpoint."""
-    from .experimental import TesseractPath, _resolve_input_path, _strip_output_path
-
-    def _core_type(obj: Any) -> Any:
-        return get_args(obj)[0] if _is_annotated(obj) else obj
-
-    def _inject_input_path_validator(x: Any, _: tuple) -> Any:
-        if x is TesseractPath:
-            # Wrap with _resolve_input_path as the INNERMOST validator so that
-            # it runs before all user validators (if any)
-            return Annotated[Path, AfterValidator(_resolve_input_path)]
-        return x
-
-    def _inject_output_path_validator(x: Any, _: Any) -> Any:
-        if _core_type(x) is TesseractPath:
-            # x is either bare TesseractPath or Annotated[TesseractPath, *user_validators]
-            # Wrap with _strip_output_path as the OUTERMOST validator so user validators
-            # run first (on absolute paths) and stripping happens last.
-            return Annotated[x, AfterValidator(_strip_output_path)]
-        return x
-
     # We add metadata to the input and output schemas to indicate which fields are differentiable,
     # what their paths are, and which expected shape / dtype they have.
     # This is used internally and by some official clients, but not advertised as part of the public API,
@@ -298,17 +268,15 @@ def create_apply_schema(
 
     InputSchema = apply_function_to_model_tree(
         InputSchema,
-        _inject_input_path_validator,
+        lambda x, _: x,
         model_prefix="Apply_",
         default_model_config=dict(extra="forbid"),
     )
-
     OutputSchema = apply_function_to_model_tree(
         OutputSchema,
-        _inject_output_path_validator,
+        lambda x, _: x,
         model_prefix="Apply_",
         default_model_config=dict(extra="forbid"),
-        is_leaf=lambda x: _core_type(x) is TesseractPath,
     )
 
     class ApplyInputSchema(BaseModel):

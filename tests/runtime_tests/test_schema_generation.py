@@ -12,7 +12,12 @@ import pytest
 from pydantic import AfterValidator, BaseModel, ConfigDict, RootModel, ValidationError
 
 from tesseract_core.runtime import Array, Differentiable, Float32, Float64, Int64, UInt8
-from tesseract_core.runtime.experimental import LazySequence, TesseractPath
+from tesseract_core.runtime.experimental import (
+    InputPathReference,
+    LazySequence,
+    OutputPathReference,
+    TesseractPath,
+)
 from tesseract_core.runtime.schema_generation import (
     apply_function_to_model_tree,
     create_abstract_eval_schema,
@@ -852,8 +857,8 @@ def test_input_relative_path_resolved_to_absolute(runtime_config):
     (input_path / "mydir").mkdir()
 
     class InputSchema(BaseModel):
-        file: TesseractPath
-        folder: TesseractPath
+        file: InputPathReference
+        folder: InputPathReference
 
     ApplyInput, _ = create_apply_schema(InputSchema, InputSchema)
     result = ApplyInput.model_validate(
@@ -872,7 +877,7 @@ def test_input_relative_path_resolved_to_absolute(runtime_config):
 )
 def test_input_invalid_path_raises(runtime_config, path, exc, match):
     class InputSchema(BaseModel):
-        file: TesseractPath
+        file: InputPathReference
 
     ApplyInput, _ = create_apply_schema(InputSchema, InputSchema)
     with pytest.raises(exc, match=match):
@@ -889,7 +894,7 @@ def test_input_list_of_paths_all_resolved(runtime_config):
     (input_path / "b.txt").touch()
 
     class InputSchema(BaseModel):
-        files: list[TesseractPath]
+        files: list[InputPathReference]
         non_path_field: int
 
     ApplyInput, _ = create_apply_schema(InputSchema, InputSchema)
@@ -903,7 +908,7 @@ def test_input_optional_path(runtime_config):
     input_path = Path(runtime_config.input_path)
 
     class InputSchema(BaseModel):
-        file: TesseractPath | None = None
+        file: InputPathReference | None = None
 
     # None works
     ApplyInput, _ = create_apply_schema(InputSchema, InputSchema)
@@ -938,7 +943,7 @@ def test_input_user_validator_receives_absolute_path(runtime_config):
         return path
 
     class InputSchema(BaseModel):
-        file: Annotated[TesseractPath, AfterValidator(record)]
+        file: Annotated[InputPathReference, AfterValidator(record)]
 
     ApplyInput, _ = create_apply_schema(InputSchema, InputSchema)
     ApplyInput.model_validate({"inputs": {"file": "data.txt"}})
@@ -963,7 +968,7 @@ def test_output_absolute_path_stripped_to_relative(runtime_config):
     (output_path / "result.txt").touch()
 
     class OutputSchema(BaseModel):
-        result: TesseractPath
+        result: OutputPathReference
 
     _, ApplyOutput = create_apply_schema(OutputSchema, OutputSchema)
     out = ApplyOutput.model_validate({"result": output_path / "result.txt"})
@@ -976,7 +981,7 @@ def test_output_nonexistent_path_raises(runtime_config):
     output_path = Path(runtime_config.output_path)
 
     class OutputSchema(BaseModel):
-        result: TesseractPath
+        result: OutputPathReference
 
     _, ApplyOutput = create_apply_schema(OutputSchema, OutputSchema)
     with pytest.raises(ValidationError, match="does not exist"):
@@ -990,7 +995,7 @@ def test_output_list_of_paths_all_stripped(runtime_config):
     (output_path / "b.out").touch()
 
     class OutputSchema(BaseModel):
-        files: list[TesseractPath]
+        files: list[OutputPathReference]
         other_non_path_field: int
 
     _, ApplyOutput = create_apply_schema(OutputSchema, OutputSchema)
@@ -1006,13 +1011,13 @@ def test_output_list_of_paths_all_stripped(runtime_config):
 # --- Output: user validators ---
 
 
-def test_output_user_validator_receives_absolute_path(runtime_config):
-    """AfterValidator on an output Path field receives the absolute path before stripping.
+def test_output_user_validator_receives_stripped_path(runtime_config):
+    """AfterValidator on an output Path field receives the already-stripped relative path.
 
-    From the README:
+    With explicit OutputPathReference, the built-in strip validator is innermost:
         apply returns    → Path("/tesseract/output_data/sample_8.copy")
-          → user validator → Path("/tesseract/output_data/sample_8.copy")  ← absolute
           → built-in       → Path("sample_8.copy")                          ← stripped
+          → user validator → Path("sample_8.copy")                           ← relative
     """
     output_path = Path(runtime_config.output_path)
     output_file = output_path / "result.txt"
@@ -1025,11 +1030,11 @@ def test_output_user_validator_receives_absolute_path(runtime_config):
         return path
 
     class OutputSchema(BaseModel):
-        result: Annotated[TesseractPath, AfterValidator(record)]
+        result: Annotated[OutputPathReference, AfterValidator(record)]
 
     _, ApplyOutput = create_apply_schema(OutputSchema, OutputSchema)
     out = ApplyOutput.model_validate({"result": output_file})
 
     assert len(seen) == 1
-    assert seen[0] == output_file  # absolute, not yet stripped
-    assert out.root.result == Path("result.txt")  # final result is stripped
+    assert seen[0] == Path("result.txt")  # already stripped
+    assert out.root.result == Path("result.txt")

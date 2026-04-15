@@ -9,7 +9,7 @@ from typing import Annotated
 from pydantic import AfterValidator, BaseModel
 
 from tesseract_core.runtime.config import get_config
-from tesseract_core.runtime.experimental import TesseractPath
+from tesseract_core.runtime.experimental import InputPathReference, OutputPathReference
 
 
 def bin_reference(path: Path) -> str | None:
@@ -38,11 +38,11 @@ def has_bin_sidecar(path: Path) -> Path:
 
 
 class InputSchema(BaseModel):
-    paths: list[Annotated[TesseractPath, AfterValidator(has_bin_sidecar)]]
+    paths: list[Annotated[InputPathReference, AfterValidator(has_bin_sidecar)]]
 
 
 class OutputSchema(BaseModel):
-    paths: list[Annotated[TesseractPath, AfterValidator(has_bin_sidecar)]]
+    paths: list[OutputPathReference]
 
 
 def apply(inputs: InputSchema) -> OutputSchema:

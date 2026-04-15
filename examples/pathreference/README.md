@@ -1,15 +1,17 @@
 # Path Reference Example
 
 A Tesseract that copies files and directories from `input_path` to `output_path`.
-It demonstrates how to use `TesseractPath` in Tesseract schemas and how to compose
-custom Pydantic validators on top of the built-in path-handling behaviour.
+It demonstrates how to use `InputPathReference` / `OutputPathReference` in Tesseract
+schemas and how to compose custom Pydantic validators on top of the built-in
+path-handling behaviour.
 
-## What `TesseractPath` does in a schema
+## What `InputPathReference` / `OutputPathReference` do in a schema
 
-When you annotate a field with `TesseractPath`, the schema generation layer
-automatically injects path-handling validators at runtime.
+These are `Annotated[Path, AfterValidator(...)]` types that carry their validation
+logic directly. Use `InputPathReference` in your `InputSchema` and
+`OutputPathReference` in your `OutputSchema`.
 
-**Input `TesseractPath` fields** — caller sends a relative string, `apply` receives an absolute `Path`:
+**`InputPathReference` fields** — caller sends a relative string, `apply` receives an absolute `Path`:
 
 ```
 caller sends       →  "sample_8.json"
@@ -20,7 +22,7 @@ apply sees         →  Path("/tesseract/input_data/sample_8.json")
 - Rejects any path that would escape `input_path` (path traversal protection).
 - Raises `FileNotFoundError` if the resolved path does not exist.
 
-**Output `TesseractPath` fields** — `apply` returns an absolute `Path`, caller receives a relative string:
+**`OutputPathReference` fields** — `apply` returns an absolute `Path`, caller receives a relative string:
 
 ```
 apply returns      →  Path("/tesseract/output_data/sample_8.copy")
@@ -32,13 +34,14 @@ caller receives    →  "sample_8.copy"
 
 ## Composing user-defined validators
 
-`AfterValidator`s placed on a `TesseractPath`-annotated field are preserved, and
-in both cases you receive an already-resolved **absolute** `Path` in your Tesseract endpoints:
+`AfterValidator`s placed on an `InputPathReference` or `OutputPathReference` field
+are preserved. Because the built-in validator is the **innermost** `AfterValidator`,
+it always runs first:
 
 ```python
 def has_bin_sidecar(path: Path) -> Path:
     """Check that any binref JSON has its .bin sidecar present."""
-    if path.is_file(): # <-- absolute path starting with /tesseract/input_data
+    if path.is_file():
         name = bin_reference(path)
         if name is not None:
             bin = path.parent / name
@@ -48,12 +51,13 @@ def has_bin_sidecar(path: Path) -> Path:
     return path
 
 class InputSchema(BaseModel):
-    paths: list[Annotated[TesseractPath, AfterValidator(has_bin_sidecar)]]
+    paths: list[Annotated[InputPathReference, AfterValidator(has_bin_sidecar)]]
+
+class OutputSchema(BaseModel):
+    paths: list[Annotated[OutputPathReference, AfterValidator(has_bin_sidecar)]]
 ```
 
-The built-in path validators run at different points depending on direction:
-
-**Input fields** — built-in validator runs **first**, user validators run after:
+**Input fields** — built-in validator runs **first**, user validators run after (on absolute paths):
 
 ```
 "sample_8.json"
@@ -62,17 +66,14 @@ The built-in path validators run at different points depending on direction:
   → apply receives   →  Path("/tesseract/input_data/sample_8.json")
 ```
 
-**Output fields** — user validators run **first**, built-in validator runs after:
+**Output fields** — built-in validator runs **first**, user validators run after (on relative paths):
 
 ```
 apply returns  →  Path("/tesseract/output_data/sample_8.copy")
-  → has_bin_sidecar  →  Path("/tesseract/output_data/sample_8.copy")   (checks .bin sidecar was copied)
   → built-in         →  Path("sample_8.copy")                          (existence check + prefix stripped)
+  → has_bin_sidecar  →  Path("sample_8.copy")                          (user validation on relative path)
   → caller receives  →  "sample_8.copy"
 ```
-
-This example uses output validators to confirm that `apply` copied the sidecar
-`.bin` file alongside each JSON file.
 
 ## Test data
 

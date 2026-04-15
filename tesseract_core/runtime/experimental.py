@@ -279,7 +279,7 @@ def _strip_output_path(path: Path) -> Path:
 
 def _resolve_input_file(path: Path) -> Path:
     warnings.warn(
-        "InputFileReference is deprecated, use TesseractPath instead.",
+        "InputFileReference is deprecated, use InputPathReference instead.",
         DeprecationWarning,
         stacklevel=2,
     )
@@ -291,7 +291,7 @@ def _resolve_input_file(path: Path) -> Path:
 
 def _strip_output_file(path: Path) -> Path:
     warnings.warn(
-        "OutputFileReference is deprecated, use TesseractPath instead.",
+        "OutputFileReference is deprecated, use OutputPathReference instead.",
         DeprecationWarning,
         stacklevel=2,
     )
@@ -300,6 +300,9 @@ def _strip_output_file(path: Path) -> Path:
     stripped = _strip_output_path(path)
     return stripped
 
+
+InputPathReference = Annotated[Path, AfterValidator(_resolve_input_path)]
+OutputPathReference = Annotated[Path, AfterValidator(_strip_output_path)]
 
 InputFileReference = Annotated[Path, AfterValidator(_resolve_input_file)]
 OutputFileReference = Annotated[Path, AfterValidator(_strip_output_file)]
@@ -407,8 +410,10 @@ class TesseractReference:
 
 __all__ = [
     "InputFileReference",
+    "InputPathReference",
     "LazySequence",
     "OutputFileReference",
+    "OutputPathReference",
     "PydanticLazySequenceAnnotation",
     "TesseractPath",
     "TesseractReference",
