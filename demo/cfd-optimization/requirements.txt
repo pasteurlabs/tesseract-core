@@ -3,3 +3,4 @@ matplotlib
 scipy
 tqdm
 pillow
+tesseract-jax
