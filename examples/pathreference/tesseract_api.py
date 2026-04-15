@@ -4,12 +4,15 @@
 import json
 import shutil
 from pathlib import Path
-from typing import Annotated
 
 from pydantic import AfterValidator, BaseModel
 
 from tesseract_core.runtime.config import get_config
-from tesseract_core.runtime.experimental import InputPathReference, OutputPathReference
+from tesseract_core.runtime.experimental import (
+    InputPathReference,
+    OutputPathReference,
+    compose_validator,
+)
 
 
 def bin_reference(path: Path) -> str | None:
@@ -37,12 +40,18 @@ def has_bin_sidecar(path: Path) -> Path:
     return path
 
 
+InputPath = compose_validator(InputPathReference, AfterValidator(has_bin_sidecar))
+OutputPath = compose_validator(OutputPathReference, AfterValidator(has_bin_sidecar))
+
+
 class InputSchema(BaseModel):
-    paths: list[Annotated[InputPathReference, AfterValidator(has_bin_sidecar)]]
+    # paths: list[Annotated[InputPathReference, AfterValidator(has_bin_sidecar)]]
+    paths: list[InputPath]
 
 
 class OutputSchema(BaseModel):
-    paths: list[OutputPathReference]
+    # paths: list[Annotated[OutputPathReference, AfterValidator(has_bin_sidecar)]]
+    paths: list[OutputPath]
 
 
 def apply(inputs: InputSchema) -> OutputSchema:

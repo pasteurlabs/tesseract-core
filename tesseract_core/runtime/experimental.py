@@ -260,7 +260,9 @@ def _strip_output_path(path: Path) -> Path:
     output_path = get_config().output_path
     if path.is_relative_to(output_path):
         if not path.exists():
-            raise ValueError(f"Output path {path} does not exist inside Tesseract")
+            raise FileNotFoundError(
+                f"Output path {path} does not exist inside Tesseract"
+            )
         return path.relative_to(output_path)
     else:
         full_path = output_path / path
@@ -299,6 +301,68 @@ def _strip_output_file(path: Path) -> Path:
         raise ValueError(f"Output path {path} is not a file.")
     stripped = _strip_output_path(path)
     return stripped
+
+
+def _append_validator(
+    annotated_path: type[Annotated], validator: AfterValidator
+) -> type[Annotated]:
+    return Annotated[annotated_path, validator]
+
+
+def _ensure_absolute_output_path(path: Path) -> Path:
+    if not path.is_absolute():
+        return get_config().output_path / path
+    return path
+
+
+def _prepend_validator(
+    annotated_path: type[Annotated], validator: AfterValidator
+) -> type[Annotated]:
+    from tesseract_core.runtime.schema_generation import _construct_annotated
+
+    _, *args = get_args(annotated_path)
+
+    # Resolve a relative path against output_path so user validators always see
+    # absolute paths.
+    metadata = [AfterValidator(_ensure_absolute_output_path), validator, *args]
+    return _construct_annotated(Path, metadata)
+
+
+def compose_validator(
+    path_reference: type[Annotated], validator: AfterValidator
+) -> type[Annotated]:
+    """Add custom validators to an ``InputPathReference`` or ``OutputPathReference``.
+
+    For inputs, validators run *after* path resolution, so they receive
+    absolute, resolved paths. For outputs, validators run *before* path
+    stripping, so they also receive absolute paths. This ordering is
+    maintained even when Pydantic re-validates already-stripped output paths
+    (e.g. during the endpoint wrapper in ``core.py``).
+
+    Args:
+        path_reference: Either ``InputPathReference`` or ``OutputPathReference``.
+        validator: Pydantic ``AfterValidator`` to compose with the built-in path
+            resolution/stripping logic.
+
+    Returns:
+        An ``Annotated`` type combining the path reference with the given validators.
+
+    Example::
+
+        InputPath = compose_validators(InputPathReference, AfterValidator(my_check))
+        OutputPath = compose_validators(OutputPathReference, AfterValidator(my_check))
+    """
+    if path_reference is InputPathReference:
+        compose_fn = _append_validator
+    elif path_reference is OutputPathReference:
+        compose_fn = _prepend_validator
+    else:
+        raise ValueError(
+            "Unsupported *PathReference type. "
+            "Expected: InputPathReference or OutputPathReference. "
+            f"Found: {path_reference}"
+        )
+    return compose_fn(path_reference, validator)
 
 
 InputPathReference = Annotated[Path, AfterValidator(_resolve_input_path)]

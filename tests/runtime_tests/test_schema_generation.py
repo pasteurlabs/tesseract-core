@@ -16,7 +16,6 @@ from tesseract_core.runtime.experimental import (
     InputPathReference,
     LazySequence,
     OutputPathReference,
-    TesseractPath,
 )
 from tesseract_core.runtime.schema_generation import (
     apply_function_to_model_tree,
@@ -977,14 +976,14 @@ def test_output_absolute_path_stripped_to_relative(runtime_config):
 
 
 def test_output_nonexistent_path_raises(runtime_config):
-    """ValueError when the output path does not exist."""
+    """FileNotFoundError when the output path does not exist."""
     output_path = Path(runtime_config.output_path)
 
     class OutputSchema(BaseModel):
         result: OutputPathReference
 
     _, ApplyOutput = create_apply_schema(OutputSchema, OutputSchema)
-    with pytest.raises(ValidationError, match="does not exist"):
+    with pytest.raises(FileNotFoundError, match="does not exist"):
         ApplyOutput.model_validate({"result": output_path / "ghost.txt"})
 
 
