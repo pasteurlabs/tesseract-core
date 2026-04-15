@@ -1,5 +1,3 @@
-(what-is-si)=
-
 # Tesseract Core Documentation
 
 Tesseract packages scientific software into portable, self-documenting, differentiable components.
