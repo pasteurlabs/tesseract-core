@@ -275,8 +275,10 @@ def setup(
     # umfpack_solver seems to give NaNs in the gradients for some reason, while petsc_solver and jax_solver work fine
     fwd_pred = ad_wrapper(
         problem,
-        solver_options={"jax_solver": {}},
-        adjoint_solver_options={"jax_solver": {}},
+        solver_options={"petsc_solver": {"ksp_type": "preonly", "pc_type": "lu"}},
+        adjoint_solver_options={
+            "petsc_solver": {"ksp_type": "preonly", "pc_type": "lu"}
+        },
     )
     return problem, fwd_pred
 
