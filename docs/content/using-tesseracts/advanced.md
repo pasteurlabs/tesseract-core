@@ -7,13 +7,13 @@ The `tesseract` CLI can load data from local disk or any [fsspec-compatible](htt
 Use `--input-path` to mount a folder into the Tesseract (read-only). Paths in the payload must be relative to `--input-path`:
 
 ```bash
-tesseract run filereference apply \
+tesseract run pathreference apply \
     --input-path ./testdata \
     --output-path ./output \
-    '{"inputs": {"data": ["sample_2.json", "sample_3.json"]}}'
+    '{"inputs": {"paths": ["sample_2.json", "sample_3.json"]}}'
 ```
 
-See the [`filereference` example](../examples/building-blocks/filereference) for a complete walkthrough.
+See the [`pathreference` example](../examples/building-blocks/pathreference) for a complete walkthrough.
 
 To write output to a file, use `--output-path` (also supports fsspec-compatible targets):
 

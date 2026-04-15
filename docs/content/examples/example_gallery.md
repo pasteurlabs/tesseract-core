@@ -14,7 +14,7 @@ building-blocks/packagedata.md
 building-blocks/arm64.md
 building-blocks/localpackage.md
 building-blocks/dataloader.md
-building-blocks/filereference.md
+building-blocks/pathreference.md
 building-blocks/finitediff.md
 building-blocks/gradient-fallbacks.md
 ```
@@ -87,13 +87,13 @@ Tesseract that loads in data samples from a folder without loading them into mem
 [View on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/dataloader)
 :::
 
-:::{grid-item-card} Input/Output File References
-:link: building-blocks/filereference.html
+:::{grid-item-card} Input/Output Path References
+:link: building-blocks/pathreference.html
 
 Tesseract that mounts input and output directories as datasets.
 To be used for Tesseracts with large inputs and/or outputs.
 
-[View on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/filereference)
+[View on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/pathreference)
 :::
 
 :::{grid-item-card} Finite Difference Gradients

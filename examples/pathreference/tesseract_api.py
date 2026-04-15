@@ -40,18 +40,16 @@ def has_bin_sidecar(path: Path) -> Path:
     return path
 
 
-InputPath = compose_validator(InputPathReference, AfterValidator(has_bin_sidecar))
-OutputPath = compose_validator(OutputPathReference, AfterValidator(has_bin_sidecar))
+InputPathReference = compose_validator(InputPathReference, AfterValidator(has_bin_sidecar))
+OutputPathReference = compose_validator(OutputPathReference, AfterValidator(has_bin_sidecar))
 
 
 class InputSchema(BaseModel):
-    # paths: list[Annotated[InputPathReference, AfterValidator(has_bin_sidecar)]]
-    paths: list[InputPath]
+    paths: list[InputPathReference]
 
 
 class OutputSchema(BaseModel):
-    # paths: list[Annotated[OutputPathReference, AfterValidator(has_bin_sidecar)]]
-    paths: list[OutputPath]
+    paths: list[OutputPathReference]
 
 
 def apply(inputs: InputSchema) -> OutputSchema:
