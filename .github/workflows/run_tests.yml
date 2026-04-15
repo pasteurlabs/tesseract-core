@@ -326,7 +326,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq xvfb libgl1-mesa-glx libosmesa6
+          sudo apt-get install -y -qq xvfb libgl1 libosmesa6
 
       - name: Install demo requirements
         working-directory: demo/${{matrix.demo}}
