@@ -122,6 +122,7 @@ or Python SDK.
 
 ```python
 # tesseract_api.py
+import numpy as np
 from pydantic import BaseModel
 from tesseract_core.runtime import (
     Array, Differentiable, Float64,
@@ -135,6 +136,9 @@ class OutputSchema(BaseModel):
 
 def apply(inputs: InputSchema) -> OutputSchema:
     return OutputSchema(y=inputs.x ** 2)
+
+def jacobian(inputs: InputSchema, jac_inputs, jac_outputs):
+    return {"y": {"x": np.diag(2 * inputs.x)}}
 ```
 
 :::::
@@ -149,13 +153,12 @@ def apply(inputs: InputSchema) -> OutputSchema:
 $ tesseract build .
  [i] Built image my-tesseract:latest
 
-$ tesseract run my-tesseract apply \
-    '{"inputs": {"x": [3.0]}}'
-# => {"y": {"shape": [1], "data": [9.0], ...}}
+$ tesseract run my-tesseract apply '{"inputs": {"x": [3.0]}}'
+# => {"y": {"object_type": "array", "shape": [1], ..., "data": {"buffer": [9.0], ...}}}
 
 $ tesseract run my-tesseract jacobian \
-    '{"inputs": {"x": [3.0]}}'
-# => {"y": {"x": {"shape": [1, 1], "data": [[6.0]], ...}}}
+    '{"inputs": {"x": [3.0]}, "jac_inputs": ["x"], "jac_outputs": ["y"]}'
+# => {"y": {"x": {"object_type": "array", "shape": [1, 1], ...}}}
 ```
 
 :::
@@ -165,26 +168,34 @@ $ tesseract run my-tesseract jacobian \
 from tesseract_core import Tesseract
 
 t = Tesseract.from_image("my-tesseract")
+t.serve()
+
 result = t.apply(inputs={"x": [3.0]})
 # result["y"] => array([9.0])
 
-jac = t.jacobian(inputs={"x": [3.0]})
+jac = t.jacobian(
+    inputs={"x": [3.0]},
+    jac_inputs=["x"], jac_outputs=["y"],
+)
 # jac["y"]["x"] => array([[6.0]])
+
+t.teardown()
 ```
 
 :::
 :::{tab-item} JAX
 
 ```python
+import jax
 from tesseract_jax import apply_tesseract
 
 out = apply_tesseract(t, {"x": x_array})
 # out["y"] => Array([9.0])
 
-grad_fn = jax.grad(
+jac_fn = jax.jacobian(
     lambda x: apply_tesseract(t, {"x": x})["y"]
 )
-# grad_fn({"x": x_array}) => Array([6.0])
+# jac_fn(x_array) => Array([[6.0]])
 ```
 
 :::
