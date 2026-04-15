@@ -503,32 +503,6 @@ body[data-theme="dark"] .landing-demo-gif {
 }
 
 
-/* ===== Persona icons ===== */
-
-.persona-icon {
-    width: 48px;
-    height: 48px;
-    margin: 0.75rem auto 0;
-    display: block;
-    opacity: 0.85;
-    transition: opacity 0.2s, filter 0.2s;
-}
-
-body[data-theme="dark"] .persona-icon {
-    filter: invert(0.95);
-}
-
-@media (prefers-color-scheme: dark) {
-    body[data-theme="auto"] .persona-icon {
-        filter: invert(0.95);
-    }
-}
-
-.persona-card:hover .persona-icon {
-    opacity: 1;
-}
-
-
 /* ===== Demo cards & schematics ===== */
 
 .demo-card {
@@ -591,34 +565,29 @@ body[data-theme="dark"] .demo-schematic {
 }
 
 
-/* ===== Persona & Ecosystem cards ===== */
+/* ===== Ecosystem cards ===== */
 
-.persona-card,
 .ecosystem-card {
     border: 1px solid var(--color-background-border) !important;
     border-radius: 8px !important;
     transition: box-shadow 0.2s, border-color 0.2s, transform 0.2s;
 }
 
-.persona-card:hover,
 .ecosystem-card:hover {
     border-color: var(--color-brand-primary) !important;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
     transform: translateY(-2px);
 }
 
-body[data-theme="dark"] .persona-card:hover,
 body[data-theme="dark"] .ecosystem-card:hover {
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
 }
 
-.persona-card .sd-card-title,
 .ecosystem-card .sd-card-title {
     font-size: 1.05rem;
     font-weight: 600;
 }
 
-.persona-card .sd-card-body p,
 .ecosystem-card .sd-card-body p {
     font-size: 0.9rem;
     color: var(--color-foreground-secondary);

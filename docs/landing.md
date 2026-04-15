@@ -167,19 +167,15 @@ $ tesseract run my-tesseract jacobian \
 ```python
 from tesseract_core import Tesseract
 
-t = Tesseract.from_image("my-tesseract")
-t.serve()
+with Tesseract.from_image("my-tesseract") as t:
+    result = t.apply(inputs={"x": [3.0]})
+    # result["y"] => array([9.0])
 
-result = t.apply(inputs={"x": [3.0]})
-# result["y"] => array([9.0])
-
-jac = t.jacobian(
-    inputs={"x": [3.0]},
-    jac_inputs=["x"], jac_outputs=["y"],
-)
-# jac["y"]["x"] => array([[6.0]])
-
-t.teardown()
+    jac = t.jacobian(
+        inputs={"x": [3.0]},
+        jac_inputs=["x"], jac_outputs=["y"],
+    )
+    # jac["y"]["x"] => array([[6.0]])
 ```
 
 :::
@@ -204,6 +200,11 @@ jac_fn = jax.jacobian(
 :::::
 
 :::::::
+
+:::{div} section-intro
+The example above defines a differentiable Tesseract and calls it from the CLI, Python, and JAX.
+Ready to build your own? The {doc}`Get Started <content/introduction/get-started>` tutorial walks you through a complete example from scratch.
+:::
 
 :::{div} landing-divider
 :::

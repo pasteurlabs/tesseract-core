@@ -1,33 +1,9 @@
 (what-is-si)=
 
-# Tesseract Core
+# Tesseract Core Documentation
 
-Universal, autodiff-native software components for [Simulation Intelligence](https://arxiv.org/abs/2112.03235)
-
-```{seealso}
-Already convinced? See how to [Get started](get-started.md) instead.
-```
-
-## The problem
-
-Real-world scientific workflows span multiple tools, languages, and computing environments. You might have a mesh generator in C++, a solver in Julia, and post-processing in Python. Getting these to work together is painful. Getting [gradients to flow through them](../misc/differentiable-programming) for optimization is nearly impossible.
-
-Existing autodiff frameworks work great within a single codebase, but fall short when your pipeline crosses framework boundaries or includes legacy or commercial tools.
-
-## The solution
-
-Tesseract packages scientific software into **self-contained, portable components** that:
-
-- **Run anywhere** — Local machines, cloud, HPC clusters. Same container, same results.
-- **Expose clean interfaces** — CLI, REST API, and Python SDK. No more deciphering undocumented scripts.
-- **Propagate gradients** — Each component can expose derivatives, enabling end-to-end optimization across heterogeneous pipelines.
-- **Self-document** — Schemas, types, and API docs are generated automatically.
-
-## Who is this for?
-
-- **Researchers** interfacing with (differentiable) simulators or probabilistic models, or who need to combine tools from different ecosystems.
-- **R&D engineers** packaging research code for use by others, without spending weeks on DevOps.
-- **Platform engineers** deploying scientific workloads at scale with consistent interfaces and dependency isolation.
+Tesseract packages scientific software into portable, self-documenting, differentiable components.
+New here? Start with the [Get Started](get-started.md) tutorial or the [Installation](installation.md) guide.
 
 ## How it works
 
@@ -48,45 +24,26 @@ There are several ways to interact with Tesseracts:
 3. **Serve** via HTTP with `tesseract serve`
 4. **Invoke** via CLI, HTTP, or the [Python SDK](../api/tesseract-api.md)
 
-## Features and restrictions
+## Features and limitations
 
 ::::{tab-set}
 :::{tab-item} Features
 
-- **Self-documenting** – Tesseracts announce their interfaces, so that users can inspect them without needing to read the source code, and perform static validation without running the code.
-- **Auto-validating** – When data reaches a Tesseract, it is automatically validated against the schema, so that internal logic can be sure that the data is in the expected format.
-- **Autodiff-native** – Tesseracts support [Differentiable Programming](../misc/differentiable-programming), meaning that they can be used in gradient-based optimization algorithms – or not, since exposing derivatives is _strictly optional_.
-- **Batteries included** – Tesseracts ship with a containerized runtime, which can be run on a variety of platforms, and exposes the Tesseract's functionality via a command line interface (CLI) and a REST API.
-  :::
-  :::{tab-item} Restrictions
-- **Python first** – Although Tesseracts may use any software under the hood, Tesseracts always use Python as glue between the Tesseract runtime and the wrapped functionality. This also means that support for working with Python projects is more mature than other languages.
-- **Single entrypoint** – Tesseracts have a single entrypoint, `apply`, which wraps a software functionality of the Tesseract creator's choice. When exposing N entrypoints of a software, users need to create N distinct Tesseracts.
-- **Context-free** – Tesseracts are not aware of outer-loop orchestration or runtime details.
-- **Runtime overhead** – Tesseracts are primarily designed for compute kernels and data transformations that run at least several seconds, so they may not be the best choice for workloads with very low latency requirements.
-  :::
-  ::::
+- **Self-documenting** — Tesseracts announce their interfaces, so users can inspect them without reading source code and perform static validation without running the code.
+- **Auto-validating** — Input data is automatically validated against the schema, so internal logic can assume the data is in the expected format.
+- **Autodiff-native** — Tesseracts support [differentiable programming](../misc/differentiable-programming.md) and integrate as native operations in PyTorch and JAX — but exposing derivatives is _strictly optional_.
+- **Batteries included** — Every Tesseract ships with a containerized runtime, a CLI, a REST API, and a Python SDK.
 
-## Why Tesseracts?
+:::
+:::{tab-item} Limitations
 
-Tesseracts help you manage **diversity** in scientific computing:
+- **Python as glue** — Tesseracts may use any software under the hood, but they always use Python as glue between the runtime and the wrapped functionality. Support for Python projects is more mature than other languages.
+- **Single entrypoint** — Each Tesseract has a single `apply` entrypoint. To expose N functions, create N Tesseracts.
+- **Context-free** — Tesseracts are not aware of outer-loop orchestration or runtime details.
+- **Runtime overhead** — Tesseracts are designed for compute kernels that run at least several seconds, so they may not suit very low-latency workloads.
 
-- **Diversity of roles** — The software creator's job ends when code is packaged as a Tesseract. Pipeline builders focus on high-level logic. Team members can inspect interfaces and schemas without diving into implementations.
-
-- **Diversity of software** — Components can use any framework or language: PyTorch, JAX, C++, [Fortran](../examples/building-blocks/fortran.md), Julia, or shell scripts. A thin Python wrapper (`tesseract_api.py`) connects everything.
-
-- **Diversity of hardware** — Components don't need to run on the same machine. Distribute work across GPUs, CPUs, and clusters while maintaining end-to-end differentiability.
-
-- **Diversity of differentiation strategies** — Mix automatic differentiation, analytic adjoints, and finite differences in the same pipeline. Each component chooses its own approach.
-
-If you're a single developer working with a single software stack in a single environment, you might not need Tesseracts. Everyone else, read on!
-
-## The Ecosystem
-
-Tesseract Core is the foundation of the Tesseract ecosystem. Additional packages extend its capabilities:
-
-- **[Tesseract Core](https://github.com/pasteurlabs/tesseract-core)** — CLI, Python SDK, and runtime.
-- **[Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax)** — Embed Tesseracts as JAX primitives into end-to-end differentiable programs.
-- **[Tesseract-Streamlit](https://github.com/pasteurlabs/tesseract-streamlit)** — Auto-generate interactive Streamlit web apps from running Tesseracts. Instantly create UIs for your components without writing frontend code.
+:::
+::::
 
 ## Citing Tesseract
 

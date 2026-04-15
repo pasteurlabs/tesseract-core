@@ -25,7 +25,7 @@ os.environ["TESSERACT_API_PATH"] = os.path.abspath(
 )
 
 project = "Tesseract"
-copyright = "2025, Pasteur Labs"
+copyright = "2026, Pasteur Labs"
 author = "The Tesseract Team @ Pasteur Labs + OSS contributors"
 
 # The short X.Y version
@@ -57,6 +57,8 @@ extensions = [
     "sphinx_design",
     # For nice rendering of Pydantic models
     "sphinxcontrib.autodoc_pydantic",
+    # Sitemap for SEO
+    "sphinx_sitemap",
 ]
 
 
@@ -90,7 +92,10 @@ html_theme_options = {
     "sidebar_hide_name": True,
 }
 html_css_files = ["custom.css"]
-html_js_files = ["pipeline-animations.js"]
+html_baseurl = "https://docs.pasteurlabs.ai/projects/tesseract-core/latest/"
+sitemap_url_scheme = (
+    "{link}"  # ReadTheDocs handles versioning; don't add language/version prefix
+)
 
 
 # -- OpenGraph metadata (social cards) ---------------------------------------
