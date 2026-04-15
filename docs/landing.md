@@ -153,12 +153,13 @@ def jacobian(inputs: InputSchema, jac_inputs, jac_outputs):
 $ tesseract build .
  [i] Built image my-tesseract:latest
 
-$ tesseract run my-tesseract apply '{"inputs": {"x": [3.0]}}'
+$ tesseract run my-tesseract apply \
+    '{"inputs": {"x": [3.0]}}'
 # => {"y": {"object_type": "array", "shape": [1], ..., "data": {"buffer": [9.0], ...}}}
 
 $ tesseract run my-tesseract jacobian \
     '{"inputs": {"x": [3.0]}, "jac_inputs": ["x"], "jac_outputs": ["y"]}'
-# => {"y": {"x": {"object_type": "array", "shape": [1, 1], ...}}}
+# => {"y": {"x": {"object_type": "array", "shape": [1, 1], ..., "data": {"buffer": [6.0], ...}}}}
 ```
 
 :::
@@ -183,15 +184,23 @@ with Tesseract.from_image("my-tesseract") as t:
 
 ```python
 import jax
+from tesseract_core import Tesseract
 from tesseract_jax import apply_tesseract
 
-out = apply_tesseract(t, {"x": x_array})
+t = Tesseract.from_image("my-tesseract")
+t.serve()
+
+apply_jit = jax.jit(apply_tesseract, static_argnums=(0,))
+
+out = apply_jit(t, {"x": x_array})
 # out["y"] => Array([9.0])
 
 jac_fn = jax.jacobian(
-    lambda x: apply_tesseract(t, {"x": x})["y"]
+    lambda x: apply_jit(t, {"x": x})["y"]
 )
 # jac_fn(x_array) => Array([[6.0]])
+
+t.teardown()
 ```
 
 :::
