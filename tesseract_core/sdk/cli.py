@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
+import logging
 import re
 import shlex
 import sys
@@ -343,11 +344,23 @@ def build_image(
                 inject_ssh=forward_ssh_agent,
                 config_override=parsed_config_override,
                 generate_only=generate_only,
+                stream_logs=logger.debug,
             )
     except BuildError as e:
-        # raise from None to Avoid overly long tracebacks,
-        # all the information is in the printed logs / exception str already
-        raise UserError(f"Error building Tesseract: {e}") from None
+        loglevel = logging.getLogger("tesseract").handlers[0].level
+        error_string = "Error building Tesseract."
+        if loglevel <= logging.DEBUG:
+            # Build logs already streamed via logger.debug
+            pass
+        elif loglevel <= logging.ERROR:
+            # Re-emit build log at error level so it's visible
+            logger.error("\n".join(e.build_log))
+        else:
+            error_string = (
+                "Error building Tesseract. "
+                "Run with `--loglevel debug` for more details."
+            )
+        raise UserError(error_string) from None
     except APIError as e:
         raise UserError(f"Docker server error: {e}") from e
     except TypeError as e:
@@ -844,7 +857,10 @@ def teardown(
             f"Internal Docker error occurred while tearing down Tesseracts: {ex}"
         ) from ex
     except NotFound as ex:
-        raise UserError(f"Tesseract Project ID not found: {ex}") from ex
+        raise UserError(
+            f"Tesseract container not found: {ex}\n"
+            "Use `tesseract ps` to list running containers."
+        ) from ex
 
 
 def _sanitize_error_output(error_output: str, tesseract_image: str) -> str:
@@ -1190,7 +1206,7 @@ def run_container(
             user=user,
             memory=memory,
             docker_args=shlex.split(docker_args) if docker_args else None,
-            stream_logs=True,  # Always stream for CLI
+            stream_logs=logger.info,  # Stream logs via logger
         )
 
     except ImageNotFound as e:
@@ -1204,9 +1220,20 @@ def run_container(
         if "No such command" in msg:
             error_string = f"Error running Tesseract '{tesseract_image}' \n\n Error: Unimplemented command '{cmd}'.  "
         else:
-            error_string = _sanitize_error_output(
-                f"Error running Tesseract. \n\n{msg}", tesseract_image
-            )
+            loglevel = logging.getLogger("tesseract").handlers[0].level
+            error_string = "Error running Tesseract."
+            if loglevel <= logging.INFO:
+                # Errors already streamed via logger.info, don't repeat them
+                pass
+            elif loglevel <= logging.ERROR:
+                # Re-emit errors at error level so they're visible
+                logger.error(msg)
+            else:
+                # Logs are squelched, tell user how to see them
+                error_string = (
+                    "Error running Tesseract. "
+                    "Run with `--loglevel info` for more details."
+                )
 
         raise UserError(error_string) from e
 

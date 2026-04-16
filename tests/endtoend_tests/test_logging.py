@@ -203,7 +203,8 @@ def test_logging_tesseract_run(logging_test_image, tmpdir):
         text=True,
     )
     assert run_res.returncode == 0, run_res.stderr
-    assert "Hello from tesseract_api.py!\nHello from apply!" == run_res.stderr.strip()
+    assert "Hello from tesseract_api.py!" in run_res.stderr
+    assert "Hello from apply!" in run_res.stderr
 
     results = json.loads(run_res.stdout.strip())
     assert results["out"] == "Received message: Test message"
@@ -216,6 +217,38 @@ def test_logging_tesseract_run(logging_test_image, tmpdir):
     with open(log_file) as f:
         log_content = f.read()
     assert "Hello from apply!" == log_content.strip()
+
+
+def test_validation_error_not_duplicated(logging_test_image, tmpdir):
+    """Test that validation errors are not printed twice.
+
+    Regression test for the fix where streaming logs via logger.info caused
+    error output to appear once from the stream and again from the error handler.
+    """
+    # Send a list where a string is expected to trigger a pydantic validation error
+    run_res = subprocess.run(
+        [
+            "tesseract",
+            "run",
+            logging_test_image,
+            "apply",
+            '{"inputs": {"message": [1, 2, 3]}}',
+            "--output-path",
+            tmpdir,
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert run_res.returncode != 0
+
+    # The key assertion: "validation error" should appear only once in stderr.
+    # Before the fix, it would appear twice: once from the streamed logs and
+    # once from the error handler re-emitting the full error message.
+    error_count = run_res.stderr.lower().count("validation error")
+    assert error_count == 1, (
+        f"Expected 'validation error' exactly once in stderr, "
+        f"found {error_count} times.\nFull stderr:\n{run_res.stderr}"
+    )
 
 
 def test_logging_tesseract_serve(
