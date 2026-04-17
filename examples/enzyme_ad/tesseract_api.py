@@ -29,7 +29,7 @@ import numpy as np
 from pydantic import BaseModel, Field, model_validator
 from typing_extensions import Self
 
-from tesseract_core.runtime import Array, Differentiable, Float64
+from tesseract_core.runtime import Array, Differentiable, Float64, ShapeDType
 
 # ── Shared library loading ──────────────────────────────────────────
 
@@ -104,23 +104,25 @@ class InputSchema(BaseModel):
     )
     alpha: Differentiable[Float64] = Field(
         default=0.01,
-        description="Thermal diffusivity [m^2/s].",
-        gt=0.0,
+        description="Thermal diffusivity [m^2/s]. Must be > 0.",
     )
     dx: Differentiable[Float64] = Field(
         default=0.25,
-        description="Grid spacing [m].",
-        gt=0.0,
+        description="Grid spacing [m]. Must be > 0.",
     )
     dt: Differentiable[Float64] = Field(
         default=0.001,
-        description="Time step size [s].",
-        gt=0.0,
+        description="Time step size [s]. Must be > 0.",
     )
 
     @model_validator(mode="after")
     def check_stability(self) -> Self:
-        """Verify CFL stability condition: r = alpha * dt / dx^2 <= 0.5."""
+        """Verify positivity and CFL stability condition: r = alpha * dt / dx^2 <= 0.5."""
+        if isinstance(self.alpha, ShapeDType):
+            return self  # skip during abstract_eval
+        for name in ("alpha", "dx", "dt"):
+            if getattr(self, name) <= 0:
+                raise ValueError(f"{name} must be > 0, got {getattr(self, name)}")
         r = self.alpha * self.dt / (self.dx**2)
         if r > 0.5:
             raise ValueError(
@@ -132,6 +134,8 @@ class InputSchema(BaseModel):
     @model_validator(mode="after")
     def check_min_points(self) -> Self:
         """Need at least 3 points for interior stencil."""
+        if isinstance(self.T_in, ShapeDType):
+            return self  # skip during abstract_eval
         if len(self.T_in) < 3:
             raise ValueError("T_in must have at least 3 points.")
         return self
@@ -159,6 +163,12 @@ def apply(inputs: InputSchema) -> OutputSchema:
     )
 
     return OutputSchema(T_out=T_out)
+
+
+def abstract_eval(abstract_inputs):
+    """Calculate output shape from input shapes (required for tesseract-jax)."""
+    T_in_shape = abstract_inputs.T_in
+    return {"T_out": ShapeDType(shape=T_in_shape.shape, dtype=T_in_shape.dtype)}
 
 
 # ── Optional endpoints (AD via Enzyme) ──────────────────────────────
