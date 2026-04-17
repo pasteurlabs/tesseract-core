@@ -5,7 +5,7 @@ import json
 import shutil
 from pathlib import Path
 
-from pydantic import AfterValidator, BaseModel
+from pydantic import AfterValidator, BaseModel, ValidationInfo
 
 from tesseract_core.runtime.config import get_config
 from tesseract_core.runtime.experimental import (
@@ -24,14 +24,20 @@ def bin_reference(path: Path) -> str | None:
     return None
 
 
-def has_bin_sidecar(path: Path) -> Path:
+def has_bin_sidecar(path: Path, info: ValidationInfo) -> Path:
     """Pydantic validator to check for .bin file next to any json file that references one."""
+    # skip_path_checks is set by the regression test runner when validating
+    # expected outputs that have not been created yet (CI only).
+    ctx = info.context if info else None
+    if ctx and ctx.get("skip_path_checks", False):
+        return path
+
     if path.is_file():
         name = bin_reference(path)
         if name is not None:
             bin = path.parent / name
             assert bin.exists(), (
-                f"Expected .bin file for json {json} not found at {bin}"
+                f"Expected .bin file for json {path} not found at {bin}"
             )
     elif path.is_dir():
         return path
@@ -40,8 +46,12 @@ def has_bin_sidecar(path: Path) -> Path:
     return path
 
 
-InputPathReference = compose_validator(InputPathReference, AfterValidator(has_bin_sidecar))
-OutputPathReference = compose_validator(OutputPathReference, AfterValidator(has_bin_sidecar))
+InputPathReference = compose_validator(
+    InputPathReference, AfterValidator(has_bin_sidecar)
+)
+OutputPathReference = compose_validator(
+    OutputPathReference, AfterValidator(has_bin_sidecar)
+)
 
 
 class InputSchema(BaseModel):

@@ -539,45 +539,41 @@ def regress_test_case(
     if expected_exception is _NoException:
         OutputSchema = get_output_schema(endpoint_func)
 
-        if test_spec.skip_expected_output_validation:
-            expected_outputs = test_spec.expected_outputs
-        else:
-            # Build context for validation
-            validation_context = {"base_dir": base_dir}
-            if test_spec.endpoint == "jacobian":
-                validation_context["output_keys"] = test_spec.payload.get(
-                    "jac_outputs", []
-                )
-                validation_context["input_keys"] = test_spec.payload.get(
-                    "jac_inputs", []
-                )
-            elif test_spec.endpoint == "jacobian_vector_product":
-                validation_context["output_keys"] = test_spec.payload.get(
-                    "jvp_outputs", []
-                )
-            elif test_spec.endpoint == "vector_jacobian_product":
-                validation_context["input_keys"] = test_spec.payload.get(
-                    "vjp_inputs", []
-                )
+        # Build context for validation
+        validation_context = {"base_dir": base_dir}
+        if test_spec.endpoint == "jacobian":
+            validation_context["output_keys"] = test_spec.payload.get("jac_outputs", [])
+            validation_context["input_keys"] = test_spec.payload.get("jac_inputs", [])
+        elif test_spec.endpoint == "jacobian_vector_product":
+            validation_context["output_keys"] = test_spec.payload.get("jvp_outputs", [])
+        elif test_spec.endpoint == "vector_jacobian_product":
+            validation_context["input_keys"] = test_spec.payload.get("vjp_inputs", [])
 
-            # Do not cast shapes/dtypes when validating expected_outputs,
-            # since we want to catch mismatches as structural errors
-            validation_context.update({"strict_shapes": True, "strict_types": True})
+        # Do not cast shapes/dtypes when validating expected_outputs,
+        # since we want to catch mismatches as structural errors.
+        # skip_path_checks: expected output paths may not exist yet.
+        validation_context.update(
+            {
+                "strict_shapes": True,
+                "strict_types": True,
+                "skip_path_checks": test_spec.skip_expected_output_validation,
+            }
+        )
 
-            try:
-                expected_outputs = OutputSchema.model_validate(
-                    test_spec.expected_outputs, context=validation_context
-                ).model_dump()
-            except ValidationError as e:
-                error_str = "\n".join(f"  {line}" for line in str(e).splitlines())
-                return TestOutputSchema(
-                    status="failed",
-                    message=(
-                        "expected_outputs does not conform to OutputSchema "
-                        f"(perhaps the OutputSchema has recently changed?):\n{error_str}"
-                    ),
-                    endpoint=test_spec.endpoint,
-                )
+        try:
+            expected_outputs = OutputSchema.model_validate(
+                test_spec.expected_outputs, context=validation_context
+            ).model_dump()
+        except ValidationError as e:
+            error_str = "\n".join(f"  {line}" for line in str(e).splitlines())
+            return TestOutputSchema(
+                status="failed",
+                message=(
+                    "expected_outputs does not conform to OutputSchema "
+                    f"(perhaps the OutputSchema has recently changed?):\n{error_str}"
+                ),
+                endpoint=test_spec.endpoint,
+            )
 
     # Validate inputs
     InputSchema = get_input_schema(endpoint_func)
@@ -626,8 +622,7 @@ def regress_test_case(
 
     # Call endpoint - only try-except needed for endpoint execution
     try:
-        dump_mode = "json" if test_spec.skip_expected_output_validation else "python"
-        obtained_outputs = endpoint_func(loaded_inputs).model_dump(mode=dump_mode)
+        obtained_outputs = endpoint_func(loaded_inputs).model_dump()
     except expected_exception as e:
         if expected_exception_regex and not re.search(expected_exception_regex, str(e)):
             return TestOutputSchema(

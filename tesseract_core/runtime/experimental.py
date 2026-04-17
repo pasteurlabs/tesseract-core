@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import (
     Annotated,
     Any,
-    NewType,
     get_args,
     get_origin,
 )
@@ -18,6 +17,7 @@ from pydantic import (
     GetCoreSchemaHandler,
     GetJsonSchemaHandler,
     TypeAdapter,
+    ValidationInfo,
 )
 from pydantic.json_schema import JsonSchemaValue
 from pydantic_core import CoreSchema, SchemaSerializer, SchemaValidator, core_schema
@@ -219,63 +219,65 @@ class PydanticLazySequenceAnnotation:
         return handler(_core_schema)
 
 
-TesseractPath = NewType("TesseractPath", Path)
-"""Path type for Tesseract input/output schemas.
-
-Use this instead of ``pathlib.Path`` in your ``InputSchema`` and ``OutputSchema``
-to opt into automatic path resolution (inputs) and stripping (outputs).
-"""
-
-
-def _resolve_input_path(path: Path) -> Path:
+def _resolve_input_path(path: Path, info: ValidationInfo) -> Path:
     """Resolve a relative path against RuntimeConfig().input_path.
 
     Validates that the resolved path stays within the input directory and exists.
+    Existence checks are skipped when ``info.context`` contains
+    ``"skip_path_checks": True`` (e.g. during test-case validation of expected
+    outputs that have not been created yet).
 
     Raises:
         ValueError: If the path escapes the input directory.
         FileNotFoundError: If the resolved path does not exist.
     """
+    ctx = info.context if info else None
+    skip = ctx.get("skip_path_checks", False) if ctx else False
     input_path = get_config().input_path
     tess_path = (input_path / path).resolve()
-    if str(input_path) not in str(tess_path):
+    if not tess_path.is_relative_to(input_path):
         raise ValueError(
             f"Invalid input file reference: {path}. "
             f"Expected path to be relative to {input_path}, but got {tess_path}. "
             "File references have to be relative to --input-path."
         )
-    if not tess_path.exists():
+    if not skip and not tess_path.exists():
         raise FileNotFoundError(f"Input path {tess_path} does not exist.")
     return tess_path
 
 
-def _strip_output_path(path: Path) -> Path:
+def _strip_output_path(path: Path, info: ValidationInfo) -> Path:
     """Strip RuntimeConfig().output_path prefix from a path.
 
     If the path is relative to the output directory, returns the relative portion.
+    Existence checks are skipped when ``info.context`` contains
+    ``"skip_path_checks": True``.
 
     Raises:
         ValueError: If the path does not exist or is outside the output directory.
     """
+    ctx = info.context if info else None
+    skip = ctx.get("skip_path_checks", False) if ctx else False
     output_path = get_config().output_path
     if path.is_relative_to(output_path):
-        if not path.exists():
+        if not skip and not path.exists():
             raise FileNotFoundError(
                 f"Output path {path} does not exist inside Tesseract"
             )
         return path.relative_to(output_path)
     else:
-        full_path = output_path / path
-        if not full_path.exists():
-            if path.exists():
-                raise ValueError(
-                    f"Output path {path} is not in {output_path}. "
-                    f"All output data must be copied to `--output-path` ({output_path})."
-                )
-            else:
-                raise ValueError(
-                    f"Output path {path} is not in {output_path} or Tesseract root"
-                )
+        if not skip:
+            full_path = output_path / path
+            if not full_path.exists():
+                if path.exists():
+                    raise ValueError(
+                        f"Output path {path} is not in {output_path}. "
+                        f"All output data must be copied to `--output-path` ({output_path})."
+                    )
+                else:
+                    raise ValueError(
+                        f"Output path {path} is not in {output_path} or Tesseract root"
+                    )
         return path
 
 
@@ -285,7 +287,7 @@ def _resolve_input_file(path: Path) -> Path:
         DeprecationWarning,
         stacklevel=2,
     )
-    tess_path = _resolve_input_path(path)
+    tess_path = _resolve_input_path(path, None)
     if not tess_path.is_file():
         raise ValueError(f"Input path {tess_path} is not a file.")
     return tess_path
@@ -299,7 +301,7 @@ def _strip_output_file(path: Path) -> Path:
     )
     if not path.is_file():
         raise ValueError(f"Output path {path} is not a file.")
-    stripped = _strip_output_path(path)
+    stripped = _strip_output_path(path, None)
     return stripped
 
 
@@ -349,8 +351,8 @@ def compose_validator(
 
     Example::
 
-        InputPath = compose_validators(InputPathReference, AfterValidator(my_check))
-        OutputPath = compose_validators(OutputPathReference, AfterValidator(my_check))
+        InputPath = compose_validator(InputPathReference, AfterValidator(my_check))
+        OutputPath = compose_validator(OutputPathReference, AfterValidator(my_check))
     """
     if path_reference is InputPathReference:
         compose_fn = _append_validator
@@ -479,8 +481,8 @@ __all__ = [
     "OutputFileReference",
     "OutputPathReference",
     "PydanticLazySequenceAnnotation",
-    "TesseractPath",
     "TesseractReference",
+    "compose_validator",
     "finite_difference_jacobian",
     "finite_difference_jvp",
     "finite_difference_vjp",

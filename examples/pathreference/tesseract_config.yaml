@@ -2,7 +2,7 @@ name: pathreference
 version: "1.0.0"
 description: |
   Tesseract that copies input files and directories to the output directory.
-  Demonstrates TesseractPath usage.
+  Demonstrates PathReference usage.
 
 build_config:
   package_data: []
