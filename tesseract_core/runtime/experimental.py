@@ -286,7 +286,7 @@ def _strip_output_path(path: Path, info: ValidationInfo) -> Path:
 
 def _resolve_input_file(path: Path) -> Path:
     warnings.warn(
-        "InputFileReference is deprecated, use InputPathReference instead.",
+        "InputFileReference is deprecated, use InputPath instead.",
         DeprecationWarning,
         stacklevel=2,
     )
@@ -298,7 +298,7 @@ def _resolve_input_file(path: Path) -> Path:
 
 def _strip_output_file(path: Path) -> Path:
     warnings.warn(
-        "OutputFileReference is deprecated, use OutputPathReference instead.",
+        "OutputFileReference is deprecated, use OutputPath instead.",
         DeprecationWarning,
         stacklevel=2,
     )
@@ -337,8 +337,8 @@ def _prepend_validator(
     return _construct_annotated(Path, metadata)
 
 
-InputPathReference = Annotated[Path, AfterValidator(_resolve_input_path)]
-OutputPathReference = Annotated[Path, AfterValidator(_strip_output_path)]
+InputPath = Annotated[Path, AfterValidator(_resolve_input_path)]
+OutputPath = Annotated[Path, AfterValidator(_strip_output_path)]
 
 InputFileReference = Annotated[Path, AfterValidator(_resolve_input_file)]
 OutputFileReference = Annotated[Path, AfterValidator(_strip_output_file)]
@@ -347,7 +347,7 @@ OutputFileReference = Annotated[Path, AfterValidator(_strip_output_file)]
 def compose_validator(
     path_reference: type[Annotated], validator: AfterValidator
 ) -> type[Annotated]:
-    """Add custom validators to an ``InputPathReference`` or ``OutputPathReference``.
+    """Add custom validators to an ``InputPath`` or ``OutputPath``.
 
     For inputs, validators run *after* path resolution, so they receive
     absolute, resolved paths. For outputs, validators run *before* path
@@ -356,7 +356,7 @@ def compose_validator(
     (e.g. during the endpoint wrapper in ``core.py``).
 
     Args:
-        path_reference: Either ``InputPathReference`` or ``OutputPathReference``.
+        path_reference: Either ``InputPath`` or ``OutputPath``.
         validator: Pydantic ``AfterValidator`` to compose with the built-in path
             resolution/stripping logic.
 
@@ -365,17 +365,16 @@ def compose_validator(
 
     Example::
 
-        InputPath = compose_validator(InputPathReference, AfterValidator(my_check))
-        OutputPath = compose_validator(OutputPathReference, AfterValidator(my_check))
+        InputPath = compose_validator(InputPath, AfterValidator(my_check))
+        OutputPath = compose_validator(OutputPath, AfterValidator(my_check))
     """
-    if path_reference is InputPathReference:
+    if path_reference is InputPath:
         compose_fn = _append_validator
-    elif path_reference is OutputPathReference:
+    elif path_reference is OutputPath:
         compose_fn = _prepend_validator
     else:
         raise ValueError(
-            "Unsupported *PathReference type. "
-            "Expected: InputPathReference or OutputPathReference. "
+            "Unsupported type. Expected: InputPath or OutputPath. "
             f"Found: {path_reference}"
         )
     return compose_fn(path_reference, validator)
@@ -483,10 +482,10 @@ class TesseractReference:
 
 __all__ = [
     "InputFileReference",
-    "InputPathReference",
+    "InputPath",
     "LazySequence",
     "OutputFileReference",
-    "OutputPathReference",
+    "OutputPath",
     "PydanticLazySequenceAnnotation",
     "TesseractReference",
     "compose_validator",

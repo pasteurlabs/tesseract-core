@@ -7,7 +7,7 @@ To be used for Tesseracts with large inputs and/or outputs.
 
 ## Example Tesseract (`examples/pathreference`)
 
-Using `InputPathReference` and `OutputPathReference` you can
+Using `InputPath` and `OutputPath` you can
 include references to files or directories in the `InputSchema` and `OutputSchema` of a Tesseract.
 The path reference schemas make sure that a path exists (either locally or in the Tesseract)
 and resolve paths correctly in both `tesseract-runtime` and `tesseract run` calls.
@@ -49,11 +49,11 @@ tesseract run pathreference apply \
 
 For the Python SDK usage examples see `test_tesseract.py`.
 
-## What `InputPathReference` / `OutputPathReference` do in a schema
+## What `InputPath` / `OutputPath` do in a schema
 
-`*PathReference`s are `Annotated[Path, AfterValidator(...)]` types that carry validation logic. Use `InputPathReference` in your `InputSchema` and `OutputPathReference` in your `OutputSchema`.
+`*Path`s are `Annotated[Path, AfterValidator(...)]` types that carry validation logic. Use `InputPath` in your `InputSchema` and `OutputPath` in your `OutputSchema`.
 
-**`InputPathReference` fields** — caller sends a relative string, `apply` receives an absolute `Path`:
+**`InputPath` fields** — caller sends a relative string, `apply` receives an absolute `Path`:
 
 ```
 caller sends → "sample_8.json"
@@ -64,7 +64,7 @@ caller sends → "sample_8.json"
 - Rejects any path that would escape `input_path` (path traversal protection).
 - Raises `ValidationError` if the resolved path does not exist.
 
-**`OutputPathReference` fields** — `apply` returns an absolute `Path`, caller receives a relative string:
+**`OutputPath` fields** — `apply` returns an absolute `Path`, caller receives a relative string:
 
 ```
 apply returns  →  Path("/tesseract/output_data/sample_8.copy")
@@ -82,7 +82,7 @@ is an input or output:
 
 ```python
 from tesseract_core.runtime.experimental import (
-    InputPathReference, OutputPathReference, compose_validator,
+    InputPath, OutputPath, compose_validator,
 )
 
 def has_bin_sidecar(path: Path) -> Path:
@@ -98,8 +98,8 @@ def has_bin_sidecar(path: Path) -> Path:
         raise ValueError(f"{path} does not exist.")
     return path
 
-InputPath = compose_validator(InputPathReference, AfterValidator(has_bin_sidecar))
-OutputPath = compose_validator(OutputPathReference, AfterValidator(has_bin_sidecar))
+InputPath = compose_validator(InputPath, AfterValidator(has_bin_sidecar))
+OutputPath = compose_validator(OutputPath, AfterValidator(has_bin_sidecar))
 
 class InputSchema(BaseModel):
     paths: list[InputPath]

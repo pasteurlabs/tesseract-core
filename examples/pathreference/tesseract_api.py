@@ -9,8 +9,8 @@ from pydantic import AfterValidator, BaseModel, ValidationInfo
 
 from tesseract_core.runtime.config import get_config
 from tesseract_core.runtime.experimental import (
-    InputPathReference,
-    OutputPathReference,
+    InputPath,
+    OutputPath,
     compose_validator,
 )
 
@@ -46,20 +46,16 @@ def has_bin_sidecar(path: Path, info: ValidationInfo) -> Path:
     return path
 
 
-InputPathReference = compose_validator(
-    InputPathReference, AfterValidator(has_bin_sidecar)
-)
-OutputPathReference = compose_validator(
-    OutputPathReference, AfterValidator(has_bin_sidecar)
-)
+InputPath = compose_validator(InputPath, AfterValidator(has_bin_sidecar))
+OutputPath = compose_validator(OutputPath, AfterValidator(has_bin_sidecar))
 
 
 class InputSchema(BaseModel):
-    paths: list[InputPathReference]
+    paths: list[InputPath]
 
 
 class OutputSchema(BaseModel):
-    paths: list[OutputPathReference]
+    paths: list[OutputPath]
 
 
 def apply(inputs: InputSchema) -> OutputSchema:
