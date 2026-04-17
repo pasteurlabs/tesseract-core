@@ -55,9 +55,9 @@ For the Python SDK usage examples see `test_tesseract.py`.
 **`InputPathReference` fields** — caller sends a relative string, `apply` receives an absolute `Path`:
 
 ```
-caller sends       →  "sample_8.json"
-built-in resolves  →  Path("/tesseract/input_data/sample_8.json")   (checked: exists)
-apply sees         →  Path("/tesseract/input_data/sample_8.json")
+"sample_8.json"
+  → built-in   →  Path("/tesseract/input_data/sample_8.json")   (resolved + existence check)
+  → apply sees →  Path("/tesseract/input_data/sample_8.json")
 ```
 
 - Rejects any path that would escape `input_path` (path traversal protection).
@@ -66,9 +66,9 @@ apply sees         →  Path("/tesseract/input_data/sample_8.json")
 **`OutputPathReference` fields** — `apply` returns an absolute `Path`, caller receives a relative string:
 
 ```
-apply returns      →  Path("/tesseract/output_data/sample_8.copy")
-built-in strips    →  Path("sample_8.copy")                          (checked: exists)
-caller receives    →  "sample_8.copy"
+apply returns  →  Path("/tesseract/output_data/sample_8.copy")
+  → built-in         →  Path("sample_8.copy")                          (existence check + prefix stripped)
+  → caller receives  →  "sample_8.copy"
 ```
 
 - Raises `ValidationError` if the path does not exist inside `output_path`.
