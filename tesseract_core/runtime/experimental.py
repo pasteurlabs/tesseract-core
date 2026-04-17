@@ -259,7 +259,9 @@ def _strip_output_path(path: Path, info: ValidationInfo) -> Path:
     ctx = info.context if info else None
     skip = ctx.get("skip_path_checks", False) if ctx else False
     output_path = get_config().output_path
-    rel_path = path.relative_to(output_path) if path.is_relative_to(output_path) else path
+    rel_path = (
+        path.relative_to(output_path) if path.is_relative_to(output_path) else path
+    )
 
     if skip:
         return rel_path
@@ -314,11 +316,11 @@ def _append_validator(
 
 def _ensure_absolute_output_path(path: Path) -> Path:
     output_path = get_config().output_path
-    resolved = (output_path / path).resolve() if not path.is_absolute() else path.resolve()
+    resolved = (
+        (output_path / path).resolve() if not path.is_absolute() else path.resolve()
+    )
     if not resolved.is_relative_to(output_path):
-        raise ValueError(
-            f"Output path {path} escapes output directory {output_path}."
-        )
+        raise ValueError(f"Output path {path} escapes output directory {output_path}.")
     return resolved
 
 
