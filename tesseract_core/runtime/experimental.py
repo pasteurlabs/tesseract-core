@@ -259,26 +259,27 @@ def _strip_output_path(path: Path, info: ValidationInfo) -> Path:
     ctx = info.context if info else None
     skip = ctx.get("skip_path_checks", False) if ctx else False
     output_path = get_config().output_path
-    if path.is_relative_to(output_path):
-        if not skip and not path.exists():
+    rel_path = path.relative_to(output_path) if path.is_relative_to(output_path) else path
+
+    if skip:
+        return rel_path
+
+    full_path = output_path / rel_path
+    if not full_path.exists():
+        if path.is_relative_to(output_path):
             raise FileNotFoundError(
                 f"Output path {path} does not exist inside Tesseract"
             )
-        return path.relative_to(output_path)
-    else:
-        if not skip:
-            full_path = output_path / path
-            if not full_path.exists():
-                if path.exists():
-                    raise ValueError(
-                        f"Output path {path} is not in {output_path}. "
-                        f"All output data must be copied to `--output-path` ({output_path})."
-                    )
-                else:
-                    raise ValueError(
-                        f"Output path {path} is not in {output_path} or Tesseract root"
-                    )
-        return path
+        elif path.exists():
+            raise ValueError(
+                f"Output path {path} is not in {output_path}. "
+                f"All output data must be copied to `--output-path` ({output_path})."
+            )
+        else:
+            raise ValueError(
+                f"Output path {path} is not in {output_path} or Tesseract root"
+            )
+    return rel_path
 
 
 def _resolve_input_file(path: Path) -> Path:
@@ -312,9 +313,13 @@ def _append_validator(
 
 
 def _ensure_absolute_output_path(path: Path) -> Path:
-    if not path.is_absolute():
-        return get_config().output_path / path
-    return path
+    output_path = get_config().output_path
+    resolved = (output_path / path).resolve() if not path.is_absolute() else path.resolve()
+    if not resolved.is_relative_to(output_path):
+        raise ValueError(
+            f"Output path {path} escapes output directory {output_path}."
+        )
+    return resolved
 
 
 def _prepend_validator(
@@ -383,7 +388,7 @@ def require_file(file_path: PathLike) -> Path:
     if SKIP_REQUIRED_FILE_CHECK:
         return Path(file_path)
 
-    file_path = _resolve_input_path(Path(file_path))
+    file_path = _resolve_input_path(Path(file_path), None)
 
     if not file_path.is_file():
         raise FileNotFoundError(f"Required file not found: {file_path}")
