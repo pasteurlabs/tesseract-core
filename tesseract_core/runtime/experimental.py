@@ -337,6 +337,13 @@ def _prepend_validator(
     return _construct_annotated(Path, metadata)
 
 
+InputPathReference = Annotated[Path, AfterValidator(_resolve_input_path)]
+OutputPathReference = Annotated[Path, AfterValidator(_strip_output_path)]
+
+InputFileReference = Annotated[Path, AfterValidator(_resolve_input_file)]
+OutputFileReference = Annotated[Path, AfterValidator(_strip_output_file)]
+
+
 def compose_validator(
     path_reference: type[Annotated], validator: AfterValidator
 ) -> type[Annotated]:
@@ -372,13 +379,6 @@ def compose_validator(
             f"Found: {path_reference}"
         )
     return compose_fn(path_reference, validator)
-
-
-InputPathReference = Annotated[Path, AfterValidator(_resolve_input_path)]
-OutputPathReference = Annotated[Path, AfterValidator(_strip_output_path)]
-
-InputFileReference = Annotated[Path, AfterValidator(_resolve_input_file)]
-OutputFileReference = Annotated[Path, AfterValidator(_strip_output_file)]
 
 
 def require_file(file_path: PathLike) -> Path:
