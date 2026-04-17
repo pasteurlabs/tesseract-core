@@ -26,6 +26,7 @@ and resolve paths correctly in both `tesseract-runtime` and `tesseract run` call
 :pyobject: apply
 :language: python
 ```
+
 For the `tesseract-runtime` command, paths are relative to the local input/output paths:
 
 ```bash
@@ -55,7 +56,7 @@ For the Python SDK usage examples see `test_tesseract.py`.
 **`InputPathReference` fields** — caller sends a relative string, `apply` receives an absolute `Path`:
 
 ```
-"sample_8.json"
+caller sends → "sample_8.json"
   → built-in   →  Path("/tesseract/input_data/sample_8.json")   (resolved + existence check)
   → apply sees →  Path("/tesseract/input_data/sample_8.json")
 ```
@@ -72,7 +73,6 @@ apply returns  →  Path("/tesseract/output_data/sample_8.copy")
 ```
 
 - Raises `ValidationError` if the path does not exist inside `output_path`.
-
 
 ## Composing user-defined validators
 
@@ -111,7 +111,7 @@ class OutputSchema(BaseModel):
 **Input fields** — built-in resolves first, then user validators run (on absolute paths):
 
 ```
-"sample_8.json"
+caller sends → "sample_8.json"
   → built-in         →  Path("/tesseract/input_data/sample_8.json")   (resolved + existence check)
   → has_bin_sidecar  →  Path("/tesseract/input_data/sample_8.json")   (checks .bin sidecar present)
   → apply receives   →  Path("/tesseract/input_data/sample_8.json")
