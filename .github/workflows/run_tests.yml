@@ -323,9 +323,23 @@ jobs:
         run: |
           uv sync --extra dev --frozen
 
-      - name: Run demos
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb libgl1 libosmesa6
+
+      - name: Install demo requirements
         working-directory: demo/${{matrix.demo}}
         run: |
+          uv pip install -r requirements.txt
+
+      - name: Run demos
+        working-directory: demo/${{matrix.demo}}
+        env:
+          DISPLAY: ":99"
+          PYVISTA_OFF_SCREEN: "true"
+        run: |
+          Xvfb :99 -screen 0 1024x768x24 &
           uv pip install jupyter
           uv run --no-sync jupyter nbconvert --to notebook --execute demo.ipynb
 

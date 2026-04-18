@@ -25,7 +25,7 @@ os.environ["TESSERACT_API_PATH"] = os.path.abspath(
 )
 
 project = "Tesseract"
-copyright = "2025, Pasteur Labs"
+copyright = "2026, Pasteur Labs"
 author = "The Tesseract Team @ Pasteur Labs + OSS contributors"
 
 # The short X.Y version
@@ -57,6 +57,8 @@ extensions = [
     "sphinx_design",
     # For nice rendering of Pydantic models
     "sphinxcontrib.autodoc_pydantic",
+    # Sitemap for SEO
+    "sphinx_sitemap",
 ]
 
 
@@ -70,12 +72,17 @@ intersphinx_mapping = {
     "numpy": ("http://docs.scipy.org/doc/numpy/", None),
 }
 
-templates_path = []
-exclude_patterns = ["build", "Thumbs.db", ".DS_Store"]
+templates_path = ["_templates"]
+exclude_patterns = ["build", "_build", "jupyter_execute", "Thumbs.db", ".DS_Store"]
 
 
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
+
+# The docs root is content/introduction/index.md, which owns all toctrees
+# and drives the sidebar. The landing page (landing.md) is an orphan page
+# that gets copied to index.html after build so it serves at the site root.
+root_doc = "content/introduction/index"
 
 html_theme = "furo"
 html_static_path = ["static"]
@@ -85,6 +92,22 @@ html_theme_options = {
     "sidebar_hide_name": True,
 }
 html_css_files = ["custom.css"]
+html_baseurl = "https://docs.pasteurlabs.ai/projects/tesseract-core/latest/"
+sitemap_url_scheme = (
+    "{link}"  # ReadTheDocs handles versioning; don't add language/version prefix
+)
+
+
+# -- OpenGraph metadata (social cards) ---------------------------------------
+
+ogp_site_url = "https://docs.pasteurlabs.ai/projects/tesseract-core/latest/"
+ogp_site_name = "Tesseract"
+ogp_description_length = 200
+ogp_type = "article"
+ogp_social_cards = {
+    "image": "static/logo-dark.png",
+    "line_color": "#d946ef",
+}
 
 
 # -- Custom directives ----------------------------------------------------
@@ -104,10 +127,23 @@ def zip_examples_folder() -> None:
     assert archive_path.exists()
 
 
+def _copy_landing_to_index(app, exception) -> None:
+    """Copy landing.html to index.html so the landing page serves at /."""
+    if exception or app.builder.format != "html":
+        return
+    outdir = Path(app.outdir)
+    landing = outdir / "landing.html"
+    index = outdir / "index.html"
+    if landing.exists():
+        shutil.copy2(landing, index)
+
+
 def setup(app) -> None:
     """Sphinx setup function. Used to register custom stuff."""
     # HACK: We zip the examples folder here so that it can be downloaded
     zip_examples_folder()
+    # Copy landing page to index.html after build
+    app.connect("build-finished", _copy_landing_to_index)
 
 
 # -- Handle Jupyter notebooks ------------------------------------------------
@@ -115,8 +151,13 @@ def setup(app) -> None:
 # Do not execute notebooks during build (just take existing output)
 nb_execution_mode = "off"
 
-# Copy example notebooks to auto_examples folder on every build
+# Copy example notebooks and their companion files to the docs folder on every build
+_COMPANION_EXTS = {".png", ".gif", ".jpg", ".jpeg", ".svg"}
 for example_notebook in Path("../demo").glob("*/demo.ipynb"):
     # Copy the example notebook to the docs folder
     dest = (Path("content/demo") / example_notebook.parent.name).with_suffix(".ipynb")
     shutil.copyfile(example_notebook, dest)
+    # Copy companion images so relative references in the notebook resolve
+    for companion in example_notebook.parent.iterdir():
+        if companion.suffix.lower() in _COMPANION_EXTS:
+            shutil.copyfile(companion, Path("content/demo") / companion.name)
