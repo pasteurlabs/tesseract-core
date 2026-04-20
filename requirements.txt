@@ -30,7 +30,7 @@ numpy==2.4.4 ; python_full_version >= '3.11'
     # via tesseract-core
 orjson==3.11.8
     # via tesseract-core
-packaging==26.0
+packaging==26.1
     # via tesseract-core
 pip==26.0.1
     # via tesseract-core
