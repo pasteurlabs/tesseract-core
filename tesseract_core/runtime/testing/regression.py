@@ -53,7 +53,7 @@ class TestSpec(BaseModel):
     expected_exception_regex: str | None = None
     atol: float = 1e-8
     rtol: float = 1e-5
-    skip_expected_output_validation: bool = False
+    skip_output_path_checks: bool = False
     cli_config: TestCliConfig | None = None
 
     @field_validator("expected_exception", mode="before")
@@ -556,7 +556,7 @@ def regress_test_case(
             {
                 "strict_shapes": True,
                 "strict_types": True,
-                "skip_path_checks": test_spec.skip_expected_output_validation,
+                "skip_path_checks": test_spec.skip_output_path_checks,
             }
         )
 

@@ -1,6 +1,6 @@
 {
   "endpoint": "apply",
-  "skip_expected_output_validation": true,
+  "skip_output_path_checks": true,
   "expected_outputs": {
     "paths": [
       "sample_0.copy",

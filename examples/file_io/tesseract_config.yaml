@@ -1,8 +1,8 @@
-name: pathreference
+name: file_io
 version: "1.0.0"
 description: |
   Tesseract that copies input files and directories to the output directory.
-  Demonstrates PathReference usage.
+  Demonstrates InputPath/OutputPath usage.
 
 build_config:
   package_data: []
