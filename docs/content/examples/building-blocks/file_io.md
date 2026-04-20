@@ -2,17 +2,16 @@
 
 ## Context
 
-Instead of serializing file contents into the request payload, a Tesseract can
+Instead passing file constents to the input payload, a Tesseract can
 declare `InputPath` / `OutputPath` fields that refer to files or directories on
 the `--input-path` / `--output-path` mounts. This is useful when inputs or
-outputs are large on disk, or consist of many (or a variable number of) files —
-the typical case where operating on a whole directory is the natural interface.
+outputs are large on disk, or consist of many files.
 
 ## Example Tesseract (`examples/file_io`)
 
 Using `InputPath` and `OutputPath` you can
 include references to files or directories in the `InputSchema` and `OutputSchema` of a Tesseract.
-The path reference schemas make sure that a path exists (either locally or in the Tesseract)
+The schemas make sure that a path exists (either locally or in the Tesseract)
 and resolve paths correctly in both `tesseract-runtime` and `tesseract run` calls.
 
 ```{literalinclude} ../../../../examples/file_io/tesseract_api.py
@@ -49,8 +48,6 @@ tesseract run file_io apply \
     --output-path ./output \
     '{"inputs": {"paths": ["sample_2.json", "sample_3.json"]}}'
 ```
-
-For the Python SDK usage examples see `test_tesseract.py`.
 
 ## What `InputPath` / `OutputPath` do in a schema
 

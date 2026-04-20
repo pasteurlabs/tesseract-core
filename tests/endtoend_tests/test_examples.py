@@ -102,7 +102,7 @@ TEST_CASES = {
     "fortran_heat": Config(),
     "conda": Config(),
     "required_files": Config(input_path="input"),
-    "file_io": Config(input_path="test_cases/testdata"),
+    "file_io": Config(input_path="test_cases/testdata", output_path="__tmp_path__"),
     "metrics": Config(test_with_random_inputs=True),
     "qp_solve": Config(),
     "tesseractreference": Config(),  # Can't test requests standalone; needs target Tesseract. Covered in separate test.
@@ -248,11 +248,12 @@ def test_unit_tesseract_endtoend(
             ]
         )
     if unit_tesseract_config.output_path:
-        output_dir = unit_tesseract_path / unit_tesseract_config.output_path
-    else:
-        output_dir = tmp_path / "output"
-        output_dir.mkdir()
-    output_args.extend(["--output-path", str(output_dir)])
+        if unit_tesseract_config.output_path == "__tmp_path__":
+            output_dir = tmp_path / "output"
+            output_dir.mkdir()
+        else:
+            output_dir = unit_tesseract_path / unit_tesseract_config.output_path
+        output_args.extend(["--output-path", str(output_dir)])
 
     if unit_tesseract_config.test_with_random_inputs:
         random_input = example_from_json_schema(input_schema)
