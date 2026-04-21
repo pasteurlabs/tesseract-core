@@ -1,5 +1,7 @@
 # `FileReference`
 
+[View on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/filereference)
+
 ## Context
 
 Tesseract that mounts input and output directories as datasets.

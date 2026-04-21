@@ -1,5 +1,7 @@
 # Finite Difference Gradients
 
+[View on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/meshstats_finitediff)
+
 This example demonstrates how to make any Tesseract differentiable using **finite differences**,
 without implementing analytical gradient code.
 

@@ -1,5 +1,7 @@
 # Wrapping Compiled Code (Fortran Example)
 
+[View on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/fortran_heat)
+
 ## Context
 
 Many industries---aerospace, energy, automotive---rely on simulation codes written in compiled languages like Fortran that have been developed and validated over decades. These legacy assets represent significant investment and domain expertise. Tesseract provides a straightforward path to wrap such codes, making them accessible through a modern API while preserving their proven numerical implementations.
