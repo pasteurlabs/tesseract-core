@@ -51,7 +51,7 @@ tesseract run file_io apply \
 
 ## What `InputPath` / `OutputPath` do in a schema
 
-`*Path`s are `Annotated[Path, AfterValidator(...)]` types that carry validation logic. Use `InputPath` in your `InputSchema` and `OutputPath` in your `OutputSchema`.
+`InputPath` and `OutputPath` are Pydantic-aware `Path` subclasses that carry validation logic. Use `InputPath` in your `InputSchema` and `OutputPath` in your `OutputSchema`.
 
 **`InputPath` fields** — caller sends a relative string, `apply` receives an absolute `Path`:
 
@@ -76,16 +76,16 @@ apply returns  →  Path("/tesseract/output_data/sample_8.copy")
 
 ## Composing user-defined validators
 
-Use `compose_validator()` to attach custom `AfterValidator`s to a path reference.
-User validators always receive **absolute paths**, regardless of whether the field
-is an input or output:
+Use `Annotated` with `AfterValidator` to attach custom validators to a path
+reference. Validators always receive **absolute paths** for both input and
+output types:
 
 ```python
-from tesseract_core.runtime.experimental import (
-    InputPath, OutputPath, compose_validator,
-)
+from typing import Annotated
+from pydantic import AfterValidator
+from tesseract_core.runtime.experimental import InputPath, OutputPath
 
-def has_bin_sidecar(path: Path) -> Path:
+def has_bin_sidecar(path: Path, info) -> Path:
     """Check that any binref JSON has its .bin sidecar present."""
     if path.is_file():
         name = bin_reference(path)
@@ -98,14 +98,14 @@ def has_bin_sidecar(path: Path) -> Path:
         raise ValueError(f"{path} does not exist.")
     return path
 
-InputPath = compose_validator(InputPath, AfterValidator(has_bin_sidecar))
-OutputPath = compose_validator(OutputPath, AfterValidator(has_bin_sidecar))
+CheckedInputPath = Annotated[InputPath, AfterValidator(has_bin_sidecar)]
+CheckedOutputPath = Annotated[OutputPath, AfterValidator(has_bin_sidecar)]
 
 class InputSchema(BaseModel):
-    paths: list[InputPath]
+    paths: list[CheckedInputPath]
 
 class OutputSchema(BaseModel):
-    paths: list[OutputPath]
+    paths: list[CheckedOutputPath]
 ```
 
 **Input fields** — built-in resolves first, then user validators run (on absolute paths):
@@ -117,11 +117,11 @@ caller sends → "sample_8.json"
   → apply receives   →  Path("/tesseract/input_data/sample_8.json")
 ```
 
-**Output fields** — user validators run first (on absolute paths), then built-in strips:
+**Output fields** — user validators run on absolute paths, built-in strips on serialization:
 
 ```
 apply returns  →  Path("/tesseract/output_data/sample_8.copy")
+  → built-in         →  Path("/tesseract/output_data/sample_8.copy")   (existence check)
   → has_bin_sidecar  →  Path("/tesseract/output_data/sample_8.copy")   (checks .bin sidecar present)
-  → built-in         →  Path("sample_8.copy")                          (existence check + prefix stripped)
-  → caller receives  →  "sample_8.copy"
+  → caller receives  →  "sample_8.copy"                                (prefix stripped on serialization)
 ```
