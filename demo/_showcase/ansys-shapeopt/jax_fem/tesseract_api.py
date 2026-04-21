@@ -271,12 +271,14 @@ def setup(
         # additional_info=([0.1],),
     )
 
-    # Apply the automatic differentiation wrapper
-    # This is a critical step that makes the problem solver differentiable
+    # Apply the automatic differentiation wrapper to make the problem solver differentiable
+    # umfpack_solver seems to give NaNs in the gradients for some reason, while petsc_solver and jax_solver work fine
     fwd_pred = ad_wrapper(
         problem,
-        solver_options={"umfpack_solver": {}},
-        adjoint_solver_options={"umfpack_solver": {}},
+        solver_options={"petsc_solver": {"ksp_type": "preonly", "pc_type": "lu"}},
+        adjoint_solver_options={
+            "petsc_solver": {"ksp_type": "preonly", "pc_type": "lu"}
+        },
     )
     return problem, fwd_pred
 

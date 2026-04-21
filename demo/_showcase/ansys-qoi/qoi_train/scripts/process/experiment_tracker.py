@@ -83,7 +83,7 @@ class ExperimentTracker:
             # Convert numpy types to native Python types for JSON serialization
             serializable_info = {}
             for key, value in split_info.items():
-                if isinstance(value, (list, np.ndarray)):
+                if isinstance(value, list | np.ndarray):
                     serializable_info[key] = (
                         [int(x) for x in value] if len(value) > 0 else []
                     )
@@ -144,22 +144,20 @@ class ExperimentTracker:
                 return obj.tolist()
             elif isinstance(
                 obj,
-                (
-                    np.int_,
-                    np.intc,
-                    np.intp,
-                    np.int8,
-                    np.int16,
-                    np.int32,
-                    np.int64,
-                    np.uint8,
-                    np.uint16,
-                    np.uint32,
-                    np.uint64,
-                ),
+                np.int_
+                | np.intc
+                | np.intp
+                | np.int8
+                | np.int16
+                | np.int32
+                | np.int64
+                | np.uint8
+                | np.uint16
+                | np.uint32
+                | np.uint64,
             ):
                 return int(obj)
-            elif isinstance(obj, (np.float16, np.float32, np.float64)):
+            elif isinstance(obj, np.float16 | np.float32 | np.float64):
                 return float(obj)
             elif isinstance(obj, np.bool_):
                 return bool(obj)
