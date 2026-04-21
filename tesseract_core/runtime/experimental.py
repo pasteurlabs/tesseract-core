@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
+import warnings
 from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
 from typing import (
@@ -16,11 +17,16 @@ from pydantic import (
     GetCoreSchemaHandler,
     GetJsonSchemaHandler,
     TypeAdapter,
+    ValidationInfo,
 )
 from pydantic.json_schema import JsonSchemaValue
 from pydantic_core import CoreSchema, SchemaSerializer, SchemaValidator, core_schema
 
-from tesseract_core.runtime.file_interactions import PathLike, parent_path
+from tesseract_core.runtime.config import get_config
+from tesseract_core.runtime.file_interactions import (
+    PathLike,
+    parent_path,
+)
 from tesseract_core.runtime.gradient_endpoint_derivation import (
     jacobian_from_jvp,
     jacobian_from_vjp,
@@ -213,36 +219,163 @@ class PydanticLazySequenceAnnotation:
         return handler(_core_schema)
 
 
-def _resolve_input_path(path: Path) -> Path:
-    from tesseract_core.runtime.config import get_config
+class InputPath(Path):
+    """Path type for Tesseract input files.
 
-    input_path = get_config().input_path
-    tess_path = (input_path / path).resolve()
-    if str(input_path) not in str(tess_path):
-        raise ValueError(
-            f"Invalid input file reference: {path}. "
-            f"Expected path to be relative to {input_path}, but got {tess_path}. "
-            "File references have to be relative to --input-path."
+    Resolves relative paths against ``RuntimeConfig().input_path`` and validates
+    that the resolved path stays within the input directory and exists.
+
+    Use ``Annotated[InputPath, AfterValidator(...)]`` to add custom validation
+    that runs after path resolution (receives the absolute, resolved path).
+    """
+
+    @classmethod
+    def _resolve(cls, path: Path, info: ValidationInfo | None) -> Path:
+        ctx = info.context if info else None
+        skip = ctx.get("skip_path_checks", False) if ctx else False
+        input_path = Path(get_config().input_path).resolve()
+        tess_path = (input_path / path).resolve()
+        if not tess_path.is_relative_to(input_path):
+            raise ValueError(
+                f"Invalid input file reference: {path}. "
+                f"Expected path to be relative to {input_path}, but got {tess_path}. "
+                "File references have to be relative to --input-path."
+            )
+        if not skip and not tess_path.exists():
+            raise ValueError(f"Input path {tess_path} does not exist.")
+        return tess_path
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls,
+        _source_type: Any,
+        _handler: GetCoreSchemaHandler,
+    ) -> core_schema.CoreSchema:
+        return core_schema.json_or_python_schema(
+            json_schema=core_schema.with_info_after_validator_function(
+                cls._validate,
+                core_schema.str_schema(),
+            ),
+            python_schema=core_schema.with_info_after_validator_function(
+                cls._validate,
+                core_schema.union_schema(
+                    [
+                        core_schema.is_instance_schema(Path),
+                        core_schema.str_schema(),
+                    ]
+                ),
+            ),
+            serialization=core_schema.plain_serializer_function_ser_schema(
+                lambda p: str(p),
+            ),
         )
-    if not tess_path.exists():
-        raise FileNotFoundError(f"Input path {tess_path} does not exist.")
+
+    @classmethod
+    def _validate(cls, value: Any, info: ValidationInfo) -> Path:
+        return cls._resolve(Path(value), info)
+
+
+class OutputPath(Path):
+    """Path type for Tesseract output files.
+
+    Validates that paths exist inside ``RuntimeConfig().output_path`` and
+    strips the prefix when serializing.
+
+    In-memory values are **absolute** paths. Use
+    ``Annotated[OutputPath, AfterValidator(...)]`` to add custom validation;
+    validators receive absolute paths.
+    """
+
+    @classmethod
+    def _validate(cls, value: Any, info: ValidationInfo) -> Path:
+        """Resolve to absolute, check containment and existence."""
+        output_path = Path(get_config().output_path).resolve()
+        path = Path(value)
+        resolved = (
+            (output_path / path).resolve() if not path.is_absolute() else path.resolve()
+        )
+        if not resolved.is_relative_to(output_path):
+            raise ValueError(
+                f"Output path {path} escapes output directory {output_path}."
+            )
+
+        ctx = info.context if info else None
+        skip = ctx.get("skip_path_checks", False) if ctx else False
+        if not skip and not resolved.exists():
+            if path.is_relative_to(output_path) or not path.is_absolute():
+                raise ValueError(
+                    f"Output path {resolved} does not exist inside Tesseract"
+                )
+            elif path.exists():
+                raise ValueError(
+                    f"Output path {path} is not in {output_path}. "
+                    f"All output data must be copied to `--output-path` ({output_path})."
+                )
+            else:
+                raise ValueError(
+                    f"Output path {path} is not in {output_path} or Tesseract root"
+                )
+        return resolved
+
+    @classmethod
+    def _serialize(cls, path: Path) -> str:
+        """Strip output_path prefix for serialization."""
+        output_path = Path(get_config().output_path).resolve()
+        if path.is_relative_to(output_path):
+            return str(path.relative_to(output_path))
+        return str(path)
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls,
+        _source_type: Any,
+        _handler: GetCoreSchemaHandler,
+    ) -> core_schema.CoreSchema:
+        return core_schema.json_or_python_schema(
+            json_schema=core_schema.with_info_after_validator_function(
+                cls._validate,
+                core_schema.str_schema(),
+            ),
+            python_schema=core_schema.with_info_after_validator_function(
+                cls._validate,
+                core_schema.union_schema(
+                    [
+                        core_schema.is_instance_schema(Path),
+                        core_schema.str_schema(),
+                    ]
+                ),
+            ),
+            serialization=core_schema.plain_serializer_function_ser_schema(
+                cls._serialize,
+            ),
+        )
+
+
+def _resolve_input_file(path: Path) -> Path:
+    warnings.warn(
+        "InputFileReference is deprecated, use InputPath instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    tess_path = InputPath._resolve(path, None)
     if not tess_path.is_file():
         raise ValueError(f"Input path {tess_path} is not a file.")
     return tess_path
 
 
-def _strip_output_path(path: Path) -> Path:
-    from tesseract_core.runtime.config import get_config
+def _strip_output_file(path: Path) -> Path:
+    warnings.warn(
+        "OutputFileReference is deprecated, use OutputPath instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    if not path.is_file():
+        raise ValueError(f"Output path {path} is not a file.")
+    return Path(OutputPath._serialize(path))
 
-    output_path = get_config().output_path
-    if path.is_relative_to(output_path):
-        return path.relative_to(output_path)
-    else:
-        return path
 
-
-InputFileReference = Annotated[Path, AfterValidator(_resolve_input_path)]
-OutputFileReference = Annotated[Path, AfterValidator(_strip_output_path)]
+InputFileReference = Annotated[Path, AfterValidator(_resolve_input_file)]
+OutputFileReference = Annotated[Path, AfterValidator(_strip_output_file)]
 
 
 def require_file(file_path: PathLike) -> Path:
@@ -254,7 +387,7 @@ def require_file(file_path: PathLike) -> Path:
     if SKIP_REQUIRED_FILE_CHECK:
         return Path(file_path)
 
-    file_path = _resolve_input_path(Path(file_path))
+    file_path = InputPath._resolve(Path(file_path), None)
 
     if not file_path.is_file():
         raise FileNotFoundError(f"Required file not found: {file_path}")
@@ -347,8 +480,10 @@ class TesseractReference:
 
 __all__ = [
     "InputFileReference",
+    "InputPath",
     "LazySequence",
     "OutputFileReference",
+    "OutputPath",
     "PydanticLazySequenceAnnotation",
     "TesseractReference",
     "finite_difference_jacobian",
