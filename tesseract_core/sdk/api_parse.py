@@ -4,7 +4,7 @@
 import ast
 import re
 from pathlib import Path
-from typing import Annotated, Literal, NamedTuple
+from typing import Annotated, Any, Literal, NamedTuple
 
 import yaml
 from pydantic import (
@@ -118,7 +118,9 @@ class TesseractBuildConfig(BaseModel, validate_assignment=True):
         (),
         description=(
             "Additional files to copy into the Docker image, in the format ``(source, destination)``. "
-            "Source paths are relative to the Tesseract directory."
+            "Source paths are relative to the directory containing `tesseract_api.py`. "
+            "Destination paths are relative or absolute paths within the Docker image (e.g., ``/app/shared_code.py``) "
+            "and must be unique."
         ),
     )
     custom_build_steps: tuple[StrictStr, ...] | None = Field(
@@ -164,6 +166,11 @@ class TesseractConfig(BaseModel, validate_assignment=True):
     build_config: OptionalBuildConfig = Field(
         default_factory=TesseractBuildConfig,
         description="Configuration options for building the Tesseract.",
+    )
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Arbitrary user-defined metadata. "
+        "This will be stored as a Docker label (ai.pasteurlabs.tesseract.metadata).",
     )
 
     model_config = ConfigDict(extra="forbid")
@@ -309,11 +316,11 @@ def get_config(src_dir: Path) -> TesseractConfig:
         raise ValidationError(f"Invalid configuration: {err}") from err
 
 
-def get_non_base_fields_in_tesseract_config() -> list[tuple[str, type]]:
-    """Gets fields in Tesseract Config that are not a base fields."""
-    base_fields = (str, int, float, bool, bytes)
+def get_submodel_fields_in_tesseract_config() -> list[tuple[str, type]]:
+    """Gets fields in TesseractConfig that are Pydantic sub-models."""
     non_base_fields = []
     for field_name, field_info in TesseractConfig.model_fields.items():
-        if field_info.annotation not in base_fields:
+        origin = getattr(field_info.annotation, "__origin__", field_info.annotation)
+        if isinstance(origin, type) and issubclass(origin, BaseModel):
             non_base_fields.append((field_name, field_info.annotation))
     return non_base_fields

@@ -5,7 +5,6 @@
 
 import inspect
 import io
-import json
 import os
 import sys
 from collections.abc import Callable, Iterable
@@ -23,6 +22,7 @@ from typing import (
 import click
 import typer
 from pydantic import ValidationError
+from pydantic_core import from_json
 
 import tesseract_core.runtime.experimental
 from tesseract_core.runtime.config import RuntimeConfig, get_config, update_config
@@ -37,12 +37,13 @@ from tesseract_core.runtime.file_interactions import (
     read_from_path,
     write_to_path,
 )
-from tesseract_core.runtime.finite_differences import (
-    check_gradients as check_gradients_,
-)
 from tesseract_core.runtime.mpa import start_run
+from tesseract_core.runtime.profiler import Profiler
 from tesseract_core.runtime.serve import create_rest_api
 from tesseract_core.runtime.serve import serve as serve_
+from tesseract_core.runtime.testing.finite_differences import (
+    check_gradients as check_gradients_,
+)
 
 CONFIG_FIELDS = {
     str(field_name): field.annotation
@@ -112,7 +113,8 @@ def _parse_payload(value: Any) -> dict[str, Any]:
         except Exception as e:
             raise click.BadParameter(f"Could not read data from path {value}.") from e
 
-    return json.loads(value)
+    # Use pydantic from_json here because it is much faster, and the payload may be large.
+    return from_json(value)
 
 
 def make_callback() -> Callable:
@@ -296,9 +298,9 @@ def check_gradients(
     """Check gradients of endpoints against a finite difference approximation.
 
     \b
-    This is an automated way to check the correctness of the gradients of the different AD endpoints
+    This is an automated way to check the correctness of the gradients of the different gradient endpoints
     (jacobian, jacobian_vector_product, vector_jacobian_product) of a ``tesseract_api.py`` module.
-    It will sample random indices and compare the gradients computed by the AD endpoints with the
+    It will sample random indices and compare the gradients computed by the gradient endpoints with the
     finite difference approximation.
 
     \b
@@ -413,8 +415,18 @@ def _create_user_defined_cli_command(
         if output_path:
             Path(output_path).mkdir(parents=True, exist_ok=True)
 
-        with start_run(base_dir=output_path):
-            result = user_function(**user_function_args)
+        # Use stderr sink so logs are streamed when running in container
+        stderr_sink = lambda msg: print(msg, file=sys.stderr, flush=True)
+
+        profiler = Profiler(enabled=config.profiling)
+
+        with start_run(base_dir=output_path, log_sink=stderr_sink):
+            with profiler:
+                result = user_function(**user_function_args)
+
+            # Print profiling stats inside start_run context
+            # so they go through stdio redirection to the log file
+            profiler.print_stats()
 
         result = output_to_bytes(result, output_format, output_path)
 

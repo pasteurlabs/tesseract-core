@@ -1,4 +1,4 @@
-# Tesseract Endpoints
+# Endpoints (`tesseract_api.py`)
 
 ## Required endpoints
 

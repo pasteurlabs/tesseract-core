@@ -1,0 +1,139 @@
+name: Benchmarks
+
+on:
+  pull_request:
+    paths:
+      - "tesseract_core/**"
+      - "benchmarks/**"
+      - ".github/workflows/benchmarks.yml"
+
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: benchmarks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up Git repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Restore UV environment
+        run: cp production.uv.lock uv.lock
+
+      - name: Install package
+        run: uv sync --extra dev --frozen
+
+      - name: Run benchmarks on current commit
+        run: |
+          uv run --no-sync pytest benchmarks/ \
+            --benchmark-json current_benchmarks.json
+
+      - name: Check out baseline branch
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          path: baseline
+
+      - name: Install package (baseline)
+        if: github.event_name == 'pull_request'
+        working-directory: baseline
+        run: |
+          cp production.uv.lock uv.lock 2>/dev/null || true
+          uv sync --extra dev --frozen
+
+      - name: Use PR benchmark scripts for baseline
+        if: github.event_name == 'pull_request'
+        working-directory: baseline
+        run: |
+          cp -r ../benchmarks/* benchmarks/
+
+      - name: Run benchmarks on baseline
+        if: github.event_name == 'pull_request'
+        id: baseline
+        working-directory: baseline
+        run: |
+          rc=0
+          uv run --no-sync pytest benchmarks/ \
+            --benchmark-json baseline_benchmarks.json \
+            || rc=$?
+
+          if [ "$rc" != "0" ]; then
+            echo "::warning::Baseline benchmark run failed, skipping comparison"
+            echo "has_baseline=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "has_baseline=true" >> $GITHUB_OUTPUT
+
+      - name: Generate comparison report
+        if: github.event_name == 'pull_request'
+        id: comparison
+        run: |
+          baseline_flag=""
+          if [ "${{ steps.baseline.outputs.has_baseline }}" = "true" ]; then
+            baseline_flag="--baseline baseline/baseline_benchmarks.json"
+          fi
+
+          python benchmarks/compare_benchmarks.py \
+            $baseline_flag \
+            --current current_benchmarks.json \
+            --output benchmark_report.md
+
+          # Set output as multiline string
+          {
+            echo 'report<<BENCHMARK_REPORT_END'
+            cat benchmark_report.md
+            echo ''
+            echo 'BENCHMARK_REPORT_END'
+          } >> $GITHUB_OUTPUT
+
+      - name: Find existing comment
+        if: github.event_name == 'pull_request'
+        uses: peter-evans/find-comment@v4
+        id: find-comment
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: "PasteurBot"
+          body-includes: "## Benchmark Results"
+
+      - name: Create or update PR comment
+        if: github.event_name == 'pull_request'
+        uses: peter-evans/create-or-update-comment@v5
+        with:
+          token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
+          comment-id: ${{ steps.find-comment.outputs.comment-id }}
+          issue-number: ${{ github.event.pull_request.number }}
+          body: ${{ steps.comparison.outputs.report }}
+          edit-mode: replace
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v7
+        with:
+          name: benchmark-results
+          path: |
+            current_benchmarks.json
+            baseline/baseline_benchmarks.json
+            benchmark_report.md
+          if-no-files-found: ignore
+          retention-days: 30

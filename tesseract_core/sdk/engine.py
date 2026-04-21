@@ -14,20 +14,22 @@ import tempfile
 import time
 from collections.abc import Callable, Collection, Sequence
 from contextlib import closing
+from importlib.metadata import requires
 from pathlib import Path
 from shutil import copy, copytree, rmtree
 from typing import TYPE_CHECKING, Any, Literal
 
 import requests
 from jinja2 import Environment, PackageLoader, StrictUndefined
+from packaging.requirements import Requirement
 
 from .api_parse import TesseractConfig, get_config, validate_tesseract_api
 from .docker_client import (
     APIError,
     CLIDockerClient,
     Container,
-    ContainerError,
     Image,
+    NotFound,
     build_docker_image,
     is_podman,
 )
@@ -147,6 +149,27 @@ def get_runtime_dir() -> Path:
     return Path(tesseract_core.__file__).parent / "runtime"
 
 
+def get_runtime_dependencies() -> list[str]:
+    """Get the runtime dependencies from the installed tesseract-core package.
+
+    This retrieves dependencies declared under the 'runtime' extra without
+    requiring that extra to be installed.
+    """
+    deps = []
+    for req_str in sorted(requires("tesseract-core") or []):
+        req = Requirement(req_str)
+        # Check if this requirement is for the 'runtime' extra
+        if req.marker and req.marker.evaluate({"extra": "runtime"}):
+            # Reconstruct the requirement string without the marker
+            dep_str = req.name
+            if req.extras:
+                dep_str += f"[{','.join(sorted(req.extras))}]"
+            if req.specifier:
+                dep_str += str(req.specifier)
+            deps.append(dep_str)
+    return deps
+
+
 def get_template_dir() -> Path:
     """Get the template directory for the Tesseract runtime."""
     import tesseract_core
@@ -193,13 +216,70 @@ def prepare_build_context(
 
     copytree(src_dir, context_dir / "__tesseract_source__")
 
+    # Handle package_data paths that reference files outside the Tesseract directory
+    # These need to be copied into the build context and their paths rewritten
+    package_data_dir = context_dir / "__package_data__"
+    resolved_package_data = []
+    if user_config.build_config.package_data:
+        target_paths = [t for _, t in user_config.build_config.package_data]
+        duplicates = {t for t in target_paths if target_paths.count(t) > 1}
+        if duplicates:
+            raise RuntimeError(
+                f"package_data has duplicate target path(s): {', '.join(sorted(duplicates))}"
+            )
+
+        for source_path, target_path in user_config.build_config.package_data:
+            # Resolve the source path relative to the Tesseract directory
+            resolved_source = (src_dir / source_path).resolve()
+
+            # Check if the path goes outside the Tesseract directory
+            if resolved_source.is_relative_to(src_dir.resolve()):
+                # Path is within src_dir, use as-is
+                resolved_package_data.append((source_path, target_path))
+            else:
+                # Path is outside src_dir, copy to __package_data__ directory
+                if not resolved_source.exists():
+                    raise RuntimeError(
+                        f"package_data source file not found: {source_path} "
+                        f"(resolved to {resolved_source})"
+                    )
+
+                # Create a unique name for the copied file/directory,
+                # using an incrementing counter to avoid collisions
+                dest_name = resolved_source.name
+                dest_path = package_data_dir / dest_name
+                counter = 1
+                while dest_path.exists():
+                    stem = resolved_source.stem
+                    dest_name = f"{stem}_{counter}{resolved_source.suffix}"
+                    dest_path = package_data_dir / dest_name
+                    counter += 1
+
+                package_data_dir.mkdir(parents=True, exist_ok=True)
+                if resolved_source.is_file():
+                    copy(resolved_source, dest_path)
+                else:
+                    copytree(resolved_source, dest_path)
+
+                # Use the path relative to build context for Docker COPY
+                resolved_package_data.append(
+                    (f"../__package_data__/{dest_name}", target_path)
+                )
+
     template_name = "Dockerfile.base"
     template = ENV.get_template(template_name)
+
+    # Replace the package_data in config with resolved paths
+    resolved_config = user_config.model_copy(deep=True)
+    if resolved_package_data:
+        resolved_config.build_config = resolved_config.build_config.model_copy(
+            update={"package_data": tuple(resolved_package_data)}
+        )
 
     template_values = {
         "tesseract_source_directory": "__tesseract_source__",
         "tesseract_runtime_location": "__tesseract_runtime__",
-        "config": user_config,
+        "config": resolved_config,
         "use_ssh_mount": use_ssh_mount,
     }
 
@@ -265,8 +345,24 @@ def prepare_build_context(
         context_dir / "__tesseract_runtime__" / "tesseract_core" / "runtime",
         ignore=_ignore_pycache,
     )
+    # Copy meta files (except Jinja templates, which we render)
+    from tesseract_core import __version__ as tesseract_version
+
     for metafile in (runtime_source_dir / "meta").glob("*"):
-        copy(metafile, context_dir / "__tesseract_runtime__")
+        if metafile.suffix == ".jinja":
+            # Render Jinja template
+            target_name = metafile.stem  # Remove .jinja suffix
+            template_content = metafile.read_text()
+            from jinja2 import Template
+
+            template = Template(template_content)
+            rendered = template.render(
+                runtime_dependencies=get_runtime_dependencies(),
+                version=tesseract_version,
+            )
+            (context_dir / "__tesseract_runtime__" / target_name).write_text(rendered)
+        else:
+            copy(metafile, context_dir / "__tesseract_runtime__")
 
     # Docker requires a .dockerignore file to be at the root of the build context
     dockerignore_path = runtime_source_dir / "meta" / ".dockerignore"
@@ -336,6 +432,7 @@ def build_tesseract(
     inject_ssh: bool = False,
     config_override: dict[tuple[str, ...], Any] | None = None,
     generate_only: bool = False,
+    stream_logs: Callable[[str], Any] | bool = False,
 ) -> Image | Path:
     """Build a new Tesseract from a context directory.
 
@@ -349,6 +446,8 @@ def build_tesseract(
         inject_ssh: whether or not to forward SSH agent when building the image.
         config_override: overrides for configuration options in the Tesseract.
         generate_only: only generate the build context but do not build the image.
+        stream_logs: if True, stream build logs to stderr. If a callable is provided,
+            it will be called with each log line.
 
     Returns:
         Image object representing the built Tesseract image,
@@ -402,6 +501,7 @@ def build_tesseract(
             dockerfile=context_dir / "Dockerfile",
             inject_ssh=inject_ssh,
             print_and_exit=generate_only,
+            stream_logs=stream_logs,
         )
     finally:
         if not keep_build_dir:
@@ -445,25 +545,16 @@ def teardown(
     if isinstance(container_ids, str):
         container_ids = [container_ids]
 
-    def _is_container_id(container_id: str) -> bool:
-        try:
-            docker_client.containers.get(container_id)
-            return True
-        except ContainerError:
-            return False
+    # Validate all container IDs exist before removing any
+    containers = {
+        # containers.get raises NotFound if any container ID is invalid, preventing partial teardown
+        cid: docker_client.containers.get(cid)
+        for cid in container_ids
+    }
 
-    for container_id in container_ids:
-        if _is_container_id(container_id):
-            container = docker_client.containers.get(container_id)
-            container.remove(force=True)
-            logger.info(
-                f"Tesseract is shutdown for Docker container ID: {container_id}"
-            )
-        else:
-            raise ValueError(
-                f"A Docker container with ID {container_id} cannot be found, "
-                "use `tesseract ps` to find container ID"
-            )
+    for container_id, container in containers.items():
+        container.remove(force=True)
+        logger.info(f"Tesseract is shutdown for Docker container ID: {container_id}")
 
 
 def get_tesseract_containers() -> list[Container]:
@@ -474,6 +565,29 @@ def get_tesseract_containers() -> list[Container]:
 def get_tesseract_images() -> list[Image]:
     """Get Tesseract images."""
     return docker_client.images.list()
+
+
+# Built-in Docker/Podman networks that can/should not be created.
+_BUILTIN_NETWORKS = {"host", "bridge", "none"}
+
+
+def _ensure_network_exists(network: str) -> None:
+    """Create the Docker network if it does not exist yet.
+
+    Params:
+        network: The network name to create.
+    """
+    if network in _BUILTIN_NETWORKS:
+        return
+    try:
+        docker_client.networks.get(network)
+    except NotFound:
+        create_network = True
+    else:
+        create_network = False
+    if create_network:
+        logger.info("Network '%s' not found, creating it.", network)
+        docker_client.networks.create(network)
 
 
 def serve(
@@ -493,6 +607,8 @@ def serve(
     input_path: str | Path | None = None,
     output_path: str | Path | None = None,
     output_format: Literal["json", "json+base64", "json+binref"] | None = None,
+    docker_args: list[str] | None = None,
+    runtime_config: dict[str, Any] | None = None,
 ) -> tuple:
     """Serve one or more Tesseract images.
 
@@ -517,6 +633,10 @@ def serve(
         input_path: Input path to read input files from, such as local directory or S3 URI.
         output_path: Output path to write output files to, such as local directory or S3 URI.
         output_format: Output format to use for the results.
+        docker_args: Additional arguments to pass to the container runtime (e.g., Docker).
+        runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
+            These are converted to TESSERACT_* environment variables. For example,
+            ``{"profiling": True}`` sets ``TESSERACT_PROFILING=1``.
 
     Returns:
         A tuple of the Tesseract container name and the port it is serving on.
@@ -549,6 +669,16 @@ def serve(
         environment = {}
     environment.update(volume_environment)
 
+    # Convert runtime_config to TESSERACT_* environment variables
+    if runtime_config is not None:
+        for key, value in runtime_config.items():
+            env_key = f"TESSERACT_{key.upper()}"
+            if isinstance(value, bool):
+                env_value = "1" if value else "0"
+            else:
+                env_value = str(value)
+            environment[env_key] = env_value
+
     if output_format:
         environment["TESSERACT_OUTPUT_FORMAT"] = output_format
 
@@ -572,15 +702,22 @@ def serve(
     # Always bind to all interfaces inside the container
     args.extend(["--host", "0.0.0.0"])
 
-    if host_ip == "0.0.0.0":
+    # When using host network, no port mapping is needed (container binds directly to host ports)
+    # and we should always ping on localhost
+    if network == "host":
         ping_ip = "127.0.0.1"
+        port_mappings = None
+    elif host_ip == "0.0.0.0":
+        ping_ip = "127.0.0.1"
+        port_mappings = {f"{host_ip}:{port}": container_api_port}
     else:
         ping_ip = host_ip
+        port_mappings = {f"{host_ip}:{port}": container_api_port}
 
-    port_mappings = {f"{host_ip}:{port}": container_api_port}
     if debug:
         debugpy_port = str(get_free_port())
-        port_mappings[f"{host_ip}:{debugpy_port}"] = container_debugpy_port
+        if port_mappings is not None:
+            port_mappings[f"{host_ip}:{debugpy_port}"] = container_debugpy_port
         environment["TESSERACT_DEBUG"] = "1"
 
     extra_args = [
@@ -597,6 +734,12 @@ def serve(
         if network is None:
             raise ValueError("Network must be specified if network_alias is provided")
         extra_args.extend(["--network-alias", network_alias])
+
+    if docker_args:
+        extra_args.extend(docker_args)
+
+    if network is not None:
+        _ensure_network_exists(network)
 
     container = docker_client.containers.run(
         image=image_name,
@@ -781,6 +924,8 @@ def run_tesseract(
     output_path: str | Path | None = None,
     output_format: Literal["json", "json+base64", "json+binref"] | None = None,
     output_file: str | None = None,
+    docker_args: list[str] | None = None,
+    stream_logs: bool | Callable[[str], None] = False,
 ) -> tuple[str, str]:
     """Start a Tesseract and execute a given command.
 
@@ -803,10 +948,18 @@ def run_tesseract(
         output_format: Format of the output.
         output_file: If specified, the output will be written to this file within output_path
             instead of stdout.
+        docker_args: Additional arguments to pass to the container runtime (e.g., Docker).
+        stream_logs: If set, stream logs in real-time. Can be True (streams to stderr)
+            or a callable that accepts a string (e.g., logger.info).
 
     Returns:
         Tuple with the stdout and stderr of the Tesseract.
     """
+    if command == "test":
+        logger.warning(
+            "The 'test' command is experimental and may change without warning."
+        )
+
     if output_format == "json+binref" and output_path is None:
         logger.warning(
             "Consider specifying --output-path when using the 'json+binref' output format "
@@ -865,7 +1018,13 @@ def run_tesseract(
     if is_podman():
         extra_args.extend(["--userns", "keep-id"])
 
-    # Run the container
+    if docker_args:
+        extra_args.extend(docker_args)
+
+    if network is not None:
+        _ensure_network_exists(network)
+
+    # Run the container, optionally streaming stderr to the terminal
     result = docker_client.containers.run(
         image=image,
         command=cmd,
@@ -880,6 +1039,7 @@ def run_tesseract(
         user=user,
         memory=memory,
         extra_args=extra_args,
+        stream_stderr=stream_logs,
     )
     assert isinstance(result, tuple)
     stdout, stderr = result

@@ -16,6 +16,7 @@ from .config import get_config
 from .core import create_endpoints
 from .file_interactions import SUPPORTED_FORMATS, join_paths, output_to_bytes
 from .mpa import start_run
+from .profiler import Profiler
 
 # Endpoints that should use GET instead of POST
 GET_ENDPOINTS = {"health"}
@@ -69,8 +70,14 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
             output_path = get_config().output_path
             rundir_name = f"run_{run_id}"
             rundir = join_paths(output_path, rundir_name)
+            profiler = Profiler()
             with start_run(base_dir=rundir):
-                result = endpoint_func(*args, **kwargs)
+                with profiler:
+                    result = endpoint_func(*args, **kwargs)
+
+                # Print profiling stats inside start_run context
+                # so they go through stdio redirection to the log file
+                profiler.print_stats()
             return create_response(
                 result, accept, base_dir=output_path, binref_dir=rundir_name
             )
@@ -106,6 +113,11 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
 
     for endpoint_func in tesseract_endpoints:
         endpoint_name = endpoint_func.__name__
+
+        # Skip test endpoint unless in debug mode
+        if endpoint_name == "test" and not config.debug:
+            continue
+
         wrapped_endpoint = wrap_endpoint(endpoint_func)
         http_methods = ["GET"] if endpoint_name in GET_ENDPOINTS else ["POST"]
         app.add_api_route(f"/{endpoint_name}", wrapped_endpoint, methods=http_methods)
@@ -122,5 +134,12 @@ def serve(host: str, port: int, num_workers: int) -> None:
         debugpy.listen(("0.0.0.0", 5678))
 
     uvicorn.run(
-        "tesseract_core.runtime.app_http:app", host=host, port=port, workers=num_workers
+        "tesseract_core.runtime.app_http:app",
+        host=host,
+        port=port,
+        workers=num_workers,
+        # Increase from uvicorn's default of 5s to account for the fact that Tesseract endpoints
+        # tend to run longer than your average HTTP request. A higher value means that the server
+        # will wait longer before closing idle connections, so we can avoid the overhead of reconnecting.
+        timeout_keep_alive=60,
     )

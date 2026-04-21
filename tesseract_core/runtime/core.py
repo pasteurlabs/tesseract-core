@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import importlib.util
+import json
 import os
 import sys
 from collections.abc import Callable, Generator
@@ -11,14 +12,46 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, TextIO
 
+import numpy as np
 from pydantic import BaseModel
 
 from .config import get_config
+from .logs import get_logger, is_tracing_enabled
 from .schema_generation import (
     create_abstract_eval_schema,
     create_apply_schema,
-    create_autodiff_schema,
+    create_gradient_schema,
 )
+
+
+def _trace(msg: str, obj: BaseModel) -> None:
+    """Log a trace message with formatted BaseModel, only if tracing is enabled."""
+    if not is_tracing_enabled():
+        return
+
+    def format_array(arr: np.ndarray, max_elements: int = 10) -> str:
+        data_repr = repr(arr.flatten()[:max_elements].tolist())
+        if arr.size > max_elements:
+            data_repr = data_repr[:-1] + ", ...]"
+        return f"Array(shape={arr.shape}, dtype={arr.dtype}, data={data_repr})"
+
+    def format_value(v: Any) -> Any:
+        if isinstance(v, np.ndarray):
+            return format_array(v)
+        elif isinstance(v, dict):
+            return {k: format_value(val) for k, val in v.items()}
+        elif isinstance(v, list):
+            return [format_value(item) for item in v]
+        return v
+
+    formatted_dict = {k: format_value(v) for k, v in obj.model_dump().items()}
+
+    try:
+        formatted = json.dumps(formatted_dict, indent=2, default=str)
+    except (TypeError, ValueError):
+        formatted = repr(formatted_dict)
+
+    get_logger().debug("%s\n%s", msg, formatted)
 
 
 @contextmanager
@@ -67,14 +100,25 @@ def load_module_from_path(path: Path | str) -> ModuleType:
     module = importlib.util.module_from_spec(spec)
 
     try:
-        old_path = sys.path
-        sys.path = [str(module_dir), *old_path]
+        sys.path.append(str(module_dir))
+
+        # Also update PYTHONPATH in the environment so it propagates to subprocesses
+        os.environ["PYTHONPATH"] = os.pathsep.join(sys.path)
+
+        # Register in sys.modules so functions can be pickled for multiprocessing.
+        # This allows pickle to find the module via func.__module__.
+        # Note: This may shadow a user package with the same name, but that's
+        # acceptable since tesseract_api.py is the entry point for the runtime.
+        sys.modules[module_name] = module
+
         spec.loader.exec_module(module)
     except Exception as exc:
+        # Restore sys.path on failure
+        if str(module_dir) in sys.path:
+            sys.path.remove(str(module_dir))
+        os.environ["PYTHONPATH"] = os.pathsep.join(sys.path)
+        sys.modules.pop(module_name, None)
         raise ImportError(f"Could not load module from {path}") from exc
-    finally:
-        sys.path = old_path
-
     return module
 
 
@@ -96,6 +140,22 @@ def get_supported_endpoints(api_module: ModuleType) -> tuple[str, ...]:
 def get_tesseract_api() -> ModuleType:
     """Import tesseract_api.py file."""
     return load_module_from_path(get_config().api_path)
+
+
+def get_input_schema(endpoint_function: Callable) -> type[BaseModel]:
+    """Get the input schema of an endpoint function."""
+    schema = endpoint_function.__annotations__["payload"]
+    if not issubclass(schema, BaseModel):
+        raise AssertionError(f"Expected BaseModel, got {schema}")
+    return schema
+
+
+def get_output_schema(endpoint_function: Callable) -> type[BaseModel]:
+    """Get the output schema of an endpoint function."""
+    schema = endpoint_function.__annotations__["return"]
+    if not issubclass(schema, BaseModel):
+        raise AssertionError(f"Expected BaseModel, got {schema}")
+    return schema
 
 
 def check_tesseract_api(api_module: ModuleType) -> None:
@@ -162,16 +222,22 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
     @assemble_docstring(api_module.apply)
     def apply(payload: ApplyInputSchema) -> ApplyOutputSchema:
         """Apply the Tesseract to the input data."""
+        _trace("apply() called with inputs:", payload.inputs)
         out = api_module.apply(payload.inputs)
+        # NOTE: If the output schema has custom validators, they are effectively triggered
+        # twice (once in the user code, once in the endpoint wrapper). This is not ideal but
+        # should be the lesser evil to ensure validation of the final output.
         if isinstance(out, api_module.OutputSchema):
             out = out.model_dump()
-        return ApplyOutputSchema.model_validate(out)
+        result = ApplyOutputSchema.model_validate(out)
+        _trace("apply() returned:", result)
+        return result
 
     endpoints.append(apply)
 
     if "jacobian" in supported_functions:
-        JacobianInputSchema, JacobianOutputSchema = create_autodiff_schema(
-            api_module.InputSchema, api_module.OutputSchema, ad_flavor="jacobian"
+        JacobianInputSchema, JacobianOutputSchema = create_gradient_schema(
+            api_module.InputSchema, api_module.OutputSchema, gradient_type="jacobian"
         )
 
         @assemble_docstring(api_module.jacobian)
@@ -180,20 +246,23 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
 
             Differentiates ``jac_outputs`` with respect to ``jac_inputs``, at the point ``inputs``.
             """
+            _trace("jacobian() called with payload:", payload)
             out = api_module.jacobian(**dict(payload))
-            return JacobianOutputSchema.model_validate(
+            result = JacobianOutputSchema.model_validate(
                 out,
                 context={
                     "output_keys": payload.jac_outputs,
                     "input_keys": payload.jac_inputs,
                 },
             )
+            _trace("jacobian() returned:", result)
+            return result
 
         endpoints.append(jacobian)
 
     if "jacobian_vector_product" in supported_functions:
-        JVPInputSchema, JVPOutputSchema = create_autodiff_schema(
-            api_module.InputSchema, api_module.OutputSchema, ad_flavor="jvp"
+        JVPInputSchema, JVPOutputSchema = create_gradient_schema(
+            api_module.InputSchema, api_module.OutputSchema, gradient_type="jvp"
         )
 
         @assemble_docstring(api_module.jacobian_vector_product)
@@ -203,16 +272,19 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
             Evaluates the Jacobian vector product between the Jacobian given by ``jvp_outputs``
             with respect to ``jvp_inputs`` at the point ``inputs`` and the given tangent vector.
             """
+            _trace("jacobian_vector_product() called with payload:", payload)
             out = api_module.jacobian_vector_product(**dict(payload))
-            return JVPOutputSchema.model_validate(
+            result = JVPOutputSchema.model_validate(
                 out, context={"output_keys": payload.jvp_outputs}
             )
+            _trace("jacobian_vector_product() returned:", result)
+            return result
 
         endpoints.append(jacobian_vector_product)
 
     if "vector_jacobian_product" in supported_functions:
-        VJPInputSchema, VJPOutputSchema = create_autodiff_schema(
-            api_module.InputSchema, api_module.OutputSchema, ad_flavor="vjp"
+        VJPInputSchema, VJPOutputSchema = create_gradient_schema(
+            api_module.InputSchema, api_module.OutputSchema, gradient_type="vjp"
         )
 
         @assemble_docstring(api_module.vector_jacobian_product)
@@ -222,10 +294,13 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
             Computes the vector Jacobian product between the Jacobian given by ``vjp_outputs``
             with respect to ``vjp_inputs`` at the point ``inputs`` and the given cotangent vector.
             """
+            _trace("vector_jacobian_product() called with payload:", payload)
             out = api_module.vector_jacobian_product(**dict(payload))
-            return VJPOutputSchema.model_validate(
+            result = VJPOutputSchema.model_validate(
                 out, context={"input_keys": payload.vjp_inputs}
             )
+            _trace("vector_jacobian_product() returned:", result)
+            return result
 
         endpoints.append(vector_jacobian_product)
 
@@ -243,9 +318,17 @@ def create_endpoints(api_module: ModuleType) -> list[Callable]:
         @assemble_docstring(api_module.abstract_eval)
         def abstract_eval(payload: AbstractEvalInputSchema) -> AbstractEvalOutputSchema:
             """Perform abstract evaluation of the Tesseract on the input data."""
+            _trace("abstract_eval() called with inputs:", payload.inputs)
             out = api_module.abstract_eval(payload.inputs)
-            return AbstractEvalOutputSchema.model_validate(out)
+            result = AbstractEvalOutputSchema.model_validate(out)
+            _trace("abstract_eval() returned:", result)
+            return result
 
         endpoints.append(abstract_eval)
+
+    from tesseract_core.runtime.testing.regression import make_test_endpoint
+
+    test = make_test_endpoint(api_module, endpoints)
+    endpoints.append(test)
 
     return endpoints

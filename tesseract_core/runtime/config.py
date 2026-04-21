@@ -37,6 +37,8 @@ class RuntimeConfig(BaseModel):
     mlflow_run_extra_args: Annotated[dict[str, Any], BeforeValidator(_eval_str)] = (
         Field(default_factory=dict)
     )
+    profiling: bool = False
+    tracing: bool = False
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 

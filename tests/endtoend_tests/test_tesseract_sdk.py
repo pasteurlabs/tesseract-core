@@ -6,7 +6,7 @@ import socket
 
 import numpy as np
 import pytest
-from common import build_tesseract, image_exists
+from pydantic import ValidationError
 
 from tesseract_core import Tesseract
 from tesseract_core.sdk import engine
@@ -18,23 +18,8 @@ expected_endpoints = {
     "abstract_eval",
     "jacobian_vector_product",
     "vector_jacobian_product",
+    "test",
 }
-
-
-@pytest.fixture(scope="module")
-def built_image_name(
-    docker_client,
-    shared_dummy_image_name,
-    dummy_tesseract_location,
-    docker_cleanup_module,
-):
-    """Build the dummy Tesseract image for the tests."""
-    image_name = build_tesseract(
-        docker_client, dummy_tesseract_location, shared_dummy_image_name
-    )
-    assert image_exists(docker_client, image_name)
-    docker_cleanup_module["images"].append(image_name)
-    yield image_name
 
 
 def test_available_endpoints(built_image_name):
@@ -52,7 +37,7 @@ def test_apply(built_image_name, dummy_tesseract_location, free_port, output_for
         built_image_name, port=str(free_port), output_format=output_format
     )
     try:
-        vecadd = Tesseract(tesseract_url)
+        vecadd = Tesseract.from_url(tesseract_url)
         out = vecadd.apply(inputs)
     finally:
         engine.teardown(served_tesseract)
@@ -89,18 +74,14 @@ def test_apply(built_image_name, dummy_tesseract_location, free_port, output_for
 
 
 def test_apply_with_error(built_image_name):
-    # pass two inputs with different shapes, which raises an internal error
+    # pass two inputs with different shapes, which raises a validation error
     inputs = {"a": [1, 2, 3], "b": [3, 4], "s": 1}
 
     with Tesseract.from_image(built_image_name) as vecadd:
-        with pytest.raises(RuntimeError) as excinfo:
+        with pytest.raises(ValidationError) as excinfo:
             vecadd.apply(inputs)
 
-    assert "assert a.shape == b.shape" in str(excinfo.value)
-
-    # get logs
-    logs = vecadd.server_logs()
-    assert "assert a.shape == b.shape" in logs
+    assert "a and b must have the same shape" in str(excinfo.value)
 
 
 @pytest.fixture(scope="module")
@@ -112,7 +93,9 @@ def served_tesseract_remote(built_image_name):
     sock.close()
     # Serve the Tesseract image
     tesseract_url = f"http://localhost:{free_port}"
-    served_tesseract, _ = engine.serve(built_image_name, port=str(free_port))
+    served_tesseract, _ = engine.serve(
+        built_image_name, port=str(free_port), debug=True
+    )
     try:
         yield tesseract_url
     finally:
@@ -132,7 +115,8 @@ def served_tesseract_module(dummy_tesseract_location):
 
 
 @pytest.mark.parametrize(
-    "endpoint_name", sorted(expected_endpoints | {"openapi_schema"})
+    "endpoint_name",
+    sorted(expected_endpoints | {"openapi_schema"}),
 )
 def test_all_endpoints(
     endpoint_name,
@@ -168,6 +152,39 @@ def test_all_endpoints(
                 "b": {"shape": [2], "dtype": "float32"},
             }
         }
+    elif endpoint_name == "test":
+        inputs = {
+            "test_spec": {
+                "endpoint": "apply",
+                "payload": {
+                    "inputs": {
+                        "a": {
+                            "object_type": "array",
+                            "shape": [3],
+                            "dtype": "int64",
+                            "data": {
+                                "buffer": "AQAAAAAAAAACAAAAAAAAAAMAAAAAAAAA",
+                                "encoding": "base64",
+                            },
+                        },
+                        "b": {
+                            "object_type": "array",
+                            "shape": [3],
+                            "dtype": "int64",
+                            "data": {
+                                "buffer": "BAAAAAAAAAAFAAAAAAAAAAYAAAAAAAAA",
+                                "encoding": "base64",
+                            },
+                        },
+                    }
+                },
+                "expected_outputs": {
+                    "result": np.array([7.0, 11.0, 15.0], dtype="float32")
+                },
+                "atol": 1e-8,
+                "rtol": 0.00001,
+            }
+        }
     else:
         inputs = {}
 
@@ -182,7 +199,7 @@ def test_all_endpoints(
         out(**inputs)
 
     # Test URL access
-    vecadd = Tesseract(served_tesseract_remote)
+    vecadd = Tesseract.from_url(served_tesseract_remote)
     out = getattr(vecadd, endpoint_name)
     if callable(out):
         out(**inputs)
@@ -195,6 +212,8 @@ def test_signature_consistency():
         "debug",
         # setting output format is not meaningful (arrays are decoded automatically)
         "output_format",
+        # stream_logs is SDK-only for streaming logs to a callback
+        "stream_logs",
     ]
 
     from_image_sig = dict(inspect.signature(Tesseract.from_image).parameters)
@@ -213,11 +232,22 @@ def test_signature_consistency():
         )
 
 
-def test_teepipe_consistency():
-    """Test that the source code of the two duplicate TeePipe implementations is identical."""
-    from tesseract_core.runtime.logs import TeePipe as RuntimeTeePipe
-    from tesseract_core.sdk.logs import TeePipe as SDKTeePipe
+def test_apply_with_binref_format(built_image_name, tmp_path):
+    """Test that json+binref output format works with Tesseract.from_image (Issue #423)."""
+    inputs = {"a": [1, 2], "b": [3, 4], "s": 1}
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
 
-    runtime_source = inspect.getsource(RuntimeTeePipe)
-    sdk_source = inspect.getsource(SDKTeePipe)
-    assert runtime_source == sdk_source
+    with Tesseract.from_image(
+        built_image_name,
+        output_path=output_dir,
+        output_format="json+binref",
+    ) as vecadd:
+        out = vecadd.apply(inputs)
+
+    assert set(out.keys()) == {"result"}
+    np.testing.assert_array_equal(out["result"], np.array([4.0, 6.0]))
+
+    # Verify that binary files were created in the output directory (in run subdirectories)
+    bin_files = list(output_dir.glob("**/*.bin"))
+    assert len(bin_files) > 0, "Expected binary output files to be created"

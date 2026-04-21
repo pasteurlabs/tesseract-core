@@ -37,56 +37,32 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Set up WSL (Windows)
-        uses: Vampire/setup-wsl@v6
+        uses: Vampire/setup-wsl@v7
         if: runner.os == 'Windows'
         with:
           distribution: Ubuntu-24.04
 
-      - name: Set up Python
-        if: runner.os != 'Windows'
-        uses: actions/setup-python@v6
-        with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Set up Python (Windows)
-        if: runner.os == 'Windows'
-        shell: wsl-bash {0}
-        run: |
-          python_version=${{ matrix.python-version }}
-          if [ $python_version == "3.12" ]; then
-            # Python 3.12 is the default `python3` in Ubuntu 24.04
-            python_version="3"
-          fi
-
-          export DEBIAN_FRONTEND=noninteractive
-          sudo apt-get update
-          sudo apt-get install -y software-properties-common gnupg2
-          sudo add-apt-repository ppa:deadsnakes/ppa
-          sudo apt-get install -y python3-pip python${python_version} python${python_version}-venv
-
-          python${python_version} -m venv ~/venv
-
-          export PATH="$HOME/venv/bin:$PATH"
-          python -m pip install --upgrade pip
-
       - name: Set up uv
+        if: runner.os != 'Windows'
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
 
-      - name: Restore UV environment
-        run: cp production.uv.lock uv.lock
+      - name: Set up uv (Windows)
+        if: runner.os == 'Windows'
+        shell: wsl-bash {0}
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
 
       - name: Install package
         if: runner.os != 'Windows'
         run: |
-          uv sync --extra dev --frozen
+          cp production.uv.lock uv.lock
+          uv sync --python ${{ matrix.python-version }} --extra dev --frozen
 
           if [ "${{ matrix.runtime-deps }}" == "oldest" ]; then
-            # replace >= with == in pyproject.toml to install oldest runtime deps
-            sed -i 's/>=/==/g' ./tesseract_core/runtime/meta/pyproject.toml
-            # roll back changes to requires-python
-            sed -i 's/requires-python\s*=\s*\"==/requires-python = \">=/g' ./tesseract_core/runtime/meta/pyproject.toml
+            # replace >= with == in runtime deps section of pyproject.toml to install oldest runtime deps
+            sed -i '/^runtime = \[$/,/^]$/s/>=/==/g' ./pyproject.toml
             uv pip install -e .[runtime]
           fi
 
@@ -94,16 +70,15 @@ jobs:
         if: runner.os == 'Windows'
         shell: wsl-bash {0}
         run: |
-          export PATH="$HOME/venv/bin:$PATH"
-
-          pip install uv
-          uv sync --extra dev --frozen
+          source "$HOME/.local/bin/env"
+          export UV_PROJECT_ENVIRONMENT="$HOME/venv"
+          export UV_CACHE_DIR="$HOME/.cache/uv"
+          cp production.uv.lock uv.lock
+          uv sync --python ${{ matrix.python-version }} --extra dev --frozen
 
           if [ "${{ matrix.runtime-deps }}" == "oldest" ]; then
-            # replace >= with == in pyproject.toml to install oldest runtime deps
-            sed -i 's/>=/==/g' ./tesseract_core/runtime/meta/pyproject.toml
-            # roll back changes to requires-python
-            sed -i 's/requires-python\s*=\s*\"==/requires-python = \">=/g' ./tesseract_core/runtime/meta/pyproject.toml
+            # replace >= with == in runtime deps section of pyproject.toml to install oldest runtime deps
+            sed -i '/^runtime = \[$/,/^]$/s/>=/==/g' ./pyproject.toml
             uv pip install -e .[runtime]
           fi
 
@@ -111,7 +86,9 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           uv run --no-sync pytest \
+            -v \
             --skip-endtoend \
+            --timeout=300 \
             --cov-report=term-missing:skip-covered \
             --cov-report=xml:coverage.xml \
             --cov=tesseract_core \
@@ -121,16 +98,19 @@ jobs:
         if: runner.os == 'Windows'
         shell: wsl-bash {0}
         run: |
-          export PATH="$HOME/venv/bin:$PATH"
+          source "$HOME/.local/bin/env"
+          export UV_PROJECT_ENVIRONMENT="$HOME/venv"
           uv run --no-sync pytest \
+            -v \
             --skip-endtoend \
+            --timeout=300 \
             --cov-report=term-missing:skip-covered \
             --cov-report=xml:coverage.xml \
             --cov=tesseract_core \
             --cov-branch
 
       - name: Upload coverage reports to Codecov
-        uses: codecov/codecov-action@v5.5.2
+        uses: codecov/codecov-action@v6.0.0
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: pasteurlabs/tesseract-core
@@ -150,7 +130,7 @@ jobs:
 
       - name: Get all changed files
         id: changed-files
-        uses: tj-actions/changed-files@8cba46e29c11878d930bca7870bb54394d3e8b21 # v47
+        uses: tj-actions/changed-files@9426d40962ed5378910ee2e21d5f8c6fcbf2dd96 # v47
         with:
           files: |
             tesseract_core/**
@@ -234,9 +214,6 @@ jobs:
 
     runs-on: ${{ matrix.arch == 'x64' && matrix.os == 'ubuntu-24.04' && 'ubuntu-24.04' || matrix.arch == 'arm' && matrix.os == 'ubuntu-24.04' && 'ubuntu-24.04-arm'}}
 
-    env:
-      TESSERACT_DOCKER_BUILD_ARGS: "--cache-from type=gha --cache-to type=gha,mode=max"
-
     defaults:
       run:
         shell: bash -el {0}
@@ -275,14 +252,13 @@ jobs:
           export DOCKER_HOST=unix:///run/user/1001/podman/podman.sock
           echo "DOCKER_HOST=${DOCKER_HOST}" >> $GITHUB_ENV
           echo "TESSERACT_DOCKER_EXECUTABLE=podman" >> $GITHUB_ENV
-          # Podman doesn't support --cache-from
-          echo "TESSERACT_DOCKER_BUILD_ARGS=" >> $GITHUB_ENV
 
       - name: Run test suite
         run: |
           if [ "${{ matrix.unit-tesseract }}" == "base" ]; then
             uv run --no-sync pytest \
               --always-run-endtoend \
+              --timeout=300 \
               --cov-branch \
               --cov-report=term-missing:skip-covered \
               --cov-report=xml:coverage.xml \
@@ -292,6 +268,7 @@ jobs:
           else
             uv run --no-sync pytest \
               --always-run-endtoend \
+              --timeout=300 \
               --cov-branch \
               --cov-report=term-missing:skip-covered \
               --cov-report=xml:coverage.xml \
@@ -301,7 +278,7 @@ jobs:
           fi
 
       - name: Upload coverage reports to Codecov
-        uses: codecov/codecov-action@v5.5.2
+        uses: codecov/codecov-action@v6.0.0
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: pasteurlabs/tesseract-core

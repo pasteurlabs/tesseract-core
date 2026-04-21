@@ -1,14 +1,14 @@
 # Interacting with Tesseracts
 
-## Viewing Running Tesseracts
+## Viewing running Tesseracts
 
-In order to view all Tesseracts that are running, you can run the following command:
+To list all running Tesseracts:
 
 ```bash
 $ tesseract ps
 ```
 
-The output will be a table of Tesseracts containers with their ID, name, version, host port, project id, and description:
+The output is a table showing each container's ID, name, version, host port, project ID, and description:
 
 ```bash
 
@@ -19,15 +19,12 @@ The output will be a table of Tesseracts containers with their ID, name, version
 └──────────────┴───────────┴─────────┴───────────┴────────────────────────┴───────────────────────────────────────────┘
 ```
 
-The `host port` is the port used in the Tesseract address to interact with the different endpoints of the hosted Tesseract.
-The `project id` is what is used in the `tesseract teardown` command and will kill all Tesseracts associated with that project id.
+- **Host Port** — the port to use when calling the Tesseract's endpoints.
+- **Project ID** — pass this to `tesseract teardown` to stop all containers in that project.
 
 ## Invoking a Tesseract
 
-The main operation which a Tesseract implements is called `apply`. This could be
-a forward pass of a neural network applied to some input data,
-a simulation of a quantity of interest which accepts its initial conditions as input,
-and so on.
+Every Tesseract's core operation is `apply` — this could be a neural network forward pass, a simulation step, or any other computation.
 
 ::::{tab-set}
 :::{tab-item} CLI
@@ -38,28 +35,24 @@ $ tesseract run vectoradd apply @examples/vectoradd/example_inputs.json
 {"result":{"object_type":"array","shape":[3],"dtype":"float64","data":{"buffer":[5.0,7.0,9.0],"encoding":"json"}}}
 ```
 
-Where the `example_inputs.json` passed as input just contains the following:
+Where `example_inputs.json` contains:
 
 ```{literalinclude} ../../../examples/vectoradd/example_inputs.json
 :caption: example_inputs.json
 ```
 
-Notice the `@` before the filename in the command payload. This tells the CLI to read the file and
-use it as input to the Tesseract. You can also provide a JSON string in place of this:
+The `@` prefix tells the CLI to read input from a file. For small payloads, you can also pass JSON inline:
 
 ```bash
 $ tesseract run vectoradd apply '{"inputs": {"a": ..., "b": ...}}'
 ```
 
-This can be useful for small input payloads, but it can become quite cumbersome very quickly.
-
 :::
 :::{tab-item} REST API
 :sync: http
-Make sure that the Tesseract is running as a service (`docker ps`). Otherwise, launch
-it via `tesseract serve vectoradd`.
+Make sure the Tesseract is running (`docker ps`), or launch it with `tesseract serve vectoradd`.
 
-You can then simply curl its `/apply` endpoint
+Then call its `/apply` endpoint:
 
 ```bash
 $ curl http://<tesseract-address>:<port>/apply \ # Replace with actual address
@@ -68,7 +61,7 @@ $ curl http://<tesseract-address>:<port>/apply \ # Replace with actual address
 {"result":{"object_type":"array","shape":[3],"dtype":"float64","data":{"buffer":[5.0,7.0,9.0],"encoding":"json"}}}
 ```
 
-Where the payload `example_inputs.json` we POST to the `/apply` endpoint is the following:
+Where the payload posted to `/apply` is:
 
 ```{literalinclude} ../../../examples/vectoradd/example_inputs.json
 :caption: example_inputs.json
@@ -90,30 +83,29 @@ Where the payload `example_inputs.json` we POST to the `/apply` endpoint is the 
 {'result': array([5., 7., 9.])}
 ```
 
-The [Tesseract](#tesseract_core.Tesseract) context manager will spin up
-a Tesseract locally, and tear it down once the context is exited.
+The [Tesseract](#tesseract_core.Tesseract) context manager starts the container locally and tears it down when the context exits.
 
-````{tip} You can also instantiate a Tesseract object which connects to
-a remote Tesseract via `Tesseract.from_url(...)`.```
+```{tip}
+To connect to a remote Tesseract, use `Tesseract.from_url(...)`.
+```
+
 :::
 ::::
 
-This Tesseract, which accepts two vectors, is returning an object which has the vector sum
-`a + b` in the `result` output field.
+This Tesseract returns the vector sum `a + b` in the `result` output field.
 
 ## Optional endpoints and differentiation
 
-If the Tesseract you are using is differentiable, the endpoints which return derivatives can be called in a similar
-fashion; for instance, here is how one would calculate the Jacobian of the `result` output field, partial only
-on the `a` vector, at $a = (1,2,3)$, $b = (4,5,6)$:
+If a Tesseract is differentiable, its derivative endpoints work the same way. For example, computing the Jacobian of `result` with respect to `a` at $a = (1,2,3)$, $b = (4,5,6)$:
 
 ::::{tab-set}
 :::{tab-item} CLI
 :sync: cli
+
 ```bash
 $ tesseract run vectoradd jacobian @examples/vectoradd/example_jacobian_inputs.json
-{"result":{"a":{"object_type":"array","shape":[3,3],"dtype":"float64","data":{"buffer":[[3.0,0.0,0.0],[0.0,3.0,0.0],[0.0,0.0,3.0]],"encoding":"json"}}}}
-````
+{"result":{"a":{"object_type":"array","shape":[3,3],"dtype":"float64","data":{"buffer":[[1.0,0.0,0.0],[0.0,1.0,0.0],[0.0,0.0,1.0]],"encoding":"json"}}}}
+```
 
 :::
 :::{tab-item} REST API
@@ -154,25 +146,19 @@ when computing derivatives:
 :::
 ::::
 
-Now the output is a 3x3 matrix, as expected.
+The output is a 3x3 identity matrix, as expected.
 
-To know which optional endpoints such as `jacobian`, `jacobian_vector_product`, or `vector_jacobian_product` are
-available in a given Tesseract, you can look at the docs at the `/docs` endpoint of a running Tesseract service, use `tesseract apidoc`, or use the [Tesseract Python API](#tesseract_core.Tesseract.available_endpoints):
+To check which endpoints a Tesseract supports, use the `/docs` endpoint of a running Tesseract, `tesseract apidoc`, or the [Python SDK](#tesseract_core.Tesseract.available_endpoints):
 
 ```python
->>> with Tesseract(image="vectoradd") as vectoradd:
+>>> with Tesseract.from_image("vectoradd") as vectoradd:
 ...     print(vectoradd.available_endpoints)
 ['apply', 'jacobian', 'health']
 ```
 
-:::
-::::
-
 ## OpenAPI schemas for programmatic parsing
 
-Since they wrap arbitrary computation, each Tesseract has a unique input/output signature.
-To make it easier to programmatically know each specific Tesseract's input and output schema,
-you can use the following:
+Each Tesseract has a unique input/output signature. To retrieve the schema programmatically:
 
 ::::{tab-set}
 :::{tab-item} CLI
@@ -196,18 +182,13 @@ $ curl <tesseract-address>:<port>/openapi.json
 
 ```python
 >>> from tesseract_core import Tesseract
->>> with Tesseract(image="vectoradd") as vectoradd:
+>>> with Tesseract.from_image("vectoradd") as vectoradd:
 >>>     schema = vectoradd.openapi_schema
 ```
 
 :::
 ::::
 
-Schemas are returned in the [OpenAPI Schema](https://swagger.io/specification/) format,
-which is intended for programmatic parsing rather than human
-readability. If you want a more human-readable version of the schema,
-your best option is instead to look at the docs in the `/docs` endpoint of a Tesseract
-service or running `tesseract apidoc <tesseract-name>`.
+Schemas are returned in [OpenAPI](https://swagger.io/specification/) format, designed for programmatic parsing. For a human-readable view, use the `/docs` endpoint of a running Tesseract or run `tesseract apidoc <tesseract-name>`.
 
-The OpenAPI schema contains the schemas of all endpoints, even though they are all derived from
-the inputs / outputs of `/apply`.
+The OpenAPI schema includes all endpoints, though they are all derived from the `/apply` input/output schemas.

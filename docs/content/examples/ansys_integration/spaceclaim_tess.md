@@ -1,6 +1,6 @@
 # Wrapping SpaceClaim as a Tesseract
 
-This guide outlines how to wrap Ansys SpaceClaim as a Tesseract. For this, we will use [non-containerized execution](#tr-without-docker) to start an HTTP server that dispatches requests to SpaceClaim through SpaceClaim scripts (`.scscript`).
+This guide outlines how to wrap Ansys SpaceClaim as a Tesseract. For this, we will use [non-containerized execution](project:#running-without-containers) to start an HTTP server that dispatches requests to SpaceClaim through SpaceClaim scripts (`.scscript`).
 
 ```{seealso}
 The full code for this Tesseract can be found under `demo/_showcase/ansys-shapeopt/spaceclaim` in the [Tesseract Core repository](https://github.com/pasteurlabs/tesseract-core/tree/main/demo/_showcase/ansys-shapeopt/spaceclaim).
@@ -47,7 +47,7 @@ To wrap SpaceClaim as a Tesseract, we will have to implement each of these files
 ### Non-containerized usage via `tesseract-runtime`
 
 ```{note}
-**Tesseract without containerization** --- Tesseracts are most commonly used in the form of Docker containers. This is not a neccessary requirement, and any object that adheres to the Tesseract interface is a valid Tesseract (see also [](#tr-without-docker)).
+**Tesseract without containerization** --- Tesseracts are most commonly used in the form of Docker containers. This is not a neccessary requirement, and any object that adheres to the Tesseract interface is a valid Tesseract (see also <project:#running-without-containers>).
 ```
 
 SpaceClaim is typically running directly on a Windows host machine, so instead of using Docker to build an image and spin up a container, we leverage the [Tesseract runtime CLI](../../api/tesseract-runtime-cli) to serve the SpaceClaim Tesseract on bare metal and expose SpaceClaim's functionality over HTTP.
@@ -106,7 +106,7 @@ This particular choice of inputs and outputs is motivated in our [rocket fin opt
 
 #### Input schema
 
-This Tesseract accepts multiple goemetry parameters to create `N` grid fin geometries simulatanously. That way, we hide the startup latency of SpaceClaim when requesting a large number of geometries.
+This Tesseract accepts multiple geometry parameters to create `N` grid fin geometries simultaneously. That way, we hide the startup latency of SpaceClaim when requesting a large number of geometries.
 
 The `InputSchema` class looks like this:
 
@@ -222,4 +222,4 @@ Grid fin geometry shown with randomised beam locations.
 
 Invoking SpaceClaim via HTTP is only the start of the Tesseract journey.
 
-For example, by using finite difference approximations under the hood, we can make the resulting geometry [differentiable](../../introduction/differentiable-programming.md) with respect to the design parameters. For a concrete demonstration of end-to-end shape optimization in action, please have a look at our [rocket fin optimization showcase](https://si-tesseract.discourse.group/t/parametric-shape-optimization-of-rocket-fins-with-ansys-spaceclaim-and-pyansys/109).
+For example, by using finite difference approximations under the hood, we can make the resulting geometry [differentiable](../../misc/differentiable-programming.md) with respect to the design parameters. For a concrete demonstration of end-to-end shape optimization in action, please have a look at our [rocket fin optimization showcase](https://si-tesseract.discourse.group/t/parametric-shape-optimization-of-rocket-fins-with-ansys-spaceclaim-and-pyansys/109).

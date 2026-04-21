@@ -4,7 +4,7 @@
 import re
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Annotated, Any, Literal, get_args
+from typing import Annotated, Any, Literal, TypeAlias, TypedDict, get_args
 from uuid import uuid4
 
 import numpy as np
@@ -15,6 +15,7 @@ from pydantic import (
     Field,
     JsonValue,
     PositiveInt,
+    StrictStr,
     ValidationInfo,
     create_model,
 )
@@ -45,9 +46,20 @@ AllowedDtypes = Literal[
     "complex64",
     "complex128",
 ]
-EllipsisType = type(Ellipsis)
-ArrayLike = np.ndarray | np.number | np.bool_
-ShapeType = tuple[int | None, ...] | EllipsisType
+
+EllipsisType: TypeAlias = type(Ellipsis)
+ArrayLike: TypeAlias = np.ndarray | np.number | np.bool_
+ShapeType: TypeAlias = tuple[int | None, ...] | EllipsisType
+
+
+class ArrayDict(TypedDict):
+    """TypedDict for the JSON representation of an encoded array."""
+
+    object_type: str
+    shape: Sequence[int]
+    dtype: str
+    data: dict[str, Any]
+
 
 MAX_BINREF_BUFFER_SIZE = 100 * 1024 * 1024  # 100 MB
 
@@ -60,7 +72,7 @@ class Base64ArrayData(BaseModel):
     """Data structure for base64 encoded binary buffers."""
 
     buffer: Annotated[
-        str,
+        StrictStr,
         Field(
             description="Base64 encoded binary buffer",
             examples=["<base64 encoded string>"],
@@ -73,7 +85,7 @@ class Base64ArrayData(BaseModel):
 class BinrefArrayData(BaseModel):
     """Data structure that dumps array data to binary file."""
 
-    buffer: str = Field(pattern=r"^.+?(\:\d+)?$")
+    buffer: StrictStr = Field(pattern=r"^.+?(\:\d+)?$")
     encoding: Literal["binref"]
     model_config = ConfigDict(extra="forbid")
 
@@ -200,17 +212,19 @@ def get_array_model(
     return out
 
 
+def _fast_tobytes(arr: ArrayLike) -> bytes:
+    """Convert a NumPy array to bytes without copying if possible."""
+    return np.ascontiguousarray(arr).data
+
+
 def _dump_binref_arraydict(
-    arr: np.ndarray | np.number | np.bool_,
+    arr: ArrayLike,
     base_dir: Path | str,
     subdir: Path | str | None,
     current_binref_uuid: str,
     max_file_size: int = MAX_BINREF_BUFFER_SIZE,
-) -> tuple[dict[str, str | dict[str, str]], str]:
-    """Dump array to json+binref encoded array dict.
-
-    Writes a .bin file and returns json encoded data.
-    """
+) -> tuple[ArrayDict, str]:
+    """Dump array to json+binref encoded array dict."""
     target_name = f"{current_binref_uuid}.bin"
     if subdir is not None:
         target_name = join_paths(subdir, target_name)
@@ -227,60 +241,48 @@ def _dump_binref_arraydict(
             target_name = join_paths(subdir, target_name)
         target_path = join_paths(base_dir, target_name)
 
-    write_to_path(arr.tobytes(), target_path, append=True)
+    write_to_path(_fast_tobytes(arr), target_path, append=True)
     offset = current_size
 
-    data = {"buffer": f"{target_name}:{offset}", "encoding": "binref"}
     arraydict = {
         "object_type": "array",
-        "shape": arr.shape,
+        "shape": list(arr.shape),
         "dtype": arr.dtype.name,
-        "data": data,
+        "data": {"buffer": f"{target_name}:{offset}", "encoding": "binref"},
     }
     return arraydict, current_binref_uuid
 
 
-def _dump_base64_arraydict(
-    arr: np.ndarray | np.number | np.bool_,
-) -> dict[str, str | dict[str, str]]:
-    """Dump array to json+base64 encoded array dict."""
-    data = {
-        "buffer": pybase64.b64encode(arr.tobytes()).decode(),
-        "encoding": "base64",
-    }
-    arraydict = {
+def _dump_base64_arraydict(arr: ArrayLike) -> ArrayDict:
+    """Dump array to json+base64 encoded array dict (plain dict, no Pydantic models)."""
+    return {
         "object_type": "array",
-        "shape": arr.shape,
+        "shape": list(arr.shape),
         "dtype": arr.dtype.name,
-        "data": data,
+        "data": {
+            "buffer": pybase64.b64encode_as_string(_fast_tobytes(arr)),
+            "encoding": "base64",
+        },
     }
-    return arraydict
 
 
-def _dump_json_arraydict(
-    arr: np.ndarray | np.number | np.bool_,
-) -> dict[str, str | dict[str, str]]:
-    """Dump array to json encoded array dict."""
-    data = {
-        "buffer": arr.tolist(),
-        "encoding": "json",
-    }
-    arraydict = {
+def _dump_json_arraydict(arr: ArrayLike) -> ArrayDict:
+    """Dump array to json encoded array dict (plain dict, no Pydantic models)."""
+    return {
         "object_type": "array",
-        "shape": arr.shape,
+        "shape": list(arr.shape),
         "dtype": arr.dtype.name,
-        "data": data,
+        "data": {"buffer": arr.tolist(), "encoding": "json"},
     }
-    return arraydict
 
 
-def _load_base64_arraydict(val: dict) -> np.ndarray:
+def _load_base64_arraydict(val: ArrayDict) -> np.ndarray:
     """Load array from json+base64 encoded array dict."""
     buffer = pybase64.b64decode(val["data"]["buffer"], validate=True)
     return np.frombuffer(buffer, dtype=val["dtype"]).reshape(val["shape"])
 
 
-def _load_binref_arraydict(val: dict, base_dir: str | Path | None) -> np.ndarray:
+def _load_binref_arraydict(val: ArrayDict, base_dir: str | Path | None) -> np.ndarray:
     """Load array from json+binref encoded array dict."""
     path_match = re.match(r"^(?P<path>.+?)(\:(?P<offset>\d+))?$", val["data"]["buffer"])
     if not path_match:
@@ -314,9 +316,31 @@ def _load_binref_arraydict(val: dict, base_dir: str | Path | None) -> np.ndarray
 
 
 def _coerce_shape_dtype(
-    arr: ArrayLike, expected_shape: ShapeType, expected_dtype: str | None
+    arr: ArrayLike,
+    expected_shape: ShapeType,
+    expected_dtype: str | None,
+    context: dict[str, Any] | None = None,
 ) -> ArrayLike:
-    """Coerce the shape and dtype of the passed array to the expected values."""
+    """Coerce the shape and dtype of the passed array to the expected values.
+
+    The behavior can be controlled via the ``context`` dict:
+
+    - ``strict_shapes`` (bool): When True, reject arrays whose shape doesn't
+      match the expected shape exactly (no broadcasting of size-1 dims).
+    - ``strict_types`` (bool): When True, reject arrays whose dtype doesn't
+      match the expected dtype exactly (no same-kind casting).
+    """
+    # NOTE: When making changes here, be mindful that this function is called on
+    # every array validation, and inefficient code here can cause significant performance
+    # issues, especially for large arrays. In particular, avoid any operations that copy the
+    # array data (like astype or tolist) unless necessary.
+
+    if context is None:
+        context = {}
+
+    strict_shapes = context.get("strict_shapes", False)
+    strict_types = context.get("strict_types", False)
+
     if expected_shape is Ellipsis:
         # No shape check
         out_shape = arr.shape
@@ -337,6 +361,17 @@ def _coerce_shape_dtype(
             for i in range(len(expected_shape))
         )
 
+    if strict_shapes and arr.shape != out_shape:
+        raise PydanticCustomError(
+            "array_shape_mismatch",
+            "Array shape {actual_shape} does not match expected shape {expected_shape} "
+            "(strict_shapes=True, no broadcasting)",
+            {
+                "actual_shape": arr.shape,
+                "expected_shape": out_shape,
+            },
+        )
+
     # Broadcast the arr to the expected shape and dtype
     try:
         arr = np.broadcast_to(arr, out_shape)
@@ -351,7 +386,18 @@ def _coerce_shape_dtype(
         ) from None
 
     if expected_dtype is not None:
-        if not np.can_cast(arr.dtype, expected_dtype, casting="same_kind"):
+        if strict_types:
+            if str(arr.dtype) != expected_dtype:
+                raise PydanticCustomError(
+                    "array_dtype_mismatch",
+                    "Array dtype '{actual_dtype}' does not match expected dtype '{expected_dtype}' "
+                    "(strict_types=True, no casting)",
+                    {
+                        "actual_dtype": str(arr.dtype),
+                        "expected_dtype": expected_dtype,
+                    },
+                )
+        elif not np.can_cast(arr.dtype, expected_dtype, casting="same_kind"):
             raise PydanticCustomError(
                 "array_dtype_mismatch",
                 "Array dtype '{actual_dtype}' cannot be safely cast to '{expected_dtype}'",
@@ -360,7 +406,7 @@ def _coerce_shape_dtype(
                     "expected_dtype": expected_dtype,
                 },
             )
-        arr = arr.astype(expected_dtype)
+        arr = arr.astype(expected_dtype, copy=False)
 
     allowed_dtypes = [dtype.lower() for dtype in get_args(AllowedDtypes)]
     if arr.dtype.name not in allowed_dtypes:
@@ -381,7 +427,10 @@ def _coerce_shape_dtype(
 
 
 def python_to_array(
-    val: Any, expected_shape: ShapeType, expected_dtype: str | None
+    val: Any,
+    info: ValidationInfo,
+    expected_shape: ShapeType,
+    expected_dtype: str | None,
 ) -> ArrayLike:
     """Convert a Python object to a NumPy array."""
     val = np.asarray(val, order="C")
@@ -393,7 +442,8 @@ def python_to_array(
             "Could not parse value as a numeric array (contains non-numeric data)",
             {},
         )
-    return _coerce_shape_dtype(val, expected_shape, expected_dtype)
+    context = info.context if info.context else {}
+    return _coerce_shape_dtype(val, expected_shape, expected_dtype, context)
 
 
 def decode_array(
@@ -430,7 +480,7 @@ def decode_array(
                         "Expected integer data, but array contains floating point values",
                         {},
                     )
-            data = data.astype(val.dtype, casting="unsafe")
+            data = data.astype(val.dtype, casting="unsafe", copy=False)
 
         else:
             # Unreachable
@@ -446,18 +496,21 @@ def decode_array(
             {"encoding": val.data.encoding, "error": str(e)},
         ) from e
 
-    data = _coerce_shape_dtype(data, expected_shape, expected_dtype)
+    data = _coerce_shape_dtype(data, expected_shape, expected_dtype, context)
     return data
 
 
 def encode_array(
     arr: ArrayLike, info: Any, expected_shape: ShapeType, expected_dtype: str | None
-) -> EncodedArrayModel | ArrayLike:
-    """Encode a NumPy array as an EncodedArrayModel."""
+) -> ArrayDict | ArrayLike:
+    """Encode a NumPy array for serialization.
+
+    In Python mode, returns the raw array as-is.
+    """
     from tesseract_core.runtime.config import get_config
 
     # Convert to a NumPy array if necessary
-    arr = python_to_array(arr, expected_shape, expected_dtype)
+    arr = python_to_array(arr, info, expected_shape, expected_dtype)
 
     context = info.context if info.context else {}
 
@@ -467,7 +520,7 @@ def encode_array(
 
     array_encoding = context.get("array_encoding", "json")
     if array_encoding == "base64":
-        data = _dump_base64_arraydict(arr)
+        return _dump_base64_arraydict(arr)
     elif array_encoding == "binref":
         base_dir = context.get("base_dir", get_config().output_path)
         subdir = context.get("binref_dir", None)
@@ -479,10 +532,9 @@ def encode_array(
             max_file_size=context.get("max_file_size", MAX_BINREF_BUFFER_SIZE),
         )
         context["__binref_uuid"] = new_binref_uuid
+        return data
     elif array_encoding == "json":
-        data = _dump_json_arraydict(arr)
+        return _dump_json_arraydict(arr)
     else:
         # Unreachable
         raise AssertionError(f"Unsupported encoding: {array_encoding}")
-
-    return EncodedArrayModel.model_validate(data)

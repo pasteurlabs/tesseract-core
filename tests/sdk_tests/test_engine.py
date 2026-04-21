@@ -3,10 +3,6 @@
 
 import json
 import logging
-import os
-import random
-import string
-import threading
 import time
 from pathlib import Path
 
@@ -16,6 +12,7 @@ from jinja2.exceptions import TemplateNotFound
 
 from tesseract_core.sdk import engine
 from tesseract_core.sdk.api_parse import (
+    TesseractBuildConfig,
     TesseractConfig,
     validate_tesseract_api,
 )
@@ -34,6 +31,111 @@ def test_prepare_build_context(tmp_path_factory):
     assert (build_dir / "__tesseract_source__" / "foo").exists()
     assert (build_dir / "__tesseract_runtime__").exists()
     assert (build_dir / "Dockerfile").exists()
+
+
+def test_prepare_build_context_external_package_data(tmp_path_factory):
+    """Test package_data from outside the Tesseract directory is copied correctly."""
+    # Create a parent directory with src and external subdirectories
+    parent_dir = tmp_path_factory.mktemp("parent")
+    src_dir = parent_dir / "tesseract"
+    src_dir.mkdir()
+    (src_dir / "tesseract_api.py").touch()
+
+    # Create external files (sibling to src_dir)
+    external_dir = parent_dir / "external"
+    external_dir.mkdir()
+    external_file = external_dir / "shared_code.py"
+    external_file.write_text("# shared code")
+
+    build_dir = tmp_path_factory.mktemp("build")
+
+    # Configure package_data with relative external path
+    config = TesseractConfig(
+        name="foobar",
+        build_config=TesseractBuildConfig(
+            package_data=[("../external/shared_code.py", "shared_code.py")],
+        ),
+    )
+
+    engine.prepare_build_context(src_dir, build_dir, config)
+
+    # Verify external file was copied to __package_data__
+    assert (build_dir / "__package_data__" / "shared_code.py").exists()
+    assert (
+        build_dir / "__package_data__" / "shared_code.py"
+    ).read_text() == "# shared code"
+
+
+def test_prepare_build_context_package_data_same_basename(tmp_path_factory):
+    """Test that package_data with same source filenames but different targets works."""
+    # Create a parent directory with src and two external subdirectories
+    parent_dir = tmp_path_factory.mktemp("parent")
+    src_dir = parent_dir / "tesseract"
+    src_dir.mkdir()
+    (src_dir / "tesseract_api.py").touch()
+
+    # Create two external directories with files of the same name
+    external_dir1 = parent_dir / "external1"
+    external_dir2 = parent_dir / "external2"
+    external_dir1.mkdir()
+    external_dir2.mkdir()
+    (external_dir1 / "config.yaml").write_text("# config 1")
+    (external_dir2 / "config.yaml").write_text("# config 2")
+
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(
+        name="foobar",
+        build_config=TesseractBuildConfig(
+            package_data=[
+                ("../external1/config.yaml", "config1.yaml"),
+                ("../external2/config.yaml", "config2.yaml"),
+            ],
+        ),
+    )
+
+    engine.prepare_build_context(src_dir, build_dir, config)
+
+    # Both files should be copied into the build context
+    package_data_dir = build_dir / "__package_data__"
+    assert (package_data_dir / "config.yaml").exists()
+    assert (package_data_dir / "config_1.yaml").exists()
+    assert (package_data_dir / "config.yaml").read_text() == "# config 1"
+    assert (package_data_dir / "config_1.yaml").read_text() == "# config 2"
+
+    # Duplicate target paths should raise an error
+    config_dup = TesseractConfig(
+        name="foobar",
+        build_config=TesseractBuildConfig(
+            package_data=[
+                ("../external1/config.yaml", "same_target.yaml"),
+                ("../external2/config.yaml", "same_target.yaml"),
+            ],
+        ),
+    )
+
+    build_dir2 = tmp_path_factory.mktemp("build2")
+    with pytest.raises(RuntimeError, match="duplicate target path"):
+        engine.prepare_build_context(src_dir, build_dir2, config_dup)
+
+
+def test_prepare_build_context_package_data_not_found(tmp_path_factory):
+    """Test that package_data with non-existent file raises an error."""
+    parent_dir = tmp_path_factory.mktemp("parent")
+    src_dir = parent_dir / "tesseract"
+    src_dir.mkdir()
+    (src_dir / "tesseract_api.py").touch()
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(
+        name="foobar",
+        build_config=TesseractBuildConfig(
+            package_data=[("../nonexistent/file.py", "file.py")],
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="package_data source file not found"):
+        engine.prepare_build_context(src_dir, build_dir, config)
 
 
 @pytest.mark.parametrize("generate_only", [True, False])
@@ -394,101 +496,72 @@ def test_needs_docker(mocked_docker, monkeypatch):
         run_something_with_docker()
 
 
-def test_teepipe(caplog):
-    # Verify that logging in a separate thread works as intended
-    from tesseract_core.sdk.logs import TeePipe, set_logger
+def test_log_streamer(tmpdir):
+    # Test that LogStreamer can tail a file and capture lines as they are written
+    from tesseract_core.sdk.logs import LogStreamer
 
-    # Disable rich to ensure what we log is what we read
-    set_logger("info", catch_warnings=True, rich_format=False)
+    log_file = Path(tmpdir) / "test.log"
+    captured = []
 
-    logger = logging.getLogger("tesseract")
-    caplog.set_level(logging.INFO, logger="tesseract")
+    streamer = LogStreamer(log_file, captured.append)
+    streamer.start()
 
-    logged_lines = []
-    for _ in range(100):
-        # Make sure to include a few really long lines without breaks
-        if random.random() < 0.1:
-            msg_length = random.randint(1000, 10_000)
-            alphabet = string.ascii_letters + "🤯"
-        else:
-            msg_length = 2 ** random.randint(2, 12)
-            alphabet = string.printable + "🤯"
-        msg = "".join(random.choices(alphabet, k=msg_length))
-        logged_lines.append(msg)
+    # Write some lines with delays
+    with open(log_file, "w") as f:
+        for i in range(10):
+            f.write(f"line {i}\n")
+            f.flush()
+            time.sleep(0.02)  # Small delay to let streamer pick up
 
-    teepipe = TeePipe(logger.info)
-    # Extend grace period to avoid flakes in tests when runners are slow
-    teepipe._grace_period = 1
-    with teepipe:
-        fd = os.fdopen(teepipe.fileno(), "w", closefd=False)
-        for line in logged_lines:
-            print(line, file=fd)
-            time.sleep(random.random() / 100)
-        fd.close()
+    # Stop and drain
+    streamer.stop()
 
-    expected_lines = []
-    for line in logged_lines:
-        sublines = line.split("\n")
-        expected_lines.extend(sublines)
-
-    assert teepipe.captured_lines == expected_lines
-    assert caplog.record_tuples == [
-        ("tesseract", logging.INFO, line) for line in expected_lines
-    ]
+    assert captured == [f"line {i}" for i in range(10)]
 
 
-def test_teepipe_early_exit():
-    # Verify that TeePipe can handle early exit without hanging or losing data
-    from tesseract_core.sdk.logs import TeePipe
+def test_log_streamer_waits_for_file(tmpdir):
+    # Test that LogStreamer waits for the file to appear
+    from tesseract_core.sdk.logs import LogStreamer
 
-    logged_lines = []
-    for _ in range(100):
-        # Make sure to include a few really long lines without breaks
-        if random.random() < 0.1:
-            msg_length = random.randint(1000, 10_000)
-            alphabet = string.ascii_letters + "🤯"
-        else:
-            msg_length = 2 ** random.randint(2, 12)
-            alphabet = string.printable + "🤯"
-        msg = "".join(random.choices(alphabet, k=msg_length))
-        logged_lines.append(msg)
+    log_file = Path(tmpdir) / "delayed.log"
+    captured = []
 
-    teepipe = TeePipe()
-    # Extend grace period to avoid flakes in tests when runners are slow
-    teepipe._grace_period = 1
+    streamer = LogStreamer(log_file, captured.append)
+    streamer.start()
 
-    teepipe.start()
-    fd = os.fdopen(teepipe.fileno(), "w", closefd=False)
+    # File doesn't exist yet, streamer should be waiting
+    time.sleep(0.1)
 
-    def _write_to_pipe():
-        for line in logged_lines:
-            print(line, file=fd, flush=True)
-            time.sleep(random.random() / 100)
+    # Now create the file
+    with open(log_file, "w") as f:
+        f.write("delayed line\n")
+        f.flush()
 
-        print("end without newline", end="", file=fd, flush=True)
+    time.sleep(0.1)
+    streamer.stop()
 
-    expected_lines = []
-    for line in logged_lines:
-        sublines = line.split("\n")
-        expected_lines.extend(sublines)
-    expected_lines.append("end without newline")
+    assert captured == ["delayed line"]
 
-    writer_thread = threading.Thread(target=_write_to_pipe)
-    writer_thread.start()
 
-    # Wait for the first data to roll in, i.e., thread is up and running
-    while not teepipe.captured_lines:
-        time.sleep(0.01)
+def test_log_streamer_handles_trailing_content(tmpdir):
+    # Test that LogStreamer handles content without trailing newline
+    from tesseract_core.sdk.logs import LogStreamer
 
-    # Sanity check that not all data has been written yet
-    assert len(teepipe.captured_lines) < len(expected_lines)
+    log_file = Path(tmpdir) / "trailing.log"
+    captured = []
 
-    # Exit the pipe early before all data is written
-    # This should block until no more data is incoming
-    teepipe.stop()
+    streamer = LogStreamer(log_file, captured.append)
+    streamer.start()
 
-    assert len(teepipe.captured_lines) == len(expected_lines)
-    assert teepipe.captured_lines == expected_lines
+    with open(log_file, "w") as f:
+        f.write("line 1\n")
+        f.write("no newline at end")
+        f.flush()
+
+    time.sleep(0.1)
+    streamer.stop()
+
+    assert captured == ["line 1", "no newline at end"]
 
 
 def test_parse_requirements(tmpdir):

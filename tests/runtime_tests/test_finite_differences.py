@@ -5,7 +5,7 @@ import pytest
 from pydantic import BaseModel
 
 from tesseract_core.runtime import Array, Differentiable, Float32
-from tesseract_core.runtime.finite_differences import check_gradients
+from tesseract_core.runtime.testing.finite_differences import check_gradients
 from tesseract_core.runtime.tree_transforms import get_at_path
 
 

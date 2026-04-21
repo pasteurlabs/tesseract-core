@@ -2,6 +2,93 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.7.0] - 2026-04-17
+
+### Features
+
+- Automatically create network specified via --network option if it does not exist (#544)
+
+### Bug Fixes
+
+- Don't hard wrap tracebacks (#539)
+- False-positive 'image not found' errors when docker is in resource saving mode (#535)
+- Resource leak when using `TesseractReference` + more fault tolerance when HTTP sessions time out (#543)
+- Make logging from subprocesses more reliable (#551)
+
+### Refactor
+
+- Thread live logging through `logger.info` instead of printing directly to stderr (#536)
+
+### Documentation
+
+- Add performance guide (#508)
+- Document how to use `tesseract serve --network` parameter (#530)
+- Update rocket fin example to recent versions of Tesseract (#541)
+
+## [1.6.0] - 2026-03-19
+
+### Features
+
+- Add experimental finite difference functionality for auto-generated AD endpoints (#469)
+- Issue mega sprint - allow package_data outside root, cli alias `tesseract-core`, flags to pass arguments to `docker run` and `tesseract runtime`, `json+binref` support in SDK, better support for `tesseract serve --network host` (#491)
+- Add gradient fallback helpers (`tesseract_core.runtime.experimental.vjp_from_jacobian`, ...) for deriving AD endpoints from each other (#511)
+- Add optional metadata field in tesseract_config.yaml (#523)
+
+### Bug Fixes
+
+- Remove fixed 100ms runtime overhead for every call (#485)
+- Reduce performance overhead, especially in array encoding/decoding (#522)
+- Rendering of custom validation errors over HTTP (#534)
+
+### Documentation
+
+- Editing and restructuring of docs, README, and landing page (#510)
+- More restructurings and polish (#529)
+
+## [1.5.1] - 2026-03-09
+
+### Bug Fixes
+
+- Add missing dep, test default install (no extras) + basic usage on CI (#514)
+
+## [1.5.0] - 2026-03-05
+
+### Features
+
+- Deprecate `Tesseract(url)` constructor in favor of `Tesseract.from_url` (#486)
+- Add live streaming of logs (#482)
+- Validation of (co)tangents (#493)
+- Add profile and trace mode, plus debugging guide (#484)
+
+### Bug Fixes
+
+- Better multiprocessing support from within `tesseract_api.py` (#488)
+- Ensure deprecration warning is actually visible (#487)
+- Ensure $HOME is set in Tesseracts and has appropriate permissions (#490)
+- Relax permissions on `/tmp` inside Tesseracts after build-time check (#506)
+
+### Refactor
+
+- Simplify runtime dependency handling (#495)
+- Make `stream_logs` a constructor-level parameter in Python SDK (#509)
+
+### Documentation
+
+- Add Fortran heat equation example (#477)
+- Tesseract init doesn't prompt if name not provided (#501)
+- Documentation mega issue sprint (#492)
+
+## [1.4.0] - 2026-02-20
+
+### Features
+
+- Add better validation errors (#471)
+- Add new `test` command to `tesseract run` and `tesseract-runtime` to support regression testing (#411)
+
+### Bug Fixes
+
+- Use libnss_wrapper instead of addmeplease to create a home for any uid:gid specified at runtime (#476)
+
 ## [1.3.0] - 2026-01-08
 
 ### Features

@@ -4,7 +4,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
+import logging
 import re
+import shlex
 import sys
 import time
 import webbrowser
@@ -30,7 +32,7 @@ from .api_parse import (
     TesseractBuildConfig,
     TesseractConfig,
     ValidationError,
-    get_non_base_fields_in_tesseract_config,
+    get_submodel_fields_in_tesseract_config,
 )
 from .config import get_config
 from .docker_client import (
@@ -94,12 +96,21 @@ POSSIBLE_CMDS = set(
     re.sub(r"([a-z])([A-Z])", r"\1-\2", object.name).replace("_", "-").lower()
     for object in EXPECTED_OBJECTS
 )
-POSSIBLE_CMDS.update({"health", "openapi-schema", "check", "check-gradients", "serve"})
+POSSIBLE_CMDS.update(
+    {
+        "health",
+        "openapi-schema",
+        "check",
+        "check-gradients",
+        "test",
+        "serve",
+    }
+)
 
 # All fields in TesseractConfig and TesseractBuildConfig for config override
 POSSIBLE_KEYPATHS = TesseractConfig.model_fields.keys()
-# Check that the only field that has nested fields is build_config
-assert len(get_non_base_fields_in_tesseract_config()) == 1
+# Check that the only field that has nested models is build_config
+assert len(get_submodel_fields_in_tesseract_config()) == 1
 POSSIBLE_BUILD_CONFIGS = TesseractBuildConfig.model_fields.keys()
 
 # Traverse templates folder to seach for recipes
@@ -333,11 +344,23 @@ def build_image(
                 inject_ssh=forward_ssh_agent,
                 config_override=parsed_config_override,
                 generate_only=generate_only,
+                stream_logs=logger.debug,
             )
     except BuildError as e:
-        # raise from None to Avoid overly long tracebacks,
-        # all the information is in the printed logs / exception str already
-        raise UserError(f"Error building Tesseract: {e}") from None
+        loglevel = logging.getLogger("tesseract").handlers[0].level
+        error_string = "Error building Tesseract."
+        if loglevel <= logging.DEBUG:
+            # Build logs already streamed via logger.debug
+            pass
+        elif loglevel <= logging.ERROR:
+            # Re-emit build log at error level so it's visible
+            logger.error("\n".join(e.build_log))
+        else:
+            error_string = (
+                "Error building Tesseract. "
+                "Run with `--loglevel debug` for more details."
+            )
+        raise UserError(error_string) from None
     except APIError as e:
         raise UserError(f"Docker server error: {e}") from e
     except TypeError as e:
@@ -367,7 +390,7 @@ def init(
         # Guaranteed to be a string by _validate_tesseract_name
         str,
         typer.Option(
-            help="Tesseract name as specified in tesseract_config.yaml. Will be prompted if not provided.",
+            help="Tesseract name as specified in tesseract_config.yaml. Will be empty if not provided.",
             callback=_validate_tesseract_name,
             show_default=False,
         ),
@@ -599,6 +622,18 @@ def serve(
             help=("Output format to use for the Tesseract."),
         ),
     ] = None,
+    docker_args: Annotated[
+        str | None,
+        typer.Option(
+            "--runtime-args",
+            help=(
+                "Additional arguments to pass to the underlying container runtime (e.g., Docker). "
+                "Example: --runtime-args '--shm-size=1g --cpus=2'"
+            ),
+            metavar="ARGS",
+            show_default=False,
+        ),
+    ] = None,
 ) -> None:
     """Serve one or more Tesseract images.
 
@@ -633,6 +668,7 @@ def serve(
             input_path=input_path,
             output_path=output_path,
             output_format=_enum_to_val(output_format),
+            docker_args=shlex.split(docker_args) if docker_args else None,
         )
     except RuntimeError as ex:
         raise UserError(
@@ -821,7 +857,10 @@ def teardown(
             f"Internal Docker error occurred while tearing down Tesseracts: {ex}"
         ) from ex
     except NotFound as ex:
-        raise UserError(f"Tesseract Project ID not found: {ex}") from ex
+        raise UserError(
+            f"Tesseract container not found: {ex}\n"
+            "Use `tesseract ps` to list running containers."
+        ) from ex
 
 
 def _sanitize_error_output(error_output: str, tesseract_image: str) -> str:
@@ -851,6 +890,29 @@ def _sanitize_error_output(error_output: str, tesseract_image: str) -> str:
 
 
 CmdChoices = make_choice_enum("Cmd", sorted(POSSIBLE_CMDS))
+
+
+def _extract_cli_config(
+    test_spec: dict,
+    base_dir: Path,
+) -> tuple[str | None, list[str], str | None]:
+    """Extracts and resolve (input_path, volume_mounts, user) from a parsed test spec."""
+    cli_config = test_spec.get("cli_config", {})
+
+    if input_path := cli_config.get("input_path"):
+        if not Path(input_path).is_absolute():
+            input_path = str(base_dir / input_path)
+
+    volume_mounts = []
+    for vol_mount in cli_config.get("volume_mounts", []):
+        if not Path(vol_mount.split(":", 1)[0]).is_absolute():
+            volume_mounts.append(str(base_dir / vol_mount))
+        else:
+            volume_mounts.append(vol_mount)
+
+    user = cli_config.get("user")
+
+    return input_path, volume_mounts, user
 
 
 @app.command(
@@ -991,6 +1053,45 @@ def run_container(
             ),
         ),
     ] = None,
+    docker_args: Annotated[
+        str | None,
+        typer.Option(
+            "--docker-args",
+            help=(
+                "Additional arguments to pass to the underlying container runtime (e.g., Docker). "
+                "Example: --docker-args '--shm-size=1g --cpus=2'"
+            ),
+            metavar="ARGS",
+            show_default=False,
+        ),
+    ] = None,
+    runtime_args: Annotated[
+        str | None,
+        typer.Option(
+            "--runtime-args",
+            help=(
+                "Additional arguments to pass to the `tesseract-runtime` command inside the container. "
+                "Example: --runtime-args '--seed=42 --eps=1e-5' to pass optional arguments to "
+                "`tesseract-runtime check-gradients`."
+            ),
+            metavar="ARGS",
+            show_default=False,
+        ),
+    ] = None,
+    profiling: Annotated[
+        bool,
+        typer.Option(
+            "--profiling",
+            help="Enable profiling to measure execution time of functions.",
+        ),
+    ] = False,
+    tracing: Annotated[
+        bool,
+        typer.Option(
+            "--tracing",
+            help="Enable tracing for detailed debug output.",
+        ),
+    ] = False,
     invoke_help: Annotated[
         bool,
         typer.Option(
@@ -1044,12 +1145,50 @@ def run_container(
                 param_hint="env",
             ) from ex
 
+    # Add profiling and tracing flags as environment variables
+    if profiling:
+        parsed_environment["TESSERACT_PROFILING"] = "1"
+    if tracing:
+        parsed_environment["TESSERACT_TRACING"] = "1"
+
     args = []
     if invoke_help:
         args.append("--help")
 
+    # Add runtime_args before payload so they appear as options to the command
+    if runtime_args:
+        args.extend(shlex.split(runtime_args))
+
     if payload is not None:
         args.append(payload)
+
+    # For test command, extract cli_config from test spec if available
+    # This allows test specs to be self-contained without requiring manual -i/-o flags
+    if cmd == "test" and payload is not None:
+        if payload.startswith("@"):
+            test_spec_path = Path(payload.lstrip("@")).resolve()
+            try:
+                with open(test_spec_path) as f:
+                    test_spec = json.load(f)
+            except (OSError, json.JSONDecodeError):
+                test_spec = {}
+            base_dir = test_spec_path.parent
+        else:
+            try:
+                test_spec = json.loads(payload)
+            except json.JSONDecodeError:
+                test_spec = {}
+            base_dir = Path.cwd()
+
+        config_input_path, config_volume_mounts, config_user = _extract_cli_config(
+            test_spec, base_dir
+        )
+        if input_path is None:
+            input_path = config_input_path
+        if volume is None:
+            volume = config_volume_mounts
+        if user is None:
+            user = config_user
 
     try:
         result_out, result_err = engine.run_tesseract(
@@ -1066,6 +1205,8 @@ def run_container(
             network=network,
             user=user,
             memory=memory,
+            docker_args=shlex.split(docker_args) if docker_args else None,
+            stream_logs=logger.info,  # Stream logs via logger
         )
 
     except ImageNotFound as e:
@@ -1079,16 +1220,28 @@ def run_container(
         if "No such command" in msg:
             error_string = f"Error running Tesseract '{tesseract_image}' \n\n Error: Unimplemented command '{cmd}'.  "
         else:
-            error_string = _sanitize_error_output(
-                f"Error running Tesseract. \n\n{msg}", tesseract_image
-            )
+            loglevel = logging.getLogger("tesseract").handlers[0].level
+            error_string = "Error running Tesseract."
+            if loglevel <= logging.INFO:
+                # Errors already streamed via logger.info, don't repeat them
+                pass
+            elif loglevel <= logging.ERROR:
+                # Re-emit errors at error level so they're visible
+                logger.error(msg)
+            else:
+                # Logs are squelched, tell user how to see them
+                error_string = (
+                    "Error running Tesseract. "
+                    "Run with `--loglevel info` for more details."
+                )
 
         raise UserError(error_string) from e
 
     if invoke_help:
         result_err = _sanitize_error_output(result_err, tesseract_image)
+        typer.echo(result_err, err=True, nl=False)
 
-    typer.echo(result_err, err=True, nl=False)
+    # Logs have already been streamed to stderr, just output stdout (the result)
     typer.echo(result_out, nl=False)
 
 

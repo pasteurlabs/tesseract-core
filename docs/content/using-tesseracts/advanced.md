@@ -2,64 +2,60 @@
 
 ## File aliasing
 
-The `tesseract` command can take care of
-passing data from local disk
-(or any [fsspec-compatible](https://filesystem-spec.readthedocs.io/en/latest/) resource,
-like HTTP, FTP, S3 Buckets, and so on) to a Tesseract via the `@` syntax.
+The `tesseract` CLI can load data from local disk or any [fsspec-compatible](https://filesystem-spec.readthedocs.io/en/latest/) resource (HTTP, FTP, S3, etc.) using the `@` syntax.
 
-You can mount a folder into a Tesseract with `--input-path`. A The input path is mounted with read-only permissions so a Tesseract will never mutate files located at the input path.
-Paths in a Tesseract's payload have to be relative to `--input-path`:
+Use `--input-path` to mount a folder into the Tesseract (read-only). Paths in the payload must be relative to `--input-path`:
 
 ```bash
-tesseract run filereference apply \
+tesseract run file_io apply \
     --input-path ./testdata \
     --output-path ./output \
-    '{"inputs": {"data": ["sample_2.json", "sample_3.json"]}}'
+    '{"inputs": {"paths": ["sample_2.json", "sample_3.json"]}}'
 ```
 
-See [`examples/filereference`](../examples/building-blocks/filereference)
+See the [`file_io` example](../examples/building-blocks/file_io) for a complete walkthrough.
 
-If you want to write the output of a Tesseract to a file,
-you can use the `--output-path` parameter, which also supports any
-[fsspec-compatible](https://filesystem-spec.readthedocs.io/en/latest/)
-target path:
+To write output to a file, use `--output-path` (also supports fsspec-compatible targets):
 
 ```bash
 $ tesseract run vectoradd apply --output-path /tmp/output @inputs.json
 ```
 
+```{seealso}
+For handling large datasets that don't fit in memory, see the [out-of-core dataloading tutorial](https://si-tesseract.discourse.group/t/out-of-core-dataloading/52) which demonstrates streaming data through Tesseracts using file references and volume mounts.
+```
+
 ## Logging metrics and artifacts
 
-Tesseracts may log metrics and artifacts (e.g. iteration numbers, VTK files, ...) as demonstrated in the `metrics` example Tesseract.
+Tesseracts can log metrics and artifacts (e.g., iteration numbers, VTK files) as shown in the `metrics` example:
 
 ```{literalinclude} ../../../examples/metrics/tesseract_api.py
 
 ```
 
-By default, Tesseracts log metrics, parameters and artifacts to a directory `logs` in the Tesseract's `--output-path`. (Note that, when running Tesseracts in a container, the log directory is placed inside the container.)
+By default, metrics, parameters, and artifacts are logged to a `logs` directory in the Tesseract's `--output-path`. (When running in a container, this directory lives inside the container.)
 
-Alternatively, you can log metrics and artifacts to an MLflow server by setting the `TESSERACT_MLFLOW_TRACKING_URI` environment variable. For local development, you can spin up an MLflow server (ready to use with Tesseract) through the provided docker-compose file:
+To log to an [MLflow](https://mlflow.org/) server instead, set the `TESSERACT_MLFLOW_TRACKING_URI` environment variable. For local development, spin up an MLflow server using the provided Docker Compose file:
 
 ```bash
 docker-compose -f extra/mlflow/docker-compose-mlflow.yml up
 ```
 
-Launch the `metrics` example Tesseract with the the following volume mount, network and `TESSERACT_MLFLOW_TRACKING_URI` to ensure that it connects to that MLflow server.
+Then launch the `metrics` Tesseract with the appropriate volume mount, network, and tracking URI:
 
 ```bash
 tesseract serve --network=tesseract-mlflow-server --env=TESSERACT_MLFLOW_TRACKING_URI=http://mlflow-server:5000 --volume mlflow-data:/mlflow-data:rw metrics
 ```
 
-The same options apply when executing Tesseracts through `tesseract run`.
+The same options work with `tesseract run`.
 
-As an alternative to the MLflow setup we provide, you can point your Tesseract to a custom MLflow server:
+To connect to a custom MLflow server instead:
 
 ```bash
 $ tesseract serve --env=TESSERACT_MLFLOW_TRACKING_URI="..."  metrics
 ```
 
-Note that if your MLFlow server uses basic auth, you need to set the `MLFLOW_TRACKING_USERNAME` and
-`MLFLOW_TRACKING_PASSWORD` env variables for the Tesseract to be able to authenticate to it.
+If your MLflow server uses basic auth, pass the credentials as environment variables:
 
 ```bash
 $ tesseract serve --env=TESSERACT_MLFLOW_TRACKING_URI="..." \
@@ -67,8 +63,7 @@ $ tesseract serve --env=TESSERACT_MLFLOW_TRACKING_URI="..." \
     metrics
 ```
 
-If you wish to pass additional parameters to the MLflow run (such as tags, run name, or description), you can do so via the `TESSERACT_MLFLOW_RUN_EXTRA_ARGS` environment variable. This accepts a Python dictionary string that is passed directly to `mlflow.start_run()`. See supported
-parameters in the [mlflow documentation](https://mlflow.org/docs/latest/api_reference/python_api/mlflow.html#mlflow.start_run).
+To pass additional parameters to the MLflow run (tags, run name, description), use `TESSERACT_MLFLOW_RUN_EXTRA_ARGS`. This accepts a Python dictionary string passed directly to [`mlflow.start_run()`](https://mlflow.org/docs/latest/api_reference/python_api/mlflow.html#mlflow.start_run).
 
 **Example: Setting tags only**
 
@@ -94,100 +89,156 @@ $ tesseract serve --env=TESSERACT_MLFLOW_TRACKING_URI="..." \
     metrics
 ```
 
-## Volume mounts and user permissions
+## Networking and interactions between Tesseracts
 
-When mounting a volume into a Tesseract container, default behavior depends on the Docker engine being used. Specifically, Docker Desktop, Docker Engine, and Podman have different ways of handling user permissions for mounted volumes.
+Tesseracts can be connected to shared Docker networks, allowing them to communicate with each other and with other services at runtime. A common use case is composing multiple Tesseracts into a pipeline, where one Tesseract calls another via its REST API using `Tesseract.from_url()`. A working end-to-end example of this pattern is available in [`examples/_multi-tesseract/multi-helloworld`](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/_multi-tesseract/multi-helloworld).
 
-Tesseract tries to ensure that the container user has the same permissions as the host user running the `tesseract` command. This is done by setting the user ID and group ID of the container user to match those of the host user.
+You can attach Tesseracts to a named Docker network using the `--network` flag. The network is created automatically if it does not already exist.
 
-In cases where this fails or is not desired, you can explicitly set the user ID and group ID of the container user using the `--user` argument. This allows you to specify a different user or group for the container, which can be useful for ensuring proper permissions when accessing mounted volumes.
-
-```{warning}
-In cases where the Tesseract user is neither `root` nor the local user / file owner, you may encounter permission issues when accessing files in mounted volumes. To resolve this, ensure that the user ID and group ID are set correctly using the `--user` argument, or modify the permissions of files to be readable by any user.
+```bash
+$ tesseract serve "my-tesseract:latest" --network my_network --network-alias my-tesseract --port 8000
 ```
 
-## Passing environment variables to Tesseract containers
+The `serve` command prints container metadata to `stdout`, including the Tesseract's IP address and port on each connected network. The `--network-alias` argument assigns a hostname so other containers on the same network can reach it by name (e.g. `http://my-tesseract:8000`) rather than by IP. Note that the port is assigned randomly if left unspecified.
 
-Through the optional `--env` argument, you can pass environment variables to Tesseracts.
-This works both for serving a Tesseract and running a single execution:
+**A note on `--network=host`:**
+
+Setting `--network=host` makes a container share the host's network stack, bypassing network isolation. Whether it works as expected depends on how Docker is running on your system.
+
+Docker Engine on Linux runs the daemon directly on the host OS, so `--network=host` gives the container access to the host's network namespace, including `localhost`. This is the only platform that supports sharing the full network stack.
+
+Docker Desktop runs the Docker daemon inside a lightweight Linux VM. Here `--network=host` refers to the network stack of the VM, not your actual machine. As a result services on your machine's `localhost` are not reachable from inside the container. Docker Desktop >=4.34 added opt-in support for host networking (Settings > Resources > Network > "Enable host networking"), but only works at the TCP/UDP level and does not give access to the host's network namespace. For more details check out the [Docker documentation](https://docs.docker.com/engine/network/drivers/host/).
+
+## Volume mounts and user permissions
+
+Permission handling for mounted volumes varies between Docker Desktop, Docker Engine, and Podman. By default, Tesseract maps the container user's UID and GID to match the host user running the `tesseract` command.
+
+If this doesn't work for your setup, override it with the `--user` argument to set a specific UID/GID for the container.
+
+```{warning}
+If the container user is neither `root` nor the file owner, you may encounter permission errors on mounted volumes. Fix this by setting the correct UID/GID with `--user`, or by making the files readable by all users.
+```
+
+## Passing environment variables
+
+Use `--env` to pass environment variables to Tesseract containers. This works with both `serve` and `run`:
 
 ```bash
 $ tesseract serve --env=MY_ENV_VARIABLE="some value" helloworld
 $ tesseract run --env=MY_ENV_VARIABLE="some value" helloworld apply '{"inputs": {"name": "Osborne"}}'
 ```
 
+## Parallelism and worker processes
+
+By default, Tesseracts run with a single worker process. To handle concurrent requests, increase the worker count with `--num-workers` (for `tesseract serve`) or the `num_workers` parameter (in the Python SDK). This is not available for `tesseract run`, which processes a single request and exits.
+
+Each worker runs as a separate process, so they are not affected by the GIL but do not share in-process state.
+
+### When to use multiple workers
+
+Multiple workers are useful when:
+
+- **Handling concurrent requests** — If multiple clients will call your Tesseract simultaneously, each worker can handle one request at a time. With a single worker, requests are processed sequentially.
+- **CPU-bound computations** — If your Tesseract performs CPU-intensive work and you have multiple cores available, multiple workers can process requests in parallel.
+- **Batch processing** — When processing many independent inputs, you can submit them concurrently and let workers handle them in parallel.
+
+### When NOT to use multiple workers
+
+Stick with a single worker when:
+
+- **GPU-bound computations** — GPUs typically can't run multiple processes efficiently. If your Tesseract uses a GPU, multiple workers will compete for GPU resources and may cause out-of-memory errors or slowdowns.
+- **High memory usage** — Each worker loads its own copy of the model/data into memory. If your Tesseract uses 4GB of RAM, 4 workers will use 16GB total.
+- **Stateful operations** — Workers don't share state. If your computation requires shared state between requests, multiple workers won't work correctly.
+
+### CLI usage
+
+```bash
+# Serve with 4 worker processes
+$ tesseract serve --num-workers 4 my-tesseract
+```
+
+### Python SDK usage
+
+```python
+from concurrent.futures import ThreadPoolExecutor
+from tesseract_core import Tesseract
+
+# Serve with multiple workers
+with Tesseract.from_image("my-tesseract", num_workers=4) as t:
+    # Process requests concurrently using threads
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        results = list(executor.map(t.apply, batch))
+```
+
+### Choosing the right number of workers
+
+As a starting point:
+
+- **CPU-bound**: `num_workers` = number of CPU cores
+- **I/O-bound** (e.g., calling external APIs): `num_workers` = 2 x number of CPU cores
+- **GPU-bound**: `num_workers` = 1 (or match the number of GPUs if using `--gpus`)
+
+Monitor memory usage and adjust. More workers isn't always better — context switching overhead can reduce throughput.
+
 ## Using GPUs
 
-To leverage GPU support in your Tesseract environment, you can specify which NVIDIA GPU(s) to make available
-using the `--gpus` argument when running a Tesseract command. This allows you to select specific GPUs or
-enable all available GPUs for a task.
+Use the `--gpus` argument to make NVIDIA GPUs available to a Tesseract.
 
-To run Tesseract on a specific GPU, provide its index:
+To use a specific GPU:
 
 ```bash
 $ tesseract run --gpus 0 helloworld apply '{"inputs": {"name": "Osborne"}}'
 ```
 
-To make all available GPUs accessible, use the `--gpus all` option:
+To use all available GPUs:
 
 ```bash
 $ tesseract run --gpus all helloworld apply '{"inputs": {"name": "Osborne"}}'
 ```
 
-You can also specify multiple GPUs individually:
+To specify multiple GPUs:
 
 ```bash
 $ tesseract run --gpus 0 --gpus 1 helloworld apply '{"inputs": {"name": "Osborne"}}'
 ```
 
-The GPUs are indexed starting at zero with the same convention as `nvidia-smi`.
+GPUs are indexed starting at zero, matching `nvidia-smi` conventions.
 
-## Deploying and interacting with Tesseracts on HPC clusters
+## Tesseracts on HPC clusters
 
-Running Tesseracts on high-performance computing clusters can have many use cases including:
+Common HPC use cases for Tesseracts include:
 
-- Deployment of a single long-running component of a pipeline on a state-of-the-art GPU.
-- Running an entire optimization workflow on a dedicated compute node
-- Large parameter scans distributed in parallel over a multitude of cores.
+- Deploying a long-running pipeline component on a GPU node
+- Running an optimization workflow on a dedicated compute node
+- Distributing parameter scans across many cores
 
-All of this is possible even in scenarios where containerisation options are either unavailable or incompatible by directly using `tesseract-runtime` (which includes a `serve` feature). For more details, please see our [tutorial](https://si-tesseract.discourse.group/t/deploying-and-interacting-with-tesseracts-on-hpc-clusters-using-tesseract-runtime-serve/104), which demonstrates how to launch uncontainerised Tesseracts using SLURM, either as a batch job or for interactive use.
+This works even without containerization, using `tesseract-runtime serve` directly. See our [HPC tutorial](https://si-tesseract.discourse.group/t/deploying-and-interacting-with-tesseracts-on-hpc-clusters-using-tesseract-runtime-serve/104) for a SLURM-based walkthrough covering both batch and interactive use.
 
-## Debug mode
+(running-without-containers)=
 
-`tesseract serve` supports a `--debug` flag; this has two effects:
+## Running Tesseracts without containers
 
-- Tracebacks from execution are returned in the response body, instead of a generic 500 error.
-  This is useful for debugging and testing, but unsafe for production environments.
-- Aside from listening to the usual Tesseract requests, a debugpy server is also started in
-  the container, and the port it's listening to is forwarded to some free port on the host which
-  is displayed in the cli when spinning up a tesseract via `tesseract serve`. This allows you to perform
-  remote debugging sessions.
+When containerization is unavailable or undesirable, run Tesseracts directly using the `tesseract-runtime` CLI (the same command that runs inside Tesseract containers).
 
-In particular, if you are using VScode, here is a sample launch config to attach to a running Tesseract in
-debug mode:
+Setup:
 
-```json
-        {
-            "name": "Tesseract: Remote debugger",
-            "type": "debugpy",
-            "request": "attach",
-            "connect": {
-                "host": "localhost",
-                "port": "PORT_NUMBER_HERE"
-            },
-            "pathMappings": [
-                {
-                    "localRoot": "${workspaceFolder}/examples/helloworld",
-                    "remoteRoot": "/tesseract"
-                }
-            ],
-        },
+1. [Install tesseract-core](installation-runtime) with the runtime extra.
+2. Install the Tesseract's dependencies: `pip install -r tesseract_requirements.txt`
+3. Set `TESSERACT_API_PATH` to point to your `tesseract_api.py`.
+
+Then use `tesseract-runtime` instead of `tesseract run`:
+
+```bash
+# Instead of:
+$ tesseract run helloworld apply '{"inputs": {"name": "Tessie"}}'
+
+# Use:
+$ export TESSERACT_API_PATH=/path/to/tesseract_api.py
+$ tesseract-runtime apply '{"inputs": {"name": "Tessie"}}'
 ```
 
-(make sure to fill in with the actual port number). After inserting this into the `configurations`
-field of your `launch.json` file, you should be able to attach to the Tesseract being served by clicking on the
-green "play" button at the top left corner of the "Run and Debug" tab.
+`tesseract-runtime` supports the same endpoints and options as containerized Tesseracts. Run `tesseract-runtime --help` for details.
 
-![Starting remote debug session in VScode](./remote_debug.png)
-
-For more information on the VSCode debugger, see [this guide](https://code.visualstudio.com/docs/debugtest/debugging).
+```{tip}
+Running without containers is also useful for [debugging and development](project:#running-tesseracts-without-containerization).
+```
