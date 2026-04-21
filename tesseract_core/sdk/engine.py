@@ -29,6 +29,7 @@ from .docker_client import (
     CLIDockerClient,
     Container,
     Image,
+    NotFound,
     build_docker_image,
     is_podman,
 )
@@ -566,6 +567,29 @@ def get_tesseract_images() -> list[Image]:
     return docker_client.images.list()
 
 
+# Built-in Docker/Podman networks that can/should not be created.
+_BUILTIN_NETWORKS = {"host", "bridge", "none"}
+
+
+def _ensure_network_exists(network: str) -> None:
+    """Create the Docker network if it does not exist yet.
+
+    Params:
+        network: The network name to create.
+    """
+    if network in _BUILTIN_NETWORKS:
+        return
+    try:
+        docker_client.networks.get(network)
+    except NotFound:
+        create_network = True
+    else:
+        create_network = False
+    if create_network:
+        logger.info("Network '%s' not found, creating it.", network)
+        docker_client.networks.create(network)
+
+
 def serve(
     image_name: str,
     *,
@@ -713,6 +737,9 @@ def serve(
 
     if docker_args:
         extra_args.extend(docker_args)
+
+    if network is not None:
+        _ensure_network_exists(network)
 
     container = docker_client.containers.run(
         image=image_name,
@@ -993,6 +1020,9 @@ def run_tesseract(
 
     if docker_args:
         extra_args.extend(docker_args)
+
+    if network is not None:
+        _ensure_network_exists(network)
 
     # Run the container, optionally streaming stderr to the terminal
     result = docker_client.containers.run(
