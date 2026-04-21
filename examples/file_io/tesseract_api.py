@@ -4,6 +4,7 @@
 import json
 import shutil
 from pathlib import Path
+from typing import Annotated
 
 from pydantic import AfterValidator, BaseModel, ValidationInfo
 
@@ -11,7 +12,6 @@ from tesseract_core.runtime.config import get_config
 from tesseract_core.runtime.experimental import (
     InputPath,
     OutputPath,
-    compose_validator,
 )
 
 
@@ -46,16 +46,16 @@ def has_bin_sidecar(path: Path, info: ValidationInfo) -> Path:
     return path
 
 
-InputPath = compose_validator(InputPath, AfterValidator(has_bin_sidecar))
-OutputPath = compose_validator(OutputPath, AfterValidator(has_bin_sidecar))
+CheckedInputPath = Annotated[InputPath, AfterValidator(has_bin_sidecar)]
+CheckedOutputPath = Annotated[OutputPath, AfterValidator(has_bin_sidecar)]
 
 
 class InputSchema(BaseModel):
-    paths: list[InputPath]
+    paths: list[CheckedInputPath]
 
 
 class OutputSchema(BaseModel):
-    paths: list[OutputPath]
+    paths: list[CheckedOutputPath]
 
 
 def apply(inputs: InputSchema) -> OutputSchema:

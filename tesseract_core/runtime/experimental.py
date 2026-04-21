@@ -219,69 +219,119 @@ class PydanticLazySequenceAnnotation:
         return handler(_core_schema)
 
 
-def _resolve_input_path(path: Path, info: ValidationInfo) -> Path:
-    """Resolve a relative path against RuntimeConfig().input_path.
+class InputPath(Path):
+    """Path type for Tesseract input files.
 
-    Validates that the resolved path stays within the input directory and exists.
-    Existence checks are skipped when ``info.context`` contains
-    ``"skip_path_checks": True`` (e.g. during test-case validation of expected
-    outputs that have not been created yet).
+    Resolves relative paths against ``RuntimeConfig().input_path`` and validates
+    that the resolved path stays within the input directory and exists.
 
-    Raises:
-        ValueError: If the path escapes the input directory.
-        FileNotFoundError: If the resolved path does not exist.
+    Use ``Annotated[InputPath, AfterValidator(...)]`` to add custom validation
+    that runs after path resolution (receives the absolute, resolved path).
     """
-    ctx = info.context if info else None
-    skip = ctx.get("skip_path_checks", False) if ctx else False
-    input_path = get_config().input_path
-    tess_path = (input_path / path).resolve()
-    if not tess_path.is_relative_to(input_path):
-        raise ValueError(
-            f"Invalid input file reference: {path}. "
-            f"Expected path to be relative to {input_path}, but got {tess_path}. "
-            "File references have to be relative to --input-path."
+
+    @classmethod
+    def _resolve(cls, path: Path, info: ValidationInfo | None) -> Path:
+        ctx = info.context if info else None
+        skip = ctx.get("skip_path_checks", False) if ctx else False
+        input_path = Path(get_config().input_path).resolve()
+        tess_path = (input_path / path).resolve()
+        if not tess_path.is_relative_to(input_path):
+            raise ValueError(
+                f"Invalid input file reference: {path}. "
+                f"Expected path to be relative to {input_path}, but got {tess_path}. "
+                "File references have to be relative to --input-path."
+            )
+        if not skip and not tess_path.exists():
+            raise ValueError(f"Input path {tess_path} does not exist.")
+        return tess_path
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls,
+        _source_type: Any,
+        _handler: GetCoreSchemaHandler,
+    ) -> core_schema.CoreSchema:
+        return core_schema.with_info_after_validator_function(
+            cls._validate,
+            core_schema.str_schema(),
+            serialization=core_schema.plain_serializer_function_ser_schema(
+                lambda p: str(p),
+            ),
         )
-    if not skip and not tess_path.exists():
-        raise FileNotFoundError(f"Input path {tess_path} does not exist.")
-    return tess_path
+
+    @classmethod
+    def _validate(cls, value: Any, info: ValidationInfo) -> Path:
+        return cls._resolve(Path(value), info)
 
 
-def _strip_output_path(path: Path, info: ValidationInfo) -> Path:
-    """Strip RuntimeConfig().output_path prefix from a path.
+class OutputPath(Path):
+    """Path type for Tesseract output files.
 
-    If the path is relative to the output directory, returns the relative portion.
-    Existence checks are skipped when ``info.context`` contains
-    ``"skip_path_checks": True``.
+    Strips ``RuntimeConfig().output_path`` prefix from paths during validation.
 
-    Raises:
-        ValueError: If the path does not exist or is outside the output directory.
+    Use ``Annotated[OutputPath, AfterValidator(...)]`` to add custom validation.
+    When used with ``Annotated``, validators run after path stripping, so they
+    receive relative paths. To validate absolute paths before stripping, put
+    logic in a ``BeforeValidator`` instead.
     """
-    ctx = info.context if info else None
-    skip = ctx.get("skip_path_checks", False) if ctx else False
-    output_path = get_config().output_path
-    rel_path = (
-        path.relative_to(output_path) if path.is_relative_to(output_path) else path
-    )
 
-    if skip:
+    @classmethod
+    def _ensure_absolute(cls, path: Path) -> Path:
+        output_path = Path(get_config().output_path).resolve()
+        resolved = (
+            (output_path / path).resolve() if not path.is_absolute() else path.resolve()
+        )
+        if not resolved.is_relative_to(output_path):
+            raise ValueError(
+                f"Output path {path} escapes output directory {output_path}."
+            )
+        return resolved
+
+    @classmethod
+    def _strip(cls, path: Path, info: ValidationInfo | None) -> Path:
+        ctx = info.context if info else None
+        skip = ctx.get("skip_path_checks", False) if ctx else False
+        output_path = Path(get_config().output_path).resolve()
+        rel_path = (
+            path.relative_to(output_path) if path.is_relative_to(output_path) else path
+        )
+
+        if skip:
+            return rel_path
+
+        full_path = output_path / rel_path
+        if not full_path.exists():
+            if path.is_relative_to(output_path):
+                raise ValueError(f"Output path {path} does not exist inside Tesseract")
+            elif path.exists():
+                raise ValueError(
+                    f"Output path {path} is not in {output_path}. "
+                    f"All output data must be copied to `--output-path` ({output_path})."
+                )
+            else:
+                raise ValueError(
+                    f"Output path {path} is not in {output_path} or Tesseract root"
+                )
         return rel_path
 
-    full_path = output_path / rel_path
-    if not full_path.exists():
-        if path.is_relative_to(output_path):
-            raise FileNotFoundError(
-                f"Output path {path} does not exist inside Tesseract"
-            )
-        elif path.exists():
-            raise ValueError(
-                f"Output path {path} is not in {output_path}. "
-                f"All output data must be copied to `--output-path` ({output_path})."
-            )
-        else:
-            raise ValueError(
-                f"Output path {path} is not in {output_path} or Tesseract root"
-            )
-    return rel_path
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls,
+        _source_type: Any,
+        _handler: GetCoreSchemaHandler,
+    ) -> core_schema.CoreSchema:
+        return core_schema.with_info_after_validator_function(
+            cls._validate,
+            core_schema.str_schema(),
+            serialization=core_schema.plain_serializer_function_ser_schema(
+                lambda p: str(p),
+            ),
+        )
+
+    @classmethod
+    def _validate(cls, value: Any, info: ValidationInfo) -> Path:
+        path = cls._ensure_absolute(Path(value))
+        return cls._strip(path, info)
 
 
 def _resolve_input_file(path: Path) -> Path:
@@ -290,7 +340,7 @@ def _resolve_input_file(path: Path) -> Path:
         DeprecationWarning,
         stacklevel=2,
     )
-    tess_path = _resolve_input_path(path, None)
+    tess_path = InputPath._resolve(path, None)
     if not tess_path.is_file():
         raise ValueError(f"Input path {tess_path} is not a file.")
     return tess_path
@@ -304,80 +354,12 @@ def _strip_output_file(path: Path) -> Path:
     )
     if not path.is_file():
         raise ValueError(f"Output path {path} is not a file.")
-    stripped = _strip_output_path(path, None)
+    stripped = OutputPath._strip(path, None)
     return stripped
 
 
-def _append_validator(
-    annotated_path: type[Annotated], validator: AfterValidator
-) -> type[Annotated]:
-    return Annotated[annotated_path, validator]
-
-
-def _ensure_absolute_output_path(path: Path) -> Path:
-    output_path = get_config().output_path
-    resolved = (
-        (output_path / path).resolve() if not path.is_absolute() else path.resolve()
-    )
-    if not resolved.is_relative_to(output_path):
-        raise ValueError(f"Output path {path} escapes output directory {output_path}.")
-    return resolved
-
-
-def _prepend_validator(
-    annotated_path: type[Annotated], validator: AfterValidator
-) -> type[Annotated]:
-    from tesseract_core.runtime.schema_generation import _construct_annotated
-
-    _, *args = get_args(annotated_path)
-
-    # Resolve a relative path against output_path so user validators always see
-    # absolute paths.
-    metadata = [AfterValidator(_ensure_absolute_output_path), validator, *args]
-    return _construct_annotated(Path, metadata)
-
-
-InputPath = Annotated[Path, AfterValidator(_resolve_input_path)]
-OutputPath = Annotated[Path, AfterValidator(_strip_output_path)]
-
 InputFileReference = Annotated[Path, AfterValidator(_resolve_input_file)]
 OutputFileReference = Annotated[Path, AfterValidator(_strip_output_file)]
-
-
-def compose_validator(
-    path_reference: type[Annotated], validator: AfterValidator
-) -> type[Annotated]:
-    """Add custom validators to an ``InputPath`` or ``OutputPath``.
-
-    For inputs, validators run *after* path resolution, so they receive
-    absolute, resolved paths. For outputs, validators run *before* path
-    stripping, so they also receive absolute paths. This ordering is
-    maintained even when Pydantic re-validates already-stripped output paths
-    (e.g. during the endpoint wrapper in ``core.py``).
-
-    Args:
-        path_reference: Either ``InputPath`` or ``OutputPath``.
-        validator: Pydantic ``AfterValidator`` to compose with the built-in path
-            resolution/stripping logic.
-
-    Returns:
-        An ``Annotated`` type combining the path reference with the given validators.
-
-    Example::
-
-        InputPath = compose_validator(InputPath, AfterValidator(my_check))
-        OutputPath = compose_validator(OutputPath, AfterValidator(my_check))
-    """
-    if path_reference is InputPath:
-        compose_fn = _append_validator
-    elif path_reference is OutputPath:
-        compose_fn = _prepend_validator
-    else:
-        raise ValueError(
-            "Unsupported type. Expected: InputPath or OutputPath. "
-            f"Found: {path_reference}"
-        )
-    return compose_fn(path_reference, validator)
 
 
 def require_file(file_path: PathLike) -> Path:
@@ -389,7 +371,7 @@ def require_file(file_path: PathLike) -> Path:
     if SKIP_REQUIRED_FILE_CHECK:
         return Path(file_path)
 
-    file_path = _resolve_input_path(Path(file_path), None)
+    file_path = InputPath._resolve(Path(file_path), None)
 
     if not file_path.is_file():
         raise FileNotFoundError(f"Required file not found: {file_path}")
@@ -488,7 +470,6 @@ __all__ = [
     "OutputPath",
     "PydanticLazySequenceAnnotation",
     "TesseractReference",
-    "compose_validator",
     "finite_difference_jacobian",
     "finite_difference_jvp",
     "finite_difference_vjp",
