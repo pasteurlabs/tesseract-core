@@ -39,8 +39,8 @@ tesseract-runtime = "tesseract_core.runtime.cli:main"
 # NOTE: Upper bounds (<=) on runtime deps are periodically updated via .github/workflows/bump_lockfile.yml,
 # do not edit manually. To add constraints, use other operators (e.g. <, >=, ~=, ==) as needed.
 runtime = [
-    "pydantic<=2.12.5,>=2.10",
-    "fastapi<=0.135.3,>=0.115",
+    "pydantic<=2.13.2,>=2.10",
+    "fastapi<=0.136.0,>=0.115",
     "requests<=2.33.1,>=2.32.4",
     "uvicorn<=0.44.0,>=0.34",
     "click<=8.3.2,>=8.1",
