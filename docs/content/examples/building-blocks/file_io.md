@@ -77,9 +77,8 @@ apply returns  →  Path("/tesseract/output_data/sample_8.copy")
 ## Composing user-defined validators
 
 Use `Annotated` with `AfterValidator` to attach custom validators to a path
-reference. For `InputPath`, validators run after resolution and receive
-absolute paths. For `OutputPath`, validators run after stripping and receive
-relative paths:
+reference. Validators always receive **absolute paths** for both input and
+output types:
 
 ```python
 from typing import Annotated
@@ -118,11 +117,11 @@ caller sends → "sample_8.json"
   → apply receives   →  Path("/tesseract/input_data/sample_8.json")
 ```
 
-**Output fields** — built-in strips first, then user validators run (on relative paths):
+**Output fields** — user validators run on absolute paths, built-in strips on serialization:
 
 ```
 apply returns  →  Path("/tesseract/output_data/sample_8.copy")
-  → built-in         →  Path("sample_8.copy")                          (existence check + prefix stripped)
-  → has_bin_sidecar  →  Path("sample_8.copy")                          (checks .bin sidecar present)
-  → caller receives  →  "sample_8.copy"
+  → built-in         →  Path("/tesseract/output_data/sample_8.copy")   (existence check)
+  → has_bin_sidecar  →  Path("/tesseract/output_data/sample_8.copy")   (checks .bin sidecar present)
+  → caller receives  →  "sample_8.copy"                                (prefix stripped on serialization)
 ```

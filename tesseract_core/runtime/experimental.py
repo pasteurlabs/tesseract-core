@@ -251,9 +251,20 @@ class InputPath(Path):
         _source_type: Any,
         _handler: GetCoreSchemaHandler,
     ) -> core_schema.CoreSchema:
-        return core_schema.with_info_after_validator_function(
-            cls._validate,
-            core_schema.str_schema(),
+        return core_schema.json_or_python_schema(
+            json_schema=core_schema.with_info_after_validator_function(
+                cls._validate,
+                core_schema.str_schema(),
+            ),
+            python_schema=core_schema.with_info_after_validator_function(
+                cls._validate,
+                core_schema.union_schema(
+                    [
+                        core_schema.is_instance_schema(Path),
+                        core_schema.str_schema(),
+                    ]
+                ),
+            ),
             serialization=core_schema.plain_serializer_function_ser_schema(
                 lambda p: str(p),
             ),
@@ -267,17 +278,19 @@ class InputPath(Path):
 class OutputPath(Path):
     """Path type for Tesseract output files.
 
-    Strips ``RuntimeConfig().output_path`` prefix from paths during validation.
+    Validates that paths exist inside ``RuntimeConfig().output_path`` and
+    strips the prefix when serializing.
 
-    Use ``Annotated[OutputPath, AfterValidator(...)]`` to add custom validation.
-    When used with ``Annotated``, validators run after path stripping, so they
-    receive relative paths. To validate absolute paths before stripping, put
-    logic in a ``BeforeValidator`` instead.
+    In-memory values are **absolute** paths. Use
+    ``Annotated[OutputPath, AfterValidator(...)]`` to add custom validation;
+    validators receive absolute paths.
     """
 
     @classmethod
-    def _ensure_absolute(cls, path: Path) -> Path:
+    def _validate(cls, value: Any, info: ValidationInfo) -> Path:
+        """Resolve to absolute, check containment and existence."""
         output_path = Path(get_config().output_path).resolve()
+        path = Path(value)
         resolved = (
             (output_path / path).resolve() if not path.is_absolute() else path.resolve()
         )
@@ -285,24 +298,14 @@ class OutputPath(Path):
             raise ValueError(
                 f"Output path {path} escapes output directory {output_path}."
             )
-        return resolved
 
-    @classmethod
-    def _strip(cls, path: Path, info: ValidationInfo | None) -> Path:
         ctx = info.context if info else None
         skip = ctx.get("skip_path_checks", False) if ctx else False
-        output_path = Path(get_config().output_path).resolve()
-        rel_path = (
-            path.relative_to(output_path) if path.is_relative_to(output_path) else path
-        )
-
-        if skip:
-            return rel_path
-
-        full_path = output_path / rel_path
-        if not full_path.exists():
-            if path.is_relative_to(output_path):
-                raise ValueError(f"Output path {path} does not exist inside Tesseract")
+        if not skip and not resolved.exists():
+            if path.is_relative_to(output_path) or not path.is_absolute():
+                raise ValueError(
+                    f"Output path {resolved} does not exist inside Tesseract"
+                )
             elif path.exists():
                 raise ValueError(
                     f"Output path {path} is not in {output_path}. "
@@ -312,7 +315,15 @@ class OutputPath(Path):
                 raise ValueError(
                     f"Output path {path} is not in {output_path} or Tesseract root"
                 )
-        return rel_path
+        return resolved
+
+    @classmethod
+    def _serialize(cls, path: Path) -> str:
+        """Strip output_path prefix for serialization."""
+        output_path = Path(get_config().output_path).resolve()
+        if path.is_relative_to(output_path):
+            return str(path.relative_to(output_path))
+        return str(path)
 
     @classmethod
     def __get_pydantic_core_schema__(
@@ -320,18 +331,24 @@ class OutputPath(Path):
         _source_type: Any,
         _handler: GetCoreSchemaHandler,
     ) -> core_schema.CoreSchema:
-        return core_schema.with_info_after_validator_function(
-            cls._validate,
-            core_schema.str_schema(),
+        return core_schema.json_or_python_schema(
+            json_schema=core_schema.with_info_after_validator_function(
+                cls._validate,
+                core_schema.str_schema(),
+            ),
+            python_schema=core_schema.with_info_after_validator_function(
+                cls._validate,
+                core_schema.union_schema(
+                    [
+                        core_schema.is_instance_schema(Path),
+                        core_schema.str_schema(),
+                    ]
+                ),
+            ),
             serialization=core_schema.plain_serializer_function_ser_schema(
-                lambda p: str(p),
+                cls._serialize,
             ),
         )
-
-    @classmethod
-    def _validate(cls, value: Any, info: ValidationInfo) -> Path:
-        path = cls._ensure_absolute(Path(value))
-        return cls._strip(path, info)
 
 
 def _resolve_input_file(path: Path) -> Path:
@@ -354,8 +371,7 @@ def _strip_output_file(path: Path) -> Path:
     )
     if not path.is_file():
         raise ValueError(f"Output path {path} is not a file.")
-    stripped = OutputPath._strip(path, None)
-    return stripped
+    return Path(OutputPath._serialize(path))
 
 
 InputFileReference = Annotated[Path, AfterValidator(_resolve_input_file)]

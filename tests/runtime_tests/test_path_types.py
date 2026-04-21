@@ -117,7 +117,7 @@ def test_input_path_skip_checks():
 # -- OutputPath validation --
 
 
-def test_output_path_strips_prefix(path_dirs):
+def test_output_path_resolves_to_absolute(path_dirs):
     _, output_dir = path_dirs
     (output_dir / "result.json").touch()
 
@@ -125,7 +125,8 @@ def test_output_path_strips_prefix(path_dirs):
         out: OutputPath
 
     model = M.model_validate({"out": str(output_dir / "result.json")})
-    assert model.out == Path("result.json")
+    assert model.out == output_dir / "result.json"
+    assert model.out.is_absolute()
 
 
 def test_output_path_accepts_relative(path_dirs):
@@ -136,7 +137,7 @@ def test_output_path_accepts_relative(path_dirs):
         out: OutputPath
 
     model = M.model_validate({"out": "result.json"})
-    assert model.out == Path("result.json")
+    assert model.out == output_dir / "result.json"
 
 
 def test_output_path_rejects_missing(path_dirs):
@@ -170,21 +171,26 @@ def test_output_path_skip_checks(path_dirs):
         {"out": str(output_dir / "future.bin")},
         context={"skip_path_checks": True},
     )
-    assert model.out == Path("future.bin")
+    assert model.out == output_dir / "future.bin"
 
 
 # -- Serialization roundtrip --
 
 
-def test_serialization_roundtrip(path_dirs):
+def test_serialization_strips_output_prefix(path_dirs):
     input_dir, output_dir = path_dirs
     (input_dir / "a.txt").touch()
     (output_dir / "b.txt").touch()
 
     model = PathModel.model_validate({"inp": "a.txt", "out": str(output_dir / "b.txt")})
+
+    # In-memory: OutputPath is absolute
+    assert model.out == output_dir / "b.txt"
+
+    # Serialized: OutputPath is stripped to relative
     dumped = model.model_dump()
+    assert dumped["out"] == "b.txt"
     assert isinstance(dumped["inp"], str)
-    assert isinstance(dumped["out"], str)
 
     json_str = model.model_dump_json()
     assert "a.txt" in json_str
@@ -227,4 +233,30 @@ def test_annotated_output_path_runs_extra_validator(path_dirs):
         f: Annotated[OutputPath, AfterValidator(require_csv)]
 
     m = M.model_validate({"f": str(output_dir / "result.csv")})
-    assert m.f == Path("result.csv")
+    assert m.f == output_dir / "result.csv"
+
+
+# -- Python-mode Path objects (e.g. from apply() return values) --
+
+
+def test_input_path_accepts_path_object(path_dirs):
+    input_dir, _ = path_dirs
+    (input_dir / "file.txt").touch()
+
+    class M(BaseModel):
+        f: InputPath
+
+    m = M(f=Path("file.txt"))
+    assert m.f == input_dir / "file.txt"
+
+
+def test_output_path_accepts_path_object(path_dirs):
+    _, output_dir = path_dirs
+    (output_dir / "out.txt").touch()
+
+    class M(BaseModel):
+        f: OutputPath
+
+    m = M(f=output_dir / "out.txt")
+    assert m.f == output_dir / "out.txt"
+    assert m.model_dump()["f"] == "out.txt"
