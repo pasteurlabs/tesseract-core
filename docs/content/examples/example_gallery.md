@@ -14,7 +14,7 @@ building-blocks/packagedata.md
 building-blocks/arm64.md
 building-blocks/localpackage.md
 building-blocks/dataloader.md
-building-blocks/filereference.md
+building-blocks/file_io.md
 building-blocks/finitediff.md
 building-blocks/gradient-fallbacks.md
 ```
@@ -71,11 +71,13 @@ A guide on installing local Python packages into a Tesseract.
 Tesseract that loads in data samples from a folder without loading them into memory.
 :::
 
-:::{grid-item-card} Input/Output File References
-:link: building-blocks/filereference.html
+:::{grid-item-card} Input/Output Path References
+:link: building-blocks/file_io.html
 
-Tesseract that mounts input and output directories as datasets.
-To be used for Tesseracts with large inputs and/or outputs.
+Tesseract that passes files and directories through the input/output mounts
+instead of serializing their contents into the request payload.
+Useful when inputs or outputs are large on disk, or consist of
+many (or a variable number of) files.
 :::
 
 :::{grid-item-card} Finite Difference Gradients
