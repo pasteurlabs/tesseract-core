@@ -27,7 +27,6 @@ BASE_OPTIONAL_DEPS = {
         "docker",
         "fastapi",
         "httpx",  # required by fastapi test client
-        "jsf",
         "numpy",
         "pre-commit",
         "pytest",
