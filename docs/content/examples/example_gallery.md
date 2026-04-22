@@ -10,6 +10,7 @@ building-blocks/helloworld.md
 building-blocks/vectoradd.md
 building-blocks/univariate.md
 building-blocks/fortran.md
+building-blocks/matlab.md
 building-blocks/packagedata.md
 building-blocks/arm64.md
 building-blocks/localpackage.md
@@ -57,6 +58,13 @@ A Tesseract that wraps the univariate Rosenbrock function, which is a common tes
 Wrapping a Fortran heat equation solver. Demonstrates subprocess-based integration for legacy compiled code.
 
 [View on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/fortran_heat)
+:::
+:::{grid-item-card} MATLAB Integration
+:link: building-blocks/matlab.html
+
+Wrapping a MATLAB spring-mass-damper ODE solver. Demonstrates using the official MathWorks Docker image to run MATLAB code via `matlab -batch`.
+
+[View on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/_matlab_springmass)
 :::
 :::{grid-item-card} Package Data
 :link: building-blocks/packagedata.html
