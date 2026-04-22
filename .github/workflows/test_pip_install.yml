@@ -15,13 +15,13 @@ jobs:
           - macos-latest
         python-version:
           - "3.10"
-          - "3.13"
+          - "3.14"
         dependencies:
           - "pinned"
 
         include:
           - os: ubuntu-latest
-            python-version: "3.13"
+            python-version: "3.14"
             dependencies: "latest"
 
       fail-fast: false

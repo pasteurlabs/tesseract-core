@@ -60,9 +60,8 @@ So instead of using the more common `tesseract build`, we install and use the `t
 $ pip install tesseract-core[runtime]
 ```
 
-```{warning}
-Windows is officially only supported via Windows Subsystem for Linux (WSL), see [](#windows-support).
-Make sure to use an appropriate WSL setup when running into issues.
+```{note}
+Windows is natively supported. If you run into performance issues, consider using [WSL](https://docs.microsoft.com/en-us/windows/wsl/) to avoid Docker Desktop's virtualization overhead (see [](#windows-support)).
 ```
 
 Now with an a open port of your choice, and from within the Tesseract directory, we can execute:
