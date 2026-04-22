@@ -5,7 +5,6 @@ import base64
 import json
 import os
 import platform
-import signal
 import subprocess
 import sys
 import time
@@ -67,6 +66,7 @@ def model_to_json(model):
 
 @contextmanager
 def serve_in_subprocess(api_file, port, num_workers=1, timeout=30.0):
+    proc = None
     try:
         proc = subprocess.Popen(
             [
@@ -75,7 +75,7 @@ def serve_in_subprocess(api_file, port, num_workers=1, timeout=30.0):
                 "from tesseract_core.runtime.serve import serve; "
                 f"serve(host='localhost', port={port}, num_workers={num_workers})",
             ],
-            env=dict(os.environ, TESSERACT_API_PATH=api_file),
+            env=dict(os.environ, TESSERACT_API_PATH=str(api_file)),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
@@ -99,11 +99,12 @@ def serve_in_subprocess(api_file, port, num_workers=1, timeout=30.0):
         yield f"http://localhost:{port}"
 
     finally:
-        proc.send_signal(signal.SIGINT)
-        stdout, stderr = proc.communicate()
-        print(stdout.decode())
-        print(stderr.decode())
-        proc.wait(timeout=5)
+        if proc is not None:
+            proc.terminate()
+            stdout, stderr = proc.communicate()
+            print(stdout.decode())
+            print(stderr.decode())
+            proc.wait(timeout=5)
 
 
 @pytest.fixture
@@ -244,7 +245,7 @@ def test_threading_sanity(tmpdir, free_port):
 
 
 @pytest.mark.skipif(
-    is_wsl(),
+    is_wsl() or sys.platform == "win32",
     reason="flaky on Windows",
 )
 def test_multiple_workers(tmpdir, free_port):

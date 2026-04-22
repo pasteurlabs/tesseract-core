@@ -157,9 +157,6 @@ def get_array_model(
             # Dimensionality must match exactly
             min_length=len(expected_shape),
             max_length=len(expected_shape),
-            # TODO: This is a hack to allow JSF to parse the JSON schema
-            # see https://github.com/ghandic/jsf/issues/118
-            json_schema_extra={"items": {"type": "integer"}},
         )
 
     # Add flags to the model config
