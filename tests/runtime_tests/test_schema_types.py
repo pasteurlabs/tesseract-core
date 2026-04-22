@@ -255,7 +255,7 @@ def test_model_from_json(tmpdir):
         assert np.array_equal(getattr(model, field), getattr(ref_model, field))
 
 
-def fix_fake_arrays(fakedata, target_shape, seed=42):
+def fix_fake_arrays(fakedata, seed=42):
     is_array = lambda x: (
         isinstance(x, dict) and "shape" in x and "dtype" in x and "data" in x
     )
@@ -264,7 +264,7 @@ def fix_fake_arrays(fakedata, target_shape, seed=42):
     def _walk(data):
         if is_array(data):
             if data["shape"]:  # don't touch scalars
-                data["shape"] = target_shape
+                data["shape"] = (1,) * len(data["shape"])
 
             new_data = rng.uniform(0, 100, data["shape"]).astype(data["dtype"])
 
@@ -296,7 +296,7 @@ def test_json_schema(mode):
     payload = generate_example(schema)
 
     # Fix fake arrays to match the expected shape and be properly encoded
-    payload = fix_fake_arrays(payload, target_shape=(2, 3))
+    payload = fix_fake_arrays(payload)
 
     try:
         MyModel.model_validate_json(json.dumps(payload))

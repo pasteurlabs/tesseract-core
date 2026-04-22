@@ -21,7 +21,7 @@ def generate_example(schema: dict) -> Any:
 def _resolve(schema: dict, defs: dict) -> dict:
     if "$ref" in schema:
         ref_path = schema["$ref"]
-        # Handles #/$defs/Name and #/components/schemas/Name
+        # Assume ref_path is in the format #/$defs/Name
         ref_name = ref_path.split("/")[-1]
         return defs[ref_name]
     return schema
