@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.8.0] - 2026-04-22
+
+### Features
+
+- Allow `*PathReference`s in apply schemas (#555)
+- Add native windows support (#559)
+
+### Bug Fixes
+
+- Support Python 3.14 (#388)
+
+### Documentation
+
+- Add matlab example (#560)
+
 ## [1.7.0] - 2026-04-17
 
 ### Features
