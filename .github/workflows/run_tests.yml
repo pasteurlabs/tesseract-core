@@ -32,47 +32,21 @@ jobs:
 
     runs-on: ${{ matrix.os }}
 
+    defaults:
+      run:
+        shell: bash -el {0}
+
     steps:
       - name: Set up Git repository
         uses: actions/checkout@v6
 
-      - name: Set up WSL (Windows)
-        uses: Vampire/setup-wsl@v7
-        if: runner.os == 'Windows'
-        with:
-          distribution: Ubuntu-24.04
-
       - name: Set up uv
-        if: runner.os != 'Windows'
         uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
 
-      - name: Set up uv (Windows)
-        if: runner.os == 'Windows'
-        shell: wsl-bash {0}
-        run: |
-          curl -LsSf https://astral.sh/uv/install.sh | sh
-
       - name: Install package
-        if: runner.os != 'Windows'
         run: |
-          cp production.uv.lock uv.lock
-          uv sync --python ${{ matrix.python-version }} --extra dev --frozen
-
-          if [ "${{ matrix.runtime-deps }}" == "oldest" ]; then
-            # replace >= with == in runtime deps section of pyproject.toml to install oldest runtime deps
-            sed -i '/^runtime = \[$/,/^]$/s/>=/==/g' ./pyproject.toml
-            uv pip install -e .[runtime]
-          fi
-
-      - name: Install package (Windows)
-        if: runner.os == 'Windows'
-        shell: wsl-bash {0}
-        run: |
-          source "$HOME/.local/bin/env"
-          export UV_PROJECT_ENVIRONMENT="$HOME/venv"
-          export UV_CACHE_DIR="$HOME/.cache/uv"
           cp production.uv.lock uv.lock
           uv sync --python ${{ matrix.python-version }} --extra dev --frozen
 
@@ -83,23 +57,7 @@ jobs:
           fi
 
       - name: Run test suite
-        if: runner.os != 'Windows'
         run: |
-          uv run --no-sync pytest \
-            -v \
-            --skip-endtoend \
-            --timeout=300 \
-            --cov-report=term-missing:skip-covered \
-            --cov-report=xml:coverage.xml \
-            --cov=tesseract_core \
-            --cov-branch
-
-      - name: Run test suite (Windows)
-        if: runner.os == 'Windows'
-        shell: wsl-bash {0}
-        run: |
-          source "$HOME/.local/bin/env"
-          export UV_PROJECT_ENVIRONMENT="$HOME/venv"
           uv run --no-sync pytest \
             -v \
             --skip-endtoend \
