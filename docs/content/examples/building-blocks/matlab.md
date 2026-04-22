@@ -1,5 +1,7 @@
 # Wrapping MATLAB Code
 
+[View on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/_matlab_springmass)
+
 ## Context
 
 MATLAB is one of the most widely used tools in engineering for simulation, control system design, and signal processing. Many organizations have decades of validated MATLAB code that they want to make accessible through modern APIs without rewriting. Tesseract provides a way to wrap MATLAB code by using the official [MathWorks MATLAB Docker image](https://hub.docker.com/r/mathworks/matlab) as the base image and calling MATLAB via `matlab -batch`.

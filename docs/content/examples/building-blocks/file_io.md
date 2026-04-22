@@ -1,5 +1,7 @@
 # File IO with `InputPath` / `OutputPath`
 
+[View on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/file_io)
+
 ## Context
 
 Instead passing file constents to the input payload, a Tesseract can
