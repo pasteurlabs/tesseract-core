@@ -171,10 +171,9 @@ def fix_fake_arrays(fakedata, seed=42):
 
 def example_from_json_schema(schema):
     """Generate a random example JSON object from a JSON schema."""
-    import jsf
+    from schema_example_generator import generate_example
 
-    faker = jsf.JSF(schema)
-    payload = faker.generate()
+    payload = generate_example(schema)
     payload = fix_fake_arrays(payload)
     return payload
 
@@ -217,8 +216,7 @@ def test_unit_tesseract_endtoend(
 
     def _input_schema_from_openapi(openapi_schema):
         input_schema = openapi_schema["components"]["schemas"]["ApplyInputSchema"]
-        # For some reason, jsf can't handle #/components/schemas/<x> references,
-        # so we convert them to #$defs/<x>
+        # Convert OpenAPI-style references to JSON Schema $defs
         input_schema.update({"$defs": openapi_schema["components"]["schemas"]})
         input_schema["$defs"].pop("ApplyInputSchema", None)
         input_schema = json.loads(
