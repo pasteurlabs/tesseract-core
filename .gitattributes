@@ -1,5 +1,4 @@
-# Force LF on every text file. Shell scripts are COPY'd into Linux containers
-# during `tesseract build` and executed with bash, which fails on CRLF
-# (e.g. `$'\r': command not found`) when checked out on Windows with
-# core.autocrlf=true.
-* text=auto eol=lf
+# These scripts are COPY'd into Linux containers during `tesseract build` and
+# executed with bash, which fails on CRLF (`$'\r': command not found`) when
+# checked out on Windows with core.autocrlf=true.
+tesseract_core/sdk/templates/*.sh text eol=lf
