@@ -10,7 +10,9 @@ import re
 import shlex
 import subprocess
 import sys
+import tempfile
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from io import IOBase
@@ -146,6 +148,34 @@ def _run_process(
             proc.stderr.close()
 
     return proc.returncode, b"".join(stdout_lines), b"".join(stderr_lines)
+
+
+def _read_cidfile(path: str, timeout: float = 30.0) -> str:
+    """Read a container ID from a cidfile, polling until it is written.
+
+    Docker writes the container ID to the cidfile asynchronously after
+    container creation. This function polls until the file is non-empty.
+
+    Args:
+        path: Path to the cidfile.
+        timeout: Maximum time to wait in seconds.
+
+    Returns:
+        The container ID string.
+
+    Raises:
+        TimeoutError: If the cidfile is not written within the timeout.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            content = Path(path).read_text().strip()
+            if content:
+                return content
+        except FileNotFoundError:
+            pass
+        time.sleep(0.05)
+    raise TimeoutError(f"Timed out waiting for container ID in cidfile {path}")
 
 
 def _is_valid_docker_tag(tag: str) -> bool:
@@ -727,6 +757,7 @@ class Containers:
         extra_args: list_[str] | None = None,  # noqa: UP006
         stream_stdout: BoolOrCallable = False,
         stream_stderr: BoolOrCallable = False,
+        background: bool = False,
     ) -> Container | tuple[bytes, bytes] | bytes:
         """Run a command in a container from an image.
 
@@ -756,9 +787,13 @@ class Containers:
             stream_stderr: If True, stream stderr to sys.stderr in real-time. Can also be
                     a callable that accepts a string to use as a custom sink.
                     Cannot be used with detach.
+            background: If True, launch the container via `docker run` as a child process.
+                    The container process remains a child of the current process, so it will
+                    be cleaned up if the parent process dies. Cannot be used with detach.
 
         Returns:
-            Container object if detach is True, otherwise returns list of stdout and stderr.
+            Container object if detach or background is True,
+            otherwise returns list of stdout and stderr.
         """
         config = get_config()
         docker = _get_docker_executable()
@@ -803,6 +838,8 @@ class Containers:
             raise ValueError(
                 "Cannot set both remove and detach to True when running a container."
             )
+        if background and detach:
+            raise ValueError("Cannot use background with detach.")
         if (stream_stdout or stream_stderr) and detach:
             raise ValueError(
                 "Cannot use stream_stdout or stream_stderr with detach=True."
@@ -819,6 +856,16 @@ class Containers:
         if extra_args is None:
             extra_args = []
 
+        if background:
+            # Docker requires the cidfile to not exist, so we create a
+            # NamedTemporaryFile, grab its name, then delete it before
+            # passing the path to docker run.
+            cidfile = tempfile.NamedTemporaryFile(prefix="tesseract_cid_", delete=False)
+            cidfile_path = cidfile.name
+            cidfile.close()
+            os.unlink(cidfile_path)
+            optional_args.extend(["--cidfile", cidfile_path])
+
         full_cmd = [
             *docker,
             "run",
@@ -830,6 +877,21 @@ class Containers:
         ]
 
         logger.debug(f"Running command: {full_cmd}")
+
+        if background:
+            subprocess.Popen(
+                full_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            try:
+                container_id = _read_cidfile(cidfile_path)
+            finally:
+                try:
+                    os.unlink(cidfile_path)
+                except OSError:
+                    pass
+            return Containers.get(container_id)
 
         returncode, stdout_data, stderr_data = _run_process(
             full_cmd,

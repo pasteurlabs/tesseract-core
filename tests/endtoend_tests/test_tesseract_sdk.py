@@ -214,6 +214,8 @@ def test_signature_consistency():
         "output_format",
         # stream_logs is SDK-only for streaming logs to a callback
         "stream_logs",
+        # detach is engine-only (SDK always uses detach=False)
+        "detach",
     ]
 
     from_image_sig = dict(inspect.signature(Tesseract.from_image).parameters)

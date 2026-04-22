@@ -308,7 +308,7 @@ class Tesseract:
             raise RuntimeError("Can only serve a Tesseract created via from_image.")
         if self._serve_context is not None:
             raise RuntimeError("Tesseract is already being served.")
-        container_name, container = engine.serve(**self._spawn_config)
+        container_name, container = engine.serve(**self._spawn_config, detach=False)
         self._serve_context = dict(
             container_name=container_name,
             port=container.host_port,

@@ -163,7 +163,7 @@ def test_serve_lifecycle(mock_serving, mock_clients):
     # Output_path is auto-created as a temp directory
     assert call_kwargs["output_path"].is_dir()
     # Check that no unexpected kwargs were passed
-    assert call_kwargs.keys() == expected_kwargs.keys() | {"output_path"}
+    assert call_kwargs.keys() == expected_kwargs.keys() | {"output_path", "detach"}
 
     mock_serving["teardown_mock"].assert_called_with("container-id-123")
 

@@ -42,6 +42,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger("tesseract")
 docker_client = CLIDockerClient()
 
+
 # Jinja2 Environment
 ENV = Environment(
     loader=PackageLoader("tesseract_core.sdk", "templates"),
@@ -609,6 +610,7 @@ def serve(
     output_format: Literal["json", "json+base64", "json+binref"] | None = None,
     docker_args: list[str] | None = None,
     runtime_config: dict[str, Any] | None = None,
+    detach: bool = True,
 ) -> tuple:
     """Serve one or more Tesseract images.
 
@@ -637,9 +639,12 @@ def serve(
         runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
             These are converted to TESSERACT_* environment variables. For example,
             ``{"profiling": True}`` sets ``TESSERACT_PROFILING=1``.
+        detach: If True (default), run the container in detached mode. If False,
+            the container runs as a child process of the current Python process,
+            so it is cleaned up automatically if the parent process dies.
 
     Returns:
-        A tuple of the Tesseract container name and the port it is serving on.
+        A tuple of the Tesseract container name and the Container object.
     """
     if not image_name or not isinstance(image_name, str):
         raise ValueError("Tesseract image name must be provided")
@@ -747,7 +752,8 @@ def serve(
         device_requests=gpus,
         ports=port_mappings,
         network=network,
-        detach=True,
+        detach=detach,
+        background=not detach,
         volumes=parsed_volumes,
         user=user,
         memory=memory,
