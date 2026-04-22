@@ -99,11 +99,15 @@ def join_paths(base: PathLike, other: PathLike) -> str:
 
     If the other path is an absolute URL, return it as is.
     """
+    # Coerce to str to avoid "Cannot mix str and non-str arguments"
+    # when mixing PurePosixPath / PureWindowsPath on Windows
+    base = str(base)
+    other = str(other)
     if is_absolute_path(other):
-        return str(other)
+        return other
     if is_url(base):
         return urllib.parse.urljoin(base, other)
-    return Path(base).joinpath(other).as_posix()
+    return str(Path(base).joinpath(other))
 
 
 def is_absolute_path(path: PathLike) -> bool:
@@ -113,7 +117,9 @@ def is_absolute_path(path: PathLike) -> bool:
 
 def is_url(path: PathLike) -> bool:
     """Check if path is a url."""
-    return bool(urllib.parse.urlparse(str(path)).scheme)
+    scheme = urllib.parse.urlparse(str(path)).scheme
+    # Single-letter schemes are Windows drive letters (e.g., C:), not URLs
+    return bool(scheme) and len(scheme) > 1
 
 
 def parent_path(x: PathLike) -> PathLike:
@@ -121,4 +127,4 @@ def parent_path(x: PathLike) -> PathLike:
     if is_url(x):
         return urllib.parse.urljoin(x, "..")
 
-    return type(x)(Path(x).parent.as_posix())
+    return type(x)(str(Path(x).parent))

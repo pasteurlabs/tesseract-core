@@ -66,7 +66,9 @@ EXPECTED_OBJECTS = (
 
 def assert_relative_path(value: str) -> str:
     """Assert that a string encodes a relative path."""
-    if Path(value).is_absolute():
+    from pathlib import PurePosixPath, PureWindowsPath
+
+    if PurePosixPath(value).is_absolute() or PureWindowsPath(value).is_absolute():
         raise ValueError(f"value must be a relative path (got {value})")
     return value
 
