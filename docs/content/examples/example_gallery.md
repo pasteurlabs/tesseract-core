@@ -55,8 +55,6 @@ Wrapping a Fortran heat equation solver. Demonstrates subprocess-based integrati
 :link: building-blocks/matlab.html
 
 Wrapping a MATLAB spring-mass-damper ODE solver. Demonstrates using the official MathWorks Docker image to run MATLAB code via `matlab -batch`.
-
-[View on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/_matlab_springmass)
 :::
 :::{grid-item-card} Package Data
 :link: building-blocks/packagedata.html
