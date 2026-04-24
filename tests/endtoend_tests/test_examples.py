@@ -105,6 +105,7 @@ TEST_CASES = {
     "file_io": Config(input_path="test_cases/testdata", output_path="__tmp_path__"),
     "metrics": Config(test_with_random_inputs=True),
     "qp_solve": Config(),
+    "bandedblock_cholmod": Config(),
     "tesseractreference": Config(),  # Can't test requests standalone; needs target Tesseract. Covered in separate test.
     "userhandling": Config(),
 }
