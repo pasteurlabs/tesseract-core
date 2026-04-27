@@ -6,6 +6,10 @@ End-to-end examples that show Tesseracts in action — from optimization workflo
 :maxdepth: 1
 :hidden:
 
+bayesian-inference.ipynb
+learned-closure.ipynb
+multiphysics-optimization.ipynb
+torch-primitive.ipynb
 data-assimilation-4dvar.ipynb
 lorenz_tesseract.md
 JAX Rosenbrock Minimization <https://si-tesseract.discourse.group/t/jax-based-rosenbrock-function-minimization/48>

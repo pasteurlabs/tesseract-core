@@ -70,12 +70,17 @@ intersphinx_mapping = {
     "numpy": ("http://docs.scipy.org/doc/numpy/", None),
 }
 
-templates_path = []
-exclude_patterns = ["build", "Thumbs.db", ".DS_Store"]
+templates_path = ["_templates"]
+exclude_patterns = ["build", "_build", "jupyter_execute", "Thumbs.db", ".DS_Store"]
 
 
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
+
+# The docs root is content/introduction/index.md, which owns all toctrees
+# and drives the sidebar. The landing page (landing.md) is an orphan page
+# that gets copied to index.html after build so it serves at the site root.
+root_doc = "content/introduction/index"
 
 html_theme = "furo"
 html_static_path = ["static"]
@@ -85,6 +90,18 @@ html_theme_options = {
     "sidebar_hide_name": True,
 }
 html_css_files = ["custom.css"]
+html_js_files = ["pipeline-animations.js"]
+
+
+# -- OpenGraph metadata (social cards) ---------------------------------------
+
+ogp_site_url = "https://docs.pasteurlabs.ai/projects/tesseract-core/latest/"
+ogp_site_name = "Tesseract"
+ogp_description_length = 200
+ogp_type = "article"
+ogp_image = (
+    "https://docs.pasteurlabs.ai/projects/tesseract-core/latest/_static/logo-light.png"
+)
 
 
 # -- Custom directives ----------------------------------------------------
@@ -104,10 +121,23 @@ def zip_examples_folder() -> None:
     assert archive_path.exists()
 
 
+def _copy_landing_to_index(app, exception) -> None:
+    """Copy landing.html to index.html so the landing page serves at /."""
+    if exception or app.builder.format != "html":
+        return
+    outdir = Path(app.outdir)
+    landing = outdir / "landing.html"
+    index = outdir / "index.html"
+    if landing.exists():
+        shutil.copy2(landing, index)
+
+
 def setup(app) -> None:
     """Sphinx setup function. Used to register custom stuff."""
     # HACK: We zip the examples folder here so that it can be downloaded
     zip_examples_folder()
+    # Copy landing page to index.html after build
+    app.connect("build-finished", _copy_landing_to_index)
 
 
 # -- Handle Jupyter notebooks ------------------------------------------------
