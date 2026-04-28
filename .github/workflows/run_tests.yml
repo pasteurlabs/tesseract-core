@@ -181,7 +181,7 @@ jobs:
         uses: actions/checkout@v6
 
       # Use Conda to install Python (setup-python action doesn't support ARM)
-      - uses: conda-incubator/setup-miniconda@v3
+      - uses: conda-incubator/setup-miniconda@v4
         with:
           auto-update-conda: true
           python-version: ${{ matrix.python-version }}
