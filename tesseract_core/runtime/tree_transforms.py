@@ -199,10 +199,20 @@ class LRUCache:
             return
         with self._lock:
             if key in self._cache:
-                self._cache.move_to_end(key)
+                if len(self._cache) > 1 and next(reversed(self._cache)) != key:
+                    self._cache.move_to_end(key)
             self._cache[key] = value
             while len(self._cache) > self._maxsize:
                 self._cache.popitem(last=False)
+
+    def get(self, key: bytes) -> Any | None:
+        """Return the value for *key* (marking it MRU), or ``None`` on a miss."""
+        with self._lock:
+            if key not in self._cache:
+                return None
+            if len(self._cache) > 1 and next(reversed(self._cache)) != key:
+                self._cache.move_to_end(key)
+            return self._cache[key]
 
     def pop(self, key: bytes) -> Any | None:
         """Remove and return the value for *key*, or ``None`` on a miss."""
