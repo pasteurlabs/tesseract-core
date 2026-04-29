@@ -710,6 +710,35 @@ class TestLRUCache:
         assert result[0] is value[0]
         np.testing.assert_array_equal(result[1]["template"], np.zeros(3))
 
+    def test_get_miss_returns_none(self):
+        cache = LRUCache(maxsize=2)
+        assert cache.get(b"nonexistent") is None
+
+    def test_get_does_not_consume(self):
+        cache = LRUCache(maxsize=1)
+        cache.put(b"k", "v")
+        assert cache.get(b"k") == "v"
+        assert cache.get(b"k") == "v"
+        assert cache.size == 1
+
+    def test_get_marks_mru(self):
+        """get() on an older entry should protect it from eviction on the next put."""
+        cache = LRUCache(maxsize=2)
+        cache.put(b"a", "value_a")
+        cache.put(b"b", "value_b")
+        # Touch "a" via get — should make it MRU.
+        assert cache.get(b"a") == "value_a"
+        # Adding "c" should now evict "b", not "a".
+        cache.put(b"c", "value_c")
+        assert cache.get(b"b") is None
+        assert cache.get(b"a") == "value_a"
+        assert cache.get(b"c") == "value_c"
+
+    def test_get_maxsize_zero_always_misses(self):
+        cache = LRUCache(maxsize=0)
+        cache.put(b"k", "v")
+        assert cache.get(b"k") is None
+
 
 class TestHashPytreeLeaves:
     """Test cases for hash_pytree_leaves."""
