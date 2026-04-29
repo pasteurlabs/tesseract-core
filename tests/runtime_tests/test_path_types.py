@@ -250,6 +250,38 @@ def test_input_path_accepts_path_object(path_dirs):
     assert m.f == input_dir / "file.txt"
 
 
+def test_output_path_stable_after_chdir(path_dirs, monkeypatch):
+    """os.chdir() after config init must not break OutputPath validation."""
+    _, output_dir = path_dirs
+    (output_dir / "result.txt").touch()
+
+    subdir = output_dir / "subdir"
+    subdir.mkdir()
+    monkeypatch.chdir(subdir)
+
+    class M(BaseModel):
+        out: OutputPath
+
+    model = M.model_validate({"out": str(output_dir / "result.txt")})
+    assert model.out == output_dir / "result.txt"
+
+
+def test_input_path_stable_after_chdir(path_dirs, monkeypatch):
+    """os.chdir() after config init must not break InputPath validation."""
+    input_dir, _ = path_dirs
+    (input_dir / "data.json").touch()
+
+    subdir = input_dir / "subdir"
+    subdir.mkdir()
+    monkeypatch.chdir(subdir)
+
+    class M(BaseModel):
+        inp: InputPath
+
+    model = M.model_validate({"inp": "data.json"})
+    assert model.inp == input_dir / "data.json"
+
+
 def test_output_path_accepts_path_object(path_dirs):
     _, output_dir = path_dirs
     (output_dir / "out.txt").touch()
