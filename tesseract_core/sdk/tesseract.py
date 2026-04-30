@@ -648,10 +648,21 @@ def _decode_array(
                 "Make sure output_path is set when using json+binref encoding."
             )
 
+        compression = encoded_arr["data"].get("compression")
+        compressed_size = encoded_arr["data"].get("compressed_size")
+
         # Read the binary data
         with open(full_path, "rb") as f:
             f.seek(offset)
-            data = f.read(num_bytes)
+            if compression is None:
+                data = f.read(num_bytes)
+            else:
+                data = f.read(compressed_size)
+
+        if compression is not None:
+            from tesseract_core.runtime.array_encoding import _decompress
+
+            data = _decompress(data, compression)
 
         arr = np.frombuffer(data, dtype=dtype)
     else:
