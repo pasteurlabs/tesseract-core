@@ -320,6 +320,28 @@ def test_decode_array_various_dtypes(dtype):
     assert decoded.dtype == original.dtype
 
 
+def test_decode_array_binref_lz4(tmp_path):
+    from tesseract_core.runtime.array_encoding import _compress
+
+    arr = np.array([1.0, 2.0, 3.0], dtype="float32")
+    blob = _compress(arr.tobytes(), "lz4")
+    bin_file = tmp_path / "data.bin"
+    bin_file.write_bytes(blob)
+
+    encoded = {
+        "shape": (3,),
+        "dtype": "float32",
+        "data": {
+            "buffer": "data.bin:0",
+            "encoding": "binref",
+            "compression": "lz4",
+            "compressed_size": len(blob),
+        },
+    }
+    decoded = _decode_array(encoded, output_path=tmp_path)
+    np.testing.assert_array_equal(decoded, arr, strict=True)
+
+
 def test_tree_map():
     tree = {
         "a": [10, 20],

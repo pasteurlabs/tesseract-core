@@ -71,6 +71,28 @@ def test_output_to_bytes_json_binref(output_data):
         _check_decoded_data(decoded, "binref")
 
 
+def test_output_to_bytes_json_binref_lz4(output_data):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        base_dir = Path(tmpdir)
+
+        result = output_to_bytes(
+            output_data, "json+binref", base_dir=base_dir, binref_compression="lz4"
+        )
+        assert isinstance(result, bytes)
+
+        decoded = json.loads(result.decode())
+        _check_decoded_data(decoded, "binref")
+        assert decoded["array"]["data"]["compression"] == "lz4"
+        assert "compressed_size" in decoded["array"]["data"]
+
+        roundtrip = OutputSchema.model_validate_json(
+            result, context={"base_dir": base_dir}
+        )
+        assert np.array_equal(roundtrip.array, output_data.array)
+        assert roundtrip.scalar == output_data.scalar
+        assert roundtrip.string == output_data.string
+
+
 def test_output_to_bytes_unsupported_format(output_data):
     with pytest.raises(ValueError, match="Unsupported format invalid"):
         with suppress_type_checks():
