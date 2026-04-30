@@ -3,6 +3,7 @@
 
 import re
 from collections.abc import Sequence
+from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any, Literal, TypeAlias, TypedDict, get_args
 from uuid import uuid4
@@ -18,6 +19,7 @@ from pydantic import (
     StrictStr,
     ValidationInfo,
     create_model,
+    model_validator,
 )
 from pydantic_core import PydanticCustomError
 
@@ -64,6 +66,7 @@ class ArrayDict(TypedDict):
 MAX_BINREF_BUFFER_SIZE = 100 * 1024 * 1024  # 100 MB
 
 
+@lru_cache(maxsize=1)
 def _lz4_frame():
     try:
         import lz4.frame
@@ -117,6 +120,13 @@ class BinrefArrayData(BaseModel):
     compression: Literal["lz4"] | None = None
     compressed_size: int | None = None
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def check_compressed_size(self) -> "BinrefArrayData":
+        """Require compressed_size when compression is set."""
+        if self.compression is not None and self.compressed_size is None:
+            raise ValueError("compressed_size is required when compression is set")
+        return self
 
 
 class JsonArrayData(BaseModel):
