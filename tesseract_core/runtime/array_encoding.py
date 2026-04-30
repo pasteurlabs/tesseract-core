@@ -64,6 +64,33 @@ class ArrayDict(TypedDict):
 MAX_BINREF_BUFFER_SIZE = 100 * 1024 * 1024  # 100 MB
 
 
+def _lz4_frame():
+    try:
+        import lz4.frame
+
+        return lz4.frame
+    except ImportError as err:
+        raise ImportError(
+            "lz4 is required for compression. Install with: pip install tesseract-core[compression]"
+        ) from err
+
+
+def _compress(data: bytes, compression: str | None) -> bytes:
+    if compression is None:
+        return data
+    if compression == "lz4":
+        return _lz4_frame().compress(data)
+    raise ValueError(f"Unknown compression: {compression}")
+
+
+def _decompress(data: bytes, compression: str | None) -> bytes:
+    if compression is None:
+        return data
+    if compression == "lz4":
+        return _lz4_frame().decompress(data)
+    raise ValueError(f"Unknown compression: {compression}")
+
+
 # Base classes for the different array encodings
 # The actual models are created dynamically based on the expected shape and dtype by get_array_model
 
@@ -87,6 +114,8 @@ class BinrefArrayData(BaseModel):
 
     buffer: StrictStr = Field(pattern=r"^.+?(\:\d+)?$")
     encoding: Literal["binref"]
+    compression: Literal["lz4"] | None = None
+    compressed_size: int | None = None
     model_config = ConfigDict(extra="forbid")
 
 
@@ -223,6 +252,7 @@ def _dump_binref_arraydict(
     subdir: Path | str | None,
     current_binref_uuid: str,
     max_file_size: int = MAX_BINREF_BUFFER_SIZE,
+    compression: str | None = None,
 ) -> tuple[ArrayDict, str]:
     """Dump array to json+binref encoded array dict."""
     target_name = f"{current_binref_uuid}.bin"
@@ -241,14 +271,19 @@ def _dump_binref_arraydict(
             target_name = join_paths(subdir, target_name)
         target_path = join_paths(base_dir, target_name)
 
-    write_to_path(_fast_tobytes(arr), target_path, append=True)
+    blob = _compress(_fast_tobytes(arr), compression)
+    write_to_path(blob, target_path, append=True)
     offset = current_size
 
+    data = {"buffer": f"{target_name}:{offset}", "encoding": "binref"}
+    if compression is not None:
+        data["compression"] = compression
+        data["compressed_size"] = len(blob)
     arraydict = {
         "object_type": "array",
         "shape": list(arr.shape),
         "dtype": arr.dtype.name,
-        "data": {"buffer": f"{target_name}:{offset}", "encoding": "binref"},
+        "data": data,
     }
     return arraydict, current_binref_uuid
 
@@ -308,10 +343,19 @@ def _load_binref_arraydict(val: ArrayDict, base_dir: str | Path | None) -> np.nd
     size = 1 if len(shape) == 0 else np.prod(shape)
     num_bytes = int(size * dtype.itemsize)
 
+    compression = val["data"].get("compression")
+    compressed_size = val["data"].get("compressed_size")
+
     if base_dir is not None:
         bufferpath = join_paths(base_dir, bufferpath)
 
-    buffer = read_from_path(bufferpath, offset=offset, length=num_bytes)
+    if compression is None:
+        buffer = read_from_path(bufferpath, offset=offset, length=num_bytes)
+    else:
+        buffer = _decompress(
+            read_from_path(bufferpath, offset=offset, length=compressed_size),
+            compression,
+        )
     return np.frombuffer(buffer, dtype=dtype).reshape(shape)
 
 
@@ -530,6 +574,7 @@ def encode_array(
             subdir=subdir,
             current_binref_uuid=context.get("__binref_uuid", str(uuid4())),
             max_file_size=context.get("max_file_size", MAX_BINREF_BUFFER_SIZE),
+            compression=context.get("binref_compression"),
         )
         context["__binref_uuid"] = new_binref_uuid
         return data
