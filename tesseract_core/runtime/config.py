@@ -4,7 +4,7 @@
 import ast
 import os
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, FilePath
 
@@ -33,6 +33,7 @@ class RuntimeConfig(BaseModel):
     output_path: str = "."
     output_format: supported_format_type = "json"
     output_file: str = ""
+    binref_compression: Literal["lz4"] | None = None
     mlflow_tracking_uri: str = ""
     mlflow_run_extra_args: Annotated[dict[str, Any], BeforeValidator(_eval_str)] = (
         Field(default_factory=dict)

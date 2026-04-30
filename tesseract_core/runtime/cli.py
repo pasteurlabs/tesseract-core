@@ -428,7 +428,12 @@ def _create_user_defined_cli_command(
             # so they go through stdio redirection to the log file
             profiler.print_stats()
 
-        result = output_to_bytes(result, output_format, output_path)
+        result = output_to_bytes(
+            result,
+            output_format,
+            output_path,
+            binref_compression=config.binref_compression,
+        )
 
         # write raw bytes to out_stream.buffer to support binary data (which may e.g. be piped)
         if not output_file:

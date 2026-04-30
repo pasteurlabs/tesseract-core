@@ -335,6 +335,47 @@ def test_outputs_to_local_file(
         raise AssertionError(f"Unexpected output format: {output_format}")
 
 
+def test_apply_command_binref_lz4(cli, cli_runner, tmpdir, dummy_tesseract_module):
+    """Test that TESSERACT_BINREF_COMPRESSION=lz4 produces compressed binref output."""
+    tmpdir = Path(tmpdir)
+    result = cli_runner.invoke(
+        cli,
+        [
+            "--output-path",
+            tmpdir,
+            "--output-format",
+            "json+binref",
+            "apply",
+            json.dumps({"inputs": test_input}),
+        ],
+        env={"TESSERACT_BINREF_COMPRESSION": "lz4"},
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0, result.stderr
+
+    output = json.loads(result.stdout)
+    # Find any array field and verify compression metadata is present
+    arrays = [
+        v
+        for v in output.values()
+        if isinstance(v, dict) and v.get("object_type") == "array"
+    ]
+    assert arrays, "Expected at least one array in output"
+    for arr in arrays:
+        assert arr["data"]["encoding"] == "binref"
+        assert arr["data"]["compression"] == "lz4"
+        assert "compressed_size" in arr["data"]
+
+    # Verify the data roundtrips correctly
+    test_input_val = dummy_tesseract_module.InputSchema.model_validate(test_input)
+    expected = dummy_tesseract_module.apply(test_input_val)
+    roundtrip = dummy_tesseract_module.OutputSchema.model_validate_json(
+        result.stdout, context={"base_dir": tmpdir}
+    )
+    for field in expected.model_fields:
+        assert np.array_equal(getattr(roundtrip, field), getattr(expected, field))
+
+
 @pytest.mark.parametrize(
     "test_server",
     [
