@@ -140,3 +140,13 @@ $ curl \
 The `.bin` file references are relative to the `--output-path`.
 :::
 ::::
+
+### binref + lz4 compression
+
+Set `TESSERACT_BINREF_COMPRESSION=lz4` to compress arrays in `.bin` files (requires `pip install tesseract-core[compression]`). Each array is compressed individually, preserving offset-based random access.
+
+```bash
+$ TESSERACT_BINREF_COMPRESSION=lz4 tesseract run vectoradd apply -f "json+binref" -o /tmp/output @examples/vectoradd/example_inputs.json
+$ cat /tmp/output/results.json
+{"result":{"object_type":"array","shape":[3],"dtype":"float64","data":{"buffer":"....bin:0","encoding":"binref","compression":"lz4","compressed_size":35}}}
+```
