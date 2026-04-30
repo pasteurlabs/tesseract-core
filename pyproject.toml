@@ -31,6 +31,8 @@ tesseract-core = "tesseract_core.sdk.cli:entrypoint"
 tesseract-runtime = "tesseract_core.runtime.cli:main"
 
 [project.optional-dependencies]
+compression = ["lz4"]
+
 
 # RUNTIME DEPENDENCIES
 # These are the only dependencies that are installed into Tesseract containers, so may contain duplicates of deps above.
