@@ -1,5 +1,7 @@
 # Packaging local files into a Tesseract
 
+[View on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/package_data)
+
 ## Context
 
 You may need to include local files into your Tesseract, e.g. if we want to load in pretrained model weights, or artifacts that we may need access to. This guide will demonstrate how.

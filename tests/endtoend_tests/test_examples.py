@@ -102,7 +102,7 @@ TEST_CASES = {
     "fortran_heat": Config(),
     "conda": Config(),
     "required_files": Config(input_path="input"),
-    "filereference": Config(input_path="test_cases/testdata", output_path="output"),
+    "file_io": Config(input_path="test_cases/testdata", output_path="__tmp_path__"),
     "metrics": Config(test_with_random_inputs=True),
     "qp_solve": Config(),
     "tesseractreference": Config(),  # Can't test requests standalone; needs target Tesseract. Covered in separate test.
@@ -171,10 +171,9 @@ def fix_fake_arrays(fakedata, seed=42):
 
 def example_from_json_schema(schema):
     """Generate a random example JSON object from a JSON schema."""
-    import jsf
+    from schema_example_generator import generate_example
 
-    faker = jsf.JSF(schema)
-    payload = faker.generate()
+    payload = generate_example(schema)
     payload = fix_fake_arrays(payload)
     return payload
 
@@ -187,6 +186,7 @@ def test_unit_tesseract_endtoend(
     unit_tesseract_config,
     free_port,
     docker_cleanup,
+    tmp_path,
 ):
     """Test that unit Tesseract images can be built and used to serve REST API."""
     from tesseract_core.sdk.cli import app
@@ -216,8 +216,7 @@ def test_unit_tesseract_endtoend(
 
     def _input_schema_from_openapi(openapi_schema):
         input_schema = openapi_schema["components"]["schemas"]["ApplyInputSchema"]
-        # For some reason, jsf can't handle #/components/schemas/<x> references,
-        # so we convert them to #$defs/<x>
+        # Convert OpenAPI-style references to JSON Schema $defs
         input_schema.update({"$defs": openapi_schema["components"]["schemas"]})
         input_schema["$defs"].pop("ApplyInputSchema", None)
         input_schema = json.loads(
@@ -247,12 +246,12 @@ def test_unit_tesseract_endtoend(
             ]
         )
     if unit_tesseract_config.output_path:
-        output_args.extend(
-            [
-                "--output-path",
-                str(unit_tesseract_path / unit_tesseract_config.output_path),
-            ]
-        )
+        if unit_tesseract_config.output_path == "__tmp_path__":
+            output_dir = tmp_path / "output"
+            output_dir.mkdir()
+        else:
+            output_dir = unit_tesseract_path / unit_tesseract_config.output_path
+        output_args.extend(["--output-path", str(output_dir)])
 
     if unit_tesseract_config.test_with_random_inputs:
         random_input = example_from_json_schema(input_schema)

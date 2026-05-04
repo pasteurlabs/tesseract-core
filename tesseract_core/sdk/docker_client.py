@@ -1248,16 +1248,20 @@ def build_docker_image(
     build_args = dict(path=path, tags=tags, dockerfile=dockerfile)
 
     if inject_ssh:
-        ssh_sock = os.environ.get("SSH_AUTH_SOCK")
-        if ssh_sock is None:
-            raise ValueError(
-                "SSH_AUTH_SOCK environment variable not set (try running `ssh-agent`)"
-            )
-
         ssh_keys = subprocess.run(["ssh-add", "-L"], capture_output=True)
         if ssh_keys.returncode != 0 or not ssh_keys.stdout:
             raise ValueError("No SSH keys found in SSH agent (try running `ssh-add`)")
-        build_args["ssh"] = f"default={ssh_sock}"
+
+        if sys.platform == "win32":
+            # On Windows, Docker Desktop connects to the SSH agent directly
+            build_args["ssh"] = "default"
+        else:
+            ssh_sock = os.environ.get("SSH_AUTH_SOCK")
+            if ssh_sock is None:
+                raise ValueError(
+                    "SSH_AUTH_SOCK environment variable not set (try running `ssh-agent`)"
+                )
+            build_args["ssh"] = f"default={ssh_sock}"
 
     build_cmd = Images._get_buildx_command(**build_args)
 

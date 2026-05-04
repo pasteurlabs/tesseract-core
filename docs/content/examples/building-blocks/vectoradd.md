@@ -1,5 +1,7 @@
 # VectorAdd
 
+[View on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/vectoradd)
+
 ## Context
 
 Example using vector add with differentiable inputs and jacobians.

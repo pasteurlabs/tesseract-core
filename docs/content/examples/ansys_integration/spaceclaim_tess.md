@@ -1,5 +1,7 @@
 # Wrapping SpaceClaim as a Tesseract
 
+[View on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/demo/_showcase/ansys-shapeopt/spaceclaim)
+
 This guide outlines how to wrap Ansys SpaceClaim as a Tesseract. For this, we will use [non-containerized execution](project:#running-without-containers) to start an HTTP server that dispatches requests to SpaceClaim through SpaceClaim scripts (`.scscript`).
 
 ```{seealso}
@@ -58,9 +60,8 @@ So instead of using the more common `tesseract build`, we install and use the `t
 $ pip install tesseract-core[runtime]
 ```
 
-```{warning}
-Windows is officially only supported via Windows Subsystem for Linux (WSL), see [](#windows-support).
-Make sure to use an appropriate WSL setup when running into issues.
+```{note}
+Windows is natively supported. If you run into performance issues, consider using [WSL](https://docs.microsoft.com/en-us/windows/wsl/) to avoid Docker Desktop's virtualization overhead (see [](#windows-support)).
 ```
 
 Now with an a open port of your choice, and from within the Tesseract directory, we can execute:
