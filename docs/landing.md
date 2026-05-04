@@ -29,8 +29,8 @@ html_class: landing-page
 
 **Universal components for differentiable scientific computing**
 
-Scientific simulators are hard to share, hard to compose, and hard to differentiate through.
-Tesseract packages any operation &mdash; like simulators, preprocessors, and other computational routines &mdash; into a portable, self-documenting component with gradients built in.
+Differentiable workflows often span multiple languages, frameworks, and autodiff strategies.
+Tesseract packages any computational routine &mdash; solvers, meshers, data transforms, geometric operators, postprocessors &mdash; into a portable, self-documenting component with gradient support.
 Open source under the Apache License, published in [JOSS](https://doi.org/10.21105/joss.08385).
 
 :::{div} landing-cta
@@ -49,8 +49,7 @@ Open source under the Apache License, published in [JOSS](https://doi.org/10.211
 ## Why Tesseract
 
 :::{div} section-intro
-Tesseract grew out of the need to compose (differentiable) research software into end-to-end pipelines, where each has its own language, framework, and
-differentiation strategy.
+Tesseract is built for differentiable systems: solver-in-the-loop training, simulation-based inference, shape & topology optimization, learned closures, surrogate modeling, and optimal control.
 :::
 
 ::::{grid} 1 2 3 3
@@ -60,22 +59,21 @@ differentiation strategy.
 :class-card: feature-card
 
 Same container, same results: laptop, cloud, or HPC cluster.
-No dependency conflicts, no version mismatches.
+Avoid dependency conflicts and version mismatches.
 :::
 
 :::{grid-item-card} End-to-end gradients
 :class-card: feature-card
 
-Differentiate across heterogeneous pipelines, even through
-black-box solvers. Mix autodiff, analytic adjoints, and finite
-differences freely.
+Differentiate across heterogeneous pipelines. Mix autodiff, analytic adjoints, and finite
+differences freely, with full support for forward and reverse-mode AD.
 :::
 
 :::{grid-item-card} Any language
 :class-card: feature-card
 
 Fortran, C++, Julia, JAX, PyTorch, or shell scripts.
-Python is the interface layer; your solver stays in its native language.
+Python is the interface layer, your code stays in its native language.
 :::
 
 :::{grid-item-card} JAX native
@@ -95,8 +93,7 @@ Inspect any Tesseract without reading its source.
 :::{grid-item-card} Community-driven
 :class-card: feature-card
 
-Created at [Pasteur Labs](https://pasteurlabs.ai), developed with and for the community.
-Apache licensed. No vendor lock-in, no proprietary dependencies.
+Created at [Pasteur Labs](https://pasteurlabs.ai), developed with and for the community (Apache licensed).
 :::
 
 ::::
@@ -135,9 +132,11 @@ class OutputSchema(BaseModel):
     y: Differentiable[Array[(None,), Float64]]
 
 def apply(inputs: InputSchema) -> OutputSchema:
+    # Replace with your solver, operator, or model call
     return OutputSchema(y=inputs.x ** 2)
 
 def jacobian(inputs: InputSchema, jac_inputs, jac_outputs):
+    # Use autodiff, analytic gradients, finite differences, ...
     return {"y": {"x": np.diag(2 * inputs.x)}}
 ```
 
