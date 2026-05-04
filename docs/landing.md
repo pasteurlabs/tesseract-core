@@ -30,8 +30,8 @@ html_class: landing-page
 **Universal components for differentiable scientific computing**
 
 Differentiable workflows often span multiple languages, frameworks, and autodiff strategies.
-Tesseract packages any computational routine &mdash; solvers, meshers, data transforms, geometric operators, postprocessors &mdash; into a portable, self-documenting component with gradient support.
-Open source under the Apache License, published in [JOSS](https://doi.org/10.21105/joss.08385).
+Tesseract packages any computational routine into a portable, self-documenting component with gradient support &mdash; enabling end-to-end differentiable systems for optimization, inference, and training.
+Open source, published in [JOSS](https://doi.org/10.21105/joss.08385).
 
 :::{div} landing-cta
 {bdg-ref-primary-line}`Install <content/introduction/installation>`
@@ -49,24 +49,17 @@ Open source under the Apache License, published in [JOSS](https://doi.org/10.211
 ## Why Tesseract
 
 :::{div} section-intro
-Tesseract is built for differentiable systems: solver-in-the-loop training, simulation-based inference, shape & topology optimization, learned closures, surrogate modeling, and optimal control.
+Tesseract is built for differentiable systems: solver-in-the-loop training, simulation-based inference, shape & topology optimization, learned closures, surrogate modeling, optimal control, ...
 :::
 
 ::::{grid} 1 2 3 3
 :gutter: 4
 
-:::{grid-item-card} Run anywhere
-:class-card: feature-card
-
-Same container, same results: laptop, cloud, or HPC cluster.
-Avoid dependency conflicts and version mismatches.
-:::
-
 :::{grid-item-card} End-to-end gradients
 :class-card: feature-card
 
 Differentiate across heterogeneous pipelines. Mix autodiff, analytic adjoints, and finite
-differences freely, with full support for forward and reverse-mode AD.
+differences freely.
 :::
 
 :::{grid-item-card} Any language
@@ -83,11 +76,17 @@ Every Tesseract becomes a JAX primitive,
 with full support for `grad`, `jit`, and `vmap`.
 :::
 
+:::{grid-item-card} Run anywhere
+:class-card: feature-card
+
+Same container, same results: laptop, cloud, or HPC cluster. Avoid dependency conflicts and version mismatches; share a Tesseract and get identical results.
+:::
+
 :::{grid-item-card} Self-documenting
 :class-card: feature-card
 
 Schemas, types, and API docs are generated from your code.
-Inspect any Tesseract without reading its source.
+Inspect any Tesseract's inputs, outputs, and differentiable fields without reading its source.
 :::
 
 :::{grid-item-card} Community-driven
@@ -121,9 +120,9 @@ or Python SDK.
 # tesseract_api.py
 import numpy as np
 from pydantic import BaseModel
-from tesseract_core.runtime import (
-    Array, Differentiable, Float64,
-)
+from tesseract_core.runtime import Array
+from tesseract_core.runtime import Differentiable
+from tesseract_core.runtime import Float64
 
 class InputSchema(BaseModel):
     x: Differentiable[Array[(None,), Float64]]
@@ -132,11 +131,13 @@ class OutputSchema(BaseModel):
     y: Differentiable[Array[(None,), Float64]]
 
 def apply(inputs: InputSchema) -> OutputSchema:
-    # Replace with your solver, operator, or model call
+    # Replace with your FEM solver, mesh generator,
+    # or neural surrogate
     return OutputSchema(y=inputs.x ** 2)
 
 def jacobian(inputs: InputSchema, jac_inputs, jac_outputs):
-    # Use autodiff, analytic gradients, finite differences, ...
+    # Use autodiff, analytic gradients,
+    # finite differences, ...
     return {"y": {"x": np.diag(2 * inputs.x)}}
 ```
 
