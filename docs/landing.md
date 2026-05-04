@@ -34,9 +34,9 @@ Tesseract packages any operation &mdash; like simulators, preprocessors, and oth
 Open source under the Apache License, published in [JOSS](https://doi.org/10.21105/joss.08385).
 
 :::{div} landing-cta
-{bdg-ref-primary-line}`Get Started <content/introduction/get-started>`
 {bdg-ref-primary-line}`Install <content/introduction/installation>`
-{bdg-link-primary-line}`GitHub <https://github.com/pasteurlabs/tesseract-core>`
+{bdg-ref-primary-line}`Get Started <content/introduction/get-started>`
+{bdg-ref-primary-line}`Demos <content/demo/demo>`
 :::
 
 :::

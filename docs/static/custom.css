@@ -432,12 +432,40 @@ body:not([data-theme="dark"]) .landing-logo.only-dark {
     justify-content: center;
     flex-wrap: wrap;
     margin-bottom: 0;
+    align-items: center;
 }
 
 .landing-cta .sd-badge {
     padding: 0.5rem 1.25rem;
     font-size: 0.95rem;
     border-radius: 6px;
+}
+
+/* GitHub Star button — theme toggle & alignment.
+   Uses the same pattern as the landing logos: two variants, toggle via
+   body[data-theme] and prefers-color-scheme for "auto" mode. */
+.github-star-light,
+.github-star-dark {
+    display: inline-flex;
+    align-items: center;
+    height: 28px; /* match github-buttons large iframe height */
+}
+.github-star-light > span,
+.github-star-dark > span {
+    display: inline-flex !important;
+    align-items: center;
+    height: 28px;
+}
+.github-star-dark { display: none; }
+body[data-theme="dark"] .github-star-light { display: none; }
+body[data-theme="dark"] .github-star-dark { display: inline-flex; }
+@media (prefers-color-scheme: dark) {
+    body[data-theme="auto"] .github-star-light { display: none; }
+    body[data-theme="auto"] .github-star-dark { display: inline-flex; }
+}
+@media (prefers-color-scheme: light) {
+    body[data-theme="auto"] .github-star-dark { display: none; }
+    body[data-theme="auto"] .github-star-light { display: inline-flex; }
 }
 
 

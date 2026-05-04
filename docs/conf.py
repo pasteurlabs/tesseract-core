@@ -92,6 +92,10 @@ html_theme_options = {
     "sidebar_hide_name": True,
 }
 html_css_files = ["custom.css"]
+html_js_files = [
+    ("https://buttons.github.io/buttons.js", {"async": "async"}),
+    "external-links.js",
+]
 html_baseurl = "https://docs.pasteurlabs.ai/projects/tesseract-core/latest/"
 sitemap_url_scheme = (
     "{link}"  # ReadTheDocs handles versioning; don't add language/version prefix
