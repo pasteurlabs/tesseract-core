@@ -36,9 +36,9 @@ pip==26.1
     # via tesseract-core
 pybase64==1.4.3
     # via tesseract-core
-pydantic==2.12.4
+pydantic==2.13.3
     # via tesseract-core
-pydantic-core==2.41.5
+pydantic-core==2.46.3
     # via pydantic
 pygments==2.20.0
     # via rich
@@ -52,7 +52,7 @@ rich==15.0.0
     #   typer
 shellingham==1.5.4
     # via typer
-typer==0.25.0
+typer==0.25.1
     # via tesseract-core
 typing-extensions==4.15.0
     # via
