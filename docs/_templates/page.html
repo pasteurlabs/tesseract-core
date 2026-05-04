@@ -44,4 +44,21 @@
 <script>document.body.classList.add("{{ meta["html_class"] }}");</script>
 {% endif %}
 {{ super() }}
+<script>
+// Dynamically offset sidebars so they don't overlap the top-nav.
+// When the nav scrolls out of view the offset shrinks to 0.
+(function () {
+  var nav = document.querySelector(".top-nav");
+  if (!nav) return;
+  var root = document.documentElement;
+  function update() {
+    var rect = nav.getBoundingClientRect();
+    var visible = Math.max(0, rect.bottom);
+    root.style.setProperty("--top-nav-offset", visible + "px");
+  }
+  update();
+  document.addEventListener("scroll", update, { passive: true });
+  window.addEventListener("resize", update, { passive: true });
+})();
+</script>
 {% endblock %}

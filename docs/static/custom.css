@@ -247,6 +247,15 @@ body[data-theme="dark"] .top-nav-dropdown-menu {
 }
 
 
+/* ===== Offset Furo sidebars below the sticky top-nav ===== */
+
+.sidebar-sticky,
+.toc-sticky {
+    top: calc(var(--top-nav-offset, 0px) + 0.5rem);
+    max-height: calc(100vh - var(--top-nav-offset, 0px) - 0.5rem);
+}
+
+
 /* ===== Landing page layout ===== */
 
 .landing-page .sidebar-drawer,
