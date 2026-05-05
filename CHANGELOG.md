@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.8.1] - 2026-05-05
+
+### Bug Fixes
+
+- Bug when using chdir with OutputPath (#578)
+- OutputFileReference validation was broken (#581)
+
+### Documentation
+
+- Move unclickable GH links to example subpages (#570)
+
 ## [1.8.0] - 2026-04-22
 
 ### Features
