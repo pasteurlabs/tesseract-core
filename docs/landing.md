@@ -58,7 +58,7 @@ Tesseract is built for differentiable systems: solver-in-the-loop training, simu
 :::{grid-item-card} End-to-end gradients
 :class-card: feature-card
 
-Differentiate through your entire pipeline, even when components use different autodiff frameworks.
+Differentiate through your entire pipeline, no matter how gradients are computed.
 Mix analytic adjoints, autodiff, and finite differences freely.
 :::
 
