@@ -40,8 +40,16 @@ class ListPathModel(BaseModel):
 
 def test_json_schema_basic():
     schema = PathModel.model_json_schema()
-    assert schema["properties"]["inp"] == {"title": "Inp", "type": "string"}
-    assert schema["properties"]["out"] == {"title": "Out", "type": "string"}
+    assert schema["properties"]["inp"] == {
+        "title": "Inp",
+        "type": "string",
+        "format": "path",
+    }
+    assert schema["properties"]["out"] == {
+        "title": "Out",
+        "type": "string",
+        "format": "path",
+    }
     assert set(schema["required"]) == {"inp", "out"}
 
 
@@ -50,6 +58,7 @@ def test_json_schema_in_list():
     inp_prop = schema["properties"]["inputs"]
     assert inp_prop["type"] == "array"
     assert inp_prop["items"]["type"] == "string"
+    assert inp_prop["items"]["format"] == "path"
 
 
 def test_json_schema_with_annotated_validator():
@@ -64,7 +73,9 @@ def test_json_schema_with_annotated_validator():
 
     schema = M.model_json_schema()
     assert schema["properties"]["inp"]["type"] == "string"
+    assert schema["properties"]["inp"]["format"] == "path"
     assert schema["properties"]["out"]["type"] == "string"
+    assert schema["properties"]["out"]["format"] == "path"
 
 
 # -- InputPath validation --
