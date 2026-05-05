@@ -1,0 +1,10 @@
+name: filereference
+version: "1.0.0"
+description: |
+  Tesseract that loads data from a folder using the deprecated
+  InputFileReference / OutputFileReference types. New code should use
+  InputPath / OutputPath instead (see examples/file_io).
+
+build_config:
+  package_data: []
+  custom_build_steps: []
