@@ -27,10 +27,10 @@ html_class: landing-page
 
 :::{div} landing-hero-text
 
-**Universal components for differentiable scientific computing**
+**End-to-end differentiable pipelines for scientific computing**
 
-Differentiable workflows often span multiple languages, frameworks, and autodiff strategies.
-Tesseract packages any computational routine into a portable, self-documenting component with gradient support &mdash; enabling end-to-end differentiable systems for optimization, inference, and training.
+Tesseract packages any computational routine &mdash; in any language, with your choice of gradient implementation &mdash; into a containerized component.
+Compose solvers, geometry ops, and ML models into pipelines with gradients flowing across every boundary.
 Open source, published in [JOSS](https://doi.org/10.21105/joss.08385).
 
 :::{div} landing-cta
@@ -58,15 +58,15 @@ Tesseract is built for differentiable systems: solver-in-the-loop training, simu
 :::{grid-item-card} End-to-end gradients
 :class-card: feature-card
 
-Differentiate across heterogeneous pipelines. Mix autodiff, analytic adjoints, and finite
-differences freely.
+Differentiate through your entire pipeline, even when components use different autodiff frameworks.
+Mix analytic adjoints, autodiff, and finite differences freely.
 :::
 
 :::{grid-item-card} Any language
 :class-card: feature-card
 
 Fortran, C++, Julia, JAX, PyTorch, or shell scripts.
-Python is the interface layer, your code stays in its native language.
+Your code stays in its native language and runs at native speed. Python is only the glue.
 :::
 
 :::{grid-item-card} JAX native
@@ -79,20 +79,21 @@ with full support for `grad`, `jit`, and `vmap`.
 :::{grid-item-card} Run anywhere
 :class-card: feature-card
 
-Same container, same results: laptop, cloud, or HPC cluster. Avoid dependency conflicts and version mismatches; share a Tesseract and get identical results.
+Share a Tesseract, get identical results — on any laptop, cloud, or HPC cluster.
+No dependency conflicts, no version mismatches.
 :::
 
 :::{grid-item-card} Self-documenting
 :class-card: feature-card
 
 Schemas, types, and API docs are generated from your code.
-Inspect any Tesseract's inputs, outputs, and differentiable fields without reading its source.
+Know exactly what any Tesseract expects and returns — without reading its source.
 :::
 
 :::{grid-item-card} Community-driven
 :class-card: feature-card
 
-Created at [Pasteur Labs](https://pasteurlabs.ai), developed with and for the community (Apache licensed).
+Created at [Pasteur Labs](https://pasteurlabs.ai), developed with and for the community. Open source under Apache License 2.0.
 :::
 
 ::::
@@ -104,8 +105,8 @@ Created at [Pasteur Labs](https://pasteurlabs.ai), developed with and for the co
 
 :::{div} section-intro
 Define a differentiable component in `tesseract_api.py`, build it into a
-container, and call it, including its gradients, from the CLI, REST API,
-or Python SDK.
+container, and call it — including its gradients — from the CLI, REST API,
+or Python SDK. Compose multiple Tesseracts into end-to-end differentiable pipelines.
 :::
 
 :::::::{grid} 1 1 2 2
@@ -279,8 +280,8 @@ Tesseract Core is the foundation. Additional packages extend its capabilities.
 :link-type: doc
 :class-card: ecosystem-card
 
-CLI, Python SDK, and container runtime. The building blocks for creating
-and running Tesseracts.
+CLI, Python SDK, and container runtime for wrapping and running
+differentiable components.
 :::
 
 :::{grid-item-card} Tesseract-JAX
@@ -307,9 +308,9 @@ code required.
 ## Get Involved
 
 :::{div} section-intro
-Tesseract is an open-source project and we welcome contributions of all kinds:
-bug reports, new Tesseract implementations, documentation improvements, or
-feature proposals.
+Tesseract is an open-source project. Build something cool with Tesseract and
+[share it on the forum](https://si-tesseract.discourse.group/c/showcase/11) — or contribute
+bug reports, docs improvements, and feature proposals.
 :::
 
 :::{div} landing-cta
@@ -329,24 +330,24 @@ feature proposals.
 - {doc}`Get Started <content/introduction/get-started>`
 - {doc}`Installation <content/introduction/installation>`
 - {doc}`API Reference <content/api/tesseract-api>`
-- [JOSS Paper](https://doi.org/10.21105/joss.08385)
-- [Changelog](https://github.com/pasteurlabs/tesseract-core/releases)
+- [JOSS Paper ↗](https://doi.org/10.21105/joss.08385)
+- [Changelog ↗](https://github.com/pasteurlabs/tesseract-core/releases)
   :::
 
 :::{grid-item}
 **Community**
 
-- [Forums](https://si-tesseract.discourse.group/)
-- [GitHub](https://github.com/pasteurlabs/tesseract-core)
-- [Contributing](https://github.com/pasteurlabs/tesseract-core/blob/main/CONTRIBUTING.md)
-- [Code of Conduct](https://github.com/pasteurlabs/tesseract-core/blob/main/CODE_OF_CONDUCT.md)
+- [Forums ↗](https://si-tesseract.discourse.group/)
+- [GitHub ↗](https://github.com/pasteurlabs/tesseract-core)
+- [Contributing ↗](https://github.com/pasteurlabs/tesseract-core/blob/main/CONTRIBUTING.md)
+- [Code of Conduct ↗](https://github.com/pasteurlabs/tesseract-core/blob/main/CODE_OF_CONDUCT.md)
   :::
 
 :::{grid-item}
 **About**
 
-- Created at [Pasteur Labs](https://pasteurlabs.ai)
-- Open source — [Apache License](https://github.com/pasteurlabs/tesseract-core/blob/main/LICENSE)
+- Created at [Pasteur Labs ↗](https://pasteurlabs.ai)
+- Open source — [Apache License ↗](https://github.com/pasteurlabs/tesseract-core/blob/main/LICENSE)
   :::
 
 ::::
