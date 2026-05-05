@@ -87,7 +87,7 @@ No dependency conflicts, no version mismatches.
 :class-card: feature-card
 
 Schemas, types, and API docs are generated from your code.
-Know exactly what any Tesseract expects and returns — without reading its source.
+Know exactly what any Tesseract expects and returns without reading its source.
 :::
 
 :::{grid-item-card} Community-driven
@@ -309,7 +309,7 @@ code required.
 
 :::{div} section-intro
 Tesseract is an open-source project. Build something cool with Tesseract and
-[share it on the forum](https://si-tesseract.discourse.group/c/showcase/11) — or contribute
+[share it on the forum](https://si-tesseract.discourse.group/c/showcase/11) or contribute
 bug reports, docs improvements, and feature proposals.
 :::
 
