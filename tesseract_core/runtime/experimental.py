@@ -351,27 +351,36 @@ class OutputPath(Path):
         )
 
 
-def _resolve_input_file(path: Path) -> Path:
+def _resolve_input_file(path: Path, info: ValidationInfo) -> Path:
     warnings.warn(
         "InputFileReference is deprecated, use InputPath instead.",
         DeprecationWarning,
         stacklevel=2,
     )
-    tess_path = InputPath._resolve(path, None)
-    if not tess_path.is_file():
+    tess_path = InputPath._resolve(path, info)
+    ctx = info.context if info else None
+    skip = ctx.get("skip_path_checks", False) if ctx else False
+    if not skip and not tess_path.is_file():
         raise ValueError(f"Input path {tess_path} is not a file.")
     return tess_path
 
 
-def _strip_output_file(path: Path) -> Path:
+def _strip_output_file(path: Path, info: ValidationInfo) -> Path:
     warnings.warn(
         "OutputFileReference is deprecated, use OutputPath instead.",
         DeprecationWarning,
         stacklevel=2,
     )
-    if not path.is_file():
+    ctx = info.context if info else None
+    skip = ctx.get("skip_path_checks", False) if ctx else False
+    # Resolve relative paths against output_path so the file check works on
+    # both absolute paths returned from apply() and on relative paths that
+    # come back through a re-validation pass.
+    output_path = Path(get_config().output_path).resolve()
+    resolved = (output_path / path).resolve() if not path.is_absolute() else path
+    if not skip and not resolved.is_file():
         raise ValueError(f"Output path {path} is not a file.")
-    return Path(OutputPath._serialize(path))
+    return Path(OutputPath._serialize(resolved))
 
 
 InputFileReference = Annotated[Path, AfterValidator(_resolve_input_file)]
