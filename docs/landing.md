@@ -29,7 +29,7 @@ html_class: landing-page
 
 **End-to-end differentiable pipelines for scientific computing**
 
-Tesseract packages any computational routine &mdash; in any language, with your choice of gradient implementation &mdash; into a containerized component.
+Tesseract packages any computational routine &mdash; in any language, with your choice of gradient implementation &mdash; into a differentiable containerized component.
 Compose solvers, geometry ops, and ML models into pipelines with gradients flowing across every boundary.
 Open source, published in [JOSS](https://doi.org/10.21105/joss.08385).
 
@@ -66,7 +66,7 @@ Mix analytic adjoints, autodiff, and finite differences freely.
 :class-card: feature-card
 
 Fortran, C++, Julia, JAX, PyTorch, or shell scripts.
-Your code stays in its native language and runs at native speed. Python is only the glue.
+Your code stays in its native language, Python is the glue.
 :::
 
 :::{grid-item-card} JAX native
