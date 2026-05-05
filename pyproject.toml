@@ -63,7 +63,8 @@ docs = [
     "autodoc_pydantic",
     "sphinx_design",
     "sphinx_copybutton",
-    "sphinxext_opengraph",
+    "sphinxext_opengraph[social_cards]",
+    "sphinx-sitemap",
     "tesseract-core[runtime]",
 ]
 dev = [
@@ -195,6 +196,7 @@ ignore = [
 "tests/*" = ["D101", "D102", "D103", "D106", "ANN"]
 "benchmarks/*" = ["D101", "D102", "D103", "D106", "ANN"]
 "examples/**/*" = ["D101", "D102", "D103", "D106", "ANN"]
+"demo/**/*" = ["D101", "D102", "D103", "D106", "ANN"]
 "tesseract_core/sdk/templates/*" = ["D101", "D102", "D103", "D106", "ANN"]
 
 [tool.ruff.lint.pydocstyle]

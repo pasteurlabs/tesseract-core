@@ -1,3 +1,5 @@
+/* ===== Existing styles ===== */
+
 .sidebar-logo {
     width: 180px;
 }
@@ -17,4 +19,736 @@
 figure.align-default {
     margin-top: 2em;
     margin-bottom: 2em;
+}
+
+
+/* ===== Top navigation bar (all pages) ===== */
+
+.top-nav {
+    background: var(--color-background-secondary);
+    border-bottom: 1px solid var(--color-background-border);
+    padding: 0.6rem 1.5rem;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+}
+
+.top-nav-inner {
+    max-width: 1200px;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.top-nav-brand {
+    font-weight: 700;
+    font-size: 1.15rem;
+    color: var(--color-foreground-primary) !important;
+    text-decoration: none !important;
+}
+
+.top-nav-brand:hover {
+    color: var(--color-foreground-primary) !important;
+    text-decoration: none !important;
+    opacity: 0.8;
+}
+
+.top-nav-brand:visited {
+    color: var(--color-foreground-primary) !important;
+}
+
+.top-nav-links {
+    display: flex;
+    gap: 1.5rem;
+    align-items: center;
+}
+
+.top-nav-links a {
+    color: var(--color-foreground-secondary);
+    text-decoration: none;
+    font-size: 0.9rem;
+    font-weight: 500;
+    transition: color 0.15s;
+}
+
+.top-nav-links a:hover {
+    color: var(--color-brand-primary);
+    text-decoration: none;
+}
+
+/* Docs dropdown */
+.top-nav-dropdown {
+    position: relative;
+}
+
+button.top-nav-dropdown-trigger {
+    background: none;
+    border: none;
+    padding: 0;
+    font: inherit;
+    color: var(--color-foreground-secondary);
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: color 0.15s;
+}
+
+button.top-nav-dropdown-trigger:hover {
+    color: var(--color-brand-primary);
+}
+
+.top-nav-dropdown-trigger::after {
+    content: "";
+    display: inline-block;
+    width: 0;
+    height: 0;
+    margin-left: 4px;
+    vertical-align: 2px;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 4px solid currentColor;
+}
+
+.top-nav-dropdown-menu {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    min-width: 200px;
+    background: var(--color-background-primary);
+    border: 1px solid var(--color-background-border);
+    border-radius: 8px;
+    padding: 0.5rem 0;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+    z-index: 200;
+}
+
+/* Invisible bridge between trigger and menu to maintain hover */
+.top-nav-dropdown::after {
+    content: "";
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    height: 12px;
+    display: none;
+}
+
+.top-nav-dropdown:hover::after {
+    display: block;
+}
+
+body[data-theme="dark"] .top-nav-dropdown-menu {
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+.top-nav-dropdown:hover .top-nav-dropdown-menu {
+    display: block;
+}
+
+.top-nav-dropdown-menu a {
+    display: block;
+    padding: 0.35rem 1rem;
+    font-size: 0.85rem !important;
+    color: var(--color-foreground-secondary) !important;
+    white-space: nowrap;
+}
+
+.top-nav-dropdown-menu a:hover {
+    background: var(--color-background-secondary);
+    color: var(--color-brand-primary) !important;
+}
+
+.top-nav-dropdown-label {
+    display: block;
+    padding: 0.5rem 1rem 0.2rem;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--color-foreground-muted);
+}
+
+.top-nav-dropdown-label:first-child {
+    padding-top: 0.25rem;
+}
+
+/* Hamburger toggle (hidden on desktop) */
+.top-nav-toggle {
+    display: none;
+}
+
+.top-nav-hamburger {
+    display: none;
+    flex-direction: column;
+    gap: 4px;
+    cursor: pointer;
+    padding: 4px;
+}
+
+.top-nav-hamburger span {
+    display: block;
+    width: 20px;
+    height: 2px;
+    background: var(--color-foreground-secondary);
+    transition: transform 0.2s;
+}
+
+@media (max-width: 768px) {
+    .top-nav-hamburger {
+        display: flex;
+    }
+
+    .top-nav-links {
+        display: none;
+        flex-direction: column;
+        width: 100%;
+        gap: 0.5rem;
+        padding-top: 0.75rem;
+    }
+
+    .top-nav-inner {
+        flex-wrap: wrap;
+    }
+
+    .top-nav-toggle:checked ~ .top-nav-links {
+        display: flex;
+    }
+
+    /* Flatten dropdown on mobile */
+    .top-nav-dropdown-menu {
+        position: static;
+        transform: none;
+        border: none;
+        box-shadow: none;
+        padding: 0 0 0 1rem;
+        min-width: auto;
+        background: transparent;
+    }
+
+    .top-nav-dropdown:hover .top-nav-dropdown-menu,
+    .top-nav-dropdown .top-nav-dropdown-menu {
+        display: block;
+    }
+
+    .top-nav-dropdown-trigger::after {
+        display: none;
+    }
+
+    .top-nav-dropdown-menu a {
+        padding: 0.25rem 0;
+    }
+
+    .top-nav-dropdown-label {
+        padding: 0.4rem 0 0.15rem;
+    }
+}
+
+
+/* ===== Offset Furo sidebars below the sticky top-nav ===== */
+
+.sidebar-sticky,
+.toc-sticky {
+    top: calc(var(--top-nav-offset, 0px) + 0.5rem);
+    max-height: calc(100vh - var(--top-nav-offset, 0px) - 0.5rem);
+}
+
+
+/* ===== Landing page layout ===== */
+
+.landing-page .sidebar-drawer,
+.landing-page .toc-drawer {
+    display: none !important;
+}
+
+.landing-page .page {
+    display: block;
+}
+
+.landing-page .main {
+    display: block;
+}
+
+.landing-page .content {
+    width: 100%;
+    max-width: none;
+    padding: 0;
+    margin: 0 auto;
+    overflow-x: hidden;
+}
+
+.landing-page .article-container {
+    max-width: none;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Keep theme toggle visible on landing page, hide everything else */
+.landing-page .content-icon-container {
+    position: fixed;
+    top: 2.5rem;
+    right: 2.5rem;
+    z-index: 101;
+}
+
+.landing-page .content-icon-container .edit-this-page,
+.landing-page .content-icon-container .view-this-page,
+.landing-page .content-icon-container .toc-overlay-icon {
+    display: none;
+}
+
+/* Hide back-to-top on landing page */
+.landing-page .back-to-top {
+    display: none !important;
+}
+
+/* Horizontal rules as section dividers */
+.landing-page article hr {
+    border: none;
+    border-top: 1px solid var(--color-background-border);
+    margin: 0;
+}
+
+/* Section dividers */
+.landing-divider {
+    max-width: 960px;
+    margin: 0 auto;
+    border-top: 1px solid var(--color-background-border);
+}
+
+/* Constrain all landing content to readable width */
+.landing-page article#furo-main-content > section {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 0 1.5rem;
+}
+
+/* How-it-works: tighten gap between column header and code block */
+.howto-define > p:first-child {
+    margin-bottom: 0;
+}
+
+.howto-define .highlight {
+    margin-top: 0.5rem;
+}
+
+/* How-it-works: both columns top-aligned, tab header styled to anchor visually */
+.landing-page .sd-tab-set > input + label {
+    background: var(--color-background-secondary);
+    border-radius: 6px 6px 0 0;
+    padding: 0.4rem 1rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+    border: 1px solid var(--color-background-border);
+    border-bottom: none;
+}
+
+/* Section headings */
+.landing-page .content h2 {
+    text-align: center;
+    margin-top: 3rem;
+    margin-bottom: 2rem;
+    font-size: 1.6rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+}
+
+
+/* ===== Hero ===== */
+
+.landing-hero {
+    display: flex;
+    align-items: center;
+    gap: 2.5rem;
+    padding: 3.5rem 1.5rem 2.5rem;
+    max-width: 960px;
+    margin: 0 auto;
+}
+
+.landing-hero-logo {
+    flex-shrink: 0;
+}
+
+.landing-hero-text {
+    text-align: left;
+}
+
+.landing-hero-text .landing-cta {
+    justify-content: flex-start;
+}
+
+.landing-logo {
+    display: block;
+    margin: 0;
+}
+
+/* Prevent the hero logo from being a clickable link to the image file */
+a.image-reference:has(.landing-logo) {
+    pointer-events: none;
+    cursor: default;
+}
+
+/* Light/dark logo switching */
+body[data-theme="dark"] .landing-logo.only-light,
+body:not([data-theme="dark"]) .landing-logo.only-dark {
+    display: none !important;
+}
+
+/* Auto theme: follow system preference */
+@media (prefers-color-scheme: dark) {
+    body[data-theme="auto"] .landing-logo.only-light {
+        display: none !important;
+    }
+    body[data-theme="auto"] .landing-logo.only-dark {
+        display: block !important;
+    }
+}
+
+@media (prefers-color-scheme: light) {
+    body[data-theme="auto"] .landing-logo.only-dark {
+        display: none !important;
+    }
+    body[data-theme="auto"] .landing-logo.only-light {
+        display: block !important;
+    }
+}
+
+.landing-hero-text > p {
+    max-width: 640px;
+    margin: 0 0 0.5rem;
+    line-height: 1.5;
+}
+
+.landing-hero-text > p:first-of-type {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--color-foreground-primary);
+}
+
+.landing-hero-text > p:nth-of-type(2) {
+    font-size: 0.95rem;
+    color: var(--color-foreground-secondary);
+    margin-bottom: 1.25rem;
+}
+
+/* CTA buttons */
+.landing-cta {
+    display: flex;
+    gap: 0.75rem;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-bottom: 0;
+    align-items: center;
+}
+
+.landing-cta .sd-badge {
+    padding: 0.5rem 1.25rem;
+    font-size: 0.95rem;
+    border-radius: 6px;
+}
+
+/* GitHub Star button — theme toggle & alignment.
+   Uses the same pattern as the landing logos: two variants, toggle via
+   body[data-theme] and prefers-color-scheme for "auto" mode. */
+.github-star-light,
+.github-star-dark {
+    display: inline-flex;
+    align-items: center;
+    height: 28px; /* match github-buttons large iframe height */
+}
+.github-star-light > span,
+.github-star-dark > span {
+    display: inline-flex !important;
+    align-items: center;
+    height: 28px;
+}
+.github-star-dark { display: none; }
+body[data-theme="dark"] .github-star-light { display: none; }
+body[data-theme="dark"] .github-star-dark { display: inline-flex; }
+@media (prefers-color-scheme: dark) {
+    body[data-theme="auto"] .github-star-light { display: none; }
+    body[data-theme="auto"] .github-star-dark { display: inline-flex; }
+}
+@media (prefers-color-scheme: light) {
+    body[data-theme="auto"] .github-star-dark { display: none; }
+    body[data-theme="auto"] .github-star-light { display: inline-flex; }
+}
+
+
+/* ===== Feature cards ===== */
+
+.feature-card {
+    border: 1px solid var(--color-background-border) !important;
+    border-radius: 8px !important;
+    overflow: hidden;
+    position: relative;
+}
+
+.feature-card::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(135deg, #e040a0, #40a0e0);
+}
+
+.feature-card .sd-card-title {
+    font-weight: 600;
+    font-size: 1rem;
+}
+
+.feature-card .sd-card-body p {
+    font-size: 0.9rem;
+    color: var(--color-foreground-secondary);
+    line-height: 1.5;
+}
+
+
+/* ===== Demo GIF ===== */
+
+.landing-demo-gif {
+    border-radius: 10px;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.12);
+    margin-bottom: 1.5rem;
+}
+
+body[data-theme="dark"] .landing-demo-gif {
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+}
+
+/* Step cards */
+.step-card {
+    text-align: center;
+    font-size: 0.9rem;
+    border: 1px solid var(--color-background-border) !important;
+    border-radius: 8px !important;
+    background: var(--color-background-secondary);
+}
+
+.step-card .sd-card-body {
+    padding: 0.75rem;
+}
+
+.step-card .sd-card-title {
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+}
+
+
+/* ===== Demo cards & schematics ===== */
+
+.demo-card {
+    border: 1px solid var(--color-background-border) !important;
+    border-radius: 8px !important;
+    transition: box-shadow 0.2s, border-color 0.2s, transform 0.2s;
+}
+
+.demo-card:hover {
+    border-color: var(--color-brand-primary) !important;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+    transform: translateY(-2px);
+}
+
+body[data-theme="dark"] .demo-card:hover {
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+.demo-card .sd-card-title {
+    font-size: 1.05rem;
+    font-weight: 600;
+}
+
+.demo-card .sd-card-body p {
+    font-size: 0.9rem;
+    color: var(--color-foreground-secondary);
+    line-height: 1.5;
+}
+
+.demo-schematic {
+    width: 100%;
+    padding: 0.75rem 0.5rem;
+    display: block;
+    opacity: 0.9;
+    transition: opacity 0.2s, filter 0.2s;
+}
+
+body[data-theme="dark"] .demo-schematic {
+    filter: invert(0.95);
+}
+
+@media (prefers-color-scheme: dark) {
+    body[data-theme="auto"] .demo-schematic {
+        filter: invert(0.95);
+    }
+}
+
+.demo-card:hover .demo-schematic {
+    opacity: 1;
+}
+
+
+/* ===== Section intro text ===== */
+
+.section-intro {
+    text-align: center;
+    margin-bottom: 1.5rem;
+    color: var(--color-foreground-secondary);
+    font-size: 1.05rem;
+}
+
+
+/* ===== Ecosystem cards ===== */
+
+.ecosystem-card {
+    border: 1px solid var(--color-background-border) !important;
+    border-radius: 8px !important;
+    transition: box-shadow 0.2s, border-color 0.2s, transform 0.2s;
+}
+
+.ecosystem-card:hover {
+    border-color: var(--color-brand-primary) !important;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+    transform: translateY(-2px);
+}
+
+body[data-theme="dark"] .ecosystem-card:hover {
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+.ecosystem-card .sd-card-title {
+    font-size: 1.05rem;
+    font-weight: 600;
+}
+
+.ecosystem-card .sd-card-body p {
+    font-size: 0.9rem;
+    color: var(--color-foreground-secondary);
+    line-height: 1.5;
+}
+
+
+/* ===== Community section ===== */
+
+.landing-community {
+    text-align: center;
+}
+
+.landing-community p {
+    font-size: 1.05rem;
+}
+
+.landing-community a {
+    margin: 0 0.5rem;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+
+/* ===== Citation dropdown ===== */
+
+.landing-page details.sd-dropdown {
+    margin-bottom: 2rem;
+}
+
+.cite-toggle {
+    font-size: 0.9rem;
+    color: var(--color-foreground-muted);
+}
+
+.landing-page .sd-summary-title {
+    font-size: 0.95rem;
+    justify-content: center;
+}
+
+
+/* ===== Landing page footer ===== */
+
+.landing-footer {
+    background: var(--color-background-secondary);
+    border-top: 1px solid var(--color-background-border);
+    padding: 3rem 1.5rem 2rem;
+    margin-top: 3rem;
+    max-width: none !important;
+    width: 100vw;
+    margin-left: calc(-50vw + 50%);
+}
+
+.landing-footer .sd-row {
+    max-width: 960px;
+    margin: 0 auto;
+}
+
+.landing-footer strong {
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--color-foreground-muted);
+    display: block;
+    margin-bottom: 0.75rem;
+}
+
+.landing-footer ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.landing-footer li {
+    margin-bottom: 0.4rem;
+}
+
+.landing-footer a {
+    font-size: 0.9rem;
+    color: var(--color-foreground-secondary);
+    text-decoration: none;
+    transition: color 0.15s;
+}
+
+.landing-footer a:hover {
+    color: var(--color-brand-primary);
+}
+
+/* Hide Furo's default footer on landing page */
+.landing-page footer {
+    display: none !important;
+}
+
+
+/* ===== Responsive ===== */
+
+@media (max-width: 768px) {
+    .landing-hero {
+        flex-direction: column;
+        text-align: center;
+        gap: 1rem;
+    }
+
+    .landing-hero-text {
+        text-align: center;
+    }
+
+    .landing-hero-text .landing-cta {
+        justify-content: center;
+    }
+
+    .landing-hero h1 {
+        font-size: 2rem;
+    }
+
+    .landing-hero-text > p:nth-of-type(1) {
+        font-size: 1.05rem;
+    }
+
+    .landing-hero-text > p:nth-of-type(2) {
+        font-size: 0.95rem;
+    }
+
+    .landing-logo {
+        width: 140px !important;
+    }
 }

@@ -1,2 +1,6 @@
-# Notebooks are copied on demand by conf.py
+# Notebooks and companion images are copied on demand by conf.py
 *.ipynb
+*.png
+*.gif
+*.jpg
+*.jpeg

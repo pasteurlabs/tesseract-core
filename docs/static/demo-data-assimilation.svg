@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 120" fill="none">
+  <!-- Data Assimilation: x₀ → Lorenz-96 Tesseract → trajectory → 4D-Var cost (obs) → ∇ -->
+
+  <!-- Initial state -->
+  <rect x="4" y="35" width="52" height="50" rx="6" stroke="#222" stroke-width="1.2"/>
+  <!-- Wavy initial-condition icon -->
+  <path d="M 14,50 C 18,44 22,56 26,50 C 30,44 34,56 38,50 C 42,44 46,56 48,50" stroke="#222" stroke-width="0.9" fill="none"/>
+  <path d="M 14,62 C 18,56 22,68 26,62 C 30,56 34,68 38,62 C 42,56 46,68 48,62" stroke="#222" stroke-width="0.9" fill="none"/>
+  <text x="30" y="30" text-anchor="middle" font-family="system-ui, sans-serif" font-size="7.5" fill="#555">x₀ (optimize)</text>
+
+  <!-- Arrow 1 -->
+  <line x1="56" y1="60" x2="78" y2="60" stroke="#222" stroke-width="1"/>
+  <polygon points="78,57 84,60 78,63" fill="#222"/>
+
+  <!-- Lorenz-96 Tesseract -->
+  <rect x="86" y="35" width="62" height="50" rx="6" stroke="#222" stroke-width="1.2"/>
+  <!-- Inner tesseract symbol -->
+  <rect x="104" y="46" width="14" height="14" rx="1" stroke="#222" stroke-width="0.8" stroke-dasharray="2 1.5"/>
+  <rect x="108" y="50" width="6" height="6" rx="0.5" stroke="#222" stroke-width="0.8"/>
+  <text x="117" y="77" text-anchor="middle" font-family="system-ui, sans-serif" font-size="7" fill="#555">Lorenz-96</text>
+
+  <!-- Arrow 2 -->
+  <line x1="148" y1="60" x2="170" y2="60" stroke="#222" stroke-width="1"/>
+  <polygon points="170,57 176,60 170,63" fill="#222"/>
+
+  <!-- 4D-Var cost with observations -->
+  <rect x="178" y="35" width="98" height="50" rx="6" stroke="#222" stroke-width="1.2"/>
+  <!-- Trajectory line with observation dots -->
+  <line x1="188" y1="72" x2="266" y2="72" stroke="#555" stroke-width="0.6"/>
+  <line x1="188" y1="72" x2="188" y2="44" stroke="#555" stroke-width="0.6"/>
+  <path d="M 190,68 C 200,48 210,62 220,50 C 230,56 240,44 250,52 C 256,58 262,46 266,50" stroke="#222" stroke-width="1" fill="none"/>
+  <!-- Observation points -->
+  <circle cx="210" cy="58" r="2.5" fill="#222"/>
+  <circle cx="230" cy="52" r="2.5" fill="#222"/>
+  <circle cx="250" cy="48" r="2.5" fill="#222"/>
+  <text x="227" y="43" text-anchor="middle" font-family="system-ui, sans-serif" font-size="6" fill="#555">obs</text>
+  <text x="227" y="82" text-anchor="middle" font-family="system-ui, sans-serif" font-size="7" fill="#555">J(x₀) = Σ‖x − y‖²</text>
+
+  <!-- Gradient arrow (backprop) -->
+  <line x1="176" y1="15" x2="10" y2="15" stroke="#222" stroke-width="0.8" stroke-dasharray="3 2"/>
+  <polygon points="10,12 4,15 10,18" fill="#222"/>
+  <text x="93" y="11" text-anchor="middle" font-family="system-ui, sans-serif" font-size="6.5" fill="#555">∇ through solver</text>
+</svg>

@@ -5,7 +5,7 @@
 
 ### Tesseract Core
 
-Universal, autodiff-native software components for [Simulation Intelligence](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/misc/faq.html#what-is-simulation-intelligence) 📦
+Universal components for differentiable scientific computing 📦
 
 [Read the docs](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/) |
 [Showcases & tutorials](https://si-tesseract.discourse.group/c/showcase/11) |

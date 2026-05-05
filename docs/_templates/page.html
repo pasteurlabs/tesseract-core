@@ -1,0 +1,64 @@
+{# Override Furo's page template to add a persistent top navigation bar
+   and support custom body classes from page metadata. #}
+{% extends "!page.html" %}
+
+{% block body %}
+<nav class="top-nav" role="navigation" aria-label="Site navigation">
+  <div class="top-nav-inner">
+    <a href="{{ pathto('index') }}" class="top-nav-brand">
+      Tesseract
+    </a>
+    <input type="checkbox" id="top-nav-toggle" class="top-nav-toggle" aria-label="Toggle navigation">
+    <label for="top-nav-toggle" class="top-nav-hamburger" aria-hidden="true">
+      <span></span>
+      <span></span>
+      <span></span>
+    </label>
+    <div class="top-nav-links">
+      <a href="{{ pathto('content/introduction/installation') }}">Install</a>
+      <a href="{{ pathto('content/introduction/get-started') }}">Get Started</a>
+      <div class="top-nav-dropdown">
+        <button class="top-nav-dropdown-trigger" aria-haspopup="true" aria-expanded="false">Docs</button>
+        <div class="top-nav-dropdown-menu">
+          <a href="{{ pathto('content/introduction/index') }}">Tesseract Core</a>
+          <a href="https://docs.pasteurlabs.ai/projects/tesseract-jax/latest/" class="external-link">Tesseract-JAX</a>
+          <a href="https://docs.pasteurlabs.ai/projects/tesseract-streamlit/en/latest/" class="external-link">Tesseract-Streamlit</a>
+        </div>
+      </div>
+      <a href="{{ pathto('content/demo/demo') }}">Demos</a>
+      <a href="https://si-tesseract.discourse.group/" class="external-link">Community ↗</a>
+      <div class="top-nav-dropdown">
+        <button class="top-nav-dropdown-trigger" aria-haspopup="true" aria-expanded="false">GitHub</button>
+        <div class="top-nav-dropdown-menu">
+          <a href="https://github.com/pasteurlabs/tesseract-core" class="external-link">Tesseract Core ↗</a>
+          <a href="https://github.com/pasteurlabs/tesseract-jax" class="external-link">Tesseract-JAX ↗</a>
+          <a href="https://github.com/pasteurlabs/tesseract-streamlit" class="external-link">Tesseract-Streamlit ↗</a>
+        </div>
+      </div>
+      <span class="github-star-light"><a class="github-button" href="https://github.com/pasteurlabs/tesseract-core" data-color-scheme="light: light; dark: light;" data-icon="octicon-star" data-size="large" data-show-count="true" aria-label="Star pasteurlabs/tesseract-core on GitHub">Star</a></span>
+      <span class="github-star-dark"><a class="github-button" href="https://github.com/pasteurlabs/tesseract-core" data-color-scheme="light: dark; dark: dark;" data-icon="octicon-star" data-size="large" data-show-count="true" aria-label="Star pasteurlabs/tesseract-core on GitHub">Star</a></span>
+    </div>
+  </div>
+</nav>
+{% if meta and meta.get("html_class") %}
+<script>document.body.classList.add("{{ meta["html_class"] }}");</script>
+{% endif %}
+{{ super() }}
+<script>
+// Dynamically offset sidebars so they don't overlap the top-nav.
+// When the nav scrolls out of view the offset shrinks to 0.
+(function () {
+  var nav = document.querySelector(".top-nav");
+  if (!nav) return;
+  var root = document.documentElement;
+  function update() {
+    var rect = nav.getBoundingClientRect();
+    var visible = Math.max(0, rect.bottom);
+    root.style.setProperty("--top-nav-offset", visible + "px");
+  }
+  update();
+  document.addEventListener("scroll", update, { passive: true });
+  window.addEventListener("resize", update, { passive: true });
+})();
+</script>
+{% endblock %}

@@ -171,6 +171,27 @@ This file is optional. `tesseract_api.py` can invoke functions written in any la
 
 ```
 
+## Features and limitations
+
+::::{tab-set}
+:::{tab-item} Features
+
+- **Self-documenting** — Tesseracts announce their interfaces, so users can inspect them without reading source code and perform static validation without running the code.
+- **Auto-validating** — Input data is automatically validated against the schema, so internal logic can assume the data is in the expected format.
+- **Autodiff-native** — Tesseracts support [differentiable programming](../misc/differentiable-programming.md) and integrate as native operations in PyTorch and JAX — but exposing derivatives is _strictly optional_.
+- **Batteries included** — Every Tesseract ships with a containerized runtime, a CLI, a REST API, and a Python SDK.
+
+:::
+:::{tab-item} Limitations
+
+- **Python as glue** — Tesseracts may use any software under the hood, but they always use Python as glue between the runtime and the wrapped functionality. Support for Python projects is more mature than other languages.
+- **Single entrypoint** — Each Tesseract has a single `apply` entrypoint. To expose N functions, create N Tesseracts.
+- **Context-free** — Tesseracts are not aware of outer-loop orchestration or runtime details.
+- **Runtime overhead** — Tesseracts are designed for compute kernels that run at least several seconds, so they may not suit very low-latency workloads.
+
+:::
+::::
+
 ## Next steps
 
 Depending on your needs:
