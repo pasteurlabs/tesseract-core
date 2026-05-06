@@ -24,7 +24,7 @@ os.environ["TESSERACT_API_PATH"] = os.path.abspath(
     )
 )
 
-project = "Tesseract"
+project = "Tesseract Core"
 copyright = "2026, Pasteur Labs"
 author = "The Tesseract Team @ Pasteur Labs + OSS contributors"
 
