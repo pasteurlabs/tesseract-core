@@ -329,25 +329,25 @@ Show us what you built in the [community showcase](https://si-tesseract.discours
 - {doc}`Get Started <content/introduction/get-started>`
 - {doc}`Installation <content/introduction/installation>`
 - {doc}`API Reference <content/api/tesseract-api>`
-- [JOSS Paper ↗](https://doi.org/10.21105/joss.08385)
-- [Changelog ↗](https://github.com/pasteurlabs/tesseract-core/releases)
+- [JOSS Paper](https://doi.org/10.21105/joss.08385)
+- [Changelog](https://github.com/pasteurlabs/tesseract-core/releases)
   :::
 
 :::{grid-item}
 **Community**
 
-- [Forums ↗](https://si-tesseract.discourse.group/)
-- [GitHub ↗](https://github.com/pasteurlabs/tesseract-core)
-- [Contributing ↗](https://github.com/pasteurlabs/tesseract-core/blob/main/CONTRIBUTING.md)
-- [Code of Conduct ↗](https://github.com/pasteurlabs/tesseract-core/blob/main/CODE_OF_CONDUCT.md)
-- [Report an Issue ↗](https://github.com/pasteurlabs/tesseract-core/issues)
+- [Forums](https://si-tesseract.discourse.group/)
+- [GitHub](https://github.com/pasteurlabs/tesseract-core)
+- [Contributing](https://github.com/pasteurlabs/tesseract-core/blob/main/CONTRIBUTING.md)
+- [Code of Conduct](https://github.com/pasteurlabs/tesseract-core/blob/main/CODE_OF_CONDUCT.md)
+- [Report an Issue](https://github.com/pasteurlabs/tesseract-core/issues)
   :::
 
 :::{grid-item}
 **About**
 
-- Created at [Pasteur Labs ↗](https://pasteurlabs.ai)
-- Open source — [Apache License ↗](https://github.com/pasteurlabs/tesseract-core/blob/main/LICENSE)
+- Created at [Pasteur Labs](https://pasteurlabs.ai)
+- Open source — [Apache License](https://github.com/pasteurlabs/tesseract-core/blob/main/LICENSE)
   :::
 
 ::::

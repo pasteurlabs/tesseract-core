@@ -775,6 +775,10 @@ body[data-theme="dark"] .ecosystem-card:hover {
     color: var(--color-brand-primary);
 }
 
+.landing-footer a.reference.external::after {
+    content: " \2197";
+}
+
 /* Hide Furo's default footer on landing page */
 .landing-page footer {
     display: none !important;
