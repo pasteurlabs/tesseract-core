@@ -49,7 +49,7 @@ Open source, published in [JOSS](https://doi.org/10.21105/joss.08385).
 ## Why Tesseract
 
 :::{div} section-intro
-Tesseract is built for the needs of differentiable systems that combine many moving parts and need to backpropagate through them &mdash; solver-in-the-loop training, simulation-based inference, shape optimization, and more.
+Tesseract is built for the needs of differentiable systems that combine several moving parts and need to backpropagate through them &mdash; solver-in-the-loop training, simulation-based inference, shape optimization, and more.
 :::
 
 ::::{grid} 1 2 3 3
@@ -79,7 +79,7 @@ with full support for `grad`, `jit`, and `vmap`.
 :::{grid-item-card} Run anywhere
 :class-card: feature-card
 
-Share a Tesseract, get identical results — on any laptop, cloud, or HPC cluster.
+Share a Tesseract, get identical results on any laptop, cloud, or HPC cluster.
 No dependency conflicts, no version mismatches.
 :::
 
@@ -105,7 +105,7 @@ Created at [Pasteur Labs](https://pasteurlabs.ai), developed with and for the co
 
 :::{div} section-intro
 Define a differentiable component in `tesseract_api.py`, build it into a
-container, and call it — including its gradients — from the CLI, REST API,
+container, and call it &mdash; including its gradients &mdash; from the CLI, REST API,
 or Python SDK. Compose multiple Tesseracts into end-to-end differentiable pipelines.
 :::
 
@@ -309,7 +309,7 @@ code required.
 
 :::{div} section-intro
 Wrap your solver or model as a Tesseract, or compose existing ones into a new pipeline.
-Show us what you built in the [community showcase](https://si-tesseract.discourse.group/c/showcase/11) &mdash; or help improve the project.
+Show us what you built in the [community showcase](https://si-tesseract.discourse.group/c/showcase/11), or help improve the project.
 :::
 
 :::{div} landing-cta
