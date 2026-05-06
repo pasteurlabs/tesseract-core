@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.8.2] - 2026-05-06
+
+### Bug Fixes
+
+- Mark InputPath/OutputPath fields with format: "path" in JSON schema (#583)
+
 ## [1.8.1] - 2026-05-05
 
 ### Bug Fixes
