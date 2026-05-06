@@ -49,7 +49,7 @@ Open source, published in [JOSS](https://doi.org/10.21105/joss.08385).
 ## Why Tesseract
 
 :::{div} section-intro
-Tesseract is built for the needs of differentiable systems that combine several moving parts and need to backpropagate through them &mdash; solver-in-the-loop training, simulation-based inference, shape optimization, and more.
+Tesseract is built for the needs of differentiable systems that combine several moving parts and backpropagate gradients through them &mdash; solver-in-the-loop training, simulation-based inference, shape optimization, and more.
 :::
 
 ::::{grid} 1 2 3 3
