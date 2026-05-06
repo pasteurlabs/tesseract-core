@@ -271,6 +271,16 @@ class InputPath(Path):
         )
 
     @classmethod
+    def __get_pydantic_json_schema__(
+        cls,
+        _core_schema: core_schema.CoreSchema,
+        handler: GetJsonSchemaHandler,
+    ) -> JsonSchemaValue:
+        schema = handler(_core_schema)
+        schema["format"] = "path"
+        return schema
+
+    @classmethod
     def _validate(cls, value: Any, info: ValidationInfo) -> Path:
         return cls._resolve(Path(value), info)
 
@@ -349,6 +359,16 @@ class OutputPath(Path):
                 cls._serialize,
             ),
         )
+
+    @classmethod
+    def __get_pydantic_json_schema__(
+        cls,
+        _core_schema: core_schema.CoreSchema,
+        handler: GetJsonSchemaHandler,
+    ) -> JsonSchemaValue:
+        schema = handler(_core_schema)
+        schema["format"] = "path"
+        return schema
 
 
 def _resolve_input_file(path: Path, info: ValidationInfo) -> Path:
