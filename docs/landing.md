@@ -27,16 +27,16 @@ html_class: landing-page
 
 :::{div} landing-hero-text
 
-**End-to-end differentiable pipelines for scientific computing**
+**Universal components for differentiable scientific computing**
 
-Tesseract packages any computational routine &mdash; in any language, with your choice of gradient implementation &mdash; into a differentiable containerized component.
-Compose solvers, geometry ops, and ML models into pipelines with gradients flowing across every boundary.
+Tesseract allows you to compose solvers, geometry ops, ML models, and more into end-to-end differentiable pipelines for optimization, inference, and training.
+Each component is containerized, language-agnostic, and supports any gradient implementation.
 Open source, published in [JOSS](https://doi.org/10.21105/joss.08385).
 
 :::{div} landing-cta
-{bdg-ref-primary-line}`Install <content/introduction/installation>`
 {bdg-ref-primary-line}`Get Started <content/introduction/get-started>`
 {bdg-ref-primary-line}`Demos <content/demo/demo>`
+{bdg-link-primary-line}`GitHub <https://github.com/pasteurlabs/tesseract-core>`
 :::
 
 :::
@@ -49,7 +49,7 @@ Open source, published in [JOSS](https://doi.org/10.21105/joss.08385).
 ## Why Tesseract
 
 :::{div} section-intro
-Tesseract is built for differentiable systems: solver-in-the-loop training, simulation-based inference, shape & topology optimization, learned closures, surrogate modeling, optimal control, ...
+Tesseract is built for the needs of differentiable systems that combine many moving parts and need to backpropagate through them &mdash; solver-in-the-loop training, simulation-based inference, shape optimization, and more.
 :::
 
 ::::{grid} 1 2 3 3
@@ -308,15 +308,14 @@ code required.
 ## Get Involved
 
 :::{div} section-intro
-Tesseract is an open-source project. Build something cool with Tesseract and
-[share it on the forum](https://si-tesseract.discourse.group/c/showcase/11) or contribute
-bug reports, docs improvements, and feature proposals.
+Wrap your solver or model as a Tesseract, or compose existing ones into a new pipeline.
+Show us what you built in the [community showcase](https://si-tesseract.discourse.group/c/showcase/11) &mdash; or help improve the project.
 :::
 
 :::{div} landing-cta
 {bdg-link-primary-line}`Community Forum <https://si-tesseract.discourse.group/>`
-{bdg-link-primary-line}`Contributing Guide <https://github.com/pasteurlabs/tesseract-core/blob/main/CONTRIBUTING.md>`
-{bdg-link-primary-line}`Report an Issue <https://github.com/pasteurlabs/tesseract-core/issues>`
+{bdg-link-primary-line}`GitHub <https://github.com/pasteurlabs/tesseract-core>`
+{bdg-ref-primary-line}`Example Gallery <content/examples/example_gallery>`
 :::
 
 ::::{div} landing-footer
@@ -341,6 +340,7 @@ bug reports, docs improvements, and feature proposals.
 - [GitHub ↗](https://github.com/pasteurlabs/tesseract-core)
 - [Contributing ↗](https://github.com/pasteurlabs/tesseract-core/blob/main/CONTRIBUTING.md)
 - [Code of Conduct ↗](https://github.com/pasteurlabs/tesseract-core/blob/main/CODE_OF_CONDUCT.md)
+- [Report an Issue ↗](https://github.com/pasteurlabs/tesseract-core/issues)
   :::
 
 :::{grid-item}
