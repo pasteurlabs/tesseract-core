@@ -2,6 +2,8 @@
 
 # Get Started
 
+## Installation
+
 ```bash
 $ pip install tesseract-core
 ```
