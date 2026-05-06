@@ -29,7 +29,7 @@ html_class: landing-page
 
 **Universal components for differentiable scientific computing**
 
-Tesseract allows you to compose solvers, geometry ops, ML models, and more into end-to-end differentiable pipelines for optimization, inference, and training.
+Tesseract allows you to compose solvers, geometry ops, ML models, and more into end-to-end differentiable pipelines &mdash; for optimization, inference, and training.
 Each component is containerized, language-agnostic, and supports any gradient implementation.
 Open source, published in [JOSS](https://doi.org/10.21105/joss.08385).
 
@@ -49,7 +49,7 @@ Open source, published in [JOSS](https://doi.org/10.21105/joss.08385).
 ## Why Tesseract
 
 :::{div} section-intro
-Tesseract is built for the needs of differentiable systems that combine several moving parts and backpropagate gradients through them &mdash; solver-in-the-loop training, simulation-based inference, shape optimization, and more.
+Tesseract is built for the needs of differentiable systems that combine several moving parts and backpropagate gradients through them: solver-in-the-loop training, simulation-based inference, shape optimization, and more.
 :::
 
 ::::{grid} 1 2 3 3
