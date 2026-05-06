@@ -77,6 +77,10 @@ figure.align-default {
     text-decoration: none;
 }
 
+.top-nav a.external-link::after {
+    content: " \2197";
+}
+
 /* Docs dropdown */
 .top-nav-dropdown {
     position: relative;
