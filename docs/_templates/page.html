@@ -1,11 +1,24 @@
-{# Override Furo's page template to add a persistent top navigation bar
-   and support custom body classes from page metadata. #}
+{# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+   ! THIS TEMPLATE IS SHARED ACROSS ALL TESSERACT ECOSYSTEM REPOS.      !
+   ! Any changes here MUST be copied to:                                 !
+   !   - tesseract-jax/docs/_templates/page.html                        !
+   !   - tesseract-streamlit/docs/_templates/page.html                   !
+   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+   Override Furo's page template to add a persistent top navigation bar
+   and support custom body classes from page metadata. In tesseract-core
+   the internal links use pathto(); in other repos they fall back to
+   absolute URLs on the live deployment. #}
 {% extends "!page.html" %}
+
+{# Base URL for tesseract-core docs (used when building other repos) #}
+{% set core_base = "https://docs.pasteurlabs.ai/projects/tesseract-core/latest/" %}
+{% set is_core = (project == "Tesseract Core") %}
 
 {% block body %}
 <nav class="top-nav" role="navigation" aria-label="Site navigation">
   <div class="top-nav-inner">
-    <a href="{{ pathto('index') }}" class="top-nav-brand">
+    <a href="{{ pathto('index') if is_core else core_base }}" class="top-nav-brand">
       Tesseract
     </a>
     <input type="checkbox" id="top-nav-toggle" class="top-nav-toggle" aria-label="Toggle navigation">
@@ -15,17 +28,17 @@
       <span></span>
     </label>
     <div class="top-nav-links">
-      <a href="{{ pathto('content/introduction/get-started') }}">Get Started</a>
+      <a href="{{ pathto('content/introduction/get-started') if is_core else core_base + 'content/introduction/get-started.html' }}">Get Started</a>
       <div class="top-nav-dropdown">
         <button class="top-nav-dropdown-trigger" aria-haspopup="true" aria-expanded="false">Docs</button>
         <div class="top-nav-dropdown-menu">
-          <a href="{{ pathto('content/introduction/index') }}">Tesseract Core</a>
+          <a href="{{ pathto('content/introduction/index') if is_core else core_base + 'content/introduction/index.html' }}">Tesseract Core</a>
           <a href="https://docs.pasteurlabs.ai/projects/tesseract-jax/latest/">Tesseract-JAX</a>
           <a href="https://docs.pasteurlabs.ai/projects/tesseract-streamlit/en/latest/">Tesseract-Streamlit</a>
         </div>
       </div>
-      <a href="{{ pathto('content/demo/demo') }}">Demos</a>
-      <a href="{{ pathto('content/blog/index') }}">Blog</a>
+      <a href="{{ pathto('content/demo/demo') if is_core else core_base + 'content/demo/demo.html' }}">Demos</a>
+      <a href="{{ pathto('content/blog/index') if is_core else core_base + 'content/blog/index.html' }}">Blog</a>
       <a href="https://si-tesseract.discourse.group/" class="external-link">Community Forum</a>
       <div class="top-nav-dropdown">
         <button class="top-nav-dropdown-trigger" aria-haspopup="true" aria-expanded="false">GitHub</button>

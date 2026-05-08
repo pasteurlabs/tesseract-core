@@ -91,7 +91,7 @@ html_theme_options = {
     "dark_logo": "logo-dark.png",
     "sidebar_hide_name": True,
 }
-html_css_files = ["custom.css"]
+html_css_files = ["top-nav.css", "custom.css"]
 html_js_files = [
     ("https://buttons.github.io/buttons.js", {"async": "async"}),
     "external-links.js",
