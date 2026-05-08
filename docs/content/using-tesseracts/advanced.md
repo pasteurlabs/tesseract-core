@@ -7,13 +7,13 @@ The `tesseract` CLI can load data from local disk or any [fsspec-compatible](htt
 Use `--input-path` to mount a folder into the Tesseract (read-only). Paths in the payload must be relative to `--input-path`:
 
 ```bash
-tesseract run filereference apply \
+tesseract run file_io apply \
     --input-path ./testdata \
     --output-path ./output \
-    '{"inputs": {"data": ["sample_2.json", "sample_3.json"]}}'
+    '{"inputs": {"paths": ["sample_2.json", "sample_3.json"]}}'
 ```
 
-See the [`filereference` example](../examples/building-blocks/filereference) for a complete walkthrough.
+See the [`file_io` example](../examples/building-blocks/file_io) for a complete walkthrough.
 
 To write output to a file, use `--output-path` (also supports fsspec-compatible targets):
 
@@ -88,6 +88,26 @@ $ tesseract serve --env=TESSERACT_MLFLOW_TRACKING_URI="..." \
     --env=TESSERACT_MLFLOW_RUN_EXTRA_ARGS='{"run_name": "test_run", "description": "Testing new feature", "tags": {"version": "1.0"}}' \
     metrics
 ```
+
+## Networking and interactions between Tesseracts
+
+Tesseracts can be connected to shared Docker networks, allowing them to communicate with each other and with other services at runtime. A common use case is composing multiple Tesseracts into a pipeline, where one Tesseract calls another via its REST API using `Tesseract.from_url()`. A working end-to-end example of this pattern is available in [`examples/_multi-tesseract/multi-helloworld`](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/_multi-tesseract/multi-helloworld).
+
+You can attach Tesseracts to a named Docker network using the `--network` flag. The network is created automatically if it does not already exist.
+
+```bash
+$ tesseract serve "my-tesseract:latest" --network my_network --network-alias my-tesseract --port 8000
+```
+
+The `serve` command prints container metadata to `stdout`, including the Tesseract's IP address and port on each connected network. The `--network-alias` argument assigns a hostname so other containers on the same network can reach it by name (e.g. `http://my-tesseract:8000`) rather than by IP. Note that the port is assigned randomly if left unspecified.
+
+**A note on `--network=host`:**
+
+Setting `--network=host` makes a container share the host's network stack, bypassing network isolation. Whether it works as expected depends on how Docker is running on your system.
+
+Docker Engine on Linux runs the daemon directly on the host OS, so `--network=host` gives the container access to the host's network namespace, including `localhost`. This is the only platform that supports sharing the full network stack.
+
+Docker Desktop runs the Docker daemon inside a lightweight Linux VM. Here `--network=host` refers to the network stack of the VM, not your actual machine. As a result services on your machine's `localhost` are not reachable from inside the container. Docker Desktop >=4.34 added opt-in support for host networking (Settings > Resources > Network > "Enable host networking"), but only works at the TCP/UDP level and does not give access to the host's network namespace. For more details check out the [Docker documentation](https://docs.docker.com/engine/network/drivers/host/).
 
 ## Volume mounts and user permissions
 

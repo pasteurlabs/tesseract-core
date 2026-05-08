@@ -24,8 +24,8 @@ os.environ["TESSERACT_API_PATH"] = os.path.abspath(
     )
 )
 
-project = "Tesseract"
-copyright = "2025, Pasteur Labs"
+project = "Tesseract Core"
+copyright = "2026, Pasteur Labs"
 author = "The Tesseract Team @ Pasteur Labs + OSS contributors"
 
 # The short X.Y version
@@ -57,6 +57,8 @@ extensions = [
     "sphinx_design",
     # For nice rendering of Pydantic models
     "sphinxcontrib.autodoc_pydantic",
+    # Sitemap for SEO
+    "sphinx_sitemap",
 ]
 
 
@@ -90,7 +92,14 @@ html_theme_options = {
     "sidebar_hide_name": True,
 }
 html_css_files = ["custom.css"]
-html_js_files = ["pipeline-animations.js"]
+html_js_files = [
+    ("https://buttons.github.io/buttons.js", {"async": "async"}),
+    "external-links.js",
+]
+html_baseurl = "https://docs.pasteurlabs.ai/projects/tesseract-core/latest/"
+sitemap_url_scheme = (
+    "{link}"  # ReadTheDocs handles versioning; don't add language/version prefix
+)
 
 
 # -- OpenGraph metadata (social cards) ---------------------------------------
@@ -99,9 +108,10 @@ ogp_site_url = "https://docs.pasteurlabs.ai/projects/tesseract-core/latest/"
 ogp_site_name = "Tesseract"
 ogp_description_length = 200
 ogp_type = "article"
-ogp_image = (
-    "https://docs.pasteurlabs.ai/projects/tesseract-core/latest/_static/logo-light.png"
-)
+ogp_social_cards = {
+    "image": "static/logo-dark.png",
+    "line_color": "#d946ef",
+}
 
 
 # -- Custom directives ----------------------------------------------------
@@ -145,8 +155,13 @@ def setup(app) -> None:
 # Do not execute notebooks during build (just take existing output)
 nb_execution_mode = "off"
 
-# Copy example notebooks to auto_examples folder on every build
+# Copy example notebooks and their companion files to the docs folder on every build
+_COMPANION_EXTS = {".png", ".gif", ".jpg", ".jpeg", ".svg"}
 for example_notebook in Path("../demo").glob("*/demo.ipynb"):
     # Copy the example notebook to the docs folder
     dest = (Path("content/demo") / example_notebook.parent.name).with_suffix(".ipynb")
     shutil.copyfile(example_notebook, dest)
+    # Copy companion images so relative references in the notebook resolve
+    for companion in example_notebook.parent.iterdir():
+        if companion.suffix.lower() in _COMPANION_EXTS:
+            shutil.copyfile(companion, Path("content/demo") / companion.name)

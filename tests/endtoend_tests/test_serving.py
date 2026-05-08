@@ -6,6 +6,7 @@
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -482,7 +483,7 @@ def test_serve_nonstandard_host_ip(
 
 
 @pytest.mark.skipif(
-    os.uname().sysname == "Darwin",
+    sys.platform == "darwin",
     reason="network=host binds to Docker VM's network on macOS, not the host's, "
     "so health checks from the Mac host fail. This test only works on Linux.",
 )

@@ -2,8 +2,14 @@
 
 # Get Started
 
+## Quick install
+
 ```{note}
-Make sure you have a working [installation](installation.md) before proceeding.
+This requires Docker and Python 3.10+. See the [installation guide](installation.md) for detailed setup instructions.
+```
+
+```bash
+$ pip install tesseract-core
 ```
 
 ## Hello Tesseract

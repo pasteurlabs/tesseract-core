@@ -1,0 +1,6 @@
+jax[cpu]==0.5.3
+matplotlib==3.10.3
+optax==0.2.5
+pyvista==0.45.2
+tesseract-jax
+tesseract-core[runtime]
