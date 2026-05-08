@@ -3,6 +3,8 @@ orphan: true
 html_theme.sidebar_secondary.remove: true
 sd_hide_title: true
 html_class: landing-page
+og:title: "Tesseract — Universal components for differentiable scientific computing"
+og:description: "Compose solvers, geometry ops, ML models, and more into end-to-end differentiable pipelines — for optimization, inference, and training. Language-agnostic, containerized, open source."
 ---
 
 # Tesseract

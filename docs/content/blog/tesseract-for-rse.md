@@ -3,6 +3,9 @@ orphan: true
 html_class: blog-page
 og:title: Tesseract for Research Software Engineers
 og:description: "A standard contract for packaging, sharing, and composing scientific software across research groups — typed interfaces, reproducibility, and multi-group solver coupling."
+blog_date: "2026-03-31"
+blog_author: The Tesseract Team
+blog_description: "A standard contract for packaging, sharing, and composing scientific software across research groups."
 ---
 
 # Tesseract for Research Software Engineers

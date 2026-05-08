@@ -4,6 +4,9 @@ html_class: blog-page
 hide-toc: true
 og:title: Building Differentiable Multi-Physics Pipelines with Tesseract
 og:description: "Gradient-based shape optimization of a rocket fin using three solvers in different languages — C++ with analytic adjoints, Julia with Enzyme, JAX — composed into an end-to-end differentiable pipeline."
+blog_date: "2026-03-15"
+blog_author: Dion Hafner
+blog_description: "Gradient-based shape optimization of a rocket fin using three solvers in different languages, composed into an end-to-end differentiable pipeline."
 ---
 
 # Building Differentiable Multi-Physics Pipelines with Tesseract

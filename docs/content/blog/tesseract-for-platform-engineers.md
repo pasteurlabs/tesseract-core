@@ -3,6 +3,9 @@ orphan: true
 html_class: blog-page
 og:title: Tesseract for Platform Engineers
 og:description: "Uniform deployment contracts for scientific workloads that MLOps tools can't handle — consistent interfaces, dependency isolation, and schema validation."
+blog_date: "2026-03-31"
+blog_author: The Tesseract Team
+blog_description: "Uniform deployment contracts for scientific workloads that MLOps tools can't handle."
 ---
 
 # Tesseract for Platform Engineers

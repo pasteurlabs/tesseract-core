@@ -131,6 +131,71 @@ def zip_examples_folder() -> None:
     assert archive_path.exists()
 
 
+def generate_blog_index() -> None:
+    """Auto-generate content/blog/index.md from blog post frontmatter."""
+    import logging
+    from datetime import datetime
+
+    import yaml
+    from jinja2 import Environment, FileSystemLoader
+
+    logger = logging.getLogger("sphinx.ext.blog")
+
+    here = Path(__file__).parent
+    blog_dir = here / "content" / "blog"
+
+    posts = []
+    for md_file in sorted(blog_dir.glob("*.md")):
+        if md_file.name == "index.md":
+            continue
+        text = md_file.read_text()
+        if not text.startswith("---"):
+            logger.warning(
+                "blog post %s has no YAML frontmatter, skipping", md_file.name
+            )
+            continue
+        end = text.index("---", 3)
+        fm = yaml.safe_load(text[3:end])
+        blog_date = fm.get("blog_date")
+        if not blog_date:
+            logger.warning(
+                "blog post %s missing 'blog_date' in frontmatter, skipping",
+                md_file.name,
+            )
+            continue
+        # Extract title from first # heading
+        title = None
+        for line in text[end + 3 :].splitlines():
+            if line.startswith("# "):
+                title = line[2:].strip()
+                break
+        if not title:
+            logger.warning(
+                "blog post %s has no '# ...' title heading, skipping", md_file.name
+            )
+            continue
+        date = datetime.strptime(str(blog_date), "%Y-%m-%d")
+        posts.append(
+            {
+                "file": md_file.name,
+                "title": title,
+                "date": date.strftime("%b %d, %Y").replace(" 0", " "),
+                "author": fm.get("blog_author", ""),
+                "description": fm.get("blog_description", ""),
+                "_sort_key": (date, md_file.name),
+            }
+        )
+
+    posts.sort(key=lambda p: p["_sort_key"], reverse=True)
+
+    env = Environment(
+        loader=FileSystemLoader(here / "_templates"),
+        keep_trailing_newline=True,
+    )
+    template = env.get_template("blog_index.md.jinja")
+    (blog_dir / "index.md").write_text(template.render(posts=posts))
+
+
 def _copy_landing_to_index(app, exception) -> None:
     """Copy landing.html to index.html so the landing page serves at /."""
     if exception or app.builder.format != "html":
@@ -138,14 +203,15 @@ def _copy_landing_to_index(app, exception) -> None:
     outdir = Path(app.outdir)
     landing = outdir / "landing.html"
     index = outdir / "index.html"
-    if landing.exists():
-        shutil.copy2(landing, index)
+    shutil.copy2(landing, index)
 
 
 def setup(app) -> None:
     """Sphinx setup function. Used to register custom stuff."""
     # HACK: We zip the examples folder here so that it can be downloaded
     zip_examples_folder()
+    # Generate blog index from blog post frontmatter
+    generate_blog_index()
     # Copy landing page to index.html after build
     app.connect("build-finished", _copy_landing_to_index)
 
