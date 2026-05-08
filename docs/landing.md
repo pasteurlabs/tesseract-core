@@ -274,7 +274,7 @@ parametric structural optimization.
 :gutter: 3
 
 :::{grid-item-card} Researchers
-:link: content/blog/tesseract-for-researchers
+:link: blog/tesseract-for-researchers
 :link-type: doc
 :class-card: persona-card
 :img-top: static/icon-researcher.svg
@@ -284,7 +284,7 @@ Differentiable simulation, probabilistic inference, cross-framework gradient com
 :::
 
 :::{grid-item-card} Research Software Engineers
-:link: content/blog/tesseract-for-rse
+:link: blog/tesseract-for-rse
 :link-type: doc
 :class-card: persona-card
 :img-top: static/icon-rse.svg
@@ -294,7 +294,7 @@ Typed interface contracts, reproducibility, multi-group solver coupling.
 :::
 
 :::{grid-item-card} R&D Engineers
-:link: content/blog/tesseract-for-rnd-engineers
+:link: blog/tesseract-for-rnd-engineers
 :link-type: doc
 :class-card: persona-card
 :img-top: static/icon-rnd.svg
@@ -304,7 +304,7 @@ From research prototype to production pipeline without writing Dockerfiles.
 :::
 
 :::{grid-item-card} Platform Engineers
-:link: content/blog/tesseract-for-platform-engineers
+:link: blog/tesseract-for-platform-engineers
 :link-type: doc
 :class-card: persona-card
 :img-top: static/icon-platform.svg
@@ -389,7 +389,7 @@ Show us what you built in the [community showcase](https://si-tesseract.discours
 **Community**
 
 - [Forums](https://si-tesseract.discourse.group/)
-- {doc}`Blog <content/blog/index>`
+- {doc}`Blog <blog/index>`
 - [GitHub](https://github.com/pasteurlabs/tesseract-core)
 - [Contributing](https://github.com/pasteurlabs/tesseract-core/blob/main/CONTRIBUTING.md)
 - [Code of Conduct](https://github.com/pasteurlabs/tesseract-core/blob/main/CODE_OF_CONDUCT.md)

@@ -132,7 +132,7 @@ def zip_examples_folder() -> None:
 
 
 def generate_blog_index() -> None:
-    """Auto-generate content/blog/index.md from blog post frontmatter."""
+    """Auto-generate blog/index.md from blog post frontmatter."""
     import logging
     from datetime import datetime
 
@@ -142,7 +142,7 @@ def generate_blog_index() -> None:
     logger = logging.getLogger("sphinx.ext.blog")
 
     here = Path(__file__).parent
-    blog_dir = here / "content" / "blog"
+    blog_dir = here / "blog"
 
     posts = []
     for md_file in sorted(blog_dir.glob("*.md")):
