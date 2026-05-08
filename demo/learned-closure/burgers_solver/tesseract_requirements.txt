@@ -1,0 +1,3 @@
+jax[cpu]==0.5.2
+equinox
+tesseract-core

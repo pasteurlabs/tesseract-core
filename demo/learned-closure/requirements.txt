@@ -1,0 +1,6 @@
+jax[cpu]==0.5.2
+equinox
+matplotlib
+optax
+tesseract-core
+tesseract-jax

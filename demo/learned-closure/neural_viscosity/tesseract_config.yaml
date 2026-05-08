@@ -1,0 +1,6 @@
+name: "neural-viscosity"
+version: "0.1.0"
+description: "Neural network closure that predicts spatially-varying viscosity from local flow features"
+
+build_config:
+  target_platform: "native"
