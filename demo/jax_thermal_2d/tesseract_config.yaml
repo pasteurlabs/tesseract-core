@@ -1,0 +1,16 @@
+name: "jax-thermal-2d"
+version: "1.0.0"
+description: |
+  JAX reimplementation of the 2D thermal solver from enzyme_thermal_2d.
+
+  Solves the same physics (2D transient heat conduction with temperature-dependent
+  conductivity, mixed BCs, explicit Euler time integration) with an identical
+  Tesseract interface — but the solver is written in pure JAX instead of Fortran.
+
+  Derivatives (JVP, VJP, Jacobian) are obtained via jax.jvp / jax.vjp with no
+  manual adjoint code and no compilation pipeline. This enables a direct
+  performance comparison between Enzyme (legacy Fortran + LLVM AD) and JAX
+  (native Python AD with XLA JIT).
+
+build_config:
+  target_platform: "native"

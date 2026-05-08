@@ -1,0 +1,62 @@
+name: "enzyme-thermal-2d"
+version: "1.0.0"
+description: |
+  Differentiable 2D transient heat conduction solver using Enzyme automatic
+  differentiation.
+
+  Solves rho*cp*dT/dt = div(k(T)*grad(T)) + Q on a structured rectangular
+  grid with temperature-dependent conductivity k(T) = k0 + k1*T, mixed
+  boundary conditions (Dirichlet, convection, insulated), and multi-step
+  explicit time integration.
+
+  Enzyme generates both forward-mode (JVP) and reverse-mode (VJP) derivatives
+  through the entire time-stepping loop directly from the compiled Fortran code
+  at the LLVM IR level — no manual adjoint code required.
+
+  Industry relevance: gradient-based calibration of thermal material properties,
+  inverse heat transfer problems, sensitivity analysis for thermal management
+  design, and differentiable physics for digital twins.
+
+build_config:
+  base_image: "debian:bookworm-slim"
+  target_platform: "linux/amd64"
+
+  extra_packages:
+    - wget
+    - gnupg
+    - ca-certificates
+    - bzip2
+
+  package_data:
+    - ["enzyme/thermal_2d.f90", "enzyme/thermal_2d.f90"]
+    - ["enzyme/wrapper.c", "enzyme/wrapper.c"]
+    - ["enzyme/build.sh", "enzyme/build.sh"]
+
+  custom_build_steps:
+    # Install LLVM 19 toolchain
+    - |
+      RUN wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc && \
+          echo "deb http://apt.llvm.org/bookworm/ llvm-toolchain-bookworm-19 main" > /etc/apt/sources.list.d/llvm.list && \
+          apt-get update && apt-get install -y --no-install-recommends llvm-19 clang-19 && \
+          rm -rf /var/lib/apt/lists/* && \
+          for tool in opt llvm-as llvm-link llvm-dis llc clang clang++; do \
+            ln -sf /usr/bin/${tool}-19 /usr/local/bin/${tool} 2>/dev/null || true; \
+          done
+
+    # Install LFortran via micromamba (prebuilt from conda-forge)
+    - |
+      RUN wget -q https://github.com/mamba-org/micromamba-releases/releases/latest/download/micromamba-linux-64 \
+            -O /usr/local/bin/micromamba && chmod +x /usr/local/bin/micromamba && \
+          MAMBA_ROOT_PREFIX=/opt/conda micromamba create -y -n base -c conda-forge lfortran=0.61.0 && \
+          ln -sf $(find /opt/conda -name lfortran -type f | head -1) /usr/local/bin/lfortran && \
+          echo /opt/conda/lib > /etc/ld.so.conf.d/conda.conf && ldconfig
+
+    # Download prebuilt Enzyme LLVM plugin
+    - |
+      RUN wget -q https://github.com/EnzymeAD/Enzyme/releases/download/nightly/LLVMEnzyme-19.so \
+            -O /usr/local/lib/LLVMEnzyme-19.so
+
+    # Build the differentiated shared library
+    - |
+      RUN chmod +x /tesseract/enzyme/build.sh && \
+          /tesseract/enzyme/build.sh /tesseract/enzyme/libthermal_2d_ad.so
