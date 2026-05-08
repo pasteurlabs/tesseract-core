@@ -1,7 +1,7 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Single-timestep Burgers' equation solver Tesseract.
+"""Single-timestep Burgers' equation solver Tesseract (PyTorch).
 
 Solves one explicit Euler step of the 1D viscous Burgers' equation:
 
@@ -16,10 +16,10 @@ calls and end-to-end gradient flow through both solver and closure.
 
 from typing import Any
 
-import equinox as eqx
-import jax
-import jax.numpy as jnp
+import numpy as np
+import torch
 from pydantic import BaseModel, Field
+from torch.utils._pytree import tree_map
 
 from tesseract_core.runtime import Array, Differentiable, Float64
 from tesseract_core.runtime.tree_transforms import filter_func, flatten_with_paths
@@ -29,6 +29,12 @@ N = 128
 
 # --- Grid setup (fixed for this Tesseract) ---
 DX = 1.0 / (N - 1)
+
+to_tensor = lambda x: (
+    torch.tensor(x, dtype=torch.float64)
+    if isinstance(x, np.generic | np.ndarray)
+    else x
+)
 
 
 class InputSchema(BaseModel):
@@ -47,18 +53,18 @@ class OutputSchema(BaseModel):
     )
 
 
-@eqx.filter_jit
-def apply_jit(inputs: dict) -> dict:
+def evaluate(inputs: dict) -> dict:
+    """Core differentiable computation — pure torch operations."""
     u = inputs["u"]
     nu = inputs["nu"]
     dt = inputs["dt"]
 
     # Spatial derivatives via central differences
-    dudx = jnp.zeros_like(u)
-    dudx = dudx.at[1:-1].set((u[2:] - u[:-2]) / (2 * DX))
+    dudx = torch.zeros_like(u)
+    dudx[1:-1] = (u[2:] - u[:-2]) / (2 * DX)
 
-    d2udx2 = jnp.zeros_like(u)
-    d2udx2 = d2udx2.at[1:-1].set((u[2:] - 2 * u[1:-1] + u[:-2]) / (DX**2))
+    d2udx2 = torch.zeros_like(u)
+    d2udx2[1:-1] = (u[2:] - 2 * u[1:-1] + u[:-2]) / (DX**2)
 
     # Burgers' equation: du/dt = -u * du/dx + nu * d²u/dx²
     dudt = -u * dudx + nu * d2udx2
@@ -67,33 +73,18 @@ def apply_jit(inputs: dict) -> dict:
     u_next = u + dt * dudt
 
     # Enforce boundary conditions (Dirichlet: hold boundary values)
-    u_next = u_next.at[0].set(u[0])
-    u_next = u_next.at[-1].set(u[-1])
+    u_next = torch.cat([u[:1], u_next[1:-1], u[-1:]])
 
     return {"u_next": u_next}
 
 
 def apply(inputs: InputSchema) -> OutputSchema:
-    return apply_jit(inputs.model_dump())
+    tensor_inputs = tree_map(to_tensor, inputs.model_dump())
+    return evaluate(tensor_inputs)
 
 
 def abstract_eval(abstract_inputs: Any) -> Any:
     return {"u_next": {"shape": [N], "dtype": "float64"}}
-
-
-@eqx.filter_jit
-def jvp_jit(
-    inputs: dict,
-    jvp_inputs: tuple[str],
-    jvp_outputs: tuple[str],
-    tangent_vector: dict,
-) -> Any:
-    filtered_apply = filter_func(apply_jit, inputs, jvp_outputs)
-    return jax.jvp(
-        filtered_apply,
-        [flatten_with_paths(inputs, include_paths=jvp_inputs)],
-        [tangent_vector],
-    )[1]
 
 
 def jacobian_vector_product(
@@ -101,27 +92,19 @@ def jacobian_vector_product(
     jvp_inputs: set[str],
     jvp_outputs: set[str],
     tangent_vector: dict[str, Any],
-) -> Any:
-    return jvp_jit(
-        inputs.model_dump(),
-        tuple(jvp_inputs),
-        tuple(jvp_outputs),
-        tangent_vector,
+):
+    jvp_inputs = tuple(jvp_inputs)
+    tangent_vector = {key: tangent_vector[key] for key in jvp_inputs}
+
+    tensor_inputs = tree_map(to_tensor, inputs.model_dump())
+    pos_tangent = tree_map(to_tensor, tangent_vector).values()
+    pos_inputs = flatten_with_paths(tensor_inputs, jvp_inputs).values()
+
+    filtered_pos_eval = filter_func(
+        evaluate, tensor_inputs, jvp_outputs, input_paths=jvp_inputs
     )
 
-
-@eqx.filter_jit
-def vjp_jit(
-    inputs: dict,
-    vjp_inputs: tuple[str],
-    vjp_outputs: tuple[str],
-    cotangent_vector: dict,
-) -> Any:
-    filtered_apply = filter_func(apply_jit, inputs, vjp_outputs)
-    _, vjp_func = jax.vjp(
-        filtered_apply, flatten_with_paths(inputs, include_paths=vjp_inputs)
-    )
-    return vjp_func(cotangent_vector)[0]
+    return torch.func.jvp(filtered_pos_eval, tuple(pos_inputs), tuple(pos_tangent))[1]
 
 
 def vector_jacobian_product(
@@ -129,30 +112,46 @@ def vector_jacobian_product(
     vjp_inputs: set[str],
     vjp_outputs: set[str],
     cotangent_vector: dict[str, Any],
-) -> Any:
-    return vjp_jit(
-        inputs.model_dump(),
-        tuple(vjp_inputs),
-        tuple(vjp_outputs),
-        cotangent_vector,
+):
+    vjp_inputs = tuple(vjp_inputs)
+    cotangent_vector = {key: cotangent_vector[key] for key in vjp_outputs}
+
+    tensor_inputs = tree_map(to_tensor, inputs.model_dump())
+    tensor_cotangent = tree_map(to_tensor, cotangent_vector)
+    pos_inputs = flatten_with_paths(tensor_inputs, vjp_inputs).values()
+
+    filtered_pos_func = filter_func(
+        evaluate, tensor_inputs, vjp_outputs, input_paths=vjp_inputs
     )
 
-
-@eqx.filter_jit
-def jac_jit(
-    inputs: dict,
-    jac_inputs: tuple[str],
-    jac_outputs: tuple[str],
-) -> Any:
-    filtered_apply = filter_func(apply_jit, inputs, jac_outputs)
-    return jax.jacrev(filtered_apply)(
-        flatten_with_paths(inputs, include_paths=jac_inputs)
-    )
+    _, vjp_func = torch.func.vjp(filtered_pos_func, *pos_inputs)
+    vjp_vals = vjp_func(tensor_cotangent)
+    return dict(zip(vjp_inputs, vjp_vals, strict=True))
 
 
 def jacobian(
     inputs: InputSchema,
     jac_inputs: set[str],
     jac_outputs: set[str],
-) -> Any:
-    return jac_jit(inputs.model_dump(), tuple(jac_inputs), tuple(jac_outputs))
+):
+    jac_inputs = tuple(jac_inputs)
+    tensor_inputs = tree_map(to_tensor, inputs.model_dump())
+    pos_inputs = flatten_with_paths(tensor_inputs, jac_inputs).values()
+
+    filtered_pos_eval = filter_func(
+        evaluate, tensor_inputs, jac_outputs, input_paths=jac_inputs
+    )
+
+    def filtered_pos_eval_flat(*args):
+        res = filtered_pos_eval(*args)
+        return tuple(res[k] for k in jac_outputs)
+
+    jac = torch.autograd.functional.jacobian(filtered_pos_eval_flat, tuple(pos_inputs))
+
+    jac_dict = {}
+    for dy, dys in zip(jac_outputs, jac, strict=True):
+        jac_dict[dy] = {}
+        for dx, dxs in zip(jac_inputs, dys, strict=True):
+            jac_dict[dy][dx] = dxs
+
+    return jac_dict

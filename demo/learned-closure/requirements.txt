@@ -1,6 +1,4 @@
-jax[cpu]==0.5.2
-equinox
+torch
 matplotlib
-optax
 tesseract-core
-tesseract-jax
+tesseract-torch

@@ -1,7 +1,7 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Neural viscosity closure Tesseract.
+"""Neural viscosity closure Tesseract (PyTorch).
 
 A small MLP that predicts spatially-varying viscosity from local flow features.
 Used as a learned closure inside a PDE solver — the solver calls this Tesseract
@@ -14,10 +14,10 @@ an external optimizer can differentiate through the full solver-closure pipeline
 
 from typing import Any
 
-import equinox as eqx
-import jax
-import jax.numpy as jnp
+import numpy as np
+import torch
 from pydantic import BaseModel, Field
+from torch.utils._pytree import tree_map
 
 from tesseract_core.runtime import Array, Differentiable, Float64
 from tesseract_core.runtime.tree_transforms import filter_func, flatten_with_paths
@@ -25,6 +25,12 @@ from tesseract_core.runtime.tree_transforms import filter_func, flatten_with_pat
 # Network architecture constants
 HIDDEN_DIM = 32
 N_HIDDEN_LAYERS = 2
+
+to_tensor = lambda x: (
+    torch.tensor(x, dtype=torch.float64)
+    if isinstance(x, np.generic | np.ndarray)
+    else x
+)
 
 
 class InputSchema(BaseModel):
@@ -60,74 +66,39 @@ class OutputSchema(BaseModel):
     )
 
 
-@eqx.filter_jit
-def apply_jit(inputs: dict) -> dict:
+def evaluate(inputs: dict) -> dict:
+    """Core differentiable computation — pure torch operations."""
     u = inputs["u"]
     dudx = inputs["dudx"]
     x = inputs["x"]
 
     # Stack features: [u, dudx, x] at each grid point -> (N, 3)
-    features = jnp.stack([u, dudx, x], axis=-1)
+    features = torch.stack([u, dudx, x], dim=-1)
 
     # Forward pass through MLP
     h = features @ inputs["w1"] + inputs["b1"]
-    h = jnp.tanh(h)
+    h = torch.tanh(h)
     h = h @ inputs["w2"] + inputs["b2"]
-    h = jnp.tanh(h)
+    h = torch.tanh(h)
     out = h @ inputs["w3"] + inputs["b3"]
 
     # Sigmoid * scale to keep viscosity in a physically reasonable range.
     # Range [0, nu_max] prevents CFL violations in the explicit solver.
     nu_max = 0.05
-    nu = nu_max * jax.nn.sigmoid(out[:, 0])
+    nu = nu_max * torch.sigmoid(out[:, 0])
 
     return {"nu": nu}
 
 
 def apply(inputs: InputSchema) -> OutputSchema:
-    return apply_jit(inputs.model_dump())
+    tensor_inputs = tree_map(to_tensor, inputs.model_dump())
+    return evaluate(tensor_inputs)
 
 
 def abstract_eval(abstract_inputs: Any) -> Any:
-    is_shapedtype_dict = lambda x: type(x) is dict and (x.keys() == {"shape", "dtype"})
-    is_shapedtype_struct = lambda x: isinstance(x, jax.ShapeDtypeStruct)
-
-    jaxified_inputs = jax.tree.map(
-        lambda x: jax.ShapeDtypeStruct(**x) if is_shapedtype_dict(x) else x,
-        abstract_inputs.model_dump(),
-        is_leaf=is_shapedtype_dict,
-    )
-    dynamic_inputs, static_inputs = eqx.partition(
-        jaxified_inputs, filter_spec=is_shapedtype_struct
-    )
-
-    def wrapped_apply(dynamic_inputs: Any) -> Any:
-        inputs = eqx.combine(static_inputs, dynamic_inputs)
-        return apply_jit(inputs)
-
-    jax_shapes = jax.eval_shape(wrapped_apply, dynamic_inputs)
-    return jax.tree.map(
-        lambda x: (
-            {"shape": x.shape, "dtype": str(x.dtype)} if is_shapedtype_struct(x) else x
-        ),
-        jax_shapes,
-        is_leaf=is_shapedtype_struct,
-    )
-
-
-@eqx.filter_jit
-def jvp_jit(
-    inputs: dict,
-    jvp_inputs: tuple[str],
-    jvp_outputs: tuple[str],
-    tangent_vector: dict,
-) -> Any:
-    filtered_apply = filter_func(apply_jit, inputs, jvp_outputs)
-    return jax.jvp(
-        filtered_apply,
-        [flatten_with_paths(inputs, include_paths=jvp_inputs)],
-        [tangent_vector],
-    )[1]
+    inputs_dict = abstract_inputs.model_dump()
+    n = inputs_dict["u"]["shape"][0]
+    return {"nu": {"shape": [n], "dtype": "float64"}}
 
 
 def jacobian_vector_product(
@@ -135,27 +106,19 @@ def jacobian_vector_product(
     jvp_inputs: set[str],
     jvp_outputs: set[str],
     tangent_vector: dict[str, Any],
-) -> Any:
-    return jvp_jit(
-        inputs.model_dump(),
-        tuple(jvp_inputs),
-        tuple(jvp_outputs),
-        tangent_vector,
+):
+    jvp_inputs = tuple(jvp_inputs)
+    tangent_vector = {key: tangent_vector[key] for key in jvp_inputs}
+
+    tensor_inputs = tree_map(to_tensor, inputs.model_dump())
+    pos_tangent = tree_map(to_tensor, tangent_vector).values()
+    pos_inputs = flatten_with_paths(tensor_inputs, jvp_inputs).values()
+
+    filtered_pos_eval = filter_func(
+        evaluate, tensor_inputs, jvp_outputs, input_paths=jvp_inputs
     )
 
-
-@eqx.filter_jit
-def vjp_jit(
-    inputs: dict,
-    vjp_inputs: tuple[str],
-    vjp_outputs: tuple[str],
-    cotangent_vector: dict,
-) -> Any:
-    filtered_apply = filter_func(apply_jit, inputs, vjp_outputs)
-    _, vjp_func = jax.vjp(
-        filtered_apply, flatten_with_paths(inputs, include_paths=vjp_inputs)
-    )
-    return vjp_func(cotangent_vector)[0]
+    return torch.func.jvp(filtered_pos_eval, tuple(pos_inputs), tuple(pos_tangent))[1]
 
 
 def vector_jacobian_product(
@@ -163,30 +126,46 @@ def vector_jacobian_product(
     vjp_inputs: set[str],
     vjp_outputs: set[str],
     cotangent_vector: dict[str, Any],
-) -> Any:
-    return vjp_jit(
-        inputs.model_dump(),
-        tuple(vjp_inputs),
-        tuple(vjp_outputs),
-        cotangent_vector,
+):
+    vjp_inputs = tuple(vjp_inputs)
+    cotangent_vector = {key: cotangent_vector[key] for key in vjp_outputs}
+
+    tensor_inputs = tree_map(to_tensor, inputs.model_dump())
+    tensor_cotangent = tree_map(to_tensor, cotangent_vector)
+    pos_inputs = flatten_with_paths(tensor_inputs, vjp_inputs).values()
+
+    filtered_pos_func = filter_func(
+        evaluate, tensor_inputs, vjp_outputs, input_paths=vjp_inputs
     )
 
-
-@eqx.filter_jit
-def jac_jit(
-    inputs: dict,
-    jac_inputs: tuple[str],
-    jac_outputs: tuple[str],
-) -> Any:
-    filtered_apply = filter_func(apply_jit, inputs, jac_outputs)
-    return jax.jacrev(filtered_apply)(
-        flatten_with_paths(inputs, include_paths=jac_inputs)
-    )
+    _, vjp_func = torch.func.vjp(filtered_pos_func, *pos_inputs)
+    vjp_vals = vjp_func(tensor_cotangent)
+    return dict(zip(vjp_inputs, vjp_vals, strict=True))
 
 
 def jacobian(
     inputs: InputSchema,
     jac_inputs: set[str],
     jac_outputs: set[str],
-) -> Any:
-    return jac_jit(inputs.model_dump(), tuple(jac_inputs), tuple(jac_outputs))
+):
+    jac_inputs = tuple(jac_inputs)
+    tensor_inputs = tree_map(to_tensor, inputs.model_dump())
+    pos_inputs = flatten_with_paths(tensor_inputs, jac_inputs).values()
+
+    filtered_pos_eval = filter_func(
+        evaluate, tensor_inputs, jac_outputs, input_paths=jac_inputs
+    )
+
+    def filtered_pos_eval_flat(*args):
+        res = filtered_pos_eval(*args)
+        return tuple(res[k] for k in jac_outputs)
+
+    jac = torch.autograd.functional.jacobian(filtered_pos_eval_flat, tuple(pos_inputs))
+
+    jac_dict = {}
+    for dy, dys in zip(jac_outputs, jac, strict=True):
+        jac_dict[dy] = {}
+        for dx, dxs in zip(jac_inputs, dys, strict=True):
+            jac_dict[dy][dx] = dxs
+
+    return jac_dict
