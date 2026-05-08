@@ -1,4 +1,5 @@
 ---
+orphan: true
 html_class: blog-page
 hide-toc: true
 og:title: Building Differentiable Multi-Physics Pipelines with Tesseract

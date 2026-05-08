@@ -275,7 +275,7 @@ parametric structural optimization.
 :link: content/blog/tesseract-for-researchers
 :link-type: doc
 :class-card: persona-card
-:img-top: \_static/icon-researcher.svg
+:img-top: static/icon-researcher.svg
 :class-img-top: persona-icon
 
 Differentiable simulation, probabilistic inference, cross-framework gradient composition.
@@ -285,7 +285,7 @@ Differentiable simulation, probabilistic inference, cross-framework gradient com
 :link: content/blog/tesseract-for-rse
 :link-type: doc
 :class-card: persona-card
-:img-top: \_static/icon-rse.svg
+:img-top: static/icon-rse.svg
 :class-img-top: persona-icon
 
 Typed interface contracts, reproducibility, multi-group solver coupling.
@@ -295,7 +295,7 @@ Typed interface contracts, reproducibility, multi-group solver coupling.
 :link: content/blog/tesseract-for-rnd-engineers
 :link-type: doc
 :class-card: persona-card
-:img-top: \_static/icon-rnd.svg
+:img-top: static/icon-rnd.svg
 :class-img-top: persona-icon
 
 From research prototype to production pipeline without writing Dockerfiles.
@@ -305,7 +305,7 @@ From research prototype to production pipeline without writing Dockerfiles.
 :link: content/blog/tesseract-for-platform-engineers
 :link-type: doc
 :class-card: persona-card
-:img-top: \_static/icon-platform.svg
+:img-top: static/icon-platform.svg
 :class-img-top: persona-icon
 
 Uniform deployment contracts for scientific workloads.

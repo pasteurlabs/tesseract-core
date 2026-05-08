@@ -1,4 +1,5 @@
 ---
+orphan: true
 html_class: blog-page
 og:title: Tesseract for R&D Engineers
 og:description: "From research prototype to production pipeline without writing Dockerfiles — Tesseract bridges the gap between research code and deployable software."

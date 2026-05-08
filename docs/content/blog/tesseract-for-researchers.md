@@ -1,4 +1,5 @@
 ---
+orphan: true
 html_class: blog-page
 og:title: Tesseract for Researchers
 og:description: "How Tesseract helps researchers in differentiable simulation, physics-informed ML, and probabilistic modeling work across language and framework boundaries."
