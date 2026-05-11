@@ -9,7 +9,6 @@ from typing import Any
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-from jax.tree_util import Partial
 from pydantic import BaseModel
 
 from tesseract_core.runtime import Differentiable, Float32
@@ -18,31 +17,32 @@ from tesseract_core.runtime.tree_transforms import (
     filter_func,
     flatten_with_paths,
     hash_pytree_leaves,
+    set_at_path,
 )
 
 #
 # Cache configuration
 #
-# This recipe caches the linearization of apply() so that gradient endpoints
-# (vjp, jvp, jacobian) can reuse the forward pass instead of recomputing it.
+# When apply() is called, this template runs jax.vjp internally and caches the
+# resulting backward function. A subsequent vector_jacobian_product call on the
+# same inputs reuses that cached backward, skipping the redundant forward pass
+# that vjp would otherwise repeat. Typical speedup is ~10-20%
+# for a val-and-grad on moderate-to-deep networks.
 #
-# Best fit:
-#   - Iterative solvers that evaluate many JVPs at the same point, e.g. CG for
-#     an inverse problem (the linear map is evaluated hundreds of times per solve).
-#   - Line-search optimizers such as L-BFGS, which call apply() one or more
-#     times before accepting a step and requesting a gradient.
-#   - Any workflow that calls apply() and then a gradient endpoint on the same
-#     inputs — the cache saves the repeated forward pass (~40% on a typical call).
+# The cache also helps when a single apply is followed by multiple vjp calls
+# on the same input — for example, jax.jacrev (which decomposes into one vjp
+# per output basis vector) or CG-style inverse-problem solvers (each inner CG
+# step computes J^T u at the same iterate). Each subsequent vjp on the same
+# input reuses the cached residuals.
 #
 # Poor fit:
-#   - Optimizers that only ever use gradient information and never inspect the
-#     loss value (e.g. Adam/SGD using jax.grad rather than jax.value_and_grad).
-#     No apply() call is issued, the cache is never populated, and every vjp
-#     pays a cold-miss linearize cost. Use --recipe jax instead.
+#   - Very small models where the forward pass is microseconds: the cache
+#     machinery overhead exceeds the saved work.
 #
-# _CACHE_SIZE = 1 covers the common case (one outstanding apply at a time).
-# Increase it if your workflow interleaves multiple apply() calls before their
-# corresponding gradient calls.
+# Set _CACHE_SIZE = 0 to disable caching entirely; apply() and vjp() then
+# bypass the cache machinery and run their forward passes directly.
+# Increase _CACHE_SIZE for workloads that interleave several apply() calls
+# before their corresponding vjp() calls.
 #
 _CACHE_SIZE = 1
 
@@ -70,52 +70,13 @@ class OutputSchema(BaseModel):
 #
 # Internals — no need to modify below this line
 #
-_cache = LRUCache(maxsize=_CACHE_SIZE)
-_f_lin_ref: dict[tuple, Partial] = {}
+_vjp_cache = LRUCache(maxsize=_CACHE_SIZE)
 
 
 def _hash_inputs(inputs_dict: dict) -> bytes:
     """Compute a SHA-256 hash of a pytree of inputs for cache key comparison."""
     leaves, treedef = jax.tree.flatten(inputs_dict)
     return hash_pytree_leaves(leaves, treedef)
-
-
-def _shape_key(inputs_dict: dict) -> tuple:
-    """Shape/dtype key used to share one linearization reference per input shape."""
-    leaves, treedef = jax.tree.flatten(eqx.filter(inputs_dict, eqx.is_array))
-    return (str(treedef), tuple((leaf.shape, str(leaf.dtype)) for leaf in leaves))
-
-
-def _linearize_and_cache(inputs_dict: dict) -> tuple:
-    """Return (primal_out, f_lin) for *inputs_dict*, populating the cache on miss.
-
-    f_lin is linearized only over the dynamic (array) inputs so that non-array
-    leaves (e.g. ints, strings) don't show up in the tangent structure.
-    """
-    key = _hash_inputs(inputs_dict)
-    hit = _cache.get(key)
-    if hit is not None:
-        return hit
-
-    dynamic_in, static_in = eqx.partition(inputs_dict, eqx.is_array)
-
-    def _apply_dynamic_only(dyn):
-        out = apply_jit(eqx.combine(dyn, static_in))
-        dynamic_out, _ = eqx.partition(out, eqx.is_array)
-        return dynamic_out
-
-    dynamic_primals, f_lin_fresh = jax.linearize(_apply_dynamic_only, dynamic_in)
-
-    ref = _f_lin_ref.setdefault(_shape_key(inputs_dict), f_lin_fresh)
-    f_lin = Partial(ref.func, *f_lin_fresh.args)
-
-    full_out = apply_jit(inputs_dict)
-    _, static_out = eqx.partition(full_out, eqx.is_array)
-    primal_out = eqx.combine(dynamic_primals, static_out)
-
-    entry = (primal_out, f_lin)
-    _cache.put(key, entry)
-    return entry
 
 
 #
@@ -140,11 +101,27 @@ def apply(inputs: InputSchema) -> OutputSchema:
     # differentiable outputs in a nonlinear way (a constant shift
     # should be safe)
 
+    inputs_dict = inputs.model_dump()
+
     if _CACHE_SIZE <= 0:
-        out = apply_jit(inputs.model_dump())
-    else:
-        primal_out, _f_lin = _linearize_and_cache(inputs.model_dump())
-        out = primal_out
+        return apply_jit(inputs_dict)
+
+    # Compute forward pass via jax.vjp to cache residuals for a potential
+    # subsequent vector_jacobian_product call. eqx.partition separates
+    # array (differentiable) from non-array outputs; has_aux tells jax.vjp
+    # to only differentiate through the array outputs.
+    def _apply_for_vjp(inputs_dict):
+        out = apply_jit(inputs_dict)
+        diff_out, static_out = eqx.partition(out, eqx.is_array)
+        return diff_out, static_out
+
+    diff_primals, vjp_func, static_primals = jax.vjp(
+        _apply_for_vjp, inputs_dict, has_aux=True
+    )
+    out = eqx.combine(diff_primals, static_primals)
+
+    cotangent_template = jax.tree.map(jnp.zeros_like, diff_primals)
+    _vjp_cache.put(_hash_inputs(inputs_dict), (vjp_func, cotangent_template))
 
     # Optional: Insert any post-processing that doesn't require tracing
     # For example, you might want to save to disk or modify a non-differentiable
@@ -162,12 +139,7 @@ def jacobian(
     jac_inputs: set[str],
     jac_outputs: set[str],
 ):
-    if _CACHE_SIZE <= 0:
-        return jac_jit(inputs.model_dump(), tuple(jac_inputs), tuple(jac_outputs))
-    inputs_dict = inputs.model_dump()
-    _, f_lin = _linearize_and_cache(inputs_dict)
-    dynamic_in, _ = eqx.partition(inputs_dict, eqx.is_array)
-    return _jac_with_lin(f_lin, dynamic_in, tuple(jac_inputs), tuple(jac_outputs))
+    return jac_jit(inputs.model_dump(), tuple(jac_inputs), tuple(jac_outputs))
 
 
 def jacobian_vector_product(
@@ -176,18 +148,11 @@ def jacobian_vector_product(
     jvp_outputs: set[str],
     tangent_vector: dict[str, Any],
 ):
-    if _CACHE_SIZE <= 0:
-        return jvp_jit(
-            inputs.model_dump(),
-            tuple(jvp_inputs),
-            tuple(jvp_outputs),
-            tangent_vector,
-        )
-    inputs_dict = inputs.model_dump()
-    _, f_lin = _linearize_and_cache(inputs_dict)
-    dynamic_in, _ = eqx.partition(inputs_dict, eqx.is_array)
-    return _jvp_with_lin(
-        f_lin, dynamic_in, tangent_vector, tuple(jvp_inputs), tuple(jvp_outputs)
+    return jvp_jit(
+        inputs.model_dump(),
+        tuple(jvp_inputs),
+        tuple(jvp_outputs),
+        tangent_vector,
     )
 
 
@@ -197,23 +162,31 @@ def vector_jacobian_product(
     vjp_outputs: set[str],
     cotangent_vector: dict[str, Any],
 ):
-    if _CACHE_SIZE <= 0:
-        return vjp_jit(
-            inputs.model_dump(),
-            tuple(vjp_inputs),
-            tuple(vjp_outputs),
-            cotangent_vector,
-        )
     inputs_dict = inputs.model_dump()
-    primal_out, f_lin = _linearize_and_cache(inputs_dict)
-    dynamic_in, _ = eqx.partition(inputs_dict, eqx.is_array)
-    return _vjp_with_lin(
-        f_lin,
-        dynamic_in,
-        primal_out,
-        cotangent_vector,
+
+    # Use get (not pop) so the cached residuals can serve multiple sequential
+    # vjp calls on the same inputs — for example, when tesseract-jax's
+    # value_and_grad is followed by jax.jacrev, which decomposes into many
+    # vjp calls per output basis vector.
+    if (
+        _CACHE_SIZE > 0
+        and (cached := _vjp_cache.get(_hash_inputs(inputs_dict))) is not None
+    ):
+        vjp_func, cotangent_template = cached
+
+        # Build full cotangent from template, zeroing outputs not in vjp_outputs
+        full_cotangent = jax.tree.map(jnp.zeros_like, cotangent_template)
+        full_cotangent = set_at_path(full_cotangent, cotangent_vector)
+
+        (all_input_cotangents,) = vjp_func(full_cotangent)
+        return flatten_with_paths(all_input_cotangents, include_paths=vjp_inputs)
+
+    # Cache disabled or cache miss: fall back to original JIT-compiled path
+    return vjp_jit(
+        inputs_dict,
         tuple(vjp_inputs),
         tuple(vjp_outputs),
+        cotangent_vector,
     )
 
 
@@ -248,58 +221,6 @@ def abstract_eval(abstract_inputs):
 #
 # Helper functions
 #
-# The _{jvp,vjp,jac}_with_lin helpers run when caching is enabled and reuse
-# the cached linearization. The _jit helpers below are used when caching is
-# disabled and compute everything from the forward pass on each call.
-#
-
-
-@eqx.filter_jit
-def _jvp_with_lin(
-    f_lin,
-    dynamic_in: dict,
-    tangent_vector: dict,
-    jvp_inputs: tuple[str],
-    jvp_outputs: tuple[str],
-):
-    zero_in = jax.tree.map(jnp.zeros_like, dynamic_in)
-    projected = filter_func(f_lin, zero_in, jvp_outputs)
-    return projected(tangent_vector)
-
-
-@eqx.filter_jit
-def _vjp_with_lin(
-    f_lin,
-    dynamic_in: dict,
-    primal_out: dict,
-    cotangent_vector: dict,
-    vjp_inputs: tuple[str],
-    vjp_outputs: tuple[str],
-):
-    zero_out = jax.tree.map(jnp.zeros_like, eqx.filter(primal_out, eqx.is_array))
-    f_trans = jax.linear_transpose(f_lin, dynamic_in)
-
-    def _trans_single(ct_out):
-        (ct_in,) = f_trans(ct_out)
-        return ct_in
-
-    projected = filter_func(_trans_single, zero_out, vjp_inputs)
-    return projected(cotangent_vector)
-
-
-@eqx.filter_jit
-def _jac_with_lin(
-    f_lin,
-    dynamic_in: dict,
-    jac_inputs: tuple[str],
-    jac_outputs: tuple[str],
-):
-    # Reverse-mode by default (cheaper when you have more inputs than outputs,
-    # e.g. loss gradients). Swap `jacrev` for `jacfwd` for forward-mode.
-    zero_in = jax.tree.map(jnp.zeros_like, dynamic_in)
-    projected = filter_func(f_lin, zero_in, jac_outputs)
-    flat_zero_in = flatten_with_paths(zero_in, jac_inputs)
-    return jax.jacrev(projected)(flat_zero_in)
 
 
 @eqx.filter_jit
