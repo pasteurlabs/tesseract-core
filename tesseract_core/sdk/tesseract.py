@@ -584,7 +584,8 @@ def _fast_tobytes(arr: np.ndarray) -> memoryview:
     return np.ascontiguousarray(arr).data
 
 
-def _encode_array(arr: np.ndarray, b64: bool = True) -> dict:
+def _encode_array(arr: Any, b64: bool = True) -> dict:
+    arr = np.asarray(arr)
     if b64:
         data = {
             "buffer": pybase64.b64encode_as_string(_fast_tobytes(arr)),
@@ -698,7 +699,7 @@ class HTTPClient:
 
         if payload:
             encoded_payload = _tree_map(
-                _encode_array, payload, is_leaf=lambda x: hasattr(x, "shape")
+                _encode_array, payload, is_leaf=lambda x: hasattr(x, "__array__")
             )
         else:
             encoded_payload = None
