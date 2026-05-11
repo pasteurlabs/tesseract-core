@@ -585,7 +585,8 @@ def _fast_tobytes(arr: np.ndarray) -> memoryview:
 
 
 def _encode_array(arr: Any, b64: bool = True) -> dict:
-    arr = np.asarray(arr)
+    # Ensure arr is a numpy-compatible array so we guarantee it has a compatible dtype (not e.g. torch bfloat16)
+    arr = np.asanyarray(arr, order="A")
     if b64:
         data = {
             "buffer": pybase64.b64encode_as_string(_fast_tobytes(arr)),
