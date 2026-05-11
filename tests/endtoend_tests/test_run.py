@@ -181,6 +181,62 @@ def test_io_path_interactions(
         assert result["result"]["data"]["encoding"] == "base64"
 
 
+def test_binref_lz4_compression(built_image_name, dummy_tesseract_module, tmp_path):
+    """Ensure that lz4 compression works end-to-end with json+binref output."""
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    input_dir.mkdir()
+    output_dir.mkdir()
+
+    example_inputs = {
+        "inputs": {
+            "a": encode_array(np.array([1, 2]), encoding="binref", basedir=input_dir),
+            "b": encode_array(np.array([3, 4]), encoding="binref", basedir=input_dir),
+            "s": 1.0,
+            "normalize": True,
+        },
+    }
+
+    run_res = subprocess.run(
+        [
+            "tesseract",
+            "run",
+            built_image_name,
+            "apply",
+            "-i",
+            str(input_dir),
+            "-o",
+            str(output_dir),
+            "-f",
+            "json+binref",
+            "--env",
+            "TESSERACT_BINREF_COMPRESSION=lz4",
+            json.dumps(example_inputs),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert run_res.returncode == 0, run_res.stderr
+
+    result = json.loads(run_res.stdout)
+    assert result["result"]["data"]["encoding"] == "binref"
+    assert result["result"]["data"]["compression"] == "lz4"
+    assert "compressed_size" in result["result"]["data"]
+
+    binref_path = result["result"]["data"]["buffer"].rsplit(":", maxsplit=1)[0]
+    assert (output_dir / binref_path).exists()
+
+    # Verify decompressed values match expected output
+    roundtrip = dummy_tesseract_module.OutputSchema.model_validate_json(
+        run_res.stdout, context={"base_dir": output_dir}
+    )
+    expected = dummy_tesseract_module.apply(
+        dummy_tesseract_module.InputSchema.model_validate(example_inputs["inputs"])
+    )
+    for field in expected.model_fields:
+        assert np.array_equal(getattr(roundtrip, field), getattr(expected, field))
+
+
 def test_profiling(built_image_name, tmpdir):
     """Test that --profiling flag produces expected output."""
     payload = '{"inputs": {"a": [1.0, 2.0], "b": [3.0, 4.0], "s": 1.0}}'
