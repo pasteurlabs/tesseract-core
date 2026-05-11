@@ -328,7 +328,7 @@ def test_tree_map():
         "f": "hello",
     }
 
-    encoded = _tree_map(_encode_array, tree, is_leaf=lambda x: hasattr(x, "shape"))
+    encoded = _tree_map(_encode_array, tree, is_leaf=lambda x: hasattr(x, "__array__"))
 
     assert encoded == {
         "a": [10, 20],
@@ -351,6 +351,54 @@ def test_tree_map():
         },
         "f": "hello",
     }
+
+
+class _ForeignDtype:
+    """Mimics torch.float32 — has no .name attribute unlike numpy dtypes."""
+
+    pass
+
+
+class _ForeignTensor:
+    """Mimics a torch tensor: has .shape, a non-numpy dtype, and supports __array__."""
+
+    def __init__(self, data):
+        self._data = np.array(data, dtype=np.float32)
+        self.shape = self._data.shape
+        self.dtype = _ForeignDtype()
+
+    def __array__(self, dtype=None, copy=None):
+        if dtype is not None:
+            return self._data.astype(dtype)
+        return self._data
+
+
+def test_encode_array_foreign_tensor():
+    """_encode_array should handle non-numpy array-likes (e.g. torch tensors)."""
+    tensor = _ForeignTensor([1.0, 2.0, 3.0])
+    encoded = _encode_array(tensor)
+
+    assert encoded["shape"] == (3,)
+    assert encoded["dtype"] == "float32"
+    assert encoded["data"]["encoding"] == "base64"
+
+    decoded = _decode_array(encoded)
+    np.testing.assert_array_equal(decoded, [1.0, 2.0, 3.0])
+
+
+def test_tree_map_with_foreign_tensor():
+    """tree_map + _encode_array should work when payloads contain non-numpy arrays."""
+    tensor = _ForeignTensor([4.0, 5.0])
+    tree = {"inputs": {"x": tensor, "flag": True}}
+
+    encoded = _tree_map(_encode_array, tree, is_leaf=lambda x: hasattr(x, "__array__"))
+
+    assert encoded["inputs"]["flag"] is True
+    assert encoded["inputs"]["x"]["shape"] == (2,)
+    assert encoded["inputs"]["x"]["dtype"] == "float32"
+
+    decoded = _decode_array(encoded["inputs"]["x"])
+    np.testing.assert_array_equal(decoded, [4.0, 5.0])
 
 
 def test_test_endpoint_success_local(dummy_tesseract_package):
