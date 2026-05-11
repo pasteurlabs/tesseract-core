@@ -21,6 +21,32 @@ from tesseract_core.runtime.tree_transforms import (
 )
 
 #
+# Cache configuration
+#
+# When apply() is called, this template runs jax.vjp internally and caches the
+# resulting backward function. A subsequent vector_jacobian_product call on the
+# same inputs reuses that cached backward, skipping the redundant forward pass
+# that vjp would otherwise repeat. Typical speedup is ~10-20%
+# for a val-and-grad on moderate-to-deep networks.
+#
+# The cache also helps when a single apply is followed by multiple vjp calls
+# on the same input — for example, jax.jacrev (which decomposes into one vjp
+# per output basis vector) or CG-style inverse-problem solvers (each inner CG
+# step computes J^T u at the same iterate). Each subsequent vjp on the same
+# input reuses the cached residuals.
+#
+# Poor fit:
+#   - Very small models where the forward pass is microseconds: the cache
+#     machinery overhead exceeds the saved work.
+#
+# Set _CACHE_SIZE = 0 to disable caching entirely; apply() and vjp() then
+# bypass the cache machinery and run their forward passes directly.
+# Increase _CACHE_SIZE for workloads that interleave several apply() calls
+# before their corresponding vjp() calls.
+#
+_CACHE_SIZE = 1
+
+#
 # Schemata
 #
 
@@ -42,19 +68,9 @@ class OutputSchema(BaseModel):
 
 
 #
-# VJP residual caching
+# Internals — no need to modify below this line
 #
-# When computing gradients of a loss applied to Tesseract outputs, both apply()
-# and vector_jacobian_product() are called. Without caching, VJP recomputes the
-# forward pass internally to obtain residuals. This cache stores the VJP function
-# (with residuals) from apply() so the subsequent VJP call can skip recomputation.
-# See: https://github.com/pasteurlabs/tesseract-jax/issues/27
-#
-
-
-# Set maxsize=0 to disable caching, or increase for workloads that
-# interleave apply() calls before their corresponding VJP calls.
-_vjp_cache = LRUCache(maxsize=1)
+_vjp_cache = LRUCache(maxsize=_CACHE_SIZE)
 
 
 def _hash_inputs(inputs_dict: dict) -> bytes:
@@ -86,6 +102,9 @@ def apply(inputs: InputSchema) -> OutputSchema:
     # should be safe)
 
     inputs_dict = inputs.model_dump()
+
+    if _CACHE_SIZE <= 0:
+        return apply_jit(inputs_dict)
 
     # Compute forward pass via jax.vjp to cache residuals for a potential
     # subsequent vector_jacobian_product call. eqx.partition separates
@@ -145,9 +164,14 @@ def vector_jacobian_product(
 ):
     inputs_dict = inputs.model_dump()
 
-    # Check for cached VJP residuals from a prior apply call
-    cached = _vjp_cache.pop(_hash_inputs(inputs_dict))
-    if cached is not None:
+    # Use get (not pop) so the cached residuals can serve multiple sequential
+    # vjp calls on the same inputs — for example, when tesseract-jax's
+    # value_and_grad is followed by jax.jacrev, which decomposes into many
+    # vjp calls per output basis vector.
+    if (
+        _CACHE_SIZE > 0
+        and (cached := _vjp_cache.get(_hash_inputs(inputs_dict))) is not None
+    ):
         vjp_func, cotangent_template = cached
 
         # Build full cotangent from template, zeroing outputs not in vjp_outputs
@@ -157,7 +181,7 @@ def vector_jacobian_product(
         (all_input_cotangents,) = vjp_func(full_cotangent)
         return flatten_with_paths(all_input_cotangents, include_paths=vjp_inputs)
 
-    # Cache miss: fall back to original JIT-compiled path
+    # Cache disabled or cache miss: fall back to original JIT-compiled path
     return vjp_jit(
         inputs_dict,
         tuple(vjp_inputs),
