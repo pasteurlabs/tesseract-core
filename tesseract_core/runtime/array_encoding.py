@@ -123,9 +123,14 @@ class BinrefArrayData(BaseModel):
 
     @model_validator(mode="after")
     def check_compressed_size(self) -> "BinrefArrayData":
-        """Require compressed_size when compression is set."""
-        if self.compression is not None and self.compressed_size is None:
-            raise ValueError("compressed_size is required when compression is set")
+        """Require a positive compressed_size when compression is set."""
+        if self.compression is not None:
+            if self.compressed_size is None:
+                raise ValueError("compressed_size is required when compression is set")
+            if self.compressed_size <= 0:
+                raise ValueError(
+                    "compressed_size must be positive when compression is set"
+                )
         return self
 
 
