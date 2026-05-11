@@ -109,7 +109,9 @@ class Tesseract:
         memory: str | None = None,
         input_path: str | Path | None = None,
         output_path: str | Path | None = None,
-        output_format: Literal["json", "json+base64", "json+binref"] = "json+base64",
+        output_format: Literal[
+            "json", "json+base64", "json+binref", "json+cuda_ipc"
+        ] = "json+base64",
         docker_args: list[str] | None = None,
         runtime_config: dict[str, Any] | None = None,
         stream_logs: BoolOrCallable = False,
@@ -198,7 +200,9 @@ class Tesseract:
         tesseract_api: str | Path | ModuleType,
         input_path: Path | None = None,
         output_path: Path | None = None,
-        output_format: Literal["json", "json+base64", "json+binref"] = "json+base64",
+        output_format: Literal[
+            "json", "json+base64", "json+binref", "json+cuda_ipc"
+        ] = "json+base64",
         runtime_config: dict[str, Any] | None = None,
         stream_logs: BoolOrCallable = False,
     ) -> Tesseract:
@@ -318,9 +322,11 @@ class Tesseract:
         host_ip = self._spawn_config["host_ip"]
         self._lastlog = None
         output_path = self._spawn_config.get("output_path")
+        output_format = self._spawn_config.get("output_format", "json+base64")
         self._client = HTTPClient(
             f"http://{host_ip}:{container.host_port}",
             output_path=Path(output_path) if output_path else None,
+            output_format=output_format,
         )
 
         # Ensure that the Tesseract is torn down once the object is garbage collected,
@@ -603,6 +609,13 @@ def _encode_array(arr: np.ndarray, b64: bool = True) -> dict:
     }
 
 
+def _encode_array_cuda_ipc(arr: Any) -> dict:
+    """Encode a CUDA tensor via IPC handle for cross-process GPU sharing."""
+    from tesseract_core.runtime.array_encoding import _dump_cuda_ipc_arraydict
+
+    return _dump_cuda_ipc_arraydict(arr)
+
+
 def _decode_array(
     encoded_arr: dict, output_path: str | Path | None = None
 ) -> np.ndarray:
@@ -654,6 +667,10 @@ def _decode_array(
             data = f.read(num_bytes)
 
         arr = np.frombuffer(data, dtype=dtype)
+    elif encoding == "cuda_ipc":
+        from tesseract_core.runtime.array_encoding import _load_cuda_ipc_arraydict
+
+        return _load_cuda_ipc_arraydict(encoded_arr)
     else:
         raise ValueError(f"Unexpected array encoding {encoding}. Cannot decode.")
 
@@ -664,9 +681,15 @@ def _decode_array(
 class HTTPClient:
     """HTTP Client for Tesseracts."""
 
-    def __init__(self, url: str, output_path: str | Path | None = None) -> None:
+    def __init__(
+        self,
+        url: str,
+        output_path: str | Path | None = None,
+        output_format: str = "json+base64",
+    ) -> None:
         self._url = self._sanitize_url(url)
         self._output_path = output_path
+        self._output_format = output_format
         self._session = requests.Session()
         self._session.headers["Content-Type"] = "application/json"
 
@@ -697,9 +720,25 @@ class HTTPClient:
         url = f"{self.url}/{endpoint.lstrip('/')}"
 
         if payload:
-            encoded_payload = _tree_map(
-                _encode_array, payload, is_leaf=lambda x: hasattr(x, "shape")
-            )
+            if self._output_format == "json+cuda_ipc":
+                # For CUDA IPC: encode GPU arrays via IPC handles,
+                # fall back to base64 for CPU arrays
+                def _encode_leaf(x: Any) -> dict:
+                    if hasattr(x, "__cuda_array_interface__"):
+                        return _encode_array_cuda_ipc(x)
+                    return _encode_array(x)
+
+                encoded_payload = _tree_map(
+                    _encode_leaf,
+                    payload,
+                    is_leaf=lambda x: (
+                        hasattr(x, "shape") or hasattr(x, "__cuda_array_interface__")
+                    ),
+                )
+            else:
+                encoded_payload = _tree_map(
+                    _encode_array, payload, is_leaf=lambda x: hasattr(x, "shape")
+                )
         else:
             encoded_payload = None
 
