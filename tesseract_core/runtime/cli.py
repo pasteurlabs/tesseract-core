@@ -15,6 +15,7 @@ from typing import (
     Annotated,
     Any,
     Literal,
+    Union,
     get_args,
     get_origin,
 )
@@ -139,6 +140,12 @@ def make_callback() -> Callable:
         if field_name == "api_path":
             # Too late to configure here, as the API path is needed to load the Tesseract API
             continue
+
+        # Unwrap Optional[X] -> X so the inner type can be handled below
+        if get_origin(field_type) is Union:
+            non_none = [a for a in get_args(field_type) if a is not type(None)]
+            if len(non_none) == 1:
+                field_type = non_none[0]
 
         if get_origin(field_type) is Literal:
             field_type = make_choice_enum(f"{field_name}Choices", get_args(field_type))
