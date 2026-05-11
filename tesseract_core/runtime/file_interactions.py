@@ -11,7 +11,7 @@ from pydantic import TypeAdapter
 
 PathLike = str | Path
 
-supported_format_type = Literal["json", "json+base64", "json+binref"]
+supported_format_type = Literal["json", "json+base64", "json+binref", "json+cuda_ipc"]
 SUPPORTED_FORMATS = get_args(supported_format_type)
 
 
@@ -36,6 +36,8 @@ def output_to_bytes(
             "base_dir": base_dir,
             "binref_dir": binref_dir,
         }
+    elif format == "json+cuda_ipc":
+        context = {"array_encoding": "cuda_ipc"}
     else:
         raise ValueError(
             f"Unsupported format {format} (must be one of {SUPPORTED_FORMATS})"
