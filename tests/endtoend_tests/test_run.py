@@ -231,7 +231,9 @@ def test_binref_lz4_compression(built_image_name, dummy_tesseract_module, tmp_pa
         run_res.stdout, context={"base_dir": output_dir}
     )
     expected = dummy_tesseract_module.apply(
-        dummy_tesseract_module.InputSchema.model_validate(example_inputs["inputs"])
+        dummy_tesseract_module.InputSchema.model_validate(
+            example_inputs["inputs"], context={"base_dir": input_dir}
+        )
     )
     for field in expected.model_fields:
         assert np.array_equal(getattr(roundtrip, field), getattr(expected, field))
