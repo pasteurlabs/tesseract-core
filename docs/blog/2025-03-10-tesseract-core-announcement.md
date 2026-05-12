@@ -1,6 +1,5 @@
 ---
 orphan: true
-hide-toc: true
 og:title: Tesseract Core is now live... and open source!
 og:description: "We're announcing the public release of Tesseract Core, a free and open source application enabling scientists and engineers to build end-to-end differentiable pipelines with minimal code."
 blog_date: "2025-03-10"

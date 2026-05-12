@@ -1,6 +1,5 @@
 ---
 orphan: true
-hide-toc: true
 og:title: "Parametric Shape Optimization of Rocket Fins with Ansys SpaceClaim, PyAnsys, and Tesseract"
 og:description: "A gradient-based optimization workflow combining Ansys tools with Tesseract-driven differentiable programming to maximize grid fin stiffness on rockets."
 blog_date: "2025-11-28"

@@ -1,6 +1,5 @@
 ---
 orphan: true
-hide-toc: true
 og:title: "Playing Catch With Newton: a Beginner's Guide to Tesseracts"
 og:description: "A hands-on tutorial introducing the Tesseract ecosystem through a physics-based example, covering containerization of computational tools and implementing derivative endpoints."
 blog_date: "2025-08-03"

@@ -1,6 +1,5 @@
 ---
 orphan: true
-hide-toc: true
 og:title: "New demo: Pipeline-level autodiff with Tesseracts"
 og:description: "How Tesseracts unlock efficient, clean pipeline-level automatic differentiation."
 blog_date: "2025-06-30"

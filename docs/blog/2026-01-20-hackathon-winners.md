@@ -1,6 +1,5 @@
 ---
 orphan: true
-hide-toc: true
 og:title: Announcing the winners of the Tesseract Hackathon
 og:description: "The inaugural virtual Tesseract Hackathon concluded with impressive entries from global researchers and engineers building differentiable pipelines for scientific impact."
 blog_date: "2026-01-20"
@@ -26,6 +25,13 @@ This project explores how agents in flow fields can coordinate without direct co
 <figure>
 <img src="../_static/blog/hackathon-multi-agent-dpc.png" alt="Multi-Agent DPC architecture">
 <figcaption>Multi-Agent Differentiable Predictive Control architecture for zero-shot PDE scalability.</figcaption>
+</figure>
+
+<figure>
+<video autoplay loop muted playsinline>
+  <source src="../_static/blog/hackathon-heat2d-decentralized.mp4" type="video/mp4">
+</video>
+<figcaption>Visualization of decentralized agents shaping a 2D heat field without direct communication.</figcaption>
 </figure>
 
 ## 2nd Place: DeepSwingr -- A Differentiable Framework for Cricket Ball Swing Optimization
@@ -56,13 +62,11 @@ The modular design demonstrates Tesseract's containerization benefits, allowing 
 
 This entry became far and away the most viral project among submissions, comparing two surrogate architectures using Tesseract.
 
----
-
 ## Honorable Mentions
 
-- **Diffopteract** -- Differentiable Optimization in JAX via Julia/JuMP Tesseract (Laurens Lueg)
-- **DiffPIC** -- Differentiable Particle-in-Cell Optimization (Alejo Ballester, Rushan Zhang, Tage Burnett, Harshavardhan Harish)
-- **Tesseract-pinn-inverse-burgers** -- Backend-Agnostic Inverse 1D Burgers Solver (Julian Chan)
+- **[Diffopteract](https://github.com/llueg/diffopteract)** -- Differentiable Optimization in JAX via Julia/JuMP Tesseract (Laurens Lueg)
+- **[DiffPIC](https://github.com/ale-ballester/tesseract-hackathon)** -- Differentiable Particle-in-Cell Optimization (Alejo Ballester, Rushan Zhang, Tage Burnett, Harshavardhan Harish)
+- **[Tesseract-pinn-inverse-burgers](https://github.com/julian-8897/tesseract-pinn-inverse-burgers)** -- Backend-Agnostic Inverse 1D Burgers Solver (Julian Chan)
 
 ## Learn more
 

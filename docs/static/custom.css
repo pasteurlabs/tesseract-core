@@ -63,10 +63,10 @@ figure.align-default {
 
 /* Keep theme toggle visible on landing page, hide everything else */
 .landing-page .content-icon-container {
-    position: fixed;
+    position: absolute;
     top: 2.5rem;
     right: 2.5rem;
-    z-index: 101;
+    z-index: 99;
 }
 
 .landing-page .content-icon-container .edit-this-page,
@@ -523,7 +523,7 @@ body[data-theme="dark"] .ecosystem-card:hover {
     }
 
     .landing-hero h1 {
-        font-size: 2rem;
+        font-size: 2.2rem;
     }
 
     .landing-hero-text > p:nth-of-type(1) {
@@ -542,8 +542,7 @@ body[data-theme="dark"] .ecosystem-card:hover {
 
 /* ===== Blog page styles ===== */
 
-.blog-page .sidebar-drawer,
-.blog-page .toc-drawer {
+.blog-page .sidebar-drawer {
     display: none !important;
 }
 
@@ -552,28 +551,58 @@ body[data-theme="dark"] .ecosystem-card:hover {
     display: none !important;
 }
 
+/* Override Furo's flex layout: single centered column + absolute ToC */
 .blog-page .page {
     display: block;
 }
 
-/* Pin theme toggle to top-right, just below the navbar */
+.blog-page .main {
+    display: block;
+}
+
 .blog-page .content-icon-container {
-    position: fixed;
-    top: 2.5rem;
-    right: 2.5rem;
-    z-index: 101;
+    float: right;
+    display: flex;
+    margin: 0;
+    padding: 0.5rem 0;
 }
 
 .blog-page .content-icon-container .edit-this-page,
 .blog-page .content-icon-container .view-this-page,
-.blog-page .content-icon-container .toc-overlay-icon {
+.blog-page .content-icon-container .toc-overlay-icon,
+.blog-page .content-icon-container .toc-header-icon {
     display: none;
 }
 
 .blog-page .content {
     max-width: 720px;
     margin: 0 auto;
-    padding: 3.5rem 1.5rem 0;
+    padding: 1rem;
+    position: relative;
+}
+
+/* ToC: fixed sidebar anchored to the right of the content column.
+   We reset Furo's mobile-first off-screen positioning and place the
+   drawer ourselves, then let Furo's own toc-sticky / toc-scroll /
+   toc-title / toc-tree styles handle everything inside it. */
+.blog-page .toc-drawer {
+    display: block !important;
+    position: fixed;
+    left: calc(50% + 360px + 3rem);
+    top: var(--top-nav-offset, 0px);
+    width: 15em;
+    height: calc(100vh - var(--top-nav-offset, 0px));
+    background: none;
+    border: none;
+    padding: 0;
+    z-index: 10;
+}
+
+/* Hide ToC when viewport is too narrow for it */
+@media (max-width: 1200px) {
+    .blog-page .toc-drawer {
+        display: none !important;
+    }
 }
 
 /* ---- Blog post typography ---- */
@@ -586,7 +615,7 @@ body[data-theme="dark"] .ecosystem-card:hover {
 
 .blog-back-link {
     display: inline-block;
-    margin-top: 0;
+    margin-top: 0.25rem;
     margin-bottom: 0.75rem;
     font-size: 0.85rem;
     color: var(--color-foreground-muted);
@@ -613,8 +642,8 @@ body[data-theme="dark"] .ecosystem-card:hover {
 .blog-post-meta {
     color: var(--color-foreground-muted);
     font-size: 0.9rem;
-    margin-top: 0;
-    margin-bottom: 1rem;
+    margin-top: 1rem;
+    margin-bottom: 0.2rem;
 }
 
 .blog-post-meta a {
@@ -630,7 +659,7 @@ body[data-theme="dark"] .ecosystem-card:hover {
 .blog-page .content h2 {
     font-size: 1.45rem;
     font-weight: 700;
-    margin-top: 3rem;
+    margin-top: 2rem;
     margin-bottom: 0.75rem;
     padding-top: 0.75rem;
     letter-spacing: -0.01em;
@@ -641,7 +670,7 @@ body[data-theme="dark"] .ecosystem-card:hover {
 .blog-page .content h3 {
     font-size: 1.15rem;
     font-weight: 600;
-    margin-top: 2.5rem;
+    margin-top: 1.5rem;
     margin-bottom: 0.5rem;
     line-height: 1.35;
 }
@@ -760,13 +789,27 @@ body[data-theme="dark"] .ecosystem-card:hover {
     line-height: 1.5;
 }
 
+/* Videos — match img treatment */
+.blog-page .content video {
+    display: block;
+    border-radius: 6px;
+    margin: 1.75rem auto;
+    max-width: 100%;
+    height: auto;
+}
+
+.blog-page .content video:not(.blog-img-full) {
+    max-width: min(100%, 600px);
+}
+
 /* Figure + figcaption (MyST/Sphinx generated) */
 .blog-page .content figure {
     margin: 1.75rem auto;
     text-align: center;
 }
 
-.blog-page .content figure img {
+.blog-page .content figure img,
+.blog-page .content figure video {
     margin: 0 auto;
 }
 
@@ -913,6 +956,11 @@ body[data-theme="dark"] .ecosystem-card:hover {
 }
 
 
+/* Blog index heading — extra breathing room (post pages have .blog-back-link above h1 instead) */
+.blog-page .content h1:first-child {
+    margin-top: 1.5rem;
+}
+
 /* ---- Blog index / post listing ---- */
 
 .blog-post-listing {
@@ -994,11 +1042,11 @@ body[data-theme="dark"] .ecosystem-card:hover {
 
 @media (max-width: 768px) {
     .blog-page .content {
-        padding: 0 1rem;
+        padding: 1rem;
     }
 
     .blog-page .content h1 {
-        font-size: 1.6rem;
+        font-size: 1.8rem;
     }
 
     .blog-page .content h2 {
@@ -1020,8 +1068,9 @@ body[data-theme="dark"] .ecosystem-card:hover {
         font-size: 1.15rem;
     }
 
-    /* Full-bleed images on mobile */
-    .blog-page .content img:not(.blog-img-full) {
+    /* Full-bleed images & videos on mobile */
+    .blog-page .content img:not(.blog-img-full),
+    .blog-page .content video:not(.blog-img-full) {
         max-width: 100%;
     }
 
