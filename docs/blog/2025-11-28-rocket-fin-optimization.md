@@ -1,85 +1,54 @@
 ---
 orphan: true
-og:title: "Parametric Shape Optimization of Rocket Fins with Ansys SpaceClaim, PyAnsys, and Tesseract"
-og:description: "A gradient-based optimization workflow combining Ansys tools with Tesseract-driven differentiable programming to maximize grid fin stiffness on rockets."
-blog_date: "2025-11-28"
+og:title: "Gradient-based rocket fin design with Ansys, JAX, and Tesseract"
+og:description: "We used Tesseract to connect Ansys tools into a differentiable pipeline and optimize rocket grid fins — then turned the optimizer's insights into a practical design that's 24% stiffer."
+blog_date: "2026-05-12"
 blog_author: "@andrinr"
-blog_title: "Parametric Shape Optimization of Rocket Fins with Ansys SpaceClaim, PyAnsys, and Tesseract"
-blog_description: "Gradient-based shape optimization of rocket grid fins, combining Ansys SpaceClaim and PyAnsys with Tesseract for end-to-end differentiable simulation."
+blog_title: "Gradient-based rocket fin design with Ansys, JAX, and Tesseract"
+blog_description: "We used Tesseract to connect Ansys tools into a differentiable pipeline and let gradients reshape a rocket grid fin."
 ---
 
-# Parametric Shape Optimization of Rocket Fins with Ansys SpaceClaim, PyAnsys, and Tesseract
+# Gradient-based rocket fin design with Ansys, JAX, and Tesseract
 
-_This post originally appeared on the [Tesseract Community Forum](https://si-tesseract.discourse.group/t/parametric-shape-optimization-of-rocket-fins-with-ansys-spaceclaim-pyansys-and-tesseract/109). All relevant code to reproduce the figures and results can be found [here](https://github.com/pasteurlabs/tesseract-core/tree/main/demo/_showcase/ansys-shapeopt)._
+_For the full methodology, see the [original forum post](https://si-tesseract.discourse.group/t/parametric-shape-optimization-of-rocket-fins-with-ansys-spaceclaim-pyansys-and-tesseract/109). All code to reproduce the results is available [here](https://github.com/pasteurlabs/tesseract-core/tree/main/demo/_showcase/ansys-shapeopt)._
 
 ## Introduction
 
-Grid fins are lattice-like structures on multi-stage rockets that provide steering control across a wide range of speeds. For example, during SpaceX Starship booster re-entry, grid fins experience high dynamic pressure --- much higher than during ascent. At this critical flight stage, the fins must maintain structural rigidity under maximum loading to preserve aerodynamic characteristics and enable precise trajectory control back to the landing pad.
+If you work in simulation-driven design, you've probably hit this wall: you have a parametric CAD model in one tool, a mesher in another, and a finite element solver in a third. Each tool is good at what it does. Getting them to work together --- let alone pass gradients between them --- is where things fall apart.
 
-<div class="double-figure">
-<figure>
-<img src="../_static/blog/rocket-fins-grid-example.png" alt="Grid fin example">
-<figcaption>Grid fin geometry used in this study.</figcaption>
-</figure>
-<figure>
-<img src="../_static/blog/rocket-fins-starship.jpeg" alt="Starship booster with grid fins">
-<figcaption>SpaceX Starship booster with grid fins during re-entry.</figcaption>
-</figure>
-</div>
-
-This case study demonstrates a gradient-based optimization workflow combining Ansys tools with Tesseract-driven differentiable programming. The goal is to maximize grid fin stiffness while maintaining a fixed mass constraint of 8 bars. Higher stiffness reduces deformation during Max-Q, keeping lift and drag coefficients consistent for reliable aerodynamic control.
-
-Each bar is defined by start and end angular positions, giving us 16 design parameters to optimize. Below are two example starting configurations:
-
-<div class="double-figure">
-<figure>
-<img src="../_static/blog/rocket-fins-rnd-surface.png" alt="Random initial conditions">
-<figcaption>Random initial bar arrangement.</figcaption>
-</figure>
-<figure>
-<img src="../_static/blog/rocket-fins-grid-surface.jpeg" alt="Grid initial conditions">
-<figcaption>Regular grid initial bar arrangement.</figcaption>
-</figure>
-</div>
-
-The simulation uses fixed boundary conditions at the knuckles (where the fin attaches to the rocket) and an out-of-plane load on the frame of the structure. This load placement approximates the aerodynamic forces while decoupling them from the bar geometry during optimization:
+We recently built a case study around exactly this kind of pipeline: optimizing rocket grid fin geometry using Ansys SpaceClaim for CAD, a custom mesh converter, and PyMAPDL for structural analysis. The physics is interesting, but what we really want to talk about is the engineering challenge underneath --- and how Tesseract made it tractable.
 
 <figure>
-<img src="../_static/blog/rocket-fins-boundary.jpeg" alt="Boundary conditions">
-<figcaption>Fixed boundary conditions at the knuckles and out-of-plane load on the frame.</figcaption>
+<img src="../_static/blog/rocket-fins-grid-fins.jpg" alt="Titanium grid fins on a Falcon 9 booster">
+<figcaption>Second-generation titanium grid fins on a Falcon 9 booster. <a href="https://commons.wikimedia.org/wiki/File:Second-generation_titanium_grid_fins,_Iridium-2_Mission_(35533873795).jpg">SpaceX, Public Domain</a>.</figcaption>
 </figure>
 
-The simulation uses a linear elastic finite element solver with small deformation assumptions. To maximize stiffness, we minimize compliance, which is the inverse measure of structural rigidity.
+## Three tools, two operating systems, zero shared dependencies
 
-## Workflow
-
-This workflow demonstrates an end-to-end gradient-based optimization connecting Ansys SpaceClaim for parametric geometry generation with PyAnsys for finite element analysis. Tesseract acts as glue between components, packaging each into a unified interface with built-in differentiation support. By composing Tesseracts with [Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax), we can leverage automatic differentiation across the entire pipeline:
+Here's what the pipeline looks like: Ansys SpaceClaim generates parametric geometry from 16 design variables (angular positions of 8 bars on a grid fin). That geometry gets converted to a signed distance field on a regular grid. PyMAPDL then solves the linear elasticity problem and returns compliance --- a measure of how much the structure deforms under load.
 
 <figure>
-<img src="../_static/blog/rocket-fins-workflow.jpeg" alt="Optimization workflow" class="blog-img-full">
+<img src="../_static/blog/rocket-fins-workflow.png" alt="Optimization workflow" class="blog-img-full">
 <figcaption>End-to-end optimization workflow connecting Ansys SpaceClaim, SDF conversion, and PyMAPDL via Tesseract.</figcaption>
 </figure>
 
-The workflow uses three Tesseract components:
+Each of these tools lives in a different world. SpaceClaim runs on Windows with a commercial license. PyMAPDL has its own Python environment and dependency tree. JAX handles the glue code and autodiff on Linux. In a traditional setup, you'd spend more time on environment management and data plumbing than on the actual optimization.
 
-- **Ansys SpaceClaim Tesseract**: Takes design parameters and generates the grid fin geometry through a SpaceClaim script, returning a triangular surface mesh (vertices and faces). Described in more detail in the [Tesseract docs](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/examples/ansys_integration/spaceclaim_tess.html).
+With Tesseract, each tool becomes a self-contained component with a clean interface. We packaged SpaceClaim, the SDF converter, and PyMAPDL as three separate Tesseracts, each with isolated dependencies. The pipeline composition happens through [Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax), which handles the orchestration and --- crucially --- the gradient flow.
 
-- **SDF and Finite Difference Tesseract**: Converts the surface mesh into a signed distance field (SDF) on a regular grid. Additionally computes gradients with respect to design parameters using finite differences. Takes another Tesseract (here: SpaceClaim Tesseract) as input, which makes it a higher-order Tesseract. This Tesseract can work with any mesh generator Tesseract that matches the expected interface.
+## Gradients across boundaries
 
-- **PyMAPDL Tesseract**: Takes a hex mesh and boundary conditions as inputs, then solves the linear elasticity problem using PyMAPDL. Returns strain energy per cell and total compliance, with full gradient support for optimization via an analytical adjoint. Described in more detail in the [Tesseract docs](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/examples/ansys_integration/pymapdl_tess.html).
+This is where things get interesting from a Tesseract perspective. Each component in this pipeline uses a _different_ differentiation strategy:
 
-Between these Tesseracts, standard Python code handles hex mesh generation, boundary condition setup, and density derivation from the SDF. The hex mesh generation and boundary condition setup operations don't require differentiation since we optimize with respect to field quantities on mesh cells, not the mesh structure itself. The density function uses a sigmoid-like mapping and is differentiated with [JAX](https://github.com/google/jax)'s automatic differentiation.
+- PyMAPDL computes gradients via an **analytical adjoint**
+- The SDF converter uses **finite differences** (wrapping another Tesseract to do so --- a higher-order Tesseract)
+- The JAX glue code between components uses **automatic differentiation**
 
-## Optimization
+Tesseract's differentiation interface unifies all of these behind the same contract: every component exposes Jacobian, JVP, or VJP endpoints, regardless of how it computes them internally. From the optimizer's perspective, it's just one differentiable function. This is what we mean when we talk about pipeline-level autodiff --- not "everything must be written in one AD framework," but "gradients flow end-to-end even when the components couldn't be more different."
 
-We first compare the two initial configurations. The regular grid (compliance: 61.9) significantly outperforms the random arrangement (compliance: 87.0). The plots below show strain energy and compliance sensitivities with respect to density. Negative sensitivity values indicate where adding material would reduce compliance. Note the tendency to thicken bars along their length, though this isn't achievable under our angular parametrization.
+## The result: optimization as a design partner
 
-<figure>
-<img src="../_static/blog/rocket-fins-sim-comparison.png" alt="Simulation comparison between initial configurations" class="blog-img-full">
-<figcaption>Strain energy and compliance sensitivities for random (left) and grid (right) initial configurations.</figcaption>
-</figure>
-
-We run gradient-based optimization using Adam (learning rate: 0.01, 80 iterations) on both initial conditions.
+With gradients in hand, we ran Adam from two different starting configurations. Both converged to similar topologies, which told us we were finding something real rather than getting stuck in local minima.
 
 <div class="double-figure">
 <figure>
@@ -92,30 +61,9 @@ We run gradient-based optimization using Adam (learning rate: 0.01, 80 iteration
 </figure>
 </div>
 
-Both runs converge to similar asymmetric solutions. The optimizer concentrates material near the knuckle attachments to maximize local stiffness, consistent with the strain energy distributions showing highest concentrations at the fixed boundaries. The emergence of a grid-like structure from random initial conditions suggests the solver finds a near-optimal topology.
+The raw optimized designs were asymmetric and impractical to manufacture. But they taught us something useful: where to put the material. The optimizer consistently reinforced bar roots near attachment points, organized bars into orthogonal patterns, and created diagonal load paths to the fixed boundaries.
 
-However, the resulting geometries lack symmetry and would be difficult to manufacture. While increasing the number of optimization iterations might improve symmetry, explicitly enforcing symmetry constraints on the parameters would be more effective.
-
-The compliance evolution for both initial conditions:
-
-<figure>
-<img src="../_static/blog/rocket-fins-convergence.png" alt="Convergence plots">
-<figcaption>Compliance evolution over 80 optimization iterations for both initial configurations.</figcaption>
-</figure>
-
-Both configurations converge to similar final compliance values. The optimization reveals three structural behaviors for optimal load paths under these boundary conditions:
-
-- **Emergent Orthogonality**: Regardless of initialization, the topology settles into roughly equal numbers of lateral and longitudinal members. The random initialization is particularly revealing --- bars initially spanning 180 degrees reorganize into a nearly orthogonal pattern.
-
-- **Diagonal Lateral Load Paths**: Lateral bars orient diagonally relative to the opposing knuckle, creating direct load paths that efficiently transfer tip moments to the fixed boundary.
-
-- **Root Reinforcement**: Longitudinal bars align vertically and cluster near the knuckles. Concentrating material at the fixed boundary stiffens the fin root where strain energy gradients are highest.
-
-## Results
-
-The optimized designs achieve higher stiffness at constant mass through non-uniform bar distributions. Lower compliance translates to reduced deformation under load, maintaining consistent aerodynamic coefficients during re-entry. However, the asymmetric topologies present manufacturing challenges and would provide unequal control authority in different flight directions.
-
-The final step in shape optimization is translating computational insights into manufacturable designs that satisfy practical constraints the optimizer didn't account for. We synthesize the three structural behaviors (Emergent Orthogonality, Diagonal Lateral Load Paths, Root Reinforcement) into a symmetric, manufacturable geometry:
+We took those insights and hand-designed a symmetric, manufacturable geometry. Running it back through the pipeline: **24% stiffer than the baseline grid, at the same mass.**
 
 <div class="double-figure">
 <figure>
@@ -128,29 +76,16 @@ The final step in shape optimization is translating computational insights into 
 </figure>
 </div>
 
-Running this geometry through the Tesseract pipeline yields a compliance of 49.8 --- a design that is **24% stiffer than the original grid** and **75% stiffer than random bars**. While not matching the fully optimized result, this design balances performance with manufacturability and symmetric aerodynamic characteristics.
+## The bigger picture
 
-This demonstrates how gradient-based optimization with the Tesseract ecosystem and Ansys software can guide practical engineering decisions, even when the final design incorporates constraints beyond the optimization problem.
+The rocket fin problem is a good example, but the pattern is general. If you're coupling simulation tools that span different languages, platforms, or differentiation strategies, you're dealing with the same integration problem we were. Tesseract's role here isn't to replace any of these tools --- it's to let them compose into something greater than the sum of their parts.
 
-## Why Tesseract?
+We've since validated this by swapping in [PyVista](https://docs.pyvista.org/) for geometry and [JAX-FEM](https://github.com/deepmodeling/jax-fem) for the solver with minimal changes. That kind of modularity is the real payoff.
 
-This case study demonstrates several capabilities that make Tesseract practical for simulation-driven design workflows:
-
-- **Composability**: Each component (geometry generation, meshing, FEM) is independently packaged. You can swap SpaceClaim for another CAD tool or replace PyMAPDL with a different solver without rewriting the pipeline. We've validated this by running the same workflow with a [PyVista](https://docs.pyvista.org/) geometry and the [JAX-FEM](https://github.com/deepmodeling/jax-fem) solver.
-
-- **Gradient Support**: Tesseract's differentiation interface connects tools not originally designed for gradient-based optimization. This workflow combines analytic adjoints (PyMAPDL), finite differences (SDF conversion), and automatic differentiation (JAX glue code) into a complete gradient chain.
-
-- **Heterogeneous Compute**: Tesseract integrates across different operating systems and environments. This workflow runs PyAnsys tools on Windows (with specific licenses and installation requirements) while executing optimization logic and Tesseract orchestration on Linux.
-
-- **Dependency Management**: Setting up workflows with multiple commercial and open-source packages typically creates dependency conflicts. Each Tesseract is self-contained with its own environment, isolating Python packages and system requirements. This makes workflows reproducible and eliminates version conflicts.
-
-- **Team Collaboration**: Tesseract uses a contract-first approach where each component's inputs and outputs are defined upfront through schemas. Different engineers can develop components independently against these interfaces, reducing integration issues when combining work.
-
-This approach generalizes beyond structural optimization to virtually any workflow involving simulation tools, multiphysics coupling, design exploration, or inverse problems.
+If this is the kind of workflow you're building, the [full technical writeup](https://si-tesseract.discourse.group/t/parametric-shape-optimization-of-rocket-fins-with-ansys-spaceclaim-pyansys-and-tesseract/109) has all the details, and the [demo code](https://github.com/pasteurlabs/tesseract-core/tree/main/demo/_showcase/ansys-shapeopt) is ready to run.
 
 ## Learn more
 
-- Browse the [demo code for this case study](https://github.com/pasteurlabs/tesseract-core/tree/main/demo/_showcase/ansys-shapeopt)
 - Check out the [Tesseract Core documentation](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/)
 - Join the [Tesseract Community Forum](https://si-tesseract.discourse.group/)
 - Visit [Tesseract Core on GitHub](https://github.com/pasteurlabs/tesseract-core)

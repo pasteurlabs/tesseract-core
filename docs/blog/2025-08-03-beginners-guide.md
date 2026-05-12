@@ -16,13 +16,7 @@ _This post originally appeared on [Pasteur Labs Insights](https://pasteurlabs.ai
 
 This tutorial introduces the Tesseract ecosystem through a physics-based example. We'll build a Tesseract from scratch that containerizes a computational tool and implements derivative endpoints for use in differentiable pipelines.
 
-This is the first in a three-part beginner's guide series covering:
-
-1. Writing a custom Tesseract to distribute a computational tool (this post)
-2. Applying gradient-based optimization to a differentiable Tesseract
-3. Adding an interactive web interface to share an exploratory tool
-
-We assume basic differential calculus knowledge and Python familiarity (including NumPy-style array operations). No prior Tesseract ecosystem experience is required.
+This beginner's guide will teach you how to write a custom Tesseract to distribute a computational tool. We assume basic differential calculus knowledge and Python familiarity (including NumPy-style array operations). No prior Tesseract ecosystem experience is required.
 
 ## The physics: Projectile motion
 
@@ -203,7 +197,7 @@ Verify the Jacobian computation at $u = 10$, $\theta = 0.75$ rad --- the numeric
 
 ## What's next
 
-By wrapping even a simple physics model in a Tesseract, we get a containerized, self-documenting component with a standard JSON interface and built-in derivative support. The next installments will explore gradient-based optimization and interactive visualization for these differentiable components.
+By wrapping even a simple physics model in a Tesseract, we get a containerized, self-documenting component with a standard JSON interface and built-in derivative support. Now you're ready to explore gradient-based optimization[ via Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax) and interactive visualization [via Tesseract-Streamlit](https://github.com/pasteurlabs/tesseract-streamlit) for these differentiable components.
 
 <figure>
 <img src="../_static/blog/beginners-newton-gravity.jpg" alt="Isaac Newton discovers gravity, 1936">
