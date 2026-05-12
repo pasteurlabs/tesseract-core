@@ -131,13 +131,12 @@ def zip_examples_folder() -> None:
     assert archive_path.exists()
 
 
-def generate_blog_index() -> None:
-    """Auto-generate blog/index.md from blog post frontmatter."""
+def _collect_blog_posts() -> list[dict]:
+    """Collect metadata from all blog posts for the blog index."""
     import logging
     from datetime import datetime
 
     import yaml
-    from jinja2 import Environment, FileSystemLoader
 
     logger = logging.getLogger("sphinx.ext.blog")
 
@@ -163,21 +162,17 @@ def generate_blog_index() -> None:
                 md_file.name,
             )
             continue
-        # Extract title from first # heading
-        title = None
-        for line in text[end + 3 :].splitlines():
-            if line.startswith("# "):
-                title = line[2:].strip()
-                break
+        title = fm.get("blog_title")
         if not title:
             logger.warning(
-                "blog post %s has no '# ...' title heading, skipping", md_file.name
+                "blog post %s missing 'blog_title' in frontmatter, skipping",
+                md_file.name,
             )
             continue
         date = datetime.strptime(str(blog_date), "%Y-%m-%d")
         posts.append(
             {
-                "file": md_file.name,
+                "file": md_file.stem,
                 "title": title,
                 "date": date.strftime("%b %d, %Y").replace(" 0", " "),
                 "author": fm.get("blog_author", ""),
@@ -187,13 +182,29 @@ def generate_blog_index() -> None:
         )
 
     posts.sort(key=lambda p: p["_sort_key"], reverse=True)
+    return posts
 
-    env = Environment(
-        loader=FileSystemLoader(here / "_templates"),
-        keep_trailing_newline=True,
-    )
-    template = env.get_template("blog_index.md.jinja")
-    (blog_dir / "index.md").write_text(template.render(posts=posts))
+
+def _blog_page_context(app, pagename, templatename, context, doctree):
+    """Select blog templates and inject context for blog pages."""
+    if not pagename.startswith("blog/"):
+        return
+
+    if pagename == "blog/index":
+        posts = _collect_blog_posts()
+        context["blog_posts"] = [
+            {
+                "url": app.builder.get_relative_uri(pagename, "blog/" + p["file"]),
+                "title": p["title"],
+                "date": p["date"],
+                "author": p["author"],
+                "description": p["description"],
+            }
+            for p in posts
+        ]
+        return "blog_index.html"
+
+    return "blog_post.html"
 
 
 def _copy_landing_to_index(app, exception) -> None:
@@ -210,8 +221,8 @@ def setup(app) -> None:
     """Sphinx setup function. Used to register custom stuff."""
     # HACK: We zip the examples folder here so that it can be downloaded
     zip_examples_folder()
-    # Generate blog index from blog post frontmatter
-    generate_blog_index()
+    # Inject blog post listing into blog index page context
+    app.connect("html-page-context", _blog_page_context)
     # Copy landing page to index.html after build
     app.connect("build-finished", _copy_landing_to_index)
 

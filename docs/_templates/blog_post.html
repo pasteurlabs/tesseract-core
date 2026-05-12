@@ -1,0 +1,29 @@
+{# Template for blog posts. Selected by conf.py for all blog/* pages.
+   Renders a back-link and date/author meta line from frontmatter.
+   The H1 title comes from the markdown body (# Title). #}
+{% extends "page.html" %}
+
+{% macro format_author(raw) -%}
+  {%- for part in raw.split(",") -%}
+    {%- set name = part.strip() -%}
+    {%- if name.startswith("@") -%}
+      <a href="https://github.com/{{ name[1:] }}">{{ name }}</a>
+    {%- else -%}
+      {{ name }}
+    {%- endif -%}
+    {%- if not loop.last %}, {% endif -%}
+  {%- endfor -%}
+{%- endmacro %}
+
+{% block body %}
+<script>document.body.classList.add("blog-page");</script>
+{{ super() }}
+{% endblock %}
+
+{% block content %}
+<a class="blog-back-link" href="{{ pathto('blog/index') }}">&larr; Tesseract Blog</a>
+{% if meta and meta.get("blog_date") %}
+<div class="blog-post-meta">{{ meta["blog_date"] }} &middot; {{ format_author(meta.get("blog_author", "")) }}</div>
+{% endif %}
+{{ body }}
+{% endblock %}

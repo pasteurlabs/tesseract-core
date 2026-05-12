@@ -268,56 +268,6 @@ parametric structural optimization.
 :::{div} landing-divider
 :::
 
-## Is Tesseract for me?
-
-::::{grid} 1 2 4 4
-:gutter: 3
-
-:::{grid-item-card} Researchers
-:link: blog/tesseract-for-researchers
-:link-type: doc
-:class-card: persona-card
-:img-top: static/icon-researcher.svg
-:class-img-top: persona-icon
-
-Differentiable simulation, probabilistic inference, cross-framework gradient composition.
-:::
-
-:::{grid-item-card} Research Software Engineers
-:link: blog/tesseract-for-rse
-:link-type: doc
-:class-card: persona-card
-:img-top: static/icon-rse.svg
-:class-img-top: persona-icon
-
-Typed interface contracts, reproducibility, multi-group solver coupling.
-:::
-
-:::{grid-item-card} R&D Engineers
-:link: blog/tesseract-for-rnd-engineers
-:link-type: doc
-:class-card: persona-card
-:img-top: static/icon-rnd.svg
-:class-img-top: persona-icon
-
-From research prototype to production pipeline without writing Dockerfiles.
-:::
-
-:::{grid-item-card} Platform Engineers
-:link: blog/tesseract-for-platform-engineers
-:link-type: doc
-:class-card: persona-card
-:img-top: static/icon-platform.svg
-:class-img-top: persona-icon
-
-Uniform deployment contracts for scientific workloads.
-:::
-
-::::
-
-:::{div} landing-divider
-:::
-
 ## The Tesseract Ecosystem
 
 :::{div} section-intro

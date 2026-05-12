@@ -1,6 +1,5 @@
 ---
 orphan: true
-html_class: blog-page
 hide-toc: true
 og:title: Tesseract Blog
 og:description: "News, tutorials, and deep dives on composable, differentiable scientific computing from the Tesseract team."
@@ -9,18 +8,3 @@ og:description: "News, tutorials, and deep dives on composable, differentiable s
 # Tesseract Blog
 
 News, tutorials, and deep dives from the Tesseract team.
-
----
-
-::::{div} blog-post-listing
-{% for post in posts %}
-:::{div} blog-post-entry
-
-### [{{ post.title }}]({{ post.file }})
-
-_{{ post.date }}_ · {{ post.author }}
-
-{{ post.description }}
-:::
-{% endfor %}
-::::

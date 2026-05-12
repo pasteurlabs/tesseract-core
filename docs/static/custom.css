@@ -547,61 +547,119 @@ body[data-theme="dark"] .ecosystem-card:hover {
     display: none !important;
 }
 
+/* Hide Furo's native mobile header on blog (we use .top-nav instead) */
+.blog-page .mobile-header {
+    display: none !important;
+}
+
 .blog-page .page {
     display: block;
+}
+
+/* Pin theme toggle to top-right, just below the navbar */
+.blog-page .content-icon-container {
+    position: fixed;
+    top: 2.5rem;
+    right: 2.5rem;
+    z-index: 101;
+}
+
+.blog-page .content-icon-container .edit-this-page,
+.blog-page .content-icon-container .view-this-page,
+.blog-page .content-icon-container .toc-overlay-icon {
+    display: none;
 }
 
 .blog-page .content {
     max-width: 720px;
     margin: 0 auto;
-    padding: 0 1.5rem;
+    padding: 3.5rem 1.5rem 0;
 }
 
 /* ---- Blog post typography ---- */
 
 .blog-page .content .article-container {
     font-size: 1.05rem;
-    line-height: 1.8;
+    line-height: 1.65;
     color: var(--color-foreground-primary);
 }
 
-.blog-page .content h1 {
-    font-size: 2.2rem;
-    font-weight: 700;
-    margin-top: 2.5rem;
-    margin-bottom: 0.5rem;
-    letter-spacing: -0.02em;
-    line-height: 1.2;
-}
-
-.blog-page .content h2 {
-    font-size: 1.5rem;
-    font-weight: 600;
-    margin-top: 3rem;
-    margin-bottom: 1rem;
-    padding-top: 0.5rem;
-    letter-spacing: -0.01em;
-}
-
-.blog-page .content h3 {
-    font-size: 1.2rem;
-    font-weight: 600;
-    margin-top: 2.5rem;
+.blog-back-link {
+    display: inline-block;
+    margin-top: 0;
     margin-bottom: 0.75rem;
+    font-size: 0.85rem;
+    color: var(--color-foreground-muted);
+    text-decoration: none;
+    transition: color 0.15s;
+}
+
+.blog-back-link:hover {
+    color: var(--color-brand-primary);
+}
+
+.blog-page .content h1 {
+    font-size: 2rem;
+    font-weight: 800;
+    margin-top: 0;
+    margin-bottom: 2rem;
+    padding-bottom: 1.5rem;
+    border-bottom: 1px solid var(--color-background-border);
+    letter-spacing: -0.03em;
+    line-height: 1.2;
+    text-wrap: pretty;
 }
 
 .blog-post-meta {
     color: var(--color-foreground-muted);
     font-size: 0.9rem;
-    margin-top: 0.5rem;
-    margin-bottom: 2.5rem;
-    padding-bottom: 1.5rem;
-    border-bottom: 1px solid var(--color-background-border);
+    margin-top: 0;
+    margin-bottom: 1rem;
+}
+
+.blog-post-meta a {
+    color: var(--color-foreground-muted);
+    text-decoration: none;
+    transition: color 0.15s;
+}
+
+.blog-post-meta a:hover {
+    color: var(--color-brand-primary);
+}
+
+.blog-page .content h2 {
+    font-size: 1.45rem;
+    font-weight: 700;
+    margin-top: 3rem;
+    margin-bottom: 0.75rem;
+    padding-top: 0.75rem;
+    letter-spacing: -0.01em;
+    line-height: 1.3;
+    text-wrap: pretty;
+}
+
+.blog-page .content h3 {
+    font-size: 1.15rem;
+    font-weight: 600;
+    margin-top: 2.5rem;
+    margin-bottom: 0.5rem;
+    line-height: 1.35;
 }
 
 /* Paragraph spacing for prose rhythm */
 .blog-page .content p {
     margin-bottom: 1.25rem;
+}
+
+.blog-page .content ol > p, .blog-page .content li > p {
+    margin-bottom: 0.75rem;
+}
+
+/* Lead paragraph — slightly larger */
+.blog-page .content article > section > p:first-of-type {
+    font-size: 1.1rem;
+    color: var(--color-foreground-secondary);
+    line-height: 1.6;
 }
 
 /* Links in blog prose */
@@ -620,38 +678,120 @@ body[data-theme="dark"] .ecosystem-card:hover {
 /* Inline code in prose */
 .blog-page .content p code,
 .blog-page .content li code {
-    font-size: 0.9em;
-    padding: 0.15em 0.35em;
+    font-size: 0.88em;
+    padding: 0.15em 0.4em;
     border-radius: 4px;
     background: var(--color-background-secondary);
+    border: 1px solid var(--color-background-border);
 }
 
-/* Code blocks */
-.blog-page .content pre {
+/* Code blocks — border + background on the wrapper, not the pre */
+.blog-page .content .highlight {
+    background: var(--color-code-background);
     border-radius: 8px;
-    padding: 1.25rem 1.5rem;
-    margin: 2rem 0;
-    font-size: 0.88rem;
-    line-height: 1.6;
+    border: 1px solid var(--color-background-border);
+    margin: 1.5rem 0;
+    overflow: hidden;
 }
 
-/* Images */
+.blog-page .content .highlight pre {
+    background: transparent;
+    border-radius: 0;
+    border: none;
+    padding: 1rem 1.25rem;
+    margin: 0;
+    font-size: 0.85rem;
+    line-height: 1.6;
+    overflow-x: auto;
+}
+
+/* Images — center and constrain */
 .blog-page .content img {
+    display: block;
     border-radius: 6px;
-    margin: 1.5rem 0;
+    margin: 1.75rem auto;
+    max-width: 100%;
+    height: auto;
+}
+
+.blog-page .content img:not(.blog-img-full) {
+    max-width: min(100%, 600px);
+}
+
+/* Reduce gap between consecutive images */
+.blog-page .content p:has(> img) + p:has(> img) {
+    margin-top: -0.75rem;
+}
+
+/* Double figures — opt-in side-by-side layout */
+.double-figure {
+    display: flex;
+    gap: 1rem;
+    margin: 1.75rem auto;
+}
+
+.double-figure > figure {
+    flex: 1 1 0;
+    min-width: 0;
+    margin: 0;
+    text-align: center;
+}
+
+.double-figure > figure > img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 6px;
+}
+
+@media (max-width: 768px) {
+    .double-figure {
+        flex-direction: column;
+    }
+}
+
+/* Image captions — italic paragraph immediately after an image */
+.blog-page .content p:has(> img) + p > em:only-child {
+    display: block;
+    text-align: center;
+    font-size: 0.85rem;
+    color: var(--color-foreground-muted);
+    margin-top: -1rem;
+    margin-bottom: 1.5rem;
+    line-height: 1.5;
+}
+
+/* Figure + figcaption (MyST/Sphinx generated) */
+.blog-page .content figure {
+    margin: 1.75rem auto;
+    text-align: center;
+}
+
+.blog-page .content figure img {
+    margin: 0 auto;
+}
+
+.blog-page .content figcaption {
+    font-size: 0.85rem;
+    color: var(--color-foreground-muted);
+    margin-top: 0.5rem;
+    line-height: 1.5;
 }
 
 /* Blockquotes */
 .blog-page .content blockquote {
     border-left: 3px solid var(--color-brand-primary);
-    padding: 0.25rem 0 0.25rem 1.25rem;
-    margin: 2rem 0;
+    padding: 0.5rem 0 0.5rem 1.25rem;
+    margin: 1.75rem 0;
     color: var(--color-foreground-secondary);
     font-style: italic;
 }
 
 .blog-page .content blockquote p {
     margin-bottom: 0.5rem;
+}
+
+.blog-page .content blockquote p:last-child {
+    margin-bottom: 0;
 }
 
 /* Lists in prose */
@@ -662,11 +802,28 @@ body[data-theme="dark"] .ecosystem-card:hover {
 }
 
 .blog-page .content li {
-    margin-bottom: 0.5rem;
+    margin-bottom: 0.4rem;
+    line-height: 1.65;
 }
 
 .blog-page .content li > strong:first-child {
     color: var(--color-foreground-primary);
+}
+
+/* Nested lists — tighter spacing */
+.blog-page .content li ul,
+.blog-page .content li ol {
+    margin: 0.4rem 0;
+}
+
+/* Math blocks */
+.blog-page .content .math-wrapper {
+    margin: 1.25rem 0;
+    overflow-x: auto;
+}
+
+.blog-page .content .math-wrapper .math {
+    margin: 0;
 }
 
 /* Tables */
@@ -703,11 +860,45 @@ body[data-theme="dark"] .ecosystem-card:hover {
     background: color-mix(in srgb, var(--color-background-secondary) 50%, transparent);
 }
 
-/* Horizontal rules in blog posts */
+/* Horizontal rules in blog posts — used as section dividers */
 .blog-page .content hr {
     border: none;
     border-top: 1px solid var(--color-background-border);
     margin: 2.5rem 0;
+}
+
+/* Footnotes */
+.blog-page .content .footnote-reference {
+    font-size: 0.75em;
+    vertical-align: super;
+    line-height: 0;
+    text-decoration: none;
+}
+
+.blog-page .content dl.footnote {
+    font-size: 0.88rem;
+    color: var(--color-foreground-secondary);
+    border-top: 1px solid var(--color-background-border);
+    margin-top: 2.5rem;
+    padding-top: 1.5rem;
+}
+
+.blog-page .content dl.footnote dt {
+    float: left;
+    margin-right: 0.5rem;
+    font-weight: 600;
+}
+
+.blog-page .content dl.footnote dd {
+    margin-bottom: 0.5rem;
+    margin-left: 2rem;
+}
+
+/* Admonitions / callouts in blog posts */
+.blog-page .content .admonition {
+    border-radius: 8px;
+    margin: 1.5rem 0;
+    font-size: 0.95rem;
 }
 
 /* Hide docs-style footer on blog pages */
@@ -725,7 +916,7 @@ body[data-theme="dark"] .ecosystem-card:hover {
 /* ---- Blog index / post listing ---- */
 
 .blog-post-listing {
-    margin-top: 1.5rem;
+    margin-top: 0.5rem;
 }
 
 .blog-post-entry {
@@ -733,41 +924,109 @@ body[data-theme="dark"] .ecosystem-card:hover {
     border-bottom: 1px solid var(--color-background-border);
 }
 
+.blog-post-entry:first-child {
+    padding-top: 1rem;
+}
+
 .blog-post-entry:last-child {
     border-bottom: none;
 }
 
-/* Post titles on the listing (rendered as p.rubric by Sphinx) */
-.blog-post-entry .rubric {
-    font-size: 1.5rem;
-    font-weight: 600;
+/* Post titles on the listing */
+.blog-post-entry h3 {
+    font-size: 1.3rem;
+    font-weight: 700;
     line-height: 1.3;
     margin-top: 0;
-    margin-bottom: 0.5rem;
+    margin-bottom: 0.3rem;
     letter-spacing: -0.01em;
 }
 
-.blog-post-entry .rubric a {
+.blog-post-entry h3 a {
     color: var(--color-foreground-primary);
     text-decoration: none;
     transition: color 0.15s;
 }
 
-.blog-post-entry .rubric a:hover {
+.blog-post-entry h3 a:hover {
     color: var(--color-brand-primary);
 }
 
 /* Date/author line */
+.blog-post-entry .blog-post-entry-meta {
+    color: var(--color-foreground-muted);
+    font-size: 0.85rem;
+    margin-bottom: 0.5rem;
+}
+
+.blog-post-entry .blog-post-entry-meta a {
+    color: var(--color-foreground-muted);
+    text-decoration: none;
+    transition: color 0.15s;
+}
+
+.blog-post-entry .blog-post-entry-meta a:hover {
+    color: var(--color-brand-primary);
+}
+
+/* Fallback: target by position if no class is available */
 .blog-post-entry > p:nth-child(2) {
     color: var(--color-foreground-muted);
     font-size: 0.85rem;
     margin-bottom: 0.5rem;
 }
 
-/* Excerpt text */
+/* Excerpt text — clamp to 3 lines for consistent layout */
 .blog-post-entry > p:last-child {
     color: var(--color-foreground-secondary);
-    font-size: 1rem;
+    font-size: 0.95rem;
     line-height: 1.6;
     margin-bottom: 0;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+
+/* ---- Blog responsive ---- */
+
+@media (max-width: 768px) {
+    .blog-page .content {
+        padding: 0 1rem;
+    }
+
+    .blog-page .content h1 {
+        font-size: 1.6rem;
+    }
+
+    .blog-page .content h2 {
+        font-size: 1.25rem;
+        margin-top: 2rem;
+    }
+
+    .blog-page .content .article-container {
+        font-size: 1rem;
+        line-height: 1.6;
+    }
+
+    .blog-page .content .highlight pre {
+        padding: 0.75rem 1rem;
+        font-size: 0.82rem;
+    }
+
+    .blog-post-entry h3 {
+        font-size: 1.15rem;
+    }
+
+    /* Full-bleed images on mobile */
+    .blog-page .content img:not(.blog-img-full) {
+        max-width: 100%;
+    }
+
+    .blog-page .content blockquote {
+        margin-left: 0;
+        margin-right: 0;
+    }
 }
