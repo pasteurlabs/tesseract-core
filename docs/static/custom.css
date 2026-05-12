@@ -649,7 +649,9 @@ body[data-theme="dark"] .ecosystem-card:focus-visible {
 }
 
 .blog-page .content img:not(.blog-img-full) {
-    max-width: min(100%, 600px);
+    max-width: min(100%, 420px);
+    max-height: 360px;
+    object-fit: contain;
 }
 
 /* Reduce gap between consecutive images */
@@ -704,7 +706,9 @@ body[data-theme="dark"] .ecosystem-card:focus-visible {
 }
 
 .blog-page .content video:not(.blog-img-full) {
-    max-width: min(100%, 600px);
+    max-width: min(100%, 420px);
+    max-height: 360px;
+    object-fit: contain;
 }
 
 /* Figure + figcaption (MyST/Sphinx generated) */
@@ -933,6 +937,63 @@ body[data-theme="dark"] .ecosystem-card:focus-visible {
     line-clamp: 3;
     -webkit-box-orient: vertical;
     overflow: hidden;
+}
+
+
+/* ---- Blog image lightbox ---- */
+
+.blog-page .content img {
+    cursor: zoom-in;
+}
+
+.blog-lightbox {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.95);
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    cursor: zoom-out;
+}
+
+.blog-lightbox.is-visible {
+    opacity: 1;
+}
+
+.blog-lightbox img {
+    max-width: 90vw;
+    max-height: 90vh;
+    object-fit: contain;
+    border-radius: var(--radius-sm);
+    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.4);
+    transform: scale(0.95);
+    transition: transform 0.2s ease;
+}
+
+.blog-lightbox.is-visible img {
+    transform: scale(1);
+}
+
+.blog-lightbox-close {
+    position: absolute;
+    top: 1rem;
+    right: 1.5rem;
+    background: none;
+    border: none;
+    color: #fff;
+    font-size: 2rem;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0.7;
+    transition: opacity 0.15s;
+    padding: 0.25rem 0.5rem;
+}
+
+.blog-lightbox-close:hover {
+    opacity: 1;
 }
 
 

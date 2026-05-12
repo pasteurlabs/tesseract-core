@@ -27,4 +27,60 @@
 <div class="blog-post-meta">{{ meta["blog_date"] }} &middot; {{ format_author(meta.get("blog_author", "")) }}</div>
 {% endif %}
 {{ body }}
+
+<script>
+// Lightbox for blog post images
+(function () {
+  var overlay = document.createElement("div");
+  overlay.className = "blog-lightbox";
+  overlay.innerHTML = '<button class="blog-lightbox-close" aria-label="Close">&times;</button><img>';
+  document.body.appendChild(overlay);
+
+  var lbImg = overlay.querySelector("img");
+  var scrollY = 0;
+
+  function open(src, alt) {
+    scrollY = window.scrollY;
+    lbImg.src = src;
+    lbImg.alt = alt || "";
+    overlay.style.display = "flex";
+    requestAnimationFrame(function () {
+      overlay.classList.add("is-visible");
+    });
+    document.body.style.position = "fixed";
+    document.body.style.top = "-" + scrollY + "px";
+    document.body.style.left = "0";
+    document.body.style.right = "0";
+  }
+
+  function close() {
+    overlay.classList.remove("is-visible");
+    overlay.addEventListener("transitionend", function handler() {
+      overlay.removeEventListener("transitionend", handler);
+      overlay.style.display = "none";
+      lbImg.src = "";
+    });
+    document.body.style.position = "";
+    document.body.style.top = "";
+    document.body.style.left = "";
+    document.body.style.right = "";
+    window.scrollTo({ top: scrollY, behavior: "instant" });
+  }
+
+  overlay.addEventListener("click", close);
+  lbImg.addEventListener("click", function (e) { e.stopPropagation(); });
+
+  document.querySelectorAll(".blog-page .content img").forEach(function (img) {
+    img.addEventListener("click", function () {
+      open(img.src, img.alt);
+    });
+  });
+
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && overlay.classList.contains("is-visible")) close();
+  });
+
+  overlay.style.display = "none";
+})();
+</script>
 {% endblock %}
