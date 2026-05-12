@@ -12,6 +12,8 @@ blog_description: "A demo highlighting how Tesseracts unlock efficient, clean pi
 
 _This post originally appeared on [Pasteur Labs Insights](https://pasteurlabs.ai/insights/tesseract-pipeline)._
 
+## Introduction
+
 We're excited to share our new demo showcasing how Tesseracts enable pipeline-level automatic differentiation. In this demo, we use multiple Tesseracts to implement gradient-based parametric optimization of a finite element method (FEM) simulation.
 
 ## A quick refresher: What's a Tesseract?

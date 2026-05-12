@@ -12,6 +12,8 @@ blog_description: "The inaugural Tesseract Hackathon concluded with impressive e
 
 _This post originally appeared on [Pasteur Labs Insights](https://pasteurlabs.ai/insights/tesseract-hackathon-winners)._
 
+## Introduction
+
 The inaugural virtual Tesseract Hackathon has concluded, and we're thrilled to announce the winners! Over thirty days, participants from around the world developed applications leveraging Tesseract's differentiable pipeline capabilities to address real scientific challenges. The brief: use the differentiable pipeline capabilities of Tesseract for scientific impact, and publish all code under an open source license.
 
 ## 1st Place: Multi-Agent Differentiable Predictive Control for Zero-Shot PDE Scalability

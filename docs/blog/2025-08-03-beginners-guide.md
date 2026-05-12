@@ -12,6 +12,8 @@ blog_description: "A hands-on tutorial introducing the Tesseract ecosystem throu
 
 _This post originally appeared on [Pasteur Labs Insights](https://pasteurlabs.ai/insights/beginners-guide-tesseract)._
 
+## Introduction
+
 This tutorial introduces the Tesseract ecosystem through a physics-based example. We'll build a Tesseract from scratch that containerizes a computational tool and implements derivative endpoints for use in differentiable pipelines.
 
 This is the first in a three-part beginner's guide series covering:

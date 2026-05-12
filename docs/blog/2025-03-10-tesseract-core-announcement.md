@@ -12,6 +12,8 @@ blog_description: "We're announcing the public release of Tesseract Core, a free
 
 _This post originally appeared on [Pasteur Labs Insights](https://pasteurlabs.ai/insights/tesseract-core-announcement)._
 
+## Introduction
+
 We've released Tesseract Core as a free and open source application to define, build, and execute Tesseracts. Alongside this release, we launched the [Tesseract dev forum](https://si-tesseract.discourse.group/) to support the growing ecosystem.
 
 ## What are Tesseracts?

@@ -12,6 +12,8 @@ blog_description: "Gradient-based shape optimization of rocket grid fins, combin
 
 _This post originally appeared on the [Tesseract Community Forum](https://si-tesseract.discourse.group/t/parametric-shape-optimization-of-rocket-fins-with-ansys-spaceclaim-pyansys-and-tesseract/109). All relevant code to reproduce the figures and results can be found [here](https://github.com/pasteurlabs/tesseract-core/tree/main/demo/_showcase/ansys-shapeopt)._
 
+## Introduction
+
 Grid fins are lattice-like structures on multi-stage rockets that provide steering control across a wide range of speeds. For example, during SpaceX Starship booster re-entry, grid fins experience high dynamic pressure --- much higher than during ascent. At this critical flight stage, the fins must maintain structural rigidity under maximum loading to preserve aerodynamic characteristics and enable precise trajectory control back to the landing pad.
 
 <div class="double-figure">
