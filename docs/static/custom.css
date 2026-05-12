@@ -1,3 +1,14 @@
+/* ===== Custom properties ===== */
+
+:root {
+    --landing-max-width: 960px;
+    --blog-content-width: 720px;
+    --radius-sm: 6px;
+    --radius-md: 8px;
+    --accent-gradient: linear-gradient(135deg, var(--color-brand-primary, #e040a0), var(--color-brand-content, #40a0e0));
+}
+
+
 /* ===== Existing styles ===== */
 
 .sidebar-logo {
@@ -26,32 +37,47 @@ figure.align-default {
    ecosystem repos). */
 
 
-/* ===== Landing page layout ===== */
+/* ===== Dark-mode inversion utility ===== */
+
+body[data-theme="dark"] .invert-on-dark {
+    filter: invert(0.95);
+}
+
+@media (prefers-color-scheme: dark) {
+    body[data-theme="auto"] .invert-on-dark {
+        filter: invert(0.95);
+    }
+}
+
+
+/* ===== Shared landing-page & blog-page overrides ===== */
 
 .landing-page .sidebar-drawer,
 .landing-page .toc-drawer {
     display: none !important;
 }
 
-/* Hide Furo's native mobile header on landing page (we use .top-nav instead) */
-.landing-page .mobile-header {
+/* Hide Furo's native mobile header (we use .top-nav instead) */
+.landing-page .mobile-header,
+.blog-page .mobile-header {
     display: none !important;
 }
 
-.landing-page .page {
+.landing-page .page,
+.landing-page .main,
+.blog-page .page,
+.blog-page .main {
     display: block;
 }
 
-.landing-page .main {
-    display: block;
-}
+
+/* ===== Landing page layout ===== */
 
 .landing-page .content {
     width: 100%;
     max-width: none;
     padding: 0;
     margin: 0 auto;
-    overflow-x: hidden;
 }
 
 .landing-page .article-container {
@@ -89,14 +115,14 @@ figure.align-default {
 
 /* Section dividers */
 .landing-divider {
-    max-width: 960px;
+    max-width: var(--landing-max-width);
     margin: 0 auto;
     border-top: 1px solid var(--color-background-border);
 }
 
 /* Constrain all landing content to readable width */
 .landing-page article#furo-main-content > section {
-    max-width: 960px;
+    max-width: var(--landing-max-width);
     margin: 0 auto;
     padding: 0 1.5rem;
 }
@@ -113,7 +139,7 @@ figure.align-default {
 /* How-it-works: both columns top-aligned, tab header styled to anchor visually */
 .landing-page .sd-tab-set > input + label {
     background: var(--color-background-secondary);
-    border-radius: 6px 6px 0 0;
+    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
     padding: 0.4rem 1rem;
     font-size: 0.85rem;
     font-weight: 600;
@@ -139,7 +165,7 @@ figure.align-default {
     align-items: center;
     gap: 2.5rem;
     padding: 3.5rem 1.5rem 2.5rem;
-    max-width: 960px;
+    max-width: var(--landing-max-width);
     margin: 0 auto;
 }
 
@@ -191,19 +217,20 @@ body:not([data-theme="dark"]) .landing-logo.only-dark {
     }
 }
 
-.landing-hero-text > p {
+.landing-hero-tagline,
+.landing-hero-subtitle {
     max-width: 640px;
     margin: 0 0 0.5rem;
     line-height: 1.5;
 }
 
-.landing-hero-text > p:first-of-type {
+.landing-hero-tagline {
     font-size: 1.25rem;
     font-weight: 700;
     color: var(--color-foreground-primary);
 }
 
-.landing-hero-text > p:nth-of-type(2) {
+.landing-hero-subtitle {
     font-size: 0.95rem;
     color: var(--color-foreground-secondary);
     margin-bottom: 1.25rem;
@@ -226,14 +253,71 @@ body:not([data-theme="dark"]) .landing-logo.only-dark {
 .landing-cta .sd-badge {
     padding: 0.5rem 1.25rem;
     font-size: 0.95rem;
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
 }
 
-/* ===== Feature cards ===== */
+
+/* ===== Shared landing card base =====
+   Overrides sphinx-design's .sd-card (which Furo strips border from via
+   furo-extensions.css), so !important is needed on border/border-radius. */
+
+.feature-card,
+.demo-card,
+.ecosystem-card {
+    border: 1px solid var(--color-background-border) !important;
+    border-radius: var(--radius-md) !important;
+}
+
+.demo-card,
+.ecosystem-card {
+    transition: box-shadow 0.2s, border-color 0.2s, transform 0.2s;
+}
+
+.demo-card:hover,
+.ecosystem-card:hover {
+    border-color: var(--color-brand-primary) !important;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+    transform: translateY(-2px);
+}
+
+.demo-card:focus-visible,
+.ecosystem-card:focus-visible {
+    border-color: var(--color-brand-primary) !important;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+    outline: 2px solid var(--color-brand-primary);
+    outline-offset: 2px;
+}
+
+body[data-theme="dark"] .demo-card:hover,
+body[data-theme="dark"] .ecosystem-card:hover,
+body[data-theme="dark"] .demo-card:focus-visible,
+body[data-theme="dark"] .ecosystem-card:focus-visible {
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+.feature-card .sd-card-title,
+.demo-card .sd-card-title,
+.ecosystem-card .sd-card-title {
+    font-weight: 600;
+    font-size: 1rem;
+}
+
+.demo-card .sd-card-title {
+    font-size: 1.05rem;
+}
+
+.feature-card .sd-card-body p,
+.demo-card .sd-card-body p,
+.ecosystem-card .sd-card-body p {
+    font-size: 0.9rem;
+    color: var(--color-foreground-secondary);
+    line-height: 1.5;
+}
+
+
+/* ===== Feature cards — top gradient accent ===== */
 
 .feature-card {
-    border: 1px solid var(--color-background-border) !important;
-    border-radius: 8px !important;
     overflow: hidden;
     position: relative;
 }
@@ -245,123 +329,18 @@ body:not([data-theme="dark"]) .landing-logo.only-dark {
     left: 0;
     right: 0;
     height: 3px;
-    background: linear-gradient(135deg, #e040a0, #40a0e0);
-}
-
-.feature-card .sd-card-title {
-    font-weight: 600;
-    font-size: 1rem;
-}
-
-.feature-card .sd-card-body p {
-    font-size: 0.9rem;
-    color: var(--color-foreground-secondary);
-    line-height: 1.5;
+    background: var(--accent-gradient);
 }
 
 
-/* ===== Demo GIF ===== */
-
-.landing-demo-gif {
-    border-radius: 10px;
-    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.12);
-    margin-bottom: 1.5rem;
-}
-
-body[data-theme="dark"] .landing-demo-gif {
-    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
-}
-
-/* Step cards */
-.step-card {
-    text-align: center;
-    font-size: 0.9rem;
-    border: 1px solid var(--color-background-border) !important;
-    border-radius: 8px !important;
-    background: var(--color-background-secondary);
-}
-
-.step-card .sd-card-body {
-    padding: 0.75rem;
-}
-
-.step-card .sd-card-title {
-    font-weight: 600;
-    margin-bottom: 0.25rem;
-}
-
-
-/* ===== Persona icons ===== */
-
-.persona-icon {
-    width: 48px;
-    height: 48px;
-    margin: 0.75rem auto 0;
-    display: block;
-    opacity: 0.85;
-    transition: opacity 0.2s, filter 0.2s;
-}
-
-body[data-theme="dark"] .persona-icon {
-    filter: invert(0.95);
-}
-
-@media (prefers-color-scheme: dark) {
-    body[data-theme="auto"] .persona-icon {
-        filter: invert(0.95);
-    }
-}
-
-.persona-card:hover .persona-icon {
-    opacity: 1;
-}
-
-
-/* ===== Demo cards & schematics ===== */
-
-.demo-card {
-    border: 1px solid var(--color-background-border) !important;
-    border-radius: 8px !important;
-    transition: box-shadow 0.2s, border-color 0.2s, transform 0.2s;
-}
-
-.demo-card:hover {
-    border-color: var(--color-brand-primary) !important;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
-    transform: translateY(-2px);
-}
-
-body[data-theme="dark"] .demo-card:hover {
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
-}
-
-.demo-card .sd-card-title {
-    font-size: 1.05rem;
-    font-weight: 600;
-}
-
-.demo-card .sd-card-body p {
-    font-size: 0.9rem;
-    color: var(--color-foreground-secondary);
-    line-height: 1.5;
-}
+/* ===== Demo schematics ===== */
 
 .demo-schematic {
     width: 100%;
     padding: 0.75rem 0.5rem;
     display: block;
     opacity: 0.9;
-    transition: opacity 0.2s, filter 0.2s;
-}
-
-body[data-theme="dark"] .demo-schematic {
-    filter: invert(0.95);
-}
-
-@media (prefers-color-scheme: dark) {
-    body[data-theme="auto"] .demo-schematic {
-        filter: invert(0.95);
-    }
+    transition: opacity 0.2s;
 }
 
 .demo-card:hover .demo-schematic {
@@ -379,67 +358,10 @@ body[data-theme="dark"] .demo-schematic {
 }
 
 
-/* ===== Persona & Ecosystem cards ===== */
-
-.persona-card,
-.ecosystem-card {
-    border: 1px solid var(--color-background-border) !important;
-    border-radius: 8px !important;
-    transition: box-shadow 0.2s, border-color 0.2s, transform 0.2s;
-}
-
-.persona-card:hover,
-.ecosystem-card:hover {
-    border-color: var(--color-brand-primary) !important;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
-    transform: translateY(-2px);
-}
-
-body[data-theme="dark"] .persona-card:hover,
-body[data-theme="dark"] .ecosystem-card:hover {
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
-}
-
-.persona-card .sd-card-title,
-.ecosystem-card .sd-card-title {
-    font-size: 1.05rem;
-    font-weight: 600;
-}
-
-.persona-card .sd-card-body p,
-.ecosystem-card .sd-card-body p {
-    font-size: 0.9rem;
-    color: var(--color-foreground-secondary);
-    line-height: 1.5;
-}
-
-
-/* ===== Community section ===== */
-
-.landing-community {
-    text-align: center;
-}
-
-.landing-community p {
-    font-size: 1.05rem;
-}
-
-.landing-community a {
-    margin: 0 0.5rem;
-    font-weight: 500;
-    white-space: nowrap;
-}
-
-
 /* ===== Citation dropdown ===== */
 
 .landing-page details.sd-dropdown {
     margin-bottom: 2rem;
-}
-
-.cite-toggle {
-    font-size: 0.9rem;
-    color: var(--color-foreground-muted);
 }
 
 .landing-page .sd-summary-title {
@@ -456,12 +378,13 @@ body[data-theme="dark"] .ecosystem-card:hover {
     padding: 3rem 1.5rem 2rem;
     margin-top: 3rem;
     max-width: none !important;
-    width: 100vw;
-    margin-left: calc(-50vw + 50%);
+    /* Full-bleed: use dvw to avoid scrollbar-induced overflow */
+    width: 100dvw;
+    margin-left: calc(-50dvw + 50%);
 }
 
 .landing-footer .sd-row {
-    max-width: 960px;
+    max-width: var(--landing-max-width);
     margin: 0 auto;
 }
 
@@ -526,12 +449,8 @@ body[data-theme="dark"] .ecosystem-card:hover {
         font-size: 2.2rem;
     }
 
-    .landing-hero-text > p:nth-of-type(1) {
+    .landing-hero-tagline {
         font-size: 1.05rem;
-    }
-
-    .landing-hero-text > p:nth-of-type(2) {
-        font-size: 0.95rem;
     }
 
     .landing-logo {
@@ -544,20 +463,6 @@ body[data-theme="dark"] .ecosystem-card:hover {
 
 .blog-page .sidebar-drawer {
     display: none !important;
-}
-
-/* Hide Furo's native mobile header on blog (we use .top-nav instead) */
-.blog-page .mobile-header {
-    display: none !important;
-}
-
-/* Override Furo's flex layout: single centered column + absolute ToC */
-.blog-page .page {
-    display: block;
-}
-
-.blog-page .main {
-    display: block;
 }
 
 .blog-page .content-icon-container {
@@ -575,7 +480,7 @@ body[data-theme="dark"] .ecosystem-card:hover {
 }
 
 .blog-page .content {
-    max-width: 720px;
+    max-width: var(--blog-content-width);
     margin: 0 auto;
     padding: 1rem;
     position: relative;
@@ -588,7 +493,7 @@ body[data-theme="dark"] .ecosystem-card:hover {
 .blog-page .toc-drawer {
     display: block !important;
     position: fixed;
-    left: calc(50% + 360px + 3rem);
+    left: calc(50% + (var(--blog-content-width) / 2) + 3rem);
     top: var(--top-nav-offset, 0px);
     width: 15em;
     height: calc(100vh - var(--top-nav-offset, 0px));
@@ -717,7 +622,7 @@ body[data-theme="dark"] .ecosystem-card:hover {
 /* Code blocks — border + background on the wrapper, not the pre */
 .blog-page .content .highlight {
     background: var(--color-code-background);
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     border: 1px solid var(--color-background-border);
     margin: 1.5rem 0;
     overflow: hidden;
@@ -737,7 +642,7 @@ body[data-theme="dark"] .ecosystem-card:hover {
 /* Images — center and constrain */
 .blog-page .content img {
     display: block;
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     margin: 1.75rem auto;
     max-width: 100%;
     height: auto;
@@ -769,7 +674,7 @@ body[data-theme="dark"] .ecosystem-card:hover {
 .double-figure > figure > img {
     max-width: 100%;
     height: auto;
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
 }
 
 @media (max-width: 768px) {
@@ -792,7 +697,7 @@ body[data-theme="dark"] .ecosystem-card:hover {
 /* Videos — match img treatment */
 .blog-page .content video {
     display: block;
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     margin: 1.75rem auto;
     max-width: 100%;
     height: auto;
@@ -877,7 +782,7 @@ body[data-theme="dark"] .ecosystem-card:hover {
     border-spacing: 0;
     font-size: 0.9rem;
     line-height: 1.5;
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     overflow: hidden;
     border: 1px solid var(--color-background-border);
 }
@@ -914,7 +819,7 @@ body[data-theme="dark"] .ecosystem-card:hover {
 .blog-page .content .footnote-reference {
     font-size: 0.75em;
     vertical-align: super;
-    line-height: 0;
+    line-height: 1;
     text-decoration: none;
 }
 
@@ -939,7 +844,7 @@ body[data-theme="dark"] .ecosystem-card:hover {
 
 /* Admonitions / callouts in blog posts */
 .blog-page .content .admonition {
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     margin: 1.5rem 0;
     font-size: 0.95rem;
 }
@@ -956,8 +861,8 @@ body[data-theme="dark"] .ecosystem-card:hover {
 }
 
 
-/* Blog index heading — extra breathing room (post pages have .blog-back-link above h1 instead) */
-.blog-page .content h1:first-child {
+/* Blog index heading — extra breathing room */
+.blog-index .content h1 {
     margin-top: 1.5rem;
 }
 
@@ -1001,31 +906,24 @@ body[data-theme="dark"] .ecosystem-card:hover {
 }
 
 /* Date/author line */
-.blog-post-entry .blog-post-entry-meta {
+.blog-post-entry-meta {
     color: var(--color-foreground-muted);
     font-size: 0.85rem;
     margin-bottom: 0.5rem;
 }
 
-.blog-post-entry .blog-post-entry-meta a {
+.blog-post-entry-meta a {
     color: var(--color-foreground-muted);
     text-decoration: none;
     transition: color 0.15s;
 }
 
-.blog-post-entry .blog-post-entry-meta a:hover {
+.blog-post-entry-meta a:hover {
     color: var(--color-brand-primary);
 }
 
-/* Fallback: target by position if no class is available */
-.blog-post-entry > p:nth-child(2) {
-    color: var(--color-foreground-muted);
-    font-size: 0.85rem;
-    margin-bottom: 0.5rem;
-}
-
 /* Excerpt text — clamp to 3 lines for consistent layout */
-.blog-post-entry > p:last-child {
+.blog-post-entry-excerpt {
     color: var(--color-foreground-secondary);
     font-size: 0.95rem;
     line-height: 1.6;
@@ -1041,10 +939,6 @@ body[data-theme="dark"] .ecosystem-card:hover {
 /* ---- Blog responsive ---- */
 
 @media (max-width: 768px) {
-    .blog-page .content {
-        padding: 1rem;
-    }
-
     .blog-page .content h1 {
         font-size: 1.8rem;
     }

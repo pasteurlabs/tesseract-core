@@ -1,8 +1,8 @@
 /* !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-   ! THIS FILE IS SHARED ACROSS ALL TESSERACT ECOSYSTEM REPOS.            !
-   ! Any changes here MUST be copied to:                                   !
-   !   - tesseract-jax/docs/static/top-nav.css                            !
-   !   - tesseract-streamlit/docs/static/top-nav.css                       !
+   ! SHARED FILE — tesseract-jax and tesseract-streamlit pull this file   !
+   ! from tesseract-core/main at build time via HTTP.                     !
+   ! Do NOT rename or move this file. Keep changes compatible with all    !
+   ! three repos.                                                         !
    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! */
 
 

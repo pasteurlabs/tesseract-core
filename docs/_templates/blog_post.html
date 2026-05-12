@@ -16,8 +16,9 @@
 {%- endmacro %}
 
 {% block body %}
-<script>document.body.classList.add("blog-page");</script>
+<div class="blog-page">
 {{ super() }}
+</div>
 {% endblock %}
 
 {% block content %}

@@ -16,8 +16,9 @@
 {%- endmacro %}
 
 {% block body %}
-<script>document.body.classList.add("blog-page");</script>
+<div class="blog-page blog-index">
 {{ super() }}
+</div>
 {% endblock %}
 
 {% block content %}
@@ -28,7 +29,7 @@
   <div class="blog-post-entry">
     <h3><a href="{{ post.url }}">{{ post.title }}</a></h3>
     <p class="blog-post-entry-meta"><em>{{ post.date }}</em> · {{ format_author(post.author) }}</p>
-    <p>{{ post.description }}</p>
+    <p class="blog-post-entry-excerpt">{{ post.description }}</p>
   </div>
   {% endfor %}
 </div>

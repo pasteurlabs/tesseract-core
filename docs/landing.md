@@ -9,7 +9,7 @@ og:description: "Compose solvers, geometry ops, ML models, and more into end-to-
 
 # Tesseract
 
-::::{div} landing-hero
+::::::{div} landing-hero
 
 :::{div} landing-hero-logo
 
@@ -27,13 +27,17 @@ og:description: "Compose solvers, geometry ops, ML models, and more into end-to-
 
 :::
 
-:::{div} landing-hero-text
+:::::{div} landing-hero-text
 
-**Universal components for differentiable scientific computing**
+:::{div} landing-hero-tagline
+Universal components for differentiable scientific computing
+:::
 
+:::{div} landing-hero-subtitle
 Tesseract allows you to compose solvers, geometry ops, ML models, and more into end-to-end differentiable pipelines &mdash; for optimization, inference, and training.
 Each component is containerized, language-agnostic, and supports any gradient implementation.
 Open source, published in [JOSS](https://doi.org/10.21105/joss.08385).
+:::
 
 :::{div} landing-cta
 {bdg-ref-primary-line}`Get Started <content/introduction/get-started>`
@@ -41,9 +45,9 @@ Open source, published in [JOSS](https://doi.org/10.21105/joss.08385).
 {bdg-link-primary-line}`GitHub <https://github.com/pasteurlabs/tesseract-core>`
 :::
 
-:::
+:::::
 
-::::
+::::::
 
 :::{div} landing-divider
 :::
@@ -231,7 +235,7 @@ Ready to build your own? The {doc}`Get Started <content/introduction/get-started
 :link-type: doc
 :class-card: demo-card
 :img-top: static/demo-data-assimilation.svg
-:class-img-top: demo-schematic
+:class-img-top: demo-schematic invert-on-dark
 
 A complete 4D-Variational data assimilation scheme for a chaotic dynamical
 system (Lorenz-96), built with a differentiable JAX Tesseract.
@@ -242,7 +246,7 @@ system (Lorenz-96), built with a differentiable JAX Tesseract.
 :link-type: doc
 :class-card: demo-card
 :img-top: static/demo-cfd.svg
-:class-img-top: demo-schematic
+:class-img-top: demo-schematic invert-on-dark
 
 Optimize initial conditions of a 2D Navier-Stokes simulation so the
 vorticity evolves into a target image, via a JAX-CFD Tesseract.
@@ -253,7 +257,7 @@ vorticity evolves into a target image, via a JAX-CFD Tesseract.
 :link-type: doc
 :class-card: demo-card
 :img-top: static/demo-fem-shapeopt.svg
-:class-img-top: demo-schematic
+:class-img-top: demo-schematic invert-on-dark
 
 Compose a geometry Tesseract with a FEM solver Tesseract for end-to-end
 parametric structural optimization.
