@@ -1,7 +1,7 @@
 ---
 orphan: true
 og:title: "Gradient-based rocket fin design with Ansys, JAX, and Tesseract"
-og:description: "We used Tesseract to connect Ansys tools into a differentiable pipeline and optimize rocket grid fins — then turned the optimizer's insights into a practical design that's 24% stiffer."
+og:description: "We used Tesseract to connect Ansys tools into a differentiable pipeline, optimize rocket grid fins, and turn the optimizer's insights into a practical design that's 24% stiffer."
 blog_date: "2026-05-12"
 blog_author: "@andrinr"
 blog_title: "Gradient-based rocket fin design with Ansys, JAX, and Tesseract"
@@ -14,9 +14,9 @@ _For the full methodology, see the [original forum post](https://si-tesseract.di
 
 ## Introduction
 
-If you work in simulation-driven design, you've probably hit this wall: you have a parametric CAD model in one tool, a mesher in another, and a finite element solver in a third. Each tool is good at what it does. Getting them to work together --- let alone pass gradients between them --- is where things fall apart.
+If you work in simulation-driven design, you've probably hit this wall: you have a parametric CAD model in one tool, a mesher in another, and a finite element solver in a third. Each tool is good at what it does. Getting them to work together, let alone pass gradients between them, is where things fall apart.
 
-We recently built a case study around exactly this kind of pipeline: optimizing rocket grid fin geometry using Ansys SpaceClaim for CAD, a custom mesh converter, and PyMAPDL for structural analysis. The physics is interesting, but what we really want to talk about is the engineering challenge underneath --- and how Tesseract made it tractable.
+We recently built a case study around exactly this kind of pipeline: optimizing rocket grid fin geometry using Ansys SpaceClaim for CAD, a custom mesh converter, and PyMAPDL for structural analysis. The physics is interesting, but what we really want to talk about is the engineering challenge underneath, and how Tesseract made it tractable.
 
 <figure>
 <img src="../_static/blog/rocket-fins-grid-fins.jpg" alt="Titanium grid fins on a Falcon 9 booster">
@@ -32,19 +32,19 @@ Here's what the pipeline looks like: Ansys SpaceClaim generates parametric geome
 <figcaption>End-to-end optimization workflow connecting Ansys SpaceClaim, SDF conversion, and PyMAPDL via Tesseract.</figcaption>
 </figure>
 
-Each of these tools lives in a different world. SpaceClaim runs on Windows with a commercial license. PyMAPDL has its own Python environment and dependency tree. JAX handles the glue code and autodiff on Linux. In a traditional setup, you'd spend more time on environment management and data plumbing than on the actual optimization.
+Each of these tools lives in a different world. SpaceClaim runs on Windows with a commercial license. PyMAPDL has its own Python environment and dependency tree. JAX handles the glue code and autodiff on Linux. Without some way to bridge these environments, much of the effort goes into dependency management and data plumbing rather than the actual optimization.
 
-With Tesseract, each tool becomes a self-contained component with a clean interface. We packaged SpaceClaim, the SDF converter, and PyMAPDL as three separate Tesseracts, each with isolated dependencies. The pipeline composition happens through [Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax), which handles the orchestration and --- crucially --- the gradient flow.
+With Tesseract, each tool becomes a self-contained component with a clean interface. We packaged SpaceClaim, the SDF converter, and PyMAPDL as three separate Tesseracts, each with isolated dependencies. The pipeline composition happens through [Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax), which handles orchestration and gradient flow.
 
 ## Gradients across boundaries
 
 This is where things get interesting from a Tesseract perspective. Each component in this pipeline uses a _different_ differentiation strategy:
 
 - PyMAPDL computes gradients via an **analytical adjoint**
-- The SDF converter uses **finite differences** (wrapping another Tesseract to do so --- a higher-order Tesseract)
+- The SDF converter uses **finite differences**, wrapping another Tesseract to do so (a higher-order Tesseract)
 - The JAX glue code between components uses **automatic differentiation**
 
-Tesseract's differentiation interface unifies all of these behind the same contract: every component exposes Jacobian, JVP, or VJP endpoints, regardless of how it computes them internally. From the optimizer's perspective, it's just one differentiable function. This is what we mean when we talk about pipeline-level autodiff --- not "everything must be written in one AD framework," but "gradients flow end-to-end even when the components couldn't be more different."
+Tesseract's differentiation interface unifies all of these behind the same contract: every component exposes Jacobian, JVP, or VJP endpoints, regardless of how it computes them internally. From the optimizer's perspective, it's just one differentiable function. Pipeline-level autodiff doesn't require everything to be written in one AD framework. It means gradients flow end-to-end even when the components couldn't be more different.
 
 ## The result: optimization as a design partner
 
@@ -78,9 +78,9 @@ We took those insights and hand-designed a symmetric, manufacturable geometry. R
 
 ## The bigger picture
 
-The rocket fin problem is a good example, but the pattern is general. If you're coupling simulation tools that span different languages, platforms, or differentiation strategies, you're dealing with the same integration problem we were. Tesseract's role here isn't to replace any of these tools --- it's to let them compose into something greater than the sum of their parts.
+The rocket fin problem is a good example, but the pattern is general. Any workflow coupling simulation tools across different languages, platforms, or differentiation strategies faces the same integration challenge. Tesseract lets these tools compose without requiring them to share environments, dependencies, or differentiation frameworks.
 
-We've since validated this by swapping in [PyVista](https://docs.pyvista.org/) for geometry and [JAX-FEM](https://github.com/deepmodeling/jax-fem) for the solver with minimal changes. That kind of modularity is the real payoff.
+We've since validated this by swapping in [PyVista](https://docs.pyvista.org/) for geometry and [JAX-FEM](https://github.com/deepmodeling/jax-fem) for the solver with minimal changes, which gives us some confidence that the modularity holds up in practice.
 
 If this is the kind of workflow you're building, the [full technical writeup](https://si-tesseract.discourse.group/t/parametric-shape-optimization-of-rocket-fins-with-ansys-spaceclaim-pyansys-and-tesseract/109) has all the details, and the [demo code](https://github.com/pasteurlabs/tesseract-core/tree/main/demo/_showcase/ansys-shapeopt) is ready to run.
 
