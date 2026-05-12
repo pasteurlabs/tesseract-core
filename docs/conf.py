@@ -92,10 +92,7 @@ html_theme_options = {
     "sidebar_hide_name": True,
 }
 html_css_files = ["top-nav.css", "custom.css"]
-html_js_files = [
-    ("https://buttons.github.io/buttons.js", {"async": "async"}),
-    "external-links.js",
-]
+html_js_files = []
 html_baseurl = "https://docs.pasteurlabs.ai/projects/tesseract-core/latest/"
 sitemap_url_scheme = (
     "{link}"  # ReadTheDocs handles versioning; don't add language/version prefix
@@ -219,8 +216,8 @@ def _copy_landing_to_index(app, exception) -> None:
 
 def setup(app) -> None:
     """Sphinx setup function. Used to register custom stuff."""
-    # HACK: We zip the examples folder here so that it can be downloaded
-    zip_examples_folder()
+    # We zip the examples folder here so that it can be downloaded
+    app.connect("builder-inited", zip_examples_folder)
     # Inject blog post listing into blog index page context
     app.connect("html-page-context", _blog_page_context)
     # Copy landing page to index.html after build

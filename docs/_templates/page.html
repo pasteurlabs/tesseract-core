@@ -73,5 +73,17 @@
   document.addEventListener("scroll", update, { passive: true });
   window.addEventListener("resize", update, { passive: true });
 })();
+
+// Open external links in a new tab.
+document.addEventListener("DOMContentLoaded", function () {
+  var host = window.location.host;
+  document.querySelectorAll("a[href]").forEach(function (link) {
+    if (link.hostname && link.hostname !== host) {
+      link.setAttribute("target", "_blank");
+      link.setAttribute("rel", "noopener noreferrer");
+    }
+  });
+});
 </script>
+<script async src="https://buttons.github.io/buttons.js"></script>
 {% endblock %}
