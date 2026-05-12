@@ -114,7 +114,7 @@ ogp_social_cards = {
 # -- Custom directives ----------------------------------------------------
 
 
-def zip_examples_folder() -> None:
+def zip_examples_folder(_app) -> None:
     """Zip a folder and save it to the specified path."""
     import shutil
     from pathlib import Path
