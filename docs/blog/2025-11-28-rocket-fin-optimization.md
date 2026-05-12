@@ -23,7 +23,7 @@ We recently built a case study around exactly this kind of pipeline: optimizing 
 <figcaption>Second-generation titanium grid fins on a Falcon 9 booster. <a href="https://commons.wikimedia.org/wiki/File:Second-generation_titanium_grid_fins,_Iridium-2_Mission_(35533873795).jpg">SpaceX, Public Domain</a>.</figcaption>
 </figure>
 
-## Three tools, two operating systems, zero shared dependencies
+## Three tools across two operating systems
 
 Here's what the pipeline looks like: Ansys SpaceClaim generates parametric geometry from 16 design variables (angular positions of 8 bars on a grid fin). That geometry gets converted to a signed distance field on a regular grid. PyMAPDL then solves the linear elasticity problem and returns compliance --- a measure of how much the structure deforms under load.
 
@@ -34,7 +34,7 @@ Here's what the pipeline looks like: Ansys SpaceClaim generates parametric geome
 
 Each of these tools lives in a different world. SpaceClaim runs on Windows with a commercial license. PyMAPDL has its own Python environment and dependency tree. JAX handles the glue code and autodiff on Linux. Without some way to bridge these environments, much of the effort goes into dependency management and data plumbing rather than the actual optimization.
 
-With Tesseract, each tool becomes a self-contained component with a clean interface. We packaged SpaceClaim, the SDF converter, and PyMAPDL as three separate Tesseracts, each with isolated dependencies. The pipeline composition happens through [Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax), which handles orchestration and gradient flow.
+With Tesseract, each tool becomes a component with a clean interface. The SDF converter and PyMAPDL Tesseracts run as containerized images on Linux, while the SpaceClaim Tesseract runs directly on the Windows host via `tesseract-runtime serve` (since it depends on a local Ansys installation and license). Despite the different deployment modes, all three expose the same API. [Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax) composes them into a single pipeline and handles gradient flow across the boundaries.
 
 ## Gradients across boundaries
 
