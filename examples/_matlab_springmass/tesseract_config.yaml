@@ -19,7 +19,7 @@ description: |
 build_config:
   # Official MathWorks MATLAB image — includes a full MATLAB installation.
   # Change the tag to match your license version if needed.
-  base_image: "mathworks/matlab:r2025b"
+  base_image: "matlab-licensed:r2026a"
 
   # Copy the MATLAB .m source file into the container
   package_data:

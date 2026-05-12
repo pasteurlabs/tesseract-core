@@ -28,7 +28,7 @@ from tesseract_core.runtime import Array, Float64
 # Path to the MATLAB binary inside the container.
 # Override with the MATLAB_BIN environment variable if your MATLAB
 # is mounted at a non-standard path.
-MATLAB_BIN = os.environ.get("MATLAB_BIN", "/opt/matlab/R2025b/bin/matlab")
+MATLAB_BIN = os.environ.get("MATLAB_BIN", "/opt/matlab/R2026a/bin/matlab")
 
 # Path to the .m source file copied into the container at build time.
 SOLVER_DIR = Path("/tesseract/matlab")
