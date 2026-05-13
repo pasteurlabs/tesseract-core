@@ -1,22 +1,22 @@
 ---
 orphan: true
-og:title: "End-to-end gradients through three tools and three differentiation strategies"
+og:title: "Optimizing rocket fins across CAD, mesher, and FEA with end-to-end gradients"
 og:description: "We chained adjoint, finite-difference, and AD gradients across Ansys SpaceClaim, PyMAPDL, and JAX to optimize rocket grid fins, achieving a 24% stiffer design."
 blog_date: "2026-05-12"
 blog_author: "@andrinr"
-blog_title: "End-to-end gradients through three tools and three differentiation strategies"
+blog_title: "Optimizing rocket fins across CAD, mesher, and FEA with end-to-end gradients"
 blog_description: "We chained adjoint, finite-difference, and AD gradients across Ansys SpaceClaim, PyMAPDL, and JAX to optimize rocket grid fins."
 ---
 
-# End-to-end gradients through three tools and three differentiation strategies
+# Optimizing rocket fins across CAD, mesher, and FEA with end-to-end gradients
 
 _For the full methodology, see the [original forum post](https://si-tesseract.discourse.group/t/parametric-shape-optimization-of-rocket-fins-with-ansys-spaceclaim-pyansys-and-tesseract/109). All code to reproduce the results is available [here](https://github.com/pasteurlabs/tesseract-core/tree/main/demo/_showcase/ansys-shapeopt)._
 
 ## Introduction
 
-If you work in simulation-driven design, you've probably hit this wall: you have a parametric CAD model in one tool, a mesher in another, and a finite element solver in a third. Each tool is good at what it does. Getting them to work together is where things fall apart. Getting _gradients_ to flow between them is where most people give up entirely, because each component computes derivatives in a completely different way — if it computes them at all.
+If you work in simulation-driven design, you've probably hit this wall: you have a parametric CAD model in one tool, a mesher in another, and a finite element solver in a third. Each tool is good at what it does. Getting them to work together is where things fall apart. Getting _gradients_ to flow between them is where most people give up entirely, because each component computes derivatives in a completely different way, if it computes them at all.
 
-We built a pipeline that does exactly this: optimizing rocket grid fin geometry using Ansys SpaceClaim for CAD, a custom mesh converter, and PyMAPDL for structural analysis. The optimizer sees a single differentiable function, even though the underlying gradient strategies — analytical adjoint, finite differences, and JAX automatic differentiation — are completely different at every stage.
+We built a pipeline that does exactly this: optimizing rocket grid fin geometry using Ansys SpaceClaim for CAD, a custom mesh converter, and PyMAPDL for structural analysis. The optimizer sees a single differentiable function, even though the underlying gradient strategies (analytical adjoint, finite differences, and JAX automatic differentiation) are completely different at every stage.
 
 <figure>
 <img src="../_static/blog/rocket-fins-grid-fins.jpg" alt="Titanium grid fins on a Falcon 9 booster">
@@ -40,11 +40,11 @@ None of this is specific to Ansys. We also ran the same optimization with [PyVis
 
 The trickiest part of this setup is differentiation. We need gradients of compliance with respect to the 16 bar parameters, but the gradient computation is different at every stage:
 
-- **PyMAPDL** computes gradients via an **analytical adjoint** — the solver already knows its own structure, so we can derive sensitivities directly from the stiffness matrix.
+- **PyMAPDL** computes gradients via an **analytical adjoint**. The solver already knows its own structure, so we can derive sensitivities directly from the stiffness matrix.
 - **The SDF converter** uses **finite differences**, wrapping the SpaceClaim Tesseract to perturb its inputs. SpaceClaim is a black box with no derivative information, so perturbation is the only option. This makes the SDF converter a higher-order Tesseract: a Tesseract that calls another Tesseract to compute its own gradients.
 - **The density mapping** and glue code between components use JAX **automatic differentiation**, since these are pure array operations where AD is straightforward.
 
-Tesseract's differentiation endpoints (Jacobian, JVP, VJP) provide a common interface across all three strategies. Tesseract-JAX chains them together so the optimizer sees a single differentiable function. This is the key idea: you don't need to rewrite everything in one AD framework to get end-to-end gradients. Each component uses whatever differentiation strategy makes sense for it, and Tesseract handles the composition.
+Tesseract's differentiation endpoints (Jacobian, JVP, VJP) provide a common interface across all three strategies. Tesseract-JAX chains them together so the optimizer sees a single differentiable function. This is the core idea: each component uses whatever differentiation strategy makes sense for it, and Tesseract handles the composition.
 
 ## What the optimizer found
 
