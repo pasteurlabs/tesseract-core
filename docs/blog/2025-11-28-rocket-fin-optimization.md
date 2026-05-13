@@ -1,54 +1,54 @@
 ---
 orphan: true
-og:title: "Gradient-based rocket fin design with Ansys, JAX, and Tesseract"
-og:description: "We used Tesseract to connect Ansys tools into a differentiable pipeline, optimize rocket grid fins, and turn the optimizer's insights into a practical design that's 24% stiffer."
+og:title: "End-to-end gradients through three tools and three differentiation strategies"
+og:description: "We chained adjoint, finite-difference, and AD gradients across Ansys SpaceClaim, PyMAPDL, and JAX to optimize rocket grid fins, achieving a 24% stiffer design."
 blog_date: "2026-05-12"
 blog_author: "@andrinr"
-blog_title: "Gradient-based rocket fin design with Ansys, JAX, and Tesseract"
-blog_description: "We used Tesseract to connect Ansys tools into a differentiable pipeline and let gradients reshape a rocket grid fin."
+blog_title: "End-to-end gradients through three tools and three differentiation strategies"
+blog_description: "We chained adjoint, finite-difference, and AD gradients across Ansys SpaceClaim, PyMAPDL, and JAX to optimize rocket grid fins."
 ---
 
-# Gradient-based rocket fin design with Ansys, JAX, and Tesseract
+# End-to-end gradients through three tools and three differentiation strategies
 
 _For the full methodology, see the [original forum post](https://si-tesseract.discourse.group/t/parametric-shape-optimization-of-rocket-fins-with-ansys-spaceclaim-pyansys-and-tesseract/109). All code to reproduce the results is available [here](https://github.com/pasteurlabs/tesseract-core/tree/main/demo/_showcase/ansys-shapeopt)._
 
 ## Introduction
 
-If you work in simulation-driven design, you've probably hit this wall: you have a parametric CAD model in one tool, a mesher in another, and a finite element solver in a third. Each tool is good at what it does. Getting them to work together, let alone pass gradients between them, is where things fall apart.
+If you work in simulation-driven design, you've probably hit this wall: you have a parametric CAD model in one tool, a mesher in another, and a finite element solver in a third. Each tool is good at what it does. Getting them to work together is where things fall apart. Getting _gradients_ to flow between them is where most people give up entirely, because each component computes derivatives in a completely different way — if it computes them at all.
 
-We recently built a case study around exactly this kind of pipeline: optimizing rocket grid fin geometry using Ansys SpaceClaim for CAD, a custom mesh converter, and PyMAPDL for structural analysis. The physics is interesting, but what we really want to talk about is the engineering challenge underneath, and how Tesseract made it tractable.
+We built a pipeline that does exactly this: optimizing rocket grid fin geometry using Ansys SpaceClaim for CAD, a custom mesh converter, and PyMAPDL for structural analysis. The optimizer sees a single differentiable function, even though the underlying gradient strategies — analytical adjoint, finite differences, and JAX automatic differentiation — are completely different at every stage.
 
 <figure>
 <img src="../_static/blog/rocket-fins-grid-fins.jpg" alt="Titanium grid fins on a Falcon 9 booster">
 <figcaption>Second-generation titanium grid fins on a Falcon 9 booster. <a href="https://commons.wikimedia.org/wiki/File:Second-generation_titanium_grid_fins,_Iridium-2_Mission_(35533873795).jpg">SpaceX, Public Domain</a>.</figcaption>
 </figure>
 
-## Three tools across two operating systems
+## The pipeline
 
-Here's what the pipeline looks like: Ansys SpaceClaim generates parametric geometry from 16 design variables (angular positions of 8 bars on a grid fin). That geometry gets converted to a signed distance field on a regular grid. PyMAPDL then solves the linear elasticity problem and returns compliance --- a measure of how much the structure deforms under load.
+Each grid fin has 8 bars defined by start and end angular positions, giving us 16 design parameters. SpaceClaim generates the geometry, which gets converted to a signed distance field on a regular grid. PyMAPDL then solves the linear elasticity problem and returns compliance, a measure of how much the structure deforms under load. Lower compliance means a stiffer fin.
 
 <figure>
 <img src="../_static/blog/rocket-fins-workflow.png" alt="Optimization workflow" class="blog-img-full">
 <figcaption>End-to-end optimization workflow connecting Ansys SpaceClaim, SDF conversion, and PyMAPDL via Tesseract.</figcaption>
 </figure>
 
-Each of these tools lives in a different world. SpaceClaim runs on Windows with a commercial license. PyMAPDL has its own Python environment and dependency tree. JAX handles the glue code and autodiff on Linux. Without some way to bridge these environments, much of the effort goes into dependency management and data plumbing rather than the actual optimization.
+These tools don't naturally fit together. SpaceClaim runs on Windows with a commercial license. PyMAPDL has its own dependency tree. The optimization logic and glue code run in JAX on Linux. We wrapped each step as a Tesseract: the SDF converter and PyMAPDL run as containerized images on Linux, while SpaceClaim runs directly on the Windows host via `tesseract-runtime serve` (since it needs the local Ansys installation). All three expose the same API regardless of deployment mode, and [Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax) composes them into a single callable pipeline.
 
-With Tesseract, each tool becomes a component with a clean interface. The SDF converter and PyMAPDL Tesseracts run as containerized images on Linux, while the SpaceClaim Tesseract runs directly on the Windows host via `tesseract-runtime serve` (since it depends on a local Ansys installation and license). Despite the different deployment modes, all three expose the same API. [Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax) composes them into a single pipeline and handles gradient flow across the boundaries.
+None of this is specific to Ansys. We also ran the same optimization with [PyVista](https://docs.pyvista.org/) for geometry and [JAX-FEM](https://github.com/deepmodeling/jax-fem) as the solver. The Tesseract interfaces stayed the same — only the containers changed.
 
-## Gradients across boundaries
+## Getting gradients through
 
-This is where things get interesting from a Tesseract perspective. Each component in this pipeline uses a _different_ differentiation strategy:
+The trickiest part of this setup is differentiation. We need gradients of compliance with respect to the 16 bar parameters, but the gradient computation is different at every stage:
 
-- PyMAPDL computes gradients via an **analytical adjoint**
-- The SDF converter uses **finite differences**, wrapping another Tesseract to do so (a higher-order Tesseract)
-- The JAX glue code between components uses **automatic differentiation**
+- **PyMAPDL** computes gradients via an **analytical adjoint** — the solver already knows its own structure, so we can derive sensitivities directly from the stiffness matrix.
+- **The SDF converter** uses **finite differences**, wrapping the SpaceClaim Tesseract to perturb its inputs. SpaceClaim is a black box with no derivative information, so perturbation is the only option. This makes the SDF converter a higher-order Tesseract: a Tesseract that calls another Tesseract to compute its own gradients.
+- **The density mapping** and glue code between components use JAX **automatic differentiation**, since these are pure array operations where AD is straightforward.
 
-Tesseract's differentiation interface unifies all of these behind the same contract: every component exposes Jacobian, JVP, or VJP endpoints, regardless of how it computes them internally. From the optimizer's perspective, it's just one differentiable function. Pipeline-level autodiff doesn't require everything to be written in one AD framework. It means gradients flow end-to-end even when the components couldn't be more different.
+Tesseract's differentiation endpoints (Jacobian, JVP, VJP) provide a common interface across all three strategies. Tesseract-JAX chains them together so the optimizer sees a single differentiable function. This is the key idea: you don't need to rewrite everything in one AD framework to get end-to-end gradients. Each component uses whatever differentiation strategy makes sense for it, and Tesseract handles the composition.
 
-## The result: optimization as a design partner
+## What the optimizer found
 
-With gradients in hand, we ran Adam from two different starting configurations. Both converged to similar topologies, which told us we were finding something real rather than getting stuck in local minima.
+We ran Adam (learning rate 0.01, 80 iterations) from two starting points: a regular grid and a random bar arrangement.
 
 <div class="double-figure">
 <figure>
@@ -61,9 +61,13 @@ With gradients in hand, we ran Adam from two different starting configurations. 
 </figure>
 </div>
 
-The raw optimized designs were asymmetric and impractical to manufacture. But they taught us something useful: where to put the material. The optimizer consistently reinforced bar roots near attachment points, organized bars into orthogonal patterns, and created diagonal load paths to the fixed boundaries.
+Both runs converged to similar topologies, which is a good sign that the optimizer isn't just stuck in a local minimum. Three structural patterns emerged: bars organized into roughly orthogonal members, lateral bars angled diagonally to create direct load paths to the attachment points, and longitudinal bars clustered near the root where strain energy is highest.
 
-We took those insights and hand-designed a symmetric, manufacturable geometry. Running it back through the pipeline: **24% stiffer than the baseline grid, at the same mass.**
+The catch is that the raw optimized geometries are asymmetric and impractical to manufacture.
+
+## From optimizer output to a real design
+
+Rather than using the optimizer's output directly, we used it to inform a hand-designed geometry that incorporates the three structural patterns while enforcing symmetry and manufacturability.
 
 <div class="double-figure">
 <figure>
@@ -76,13 +80,15 @@ We took those insights and hand-designed a symmetric, manufacturable geometry. R
 </figure>
 </div>
 
-## The bigger picture
+Running this geometry back through the pipeline gave a compliance of 49.8, 24% stiffer than the regular grid baseline at the same mass. It doesn't match the unconstrained optimum, but it's a practical design informed by what the gradients revealed about where material matters most.
 
-The rocket fin problem is a good example, but the pattern is general. Any workflow coupling simulation tools across different languages, platforms, or differentiation strategies faces the same integration challenge. Tesseract lets these tools compose without requiring them to share environments, dependencies, or differentiation frameworks.
+## Reflections
 
-We've since validated this by swapping in [PyVista](https://docs.pyvista.org/) for geometry and [JAX-FEM](https://github.com/deepmodeling/jax-fem) for the solver with minimal changes, which gives us some confidence that the modularity holds up in practice.
+The main bottleneck in this pipeline is SpaceClaim, which has significant per-call overhead. Each optimization iteration takes on the order of minutes, so the full 80-iteration run takes a few hours. That's acceptable for a design exploration study, but for tighter iteration loops, the PyVista + JAX-FEM variant runs much faster.
 
-If this is the kind of workflow you're building, the [full technical writeup](https://si-tesseract.discourse.group/t/parametric-shape-optimization-of-rocket-fins-with-ansys-spaceclaim-pyansys-and-tesseract/109) has all the details, and the [demo code](https://github.com/pasteurlabs/tesseract-core/tree/main/demo/_showcase/ansys-shapeopt) is ready to run.
+The broader pattern here extends well beyond structural optimization. Any workflow where you chain tools that differ in language, OS, licensing, or differentiation capability is a candidate for the same approach. The constraint that each component must expose a derivative endpoint through a common interface turns out to be a mild one — most solvers already have _some_ notion of sensitivities, even if they don't expose it as a clean API. Tesseract just gives those sensitivities a uniform shape.
+
+If you want to dig into the details, the [full technical writeup](https://si-tesseract.discourse.group/t/parametric-shape-optimization-of-rocket-fins-with-ansys-spaceclaim-pyansys-and-tesseract/109) covers the methodology, and the [demo code](https://github.com/pasteurlabs/tesseract-core/tree/main/demo/_showcase/ansys-shapeopt) is ready to reproduce.
 
 ## Learn more
 
