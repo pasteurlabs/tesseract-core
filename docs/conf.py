@@ -80,10 +80,11 @@ exclude_patterns = ["build", "_build", "jupyter_execute", "Thumbs.db", ".DS_Stor
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
 # The docs root is content/introduction/index.md, which owns all toctrees
-# and drives the sidebar. The landing page (landing.md) is an orphan page
-# that gets copied to index.html after build so it serves at the site root.
+# and drives the sidebar. The landing page (index.md) is an orphan page
+# that exists outside the main docs structure and is not included in the sidebar or toctrees.
 root_doc = "content/introduction/index"
 
+html_title = f"Tesseract Core {version}"
 html_theme = "furo"
 html_static_path = ["static"]
 html_theme_options = {
@@ -182,9 +183,24 @@ def _collect_blog_posts() -> list[dict]:
     return posts
 
 
-def _blog_page_context(app, pagename, templatename, context, doctree):
-    """Select blog templates and inject context for blog pages."""
-    if not pagename.startswith("blog/"):
+def _inject_page_context(app, pagename, templatename, context, doctree):
+    """Select special templates and inject context for blog/landing pages."""
+    is_blog = pagename.startswith("blog/")
+    is_landing = pagename == "index"
+
+    # Override favicon and site title for blog + landing pages
+    if is_blog or is_landing:
+        pathto = context["pathto"]
+        context["favicon_url"] = pathto("_static/favicon.ico", resource=True)
+
+    if is_blog:
+        context["docstitle"] = "Tesseract"
+
+    # Landing page: suppress docstitle so Furo renders just "Tesseract" as <title>
+    if is_landing:
+        context["docstitle"] = ""
+
+    if not is_blog:
         return
 
     if pagename == "blog/index":
@@ -204,24 +220,12 @@ def _blog_page_context(app, pagename, templatename, context, doctree):
     return "blog_post.html"
 
 
-def _copy_landing_to_index(app, exception) -> None:
-    """Copy landing.html to index.html so the landing page serves at /."""
-    if exception or app.builder.format != "html":
-        return
-    outdir = Path(app.outdir)
-    landing = outdir / "landing.html"
-    index = outdir / "index.html"
-    shutil.copy2(landing, index)
-
-
 def setup(app) -> None:
     """Sphinx setup function. Used to register custom stuff."""
     # We zip the examples folder here so that it can be downloaded
     app.connect("builder-inited", zip_examples_folder)
     # Inject blog post listing into blog index page context
-    app.connect("html-page-context", _blog_page_context)
-    # Copy landing page to index.html after build
-    app.connect("build-finished", _copy_landing_to_index)
+    app.connect("html-page-context", _inject_page_context)
 
 
 # -- Handle Jupyter notebooks ------------------------------------------------
