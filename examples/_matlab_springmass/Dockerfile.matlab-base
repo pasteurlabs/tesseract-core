@@ -20,6 +20,13 @@
 ARG MATLAB_RELEASE=r2026a
 FROM mathworks/matlab:${MATLAB_RELEASE}
 
+# Re-declare MATLAB_RELEASE after FROM so it's in scope for the build stage
+# (ARGs declared before FROM are only available for image tag substitution).
+ARG MATLAB_RELEASE
 ARG MATLAB_USERNAME=matlab-user
 USER root
 RUN sed -i "s/^ubuntu:/${MATLAB_USERNAME}:/" /etc/passwd /etc/group
+
+# Expose the release tag so downstream code (e.g. tesseract_api.py) can
+# locate the MATLAB binary without hardcoding the version.
+ENV MATLAB_RELEASE=${MATLAB_RELEASE}

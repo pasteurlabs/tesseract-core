@@ -25,10 +25,15 @@ from pydantic import BaseModel, Field
 
 from tesseract_core.runtime import Array, Float64
 
-# Path to the MATLAB binary inside the container.
-# Override with the MATLAB_BIN environment variable if your MATLAB
-# is mounted at a non-standard path.
-MATLAB_BIN = os.environ.get("MATLAB_BIN", "/opt/matlab/R2026a/bin/matlab")
+# Path to the MATLAB binary inside the container. Derived from MATLAB_RELEASE
+# (set by Dockerfile.matlab-base from its build arg). The Docker tag is
+# lowercase (r2026a) while the install dir is uppercase (R2026a), so we
+# capitalize the first letter. Override either env var if your MATLAB is at
+# a non-standard path.
+_release = os.environ.get("MATLAB_RELEASE", "r2026a")
+MATLAB_BIN = os.environ.get(
+    "MATLAB_BIN", f"/opt/matlab/{_release[0].upper() + _release[1:]}/bin/matlab"
+)
 
 # Path to the .m source file copied into the container at build time.
 SOLVER_DIR = Path("/tesseract/matlab")
