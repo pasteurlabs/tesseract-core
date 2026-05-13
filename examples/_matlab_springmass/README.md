@@ -13,57 +13,65 @@ m * x'' + c * x' + k * x = F₀  (step force input)
 
 ## Prerequisites
 
-- **A MATLAB network license server** reachable from the container
 - **Docker**
+- **A valid MATLAB license**, either:
+  - A **network license server** reachable from the container (e.g. `27000@server`), or
+  - A **MATLAB Individual license file** (`.lic`) and its associated activation MAC address
 
 No local MATLAB installation or additional toolboxes are needed.
 
-## Docker Runtime Requirements
+## Build the wrapper base image
 
-MATLAB's JVM requires more shared memory than Docker's default 64MB.
-Pass `--shm-size=512M` via `--runtime-args` in all `tesseract run` /
-`tesseract serve` commands below. You also need to pass your license
-server and its DNS mapping:
+The upstream `mathworks/matlab` image needs two small adjustments before it
+can be used as a Tesseract base image — see [`Dockerfile.matlab-base`](Dockerfile.matlab-base)
+for the rationale. Build it once:
 
 ```bash
-MATLAB_RUNTIME_ARGS="\
-  -e MLM_LICENSE_FILE=27000@your-license-server \
-  --add-host=your-license-server:YOUR_SERVER_IP \
-  --shm-size=512M"
+docker build -f Dockerfile.matlab-base \
+  --build-arg MATLAB_RELEASE=r2026a \
+  --build-arg MATLAB_USERNAME=matlab-user \
+  -t matlab-root:r2026a .
 ```
 
-Set this once and reuse it in the commands below.
+For a **network license**, the value of `MATLAB_USERNAME` does not matter.
+For an **Individual license file**, set `MATLAB_USERNAME` to the username
+linked to your license — see [Using an Individual License](#using-an-individual-license)
+below for how to find it.
 
-## Quick Start
-
-### 1. Build the Tesseract
+## Build the Tesseract
 
 ```bash
 tesseract build .
 ```
 
-### 2. Run
+## Run (network license)
+
+MATLAB's JVM requires more shared memory than Docker's default 64 MB.
+Pass `--shm-size=512M` via `--docker-args`, your license server via
+`--env MLM_LICENSE_FILE`, and the server's DNS mapping via `--docker-args`:
 
 ```bash
-tesseract run matlab-springmass apply '{}' \
-  --runtime-args "$MATLAB_RUNTIME_ARGS"
+tesseract run matlab-springmass \
+  --env MLM_LICENSE_FILE=27000@your-license-server \
+  --docker-args "--shm-size=512M --add-host=your-license-server:YOUR_SERVER_IP" \
+  apply '{"inputs": {}}'
 ```
 
 With custom parameters:
 
 ```bash
-tesseract run matlab-springmass apply '{
-  "mass": 2.0,
-  "damping": 1.0,
-  "stiffness": 20.0,
-  "force_amplitude": 5.0
-}' --runtime-args "$MATLAB_RUNTIME_ARGS"
+tesseract run matlab-springmass \
+  --env MLM_LICENSE_FILE=27000@your-license-server \
+  --docker-args "--shm-size=512M --add-host=your-license-server:YOUR_SERVER_IP" \
+  apply '{"inputs": {"mass": 2.0, "damping": 1.0, "stiffness": 20.0, "force_amplitude": 5.0}}'
 ```
 
-### 3. Or serve as a REST API
+## Or serve as a REST API
 
 ```bash
-tesseract serve matlab-springmass --runtime-args "$MATLAB_RUNTIME_ARGS"
+tesseract serve matlab-springmass \
+  --env MLM_LICENSE_FILE=27000@your-license-server \
+  --docker-args "--shm-size=512M --add-host=your-license-server:YOUR_SERVER_IP"
 
 # In another terminal:
 curl -X POST http://localhost:8000/apply \
@@ -71,7 +79,7 @@ curl -X POST http://localhost:8000/apply \
   -d '{"inputs": {"mass": 1.0, "stiffness": 10.0}}'
 ```
 
-### 4. Use from Python
+## Use from Python
 
 ```python
 from tesseract_core import Tesseract
@@ -86,19 +94,46 @@ with Tesseract.from_image("matlab-springmass") as t:
     print(f"Final displacement: {result['displacement'][-1]:.6f} m")
 ```
 
-## Visualization
+## Using an Individual License
+
+If you don't have access to a network license server, you can run the
+Tesseract using your MATLAB Individual license file (`.lic`).
+
+### 1. Get your authorized username and activation MAC address
+
+An Individual license is bound to a specific OS username and the MAC
+address of the machine it was activated on. You can find both in your
+MathWorks Account license details.
+You will need them in the next two steps.
+
+### 2. Build the wrapper with that username
+
+Rebuild `matlab-root:r2026a` passing `--build-arg MATLAB_USERNAME=<your-username>`
+(see [Build the wrapper base image](#build-the-wrapper-base-image)). The
+username inside the container will then match what your license expects,
+and the file-based license check will succeed.
+
+### 3. Run with the license file mounted
 
 ```bash
-python visualize.py
-# Or with custom parameters:
-python visualize.py --mass 2.0 --damping 3.0 --stiffness 50.0
+tesseract run matlab-springmass \
+  --user 1000:1000 \
+  --volume /path/to/your/license.lic:/licenses/license.lic \
+  --env MLM_LICENSE_FILE=/licenses/license.lic \
+  --docker-args "--shm-size=512M --mac-address=XX:XX:XX:XX:XX:XX" \
+  apply '{"inputs": {}}'
 ```
+
+- `--user 1000:1000` runs the container as the renamed user (UID 1000, which
+  is where the `MATLAB_USERNAME` you set in the wrapper ends up).
+- `--mac-address=XX:XX:XX:XX:XX:XX` must match the MAC your license was
+  activated against.
 
 ## How It Works
 
-The `tesseract_config.yaml` uses `mathworks/matlab:r2025b` as the base
-image, which has MATLAB pre-installed. The `.m` source file is copied in
-at build time, and `tesseract_api.py` calls it via `matlab -batch`:
+The `tesseract_config.yaml` uses `matlab-root:r2026a` (the wrapper image
+you built above) as the base. The `.m` source file is copied in at build
+time, and `tesseract_api.py` invokes it via `matlab -batch`:
 
 ```
 Python (tesseract_api.py)
@@ -110,22 +145,24 @@ Python (tesseract_api.py)
   └── Read output JSON → OutputSchema
 ```
 
-## Licensing
+## Visualization
 
-The container includes MATLAB but **not** a license. You must provide
-access to a network license server at runtime via the `MLM_LICENSE_FILE`
-environment variable. See [MathWorks: Licensing for Containers](https://www.mathworks.com/help/cloudcenter/ug/matlab-container-on-docker-hub.html)
-for details.
+```bash
+python visualize.py
+# Or with custom parameters:
+python visualize.py --mass 2.0 --damping 3.0 --stiffness 50.0
+```
 
 ## File Structure
 
 ```
-matlab_springmass/
+_matlab_springmass/
 ├── matlab/
 │   └── spring_mass_damper.m    # MATLAB solver source
 ├── tesseract_api.py            # Python wrapper (InputSchema, OutputSchema, apply)
 ├── tesseract_config.yaml       # Build configuration
 ├── tesseract_requirements.txt  # Python dependencies
+├── Dockerfile.matlab-base      # Wrapper for mathworks/matlab (see top)
 ├── test_cases/
 │   └── test_apply.json         # Expected output for default inputs
 ├── visualize.py                # Visualization script
