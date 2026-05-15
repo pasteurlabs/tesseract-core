@@ -588,3 +588,34 @@ def test_parse_requirements(tmpdir):
         "--find-links https://data.pyg.org/whl/torch-2.5.1+cpu.html",
         "torch_scatter==2.1.2+pt25cpu",
     ]
+
+
+@pytest.mark.parametrize(
+    "spec, expected",
+    [
+        ("/foo:/bar:ro", ["/foo", "/bar", "ro"]),
+        ("/foo:/bar", ["/foo", "/bar"]),
+        ("./foo:/bar:rw", ["./foo", "/bar", "rw"]),
+        ("myvolume:/bar", ["myvolume", "/bar"]),
+        ("C:\\Users\\foo:/bar:ro", ["C:\\Users\\foo", "/bar", "ro"]),
+        ("C:\\Users\\foo:/bar", ["C:\\Users\\foo", "/bar"]),
+        ("D:/data:/mnt/data:rw", ["D:/data", "/mnt/data", "rw"]),
+    ],
+)
+def test_split_volume_spec(spec, expected):
+    assert engine._split_volume_spec(spec) == expected
+
+
+@pytest.mark.parametrize(
+    "volume, expected",
+    [
+        ("/foo/bar", True),
+        ("./foo", True),
+        ("../foo", True),
+        ("myvolume", False),
+        ("C:\\Users\\foo", True),
+        ("D:/data", True),
+    ],
+)
+def test_is_local_volume(volume, expected):
+    assert engine._is_local_volume(volume) == expected

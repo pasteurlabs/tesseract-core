@@ -2,6 +2,61 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.8.2] - 2026-05-06
+
+### Bug Fixes
+
+- Mark InputPath/OutputPath fields with format: "path" in JSON schema (#583)
+
+## [1.8.1] - 2026-05-05
+
+### Bug Fixes
+
+- Bug when using chdir with OutputPath (#578)
+- OutputFileReference validation was broken (#581)
+
+### Documentation
+
+- Move unclickable GH links to example subpages (#570)
+
+## [1.8.0] - 2026-04-22
+
+### Features
+
+- Allow `*PathReference`s in apply schemas (#555)
+- Add native windows support (#559)
+
+### Bug Fixes
+
+- Support Python 3.14 (#388)
+
+### Documentation
+
+- Add matlab example (#560)
+
+## [1.7.0] - 2026-04-17
+
+### Features
+
+- Automatically create network specified via --network option if it does not exist (#544)
+
+### Bug Fixes
+
+- Don't hard wrap tracebacks (#539)
+- False-positive 'image not found' errors when docker is in resource saving mode (#535)
+- Resource leak when using `TesseractReference` + more fault tolerance when HTTP sessions time out (#543)
+- Make logging from subprocesses more reliable (#551)
+
+### Refactor
+
+- Thread live logging through `logger.info` instead of printing directly to stderr (#536)
+
+### Documentation
+
+- Add performance guide (#508)
+- Document how to use `tesseract serve --network` parameter (#530)
+- Update rocket fin example to recent versions of Tesseract (#541)
+
 ## [1.6.0] - 2026-03-19
 
 ### Features

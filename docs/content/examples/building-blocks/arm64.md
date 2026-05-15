@@ -1,5 +1,7 @@
 # Custom build steps: PyVista on ARM64
 
+[View on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/pyvista-arm64)
+
 ## Context
 
 Tesseracts use by default an official Python docker image as the base image. Although this covers many useful cases, some system dependencies sometimes require a custom image and extra build steps.

@@ -1,0 +1,8 @@
+name: jax-cfd
+version: "0.1.0"
+description: |
+  Tesseract that runs a differentiable 2D Navier Stokes simulation on a 2D grid.
+
+build_config:
+  package_data: []
+  custom_build_steps: []
