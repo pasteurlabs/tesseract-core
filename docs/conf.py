@@ -194,7 +194,7 @@ def _inject_page_context(app, pagename, templatename, context, doctree):
         context["favicon_url"] = pathto("_static/favicon.ico", resource=True)
 
     if is_blog:
-        context["docstitle"] = "Tesseract"
+        context["docstitle"] = "Tesseract Blog"
 
     # Landing page: suppress docstitle so Furo renders just "Tesseract" as <title>
     if is_landing:

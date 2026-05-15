@@ -90,8 +90,7 @@ The broader pattern here extends well beyond structural optimization. Any workfl
 
 If you want to dig into the details, the [full technical writeup](https://si-tesseract.discourse.group/t/parametric-shape-optimization-of-rocket-fins-with-ansys-spaceclaim-pyansys-and-tesseract/109) covers the methodology, and the [demo code](https://github.com/pasteurlabs/tesseract-core/tree/main/demo/_showcase/ansys-shapeopt) is ready to reproduce.
 
-## Learn more
+---
 
-- Check out the [Tesseract Core documentation](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/)
-- Join the [Tesseract Community Forum](https://si-tesseract.discourse.group/)
-- Visit [Tesseract Core on GitHub](https://github.com/pasteurlabs/tesseract-core)
+_Tesseract is a free, open-source framework for differentiable scientific computing. `pip install tesseract-core`.
+[Docs](https://tesseract.pasteurlabs.ai) · [Demos](https://tesseract.pasteurlabs.ai/content/demo/demo.html) · [GitHub](https://github.com/pasteurlabs/tesseract-core) · [Forum](https://si-tesseract.discourse.group/)_

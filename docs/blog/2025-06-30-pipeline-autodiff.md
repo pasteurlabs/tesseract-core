@@ -42,8 +42,7 @@ We've implemented this demo using multiple Tesseracts that communicate with each
 <figcaption>Shape optimization results showing the initial and optimized geometries.</figcaption>
 </figure>
 
-## Learn more
+---
 
-- Join the [Tesseract Community Forum](https://si-tesseract.discourse.group/)
-- Visit [Tesseract Core on GitHub](https://github.com/pasteurlabs/tesseract-core)
-- Visit [Tesseract-JAX on GitHub](https://github.com/pasteurlabs/tesseract-jax)
+_Tesseract is a free, open-source framework for differentiable scientific computing. `pip install tesseract-core`.
+[Docs](https://tesseract.pasteurlabs.ai) · [Demos](https://tesseract.pasteurlabs.ai/content/demo/demo.html) · [GitHub](https://github.com/pasteurlabs/tesseract-core) · [Forum](https://si-tesseract.discourse.group/)_

@@ -70,9 +70,7 @@ This entry became far and away the most viral project among submissions, compari
 - **[DiffPIC](https://github.com/ale-ballester/tesseract-hackathon)** -- Differentiable Particle-in-Cell Optimization (Alejo Ballester, Rushan Zhang, Tage Burnett, Harshavardhan Harish)
 - **[Tesseract-pinn-inverse-burgers](https://github.com/julian-8897/tesseract-pinn-inverse-burgers)** -- Backend-Agnostic Inverse 1D Burgers Solver (Julian Chan)
 
-## Learn more
+---
 
-- Check out the [Tesseract Core documentation](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/)
-- Browse more applications in the [Community Showcase](https://si-tesseract.discourse.group/c/showcase/11)
-- Join the [Tesseract Community Forum](https://si-tesseract.discourse.group/)
-- Visit [Tesseract Core on GitHub](https://github.com/pasteurlabs/tesseract-core)
+_Tesseract is a free, open-source framework for differentiable scientific computing. `pip install tesseract-core`.
+[Docs](https://tesseract.pasteurlabs.ai) · [Demos](https://tesseract.pasteurlabs.ai/content/demo/demo.html) · [GitHub](https://github.com/pasteurlabs/tesseract-core) · [Forum](https://si-tesseract.discourse.group/)_
