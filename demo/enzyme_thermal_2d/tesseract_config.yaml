@@ -26,6 +26,10 @@ build_config:
     - gnupg
     - ca-certificates
     - bzip2
+    - cmake
+    - git
+    - build-essential
+    - libzstd-dev
 
   package_data:
     - ["enzyme/thermal_2d.f90", "enzyme/thermal_2d.f90"]
@@ -33,11 +37,11 @@ build_config:
     - ["enzyme/build.sh", "enzyme/build.sh"]
 
   custom_build_steps:
-    # Install LLVM 19 toolchain
+    # Install LLVM 19 toolchain (including dev headers for building Enzyme)
     - |
       RUN wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc && \
           echo "deb http://apt.llvm.org/bookworm/ llvm-toolchain-bookworm-19 main" > /etc/apt/sources.list.d/llvm.list && \
-          apt-get update && apt-get install -y --no-install-recommends llvm-19 clang-19 && \
+          apt-get update && apt-get install -y --no-install-recommends llvm-19 llvm-19-dev clang-19 && \
           rm -rf /var/lib/apt/lists/* && \
           for tool in opt llvm-as llvm-link llvm-dis llc clang clang++; do \
             ln -sf /usr/bin/${tool}-19 /usr/local/bin/${tool} 2>/dev/null || true; \
@@ -51,10 +55,17 @@ build_config:
           ln -sf $(find /opt/conda -name lfortran -type f | head -1) /usr/local/bin/lfortran && \
           echo /opt/conda/lib > /etc/ld.so.conf.d/conda.conf && ldconfig
 
-    # Download prebuilt Enzyme LLVM plugin
+    # Build Enzyme from a pinned release (nightly builds are not reproducible
+    # and have caused reverse-mode NaN regressions in the past)
     - |
-      RUN wget -q https://github.com/EnzymeAD/Enzyme/releases/download/nightly/LLVMEnzyme-19.so \
-            -O /usr/local/lib/LLVMEnzyme-19.so
+      RUN git clone --depth 1 --branch v0.0.258 https://github.com/EnzymeAD/Enzyme.git /tmp/enzyme-src && \
+          cmake -S /tmp/enzyme-src/enzyme -B /tmp/enzyme-build \
+            -DLLVM_DIR=/usr/lib/llvm-19/lib/cmake/llvm \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DENZYME_CLANG=OFF -DENZYME_MLIR=OFF && \
+          cmake --build /tmp/enzyme-build --target LLVMEnzyme-19 -j"$(nproc)" && \
+          cp /tmp/enzyme-build/Enzyme/LLVMEnzyme-19.so /usr/local/lib/ && \
+          rm -rf /tmp/enzyme-src /tmp/enzyme-build
 
     # Build the differentiated shared library
     - |

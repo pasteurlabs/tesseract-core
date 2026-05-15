@@ -23,9 +23,10 @@ lfortran --show-llvm --no-array-bounds-checking \
     "${SCRIPT_DIR}/thermal_2d.f90" > /tmp/thermal_2d.ll
 
 echo "=== Step 2: Optimize IR ==="
-# Use -O1 to avoid aggressive transforms (vectorization, code motion) that can
-# produce IR patterns Enzyme's reverse-mode pass mishandles, leading to NaN
-# gradients when intermediate values cancel (e.g. uniform temperature fields).
+# Use -O1 before Enzyme to avoid aggressive transforms (vectorization, code
+# motion) that produce IR patterns Enzyme's reverse-mode pass mishandles —
+# specifically NaN gradients when adjacent cell values are equal and
+# intermediate terms cancel.  Post-Enzyme -O3 is fine.
 opt -O1 -S /tmp/thermal_2d.ll -o /tmp/thermal_2d_opt.ll
 
 echo "=== Step 3: Compile C wrapper -> LLVM IR ==="
