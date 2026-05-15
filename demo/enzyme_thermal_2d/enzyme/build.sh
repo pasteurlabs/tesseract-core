@@ -23,10 +23,13 @@ lfortran --show-llvm --no-array-bounds-checking \
     "${SCRIPT_DIR}/thermal_2d.f90" > /tmp/thermal_2d.ll
 
 echo "=== Step 2: Optimize IR ==="
-opt -O3 -S /tmp/thermal_2d.ll -o /tmp/thermal_2d_opt.ll
+# Use -O1 to avoid aggressive transforms (vectorization, code motion) that can
+# produce IR patterns Enzyme's reverse-mode pass mishandles, leading to NaN
+# gradients when intermediate values cancel (e.g. uniform temperature fields).
+opt -O1 -S /tmp/thermal_2d.ll -o /tmp/thermal_2d_opt.ll
 
 echo "=== Step 3: Compile C wrapper -> LLVM IR ==="
-clang -emit-llvm -S -O3 "${SCRIPT_DIR}/wrapper.c" -o /tmp/wrapper.ll
+clang -emit-llvm -S -O1 "${SCRIPT_DIR}/wrapper.c" -o /tmp/wrapper.ll
 
 echo "=== Step 4: Link IR modules ==="
 llvm-link /tmp/wrapper.ll /tmp/thermal_2d_opt.ll -S -o /tmp/combined.ll
