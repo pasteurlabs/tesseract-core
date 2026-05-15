@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import (
     Annotated,
     Any,
+    ClassVar,
     get_args,
     get_origin,
 )
@@ -225,6 +226,10 @@ class InputPath(Path):
     Resolves relative paths against ``RuntimeConfig().input_path`` and validates
     that the resolved path stays within the input directory and exists.
 
+    If the path is a URL (contains a scheme like ``https://`` or ``s3://``),
+    the file is downloaded to a local temporary directory via fsspec and the
+    local path is returned.
+
     Use ``Annotated[InputPath, AfterValidator(...)]`` to add custom validation
     that runs after path resolution (receives the absolute, resolved path).
     """
@@ -244,6 +249,35 @@ class InputPath(Path):
         if not skip and not tess_path.exists():
             raise ValueError(f"Input path {tess_path} does not exist.")
         return tess_path
+
+    _temp_dirs: ClassVar[list[Path]] = []
+
+    @classmethod
+    def _download_url(cls, url: str) -> Path:
+        """Download a URL to a local temporary file and return its path."""
+        import tempfile
+        from urllib.parse import urlparse
+
+        import fsspec
+
+        remote_name = Path(urlparse(url).path).name or "download"
+        tmp_dir = Path(tempfile.mkdtemp(prefix="tesseract_input_"))
+        cls._temp_dirs.append(tmp_dir)
+        local_path = tmp_dir / remote_name
+
+        with fsspec.open(url, "rb") as remote:
+            local_path.write_bytes(remote.read())
+
+        return local_path
+
+    @classmethod
+    def cleanup(cls) -> None:
+        """Remove all temporary directories created by URL downloads."""
+        import shutil
+
+        while cls._temp_dirs:
+            tmp_dir = cls._temp_dirs.pop()
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
     @classmethod
     def __get_pydantic_core_schema__(
@@ -282,6 +316,13 @@ class InputPath(Path):
 
     @classmethod
     def _validate(cls, value: Any, info: ValidationInfo) -> Path:
+        from tesseract_core.runtime.file_interactions import is_url
+
+        # Avoid converting URLs to Path, which mangles the scheme (e.g. strips slashes)
+        value_str = str(value)
+        if is_url(value_str):
+            return cls._download_url(value_str)
+
         return cls._resolve(Path(value), info)
 
 
