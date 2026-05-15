@@ -160,6 +160,8 @@ def fix_fake_arrays(fakedata, seed=42):
                 # in the tesseract
                 data["data"]["encoding"] = "base64"
                 data["data"]["buffer"] = base64.b64encode(new_data.tobytes()).decode()
+                data["data"].pop("compression", None)
+                data["data"].pop("compressed_size", None)
         elif isinstance(data, dict):
             for key, value in data.items():
                 data[key] = _walk(value)

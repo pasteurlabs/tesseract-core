@@ -31,6 +31,8 @@ tesseract-core = "tesseract_core.sdk.cli:entrypoint"
 tesseract-runtime = "tesseract_core.runtime.cli:main"
 
 [project.optional-dependencies]
+compression = ["lz4"]
+
 
 # RUNTIME DEPENDENCIES
 # These are the only dependencies that are installed into Tesseract containers, so may contain duplicates of deps above.
@@ -39,18 +41,18 @@ tesseract-runtime = "tesseract_core.runtime.cli:main"
 # NOTE: Upper bounds (<=) on runtime deps are periodically updated via .github/workflows/bump_lockfile.yml,
 # do not edit manually. To add constraints, use other operators (e.g. <, >=, ~=, ==) as needed.
 runtime = [
-    "pydantic<=2.13.4,>=2.10",
-    "fastapi<=0.136.1,>=0.115",
+    "pydantic<=2.13.2,>=2.10",
+    "fastapi<=0.136.0,>=0.115",
     "requests<=2.33.1,>=2.32.4",
-    "uvicorn<=0.46.0,>=0.34",
-    "click<=8.3.3,>=8.1",
-    "typer<=0.25.1,>=0.15",
-    "fsspec[http,s3]<=2026.4.0,>=2024.12",
+    "uvicorn<=0.44.0,>=0.34",
+    "click<=8.3.2,>=8.1",
+    "typer<=0.24.1,>=0.15",
+    "fsspec[http,s3]<=2026.3.0,>=2024.12",
     "pybase64<=1.4.3,>=1.4",
-    "orjson<=3.11.9,>=3.10",
+    "orjson<=3.11.8,>=3.10",
     "numpy<=2.4.4,>=1.26",
     "debugpy<=1.8.20,>=1.8.14",
-    "mlflow-skinny<=3.12.0,>=3.7.0",
+    "mlflow-skinny<=3.11.1,>=3.7.0",
 ]
 # END RUNTIME DEPENDENCIES
 
@@ -63,13 +65,14 @@ docs = [
     "autodoc_pydantic",
     "sphinx_design",
     "sphinx_copybutton",
-    "sphinxext_opengraph[social_cards]",
-    "sphinx-sitemap",
+    "sphinxext_opengraph",
     "tesseract-core[runtime]",
 ]
 dev = [
     "docker",
+    "fastapi",
     "httpx",  # required by fastapi test client
+    "numpy",
     "pre-commit",
     "pytest",
     "pytest-cov",
@@ -82,6 +85,7 @@ dev = [
     # also add all other extras here
     "tesseract-core[runtime]",
     "tesseract-core[docs]",
+    "tesseract-core[compression]",
 ]
 
 [project.urls]
@@ -194,7 +198,6 @@ ignore = [
 "tests/*" = ["D101", "D102", "D103", "D106", "ANN"]
 "benchmarks/*" = ["D101", "D102", "D103", "D106", "ANN"]
 "examples/**/*" = ["D101", "D102", "D103", "D106", "ANN"]
-"demo/**/*" = ["D101", "D102", "D103", "D106", "ANN"]
 "tesseract_core/sdk/templates/*" = ["D101", "D102", "D103", "D106", "ANN"]
 
 [tool.ruff.lint.pydocstyle]
