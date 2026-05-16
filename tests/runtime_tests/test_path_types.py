@@ -4,6 +4,7 @@
 from pathlib import Path
 from typing import Annotated
 
+import fsspec
 import pytest
 from pydantic import AfterValidator, BaseModel, ValidationError
 
@@ -303,3 +304,59 @@ def test_output_path_accepts_path_object(path_dirs):
     m = M(f=output_dir / "out.txt")
     assert m.f == output_dir / "out.txt"
     assert m.model_dump()["f"] == "out.txt"
+
+
+# -- URL input paths --
+
+
+@pytest.fixture
+def memory_fs():
+    """Set up an fsspec memory filesystem with a test file."""
+    fs = fsspec.filesystem("memory")
+    fs.mkdir("/test")
+    fs.pipe("/test/remote_data.json", b'{"key": "value"}')
+    yield fs
+    fs.rm("/test", recursive=True)
+    InputPath.cleanup()
+
+
+def test_input_path_downloads_url(memory_fs):
+    class M(BaseModel):
+        inp: InputPath
+
+    model = M.model_validate({"inp": "memory:///test/remote_data.json"})
+    assert model.inp.exists()
+    assert model.inp.read_bytes() == b'{"key": "value"}'
+
+
+def test_input_path_url_preserves_filename(memory_fs):
+    class M(BaseModel):
+        inp: InputPath
+
+    model = M.model_validate({"inp": "memory:///test/remote_data.json"})
+    assert model.inp.name == "remote_data.json"
+
+
+def test_input_path_cleanup(memory_fs):
+    class M(BaseModel):
+        inp: InputPath
+
+    model = M.model_validate({"inp": "memory:///test/remote_data.json"})
+    tmp_dir = model.inp.parent
+    assert tmp_dir.exists()
+
+    InputPath.cleanup()
+    assert not tmp_dir.exists()
+    assert InputPath._temp_dirs == []
+
+
+def test_input_path_local_paths_still_work(path_dirs):
+    """URL support must not break normal relative path resolution."""
+    input_dir, _ = path_dirs
+    (input_dir / "local.txt").touch()
+
+    class M(BaseModel):
+        inp: InputPath
+
+    model = M.model_validate({"inp": "local.txt"})
+    assert model.inp == input_dir / "local.txt"
