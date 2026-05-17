@@ -132,6 +132,15 @@ class TesseractBuildConfig(BaseModel, validate_assignment=True):
             "Example: ``[\"RUN echo 'Hello, world!'\"]``"
         ),
     )
+    python_version: StrictStr | None = Field(
+        None,
+        description=(
+            "Python version to use inside the Tesseract (e.g., '3.12'). "
+            "When set, ``uv python install`` is used to install the specified version, "
+            "decoupling the Python version from the base image. "
+            "When unset, the system Python from the base image is used."
+        ),
+    )
 
     requirements: PythonRequirements = PipRequirements(provider="python-pip")
 
