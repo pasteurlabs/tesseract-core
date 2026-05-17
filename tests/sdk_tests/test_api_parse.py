@@ -100,6 +100,13 @@ def test_invalid_config_error(tmp_path, valid_tesseract_api, valid_tesseract_con
     with pytest.raises(ValidationError, match="must be a relative path"):
         validate_tesseract_api(tmp_path)
 
+    invalid_config = yaml.safe_load(valid_tesseract_config)
+    invalid_config["build_config"]["env"] = {"VALID_KEY": 123}
+    _write_tesseract_config_to_file(yaml.dump(invalid_config), tmp_path)
+
+    with pytest.raises(ValidationError, match="should be a valid string"):
+        validate_tesseract_api(tmp_path)
+
 
 def test_config_with_metadata(tmp_path, valid_tesseract_api, valid_tesseract_config):
     _write_tesseract_api_to_file(valid_tesseract_api, tmp_path)

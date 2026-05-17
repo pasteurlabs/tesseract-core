@@ -133,6 +133,15 @@ class TesseractBuildConfig(BaseModel, validate_assignment=True):
         ),
     )
 
+    env: dict[StrictStr, StrictStr] = Field(
+        {},
+        description=(
+            "Runtime environment variables to set in the Docker image. "
+            "Rendered as ``ENV`` lines in the Dockerfile. "
+            "Example: ``{XLA_PYTHON_CLIENT_PREALLOCATE: 'false'}``"
+        ),
+    )
+
     requirements: PythonRequirements = PipRequirements(provider="python-pip")
 
     model_config = ConfigDict(extra="forbid")
