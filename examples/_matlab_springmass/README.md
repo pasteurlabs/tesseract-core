@@ -1,9 +1,9 @@
 # MATLAB Spring-Mass-Damper Tesseract
 
 This example demonstrates how to wrap MATLAB code as a Tesseract using
-the official [MathWorks MATLAB Docker image](https://hub.docker.com/r/mathworks/matlab).
-MATLAB is pre-installed in the base image — no compilation or additional
-toolboxes required.
+the official [MathWorks MATLAB Docker image](https://hub.docker.com/r/mathworks/matlab)
+directly as the base image. MATLAB is pre-installed in the base image —
+no compilation or additional toolboxes required.
 
 The solver uses MATLAB's `ode45` to simulate a spring-mass-damper system:
 
@@ -15,28 +15,10 @@ m * x'' + c * x' + k * x = F₀  (step force input)
 
 - **Docker**
 - **A valid MATLAB license**, either:
-  - A **network license server** reachable from the container (e.g. `27000@server`), or
-  - A **MATLAB Individual license file** (`.lic`) and its associated activation MAC address
+  - A **network license server** reachable from the container (e.g. `27000@your-license-server`), or
+  - A **MATLAB Individual license file** (`.lic`) along with the activation MAC address
 
-No local MATLAB installation or additional toolboxes are needed.
-
-## Build the wrapper base image
-
-The upstream `mathworks/matlab` image needs two small adjustments before it
-can be used as a Tesseract base image — see [`Dockerfile.matlab-base`](Dockerfile.matlab-base)
-for the rationale. Build it once:
-
-```bash
-docker build -f Dockerfile.matlab-base \
-  --build-arg MATLAB_RELEASE=r2026a \
-  --build-arg MATLAB_USERNAME=matlab-user \
-  -t matlab-root:r2026a .
-```
-
-For a **network license**, the value of `MATLAB_USERNAME` does not matter.
-For an **Individual license file**, set `MATLAB_USERNAME` to the username
-linked to your license — see [Using an Individual License](#using-an-individual-license)
-below for how to find it.
+No local MATLAB installation is needed.
 
 ## Build the Tesseract
 
@@ -44,11 +26,16 @@ below for how to find it.
 tesseract build .
 ```
 
+The Tesseract image is built directly on top of `mathworks/matlab:r2026a`
+(see [tesseract_config.yaml](tesseract_config.yaml)). To use a different
+MATLAB release, edit the `base_image` tag — no other change is necessary,
+since `tesseract_api.py` auto-discovers the MATLAB binary in `/opt/matlab/`.
+
 ## Run (network license)
 
-MATLAB's JVM requires more shared memory than Docker's default 64 MB.
-Pass `--shm-size=512M` via `--docker-args`, your license server via
-`--env MLM_LICENSE_FILE`, and the server's DNS mapping via `--docker-args`:
+MATLAB's JVM requires more shared memory than Docker's 64 MB default.
+Pass the license server via `--env`, plus shared memory and DNS mapping
+via `--docker-args`:
 
 ```bash
 tesseract run matlab-springmass \
@@ -104,41 +91,44 @@ Tesseract using your MATLAB Individual license file (`.lic`).
 An Individual license is bound to a specific OS username and the MAC
 address of the machine it was activated on. You can find both in your
 MathWorks Account license details.
-You will need them in the next two steps.
 
-### 2. Build the wrapper with that username
-
-Rebuild `matlab-root:r2026a` passing `--build-arg MATLAB_USERNAME=<your-username>`
-(see [Build the wrapper base image](#build-the-wrapper-base-image)). The
-username inside the container will then match what your license expects,
-and the file-based license check will succeed.
-
-### 3. Run with the license file mounted
+### 2. Run with the license file mounted
 
 ```bash
 tesseract run matlab-springmass \
-  --user 1000:1000 \
-  --volume /path/to/your/license.lic:/licenses/license.lic \
+  --user 0:0 \
+  --env MATLAB_USERNAME=<your-username> \
   --env MLM_LICENSE_FILE=/licenses/license.lic \
+  --volume /path/to/your/license.lic:/licenses/license.lic \
   --docker-args "--shm-size=512M --mac-address=XX:XX:XX:XX:XX:XX" \
   apply '{"inputs": {}}'
 ```
 
-- `--user 1000:1000` runs the container as the renamed user (UID 1000, which
-  is where the `MATLAB_USERNAME` you set in the wrapper ends up).
-- `--mac-address=XX:XX:XX:XX:XX:XX` must match the MAC your license was
-  activated against.
+What the extra flags do:
+
+- `--user 0:0` runs the container as root. This is needed for the next
+  step. The MATLAB process itself does **not** run as root — it gets
+  dropped to UID 1000 just before launch.
+- `--env MATLAB_USERNAME=<your-username>` makes `tesseract_api.py`
+  rename the `ubuntu` user in `/etc/passwd` (and the libnss_wrapper
+  files in `/tmp/`) to `<your-username>` at startup, then spawn MATLAB
+  as that user. This is required because MATLAB's file-based license
+  check picks the `ubuntu` entry out of `/etc/passwd` regardless of the
+  actual running UID — renaming it lets the check see the correct user.
+- `--mac-address=XX:XX:XX:XX:XX:XX` must match the MAC your license
+  was activated against.
 
 ## How It Works
 
-The `tesseract_config.yaml` uses `matlab-root:r2026a` (the wrapper image
-you built above) as the base. The `.m` source file is copied in at build
-time, and `tesseract_api.py` invokes it via `matlab -batch`:
+The `tesseract_config.yaml` uses `mathworks/matlab:r2026a` directly as
+the base image. The `.m` source file is copied in at build time, and
+`tesseract_api.py` invokes it via `matlab -batch`:
 
 ```
 Python (tesseract_api.py)
-  ├── Write input JSON → /tmp/input.json
-  ├── subprocess: matlab -batch "addpath(...); spring_mass_damper('input.json', 'output.json')"
+  ├── (if MATLAB_USERNAME set) Rename 'ubuntu' in /etc/passwd to <user>
+  ├── Write input JSON → /tmp/<rand>/input.json
+  ├── subprocess(user=<user>): matlab -batch "addpath(...); spring_mass_damper(...)"
   │     └── MATLAB reads input JSON (jsondecode)
   │     └── ode45 solves the ODE system
   │     └── MATLAB writes output JSON (jsonencode)
@@ -162,7 +152,6 @@ _matlab_springmass/
 ├── tesseract_api.py            # Python wrapper (InputSchema, OutputSchema, apply)
 ├── tesseract_config.yaml       # Build configuration
 ├── tesseract_requirements.txt  # Python dependencies
-├── Dockerfile.matlab-base      # Wrapper for mathworks/matlab (see top)
 ├── test_cases/
 │   └── test_apply.json         # Expected output for default inputs
 ├── visualize.py                # Visualization script
