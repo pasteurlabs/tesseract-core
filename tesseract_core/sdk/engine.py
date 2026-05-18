@@ -422,6 +422,15 @@ def init_api(
         "tesseract_requirements.txt", target_dir, template_vars, recipe=Path(recipe)
     )
 
+    # Julia recipe: copy Julia project directory (solver + Enzyme wrappers + Project.toml)
+    if recipe == "julia":
+        julia_dir = target_dir / "julia"
+        julia_dir.mkdir(parents=True, exist_ok=True)
+        for jl_file in ("apply.jl", "enzyme_wrappers.jl", "Project.toml"):
+            _write_template_file(
+                f"julia/{jl_file}", target_dir, template_vars, recipe=Path(recipe)
+            )
+
     return target_dir / "tesseract_api.py"
 
 

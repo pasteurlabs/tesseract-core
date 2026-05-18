@@ -1,0 +1,240 @@
+{
+  "endpoint": "abstract_eval",
+  "expected_outputs": {
+    "x": {
+      "shape": [9],
+      "dtype": "float64"
+    }
+  },
+  "expected_exception": null,
+  "expected_exception_regex": null,
+  "atol": 1e-8,
+  "rtol": 1e-5,
+  "payload": {
+    "inputs": {
+      "blocks": [
+        [
+          {
+            "main": {
+              "object_type": "array",
+              "shape": [3],
+              "dtype": "float64",
+              "data": {
+                "buffer": "AAAAAAAAEEAAAAAAAAAQQAAAAAAAABBA",
+                "encoding": "base64"
+              }
+            },
+            "sub": {
+              "object_type": "array",
+              "shape": [2],
+              "dtype": "float64",
+              "data": {
+                "buffer": "mpmZmZmZuT+amZmZmZm5Pw==",
+                "encoding": "base64"
+              }
+            },
+            "sup": {
+              "object_type": "array",
+              "shape": [2],
+              "dtype": "float64",
+              "data": {
+                "buffer": "mpmZmZmZuT+amZmZmZm5Pw==",
+                "encoding": "base64"
+              }
+            }
+          },
+          {
+            "main": {
+              "object_type": "array",
+              "shape": [3],
+              "dtype": "float64",
+              "data": {
+                "buffer": "AAAAAAAA4D8AAAAAAADgPwAAAAAAAOA/",
+                "encoding": "base64"
+              }
+            },
+            "sub": {
+              "object_type": "array",
+              "shape": [2],
+              "dtype": "float64",
+              "data": {
+                "buffer": "mpmZmZmZqT+amZmZmZmpPw==",
+                "encoding": "base64"
+              }
+            },
+            "sup": {
+              "object_type": "array",
+              "shape": [2],
+              "dtype": "float64",
+              "data": {
+                "buffer": "mpmZmZmZqT+amZmZmZmpPw==",
+                "encoding": "base64"
+              }
+            }
+          },
+          {
+            "main": {
+              "object_type": "array",
+              "shape": [3],
+              "dtype": "float64",
+              "data": {
+                "buffer": "MzMzMzMz0z8zMzMzMzPTPzMzMzMzM9M/",
+                "encoding": "base64"
+              }
+            },
+            "sub": {
+              "object_type": "array",
+              "shape": [2],
+              "dtype": "float64",
+              "data": {
+                "buffer": "uB6F61G4nj+4HoXrUbiePw==",
+                "encoding": "base64"
+              }
+            },
+            "sup": {
+              "object_type": "array",
+              "shape": [2],
+              "dtype": "float64",
+              "data": {
+                "buffer": "uB6F61G4nj+4HoXrUbiePw==",
+                "encoding": "base64"
+              }
+            }
+          }
+        ],
+        [
+          {
+            "main": {
+              "object_type": "array",
+              "shape": [3],
+              "dtype": "float64",
+              "data": {
+                "buffer": "AAAAAAAA4D8AAAAAAADgPwAAAAAAAOA/",
+                "encoding": "base64"
+              }
+            },
+            "sub": {
+              "object_type": "array",
+              "shape": [2],
+              "dtype": "float64",
+              "data": {
+                "buffer": "mpmZmZmZqT+amZmZmZmpPw==",
+                "encoding": "base64"
+              }
+            },
+            "sup": {
+              "object_type": "array",
+              "shape": [2],
+              "dtype": "float64",
+              "data": {
+                "buffer": "mpmZmZmZqT+amZmZmZmpPw==",
+                "encoding": "base64"
+              }
+            }
+          },
+          {
+            "main": {
+              "object_type": "array",
+              "shape": [3],
+              "dtype": "float64",
+              "data": {
+                "buffer": "AAAAAAAAFEAAAAAAAAAUQAAAAAAAABRA",
+                "encoding": "base64"
+              }
+            },
+            "sub": {
+              "object_type": "array",
+              "shape": [2],
+              "dtype": "float64",
+              "data": {
+                "buffer": "mpmZmZmZyT+amZmZmZnJPw==",
+                "encoding": "base64"
+              }
+            },
+            "sup": {
+              "object_type": "array",
+              "shape": [2],
+              "dtype": "float64",
+              "data": {
+                "buffer": "mpmZmZmZyT+amZmZmZnJPw==",
+                "encoding": "base64"
+              }
+            }
+          },
+          null
+        ],
+        [
+          {
+            "main": {
+              "object_type": "array",
+              "shape": [3],
+              "dtype": "float64",
+              "data": {
+                "buffer": "MzMzMzMz0z8zMzMzMzPTPzMzMzMzM9M/",
+                "encoding": "base64"
+              }
+            },
+            "sub": {
+              "object_type": "array",
+              "shape": [2],
+              "dtype": "float64",
+              "data": {
+                "buffer": "uB6F61G4nj+4HoXrUbiePw==",
+                "encoding": "base64"
+              }
+            },
+            "sup": {
+              "object_type": "array",
+              "shape": [2],
+              "dtype": "float64",
+              "data": {
+                "buffer": "uB6F61G4nj+4HoXrUbiePw==",
+                "encoding": "base64"
+              }
+            }
+          },
+          null,
+          {
+            "main": {
+              "object_type": "array",
+              "shape": [3],
+              "dtype": "float64",
+              "data": {
+                "buffer": "AAAAAAAAGEAAAAAAAAAYQAAAAAAAABhA",
+                "encoding": "base64"
+              }
+            },
+            "sub": {
+              "object_type": "array",
+              "shape": [2],
+              "dtype": "float64",
+              "data": {
+                "buffer": "MzMzMzMzwz8zMzMzMzPDPw==",
+                "encoding": "base64"
+              }
+            },
+            "sup": {
+              "object_type": "array",
+              "shape": [2],
+              "dtype": "float64",
+              "data": {
+                "buffer": "MzMzMzMzwz8zMzMzMzPDPw==",
+                "encoding": "base64"
+              }
+            }
+          }
+        ]
+      ],
+      "b": {
+        "object_type": "array",
+        "shape": [9],
+        "dtype": "float64",
+        "data": {
+          "buffer": "AAAAAAAA8D8AAAAAAAAAQAAAAAAAAAhAAAAAAAAAEEAAAAAAAAAUQAAAAAAAABhAAAAAAAAAHEAAAAAAAAAgQAAAAAAAACJA",
+          "encoding": "base64"
+        }
+      },
+      "block_sizes": [3, 3, 3]
+    }
+  }
+}
