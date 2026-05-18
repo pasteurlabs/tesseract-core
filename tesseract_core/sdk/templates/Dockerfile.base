@@ -8,6 +8,9 @@ FROM {{ config.build_config.base_image }} AS build_stage
 FROM --platform={{ config.build_config.target_platform }} {{ config.build_config.base_image }} AS build_stage
 {% endif %}
 
+# Ensure we run as root for system setup (some base images default to non-root).
+USER root
+
 # Obtain uv and companions
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
@@ -57,6 +60,10 @@ FROM {{ config.build_config.base_image }} AS run_stage
 {% else %}
 FROM --platform={{ config.build_config.target_platform }} {{ config.build_config.base_image }} AS run_stage
 {% endif %}
+
+# Ensure we run as root for system setup (some base images default to non-root).
+# The final image still drops back to 9999:9999 later.
+USER root
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libnss-wrapper \
