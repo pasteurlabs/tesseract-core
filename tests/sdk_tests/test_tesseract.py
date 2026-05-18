@@ -155,6 +155,7 @@ def test_serve_lifecycle(mock_serving, mock_clients):
         "output_format": "json+base64",
         "docker_args": None,
         "runtime_config": None,
+        "skip_health_check": False,
     }
 
     for key, expected_value in expected_kwargs.items():

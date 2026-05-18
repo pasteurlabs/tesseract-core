@@ -609,6 +609,7 @@ def serve(
     output_format: Literal["json", "json+base64", "json+binref"] | None = None,
     docker_args: list[str] | None = None,
     runtime_config: dict[str, Any] | None = None,
+    skip_health_check: bool = False,
 ) -> tuple:
     """Serve one or more Tesseract images.
 
@@ -637,6 +638,9 @@ def serve(
         runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
             These are converted to TESSERACT_* environment variables. For example,
             ``{"profiling": True}`` sets ``TESSERACT_PROFILING=1``.
+        skip_health_check: If True, skip the startup health check poll. Useful for
+            Tesseracts with slow initialization (e.g., Julia runtime startup, large
+            model loading).
 
     Returns:
         A tuple of the Tesseract container name and the port it is serving on.

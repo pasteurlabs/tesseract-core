@@ -571,6 +571,17 @@ def serve(
             ),
         ),
     ] = False,
+    skip_health_check: Annotated[
+        bool,
+        typer.Option(
+            "--skip-health-check",
+            help=(
+                "Skip the startup health check. Useful for Tesseracts with slow "
+                "initialization (e.g., Julia runtime startup, large model loading). "
+                "The caller takes responsibility for readiness detection."
+            ),
+        ),
+    ] = False,
     user: Annotated[
         str | None,
         typer.Option(
@@ -669,6 +680,7 @@ def serve(
             output_path=output_path,
             output_format=_enum_to_val(output_format),
             docker_args=shlex.split(docker_args) if docker_args else None,
+            skip_health_check=skip_health_check,
         )
     except RuntimeError as ex:
         raise UserError(
