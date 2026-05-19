@@ -8,6 +8,9 @@ FROM {{ config.build_config.base_image }} AS build_stage
 FROM --platform={{ config.build_config.target_platform }} {{ config.build_config.base_image }} AS build_stage
 {% endif %}
 
+# Ensure root user for build commands (some base images set a non-root default)
+USER root
+
 # Obtain uv and companions
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
@@ -57,6 +60,9 @@ FROM {{ config.build_config.base_image }} AS run_stage
 {% else %}
 FROM --platform={{ config.build_config.target_platform }} {{ config.build_config.base_image }} AS run_stage
 {% endif %}
+
+# Ensure root user for build commands (some base images set a non-root default)
+USER root
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libnss-wrapper \
