@@ -119,6 +119,13 @@ def test_create_apply_schema():
         OutputSchema.model_validate({**testinput, "foo": 1})
 
 
+def test_field_order_exported():
+    _, OutputSchema = create_apply_schema(NestedModel, NestedModel)
+    user_model = OutputSchema.model_fields["root"].annotation
+    expected = list(NestedModel.model_fields.keys())
+    assert user_model.model_json_schema()["field_order"] == expected
+
+
 def test_create_abstract_eval_schema():
     testinput_abstract = replace_arrays(
         testinput, lambda arr: {"shape": arr["shape"], "dtype": arr["dtype"]}

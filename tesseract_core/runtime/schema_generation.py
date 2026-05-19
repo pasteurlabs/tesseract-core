@@ -142,6 +142,15 @@ def apply_function_to_model_tree(
             if safe_issubclass(treeobj, RootModel):
                 model_config.pop("extra", None)
 
+            # Snapshot field declaration order into json_schema_extra, since JSON order
+            # is not guaranteed to be preserved in clients (e.g. postgres).
+            existing_extra = model_config.get("json_schema_extra")
+            if existing_extra is None or isinstance(existing_extra, dict):
+                model_config["json_schema_extra"] = {
+                    **(existing_extra or {}),
+                    "field_order": list(new_fields.keys()),
+                }
+
             return create_model(
                 f"{model_prefix}{treeobj.__name__}",
                 **new_fields,
