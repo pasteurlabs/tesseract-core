@@ -1,10 +1,13 @@
+import numpy as np
 import pytest
 from pydantic import BaseModel
 
 from tesseract_core.runtime.tree_transforms import (
+    LRUCache,
     filter_func,
     flatten_with_paths,
     get_at_path,
+    hash_pytree_leaves,
     path_to_index_op,
     set_at_path,
 )
@@ -628,3 +631,125 @@ class TestFilterFunc:
         # Should expect a dictionary argument
         with pytest.raises(TypeError, match="Expected argument to be a dictionary"):
             filtered_func(invalid_arg)
+
+
+class TestLRUCache:
+    """Test cases for LRUCache."""
+
+    def test_put_and_pop(self):
+        cache = LRUCache(maxsize=2)
+        cache.put(b"a", "value_a")
+        cache.put(b"b", "value_b")
+        assert cache.size == 2
+        assert cache.pop(b"a") == "value_a"
+        assert cache.pop(b"b") == "value_b"
+        assert cache.size == 0
+
+    def test_pop_miss_returns_none(self):
+        cache = LRUCache(maxsize=2)
+        assert cache.pop(b"nonexistent") is None
+
+    def test_pop_consumes_entry(self):
+        cache = LRUCache(maxsize=1)
+        cache.put(b"k", "v")
+        assert cache.pop(b"k") == "v"
+        assert cache.pop(b"k") is None
+
+    def test_eviction_maxsize_1(self):
+        cache = LRUCache(maxsize=1)
+        cache.put(b"a", "value_a")
+        cache.put(b"b", "value_b")
+        assert cache.size == 1
+        assert cache.pop(b"a") is None
+        assert cache.pop(b"b") == "value_b"
+
+    def test_eviction_maxsize_3(self):
+        cache = LRUCache(maxsize=3)
+        for i in range(5):
+            cache.put(bytes([i]), f"value_{i}")
+        assert cache.size == 3
+        # First two should be evicted
+        assert cache.pop(bytes([0])) is None
+        assert cache.pop(bytes([1])) is None
+        # Last three should remain
+        assert cache.pop(bytes([2])) == "value_2"
+        assert cache.pop(bytes([3])) == "value_3"
+        assert cache.pop(bytes([4])) == "value_4"
+
+    def test_lru_order_evicts_least_recent(self):
+        """Accessing an entry should move it to most-recent, protecting it from eviction."""
+        cache = LRUCache(maxsize=2)
+        cache.put(b"a", "value_a")
+        cache.put(b"b", "value_b")
+        # Re-put "a" to make it most-recently-used
+        cache.put(b"a", "value_a_updated")
+        # Adding "c" should evict "b" (least recent), not "a"
+        cache.put(b"c", "value_c")
+        assert cache.pop(b"b") is None
+        assert cache.pop(b"a") == "value_a_updated"
+        assert cache.pop(b"c") == "value_c"
+
+    def test_put_updates_existing_key(self):
+        cache = LRUCache(maxsize=2)
+        cache.put(b"k", "old")
+        cache.put(b"k", "new")
+        assert cache.size == 1
+        assert cache.pop(b"k") == "new"
+
+    def test_maxsize_zero_disables_caching(self):
+        cache = LRUCache(maxsize=0)
+        cache.put(b"k", "v")
+        assert cache.size == 0
+        assert cache.pop(b"k") is None
+
+    def test_stores_arbitrary_values(self):
+        cache = LRUCache(maxsize=1)
+        value = (lambda x: x, {"template": np.zeros(3)})
+        cache.put(b"k", value)
+        result = cache.pop(b"k")
+        assert result[0] is value[0]
+        np.testing.assert_array_equal(result[1]["template"], np.zeros(3))
+
+
+class TestHashPytreeLeaves:
+    """Test cases for hash_pytree_leaves."""
+
+    def test_deterministic(self):
+        leaves = [np.array([1.0, 2.0]), np.array([3.0])]
+        treedef = "some_treedef"
+        h1 = hash_pytree_leaves(leaves, treedef)
+        h2 = hash_pytree_leaves(leaves, treedef)
+        assert h1 == h2
+
+    def test_returns_bytes(self):
+        h = hash_pytree_leaves([np.array([1.0])], "treedef")
+        assert isinstance(h, bytes)
+        assert len(h) == 32  # SHA-256
+
+    def test_different_values_different_hash(self):
+        h1 = hash_pytree_leaves([np.array([1.0, 2.0])], "td")
+        h2 = hash_pytree_leaves([np.array([1.0, 3.0])], "td")
+        assert h1 != h2
+
+    def test_different_treedef_different_hash(self):
+        leaves = [np.array([1.0])]
+        h1 = hash_pytree_leaves(leaves, "treedef_a")
+        h2 = hash_pytree_leaves(leaves, "treedef_b")
+        assert h1 != h2
+
+    def test_scalar_leaves(self):
+        h1 = hash_pytree_leaves([42, "hello", True], "td")
+        h2 = hash_pytree_leaves([42, "hello", True], "td")
+        assert h1 == h2
+
+    def test_mixed_leaves(self):
+        h1 = hash_pytree_leaves([np.array([1.0]), 42, "foo"], "td")
+        h2 = hash_pytree_leaves([np.array([1.0]), 42, "foo"], "td")
+        assert h1 == h2
+        h3 = hash_pytree_leaves([np.array([1.0]), 43, "foo"], "td")
+        assert h1 != h3
+
+    def test_empty_leaves(self):
+        h = hash_pytree_leaves([], "empty")
+        assert isinstance(h, bytes)
+        assert len(h) == 32
