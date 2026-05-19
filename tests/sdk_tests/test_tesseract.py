@@ -200,7 +200,68 @@ def test_HTTPClient_run_tesseract(mocker, run_id):
         url="http://somehost/apply",
         data=orjson.dumps({"inputs": {"a": 1}}),
         params=expected_params,
+        timeout=None,
     )
+
+
+def test_HTTPClient_timeout_passed_to_request(mocker):
+    """HTTPClient passes its timeout to every requests.Session.request call."""
+    mock_response = mocker.Mock()
+    mock_response.content = b'{"status": "ok"}'
+    mock_response.ok = True
+    mock_response.status_code = 200
+
+    mocked_request = mocker.patch(
+        "requests.Session.request",
+        return_value=mock_response,
+    )
+
+    client = HTTPClient("somehost", timeout=42)
+    client.run_tesseract("health")
+
+    mocked_request.assert_called_with(
+        method="GET",
+        url="http://somehost/health",
+        data=b"null",
+        params={},
+        timeout=42,
+    )
+
+
+def test_HTTPClient_default_timeout(mocker):
+    """HTTPClient has no timeout by default."""
+    mock_response = mocker.Mock()
+    mock_response.content = b'{"status": "ok"}'
+    mock_response.ok = True
+    mock_response.status_code = 200
+
+    mocked_request = mocker.patch(
+        "requests.Session.request",
+        return_value=mock_response,
+    )
+
+    client = HTTPClient("somehost")
+    client.run_tesseract("health")
+
+    assert mocked_request.call_args.kwargs["timeout"] is None
+
+
+def test_HTTPClient_timeout_tuple(mocker):
+    """HTTPClient accepts a (connect, read) timeout tuple."""
+    mock_response = mocker.Mock()
+    mock_response.content = b'{"status": "ok"}'
+    mock_response.ok = True
+    mock_response.status_code = 200
+
+    mocked_request = mocker.patch(
+        "requests.Session.request",
+        return_value=mock_response,
+    )
+
+    client = HTTPClient("somehost", timeout=(5, 300))
+    client.run_tesseract("health")
+
+    assert mocked_request.call_args.kwargs["timeout"] == (5, 300)
 
 
 def test_HTTPClient_run_tesseract_raises_validation_error(mocker):
