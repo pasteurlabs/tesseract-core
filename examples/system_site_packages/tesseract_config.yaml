@@ -1,0 +1,9 @@
+name: "system_site_packages"
+version: "0.1.0"
+description: |
+  Tesseract that uses system_site_packages to access Firedrake,
+  a finite element library pre-installed in the base image.
+
+build_config:
+  base_image: "firedrakeproject/firedrake:2026.4.0"
+  system_site_packages: true

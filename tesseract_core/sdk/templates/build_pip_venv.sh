@@ -5,7 +5,12 @@
 
 set -e  # Exit immediately if a command exits with a non-zero status
 
-uv venv /python-env
+SYSTEM_SITE_PACKAGES_FLAG=""
+if [ "${TESSERACT_SYSTEM_SITE_PACKAGES:-0}" = "1" ]; then
+    SYSTEM_SITE_PACKAGES_FLAG="--system-site-packages"
+fi
+
+uv venv $SYSTEM_SITE_PACKAGES_FLAG /python-env
 source /python-env/bin/activate
 
 # Collect dependencies

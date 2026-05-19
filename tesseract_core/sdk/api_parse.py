@@ -133,6 +133,15 @@ class TesseractBuildConfig(BaseModel, validate_assignment=True):
         ),
     )
 
+    system_site_packages: bool = Field(
+        False,
+        description=(
+            "If True, create the Python virtual environment with --system-site-packages. "
+            "This allows the venv to access packages pre-installed in the base image "
+            "(e.g., Firedrake, FEniCS, OpenFOAM)."
+        ),
+    )
+
     requirements: PythonRequirements = PipRequirements(provider="python-pip")
 
     model_config = ConfigDict(extra="forbid")
