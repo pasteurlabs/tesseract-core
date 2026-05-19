@@ -198,6 +198,50 @@ def test_optional_signature_check(
         validate_tesseract_api(tmp_path)
 
 
+def test_config_with_python_version(
+    tmp_path, valid_tesseract_api, valid_tesseract_config
+):
+    _write_tesseract_api_to_file(valid_tesseract_api, tmp_path)
+
+    config_with_python_version = yaml.safe_load(valid_tesseract_config)
+    config_with_python_version["build_config"]["python_version"] = "3.12"
+    _write_tesseract_config_to_file(yaml.dump(config_with_python_version), tmp_path)
+    validate_tesseract_api(tmp_path)
+
+    from tesseract_core.sdk.api_parse import get_config
+
+    config = get_config(tmp_path)
+    assert config.build_config.python_version == "3.12"
+
+
+def test_config_python_version_rejects_conda(
+    tmp_path, valid_tesseract_api, valid_tesseract_config
+):
+    _write_tesseract_api_to_file(valid_tesseract_api, tmp_path)
+
+    config = yaml.safe_load(valid_tesseract_config)
+    config["build_config"]["python_version"] = "3.12"
+    config["build_config"]["requirements"] = {"provider": "conda"}
+    _write_tesseract_config_to_file(yaml.dump(config), tmp_path)
+
+    with pytest.raises(
+        ValidationError, match="python_version cannot be used with conda"
+    ):
+        validate_tesseract_api(tmp_path)
+
+
+def test_config_python_version_defaults_to_none(
+    tmp_path, valid_tesseract_api, valid_tesseract_config
+):
+    _write_tesseract_api_to_file(valid_tesseract_api, tmp_path)
+    _write_tesseract_config_to_file(valid_tesseract_config, tmp_path)
+
+    from tesseract_core.sdk.api_parse import get_config
+
+    config = get_config(tmp_path)
+    assert config.build_config.python_version is None
+
+
 def test_schema_parent_class_is_checked(
     tmp_path, valid_tesseract_api, valid_tesseract_config
 ):
