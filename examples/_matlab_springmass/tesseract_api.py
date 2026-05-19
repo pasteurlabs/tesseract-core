@@ -13,9 +13,12 @@ solve the damped harmonic oscillator equation:
 with a unit step force input F(t) = F0 for t >= 0.
 """
 
+import glob
 import json
 import math
 import os
+import pwd
+import re
 import subprocess
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -25,10 +28,39 @@ from pydantic import BaseModel, Field
 
 from tesseract_core.runtime import Array, Float64
 
-# Path to the MATLAB binary inside the container.
-# Override with the MATLAB_BIN environment variable if your MATLAB
-# is mounted at a non-standard path.
-MATLAB_BIN = os.environ.get("MATLAB_BIN", "/opt/matlab/R2025b/bin/matlab")
+# Path to the MATLAB binary. Auto-discovers /opt/matlab/<release>/bin/matlab
+# (uses the highest version if multiple are installed). Override with the
+# MATLAB_BIN env var for a non-standard path.
+_matlab_candidates = sorted(glob.glob("/opt/matlab/*/bin/matlab"))
+MATLAB_BIN = os.environ.get(
+    "MATLAB_BIN",
+    _matlab_candidates[-1] if _matlab_candidates else "/opt/matlab/R2026a/bin/matlab",
+)
+
+# If MATLAB_USERNAME is set, rename the 'ubuntu' user in /etc/passwd (and
+# /etc/group) to that username at startup. MATLAB's file-based license check
+# picks the 'ubuntu' entry out of /etc/passwd regardless of the running UID,
+# so renaming it lets the check see the correct user without baking the
+# username into the image. Requires the container to run as root, e.g.
+# `tesseract run --user 0:0 --env MATLAB_USERNAME=<your-license-user> ...`.
+_MATLAB_USERNAME = os.environ.get("MATLAB_USERNAME")
+if _MATLAB_USERNAME:
+    # /etc/passwd is what MATLAB's license check reads directly. /tmp/passwd
+    # is what the tesseract template's libnss_wrapper redirects NSS lookups
+    # to (used by pwd.getpwnam below). Both must be updated.
+    for _path in ("/etc/passwd", "/etc/group", "/tmp/passwd", "/tmp/group"):
+        try:
+            with open(_path) as _f:
+                _content = _f.read()
+            _new = re.sub(
+                r"^ubuntu:", f"{_MATLAB_USERNAME}:", _content, flags=re.MULTILINE
+            )
+            if _new != _content:
+                with open(_path, "w") as _f:
+                    _f.write(_new)
+        except (PermissionError, OSError, FileNotFoundError):
+            # Not running as root, file doesn't exist, or rename already done.
+            pass
 
 # Path to the .m source file copied into the container at build time.
 SOLVER_DIR = Path("/tesseract/matlab")
@@ -110,6 +142,14 @@ def apply(inputs: InputSchema) -> OutputSchema:
         input_file = tmpdir_path / "input.json"
         output_file = tmpdir_path / "output.json"
 
+        # If we'll spawn MATLAB as a different user, hand them the tmpdir.
+        if _MATLAB_USERNAME:
+            try:
+                _pw = pwd.getpwnam(_MATLAB_USERNAME)
+                os.chown(tmpdir, _pw.pw_uid, _pw.pw_gid)
+            except (KeyError, PermissionError):
+                pass
+
         # Write input parameters as JSON
         input_data = {
             "mass": inputs.mass,
@@ -129,10 +169,29 @@ def apply(inputs: InputSchema) -> OutputSchema:
             f"spring_mass_damper('{input_file}', '{output_file}')"
         )
 
+        # If MATLAB_USERNAME is set, run MATLAB as that user (UID/GID resolved
+        # via getpwnam after the /etc/passwd rename above). Otherwise inherit.
+        popen_kwargs = {}
+        if _MATLAB_USERNAME:
+            try:
+                pw = pwd.getpwnam(_MATLAB_USERNAME)
+                env = os.environ.copy()
+                env.update(
+                    {
+                        "HOME": pw.pw_dir,
+                        "USER": _MATLAB_USERNAME,
+                        "LOGNAME": _MATLAB_USERNAME,
+                    }
+                )
+                popen_kwargs.update(user=pw.pw_uid, group=pw.pw_gid, env=env)
+            except KeyError:
+                pass
+
         process = subprocess.Popen(
             [MATLAB_BIN, "-batch", matlab_cmd],
             stdout=None,  # Inherit stdout — streams to parent process
             stderr=None,  # Inherit stderr — streams to parent process
+            **popen_kwargs,
         )
         returncode = process.wait()
 
