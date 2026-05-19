@@ -590,6 +590,45 @@ def _ensure_network_exists(network: str) -> None:
         docker_client.networks.create(network)
 
 
+def _wait_for_health(
+    container: Container, ping_ip: str, port: str, timeout: float = 30
+) -> None:
+    """Poll a container's /health endpoint until it responds 200 or timeout expires."""
+    while True:
+        try:
+            response = requests.get(f"http://{ping_ip}:{port}/health")
+        except requests.exceptions.ConnectionError:
+            pass
+        else:
+            if response.status_code == 200:
+                return
+
+        time.sleep(0.1)
+        timeout -= 0.1
+
+        container_status = docker_client.containers.get(container.id).status
+
+        if timeout < 0 or container_status != "running":
+            try:
+                container_logs = container.logs(stdout=True, stderr=True)
+                logger.error(
+                    f"Tesseract container {container.name} failed to start:\n{container_logs.decode()}"
+                )
+            except APIError as ex:
+                logger.warning(
+                    f"Failed to get logs for container {container.name}: {ex}"
+                )
+            try:
+                container.stop()
+            except APIError as ex:
+                logger.warning(f"Failed to stop container {container.name}: {ex}")
+
+            if timeout < 0:
+                raise TimeoutError("Tesseract did not start in time")
+            else:
+                raise RuntimeError("Tesseract failed to start")
+
+
 def serve(
     image_name: str,
     *,
@@ -609,6 +648,7 @@ def serve(
     output_format: Literal["json", "json+base64", "json+binref"] | None = None,
     docker_args: list[str] | None = None,
     runtime_config: dict[str, Any] | None = None,
+    skip_health_check: bool = False,
 ) -> tuple:
     """Serve one or more Tesseract images.
 
@@ -637,6 +677,9 @@ def serve(
         runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
             These are converted to TESSERACT_* environment variables. For example,
             ``{"profiling": True}`` sets ``TESSERACT_PROFILING=1``.
+        skip_health_check: If True, skip the startup health check poll. Useful for
+            Tesseracts with slow initialization (e.g., Julia runtime startup, large
+            model loading).
 
     Returns:
         A tuple of the Tesseract container name and the port it is serving on.
@@ -756,42 +799,11 @@ def serve(
     )
     assert isinstance(container, Container)
 
-    logger.info("Waiting for Tesseract to start...")
-    # wait for server to start
-    timeout = 30
-    while True:
-        try:
-            response = requests.get(f"http://{ping_ip}:{port}/health")
-        except requests.exceptions.ConnectionError:
-            pass
-        else:
-            if response.status_code == 200:
-                break
-
-        time.sleep(0.1)
-        timeout -= 0.1
-
-        container_status = docker_client.containers.get(container.id).status
-
-        if timeout < 0 or container_status != "running":
-            try:
-                container_logs = container.logs(stdout=True, stderr=True)
-                logger.error(
-                    f"Tesseract container {container.name} failed to start:\n{container_logs.decode()}"
-                )
-            except APIError as ex:
-                logger.warning(
-                    f"Failed to get logs for container {container.name}: {ex}"
-                )
-            try:
-                container.stop()
-            except APIError as ex:
-                logger.warning(f"Failed to stop container {container.name}: {ex}")
-
-            if timeout < 0:
-                raise TimeoutError("Tesseract did not start in time")
-            else:
-                raise RuntimeError("Tesseract failed to start")
+    if skip_health_check:
+        logger.info("Skipping health check, Tesseract may not be ready yet")
+    else:
+        logger.info("Waiting for Tesseract to start...")
+        _wait_for_health(container, ping_ip, port)
 
     logger.info(f"Serving Tesseract at http://{ping_ip}:{port}")
     logger.info(f"View Tesseract: http://{ping_ip}:{port}/docs")

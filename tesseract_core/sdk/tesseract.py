@@ -113,6 +113,7 @@ class Tesseract:
         docker_args: list[str] | None = None,
         runtime_config: dict[str, Any] | None = None,
         stream_logs: BoolOrCallable = False,
+        skip_health_check: bool = False,
     ) -> Tesseract:
         """Create a Tesseract instance from a Docker image.
 
@@ -151,6 +152,9 @@ class Tesseract:
                 `{"profiling": True}` enables profiling via TESSERACT_PROFILING=true.
             stream_logs: If True, stream logs to stdout while endpoints run.
                 If a callable, stream logs to that callable instead.
+            skip_health_check: If True, skip the startup health check poll. Useful for
+                Tesseracts with slow initialization (e.g., Julia runtime startup, large
+                model loading).
 
         Returns:
             A Tesseract instance.
@@ -189,6 +193,7 @@ class Tesseract:
             host_ip=host_ip,
             debug=True,
             docker_args=docker_args,
+            skip_health_check=skip_health_check,
         )
         return obj
 
