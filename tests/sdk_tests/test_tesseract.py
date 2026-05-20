@@ -104,6 +104,36 @@ def test_Tesseract_from_image(mock_serving, mock_clients):
         t.teardown()
 
 
+def test_container_id_and_name_set_during_serve(mock_serving, mock_clients):
+    """container_name / container_id reflect the running container's identity.
+
+    They are ``None`` before ``serve()`` and after ``teardown()``, and
+    take the values supplied by ``engine.serve`` while a container is
+    active. ``container_id`` comes from the Container object's ``.id``
+    attribute (matches the fixture's ``fake_container.id``).
+    """
+    t = Tesseract.from_image("sometesseract:0.2.3")
+
+    # Pre-serve: no container.
+    assert t.container_name is None
+    assert t.container_id is None
+
+    with t:
+        assert t.container_name == "container-id-123"
+        assert t.container_id == "container-id-123"
+
+    # Post-teardown: cleared.
+    assert t.container_name is None
+    assert t.container_id is None
+
+
+def test_container_id_and_name_none_for_local_tesseract():
+    """Tesseracts created via from_url have no Docker container backing them."""
+    t = Tesseract.from_url("http://localhost:1234")
+    assert t.container_name is None
+    assert t.container_id is None
+
+
 def test_del_tesseract_triggers_teardown(mock_serving):
     """Deleting a served Tesseract must tear down its container via weakref.finalize."""
     import gc

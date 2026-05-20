@@ -311,6 +311,7 @@ class Tesseract:
         container_name, container = engine.serve(**self._spawn_config)
         self._serve_context = dict(
             container_name=container_name,
+            container_id=getattr(container, "id", None),
             port=container.host_port,
             network=self._spawn_config["network"],
             network_alias=self._spawn_config["network_alias"],
@@ -369,6 +370,34 @@ class Tesseract:
             a list with all available endpoints for this Tesseract.
         """
         return [endpoint.lstrip("/") for endpoint in self.openapi_schema["paths"]]
+
+    @property
+    def container_name(self) -> str | None:
+        """Docker container name backing this Tesseract.
+
+        Set when a Tesseract created via :meth:`from_image` is currently
+        being served (i.e. between ``__enter__`` / ``serve()`` and
+        ``__exit__`` / ``teardown()``). Returns ``None`` for Tesseracts
+        created via :meth:`from_url` or :meth:`from_tesseract_api`, and
+        before / after the container lifecycle on image-backed Tesseracts.
+
+        Useful for callers that need to drive ``docker stats``, ``docker
+        exec``, NVML container queries, or any other tooling that takes
+        the container as input.
+        """
+        ctx = self._serve_context
+        return ctx.get("container_name") if isinstance(ctx, dict) else None
+
+    @property
+    def container_id(self) -> str | None:
+        """Docker container ID backing this Tesseract.
+
+        Same lifecycle as :attr:`container_name` — set during serving,
+        ``None`` otherwise. Returns the full container ID; pass
+        ``[:12]`` if a short ID is wanted.
+        """
+        ctx = self._serve_context
+        return ctx.get("container_id") if isinstance(ctx, dict) else None
 
     @requires_client
     def apply(
