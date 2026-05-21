@@ -93,8 +93,11 @@ class Tesseract:
                 Must be a path accessible from the client machine (e.g., via a shared or
                 mounted filesystem), since the server writes .bin files there and the
                 client reads them from the same path.
-            timeout: Request timeout in seconds. Can be a float for both connect and read
-                timeouts, a (connect, read) tuple, or None to disable. Defaults to 600s.
+            timeout: Request timeout in seconds. Can be a float for both connect and
+                read timeouts, or a ``(connect, read)`` tuple for separate control.
+                ``None`` (the default) disables timeouts. See the `requests documentation
+                <https://requests.readthedocs.io/en/latest/user/advanced/#timeouts>`_
+                for details.
 
         Returns:
             A Tesseract instance.
@@ -164,8 +167,11 @@ class Tesseract:
             stream_logs: If True, stream logs to stdout while endpoints run.
                 If a callable, stream logs to that callable instead.
             timeout: Request timeout in seconds for HTTP calls to the Tesseract.
-                Can be a float for both connect and read timeouts, a (connect, read)
-                tuple, or None to disable. Defaults to 600s.
+                Can be a float for both connect and read timeouts, or a
+                ``(connect, read)`` tuple for separate control. ``None`` (the default)
+                disables timeouts. See the `requests documentation
+                <https://requests.readthedocs.io/en/latest/user/advanced/#timeouts>`_
+                for details.
 
         Returns:
             A Tesseract instance.

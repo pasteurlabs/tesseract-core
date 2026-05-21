@@ -693,3 +693,33 @@ def test_stale_keepalive_connection_is_handled(free_port, monkeypatch):
     finally:
         server.should_exit = True
         server_thread.join(timeout=5)
+
+
+def test_HTTPClient_timeout_fires(free_port):
+    """HTTPClient raises a timeout error when the server takes too long to respond."""
+    import http.server
+    import socketserver
+    import threading
+
+    shutdown = threading.Event()
+
+    class SlowHandler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            shutdown.wait(timeout=10)
+
+        def log_message(self, *args):
+            pass  # suppress stderr noise
+
+    httpd = socketserver.TCPServer(("127.0.0.1", free_port), SlowHandler)
+    httpd.daemon_threads = True
+    server_thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    server_thread.start()
+
+    try:
+        client = HTTPClient(f"http://127.0.0.1:{free_port}", timeout=0.5)
+        with pytest.raises(requests.exceptions.ReadTimeout):
+            client._request("health")
+    finally:
+        shutdown.set()
+        httpd.shutdown()
+        server_thread.join(timeout=5)
