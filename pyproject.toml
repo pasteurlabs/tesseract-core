@@ -82,6 +82,11 @@ dev = [
     # also add all other extras here
     "tesseract-core[runtime]",
     "tesseract-core[docs]",
+    "tesseract-core[compression]",
+]
+
+compression = [
+    "lz4",
 ]
 
 [project.urls]
