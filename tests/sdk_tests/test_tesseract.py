@@ -200,7 +200,68 @@ def test_HTTPClient_run_tesseract(mocker, run_id):
         url="http://somehost/apply",
         data=orjson.dumps({"inputs": {"a": 1}}),
         params=expected_params,
+        timeout=None,
     )
+
+
+def test_HTTPClient_timeout_passed_to_request(mocker):
+    """HTTPClient passes its timeout to every requests.Session.request call."""
+    mock_response = mocker.Mock()
+    mock_response.content = b'{"status": "ok"}'
+    mock_response.ok = True
+    mock_response.status_code = 200
+
+    mocked_request = mocker.patch(
+        "requests.Session.request",
+        return_value=mock_response,
+    )
+
+    client = HTTPClient("somehost", timeout=42)
+    client.run_tesseract("health")
+
+    mocked_request.assert_called_with(
+        method="GET",
+        url="http://somehost/health",
+        data=b"null",
+        params={},
+        timeout=42,
+    )
+
+
+def test_HTTPClient_default_timeout(mocker):
+    """HTTPClient has no timeout by default."""
+    mock_response = mocker.Mock()
+    mock_response.content = b'{"status": "ok"}'
+    mock_response.ok = True
+    mock_response.status_code = 200
+
+    mocked_request = mocker.patch(
+        "requests.Session.request",
+        return_value=mock_response,
+    )
+
+    client = HTTPClient("somehost")
+    client.run_tesseract("health")
+
+    assert mocked_request.call_args.kwargs["timeout"] is None
+
+
+def test_HTTPClient_timeout_tuple(mocker):
+    """HTTPClient accepts a (connect, read) timeout tuple."""
+    mock_response = mocker.Mock()
+    mock_response.content = b'{"status": "ok"}'
+    mock_response.ok = True
+    mock_response.status_code = 200
+
+    mocked_request = mocker.patch(
+        "requests.Session.request",
+        return_value=mock_response,
+    )
+
+    client = HTTPClient("somehost", timeout=(5, 300))
+    client.run_tesseract("health")
+
+    assert mocked_request.call_args.kwargs["timeout"] == (5, 300)
 
 
 def test_HTTPClient_run_tesseract_raises_validation_error(mocker):
@@ -631,4 +692,34 @@ def test_stale_keepalive_connection_is_handled(free_port, monkeypatch):
         assert mock.call_count == 2
     finally:
         server.should_exit = True
+        server_thread.join(timeout=5)
+
+
+def test_HTTPClient_timeout_fires(free_port):
+    """HTTPClient raises a timeout error when the server takes too long to respond."""
+    import http.server
+    import socketserver
+    import threading
+
+    shutdown = threading.Event()
+
+    class SlowHandler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            shutdown.wait(timeout=10)
+
+        def log_message(self, *args):
+            pass  # suppress stderr noise
+
+    httpd = socketserver.TCPServer(("127.0.0.1", free_port), SlowHandler)
+    httpd.daemon_threads = True
+    server_thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    server_thread.start()
+
+    try:
+        client = HTTPClient(f"http://127.0.0.1:{free_port}", timeout=0.5)
+        with pytest.raises(requests.exceptions.ReadTimeout):
+            client._request("health")
+    finally:
+        shutdown.set()
+        httpd.shutdown()
         server_thread.join(timeout=5)
