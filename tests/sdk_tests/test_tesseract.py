@@ -129,7 +129,9 @@ def test_container_info_returns_id_and_name_during_serve(mock_serving, mock_clie
 def test_container_info_raises_for_non_image_tesseract():
     """Tesseracts created via from_url have no Docker container backing them."""
     t = Tesseract.from_url("http://localhost:1234")
-    with pytest.raises(RuntimeError, match="only available when using `Tesseract.from_image"):
+    with pytest.raises(
+        RuntimeError, match=r"only available when using `Tesseract\.from_image"
+    ):
         t.container_info()
 
 
