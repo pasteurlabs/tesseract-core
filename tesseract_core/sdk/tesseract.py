@@ -154,7 +154,9 @@ class Tesseract:
                 If a callable, stream logs to that callable instead.
             skip_health_check: If True, skip the startup health check poll. Useful for
                 Tesseracts with slow initialization (e.g., Julia runtime startup, large
-                model loading).
+                model loading). The caller is responsible for ensuring
+                readiness, e.g. by calling :meth:`health`, before calling
+                other endpoints.
 
         Returns:
             A Tesseract instance.

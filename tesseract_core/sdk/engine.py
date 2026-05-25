@@ -679,7 +679,8 @@ def serve(
             ``{"profiling": True}`` sets ``TESSERACT_PROFILING=1``.
         skip_health_check: If True, skip the startup health check poll. Useful for
             Tesseracts with slow initialization (e.g., Julia runtime startup, large
-            model loading).
+            model loading). The caller is responsible for ensuring readiness,
+            e.g. by polling ``/health``, before calling other endpoints.
 
     Returns:
         A tuple of the Tesseract container name and the port it is serving on.

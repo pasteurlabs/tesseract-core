@@ -578,7 +578,7 @@ def serve(
             help=(
                 "Skip the startup health check. Useful for Tesseracts with slow "
                 "initialization (e.g., Julia runtime startup, large model loading). "
-                "The caller takes responsibility for readiness detection."
+                "The caller is responsible for ensuring readiness, e.g. by polling /health."
             ),
         ),
     ] = False,
