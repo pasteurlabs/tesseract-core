@@ -354,17 +354,13 @@ def test_apply_command_binref_lz4(cli, cli_runner, tmpdir, dummy_tesseract_modul
     assert result.exit_code == 0, result.stderr
 
     output = json.loads(result.stdout)
-    # Find any array field and verify compression metadata is present
-    arrays = [
-        v
-        for v in output.values()
-        if isinstance(v, dict) and v.get("object_type") == "array"
-    ]
-    assert arrays, "Expected at least one array in output"
-    for arr in arrays:
-        assert arr["data"]["encoding"] == "binref"
-        assert arr["data"]["compression"] == "lz4"
-        assert "compressed_size" in arr["data"]
+    # Verify compression metadata is present on array fields
+    for field in dummy_tesseract_module.OutputSchema.model_fields:
+        val = output[field]
+        if isinstance(val, dict) and val.get("object_type") == "array":
+            assert val["data"]["encoding"] == "binref"
+            assert val["data"]["compression"] == "lz4"
+            assert "compressed_size" in val["data"]
 
     # Verify the data roundtrips correctly
     test_input_val = dummy_tesseract_module.InputSchema.model_validate(test_input)

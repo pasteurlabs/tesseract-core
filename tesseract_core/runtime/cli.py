@@ -149,7 +149,10 @@ def make_callback() -> Callable:
             # Too late to configure here, as the API path is needed to load the Tesseract API
             continue
 
-        # Unwrap Optional[X] -> X so the inner type can be handled below
+        # binref_compression is typed as Optional[Literal["lz4"]], but Typer
+        # can't introspect Optional[Literal[...]] to build a choice enum — it
+        # needs the bare Literal type. Strip the outer Optional here so the
+        # Literal check below can convert it to a choice enum correctly.
         if get_origin(field_type) is Union:
             non_none = [a for a in get_args(field_type) if a is not type(None)]
             if len(non_none) == 1:

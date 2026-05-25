@@ -719,10 +719,12 @@ def _decode_array(
             else:
                 data = f.read(compressed_size)
 
-        if compression is not None:
-            from tesseract_core.runtime.array_encoding import _decompress
+        if compression == "lz4":
+            import lz4.frame
 
-            data = _decompress(data, compression)
+            data = lz4.frame.decompress(data)
+        elif compression is not None:
+            raise ValueError(f"Unknown compression: {compression}")
 
         arr = np.frombuffer(data, dtype=dtype)
     else:

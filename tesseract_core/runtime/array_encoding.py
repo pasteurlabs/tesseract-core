@@ -3,7 +3,6 @@
 
 import re
 from collections.abc import Sequence
-from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any, Literal, TypeAlias, TypedDict, get_args
 from uuid import uuid4
@@ -66,7 +65,6 @@ class ArrayDict(TypedDict):
 MAX_BINREF_BUFFER_SIZE = 100 * 1024 * 1024  # 100 MB
 
 
-@lru_cache(maxsize=1)
 def _lz4_frame():
     try:
         import lz4.frame
@@ -119,7 +117,6 @@ class BinrefArrayData(BaseModel):
     encoding: Literal["binref"]
     compression: Literal["lz4"] | None = None
     compressed_size: int | None = None
-    model_config = ConfigDict(extra="forbid")
 
     @model_validator(mode="after")
     def check_compressed_size(self) -> "BinrefArrayData":
@@ -132,6 +129,8 @@ class BinrefArrayData(BaseModel):
                     "compressed_size must be positive when compression is set"
                 )
         return self
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class JsonArrayData(BaseModel):
@@ -360,6 +359,10 @@ def _load_binref_arraydict(val: ArrayDict, base_dir: str | Path | None) -> np.nd
 
     compression = val["data"].get("compression")
     compressed_size = val["data"].get("compressed_size")
+    if compression is not None and compressed_size is None:
+        raise ValueError(
+            "compressed_size is required in binref array data when compression is set"
+        )
 
     if base_dir is not None:
         bufferpath = join_paths(base_dir, bufferpath)
