@@ -371,33 +371,36 @@ class Tesseract:
         """
         return [endpoint.lstrip("/") for endpoint in self.openapi_schema["paths"]]
 
-    @property
-    def container_name(self) -> str | None:
-        """Docker container name backing this Tesseract.
+    def container_info(self) -> dict[str, str]:
+        """Identity of the Docker container backing this Tesseract.
 
-        Set when a Tesseract created via :meth:`from_image` is currently
-        being served (i.e. between ``__enter__`` / ``serve()`` and
-        ``__exit__`` / ``teardown()``). Returns ``None`` for Tesseracts
-        created via :meth:`from_url` or :meth:`from_tesseract_api`, and
-        before / after the container lifecycle on image-backed Tesseracts.
+        Returns a dict with ``id`` (full container ID) and ``name``
+        (container name) for the container currently serving this
+        Tesseract. Useful for driving ``docker stats``, ``docker exec``,
+        NVML container queries, ``docker logs``, or any other tooling
+        that takes the container as input.
 
-        Useful for callers that need to drive ``docker stats``, ``docker
-        exec``, NVML container queries, or any other tooling that takes
-        the container as input.
+        Raises:
+            RuntimeError: if this Tesseract was not created via
+                :meth:`from_image` (e.g. :meth:`from_url` or
+                :meth:`from_tesseract_api`), or if it is not currently
+                being served (call :meth:`serve` or use ``with tess:``
+                first).
         """
-        ctx = self._serve_context
-        return ctx.get("container_name") if isinstance(ctx, dict) else None
-
-    @property
-    def container_id(self) -> str | None:
-        """Docker container ID backing this Tesseract.
-
-        Same lifecycle as :attr:`container_name` — set during serving,
-        ``None`` otherwise. Returns the full container ID; pass
-        ``[:12]`` if a short ID is wanted.
-        """
-        ctx = self._serve_context
-        return ctx.get("container_id") if isinstance(ctx, dict) else None
+        if self._spawn_config is None:
+            raise RuntimeError(
+                "`container_info` is only available when using "
+                "`Tesseract.from_image(...)`."
+            )
+        if self._serve_context is None:
+            raise RuntimeError(
+                "`container_info` is only available for served Tesseracts. "
+                "Use `tess.serve()` or `with tess:` first."
+            )
+        return {
+            "id": self._serve_context["container_id"],
+            "name": self._serve_context["container_name"],
+        }
 
     @requires_client
     def apply(
