@@ -104,13 +104,22 @@ def test_Tesseract_from_image(mock_serving, mock_clients):
         t.teardown()
 
 
-def test_container_info_returns_id_and_name_during_serve(mock_serving, mock_clients):
-    """``container_info()`` returns the running container's identity while served.
+def test_container_info_returns_container_during_serve(
+    mock_serving, mock_clients, mocker
+):
+    """``container_info()`` returns a fresh ``Container`` while served.
 
-    The fixture's ``engine.serve`` mock yields ``container-id-123`` for
-    both name and id, so both fields are expected to match. Outside the
-    serve window the call must raise.
+    Each call delegates to ``Containers.get(container_name)``, so we
+    patch that lookup and verify the call site forwards the running
+    container's name through unchanged. Outside the serve window the
+    call must raise.
     """
+    fake_container = SimpleNamespace(id="container-id-123", name="container-id-123")
+    get_mock = mocker.patch(
+        "tesseract_core.sdk.tesseract.Containers.get",
+        return_value=fake_container,
+    )
+
     t = Tesseract.from_image("sometesseract:0.2.3")
 
     # Pre-serve: not yet running, so the call raises.
@@ -119,7 +128,8 @@ def test_container_info_returns_id_and_name_during_serve(mock_serving, mock_clie
 
     with t:
         info = t.container_info()
-        assert info == {"id": "container-id-123", "name": "container-id-123"}
+        assert info is fake_container
+        get_mock.assert_called_with("container-id-123")
 
     # Post-teardown: container is gone, so the call raises again.
     with pytest.raises(RuntimeError, match="only available for served Tesseracts"):

@@ -23,6 +23,7 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 from pydantic_core import InitErrorDetails, PydanticCustomError, from_json
 
 from . import engine
+from .docker_client import Container, Containers
 from .logs import LogStreamer
 
 PathLike: TypeAlias = str | Path
@@ -311,7 +312,6 @@ class Tesseract:
         container_name, container = engine.serve(**self._spawn_config)
         self._serve_context = dict(
             container_name=container_name,
-            container_id=getattr(container, "id", None),
             port=container.host_port,
             network=self._spawn_config["network"],
             network_alias=self._spawn_config["network_alias"],
@@ -371,14 +371,17 @@ class Tesseract:
         """
         return [endpoint.lstrip("/") for endpoint in self.openapi_schema["paths"]]
 
-    def container_info(self) -> dict[str, str]:
-        """Identity of the Docker container backing this Tesseract.
+    def container_info(self) -> Container:
+        """Inspect the Docker container backing this Tesseract.
 
-        Returns a dict with ``id`` (full container ID) and ``name``
-        (container name) for the container currently serving this
-        Tesseract. Useful for driving ``docker stats``, ``docker exec``,
-        NVML container queries, ``docker logs``, or any other tooling
-        that takes the container as input.
+        Re-issues a ``docker inspect`` on each call and returns the
+        up-to-date :class:`~tesseract_core.sdk.docker_client.Container`
+        for the container currently serving this Tesseract. The returned
+        object exposes ``id``, ``short_id``, ``name``, ``status``,
+        ``host_port``, ``host_ip``, ``docker_network_ips``,
+        ``exec_run(...)``, and the raw inspect payload via ``attrs`` —
+        the typical inputs to ``docker stats``, ``docker exec``, NVML
+        per-container queries, etc.
 
         Raises:
             RuntimeError: if this Tesseract was not created via
@@ -386,6 +389,8 @@ class Tesseract:
                 :meth:`from_tesseract_api`), or if it is not currently
                 being served (call :meth:`serve` or use ``with tess:``
                 first).
+            tesseract_core.sdk.docker_client.NotFound: if the container
+                disappeared between :meth:`serve` and this call.
         """
         if self._spawn_config is None:
             raise RuntimeError(
@@ -397,10 +402,7 @@ class Tesseract:
                 "`container_info` is only available for served Tesseracts. "
                 "Use `tess.serve()` or `with tess:` first."
             )
-        return {
-            "id": self._serve_context["container_id"],
-            "name": self._serve_context["container_name"],
-        }
+        return Containers.get(self._serve_context["container_name"])
 
     @requires_client
     def apply(
