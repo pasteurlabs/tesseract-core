@@ -372,16 +372,10 @@ class Tesseract:
         return [endpoint.lstrip("/") for endpoint in self.openapi_schema["paths"]]
 
     def container_info(self) -> Container:
-        """Inspect the Docker container backing this Tesseract.
+        """Retrieve information on the Docker container serving this Tesseract.
 
-        Re-issues a ``docker inspect`` on each call and returns the
-        up-to-date :class:`~tesseract_core.sdk.docker_client.Container`
-        for the container currently serving this Tesseract. The returned
-        object exposes ``id``, ``short_id``, ``name``, ``status``,
-        ``host_port``, ``host_ip``, ``docker_network_ips``,
-        ``exec_run(...)``, and the raw inspect payload via ``attrs`` —
-        the typical inputs to ``docker stats``, ``docker exec``, NVML
-        per-container queries, etc.
+        Tesseract must be created via `from_image` and be actively served for
+        this to be available.
 
         Raises:
             RuntimeError: if this Tesseract was not created via
