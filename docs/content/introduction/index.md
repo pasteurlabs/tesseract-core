@@ -1,3 +1,8 @@
+---
+og:title: "Tesseract Core Documentation"
+og:description: "Tesseract packages scientific software into portable, self-documenting, differentiable components. Build, share, and compose solvers across languages."
+---
+
 # Tesseract Core Documentation
 
 Tesseract packages scientific software into portable, self-documenting, differentiable components.

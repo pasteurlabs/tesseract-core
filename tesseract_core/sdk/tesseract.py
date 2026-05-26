@@ -59,19 +59,28 @@ class Tesseract:
     _lastlog: str | None = None
     _client: HTTPClient | LocalClient | None = None
     _stream_logs: BoolOrCallable = False
+    _timeout: float | tuple[float, float] | None = None
 
-    def __init__(self, url: str, server_output_path: str | Path | None = None) -> None:
+    def __init__(
+        self,
+        url: str,
+        server_output_path: str | Path | None = None,
+        timeout: float | tuple[float, float] | None = None,
+    ) -> None:
         warnings.warn(
             "Direct instantiation of Tesseract is deprecated. "
             "Use Tesseract.from_url(), Tesseract.from_image(), or Tesseract.from_tesseract_api() instead.",
             UserWarning,
             stacklevel=2,
         )
-        self._client = HTTPClient(url, output_path=server_output_path)
+        self._client = HTTPClient(url, output_path=server_output_path, timeout=timeout)
 
     @classmethod
     def from_url(
-        cls, url: str, server_output_path: str | Path | None = None
+        cls,
+        url: str,
+        server_output_path: str | Path | None = None,
+        timeout: float | tuple[float, float] | None = None,
     ) -> Tesseract:
         """Create a Tesseract instance from a URL.
 
@@ -84,12 +93,17 @@ class Tesseract:
                 Must be a path accessible from the client machine (e.g., via a shared or
                 mounted filesystem), since the server writes .bin files there and the
                 client reads them from the same path.
+            timeout: Request timeout in seconds. Can be a float for both connect and
+                read timeouts, or a ``(connect, read)`` tuple for separate control.
+                ``None`` (the default) disables timeouts. See the `requests documentation
+                <https://requests.readthedocs.io/en/latest/user/advanced/#timeouts>`_
+                for details.
 
         Returns:
             A Tesseract instance.
         """
         obj = cls.__new__(cls)
-        obj._client = HTTPClient(url, output_path=server_output_path)
+        obj._client = HTTPClient(url, output_path=server_output_path, timeout=timeout)
         return obj
 
     @classmethod
@@ -113,6 +127,8 @@ class Tesseract:
         docker_args: list[str] | None = None,
         runtime_config: dict[str, Any] | None = None,
         stream_logs: BoolOrCallable = False,
+        skip_health_check: bool = False,
+        timeout: float | tuple[float, float] | None = None,
     ) -> Tesseract:
         """Create a Tesseract instance from a Docker image.
 
@@ -151,6 +167,17 @@ class Tesseract:
                 `{"profiling": True}` enables profiling via TESSERACT_PROFILING=true.
             stream_logs: If True, stream logs to stdout while endpoints run.
                 If a callable, stream logs to that callable instead.
+            skip_health_check: If True, skip the startup health check poll. Useful for
+                Tesseracts with slow initialization (e.g., Julia runtime startup, large
+                model loading). The caller is responsible for ensuring
+                readiness, e.g. by calling :meth:`health`, before calling
+                other endpoints.
+            timeout: Request timeout in seconds for HTTP calls to the Tesseract.
+                Can be a float for both connect and read timeouts, or a
+                ``(connect, read)`` tuple for separate control. ``None`` (the default)
+                disables timeouts. See the `requests documentation
+                <https://requests.readthedocs.io/en/latest/user/advanced/#timeouts>`_
+                for details.
 
         Returns:
             A Tesseract instance.
@@ -171,6 +198,7 @@ class Tesseract:
             output_path = Path(tempfile.mkdtemp(prefix="tesseract_output_"))
 
         obj._stream_logs = stream_logs
+        obj._timeout = timeout
         obj._spawn_config = dict(
             image_name=image_name,
             volumes=volumes,
@@ -189,6 +217,7 @@ class Tesseract:
             host_ip=host_ip,
             debug=True,
             docker_args=docker_args,
+            skip_health_check=skip_health_check,
         )
         return obj
 
@@ -321,6 +350,7 @@ class Tesseract:
         self._client = HTTPClient(
             f"http://{host_ip}:{container.host_port}",
             output_path=Path(output_path) if output_path else None,
+            timeout=self._timeout,
         )
 
         # Ensure that the Tesseract is torn down once the object is garbage collected,
@@ -666,9 +696,15 @@ def _decode_array(
 class HTTPClient:
     """HTTP Client for Tesseracts."""
 
-    def __init__(self, url: str, output_path: str | Path | None = None) -> None:
+    def __init__(
+        self,
+        url: str,
+        output_path: str | Path | None = None,
+        timeout: float | tuple[float, float] | None = None,
+    ) -> None:
         self._url = self._sanitize_url(url)
         self._output_path = output_path
+        self._timeout = timeout
         self._session = requests.Session()
         self._session.headers["Content-Type"] = "application/json"
 
@@ -709,7 +745,7 @@ class HTTPClient:
         data = orjson.dumps(encoded_payload)
         try:
             response = self._session.request(
-                method=method, url=url, data=data, params=params
+                method=method, url=url, data=data, params=params, timeout=self._timeout
             )
         except requests.ConnectionError:
             # Retry once on stale keep-alive connections. There is a race
@@ -717,7 +753,7 @@ class HTTPClient:
             # closing idle connections (uvicorn timeout_keep_alive) that
             # can cause ConnectionError on an otherwise healthy server.
             response = self._session.request(
-                method=method, url=url, data=data, params=params
+                method=method, url=url, data=data, params=params, timeout=self._timeout
             )
 
         if response.status_code == requests.codes.unprocessable_entity:
