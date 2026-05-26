@@ -8,6 +8,7 @@ import requests
 from pydantic import ValidationError
 
 from tesseract_core import Tesseract
+from tesseract_core.sdk.docker_client import Container
 from tesseract_core.sdk.tesseract import (
     HTTPClient,
     _decode_array,
@@ -114,7 +115,12 @@ def test_container_info_returns_container_during_serve(
     container's name through unchanged. Outside the serve window the
     call must raise.
     """
-    fake_container = SimpleNamespace(id="container-id-123", name="container-id-123")
+    fake_container = Container(
+        id="container-id-123",
+        short_id="container-id",
+        name="container-id-123",
+        attrs={},
+    )
     get_mock = mocker.patch(
         "tesseract_core.sdk.tesseract.Containers.get",
         return_value=fake_container,
