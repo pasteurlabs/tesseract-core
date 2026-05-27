@@ -296,7 +296,7 @@ def create_apply_schema(
             extra="forbid",
             json_schema_extra={
                 "differentiable_arrays": differentiable_arrays,
-                "all_fields_ordered": input_field_order,
+                "field_order": input_field_order,
             },
         )
 
@@ -310,7 +310,7 @@ def create_apply_schema(
         model_config = ConfigDict(
             json_schema_extra={
                 "differentiable_arrays": differentiable_arrays,
-                "all_fields_ordered": output_field_order,
+                "field_order": output_field_order,
             },
         )
 

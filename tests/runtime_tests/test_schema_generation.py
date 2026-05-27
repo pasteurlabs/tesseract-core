@@ -119,12 +119,12 @@ def test_create_apply_schema():
         OutputSchema.model_validate({**testinput, "foo": 1})
 
 
-def test_all_fields_ordered_exported():
+def test_field_order_exported():
     InputSchema, OutputSchema = create_apply_schema(NestedModel, NestedModel)
 
     expected = list(NestedModel.model_fields.keys())
-    assert InputSchema.model_json_schema()["all_fields_ordered"] == expected
-    assert OutputSchema.model_json_schema()["all_fields_ordered"] == expected
+    assert InputSchema.model_json_schema()["field_order"] == expected
+    assert OutputSchema.model_json_schema()["field_order"] == expected
 
 
 def test_create_abstract_eval_schema():
