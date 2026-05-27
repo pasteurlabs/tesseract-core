@@ -417,6 +417,24 @@ def test_serve_tesseracts(mocked_docker):
     engine.teardown(json.loads(container_name_with_memory)["name"])
 
 
+def test_serve_skip_health_check(mocked_docker, monkeypatch):
+    """Test serving a tesseract with --skip-health-check."""
+    health_called = False
+
+    def health_get_spy(url, *args, **kwargs):
+        nonlocal health_called
+        if url.endswith("/health"):
+            health_called = True
+            return type("Response", (), {"status_code": 200, "json": lambda: {}})()
+        raise NotImplementedError(f"Mocked get request to {url} not implemented")
+
+    monkeypatch.setattr(engine.requests, "get", health_get_spy)
+
+    res, _ = engine.serve("foobar", skip_health_check=True)
+    assert res
+    assert not health_called
+
+
 def test_serve_memory(mocked_docker):
     """Test serving a tesseract with memory limit."""
     res, _ = engine.serve(

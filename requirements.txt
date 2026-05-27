@@ -4,15 +4,17 @@ annotated-doc==0.0.4
     # via typer
 annotated-types==0.7.0
     # via pydantic
-certifi==2026.4.22
+certifi==2026.5.20
     # via requests
 charset-normalizer==3.4.7
     # via requests
-click==8.4.0
-    # via typer
+click==8.4.1
+    # via
+    #   tesseract-core
+    #   typer
 colorama==0.4.6 ; sys_platform == 'win32'
     # via click
-idna==3.15
+idna==3.16
     # via requests
 jinja2==3.1.6
     # via tesseract-core
@@ -26,7 +28,7 @@ mdurl==0.1.2
     # via markdown-it-py
 numpy==2.2.6 ; python_full_version < '3.11'
     # via tesseract-core
-numpy==2.4.5 ; python_full_version >= '3.11'
+numpy==2.4.6 ; python_full_version >= '3.11'
     # via tesseract-core
 orjson==3.11.9
     # via tesseract-core
