@@ -9,6 +9,7 @@ All notable changes to this project will be documented in this file.
 - Add `env:` section to `tesseract_config.yaml` to allow setting environment variables in built Tesseracts (#591)
 - Add `timeout` parameter to Python API functions (#597)
 - Add `tesseract serve --skip-health-check` argument (#596)
+- Add `Tesseract.container_info` to expose information about running containers in Python API (#601)
 
 ### Bug Fixes
 
@@ -20,6 +21,10 @@ All notable changes to this project will be documented in this file.
 
 - Add new landing page for Tesseract ecosystem (#562)
 - Add Tesseract Blog (#549)
+
+### Testing
+
+- Rewrite stale-keepalive retry test without real socket dependence (#611)
 
 ## [1.8.2] - 2026-05-06
 
