@@ -10,6 +10,7 @@ All notable changes to this project will be documented in this file.
 - Add `timeout` parameter to Python API functions (#597)
 - Add `tesseract serve --skip-health-check` argument (#596)
 - Add `Tesseract.container_info` to expose information about running containers in Python API (#601)
+- Explicitly export IO schema field order (#595)
 
 ### Bug Fixes
 
