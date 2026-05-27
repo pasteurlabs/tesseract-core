@@ -1,0 +1,11 @@
+{
+  "endpoint": "apply",
+  "expected_outputs": null,
+  "expected_exception": "pydantic.ValidationError",
+  "expected_exception_regex": null,
+  "atol": 1e-8,
+  "rtol": 1e-5,
+  "payload": {
+    "inputs": {}
+  }
+}
