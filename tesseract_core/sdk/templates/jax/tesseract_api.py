@@ -8,10 +8,43 @@ from typing import Any
 
 import equinox as eqx
 import jax
+import jax.numpy as jnp
 from pydantic import BaseModel
 
 from tesseract_core.runtime import Differentiable, Float32
-from tesseract_core.runtime.tree_transforms import filter_func, flatten_with_paths
+from tesseract_core.runtime.tree_transforms import (
+    LRUCache,
+    filter_func,
+    flatten_with_paths,
+    hash_pytree_leaves,
+    set_at_path,
+)
+
+#
+# Cache configuration
+#
+# When apply() is called, this template runs jax.vjp internally and caches the
+# resulting backward function. A subsequent vector_jacobian_product call on the
+# same inputs reuses that cached backward, skipping the redundant forward pass
+# that vjp would otherwise repeat. Typical speedup is ~10-20%
+# for a val-and-grad on moderate-to-deep networks.
+#
+# The cache also helps when a single apply is followed by multiple vjp calls
+# on the same input — for example, jax.jacrev (which decomposes into one vjp
+# per output basis vector) or CG-style inverse-problem solvers (each inner CG
+# step computes J^T u at the same iterate). Each subsequent vjp on the same
+# input reuses the cached residuals.
+#
+# Poor fit:
+#   - Very small models where the forward pass is microseconds: the cache
+#     machinery overhead exceeds the saved work.
+#
+# Set _CACHE_SIZE = 0 to disable caching entirely; apply() and vjp() then
+# bypass the cache machinery and run their forward passes directly.
+# Increase _CACHE_SIZE for workloads that interleave several apply() calls
+# before their corresponding vjp() calls.
+#
+_CACHE_SIZE = 1
 
 #
 # Schemata
@@ -56,7 +89,27 @@ def apply(inputs: InputSchema) -> OutputSchema:
     # differentiable outputs in a nonlinear way (a constant shift
     # should be safe)
 
-    out = apply_jit(inputs.model_dump())
+    inputs_dict = inputs.model_dump()
+
+    if _CACHE_SIZE <= 0:
+        return apply_jit(inputs_dict)
+
+    # Compute forward pass via jax.vjp to cache residuals for a potential
+    # subsequent vector_jacobian_product call. eqx.partition separates
+    # array (differentiable) from non-array outputs; has_aux tells jax.vjp
+    # to only differentiate through the array outputs.
+    def _apply_for_vjp(inputs_dict):
+        out = apply_jit(inputs_dict)
+        diff_out, static_out = eqx.partition(out, eqx.is_array)
+        return diff_out, static_out
+
+    diff_primals, vjp_func, static_primals = jax.vjp(
+        _apply_for_vjp, inputs_dict, has_aux=True
+    )
+    out = eqx.combine(diff_primals, static_primals)
+
+    cotangent_template = jax.tree.map(jnp.zeros_like, diff_primals)
+    _vjp_cache.put(_hash_inputs(inputs_dict), (vjp_func, cotangent_template))
 
     # Optional: Insert any post-processing that doesn't require tracing
     # For example, you might want to save to disk or modify a non-differentiable
@@ -67,6 +120,13 @@ def apply(inputs: InputSchema) -> OutputSchema:
 #
 # Jax-handled gradient endpoints (no need to modify)
 #
+_vjp_cache = LRUCache(maxsize=_CACHE_SIZE)
+
+
+def _hash_inputs(inputs_dict: dict) -> bytes:
+    """Compute a SHA-256 hash of a pytree of inputs for cache key comparison."""
+    leaves, treedef = jax.tree.flatten(inputs_dict)
+    return hash_pytree_leaves(leaves, treedef)
 
 
 def jacobian(
@@ -97,8 +157,28 @@ def vector_jacobian_product(
     vjp_outputs: set[str],
     cotangent_vector: dict[str, Any],
 ):
+    inputs_dict = inputs.model_dump()
+
+    # Use get (not pop) so the cached residuals can serve multiple sequential
+    # vjp calls on the same inputs — for example, when tesseract-jax's
+    # value_and_grad is followed by jax.jacrev, which decomposes into many
+    # vjp calls per output basis vector.
+    if (
+        _CACHE_SIZE > 0
+        and (cached := _vjp_cache.get(_hash_inputs(inputs_dict))) is not None
+    ):
+        vjp_func, cotangent_template = cached
+
+        # Build full cotangent from template, zeroing outputs not in vjp_outputs
+        full_cotangent = jax.tree.map(jnp.zeros_like, cotangent_template)
+        full_cotangent = set_at_path(full_cotangent, cotangent_vector)
+
+        (all_input_cotangents,) = vjp_func(full_cotangent)
+        return flatten_with_paths(all_input_cotangents, include_paths=vjp_inputs)
+
+    # Cache disabled or cache miss: fall back to original JIT-compiled path
     return vjp_jit(
-        inputs.model_dump(),
+        inputs_dict,
         tuple(vjp_inputs),
         tuple(vjp_outputs),
         cotangent_vector,

@@ -1,8 +1,0 @@
-name: vectoradd_jax_cache
-version: "0.1.0"
-description: |
-  Tesseract that adds/subtracts two vectors. Uses jax internally with the
-  jax-cache recipe (linearization cache shared across gradient endpoints).
-
-build_config:
-  target_platform: "native"

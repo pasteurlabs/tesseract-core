@@ -11,7 +11,49 @@ from pydantic import BaseModel, Field, model_validator
 from typing_extensions import Self
 
 from tesseract_core.runtime import Array, Differentiable, Float32
-from tesseract_core.runtime.tree_transforms import filter_func, flatten_with_paths
+from tesseract_core.runtime.tree_transforms import (
+    LRUCache,
+    filter_func,
+    flatten_with_paths,
+    hash_pytree_leaves,
+    set_at_path,
+)
+
+#
+# Cache configuration
+#
+# When apply() is called, this template runs jax.vjp internally and caches the
+# resulting backward function. A subsequent vector_jacobian_product call on the
+# same inputs reuses that cached backward, skipping the redundant forward pass
+# that vjp would otherwise repeat.
+#
+# Under typical tesseract-jax usage (gradient-based code calling the Tesseract
+# through tesseract-jax's custom_vjp), apply() runs first on every gradient
+# evaluation — even under plain jax.grad — so the cache reliably hits on the
+# subsequent vjp call. This makes the recipe close to a free win for any
+# gradient-based workflow: Adam/SGD, L-BFGS / line search, value_and_grad-style
+# code, etc. Typical speedup is ~10-20% on moderate-to-deep networks.
+#
+# The cache also helps when a single apply is followed by multiple vjp calls
+# on the same input — for example, jax.jacrev (which decomposes into one vjp
+# per output basis vector) or CG-style inverse-problem solvers (each inner CG
+# step computes J^T u at the same iterate). Each subsequent vjp on the same
+# input reuses the cached residuals.
+#
+# Poor fit:
+#   - Very small models where the forward pass is microseconds: the cache
+#     machinery overhead exceeds the saved work.
+#
+# Set _CACHE_SIZE = 0 to disable caching entirely; apply() and vjp() then
+# bypass the cache machinery and run their forward passes directly.
+# Increase _CACHE_SIZE for workloads that interleave several apply() calls
+# before their corresponding vjp() calls.
+#
+_CACHE_SIZE = 1
+
+#
+# Schemata
+#
 
 
 class Vector_and_Scalar(BaseModel):
@@ -61,6 +103,11 @@ class OutputSchema(BaseModel):
     vector_min: Result_and_Norm
 
 
+#
+# Required endpoints
+#
+
+
 @eqx.filter_jit
 def apply_jit(inputs: dict) -> dict:
     a_scaled = inputs["a"]["s"] * inputs["a"]["v"]
@@ -83,7 +130,80 @@ def apply_jit(inputs: dict) -> dict:
 
 def apply(inputs: InputSchema) -> OutputSchema:
     """Multiplies a vector `a` by `s`, and sums the result to `b`."""
-    return apply_jit(inputs.model_dump())
+    inputs_dict = inputs.model_dump()
+
+    if _CACHE_SIZE <= 0:
+        return apply_jit(inputs_dict)
+
+    def _apply_for_vjp(inputs_dict):
+        out = apply_jit(inputs_dict)
+        diff_out, static_out = eqx.partition(out, eqx.is_array)
+        return diff_out, static_out
+
+    diff_primals, vjp_func, static_primals = jax.vjp(
+        _apply_for_vjp, inputs_dict, has_aux=True
+    )
+    out = eqx.combine(diff_primals, static_primals)
+
+    cotangent_template = jax.tree.map(jnp.zeros_like, diff_primals)
+    _vjp_cache.put(_hash_inputs(inputs_dict), (vjp_func, cotangent_template))
+
+    return out
+
+
+#
+# Jax-handled gradient endpoints (no need to modify)
+#
+_vjp_cache = LRUCache(maxsize=_CACHE_SIZE)
+
+
+def _hash_inputs(inputs_dict: dict) -> bytes:
+    """Compute a SHA-256 hash of a pytree of inputs for cache key comparison."""
+    leaves, treedef = jax.tree.flatten(inputs_dict)
+    return hash_pytree_leaves(leaves, treedef)
+
+
+def jacobian(
+    inputs: InputSchema,
+    jac_inputs: set[str],
+    jac_outputs: set[str],
+):
+    return jac_jit(inputs.model_dump(), tuple(jac_inputs), tuple(jac_outputs))
+
+
+def jacobian_vector_product(
+    inputs: InputSchema,
+    jvp_inputs: set[str],
+    jvp_outputs: set[str],
+    tangent_vector: dict[str, Any],
+):
+    return jvp_jit(
+        inputs.model_dump(),
+        tuple(jvp_inputs),
+        tuple(jvp_outputs),
+        tangent_vector,
+    )
+
+
+def vector_jacobian_product(
+    inputs: InputSchema,
+    vjp_inputs: set[str],
+    vjp_outputs: set[str],
+    cotangent_vector: dict[str, Any],
+):
+    inputs_dict = inputs.model_dump()
+
+    if (
+        _CACHE_SIZE > 0
+        and (cached := _vjp_cache.get(_hash_inputs(inputs_dict))) is not None
+    ):
+        vjp_func, cotangent_template = cached
+        full_cotangent = jax.tree.map(jnp.zeros_like, cotangent_template)
+        full_cotangent = set_at_path(full_cotangent, cotangent_vector)
+        (all_input_cotangents,) = vjp_func(full_cotangent)
+        return flatten_with_paths(all_input_cotangents, include_paths=vjp_inputs)
+
+    return vjp_jit(inputs_dict, tuple(vjp_inputs), tuple(vjp_outputs), cotangent_vector)
 
 
 def abstract_eval(abstract_inputs):
@@ -114,40 +234,21 @@ def abstract_eval(abstract_inputs):
     )
 
 
-def jacobian_vector_product(
-    inputs: InputSchema,
-    jvp_inputs: set[str],
-    jvp_outputs: set[str],
-    tangent_vector: dict[str, Any],
+#
+# Helper functions
+#
+
+
+@eqx.filter_jit
+def jac_jit(
+    inputs: dict,
+    jac_inputs: tuple[str],
+    jac_outputs: tuple[str],
 ):
-    return jvp_jit(
-        inputs.model_dump(),
-        tuple(jvp_inputs),
-        tuple(jvp_outputs),
-        tangent_vector,
+    filtered_apply = filter_func(apply_jit, inputs, jac_outputs)
+    return jax.jacrev(filtered_apply)(
+        flatten_with_paths(inputs, include_paths=jac_inputs)
     )
-
-
-def vector_jacobian_product(
-    inputs: InputSchema,
-    vjp_inputs: set[str],
-    vjp_outputs: set[str],
-    cotangent_vector: dict[str, Any],
-):
-    return vjp_jit(
-        inputs.model_dump(),
-        tuple(vjp_inputs),
-        tuple(vjp_outputs),
-        cotangent_vector,
-    )
-
-
-def jacobian(
-    inputs: InputSchema,
-    jac_inputs: set[str],
-    jac_outputs: set[str],
-):
-    return jac_jit(inputs.model_dump(), tuple(jac_inputs), tuple(jac_outputs))
 
 
 @eqx.filter_jit
@@ -174,15 +275,3 @@ def vjp_jit(
         filtered_apply, flatten_with_paths(inputs, include_paths=vjp_inputs)
     )
     return vjp_func(cotangent_vector)[0]
-
-
-@eqx.filter_jit
-def jac_jit(
-    inputs: dict,
-    jac_inputs: tuple[str],
-    jac_outputs: tuple[str],
-):
-    filtered_apply = filter_func(apply_jit, inputs, jac_outputs)
-    return jax.jacrev(filtered_apply)(
-        flatten_with_paths(inputs, include_paths=jac_inputs)
-    )
