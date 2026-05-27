@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.9.0] - 2026-05-27
+
+### Features
+
+- Add `env:` section to `tesseract_config.yaml` to allow setting environment variables in built Tesseracts (#591)
+- Add `timeout` parameter to Python API functions (#597)
+- Add `tesseract serve --skip-health-check` argument (#596)
+
+### Bug Fixes
+
+- Better support for foreign arrays (like torch tensors) in Python API (#587)
+- Always become root at the start of docker builds (#598)
+- Add `click` to base install dependencies (#610)
+
+### Documentation
+
+- Add new landing page for Tesseract ecosystem (#562)
+- Add Tesseract Blog (#549)
+
 ## [1.8.2] - 2026-05-06
 
 ### Bug Fixes
