@@ -122,7 +122,12 @@ def test_create_apply_schema():
 def test_field_order_exported():
     InputSchema, OutputSchema = create_apply_schema(NestedModel, NestedModel)
 
-    expected = list(NestedModel.model_fields.keys())
+    expected = {
+        "": list(NestedModel.model_fields.keys()),
+        "testfoo.[]": list(SubModel.model_fields.keys()),
+        "testbar.{}": list(SubModel.model_fields.keys()),
+        "testrootmodel": ["root"],
+    }
     assert InputSchema.model_json_schema()["field_order"] == expected
     assert OutputSchema.model_json_schema()["field_order"] == expected
 

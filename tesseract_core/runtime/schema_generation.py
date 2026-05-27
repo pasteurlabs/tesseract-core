@@ -214,6 +214,19 @@ def apply_function_to_model_tree(
     return _recurse_over_model_tree(Schema, [])
 
 
+def _path_tuple_to_str(pathtuple: tuple) -> str:
+    """Convert a path tuple to a dotted string, replacing sentinels with [] / {} indexing."""
+    str_parts = []
+    for part in pathtuple:
+        if part is SEQ_INDEX_SENTINEL:
+            str_parts.append("[]")
+        elif part is DICT_INDEX_SENTINEL:
+            str_parts.append("{}")
+        else:
+            str_parts.append(part)
+    return ".".join(str_parts)
+
+
 def _serialize_diffable_arrays(
     obj: dict[tuple, Any],
 ) -> dict[str, dict[str, Any]]:
@@ -233,22 +246,17 @@ def _serialize_diffable_arrays(
         else:
             shape = tuple(shape)
 
-        # Replace sentinel values with indexing syntax
-        str_parts = []
-        for part in pathtuple:
-            if part is SEQ_INDEX_SENTINEL:
-                str_parts.append("[]")
-            elif part is DICT_INDEX_SENTINEL:
-                str_parts.append("{}")
-            else:
-                str_parts.append(part)
-
-        serialized[".".join(str_parts)] = {
+        serialized[_path_tuple_to_str(pathtuple)] = {
             "shape": shape,
             "dtype": dtype,
         }
 
     return serialized
+
+
+def _serialize_field_order(obj: dict[tuple, list[str]]) -> dict[str, list[str]]:
+    """Convert a dict {path_tuple: [field_names]} to a dict {path_str: [field_names]}."""
+    return {_path_tuple_to_str(p): fields for p, fields in obj.items()}
 
 
 def create_apply_schema(
@@ -266,10 +274,10 @@ def create_apply_schema(
         OutputSchema, filter_fn=is_differentiable
     )
 
-    # Snapshot top-level field declaration order, since JSON object key order is not
-    # guaranteed to be preserved by downstream clients (e.g. postgres).
-    input_field_order = list(InputSchema.model_fields.keys())
-    output_field_order = list(OutputSchema.model_fields.keys())
+    # Snapshot field declaration order for every (nested) model, since JSON object key order is
+    # not guaranteed to be preserved by downstream clients (e.g. postgres).
+    input_field_order = get_field_order(InputSchema)
+    output_field_order = get_field_order(OutputSchema)
 
     InputSchema = apply_function_to_model_tree(
         InputSchema,
@@ -292,11 +300,14 @@ def create_apply_schema(
         differentiable_arrays: ClassVar[dict[str, dict[str, Any]]] = (
             _serialize_diffable_arrays(diffable_input_paths)
         )
+        field_order: ClassVar[dict[str, list[str]]] = _serialize_field_order(
+            input_field_order
+        )
         model_config = ConfigDict(
             extra="forbid",
             json_schema_extra={
                 "differentiable_arrays": differentiable_arrays,
-                "field_order": input_field_order,
+                "field_order": field_order,
             },
         )
 
@@ -307,10 +318,13 @@ def create_apply_schema(
         differentiable_arrays: ClassVar[dict[str, dict[str, Any]]] = (
             _serialize_diffable_arrays(diffable_output_paths)
         )
+        field_order: ClassVar[dict[str, list[str]]] = _serialize_field_order(
+            output_field_order
+        )
         model_config = ConfigDict(
             json_schema_extra={
                 "differentiable_arrays": differentiable_arrays,
-                "field_order": output_field_order,
+                "field_order": field_order,
             },
         )
 
@@ -391,6 +405,25 @@ def get_all_model_path_patterns(
 
     apply_function_to_model_tree(schema, add_path)
     return path_to_type
+
+
+def get_field_order(schema: type[BaseModel]) -> dict[tuple, list[str]]:
+    """Return a mapping {model_path: [field_names_in_declaration_order]} for every BaseModel in the tree.
+
+    The root model is keyed by the empty tuple. Field names are collected as a side effect while
+    traversing leaf paths: any string at position `i` in a leaf path is a field of the model at
+    prefix `path[:i]`.
+    """
+    field_order_by_path: dict[tuple, dict[str, None]] = {}
+
+    def add_field(obj: T, path: tuple) -> T:
+        for i, part in enumerate(path):
+            if isinstance(part, str):
+                field_order_by_path.setdefault(path[:i], {})[part] = None
+        return obj
+
+    apply_function_to_model_tree(schema, add_field)
+    return {p: list(fields) for p, fields in field_order_by_path.items()}
 
 
 def _path_to_pattern(path: Sequence[str | object]) -> str:
