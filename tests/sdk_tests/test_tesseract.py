@@ -8,6 +8,7 @@ import requests
 from pydantic import ValidationError
 
 from tesseract_core import Tesseract
+from tesseract_core.sdk.docker_client import Container
 from tesseract_core.sdk.tesseract import (
     HTTPClient,
     _decode_array,
@@ -102,6 +103,52 @@ def test_Tesseract_from_image(mock_serving, mock_clients):
         _ = t.available_endpoints
     finally:
         t.teardown()
+
+
+def test_container_info_returns_container_during_serve(
+    mock_serving, mock_clients, mocker
+):
+    """``container_info()`` returns a fresh ``Container`` while served.
+
+    Each call delegates to ``Containers.get(container_name)``, so we
+    patch that lookup and verify the call site forwards the running
+    container's name through unchanged. Outside the serve window the
+    call must raise.
+    """
+    fake_container = Container(
+        id="container-id-123",
+        short_id="container-id",
+        name="container-id-123",
+        attrs={},
+    )
+    get_mock = mocker.patch(
+        "tesseract_core.sdk.tesseract.Containers.get",
+        return_value=fake_container,
+    )
+
+    t = Tesseract.from_image("sometesseract:0.2.3")
+
+    # Pre-serve: not yet running, so the call raises.
+    with pytest.raises(RuntimeError, match="only available for served Tesseracts"):
+        t.container_info()
+
+    with t:
+        info = t.container_info()
+        assert info is fake_container
+        get_mock.assert_called_with("container-id-123")
+
+    # Post-teardown: container is gone, so the call raises again.
+    with pytest.raises(RuntimeError, match="only available for served Tesseracts"):
+        t.container_info()
+
+
+def test_container_info_raises_for_non_image_tesseract():
+    """Tesseracts created via from_url have no Docker container backing them."""
+    t = Tesseract.from_url("http://localhost:1234")
+    with pytest.raises(
+        RuntimeError, match=r"only available when using `Tesseract\.from_image"
+    ):
+        t.container_info()
 
 
 def test_del_tesseract_triggers_teardown(mock_serving):
