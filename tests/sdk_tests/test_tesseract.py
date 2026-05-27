@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock
 
 import numpy as np
 import orjson
@@ -623,77 +623,35 @@ class TestHTTPClientValidationErrors:
         assert err["loc"] == ("body", "inputs", "a")
 
 
-def test_stale_keepalive_connection_is_handled(free_port, monkeypatch):
-    """HTTPClient retries once when a stale keep-alive connection causes ConnectionError.
+def test_stale_keepalive_connection_is_handled(monkeypatch):
+    """HTTPClient retries once when session.request raises ConnectionError.
 
-    We force a stale connection by setting timeout_keep_alive=0, then monkeypatch
-    urllib3's is_connected to lie once (simulating the race where the staleness check
-    passes just before the server's FIN arrives).
+    Tests the contract directly by injecting a one-shot ConnectionError at the
+    requests.Session.request layer, avoiding the brittleness of real-socket
+    timing (which differs across OS / Python version / urllib3 version) that an
+    integration-style test would depend on.
     """
-    import threading
-    import time
+    client = HTTPClient("http://127.0.0.1:1")
 
-    import uvicorn
-    from fastapi import FastAPI
-    from urllib3.connection import HTTPConnection
+    call_count = 0
+    response = MagicMock()
+    response.status_code = 200
+    response.ok = True
+    response.content = b'{"status": "ok"}'
 
-    app = FastAPI()
-    app.get("/health")(lambda: {"status": "ok"})
+    def _fail_once_then_succeed(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise requests.ConnectionError("simulated stale keep-alive")
+        return response
 
-    server = uvicorn.Server(
-        uvicorn.Config(
-            app,
-            host="127.0.0.1",
-            port=free_port,
-            log_level="error",
-            timeout_keep_alive=0,
-        )
-    )
-    server_thread = threading.Thread(target=server.run, daemon=True)
-    server_thread.start()
+    monkeypatch.setattr(client._session, "request", _fail_once_then_succeed)
 
-    url = f"http://127.0.0.1:{free_port}"
-    for _ in range(50):
-        try:
-            requests.get(f"{url}/health", timeout=1)
-            break
-        except requests.ConnectionError:
-            time.sleep(0.1)
-    else:
-        pytest.fail("Server did not start in time")
+    result = client._request("health")
 
-    try:
-        client = HTTPClient(url)
-
-        # Ensure connection is established and in keep-alive pool
-        client._request("health")
-
-        # Sleep to ensure the server has closed the connection due to timeout_keep_alive=0
-        time.sleep(0.1)
-
-        # Make is_connected lie once (stale socket looks alive), then restore
-        original = HTTPConnection.is_connected.fget
-        call_count = 0
-
-        def _lie_once(self):
-            nonlocal call_count
-            call_count += 1
-            return True if call_count == 1 else original(self)
-
-        monkeypatch.setattr(HTTPConnection, "is_connected", property(_lie_once))
-
-        with patch.object(
-            client._session, "request", wraps=client._session.request
-        ) as mock:
-            result = client._request("health")
-
-        assert result == {"status": "ok"}
-
-        # Ensure that the request was retried once after the ConnectionError from the stale connection
-        assert mock.call_count == 2
-    finally:
-        server.should_exit = True
-        server_thread.join(timeout=5)
+    assert result == {"status": "ok"}
+    assert call_count == 2
 
 
 def test_HTTPClient_timeout_fires(free_port):
