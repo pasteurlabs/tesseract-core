@@ -23,6 +23,7 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 from pydantic_core import InitErrorDetails, PydanticCustomError, from_json
 
 from . import engine
+from .docker_client import Container, Containers
 from .logs import LogStreamer
 
 PathLike: TypeAlias = str | Path
@@ -399,6 +400,33 @@ class Tesseract:
             a list with all available endpoints for this Tesseract.
         """
         return [endpoint.lstrip("/") for endpoint in self.openapi_schema["paths"]]
+
+    def container_info(self) -> Container:
+        """Retrieve information on the Docker container serving this Tesseract.
+
+        Tesseract must be created via `from_image` and be actively served for
+        this to be available.
+
+        Raises:
+            RuntimeError: if this Tesseract was not created via
+                :meth:`from_image` (e.g. :meth:`from_url` or
+                :meth:`from_tesseract_api`), or if it is not currently
+                being served (call :meth:`serve` or use ``with tess:``
+                first).
+            tesseract_core.sdk.docker_client.NotFound: if the container
+                disappeared between :meth:`serve` and this call.
+        """
+        if self._spawn_config is None:
+            raise RuntimeError(
+                "`container_info` is only available when using "
+                "`Tesseract.from_image(...)`."
+            )
+        if self._serve_context is None:
+            raise RuntimeError(
+                "`container_info` is only available for served Tesseracts. "
+                "Use `tess.serve()` or `with tess:` first."
+            )
+        return Containers.get(self._serve_context["container_name"])
 
     @requires_client
     def apply(

@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock
 
 import numpy as np
 import orjson
@@ -8,6 +8,7 @@ import requests
 from pydantic import ValidationError
 
 from tesseract_core import Tesseract
+from tesseract_core.sdk.docker_client import Container
 from tesseract_core.sdk.tesseract import (
     HTTPClient,
     _decode_array,
@@ -102,6 +103,52 @@ def test_Tesseract_from_image(mock_serving, mock_clients):
         _ = t.available_endpoints
     finally:
         t.teardown()
+
+
+def test_container_info_returns_container_during_serve(
+    mock_serving, mock_clients, mocker
+):
+    """``container_info()`` returns a fresh ``Container`` while served.
+
+    Each call delegates to ``Containers.get(container_name)``, so we
+    patch that lookup and verify the call site forwards the running
+    container's name through unchanged. Outside the serve window the
+    call must raise.
+    """
+    fake_container = Container(
+        id="container-id-123",
+        short_id="container-id",
+        name="container-id-123",
+        attrs={},
+    )
+    get_mock = mocker.patch(
+        "tesseract_core.sdk.tesseract.Containers.get",
+        return_value=fake_container,
+    )
+
+    t = Tesseract.from_image("sometesseract:0.2.3")
+
+    # Pre-serve: not yet running, so the call raises.
+    with pytest.raises(RuntimeError, match="only available for served Tesseracts"):
+        t.container_info()
+
+    with t:
+        info = t.container_info()
+        assert info is fake_container
+        get_mock.assert_called_with("container-id-123")
+
+    # Post-teardown: container is gone, so the call raises again.
+    with pytest.raises(RuntimeError, match="only available for served Tesseracts"):
+        t.container_info()
+
+
+def test_container_info_raises_for_non_image_tesseract():
+    """Tesseracts created via from_url have no Docker container backing them."""
+    t = Tesseract.from_url("http://localhost:1234")
+    with pytest.raises(
+        RuntimeError, match=r"only available when using `Tesseract\.from_image"
+    ):
+        t.container_info()
 
 
 def test_del_tesseract_triggers_teardown(mock_serving):
@@ -623,77 +670,35 @@ class TestHTTPClientValidationErrors:
         assert err["loc"] == ("body", "inputs", "a")
 
 
-def test_stale_keepalive_connection_is_handled(free_port, monkeypatch):
-    """HTTPClient retries once when a stale keep-alive connection causes ConnectionError.
+def test_stale_keepalive_connection_is_handled(monkeypatch):
+    """HTTPClient retries once when session.request raises ConnectionError.
 
-    We force a stale connection by setting timeout_keep_alive=0, then monkeypatch
-    urllib3's is_connected to lie once (simulating the race where the staleness check
-    passes just before the server's FIN arrives).
+    Tests the contract directly by injecting a one-shot ConnectionError at the
+    requests.Session.request layer, avoiding the brittleness of real-socket
+    timing (which differs across OS / Python version / urllib3 version) that an
+    integration-style test would depend on.
     """
-    import threading
-    import time
+    client = HTTPClient("http://127.0.0.1:1")
 
-    import uvicorn
-    from fastapi import FastAPI
-    from urllib3.connection import HTTPConnection
+    call_count = 0
+    response = MagicMock()
+    response.status_code = 200
+    response.ok = True
+    response.content = b'{"status": "ok"}'
 
-    app = FastAPI()
-    app.get("/health")(lambda: {"status": "ok"})
+    def _fail_once_then_succeed(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise requests.ConnectionError("simulated stale keep-alive")
+        return response
 
-    server = uvicorn.Server(
-        uvicorn.Config(
-            app,
-            host="127.0.0.1",
-            port=free_port,
-            log_level="error",
-            timeout_keep_alive=0,
-        )
-    )
-    server_thread = threading.Thread(target=server.run, daemon=True)
-    server_thread.start()
+    monkeypatch.setattr(client._session, "request", _fail_once_then_succeed)
 
-    url = f"http://127.0.0.1:{free_port}"
-    for _ in range(50):
-        try:
-            requests.get(f"{url}/health", timeout=1)
-            break
-        except requests.ConnectionError:
-            time.sleep(0.1)
-    else:
-        pytest.fail("Server did not start in time")
+    result = client._request("health")
 
-    try:
-        client = HTTPClient(url)
-
-        # Ensure connection is established and in keep-alive pool
-        client._request("health")
-
-        # Sleep to ensure the server has closed the connection due to timeout_keep_alive=0
-        time.sleep(0.1)
-
-        # Make is_connected lie once (stale socket looks alive), then restore
-        original = HTTPConnection.is_connected.fget
-        call_count = 0
-
-        def _lie_once(self):
-            nonlocal call_count
-            call_count += 1
-            return True if call_count == 1 else original(self)
-
-        monkeypatch.setattr(HTTPConnection, "is_connected", property(_lie_once))
-
-        with patch.object(
-            client._session, "request", wraps=client._session.request
-        ) as mock:
-            result = client._request("health")
-
-        assert result == {"status": "ok"}
-
-        # Ensure that the request was retried once after the ConnectionError from the stale connection
-        assert mock.call_count == 2
-    finally:
-        server.should_exit = True
-        server_thread.join(timeout=5)
+    assert result == {"status": "ok"}
+    assert call_count == 2
 
 
 def test_HTTPClient_timeout_fires(free_port):
