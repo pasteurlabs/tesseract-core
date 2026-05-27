@@ -1,0 +1,89 @@
+{# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+   ! SHARED FILE — tesseract-jax and tesseract-streamlit pull this       !
+   ! template from tesseract-core/main at build time via HTTP.           !
+   ! Do NOT rename or move this file. Keep changes compatible with all   !
+   ! three repos (use the is_core flag for core-only paths).             !
+   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+   Override Furo's page template to add a persistent top navigation bar
+   and support custom body classes from page metadata. In tesseract-core
+   the internal links use pathto(); in other repos they fall back to
+   absolute URLs on the live deployment. #}
+{% extends "!page.html" %}
+
+{# Base URL for tesseract-core docs (used when building other repos) #}
+{% set core_base = "https://docs.pasteurlabs.ai/projects/tesseract-core/latest/" %}
+{% set is_core = (project == "Tesseract Core") %}
+
+{% block body %}
+<nav class="top-nav" role="navigation" aria-label="Site navigation">
+  <div class="top-nav-inner">
+    <a href="{{ pathto('index') if is_core else core_base }}" class="top-nav-brand">
+      Tesseract
+    </a>
+    <input type="checkbox" id="top-nav-toggle" class="top-nav-toggle" aria-label="Toggle navigation">
+    <label for="top-nav-toggle" class="top-nav-hamburger" aria-hidden="true">
+      <span></span>
+      <span></span>
+      <span></span>
+    </label>
+    <div class="top-nav-links">
+      <a href="{{ pathto('content/introduction/get-started') if is_core else core_base + 'content/introduction/get-started.html' }}">Get Started</a>
+      <div class="top-nav-dropdown">
+        <button class="top-nav-dropdown-trigger" aria-haspopup="true" aria-expanded="false">Docs</button>
+        <div class="top-nav-dropdown-menu">
+          <a href="{{ pathto('content/introduction/index') if is_core else core_base + 'content/introduction/index.html' }}">Tesseract Core</a>
+          <a href="https://docs.pasteurlabs.ai/projects/tesseract-jax/latest/">Tesseract-JAX</a>
+          <a href="https://docs.pasteurlabs.ai/projects/tesseract-streamlit/en/latest/">Tesseract-Streamlit</a>
+        </div>
+      </div>
+      <a href="{{ pathto('content/demo/demo') if is_core else core_base + 'content/demo/demo.html' }}">Demos</a>
+      <a href="{{ pathto('blog/index') if is_core else core_base + 'blog/index.html' }}">Blog</a>
+      <a href="https://si-tesseract.discourse.group/" class="external-link">Community Forum</a>
+      <div class="top-nav-dropdown">
+        <button class="top-nav-dropdown-trigger" aria-haspopup="true" aria-expanded="false">GitHub</button>
+        <div class="top-nav-dropdown-menu">
+          <a href="https://github.com/pasteurlabs/tesseract-core" class="external-link">Tesseract Core</a>
+          <a href="https://github.com/pasteurlabs/tesseract-jax" class="external-link">Tesseract-JAX</a>
+          <a href="https://github.com/pasteurlabs/tesseract-streamlit" class="external-link">Tesseract-Streamlit</a>
+        </div>
+      </div>
+      <span class="github-star-light"><a class="github-button" href="https://github.com/pasteurlabs/tesseract-core" data-color-scheme="light: light; dark: light;" data-icon="octicon-star" data-size="large" data-show-count="true" aria-label="Star pasteurlabs/tesseract-core on GitHub">Star</a></span>
+      <span class="github-star-dark"><a class="github-button" href="https://github.com/pasteurlabs/tesseract-core" data-color-scheme="light: dark; dark: dark;" data-icon="octicon-star" data-size="large" data-show-count="true" aria-label="Star pasteurlabs/tesseract-core on GitHub">Star</a></span>
+    </div>
+  </div>
+</nav>
+{% set _page_class = meta.get("html_class", "") if meta else "" %}
+<div{% if _page_class %} class="{{ _page_class }}"{% endif %}>
+{{ super() }}
+</div>
+<script>
+// Dynamically offset sidebars so they don't overlap the top-nav.
+// When the nav scrolls out of view the offset shrinks to 0.
+(function () {
+  var nav = document.querySelector(".top-nav");
+  if (!nav) return;
+  var root = document.documentElement;
+  function update() {
+    var rect = nav.getBoundingClientRect();
+    var visible = Math.max(0, rect.bottom);
+    root.style.setProperty("--top-nav-offset", visible + "px");
+  }
+  update();
+  document.addEventListener("scroll", update, { passive: true });
+  window.addEventListener("resize", update, { passive: true });
+})();
+
+// Open external links in a new tab.
+document.addEventListener("DOMContentLoaded", function () {
+  var host = window.location.host;
+  document.querySelectorAll("a[href]").forEach(function (link) {
+    if (link.hostname && link.hostname !== host) {
+      link.setAttribute("target", "_blank");
+      link.setAttribute("rel", "noopener noreferrer");
+    }
+  });
+});
+</script>
+<script async src="https://buttons.github.io/buttons.js"></script>
+{% endblock %}

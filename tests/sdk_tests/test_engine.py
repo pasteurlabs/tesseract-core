@@ -33,6 +33,26 @@ def test_prepare_build_context(tmp_path_factory):
     assert (build_dir / "Dockerfile").exists()
 
 
+def test_prepare_build_context_env(tmp_path_factory):
+    """Test that env variables are rendered as ENV lines in the Dockerfile."""
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "tesseract_api.py").touch()
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(
+        name="foobar",
+        env={
+            "XLA_PYTHON_CLIENT_PREALLOCATE": "false",
+            "MY_VAR": "hello world",
+        },
+    )
+
+    engine.prepare_build_context(src_dir, build_dir, config)
+    dockerfile = (build_dir / "Dockerfile").read_text()
+    assert 'ENV XLA_PYTHON_CLIENT_PREALLOCATE="false"' in dockerfile
+    assert 'ENV MY_VAR="hello world"' in dockerfile
+
+
 def test_prepare_build_context_external_package_data(tmp_path_factory):
     """Test package_data from outside the Tesseract directory is copied correctly."""
     # Create a parent directory with src and external subdirectories
@@ -397,6 +417,24 @@ def test_serve_tesseracts(mocked_docker):
     engine.teardown(json.loads(container_name_with_memory)["name"])
 
 
+def test_serve_skip_health_check(mocked_docker, monkeypatch):
+    """Test serving a tesseract with --skip-health-check."""
+    health_called = False
+
+    def health_get_spy(url, *args, **kwargs):
+        nonlocal health_called
+        if url.endswith("/health"):
+            health_called = True
+            return type("Response", (), {"status_code": 200, "json": lambda: {}})()
+        raise NotImplementedError(f"Mocked get request to {url} not implemented")
+
+    monkeypatch.setattr(engine.requests, "get", health_get_spy)
+
+    res, _ = engine.serve("foobar", skip_health_check=True)
+    assert res
+    assert not health_called
+
+
 def test_serve_memory(mocked_docker):
     """Test serving a tesseract with memory limit."""
     res, _ = engine.serve(
@@ -588,3 +626,34 @@ def test_parse_requirements(tmpdir):
         "--find-links https://data.pyg.org/whl/torch-2.5.1+cpu.html",
         "torch_scatter==2.1.2+pt25cpu",
     ]
+
+
+@pytest.mark.parametrize(
+    "spec, expected",
+    [
+        ("/foo:/bar:ro", ["/foo", "/bar", "ro"]),
+        ("/foo:/bar", ["/foo", "/bar"]),
+        ("./foo:/bar:rw", ["./foo", "/bar", "rw"]),
+        ("myvolume:/bar", ["myvolume", "/bar"]),
+        ("C:\\Users\\foo:/bar:ro", ["C:\\Users\\foo", "/bar", "ro"]),
+        ("C:\\Users\\foo:/bar", ["C:\\Users\\foo", "/bar"]),
+        ("D:/data:/mnt/data:rw", ["D:/data", "/mnt/data", "rw"]),
+    ],
+)
+def test_split_volume_spec(spec, expected):
+    assert engine._split_volume_spec(spec) == expected
+
+
+@pytest.mark.parametrize(
+    "volume, expected",
+    [
+        ("/foo/bar", True),
+        ("./foo", True),
+        ("../foo", True),
+        ("myvolume", False),
+        ("C:\\Users\\foo", True),
+        ("D:/data", True),
+    ],
+)
+def test_is_local_volume(volume, expected):
+    assert engine._is_local_volume(volume) == expected

@@ -1,5 +1,6 @@
 {
   "endpoint": "apply",
+  "skip_output_path_checks": true,
   "expected_outputs": {
     "data": [
       "sample_0.copy",

@@ -6,8 +6,10 @@ End-to-end examples that show Tesseracts in action — from optimization workflo
 :maxdepth: 1
 :hidden:
 
-data-assimilation-4dvar.ipynb
+data-assimilation.ipynb
 lorenz_tesseract.md
+cfd-optimization.ipynb
+fem-shape-optimization.ipynb
 JAX Rosenbrock Minimization <https://si-tesseract.discourse.group/t/jax-based-rosenbrock-function-minimization/48>
 PyTorch Rosenbrock Minimization <https://si-tesseract.discourse.group/t/pytorch-based-rosenbrock-function-minimization/44>
 JAX RBF Fitting <https://si-tesseract.discourse.group/t/jax-auto-diff-templates-gaussian-radial-basis-function-fitting/51>
@@ -27,7 +29,7 @@ A complete 4D-Variational data assimilation scheme for a chaotic dynamical syste
 :gutter: 2
 
 :::{grid-item-card} 4D-Var Data Assimilation
-:link: data-assimilation-4dvar.html
+:link: data-assimilation.html
 
 Full walkthrough of a 4D-Var scheme using a differentiable Lorenz-96 Tesseract — from building the Tesseract to running the optimization loop.
 :::
@@ -35,6 +37,26 @@ Full walkthrough of a 4D-Var scheme using a differentiable Lorenz-96 Tesseract �
 :link: lorenz_tesseract.html
 
 Detailed implementation of the JAX-based Lorenz-96 solver Tesseract used in the 4D-Var demo.
+:::
+
+::::
+
+## Simulation & design optimization demos
+
+End-to-end differentiable optimization through physics simulators, using Tesseract-JAX to compose Tesseracts with JAX code.
+
+::::{grid} 2
+:gutter: 2
+
+:::{grid-item-card} CFD Flow Optimization
+:link: cfd-optimization.html
+
+Optimize the initial velocity field of a 2D Navier-Stokes simulation so its vorticity evolves into a target image — gradient-based optimization through a JAX-CFD Tesseract.
+:::
+:::{grid-item-card} FEM Shape Optimization
+:link: fem-shape-optimization.html
+
+Compose a geometry Tesseract (PyVista, finite-difference gradients) with a FEM Tesseract (jax-fem) to optimize structural bar configurations for minimum compliance.
 :::
 
 ::::

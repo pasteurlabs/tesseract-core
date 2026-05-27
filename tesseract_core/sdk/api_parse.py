@@ -66,7 +66,9 @@ EXPECTED_OBJECTS = (
 
 def assert_relative_path(value: str) -> str:
     """Assert that a string encodes a relative path."""
-    if Path(value).is_absolute():
+    from pathlib import PurePosixPath, PureWindowsPath
+
+    if PurePosixPath(value).is_absolute() or PureWindowsPath(value).is_absolute():
         raise ValueError(f"value must be a relative path (got {value})")
     return value
 
@@ -166,6 +168,14 @@ class TesseractConfig(BaseModel, validate_assignment=True):
     build_config: OptionalBuildConfig = Field(
         default_factory=TesseractBuildConfig,
         description="Configuration options for building the Tesseract.",
+    )
+    env: dict[StrictStr, StrictStr] = Field(
+        default_factory=dict,
+        description=(
+            "Environment variables to set in the Docker image. "
+            "Rendered as ``ENV`` lines in the Dockerfile. "
+            "Example: ``{XLA_PYTHON_CLIENT_PREALLOCATE: 'false'}``"
+        ),
     )
     metadata: dict[str, Any] = Field(
         default_factory=dict,
