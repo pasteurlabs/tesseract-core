@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 120" fill="none">
+  <!-- FEM Shape Optimization: θ → Design Tesseract → SDF → ρ → FEM Tesseract → compliance -->
+
+  <!-- Design parameters -->
+  <text x="24" y="12" text-anchor="middle" font-family="system-ui, sans-serif" font-size="7.5" fill="#555">θ (shape)</text>
+
+  <!-- Design Tesseract (PyVista + FD) -->
+  <rect x="4" y="20" width="48" height="44" rx="6" stroke="#222" stroke-width="1.2"/>
+  <!-- Bar geometry icon -->
+  <line x1="14" y1="32" x2="42" y2="32" stroke="#222" stroke-width="1.2"/>
+  <line x1="14" y1="42" x2="38" y2="38" stroke="#222" stroke-width="1.2"/>
+  <line x1="14" y1="52" x2="42" y2="48" stroke="#222" stroke-width="1.2"/>
+  <text x="28" y="60" text-anchor="middle" font-family="system-ui, sans-serif" font-size="6" fill="#555">g(θ)</text>
+
+  <!-- Arrow: design → SDF/ρ -->
+  <line x1="52" y1="42" x2="70" y2="42" stroke="#222" stroke-width="1"/>
+  <polygon points="70,39 76,42 70,45" fill="#222"/>
+  <text x="64" y="36" text-anchor="middle" font-family="system-ui, sans-serif" font-size="6" fill="#555">SDF</text>
+
+  <!-- Local JAX: SDF → ρ -->
+  <rect x="78" y="28" width="36" height="28" rx="4" stroke="#222" stroke-width="0.8" stroke-dasharray="2 1.5"/>
+  <text x="96" y="40" text-anchor="middle" font-family="system-ui, sans-serif" font-size="7" fill="#555">σ(SDF)</text>
+  <text x="96" y="50" text-anchor="middle" font-family="system-ui, sans-serif" font-size="6" fill="#555">→ ρ</text>
+
+  <!-- Arrow: ρ → FEM -->
+  <line x1="114" y1="42" x2="132" y2="42" stroke="#222" stroke-width="1"/>
+  <polygon points="132,39 138,42 132,45" fill="#222"/>
+  <text x="126" y="36" text-anchor="middle" font-family="system-ui, sans-serif" font-size="6" fill="#555">ρ</text>
+
+  <!-- FEM Tesseract -->
+  <rect x="140" y="20" width="48" height="44" rx="6" stroke="#222" stroke-width="1.2"/>
+  <!-- FEM mesh icon -->
+  <line x1="150" y1="30" x2="178" y2="30" stroke="#222" stroke-width="0.5"/>
+  <line x1="150" y1="38" x2="178" y2="38" stroke="#222" stroke-width="0.5"/>
+  <line x1="150" y1="46" x2="178" y2="46" stroke="#222" stroke-width="0.5"/>
+  <line x1="156" y1="28" x2="156" y2="48" stroke="#222" stroke-width="0.5"/>
+  <line x1="164" y1="28" x2="164" y2="48" stroke="#222" stroke-width="0.5"/>
+  <line x1="172" y1="28" x2="172" y2="48" stroke="#222" stroke-width="0.5"/>
+  <text x="164" y="60" text-anchor="middle" font-family="system-ui, sans-serif" font-size="6" fill="#555">f(ρ)</text>
+
+  <!-- Arrow: FEM → compliance -->
+  <line x1="188" y1="42" x2="206" y2="42" stroke="#222" stroke-width="1"/>
+  <polygon points="206,39 212,42 206,45" fill="#222"/>
+
+  <!-- Compliance result -->
+  <rect x="214" y="20" width="62" height="44" rx="6" stroke="#222" stroke-width="1.2"/>
+  <!-- Descending curve icon -->
+  <line x1="224" y1="55" x2="266" y2="55" stroke="#555" stroke-width="0.6"/>
+  <line x1="224" y1="55" x2="224" y2="28" stroke="#555" stroke-width="0.6"/>
+  <path d="M 226,32 C 234,34 240,45 248,49 C 254,51 260,52 264,53" stroke="#222" stroke-width="1.2" fill="none"/>
+  <text x="245" y="60" text-anchor="middle" font-family="system-ui, sans-serif" font-size="6" fill="#555">compliance ↓</text>
+
+  <!-- Gradient arrow (backprop through both Tesseracts) -->
+  <line x1="212" y1="80" x2="10" y2="80" stroke="#222" stroke-width="0.8" stroke-dasharray="3 2"/>
+  <polygon points="10,77 4,80 10,83" fill="#222"/>
+  <text x="111" y="76" text-anchor="middle" font-family="system-ui, sans-serif" font-size="6.5" fill="#555">∇ end-to-end (through both Tesseracts)</text>
+
+  <!-- Labels for Tesseracts -->
+  <text x="28" y="100" text-anchor="middle" font-family="system-ui, sans-serif" font-size="6.5" fill="#555">PyVista + FD</text>
+  <text x="164" y="100" text-anchor="middle" font-family="system-ui, sans-serif" font-size="6.5" fill="#555">jax-fem</text>
+</svg>

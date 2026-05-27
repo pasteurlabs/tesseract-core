@@ -135,6 +135,19 @@ you can make your ssh agent available to `tesseract build` with the option
 `--forward-ssh-agent`. Alternatively you can use `pip download` to download a dependency
 to the machine that builds the Tesseract.
 
+## Setting environment variables
+
+Use the top-level `env` field in `tesseract_config.yaml` to set environment variables in the container. These are baked into the Docker image as `ENV` directives and available at both build time (during `RUN` steps after injection) and runtime.
+
+```yaml
+# tesseract_config.yaml
+env:
+  XLA_PYTHON_CLIENT_PREALLOCATE: "false"
+  OMP_NUM_THREADS: "4"
+```
+
+This is useful for tuning framework behavior (e.g., JAX memory allocation, OpenMP thread counts) without modifying your code. You can also override or extend these at runtime with `tesseract serve --env` or `tesseract run --env`.
+
 ## Customizing the build process
 
 The `build_config` section of [`tesseract_config.yaml`](../api/config.md) controls how the Tesseract image is built. Common reasons to customize it:

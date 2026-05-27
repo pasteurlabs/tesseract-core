@@ -53,6 +53,7 @@ class TestSpec(BaseModel):
     expected_exception_regex: str | None = None
     atol: float = 1e-8
     rtol: float = 1e-5
+    skip_output_path_checks: bool = False
     cli_config: TestCliConfig | None = None
 
     @field_validator("expected_exception", mode="before")
@@ -549,8 +550,15 @@ def regress_test_case(
             validation_context["input_keys"] = test_spec.payload.get("vjp_inputs", [])
 
         # Do not cast shapes/dtypes when validating expected_outputs,
-        # since we want to catch mismatches as structural errors
-        validation_context.update({"strict_shapes": True, "strict_types": True})
+        # since we want to catch mismatches as structural errors.
+        # skip_path_checks: expected output paths may not exist yet.
+        validation_context.update(
+            {
+                "strict_shapes": True,
+                "strict_types": True,
+                "skip_path_checks": test_spec.skip_output_path_checks,
+            }
+        )
 
         try:
             expected_outputs = OutputSchema.model_validate(

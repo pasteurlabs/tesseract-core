@@ -571,6 +571,17 @@ def serve(
             ),
         ),
     ] = False,
+    skip_health_check: Annotated[
+        bool,
+        typer.Option(
+            "--skip-health-check",
+            help=(
+                "Skip the startup health check. Useful for Tesseracts with slow "
+                "initialization (e.g., Julia runtime startup, large model loading). "
+                "The caller is responsible for ensuring readiness, e.g. by polling /health."
+            ),
+        ),
+    ] = False,
     user: Annotated[
         str | None,
         typer.Option(
@@ -669,6 +680,7 @@ def serve(
             output_path=output_path,
             output_format=_enum_to_val(output_format),
             docker_args=shlex.split(docker_args) if docker_args else None,
+            skip_health_check=skip_health_check,
         )
     except RuntimeError as ex:
         raise UserError(
@@ -903,9 +915,12 @@ def _extract_cli_config(
         if not Path(input_path).is_absolute():
             input_path = str(base_dir / input_path)
 
+    from tesseract_core.sdk.engine import _split_volume_spec
+
     volume_mounts = []
     for vol_mount in cli_config.get("volume_mounts", []):
-        if not Path(vol_mount.split(":", 1)[0]).is_absolute():
+        source = _split_volume_spec(vol_mount)[0]
+        if not Path(source).is_absolute():
             volume_mounts.append(str(base_dir / vol_mount))
         else:
             volume_mounts.append(vol_mount)

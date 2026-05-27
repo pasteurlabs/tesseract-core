@@ -155,6 +155,7 @@ def test_serve_lifecycle(mock_serving, mock_clients):
         "output_format": "json+base64",
         "docker_args": None,
         "runtime_config": None,
+        "skip_health_check": False,
     }
 
     for key, expected_value in expected_kwargs.items():
@@ -200,7 +201,68 @@ def test_HTTPClient_run_tesseract(mocker, run_id):
         url="http://somehost/apply",
         data=orjson.dumps({"inputs": {"a": 1}}),
         params=expected_params,
+        timeout=None,
     )
+
+
+def test_HTTPClient_timeout_passed_to_request(mocker):
+    """HTTPClient passes its timeout to every requests.Session.request call."""
+    mock_response = mocker.Mock()
+    mock_response.content = b'{"status": "ok"}'
+    mock_response.ok = True
+    mock_response.status_code = 200
+
+    mocked_request = mocker.patch(
+        "requests.Session.request",
+        return_value=mock_response,
+    )
+
+    client = HTTPClient("somehost", timeout=42)
+    client.run_tesseract("health")
+
+    mocked_request.assert_called_with(
+        method="GET",
+        url="http://somehost/health",
+        data=b"null",
+        params={},
+        timeout=42,
+    )
+
+
+def test_HTTPClient_default_timeout(mocker):
+    """HTTPClient has no timeout by default."""
+    mock_response = mocker.Mock()
+    mock_response.content = b'{"status": "ok"}'
+    mock_response.ok = True
+    mock_response.status_code = 200
+
+    mocked_request = mocker.patch(
+        "requests.Session.request",
+        return_value=mock_response,
+    )
+
+    client = HTTPClient("somehost")
+    client.run_tesseract("health")
+
+    assert mocked_request.call_args.kwargs["timeout"] is None
+
+
+def test_HTTPClient_timeout_tuple(mocker):
+    """HTTPClient accepts a (connect, read) timeout tuple."""
+    mock_response = mocker.Mock()
+    mock_response.content = b'{"status": "ok"}'
+    mock_response.ok = True
+    mock_response.status_code = 200
+
+    mocked_request = mocker.patch(
+        "requests.Session.request",
+        return_value=mock_response,
+    )
+
+    client = HTTPClient("somehost", timeout=(5, 300))
+    client.run_tesseract("health")
+
+    assert mocked_request.call_args.kwargs["timeout"] == (5, 300)
 
 
 def test_HTTPClient_run_tesseract_raises_validation_error(mocker):
@@ -328,7 +390,7 @@ def test_tree_map():
         "f": "hello",
     }
 
-    encoded = _tree_map(_encode_array, tree, is_leaf=lambda x: hasattr(x, "shape"))
+    encoded = _tree_map(_encode_array, tree, is_leaf=lambda x: hasattr(x, "__array__"))
 
     assert encoded == {
         "a": [10, 20],
@@ -351,6 +413,54 @@ def test_tree_map():
         },
         "f": "hello",
     }
+
+
+class _ForeignDtype:
+    """Mimics torch.float32 — has no .name attribute unlike numpy dtypes."""
+
+    pass
+
+
+class _ForeignTensor:
+    """Mimics a torch tensor: has .shape, a non-numpy dtype, and supports __array__."""
+
+    def __init__(self, data):
+        self._data = np.array(data, dtype=np.float32)
+        self.shape = self._data.shape
+        self.dtype = _ForeignDtype()
+
+    def __array__(self, dtype=None, copy=None):
+        if dtype is not None:
+            return self._data.astype(dtype)
+        return self._data
+
+
+def test_encode_array_foreign_tensor():
+    """_encode_array should handle non-numpy array-likes (e.g. torch tensors)."""
+    tensor = _ForeignTensor([1.0, 2.0, 3.0])
+    encoded = _encode_array(tensor)
+
+    assert encoded["shape"] == (3,)
+    assert encoded["dtype"] == "float32"
+    assert encoded["data"]["encoding"] == "base64"
+
+    decoded = _decode_array(encoded)
+    np.testing.assert_array_equal(decoded, [1.0, 2.0, 3.0])
+
+
+def test_tree_map_with_foreign_tensor():
+    """tree_map + _encode_array should work when payloads contain non-numpy arrays."""
+    tensor = _ForeignTensor([4.0, 5.0])
+    tree = {"inputs": {"x": tensor, "flag": True}}
+
+    encoded = _tree_map(_encode_array, tree, is_leaf=lambda x: hasattr(x, "__array__"))
+
+    assert encoded["inputs"]["flag"] is True
+    assert encoded["inputs"]["x"]["shape"] == (2,)
+    assert encoded["inputs"]["x"]["dtype"] == "float32"
+
+    decoded = _decode_array(encoded["inputs"]["x"])
+    np.testing.assert_array_equal(decoded, [4.0, 5.0])
 
 
 def test_test_endpoint_success_local(dummy_tesseract_package):
@@ -583,4 +693,34 @@ def test_stale_keepalive_connection_is_handled(free_port, monkeypatch):
         assert mock.call_count == 2
     finally:
         server.should_exit = True
+        server_thread.join(timeout=5)
+
+
+def test_HTTPClient_timeout_fires(free_port):
+    """HTTPClient raises a timeout error when the server takes too long to respond."""
+    import http.server
+    import socketserver
+    import threading
+
+    shutdown = threading.Event()
+
+    class SlowHandler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            shutdown.wait(timeout=10)
+
+        def log_message(self, *args):
+            pass  # suppress stderr noise
+
+    httpd = socketserver.TCPServer(("127.0.0.1", free_port), SlowHandler)
+    httpd.daemon_threads = True
+    server_thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    server_thread.start()
+
+    try:
+        client = HTTPClient(f"http://127.0.0.1:{free_port}", timeout=0.5)
+        with pytest.raises(requests.exceptions.ReadTimeout):
+            client._request("health")
+    finally:
+        shutdown.set()
+        httpd.shutdown()
         server_thread.join(timeout=5)
