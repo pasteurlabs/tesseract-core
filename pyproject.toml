@@ -8,6 +8,7 @@ authors = [
 license = { text = "Apache-2.0" }
 requires-python = ">=3.10,<3.15"
 dependencies = [
+    "click",
     "jinja2",
     "rich",
     "typer",
