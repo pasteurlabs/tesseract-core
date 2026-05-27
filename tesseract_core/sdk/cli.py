@@ -941,7 +941,6 @@ def _extract_cli_config(
 )
 @engine.needs_docker
 def run_container(
-    context: click.Context,
     tesseract_image: Annotated[
         str | None,
         typer.Argument(
@@ -1125,7 +1124,7 @@ def run_container(
 
     if not tesseract_image:
         if invoke_help:
-            context.get_help()
+            click.get_current_context().get_help()
             return
         raise typer.BadParameter(
             "Tesseract image name is required.",
@@ -1134,7 +1133,7 @@ def run_container(
 
     if not cmd:
         if invoke_help:
-            context.get_help()
+            click.get_current_context().get_help()
             return
         else:
             error_string = f"Command is required. Are you sure your Tesseract image name is `{tesseract_image}`?"

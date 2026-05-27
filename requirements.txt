@@ -9,7 +9,9 @@ certifi==2026.5.20
 charset-normalizer==3.4.7
     # via requests
 click==8.4.1
-    # via typer
+    # via
+    #   tesseract-core
+    #   typer
 colorama==0.4.6 ; sys_platform == 'win32'
     # via click
 idna==3.16
