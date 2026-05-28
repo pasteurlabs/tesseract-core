@@ -11,14 +11,13 @@ shared VJP residual caching across ``apply`` and ``vector_jacobian_product``.
 
 Cache behaviour
 ---------------
-When ``JAX_CACHE_SIZE > 0`` (the default), :func:`jax_apply` runs ``jax.vjp``
-internally and stashes the resulting backward function in :data:`jax_vjp_cache`.
-A subsequent :func:`jax_vjp` call on the same inputs reuses that backward,
-skipping the redundant forward pass — typically a 10-20% saving on
-moderate-to-deep networks. Set ``JAX_CACHE_SIZE = 0`` (or call
-:func:`set_jax_cache_size` with ``0``) to disable caching entirely; both
-``jax_apply`` and ``jax_vjp`` then bypass the cache machinery and run their
-forward passes directly.
+By default :func:`jax_apply` runs ``jax.vjp`` internally and stashes the
+resulting backward function in :data:`jax_vjp_cache`. A subsequent
+:func:`jax_vjp` call on the same inputs reuses that backward, skipping the
+redundant forward pass — typically a 10-20% saving on moderate-to-deep
+networks. Call :func:`set_jax_cache_size` with ``0`` to disable caching
+entirely; both :func:`jax_apply` and :func:`jax_vjp` then bypass the cache
+machinery and run their forward passes directly.
 """
 
 from collections.abc import Callable
@@ -37,19 +36,19 @@ from tesseract_core.runtime.tree_transforms import (
     set_at_path,
 )
 
-#: Default size of the VJP residual cache. Override via
-#: :func:`set_jax_cache_size` to rebuild :data:`jax_vjp_cache` at a new size.
-JAX_CACHE_SIZE = 1
+# Default size of the VJP residual cache. Use :func:`set_jax_cache_size` to
+# change at runtime; do not mutate this directly.
+_jax_cache_size = 1
 
 #: Module-level VJP residual cache. ``jax_apply`` populates it; ``jax_vjp``
-#: reads from it. Constructed at import using :data:`JAX_CACHE_SIZE`.
-jax_vjp_cache = LRUCache(maxsize=JAX_CACHE_SIZE)
+#: reads from it.
+jax_vjp_cache = LRUCache(maxsize=_jax_cache_size)
 
 
 def set_jax_cache_size(size: int) -> None:
     """Resize the VJP cache. Discards any existing entries."""
-    global JAX_CACHE_SIZE, jax_vjp_cache
-    JAX_CACHE_SIZE = size
+    global _jax_cache_size, jax_vjp_cache
+    _jax_cache_size = size
     jax_vjp_cache = LRUCache(maxsize=size)
 
 
@@ -63,12 +62,12 @@ def jax_apply(apply_jit: Callable, inputs: BaseModel) -> dict:
     """Run ``apply_jit`` and populate the VJP cache.
 
     A subsequent :func:`jax_vjp` call on the same input reuses the cached
-    backward. With ``JAX_CACHE_SIZE <= 0`` this is just
-    ``apply_jit(inputs.model_dump())``.
+    backward. When caching is disabled (see :func:`set_jax_cache_size`),
+    this is just ``apply_jit(inputs.model_dump())``.
     """
     inputs_dict = inputs.model_dump()
 
-    if JAX_CACHE_SIZE <= 0:
+    if _jax_cache_size <= 0:
         return apply_jit(inputs_dict)
 
     # Compute forward pass via jax.vjp to cache residuals for a potential
@@ -109,7 +108,7 @@ def jax_vjp(
     # value_and_grad is followed by jax.jacrev, which decomposes into many
     # vjp calls per output basis vector.
     if (
-        JAX_CACHE_SIZE > 0
+        _jax_cache_size > 0
         and (cached := jax_vjp_cache.get(_hash_inputs(inputs_dict))) is not None
     ):
         vjp_func, cotangent_template = cached

@@ -12,7 +12,6 @@ See ``tesseract_core.runtime.gradient_recipes.jax`` for JAX-backed helpers.
 """
 
 from tesseract_core.runtime.gradient_recipes.jax import (
-    JAX_CACHE_SIZE,
     jax_abstract_eval,
     jax_apply,
     jax_jacobian,
@@ -23,7 +22,6 @@ from tesseract_core.runtime.gradient_recipes.jax import (
 )
 
 __all__ = [
-    "JAX_CACHE_SIZE",
     "jax_abstract_eval",
     "jax_apply",
     "jax_jacobian",
