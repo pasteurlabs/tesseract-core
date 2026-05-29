@@ -19,7 +19,7 @@ from tesseract_core.runtime.gradient_endpoints.jax_recipes import (
 )
 
 # VJP residual caching is enabled by default and gives a ~10-20% speedup on
-# the typical tesseract-jax apply → vjp pattern. See the docstring of
+# the typical tesseract-jax apply -> vjp pattern. See the docstring of
 # `set_jax_vjp_cache_size` for the full when-it-helps taxonomy. To disable
 # or resize, uncomment below:
 #

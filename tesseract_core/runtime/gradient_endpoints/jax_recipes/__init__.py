@@ -12,8 +12,8 @@ the helpers compose the JAX transforms around it.
 
 VJP residual caching is enabled by default: :func:`jax_apply` stashes the
 backward function it constructs and :func:`jax_vjp` reuses it on the next
-matching call — typically a ~10-20% speedup on the standard tesseract-jax
-``apply → vjp`` pattern (which is hit by ``jax.value_and_grad``,
+matching call -- typically a ~10-20% speedup on the standard tesseract-jax
+``apply -> vjp`` pattern (which is hit by ``jax.value_and_grad``,
 ``jax.jacrev``, and even plain ``jax.grad`` since tesseract-jax's
 ``custom_vjp.fwd`` always runs ``apply()`` first). Call
 :func:`set_jax_vjp_cache_size` with ``0`` to disable. See its docstring
@@ -38,7 +38,7 @@ from tesseract_core.runtime.tree_transforms import (
 
 #: Module-level VJP residual cache. ``jax_apply`` populates it; ``jax_vjp``
 #: reads from it. Set to ``None`` (via :func:`set_jax_vjp_cache_size` with
-#: ``0``) to disable caching — both helpers then bypass the cache machinery
+#: ``0``) to disable caching -- both helpers then bypass the cache machinery
 #: entirely.
 jax_vjp_cache: LRUCache | None = LRUCache(maxsize=1)
 
@@ -56,7 +56,7 @@ def set_jax_vjp_cache_size(size: int) -> None:
     Best fit:
       - tesseract-jax workflows that go through ``custom_vjp`` (every
         gradient evaluation runs ``apply()`` first via ``fwd``, so the
-        cache reliably hits on the subsequent ``vjp()`` — true even
+        cache reliably hits on the subsequent ``vjp()`` -- true even
         under plain ``jax.grad``).
       - Manual ``apply()`` followed by multiple ``vjp()`` calls on the
         same inputs (e.g. iterative solvers, CG-style inverse problems).
@@ -67,7 +67,7 @@ def set_jax_vjp_cache_size(size: int) -> None:
 
     Args:
         size: Number of cache slots. ``1`` (the default) covers the standard
-            apply → vjp pattern. ``0`` disables caching entirely (both
+            apply -> vjp pattern. ``0`` disables caching entirely (both
             :func:`jax_apply` and :func:`jax_vjp` then bypass the cache
             machinery). Increase for workflows that interleave multiple
             ``apply()`` calls before their corresponding ``vjp()`` calls.
@@ -84,7 +84,7 @@ def hash_tree(tree: Any) -> bytes:
     different interpretations (e.g. ``int64[4]`` vs ``int64[2,2]``) don't
     collide. Scalar and primitive leaves use Python's ``hash()`` except for
     ``str``/``bytes`` (whose hash is randomized across processes by Python's
-    PYTHONHASHSEED — we encode them directly instead).
+    PYTHONHASHSEED -- we encode them directly instead).
     """
     leaves, treedef = jax.tree.flatten(tree)
     h = hashlib.sha256()
@@ -156,7 +156,7 @@ def jax_vjp(
     inputs_dict = inputs.model_dump()
 
     # Use get (not pop) so the cached residuals can serve multiple sequential
-    # vjp calls on the same inputs — for example, when tesseract-jax's
+    # vjp calls on the same inputs -- for example, when tesseract-jax's
     # value_and_grad is followed by jax.jacrev, which decomposes into many
     # vjp calls per output basis vector.
     if (

@@ -714,7 +714,7 @@ class TestLRUCache:
         cache = LRUCache(maxsize=2)
         cache.put(b"a", "value_a")
         cache.put(b"b", "value_b")
-        # Touch "a" via get — should make it MRU.
+        # Touch "a" via get -- should make it MRU.
         assert cache.get(b"a") == "value_a"
         # Adding "c" should now evict "b", not "a".
         cache.put(b"c", "value_c")
