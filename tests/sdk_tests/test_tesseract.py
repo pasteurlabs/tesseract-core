@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock
 
 import numpy as np
 import orjson
@@ -8,6 +8,7 @@ import requests
 from pydantic import ValidationError
 
 from tesseract_core import Tesseract
+from tesseract_core.sdk.docker_client import Container
 from tesseract_core.sdk.tesseract import (
     HTTPClient,
     _decode_array,
@@ -104,6 +105,52 @@ def test_Tesseract_from_image(mock_serving, mock_clients):
         t.teardown()
 
 
+def test_container_info_returns_container_during_serve(
+    mock_serving, mock_clients, mocker
+):
+    """``container_info()`` returns a fresh ``Container`` while served.
+
+    Each call delegates to ``Containers.get(container_name)``, so we
+    patch that lookup and verify the call site forwards the running
+    container's name through unchanged. Outside the serve window the
+    call must raise.
+    """
+    fake_container = Container(
+        id="container-id-123",
+        short_id="container-id",
+        name="container-id-123",
+        attrs={},
+    )
+    get_mock = mocker.patch(
+        "tesseract_core.sdk.tesseract.Containers.get",
+        return_value=fake_container,
+    )
+
+    t = Tesseract.from_image("sometesseract:0.2.3")
+
+    # Pre-serve: not yet running, so the call raises.
+    with pytest.raises(RuntimeError, match="only available for served Tesseracts"):
+        t.container_info()
+
+    with t:
+        info = t.container_info()
+        assert info is fake_container
+        get_mock.assert_called_with("container-id-123")
+
+    # Post-teardown: container is gone, so the call raises again.
+    with pytest.raises(RuntimeError, match="only available for served Tesseracts"):
+        t.container_info()
+
+
+def test_container_info_raises_for_non_image_tesseract():
+    """Tesseracts created via from_url have no Docker container backing them."""
+    t = Tesseract.from_url("http://localhost:1234")
+    with pytest.raises(
+        RuntimeError, match=r"only available when using `Tesseract\.from_image"
+    ):
+        t.container_info()
+
+
 def test_del_tesseract_triggers_teardown(mock_serving):
     """Deleting a served Tesseract must tear down its container via weakref.finalize."""
     import gc
@@ -155,6 +202,7 @@ def test_serve_lifecycle(mock_serving, mock_clients):
         "output_format": "json+base64",
         "docker_args": None,
         "runtime_config": None,
+        "skip_health_check": False,
     }
 
     for key, expected_value in expected_kwargs.items():
@@ -200,7 +248,68 @@ def test_HTTPClient_run_tesseract(mocker, run_id):
         url="http://somehost/apply",
         data=orjson.dumps({"inputs": {"a": 1}}),
         params=expected_params,
+        timeout=None,
     )
+
+
+def test_HTTPClient_timeout_passed_to_request(mocker):
+    """HTTPClient passes its timeout to every requests.Session.request call."""
+    mock_response = mocker.Mock()
+    mock_response.content = b'{"status": "ok"}'
+    mock_response.ok = True
+    mock_response.status_code = 200
+
+    mocked_request = mocker.patch(
+        "requests.Session.request",
+        return_value=mock_response,
+    )
+
+    client = HTTPClient("somehost", timeout=42)
+    client.run_tesseract("health")
+
+    mocked_request.assert_called_with(
+        method="GET",
+        url="http://somehost/health",
+        data=b"null",
+        params={},
+        timeout=42,
+    )
+
+
+def test_HTTPClient_default_timeout(mocker):
+    """HTTPClient has no timeout by default."""
+    mock_response = mocker.Mock()
+    mock_response.content = b'{"status": "ok"}'
+    mock_response.ok = True
+    mock_response.status_code = 200
+
+    mocked_request = mocker.patch(
+        "requests.Session.request",
+        return_value=mock_response,
+    )
+
+    client = HTTPClient("somehost")
+    client.run_tesseract("health")
+
+    assert mocked_request.call_args.kwargs["timeout"] is None
+
+
+def test_HTTPClient_timeout_tuple(mocker):
+    """HTTPClient accepts a (connect, read) timeout tuple."""
+    mock_response = mocker.Mock()
+    mock_response.content = b'{"status": "ok"}'
+    mock_response.ok = True
+    mock_response.status_code = 200
+
+    mocked_request = mocker.patch(
+        "requests.Session.request",
+        return_value=mock_response,
+    )
+
+    client = HTTPClient("somehost", timeout=(5, 300))
+    client.run_tesseract("health")
+
+    assert mocked_request.call_args.kwargs["timeout"] == (5, 300)
 
 
 def test_HTTPClient_run_tesseract_raises_validation_error(mocker):
@@ -328,7 +437,7 @@ def test_tree_map():
         "f": "hello",
     }
 
-    encoded = _tree_map(_encode_array, tree, is_leaf=lambda x: hasattr(x, "shape"))
+    encoded = _tree_map(_encode_array, tree, is_leaf=lambda x: hasattr(x, "__array__"))
 
     assert encoded == {
         "a": [10, 20],
@@ -351,6 +460,54 @@ def test_tree_map():
         },
         "f": "hello",
     }
+
+
+class _ForeignDtype:
+    """Mimics torch.float32 — has no .name attribute unlike numpy dtypes."""
+
+    pass
+
+
+class _ForeignTensor:
+    """Mimics a torch tensor: has .shape, a non-numpy dtype, and supports __array__."""
+
+    def __init__(self, data):
+        self._data = np.array(data, dtype=np.float32)
+        self.shape = self._data.shape
+        self.dtype = _ForeignDtype()
+
+    def __array__(self, dtype=None, copy=None):
+        if dtype is not None:
+            return self._data.astype(dtype)
+        return self._data
+
+
+def test_encode_array_foreign_tensor():
+    """_encode_array should handle non-numpy array-likes (e.g. torch tensors)."""
+    tensor = _ForeignTensor([1.0, 2.0, 3.0])
+    encoded = _encode_array(tensor)
+
+    assert encoded["shape"] == (3,)
+    assert encoded["dtype"] == "float32"
+    assert encoded["data"]["encoding"] == "base64"
+
+    decoded = _decode_array(encoded)
+    np.testing.assert_array_equal(decoded, [1.0, 2.0, 3.0])
+
+
+def test_tree_map_with_foreign_tensor():
+    """tree_map + _encode_array should work when payloads contain non-numpy arrays."""
+    tensor = _ForeignTensor([4.0, 5.0])
+    tree = {"inputs": {"x": tensor, "flag": True}}
+
+    encoded = _tree_map(_encode_array, tree, is_leaf=lambda x: hasattr(x, "__array__"))
+
+    assert encoded["inputs"]["flag"] is True
+    assert encoded["inputs"]["x"]["shape"] == (2,)
+    assert encoded["inputs"]["x"]["dtype"] == "float32"
+
+    decoded = _decode_array(encoded["inputs"]["x"])
+    np.testing.assert_array_equal(decoded, [4.0, 5.0])
 
 
 def test_test_endpoint_success_local(dummy_tesseract_package):
@@ -513,74 +670,62 @@ class TestHTTPClientValidationErrors:
         assert err["loc"] == ("body", "inputs", "a")
 
 
-def test_stale_keepalive_connection_is_handled(free_port, monkeypatch):
-    """HTTPClient retries once when a stale keep-alive connection causes ConnectionError.
+def test_stale_keepalive_connection_is_handled(monkeypatch):
+    """HTTPClient retries once when session.request raises ConnectionError.
 
-    We force a stale connection by setting timeout_keep_alive=0, then monkeypatch
-    urllib3's is_connected to lie once (simulating the race where the staleness check
-    passes just before the server's FIN arrives).
+    Tests the contract directly by injecting a one-shot ConnectionError at the
+    requests.Session.request layer, avoiding the brittleness of real-socket
+    timing (which differs across OS / Python version / urllib3 version) that an
+    integration-style test would depend on.
     """
+    client = HTTPClient("http://127.0.0.1:1")
+
+    call_count = 0
+    response = MagicMock()
+    response.status_code = 200
+    response.ok = True
+    response.content = b'{"status": "ok"}'
+
+    def _fail_once_then_succeed(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise requests.ConnectionError("simulated stale keep-alive")
+        return response
+
+    monkeypatch.setattr(client._session, "request", _fail_once_then_succeed)
+
+    result = client._request("health")
+
+    assert result == {"status": "ok"}
+    assert call_count == 2
+
+
+def test_HTTPClient_timeout_fires(free_port):
+    """HTTPClient raises a timeout error when the server takes too long to respond."""
+    import http.server
+    import socketserver
     import threading
-    import time
 
-    import uvicorn
-    from fastapi import FastAPI
-    from urllib3.connection import HTTPConnection
+    shutdown = threading.Event()
 
-    app = FastAPI()
-    app.get("/health")(lambda: {"status": "ok"})
+    class SlowHandler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            shutdown.wait(timeout=10)
 
-    server = uvicorn.Server(
-        uvicorn.Config(
-            app,
-            host="127.0.0.1",
-            port=free_port,
-            log_level="error",
-            timeout_keep_alive=0,
-        )
-    )
-    server_thread = threading.Thread(target=server.run, daemon=True)
+        def log_message(self, *args):
+            pass  # suppress stderr noise
+
+    httpd = socketserver.TCPServer(("127.0.0.1", free_port), SlowHandler)
+    httpd.daemon_threads = True
+    server_thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     server_thread.start()
 
-    url = f"http://127.0.0.1:{free_port}"
-    for _ in range(50):
-        try:
-            requests.get(f"{url}/health", timeout=1)
-            break
-        except requests.ConnectionError:
-            time.sleep(0.1)
-    else:
-        pytest.fail("Server did not start in time")
-
     try:
-        client = HTTPClient(url)
-
-        # Ensure connection is established and in keep-alive pool
-        client._request("health")
-
-        # Sleep to ensure the server has closed the connection due to timeout_keep_alive=0
-        time.sleep(0.1)
-
-        # Make is_connected lie once (stale socket looks alive), then restore
-        original = HTTPConnection.is_connected.fget
-        call_count = 0
-
-        def _lie_once(self):
-            nonlocal call_count
-            call_count += 1
-            return True if call_count == 1 else original(self)
-
-        monkeypatch.setattr(HTTPConnection, "is_connected", property(_lie_once))
-
-        with patch.object(
-            client._session, "request", wraps=client._session.request
-        ) as mock:
-            result = client._request("health")
-
-        assert result == {"status": "ok"}
-
-        # Ensure that the request was retried once after the ConnectionError from the stale connection
-        assert mock.call_count == 2
+        client = HTTPClient(f"http://127.0.0.1:{free_port}", timeout=0.5)
+        with pytest.raises(requests.exceptions.ReadTimeout):
+            client._request("health")
     finally:
-        server.should_exit = True
+        shutdown.set()
+        httpd.shutdown()
         server_thread.join(timeout=5)

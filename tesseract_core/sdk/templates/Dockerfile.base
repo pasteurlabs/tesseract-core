@@ -8,6 +8,9 @@ FROM {{ config.build_config.base_image }} AS build_stage
 FROM --platform={{ config.build_config.target_platform }} {{ config.build_config.base_image }} AS build_stage
 {% endif %}
 
+# Ensure root user for build commands (some base images set a non-root default)
+USER root
+
 # Obtain uv and companions
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
@@ -58,6 +61,9 @@ FROM {{ config.build_config.base_image }} AS run_stage
 FROM --platform={{ config.build_config.target_platform }} {{ config.build_config.base_image }} AS run_stage
 {% endif %}
 
+# Ensure root user for build commands (some base images set a non-root default)
+USER root
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libnss-wrapper \
     && { [ -x "$(command -v python3)" ] || apt-get install -y --no-install-recommends python3; } \
@@ -89,6 +95,13 @@ COPY "{{ tesseract_source_directory }}/tesseract_api.py" ${TESSERACT_API_PATH}
 RUN chmod 444 ${TESSERACT_API_PATH}
 
 ENV PATH="/python-env/bin:$PATH"
+
+{% if config.env %}
+# User-defined environment variables
+{% for key, value in config.env.items() %}
+ENV {{ key }}="{{ value | replace('\\', '\\\\') | replace('"', '\\"') }}"
+{% endfor %}
+{% endif %}
 
 {% if config.build_config.package_data %}
 # Copy package data to image

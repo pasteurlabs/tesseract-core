@@ -571,6 +571,17 @@ def serve(
             ),
         ),
     ] = False,
+    skip_health_check: Annotated[
+        bool,
+        typer.Option(
+            "--skip-health-check",
+            help=(
+                "Skip the startup health check. Useful for Tesseracts with slow "
+                "initialization (e.g., Julia runtime startup, large model loading). "
+                "The caller is responsible for ensuring readiness, e.g. by polling /health."
+            ),
+        ),
+    ] = False,
     user: Annotated[
         str | None,
         typer.Option(
@@ -669,6 +680,7 @@ def serve(
             output_path=output_path,
             output_format=_enum_to_val(output_format),
             docker_args=shlex.split(docker_args) if docker_args else None,
+            skip_health_check=skip_health_check,
         )
     except RuntimeError as ex:
         raise UserError(
@@ -929,7 +941,6 @@ def _extract_cli_config(
 )
 @engine.needs_docker
 def run_container(
-    context: click.Context,
     tesseract_image: Annotated[
         str | None,
         typer.Argument(
@@ -1113,7 +1124,7 @@ def run_container(
 
     if not tesseract_image:
         if invoke_help:
-            context.get_help()
+            click.get_current_context().get_help()
             return
         raise typer.BadParameter(
             "Tesseract image name is required.",
@@ -1122,7 +1133,7 @@ def run_container(
 
     if not cmd:
         if invoke_help:
-            context.get_help()
+            click.get_current_context().get_help()
             return
         else:
             error_string = f"Command is required. Are you sure your Tesseract image name is `{tesseract_image}`?"
