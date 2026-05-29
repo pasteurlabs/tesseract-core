@@ -745,8 +745,8 @@ class HTTPClient:
         self,
         url: str,
         output_path: str | Path | None = None,
-       output_format: str = "json+base64",
-       timeout: float | tuple[float, float] | None = None,
+        output_format: str = "json+base64",
+        timeout: float | tuple[float, float] | None = None,
     ) -> None:
         self._url = self._sanitize_url(url)
         self._output_path = output_path
@@ -794,7 +794,8 @@ class HTTPClient:
                     _encode_leaf,
                     payload,
                     is_leaf=lambda x: (
-                        hasattr(x, "__array__") or hasattr(x, "__cuda_array_interface__")
+                        hasattr(x, "__array__")
+                        or hasattr(x, "__cuda_array_interface__")
                     ),
                 )
             else:
