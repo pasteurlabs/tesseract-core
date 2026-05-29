@@ -80,6 +80,9 @@ dev = [
     "moto[server]",
     "aiobotocore>=2.19.0",  # without this pip dependency resolution fails
     "typeguard",
+    # required to test the jax_recipes module (and to benchmark its VJP cache)
+    "jax",
+    "equinox",
     # also add all other extras here
     "tesseract-core[runtime]",
     "tesseract-core[docs]",

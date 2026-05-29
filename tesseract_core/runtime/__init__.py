@@ -14,12 +14,11 @@ try:
             continue
         if not (path.parent / "__init__.py").exists():
             continue
-        # gradient_endpoints/ is an opt-in plug-in surface — each backend
-        # (jax_recipes, future torch_recipes, ...) brings its own framework
-        # dep. Tesseracts that opt into a backend install its deps via
-        # tesseract_requirements.txt; tesseracts that don't shouldn't be
-        # required to.
-        if "gradient_endpoints" in path.parts:
+        # *_recipes/ subpackages are opt-in plug-in surfaces that bring their
+        # own framework deps (e.g. jax_recipes -> jax + equinox). Tesseracts
+        # that opt into a recipe install its deps via tesseract_requirements.txt;
+        # tesseracts that don't shouldn't be required to.
+        if any(p.endswith("_recipes") for p in path.parts):
             continue
 
         package_path = ".".join(

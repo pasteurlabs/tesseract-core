@@ -10,17 +10,20 @@ These functions remove the boilerplate from a JAX-backed Tesseract
 supplies a single ``apply_jit`` (already wrapped in ``@eqx.filter_jit``);
 the helpers compose the JAX transforms around it.
 
-VJP residual caching is enabled by default: :func:`jax_apply` stashes the
-backward function it constructs and :func:`jax_vjp` reuses it on the next
-matching call -- typically a ~10-20% speedup on the standard tesseract-jax
-``apply -> vjp`` pattern (which is hit by ``jax.value_and_grad``,
-``jax.jacrev``, and even plain ``jax.grad`` since tesseract-jax's
-``custom_vjp.fwd`` always runs ``apply()`` first). Call
-:func:`set_jax_vjp_cache_size` with ``0`` to disable. See its docstring
-for the full taxonomy.
+Optional VJP residual caching is available via
+:func:`set_jax_vjp_cache_size` (disabled by default). When enabled,
+:func:`jax_apply` stashes the backward function it constructs and
+:func:`jax_vjp` reuses it on the next matching call, skipping the
+redundant forward pass that ``jax.vjp`` would otherwise run. This
+speeds up the standard tesseract-jax ``apply -> vjp`` pattern by
+~10-20% on moderate-to-deep forward passes (see
+``benchmarks/test_jax_recipes.py``). The pattern is hit by
+``jax.value_and_grad``, ``jax.jacrev``, and even plain ``jax.grad`` since
+tesseract-jax's ``custom_vjp.fwd`` always runs ``apply()`` first. See
+:func:`set_jax_vjp_cache_size` for the full taxonomy of when caching
+helps.
 """
 
-import hashlib
 from collections.abc import Callable
 from typing import Any
 
@@ -29,6 +32,7 @@ import jax
 import jax.numpy as jnp
 from pydantic import BaseModel
 
+from tesseract_core.runtime.array_encoding import _fast_tobytes
 from tesseract_core.runtime.tree_transforms import (
     LRUCache,
     filter_func,
@@ -37,10 +41,10 @@ from tesseract_core.runtime.tree_transforms import (
 )
 
 #: Module-level VJP residual cache. ``jax_apply`` populates it; ``jax_vjp``
-#: reads from it. Set to ``None`` (via :func:`set_jax_vjp_cache_size` with
-#: ``0``) to disable caching -- both helpers then bypass the cache machinery
-#: entirely.
-jax_vjp_cache: LRUCache | None = LRUCache(maxsize=1)
+#: reads from it. ``None`` (the default) means caching is disabled and both
+#: helpers bypass the cache machinery entirely. Use
+#: :func:`set_jax_vjp_cache_size` to enable.
+jax_vjp_cache: LRUCache | None = None
 
 
 def set_jax_vjp_cache_size(size: int) -> None:
@@ -51,7 +55,9 @@ def set_jax_vjp_cache_size(size: int) -> None:
     including under ``jax.value_and_grad`` and ``jax.jacrev``), caching the
     backward function produced by :func:`jax_apply`'s internal ``jax.vjp``
     call lets the subsequent :func:`jax_vjp` skip the redundant forward
-    pass. Typical speedup ~10-20% on moderate-to-deep networks.
+    pass. Measured speedup is ~10-20% on moderate-to-deep forward passes
+    (see ``benchmarks/test_jax_recipes.py``); the win scales with the cost
+    of the forward pass and goes the wrong way on trivially-small ones.
 
     Best fit:
       - tesseract-jax workflows that go through ``custom_vjp`` (every
@@ -66,39 +72,35 @@ def set_jax_vjp_cache_size(size: int) -> None:
         cache machinery overhead exceeds the saved work.
 
     Args:
-        size: Number of cache slots. ``1`` (the default) covers the standard
-            apply -> vjp pattern. ``0`` disables caching entirely (both
-            :func:`jax_apply` and :func:`jax_vjp` then bypass the cache
-            machinery). Increase for workflows that interleave multiple
+        size: Number of cache slots. ``0`` (the default) disables caching
+            entirely (both :func:`jax_apply` and :func:`jax_vjp` then bypass
+            the cache machinery). ``1`` covers the standard apply -> vjp
+            pattern. Increase for workflows that interleave multiple
             ``apply()`` calls before their corresponding ``vjp()`` calls.
     """
     global jax_vjp_cache
     jax_vjp_cache = LRUCache(maxsize=size) if size > 0 else None
 
 
-def hash_tree(tree: Any) -> bytes:
-    """Compute a SHA-256 digest over a pytree's structure and leaves.
+def hash_tree(tree: Any) -> int:
+    """Compute a hash of a pytree's structure and leaves.
 
-    Suitable for use as an :class:`LRUCache` key. For array leaves, the digest
-    incorporates dtype + shape + raw bytes so leaves with identical bytes but
+    Suitable for use as an :class:`LRUCache` key. Array leaves contribute
+    their dtype + shape + raw bytes so leaves with identical bytes but
     different interpretations (e.g. ``int64[4]`` vs ``int64[2,2]``) don't
-    collide. Scalar and primitive leaves use Python's ``hash()`` except for
-    ``str``/``bytes`` (whose hash is randomized across processes by Python's
-    PYTHONHASHSEED -- we encode them directly instead).
+    collide. Non-array leaves contribute themselves directly; they must be
+    hashable.
     """
     leaves, treedef = jax.tree.flatten(tree)
-    h = hashlib.sha256()
-    h.update(str(treedef).encode())
+    # jax.PyTreeDef's __hash__ collides on dicts with different keys, so we
+    # use its string form as the discriminator instead.
+    items: list = [str(treedef)]
     for leaf in leaves:
         if hasattr(leaf, "tobytes"):
-            h.update(str(leaf.dtype).encode())
-            h.update(str(leaf.shape).encode())
-            h.update(leaf.tobytes())
-        elif isinstance(leaf, (str, bytes)):
-            h.update(leaf if isinstance(leaf, bytes) else leaf.encode())
+            items.append((leaf.dtype.str, leaf.shape, bytes(_fast_tobytes(leaf))))
         else:
-            h.update(hash(leaf).to_bytes(8, "big", signed=True))
-    return h.digest()
+            items.append(leaf)
+    return hash(tuple(items))
 
 
 def jax_apply(apply_jit: Callable, inputs: BaseModel) -> dict:

@@ -10,7 +10,7 @@ import equinox as eqx
 from pydantic import BaseModel
 
 from tesseract_core.runtime import Differentiable, Float32
-from tesseract_core.runtime.gradient_endpoints.jax_recipes import (
+from tesseract_core.runtime.jax_recipes import (
     jax_abstract_eval,
     jax_apply,
     jax_jacobian,
@@ -18,15 +18,17 @@ from tesseract_core.runtime.gradient_endpoints.jax_recipes import (
     jax_vjp,
 )
 
-# VJP residual caching is enabled by default and gives a ~10-20% speedup on
-# the typical tesseract-jax apply -> vjp pattern. See the docstring of
-# `set_jax_vjp_cache_size` for the full when-it-helps taxonomy. To disable
-# or resize, uncomment below:
+# VJP residual caching is opt-in. Enabling it speeds up the typical
+# tesseract-jax apply -> vjp pattern (measured ~10-20% on moderate-to-deep
+# forward passes; see benchmarks/test_jax_recipes.py). The cost goes the
+# wrong way on trivially-small forward passes -- see the docstring of
+# `set_jax_vjp_cache_size` for the full when-it-helps taxonomy. To enable,
+# uncomment below:
 #
-# from tesseract_core.runtime.gradient_endpoints.jax_recipes import (
+# from tesseract_core.runtime.jax_recipes import (
 #     set_jax_vjp_cache_size,
 # )
-# set_jax_vjp_cache_size(0)  # disable
+# set_jax_vjp_cache_size(1)  # enable with one cached entry
 
 #
 # Schemata
