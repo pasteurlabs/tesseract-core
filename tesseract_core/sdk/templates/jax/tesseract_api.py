@@ -10,7 +10,7 @@ import equinox as eqx
 from pydantic import BaseModel
 
 from tesseract_core.runtime import Differentiable, Float32
-from tesseract_core.runtime.gradient_recipes import (
+from tesseract_core.runtime.gradient_endpoints.jax_recipes import (
     jax_abstract_eval,
     jax_apply,
     jax_jacobian,
@@ -18,37 +18,15 @@ from tesseract_core.runtime.gradient_recipes import (
     jax_vjp,
 )
 
+# VJP residual caching is enabled by default and gives a ~10-20% speedup on
+# the typical tesseract-jax apply → vjp pattern. See the docstring of
+# `set_jax_vjp_cache_size` for the full when-it-helps taxonomy. To disable
+# or resize, uncomment below:
 #
-# Cache configuration
-#
-# apply() runs jax.vjp internally and caches the resulting backward function.
-# A subsequent vector_jacobian_product call on the same inputs reuses that
-# backward, skipping the redundant forward pass that vjp would otherwise repeat.
-#
-# Under typical tesseract-jax usage (gradient-based code calling the Tesseract
-# through tesseract-jax's custom_vjp), apply() runs first on every gradient
-# evaluation — even under plain jax.grad — so the cache reliably hits on the
-# subsequent vjp call. This makes the recipe close to a free win for any
-# gradient-based workflow: Adam/SGD, L-BFGS / line search, value_and_grad-style
-# code, etc. Typical speedup is ~10-20% on moderate-to-deep networks.
-#
-# The cache also helps when a single apply is followed by multiple vjp calls
-# on the same input — for example, jax.jacrev (which decomposes into one vjp
-# per output basis vector) or CG-style inverse-problem solvers (each inner CG
-# step computes J^T u at the same iterate). Each subsequent vjp on the same
-# input reuses the cached residuals.
-#
-# Poor fit:
-#   - Very small models where the forward pass is microseconds: the cache
-#     machinery overhead exceeds the saved work.
-#
-# Uncomment to disable caching entirely (apply() and vjp() then bypass the
-# cache machinery and run their forward passes directly), or to increase the
-# size for workloads that interleave several apply() calls before their
-# corresponding vjp() calls.
-#
-# from tesseract_core.runtime.gradient_recipes import set_jax_cache_size
-# set_jax_cache_size(0)
+# from tesseract_core.runtime.gradient_endpoints.jax_recipes import (
+#     set_jax_vjp_cache_size,
+# )
+# set_jax_vjp_cache_size(0)  # disable
 
 #
 # Schemata

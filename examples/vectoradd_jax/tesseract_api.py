@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, model_validator
 from typing_extensions import Self
 
 from tesseract_core.runtime import Array, Differentiable, Float32
-from tesseract_core.runtime.gradient_recipes import (
+from tesseract_core.runtime.gradient_endpoints.jax_recipes import (
     jax_abstract_eval,
     jax_apply,
     jax_jacobian,
