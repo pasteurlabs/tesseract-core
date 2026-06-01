@@ -1,36 +1,38 @@
 ---
 orphan: true
-og:title: "From Fortran to JAX autodiff via LLVM and Enzyme"
-og:description: "We duct-taped LFortran, LLVM, and Enzyme together to get exact gradients from a Fortran thermal solver, then solved inverse problems with jax.grad. A field report."
+og:title: "Fortran solvers, JAX autodiff, and the magic of Enzyme"
+og:description: "We duct-taped LFortran, LLVM, and Enzyme together to get exact gradients from a Fortran thermal solver, then solved inverse problems with jax.grad. Here's how."
 blog_date: "2026-05-15"
 blog_author: "@dionhaefner"
-blog_title: "From Fortran to JAX autodiff via LLVM and Enzyme"
-blog_description: "We duct-taped LFortran, LLVM, and Enzyme together to get exact gradients from a Fortran thermal solver, then solved inverse problems with jax.grad. A field report."
+blog_title: "Fortran solvers, JAX autodiff, and the magic of Enzyme"
+blog_description: "We duct-taped LFortran, LLVM, and Enzyme together to get exact gradients from a Fortran thermal solver, then solved inverse problems with jax.grad. Here's how."
 ---
 
-# From Fortran to JAX autodiff via LLVM and Enzyme
+# Fortran solvers, JAX autodiff, and the magic of Enzyme
 
-We duct-taped four compilers together and got exact gradients out of a Fortran thermal solver. Then we used those gradients to reconstruct a 900-element temperature field from 100 noisy sensor readings. No adjoint code was written by hand. The whole thing is held together with shell scripts and ctypes. If you maintain a Fortran, C, or C++ simulation and have wished you could just call `grad` on it, this is a rough field report on one way to get there.
+What if you could do autodiff through existing Fortran, C, or C++ simulation code, embed it into JAX and torch, and use it as a high-performance differentiable physics engine? Turns out, you can -- if you're brave enough. The key insight is that [Enzyme](https://enzyme.mit.edu/) allows us to apply AD at the LLVM IR level, which means we can differentiate any code that compiles to LLVM, and that Tesseract enables us to wrap anything as a [JAX](https://jax.readthedocs.io/en/latest/) primitive, granting full access to JAX's autodiff capabilities from Python.
 
-The mechanism: [Enzyme](https://enzyme.mit.edu/) works at the LLVM IR level, so it can differentiate anything that compiles to LLVM. We used it on a 2D Fortran heat solver with nonlinear material properties and mixed boundary conditions, compiled through [LFortran](https://lfortran.org/). This post walks through the compilation pipeline (warts and all), verifies the gradients, and then uses them to solve two inverse problems of increasing ambition.
+All you need is to duct-tape [LFortran](https://lfortran.org/), LLVM, and Enzyme together, point the result at a Fortran thermal solver, and get exact gradients out the other end. Package it as a Tesseract, use Tesseract-JAX to register it as a custom JAX primitive, and you're off to the races: Fortran solvers acting as differentiable layers in arbitrary JAX code. From Fortran to LLVM IR to Enzyme AD to C wrapper to shared library to Tesseract to JAX primitive to XLA to Python to your optimization loop. Sounds easy, right? Well, it is and isn't, but at any rate it's pretty amazing that a stack combining some of the oldest and newest technologies out there can work together so seamlessly.
+
+But let's start a the beginning. What follows is the full walkthrough — the compilation pipeline, the sharp edges we hit, and two inverse problems that made the whole effort worth it (and that wouldn't be possible without AD).
 
 ## The problem
 
-Scientific computing is full of Fortran, C, and C++ code that people need gradients of. Optimization, inverse problems, ML integration, uncertainty quantification: all of these require derivatives of a simulation's outputs with respect to its inputs. The options today are all bad in their own way:
+If you work in scientific computing, you might have run into this: you have a simulation written in Fortran (or C, or C++), and now someone needs gradients. Maybe it's for optimization, maybe inverse problems, maybe plugging the sim into an ML pipeline. Derivatives of the simulation's outputs with respect to its inputs. And your options are:
 
-- **Hand-written adjoints.** Months of expert effort, error-prone, and a maintenance nightmare that drifts out of sync with the forward code.
-- **Finite differences.** Slow (O(n) evaluations for n parameters), inaccurate (the truncation-vs-roundoff tradeoff means there's always a sweet spot you have to find), and poorly conditioned for stiff problems.
-- **Rewrite in JAX or PyTorch.** Impractical for existing codebases with tens of thousands of lines of validated physics.
+- **Hand-written adjoints.** Months of expert effort. Error-prone. A maintenance nightmare that slowly drifts out of sync with the forward code.
+- **Finite differences.** Slow (O(n) evaluations for n parameters), inaccurate (you're always hunting for the truncation-vs-roundoff sweet spot), and poorly conditioned for stiff problems.
+- **Rewrite in JAX or PyTorch.** Sure, if you want to rewrite tens of thousands of lines of validated physics.
 
-What if you could just compile the derivatives automatically, from the existing source? That's the promise, anyway. Here's what it actually looks like in practice.
+What if you could just compile the derivatives automatically, from the existing source? That's the pitch. Here's what it actually looks like when you try.
 
 ## The Fortran code
 
-The solver is `thermal_2d.f90`, about 220 lines of vanilla Fortran 90. It solves 2D transient heat conduction with temperature-dependent conductivity:
+Our test subject is `thermal_2d.f90`, about 220 lines of vanilla Fortran 90. It solves 2D transient heat conduction with temperature-dependent conductivity:
 
 $$\rho \, c_p \frac{\partial T}{\partial t} = \nabla \cdot \big( k(T) \, \nabla T \big) + Q$$
 
-where the conductivity follows a linear material model: $k(T) = k_0 + k_1 \cdot T$. Time integration is explicit Euler over `n_steps` steps.
+The conductivity follows a linear material model, $k(T) = k_0 + k_1 \cdot T$, and time integration is explicit Euler over `n_steps` steps. Nothing exotic.
 
 Here's the subroutine signature and the interior stencil loop:
 
@@ -75,17 +77,17 @@ subroutine thermal_2d_solve(n, nx, ny, n_steps, &
   end do
 ```
 
-The stencil uses harmonic-mean conductivity at cell faces, the standard approach in finite difference thermal codes for ensuring flux continuity across cells with different conductivities. Boundary conditions are mixed: Dirichlet (hot wall at the bottom), convection/Robin (top), and insulated/Neumann (sides).
+The stencil uses harmonic-mean conductivity at cell faces (the standard approach for flux continuity across cells with different conductivities). Boundary conditions are mixed: Dirichlet (hot wall at the bottom), convection/Robin (top), and insulated/Neumann (sides).
 
-The key point for why AD matters here: with $k(T)$ nonlinear, the stencil coefficients depend on the current temperature field. The Jacobian changes at every time step. Hand-coding the adjoint through this nonlinear stencil and multi-step loop is tedious and error-prone.
+The reason AD matters here: with $k(T)$ nonlinear, the stencil coefficients depend on the current temperature field. The Jacobian changes at every time step. Hand-coding the adjoint through this nonlinear stencil and multi-step time loop is the kind of thing that sounds doable until you actually sit down to do it.
 
-This is vanilla Fortran. No special annotations, no AD-aware constructs. Explicit `do` loops, no array intrinsics. But "vanilla" required some effort. The original version used local allocatable arrays for `T_cur` and `T_new`. LFortran compiles those into `_lfortran_malloc` calls, which Enzyme can't differentiate through — the AD pass just crashes. The workaround was to pass work arrays in from C, pre-allocated on the heap. Not a huge change, but the kind of thing you discover only after staring at an unhelpful LLVM error message. We also avoid array intrinsics and bounds checking (`--no-array-bounds-checking`) for the same reason: they emit runtime calls that Enzyme doesn't know how to handle.
+Now, we keep calling this "vanilla Fortran," and it is — no special annotations, no AD-aware constructs, explicit `do` loops, no array intrinsics. But getting to "vanilla" took some work. Our first version used local allocatable arrays for `T_cur` and `T_new`. LFortran compiles those into `_lfortran_malloc` calls, and Enzyme has no idea what to do with them. The AD pass just crashes. The fix was to pass work arrays in from C, pre-allocated on the heap. Not a huge change, but we only figured that out after staring at an unhelpful LLVM error for longer than we'd like to admit. We also had to disable array intrinsics and bounds checking (`--no-array-bounds-checking`) for the same reason: they emit runtime calls that Enzyme can't see through.
 
-This is an honest preview of what "differentiate existing Fortran" looks like today. The source stays recognizably Fortran, but you'll likely need to massage it — eliminating allocations and runtime calls that the AD toolchain can't see through. For a 220-line solver, that's an afternoon of work. For a large legacy codebase, it's an open question.
+This is an honest preview of what "differentiate existing Fortran" looks like today. The source stays recognizably Fortran, but you'll need to massage it, eliminating allocations and runtime calls that break the AD toolchain. For a 220-line solver, that's an afternoon. For a large legacy codebase, it's an open question.
 
 ## The pipeline
 
-Enzyme works at the LLVM IR level, not the source level. Anything that compiles to LLVM IR — C, C++, Rust, Fortran — can, in theory, be differentiated. In practice there are caveats (we'll get to those). But the idea is sound, and the compilation chain is surprisingly straightforward if you're comfortable staring at LLVM IR when things go wrong.
+Here's the key insight that makes all of this possible: Enzyme works at the LLVM IR level, not the source level. Anything that compiles to LLVM IR — C, C++, Rust, Fortran — can be differentiated. In practice there are caveats (oh, we'll get to those). But the compilation chain is surprisingly straightforward, as long as you're comfortable staring at LLVM IR when things go wrong.
 
 Six steps:
 
@@ -97,7 +99,7 @@ Six steps:
 lfortran --show-llvm --no-array-bounds-checking thermal_2d.f90 > thermal_2d.ll
 ```
 
-LFortran is a modern Fortran compiler that emits clean LLVM IR. It's also still maturing — not all Fortran features are supported yet ([compilation status](https://lfortran.org/progress/)). We chose it over gfortran because its LLVM IR output is much cleaner, but that means your Fortran needs to stay within what LFortran can handle. Enzyme also works with GCC/Clang frontends for broader language coverage at the cost of messier IR.
+LFortran is a modern Fortran compiler that emits clean LLVM IR — arrays become plain pointers with GEP/load/store patterns (much like C), rather than the multi-field descriptor structs and runtime library calls you get from Flang. That matters because Enzyme needs to trace through every memory access for its activity analysis, and simple pointer arithmetic is much easier to analyze than opaque `fir.box` descriptors. LFortran is still maturing, though — not all Fortran features are supported yet ([compilation status](https://lfortran.org/progress/)), so your Fortran needs to stay within what LFortran can handle.
 
 **2. Optimize the IR:**
 
@@ -105,7 +107,9 @@ LFortran is a modern Fortran compiler that emits clean LLVM IR. It's also still 
 opt -O1 -S thermal_2d.ll -o thermal_2d_opt.ll
 ```
 
-We use `-O1` here rather than `-O3` deliberately, and it took us a day to figure out why. With `-O3`, the VJP returned NaN on certain inputs while the forward pass worked fine. The root cause was an interaction between LLVM's vectorization/code-motion passes and Enzyme's reverse-mode analysis: aggressive transforms produced IR patterns that Enzyme mishandled when adjacent cell temperatures were equal and intermediate terms canceled. The fix was to keep pre-Enzyme optimization mild and save `-O3` for after the AD pass (step 6). If you're building a similar pipeline, be aware that "the forward pass works" does not imply "the gradients are correct."
+Notice that's `-O1`, not `-O3`. We learned this the hard way.
+
+Our first pipeline used `-O3` here, and the forward pass worked perfectly. The VJP, however, returned NaN on certain inputs. We spent a full day tracking this down. The root cause: LLVM's aggressive vectorization and code-motion passes at `-O3` produced IR patterns that Enzyme mishandled during reverse-mode analysis, specifically when adjacent cell temperatures were equal and intermediate terms canceled. The fix was embarrassingly simple — keep pre-Enzyme optimization mild and save `-O3` for after the AD pass (step 6). But the lesson was not simple at all: "the forward pass works" does not mean "the gradients are correct." If you're building a similar pipeline, test the gradients early and often.
 
 **3. Compile the C wrapper to LLVM IR:**
 
@@ -113,7 +117,7 @@ We use `-O1` here rather than `-O3` deliberately, and it took us a day to figure
 clang -emit-llvm -S -O1 wrapper.c -o wrapper.ll
 ```
 
-The C wrapper bridges Fortran's by-pointer ABI to a C-callable interface with Enzyme annotations. It declares three entry points — `thermal_2d_forward`, `thermal_2d_vjp`, and `thermal_2d_jvp` — using Enzyme's `__enzyme_autodiff` and `__enzyme_fwddiff` intrinsics to mark which arguments get shadow (gradient) buffers. Here's the core of the VJP entry point:
+We need a thin C wrapper to bridge Fortran's by-pointer ABI to a C-callable interface with Enzyme annotations. It declares three entry points — `thermal_2d_forward`, `thermal_2d_vjp`, and `thermal_2d_jvp` — using Enzyme's `__enzyme_autodiff` and `__enzyme_fwddiff` intrinsics to mark which arguments get shadow (gradient) buffers. Here's the core of the VJP entry point:
 
 ```c
 void thermal_2d_vjp(int nx, int ny, int n_steps,
@@ -138,7 +142,7 @@ void thermal_2d_vjp(int nx, int ny, int n_steps,
 }
 ```
 
-The wrapper also allocates work arrays on the heap rather than letting Fortran allocate them, avoiding the `_lfortran_malloc` issue.
+This is also where we allocate the work arrays on the heap, sidestepping the `_lfortran_malloc` issue from earlier.
 
 **4. Link the IR modules:**
 
@@ -152,7 +156,7 @@ llvm-link wrapper.ll thermal_2d_opt.ll -S -o combined.ll
 opt --load-pass-plugin=LLVMEnzyme-19.so -passes=enzyme -S combined.ll -o ad.ll
 ```
 
-This is the step that does the actual work. Enzyme analyzes the LLVM IR and synthesizes forward- and reverse-mode derivative code. For reverse mode, it uses a store-all (tape) strategy, caching intermediate values at each time step. When it works, it's genuinely impressive. When it doesn't, you're reading LLVM IR diffs at 2 AM (see [Limitations](#limitations-and-whats-next)).
+This is where the magic happens. Enzyme analyzes the LLVM IR and synthesizes forward- and reverse-mode derivative code. For reverse mode, it uses a store-all (tape) strategy, caching intermediate values at each time step. When it works, it's genuinely impressive — you get an adjoint of your entire time-stepping loop for free. When it doesn't, you're reading LLVM IR diffs at 2 AM wondering where your life went wrong (see [What's next](#whats-next-and-what-wed-do-differently)).
 
 **6. Optimize and compile to a shared library:**
 
@@ -161,17 +165,17 @@ opt -O3 -S ad.ll -o ad_opt.ll
 clang -shared -O3 ad_opt.ll -o libthermal_2d_ad.so -lm
 ```
 
-The result is a single `.so` file with three entry points callable from Python via ctypes: forward evaluation, JVP, and VJP. The entire pipeline runs during `tesseract build` and takes about 30 seconds. It's not elegant, but there's something satisfying about a shell script that turns Fortran into exact gradients.
+Out comes a single `.so` file with three entry points callable from Python via ctypes: forward evaluation, JVP, and VJP. The entire pipeline runs during `tesseract build` and takes about 30 seconds. It's a shell script that turns Fortran into exact gradients. We're not going to pretend that's elegant, but it is deeply satisfying.
 
 ## Does it actually work?
 
-The pipeline compiles. But does it produce correct gradients? We called the VJP from Python and compared against central finite differences at various step sizes:
+OK, it compiles. But after the `-O3` NaN incident, we weren't about to trust it without checking. We called the VJP from Python and compared against central finite differences at various step sizes:
 
 <img src="../_static/blog/enzyme-fd-convergence.png" alt="Enzyme vs. finite difference gradient accuracy">
 
-Finite differences have a sweet spot: too large an $\epsilon$ and you get truncation error; too small and you get roundoff error. The best relative error is typically around $10^{-8}$. Enzyme's gradients agree to machine precision ($\sim 10^{-15}$), because they're computing the analytically correct derivative, just synthesized by a compiler rather than a human.
+Finite differences have a sweet spot: too large an $\epsilon$ and you get truncation error, too small and you get roundoff. The best you can typically do is around $10^{-8}$ relative error. Enzyme's gradients agree to machine precision ($\sim 10^{-15}$) — because they're computing the analytically correct derivative, just synthesized by a compiler instead of a human.
 
-To be clear about what's being differentiated here: the entire multi-step time loop with nonlinear stencil updates at each step. Not a single-step toy.
+And this isn't differentiating a single matrix multiply. It's the entire multi-step time loop with nonlinear stencil updates at each step.
 
 | Method                    | Relative error vs. exact |
 | ------------------------- | -----------------------: |
@@ -182,24 +186,24 @@ To be clear about what's being differentiated here: the entire multi-step time l
 
 ## Now do something useful with it
 
-Exact gradients from a compiler pass are a neat trick. But the question that matters is whether you can actually _use_ them — plug them into an optimizer, solve a real inverse problem, compose them with other code.
+Correct gradients are great, but they're not the point. The point is using them — plugging them into an optimizer, solving a real inverse problem, composing them with other differentiable code.
 
-To wire the Enzyme gradients into JAX, the solver needs to look like a differentiable JAX primitive. We used [Tesseract](https://github.com/pasteurlabs/tesseract-core) for this: it wraps the compiled library (LFortran, LLVM 19, Enzyme, the whole toolchain) into a container with autodiff endpoints, so `jax.value_and_grad` routes VJP calls to the Enzyme-generated code. The setup is two commands:
+To wire the Enzyme gradients into JAX, the solver needs to look like a differentiable JAX primitive. This is essentially what Tesseract was made for: it wraps the compiled library (LFortran, LLVM 19, Enzyme, the whole toolchain) into a container with autodiff endpoints, so `jax.value_and_grad` routes VJP calls to the Enzyme-generated code. Two commands:
 
 ```bash
 tesseract build demo/enzyme_thermal_2d/
 tesseract serve enzyme-thermal-2d
 ```
 
-With that, we can throw optimization problems at it and see what breaks.
+With that running, we can throw optimization problems at it.
 
 ### Scalar calibration: recovering 2 material parameters
 
-A steel plate is heating up. We have thermocouple readings at 9 sensor locations, but we don't know the exact material properties. Can we recover $k_0$ (base conductivity) and $k_1$ (temperature coefficient) from sparse, noisy observations?
+Setup: a steel plate is heating up. We have thermocouple readings at 9 sensor locations, but we don't know the exact material properties. Can we recover $k_0$ (base conductivity) and $k_1$ (temperature coefficient) from sparse, noisy observations?
 
-We generate synthetic "observed" data by running the solver with known true values ($k_0 = 45$, $k_1 = -0.02$), sample at sensor locations, and add 0.5 K of Gaussian noise. Then we start from a deliberately wrong initial guess — 33% off on $k_0$, wrong sign on $k_1$ — and run L-BFGS-B.
+We generate synthetic "observed" data by running the solver with known true values ($k_0 = 45$, $k_1 = -0.02$), sample at sensor locations, and add 0.5 K of Gaussian noise. Then we start from a deliberately wrong initial guess — 33% off on $k_0$, wrong sign on $k_1$ — and hand it to L-BFGS-B.
 
-One VJP call gives gradients with respect to both parameters simultaneously. The optimizer doesn't need to know that the gradients come from a compiled Fortran solver differentiated by an LLVM pass.
+One VJP call gives gradients with respect to both parameters simultaneously. The optimizer doesn't care that those gradients come from a compiled Fortran solver differentiated by an LLVM pass.
 
 ```python
 def objective_and_gradient(params, tesseract):
@@ -228,13 +232,13 @@ def objective_and_gradient(params, tesseract):
 
 <img src="../_static/blog/enzyme-part1-temperature-fields.png" alt="Temperature field comparison: initial guess, recovered, ground truth, error">
 
-L-BFGS-B converges in about 15 iterations. The recovered parameters match the true values to within the noise floor. This is a gentle problem — only 2 unknowns, well-conditioned — so it's more of a sanity check than a stress test. The real question is whether the gradients hold up when we push harder.
+L-BFGS-B converges in about 15 iterations. The recovered parameters match the true values to within the noise floor. This is a gentle problem — only 2 unknowns, well-conditioned — so it's really a sanity check. The interesting question is what happens when we push harder.
 
 ### Thermal forensics: recovering a 900-element initial temperature field
 
-A steel plate was subjected to an unmonitored heating event — say, a laser pulse or a localized defect generating heat. Five seconds later, you measure temperatures at 100 sensor locations. Can you reconstruct what the initial temperature distribution looked like?
+Now for something harder. A steel plate was subjected to an unmonitored heating event — a laser pulse, a localized defect, something. Five seconds later, you measure temperatures at 100 sensor locations. Can you figure out what the initial temperature distribution looked like?
 
-The true initial condition has two Gaussian hot spots on a warm background. This is 900 unknowns from 100 noisy observations, through a nonlinear PDE. An ill-posed problem by any measure.
+The true initial condition has two Gaussian hot spots on a warm background. That's 900 unknowns from 100 noisy observations, through a nonlinear PDE — ill-posed by any measure.
 
 This is where reverse-mode AD becomes essential:
 
@@ -248,13 +252,13 @@ Finite differences would need 901 forward solves per iteration to get all 900 gr
 
 <img src="../_static/blog/enzyme-part2-forensics.png" alt="Thermal forensics: recovering 900 initial temperature values from 100 sensors">
 
-L-BFGS-B recovers the hot spot locations and magnitudes. The correlation between recovered and true initial temperature fields exceeds 0.99. The error is largest at the edges of the hot spots, where the signal has diffused most. It's not perfect — the reconstruction is smoothed relative to the true field, as you'd expect from an ill-posed problem with diffusion — but it's far better than we had any right to expect from a pipeline held together with shell scripts.
+L-BFGS-B recovers the hot spot locations and magnitudes. Correlation between recovered and true initial temperature fields exceeds 0.99. The error is largest at the edges of the hot spots, where the signal has diffused most. The reconstruction is smoothed relative to the true field, as you'd expect from an ill-posed problem with diffusion, but it's far better than we had any right to expect from a pipeline held together with shell scripts.
 
 That's `jax.grad` flowing through compiled Fortran, with no adjoint code written by hand.
 
 ### JAX integration via tesseract-jax
 
-With [tesseract-jax](https://github.com/pasteurlabs/tesseract-jax), the Tesseract becomes a JAX primitive. `jax.value_and_grad` just works:
+You can also go one step further with [tesseract-jax](https://github.com/pasteurlabs/tesseract-jax), which turns the Tesseract into a proper JAX primitive. Then `jax.value_and_grad` just works:
 
 ```python
 from tesseract_jax import apply_tesseract
@@ -271,13 +275,13 @@ loss, (dk0, dk1) = jax.value_and_grad(loss_fn, argnums=(0, 1))(
 )
 ```
 
-From JAX's perspective, the Fortran solver is just another differentiable function. You can swap `enzyme_tess` for a pure-JAX reimplementation and the optimization loop doesn't change — only the container behind the HTTP call does. Whether that abstraction is beautiful or horrifying depends on your tolerance for gradients that traverse six layers of indirection (Python → JAX → HTTP → ctypes → Enzyme → Fortran).
+From JAX's perspective, the Fortran solver is just another differentiable function. You could swap `enzyme_tess` for a pure-JAX reimplementation and the optimization loop wouldn't change — only the container behind the HTTP call. Whether that abstraction is beautiful or horrifying probably depends on how you feel about gradients traversing six layers of indirection (Python → JAX → HTTP → ctypes → Enzyme → Fortran).
 
 ## Where this could go
 
-We should be careful about extrapolating from a 220-line solver we wrote to fit the pipeline. Enzyme handles loops, conditionals, and function calls, and the Enzyme team has demonstrated it on larger codes including [BUDE molecular docking](https://enzyme.mit.edu/getting_started/UsingEnzyme/#bude) and [LULESH hydrodynamics](https://enzyme.mit.edu/getting_started/UsingEnzyme/#lulesh), with derivative overhead factors typically between 1× and 4×. But "works on LULESH" and "works on your 30-year-old Fortran codebase" are different claims.
+We should be upfront: this is a 220-line solver we wrote to fit the pipeline. Enzyme handles loops, conditionals, and function calls, and the Enzyme team has demonstrated it on larger codes including [BUDE molecular docking](https://enzyme.mit.edu/getting_started/UsingEnzyme/#bude) and [LULESH hydrodynamics](https://enzyme.mit.edu/getting_started/UsingEnzyme/#lulesh), with derivative overhead factors typically between 1x and 4x. But "works on LULESH" and "works on your 30-year-old Fortran codebase" are very different claims.
 
-That said, the composability angle is interesting. Imagine a Fortran CFD solver (Enzyme-differentiated) feeding into a JAX neural net surrogate:
+What gets us excited is the composability. Imagine a Fortran CFD solver (Enzyme-differentiated) feeding into a JAX neural net surrogate:
 
 ```python
 cfd_output = apply_tesseract(cfd_tess, cfd_inputs)     # Fortran + Enzyme VJP
@@ -287,22 +291,27 @@ total_loss = surrogate_loss + regularizer(cfd_inputs)    # JAX AD
 grads = jax.grad(total_loss)  # chains Enzyme + JAX AD automatically
 ```
 
-Each component uses its native AD. Tesseract handles the composition. We built a version of this pattern for the [rocket fin optimization](2025-11-28-rocket-fin-optimization.md) post, where analytical adjoints, finite differences, and JAX AD coexisted in one pipeline. It worked, but each new gradient source added its own class of debugging problems.
+Each component uses its native AD. Tesseract handles the composition. We built a version of this pattern for the [rocket fin optimization](2025-11-28-rocket-fin-optimization.md) post, where analytical adjoints, finite differences, and JAX AD coexisted in one pipeline. It worked, though each new gradient source brought its own class of debugging problems.
 
-Because Enzyme works at the LLVM IR level, nothing here is Fortran-specific. The same pipeline should apply to C, C++, Rust, or any language with an LLVM frontend — though "should" is doing some work in that sentence.
+And because Enzyme works at the LLVM IR level, none of this is Fortran-specific. The same pipeline should apply to C, C++, Rust, or any language with an LLVM frontend — though "should" is doing a lot of work in that sentence.
 
 ## What's next (and what we'd do differently)
 
-Most of the sharp edges — the `_lfortran_malloc` workaround, the `-O3` NaN disaster, LFortran's incomplete coverage — are already described in context above. To summarize: this works, but it's not turnkey. You should expect to adapt your Fortran, pin your compiler versions, and debug at the IR level at least once.
+We've described most of the sharp edges inline — the `_lfortran_malloc` crash, the `-O3` NaN disaster, LFortran's incomplete coverage. To be blunt: this works, but it's not turnkey. Expect to adapt your Fortran, pin your compiler versions, and debug at the IR level at least once.
 
 A few things we haven't tried yet:
 
 **Implicit time integration.** Backward Euler, Crank-Nicolson, and other implicit schemes require differentiating through iterative linear solves (CG, GMRES). Enzyme can handle this in principle, but tape memory grows with solver iteration count, and we haven't tested this path with LFortran. This is where we're headed next.
 
-**Third-party code.** We wrote this solver to work with the pipeline. We haven't yet run Enzyme + LFortran on a Fortran codebase we didn't author. The "will it work on _my_ code?" question is fair. The honest answer is "probably, with adaptation" — the kind of adaptation we described above, and possibly more that we haven't encountered yet.
+**Third-party code.** We wrote this solver to work with the pipeline. We haven't yet tried Enzyme + LFortran on a Fortran codebase we didn't author. The "will it work on _my_ code?" question is fair. Honest answer: probably, with adaptation — the kind we described above, and possibly more we haven't encountered yet.
 
-**Solvers at scale.**. MPI-parallel codes, GPU kernels, and multi-physics coupling are also untested with this pipeline. Enzyme has support for some of these; we just haven't tried.
+**Solvers at scale.** MPI-parallel codes, GPU kernels, multi-physics coupling — all untested with this pipeline. Enzyme has support for some of these; we just haven't tried.
 
 ## Try it yourself
 
-The full source — Fortran solver, Enzyme pipeline, inverse problem notebooks, and the shell scripts holding it all together — is [on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/demo/enzyme_thermal_2d). If you have a Fortran, C, or C++ solver you want gradients for and a healthy appetite for compiler debugging, this is a starting point.
+The full source — Fortran solver, Enzyme pipeline, inverse problem notebooks, and the shell scripts holding it all together — is [on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/demo/enzyme_thermal_2d). If you have a Fortran, C, or C++ solver you want gradients for and don't mind some quality time with LLVM IR, this is a starting point.
+
+---
+
+_Tesseract is a free, open-source framework for differentiable scientific computing. `pip install tesseract-core`.
+[Docs](https://tesseract.pasteurlabs.ai) · [Demos](https://tesseract.pasteurlabs.ai/content/demo/demo.html) · [GitHub](https://github.com/pasteurlabs/tesseract-core) · [Forum](https://si-tesseract.discourse.group/)_
