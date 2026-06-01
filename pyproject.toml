@@ -8,7 +8,6 @@ authors = [
 license = { text = "Apache-2.0" }
 requires-python = ">=3.10,<3.15"
 dependencies = [
-    "click",
     "jinja2",
     "rich",
     "typer",
@@ -44,7 +43,6 @@ runtime = [
     "fastapi<=0.136.3,>=0.115",
     "requests<=2.34.2,>=2.32.4",
     "uvicorn<=0.48.0,>=0.34",
-    "click<=8.4.1,>=8.1",
     "typer<=0.26.4,>=0.15",
     "fsspec[http,s3]<=2026.4.0,>=2024.12",
     "pybase64<=1.4.3,>=1.4",

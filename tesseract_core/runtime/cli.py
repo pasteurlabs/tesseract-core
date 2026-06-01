@@ -19,7 +19,6 @@ from typing import (
     get_origin,
 )
 
-import click
 import typer
 from pydantic import ValidationError
 from pydantic_core import from_json
@@ -45,6 +44,15 @@ from tesseract_core.runtime.testing.finite_differences import (
     check_gradients as check_gradients_,
 )
 
+# typer >= 0.26 vendors its own click (and drops the click dependency), so the
+# Context type and exceptions must come from the click typer actually runs;
+# fall back to real click on older typer (which still ships it).
+try:
+    from typer._click.core import Context
+    from typer._click.exceptions import BadParameter, UsageError
+except ImportError:  # typer < 0.26
+    from click import BadParameter, Context, UsageError
+
 CONFIG_FIELDS = {
     str(field_name): field.annotation
     for field_name, field in RuntimeConfig.model_fields.items()
@@ -66,7 +74,7 @@ def _enum_to_val(val: Any) -> Any:
 class SpellcheckedTyperGroup(typer.core.TyperGroup):
     """A Typer group that suggests similar commands if a command is not found."""
 
-    def get_command(self, ctx: click.Context, invoked_command: str) -> Any:
+    def get_command(self, ctx: Context, invoked_command: str) -> Any:
         """Get a command from the Typer group, suggesting similar commands if the command is not found."""
         import difflib
 
@@ -76,7 +84,7 @@ class SpellcheckedTyperGroup(typer.core.TyperGroup):
                 invoked_command, possible_commands, n=1, cutoff=0.6
             )
             if close_match:
-                raise click.UsageError(
+                raise UsageError(
                     f"No such command '{invoked_command}'. Did you mean '{close_match[0]}'?",
                     ctx,
                 )
@@ -111,7 +119,7 @@ def _parse_payload(value: Any) -> dict[str, Any]:
         try:
             value = read_from_path(value[1:]).decode("utf-8")
         except Exception as e:
-            raise click.BadParameter(f"Could not read data from path {value}.") from e
+            raise BadParameter(f"Could not read data from path {value}.") from e
 
     # Use pydantic from_json here because it is much faster, and the payload may be large.
     return from_json(value)
@@ -407,7 +415,7 @@ def _create_user_defined_cli_command(
                     context={"base_dir": input_path},
                 )
             except ValidationError as e:
-                raise click.BadParameter(
+                raise BadParameter(
                     str(e),
                     param_hint="payload",
                 ) from e
