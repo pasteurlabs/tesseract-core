@@ -8,6 +8,7 @@ authors = [
 license = { text = "Apache-2.0" }
 requires-python = ">=3.10,<3.15"
 dependencies = [
+    "click",
     "jinja2",
     "rich",
     "typer",
@@ -40,15 +41,15 @@ tesseract-runtime = "tesseract_core.runtime.cli:main"
 # do not edit manually. To add constraints, use other operators (e.g. <, >=, ~=, ==) as needed.
 runtime = [
     "pydantic<=2.13.4,>=2.10",
-    "fastapi<=0.136.1,>=0.115",
-    "requests<=2.33.1,>=2.32.4",
-    "uvicorn<=0.46.0,>=0.34",
-    "click<=8.3.3,>=8.1",
+    "fastapi<=0.136.3,>=0.115",
+    "requests<=2.34.2,>=2.32.4",
+    "uvicorn<=0.48.0,>=0.34",
+    "click<=8.4.1,>=8.1",
     "typer<=0.25.1,>=0.15",
     "fsspec[http,s3]<=2026.4.0,>=2024.12",
     "pybase64<=1.4.3,>=1.4",
     "orjson<=3.11.9,>=3.10",
-    "numpy<=2.4.4,>=1.26",
+    "numpy<=2.4.6,>=1.26",
     "debugpy<=1.8.20,>=1.8.14",
     "mlflow-skinny<=3.12.0,>=3.7.0",
 ]
