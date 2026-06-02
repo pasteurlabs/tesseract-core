@@ -26,7 +26,7 @@ def draw_box(ax, cx, cy, w, h, line1, line2, bg, edge, lw=1.5, fs=10):
         (cx - w / 2, cy - h / 2),
         w,
         h,
-        boxstyle="round,pad=0.05",
+        boxstyle="round,pad=0.04",
         facecolor=bg,
         edgecolor=edge,
         linewidth=lw,
@@ -36,17 +36,16 @@ def draw_box(ax, cx, cy, w, h, line1, line2, bg, edge, lw=1.5, fs=10):
     kw = dict(ha="center", va="center", zorder=3, parse_math=False)
     if line2:
         ax.text(
-            cx, cy + 0.12, line1, fontsize=fs, fontweight="bold", color="#1f2937", **kw
+            cx, cy + 0.13, line1, fontsize=fs, fontweight="bold", color="#1f2937", **kw
         )
         ax.text(
-            cx, cy - 0.12, line2, fontsize=fs - 2, color="#6b7280", style="italic", **kw
+            cx, cy - 0.15, line2, fontsize=fs - 2, color="#6b7280", style="italic", **kw
         )
     else:
         ax.text(cx, cy, line1, fontsize=fs, fontweight="bold", color="#1f2937", **kw)
 
 
 def draw_arrow(ax, x0, y0, x1, y1, rad=0.0):
-    style = f"arc3,rad={rad}"
     a = FancyArrowPatch(
         (x0, y0),
         (x1, y1),
@@ -54,7 +53,9 @@ def draw_arrow(ax, x0, y0, x1, y1, rad=0.0):
         mutation_scale=14,
         color=C_ARROW,
         linewidth=1.8,
-        connectionstyle=style,
+        connectionstyle=f"arc3,rad={rad}",
+        shrinkA=0,
+        shrinkB=0,
         zorder=1,
     )
     ax.add_patch(a)
@@ -67,10 +68,10 @@ def label(ax, x, y, text):
         text,
         ha="center",
         va="center",
-        fontsize=7.5,
+        fontsize=8,
         color=C_TEXT,
         fontfamily="monospace",
-        bbox=dict(boxstyle="round,pad=0.12", fc="white", ec="#d1d5db", lw=0.5),
+        bbox=dict(boxstyle="round,pad=0.16", fc="white", ec="#d1d5db", lw=0.6),
         zorder=4,
     )
 
@@ -85,84 +86,72 @@ def badge(ax, x, y, num, color):
         fontsize=10,
         fontweight="bold",
         color=color,
-        bbox=dict(boxstyle="circle,pad=0.18", fc="white", ec=color, lw=1.3),
+        bbox=dict(boxstyle="circle,pad=0.3", fc="white", ec=color, lw=1.3),
         zorder=5,
     )
 
 
 def main():
-    fig, ax = plt.subplots(figsize=(18, 5.2))
-    ax.set_xlim(-1, 20)
-    ax.set_ylim(-1.2, 4.0)
-    ax.set_aspect("equal")
-    ax.axis("off")
+    fig, ax = plt.subplots(figsize=(16, 6))
 
     # Y lanes
-    Y_TOP = 2.8
-    Y_BOT = 0.8
-    Y_MID = 1.8
+    Y_TOP = 4.6
+    Y_BOT = 2.4
+    Y_MID = 3.5
 
-    # X centers — generous spacing
+    # X centers — each column gets >= box width + gap of clearance.
+    # Box width is W; column pitch is 3.4 so there is always a ~1.2 gap.
     X = {
-        "f90": 0.5,
-        "ll": 4.0,
-        "opt": 7.5,
-        "combined": 10.5,
-        "ad": 12.8,
-        "so": 16.0,
+        "f90": 0.0,
+        "ll": 3.4,
+        "opt": 6.8,
+        "combined": 10.2,
+        "ad": 13.6,
+        "so": 17.4,
     }
 
-    W, H = 2.2, 0.65
+    W, H = 2.2, 0.85
 
-    # ── TOP TRACK: Fortran ──
+    ax.set_xlim(X["f90"] - W / 2 - 0.6, X["so"] + (W + 0.6) / 2 + 0.6)
+    ax.set_ylim(0.4, 6.0)
+    ax.axis("off")
+
+    # ── TOP TRACK: Fortran source path ──
     draw_box(
         ax, X["f90"], Y_TOP, W, H, "thermal_2d.f90", "Fortran source", C_FORT_BG, C_FORT
     )
     draw_box(ax, X["ll"], Y_TOP, W, H, "thermal_2d.ll", "LLVM IR", C_IR_BG, C_IR)
     draw_box(
-        ax,
-        X["opt"],
-        Y_TOP,
-        W + 0.4,
-        H,
-        "thermal_2d_opt.ll",
-        "optimized IR",
-        C_IR_BG,
-        C_IR,
+        ax, X["opt"], Y_TOP, W, H, "thermal_2d_opt.ll", "optimized IR", C_IR_BG, C_IR
     )
 
     draw_arrow(ax, X["f90"] + W / 2, Y_TOP, X["ll"] - W / 2, Y_TOP)
-    label(ax, (X["f90"] + X["ll"]) / 2, Y_TOP + 0.48, "lfortran --show-llvm")
+    label(ax, (X["f90"] + X["ll"]) / 2, Y_TOP - 0.62, "lfortran\n--show-llvm")
 
-    draw_arrow(ax, X["ll"] + W / 2, Y_TOP, X["opt"] - (W + 0.4) / 2, Y_TOP)
-    label(ax, (X["ll"] + X["opt"]) / 2, Y_TOP + 0.48, "opt -O3")
+    draw_arrow(ax, X["ll"] + W / 2, Y_TOP, X["opt"] - W / 2, Y_TOP)
+    label(ax, (X["ll"] + X["opt"]) / 2, Y_TOP + 0.62, "opt -O3")
 
-    # ── BOTTOM TRACK: C wrapper ──
+    # ── BOTTOM TRACK: C wrapper path ──
     draw_box(
         ax, X["f90"], Y_BOT, W, H, "wrapper.c", "Enzyme annotations", C_WRAP_BG, C_WRAP
     )
     draw_box(ax, X["ll"], Y_BOT, W, H, "wrapper.ll", "LLVM IR", C_IR_BG, C_IR)
 
     draw_arrow(ax, X["f90"] + W / 2, Y_BOT, X["ll"] - W / 2, Y_BOT)
-    label(ax, (X["f90"] + X["ll"]) / 2, Y_BOT - 0.48, "clang -emit-llvm")
+    label(ax, (X["f90"] + X["ll"]) / 2, Y_BOT + 0.62, "clang\n-emit-llvm")
 
-    # ── MERGE ──
+    # ── MERGE into combined.ll ──
     draw_box(ax, X["combined"], Y_MID, W, H, "combined.ll", "linked IR", C_IR_BG, C_IR)
 
-    # top track -> combined
+    # both tracks feed llvm-link; arrows enter the left face of combined.ll
     draw_arrow(
-        ax,
-        X["opt"] + (W + 0.4) / 2,
-        Y_TOP,
-        X["combined"] - W / 2,
-        Y_MID + 0.12,
-        rad=-0.2,
+        ax, X["opt"] + W / 2, Y_TOP, X["combined"] - W / 2, Y_MID + 0.18, rad=-0.18
     )
-    # bottom track -> combined
     draw_arrow(
-        ax, X["ll"] + W / 2, Y_BOT, X["combined"] - W / 2, Y_MID - 0.12, rad=0.15
+        ax, X["ll"] + W / 2, Y_BOT, X["combined"] - W / 2, Y_MID - 0.18, rad=0.18
     )
-    label(ax, (X["opt"] + X["combined"]) / 2 + 0.3, Y_MID + 0.75, "llvm-link")
+    # place the merge label in the open wedge to the left of combined.ll
+    label(ax, X["combined"] - W / 2 - 1.4, Y_MID, "llvm-link")
 
     # ── LINEAR: combined -> ad -> .so ──
     draw_box(
@@ -170,7 +159,7 @@ def main():
         X["ad"],
         Y_MID,
         W,
-        H + 0.1,
+        H,
         "ad.ll",
         "differentiated IR",
         C_ENZ_BG,
@@ -178,52 +167,41 @@ def main():
         lw=2.5,
     )
 
-    W_SO, H_SO = W + 0.6, H + 0.4
+    W_SO = W + 0.6
     draw_box(
         ax,
         X["so"],
         Y_MID,
         W_SO,
-        H_SO,
+        H + 0.15,
         "libthermal_2d_ad.so",
-        None,
+        "forward / JVP / VJP",
         C_SO_BG,
         C_SO,
         lw=2.5,
-    )
-    ax.text(
-        X["so"],
-        Y_MID - 0.13,
-        "forward  /  JVP  /  VJP",
-        ha="center",
-        va="center",
-        fontsize=8.5,
-        color="#9a3412",
-        fontweight="bold",
-        zorder=3,
-        parse_math=False,
+        fs=10,
     )
 
     draw_arrow(ax, X["combined"] + W / 2, Y_MID, X["ad"] - W / 2, Y_MID)
-    label(ax, (X["combined"] + X["ad"]) / 2, Y_MID + 0.52, "opt -passes=enzyme")
+    label(ax, (X["combined"] + X["ad"]) / 2, Y_MID + 0.62, "opt\n-passes=enzyme")
 
     draw_arrow(ax, X["ad"] + W / 2, Y_MID, X["so"] - W_SO / 2, Y_MID)
-    label(ax, (X["ad"] + X["so"]) / 2, Y_MID + 0.52, "opt + clang -shared")
+    label(ax, (X["ad"] + X["so"]) / 2, Y_MID + 0.62, "opt +\nclang -shared")
 
-    # ── Step badges ──
-    badge(ax, X["f90"], Y_TOP + H / 2 + 0.32, 1, C_FORT)
-    badge(ax, X["ll"], Y_TOP + H / 2 + 0.32, 2, C_IR)
-    badge(ax, X["f90"], Y_BOT - H / 2 - 0.32, 3, C_WRAP)
-    badge(ax, X["combined"], Y_MID + H / 2 + 0.32, 4, C_IR)
-    badge(ax, X["ad"], Y_MID + (H + 0.1) / 2 + 0.32, 5, C_ENZ)
-    badge(ax, X["so"], Y_MID + H_SO / 2 + 0.32, 6, C_SO)
+    # ── Step badges, placed just above/below the box they number ──
+    badge(ax, X["f90"] - W / 2 + 0.1, Y_TOP + H / 2 + 0.35, 1, C_FORT)
+    badge(ax, X["ll"] - W / 2 + 0.1, Y_TOP + H / 2 + 0.35, 2, C_IR)
+    badge(ax, X["f90"] - W / 2 + 0.1, Y_BOT - H / 2 - 0.35, 3, C_WRAP)
+    badge(ax, X["combined"] - W / 2 + 0.1, Y_MID + H / 2 + 0.35, 4, C_IR)
+    badge(ax, X["ad"] - W / 2 + 0.1, Y_MID + H / 2 + 0.35, 5, C_ENZ)
+    badge(ax, X["so"] - W_SO / 2 + 0.1, Y_MID + (H + 0.15) / 2 + 0.35, 6, C_SO)
 
-    # ── Tool labels at bottom ──
-    by = -0.7
+    # ── Tool labels at bottom, centered under the columns they cover ──
+    by = 0.9
     for bx, txt, bg, ec in [
-        (0.5, "LFortran 0.61", C_FORT_BG, C_FORT),
-        (7.0, "LLVM 19", C_IR_BG, C_IR),
-        (13.5, "Enzyme (LLVM pass)", C_ENZ_BG, C_ENZ),
+        ((X["f90"] + X["ll"]) / 2, "LFortran 0.61", C_FORT_BG, C_FORT),
+        ((X["ll"] + X["combined"]) / 2, "LLVM 19", C_IR_BG, C_IR),
+        ((X["ad"] + X["so"]) / 2, "Enzyme (LLVM pass)", C_ENZ_BG, C_ENZ),
     ]:
         ax.text(
             bx,
@@ -231,20 +209,20 @@ def main():
             txt,
             ha="center",
             va="center",
-            fontsize=8.5,
+            fontsize=9,
             color=C_TEXT,
             fontweight="bold",
-            bbox=dict(boxstyle="round,pad=0.22", fc=bg, ec=ec, lw=1),
+            bbox=dict(boxstyle="round,pad=0.3", fc=bg, ec=ec, lw=1),
         )
 
     # Title
     ax.text(
-        9.0,
-        3.7,
+        (X["f90"] + X["so"]) / 2,
+        5.7,
         "Compilation pipeline: Fortran → Enzyme AD → shared library",
         ha="center",
         va="center",
-        fontsize=15,
+        fontsize=16,
         fontweight="bold",
         color="#111827",
     )

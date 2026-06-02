@@ -81,93 +81,38 @@ subroutine thermal_2d_solve(n, nx, ny, n_steps, &
   end do
 ```
 
-The stencil uses harmonic-mean conductivity at cell faces (the standard approach for flux continuity across cells with different conductivities). Boundary conditions are mixed: Dirichlet (hot wall at the bottom), convection/Robin (top), and insulated/Neumann (sides).
+Boundary conditions are mixed — Dirichlet (hot wall at the bottom), convection/Robin (top), insulated/Neumann (sides) — and the faces use harmonic-mean conductivity, the standard trick for flux continuity across cells with different $k$. This is exactly where AD earns its keep: because $k(T)$ is nonlinear, the stencil coefficients depend on the current temperature field, so the Jacobian changes at every time step. Hand-coding the adjoint through that, and re-deriving it every time the forward code changes, is the kind of work AD exists to delete.
 
-The reason AD matters here: since $k(T)$ is nonlinear, the stencil coefficients depend on the current temperature field, and the Jacobian changes at every time step. Hand-coding the adjoint through this nonlinear stencil and multi-step time loop is tremendously painful, and needs to be updated every time the forward code changes.
-
-This really is vanilla Fortran: no special annotations, no AD-aware constructs, explicit `do` loops, no array intrinsics. But getting to "vanilla" took some work: Our first version used local allocatable arrays for `T_cur` and `T_new`, which LFortran compiles into `_lfortran_malloc` calls, and Enzyme has no idea what to do with them, so the AD pass just crashes. The fix was to pass work arrays in from C, pre-allocated on the heap. Not a huge change, but given how unhelpful the LLVM error messages were, it took some time to figure out. We also had to disable array intrinsics and bounds checking (`--no-array-bounds-checking`) for the same reason: they emit runtime calls that Enzyme can't see through.
-
-This is an honest preview of what "differentiate existing Fortran" looks like today. The source stays recognizably Fortran, but you'll need to massage it, eliminating allocations and runtime calls that break the AD toolchain. For a 220-line solver, that's an afternoon; for a large legacy codebase, it's an open question.
+It's vanilla Fortran — explicit `do` loops, no annotations, no AD-aware constructs — but getting to "vanilla" took some massaging. Allocatables, array intrinsics, and bounds checking all compile down to runtime calls (`_lfortran_malloc` and friends) that Enzyme can't see through, so they had to go: work arrays get passed in pre-allocated from C, and we compile with `--no-array-bounds-checking`. For a 220-line solver that's an afternoon's work; for a large legacy codebase, it's an open question.
 
 ## The pipeline
 
-Enzyme works at the LLVM IR level, not the source level, so anything that compiles to LLVM IR (C, C++, Rust, Fortran) can be differentiated. In practice there are caveats, but the compilation chain is surprisingly straightforward, as long as you're comfortable inspecting LLVM IR when things go wrong.
-
-There are six steps:
+Enzyme works at the LLVM IR level, not the source level, so anything that compiles to LLVM IR (C, C++, Rust, Fortran) can be differentiated. The chain is six `opt`/`clang` invocations, surprisingly straightforward as long as you're comfortable inspecting IR when things go wrong:
 
 <img src="../_static/blog/enzyme-pipeline.png" alt="Compilation pipeline: Fortran → Enzyme AD → shared library">
 
-**1. Fortran → LLVM IR** via LFortran:
+Most of those steps are plumbing — lower the Fortran to IR, compile a thin C wrapper, `llvm-link` the two, run Enzyme, optimize, emit a `.so`. Two of them are where all the interesting failures live.
 
-```bash
-$ lfortran --show-llvm --no-array-bounds-checking thermal_2d.f90 > thermal_2d.ll
-```
+**Why LFortran.** The first step (`lfortran --show-llvm`) is also the reason the whole thing is tractable: LFortran emits remarkably clean IR. Arrays come out as plain pointers with the usual GEP/load/store patterns, much like C, instead of the multi-field descriptor structs and runtime calls that Flang produces. That matters enormously, because Enzyme has to trace every memory access to figure out what's active, and it has a far easier time with pointer arithmetic than with opaque `fir.box` descriptors. The catch: LFortran is still maturing, so your code has to stay inside what it [supports](https://lfortran.org/progress/).
 
-LFortran is a modern Fortran compiler, and the reason we reached for it is that it emits remarkably clean LLVM IR. Arrays come out as plain pointers with the usual GEP/load/store patterns, much like you'd get from C, instead of the multi-field descriptor structs and runtime library calls that Flang produces. That turns out to matter a lot, because Enzyme has to trace through every single memory access to figure out what's active, and it has a far easier time with plain pointer arithmetic than with opaque `fir.box` descriptors. The catch is that LFortran is still maturing, so not every Fortran feature is supported yet (here's the [compilation status](https://lfortran.org/progress/)) and your code has to stay within what it can handle.
+**Why `-O1`, not `-O3`.** The pre-Enzyme optimization step looks innocuous, and our first pipeline used `-O3` there. The forward pass worked perfectly, so we moved on — but the VJP returned NaN on certain inputs, and it took hours to find why. At `-O3`, LLVM's aggressive vectorization and code-motion produce IR patterns Enzyme mishandles in reverse mode; in our case it bit when adjacent cell temperatures were equal, intermediate terms cancelled, and a rearrangement turned that into a division by zero. The fix is to keep optimization mild _before_ the AD pass and save `-O3` for _after_ it. If you build something like this: test the gradients early and often.
 
-**2. Optimize the IR:**
-
-```bash
-$ opt -O1 -S thermal_2d.ll -o thermal_2d_opt.ll
-```
-
-Notice that's `-O1`, not `-O3`! Our first pipeline used `-O3` here, and the forward pass worked perfectly, so we moved on. The VJP didn't, though. It returned NaN on certain inputs, and it took us a few hours to track down why. What was happening is that LLVM's aggressive vectorization and code-motion passes at `-O3` produce IR patterns Enzyme mishandles during reverse-mode analysis, and in our case it bit specifically when adjacent cell temperatures were equal and intermediate terms canceled out, which can turn into a division by zero once things get rearranged. We settled on keeping the pre-Enzyme optimization mild and saving `-O3` for after the AD pass instead (that's step 6). If you build something like this, our advice is to test the gradients early and often.
-
-**3. Compile the C wrapper to LLVM IR:**
-
-```bash
-$ clang -emit-llvm -S -O1 wrapper.c -o wrapper.ll
-```
-
-A thin C wrapper bridges Fortran's by-pointer ABI over to a C-callable interface that Enzyme can annotate. It declares three entry points, `thermal_2d_forward`, `thermal_2d_vjp`, and `thermal_2d_jvp`, and uses Enzyme's `__enzyme_autodiff` and `__enzyme_fwddiff` intrinsics to mark which arguments should get shadow (gradient) buffers. Here's the core of the VJP entry point:
+In between sits a thin C wrapper that bridges Fortran's by-pointer ABI to a C interface Enzyme can annotate. It allocates the work arrays on the heap (sidestepping the `_lfortran_malloc` issue) and marks which arguments get shadow buffers via Enzyme's intrinsics:
 
 ```c
-void thermal_2d_vjp(int nx, int ny, int n_steps,
-                    const double* T_init,  double* dT_init,
-                    const double* T_final, double* dT_final,
-                    double k0,     double* dk0,
-                    double k1,     double* dk1,
-                    /* ... */)
+void thermal_2d_vjp(/* ... nx, ny, n_steps ... */)
 {
-    double* T_cur  = calloc(n, sizeof(double));
-    double* dT_cur = calloc(n, sizeof(double));
+    double* T_cur = calloc(n, sizeof(double));   // heap, not allocatable
     /* ... */
-
     __enzyme_autodiff((void*)thermal_2d_solve,
-        enzyme_const, &n_,
-        enzyme_const, &nx_,
-        enzyme_dup, (double*)T_init, dT_init,
-        enzyme_dup, (double*)T_final, dT_final,
-        enzyme_dup, &k0_, dk0,
-        enzyme_dup, &k1_, dk1,
+        enzyme_const, &nx_,                       // not differentiated
+        enzyme_dup,   (double*)T_init, dT_init,   // value + shadow buffer
+        enzyme_dup,   &k0_, dk0,
         /* ... */);
 }
 ```
 
-This is also where the work arrays get allocated on the heap, sidestepping the `_lfortran_malloc` issue from earlier.
-
-**4. Link the IR modules:**
-
-```bash
-$ llvm-link wrapper.ll thermal_2d_opt.ll -S -o combined.ll
-```
-
-**5. Run the Enzyme AD pass:**
-
-```bash
-$ opt --load-pass-plugin=LLVMEnzyme-19.so -passes=enzyme -S combined.ll -o ad.ll
-```
-
-This is the step that does the real work, and where Enzyme analyzes the LLVM IR and synthesizes forward and reverse-mode derivative code. For reverse mode, it uses a store-all (tape) strategy, caching intermediate values at each time step. When it works, it's genuinely impressive — you get an adjoint of your entire time-stepping loop for free. When it doesn't, you're reading LLVM IR diffs at 2 AM wondering where your life went wrong (see [What's next](#whats-next-and-what-wed-do-differently)).
-
-**6. Optimize and compile to a shared library:**
-
-```bash
-$ opt -O3 -S ad.ll -o ad_opt.ll
-$ clang -shared -O3 ad_opt.ll -o libthermal_2d_ad.so -lm
-```
-
-Out comes a single `.so` file with three entry points you can call from Python via ctypes, one each for forward evaluation, the JVP, and the VJP. The whole pipeline runs during `tesseract build` and takes about 30 seconds end to end.
+The Enzyme pass (`-passes=enzyme`) is where the real work happens: it analyzes the linked IR and synthesizes the derivative code, using a store-all tape strategy that caches intermediates at each time step. When it works, you get an adjoint of your entire time-stepping loop for free. When it doesn't, you're reading IR diffs at 2 AM (see [What's next](#whats-next-and-what-wed-do-differently)). The final `-O3 + clang -shared` step emits a single `.so` with three entry points — forward, JVP, VJP — callable from Python via ctypes. The whole pipeline runs during `tesseract build`, about 30 seconds end to end.
 
 ## Does it actually work?
 
@@ -211,9 +156,7 @@ With that in place, it's finally time to point some real optimization problems a
 
 ### Scalar calibration: recovering 2 material parameters
 
-For a sanity check, the setup stays simple. A steel plate is heating up, there are thermocouple readings at 9 sensor locations, and the plate's material properties are unknown. The question is whether $k_0$ (base conductivity) and $k_1$ (its temperature coefficient) can be recovered from those sparse, noisy readings.
-
-To keep the test honest, the "observed" data is generated synthetically: run the solver with known true values ($k_0 = 45$, $k_1 = -0.02$), sample at the sensor locations, and add 0.5 K of Gaussian noise on top. The optimizer then starts from a deliberately bad guess, 33% off on $k_0$ and the wrong sign entirely on $k_1$, and the whole thing goes to L-BFGS-B. The loss is a plain JAX function that happens to call the Fortran solver; `jax.value_and_grad` hands back both the loss and its gradient, propagating the cotangent through the HTTP boundary into Enzyme's reverse-mode pass. The optimizer is none the wiser that the gradients came from a compiled Fortran solver differentiated by an LLVM pass.
+A sanity check first: a steel plate heats up, 9 thermocouples read its temperature, and the material properties are unknown. Can we recover $k_0$ (base conductivity) and $k_1$ (its temperature coefficient) from those sparse, noisy readings? To keep the test honest, the "observed" data is synthetic — the solver run at known true values ($k_0 = 45$, $k_1 = -0.02$), sampled at the sensors, plus 0.5 K of Gaussian noise — and the optimizer starts from a deliberately bad guess: 33% off on $k_0$, the wrong sign entirely on $k_1$. The loss is a plain JAX function that happens to call the Fortran solver:
 
 ```python
 def loss_fn(params):
@@ -229,9 +172,7 @@ loss, grad = value_and_grad(jnp.array([60.0, 0.01]))
 
 <img src="../_static/blog/enzyme-part1-convergence.png" alt="Scalar calibration convergence: loss, k0, k1">
 
-<img src="../_static/blog/enzyme-part1-temperature-fields.png" alt="Temperature field comparison: initial guess, recovered, ground truth, error">
-
-L-BFGS-B converges in about 20 iterations. It nails $k_0$ to within a few percent; $k_1$ lands a bit further out (the temperature field is only weakly sensitive to it, so it's poorly constrained by 9 noisy sensors), but the recovered field still matches the observations. The more interesting question is what happens once the method gets pushed a lot harder.
+L-BFGS-B converges in about 20 iterations, nailing $k_0$ to within a few percent. $k_1$ lands further out — the temperature field is only weakly sensitive to it, so 9 noisy sensors barely constrain it — but the recovered field still matches the observations. The more interesting question is what happens once you push the method a lot harder.
 
 ### Thermal forensics: recovering a 900-element initial temperature field
 
