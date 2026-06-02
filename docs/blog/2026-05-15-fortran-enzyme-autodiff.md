@@ -190,55 +190,54 @@ Error is worst at both ends of the $\epsilon$ range and best in the middle, the 
 
 Correct gradients are only worth something once you put them to work, whether that means dropping them into an optimizer, solving a real inverse problem, or composing them with other differentiable code.
 
-To wire the Enzyme gradients into JAX, the solver has to look like a differentiable JAX primitive, and this is more or less exactly what Tesseract was built for. It wraps the compiled library, with LFortran, LLVM 19, Enzyme, and the whole toolchain inside it, into a container that exposes autodiff endpoints, so that `jax.value_and_grad` can route its VJP calls straight to the Enzyme-generated code. From there it's just a matter of building the container and serving it over HTTP:
+To wire the Enzyme gradients into JAX, the solver has to look like a differentiable JAX primitive, and this is more or less exactly what Tesseract was built for. It wraps the compiled library, with LFortran, LLVM 19, Enzyme, and the whole toolchain inside it, into a container that exposes autodiff endpoints. Building and serving it is two commands:
 
 ```bash
 $ tesseract build demo/enzyme_thermal_2d/
 $ tesseract serve enzyme-thermal-2d
 ```
 
-With that running, it's finally time to point some real optimization problems at it and find out whether all the effort actually paid off.
+The last piece is [Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax), which promotes a served Tesseract to a proper JAX primitive. Wrap a call in `apply_tesseract` and the Fortran solver becomes an ordinary differentiable JAX function: `jax.value_and_grad` routes its VJP calls straight through the HTTP boundary to the Enzyme-generated code, and the optimizer never has to know.
+
+```python
+from tesseract_jax import apply_tesseract
+
+def solve(k0, k1):
+    inputs = {**base_inputs, "k0": k0, "k1": k1}
+    return apply_tesseract(enzyme_tess, inputs)["T_final"]  # differentiable
+```
+
+With that in place, it's finally time to point some real optimization problems at it and find out whether all the effort actually paid off.
 
 ### Scalar calibration: recovering 2 material parameters
 
 For a sanity check, the setup stays simple. A steel plate is heating up, there are thermocouple readings at 9 sensor locations, and the plate's material properties are unknown. The question is whether $k_0$ (base conductivity) and $k_1$ (its temperature coefficient) can be recovered from those sparse, noisy readings.
 
-To keep the test honest, the "observed" data is generated synthetically: run the solver with known true values ($k_0 = 45$, $k_1 = -0.02$), sample at the sensor locations, and add 0.5 K of Gaussian noise on top. The optimizer then starts from a deliberately bad guess, 33% off on $k_0$ and the wrong sign entirely on $k_1$, and the whole thing goes to L-BFGS-B. A single VJP call hands back gradients with respect to both parameters at once, and the optimizer is none the wiser that they came from a compiled Fortran solver differentiated by an LLVM pass.
+To keep the test honest, the "observed" data is generated synthetically: run the solver with known true values ($k_0 = 45$, $k_1 = -0.02$), sample at the sensor locations, and add 0.5 K of Gaussian noise on top. The optimizer then starts from a deliberately bad guess, 33% off on $k_0$ and the wrong sign entirely on $k_1$, and the whole thing goes to L-BFGS-B. The loss is a plain JAX function that happens to call the Fortran solver; `jax.value_and_grad` hands back both the loss and its gradient, propagating the cotangent through the HTTP boundary into Enzyme's reverse-mode pass. The optimizer is none the wiser that the gradients came from a compiled Fortran solver differentiated by an LLVM pass.
 
 ```python
-def objective_and_gradient(params, tesseract):
+def loss_fn(params):
     k0, k1 = params
-    result = tesseract.apply(inputs=make_inputs(k0, k1))
-    T_pred = np.array(result["T_final"])
-
+    T_pred = solve(k0, k1)                       # apply_tesseract under the hood
     residuals = T_pred[sensor_indices] - T_obs
-    loss = 0.5 * np.sum(residuals**2)
+    return 0.5 * jnp.sum(residuals**2)
 
-    # Cotangent: residuals at sensor locations, zero elsewhere
-    cotangent = np.zeros(n, dtype=np.float64)
-    cotangent[sensor_indices] = residuals
-
-    # One VJP call → gradients w.r.t. both k0 and k1
-    vjp = tesseract.vector_jacobian_product(
-        inputs=make_inputs(k0, k1),
-        vjp_inputs=["k0", "k1"],
-        vjp_outputs=["T_final"],
-        cotangent_vector={"T_final": cotangent},
-    )
-    return loss, np.array([vjp["k0"], vjp["k1"]])
+# One reverse sweep → gradients w.r.t. both k0 and k1
+value_and_grad = jax.value_and_grad(loss_fn)
+loss, grad = value_and_grad(jnp.array([60.0, 0.01]))
 ```
 
 <img src="../_static/blog/enzyme-part1-convergence.png" alt="Scalar calibration convergence: loss, k0, k1">
 
 <img src="../_static/blog/enzyme-part1-temperature-fields.png" alt="Temperature field comparison: initial guess, recovered, ground truth, error">
 
-L-BFGS-B converges in about 15 iterations and recovers both parameters to within the noise floor. The more interesting question is what happens once the method gets pushed a lot harder.
+L-BFGS-B converges in about 20 iterations. It nails $k_0$ to within a few percent; $k_1$ lands a bit further out (the temperature field is only weakly sensitive to it, so it's poorly constrained by 9 noisy sensors), but the recovered field still matches the observations. The more interesting question is what happens once the method gets pushed a lot harder.
 
 ### Thermal forensics: recovering a 900-element initial temperature field
 
 Imagine a steel plate that went through some unmonitored heating event, maybe a laser pulse, maybe a localized defect, nobody knows. Five seconds later you get to measure temperatures at 100 sensor locations, and the question is whether you can reconstruct what the initial temperature distribution must have looked like.
 
-The true initial condition has two Gaussian hot spots sitting on a warm background. So the ask is 900 unknowns out of 100 noisy observations, run backwards through a nonlinear PDE. This is exactly the regime where reverse-mode AD (or its cousin the adjoint method) stops being a nice-to-have and becomes essential:
+The true initial condition has two Gaussian hot spots sitting on a warm background. So the ask is 900 unknowns out of 100 noisy observations, run backwards through a nonlinear PDE. A small Tikhonov term (penalizing departure from the ambient prior) regularizes the otherwise ill-posed inversion, and since the loss is just a JAX function, that term is one extra line that `jax.value_and_grad` differentiates for free. The optimization is the same `jax.value_and_grad` + L-BFGS-B as before; only the parameter vector grows from 2 to 900. This is exactly the regime where reverse-mode AD (or its cousin the adjoint method) stops being a nice-to-have and becomes essential:
 
 | Method                | Forward solves per iteration |
 | --------------------- | ---------------------------: |
@@ -250,30 +249,11 @@ Finite differences would have to do 901 forward solves every iteration just to a
 
 <img src="../_static/blog/enzyme-part2-forensics.png" alt="Thermal forensics: recovering 900 initial temperature values from 100 sensors">
 
-And it works! L-BFGS-B finds both hot spots, gets their locations and magnitudes right, and the correlation between the recovered and true initial fields comes out above 0.99. Where it struggles is at the edges of the hot spots, which is exactly where the signal has had the most time to diffuse away. The reconstruction comes out a little smoothed compared to the truth, which is about what you'd expect from an ill-posed problem with diffusion in it, but it's honestly far better than a pipeline held together with shell scripts has any right to deliver.
+And it works! L-BFGS-B finds both hot spots, gets their locations and magnitudes right, and the correlation between the recovered and true initial fields comes out around 0.98. Where it struggles is at the edges of the hot spots, which is exactly where the signal has had the most time to diffuse away. The reconstruction comes out a little smoothed compared to the truth, which is about what you'd expect from an ill-posed problem with diffusion in it, but it's honestly far better than a pipeline held together with shell scripts has any right to deliver.
 
-That's `jax.grad` flowing all the way through compiled Fortran, without a single line of adjoint code written by hand.
+That's `jax.grad` flowing all the way through compiled Fortran, without a single line of adjoint code written by hand. The same `value_and_grad` call powered both inverse problems above; only the size of the parameter vector changed.
 
-### JAX integration via Tesseract-JAX
-
-If you want, you can take this one step further with [Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax), which promotes the Tesseract to a proper JAX primitive. At that point `jax.value_and_grad` just works on it directly:
-
-```python
-from tesseract_jax import apply_tesseract
-
-def loss_fn(k0, k1, tesseract):
-    inputs = {**base_inputs, "k0": k0, "k1": k1}
-    T_pred = apply_tesseract(tesseract, inputs)["T_final"]
-    residuals = T_pred[sensor_indices] - jnp.array(T_obs)
-    return 0.5 * jnp.sum(residuals**2)
-
-# jax.value_and_grad differentiates straight through the HTTP boundary
-loss, (dk0, dk1) = jax.value_and_grad(loss_fn, argnums=(0, 1))(
-    jnp.float64(60.0), jnp.float64(0.01), enzyme_tess
-)
-```
-
-As far as JAX is concerned, the Fortran solver is just another differentiable function. You could swap `enzyme_tess` out for a pure-JAX reimplementation tomorrow and nothing in the optimization loop would change, only the container sitting behind the HTTP call. Whether you find that abstraction beautiful or horrifying probably comes down to how you feel about your gradients quietly traversing six layers of indirection on the way through (Python → JAX/XLA → HTTP → ctypes → Enzyme → Fortran).
+And because the solver is just another JAX function behind `apply_tesseract`, you could swap `enzyme_tess` out for a pure-JAX reimplementation tomorrow and nothing in the optimization loop would change, only the container sitting behind the HTTP call. Whether you find that abstraction beautiful or horrifying probably comes down to how you feel about your gradients quietly traversing six layers of indirection on the way through (Python → JAX/XLA → HTTP → ctypes → Enzyme → Fortran).
 
 ## Where this could go
 
