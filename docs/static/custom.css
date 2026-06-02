@@ -624,7 +624,7 @@ body[data-theme="dark"] .ecosystem-card:focus-visible {
     background: var(--color-code-background);
     border-radius: var(--radius-md);
     border: 1px solid var(--color-background-border);
-    margin: 1.5rem 0;
+    margin: 1rem 0;
     overflow: hidden;
 }
 
@@ -632,11 +632,17 @@ body[data-theme="dark"] .ecosystem-card:focus-visible {
     background: transparent;
     border-radius: 0;
     border: none;
-    padding: 1rem 1.25rem;
+    padding: 0.7rem 1.1rem;
     margin: 0;
     font-size: 0.85rem;
-    line-height: 1.6;
+    line-height: 1.5;
     overflow-x: auto;
+}
+
+/* Tighten the gap when a short intro line is immediately followed by a code
+   block (e.g. "Building and serving it is two commands:") */
+.blog-page .content p:has(+ .highlight) {
+    margin-bottom: 0.6rem;
 }
 
 /* Images — center and constrain */
@@ -778,29 +784,44 @@ body[data-theme="dark"] .ecosystem-card:focus-visible {
     margin: 0;
 }
 
-/* Tables */
+/* Tables — size to content rather than stretching full-width, so the small
+   comparison tables in posts don't waste horizontal (and vertical) space. */
 .blog-page .content table {
-    width: 100%;
-    margin: 2rem 0;
+    width: auto;
+    max-width: 100%;
+    margin: 1.25rem 0;
     border-collapse: separate;
     border-spacing: 0;
     font-size: 0.9rem;
-    line-height: 1.5;
+    line-height: 1.45;
     border-radius: var(--radius-md);
     overflow: hidden;
     border: 1px solid var(--color-background-border);
+}
+
+/* Furo wraps tables in a scroll container that is itself full-width; let it
+   shrink so the content-width table isn't centered in a wide empty box. */
+.blog-page .content .table-wrapper {
+    width: fit-content;
+    max-width: 100%;
+    margin: 1.25rem 0;
+    overflow-x: auto;
+}
+
+.blog-page .content .table-wrapper table {
+    margin: 0;
 }
 
 .blog-page .content table thead th {
     background: var(--color-background-secondary);
     font-weight: 600;
     text-align: left;
-    padding: 0.75rem 1rem;
+    padding: 0.45rem 0.9rem;
     border-bottom: 2px solid var(--color-background-border);
 }
 
 .blog-page .content table tbody td {
-    padding: 0.6rem 1rem;
+    padding: 0.4rem 0.9rem;
     border-bottom: 1px solid var(--color-background-border);
 }
 
