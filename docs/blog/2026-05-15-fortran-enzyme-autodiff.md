@@ -1,18 +1,18 @@
 ---
 orphan: true
-og:title: "Differentiable Fortran in JAX via LFortran and Enzyme"
+og:title: "Differentiable Fortran via LFortran and Enzyme"
 og:description: "How we duct-taped a compiler pipeline together to get exact gradients out of a Fortran thermal solver, then used it to solve real inverse problems from Python."
 blog_date: "2026-05-15"
 blog_author: "@dionhaefner"
-blog_title: "Differentiable Fortran in JAX via LFortran and Enzyme"
+blog_title: "Differentiable Fortran via LFortran and Enzyme"
 blog_description: "How we duct-taped a compiler pipeline together to get exact gradients out of a Fortran thermal solver, then used it to solve real inverse problems from Python."
 ---
 
-# Differentiable Fortran in JAX via LFortran and Enzyme
+# Differentiable Fortran via LFortran and Enzyme
 
 What if you could do autodiff through existing Fortran, C, or C++ simulation code, embed it into JAX and torch, and use it as a high-performance differentiable physics engine? Turns out, you can.
 
-Decades of validated physics code, climate models, CFD, aerospace, nuclear, sit behind a wall that modern ML pipelines can't cross: no gradients. The usual answer is to rewrite it all in JAX or PyTorch. The alternative we explore here is to leave the code where it is and get exact gradients out anyway, thanks to some LLVM-level magic. [Enzyme](https://enzyme.mit.edu/) applies AD at the LLVM IR level, so we can differentiate any code that compiles to LLVM.
+Decades of validated physics code within CFD, climate, aerospace, nuclear, sit behind a wall that modern ML pipelines can't cross: no gradients. The usual answer is to rewrite it all in JAX or PyTorch. The alternative we explore here is to leave the code where it is and get exact gradients out anyway, thanks to some LLVM-level magic. [Enzyme](https://enzyme.mit.edu/) applies AD at the LLVM IR level, so we can differentiate any code that compiles to LLVM.
 
 So all we need is to duct-tape [LFortran](https://lfortran.org/), LLVM, and Enzyme together, point the result at a Fortran thermal solver, and get exact gradients out the other end. From there, [Tesseract](https://github.com/pasteurlabs/tesseract-core) (whose blog you're reading) wraps the result as a custom [JAX](https://jax.readthedocs.io/en/latest/) primitive, so a Fortran solver becomes a differentiable layer in arbitrary JAX code. Sounds easy, right?
 
@@ -100,7 +100,7 @@ There are six steps:
 **1. Fortran → LLVM IR** via LFortran:
 
 ```bash
-lfortran --show-llvm --no-array-bounds-checking thermal_2d.f90 > thermal_2d.ll
+$ lfortran --show-llvm --no-array-bounds-checking thermal_2d.f90 > thermal_2d.ll
 ```
 
 LFortran is a modern Fortran compiler, and the reason we reached for it is that it emits remarkably clean LLVM IR. Arrays come out as plain pointers with the usual GEP/load/store patterns, much like you'd get from C, instead of the multi-field descriptor structs and runtime library calls that Flang produces. That turns out to matter a lot, because Enzyme has to trace through every single memory access to figure out what's active, and it has a far easier time with plain pointer arithmetic than with opaque `fir.box` descriptors. The catch is that LFortran is still maturing, so not every Fortran feature is supported yet (here's the [compilation status](https://lfortran.org/progress/)) and your code has to stay within what it can handle.
@@ -108,7 +108,7 @@ LFortran is a modern Fortran compiler, and the reason we reached for it is that 
 **2. Optimize the IR:**
 
 ```bash
-opt -O1 -S thermal_2d.ll -o thermal_2d_opt.ll
+$ opt -O1 -S thermal_2d.ll -o thermal_2d_opt.ll
 ```
 
 Notice that's `-O1`, not `-O3`! Our first pipeline used `-O3` here, and the forward pass worked perfectly, so we moved on. The VJP didn't, though. It returned NaN on certain inputs, and it took us a few hours to track down why. What was happening is that LLVM's aggressive vectorization and code-motion passes at `-O3` produce IR patterns Enzyme mishandles during reverse-mode analysis, and in our case it bit specifically when adjacent cell temperatures were equal and intermediate terms canceled out, which can turn into a division by zero once things get rearranged. We settled on keeping the pre-Enzyme optimization mild and saving `-O3` for after the AD pass instead (that's step 6). If you build something like this, our advice is to test the gradients early and often.
@@ -116,7 +116,7 @@ Notice that's `-O1`, not `-O3`! Our first pipeline used `-O3` here, and the forw
 **3. Compile the C wrapper to LLVM IR:**
 
 ```bash
-clang -emit-llvm -S -O1 wrapper.c -o wrapper.ll
+$ clang -emit-llvm -S -O1 wrapper.c -o wrapper.ll
 ```
 
 A thin C wrapper bridges Fortran's by-pointer ABI over to a C-callable interface that Enzyme can annotate. It declares three entry points, `thermal_2d_forward`, `thermal_2d_vjp`, and `thermal_2d_jvp`, and uses Enzyme's `__enzyme_autodiff` and `__enzyme_fwddiff` intrinsics to mark which arguments should get shadow (gradient) buffers. Here's the core of the VJP entry point:
@@ -149,13 +149,13 @@ This is also where the work arrays get allocated on the heap, sidestepping the `
 **4. Link the IR modules:**
 
 ```bash
-llvm-link wrapper.ll thermal_2d_opt.ll -S -o combined.ll
+$ llvm-link wrapper.ll thermal_2d_opt.ll -S -o combined.ll
 ```
 
 **5. Run the Enzyme AD pass:**
 
 ```bash
-opt --load-pass-plugin=LLVMEnzyme-19.so -passes=enzyme -S combined.ll -o ad.ll
+$ opt --load-pass-plugin=LLVMEnzyme-19.so -passes=enzyme -S combined.ll -o ad.ll
 ```
 
 This is the step that does the real work, and where Enzyme analyzes the LLVM IR and synthesizes forward and reverse-mode derivative code. For reverse mode, it uses a store-all (tape) strategy, caching intermediate values at each time step. When it works, it's genuinely impressive — you get an adjoint of your entire time-stepping loop for free. When it doesn't, you're reading LLVM IR diffs at 2 AM wondering where your life went wrong (see [What's next](#whats-next-and-what-wed-do-differently)).
@@ -163,8 +163,8 @@ This is the step that does the real work, and where Enzyme analyzes the LLVM IR 
 **6. Optimize and compile to a shared library:**
 
 ```bash
-opt -O3 -S ad.ll -o ad_opt.ll
-clang -shared -O3 ad_opt.ll -o libthermal_2d_ad.so -lm
+$ opt -O3 -S ad.ll -o ad_opt.ll
+$ clang -shared -O3 ad_opt.ll -o libthermal_2d_ad.so -lm
 ```
 
 Out comes a single `.so` file with three entry points you can call from Python via ctypes, one each for forward evaluation, the JVP, and the VJP. The whole pipeline runs during `tesseract build` and takes about 30 seconds end to end.
@@ -193,8 +193,8 @@ Correct gradients are only worth something once you put them to work, whether th
 To wire the Enzyme gradients into JAX, the solver has to look like a differentiable JAX primitive, and this is more or less exactly what Tesseract was built for. It wraps the compiled library, with LFortran, LLVM 19, Enzyme, and the whole toolchain inside it, into a container that exposes autodiff endpoints, so that `jax.value_and_grad` can route its VJP calls straight to the Enzyme-generated code. From there it's just a matter of building the container and serving it over HTTP:
 
 ```bash
-tesseract build demo/enzyme_thermal_2d/
-tesseract serve enzyme-thermal-2d
+$ tesseract build demo/enzyme_thermal_2d/
+$ tesseract serve enzyme-thermal-2d
 ```
 
 With that running, it's finally time to point some real optimization problems at it and find out whether all the effort actually paid off.
@@ -290,6 +290,8 @@ grads = jax.grad(total_loss)  # chains Enzyme + JAX AD automatically
 Every component differentiates itself with whatever AD is native to it, and Tesseract is the thing that stitches the pieces together. This is similar to the pattern showcased in the [rocket fin optimization](2025-11-28-rocket-fin-optimization.md) post, where analytical adjoints, finite differences, and JAX AD all coexisted in a single pipeline. It works, though every new gradient source tends to bring along its own fresh class of debugging headaches.
 
 Because Enzyme works at the LLVM IR level, none of this is Fortran-specific. The same pipeline should apply to C, C++, Rust, or any language with an LLVM frontend, which we graciously leave as an exercise for the reader.
+
+(whats-next-and-what-wed-do-differently)=
 
 ## What's next (and what we'd do differently)
 

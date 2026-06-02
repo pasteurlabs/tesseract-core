@@ -25,7 +25,7 @@ import numpy as np
 from pydantic import BaseModel, Field, model_validator
 from typing_extensions import Self
 
-from tesseract_core.runtime import Array, Differentiable, Float64
+from tesseract_core.runtime import Array, Differentiable, Float64, ShapeDType
 
 # -- Shared library loading ------------------------------------------------
 
@@ -183,27 +183,23 @@ class InputSchema(BaseModel):
     )
     dt: Differentiable[Float64] = Field(
         default=0.01,
-        description="Time step size [s].",
-        gt=0.0,
+        description="Time step size [s]. Must be > 0.",
     )
 
     # Domain geometry
     Lx: Differentiable[Float64] = Field(
         default=0.1,
-        description="Domain length in x [m].",
-        gt=0.0,
+        description="Domain length in x [m]. Must be > 0.",
     )
     Ly: Differentiable[Float64] = Field(
         default=0.05,
-        description="Domain length in y [m].",
-        gt=0.0,
+        description="Domain length in y [m]. Must be > 0.",
     )
 
     # Material properties
     k0: Differentiable[Float64] = Field(
         default=45.0,
-        description="Base thermal conductivity [W/(m*K)]. k(T) = k0 + k1*T.",
-        gt=0.0,
+        description="Base thermal conductivity [W/(m*K)]. k(T) = k0 + k1*T. Must be > 0.",
     )
     k1: Differentiable[Float64] = Field(
         default=-0.01,
@@ -214,20 +210,20 @@ class InputSchema(BaseModel):
     )
     rho: Differentiable[Float64] = Field(
         default=7850.0,
-        description="Density [kg/m^3].",
-        gt=0.0,
+        description="Density [kg/m^3]. Must be > 0.",
     )
     cp: Differentiable[Float64] = Field(
         default=460.0,
-        description="Specific heat capacity [J/(kg*K)].",
-        gt=0.0,
+        description="Specific heat capacity [J/(kg*K)]. Must be > 0.",
     )
 
     # Boundary conditions
     h_conv: Differentiable[Float64] = Field(
         default=25.0,
-        description="Convective heat transfer coefficient at top boundary [W/(m^2*K)].",
-        gt=0.0,
+        description=(
+            "Convective heat transfer coefficient at top boundary "
+            "[W/(m^2*K)]. Must be > 0."
+        ),
     )
     T_inf: Differentiable[Float64] = Field(
         default=293.15,
@@ -249,6 +245,8 @@ class InputSchema(BaseModel):
     @model_validator(mode="after")
     def check_array_sizes(self) -> Self:
         """Verify T_init and Q have the correct size."""
+        if isinstance(self.T_init, ShapeDType):
+            return self  # skip during abstract_eval
         expected = self.nx * self.ny
         if len(self.T_init) != expected:
             raise ValueError(
@@ -262,11 +260,16 @@ class InputSchema(BaseModel):
 
     @model_validator(mode="after")
     def check_stability(self) -> Self:
-        """Check CFL stability for the explicit scheme.
+        """Check positivity and CFL stability for the explicit scheme.
 
         For temperature-dependent conductivity, use k_max = k0 + k1*T_hot
         (conservative estimate with the hottest expected temperature).
         """
+        if isinstance(self.dt, ShapeDType):
+            return self  # skip during abstract_eval
+        for name in ("dt", "Lx", "Ly", "k0", "rho", "cp", "h_conv"):
+            if getattr(self, name) <= 0:
+                raise ValueError(f"{name} must be > 0, got {getattr(self, name)}.")
         dx = self.Lx / (self.nx - 1)
         dy = self.Ly / (self.ny - 1)
         k_max = self.k0 + self.k1 * self.T_hot
@@ -324,6 +327,12 @@ def apply(inputs: InputSchema) -> OutputSchema:
     )
 
     return OutputSchema(T_final=T_final)
+
+
+def abstract_eval(abstract_inputs):
+    """Calculate output shape from input shapes (required for tesseract-jax)."""
+    T_init_shape = abstract_inputs.T_init
+    return {"T_final": ShapeDType(shape=T_init_shape.shape, dtype=T_init_shape.dtype)}
 
 
 # -- Optional endpoints (AD via Enzyme) ------------------------------------

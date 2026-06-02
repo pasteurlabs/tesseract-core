@@ -100,6 +100,7 @@ TEST_CASES = {
     ),
     "meshstats_finitediff": Config(check_gradients=True),
     "fortran_heat": Config(),
+    "enzyme_ad": Config(check_gradients=True),
     "conda": Config(),
     "required_files": Config(input_path="input"),
     "file_io": Config(input_path="test_cases/testdata", output_path="__tmp_path__"),
