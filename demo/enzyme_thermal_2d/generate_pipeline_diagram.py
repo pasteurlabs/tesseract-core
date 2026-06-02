@@ -5,6 +5,7 @@
 
 from pathlib import Path
 
+import matplotlib.patheffects as pe
 import matplotlib.pyplot as plt
 from matplotlib.patches import FancyArrowPatch, FancyBboxPatch
 
@@ -17,11 +18,14 @@ C_IR_BG, C_IR = "#fef9c4", "#ca8a04"
 C_ENZ_BG, C_ENZ = "#ede9fe", "#7c3aed"
 C_SO_BG, C_SO = "#ffedd5", "#ea580c"
 C_WRAP_BG, C_WRAP = "#dcfce7", "#16a34a"
-C_ARROW = "#9ca3af"
+# Arrows carry the mechanism (the flow of compilation), so they lead: dark and
+# solid. Box borders recede to a thin, muted line — the fill already encodes the
+# stage, so a heavy border would be redundant data-ink.
+C_ARROW = "#4b5563"
 C_TEXT = "#374151"
 
 
-def draw_box(ax, cx, cy, w, h, line1, line2, bg, edge, lw=1.5, fs=10):
+def draw_box(ax, cx, cy, w, h, line1, line2, bg, edge, fs=10):
     p = FancyBboxPatch(
         (cx - w / 2, cy - h / 2),
         w,
@@ -29,7 +33,7 @@ def draw_box(ax, cx, cy, w, h, line1, line2, bg, edge, lw=1.5, fs=10):
         boxstyle="round,pad=0.04",
         facecolor=bg,
         edgecolor=edge,
-        linewidth=lw,
+        linewidth=0.8,
         zorder=2,
     )
     ax.add_patch(p)
@@ -50,9 +54,9 @@ def draw_arrow(ax, x0, y0, x1, y1, rad=0.0):
         (x0, y0),
         (x1, y1),
         arrowstyle="-|>",
-        mutation_scale=14,
+        mutation_scale=15,
         color=C_ARROW,
-        linewidth=1.8,
+        linewidth=2.0,
         connectionstyle=f"arc3,rad={rad}",
         shrinkA=0,
         shrinkB=0,
@@ -62,6 +66,8 @@ def draw_arrow(ax, x0, y0, x1, y1, rad=0.0):
 
 
 def label(ax, x, y, text):
+    # No box: the chip border was non-data-ink. Plain monospace text reads as a
+    # command annotation on the arrow it sits beside.
     ax.text(
         x,
         y,
@@ -71,23 +77,8 @@ def label(ax, x, y, text):
         fontsize=8,
         color=C_TEXT,
         fontfamily="monospace",
-        bbox=dict(boxstyle="round,pad=0.16", fc="white", ec="#d1d5db", lw=0.6),
         zorder=4,
-    )
-
-
-def badge(ax, x, y, num, color):
-    ax.text(
-        x,
-        y,
-        str(num),
-        ha="center",
-        va="center",
-        fontsize=10,
-        fontweight="bold",
-        color=color,
-        bbox=dict(boxstyle="circle,pad=0.3", fc="white", ec=color, lw=1.3),
-        zorder=5,
+        path_effects=[pe.withStroke(linewidth=3, foreground="white")],
     )
 
 
@@ -120,7 +111,7 @@ def main():
     draw_box(
         ax, X["f90"], Y_TOP, W, H, "thermal_2d.f90", "Fortran source", C_FORT_BG, C_FORT
     )
-    draw_box(ax, X["ll"], Y_TOP, W, H, "thermal_2d.ll", "LLVM IR", C_IR_BG, C_IR)
+    draw_box(ax, X["ll"], Y_TOP, W, H, "thermal_2d.ll", "raw LLVM IR", C_IR_BG, C_IR)
     draw_box(
         ax, X["opt"], Y_TOP, W, H, "thermal_2d_opt.ll", "optimized IR", C_IR_BG, C_IR
     )
@@ -135,7 +126,7 @@ def main():
     draw_box(
         ax, X["f90"], Y_BOT, W, H, "wrapper.c", "Enzyme annotations", C_WRAP_BG, C_WRAP
     )
-    draw_box(ax, X["ll"], Y_BOT, W, H, "wrapper.ll", "LLVM IR", C_IR_BG, C_IR)
+    draw_box(ax, X["ll"], Y_BOT, W, H, "wrapper.ll", "wrapper IR", C_IR_BG, C_IR)
 
     draw_arrow(ax, X["f90"] + W / 2, Y_BOT, X["ll"] - W / 2, Y_BOT)
     label(ax, (X["f90"] + X["ll"]) / 2, Y_BOT + 0.62, "clang\n-emit-llvm")
@@ -154,18 +145,7 @@ def main():
     label(ax, X["combined"] - W / 2 - 1.4, Y_MID, "llvm-link")
 
     # ── LINEAR: combined -> ad -> .so ──
-    draw_box(
-        ax,
-        X["ad"],
-        Y_MID,
-        W,
-        H,
-        "ad.ll",
-        "differentiated IR",
-        C_ENZ_BG,
-        C_ENZ,
-        lw=2.5,
-    )
+    draw_box(ax, X["ad"], Y_MID, W, H, "ad.ll", "differentiated IR", C_ENZ_BG, C_ENZ)
 
     W_SO = W + 0.6
     draw_box(
@@ -178,41 +158,41 @@ def main():
         "forward / JVP / VJP",
         C_SO_BG,
         C_SO,
-        lw=2.5,
-        fs=10,
     )
 
     draw_arrow(ax, X["combined"] + W / 2, Y_MID, X["ad"] - W / 2, Y_MID)
-    label(ax, (X["combined"] + X["ad"]) / 2, Y_MID + 0.62, "opt\n-passes=enzyme")
+    label(ax, (X["combined"] + X["ad"]) / 2, Y_MID + 0.72, "opt\n-passes=enzyme")
 
     draw_arrow(ax, X["ad"] + W / 2, Y_MID, X["so"] - W_SO / 2, Y_MID)
-    label(ax, (X["ad"] + X["so"]) / 2, Y_MID + 0.62, "opt +\nclang -shared")
-
-    # ── Step badges, placed just above/below the box they number ──
-    badge(ax, X["f90"] - W / 2 + 0.1, Y_TOP + H / 2 + 0.35, 1, C_FORT)
-    badge(ax, X["ll"] - W / 2 + 0.1, Y_TOP + H / 2 + 0.35, 2, C_IR)
-    badge(ax, X["f90"] - W / 2 + 0.1, Y_BOT - H / 2 - 0.35, 3, C_WRAP)
-    badge(ax, X["combined"] - W / 2 + 0.1, Y_MID + H / 2 + 0.35, 4, C_IR)
-    badge(ax, X["ad"] - W / 2 + 0.1, Y_MID + H / 2 + 0.35, 5, C_ENZ)
-    badge(ax, X["so"] - W_SO / 2 + 0.1, Y_MID + (H + 0.15) / 2 + 0.35, 6, C_SO)
+    label(ax, (X["ad"] + X["so"]) / 2, Y_MID + 0.72, "opt +\nclang -shared")
 
     # ── Tool labels at bottom, centered under the columns they cover ──
-    by = 0.9
-    for bx, txt, bg, ec in [
-        ((X["f90"] + X["ll"]) / 2, "LFortran 0.61", C_FORT_BG, C_FORT),
-        ((X["ll"] + X["combined"]) / 2, "LLVM 19", C_IR_BG, C_IR),
-        ((X["ad"] + X["so"]) / 2, "Enzyme (LLVM pass)", C_ENZ_BG, C_ENZ),
+    # No chip box (non-data-ink). A short tick links each label to its track so
+    # the eye reads the grouping without a heavy enclosure.
+    by = 1.0
+    for x0, x1, txt, color in [
+        (X["f90"], X["f90"], "LFortran 0.61", C_FORT),
+        (X["ll"], X["opt"], "LLVM 19", C_IR),
+        (X["ad"], X["so"], "Enzyme (LLVM pass)", C_ENZ),
     ]:
+        cx = (x0 + x1) / 2
+        ax.plot(
+            [x0 - W / 2, x1 + W / 2],
+            [by + 0.45, by + 0.45],
+            color=color,
+            lw=1.2,
+            zorder=1,
+            solid_capstyle="round",
+        )
         ax.text(
-            bx,
+            cx,
             by,
             txt,
             ha="center",
             va="center",
             fontsize=9,
-            color=C_TEXT,
+            color=color,
             fontweight="bold",
-            bbox=dict(boxstyle="round,pad=0.3", fc=bg, ec=ec, lw=1),
         )
 
     # Title
