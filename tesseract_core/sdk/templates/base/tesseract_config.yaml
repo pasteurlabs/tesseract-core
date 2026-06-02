@@ -5,6 +5,10 @@ name: "{{name}}"
 version: "unknown"
 description: ""
 
+# Environment variables to set in the container
+# env:
+#   MY_VAR: "my_value"
+
 # Arbitrary user-defined metadata
 # metadata:
 #   key: value
