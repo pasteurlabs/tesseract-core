@@ -3,6 +3,6 @@ version: "1.0.0"
 description: "Custom venv creation."
 
 build_config:
-  base_image: "condaforge/miniforge3:26.3.2-3"
+  base_image: "condaforge/miniforge3:26.1.1-3"
   requirements:
     provider: conda
