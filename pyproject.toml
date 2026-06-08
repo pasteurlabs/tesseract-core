@@ -68,7 +68,8 @@ docs = [
 ]
 dev = [
     "docker",
-    "httpx2",  # required by fastapi test client
+    "httpx",  # required by fastapi older test client
+    "httpx2",  # required by fastapi newer test client
     "pre-commit",
     "pytest",
     "pytest-cov",
