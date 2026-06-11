@@ -24,7 +24,12 @@ from pydantic import ValidationError
 from pydantic_core import from_json
 
 import tesseract_core.runtime.experimental
-from tesseract_core.runtime.config import RuntimeConfig, get_config, update_config
+from tesseract_core.runtime.config import (
+    DEBUGPY_PORT,
+    RuntimeConfig,
+    get_config,
+    update_config,
+)
 from tesseract_core.runtime.core import (
     check_tesseract_api,
     create_endpoints,
@@ -57,6 +62,13 @@ CONFIG_FIELDS = {
     str(field_name): field.annotation
     for field_name, field in RuntimeConfig.model_fields.items()
 }
+
+# Compute endpoints for which `debug_wait` arms a blocking debugpy attach. Mirrors the
+# set serve.py wraps; deliberately excludes abstract_eval and openapi-schema so a debug
+# wait never fires on a schema dump.
+DEBUG_WAIT_ENDPOINTS = frozenset(
+    {"apply", "jacobian", "jacobian_vector_product", "vector_jacobian_product"}
+)
 
 
 def make_choice_enum(name: str, choices: Iterable[str]) -> type[Enum]:
@@ -429,6 +441,20 @@ def _create_user_defined_cli_command(
         profiler = Profiler(enabled=config.profiling)
 
         with start_run(base_dir=output_path, log_sink=stderr_sink):
+            if config.debug_wait and user_function.__name__ in DEBUG_WAIT_ENDPOINTS:
+                # Block until a debugger attaches, so the actual endpoint invocation
+                # (with the real, fully-staged inputs) can be stepped through. Local-dev
+                # only; this pauses execution indefinitely until a client connects.
+                import debugpy
+
+                debugpy.listen(("0.0.0.0", DEBUGPY_PORT))
+                print(
+                    f"Waiting for debugger to attach on port {DEBUGPY_PORT}...",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                debugpy.wait_for_client()
+
             with profiler:
                 result = user_function(**user_function_args)
 

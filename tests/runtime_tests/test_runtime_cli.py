@@ -192,6 +192,56 @@ def test_apply_command(cli, cli_runner, dummy_tesseract_module):
     assert json.loads(result.stdout) == json.loads(expected)
 
 
+def test_debug_wait_arms_for_compute_endpoint(
+    cli, cli_runner, dummy_tesseract_module, monkeypatch
+):
+    """With TESSERACT_DEBUG_WAIT set, `apply` starts debugpy and waits before running."""
+    import types
+
+    from tesseract_core.runtime.config import DEBUGPY_PORT
+
+    events = []
+    fake_debugpy = types.ModuleType("debugpy")
+    fake_debugpy.listen = lambda addr: events.append(("listen", addr))
+    fake_debugpy.wait_for_client = lambda: events.append(("wait_for_client",))
+    monkeypatch.setitem(sys.modules, "debugpy", fake_debugpy)
+    monkeypatch.setenv("TESSERACT_DEBUG_WAIT", "1")
+
+    inputs = dummy_tesseract_module.InputSchema(**test_input).model_dump_json(
+        context={"array_encoding": "base64"}
+    )
+    inputs = {"inputs": json.loads(inputs)}
+    result = cli_runner.invoke(
+        cli,
+        ["--debug-wait", "apply", json.dumps(inputs)],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0, result.stderr
+    # debugpy was armed on the shared port, and waited before the endpoint ran.
+    assert ("listen", ("0.0.0.0", DEBUGPY_PORT)) in events
+    assert ("wait_for_client",) in events
+    # The endpoint still produced its result after "attach".
+    expected = dummy_tesseract_module.apply(
+        dummy_tesseract_module.InputSchema.model_validate(test_input)
+    ).model_dump_json()
+    assert json.loads(result.stdout) == json.loads(expected)
+
+
+def test_debug_wait_does_not_arm_for_schema_dump(cli, cli_runner, monkeypatch):
+    """openapi-schema passes through the same wrapper but must not pause for a debugger."""
+    import types
+
+    events = []
+    fake_debugpy = types.ModuleType("debugpy")
+    fake_debugpy.listen = lambda addr: events.append("listen")
+    fake_debugpy.wait_for_client = lambda: events.append("wait_for_client")
+    monkeypatch.setitem(sys.modules, "debugpy", fake_debugpy)
+
+    result = cli_runner.invoke(cli, ["--debug-wait", "openapi-schema"])
+    assert result.exit_code == 0, result.stderr
+    assert events == []
+
+
 def test_apply_command_binref(cli, cli_runner, dummy_tesseract_module, tmpdir):
     # construct payload with absolute paths
     test_input_absolute = deepcopy(test_input_binref)

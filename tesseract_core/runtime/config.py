@@ -17,6 +17,11 @@ from pydantic import (
 
 from tesseract_core.runtime.file_interactions import supported_format_type
 
+# Port the debugpy server listens on inside the container, for both `serve --debug`
+# and the `debug_wait` blocking attach on compute endpoints. The host-side port is
+# mapped separately by whatever launches the container.
+DEBUGPY_PORT = 5678
+
 
 def _eval_str(obj: Any) -> Any:
     """Evaluate a string into the corresponding Python object."""
@@ -36,6 +41,10 @@ class RuntimeConfig(BaseModel):
     description: str = ""
     version: str = "unknown"
     debug: bool = False
+    # When set, compute endpoints (apply/jacobian/jvp/vjp) start a debugpy server and
+    # block until a debugger attaches, so the actual invocation can be stepped through.
+    # Local-dev only; never enable in production (it pauses execution indefinitely).
+    debug_wait: bool = False
     input_path: str = "."
     output_path: str = "."
     output_format: supported_format_type = "json"

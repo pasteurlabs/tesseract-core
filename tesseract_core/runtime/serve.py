@@ -12,7 +12,7 @@ import uvicorn
 from fastapi import FastAPI, Header, Query, Response
 from pydantic import BaseModel
 
-from .config import get_config
+from .config import DEBUGPY_PORT, get_config
 from .core import create_endpoints
 from .file_interactions import SUPPORTED_FORMATS, join_paths, output_to_bytes
 from .mpa import start_run
@@ -131,7 +131,7 @@ def serve(host: str, port: int, num_workers: int) -> None:
     if config.debug:
         import debugpy
 
-        debugpy.listen(("0.0.0.0", 5678))
+        debugpy.listen(("0.0.0.0", DEBUGPY_PORT))
 
     uvicorn.run(
         "tesseract_core.runtime.app_http:app",
