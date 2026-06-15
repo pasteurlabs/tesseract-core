@@ -15,6 +15,7 @@ from pydantic import (
     Field,
     Strict,
     field_validator,
+    model_validator,
 )
 from pydantic import ValidationError as PydanticValidationError
 
@@ -132,10 +133,30 @@ class TesseractBuildConfig(BaseModel, validate_assignment=True):
             "Example: ``[\"RUN echo 'Hello, world!'\"]``"
         ),
     )
+    python_version: StrictStr | None = Field(
+        None,
+        description=(
+            "Python version to use inside the Tesseract (e.g., '3.12'). "
+            "When set, ``uv python install`` is used to install the specified version, "
+            "decoupling the Python version from the base image. "
+            "When unset, the system Python from the base image is used."
+        ),
+    )
 
     requirements: PythonRequirements = PipRequirements(provider="python-pip")
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def _validate_python_version_provider(self):
+        if self.python_version is not None and isinstance(
+            self.requirements, CondaRequirements
+        ):
+            raise ValueError(
+                "python_version cannot be used with conda requirements. "
+                "Set the Python version in tesseract_environment.yaml instead."
+            )
+        return self
 
     skip_checks: bool = Field(
         False,

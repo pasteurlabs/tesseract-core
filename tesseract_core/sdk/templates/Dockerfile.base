@@ -52,6 +52,10 @@ COPY {{ tesseract_source_directory }}/{{ config.build_config.requirements._filen
 COPY {{ config.build_config.requirements._build_script }} ./
 COPY local_requirements/ ./local_requirements
 
+{% if config.build_config.python_version %}
+ENV TESSERACT_PYTHON_VERSION="{{ config.build_config.python_version }}"
+{% endif %}
+
 # Build a python venv from python provider build scripts.
 # The build script has to create a venv at /python-env
 RUN --mount=type=cache,target=/root/.cache/uv {% if use_ssh_mount %}--mount=type=ssh{% endif %} bash {{ config.build_config.requirements._build_script }}
@@ -69,7 +73,9 @@ USER root
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libnss-wrapper \
+{%- if not config.build_config.python_version %}
     && { [ -x "$(command -v python3)" ] || apt-get install -y --no-install-recommends python3; } \
+{%- endif %}
     && rm -rf /var/lib/apt/lists/*
 
 {% if config.build_config.extra_packages %}
