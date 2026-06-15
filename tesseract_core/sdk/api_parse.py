@@ -190,6 +190,14 @@ class TesseractConfig(BaseModel, validate_assignment=True):
         default_factory=TesseractBuildConfig,
         description="Configuration options for building the Tesseract.",
     )
+    env: dict[StrictStr, StrictStr] = Field(
+        default_factory=dict,
+        description=(
+            "Environment variables to set in the Docker image. "
+            "Rendered as ``ENV`` lines in the Dockerfile. "
+            "Example: ``{XLA_PYTHON_CLIENT_PREALLOCATE: 'false'}``"
+        ),
+    )
     metadata: dict[str, Any] = Field(
         default_factory=dict,
         description="Arbitrary user-defined metadata. "

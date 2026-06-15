@@ -57,6 +57,26 @@ def test_prepare_build_context_python_version(tmp_path_factory):
     assert "TESSERACT_PYTHON_VERSION" not in dockerfile_default
 
 
+def test_prepare_build_context_env(tmp_path_factory):
+    """Test that env variables are rendered as ENV lines in the Dockerfile."""
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "tesseract_api.py").touch()
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(
+        name="foobar",
+        env={
+            "XLA_PYTHON_CLIENT_PREALLOCATE": "false",
+            "MY_VAR": "hello world",
+        },
+    )
+
+    engine.prepare_build_context(src_dir, build_dir, config)
+    dockerfile = (build_dir / "Dockerfile").read_text()
+    assert 'ENV XLA_PYTHON_CLIENT_PREALLOCATE="false"' in dockerfile
+    assert 'ENV MY_VAR="hello world"' in dockerfile
+
+
 def test_prepare_build_context_external_package_data(tmp_path_factory):
     """Test package_data from outside the Tesseract directory is copied correctly."""
     # Create a parent directory with src and external subdirectories
@@ -419,6 +439,24 @@ def test_serve_tesseracts(mocked_docker):
 
     # Teardown valid
     engine.teardown(json.loads(container_name_with_memory)["name"])
+
+
+def test_serve_skip_health_check(mocked_docker, monkeypatch):
+    """Test serving a tesseract with --skip-health-check."""
+    health_called = False
+
+    def health_get_spy(url, *args, **kwargs):
+        nonlocal health_called
+        if url.endswith("/health"):
+            health_called = True
+            return type("Response", (), {"status_code": 200, "json": lambda: {}})()
+        raise NotImplementedError(f"Mocked get request to {url} not implemented")
+
+    monkeypatch.setattr(engine.requests, "get", health_get_spy)
+
+    res, _ = engine.serve("foobar", skip_health_check=True)
+    assert res
+    assert not health_called
 
 
 def test_serve_memory(mocked_docker):
