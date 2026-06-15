@@ -44,4 +44,9 @@ if [ -n "${TESSERACT_PYTHON_VERSION:-}" ]; then
     cp -a "$UV_PYTHON_DIR"/bin/* /python-env/bin/
     cp -a "$UV_PYTHON_DIR"/lib/* /python-env/lib/
     cp -a "$UV_PYTHON_DIR"/include/* /python-env/include/
+
+    # pyvenv.cfg still points `home` at the uv-managed installation, which does
+    # not exist after the Docker multi-stage COPY. Point it at the now-local
+    # binaries so the interpreter can locate its stdlib.
+    sed -i "s|^home = .*|home = /python-env/bin|" /python-env/pyvenv.cfg
 fi

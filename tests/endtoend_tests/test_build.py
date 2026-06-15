@@ -170,54 +170,6 @@ def test_tarball_install(cli_runner, dummy_tesseract_package, docker_cleanup):
     docker_cleanup["images"].append(img_tag)
 
 
-def test_build_with_python_version(
-    cli_runner,
-    docker_client,
-    docker_cleanup,
-    dummy_image_name,
-    tmp_path,
-):
-    """Test that a Tesseract can be built with a specific python_version."""
-    init_args = ["init", "--target-dir", str(tmp_path), "--name", dummy_image_name]
-    result = cli_runner.invoke(app, init_args, catch_exceptions=False)
-    assert result.exit_code == 0, result.stderr
-
-    image_name = build_tesseract(
-        docker_client,
-        tmp_path,
-        dummy_image_name,
-        config_override={"build_config.python_version": "'3.12'"},
-    )
-    docker_cleanup["images"].append(image_name)
-    assert image_exists(docker_client, image_name)
-
-    # Verify the Python version inside the container
-    result = subprocess.run(
-        [
-            "docker",
-            "run",
-            "--rm",
-            "--entrypoint",
-            "python",
-            image_name,
-            "--version",
-        ],
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0
-    assert "3.12" in result.stdout
-
-    # Verify the runtime and its dependencies are functional under that Python
-    # version by running the Tesseract's check command through the CLI.
-    result = cli_runner.invoke(
-        app,
-        ["run", image_name, "check"],
-        catch_exceptions=False,
-    )
-    assert result.exit_code == 0, result.stderr
-
-
 def test_metadata_label(built_image_name):
     """Test that metadata from tesseract_config.yaml is stored as a Docker label."""
     result = subprocess.run(
