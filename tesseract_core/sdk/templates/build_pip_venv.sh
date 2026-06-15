@@ -10,7 +10,12 @@ if [ "${TESSERACT_SYSTEM_SITE_PACKAGES:-0}" = "1" ]; then
     SYSTEM_SITE_PACKAGES_FLAG="--system-site-packages"
 fi
 
-uv venv $SYSTEM_SITE_PACKAGES_FLAG /python-env
+if [ -n "${TESSERACT_PYTHON_VERSION:-}" ]; then
+    uv python install "$TESSERACT_PYTHON_VERSION"
+    uv venv $SYSTEM_SITE_PACKAGES_FLAG --python "$TESSERACT_PYTHON_VERSION" /python-env
+else
+    uv venv $SYSTEM_SITE_PACKAGES_FLAG /python-env
+fi
 source /python-env/bin/activate
 
 # Collect dependencies
@@ -33,3 +38,20 @@ uv -v pip install --compile-bytecode ./tesseract_runtime
 
 # Install pip itself into the virtual environment for use by any custom build steps
 uv pip install pip
+
+if [ -n "${TESSERACT_PYTHON_VERSION:-}" ]; then
+    # The venv's python binary is a symlink into the uv-managed installation
+    # (e.g. /root/.local/share/uv/python/cpython-3.12-.../). Merge that
+    # installation (stdlib, binary) into /python-env so the venv is fully
+    # self-contained after Docker multi-stage COPY (which preserves symlinks).
+    UV_PYTHON_DIR=$(dirname "$(dirname "$(readlink -f /python-env/bin/python)")")
+    rm /python-env/bin/python /python-env/bin/python3 /python-env/bin/python3.*
+    cp -a "$UV_PYTHON_DIR"/bin/* /python-env/bin/
+    cp -a "$UV_PYTHON_DIR"/lib/* /python-env/lib/
+    cp -a "$UV_PYTHON_DIR"/include/* /python-env/include/
+
+    # pyvenv.cfg still points `home` at the uv-managed installation, which does
+    # not exist after the Docker multi-stage COPY. Point it at the now-local
+    # binaries so the interpreter can locate its stdlib.
+    sed -i "s|^home = .*|home = /python-env/bin|" /python-env/pyvenv.cfg
+fi

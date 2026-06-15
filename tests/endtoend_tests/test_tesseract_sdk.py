@@ -214,6 +214,8 @@ def test_signature_consistency():
         "output_format",
         # stream_logs is SDK-only for streaming logs to a callback
         "stream_logs",
+        # timeout is a client-side HTTP parameter, not relevant for serve
+        "timeout",
     ]
 
     from_image_sig = dict(inspect.signature(Tesseract.from_image).parameters)

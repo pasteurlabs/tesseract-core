@@ -18,7 +18,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Annotated, Any, NoReturn
 
-import click
 import typer
 import yaml
 from jinja2 import Environment, PackageLoader, StrictUndefined
@@ -48,6 +47,16 @@ from .docker_client import (
 from .exceptions import UserError
 from .logs import DEFAULT_CONSOLE, set_logger
 
+# typer >= 0.26 vendors its own click (and drops the click dependency), so the
+# Context type, exceptions, and context lookups must come from the click typer
+# actually runs; fall back to real click on older typer (which still ships it).
+try:
+    from typer._click.core import Context
+    from typer._click.exceptions import UsageError
+    from typer._click.globals import get_current_context
+except ImportError:  # typer < 0.26
+    from click import Context, UsageError, get_current_context
+
 logger = getLogger("tesseract")
 
 # Jinja2 Template Environment
@@ -62,7 +71,7 @@ docker_client = CLIDockerClient()
 class SpellcheckedTyperGroup(typer.core.TyperGroup):
     """A Typer group that suggests similar commands if a command is not found."""
 
-    def get_command(self, ctx: click.Context, invoked_command: str) -> Any:
+    def get_command(self, ctx: Context, invoked_command: str) -> Any:
         """Get a command from the Typer group, suggesting similar commands if the command is not found."""
         import difflib
 
@@ -72,7 +81,7 @@ class SpellcheckedTyperGroup(typer.core.TyperGroup):
                 invoked_command, possible_commands, n=1, cutoff=0.6
             )
             if close_match:
-                raise click.UsageError(
+                raise UsageError(
                     f"No such command '{invoked_command}'. Did you mean '{close_match[0]}'?",
                     ctx,
                 )
@@ -571,6 +580,17 @@ def serve(
             ),
         ),
     ] = False,
+    skip_health_check: Annotated[
+        bool,
+        typer.Option(
+            "--skip-health-check",
+            help=(
+                "Skip the startup health check. Useful for Tesseracts with slow "
+                "initialization (e.g., Julia runtime startup, large model loading). "
+                "The caller is responsible for ensuring readiness, e.g. by polling /health."
+            ),
+        ),
+    ] = False,
     user: Annotated[
         str | None,
         typer.Option(
@@ -669,6 +689,7 @@ def serve(
             output_path=output_path,
             output_format=_enum_to_val(output_format),
             docker_args=shlex.split(docker_args) if docker_args else None,
+            skip_health_check=skip_health_check,
         )
     except RuntimeError as ex:
         raise UserError(
@@ -929,7 +950,6 @@ def _extract_cli_config(
 )
 @engine.needs_docker
 def run_container(
-    context: click.Context,
     tesseract_image: Annotated[
         str | None,
         typer.Argument(
@@ -1113,7 +1133,7 @@ def run_container(
 
     if not tesseract_image:
         if invoke_help:
-            context.get_help()
+            get_current_context().get_help()
             return
         raise typer.BadParameter(
             "Tesseract image name is required.",
@@ -1122,7 +1142,7 @@ def run_container(
 
     if not cmd:
         if invoke_help:
-            context.get_help()
+            get_current_context().get_help()
             return
         else:
             error_string = f"Command is required. Are you sure your Tesseract image name is `{tesseract_image}`?"
