@@ -208,6 +208,15 @@ def test_build_with_python_version(
     assert result.returncode == 0
     assert "3.12" in result.stdout
 
+    # Verify the runtime and its dependencies are functional under that Python
+    # version by running the Tesseract's check command through the CLI.
+    result = cli_runner.invoke(
+        app,
+        ["run", image_name, "check"],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0, result.stderr
+
 
 def test_metadata_label(built_image_name):
     """Test that metadata from tesseract_config.yaml is stored as a Docker label."""
