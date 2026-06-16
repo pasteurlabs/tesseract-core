@@ -108,7 +108,7 @@ TEST_CASES = {
     ),
     "metrics": Config(test_with_random_inputs=True),
     "qp_solve": Config(),
-    "system_site_packages": Config(),
+    "inherit_base_image_packages": Config(),
     "tesseractreference": Config(),  # Can't test requests standalone; needs target Tesseract. Covered in separate test.
     "userhandling": Config(),
 }

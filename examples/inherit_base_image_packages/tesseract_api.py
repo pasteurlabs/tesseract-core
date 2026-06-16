@@ -4,8 +4,8 @@
 """Solve the Poisson equation on a unit square using Firedrake.
 
 Firedrake is NOT listed in tesseract_requirements.txt — it's only available
-because system_site_packages is enabled and Firedrake is pre-installed in the
-base image.
+because inherit_base_image_packages is enabled and Firedrake is pre-installed in
+the base image.
 """
 
 from pydantic import BaseModel, Field

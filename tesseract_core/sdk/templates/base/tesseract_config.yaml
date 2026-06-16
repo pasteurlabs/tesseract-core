@@ -24,9 +24,9 @@ build_config:
   # python_version: "3.12"
 
   # If true, create the Python virtual environment with --system-site-packages so
-  # it can access packages pre-installed in the base image. Cannot be combined with
+  # it inherits packages pre-installed in the base image. Cannot be combined with
   # python_version.
-  # system_site_packages: false
+  # inherit_base_image_packages: false
 
   # Platform to build the container for. In general, images can only be executed
   # on the platform they were built for.

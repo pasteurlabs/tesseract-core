@@ -237,19 +237,19 @@ def test_config_python_version_rejects_conda(
         validate_tesseract_api(tmp_path)
 
 
-def test_config_python_version_rejects_system_site_packages(
+def test_config_python_version_rejects_inherit_base_image_packages(
     tmp_path, valid_tesseract_api, valid_tesseract_config
 ):
     _write_tesseract_api_to_file(valid_tesseract_api, tmp_path)
 
     config = yaml.safe_load(valid_tesseract_config)
     config["build_config"]["python_version"] = "3.12"
-    config["build_config"]["system_site_packages"] = True
+    config["build_config"]["inherit_base_image_packages"] = True
     _write_tesseract_config_to_file(yaml.dump(config), tmp_path)
 
     with pytest.raises(
         ValidationError,
-        match="python_version cannot be used with system_site_packages",
+        match="python_version cannot be used with inherit_base_image_packages",
     ):
         validate_tesseract_api(tmp_path)
 

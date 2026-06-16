@@ -5,16 +5,15 @@
 
 set -e  # Exit immediately if a command exits with a non-zero status
 
-SYSTEM_SITE_PACKAGES_FLAG=""
-if [ "${TESSERACT_SYSTEM_SITE_PACKAGES:-0}" = "1" ]; then
-    SYSTEM_SITE_PACKAGES_FLAG="--system-site-packages"
-fi
-
+# python_version and inherit_base_image_packages are mutually exclusive (enforced
+# at config validation time), so at most one of these branches sets venv options.
 if [ -n "${TESSERACT_PYTHON_VERSION:-}" ]; then
     uv python install "$TESSERACT_PYTHON_VERSION"
-    uv venv $SYSTEM_SITE_PACKAGES_FLAG --python "$TESSERACT_PYTHON_VERSION" /python-env
+    uv venv --python "$TESSERACT_PYTHON_VERSION" /python-env
+elif [ "${TESSERACT_INHERIT_BASE_IMAGE_PACKAGES:-0}" = "1" ]; then
+    uv venv --system-site-packages /python-env
 else
-    uv venv $SYSTEM_SITE_PACKAGES_FLAG /python-env
+    uv venv /python-env
 fi
 source /python-env/bin/activate
 
