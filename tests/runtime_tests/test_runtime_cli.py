@@ -360,7 +360,8 @@ def test_apply_command_binref_lz4(cli, cli_runner, tmpdir, dummy_tesseract_modul
         if isinstance(val, dict) and val.get("object_type") == "array":
             assert val["data"]["encoding"] == "binref"
             assert val["data"]["compression"] == "lz4"
-            assert "compressed_size" in val["data"]
+            # compressed_size is now embedded in the buffer spec as path:offset:compressed_size
+            assert val["data"]["buffer"].count(":") == 2
 
     # Verify the data roundtrips correctly
     test_input_val = dummy_tesseract_module.InputSchema.model_validate(test_input)

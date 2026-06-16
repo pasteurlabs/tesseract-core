@@ -221,9 +221,10 @@ def test_binref_lz4_compression(built_image_name, dummy_tesseract_module, tmp_pa
     result = json.loads(run_res.stdout)
     assert result["result"]["data"]["encoding"] == "binref"
     assert result["result"]["data"]["compression"] == "lz4"
-    assert "compressed_size" in result["result"]["data"]
+    # compressed_size is now embedded in the buffer spec as path:offset:compressed_size
+    assert result["result"]["data"]["buffer"].count(":") == 2
 
-    binref_path = result["result"]["data"]["buffer"].rsplit(":", maxsplit=1)[0]
+    binref_path = result["result"]["data"]["buffer"].split(":")[0]
     assert (output_dir / binref_path).exists()
 
     # Verify decompressed values match expected output

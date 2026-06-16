@@ -444,10 +444,9 @@ def test_decode_array_binref_lz4(tmp_path):
         "shape": (3,),
         "dtype": "float32",
         "data": {
-            "buffer": "data.bin:0",
+            "buffer": f"data.bin:0:{len(blob)}",
             "encoding": "binref",
             "compression": "lz4",
-            "compressed_size": len(blob),
         },
     }
     decoded = _decode_array(encoded, output_path=tmp_path)

@@ -14,6 +14,8 @@ idna==3.18
     # via requests
 jinja2==3.1.6
     # via tesseract-core
+lz4==4.4.5
+    # via tesseract-core
 markdown-it-py==3.0.0 ; python_full_version < '3.11'
     # via rich
 markdown-it-py==4.2.0 ; python_full_version >= '3.11'

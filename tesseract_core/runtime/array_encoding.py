@@ -18,7 +18,6 @@ from pydantic import (
     StrictStr,
     ValidationInfo,
     create_model,
-    model_validator,
 )
 from pydantic_core import PydanticCustomError
 
@@ -72,7 +71,7 @@ def _lz4_frame():
         return lz4.frame
     except ImportError as err:
         raise ImportError(
-            "lz4 is required for compression. Install with: pip install tesseract-core[compression]"
+            "lz4 is required for compression. Install with: pip install lz4"
         ) from err
 
 
@@ -107,28 +106,21 @@ class Base64ArrayData(BaseModel):
         ),
     ]
     encoding: Literal["base64"]
+    compression: Literal["lz4"] | None = None
     model_config = ConfigDict(extra="forbid")
 
 
 class BinrefArrayData(BaseModel):
-    """Data structure that dumps array data to binary file."""
+    """Data structure that dumps array data to binary file.
 
-    buffer: StrictStr = Field(pattern=r"^.+?(\:\d+)?$")
+    The buffer field format is ``<path>[:<offset>[:<compressed_size>]]``.
+    When compression is set, the buffer must include ``:<compressed_size>``
+    so readers know how many compressed bytes to read.
+    """
+
+    buffer: StrictStr = Field(pattern=r"^.+?(\:\d+(\:\d+)?)?$")
     encoding: Literal["binref"]
     compression: Literal["lz4"] | None = None
-    compressed_size: int | None = None
-
-    @model_validator(mode="after")
-    def check_compressed_size(self) -> "BinrefArrayData":
-        """Require a positive compressed_size when compression is set."""
-        if self.compression is not None:
-            if self.compressed_size is None:
-                raise ValueError("compressed_size is required when compression is set")
-            if self.compressed_size <= 0:
-                raise ValueError(
-                    "compressed_size must be positive when compression is set"
-                )
-        return self
 
     model_config = ConfigDict(extra="forbid")
 
@@ -289,10 +281,14 @@ def _dump_binref_arraydict(
     write_to_path(blob, target_path, append=True)
     offset = current_size
 
-    data = {"buffer": f"{target_name}:{offset}", "encoding": "binref"}
     if compression is not None:
-        data["compression"] = compression
-        data["compressed_size"] = len(blob)
+        data = {
+            "buffer": f"{target_name}:{offset}:{len(blob)}",
+            "encoding": "binref",
+            "compression": compression,
+        }
+    else:
+        data = {"buffer": f"{target_name}:{offset}", "encoding": "binref"}
     arraydict = {
         "object_type": "array",
         "shape": list(arr.shape),
@@ -302,16 +298,20 @@ def _dump_binref_arraydict(
     return arraydict, current_binref_uuid
 
 
-def _dump_base64_arraydict(arr: ArrayLike) -> ArrayDict:
+def _dump_base64_arraydict(arr: ArrayLike, compression: str | None = None) -> ArrayDict:
     """Dump array to json+base64 encoded array dict (plain dict, no Pydantic models)."""
+    blob = _compress(_fast_tobytes(arr), compression)
+    data: dict[str, Any] = {
+        "buffer": pybase64.b64encode_as_string(blob),
+        "encoding": "base64",
+    }
+    if compression is not None:
+        data["compression"] = compression
     return {
         "object_type": "array",
         "shape": list(arr.shape),
         "dtype": arr.dtype.name,
-        "data": {
-            "buffer": pybase64.b64encode_as_string(_fast_tobytes(arr)),
-            "encoding": "base64",
-        },
+        "data": data,
     }
 
 
@@ -328,22 +328,24 @@ def _dump_json_arraydict(arr: ArrayLike) -> ArrayDict:
 def _load_base64_arraydict(val: ArrayDict) -> np.ndarray:
     """Load array from json+base64 encoded array dict."""
     buffer = pybase64.b64decode(val["data"]["buffer"], validate=True)
+    buffer = _decompress(buffer, val["data"].get("compression"))
     return np.frombuffer(buffer, dtype=val["dtype"]).reshape(val["shape"])
 
 
 def _load_binref_arraydict(val: ArrayDict, base_dir: str | Path | None) -> np.ndarray:
     """Load array from json+binref encoded array dict."""
-    path_match = re.match(r"^(?P<path>.+?)(\:(?P<offset>\d+))?$", val["data"]["buffer"])
+    path_match = re.match(
+        r"^(?P<path>.+?)(\:(?P<offset>\d+)(\:(?P<compressed_size>\d+))?)?$",
+        val["data"]["buffer"],
+    )
     if not path_match:
         raise ValueError(
             f"Invalid binref path format: {val['data']['buffer']}. "
-            "Expected format is '<path>[:<offset>]'."
+            "Expected format is '<path>[:<offset>[:<compressed_size>]]'."
         )
     bufferpath = path_match.group("path")
-    if path_match.group("offset") is None:
-        offset = 0
-    else:
-        offset = int(path_match.group("offset"))
+    offset = int(path_match.group("offset") or 0)
+    compressed_size_str = path_match.group("compressed_size")
 
     uses_relative_path = not is_absolute_path(bufferpath) and not is_url(bufferpath)
     if uses_relative_path and base_dir is None:
@@ -358,11 +360,6 @@ def _load_binref_arraydict(val: ArrayDict, base_dir: str | Path | None) -> np.nd
     num_bytes = int(size * dtype.itemsize)
 
     compression = val["data"].get("compression")
-    compressed_size = val["data"].get("compressed_size")
-    if compression is not None and compressed_size is None:
-        raise ValueError(
-            "compressed_size is required in binref array data when compression is set"
-        )
 
     if base_dir is not None:
         bufferpath = join_paths(base_dir, bufferpath)
@@ -370,8 +367,13 @@ def _load_binref_arraydict(val: ArrayDict, base_dir: str | Path | None) -> np.nd
     if compression is None:
         buffer = read_from_path(bufferpath, offset=offset, length=num_bytes)
     else:
+        if compressed_size_str is None:
+            raise ValueError(
+                "compressed_size is required in buffer spec when compression is set "
+                "(expected format: '<path>:<offset>:<compressed_size>')"
+            )
         buffer = _decompress(
-            read_from_path(bufferpath, offset=offset, length=compressed_size),
+            read_from_path(bufferpath, offset=offset, length=int(compressed_size_str)),
             compression,
         )
     return np.frombuffer(buffer, dtype=dtype).reshape(shape)
@@ -582,7 +584,9 @@ def encode_array(
 
     array_encoding = context.get("array_encoding", "json")
     if array_encoding == "base64":
-        return _dump_base64_arraydict(arr)
+        return _dump_base64_arraydict(
+            arr, compression=context.get("base64_compression")
+        )
     elif array_encoding == "binref":
         base_dir = context.get("base_dir", get_config().output_path)
         subdir = context.get("binref_dir", None)

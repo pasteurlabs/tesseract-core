@@ -83,7 +83,8 @@ def test_output_to_bytes_json_binref_lz4(output_data):
         decoded = json.loads(result.decode())
         _check_decoded_data(decoded, "binref")
         assert decoded["array"]["data"]["compression"] == "lz4"
-        assert "compressed_size" in decoded["array"]["data"]
+        # compressed_size is now embedded in the buffer spec as path:offset:compressed_size
+        assert decoded["array"]["data"]["buffer"].count(":") == 2
 
         roundtrip = OutputSchema.model_validate_json(
             result, context={"base_dir": base_dir}
