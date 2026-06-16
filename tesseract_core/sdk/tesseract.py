@@ -771,18 +771,20 @@ class HTTPClient:
 
         params = {"run_id": run_id} if run_id is not None else {}
         data = orjson.dumps(encoded_payload)
+        # Only forward timeout when set; omitting it is equivalent to None for
+        # requests.Session, and avoids passing a kwarg that some session
+        # implementations (e.g. starlette's TestClient) don't accept.
+        request_kwargs = {"method": method, "url": url, "data": data, "params": params}
+        if self._timeout is not None:
+            request_kwargs["timeout"] = self._timeout
         try:
-            response = self._session.request(
-                method=method, url=url, data=data, params=params, timeout=self._timeout
-            )
+            response = self._session.request(**request_kwargs)
         except requests.ConnectionError:
             # Retry once on stale keep-alive connections. There is a race
             # between urllib3's is_connection_dropped check and the server
             # closing idle connections (uvicorn timeout_keep_alive) that
             # can cause ConnectionError on an otherwise healthy server.
-            response = self._session.request(
-                method=method, url=url, data=data, params=params, timeout=self._timeout
-            )
+            response = self._session.request(**request_kwargs)
 
         if response.status_code == requests.codes.unprocessable_entity:
             # Try and raise a more helpful error if the response is a Pydantic error

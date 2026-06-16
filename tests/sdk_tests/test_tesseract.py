@@ -243,12 +243,13 @@ def test_HTTPClient_run_tesseract(mocker, run_id):
 
     assert out == {"result": [4, 4, 4]}
     expected_params = {} if run_id is None else {"run_id": run_id}
+    # timeout is omitted (not passed as None) so that passing the session to a
+    # starlette TestClient does not trigger a StarletteDeprecationWarning.
     mocked_request.assert_called_with(
         method="POST",
         url="http://somehost/apply",
         data=orjson.dumps({"inputs": {"a": 1}}),
         params=expected_params,
-        timeout=None,
     )
 
 
@@ -291,7 +292,9 @@ def test_HTTPClient_default_timeout(mocker):
     client = HTTPClient("somehost")
     client.run_tesseract("health")
 
-    assert mocked_request.call_args.kwargs["timeout"] is None
+    # The timeout kwarg is omitted entirely when unset (equivalent to None for
+    # requests) to avoid a StarletteDeprecationWarning with a TestClient session.
+    assert "timeout" not in mocked_request.call_args.kwargs
 
 
 def test_HTTPClient_timeout_tuple(mocker):
