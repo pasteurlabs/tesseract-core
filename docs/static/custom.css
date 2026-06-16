@@ -609,6 +609,19 @@ body[data-theme="dark"] .ecosystem-card:focus-visible {
     text-decoration-color: var(--color-brand-primary);
 }
 
+/* Standard post footer (rendered by the blog_post template, not the markdown) */
+.blog-page .content .blog-footer a {
+    color: var(--color-brand-primary);
+    text-decoration: underline;
+    text-decoration-color: color-mix(in srgb, var(--color-brand-primary) 35%, transparent);
+    text-underline-offset: 2px;
+    transition: text-decoration-color 0.15s;
+}
+
+.blog-page .content .blog-footer a:hover {
+    text-decoration-color: var(--color-brand-primary);
+}
+
 /* Inline code in prose */
 .blog-page .content p code,
 .blog-page .content li code {

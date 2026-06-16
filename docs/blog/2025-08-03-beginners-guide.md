@@ -208,8 +208,3 @@ By wrapping even a simple physics model in a Tesseract, we get a containerized, 
 
 "Isaac Newton discovers gravity", 1936.
 ```
-
----
-
-_Tesseract is a free, open-source framework for differentiable scientific computing._
-_[Docs](https://tesseract.pasteurlabs.ai) · [Demos](https://tesseract.pasteurlabs.ai/content/demo/demo.html) · [GitHub](https://github.com/pasteurlabs/tesseract-core) · [Forum](https://si-tesseract.discourse.group/)_

@@ -92,8 +92,3 @@ The main bottleneck in this pipeline is SpaceClaim, which has significant per-ca
 The broader pattern here extends well beyond structural optimization. Any workflow where you chain tools that differ in language, OS, licensing, or differentiation capability is a candidate for the same approach. The constraint that each component must expose a derivative endpoint through a common interface turns out to be a mild one — most solvers already have _some_ notion of sensitivities, even if they don't expose it as a clean API. Tesseract just gives those sensitivities a uniform shape.
 
 If you want to dig into the details, the [full technical writeup](https://si-tesseract.discourse.group/t/parametric-shape-optimization-of-rocket-fins-with-ansys-spaceclaim-pyansys-and-tesseract/109) covers the methodology, and the [demo code](https://github.com/pasteurlabs/tesseract-core/tree/main/demo/_showcase/ansys-shapeopt) is ready to reproduce.
-
----
-
-_Tesseract is a free, open-source framework for differentiable scientific computing._
-_[Docs](https://tesseract.pasteurlabs.ai) · [Demos](https://tesseract.pasteurlabs.ai/content/demo/demo.html) · [GitHub](https://github.com/pasteurlabs/tesseract-core) · [Forum](https://si-tesseract.discourse.group/)_

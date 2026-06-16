@@ -29,8 +29,3 @@ Tesseract Core is a command line app and Python SDK for building end-to-end diff
 
 Gradient-based optimization of the Rosenbrock function using a Tesseract.
 ```
-
----
-
-_Tesseract is a free, open-source framework for differentiable scientific computing._
-_[Docs](https://tesseract.pasteurlabs.ai) · [Demos](https://tesseract.pasteurlabs.ai/content/demo/demo.html) · [GitHub](https://github.com/pasteurlabs/tesseract-core) · [Forum](https://si-tesseract.discourse.group/)_

@@ -43,8 +43,3 @@ We've implemented this demo using multiple Tesseracts that communicate with each
 
 Shape optimization results showing the initial and optimized geometries.
 ```
-
----
-
-_Tesseract is a free, open-source framework for differentiable scientific computing._
-_[Docs](https://tesseract.pasteurlabs.ai) · [Demos](https://tesseract.pasteurlabs.ai/content/demo/demo.html) · [GitHub](https://github.com/pasteurlabs/tesseract-core) · [Forum](https://si-tesseract.discourse.group/)_

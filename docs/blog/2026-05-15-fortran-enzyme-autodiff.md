@@ -10,7 +10,7 @@ blog_description: "How we built a pipeline to get exact gradients out of a Fortr
 
 # Differentiable Fortran with LFortran and Enzyme
 
-What if you could backpropagate through existing Fortran, C, or C++ simulation code, embed it into JAX and torch, and use it as a high-performance differentiable physics engine? Turns out, you can! If you're brave enough...
+What if you could backpropagate through existing Fortran, C, or C++ simulation code, embed it into JAX and torch, and use it as a high-performance differentiable physics engine? Turns out, you can, if you're brave enough...
 
 Decades of validated physics code in CFD, climate, aerospace, and nuclear sit behind a wall that modern ML pipelines can't cross, because they don't expose gradients. The usual answer is to rewrite it all in JAX or PyTorch. The alternative we explore here is to leave the code where it is and get exact gradients out anyway, thanks to some LLVM-level magic. [Enzyme](https://enzyme.mit.edu/) applies autodiff at the LLVM IR level, so we can differentiate any code that compiles to LLVM.
 
@@ -89,7 +89,7 @@ This is vanilla Fortran with no annotations or AD-aware constructs, but even get
 
 ## The compilation pipeline
 
-Enzyme works at the LLVM IR level, not the source level, so anything that compiles to LLVM IR (C, C++, Rust, Fortran) can be differentiated. The chain is six `opt`/`clang` invocations, surprisingly straightforward as long as you're comfortable inspecting IR when things go wrong:
+Enzyme works at the LLVM IR level, not the source level, so anything that compiles to LLVM IR (C, C++, Rust, Fortran) can be differentiated. The chain is six `opt`/`clang` invocations, surprisingly straightforward as long as you're comfortable inspecting IR when things go wrong.
 
 ```{figure} ../static/blog/enzyme-pipeline.png
 :alt: "Compilation pipeline: Fortran → Enzyme AD → shared library"
@@ -113,7 +113,7 @@ A couple of decisions along the way shaped how the whole thing holds together, t
 
 **Why `-O1`, not `-O3`.** The pre-Enzyme optimization step looks innocuous, and our first pipeline used `-O3` there. The forward pass worked perfectly, so we moved on. Later, the VJP returned NaN on certain inputs, and it took hours to find why. At `-O3`, LLVM's aggressive vectorization and code-motion produce IR patterns Enzyme apparently mishandles in reverse mode; in our case it bit when adjacent cell temperatures were equal, intermediate terms cancelled, and a rearrangement turned that into a division by zero. The fix is to keep optimization mild _before_ the AD pass and save `-O3` for _after_ it. We certainly learned to test the gradients early and often.
 
-In between sits a thin C wrapper that bridges Fortran's by-pointer ABI to a C interface Enzyme can annotate. It allocates the work arrays on the heap (sidestepping the `_lfortran_malloc` issue) and marks which arguments get shadow buffers via Enzyme's intrinsics:
+In between sits a thin C wrapper that bridges Fortran's by-pointer ABI to a C interface Enzyme can annotate. It allocates the work arrays on the heap (sidestepping the `_lfortran_malloc` issue) and marks which arguments get shadow buffers via Enzyme's intrinsics.
 
 ```c
 void thermal_2d_vjp(/* ... nx, ny, n_steps ... */)
@@ -252,8 +252,3 @@ Because Enzyme works at the LLVM IR level, none of this is Fortran-specific. The
 The full source is [on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/demo/enzyme_thermal_2d), the Fortran solver, the Enzyme pipeline, the inverse-problem notebooks, and the LLVM hackery holding it all together. If you've got a Fortran, C, or C++ solver you'd like gradients for and you don't mind spending some quality time with LLVM IR, this is a pretty good place to start.
 
 The pieces are here, and the remaining questions are exactly the kind of thing that's more fun with company. If you take it somewhere, whether you get it running on your own solver or hit a wall we didn't, come tell us on the [forum](https://si-tesseract.discourse.group/). We'd genuinely like to see how far it goes!
-
----
-
-_Tesseract is a free, open-source framework for differentiable scientific computing._
-_[Docs](https://tesseract.pasteurlabs.ai) · [Demos](https://tesseract.pasteurlabs.ai/content/demo/demo.html) · [GitHub](https://github.com/pasteurlabs/tesseract-core) · [Forum](https://si-tesseract.discourse.group/)_
