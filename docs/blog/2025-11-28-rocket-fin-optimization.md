@@ -18,19 +18,22 @@ If you work in simulation-driven design, you've probably hit this wall: you have
 
 We built a pipeline that does exactly this: optimizing rocket grid fin geometry using Ansys SpaceClaim for CAD, a custom mesh converter, and PyMAPDL for structural analysis. The optimizer sees a single differentiable function, even though the underlying gradient strategies (analytical adjoint, finite differences, and JAX automatic differentiation) are completely different at every stage.
 
-<figure>
-<img src="../_static/blog/rocket-fins-grid-fins.jpg" alt="Titanium grid fins on a Falcon 9 booster">
-<figcaption>Second-generation titanium grid fins on a Falcon 9 booster. <a href="https://commons.wikimedia.org/wiki/File:Second-generation_titanium_grid_fins,_Iridium-2_Mission_(35533873795).jpg">SpaceX, Public Domain</a>.</figcaption>
-</figure>
+```{figure} ../static/blog/rocket-fins-grid-fins.jpg
+:alt: Titanium grid fins on a Falcon 9 booster
+
+Second-generation titanium grid fins on a Falcon 9 booster. [SpaceX, Public Domain](<https://commons.wikimedia.org/wiki/File:Second-generation_titanium_grid_fins,_Iridium-2_Mission_(35533873795).jpg>).
+```
 
 ## The pipeline
 
 Each grid fin has 8 bars defined by start and end angular positions, giving us 16 design parameters. SpaceClaim generates the geometry, which gets converted to a signed distance field on a regular grid. PyMAPDL then solves the linear elasticity problem and returns compliance, a measure of how much the structure deforms under load. Lower compliance means a stiffer fin.
 
-<figure>
-<img src="../_static/blog/rocket-fins-workflow.png" alt="Optimization workflow" class="blog-img-full">
-<figcaption>End-to-end optimization workflow connecting Ansys SpaceClaim, SDF conversion, and PyMAPDL via Tesseract.</figcaption>
-</figure>
+```{figure} ../static/blog/rocket-fins-workflow.png
+:alt: Optimization workflow
+:class: blog-img-full
+
+End-to-end optimization workflow connecting Ansys SpaceClaim, SDF conversion, and PyMAPDL via Tesseract.
+```
 
 These tools don't naturally fit together. SpaceClaim runs on Windows with a commercial license. PyMAPDL has its own dependency tree. The optimization logic and glue code run in JAX on Linux. We wrapped each step as a Tesseract: the SDF converter and PyMAPDL run as containerized images on Linux, while SpaceClaim runs directly on the Windows host via `tesseract-runtime serve` (since it needs the local Ansys installation). All three expose the same API regardless of deployment mode, and [Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax) composes them into a single callable pipeline.
 
@@ -92,5 +95,5 @@ If you want to dig into the details, the [full technical writeup](https://si-tes
 
 ---
 
-_Tesseract is a free, open-source framework for differentiable scientific computing. `pip install tesseract-core`.
-[Docs](https://tesseract.pasteurlabs.ai) · [Demos](https://tesseract.pasteurlabs.ai/content/demo/demo.html) · [GitHub](https://github.com/pasteurlabs/tesseract-core) · [Forum](https://si-tesseract.discourse.group/)_
+_Tesseract is a free, open-source framework for differentiable scientific computing._
+_[Docs](https://tesseract.pasteurlabs.ai) · [Demos](https://tesseract.pasteurlabs.ai/content/demo/demo.html) · [GitHub](https://github.com/pasteurlabs/tesseract-core) · [Forum](https://si-tesseract.discourse.group/)_

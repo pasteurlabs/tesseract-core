@@ -800,11 +800,12 @@ body[data-theme="dark"] .ecosystem-card:focus-visible {
 }
 
 /* Furo wraps tables in a scroll container that is itself full-width; let it
-   shrink so the content-width table isn't centered in a wide empty box. */
+   shrink to its content so the table sizes to content, then center the whole
+   wrapper so small comparison tables sit in the middle of the column. */
 .blog-page .content .table-wrapper {
     width: fit-content;
     max-width: 100%;
-    margin: 1.25rem 0;
+    margin: 1.25rem auto;
     overflow-x: auto;
 }
 

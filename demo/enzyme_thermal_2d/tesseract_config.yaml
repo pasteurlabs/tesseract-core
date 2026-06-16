@@ -55,8 +55,7 @@ build_config:
           ln -sf $(find /opt/conda -name lfortran -type f | head -1) /usr/local/bin/lfortran && \
           echo /opt/conda/lib > /etc/ld.so.conf.d/conda.conf && ldconfig
 
-    # Build Enzyme from a pinned release (nightly builds are not reproducible
-    # and have caused reverse-mode NaN regressions in the past)
+    # Build Enzyme from a pinned release
     - |
       RUN git clone --depth 1 --branch v0.0.258 https://github.com/EnzymeAD/Enzyme.git /tmp/enzyme-src && \
           cmake -S /tmp/enzyme-src/enzyme -B /tmp/enzyme-build \
