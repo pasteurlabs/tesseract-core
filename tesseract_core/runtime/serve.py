@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from .config import get_config
 from .core import create_endpoints
+from .experimental import InputPath
 from .file_interactions import SUPPORTED_FORMATS, join_paths, output_to_bytes
 from .mpa import start_run
 from .profiler import Profiler
@@ -71,16 +72,19 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
             rundir_name = f"run_{run_id}"
             rundir = join_paths(output_path, rundir_name)
             profiler = Profiler()
-            with start_run(base_dir=rundir):
-                with profiler:
-                    result = endpoint_func(*args, **kwargs)
+            try:
+                with start_run(base_dir=rundir):
+                    with profiler:
+                        result = endpoint_func(*args, **kwargs)
 
-                # Print profiling stats inside start_run context
-                # so they go through stdio redirection to the log file
-                profiler.print_stats()
-            return create_response(
-                result, accept, base_dir=output_path, binref_dir=rundir_name
-            )
+                    # Print profiling stats inside start_run context
+                    # so they go through stdio redirection to the log file
+                    profiler.print_stats()
+                return create_response(
+                    result, accept, base_dir=output_path, binref_dir=rundir_name
+                )
+            finally:
+                InputPath.cleanup()
 
         if endpoint_func.__name__ not in endpoints_to_wrap:
             return endpoint_func
