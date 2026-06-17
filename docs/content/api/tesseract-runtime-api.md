@@ -2,6 +2,8 @@
 
 # Python API (`tesseract_core.runtime`)
 
+## `tesseract_core.runtime`
+
 The `tesseract_core.runtime` Python module contains some useful utilities to create and extend `tesseract_api.py` files. It is available in all Tesseract container images.
 
 ```{eval-rst}
@@ -78,5 +80,13 @@ releases.
 ```{eval-rst}
 .. automodule:: tesseract_core.runtime.experimental
    :members:
-   :exclude-members: PydanticLazySequenceAnnotation
+```
+
+## `tesseract_core.runtime.jax_recipes`
+
+The `tesseract_core.runtime.jax_recipes` module contains utilities for working with JAX in `tesseract_api.py`, including support for efficient vector-Jacobian products (VJPs) when using JAX models in Tesseract apps. Used by default when initializing Tesseracts via `tesseract init --recipe jax`.
+
+```{eval-rst}
+.. automodule:: tesseract_core.runtime.jax_recipes
+   :members:
 ```
