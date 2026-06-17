@@ -33,6 +33,30 @@ def test_prepare_build_context(tmp_path_factory):
     assert (build_dir / "Dockerfile").exists()
 
 
+def test_prepare_build_context_python_version(tmp_path_factory):
+    """Test that python_version is rendered as ENV in the Dockerfile."""
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "foo").touch()
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(
+        name="foobar",
+        build_config=TesseractBuildConfig(python_version="3.12"),
+    )
+    engine.prepare_build_context(src_dir, build_dir, config)
+
+    dockerfile = (build_dir / "Dockerfile").read_text()
+    assert 'TESSERACT_PYTHON_VERSION="3.12"' in dockerfile
+
+    # Without python_version, the env var should not appear
+    build_dir2 = tmp_path_factory.mktemp("build2")
+    config_default = TesseractConfig(name="foobar")
+    engine.prepare_build_context(src_dir, build_dir2, config_default)
+
+    dockerfile_default = (build_dir2 / "Dockerfile").read_text()
+    assert "TESSERACT_PYTHON_VERSION" not in dockerfile_default
+
+
 def test_prepare_build_context_env(tmp_path_factory):
     """Test that env variables are rendered as ENV lines in the Dockerfile."""
     src_dir = tmp_path_factory.mktemp("src")

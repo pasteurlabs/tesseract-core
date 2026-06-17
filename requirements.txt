@@ -8,13 +8,9 @@ certifi==2026.5.20
     # via requests
 charset-normalizer==3.4.7
     # via requests
-click==8.4.1
-    # via
-    #   tesseract-core
-    #   typer
 colorama==0.4.6 ; sys_platform == 'win32'
-    # via click
-idna==3.16
+    # via typer
+idna==3.18
     # via requests
 jinja2==3.1.6
     # via tesseract-core
@@ -34,7 +30,7 @@ orjson==3.11.9
     # via tesseract-core
 packaging==26.2
     # via tesseract-core
-pip==26.1.1
+pip==26.1.2
     # via tesseract-core
 pybase64==1.4.3
     # via tesseract-core
@@ -54,7 +50,7 @@ rich==15.0.0
     #   typer
 shellingham==1.5.4
     # via typer
-typer==0.25.1
+typer==0.26.7
     # via tesseract-core
 typing-extensions==4.15.0
     # via
