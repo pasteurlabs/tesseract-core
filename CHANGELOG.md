@@ -8,6 +8,7 @@ All notable changes to this project will be documented in this file.
 
 - Make Python version configurable (#592)
 - Add `inherit_base_image_packages` flag to tesseract_config.yaml (#600)
+- Reduce boilerplate in JAX recipe, add experimental VJP cache (#577)
 
 ### Bug Fixes
 
