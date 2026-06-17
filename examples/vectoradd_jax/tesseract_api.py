@@ -16,12 +16,7 @@ from tesseract_core.runtime.jax_recipes import (
     jax_jacobian,
     jax_jvp,
     jax_vjp,
-    set_jax_vjp_cache_size,
 )
-
-# Enable VJP residual caching for this example so the apply -> vjp path
-# (e.g. under tesseract-jax's value_and_grad) reuses the cached backward.
-set_jax_vjp_cache_size(1)
 
 
 class Vector_and_Scalar(BaseModel):
