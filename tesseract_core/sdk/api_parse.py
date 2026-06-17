@@ -143,6 +143,15 @@ class TesseractBuildConfig(BaseModel, validate_assignment=True):
         ),
     )
 
+    inherit_base_image_packages: bool = Field(
+        False,
+        description=(
+            "If True, create the Python virtual environment with --system-site-packages "
+            "so it inherits Python packages pre-installed in the base image "
+            "(e.g. Firedrake, FEniCS, OpenFOAM). Cannot be combined with python_version."
+        ),
+    )
+
     requirements: PythonRequirements = PipRequirements(provider="python-pip")
 
     model_config = ConfigDict(extra="forbid")
@@ -155,6 +164,13 @@ class TesseractBuildConfig(BaseModel, validate_assignment=True):
             raise ValueError(
                 "python_version cannot be used with conda requirements. "
                 "Set the Python version in tesseract_environment.yaml instead."
+            )
+        if self.python_version is not None and self.inherit_base_image_packages:
+            raise ValueError(
+                "python_version cannot be used with inherit_base_image_packages. "
+                "inherit_base_image_packages exposes the base image's system Python "
+                "packages, which belong to a different interpreter than the one "
+                "installed by python_version. Set only one of the two."
             )
         return self
 
