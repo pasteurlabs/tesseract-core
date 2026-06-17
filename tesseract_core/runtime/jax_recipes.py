@@ -1,27 +1,12 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""JAX gradient endpoint helpers.
+"""JAX gradient endpoint helpers, used in the JAX recipe.
 
 These functions remove the boilerplate from a JAX-backed Tesseract
 ``tesseract_api.py`` by providing one-line implementations of the
 ``apply``, ``jacobian``, ``jacobian_vector_product``,
-``vector_jacobian_product`` and ``abstract_eval`` endpoints. The user
-supplies a single ``apply_jit`` (already wrapped in ``@eqx.filter_jit``);
-the helpers compose the JAX transforms around it.
-
-Optional VJP residual caching is available via
-:func:`set_jax_vjp_cache_size` (disabled by default). When enabled,
-:func:`jax_apply` stashes the backward function it constructs and
-:func:`jax_vjp` reuses it on the next matching call, skipping the
-redundant forward pass that ``jax.vjp`` would otherwise run. This
-speeds up the standard tesseract-jax ``apply -> vjp`` pattern by
-~10-20% on moderate-to-deep forward passes (see
-``benchmarks/test_jax_recipes.py``). The pattern is hit by
-``jax.value_and_grad``, ``jax.jacrev``, and even plain ``jax.grad`` since
-tesseract-jax's ``custom_vjp.fwd`` always runs ``apply()`` first. See
-:func:`set_jax_vjp_cache_size` for the full taxonomy of when caching
-helps.
+``vector_jacobian_product`` and ``abstract_eval`` endpoints.
 """
 
 from collections.abc import Callable
@@ -40,49 +25,19 @@ from tesseract_core.runtime.tree_transforms import (
     set_at_path,
 )
 
-#: Module-level VJP residual cache. ``jax_apply`` populates it; ``jax_vjp``
-#: reads from it. ``None`` (the default) means caching is disabled and both
-#: helpers bypass the cache machinery entirely. Use
-#: :func:`set_jax_vjp_cache_size` to enable.
-jax_vjp_cache: LRUCache | None = None
+_jax_vjp_cache: LRUCache | None = None
 
 
-def set_jax_vjp_cache_size(size: int) -> None:
+def _set_jax_vjp_cache_size(size: int) -> None:
     """Enable or resize the VJP residual cache, discarding existing entries.
 
-    When :func:`jax_apply` and :func:`jax_vjp` are called in sequence on the
-    same inputs (the typical pattern under tesseract-jax's ``custom_vjp``,
-    including under ``jax.value_and_grad`` and ``jax.jacrev``), caching the
-    backward function produced by :func:`jax_apply`'s internal ``jax.vjp``
-    call lets the subsequent :func:`jax_vjp` skip the redundant forward
-    pass. Measured speedup is ~10-20% on moderate-to-deep forward passes
-    (see ``benchmarks/test_jax_recipes.py``); the win scales with the cost
-    of the forward pass and goes the wrong way on trivially-small ones.
-
-    Best fit:
-      - tesseract-jax workflows that go through ``custom_vjp`` (every
-        gradient evaluation runs ``apply()`` first via ``fwd``, so the
-        cache reliably hits on the subsequent ``vjp()`` -- true even
-        under plain ``jax.grad``).
-      - Manual ``apply()`` followed by multiple ``vjp()`` calls on the
-        same inputs (e.g. iterative solvers, CG-style inverse problems).
-
-    Poor fit:
-      - Very small models where the forward pass is microseconds: the
-        cache machinery overhead exceeds the saved work.
-
-    Args:
-        size: Number of cache slots. ``0`` (the default) disables caching
-            entirely (both :func:`jax_apply` and :func:`jax_vjp` then bypass
-            the cache machinery). ``1`` covers the standard apply -> vjp
-            pattern. Increase for workflows that interleave multiple
-            ``apply()`` calls before their corresponding ``vjp()`` calls.
+    Public entry point: :func:`tesseract_core.runtime.experimental.set_jax_vjp_cache_size`.
     """
-    global jax_vjp_cache
-    jax_vjp_cache = LRUCache(maxsize=size) if size > 0 else None
+    global _jax_vjp_cache
+    _jax_vjp_cache = LRUCache(maxsize=size) if size > 0 else None
 
 
-def hash_tree(tree: Any) -> int:
+def _hash_tree(tree: Any) -> int:
     """Compute a hash of a pytree's structure and leaves.
 
     Suitable for use as an :class:`LRUCache` key. Array leaves contribute
@@ -111,14 +66,15 @@ def jax_apply(apply_jit: Callable, inputs: BaseModel) -> dict:
     ``apply`` endpoint may want to do pre/post-processing around the call,
     so we cannot wrap it in a jit internally.
 
-    When :data:`jax_vjp_cache` is set (see :func:`set_jax_vjp_cache_size`),
+    When :data:`_jax_vjp_cache` is set (see
+    :func:`tesseract_core.runtime.experimental.set_jax_vjp_cache_size`),
     the forward pass is run via ``jax.vjp`` so the resulting backward
     function can be stashed and reused by a later :func:`jax_vjp` call.
     Otherwise this is just ``apply_jit(inputs.model_dump())``.
     """
     inputs_dict = inputs.model_dump()
 
-    if jax_vjp_cache is None:
+    if _jax_vjp_cache is None:
         return apply_jit(inputs_dict)
 
     # Compute forward pass via jax.vjp to cache residuals for a potential
@@ -136,7 +92,7 @@ def jax_apply(apply_jit: Callable, inputs: BaseModel) -> dict:
     out = eqx.combine(diff_primals, static_primals)
 
     cotangent_template = jax.tree.map(jnp.zeros_like, diff_primals)
-    jax_vjp_cache.put(hash_tree(inputs_dict), (vjp_func, cotangent_template))
+    _jax_vjp_cache.put(_hash_tree(inputs_dict), (vjp_func, cotangent_template))
     return out
 
 
@@ -149,9 +105,9 @@ def jax_vjp(
 ) -> dict[str, Any]:
     """Compute the vector-Jacobian product.
 
-    Reuses the cached backward from a prior :func:`jax_apply` call when one
-    is available (see :func:`set_jax_vjp_cache_size`); otherwise falls
-    through to a freshly JIT-compiled ``jax.vjp`` evaluation. The JIT
+    Reuses the cached backward from a prior :func:`jax_apply` call when one is available (see
+    :func:`tesseract_core.runtime.experimental.set_jax_vjp_cache_size`); otherwise falls
+    through to a JIT-compiled ``jax.vjp`` evaluation. The JIT
     compilation happens internally on the first miss for a given
     (input shape/dtype, path subset) combination and is cached for reuse.
     """
@@ -162,8 +118,8 @@ def jax_vjp(
     # value_and_grad is followed by jax.jacrev, which decomposes into many
     # vjp calls per output basis vector.
     if (
-        jax_vjp_cache is not None
-        and (cached := jax_vjp_cache.get(hash_tree(inputs_dict))) is not None
+        _jax_vjp_cache is not None
+        and (cached := _jax_vjp_cache.get(_hash_tree(inputs_dict))) is not None
     ):
         vjp_func, cotangent_template = cached
         full_cotangent = jax.tree.map(jnp.zeros_like, cotangent_template)

@@ -18,16 +18,15 @@ from tesseract_core.runtime.jax_recipes import (
     jax_vjp,
 )
 
-# VJP residual caching is opt-in. Enabling it speeds up the typical
-# tesseract-jax apply -> vjp pattern (measured ~10-20% on moderate-to-deep
-# forward passes; see benchmarks/test_jax_recipes.py). The cost goes the
-# wrong way on trivially-small forward passes -- see the docstring of
+# VJP residual caching is opt-in and experimental. Enabling it can speed up
+# the typical tesseract-jax apply -> vjp pattern on moderate-to-deep forward
+# passes, but the cost goes the wrong way on trivially-small ones, so
+# benchmark your own workload first. See the docstring of
 # `set_jax_vjp_cache_size` for the full when-it-helps taxonomy. To enable,
 # uncomment below:
 #
-# from tesseract_core.runtime.jax_recipes import (
-#     set_jax_vjp_cache_size,
-# )
+# from tesseract_core.runtime.experimental import set_jax_vjp_cache_size
+#
 # set_jax_vjp_cache_size(1)  # enable with one cached entry
 
 #

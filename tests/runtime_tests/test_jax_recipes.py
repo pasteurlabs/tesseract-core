@@ -133,11 +133,8 @@ class TestCacheCorrectness:
         call hits the cache (same input as the apply that filled it), the
         third misses (different input) and falls through to vjp_jit.
         """
-        from tesseract_core.runtime.jax_recipes import (
-            jax_apply,
-            jax_vjp,
-            set_jax_vjp_cache_size,
-        )
+        from tesseract_core.runtime.experimental import set_jax_vjp_cache_size
+        from tesseract_core.runtime.jax_recipes import jax_apply, jax_vjp
 
         set_jax_vjp_cache_size(cache_size)
         InputSchema, apply_jit = _build_api()
@@ -183,24 +180,21 @@ class TestCacheCorrectness:
     def test_cache_hit_actually_engages(self):
         # Sanity check that the cache fills and is read back, not silently
         # bypassed.
-        from tesseract_core.runtime.jax_recipes import (
-            jax_apply,
-            jax_vjp,
-            set_jax_vjp_cache_size,
-        )
+        from tesseract_core.runtime.experimental import set_jax_vjp_cache_size
+        from tesseract_core.runtime.jax_recipes import jax_apply, jax_vjp
 
         set_jax_vjp_cache_size(1)
         try:
             from tesseract_core.runtime import jax_recipes
 
-            assert jax_recipes.jax_vjp_cache is not None
-            assert jax_recipes.jax_vjp_cache.size == 0
+            assert jax_recipes._jax_vjp_cache is not None
+            assert jax_recipes._jax_vjp_cache.size == 0
 
             InputSchema, apply_jit = _build_api()
             inp = _make_inputs(InputSchema)
 
             jax_apply(apply_jit, inp)
-            assert jax_recipes.jax_vjp_cache.size == 1
+            assert jax_recipes._jax_vjp_cache.size == 1
 
             # vjp on the SAME inputs should hit cache (get is non-destructive).
             jax_vjp(
@@ -210,6 +204,6 @@ class TestCacheCorrectness:
                 {"y"},
                 {"y": np.ones(3, dtype=np.float32)},
             )
-            assert jax_recipes.jax_vjp_cache.size == 1
+            assert jax_recipes._jax_vjp_cache.size == 1
         finally:
             set_jax_vjp_cache_size(0)
