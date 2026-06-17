@@ -18,28 +18,17 @@ from tesseract_core.runtime.jax_recipes import (
     jax_vjp,
 )
 
-# VJP residual caching is opt-in and experimental. Enabling it can speed up
-# the typical tesseract-jax apply -> vjp pattern on moderate-to-deep forward
-# passes, but the cost goes the wrong way on trivially-small ones, so
-# benchmark your own workload first. See the docstring of
-# `set_jax_vjp_cache_size` for the full when-it-helps taxonomy. To enable,
-# uncomment below:
-#
-# from tesseract_core.runtime.experimental import set_jax_vjp_cache_size
-#
-# set_jax_vjp_cache_size(1)  # enable with one cached entry
-
-#
-# Schemata
-#
-
-
 # Note: This template uses equinox filter_jit to automatically treat non-array
 # inputs/outputs as static. As Tesseract scalar objects (e.g. Float32) are
 # essentially just wrappers around numpy 0D arrays, they will be considered to
 # be dynamic and will be traced by JAX.
 # If you want to treat scalar numerical values as static you will need to use
 # built-in Python types (e.g. float, int) instead of Float32.
+
+
+#
+# Schemata
+#
 
 
 class InputSchema(BaseModel):
@@ -77,7 +66,7 @@ def apply(inputs: InputSchema) -> OutputSchema:
     # Optional: Insert any post-processing that doesn't require tracing
     # For example, you might want to save to disk or modify a non-differentiable
     # output. Again, do not modify any differentiable output in a non-linear way.
-    return out
+    return OutputSchema(**out)
 
 
 #
