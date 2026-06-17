@@ -373,6 +373,10 @@ Every component differentiates itself with whatever AD is native to it, and Tess
 
 Because Enzyme works at the LLVM IR level, none of this is Fortran-specific. The same pipeline should apply to C, C++, Rust, or any language with an LLVM frontend.
 
+```{seealso}
+**A real composability demo.** While this post was in draft, Florian List went and built exactly this kind of thing at a scale well beyond our toy solver. In a [Forum showcase](https://si-tesseract.discourse.group/t/sampling-the-universe-hmc-through-jax-and-fortran-with-enzyme-differentiated-tesseracts/132), he coupled an Enzyme-differentiated Fortran component with a JAX cosmological forward model and ran Hamiltonian Monte Carlo through the whole pipeline, sampling a posterior over 137,058 initial-condition parameters of the universe from Lyman-α forest observations. Gradients flow from Fortran, through JAX, and into the sampler, exactly as in the composability story above. It's a much better demonstration than anything we built here, and well worth a read.
+```
+
 ## Try it yourself
 
 The full source is [on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/demo/enzyme_thermal_2d), including the Fortran solver, the Enzyme pipeline, the inverse-problem notebooks, and the LLVM build script holding it all together. If you've got a Fortran, C, or C++ solver you'd like gradients for and you don't mind spending some quality time with LLVM IR, this is a pretty good place to start.
