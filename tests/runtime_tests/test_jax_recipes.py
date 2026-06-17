@@ -7,7 +7,7 @@ from collections.abc import Hashable
 
 import numpy as np
 
-from tesseract_core.runtime.jax_recipes import hash_tree
+from tesseract_core.runtime.jax_recipes import _hash_tree as hash_tree
 
 
 class TestHashTree:
