@@ -645,7 +645,8 @@ def serve(
     memory: str | None = None,
     input_path: str | Path | None = None,
     output_path: str | Path | None = None,
-    output_format: Literal["json", "json+base64", "json+binref"] | None = None,
+    output_format: Literal["json", "json+base64", "json+binref", "json+cuda_ipc"]
+    | None = None,
     docker_args: list[str] | None = None,
     runtime_config: dict[str, Any] | None = None,
     skip_health_check: bool = False,
@@ -778,6 +779,15 @@ def serve(
         if network is None:
             raise ValueError("Network must be specified if network_alias is provided")
         extra_args.extend(["--network-alias", network_alias])
+
+    # CUDA IPC requires shared IPC namespace between host and container
+    if output_format == "json+cuda_ipc":
+        extra_args.extend(["--ipc=host"])
+        if not gpus:
+            logger.warning(
+                "json+cuda_ipc output format requires GPU access. "
+                "Consider passing gpus=['all'] or specific GPU IDs."
+            )
 
     if docker_args:
         extra_args.extend(docker_args)
@@ -958,7 +968,8 @@ def run_tesseract(
     memory: str | None = None,
     input_path: str | Path | None = None,
     output_path: str | Path | None = None,
-    output_format: Literal["json", "json+base64", "json+binref"] | None = None,
+    output_format: Literal["json", "json+base64", "json+binref", "json+cuda_ipc"]
+    | None = None,
     output_file: str | None = None,
     docker_args: list[str] | None = None,
     stream_logs: bool | Callable[[str], None] = False,
