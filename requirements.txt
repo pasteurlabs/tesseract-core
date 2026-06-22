@@ -4,7 +4,7 @@ annotated-doc==0.0.4
     # via typer
 annotated-types==0.7.0
     # via pydantic
-certifi==2026.5.20
+certifi==2026.6.17
     # via requests
 charset-normalizer==3.4.7
     # via requests
@@ -24,7 +24,9 @@ mdurl==0.1.2
     # via markdown-it-py
 numpy==2.2.6 ; python_full_version < '3.11'
     # via tesseract-core
-numpy==2.4.6 ; python_full_version >= '3.11'
+numpy==2.4.6 ; python_full_version == '3.11.*'
+    # via tesseract-core
+numpy==2.5.0 ; python_full_version >= '3.12'
     # via tesseract-core
 orjson==3.11.9
     # via tesseract-core
