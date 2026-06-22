@@ -23,6 +23,7 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 from pydantic_core import InitErrorDetails, PydanticCustomError, from_json
 
 from . import engine
+from .docker_client import Container, Containers
 from .logs import LogStreamer
 
 PathLike: TypeAlias = str | Path
@@ -59,19 +60,28 @@ class Tesseract:
     _lastlog: str | None = None
     _client: HTTPClient | LocalClient | None = None
     _stream_logs: BoolOrCallable = False
+    _timeout: float | tuple[float, float] | None = None
 
-    def __init__(self, url: str, server_output_path: str | Path | None = None) -> None:
+    def __init__(
+        self,
+        url: str,
+        server_output_path: str | Path | None = None,
+        timeout: float | tuple[float, float] | None = None,
+    ) -> None:
         warnings.warn(
             "Direct instantiation of Tesseract is deprecated. "
             "Use Tesseract.from_url(), Tesseract.from_image(), or Tesseract.from_tesseract_api() instead.",
             UserWarning,
             stacklevel=2,
         )
-        self._client = HTTPClient(url, output_path=server_output_path)
+        self._client = HTTPClient(url, output_path=server_output_path, timeout=timeout)
 
     @classmethod
     def from_url(
-        cls, url: str, server_output_path: str | Path | None = None
+        cls,
+        url: str,
+        server_output_path: str | Path | None = None,
+        timeout: float | tuple[float, float] | None = None,
     ) -> Tesseract:
         """Create a Tesseract instance from a URL.
 
@@ -84,12 +94,17 @@ class Tesseract:
                 Must be a path accessible from the client machine (e.g., via a shared or
                 mounted filesystem), since the server writes .bin files there and the
                 client reads them from the same path.
+            timeout: Request timeout in seconds. Can be a float for both connect and
+                read timeouts, or a ``(connect, read)`` tuple for separate control.
+                ``None`` (the default) disables timeouts. See the `requests documentation
+                <https://requests.readthedocs.io/en/latest/user/advanced/#timeouts>`_
+                for details.
 
         Returns:
             A Tesseract instance.
         """
         obj = cls.__new__(cls)
-        obj._client = HTTPClient(url, output_path=server_output_path)
+        obj._client = HTTPClient(url, output_path=server_output_path, timeout=timeout)
         return obj
 
     @classmethod
@@ -113,6 +128,8 @@ class Tesseract:
         docker_args: list[str] | None = None,
         runtime_config: dict[str, Any] | None = None,
         stream_logs: BoolOrCallable = False,
+        skip_health_check: bool = False,
+        timeout: float | tuple[float, float] | None = None,
     ) -> Tesseract:
         """Create a Tesseract instance from a Docker image.
 
@@ -151,6 +168,17 @@ class Tesseract:
                 `{"profiling": True}` enables profiling via TESSERACT_PROFILING=true.
             stream_logs: If True, stream logs to stdout while endpoints run.
                 If a callable, stream logs to that callable instead.
+            skip_health_check: If True, skip the startup health check poll. Useful for
+                Tesseracts with slow initialization (e.g., Julia runtime startup, large
+                model loading). The caller is responsible for ensuring
+                readiness, e.g. by calling :meth:`health`, before calling
+                other endpoints.
+            timeout: Request timeout in seconds for HTTP calls to the Tesseract.
+                Can be a float for both connect and read timeouts, or a
+                ``(connect, read)`` tuple for separate control. ``None`` (the default)
+                disables timeouts. See the `requests documentation
+                <https://requests.readthedocs.io/en/latest/user/advanced/#timeouts>`_
+                for details.
 
         Returns:
             A Tesseract instance.
@@ -171,6 +199,7 @@ class Tesseract:
             output_path = Path(tempfile.mkdtemp(prefix="tesseract_output_"))
 
         obj._stream_logs = stream_logs
+        obj._timeout = timeout
         obj._spawn_config = dict(
             image_name=image_name,
             volumes=volumes,
@@ -189,6 +218,7 @@ class Tesseract:
             host_ip=host_ip,
             debug=True,
             docker_args=docker_args,
+            skip_health_check=skip_health_check,
         )
         return obj
 
@@ -321,6 +351,7 @@ class Tesseract:
         self._client = HTTPClient(
             f"http://{host_ip}:{container.host_port}",
             output_path=Path(output_path) if output_path else None,
+            timeout=self._timeout,
         )
 
         # Ensure that the Tesseract is torn down once the object is garbage collected,
@@ -369,6 +400,33 @@ class Tesseract:
             a list with all available endpoints for this Tesseract.
         """
         return [endpoint.lstrip("/") for endpoint in self.openapi_schema["paths"]]
+
+    def container_info(self) -> Container:
+        """Retrieve information on the Docker container serving this Tesseract.
+
+        Tesseract must be created via `from_image` and be actively served for
+        this to be available.
+
+        Raises:
+            RuntimeError: if this Tesseract was not created via
+                :meth:`from_image` (e.g. :meth:`from_url` or
+                :meth:`from_tesseract_api`), or if it is not currently
+                being served (call :meth:`serve` or use ``with tess:``
+                first).
+            tesseract_core.sdk.docker_client.NotFound: if the container
+                disappeared between :meth:`serve` and this call.
+        """
+        if self._spawn_config is None:
+            raise RuntimeError(
+                "`container_info` is only available when using "
+                "`Tesseract.from_image(...)`."
+            )
+        if self._serve_context is None:
+            raise RuntimeError(
+                "`container_info` is only available for served Tesseracts. "
+                "Use `tess.serve()` or `with tess:` first."
+            )
+        return Containers.get(self._serve_context["container_name"])
 
     @requires_client
     def apply(
@@ -584,7 +642,9 @@ def _fast_tobytes(arr: np.ndarray) -> memoryview:
     return np.ascontiguousarray(arr).data
 
 
-def _encode_array(arr: np.ndarray, b64: bool = True) -> dict:
+def _encode_array(arr: Any, b64: bool = True) -> dict:
+    # Ensure arr is a numpy-compatible array so we guarantee it has a compatible dtype (not e.g. torch bfloat16)
+    arr = np.asanyarray(arr, order="A")
     if b64:
         data = {
             "buffer": pybase64.b64encode_as_string(_fast_tobytes(arr)),
@@ -664,9 +724,15 @@ def _decode_array(
 class HTTPClient:
     """HTTP Client for Tesseracts."""
 
-    def __init__(self, url: str, output_path: str | Path | None = None) -> None:
+    def __init__(
+        self,
+        url: str,
+        output_path: str | Path | None = None,
+        timeout: float | tuple[float, float] | None = None,
+    ) -> None:
         self._url = self._sanitize_url(url)
         self._output_path = output_path
+        self._timeout = timeout
         self._session = requests.Session()
         self._session.headers["Content-Type"] = "application/json"
 
@@ -698,25 +764,27 @@ class HTTPClient:
 
         if payload:
             encoded_payload = _tree_map(
-                _encode_array, payload, is_leaf=lambda x: hasattr(x, "shape")
+                _encode_array, payload, is_leaf=lambda x: hasattr(x, "__array__")
             )
         else:
             encoded_payload = None
 
         params = {"run_id": run_id} if run_id is not None else {}
         data = orjson.dumps(encoded_payload)
+        # Only forward timeout when set; omitting it is equivalent to None for
+        # requests.Session, and avoids passing a kwarg that some session
+        # implementations (e.g. starlette's TestClient) don't accept.
+        request_kwargs = {"method": method, "url": url, "data": data, "params": params}
+        if self._timeout is not None:
+            request_kwargs["timeout"] = self._timeout
         try:
-            response = self._session.request(
-                method=method, url=url, data=data, params=params
-            )
+            response = self._session.request(**request_kwargs)
         except requests.ConnectionError:
             # Retry once on stale keep-alive connections. There is a race
             # between urllib3's is_connection_dropped check and the server
             # closing idle connections (uvicorn timeout_keep_alive) that
             # can cause ConnectionError on an otherwise healthy server.
-            response = self._session.request(
-                method=method, url=url, data=data, params=params
-            )
+            response = self._session.request(**request_kwargs)
 
         if response.status_code == requests.codes.unprocessable_entity:
             # Try and raise a more helpful error if the response is a Pydantic error

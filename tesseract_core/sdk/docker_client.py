@@ -1016,6 +1016,60 @@ class Volumes:
         return result.stdout.strip().split("\n")
 
 
+class Networks:
+    """Namespace for functions to interface with Docker networks."""
+
+    @staticmethod
+    def get(name: str) -> dict:
+        """Get metadata for a Docker network.
+
+        Params:
+            name: The name of the network to get.
+
+        Returns:
+            The network metadata dict.
+
+        Raises:
+            NotFound: If the network does not exist.
+        """
+        docker = _get_docker_executable()
+        try:
+            result = subprocess.run(
+                [*docker, "network", "inspect", name],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            json_dict = json.loads(result.stdout)
+        except subprocess.CalledProcessError as ex:
+            raise NotFound(f"Network {name} not found: {ex}") from ex
+        if not json_dict:
+            raise NotFound(f"Network {name} not found.")
+        return json_dict[0]
+
+    @staticmethod
+    def create(name: str) -> dict:
+        """Create a Docker network.
+
+        Params:
+            name: The name of the network to create.
+
+        Returns:
+            The created network metadata dict.
+        """
+        docker = _get_docker_executable()
+        try:
+            subprocess.run(
+                [*docker, "network", "create", name],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            return Networks.get(name)
+        except subprocess.CalledProcessError as ex:
+            raise APIError(f"Error creating network {name}: {ex}") from ex
+
+
 class DockerException(Exception):
     """Base class for Docker CLI exceptions."""
 
@@ -1087,6 +1141,7 @@ class CLIDockerClient:
         self.containers = Containers()
         self.images = Images()
         self.volumes = Volumes()
+        self.networks = Networks()
 
     @staticmethod
     def info() -> tuple:
@@ -1193,16 +1248,20 @@ def build_docker_image(
     build_args = dict(path=path, tags=tags, dockerfile=dockerfile)
 
     if inject_ssh:
-        ssh_sock = os.environ.get("SSH_AUTH_SOCK")
-        if ssh_sock is None:
-            raise ValueError(
-                "SSH_AUTH_SOCK environment variable not set (try running `ssh-agent`)"
-            )
-
         ssh_keys = subprocess.run(["ssh-add", "-L"], capture_output=True)
         if ssh_keys.returncode != 0 or not ssh_keys.stdout:
             raise ValueError("No SSH keys found in SSH agent (try running `ssh-add`)")
-        build_args["ssh"] = f"default={ssh_sock}"
+
+        if sys.platform == "win32":
+            # On Windows, Docker Desktop connects to the SSH agent directly
+            build_args["ssh"] = "default"
+        else:
+            ssh_sock = os.environ.get("SSH_AUTH_SOCK")
+            if ssh_sock is None:
+                raise ValueError(
+                    "SSH_AUTH_SOCK environment variable not set (try running `ssh-agent`)"
+                )
+            build_args["ssh"] = f"default={ssh_sock}"
 
     build_cmd = Images._get_buildx_command(**build_args)
 
