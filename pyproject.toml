@@ -40,16 +40,16 @@ tesseract-runtime = "tesseract_core.runtime.cli:main"
 # do not edit manually. To add constraints, use other operators (e.g. <, >=, ~=, ==) as needed.
 runtime = [
     "pydantic<=2.13.4,>=2.10",
-    "fastapi<=0.137.0,>=0.115",
+    "fastapi<=0.138.0,>=0.115",
     "requests<=2.34.2,>=2.32.4",
     "uvicorn<=0.49.0,>=0.34",
     "typer<=0.26.7,>=0.16",
-    "fsspec[http,s3]<=2026.4.0,>=2024.12",
+    "fsspec[http,s3]<=2026.6.0,>=2024.12",
     "pybase64<=1.4.3,>=1.4",
     "orjson<=3.11.9,>=3.10",
-    "numpy<=2.4.6,>=1.26",
+    "numpy<=2.5.0,>=1.26",
     "debugpy<=1.8.21,>=1.8.14",
-    "mlflow-skinny<=3.13.0,>=3.7.0",
+    "mlflow-skinny<=3.14.0,>=3.7.0",
 ]
 # END RUNTIME DEPENDENCIES
 
