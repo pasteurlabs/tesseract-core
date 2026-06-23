@@ -1,0 +1,22 @@
+name: "fmi-model-exchange"
+version: "1.0.0"
+description: |
+  Wraps an FMI 2.0 Model Exchange (ME) FMU via FMPy. Rather than simulating
+  internally, this Tesseract evaluates the model right-hand side
+  dx/dt = f(t, x, u; p) at a single point, so time integration can run
+  externally -- e.g. with JAX/diffrax over the Tesseract via tesseract-jax
+  (see parameter_estimation.py).
+
+  Differentiability hooks into FMI's directional-derivative API
+  (fmi2GetDirectionalDerivative = JVP); the Jacobian is assembled by sweeping
+  unit tangents and the VJP is derived from it. Inputs the FMU cannot
+  differentiate this way (time, and parameters with no declared dependency)
+  fall back to finite differences.
+
+  Ships the Modelica VanDerPol reference FMU. To wrap a different ME FMU, drop
+  a new .fmu into fmus/ (and set FMU_PATH / FMU_PARAMETERS) -- no code changes.
+
+build_config:
+  # FMUs bundle platform-specific shared libraries; the build target is linux.
+  package_data:
+    - ["fmus/VanDerPol.fmu", "fmus/VanDerPol.fmu"]

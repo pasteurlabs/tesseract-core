@@ -1,0 +1,4 @@
+# FMPy provides the FMI import + low-level Model Exchange interface.
+# Pinned for reproducibility: low-level FMU2Model method signatures can shift
+# between releases.
+fmpy==0.3.29

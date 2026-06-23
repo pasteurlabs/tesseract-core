@@ -1,0 +1,17 @@
+{
+  "inputs": {
+    "t": 0.0,
+    "x": {
+      "object_type": "array",
+      "shape": [2],
+      "dtype": "float64",
+      "data": { "buffer": [2.0, 1.0], "encoding": "json" }
+    },
+    "parameters": {
+      "object_type": "array",
+      "shape": [1],
+      "dtype": "float64",
+      "data": { "buffer": [3.0], "encoding": "json" }
+    }
+  }
+}

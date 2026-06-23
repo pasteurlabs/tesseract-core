@@ -1,0 +1,42 @@
+{
+  "endpoint": "jacobian_vector_product",
+  "expected_outputs": {
+    "dx_dt": {
+      "object_type": "array",
+      "shape": [2],
+      "dtype": "float64",
+      "data": { "buffer": [0.0, -13.0], "encoding": "json" }
+    }
+  },
+  "expected_exception": null,
+  "expected_exception_regex": null,
+  "atol": 1e-6,
+  "rtol": 1e-5,
+  "payload": {
+    "inputs": {
+      "t": 0.0,
+      "x": {
+        "object_type": "array",
+        "shape": [2],
+        "dtype": "float64",
+        "data": { "buffer": [2.0, 1.0], "encoding": "json" }
+      },
+      "parameters": {
+        "object_type": "array",
+        "shape": [1],
+        "dtype": "float64",
+        "data": { "buffer": [3.0], "encoding": "json" }
+      }
+    },
+    "jvp_inputs": ["x"],
+    "jvp_outputs": ["dx_dt"],
+    "tangent_vector": {
+      "x": {
+        "object_type": "array",
+        "shape": [2],
+        "dtype": "float64",
+        "data": { "buffer": [1.0, 0.0], "encoding": "json" }
+      }
+    }
+  }
+}
