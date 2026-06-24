@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 120" fill="none">
+  <!-- Multi-physics: design θ → Thermal Tesseract ⇄ Structural Tesseract (coupled) → sensor loss → ∇ -->
+
+  <!-- Design variables -->
+  <rect x="4" y="40" width="50" height="40" rx="6" stroke="#222" stroke-width="1.2"/>
+  <circle cx="20" cy="60" r="3" fill="#222"/>
+  <line x1="20" y1="60" x2="40" y2="52" stroke="#222" stroke-width="0.8"/>
+  <line x1="20" y1="60" x2="40" y2="68" stroke="#222" stroke-width="0.8"/>
+  <text x="29" y="35" text-anchor="middle" font-family="system-ui, sans-serif" font-size="7.5" fill="#555">θ (source)</text>
+
+  <!-- Arrow 1 -->
+  <line x1="54" y1="60" x2="74" y2="60" stroke="#222" stroke-width="1"/>
+  <polygon points="74,57 80,60 74,63" fill="#222"/>
+
+  <!-- Thermal Tesseract -->
+  <rect x="82" y="40" width="56" height="40" rx="6" stroke="#222" stroke-width="1.2"/>
+  <rect x="97" y="49" width="12" height="12" rx="1" stroke="#222" stroke-width="0.8" stroke-dasharray="2 1.5"/>
+  <rect x="100" y="52" width="6" height="6" rx="0.5" stroke="#222" stroke-width="0.8"/>
+  <text x="110" y="74" text-anchor="middle" font-family="system-ui, sans-serif" font-size="7.5" fill="#555">Thermal</text>
+
+  <!-- Two-way coupling arrows between the solvers -->
+  <line x1="138" y1="52" x2="160" y2="52" stroke="#222" stroke-width="1"/>
+  <polygon points="160,49 166,52 160,55" fill="#222"/>
+  <text x="152" y="48" text-anchor="middle" font-family="system-ui, sans-serif" font-size="6" fill="#555">T</text>
+  <line x1="166" y1="68" x2="144" y2="68" stroke="#222" stroke-width="1"/>
+  <polygon points="144,65 138,68 144,71" fill="#222"/>
+  <text x="152" y="79" text-anchor="middle" font-family="system-ui, sans-serif" font-size="6" fill="#555">D</text>
+
+  <!-- Structural Tesseract -->
+  <rect x="166" y="40" width="56" height="40" rx="6" stroke="#222" stroke-width="1.2"/>
+  <rect x="181" y="49" width="12" height="12" rx="1" stroke="#222" stroke-width="0.8" stroke-dasharray="2 1.5"/>
+  <rect x="184" y="52" width="6" height="6" rx="0.5" stroke="#222" stroke-width="0.8"/>
+  <text x="194" y="74" text-anchor="middle" font-family="system-ui, sans-serif" font-size="7.5" fill="#555">Structural</text>
+
+  <!-- Arrow to loss -->
+  <line x1="222" y1="60" x2="240" y2="60" stroke="#222" stroke-width="1"/>
+  <polygon points="240,57 246,60 240,63" fill="#222"/>
+
+  <!-- Sensor-error loss -->
+  <rect x="248" y="40" width="28" height="40" rx="6" stroke="#222" stroke-width="1.2"/>
+  <circle cx="258" cy="54" r="1.6" fill="#222"/>
+  <circle cx="266" cy="54" r="1.6" fill="#222"/>
+  <circle cx="258" cy="66" r="1.6" fill="#222"/>
+  <circle cx="266" cy="66" r="1.6" fill="#222"/>
+  <text x="262" y="35" text-anchor="middle" font-family="system-ui, sans-serif" font-size="7" fill="#555">loss</text>
+
+  <!-- Gradient arrow (backprop) -->
+  <line x1="262" y1="22" x2="34" y2="22" stroke="#222" stroke-width="0.8" stroke-dasharray="3 2"/>
+  <polygon points="34,19 28,22 34,25" fill="#222"/>
+  <text x="148" y="17" text-anchor="middle" font-family="system-ui, sans-serif" font-size="6.5" fill="#555">∇ through coupled iteration</text>
+</svg>

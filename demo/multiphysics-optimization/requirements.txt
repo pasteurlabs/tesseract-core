@@ -1,5 +1,6 @@
 jax[cpu]==0.5.2
-equinox
-matplotlib
-scipy
-tesseract-core
+equinox==0.13.6
+matplotlib==3.10.9
+scipy==1.17.1
+tesseract-jax==0.3.0
+tesseract-core[runtime]
