@@ -10,6 +10,7 @@ data-assimilation.ipynb
 lorenz_tesseract.md
 cfd-optimization.ipynb
 fem-shape-optimization.ipynb
+learned-closure.ipynb
 JAX Rosenbrock Minimization <https://si-tesseract.discourse.group/t/jax-based-rosenbrock-function-minimization/48>
 PyTorch Rosenbrock Minimization <https://si-tesseract.discourse.group/t/pytorch-based-rosenbrock-function-minimization/44>
 JAX RBF Fitting <https://si-tesseract.discourse.group/t/jax-auto-diff-templates-gaussian-radial-basis-function-fitting/51>
@@ -43,7 +44,7 @@ Detailed implementation of the JAX-based Lorenz-96 solver Tesseract used in the 
 
 ## Simulation & design optimization demos
 
-End-to-end differentiable optimization through physics simulators, using Tesseract-JAX to compose Tesseracts with JAX code.
+End-to-end differentiable optimization through physics simulators, composing Tesseracts with JAX or PyTorch code via Tesseract-JAX and Tesseract-Torch.
 
 ::::{grid} 2
 :gutter: 2
@@ -57,6 +58,11 @@ Optimize the initial velocity field of a 2D Navier-Stokes simulation so its vort
 :link: fem-shape-optimization.html
 
 Compose a geometry Tesseract (PyVista, finite-difference gradients) with a FEM Tesseract (jax-fem) to optimize structural bar configurations for minimum compliance.
+:::
+:::{grid-item-card} Learned Closure (PyTorch)
+:link: learned-closure.html
+
+Train a native PyTorch neural viscosity closure end-to-end through a containerized Burgers' equation solver Tesseract used as a differentiable layer — gradients flow from the loss through the solver's VJP, over HTTP, into the network using Tesseract-Torch.
 :::
 
 ::::
