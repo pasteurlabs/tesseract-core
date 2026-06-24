@@ -29,6 +29,7 @@ from .docker_client import (
     CLIDockerClient,
     Container,
     Image,
+    NotFound,
     build_docker_image,
     is_podman,
 )
@@ -379,7 +380,7 @@ def _write_template_file(
     exist_ok: bool = False,
 ):
     """Write a template to a target directory."""
-    template = ENV.get_template(str(recipe / template_name))
+    template = ENV.get_template((recipe / template_name).as_posix())
 
     target_file = target_dir / template_name
 
@@ -566,6 +567,68 @@ def get_tesseract_images() -> list[Image]:
     return docker_client.images.list()
 
 
+# Built-in Docker/Podman networks that can/should not be created.
+_BUILTIN_NETWORKS = {"host", "bridge", "none"}
+
+
+def _ensure_network_exists(network: str) -> None:
+    """Create the Docker network if it does not exist yet.
+
+    Params:
+        network: The network name to create.
+    """
+    if network in _BUILTIN_NETWORKS:
+        return
+    try:
+        docker_client.networks.get(network)
+    except NotFound:
+        create_network = True
+    else:
+        create_network = False
+    if create_network:
+        logger.info("Network '%s' not found, creating it.", network)
+        docker_client.networks.create(network)
+
+
+def _wait_for_health(
+    container: Container, ping_ip: str, port: str, timeout: float = 30
+) -> None:
+    """Poll a container's /health endpoint until it responds 200 or timeout expires."""
+    while True:
+        try:
+            response = requests.get(f"http://{ping_ip}:{port}/health")
+        except requests.exceptions.ConnectionError:
+            pass
+        else:
+            if response.status_code == 200:
+                return
+
+        time.sleep(0.1)
+        timeout -= 0.1
+
+        container_status = docker_client.containers.get(container.id).status
+
+        if timeout < 0 or container_status != "running":
+            try:
+                container_logs = container.logs(stdout=True, stderr=True)
+                logger.error(
+                    f"Tesseract container {container.name} failed to start:\n{container_logs.decode()}"
+                )
+            except APIError as ex:
+                logger.warning(
+                    f"Failed to get logs for container {container.name}: {ex}"
+                )
+            try:
+                container.stop()
+            except APIError as ex:
+                logger.warning(f"Failed to stop container {container.name}: {ex}")
+
+            if timeout < 0:
+                raise TimeoutError("Tesseract did not start in time")
+            else:
+                raise RuntimeError("Tesseract failed to start")
+
+
 def serve(
     image_name: str,
     *,
@@ -585,6 +648,7 @@ def serve(
     output_format: Literal["json", "json+base64", "json+binref"] | None = None,
     docker_args: list[str] | None = None,
     runtime_config: dict[str, Any] | None = None,
+    skip_health_check: bool = False,
 ) -> tuple:
     """Serve one or more Tesseract images.
 
@@ -613,6 +677,10 @@ def serve(
         runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
             These are converted to TESSERACT_* environment variables. For example,
             ``{"profiling": True}`` sets ``TESSERACT_PROFILING=1``.
+        skip_health_check: If True, skip the startup health check poll. Useful for
+            Tesseracts with slow initialization (e.g., Julia runtime startup, large
+            model loading). The caller is responsible for ensuring readiness,
+            e.g. by polling ``/health``, before calling other endpoints.
 
     Returns:
         A tuple of the Tesseract container name and the port it is serving on.
@@ -714,6 +782,9 @@ def serve(
     if docker_args:
         extra_args.extend(docker_args)
 
+    if network is not None:
+        _ensure_network_exists(network)
+
     container = docker_client.containers.run(
         image=image_name,
         command=["serve", *args],
@@ -729,42 +800,11 @@ def serve(
     )
     assert isinstance(container, Container)
 
-    logger.info("Waiting for Tesseract to start...")
-    # wait for server to start
-    timeout = 30
-    while True:
-        try:
-            response = requests.get(f"http://{ping_ip}:{port}/health")
-        except requests.exceptions.ConnectionError:
-            pass
-        else:
-            if response.status_code == 200:
-                break
-
-        time.sleep(0.1)
-        timeout -= 0.1
-
-        container_status = docker_client.containers.get(container.id).status
-
-        if timeout < 0 or container_status != "running":
-            try:
-                container_logs = container.logs(stdout=True, stderr=True)
-                logger.error(
-                    f"Tesseract container {container.name} failed to start:\n{container_logs.decode()}"
-                )
-            except APIError as ex:
-                logger.warning(
-                    f"Failed to get logs for container {container.name}: {ex}"
-                )
-            try:
-                container.stop()
-            except APIError as ex:
-                logger.warning(f"Failed to stop container {container.name}: {ex}")
-
-            if timeout < 0:
-                raise TimeoutError("Tesseract did not start in time")
-            else:
-                raise RuntimeError("Tesseract failed to start")
+    if skip_health_check:
+        logger.info("Skipping health check, Tesseract may not be ready yet")
+    else:
+        logger.info("Waiting for Tesseract to start...")
+        _wait_for_health(container, ping_ip, port)
 
     logger.info(f"Serving Tesseract at http://{ping_ip}:{port}")
     logger.info(f"View Tesseract: http://{ping_ip}:{port}/docs")
@@ -776,7 +816,30 @@ def serve(
 
 def _is_local_volume(volume: str) -> bool:
     """Check if a volume is a local path."""
+    # Windows absolute paths like C:\foo
+    if (
+        len(volume) >= 3
+        and volume[0].isalpha()
+        and volume[1] == ":"
+        and volume[2] in ("/", "\\")
+    ):
+        return True
     return "/" in volume or "." in volume
+
+
+def _split_volume_spec(volume_spec: str) -> list[str]:
+    r"""Split a volume spec string on colons, respecting Windows drive letters.
+
+    E.g., ``C:\\foo:/bar:ro`` -> ``['C:\\foo', '/bar', 'ro']``
+         ``/foo:/bar:ro``    -> ``['/foo', '/bar', 'ro']``
+    """
+    # Check for Windows drive letter prefix (e.g., "C:")
+    if len(volume_spec) >= 2 and volume_spec[0].isalpha() and volume_spec[1] == ":":
+        rest = volume_spec[2:]
+        parts = rest.split(":")
+        parts[0] = volume_spec[:2] + parts[0]
+        return parts
+    return volume_spec.split(":")
 
 
 def _parse_volumes(volume_specs: list[str]) -> dict[str, dict[str, str]]:
@@ -787,7 +850,7 @@ def _parse_volumes(volume_specs: list[str]) -> dict[str, dict[str, str]]:
     """
 
     def _parse_volume_spec(volume_spec: str):
-        args = volume_spec.split(":")
+        args = _split_volume_spec(volume_spec)
         if len(args) == 2:
             source, target = args
             mode = "ro"
@@ -951,9 +1014,7 @@ def run_tesseract(
             if not local_path.is_file():
                 raise RuntimeError(f"Path {local_path} provided as input is not a file")
 
-            path_in_container = os.path.join(
-                "/tesseract", f"payload{local_path.suffix}"
-            )
+            path_in_container = f"/tesseract/payload{local_path.suffix}"
             file_inputs.append((local_path, path_in_container))
 
     parsed_volumes, volume_environment = _prepare_and_validate_volumes(
@@ -993,6 +1054,9 @@ def run_tesseract(
 
     if docker_args:
         extra_args.extend(docker_args)
+
+    if network is not None:
+        _ensure_network_exists(network)
 
     # Run the container, optionally streaming stderr to the terminal
     result = docker_client.containers.run(

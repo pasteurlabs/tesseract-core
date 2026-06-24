@@ -1,7 +1,7 @@
 name: "py310"
 version: "0.1.0"
 description: |
-  Empty Tesseract that requires Python 3.10 (set through a custom Docker image).
+  Empty Tesseract that requires Python 3.10 (set through build_config.python_version).
 
 build_config:
-  base_image: "python:3.10-slim-bookworm"
+  python_version: "3.10"

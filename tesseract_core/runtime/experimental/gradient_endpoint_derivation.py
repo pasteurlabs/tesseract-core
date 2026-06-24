@@ -9,7 +9,7 @@ from typing import Any
 
 import numpy as np
 
-from .tree_transforms import get_at_path
+from ..tree_transforms import get_at_path
 
 
 def vjp_from_jacobian(

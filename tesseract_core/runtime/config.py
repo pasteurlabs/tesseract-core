@@ -6,7 +6,14 @@ import os
 from pathlib import Path
 from typing import Annotated, Any
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, FilePath
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    FilePath,
+    field_validator,
+)
 
 from tesseract_core.runtime.file_interactions import supported_format_type
 
@@ -39,6 +46,11 @@ class RuntimeConfig(BaseModel):
     )
     profiling: bool = False
     tracing: bool = False
+
+    @field_validator("input_path", "output_path")
+    @classmethod
+    def _resolve_path(cls, v: str) -> str:
+        return str(Path(v).resolve())
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 

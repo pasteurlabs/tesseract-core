@@ -12,7 +12,7 @@ from tesseract_core.runtime import Array, Float32
 
 rng = np.random.default_rng(0)
 
-OUTDIR = Path(__file__).parent / "testdata"
+OUTDIR = Path(__file__).parent / "test_cases" / "testdata"
 
 
 class TestArray(RootModel):
