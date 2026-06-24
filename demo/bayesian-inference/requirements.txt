@@ -1,6 +1,11 @@
-jax[cpu]
-numpy
-numpyro
-arviz
-matplotlib
-tesseract-jax
+# Pinned to a verified-working set (the notebook runs end-to-end with these).
+# Two upstream releases broke the unpinned demo:
+#   - numpyro >= 0.20 fails to import against jax 0.10 (xla_pmap_p removed);
+#     numpyro 0.21 restored compatibility.
+#   - arviz >= 1.0 dropped support for az.ess() on a bare ndarray.
+jax[cpu]==0.10.0
+numpy==2.4.4
+numpyro==0.21.0
+arviz==0.23.4
+matplotlib==3.10.9
+tesseract-jax==0.3.0
