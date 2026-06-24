@@ -3,7 +3,6 @@
 
 import json
 from collections.abc import Callable, Iterator, Sequence
-from pathlib import Path
 from typing import (
     Annotated,
     Any,
@@ -12,40 +11,15 @@ from typing import (
 )
 
 from pydantic import (
-    AfterValidator,
     GetCoreSchemaHandler,
     GetJsonSchemaHandler,
     TypeAdapter,
 )
 from pydantic.json_schema import JsonSchemaValue
-from pydantic_core import CoreSchema, SchemaSerializer, SchemaValidator, core_schema
+from pydantic_core import SchemaSerializer, SchemaValidator, core_schema
 
-from tesseract_core.runtime.file_interactions import PathLike, parent_path
-from tesseract_core.runtime.gradient_endpoint_derivation import (
-    jacobian_from_jvp,
-    jacobian_from_vjp,
-    jvp_from_jacobian,
-    vjp_from_jacobian,
-)
-from tesseract_core.runtime.mpa import (
-    log_artifact,
-    log_metric,
-    log_parameter,
-)
+from tesseract_core.runtime.file_interactions import parent_path
 from tesseract_core.runtime.schema_types import safe_issubclass
-
-# Finite difference utilities for automatic differentiation
-# These provide a simple way to make any Tesseract differentiable without
-# implementing analytical gradients. Note: These are experimental and the API
-# may change in future releases.
-from tesseract_core.runtime.testing.finite_differences import (
-    finite_difference_jacobian,
-    finite_difference_jvp,
-    finite_difference_vjp,
-)
-
-# Flag is modified by runtime.cli based on arguments or during build time
-SKIP_REQUIRED_FILE_CHECK = False
 
 
 class LazySequence(Sequence):
@@ -138,7 +112,7 @@ class PydanticLazySequenceAnnotation:
                 return LazySequence(items, getter)
 
             # We know that the path is a glob pattern, so we need to load items from files
-            from .file_interactions import (
+            from tesseract_core.runtime.file_interactions import (
                 expand_glob,
                 read_from_path,
             )
@@ -211,155 +185,3 @@ class PydanticLazySequenceAnnotation:
     ) -> JsonSchemaValue:
         """This method is called by Pydantic to get the JSON schema for the annotated type."""
         return handler(_core_schema)
-
-
-def _resolve_input_path(path: Path) -> Path:
-    from tesseract_core.runtime.config import get_config
-
-    input_path = get_config().input_path
-    tess_path = (input_path / path).resolve()
-    if str(input_path) not in str(tess_path):
-        raise ValueError(
-            f"Invalid input file reference: {path}. "
-            f"Expected path to be relative to {input_path}, but got {tess_path}. "
-            "File references have to be relative to --input-path."
-        )
-    if not tess_path.exists():
-        raise FileNotFoundError(f"Input path {tess_path} does not exist.")
-    if not tess_path.is_file():
-        raise ValueError(f"Input path {tess_path} is not a file.")
-    return tess_path
-
-
-def _strip_output_path(path: Path) -> Path:
-    from tesseract_core.runtime.config import get_config
-
-    output_path = get_config().output_path
-    if path.is_relative_to(output_path):
-        return path.relative_to(output_path)
-    else:
-        return path
-
-
-InputFileReference = Annotated[Path, AfterValidator(_resolve_input_path)]
-OutputFileReference = Annotated[Path, AfterValidator(_strip_output_path)]
-
-
-def require_file(file_path: PathLike) -> Path:
-    """Designate a file which is required to be present at runtime.
-
-    Args:
-        file_path: Path to required file. Must be relative to `input_path` assigned in `tesseract run`.
-    """
-    if SKIP_REQUIRED_FILE_CHECK:
-        return Path(file_path)
-
-    file_path = _resolve_input_path(Path(file_path))
-
-    if not file_path.is_file():
-        raise FileNotFoundError(f"Required file not found: {file_path}")
-
-    return file_path
-
-
-class TesseractReference:
-    """Allows passing a reference to another Tesseract as input."""
-
-    def __init__(self, tesseract: Any) -> None:
-        self._tesseract = tesseract
-
-    def __getattr__(self, name: str) -> Any:
-        """Delegate attribute access to the underlying Tesseract instance."""
-        return getattr(self._tesseract, name)
-
-    @classmethod
-    def _get_tesseract_class(cls) -> type:
-        """Lazy import of Tesseract class. Avoids hard dependency of Tesseract runtime on Tesseract SDK."""
-        try:
-            from tesseract_core import Tesseract
-
-            return Tesseract
-        except ImportError:
-            raise ImportError(
-                "Tesseract class not found. Ensure tesseract_core is installed and configured correctly."
-            ) from ImportError
-
-    @classmethod
-    def __get_pydantic_core_schema__(
-        cls, source_type: Any, handler: GetCoreSchemaHandler
-    ) -> CoreSchema:
-        """Generate Pydantic core schema for TesseractReference."""
-
-        def validate_tesseract_reference(v: Any) -> "TesseractReference":
-            if isinstance(v, cls):
-                return v
-
-            if not (isinstance(v, dict) and "type" in v and "ref" in v):
-                raise ValueError(
-                    f"Expected dict with 'type' and 'ref' keys, got {type(v)}"
-                )
-
-            tesseract_type = v["type"]
-            ref = v["ref"]
-
-            if tesseract_type not in ("api_path", "image", "url"):
-                raise ValueError(
-                    f"Invalid tesseract type '{tesseract_type}'. Expected 'api_path', 'image' or 'url'."
-                )
-
-            Tesseract = cls._get_tesseract_class()
-            if tesseract_type == "api_path":
-                tesseract = Tesseract.from_tesseract_api(ref)
-            elif tesseract_type == "image":
-                tesseract = Tesseract.from_image(ref)
-                tesseract.serve()
-            elif tesseract_type == "url":
-                tesseract = Tesseract.from_url(ref)
-
-            return cls(tesseract)
-
-        return core_schema.no_info_plain_validator_function(
-            validate_tesseract_reference
-        )
-
-    @classmethod
-    def __get_pydantic_json_schema__(
-        cls, core_schema: CoreSchema, handler: GetJsonSchemaHandler
-    ) -> JsonSchemaValue:
-        """Generate JSON schema for OpenAPI."""
-        return {
-            "type": "object",
-            "properties": {
-                "type": {
-                    "type": "string",
-                    "enum": ["api_path", "image", "url"],
-                    "description": "Type of tesseract reference",
-                },
-                "ref": {
-                    "type": "string",
-                    "description": "URL or file path to the tesseract",
-                },
-            },
-            "required": ["type", "ref"],
-            "additionalProperties": False,
-        }
-
-
-__all__ = [
-    "InputFileReference",
-    "LazySequence",
-    "OutputFileReference",
-    "PydanticLazySequenceAnnotation",
-    "TesseractReference",
-    "finite_difference_jacobian",
-    "finite_difference_jvp",
-    "finite_difference_vjp",
-    "jacobian_from_jvp",
-    "jacobian_from_vjp",
-    "jvp_from_jacobian",
-    "log_artifact",
-    "log_metric",
-    "log_parameter",
-    "require_file",
-    "vjp_from_jacobian",
-]

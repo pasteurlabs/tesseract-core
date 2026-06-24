@@ -58,7 +58,7 @@ def test_s3_server():
     """Fixture to run a mocked AWS server for testing."""
     current_conf = copy.deepcopy(fsspec.config.conf)
 
-    server = ThreadedMotoServer(port=0)
+    server = ThreadedMotoServer(ip_address="127.0.0.1", port=0)
     server.start()
 
     os.environ.update(
@@ -121,7 +121,7 @@ def test_http_server(free_port):
             self.end_headers()
             self.wfile.write(bytes)
 
-    httpd = socketserver.TCPServer(("", free_port), Handler)
+    httpd = socketserver.TCPServer(("127.0.0.1", free_port), Handler)
 
     def run_server():
         httpd.serve_forever()
@@ -435,7 +435,7 @@ def test_stdout_redirect_cli():
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout == b""
-    assert "Usage:" in result.stderr.decode("utf-8")
+    assert "Usage:" in result.stderr.decode("utf-8", errors="replace")
 
 
 @pytest.mark.parametrize("target", ["file", "stderr"])
@@ -453,7 +453,7 @@ def test_stdout_redirect_subprocess(tmpdir, target):
         "from tesseract_core.runtime.core import redirect_fd",
         "print('stdout', file=sys.stdout)",
         "print('stderr', file=sys.stderr)",
-        f"with open(\"{tmpdir / 'test_output.log'}\", 'w') as f:",
+        f"with open(r\"{tmpdir / 'test_output.log'}\", 'w') as f:",
         f"  with redirect_fd(sys.stdout, {target_stream}) as orig_stdout:",
         "    os.system('echo stderr')",
         "    print('stderr', file=sys.stdout)",
@@ -472,17 +472,19 @@ def test_stdout_redirect_subprocess(tmpdir, target):
         [sys.executable, "-W", "ignore", testscript_path], capture_output=True
     )
     assert result.returncode == 0, (result.stdout, result.stderr)
-    assert result.stdout == b"stdout\n" * 4
+    stdout = result.stdout.replace(b"\r\n", b"\n")
+    stderr = result.stderr.replace(b"\r\n", b"\n")
+    assert stdout == b"stdout\n" * 4
 
     if target == "file":
-        assert result.stderr == b"stderr\n" * 3
+        assert stderr == b"stderr\n" * 3
         # Find the log file
         log_file = tmpdir / "test_output.log"
         with open(log_file, "rb") as f:
             log_content = f.read()
-        assert log_content == b"stderr\n" * 2
+        assert log_content.replace(b"\r\n", b"\n") == b"stderr\n" * 2
     else:
-        assert result.stderr == b"stderr\n" * 5
+        assert stderr == b"stderr\n" * 5
 
 
 def test_suggestion_on_misspelled_command(cli, cli_runner):

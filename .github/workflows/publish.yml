@@ -21,11 +21,12 @@ jobs:
           # - "3.10"
           # - "3.11"
           # - "3.12"
-          - "3.13"
+          # - "3.13"
+          - "3.14"
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       # make sure tags are fetched so we can get a version
       - name: Fetch Tags
