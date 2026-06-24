@@ -1,0 +1,8 @@
+# Tesseract configuration file
+
+name: "lorenz-bayesian"
+version: "0.1.0"
+description: "Lorenz 96 Tesseract with differentiable forcing parameter for Bayesian inference"
+
+build_config:
+  target_platform: "native"
