@@ -229,6 +229,11 @@ def _maybe_start_debugger(wait_for_client: bool, port: int = 5678) -> None:
     if not get_config().debug:
         return
 
+    # Python 3.11+ freezes stdlib bootstrap modules, which makes debugpy print a
+    # noisy "frozen modules" warning (it could only ever miss breakpoints inside
+    # those frozen modules, never in user code). Skip the validation check.
+    os.environ.setdefault("PYDEVD_DISABLE_FILE_VALIDATION", "1")
+
     import debugpy
 
     debugpy.listen(("0.0.0.0", port))
