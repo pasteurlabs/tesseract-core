@@ -677,6 +677,13 @@ def _decode_array(
 
     if encoding == "base64":
         data = pybase64.b64decode(encoded_arr["data"]["buffer"])
+        compression = encoded_arr["data"].get("compression")
+        if compression == "lz4":
+            import lz4.frame
+
+            data = lz4.frame.decompress(data)
+        elif compression is not None:
+            raise ValueError(f"Unknown compression: {compression}")
         arr = np.frombuffer(data, dtype=dtype)
     elif encoding in ["json", "raw"]:
         arr = np.array(encoded_arr["data"]["buffer"], dtype=dtype)

@@ -65,14 +65,9 @@ MAX_BINREF_BUFFER_SIZE = 100 * 1024 * 1024  # 100 MB
 
 
 def _lz4_frame():
-    try:
-        import lz4.frame
+    import lz4.frame
 
-        return lz4.frame
-    except ImportError as err:
-        raise ImportError(
-            "lz4 is required for compression. Install with: pip install lz4"
-        ) from err
+    return lz4.frame
 
 
 def _compress(data: bytes, compression: str | None) -> bytes:
@@ -344,7 +339,10 @@ def _load_binref_arraydict(val: ArrayDict, base_dir: str | Path | None) -> np.nd
             "Expected format is '<path>[:<offset>[:<compressed_size>]]'."
         )
     bufferpath = path_match.group("path")
-    offset = int(path_match.group("offset") or 0)
+    if path_match.group("offset") is None:
+        offset = 0
+    else:
+        offset = int(path_match.group("offset"))
     compressed_size_str = path_match.group("compressed_size")
 
     uses_relative_path = not is_absolute_path(bufferpath) and not is_url(bufferpath)
