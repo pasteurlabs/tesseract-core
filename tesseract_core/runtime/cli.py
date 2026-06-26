@@ -213,6 +213,35 @@ def _schema_to_docstring(schema: Any, current_indent: int = 0) -> str:
     return "\n".join(docstring)
 
 
+def _maybe_start_debugger(wait_for_client: bool, port: int = 5678) -> None:
+    """Start a debugpy server for remote debugging when debug mode is enabled.
+
+    The long-running ``serve`` command launches a non-blocking server that a
+    debugger can attach to at any time. One-shot commands instead attach early in
+    ``main`` (before the Tesseract API is imported, so module-level code can be
+    debugged too) and block until a client connects, since they would otherwise
+    finish before there is a chance to attach.
+
+    Args:
+        wait_for_client: If True, block until a debugger attaches.
+        port: Port to listen on inside the container.
+    """
+    if not get_config().debug:
+        return
+
+    import debugpy
+
+    debugpy.listen(("0.0.0.0", port))
+    if wait_for_client:
+        print(
+            "Debug mode enabled, waiting for debugger to attach...",
+            file=sys.stderr,
+            flush=True,
+        )
+        debugpy.wait_for_client()
+        print("Debugger attached, resuming execution.", file=sys.stderr, flush=True)
+
+
 @app.command("check")
 def check() -> None:
     """Check whether the Tesseract API is valid."""
@@ -376,6 +405,8 @@ def serve(
     num_workers: Annotated[int, typer.Option(help="Number of worker processes")] = 1,
 ) -> None:
     """Start running this Tesseract's web server."""
+    # The server is long-running, so a debugger can attach at any time.
+    _maybe_start_debugger(wait_for_client=False)
     serve_(host=host, port=port, num_workers=num_workers)
 
 
@@ -468,6 +499,7 @@ def _create_user_defined_cli_command(
         def command_func(payload: str):
             parsed_payload = _parse_payload(payload)
             return _callback_wrapper(payload=parsed_payload)
+
     else:
 
         def command_func():
@@ -543,6 +575,15 @@ def main() -> None:
             sys.exit(1)
 
         _configure_required_file_load()
+
+        # Attach the debugger before the Tesseract API is imported below (during
+        # command registration) so module-level code can be debugged too. The
+        # command isn't parsed yet, so we inspect argv directly (like
+        # `_configure_required_file_load` above): `serve` launches its own
+        # non-blocking debugger and must not block, and help should not block.
+        skip_debug_wait_args = {"serve", "-h", "--help"}
+        if get_config().debug and not skip_debug_wait_args.intersection(sys.argv):
+            _maybe_start_debugger(wait_for_client=True)
 
         _add_user_commands_to_cli(app, out_stream=orig_stdout)
         app(auto_envvar_prefix="TESSERACT_RUNTIME")
