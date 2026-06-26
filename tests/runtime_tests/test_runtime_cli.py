@@ -335,20 +335,26 @@ def test_outputs_to_local_file(
         raise AssertionError(f"Unexpected output format: {output_format}")
 
 
-def test_apply_command_binref_lz4(cli, cli_runner, tmpdir, dummy_tesseract_module):
-    """Test that TESSERACT_BINREF_COMPRESSION=lz4 produces compressed binref output."""
+@pytest.mark.parametrize("via_env", [True, False], ids=["env", "cli_flag"])
+def test_apply_command_binref_lz4(
+    cli, cli_runner, tmpdir, dummy_tesseract_module, via_env
+):
+    """Test that binref lz4 compression works when set via env var or CLI flag."""
     tmpdir = Path(tmpdir)
+    args = [
+        "--output-path",
+        tmpdir,
+        "--output-format",
+        "json+binref",
+    ]
+    if not via_env:
+        args += ["--binref-compression", "lz4"]
+    args += ["apply", json.dumps({"inputs": test_input})]
+
     result = cli_runner.invoke(
         cli,
-        [
-            "--output-path",
-            tmpdir,
-            "--output-format",
-            "json+binref",
-            "apply",
-            json.dumps({"inputs": test_input}),
-        ],
-        env={"TESSERACT_BINREF_COMPRESSION": "lz4"},
+        args,
+        env={"TESSERACT_BINREF_COMPRESSION": "lz4"} if via_env else {},
         catch_exceptions=False,
     )
     assert result.exit_code == 0, result.stderr
