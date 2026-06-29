@@ -22,7 +22,7 @@ Enzyme differentiates through the **entire time-stepping loop** (including the n
 
 ## How it works
 
-The compilation pipeline is identical to the [1D Enzyme example](../enzyme_ad/):
+The compilation pipeline is identical to the [1D Enzyme example](../fortran_enzyme/):
 
 ```
 thermal_2d.f90         (Fortran source — 2D solver with k(T), mixed BCs, time loop)
