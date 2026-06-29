@@ -961,6 +961,7 @@ def run_tesseract(
     output_format: Literal["json", "json+base64", "json+binref"] | None = None,
     output_file: str | None = None,
     docker_args: list[str] | None = None,
+    debug: bool = False,
     stream_logs: bool | Callable[[str], None] = False,
 ) -> tuple[str, str]:
     """Start a Tesseract and execute a given command.
@@ -985,6 +986,8 @@ def run_tesseract(
         output_file: If specified, the output will be written to this file within output_path
             instead of stdout.
         docker_args: Additional arguments to pass to the container runtime (e.g., Docker).
+        debug: Enable debug mode. This starts a debugpy server in the Tesseract and
+            blocks execution until a debugger attaches to the forwarded port.
         stream_logs: If set, stream logs in real-time. Can be True (streams to stderr)
             or a callable that accepts a string (e.g., logger.info).
 
@@ -1057,6 +1060,23 @@ def run_tesseract(
 
     if network is not None:
         _ensure_network_exists(network)
+
+    if debug:
+        environment["TESSERACT_DEBUG"] = "1"
+        # `network="host"` binds the container's debugpy port directly on the host,
+        # so no explicit port mapping is needed (and would actually be rejected).
+        if network == "host":
+            debugpy_port = "5678"
+        else:
+            debugpy_port = str(get_free_port())
+            if ports is None:
+                ports = {}
+            ports[f"127.0.0.1:{debugpy_port}"] = "5678"
+        logger.info(
+            f"Debug mode enabled. Attach a debugger to localhost:{debugpy_port} "
+            "to start execution (see the 'Debug mode' section of the docs for a "
+            "sample VSCode launch config)."
+        )
 
     # Run the container, optionally streaming stderr to the terminal
     result = docker_client.containers.run(
