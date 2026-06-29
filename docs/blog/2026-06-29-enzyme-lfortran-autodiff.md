@@ -2,7 +2,7 @@
 orphan: true
 og:title: "Differentiable Fortran with LFortran and Enzyme"
 og:description: "How we built a pipeline to get exact gradients out of a Fortran thermal solver, then used it to solve real inverse problems from Python."
-blog_date: "2026-06-15"
+blog_date: "2026-06-29"
 blog_author: "@dionhaefner"
 blog_title: "Differentiable Fortran with LFortran and Enzyme"
 blog_description: "How we built a pipeline to get exact gradients out of a Fortran thermal solver, then used it to solve real inverse problems from Python."
