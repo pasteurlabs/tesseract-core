@@ -4,11 +4,7 @@
 
 ## Context
 
-The {doc}`Fortran Integration <fortran>` example shows how to wrap a compiled solver as a Tesseract, but it stops at the forward pass. Many of the most valuable workflows---inverse problems, sensitivity analysis, gradient-based design optimization---need derivatives of that solver too. For legacy compiled code, those derivatives are traditionally obtained by hand-writing adjoint code, which is tedious and error-prone, or by finite differences, which are inexact and scale poorly with the number of parameters.
-
-This example demonstrates a third option: obtaining **exact, machine-precision derivatives** of a Fortran solver with no manual adjoint code, using [Enzyme](https://enzyme.mit.edu/) to perform automatic differentiation at the LLVM IR level. The solver is compiled to LLVM IR with [LFortran](https://lfortran.org/), Enzyme generates forward- and reverse-mode derivatives directly from that IR, and the result is a shared library exposing all three differentiable endpoints.
-
-The pattern applies to any code that can be lowered to LLVM IR, including C, C++, and Rust.
+The {doc}`Fortran Integration <fortran>` example wraps a compiled solver as a Tesseract, but stops at the forward pass. This example adds **exact, machine-precision derivatives** with no hand-written adjoint code: the solver is compiled to LLVM IR with [LFortran](https://lfortran.org/), [Enzyme](https://enzyme.mit.edu/) generates forward- and reverse-mode derivatives directly from that IR, and the result is a shared library exposing all three differentiable endpoints. The pattern applies to any code that lowers to LLVM IR (C, C++, Rust).
 
 ## Example Tesseract (examples/fortran_enzyme)
 
@@ -25,10 +21,7 @@ discretized with central differences as $T_\text{out}(i) = T_\text{in}(i) + r \,
 :lines: 21-39
 ```
 
-Two details keep the generated IR clean enough for Enzyme to differentiate reliably:
-
-- **No array intrinsics.** The stencil uses explicit `do` loops rather than whole-array operations, which produces simple load/store IR patterns.
-- **`--no-array-bounds-checking`** is passed to LFortran (see the build script below). Bounds checks emit calls into LFortran's runtime that Enzyme cannot differentiate through.
+Two details keep the generated IR clean enough for Enzyme to differentiate reliably: the stencil uses explicit `do` loops (not whole-array intrinsics), and LFortran is run with `--no-array-bounds-checking`, since bounds checks emit runtime calls Enzyme cannot trace through.
 
 ### Input and output schemas
 
@@ -53,14 +46,12 @@ The Enzyme magic happens at image build time. A C wrapper (`wrapper.c`) bridges 
 :lines: 44-63
 ```
 
-The `build.sh` script chains the toolchain together: LFortran lowers the kernel to IR, `opt` cleans it up, the wrapper is compiled and linked in, the Enzyme pass generates the derivatives, and `clang` emits a shared library:
+The `build.sh` script chains the toolchain together, emitting `libheat_ad.so` with three entry points---`heat_step_forward` (primal), `heat_step_jvp` (forward-mode), and `heat_step_vjp` (reverse-mode):
 
 ```{literalinclude} ../../../../examples/fortran_enzyme/enzyme/build.sh
 :language: bash
 :lines: 21-41
 ```
-
-The resulting `libheat_ad.so` exports three entry points: `heat_step_forward` (primal), `heat_step_jvp` (forward-mode), and `heat_step_vjp` (reverse-mode).
 
 ### Wiring the library into the Tesseract API
 
@@ -71,15 +62,10 @@ The resulting `libheat_ad.so` exports three entry points: `heat_step_forward` (p
 :language: python
 ```
 
-The differentiable endpoints call the Enzyme-generated wrappers. Reverse mode threads cotangents into shadow arrays that Enzyme accumulates gradients into; the `vector_jacobian_product` endpoint then returns only the requested inputs:
+The differentiable endpoints call the Enzyme-generated wrappers. Reverse mode threads cotangents into shadow arrays that Enzyme accumulates gradients into; the `vector_jacobian_product` endpoint then returns only the requested inputs. The `jacobian_vector_product` endpoint is the forward-mode mirror image, calling `heat_step_jvp` with input tangents instead.
 
 ```{literalinclude} ../../../../examples/fortran_enzyme/tesseract_api.py
 :pyobject: vector_jacobian_product
-:language: python
-```
-
-```{literalinclude} ../../../../examples/fortran_enzyme/tesseract_api.py
-:pyobject: jacobian_vector_product
 :language: python
 ```
 
@@ -95,10 +81,9 @@ The `tesseract_config.yaml` installs the LLVM 19 toolchain, LFortran (via microm
 
 To differentiate your own compiled code with Enzyme:
 
-1. **Write a clean numerical kernel**: Prefer explicit loops over array intrinsics, and disable runtime checks (bounds, error handlers) that Enzyme cannot trace through.
-2. **Write a C wrapper**: Declare `__enzyme_autodiff` / `__enzyme_fwddiff` calls, annotating each argument with `enzyme_dup` or `enzyme_const`, and export clean C-callable entry points.
-3. **Assemble the pipeline**: Lower the source to LLVM IR, link the wrapper, run the Enzyme pass, and compile to a shared library---all as `custom_build_steps` so the library is ready at runtime.
-4. **Wire it up**: Load the library with `ctypes`, mark differentiable fields with `Differentiable[...]`, and call the JVP/VJP wrappers from the gradient endpoints.
+1. **Write a C wrapper** declaring `__enzyme_autodiff` / `__enzyme_fwddiff` calls, annotating each argument `enzyme_dup` or `enzyme_const`, against a clean kernel (explicit loops, no runtime checks Enzyme can't trace through).
+2. **Assemble the pipeline** as `custom_build_steps`: lower to LLVM IR, link the wrapper, run the Enzyme pass, and compile to a shared library.
+3. **Wire it up**: load the library with `ctypes`, mark differentiable fields with `Differentiable[...]`, and call the JVP/VJP wrappers from the gradient endpoints.
 
 ## See also
 
