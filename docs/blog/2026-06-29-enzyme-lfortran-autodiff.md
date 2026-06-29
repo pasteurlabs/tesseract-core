@@ -18,7 +18,7 @@ All we need is to duct-tape [LFortran](https://lfortran.org/), LLVM, and Enzyme 
 
 This is all pretty experimental, so you may have to spend some time chasing a gradient that returned NaN and manually compare LLVM IR diffs to make it work. But the gradients come out the other end of the entire multi-step time loop matching the analytic answer. And it's amazing to see that a stack combining some of the oldest and newest technologies can work together at all.
 
-But let's start at the beginning. What follows is the full walkthrough, including the compilation pipeline, the sharp edges we hit, and an inverse problem that made the whole effort worth it (and that wouldn't be possible without AD).
+Let's start at the beginning. What follows is the full walkthrough, including the compilation pipeline, the sharp edges we hit, and an inverse problem that made the whole effort worth it (and that wouldn't be possible without AD).
 
 ## The problem with getting gradients out of legacy code
 
