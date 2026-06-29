@@ -20,6 +20,8 @@ def output_to_bytes(
     format: supported_format_type,
     base_dir: str | Path | None = None,
     binref_dir: str | Path | None = None,
+    binref_compression: Literal["lz4"] | None = None,
+    base64_compression: Literal["lz4"] | None = None,
 ) -> bytes:
     """Encode endpoint output to bytes in the given format.
 
@@ -29,12 +31,13 @@ def output_to_bytes(
     if format == "json":
         context = {"array_encoding": "json"}
     elif format == "json+base64":
-        context = {"array_encoding": "base64"}
+        context = {"array_encoding": "base64", "base64_compression": base64_compression}
     elif format == "json+binref":
         context = {
             "array_encoding": "binref",
             "base_dir": base_dir,
             "binref_dir": binref_dir,
+            "binref_compression": binref_compression,
         }
     else:
         raise ValueError(
