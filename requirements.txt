@@ -22,7 +22,11 @@ markupsafe==3.0.3
     # via jinja2
 mdurl==0.1.2
     # via markdown-it-py
-numpy==2.2.6
+numpy==2.2.6 ; python_full_version < '3.11'
+    # via tesseract-core
+numpy==2.4.6 ; python_full_version == '3.11.*'
+    # via tesseract-core
+numpy==2.5.0 ; python_full_version >= '3.12'
     # via tesseract-core
 orjson==3.11.9
     # via tesseract-core
@@ -48,7 +52,7 @@ rich==15.0.0
     #   typer
 shellingham==1.5.4
     # via typer
-typer==0.26.7
+typer==0.26.8
     # via tesseract-core
 typing-extensions==4.15.0
     # via
