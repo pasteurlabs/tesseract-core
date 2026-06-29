@@ -16,11 +16,11 @@ Decades of validated physics code in CFD, climate, aerospace, and nuclear sit be
 
 All we need is to duct-tape [LFortran](https://lfortran.org/), LLVM, and Enzyme together, point the result at a Fortran thermal solver, and get exact gradients out the other end. From there, [Tesseract](https://github.com/pasteurlabs/tesseract-core) (whose blog you're reading) wraps the result as a custom [JAX](https://jax.readthedocs.io/en/latest/) primitive, so a Fortran solver becomes a differentiable layer in arbitrary JAX code.
 
-This is all pretty experimental, so you may have to spend a half day chasing a gradient that returned NaN and painstakingly compare LLVM IR diffs to make it work. But the gradients come out the other end of the entire multi-step time loop matching an analytic gradient. And it's amazing to see that a stack combining some of the oldest and newest technologies can work together at all.
+This is all pretty experimental, so you may have to spend some time chasing a gradient that returned NaN and manually compare LLVM IR diffs to make it work. But the gradients come out the other end of the entire multi-step time loop matching the analytic answer. And it's amazing to see that a stack combining some of the oldest and newest technologies can work together at all.
 
 But let's start at the beginning. What follows is the full walkthrough, including the compilation pipeline, the sharp edges we hit, and an inverse problem that made the whole effort worth it (and that wouldn't be possible without AD).
 
-## The problem
+## The problem with getting gradients out of legacy code
 
 If you work in scientific computing, you might have run into this: you have a simulation written in Fortran (or C, or C++), and now someone needs gradients, the derivatives of the simulation's outputs with respect to its inputs. Maybe it's for optimization, maybe inverse problems, maybe plugging the sim into an ML pipeline. Now your options are:
 
@@ -32,7 +32,7 @@ What if you could just compile the derivatives automatically, from the existing 
 
 (a-fortran-heat-solver)=
 
-## A Fortran heat solver
+## An example Fortran heat solver
 
 Our test subject is `thermal_2d.f90`, about 220 lines of vanilla Fortran 90 that we wrote for this experiment. It solves 2D transient heat conduction with temperature-dependent conductivity:
 
@@ -90,7 +90,7 @@ For this setup, there are no easy shortcuts to get derivatives: because $k(T)$ i
 
 This is vanilla Fortran with no annotations or AD-aware constructs, but even getting to "vanilla" took some massaging. Allocatables, array intrinsics, and bounds checking all compile down to runtime calls (`_lfortran_malloc` and friends) that Enzyme can't see through, so they had to go. Work arrays get passed in pre-allocated from C, and we compile with `--no-array-bounds-checking`. For a 220-line solver that's an hour of work; for a large legacy codebase, it's an open question.
 
-## The compilation pipeline
+## The Enzyme compilation pipeline
 
 This is where it gets technical, so if you're not into the low-level details, feel free to [skip to the next section](#does-it-actually-work) where we benchmark the gradients.
 
@@ -127,7 +127,7 @@ A couple of decisions along the way shaped how the whole thing holds together, t
 
 **Why LFortran.** The first step (`lfortran --show-llvm`) is also the reason the whole thing is tractable, since LFortran emits remarkably clean IR. Arrays come out as plain pointers with the usual GEP/load/store patterns, much like C, instead of the multi-field descriptor structs and runtime calls that Flang produces. That matters enormously, because Enzyme has to trace every memory access to figure out what's active, and it has a far easier time with pointer arithmetic than with opaque `fir.box` descriptors.
 
-"Clean" is doing a lot of work in that sentence, so it's worth pinning down what it means here. Three things, concretely. Every array reference lowers to a plain `getelementptr` + `load`/`store` on a bare pointer. The 19-argument subroutine takes 19 plain `ptr` arguments, with no descriptor struct wrapping any of them. And the whole module contains zero function calls: no `_lfortran_malloc`, no runtime helpers, nothing opaque for Enzyme to trace through. Here's the IR LFortran emits for the start of the stencil body, covering the `idx = (j-1)*nx + i` index and the `T_c = T_cur(idx)` / `kx_east = ...` lines from the source above:
+So what makes LFortran IR "clean"? Three things, concretely. Every array reference lowers to a plain `getelementptr` + `load`/`store` on a bare pointer; the 19-argument subroutine takes 19 plain `ptr` arguments, with no descriptor struct wrapping any of them; and the whole module contains zero function calls: no `_lfortran_malloc`, no runtime helpers, nothing opaque for Enzyme to trace through. Here's the IR LFortran emits for the start of the stencil body, covering the `idx = (j-1)*nx + i` index and the `T_c = T_cur(idx)` / `kx_east = ...` lines from the source above:
 
 ```llvm
 ; What LFortran emits for the stencil body: plain pointer math, no descriptors
@@ -242,7 +242,7 @@ For one regime we can do exactly that. If we set the conductivity's temperature 
 
 $$\frac{\partial T^{s+1}}{\partial k_0} = A_1\,T^s + A(k_0)\,\frac{\partial T^s}{\partial k_0} + c_1,$$
 
-which we iterate in plain NumPy. The reconstructed affine model reproduces the solver's actual 500-step trajectory to a relative error of ~1e-14, so it really is differentiating the discrete solver and not an approximation of it. Then we compare against Enzyme's VJP of $\sum_i T_{\mathrm{final},i}$:
+which we iterate in plain NumPy. The reconstructed affine model reproduces the solver's actual 500-step trajectory to a relative error of ~1e-14, so it really is differentiating the discrete solver and not an approximation of it. Then we compare against Enzyme's VJP of $\sum_i T_{\mathrm{final},i}$ and a finite-difference (FD) approximation of the gradient:
 
 | Method                    | Relative error vs. analytic gradient |
 | ------------------------- | -----------------------------------: |
@@ -267,11 +267,11 @@ That U-shaped FD curve is the classic truncation-vs-roundoff trade-off. Enzyme s
 
 Correct gradients are only worth something once you put them to work, whether that means dropping them into an optimizer, solving a real inverse problem, or composing them with other differentiable code. This is most easily done from Python, so the next step is to get the Enzyme gradients out of the compiled library and into JAX.
 
-To wire the Enzyme gradients into JAX, the solver has to look like a differentiable JAX primitive, and this is more or less exactly what Tesseract was built for. It wraps the build process and compiled library, with LFortran, LLVM 19, Enzyme, and the whole toolchain inside it, into a container that exposes autodiff endpoints. Building and serving it is two commands:
+To wire the Enzyme gradients into JAX, the solver has to look like a differentiable JAX primitive, and this is more or less exactly what Tesseract was built for. It wraps the build process and compiled library, with LFortran, LLVM 19, Enzyme, and the whole toolchain inside it, into a container that exposes autodiff endpoints. [Building and serving it](../content/introduction/get-started.md) is two commands:
 
 ```bash
 # Package the compiled solver as a served, differentiable JAX primitive
-$ tesseract build demo/enzyme_thermal_2d/
+$ tesseract build demo/enzyme-lfortran/
 $ tesseract serve enzyme-thermal-2d
 ```
 
@@ -292,7 +292,7 @@ With that in place, it's finally time to point a real optimization problem at it
 
 Imagine a steel plate that went through some unmonitored heating event, maybe a laser pulse, maybe a localized defect, nobody knows. Five seconds later you get to measure temperatures at 100 sensor locations, and the question is whether you can reconstruct what the initial temperature distribution must have looked like.
 
-The true initial condition has two Gaussian hot spots sitting on a warm background. So the ask is 900 unknowns out of 100 noisy observations, run backwards through a nonlinear PDE. A small Tikhonov term (penalizing departure from the ambient prior) regularizes the otherwise ill-posed inversion, and since the loss is just a JAX function, that term is one extra line that `jax.value_and_grad` differentiates for free:
+The true initial condition has two Gaussian hot spots sitting on a warm background. So the ask is 900 unknowns out of 100 noisy observations, run backwards through a nonlinear PDE. A small [Tikhonov term](https://en.wikipedia.org/wiki/Ridge_regression) penalizing departure from the ambient prior regularizes the otherwise ill-posed inversion, and since the loss is just a JAX function, that term is one extra line that `jax.value_and_grad` differentiates for free:
 
 ```python
 # The inverse-problem loss: data misfit + Tikhonov prior, differentiated end to end
@@ -374,11 +374,11 @@ Every component differentiates itself with whatever AD is native to it, and Tess
 Because Enzyme works at the LLVM IR level, none of this is Fortran-specific. The same pipeline should apply to C, C++, Rust, or any language with an LLVM frontend.
 
 ```{seealso}
-**A real composability demo.** While this post was in draft, Florian List went and built exactly this kind of thing at a scale well beyond our toy solver. In a [Forum showcase](https://si-tesseract.discourse.group/t/sampling-the-universe-hmc-through-jax-and-fortran-with-enzyme-differentiated-tesseracts/132), he coupled an Enzyme-differentiated Fortran component with a JAX cosmological forward model and ran Hamiltonian Monte Carlo through the whole pipeline, sampling a posterior over 137,058 initial-condition parameters of the universe from Lyman-α forest observations. Gradients flow from Fortran, through JAX, and into the sampler, exactly as in the composability story above. It's a much better demonstration than anything we built here, and well worth a read.
+**A real composability demo.** While this post was in draft, [Florian List](https://github.com/FloList) went and built exactly this kind of thing at a scale well beyond our toy solver. In a [Forum showcase](https://si-tesseract.discourse.group/t/sampling-the-universe-hmc-through-jax-and-fortran-with-enzyme-differentiated-tesseracts/132), he coupled an Enzyme-differentiated Fortran component with a JAX cosmological forward model and ran Hamiltonian Monte Carlo through the whole pipeline, sampling a posterior over 137,058 initial-condition parameters of the universe from Lyman-α forest observations. Gradients flow from Fortran, through JAX, and into the sampler, exactly as in the composability story above. It's a much better demonstration than anything we built here, and well worth a read.
 ```
 
 ## Try it yourself
 
-The full source is [on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/demo/enzyme_thermal_2d), including the Fortran solver, the Enzyme pipeline, the inverse-problem notebooks, and the LLVM build script holding it all together. If you've got a Fortran, C, or C++ solver you'd like gradients for and you don't mind spending some quality time with LLVM IR, this is a pretty good place to start.
+The full source is [on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/demo/enzyme-lfortran), including the Fortran solver, the Enzyme pipeline, the inverse-problem notebooks, and the LLVM build script holding it all together. If you've got a Fortran, C, or C++ solver you'd like gradients for and you don't mind spending some quality time with LLVM IR, this is a pretty good place to start.
 
 The pieces are here, and the remaining questions are exactly the kind of thing that's more fun with company. If you take it somewhere, whether you get it running on your own solver or hit a wall we didn't, come tell us on the [Forum](https://si-tesseract.discourse.group/). We'd genuinely like to see how far it goes!

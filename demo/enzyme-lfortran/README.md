@@ -167,7 +167,7 @@ All tools are installed from prebuilt binaries during the Docker build (no sourc
 ## File structure
 
 ```
-enzyme_thermal_2d/
+enzyme-lfortran/
 ├── README.md
 ├── tesseract_api.py              # Python API wrapping ctypes calls
 ├── tesseract_config.yaml         # Build config with LLVM/LFortran/Enzyme toolchain
