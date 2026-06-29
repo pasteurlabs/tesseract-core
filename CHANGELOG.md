@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.10.0] - 2026-06-17
+
+### Features
+
+- Make Python version configurable (#592)
+- Add `inherit_base_image_packages` flag to tesseract_config.yaml (#600)
+- Reduce boilerplate in JAX recipe, add experimental VJP cache (#577)
+
+### Bug Fixes
+
+- Force building for the current arch when platform is set to native (#615)
+
 ## [1.9.0] - 2026-05-27
 
 ### Features
