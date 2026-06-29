@@ -11,10 +11,12 @@ from collections.abc import Callable, Iterable
 from enum import Enum
 from pathlib import Path
 from textwrap import dedent
+from types import UnionType
 from typing import (
     Annotated,
     Any,
     Literal,
+    Union,
     get_args,
     get_origin,
 )
@@ -147,6 +149,22 @@ def make_callback() -> Callable:
         if field_name == "api_path":
             # Too late to configure here, as the API path is needed to load the Tesseract API
             continue
+
+        # TODO: The Union unwrap + Literal-to-enum conversion below only exists
+        # because our minimal supported Typer (typer>=0.16 in pyproject.toml)
+        # can't handle `Literal` types and raises "Type not yet supported".
+        # Once the minimal Typer is bumped to a version with native `Literal`
+        # support, this whole branch can be removed.
+        #
+        # Unwrap Optional[...] (i.e. `X | None`) to inspect the inner type;
+        # since all options default to None, optionality is already handled
+        # and we only need the concrete type for Typer.
+        if get_origin(field_type) in (Union, UnionType):
+            non_none_args = [
+                arg for arg in get_args(field_type) if arg is not type(None)
+            ]
+            if len(non_none_args) == 1:
+                field_type = non_none_args[0]
 
         if get_origin(field_type) is Literal:
             field_type = make_choice_enum(f"{field_name}Choices", get_args(field_type))
