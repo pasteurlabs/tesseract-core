@@ -3,7 +3,11 @@
 This is the command line interface of the Tesseract runtime that is bundled with each Tesseract container.
 
 ```{eval-rst}
-.. click:: tesseract_core.runtime.app_cli:tesseract_runtime_cli
+.. typer:: tesseract_core.runtime.app_cli:cli_app
    :prog: tesseract-runtime
-   :nested: full
+   :make-sections:
+   :show-nested:
+   :preferred: svg
+   :theme: dark
+   :width: 100
 ```
