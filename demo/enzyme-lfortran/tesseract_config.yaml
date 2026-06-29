@@ -39,8 +39,8 @@ build_config:
   custom_build_steps:
     # Install LLVM 19 toolchain (including dev headers for building Enzyme)
     - |
-      RUN wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc && \
-          echo "deb http://apt.llvm.org/bookworm/ llvm-toolchain-bookworm-19 main" > /etc/apt/sources.list.d/llvm.list && \
+      RUN wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | gpg --dearmor -o /etc/apt/keyrings/llvm.gpg && \
+          echo "deb [signed-by=/etc/apt/keyrings/llvm.gpg] http://apt.llvm.org/bookworm/ llvm-toolchain-bookworm-19 main" > /etc/apt/sources.list.d/llvm.list && \
           apt-get update && apt-get install -y --no-install-recommends llvm-19 llvm-19-dev clang-19 && \
           rm -rf /var/lib/apt/lists/* && \
           for tool in opt llvm-as llvm-link llvm-dis llc clang clang++; do \
