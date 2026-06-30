@@ -59,7 +59,11 @@ def evaluate(inputs: dict) -> dict:
     nu = inputs["nu"]
     dt = inputs["dt"]
 
-    # Spatial derivatives via central differences
+    # Spatial derivatives via plain central differences. The flow stays smooth
+    # and low-Reynolds here (gentle low-frequency ICs, viscosity bounded by the
+    # closure's sigmoid so nu*dt/dx^2 stays within the explicit CFL limit), so no
+    # shocks form and we don't need upwinding, a conservative/flux form, or a
+    # stiff integrator (e.g. ETDRK). A real solver in a harder regime would.
     dudx = torch.zeros_like(u)
     dudx[1:-1] = (u[2:] - u[:-2]) / (2 * DX)
 

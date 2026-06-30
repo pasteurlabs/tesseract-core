@@ -1,17 +1,9 @@
-"""Smoke tests for the learned closure demo (PyTorch version).
+"""Smoke tests for the learned closure demo.
 
-Tests the composition pattern: a plain torch.nn closure predicts a viscosity
-field, then the solver Tesseract steps the Burgers' equation forward as a
-differentiable layer. Gradients flow end-to-end from the loss, through the
-solver's VJP (via apply_tesseract / torch.autograd), into the network weights.
-
-These tests load the solver via ``Tesseract.from_tesseract_api`` (in-process, no
-Docker) so they run fast as a local smoke check. The demo notebook itself uses
-``Tesseract.from_image`` to serve the solver in a container over HTTP — the same
-``apply_tesseract`` call path works either way. This is also the same pattern
-that would work with a Fortran solver Tesseract backed by Enzyme or a
-hand-written adjoint: the solver just needs apply + VJP with the interface
-(u, nu_field, dt) -> u_next. The closure stays ordinary PyTorch.
+Covers the solver Tesseract (forward, VJP) and the closure + solver composition.
+The solver is loaded in-process via ``Tesseract.from_tesseract_api`` so the tests
+run without Docker; the notebook serves the same solver over HTTP via
+``Tesseract.from_image``.
 """
 
 import sys
