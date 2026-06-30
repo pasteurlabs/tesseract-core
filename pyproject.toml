@@ -54,11 +54,12 @@ runtime = [
 # END RUNTIME DEPENDENCIES
 
 docs = [
-    "sphinx<9",  # TODO: Remove when https://github.com/click-contrib/sphinx-click/pull/160 is merged
+    "sphinx",
     "sphinx_autodoc_typehints",
     "furo",
     "myst-nb",
-    "sphinx_click",
+    "sphinxcontrib-typer>=0.9.1",
+    "typer>=0.26",
     "autodoc_pydantic",
     "sphinx_design",
     "sphinx_copybutton",
