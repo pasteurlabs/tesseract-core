@@ -58,11 +58,8 @@ docs = [
     "sphinx_autodoc_typehints",
     "furo",
     "myst-nb",
-    "sphinxcontrib-typer",
-    # sphinxcontrib-typer 0.9.0 imports typer._click (added in typer 0.26) but also uses
-    # typer.rich_utils.STYLE_METAVAR, which was removed in typer 0.26.8. Pin to the working
-    # window until https://github.com/sphinx-contrib/typer/issues/68 is resolved.
-    "typer>=0.26,<0.26.8",
+    "sphinxcontrib-typer>=0.9.1",
+    "typer>=0.26",
     "autodoc_pydantic",
     "sphinx_design",
     "sphinx_copybutton",
