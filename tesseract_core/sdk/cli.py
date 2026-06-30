@@ -1290,8 +1290,5 @@ def entrypoint() -> NoReturn:
     raise SystemExit(result)
 
 
-# Expose the underlying click object for doc generation
-typer_click_object = typer.main.get_command(app)
-
 if __name__ == "__main__":
     entrypoint()
