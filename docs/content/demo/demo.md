@@ -62,7 +62,7 @@ Compose a geometry Tesseract (PyVista, finite-difference gradients) with a FEM T
 :::{grid-item-card} Learned Closure (PyTorch)
 :link: learned-closure.html
 
-Train a native PyTorch neural viscosity closure end-to-end through a containerized Burgers' equation solver Tesseract used as a differentiable layer — gradients flow from the loss through the solver's VJP, over HTTP, into the network using Tesseract-Torch.
+Train a native PyTorch neural viscosity closure end-to-end through a containerized Burgers' equation solver Tesseract used as a differentiable layer. Gradients flow from the loss through the solver's VJP, over HTTP, into the network using Tesseract-Torch.
 :::
 
 ::::
