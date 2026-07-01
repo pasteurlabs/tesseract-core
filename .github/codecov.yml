@@ -1,8 +1,14 @@
+codecov:
+  require_ci_to_pass: false
+  notify:
+    wait_for_ci: true
 coverage:
   status:
     project:
       default:
-        informational: true
+        target: auto
+        threshold: 0%
+        informational: false
         only_pulls: false
     patch: off
 comment:
