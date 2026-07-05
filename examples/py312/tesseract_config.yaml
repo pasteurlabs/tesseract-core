@@ -1,0 +1,7 @@
+name: "py312"
+version: "0.1.0"
+description: |
+  Empty Tesseract that requires Python 3.12 (set through build_config.python_version).
+
+build_config:
+  python_version: "3.12"

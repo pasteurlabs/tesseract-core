@@ -25,10 +25,10 @@ class OutputSchema(BaseModel):
 
 
 def apply(inputs: InputSchema) -> OutputSchema:
-    # Ensure that the Python version is what we expect (3.10)
+    # Ensure that the Python version is what we expect (3.12)
     import sys
 
-    assert sys.version_info[:2] == (3, 10)
+    assert sys.version_info[:2] == (3, 12)
     return OutputSchema(bar=0)
 
 

@@ -20,12 +20,12 @@ jobs:
         # test with oldest and latest supported Python versions
         # NOTE: If bumping the minimum Python version here, also do it in
         # ruff.toml, setup.py and other CI files as well.
-        python-version: ["3.10", "3.14"]
+        python-version: ["3.12", "3.14"]
         runtime-deps: ["latest"]
 
         include:
           - os: ubuntu-latest
-            python-version: "3.10"
+            python-version: "3.12"
             runtime-deps: "oldest"
 
       fail-fast: false
@@ -233,7 +233,7 @@ jobs:
       matrix:
         os: [ubuntu-latest]
         # test with oldest supported Python version only (for slow tests)
-        python-version: ["3.10"]
+        python-version: ["3.12"]
 
         demo: ${{ fromJson(needs.get-e2e-matrix.outputs.demos) }}
 

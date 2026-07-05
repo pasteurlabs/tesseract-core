@@ -80,7 +80,7 @@ class Config:
 # Add config and test cases for specific unit Tesseracts here
 TEST_CASES = {
     "empty": Config(test_with_random_inputs=True),
-    "py310": Config(test_with_random_inputs=True),
+    "py312": Config(test_with_random_inputs=True),
     "helloworld": Config(test_with_random_inputs=True),
     "pip_custom_step": Config(test_with_random_inputs=True),
     "pyvista-arm64": Config(test_with_random_inputs=True),
