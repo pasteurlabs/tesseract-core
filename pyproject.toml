@@ -190,6 +190,8 @@ ignore = [
     "D213", # Pydocstyle: multiline docstring summary start on 2nd line. Conflicts with D212
     "ANN202", # Type annotations: allow missing return type for private functions
     "ANN401", # Type annotations: allow Any
+    "UP040", # PEP 695 `type` alias: opt-out; some aliases are used at runtime (e.g. isinstance)
+    "UP047", # PEP 695 generics: opt-out to avoid a py312 modernization sweep
 ]
 
 [tool.ruff.lint.extend-per-file-ignores]

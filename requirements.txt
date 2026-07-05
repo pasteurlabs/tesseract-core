@@ -14,19 +14,13 @@ idna==3.18
     # via requests
 jinja2==3.1.6
     # via tesseract-core
-markdown-it-py==3.0.0 ; python_full_version < '3.11'
-    # via rich
-markdown-it-py==4.2.0 ; python_full_version >= '3.11'
+markdown-it-py==4.2.0
     # via rich
 markupsafe==3.0.3
     # via jinja2
 mdurl==0.1.2
     # via markdown-it-py
-numpy==2.2.6 ; python_full_version < '3.11'
-    # via tesseract-core
-numpy==2.4.6 ; python_full_version == '3.11.*'
-    # via tesseract-core
-numpy==2.5.0 ; python_full_version >= '3.12'
+numpy==2.5.0
     # via tesseract-core
 orjson==3.11.9
     # via tesseract-core
