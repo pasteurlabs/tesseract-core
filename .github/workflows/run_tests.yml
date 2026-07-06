@@ -86,31 +86,12 @@ jobs:
       - name: Set up Git repository
         uses: actions/checkout@v7
 
-      - name: Get all changed files
-        id: changed-files
-        uses: tj-actions/changed-files@9426d40962ed5378910ee2e21d5f8c6fcbf2dd96 # v47
-        with:
-          files: |
-            tesseract_core/**
-            tests/endtoend_tests/**
-            demo/**
-            examples/**
-            production.uv.lock
-            .github/workflows/run_tests.yml
-
       - name: Get available test matrix
         id: get-matrix
         env:
           EXAMPLES_DIR: examples
           DEMO_DIR: demo
         run: |
-          # if no changed files in the current PR, skip E2E tests
-          if [[ "${{ steps.changed-files.outputs.any_changed }}" != "true" && ${{ github.event_name == 'pull_request' }} ]]; then
-            echo "No changed files detected, skipping E2E tests."
-            echo "matrix=[]" >> $GITHUB_OUTPUT
-            echo "demos=[]" >> $GITHUB_OUTPUT
-            exit 0
-          fi
           # get JSON array of directories in EXAMPLES_DIR, except ones that start with _
           subjobs=$(
             find "${{ env.EXAMPLES_DIR }}" -type d -maxdepth 1 -mindepth 1 -exec basename {} \; \
