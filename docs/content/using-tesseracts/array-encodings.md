@@ -141,12 +141,12 @@ The `.bin` file references are relative to the `--output-path`.
 :::
 ::::
 
-### binref + lz4 compression
+### lz4 compression
 
-Set `TESSERACT_BINREF_COMPRESSION=lz4` to compress arrays in `.bin` files. Each array is compressed individually, preserving offset-based random access. The compressed size is embedded directly in the buffer path (`<file>:<offset>:<compressed_size>`).
+Set `TESSERACT_COMPRESSION=lz4` to compress arrays in the output. This applies to both `json+binref` and `json+base64` formats. For binref, each array is compressed individually, preserving offset-based random access, with the compressed size embedded in the buffer path (`<file>:<offset>:<compressed_size>`).
 
 ```bash
-$ TESSERACT_BINREF_COMPRESSION=lz4 tesseract run vectoradd apply -f "json+binref" -o /tmp/output @examples/vectoradd/example_inputs.json
+$ TESSERACT_COMPRESSION=lz4 tesseract run vectoradd apply -f "json+binref" -o /tmp/output @examples/vectoradd/example_inputs.json
 $ cat /tmp/output/results.json
 {"result":{"object_type":"array","shape":[3],"dtype":"float64","data":{"buffer":"....bin:0:35","encoding":"binref","compression":"lz4"}}}
 ```

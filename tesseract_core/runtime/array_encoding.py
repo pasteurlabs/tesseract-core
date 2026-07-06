@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Annotated, Any, Literal, TypeAlias, TypedDict, get_args
 from uuid import uuid4
 
+import lz4.frame
 import numpy as np
 import pybase64
 from pydantic import (
@@ -64,17 +65,11 @@ class ArrayDict(TypedDict):
 MAX_BINREF_BUFFER_SIZE = 100 * 1024 * 1024  # 100 MB
 
 
-def _lz4_frame():
-    import lz4.frame
-
-    return lz4.frame
-
-
 def _compress(data: bytes, compression: str | None) -> bytes:
     if compression is None:
         return data
     if compression == "lz4":
-        return _lz4_frame().compress(data)
+        return lz4.frame.compress(data)
     raise ValueError(f"Unknown compression: {compression}")
 
 
@@ -82,7 +77,7 @@ def _decompress(data: bytes, compression: str | None) -> bytes:
     if compression is None:
         return data
     if compression == "lz4":
-        return _lz4_frame().decompress(data)
+        return lz4.frame.decompress(data)
     raise ValueError(f"Unknown compression: {compression}")
 
 
@@ -582,9 +577,7 @@ def encode_array(
 
     array_encoding = context.get("array_encoding", "json")
     if array_encoding == "base64":
-        return _dump_base64_arraydict(
-            arr, compression=context.get("base64_compression")
-        )
+        return _dump_base64_arraydict(arr, compression=context.get("compression"))
     elif array_encoding == "binref":
         base_dir = context.get("base_dir", get_config().output_path)
         subdir = context.get("binref_dir", None)
@@ -594,7 +587,7 @@ def encode_array(
             subdir=subdir,
             current_binref_uuid=context.get("__binref_uuid", str(uuid4())),
             max_file_size=context.get("max_file_size", MAX_BINREF_BUFFER_SIZE),
-            compression=context.get("binref_compression"),
+            compression=context.get("compression"),
         )
         context["__binref_uuid"] = new_binref_uuid
         return data

@@ -76,7 +76,7 @@ def test_output_to_bytes_json_binref_lz4(output_data):
         base_dir = Path(tmpdir)
 
         result = output_to_bytes(
-            output_data, "json+binref", base_dir=base_dir, binref_compression="lz4"
+            output_data, "json+binref", base_dir=base_dir, compression="lz4"
         )
         assert isinstance(result, bytes)
 

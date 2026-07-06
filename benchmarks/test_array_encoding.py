@@ -47,8 +47,8 @@ _ENCODING_TO_KWARGS: dict[str, dict] = {
     "json": {},
     "base64": {},
     "binref": {},
-    "base64+lz4": {"base64_compression": "lz4"},
-    "binref+lz4": {"binref_compression": "lz4"},
+    "base64+lz4": {"compression": "lz4"},
+    "binref+lz4": {"compression": "lz4"},
 }
 
 

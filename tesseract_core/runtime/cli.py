@@ -458,7 +458,7 @@ def _create_user_defined_cli_command(
             result,
             output_format,
             output_path,
-            binref_compression=config.binref_compression,
+            compression=config.compression,
         )
 
         # write raw bytes to out_stream.buffer to support binary data (which may e.g. be piped)

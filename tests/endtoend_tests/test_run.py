@@ -210,7 +210,7 @@ def test_binref_lz4_compression(built_image_name, dummy_tesseract_module, tmp_pa
             "-f",
             "json+binref",
             "--env",
-            "TESSERACT_BINREF_COMPRESSION=lz4",
+            "TESSERACT_COMPRESSION=lz4",
             json.dumps(example_inputs),
         ],
         capture_output=True,

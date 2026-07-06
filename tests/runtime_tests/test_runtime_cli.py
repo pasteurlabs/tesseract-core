@@ -348,13 +348,13 @@ def test_apply_command_binref_lz4(
         "json+binref",
     ]
     if not via_env:
-        args += ["--binref-compression", "lz4"]
+        args += ["--compression", "lz4"]
     args += ["apply", json.dumps({"inputs": test_input})]
 
     result = cli_runner.invoke(
         cli,
         args,
-        env={"TESSERACT_BINREF_COMPRESSION": "lz4"} if via_env else {},
+        env={"TESSERACT_COMPRESSION": "lz4"} if via_env else {},
         catch_exceptions=False,
     )
     assert result.exit_code == 0, result.stderr
