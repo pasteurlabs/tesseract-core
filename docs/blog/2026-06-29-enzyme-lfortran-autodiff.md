@@ -16,9 +16,9 @@ Decades of validated physics code in CFD, climate, aerospace, and nuclear sit be
 
 All we need is to duct-tape [LFortran](https://lfortran.org/), LLVM, and Enzyme together, point the result at a Fortran thermal solver, and get exact gradients out the other end. From there, [Tesseract](https://github.com/pasteurlabs/tesseract-core) (whose blog you're reading) wraps the result as a custom [JAX](https://jax.readthedocs.io/en/latest/) primitive, so a Fortran solver becomes a differentiable layer in arbitrary JAX code.
 
-This is all pretty experimental, so you may have to spend some time chasing a gradient that returned NaN and manually compare LLVM IR diffs to make it work. But the gradients come out the other end of the entire multi-step time loop matching the analytic answer. And it's amazing to see that a stack combining some of the oldest and newest technologies can work together at all.
+This is all pretty experimental, so you may have to spend some time chasing a gradient that returned NaN and manually compare LLVM IR diffs to make it work. But after some work, the gradients that come out the other end of the entire multi-step time loop match an analytic answer. And it's amazing to see that a stack combining some of the oldest and newest technologies can work together at all.
 
-Let's start at the beginning. What follows is the full walkthrough, including the compilation pipeline, the sharp edges we hit, and an inverse problem that made the whole effort worth it (and that wouldn't be possible without AD).
+Let's start at the beginning. What follows is the full walkthrough, including the compilation pipeline, the sharp edges we hit, and application on a challenging inverse problem (that wouldn't be possible without AD).
 
 ## The problem with getting gradients out of legacy code
 
@@ -88,13 +88,13 @@ Boundary conditions are mixed: Dirichlet (hot wall at the bottom), convection/Ro
 
 For this setup, there are no easy shortcuts to get derivatives: because $k(T)$ is nonlinear, the stencil coefficients depend on the current temperature field, so the Jacobian changes at every time step. Hand-coding the adjoint through that, and re-deriving it every time the forward code changes, is the kind of work AD exists to delete.
 
-This is vanilla Fortran with no annotations or AD-aware constructs, but even getting to "vanilla" took some massaging. Allocatables, array intrinsics, and bounds checking all compile down to runtime calls (`_lfortran_malloc` and friends) that Enzyme can't see through, so they had to go. Work arrays get passed in pre-allocated from C, and we compile with `--no-array-bounds-checking`. For a 220-line solver that's an hour of work; for a large legacy codebase, it's an open question.
+This is vanilla Fortran with no annotations or AD-aware constructs, but even getting to "vanilla" took some massaging. In LFortran, allocatables, array intrinsics and bounds checking all compile down to runtime calls (`_lfortran_malloc` and friends) that Enzyme can't see through, so we have to avoid them here. Instead, work arrays get passed in pre-allocated from C, and we compile with `--no-array-bounds-checking`. For a 220-line solver that's an hour of work; for a large legacy codebase, it's an open question.
 
 ## The Enzyme compilation pipeline
 
 This is where it gets technical, so if you're not into the low-level details, feel free to [skip to the next section](#does-it-actually-work) where we benchmark the gradients.
 
-Enzyme works at the LLVM IR level, not the source level, so anything that compiles to LLVM IR (C, C++, Rust, Fortran) can be differentiated. The chain is six `opt`/`clang` invocations, surprisingly straightforward as long as you're comfortable inspecting IR when things go wrong.
+Enzyme works at the LLVM IR (intermediate representation) level, not the source level, so anything that compiles to LLVM IR (C, C++, Rust, Fortran) can be differentiated. The chain is six `opt`/`clang` invocations, surprisingly straightforward as long as you're comfortable inspecting IR when things go wrong.
 
 ```{figure} ../static/blog/enzyme-pipeline.png
 :alt: "Compilation pipeline: Fortran → Enzyme AD → shared library"
@@ -238,7 +238,7 @@ The loop induction variable counts _down_ (`add nsw i64 ..., -1`), and the body 
 
 OK, it compiles. But after the `-O3` NaN incident, trusting it without checking is off the table. The safest test is to compare Enzyme's gradient against a ground-truth derivative we can compute _independently_, without Enzyme anywhere in the loop.
 
-For one regime we can do exactly that. If we set the conductivity's temperature coefficient $k_1 = 0$, the solver becomes linear: each explicit step is an affine map of the temperature field, $T^{s+1} = A(k_0)\,T^s + c(k_0)$, where the operators $A$ and $c$ encode the real stencil and the real mixed boundary conditions, and depend affinely on $k_0$. (Verified numerically: one step is affine in $k_0$ to a relative residual of ~1e-16.) That structure hands us the exact derivative of the _whole_ multi-step trajectory for free, via the tangent recurrence
+For one regime we can do exactly that. If we set the conductivity's temperature coefficient $k_1 = 0$, the solver becomes linear: each explicit step is an affine map of the temperature field, $T^{s+1} = A(k_0)\,T^s + c(k_0)$, where the operators $A$ and $c$ encode the real stencil and the real mixed boundary conditions, and are themselves affine in $k_0$. That structure hands us the exact derivative of the _whole_ multi-step trajectory for free, via the tangent recurrence
 
 $$\frac{\partial T^{s+1}}{\partial k_0} = A_1\,T^s + A(k_0)\,\frac{\partial T^s}{\partial k_0} + c_1,$$
 
@@ -290,9 +290,9 @@ With that in place, it's finally time to point a real optimization problem at it
 
 ## Thermal forensics: recovering a 900-element initial temperature field
 
-Imagine a steel plate that went through some unmonitored heating event, maybe a laser pulse, maybe a localized defect, nobody knows. Five seconds later you get to measure temperatures at 100 sensor locations, and the question is whether you can reconstruct what the initial temperature distribution must have looked like.
+Imagine a steel plate that went through some unmonitored heating event, maybe a laser pulse, maybe a localized defect, nobody knows. Five seconds later you get to measure temperatures at 100 sensor locations, and the question is whether you can reconstruct the initial temperature distribution.
 
-The true initial condition has two Gaussian hot spots sitting on a warm background. So the ask is 900 unknowns out of 100 noisy observations, run backwards through a nonlinear PDE. A small [Tikhonov term](https://en.wikipedia.org/wiki/Ridge_regression) penalizing departure from the ambient prior regularizes the otherwise ill-posed inversion, and since the loss is just a JAX function, that term is one extra line that `jax.value_and_grad` differentiates for free:
+The true initial condition has two Gaussian hot spots sitting on a warm background. So the ask is 900 unknowns out of 100 noisy observations, an underdetermined problem, run backwards through a nonlinear PDE. A small [Tikhonov term](https://en.wikipedia.org/wiki/Ridge_regression) penalizing departure from the ambient prior regularizes the otherwise ill-posed inversion, and since the loss is just a JAX function, that term is one extra line that `jax.value_and_grad` differentiates for free:
 
 ```python
 # The inverse-problem loss: data misfit + Tikhonov prior, differentiated end to end
@@ -353,7 +353,7 @@ And because the solver is just another JAX function behind `apply_tesseract`, yo
 
 A reality check before getting carried away: this is a 220-line solver written specifically to fit the pipeline. Enzyme itself handles loops, conditionals, and function calls just fine, and the Enzyme team has run it on much larger codes, including [BUDE molecular docking](https://enzyme.mit.edu/getting_started/UsingEnzyme/#bude) and [LULESH hydrodynamics](https://enzyme.mit.edu/getting_started/UsingEnzyme/#lulesh), with derivative overhead that usually lands somewhere between 1x and 4x. Still, "works on LULESH" and "works on your 30-year-old Fortran codebase" are two very different claims.
 
-We've flagged the sharp edges as we went, from the `_lfortran_malloc` crash to the `-O3` NaN incident to LFortran's still-incomplete coverage; the approach works, but it is nowhere near turnkey yet. Plan on adapting your Fortran, pinning your compiler versions, and dropping down to the IR level to debug at least once before you're done.
+We've flagged the sharp edges as we went, including array allocation not being traceable by Enzyme, the necessity of using `-O1` and LFortran's still-incomplete coverage; the approach works, but it is nowhere near turnkey yet. Plan on adapting your Fortran, pinning your compiler versions, and dropping down to the IR level to debug at least once before you're done.
 
 Two bigger questions stay open. One is **third-party code**: "but will it work on _my_ code?" is a perfectly fair thing to ask. The honest guess is that it probably will, after the kind of adaptation described earlier and likely a few surprises beyond it. The other is **scale**, where checkpointing schemes, MPI-parallel codes, GPU kernels, and multi-physics coupling all remain untested here. Enzyme has support for some of them, that's just territory this pipeline hasn't reached.
 
