@@ -10,6 +10,7 @@ data-assimilation.ipynb
 lorenz_tesseract.md
 cfd-optimization.ipynb
 fem-shape-optimization.ipynb
+enzyme-lfortran.ipynb
 learned-closure.ipynb
 JAX Rosenbrock Minimization <https://si-tesseract.discourse.group/t/jax-based-rosenbrock-function-minimization/48>
 PyTorch Rosenbrock Minimization <https://si-tesseract.discourse.group/t/pytorch-based-rosenbrock-function-minimization/44>
@@ -58,6 +59,11 @@ Optimize the initial velocity field of a 2D Navier-Stokes simulation so its vort
 :link: fem-shape-optimization.html
 
 Compose a geometry Tesseract (PyVista, finite-difference gradients) with a FEM Tesseract (jax-fem) to optimize structural bar configurations for minimum compliance.
+:::
+:::{grid-item-card} Differentiable Fortran (Enzyme)
+:link: enzyme-lfortran.html
+
+Solve two inverse heat-transfer problems by differentiating a Fortran solver end-to-end: Enzyme generates exact derivatives at the LLVM IR level, and `jax.value_and_grad` drives the optimization through Tesseract-JAX.
 :::
 :::{grid-item-card} Learned Closure (PyTorch)
 :link: learned-closure.html

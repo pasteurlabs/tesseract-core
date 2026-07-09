@@ -285,6 +285,17 @@ Compose a geometry Tesseract with a FEM solver Tesseract for end-to-end
 parametric structural optimization.
 :::
 
+:::{grid-item-card} Differentiable Fortran (Enzyme)
+:link: content/demo/enzyme-lfortran
+:link-type: doc
+:class-card: demo-card
+:img-top: static/demo-enzyme-lfortran.svg
+:class-img-top: demo-schematic invert-on-dark
+
+Differentiate a Fortran heat-conduction solver end-to-end with Enzyme at the
+LLVM IR level, and solve an inverse problem through Tesseract-JAX.
+:::
+
 :::{grid-item-card} Learned Closure (PyTorch)
 :link: content/demo/learned-closure
 :link-type: doc

@@ -24,10 +24,11 @@ The inaugural virtual Tesseract Hackathon has concluded, and we're thrilled to a
 
 This project explores how agents in flow fields can coordinate without direct communication. The team employed a differentiable PDE solver wrapped as a Tesseract, enabling agents to learn action policies via gradient descent. Notably, policies trained on a set of 20 agents are still useful when actually deploying 60 agents.
 
-<figure>
-<img src="../_static/blog/hackathon-multi-agent-dpc.png" alt="Multi-Agent DPC architecture">
-<figcaption>Multi-Agent Differentiable Predictive Control architecture for zero-shot PDE scalability.</figcaption>
-</figure>
+```{figure} ../static/blog/hackathon-multi-agent-dpc.png
+:alt: Multi-Agent DPC architecture
+
+Multi-Agent Differentiable Predictive Control architecture for zero-shot PDE scalability.
+```
 
 <figure>
 <video autoplay loop muted playsinline>
@@ -51,10 +52,11 @@ This trajectory optimization pipeline comprises four specialized Tesseracts:
 
 The modular design demonstrates Tesseract's containerization benefits, allowing component substitution without code modifications.
 
-<figure>
-<img src="../_static/blog/hackathon-deepswingr.png" alt="DeepSwingr system architecture">
-<figcaption>DeepSwingr system architecture with four specialized Tesseracts for cricket ball swing optimization.</figcaption>
-</figure>
+```{figure} ../static/blog/hackathon-deepswingr.png
+:alt: DeepSwingr system architecture
+
+DeepSwingr system architecture with four specialized Tesseracts for cricket ball swing optimization.
+```
 
 ## Social Media Bonus: PruneDeepONet
 
@@ -69,8 +71,3 @@ This entry became far and away the most viral project among submissions, compari
 - **[Diffopteract](https://github.com/llueg/diffopteract)** -- Differentiable Optimization in JAX via Julia/JuMP Tesseract (Laurens Lueg)
 - **[DiffPIC](https://github.com/ale-ballester/tesseract-hackathon)** -- Differentiable Particle-in-Cell Optimization (Alejo Ballester, Rushan Zhang, Tage Burnett, Harshavardhan Harish)
 - **[Tesseract-pinn-inverse-burgers](https://github.com/julian-8897/tesseract-pinn-inverse-burgers)** -- Backend-Agnostic Inverse 1D Burgers Solver (Julian Chan)
-
----
-
-_Tesseract is a free, open-source framework for differentiable scientific computing. `pip install tesseract-core`.
-[Docs](https://tesseract.pasteurlabs.ai) · [Demos](https://tesseract.pasteurlabs.ai/content/demo/demo.html) · [GitHub](https://github.com/pasteurlabs/tesseract-core) · [Forum](https://si-tesseract.discourse.group/)_
