@@ -677,20 +677,31 @@ def _decode_array(
 
     if encoding == "base64":
         data = pybase64.b64decode(encoded_arr["data"]["buffer"])
+        compression = encoded_arr["data"].get("compression")
+        if compression == "lz4":
+            import lz4.frame
+
+            data = lz4.frame.decompress(data)
+        elif compression is not None:
+            raise ValueError(f"Unknown compression: {compression}")
         arr = np.frombuffer(data, dtype=dtype)
     elif encoding in ["json", "raw"]:
         arr = np.array(encoded_arr["data"]["buffer"], dtype=dtype)
     elif encoding == "binref":
         buffer_spec = encoded_arr["data"]["buffer"]
-        # Parse the buffer spec which has format: path[:offset]
-        path_match = re.match(r"^(?P<path>.+?)(\:(?P<offset>\d+))?$", buffer_spec)
+        # Parse the buffer spec which has format: path[:offset[:compressed_size]]
+        path_match = re.match(
+            r"^(?P<path>.+?)(\:(?P<offset>\d+)(\:(?P<compressed_size>\d+))?)?$",
+            buffer_spec,
+        )
         if not path_match:
             raise ValueError(
                 f"Invalid binref path format: {buffer_spec}. "
-                "Expected format is '<path>[:<offset>]'."
+                "Expected format is '<path>[:<offset>[:<compressed_size>]]'."
             )
         bufferpath = path_match.group("path")
         offset = int(path_match.group("offset") or 0)
+        compressed_size_str = path_match.group("compressed_size")
 
         # Calculate the number of bytes to read
         size = 1 if len(shape) == 0 else int(np.prod(shape))
@@ -708,10 +719,27 @@ def _decode_array(
                 "Make sure output_path is set when using json+binref encoding."
             )
 
+        compression = encoded_arr["data"].get("compression")
+
         # Read the binary data
         with open(full_path, "rb") as f:
             f.seek(offset)
-            data = f.read(num_bytes)
+            if compression is None:
+                data = f.read(num_bytes)
+            else:
+                if compressed_size_str is None:
+                    raise ValueError(
+                        "compressed_size missing from buffer spec when compression is set "
+                        "(expected format: '<path>:<offset>:<compressed_size>')"
+                    )
+                data = f.read(int(compressed_size_str))
+
+        if compression == "lz4":
+            import lz4.frame
+
+            data = lz4.frame.decompress(data)
+        elif compression is not None:
+            raise ValueError(f"Unknown compression: {compression}")
 
         arr = np.frombuffer(data, dtype=dtype)
     else:
