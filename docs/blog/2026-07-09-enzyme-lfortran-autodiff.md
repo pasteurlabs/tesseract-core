@@ -12,23 +12,23 @@ blog_description: "How we built a pipeline to get exact gradients out of a Fortr
 
 What if you could backpropagate through existing Fortran, C, or C++ simulation code, embed it into JAX and torch, and use it as a high-performance differentiable physics engine? Turns out, you can — if you're brave enough...
 
-Decades of validated physics code in CFD, climate, aerospace, and nuclear sit behind a wall that modern ML pipelines can't cross, because they don't expose gradients. The usual answer is to rewrite it all in JAX or PyTorch. The alternative we explore here is to leave the code where it is and get exact gradients out anyway, thanks to some LLVM-level magic. [Enzyme](https://enzyme.mit.edu/) applies autodiff at the LLVM IR level, so we can differentiate any code that compiles to LLVM.
+Decades of validated physics code in CFD, climate, aerospace, and nuclear sit behind a wall that modern ML pipelines can't cross, because they don't expose gradients. The usual answer is to rewrite it all in JAX or PyTorch. The alternative we explore here is to leave the code where it is and get exact gradients out anyway, thanks to some LLVM-level magic. This is possible because [Enzyme](https://enzyme.mit.edu/) applies autodiff at the LLVM IR level, so we can differentiate any code that compiles to LLVM!
 
 All we need is to duct-tape [LFortran](https://lfortran.org/), LLVM, and Enzyme together, point the result at a Fortran thermal solver, and get exact gradients out the other end. From there, [Tesseract](https://github.com/pasteurlabs/tesseract-core) wraps the result as a custom [JAX](https://jax.readthedocs.io/en/latest/) primitive, so a Fortran solver becomes a differentiable layer in arbitrary JAX code.
 
-This is all pretty experimental, so you may have to spend some time chasing a gradient that returned NaN and manually compare LLVM IR diffs to make it work. But after some work, the gradients that come out the other end of the entire multi-step time loop match an analytic answer. And it's amazing to see that a stack combining some of the oldest and newest technologies can work together at all.
+This is all pretty experimental, so be prepared to spend some time chasing a gradient that returned NaN and manually compare LLVM IR diffs to make it work. But if you put in the labor, you'll get gradients through the entire multi-step time loop that match an analytic answer, and it's amazing to see that a stack combining some of the oldest and newest technologies can work together at all.
 
-Let's start at the beginning. What follows is the full story, including the compilation pipeline, the sharp edges we hit, and application on a challenging inverse problem (that wouldn't be possible without AD).
+But let's start at the beginning. What follows is the full story, including the compilation pipeline, the sharp edges we hit, and application on a challenging inverse problem (that wouldn't be possible without AD).
 
 ## The problem with getting gradients out of legacy code
 
-If you work in scientific computing, you might have run into this: you have a simulation written in Fortran (or C, or C++), and now someone needs gradients, the derivatives of the simulation's outputs with respect to its inputs. Maybe it's for optimization, maybe inverse problems, maybe plugging the sim into an ML pipeline. Now your options are:
+If you work in scientific computing, you might have run into this: you have a simulation written in Fortran (or C, or C++), and now someone needs gradients (the derivatives of the simulation's outputs with respect to its inputs). Maybe it's for optimization, maybe inverse problems, maybe plugging the sim into an ML pipeline. Now your options are:
 
 - **Hand-written adjoints.** Boils down to hand-implementing the derivative of every line of code, which means months of expert effort. Error-prone and a maintenance nightmare that slowly drifts out of sync with the forward code.
 - **Finite differences.** Perturb every input and difference the outputs. Slow ($O(n)$ evaluations for n parameters), inaccurate, and poorly conditioned for stiff problems.
 - **Rewrite in JAX or PyTorch and use autodiff.** Sure, if you want to rewrite tens of thousands of lines of validated physics.
 
-What if you could just compile the derivatives automatically, from the existing source? Here's what it actually looks like when you try.
+What if you could just compile the derivatives automatically, from the existing source? This is what it actually looks like when you try.
 
 (a-fortran-heat-solver)=
 
@@ -360,7 +360,7 @@ A reality check before getting carried away: this is a 220-line solver written s
 
 We've flagged the sharp edges as we went, including array allocation not being traceable by Enzyme, the necessity of using `-O1` and LFortran's still-incomplete coverage; the approach works, but it is nowhere near turnkey yet. Plan on adapting your Fortran, pinning your compiler versions, and dropping down to the IR level to debug at least once before you're done.
 
-Two bigger questions stay open. One is **portability**: "but will it work on my existing code?" is a perfectly fair thing to ask. We'd guess that it just might, after the kind of adaptation described earlier and likely a few surprises beyond it (if you end up trying, let us know). The other is **scale**, where checkpointing schemes, MPI-parallel codes, GPU kernels, and multi-physics coupling all remain untested here. Enzyme has support for some of them, that's just territory this pipeline hasn't reached.
+Two bigger questions stay open. One is **portability**: "but will it work on my existing code?" is a perfectly fair thing to ask. We'd wager that it just might, after the kind of adaptation described earlier and likely a few surprises beyond it (if you end up trying, let us know). The other is **scale**, where checkpointing schemes, MPI-parallel codes, GPU kernels, and multi-physics coupling all remain untested here. Enzyme has support for some of them, that's just territory this pipeline hasn't reached.
 
 Where this gets even more exciting is **composability**. Picture an Enzyme-differentiated Fortran CFD solver feeding straight into a JAX neural-net surrogate:
 
@@ -380,7 +380,7 @@ Because Enzyme works at the LLVM IR level, none of this is Fortran-specific. The
 
 ## Try it yourself
 
-The full source is [on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/demo/enzyme-lfortran), including the Fortran solver, the Enzyme pipeline, the inverse-problem notebooks, and the LLVM build script holding it all together. If you've got a Fortran, C, or C++ solver you'd like gradients for and you don't mind spending some quality time with LLVM IR, this is a pretty good place to start.
+The full source is [on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/demo/enzyme-lfortran), including the Fortran solver, the Enzyme pipeline, the inverse-problem notebooks, and the LLVM build script holding it all together. If you've got a Fortran, C, or C++ solver you'd like gradients for and you don't mind spending some quality time with LLVM, this is a pretty good place to start.
 
 The pieces are here, and the remaining questions are exactly the kind of thing that's more fun with company. If you take it somewhere, whether you get it running on your own solver or hit a wall we didn't, come tell us on the [Forum](https://si-tesseract.discourse.group/). We'd love to see how far it goes!
 
