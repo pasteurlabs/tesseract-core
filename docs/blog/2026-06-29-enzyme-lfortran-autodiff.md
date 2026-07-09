@@ -94,7 +94,7 @@ This is vanilla Fortran with no annotations or AD-aware constructs, but even get
 
 This is where it gets technical, so if you're not into the low-level details, feel free to [skip to the next section](#does-it-actually-work) where we benchmark the gradients.
 
-Enzyme works at the LLVM IR (intermediate representation) level, not the source level, so anything that compiles to LLVM IR (C, C++, Rust, Fortran) can be differentiated. The chain is six `opt`/`clang` invocations, surprisingly straightforward as long as you're comfortable inspecting IR when things go wrong.
+Enzyme works at the LLVM IR (intermediate representation) level, not the source level, so anything that compiles to LLVM IR (C, C++, Rust, Fortran) can be differentiated. For Fortran that means picking a frontend. The obvious choice is Flang, LLVM's official Fortran compiler, but we reach for [LFortran](https://lfortran.org/) instead, which [turns out to be much more digestible for Enzyme](#why-lfortran). With a frontend settled, the chain is six `opt`/`clang` invocations, surprisingly straightforward as long as you're comfortable inspecting IR when things go wrong.
 
 ```{figure} ../static/blog/enzyme-pipeline.png
 :alt: "Compilation pipeline: Fortran → Enzyme AD → shared library"
@@ -125,7 +125,7 @@ A couple of decisions along the way shaped how the whole thing holds together, t
 
 (why-lfortran)=
 
-**Why LFortran.** The first step (`lfortran --show-llvm`) is also the reason the whole thing is tractable, since LFortran emits remarkably clean IR. Arrays come out as plain pointers with the usual GEP/load/store patterns, much like C, instead of the multi-field descriptor structs and runtime calls that Flang produces. That matters enormously, because Enzyme has to trace every memory access to figure out what's active, and it has a far easier time with pointer arithmetic than with opaque `fir.box` descriptors.
+**Why LFortran, not Flang.** The first step (`lfortran --show-llvm`) is also the reason the whole thing is tractable, since LFortran emits remarkably clean IR. Arrays come out as plain pointers with the usual GEP/load/store patterns, much like C, instead of the multi-field descriptor structs and runtime calls that Flang, the obvious default, produces. That matters enormously, because Enzyme has to trace every memory access to figure out what's active, and it has a far easier time with pointer arithmetic than with opaque `fir.box` descriptors.
 
 So what makes LFortran IR "clean"? Three things, concretely. Every array reference lowers to a plain `getelementptr` + `load`/`store` on a bare pointer; the 19-argument subroutine takes 19 plain `ptr` arguments, with no descriptor struct wrapping any of them; and the whole module contains zero function calls: no `_lfortran_malloc`, no runtime helpers, nothing opaque for Enzyme to trace through. Here's the IR LFortran emits for the start of the stencil body, covering the `idx = (j-1)*nx + i` index and the `T_c = T_cur(idx)` / `kx_east = ...` lines from the source above:
 
@@ -155,11 +155,9 @@ That's it. Array access is a `getelementptr` + `load`, arithmetic is a flat sequ
 
 The catch is that LFortran is still maturing, so your code has to stay inside what it [supports](https://lfortran.org/progress/).
 
-**Why `-O1`, not `-O3`.** The `opt -O1` line above looks innocuous, and our first pipeline used `-O3` there. The forward pass worked perfectly, so we moved on. Later, the VJP returned NaN on certain inputs, and it took hours to find why. At `-O3`, LLVM's aggressive vectorization and code-motion produce IR patterns Enzyme apparently mishandles in reverse mode. In our case it bit when adjacent cell temperatures were equal, which caused intermediate terms cancel and a compiler rearrangement turned that into a division by zero. The fix is to keep optimization mild _before_ the AD pass and save `-O3` for _after_ it.
+**Why `-O1`, not `-O3`.** Our first pipeline used `-O3` here, and it cost us hours: the forward pass was perfect, but the VJP returned NaN on certain inputs. At `-O3`, LLVM's aggressive vectorization and code motion produce IR patterns Enzyme seems to mishandle in reverse mode. In our case it bit when adjacent cell temperatures were equal, so intermediate terms cancelled and a compiler rearrangement turned that into a division by zero. The fix is to keep optimization mild _before_ the AD pass and save `-O3` for _after_ it.
 
-We certainly learned to test the gradients early and often.
-
-**C bridge.** In between Fortran and Enzyme sits a thin C wrapper that bridges Fortran's by-pointer ABI to a C interface Enzyme can annotate. It allocates the work arrays on the heap (sidestepping the `_lfortran_malloc` issue) and marks which arguments get shadow buffers via Enzyme's intrinsics.
+**C bridge.** In between Fortran and Enzyme sits a thin C wrapper that bridges Fortran's by-pointer ABI to a C interface Enzyme can annotate. It does no numerical work of its own: it allocates the work arrays on the heap (avoiding `_lfortran_malloc` calls in the IR) and marks which arguments get shadow buffers via Enzyme's intrinsics. The recipe is generic, not specific to this solver, so the Fortran really does stay untouched.
 
 ```c
 // The C bridge: heap-allocates work arrays and tells Enzyme what to differentiate
@@ -236,9 +234,9 @@ The loop induction variable counts _down_ (`add nsw i64 ..., -1`), and the body 
 
 ## Does it actually work?
 
-OK, it compiles. But after the `-O3` NaN incident, trusting it without checking is off the table. The safest test is to compare Enzyme's gradient against a ground-truth derivative we can compute _independently_, without Enzyme anywhere in the loop.
+OK, it compiles. But after watching `-O3` silently produce NaN gradients, trusting it without checking is off the table. The safest test is to compare Enzyme's gradient against a ground-truth derivative we can compute _independently_, without Enzyme anywhere in the loop.
 
-For one regime we can do exactly that. If we set the conductivity's temperature coefficient $k_1 = 0$, the solver becomes linear: each explicit step is an affine map of the temperature field, $T^{s+1} = A(k_0)\,T^s + c(k_0)$, where the operators $A$ and $c$ encode the real stencil and the real mixed boundary conditions, and are themselves affine in $k_0$. That structure hands us the exact derivative of the _whole_ multi-step trajectory for free, via the tangent recurrence
+For one regime we can do exactly that. If we set the conductivity's temperature coefficient $k_1 = 0$, the solver becomes linear: each explicit step is an affine map of the temperature field, $T^{s+1} = A(k_0)\,T^s + c(k_0)$, where the operators $A$ and $c$ encode the real stencil and the real mixed boundary conditions, and are themselves affine in $k_0$: $A(k_0) = A_0 + A_1 k_0$ and $c(k_0) = c_0 + c_1 k_0$. That structure hands us the exact derivative of the _whole_ multi-step trajectory for free, via the tangent recurrence
 
 $$\frac{\partial T^{s+1}}{\partial k_0} = A_1\,T^s + A(k_0)\,\frac{\partial T^s}{\partial k_0} + c_1,$$
 
@@ -355,9 +353,9 @@ A reality check before getting carried away: this is a 220-line solver written s
 
 We've flagged the sharp edges as we went, including array allocation not being traceable by Enzyme, the necessity of using `-O1` and LFortran's still-incomplete coverage; the approach works, but it is nowhere near turnkey yet. Plan on adapting your Fortran, pinning your compiler versions, and dropping down to the IR level to debug at least once before you're done.
 
-Two bigger questions stay open. One is **third-party code**: "but will it work on _my_ code?" is a perfectly fair thing to ask. The honest guess is that it probably will, after the kind of adaptation described earlier and likely a few surprises beyond it. The other is **scale**, where checkpointing schemes, MPI-parallel codes, GPU kernels, and multi-physics coupling all remain untested here. Enzyme has support for some of them, that's just territory this pipeline hasn't reached.
+Two bigger questions stay open. One is **portability**: "but will it work on my existing code?" is a perfectly fair thing to ask. We'd guess that it just might, after the kind of adaptation described earlier and likely a few surprises beyond it (if you end up trying, let us know). The other is **scale**, where checkpointing schemes, MPI-parallel codes, GPU kernels, and multi-physics coupling all remain untested here. Enzyme has support for some of them, that's just territory this pipeline hasn't reached.
 
-Where this gets genuinely exciting, though, is **composability**. Picture an Enzyme-differentiated Fortran CFD solver feeding straight into a JAX neural-net surrogate:
+Where this gets even more exciting is **composability**. Picture an Enzyme-differentiated Fortran CFD solver feeding straight into a JAX neural-net surrogate:
 
 ```python
 # Composability: chain Enzyme-differentiated Fortran with native JAX AD

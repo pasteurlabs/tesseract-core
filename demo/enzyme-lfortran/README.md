@@ -16,7 +16,7 @@ with:
 - **Mixed boundary conditions**: Dirichlet (hot wall), convection (Robin), and insulated (Neumann)
 - **Multi-step explicit time integration**: the Fortran kernel runs the full time-stepping loop internally
 
-This is representative of the thermal solvers CAE engineers run in production — a structured-grid finite difference code with nonlinear material properties, mixed BCs, and a time integration loop. The key difference from a toy example is that **the nonlinear conductivity makes the Jacobian solution-dependent**, so you can't derive it analytically and hand-coding the adjoint is error-prone.
+This is representative of the solvers many CAE engineers run in production, a structured-grid finite difference code with nonlinear material properties, mixed BCs, and a time integration loop (although a production code for a stiff heat equation would typically go implicit). The key difference from a toy example is that **the nonlinear conductivity makes the Jacobian solution-dependent**, so you can't derive it analytically and hand-coding the adjoint is error-prone.
 
 Enzyme differentiates through the **entire time-stepping loop** (including the nonlinear stencil operations at each step), giving exact gradients of the final temperature field with respect to all material properties, boundary conditions, and initial conditions.
 
@@ -97,6 +97,8 @@ Enzyme gives you exact gradients through the entire nonlinear time-stepping loop
 - **Boundary condition estimation**: infer h_conv or T_hot from sensor data (inverse heat transfer)
 - **Design optimization**: optimize geometry (Lx, Ly) or heat source placement (Q) to achieve a target temperature distribution
 - **Sensitivity analysis**: understand how uncertainties in material properties propagate to the temperature field
+
+This argument applies to any explicit method, which are pervasive in science and industry.
 
 ## Usage
 
