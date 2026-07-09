@@ -102,26 +102,31 @@ Enzyme works at the LLVM IR (intermediate representation) level, not the source 
 The six-step compilation pipeline, from Fortran source to a differentiable shared library. LFortran lowers the solver to LLVM IR, a thin C wrapper is linked in, Enzyme synthesizes the derivative code, and a final optimization pass emits a single `.so` exposing forward, JVP, and VJP entry points. The whole chain runs in about 30 seconds during `tesseract build`.
 ```
 
-Most of those steps are plumbing: lower the Fortran to IR, compile a thin C wrapper, `llvm-link` the two, run Enzyme, optimize, emit a `.so`. The three that actually matter are the LFortran IR dump, the pre-Enzyme `-O1` cleanup, and the Enzyme pass itself.
+The six steps, in order:
 
 ```bash
 # The compilation pipeline: Fortran source → differentiated shared library
 
-# Fortran → LLVM IR (clean enough for Enzyme to trace)
+# 1. Fortran → LLVM IR (clean enough for Enzyme to trace)
 $ lfortran --show-llvm --no-array-bounds-checking thermal_2d.f90 > thermal_2d.ll
 
-# Mild cleanup BEFORE the AD pass — -O1, deliberately not -O3 (see below)
+# 2. Mild cleanup BEFORE the AD pass — -O1, deliberately not -O3 (see below)
 $ opt -O1 -S thermal_2d.ll -o thermal_2d_opt.ll
 
-# ... link in the C wrapper etc ...
+# 3. Compile the C wrapper to IR
+$ clang -emit-llvm -S -O1 wrapper.c -o wrapper.ll
 
-# Synthesize the derivative
+# 4. llvm-link it with the solver
+$ llvm-link wrapper.ll thermal_2d_opt.ll -S -o combined.ll
+
+# 5. Synthesize the derivative
 $ opt --load-pass-plugin=LLVMEnzyme-19.so -passes=enzyme combined.ll -o ad.ll
 
-# ... final optimization and emit a shared library ...
+# 6. Final optimization and emit a shared library
+$ opt -O3 -S ad.ll -o ad_opt.ll && clang -shared -O3 ad_opt.ll -o thermal_2d.so -lm
 ```
 
-A couple of decisions along the way shaped how the whole thing holds together, though, and they're worth dwelling on.
+Most of those are plumbing. The three that actually matter are step 1 (the LFortran IR dump), step 2 (the pre-Enzyme `-O1` cleanup), and step 5 (the Enzyme pass itself), where each maps to a decision worth dwelling on.
 
 (why-lfortran)=
 

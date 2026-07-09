@@ -48,4 +48,5 @@ Each of these is a separate repository/Python package.
 
 - **Tesseract Core** is the main codebase that defines the Tesseract specification, the Python SDK for defining and building Tesseracts, and the runtime for executing Tesseracts in containers.
 - **Tesseract-JAX** is a mature package that supports full integration of Tesseract calls into JAX programs, including JIT compilation and automatic differentiation of code that mixes Tesseract calls and JAX operations.
+- **Tesseract-Torch** is the PyTorch counterpart to Tesseract-JAX: it embeds Tesseract calls as PyTorch operators so that `torch.autograd` flows through code that mixes Tesseract calls and PyTorch operations.
 - **Tesseract-Streamlit** provides tools to auto-generate Streamlit apps from (externally running / locally built) Tesseracts. It can be used to quickly create interactive demos for Tesseracts and custom visualization without writing any Streamlit code, but is limited to forward application (`apply`).
