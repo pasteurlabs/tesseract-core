@@ -50,6 +50,7 @@ runtime = [
     "numpy<=2.5.1,>=1.26",
     "debugpy<=1.8.21,>=1.8.14",
     "mlflow-skinny<=3.14.0,>=3.7.0",
+    "lz4<=4.4.5,>=4.0.0",
 ]
 # END RUNTIME DEPENDENCIES
 
