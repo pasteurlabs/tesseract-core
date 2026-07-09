@@ -14,11 +14,11 @@ What if you could backpropagate through existing Fortran, C, or C++ simulation c
 
 Decades of validated physics code in CFD, climate, aerospace, and nuclear sit behind a wall that modern ML pipelines can't cross, because they don't expose gradients. The usual answer is to rewrite it all in JAX or PyTorch. The alternative we explore here is to leave the code where it is and get exact gradients out anyway, thanks to some LLVM-level magic. [Enzyme](https://enzyme.mit.edu/) applies autodiff at the LLVM IR level, so we can differentiate any code that compiles to LLVM.
 
-All we need is to duct-tape [LFortran](https://lfortran.org/), LLVM, and Enzyme together, point the result at a Fortran thermal solver, and get exact gradients out the other end. From there, [Tesseract](https://github.com/pasteurlabs/tesseract-core) (whose blog you're reading) wraps the result as a custom [JAX](https://jax.readthedocs.io/en/latest/) primitive, so a Fortran solver becomes a differentiable layer in arbitrary JAX code.
+All we need is to duct-tape [LFortran](https://lfortran.org/), LLVM, and Enzyme together, point the result at a Fortran thermal solver, and get exact gradients out the other end. From there, [Tesseract](https://github.com/pasteurlabs/tesseract-core) wraps the result as a custom [JAX](https://jax.readthedocs.io/en/latest/) primitive, so a Fortran solver becomes a differentiable layer in arbitrary JAX code.
 
 This is all pretty experimental, so you may have to spend some time chasing a gradient that returned NaN and manually compare LLVM IR diffs to make it work. But after some work, the gradients that come out the other end of the entire multi-step time loop match an analytic answer. And it's amazing to see that a stack combining some of the oldest and newest technologies can work together at all.
 
-Let's start at the beginning. What follows is the full walkthrough, including the compilation pipeline, the sharp edges we hit, and application on a challenging inverse problem (that wouldn't be possible without AD).
+Let's start at the beginning. What follows is the full story, including the compilation pipeline, the sharp edges we hit, and application on a challenging inverse problem (that wouldn't be possible without AD).
 
 ## The problem with getting gradients out of legacy code
 
@@ -88,7 +88,7 @@ Boundary conditions are mixed: Dirichlet (hot wall at the bottom), convection/Ro
 
 For this setup, there are no easy shortcuts to get derivatives: because $k(T)$ is nonlinear, the stencil coefficients depend on the current temperature field, so the Jacobian changes at every time step. Hand-coding the adjoint through that, and re-deriving it every time the forward code changes, is the kind of work AD exists to delete.
 
-This is vanilla Fortran with no annotations or AD-aware constructs, but even getting to "vanilla" took some massaging. In LFortran, allocatables, array intrinsics and bounds checking all compile down to runtime calls (`_lfortran_malloc` and friends) that Enzyme can't see through, so we have to avoid them here. Instead, work arrays get passed in pre-allocated from C, and we compile with `--no-array-bounds-checking`. For a 220-line solver that's an hour of work; for a large legacy codebase, it's an open question.
+This is vanilla Fortran with no annotations or AD-aware constructs, but even getting to "vanilla" took some massaging. In LFortran, allocatables, array intrinsics and bounds checking all compile down to runtime calls (`_lfortran_malloc` and friends) that Enzyme can't see through, so we have to avoid them here. Instead, work arrays get passed in pre-allocated from C, and we compile with `--no-array-bounds-checking`. For a 220-line solver that's an hour of work, while for a large legacy codebase it's an open question.
 
 ## The Enzyme compilation pipeline
 
@@ -378,12 +378,14 @@ Every component differentiates itself with whatever AD is native to it, and Tess
 
 Because Enzyme works at the LLVM IR level, none of this is Fortran-specific. The same pipeline should apply to C, C++, Rust, or any language with an LLVM frontend.
 
-```{seealso}
-**A real composability demo.** While this post was in draft, [Florian List](https://github.com/FloList) went and built exactly this kind of thing at a scale well beyond our toy solver. In a [Forum showcase](https://si-tesseract.discourse.group/t/sampling-the-universe-hmc-through-jax-and-fortran-with-enzyme-differentiated-tesseracts/132), he coupled an Enzyme-differentiated Fortran component with a JAX cosmological forward model and ran Hamiltonian Monte Carlo through the whole pipeline, sampling a posterior over 137,058 initial-condition parameters of the universe from Lyman-α forest observations. Gradients flow from Fortran, through JAX, and into the sampler, exactly as in the composability story above. It's a much better demonstration than anything we built here, and well worth a read.
-```
-
 ## Try it yourself
 
 The full source is [on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/demo/enzyme-lfortran), including the Fortran solver, the Enzyme pipeline, the inverse-problem notebooks, and the LLVM build script holding it all together. If you've got a Fortran, C, or C++ solver you'd like gradients for and you don't mind spending some quality time with LLVM IR, this is a pretty good place to start.
 
-The pieces are here, and the remaining questions are exactly the kind of thing that's more fun with company. If you take it somewhere, whether you get it running on your own solver or hit a wall we didn't, come tell us on the [Forum](https://si-tesseract.discourse.group/). We'd genuinely like to see how far it goes!
+The pieces are here, and the remaining questions are exactly the kind of thing that's more fun with company. If you take it somewhere, whether you get it running on your own solver or hit a wall we didn't, come tell us on the [Forum](https://si-tesseract.discourse.group/). We'd love to see how far it goes!
+
+```{seealso}
+While this post was in draft, [Florian List](https://github.com/FloList) went and built exactly this kind of thing at a scale well beyond our toy solver!
+
+In a [Forum showcase](https://si-tesseract.discourse.group/t/sampling-the-universe-hmc-through-jax-and-fortran-with-enzyme-differentiated-tesseracts/132), he coupled an Enzyme-differentiated Fortran component with a JAX cosmological forward model and ran Hamiltonian Monte Carlo through the whole pipeline, sampling a posterior over 100k initial-condition parameters of the universe from Lyman-α forest observations. Gradients flow from Fortran, through JAX, and into the sampler, exactly as in the composability story above. It's a much better demonstration than anything we built here, and well worth a read.
+```
