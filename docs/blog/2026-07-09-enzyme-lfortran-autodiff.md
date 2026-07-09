@@ -2,7 +2,7 @@
 orphan: true
 og:title: "Differentiable Fortran with LFortran and Enzyme"
 og:description: "How we built a pipeline to get exact gradients out of a Fortran thermal solver, then used it to solve real inverse problems from Python."
-blog_date: "2026-06-29"
+blog_date: "2026-07-09"
 blog_author: "@dionhaefner"
 blog_title: "Differentiable Fortran with LFortran and Enzyme"
 blog_description: "How we built a pipeline to get exact gradients out of a Fortran thermal solver, then used it to solve real inverse problems from Python."
@@ -94,7 +94,7 @@ This is vanilla Fortran with no annotations or AD-aware constructs, but even get
 
 This is where it gets technical, so if you're not into the low-level details, feel free to [skip to the next section](#does-it-actually-work) where we benchmark the gradients.
 
-Enzyme works at the LLVM IR (intermediate representation) level, not the source level, so anything that compiles to LLVM IR (C, C++, Rust, Fortran) can be differentiated. For Fortran that means picking a frontend. The obvious choice is Flang, LLVM's official Fortran compiler, but we reach for [LFortran](https://lfortran.org/) instead, which [turns out to be much more digestible for Enzyme](#why-lfortran). With a frontend settled, the chain is six `opt`/`clang` invocations, surprisingly straightforward as long as you're comfortable inspecting IR when things go wrong.
+Enzyme works at the LLVM IR (intermediate representation) level, not the source level, so anything that compiles to LLVM IR (C, C++, Rust, Fortran) can be differentiated. For Fortran that means picking a frontend. The obvious choice is Flang, LLVM's official Fortran compiler, but we reach for [LFortran](https://lfortran.org/) instead, which [turns out to be much more digestible for Enzyme](#why-lfortran). With a frontend settled, the chain consists of six `opt`/`clang` invocations and is surprisingly straightforward (though when things go wrong you'll end up [reading the IR](#what-enzyme-actually-does-to-the-ir) to find out why).
 
 ```{figure} ../static/blog/enzyme-pipeline.png
 :alt: "Compilation pipeline: Fortran → Enzyme AD → shared library"
@@ -181,6 +181,8 @@ void thermal_2d_vjp(/* ... nx, ny, n_steps ... */)
 **AD tracing via Enzyme.** The Enzyme pass (`-passes=enzyme`) is where the real AD work happens. It analyzes the linked IR and synthesizes the derivative code, using a store-all tape strategy that caches intermediates at each time step. When it works, you get an adjoint of your entire time-stepping loop for free. When it doesn't, you're reading IR diffs at 2 AM (see [What's next](#whats-next-and-what-wed-do-differently)).
 
 A final `-O3 + clang -shared` step emits a single `.so` with three entry points (forward, JVP, VJP) callable from Python via ctypes. The whole pipeline runs during `tesseract build`, about 30 seconds end to end.
+
+(what-enzyme-actually-does-to-the-ir)=
 
 ### What Enzyme actually does to the IR
 
