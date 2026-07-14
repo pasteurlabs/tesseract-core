@@ -1,10 +1,10 @@
 # Composing Tesseracts into pipelines
 
-A single Tesseract packages one computation. Real work usually involves several: a mesher feeds a solver, an encoder feeds a model, a simulation feeds a post-processor. This page is about the step _after_ you've built your Tesseracts — calling them from your own code and chaining them into a larger workflow.
+A single Tesseract packages one computation. Real work usually involves several components: a mesher feeds a solver, an encoder feeds a model, a simulation feeds a post-processor. This page is about the step _after_ you've built your Tesseracts, that is, calling them from your own code and chaining them into a larger workflow.
 
-Tesseract Core is deliberately unopinionated about what you build on top. A project that uses Tesseracts might be a training loop, an optimization routine, a notebook, a web service, or a full application, with as much or as little logic of its own as you like. We won't prescribe that. What follows is the small amount of generic advice that applies regardless: _how to call and chain Tesseracts well_.
+Tesseract Core is deliberately unopinionated about what you build on top. A project that uses Tesseracts might be a training loop, an optimization routine, a notebook, a web service, or a full application, with as much or as little logic of its own as you like. What follows is the small amount of generic advice that applies regardless: _how to call and chain Tesseracts well_.
 
-The [Design Patterns](design-patterns.md) page covers the complementary question of how to split a workflow into Tesseracts in the first place. Read that for the "how many, how granular" decisions; read this for "now how do I wire them together."
+The [Design Patterns](design-patterns.md) page covers the complementary question of how to split a workflow into Tesseracts in the first place. Read that for the "how many, how granular" decisions, read this for "how do I wire them together."
 
 ## Choosing how to call a Tesseract
 
@@ -78,7 +78,7 @@ with Tesseract.from_image("scaler") as scaler:
 print(result["scaled_vector"])   # -> [2. 4. 6.]
 ```
 
-[`Tesseract.from_image`](#tesseract_core.Tesseract.from_image) references a built image by name; the `with` block starts the container and tears it down on exit. `apply` takes a dict of inputs and returns a dict of outputs — NumPy in, NumPy out, no manual serialization.
+[`Tesseract.from_image`](#tesseract_core.Tesseract.from_image) references a built image by name; the `with` block starts the container and tears it down on exit. `apply` takes a dict of inputs and returns a dict of outputs: NumPy in, NumPy out, no manual serialization.
 
 ```{note}
 To call a Tesseract that already runs elsewhere (a shared service, a GPU node, a remote deployment), use [`Tesseract.from_url(...)`](#tesseract_core.Tesseract.from_url) instead of `from_image`. The calling code is otherwise identical, so a workflow developed locally moves to distributed execution without a rewrite.
@@ -86,7 +86,7 @@ To call a Tesseract that already runs elsewhere (a shared service, a GPU node, a
 
 ## Chaining Tesseracts
 
-Chaining is deliberately unremarkable in all three cases: a Tesseract's outputs are ordinary values (a dict of arrays), so you feed them into the next call like any other Python data. There's no special pipeline object to learn.
+A Tesseract's outputs are ordinary values (a dict of arrays), so you feed them into the next call like any other Python data. There's no special pipeline object to learn.
 
 With the SDK:
 
@@ -97,7 +97,7 @@ with Tesseract.from_image("scaler") as scaler, \
     normalized = normalizer.apply({"vector": scaled["scaled_vector"]})
 ```
 
-And the same shape inside a differentiable JAX program — call `apply_tesseract` for each step and let the framework thread gradients through the whole chain:
+And the same shape inside a differentiable JAX program. Call `apply_tesseract` for each step and let the framework thread gradients through the whole chain:
 
 ```python
 def pipeline(vector):
