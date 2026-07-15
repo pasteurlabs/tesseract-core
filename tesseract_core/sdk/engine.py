@@ -154,10 +154,8 @@ def _split_local_dependency(line: str) -> tuple[str, str]:
     Returns a ``(path, extras)`` tuple where ``extras`` includes the surrounding
     brackets (e.g. ``"[extra]"``) or is empty if none are present.
     """
+    # This pattern matches any non-empty string, so a match is always found.
     match = re.match(r"^(?P<path>.+?)(?P<extras>\[[^\]]*\])?\s*\Z", line.strip())
-    if match is None:
-        # Should not happen for a non-empty line, but fall back to the raw path.
-        return line.strip(), ""
     return match.group("path"), match.group("extras") or ""
 
 

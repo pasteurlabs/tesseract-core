@@ -742,6 +742,71 @@ def test_parse_requirements(tmpdir):
     ]
 
 
+def test_prepare_build_context_conda_no_env_file(tmp_path_factory):
+    """Conda provider without an environment file does not error at staging."""
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "tesseract_api.py").touch()
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(
+        name="foobar",
+        build_config=TesseractBuildConfig(requirements={"provider": "conda"}),
+    )
+    engine.prepare_build_context(src_dir, build_dir, config)
+    assert (build_dir / "Dockerfile").exists()
+
+
+@pytest.mark.parametrize(
+    "line, expected",
+    [
+        ("./mylocaldep", ("./mylocaldep", "")),
+        ("./mylocaldep[extra]", ("./mylocaldep", "[extra]")),
+        ("../../pkg[a,b]", ("../../pkg", "[a,b]")),
+        ("/abs/path", ("/abs/path", "")),
+        ("./a[b] ", ("./a", "[b]")),
+    ],
+)
+def test_split_local_dependency(line, expected):
+    assert engine._split_local_dependency(line) == expected
+
+
+def test_stage_local_dependency_file(tmp_path):
+    """A local file dependency (e.g. a wheel) is copied, not tree-copied."""
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "mypkg-1.0-py3-none-any.whl").write_text("wheel contents")
+    local_requirements = tmp_path / "local_requirements"
+    local_requirements.mkdir()
+
+    spec = engine._stage_local_dependency(
+        "./mypkg-1.0-py3-none-any.whl", "", src_dir, local_requirements
+    )
+    staged = local_requirements / "mypkg-1.0-py3-none-any.whl"
+    assert spec == "./local_requirements/mypkg-1.0-py3-none-any.whl"
+    assert staged.is_file()
+    assert staged.read_text() == "wheel contents"
+
+
+def test_stage_local_dependency_name_collision(tmp_path):
+    """Two dependencies resolving to the same basename get distinct staged names."""
+    src_dir = tmp_path / "src"
+    (src_dir / "a" / "mypkg").mkdir(parents=True)
+    (src_dir / "b" / "mypkg").mkdir(parents=True)
+    local_requirements = tmp_path / "local_requirements"
+    local_requirements.mkdir()
+
+    spec_a = engine._stage_local_dependency(
+        "./a/mypkg", "", src_dir, local_requirements
+    )
+    spec_b = engine._stage_local_dependency(
+        "./b/mypkg", "", src_dir, local_requirements
+    )
+    assert spec_a == "./local_requirements/mypkg"
+    assert spec_b == "./local_requirements/mypkg_1"
+    assert (local_requirements / "mypkg").is_dir()
+    assert (local_requirements / "mypkg_1").is_dir()
+
+
 @pytest.mark.parametrize(
     "spec, expected",
     [
