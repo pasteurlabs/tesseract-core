@@ -9,6 +9,7 @@ import logging
 import optparse
 import os
 import random
+import re
 import socket
 import tempfile
 import time
@@ -20,6 +21,7 @@ from shutil import copy, copytree, rmtree
 from typing import TYPE_CHECKING, Any, Literal
 
 import requests
+import yaml
 from jinja2 import Environment, PackageLoader, StrictUndefined
 from packaging.requirements import Requirement
 
@@ -140,6 +142,54 @@ def parse_requirements(
         else:
             remote_dependencies.append(line)
     return local_dependencies, remote_dependencies
+
+
+def _split_local_dependency(line: str) -> tuple[str, str]:
+    """Split a local dependency line into its filesystem path and extras suffix.
+
+    A local requirement may carry an extras specifier, e.g. ``./mypkg[extra]``.
+    The extras belong to the install spec, not to the path on disk, so they must
+    be separated before the path is resolved and staged.
+
+    Returns a ``(path, extras)`` tuple where ``extras`` includes the surrounding
+    brackets (e.g. ``"[extra]"``) or is empty if none are present.
+    """
+    match = re.match(r"^(?P<path>.+?)(?P<extras>\[[^\]]*\])?\s*\Z", line.strip())
+    if match is None:
+        # Should not happen for a non-empty line, but fall back to the raw path.
+        return line.strip(), ""
+    return match.group("path"), match.group("extras") or ""
+
+
+def _stage_local_dependency(
+    path: str, extras: str, src_dir: Path, local_requirements_path: Path
+) -> str:
+    """Copy a local dependency into the build context and return its install spec.
+
+    The source path is resolved relative to ``src_dir`` (so ``.``/``..`` segments
+    are collapsed) to derive a valid, unique destination name under
+    ``local_requirements/``. Returns the install spec relative to the build
+    working directory, with any extras suffix preserved.
+    """
+    resolved_src = (src_dir / path).resolve()
+
+    # Derive a valid, unique destination name from the resolved path. Using the
+    # raw path directly would break for lines like ``../..`` (whose ``.name`` is
+    # ``..``, not a real directory name).
+    dest_name = resolved_src.name
+    dest = local_requirements_path / dest_name
+    counter = 1
+    while dest.exists():
+        dest_name = f"{resolved_src.stem}_{counter}{resolved_src.suffix}"
+        dest = local_requirements_path / dest_name
+        counter += 1
+
+    if resolved_src.is_file():
+        copy(resolved_src, dest)
+    else:
+        copytree(resolved_src, dest)
+
+    return f"./local_requirements/{dest_name}{extras}"
 
 
 def get_runtime_dir() -> Path:
@@ -315,23 +365,61 @@ def prepare_build_context(
         else:
             local_dependencies, remote_dependencies = [], []
 
-        if local_dependencies:
-            for dependency in local_dependencies:
-                src = src_dir / dependency
-                dest = context_dir / "local_requirements" / src.name
-                if src.is_file():
-                    copy(src, dest)
-                else:
-                    copytree(src, dest)
+        # Stage each local dependency into the build context and rewrite it to
+        # point at the staged copy (preserving any extras suffix). The install
+        # specs are written back into the requirements file so pip installs them
+        # alongside the remote dependencies.
+        staged_dependencies = []
+        for dependency in local_dependencies:
+            path, extras = _split_local_dependency(dependency)
+            staged_dependencies.append(
+                _stage_local_dependency(path, extras, src_dir, local_requirements_path)
+            )
 
-        # We need to write a new requirements file in the build dir, where we explicitly
-        # removed the local dependencies
+        # We need to write a new requirements file in the build dir, where the
+        # local dependencies are rewritten to their staged locations.
         requirements_file_path = (
             context_dir / "__tesseract_source__" / "tesseract_requirements.txt"
         )
         with requirements_file_path.open("w", encoding="utf-8") as f:
             for dependency in remote_dependencies:
                 f.write(f"{dependency}\n")
+            for dependency in staged_dependencies:
+                f.write(f"{dependency}\n")
+
+    elif requirement_config.provider == "conda":
+        # The conda environment file may declare local-path pip dependencies via
+        # a `pip:` sub-list (e.g. `- ./mypkg_src`). conda resolves those paths
+        # relative to the environment file, but only the file itself is copied
+        # into the build stage, not the surrounding Tesseract source. Stage each
+        # local path into the build context and rewrite it to point at the
+        # staged copy, mirroring the python-pip provider.
+        env_file = src_dir / requirement_config._filename
+        env_dest = context_dir / "__tesseract_source__" / requirement_config._filename
+        if env_file.exists():
+            with env_file.open(encoding="utf-8") as f:
+                env_spec = yaml.safe_load(f) or {}
+
+            for entry in env_spec.get("dependencies", []) or []:
+                if not (isinstance(entry, dict) and "pip" in entry):
+                    continue
+                rewritten_pip = []
+                for pip_dep in entry["pip"] or []:
+                    if isinstance(pip_dep, str) and pip_dep.strip().startswith(
+                        (".", "/", "file://")
+                    ):
+                        path, extras = _split_local_dependency(pip_dep)
+                        rewritten_pip.append(
+                            _stage_local_dependency(
+                                path, extras, src_dir, local_requirements_path
+                            )
+                        )
+                    else:
+                        rewritten_pip.append(pip_dep)
+                entry["pip"] = rewritten_pip
+
+            with env_dest.open("w", encoding="utf-8") as f:
+                yaml.safe_dump(env_spec, f, sort_keys=False)
 
     def _ignore_pycache(_: Any, names: list[str]) -> list[str]:
         ignore = []

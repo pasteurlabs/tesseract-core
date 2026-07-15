@@ -184,6 +184,94 @@ def test_prepare_build_context_package_data_not_found(tmp_path_factory):
         engine.prepare_build_context(src_dir, build_dir, config)
 
 
+def test_prepare_build_context_local_dependency_with_extras(tmp_path_factory):
+    """Local pip dependency with an extras specifier is staged (issue #643)."""
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "tesseract_api.py").touch()
+    (src_dir / "mylocaldep").mkdir()
+    (src_dir / "tesseract_requirements.txt").write_text("numpy\n./mylocaldep[extra]\n")
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(name="foobar")
+    engine.prepare_build_context(src_dir, build_dir, config)
+
+    # The directory (without the extras suffix) is staged.
+    assert (build_dir / "local_requirements" / "mylocaldep").is_dir()
+    assert not (build_dir / "local_requirements" / "mylocaldep[extra]").exists()
+
+    # The rewritten requirements file installs it from the staged copy, keeping
+    # the extra so pip installs it.
+    reqs = (
+        build_dir / "__tesseract_source__" / "tesseract_requirements.txt"
+    ).read_text()
+    assert "numpy" in reqs
+    assert "./local_requirements/mylocaldep[extra]" in reqs
+
+
+def test_prepare_build_context_local_dependency_parent_path(tmp_path_factory):
+    """Local pip dependency reached via ../.. is staged (issue #630)."""
+    parent_dir = tmp_path_factory.mktemp("parent")
+    # A package that lives two levels above the Tesseract source directory.
+    (parent_dir / "mypkg").mkdir()
+    (parent_dir / "mypkg" / "setup.py").touch()
+    src_dir = parent_dir / "sub" / "tesseract"
+    src_dir.mkdir(parents=True)
+    (src_dir / "tesseract_api.py").touch()
+    (src_dir / "tesseract_requirements.txt").write_text("../../mypkg\n")
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(name="foobar")
+    engine.prepare_build_context(src_dir, build_dir, config)
+
+    # The staged name comes from the resolved path, not from `../..`.
+    assert (build_dir / "local_requirements" / "mypkg").is_dir()
+    assert [p.name for p in (build_dir / "local_requirements").iterdir()] == ["mypkg"]
+    reqs = (
+        build_dir / "__tesseract_source__" / "tesseract_requirements.txt"
+    ).read_text()
+    assert "./local_requirements/mypkg" in reqs
+
+
+def test_prepare_build_context_conda_local_dependency(tmp_path_factory):
+    """Conda provider stages local-path pip dependencies (issue #641)."""
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "tesseract_api.py").touch()
+    (src_dir / "mypkg_src").mkdir()
+    (src_dir / "mypkg_src" / "setup.py").touch()
+    env_spec = {
+        "name": "tesseract",
+        "channels": ["conda-forge"],
+        "dependencies": [
+            "python=3.12",
+            "pip",
+            {"pip": ["requests", "./mypkg_src"]},
+        ],
+    }
+    with (src_dir / "tesseract_environment.yaml").open("w") as f:
+        yaml.safe_dump(env_spec, f)
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(
+        name="foobar",
+        build_config=TesseractBuildConfig(
+            requirements={"provider": "conda"},
+        ),
+    )
+    engine.prepare_build_context(src_dir, build_dir, config)
+
+    # The local package is staged into the build context.
+    assert (build_dir / "local_requirements" / "mypkg_src").is_dir()
+
+    # The rewritten environment file points pip at the staged copy while leaving
+    # remote dependencies untouched.
+    rewritten = yaml.safe_load(
+        (build_dir / "__tesseract_source__" / "tesseract_environment.yaml").read_text()
+    )
+    pip_entry = next(e["pip"] for e in rewritten["dependencies"] if isinstance(e, dict))
+    assert "requests" in pip_entry
+    assert "./local_requirements/mypkg_src" in pip_entry
+
+
 @pytest.mark.parametrize("generate_only", [True, False])
 def test_build_tesseract(dummy_tesseract_package, mocked_docker, generate_only, caplog):
     """Test we can build an image for a package and keep build directory."""
