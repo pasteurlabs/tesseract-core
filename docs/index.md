@@ -75,11 +75,11 @@ Fortran, C++, Julia, JAX, PyTorch, or shell scripts.
 Your code stays in its native language, Python is the glue.
 :::
 
-:::{grid-item-card} JAX native
+:::{grid-item-card} JAX & PyTorch native
 :class-card: feature-card
 
-Every Tesseract becomes a JAX primitive,
-with full support for `grad`, `jit`, and `vmap`.
+Every Tesseract becomes a JAX primitive or PyTorch operator,
+with gradients flowing through `jax.grad` and `torch.autograd` alike.
 :::
 
 :::{grid-item-card} Run anywhere
@@ -211,6 +211,28 @@ t.teardown()
 ```
 
 :::
+:::{tab-item} PyTorch
+
+```python
+import torch
+from tesseract_core import Tesseract
+from tesseract_torch import apply_tesseract
+
+t = Tesseract.from_image("my-tesseract")
+t.serve()
+
+x = torch.tensor([3.0], requires_grad=True)
+
+out = apply_tesseract(t, {"x": x})
+# out["y"] => tensor([9.0])
+
+out["y"].sum().backward()
+# x.grad => tensor([6.0])  (via the Tesseract's VJP endpoint)
+
+t.teardown()
+```
+
+:::
 ::::
 
 :::::
@@ -274,6 +296,28 @@ Compose a geometry Tesseract with a FEM solver Tesseract for end-to-end
 parametric structural optimization.
 :::
 
+:::{grid-item-card} Differentiable Fortran (Enzyme)
+:link: content/demo/enzyme-lfortran
+:link-type: doc
+:class-card: demo-card
+:img-top: static/demo-enzyme-lfortran.svg
+:class-img-top: demo-schematic invert-on-dark
+
+Differentiate a Fortran heat-conduction solver end-to-end with Enzyme at the
+LLVM IR level, and solve an inverse problem through Tesseract-JAX.
+:::
+
+:::{grid-item-card} Learned Closure (PyTorch)
+:link: content/demo/learned-closure
+:link-type: doc
+:class-card: demo-card
+:img-top: static/demo-learned-closure.svg
+:class-img-top: demo-schematic invert-on-dark
+
+Train a neural viscosity closure end-to-end through a Burgers' equation
+solver, with PyTorch gradients flowing through both via Tesseract-Torch.
+:::
+
 ::::
 
 :::{div} landing-cta
@@ -289,7 +333,7 @@ parametric structural optimization.
 Tesseract Core is the foundation. Additional packages extend its capabilities.
 :::
 
-::::{grid} 1 1 3 3
+::::{grid} 1 1 2 2
 :gutter: 3
 
 :::{grid-item-card} Tesseract Core
@@ -307,6 +351,14 @@ differentiable components.
 
 Embed Tesseracts as JAX primitives. Fully compatible with `jit`, `vmap`,
 and `grad`.
+:::
+
+:::{grid-item-card} Tesseract-Torch
+:link: https://github.com/pasteurlabs/tesseract-torch
+:class-card: ecosystem-card
+
+Embed Tesseracts as PyTorch operators. Gradients flow through with
+`torch.autograd`.
 :::
 
 :::{grid-item-card} Tesseract-Streamlit

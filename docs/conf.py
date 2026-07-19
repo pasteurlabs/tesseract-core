@@ -48,7 +48,7 @@ extensions = [
     "sphinx.ext.napoleon",
     "sphinx.ext.viewcode",
     "sphinx_autodoc_typehints",
-    "sphinx_click.ext",
+    "sphinxcontrib.typer",
     # Copy button for code blocks
     "sphinx_copybutton",
     # OpenGraph metadata for social media sharing

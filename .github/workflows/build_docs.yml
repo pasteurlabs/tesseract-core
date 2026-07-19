@@ -34,13 +34,6 @@ jobs:
         run: |
           uv sync --extra docs --frozen
 
-      # TEMPORARY: sphinx-click cannot introspect typer's vendored click (typer
-      # >= 0.26), which breaks the CLI reference pages. Pin to the last real-click
-      # typer for the docs build only (does not affect the shipped package) until
-      # we settle on a long-term docs fix. See the docs CLI reference pages.
-      - name: Pin typer < 0.26 for docs build (sphinx-click compatibility)
-        run: uv pip install 'typer<0.26'
-
       - name: Build docs
         working-directory: docs
         run: |
