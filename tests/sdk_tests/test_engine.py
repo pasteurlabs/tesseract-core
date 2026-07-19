@@ -219,7 +219,8 @@ def test_prepare_build_context_local_dependency_file_url(tmp_path_factory):
     (dep_dir / "setup.py").touch()
     src_dir = tmp_path_factory.mktemp("src")
     (src_dir / "tesseract_api.py").touch()
-    (src_dir / "tesseract_requirements.txt").write_text(f"numpy\nfile://{dep_dir}\n")
+    # `Path.as_uri()` yields a well-formed file:// URL on any platform.
+    (src_dir / "tesseract_requirements.txt").write_text(f"numpy\n{dep_dir.as_uri()}\n")
     build_dir = tmp_path_factory.mktemp("build")
 
     config = TesseractConfig(name="foobar")
@@ -810,12 +811,24 @@ def test_prepare_build_context_conda_no_env_file(tmp_path_factory):
         ("../../pkg[a,b]", ("../../pkg", "[a,b]")),
         ("/abs/path", ("/abs/path", "")),
         ("./a[b] ", ("./a", "[b]")),
-        ("file:///abs/path", ("/abs/path", "")),
-        ("file:///abs/path[extra]", ("/abs/path", "[extra]")),
     ],
 )
 def test_split_local_dependency(line, expected):
     assert engine._split_local_dependency(line) == expected
+
+
+def test_split_local_dependency_file_url(tmp_path):
+    """A file:// URL is converted back to a native filesystem path."""
+    target = tmp_path / "mypkg"
+    # `Path.as_uri()` produces a correctly-formed file:// URL on any platform,
+    # so this round-trips regardless of the OS path separator.
+    path, extras = engine._split_local_dependency(target.as_uri())
+    assert path == str(target)
+    assert extras == ""
+
+    path, extras = engine._split_local_dependency(target.as_uri() + "[extra]")
+    assert path == str(target)
+    assert extras == "[extra]"
 
 
 def test_stage_local_dependency_file(tmp_path):
