@@ -335,6 +335,50 @@ def test_outputs_to_local_file(
         raise AssertionError(f"Unexpected output format: {output_format}")
 
 
+@pytest.mark.parametrize("via_env", [True, False], ids=["env", "cli_flag"])
+def test_apply_command_binref_lz4(
+    cli, cli_runner, tmpdir, dummy_tesseract_module, via_env
+):
+    """Test that binref lz4 compression works when set via env var or CLI flag."""
+    tmpdir = Path(tmpdir)
+    args = [
+        "--output-path",
+        tmpdir,
+        "--output-format",
+        "json+binref",
+    ]
+    if not via_env:
+        args += ["--compression", "lz4"]
+    args += ["apply", json.dumps({"inputs": test_input})]
+
+    result = cli_runner.invoke(
+        cli,
+        args,
+        env={"TESSERACT_COMPRESSION": "lz4"} if via_env else {},
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0, result.stderr
+
+    output = json.loads(result.stdout)
+    # Verify compression metadata is present on array fields
+    for field in dummy_tesseract_module.OutputSchema.model_fields:
+        val = output[field]
+        if isinstance(val, dict) and val.get("object_type") == "array":
+            assert val["data"]["encoding"] == "binref"
+            assert val["data"]["compression"] == "lz4"
+            # compressed_size is now embedded in the buffer spec as path:offset:compressed_size
+            assert val["data"]["buffer"].count(":") == 2
+
+    # Verify the data roundtrips correctly
+    test_input_val = dummy_tesseract_module.InputSchema.model_validate(test_input)
+    expected = dummy_tesseract_module.apply(test_input_val)
+    roundtrip = dummy_tesseract_module.OutputSchema.model_validate_json(
+        result.stdout, context={"base_dir": tmpdir}
+    )
+    for field in expected.model_fields:
+        assert np.array_equal(getattr(roundtrip, field), getattr(expected, field))
+
+
 @pytest.mark.parametrize(
     "test_server",
     [

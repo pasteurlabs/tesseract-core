@@ -29,15 +29,20 @@ jobs:
           pip install toml packaging
           python .github/workflows/update_runtime_deps.py pyproject.toml
 
+      - name: Install pre-commit
+        # uv provides the interpreter and puts pre-commit on PATH for the steps
+        # below.
+        run: |
+          uv tool install pre-commit
+
       - name: Update lockfile
         run: |
-          mv production.uv.lock uv.lock
-          uv lock --upgrade
-          mv uv.lock production.uv.lock
+          # Remove lockfile to force update
+          rm production.uv.lock
+          pre-commit run update-uv-env --all-files || true
 
       - name: Generate new requirements.txt
         run: |
-          pip install pre-commit
           pre-commit run update-requirements --all-files || true
 
       - name: Detect if changes were made

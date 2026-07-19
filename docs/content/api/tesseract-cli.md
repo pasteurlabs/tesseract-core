@@ -1,7 +1,11 @@
 # CLI Reference (`tesseract`)
 
 ```{eval-rst}
-.. click:: tesseract_core.sdk.cli:typer_click_object
+.. typer:: tesseract_core.sdk.cli:app
    :prog: tesseract
-   :nested: full
+   :make-sections:
+   :show-nested:
+   :preferred: svg
+   :theme: dark
+   :width: 100
 ```
