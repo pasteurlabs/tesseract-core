@@ -48,12 +48,13 @@ jobs:
       - name: Install package
         run: |
           cp production.uv.lock uv.lock
-          uv sync --python ${{ matrix.python-version }} --extra dev --frozen
-
           if [ "${{ matrix.runtime-deps }}" == "oldest" ]; then
             # replace >= with == in runtime deps section of pyproject.toml to install oldest runtime deps
             sed -i '/^runtime = \[$/,/^]$/s/>=/==/g' ./pyproject.toml
-            uv pip install -e .[runtime]
+            # re-resolve (unfrozen) so the whole env is consistent against the oldest runtime pins
+            uv sync --python ${{ matrix.python-version }} --extra dev
+          else
+            uv sync --python ${{ matrix.python-version }} --extra dev --frozen
           fi
 
       - name: Run test suite
