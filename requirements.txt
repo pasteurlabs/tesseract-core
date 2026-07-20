@@ -6,7 +6,7 @@ annotated-types==0.7.0
     # via pydantic
 certifi==2026.6.17
     # via requests
-charset-normalizer==3.4.7
+charset-normalizer==3.4.9
     # via requests
 colorama==0.4.6 ; sys_platform == 'win32'
     # via typer
@@ -52,7 +52,7 @@ rich==15.0.0
     #   typer
 shellingham==1.5.4
     # via typer
-typer==0.26.8
+typer==0.27.0
     # via tesseract-core
 typing-extensions==4.16.0
     # via
