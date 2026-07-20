@@ -110,17 +110,27 @@ jax.grad(lambda v: pipeline(v).sum())(vector)   # gradient through both Tesserac
 
 Because chaining is just data flow, ordinary control flow works too. Put a Tesseract call in a loop, behind a conditional, inside `jax.lax.scan`, or wherever your program needs it.
 
-When a chain misbehaves, test each Tesseract in isolation first. A component you've verified on its own against a known input/output pair is a fixed point you can trust while debugging the workflow around it.
+When a chain misbehaves, test each Tesseract in isolation first. A component you've verified on its own against a known input/output pair is a fixed point you can trust while debugging the workflow around it, and the built-in [`test` endpoint](#testing-a-tesseract) is made for exactly this.
 
-The one thing that makes or breaks chaining is at the _interface_, not the call site: a step composes cleanly with the next only if its output fields line up with the downstream input schema. Design for that.
+Chaining is easiest when the pieces fit at the _interface_. Two Tesseracts compose most cleanly when one's output fields already match the next's input schema; when they don't, you bridge the gap with ordinary code (renaming, reshaping, selecting fields), as in the examples above. Worth keeping in mind when you design a Tesseract that you expect to feed another.
 
 ```{seealso}
-[Designing good interfaces](design-patterns.md#designing-good-interfaces) — matching one Tesseract's `OutputSchema` to the next's `InputSchema` is what keeps chains readable. Design interfaces with the downstream consumer in mind.
+[Designing good interfaces](#designing-good-interfaces) — when a Tesseract's `OutputSchema` lines up with the next's `InputSchema`, chains stay readable and need less glue code in between.
 ```
+
+(building-a-multi-tesseract-project)=
 
 ## Building a multi-Tesseract project
 
 Once a project grows past a couple of Tesseracts, some structure pays off: a consistent place for each component, a way to share code between them, and a build-and-test loop that covers the whole set. Rather than assemble this by hand, the [`cookiecutter-tesseract`](https://github.com/pasteurlabs/cookiecutter-tesseract) template generates a ready-made project with all of it wired up:
+
+With [uv](https://docs.astral.sh/uv/), which runs `cookiecutter` without a separate install step:
+
+```bash
+$ uvx cookiecutter github:pasteurlabs/cookiecutter-tesseract
+```
+
+Or with `pip`:
 
 ```bash
 $ pip install cookiecutter
