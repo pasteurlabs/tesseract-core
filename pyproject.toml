@@ -43,8 +43,9 @@ runtime = [
     "fastapi<=0.139.2,>=0.115",
     "requests<=2.34.2,>=2.32.4",
     "uvicorn<=0.51.0,>=0.34",
-    "typer<=0.27.0,>=0.26.8",  # floor raised to satisfy docs' sphinxcontrib-typer (needs >=0.26.8)
+    "typer<=0.27.0,>=0.26.8",  # sphinxcontrib-typer needs >=0.26.8
     "fsspec[http,s3]<=2026.6.0,>=2024.12",
+    "s3fs<=2026.6.0,>=2024.12",  # enters via fsspec[s3]; pin explicitly so the oldest resolution can't pair an ancient s3fs with a modern aiobotocore
     "pybase64<=1.4.3,>=1.4",
     "orjson<=3.11.9,>=3.10",
     "numpy<=2.5.1,>=1.26",
