@@ -542,6 +542,173 @@ def test_serve_tesseract_volumes(mocked_docker, tmpdir):
         engine.serve("foobar", input_path=str(indir), output_path=str(indir))
 
 
+def test_serve_debug_port_distinct_from_api_port(mocked_docker, monkeypatch):
+    """The debugpy port must never reuse the API port.
+
+    Regression test: in debug mode, ``serve`` picks two free ports (API and
+    debugpy). Both are drawn from the same range, so if the second draw is not
+    told to exclude the first, they can collide. When they do, the two entries
+    in ``port_mappings`` share the same host key and the dict silently collapses
+    to one entry, publishing the wrong container port. This showed up as a rare,
+    flaky ``[Errno 98] address already in use`` inside the container.
+
+    We force ``get_free_port`` onto a two-port range so a collision is likely
+    (~50%) without a fix, then assert the two host ports are always distinct.
+    """
+    # Reserve one port so exactly two ports remain free in the range below.
+    with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as occupied:
+        occupied.bind(("127.0.0.1", 0))
+        anchor = occupied.getsockname()[1]
+
+        # A range wide enough to hold two free ports around the anchor. The
+        # anchor itself is bound, so get_free_port will only ever hand back the
+        # two neighbours -> a naive double-draw collides roughly half the time.
+        within_range = (anchor - 1, anchor + 2)
+        real_get_free_port = engine.get_free_port
+        monkeypatch.setattr(
+            engine,
+            "get_free_port",
+            lambda within_range=within_range, exclude=(): real_get_free_port(
+                within_range=within_range, exclude=exclude
+            ),
+        )
+
+        # Run enough iterations that a collision would almost certainly surface
+        # if the exclusion were missing (P(no collision in 40 tries) ~ 1e-12).
+        for _ in range(40):
+            res, _ = engine.serve("foobar", debug=True)
+            port_mappings = json.loads(res)["ports"]
+            host_ports = [key.split(":")[-1] for key in port_mappings]
+            # Both the API and debugpy mappings must survive as separate entries.
+            assert len(port_mappings) == 2, f"port mapping collapsed: {port_mappings}"
+            assert len(set(host_ports)) == 2, (
+                f"debug and API host ports collided: {host_ports}"
+            )
+
+
+def test_serve_container_port_decoupled_from_host_port(mocked_docker):
+    """The container-side API port is fixed and independent of the host port.
+
+    In port-mapping mode the container binds a fixed internal port; only the
+    host port is dynamic. This mirrors debugpy and removes the coupling that
+    let a host-port collision corrupt the internal mapping.
+    """
+    res, _ = engine.serve("foobar", debug=True)
+    port_mappings = json.loads(res)["ports"]
+
+    # Keys are host side (dynamic), values are container side (fixed constants).
+    assert set(port_mappings.values()) == {
+        engine.CONTAINER_API_PORT,
+        engine.CONTAINER_DEBUGPY_PORT,
+    }
+
+
+def test_serve_retries_on_port_in_use(mocked_docker, monkeypatch):
+    """A port that is taken before the container binds triggers a retry.
+
+    When serve picks the port itself, a lost race for that port (the container
+    fails to bind it) should cause serve to pick a fresh port and try again,
+    rather than surfacing the failure to the caller.
+    """
+    seen_ports = []
+    fail_times = 2  # fail the first two attempts, succeed on the third
+
+    def flaky_health(container, ping_ip, port, timeout=30):
+        seen_ports.append(port)
+        if len(seen_ports) <= fail_times:
+            raise engine._PortInUseError(f"Port {port} was already in use")
+        # success -> return normally
+
+    monkeypatch.setattr(engine, "_wait_for_health", flaky_health)
+
+    res, _ = engine.serve("foobar")
+    assert res
+    # It retried until success and used a distinct port each time.
+    assert len(seen_ports) == fail_times + 1
+    assert len(set(seen_ports)) == len(seen_ports), (
+        f"retries reused a port: {seen_ports}"
+    )
+
+
+def test_serve_retries_on_docker_publish_conflict(mocked_docker, monkeypatch):
+    """A host-port publish collision (ContainerError) triggers a retry.
+
+    In port-mapping mode a lost port race fails when the Docker daemon tries to
+    publish the host port -- ``containers.run`` raises ``ContainerError`` before
+    any container exists. This must be retried like the host-network case.
+    """
+    from tesseract_core.sdk.docker_client import ContainerError
+
+    real_run = mocked_docker.containers.run
+    calls = {"n": 0}
+
+    def flaky_run(**kwargs):
+        calls["n"] += 1
+        if calls["n"] <= 2:
+            raise ContainerError(
+                None,
+                125,
+                "docker run ...",
+                kwargs["image"],
+                b"docker: Error response from daemon: port is already allocated.",
+            )
+        return real_run(**kwargs)
+
+    monkeypatch.setattr(mocked_docker.containers, "run", flaky_run)
+
+    res, _ = engine.serve("foobar")
+    assert res
+    assert calls["n"] == 3  # two conflicts, then success
+
+
+def test_serve_reraises_non_port_container_error(mocked_docker, monkeypatch):
+    """A ContainerError that is not a port conflict is not retried."""
+    from tesseract_core.sdk.docker_client import ContainerError
+
+    def failing_run(**kwargs):
+        raise ContainerError(
+            None, 1, "docker run ...", kwargs["image"], b"some other failure"
+        )
+
+    monkeypatch.setattr(mocked_docker.containers, "run", failing_run)
+
+    with pytest.raises(ContainerError):
+        engine.serve("foobar")
+
+
+def test_serve_gives_up_after_max_port_attempts(mocked_docker, monkeypatch):
+    """If every attempt loses the port race, serve raises rather than looping forever."""
+
+    def always_in_use(container, ping_ip, port, timeout=30):
+        raise engine._PortInUseError(f"Port {port} was already in use")
+
+    monkeypatch.setattr(engine, "_wait_for_health", always_in_use)
+
+    with pytest.raises(RuntimeError, match="Failed to find a free port"):
+        engine.serve("foobar")
+
+
+def test_serve_does_not_retry_user_supplied_port(mocked_docker, monkeypatch):
+    """A user-supplied fixed port is honored verbatim and never retried.
+
+    Retrying would silently move the Tesseract to a different port than the one
+    the caller explicitly asked for, so a bind failure must surface immediately.
+    """
+    attempts = []
+
+    def always_in_use(container, ping_ip, port, timeout=30):
+        attempts.append(port)
+        raise engine._PortInUseError(f"Port {port} was already in use")
+
+    monkeypatch.setattr(engine, "_wait_for_health", always_in_use)
+
+    with pytest.raises(engine._PortInUseError):
+        engine.serve("foobar", port="12345")
+
+    # Exactly one attempt, on the exact port requested.
+    assert attempts == ["12345"]
+
+
 def test_needs_docker(mocked_docker, monkeypatch):
     @engine.needs_docker
     def run_something_with_docker():

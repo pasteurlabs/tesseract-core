@@ -28,6 +28,7 @@ from .docker_client import (
     APIError,
     CLIDockerClient,
     Container,
+    ContainerError,
     Image,
     NotFound,
     build_docker_image,
@@ -41,6 +42,15 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("tesseract")
 docker_client = CLIDockerClient()
+
+# Fixed port the API server binds *inside* the container when port-mapping is
+# used (i.e. everything except host networking). The container has its own
+# network namespace, so this need not be dynamic -- only the host-side port
+# does. Keeping it fixed mirrors how debugpy is handled (fixed 5678 inside,
+# dynamic host mapping) and decouples the container port from the host port.
+CONTAINER_API_PORT = "8000"
+# Fixed port the debugpy server binds inside the container (see runtime serve).
+CONTAINER_DEBUGPY_PORT = "5678"
 
 # Jinja2 Environment
 ENV = Environment(
@@ -590,6 +600,51 @@ def _ensure_network_exists(network: str) -> None:
         docker_client.networks.create(network)
 
 
+class _PortInUseError(RuntimeError):
+    """Container failed to start because its port was already bound.
+
+    Signals that a fresh port should be picked and startup retried. Only raised
+    when we chose the port ourselves; a user-supplied port is never retried.
+
+    A port collision surfaces in one of two ways depending on network mode:
+    - port-mapping mode: the Docker daemon fails to publish the host port and
+      ``containers.run`` raises ``ContainerError`` ("port is already allocated").
+    - host networking: the container binds the host port directly, so the
+      failure appears in the container logs as uvicorn's "address already in
+      use" and is detected in ``_wait_for_health``.
+    """
+
+
+# Substrings container runtimes use to report a host port already being taken.
+_PORT_CONFLICT_MARKERS = ("address already in use", "port is already allocated")
+
+
+def _is_port_conflict(stderr: str) -> bool:
+    """Whether runtime stderr/logs indicate a host port collision."""
+    lowered = stderr.lower()
+    return any(marker in lowered for marker in _PORT_CONFLICT_MARKERS)
+
+
+def _retry_or_raise_port_conflict(
+    port: str, auto_port: bool, attempt: int, max_attempts: int
+) -> None:
+    """Decide whether a port collision should be retried.
+
+    Returns normally if the caller should retry with a fresh port; raises
+    otherwise. A user-supplied fixed port is never retried (we must not
+    silently move the Tesseract elsewhere), and auto-selected ports raise once
+    the attempt budget is exhausted.
+    """
+    if not auto_port:
+        # User asked for this exact port; surface the collision as-is.
+        raise _PortInUseError(f"Port {port} was already in use")
+    if attempt + 1 >= max_attempts:
+        raise RuntimeError(
+            f"Failed to find a free port after {max_attempts} attempts"
+        ) from None
+    logger.info(f"Port {port} was taken, retrying with a new port...")
+
+
 def _wait_for_health(
     container: Container, ping_ip: str, port: str, timeout: float = 30
 ) -> None:
@@ -609,10 +664,11 @@ def _wait_for_health(
         container_status = docker_client.containers.get(container.id).status
 
         if timeout < 0 or container_status != "running":
+            logs_text = ""
             try:
-                container_logs = container.logs(stdout=True, stderr=True)
+                logs_text = container.logs(stdout=True, stderr=True).decode()
                 logger.error(
-                    f"Tesseract container {container.name} failed to start:\n{container_logs.decode()}"
+                    f"Tesseract container {container.name} failed to start:\n{logs_text}"
                 )
             except APIError as ex:
                 logger.warning(
@@ -622,6 +678,12 @@ def _wait_for_health(
                 container.stop()
             except APIError as ex:
                 logger.warning(f"Failed to stop container {container.name}: {ex}")
+
+            # A port collision is racy and worth retrying with a fresh port;
+            # distinguish it from genuine startup failures so those still fail
+            # fast.
+            if _is_port_conflict(logs_text):
+                raise _PortInUseError(f"Port {port} was already in use")
 
             if timeout < 0:
                 raise TimeoutError("Tesseract did not start in time")
@@ -726,85 +788,121 @@ def serve(
     if output_format:
         environment["TESSERACT_OUTPUT_FORMAT"] = output_format
 
+    # A port picked by get_free_port can be grabbed by another process between
+    # our check and the container binding it (an unavoidable race, since the
+    # port must be released before the container can bind it). When we choose
+    # the port, retry a few times with a fresh one; a user-supplied fixed port
+    # is honored as-is and never retried.
     if not port:
-        port = str(get_free_port())
+        auto_port = True
+
+        def pick_port() -> str:
+            return str(get_free_port())
+    elif "-" in port:
+        auto_port = True
+        port_start, port_end = (int(p) for p in port.split("-"))
+
+        def pick_port() -> str:
+            return str(get_free_port(within_range=(port_start, port_end)))
     else:
-        # Convert port ranges to fixed ports
-        if "-" in port:
-            port_start, port_end = port.split("-")
-            port = str(get_free_port(within_range=(int(port_start), int(port_end))))
+        auto_port = False
+        fixed_port = port
 
-    args = []
-    container_api_port = port
-    container_debugpy_port = "5678"
+        def pick_port() -> str:
+            return fixed_port
 
-    args.extend(["--port", container_api_port])
+    max_attempts = 5 if auto_port else 1
+    for attempt in range(max_attempts):
+        # `port` is always the host-side port (what we publish and health-check).
+        port = pick_port()
 
-    if num_workers > 1:
-        args.extend(["--num-workers", str(num_workers)])
+        # When using host network there is no port mapping: the container binds
+        # the host's namespace directly, so the container port must equal the
+        # host port. Otherwise the container binds a fixed internal port and we
+        # map the (dynamic) host port onto it.
+        if network == "host":
+            ping_ip = "127.0.0.1"
+            port_mappings = None
+            container_api_port = port
+        else:
+            ping_ip = "127.0.0.1" if host_ip == "0.0.0.0" else host_ip
+            container_api_port = CONTAINER_API_PORT
+            port_mappings = {f"{host_ip}:{port}": container_api_port}
 
-    # Always bind to all interfaces inside the container
-    args.extend(["--host", "0.0.0.0"])
+        args = ["--port", container_api_port]
+        if num_workers > 1:
+            args.extend(["--num-workers", str(num_workers)])
+        # Always bind to all interfaces inside the container
+        args.extend(["--host", "0.0.0.0"])
 
-    # When using host network, no port mapping is needed (container binds directly to host ports)
-    # and we should always ping on localhost
-    if network == "host":
-        ping_ip = "127.0.0.1"
-        port_mappings = None
-    elif host_ip == "0.0.0.0":
-        ping_ip = "127.0.0.1"
-        port_mappings = {f"{host_ip}:{port}": container_api_port}
-    else:
-        ping_ip = host_ip
-        port_mappings = {f"{host_ip}:{port}": container_api_port}
+        if debug:
+            # debugpy binds a fixed port inside the container; only its host
+            # mapping is dynamic. Exclude the host API port so the two host
+            # ports never collide (they share the same range).
+            debugpy_port = str(get_free_port(exclude=(int(port),)))
+            if port_mappings is not None:
+                port_mappings[f"{host_ip}:{debugpy_port}"] = CONTAINER_DEBUGPY_PORT
+            environment["TESSERACT_DEBUG"] = "1"
 
-    if debug:
-        debugpy_port = str(get_free_port())
-        if port_mappings is not None:
-            port_mappings[f"{host_ip}:{debugpy_port}"] = container_debugpy_port
-        environment["TESSERACT_DEBUG"] = "1"
+        extra_args = [
+            "--restart",
+            "unless-stopped",
+        ]
 
-    extra_args = [
-        "--restart",
-        "unless-stopped",
-    ]
+        if is_podman():
+            # This ensures podman behaves like Docker in terms of user namespaces
+            # and allows the container to run with the same user ID as the host.
+            extra_args.extend(["--userns", "keep-id"])
 
-    if is_podman():
-        # This ensures podman behaves like Docker in terms of user namespaces
-        # and allows the container to run with the same user ID as the host.
-        extra_args.extend(["--userns", "keep-id"])
+        if network_alias is not None:
+            if network is None:
+                raise ValueError(
+                    "Network must be specified if network_alias is provided"
+                )
+            extra_args.extend(["--network-alias", network_alias])
 
-    if network_alias is not None:
-        if network is None:
-            raise ValueError("Network must be specified if network_alias is provided")
-        extra_args.extend(["--network-alias", network_alias])
+        if docker_args:
+            extra_args.extend(docker_args)
 
-    if docker_args:
-        extra_args.extend(docker_args)
+        if network is not None:
+            _ensure_network_exists(network)
 
-    if network is not None:
-        _ensure_network_exists(network)
+        try:
+            # In port-mapping mode a host-port collision fails here, when the
+            # daemon tries to publish the port. In host-network mode it instead
+            # surfaces from _wait_for_health (uvicorn's own bind fails).
+            container = docker_client.containers.run(
+                image=image_name,
+                command=["serve", *args],
+                device_requests=gpus,
+                ports=port_mappings,
+                network=network,
+                detach=True,
+                volumes=parsed_volumes,
+                user=user,
+                memory=memory,
+                environment=environment,
+                extra_args=extra_args,
+            )
+            assert isinstance(container, Container)
 
-    container = docker_client.containers.run(
-        image=image_name,
-        command=["serve", *args],
-        device_requests=gpus,
-        ports=port_mappings,
-        network=network,
-        detach=True,
-        volumes=parsed_volumes,
-        user=user,
-        memory=memory,
-        environment=environment,
-        extra_args=extra_args,
-    )
-    assert isinstance(container, Container)
+            if skip_health_check:
+                logger.info("Skipping health check, Tesseract may not be ready yet")
+                break
 
-    if skip_health_check:
-        logger.info("Skipping health check, Tesseract may not be ready yet")
-    else:
-        logger.info("Waiting for Tesseract to start...")
-        _wait_for_health(container, ping_ip, port)
+            logger.info("Waiting for Tesseract to start...")
+            _wait_for_health(container, ping_ip, port)
+        except ContainerError as ex:
+            if not _is_port_conflict(ex.stderr.decode("utf-8", errors="ignore")):
+                raise
+            # Publish failed; no container was created, nothing to clean up.
+            _retry_or_raise_port_conflict(port, auto_port, attempt, max_attempts)
+            continue
+        except _PortInUseError:
+            container.remove(force=True)
+            _retry_or_raise_port_conflict(port, auto_port, attempt, max_attempts)
+            continue
+        break
 
     logger.info(f"Serving Tesseract at http://{ping_ip}:{port}")
     logger.info(f"View Tesseract: http://{ping_ip}:{port}/docs")
