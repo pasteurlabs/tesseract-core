@@ -140,3 +140,19 @@ $ curl \
 The `.bin` file references are relative to the `--output-path`.
 :::
 ::::
+
+### lz4 compression
+
+Set the `TESSERACT_COMPRESSION=lz4` config variable to compress arrays in the output. This applies to both `json+binref` and `json+base64` formats. For binref, each array is compressed individually, preserving offset-based random access, with the compressed size embedded in the buffer path (`<file>:<offset>:<compressed_size>`).
+
+`TESSERACT_COMPRESSION` only affects how a Tesseract encodes its _output_; inputs are always decoded according to their own per-array `compression` field, so no configuration is needed to read compressed data.
+
+Because it is a runtime config variable, it must be forwarded into the container with `-e` when using `tesseract run` (a plain shell prefix would stay on the host):
+
+```bash
+$ tesseract run -e TESSERACT_COMPRESSION=lz4 vectoradd apply -f "json+binref" -o /tmp/output @examples/vectoradd/example_inputs.json
+$ cat /tmp/output/results.json
+{"result":{"object_type":"array","shape":[3],"dtype":"float64","data":{"buffer":"....bin:0:35","encoding":"binref","compression":"lz4"}}}
+```
+
+When calling `tesseract-runtime` directly (e.g. inside a container), the plain `TESSERACT_COMPRESSION=lz4 tesseract-runtime ...` prefix works as usual.

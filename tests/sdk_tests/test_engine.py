@@ -3,7 +3,9 @@
 
 import json
 import logging
+import socket
 import time
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -697,3 +699,68 @@ def test_split_volume_spec(spec, expected):
 )
 def test_is_local_volume(volume, expected):
     assert engine._is_local_volume(volume) == expected
+
+
+@pytest.mark.parametrize(
+    "within_range",
+    [
+        (-1, 100),
+        (0, 65536),
+        (100, 50),
+    ],
+)
+def test_get_free_port_invalid_range(within_range):
+    with pytest.raises(ValueError, match="Invalid port range"):
+        engine.get_free_port(within_range=within_range)
+
+
+def test_get_free_port_skips_port_in_use():
+    """A port that is already bound is skipped in favor of a free one."""
+    # Reserve two adjacent ports up front so we know both belong to the test,
+    # then release one of them to act as the only free candidate.
+    with (
+        closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as occupied,
+        closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as spare,
+    ):
+        occupied.bind(("127.0.0.1", 0))
+        in_use = occupied.getsockname()[1]
+        # Find an adjacent port we can also reserve, so the range holds exactly
+        # the occupied port plus one known-free port.
+        free = None
+        for candidate in (in_use + 1, in_use - 1):
+            if 0 <= candidate <= 65535:
+                try:
+                    spare.bind(("127.0.0.1", candidate))
+                except OSError:
+                    continue
+                free = candidate
+                break
+        assert free is not None, "could not reserve an adjacent port"
+        # Release the spare port so it becomes the only free port in the range.
+        spare.close()
+
+        within_range = (min(in_use, free), max(in_use, free) + 1)
+        port = engine.get_free_port(within_range=within_range)
+
+    assert port == free
+
+
+def test_get_free_port_no_free_ports():
+    """RuntimeError is raised when every port in the range is in use."""
+    with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as occupied:
+        occupied.bind(("127.0.0.1", 0))
+        in_use = occupied.getsockname()[1]
+
+        # Range containing only the single occupied port (end is exclusive).
+        with pytest.raises(RuntimeError, match="No free ports found"):
+            engine.get_free_port(within_range=(in_use, in_use + 1))
+
+
+def test_get_free_port_all_excluded():
+    """RuntimeError is raised when the only candidate port is excluded."""
+    with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
+        s.bind(("127.0.0.1", 0))
+        free = s.getsockname()[1]
+
+    with pytest.raises(RuntimeError, match="No free ports found"):
+        engine.get_free_port(within_range=(free, free + 1), exclude=(free,))

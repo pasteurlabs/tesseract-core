@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, Mock
 
 import numpy as np
 import orjson
+import pybase64
 import pytest
 import requests
 from pydantic import ValidationError
@@ -430,6 +431,31 @@ def test_decode_array_various_dtypes(dtype):
     # Verify equivalence
     np.testing.assert_array_equal(decoded, original, strict=True)
     assert decoded.dtype == original.dtype
+
+
+@pytest.mark.parametrize("encoding", ["binref", "base64"])
+def test_decode_array_lz4(encoding, tmp_path):
+    from tesseract_core.runtime.array_encoding import _compress
+
+    arr = np.array([1.0, 2.0, 3.0], dtype="float32")
+    blob = _compress(arr.tobytes(), "lz4")
+
+    if encoding == "binref":
+        bin_file = tmp_path / "data.bin"
+        bin_file.write_bytes(blob)
+        buffer = f"data.bin:0:{len(blob)}"
+        output_path = tmp_path
+    else:
+        buffer = pybase64.b64encode_as_string(blob)
+        output_path = None
+
+    encoded = {
+        "shape": (3,),
+        "dtype": "float32",
+        "data": {"buffer": buffer, "encoding": encoding, "compression": "lz4"},
+    }
+    decoded = _decode_array(encoded, output_path=output_path)
+    np.testing.assert_array_equal(decoded, arr, strict=True)
 
 
 def test_tree_map():

@@ -14,8 +14,6 @@ import types
 from textwrap import indent
 from typing import Any, get_args, get_origin
 
-import typer
-
 from tesseract_core.runtime.cli import (
     _add_user_commands_to_cli,
     _prettify_docstring,
@@ -129,6 +127,3 @@ globals().update({func.__name__: func for func in endpoints})
 
 cli_app = copy.deepcopy(cli_app)
 _add_user_commands_to_cli(cli_app, out_stream=None)
-
-# Expose the underlying click object for doc generation
-tesseract_runtime_cli = typer.main.get_command(cli_app)
