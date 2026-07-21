@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.11.0] - 2026-07-21
+
+### Features
+
+- Add optional lz4 compression support for arrays passed via `base64` or `binref` encoding (#579)
+
+### Bug Fixes
+
+- Squash all requirement handling bugs (#644)
+
+### Documentation
+
+- Replace sphinx-click with sphinxcontrib-typer (#634)
+- Add learned closure demo, add T-torch to landing page + docs (#626)
+- Add enzyme integration demo + blog post (#542)
+
 ## [1.10.0] - 2026-06-17
 
 ### Features
