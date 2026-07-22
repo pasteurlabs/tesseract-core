@@ -158,6 +158,47 @@ body[data-theme="dark"] .invert-on-dark {
 }
 
 
+/* ===== Announcement banner ===== */
+
+.landing-banner {
+    max-width: var(--landing-max-width);
+    margin: 1.5rem auto 0;
+    padding: 0 1.5rem;
+}
+
+.landing-banner > p {
+    margin: 0;
+}
+
+.landing-banner a {
+    display: block;
+    padding: 0.75rem 1.25rem;
+    border-radius: var(--radius-md);
+    background: var(--accent-gradient);
+    color: #fff !important;
+    font-size: 0.95rem;
+    line-height: 1.5;
+    text-decoration: none;
+    transition: box-shadow 0.2s, transform 0.2s;
+}
+
+.landing-banner a:hover,
+.landing-banner a:focus-visible {
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+    transform: translateY(-1px);
+}
+
+.landing-banner a:focus-visible {
+    outline: 2px solid var(--color-brand-primary);
+    outline-offset: 2px;
+}
+
+.landing-banner-cta {
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+
 /* ===== Hero ===== */
 
 .landing-hero {

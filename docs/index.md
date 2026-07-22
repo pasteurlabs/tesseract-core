@@ -9,6 +9,10 @@ og:description: "Compose solvers, geometry ops, ML models, and more into end-to-
 
 # Tesseract
 
+:::{div} landing-banner
+[**Tesseract Hackathon 2026** &mdash; Compose differentiable scientific workflows and compete for a **$20,000** prize pool. August 3&ndash;31, online. <span class="landing-banner-cta">Register now &rarr;</span>](https://pasteurlabs.ai/tesseract-hackathon-2026/)
+:::
+
 ::::::{div} landing-hero
 
 :::{div} landing-hero-logo
