@@ -184,6 +184,141 @@ def test_prepare_build_context_package_data_not_found(tmp_path_factory):
         engine.prepare_build_context(src_dir, build_dir, config)
 
 
+def test_prepare_build_context_local_dependency_with_extras(tmp_path_factory):
+    """Local pip dependency with an extras specifier is staged (issue #643)."""
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "tesseract_api.py").touch()
+    (src_dir / "mylocaldep").mkdir()
+    (src_dir / "tesseract_requirements.txt").write_text("numpy\n./mylocaldep[extra]\n")
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(name="foobar")
+    engine.prepare_build_context(src_dir, build_dir, config)
+
+    # The directory (without the extras suffix) is staged.
+    assert (build_dir / "local_requirements" / "mylocaldep").is_dir()
+    assert not (build_dir / "local_requirements" / "mylocaldep[extra]").exists()
+
+    # The rewritten requirements file installs it from the staged copy, keeping
+    # the extra so pip installs it.
+    reqs = (
+        (build_dir / "__tesseract_source__" / "tesseract_requirements.txt")
+        .read_text()
+        .splitlines()
+    )
+    assert "numpy" in reqs
+    assert "./local_requirements/mylocaldep[extra]" in reqs
+    # The original local line is rewritten, not carried over verbatim.
+    assert "./mylocaldep[extra]" not in reqs
+
+
+def test_prepare_build_context_local_dependency_file_url(tmp_path_factory):
+    """Local pip dependency given as a file:// URL is staged (issue #643)."""
+    dep_dir = tmp_path_factory.mktemp("dep") / "mylocaldep"
+    dep_dir.mkdir()
+    (dep_dir / "setup.py").touch()
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "tesseract_api.py").touch()
+    # `Path.as_uri()` yields a well-formed file:// URL on any platform.
+    (src_dir / "tesseract_requirements.txt").write_text(f"numpy\n{dep_dir.as_uri()}\n")
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(name="foobar")
+    engine.prepare_build_context(src_dir, build_dir, config)
+
+    # The file:// URL is resolved to a native path and staged by its name.
+    assert (build_dir / "local_requirements" / "mylocaldep").is_dir()
+
+    reqs = (
+        (build_dir / "__tesseract_source__" / "tesseract_requirements.txt")
+        .read_text()
+        .splitlines()
+    )
+    assert "numpy" in reqs
+    assert "./local_requirements/mylocaldep" in reqs
+
+
+def test_prepare_build_context_local_dependency_not_found(tmp_path_factory):
+    """A local dependency that does not exist raises a clear error."""
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "tesseract_api.py").touch()
+    (src_dir / "tesseract_requirements.txt").write_text("./does_not_exist\n")
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(name="foobar")
+    with pytest.raises(RuntimeError, match="local dependency not found"):
+        engine.prepare_build_context(src_dir, build_dir, config)
+
+
+def test_prepare_build_context_local_dependency_parent_path(tmp_path_factory):
+    """Local pip dependency reached via ../.. is staged (issue #630)."""
+    parent_dir = tmp_path_factory.mktemp("parent")
+    # A package that lives two levels above the Tesseract source directory.
+    (parent_dir / "mypkg").mkdir()
+    (parent_dir / "mypkg" / "setup.py").touch()
+    src_dir = parent_dir / "sub" / "tesseract"
+    src_dir.mkdir(parents=True)
+    (src_dir / "tesseract_api.py").touch()
+    (src_dir / "tesseract_requirements.txt").write_text("../../mypkg\n")
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(name="foobar")
+    engine.prepare_build_context(src_dir, build_dir, config)
+
+    # The staged name comes from the resolved path, not from `../..`.
+    assert (build_dir / "local_requirements" / "mypkg").is_dir()
+    assert [p.name for p in (build_dir / "local_requirements").iterdir()] == ["mypkg"]
+    reqs = (
+        (build_dir / "__tesseract_source__" / "tesseract_requirements.txt")
+        .read_text()
+        .splitlines()
+    )
+    assert "./local_requirements/mypkg" in reqs
+    assert "../../mypkg" not in reqs
+
+
+def test_prepare_build_context_conda_local_dependency(tmp_path_factory):
+    """Conda provider stages local-path pip dependencies (issue #641)."""
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "tesseract_api.py").touch()
+    (src_dir / "mypkg_src").mkdir()
+    (src_dir / "mypkg_src" / "setup.py").touch()
+    env_spec = {
+        "name": "tesseract",
+        "channels": ["conda-forge"],
+        "dependencies": [
+            "python=3.12",
+            "pip",
+            {"pip": ["requests", "./mypkg_src"]},
+        ],
+    }
+    with (src_dir / "tesseract_environment.yaml").open("w") as f:
+        yaml.safe_dump(env_spec, f)
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(
+        name="foobar",
+        build_config=TesseractBuildConfig(
+            requirements={"provider": "conda"},
+        ),
+    )
+    engine.prepare_build_context(src_dir, build_dir, config)
+
+    # The local package is staged into the build context.
+    assert (build_dir / "local_requirements" / "mypkg_src").is_dir()
+
+    # The rewritten environment file points pip at the staged copy while leaving
+    # remote dependencies untouched.
+    rewritten = yaml.safe_load(
+        (build_dir / "__tesseract_source__" / "tesseract_environment.yaml").read_text()
+    )
+    pip_entry = next(e["pip"] for e in rewritten["dependencies"] if isinstance(e, dict))
+    assert "requests" in pip_entry
+    assert "./local_requirements/mypkg_src" in pip_entry
+    # The original local path is rewritten, not carried over verbatim.
+    assert "./mypkg_src" not in pip_entry
+
+
 @pytest.mark.parametrize("generate_only", [True, False])
 def test_build_tesseract(dummy_tesseract_package, mocked_docker, generate_only, caplog):
     """Test we can build an image for a package and keep build directory."""
@@ -652,6 +787,81 @@ def test_parse_requirements(tmpdir):
         "--find-links https://data.pyg.org/whl/torch-2.5.1+cpu.html",
         "torch_scatter==2.1.2+pt25cpu",
     ]
+
+
+def test_prepare_build_context_conda_no_env_file(tmp_path_factory):
+    """Conda provider without an environment file does not error at staging."""
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "tesseract_api.py").touch()
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(
+        name="foobar",
+        build_config=TesseractBuildConfig(requirements={"provider": "conda"}),
+    )
+    engine.prepare_build_context(src_dir, build_dir, config)
+    assert (build_dir / "Dockerfile").exists()
+
+
+@pytest.mark.parametrize(
+    "line, expected",
+    [
+        ("./mylocaldep", ("./mylocaldep", "")),
+        ("./mylocaldep[extra]", ("./mylocaldep", "[extra]")),
+        ("../../pkg[a,b]", ("../../pkg", "[a,b]")),
+        ("/abs/path", ("/abs/path", "")),
+        ("./a[b] ", ("./a", "[b]")),
+    ],
+)
+def test_split_local_dependency(line, expected):
+    assert engine._split_local_dependency(line) == expected
+
+
+def test_split_local_dependency_file_url(tmp_path):
+    """A file:// URL is converted back to a native filesystem path."""
+    target = tmp_path / "mypkg"
+    # `Path.as_uri()` produces a correctly-formed file:// URL on any platform,
+    # so this round-trips regardless of the OS path separator.
+    path, extras = engine._split_local_dependency(target.as_uri())
+    assert path == str(target)
+    assert extras == ""
+
+    path, extras = engine._split_local_dependency(target.as_uri() + "[extra]")
+    assert path == str(target)
+    assert extras == "[extra]"
+
+
+def test_stage_local_dependency_file(tmp_path):
+    """A local file dependency (e.g. a wheel) is copied, not tree-copied."""
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "mypkg-1.0-py3-none-any.whl").write_text("wheel contents")
+    local_requirements = tmp_path / "local_requirements"
+    local_requirements.mkdir()
+
+    spec = engine._stage_local_dependency(
+        "./mypkg-1.0-py3-none-any.whl", src_dir, local_requirements
+    )
+    staged = local_requirements / "mypkg-1.0-py3-none-any.whl"
+    assert spec == "./local_requirements/mypkg-1.0-py3-none-any.whl"
+    assert staged.is_file()
+    assert staged.read_text() == "wheel contents"
+
+
+def test_stage_local_dependency_name_collision(tmp_path):
+    """Two dependencies resolving to the same basename get distinct staged names."""
+    src_dir = tmp_path / "src"
+    (src_dir / "a" / "mypkg").mkdir(parents=True)
+    (src_dir / "b" / "mypkg").mkdir(parents=True)
+    local_requirements = tmp_path / "local_requirements"
+    local_requirements.mkdir()
+
+    spec_a = engine._stage_local_dependency("./a/mypkg", src_dir, local_requirements)
+    spec_b = engine._stage_local_dependency("./b/mypkg", src_dir, local_requirements)
+    assert spec_a == "./local_requirements/mypkg"
+    assert spec_b == "./local_requirements/mypkg_1"
+    assert (local_requirements / "mypkg").is_dir()
+    assert (local_requirements / "mypkg_1").is_dir()
 
 
 @pytest.mark.parametrize(
