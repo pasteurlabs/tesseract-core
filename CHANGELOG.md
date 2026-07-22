@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [1.11.0] - 2026-07-21
+## [1.11.0] - 2026-07-22
 
 ### Features
 
@@ -17,6 +17,7 @@ All notable changes to this project will be documented in this file.
 - Replace sphinx-click with sphinxcontrib-typer (#634)
 - Add learned closure demo, add T-torch to landing page + docs (#626)
 - Add enzyme integration demo + blog post (#542)
+- Add pipeline guide and document `tesseract run test` (#642)
 
 ## [1.10.0] - 2026-06-17
 
