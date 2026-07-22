@@ -162,7 +162,7 @@ body[data-theme="dark"] .invert-on-dark {
 
 .landing-banner {
     max-width: var(--landing-max-width);
-    margin: 1.5rem auto 0;
+    margin: 1.5rem auto -1.25rem;
     padding: 0 1.5rem;
 }
 
@@ -171,21 +171,27 @@ body[data-theme="dark"] .invert-on-dark {
 }
 
 .landing-banner a {
-    display: block;
-    padding: 0.75rem 1.25rem;
+    display: flex;
+    align-items: center;
+    gap: 0.9rem;
+    padding: 0.8rem 1rem 0.8rem 1.15rem;
+    border: 1px solid color-mix(in srgb, var(--color-brand-primary) 35%, transparent);
+    border-left: 4px solid var(--color-brand-primary);
     border-radius: var(--radius-md);
-    background: var(--accent-gradient);
-    color: #fff !important;
-    font-size: 0.95rem;
+    /* Translucent brand tint layers consistently over any theme background */
+    background: color-mix(in srgb, var(--color-brand-primary) 9%, transparent);
+    color: var(--color-foreground-primary) !important;
+    font-size: 0.92rem;
     line-height: 1.5;
     text-decoration: none;
-    transition: box-shadow 0.2s, transform 0.2s;
+    transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
 }
 
 .landing-banner a:hover,
 .landing-banner a:focus-visible {
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
-    transform: translateY(-1px);
+    border-color: var(--color-brand-primary);
+    background: color-mix(in srgb, var(--color-brand-primary) 14%, transparent);
+    box-shadow: 0 2px 12px color-mix(in srgb, var(--color-brand-primary) 20%, transparent);
 }
 
 .landing-banner a:focus-visible {
@@ -193,8 +199,22 @@ body[data-theme="dark"] .invert-on-dark {
     outline-offset: 2px;
 }
 
+.landing-banner-text {
+    flex: 1 1 auto;
+}
+
+.landing-banner-text strong {
+    color: var(--color-foreground-primary);
+}
+
 .landing-banner-cta {
-    font-weight: 700;
+    flex-shrink: 0;
+    padding: 0.35rem 0.9rem;
+    border-radius: var(--radius-sm);
+    background: var(--color-brand-primary);
+    color: #fff;
+    font-size: 0.85rem;
+    font-weight: 600;
     white-space: nowrap;
 }
 
