@@ -2,6 +2,7 @@
 """End-to-end test of the Bayesian inference demo notebook logic."""
 
 import time
+from functools import wraps
 
 import jax
 import jax.numpy as jnp
@@ -13,14 +14,40 @@ from tesseract_jax import apply_tesseract
 
 from tesseract_core import Tesseract
 
+
+def instrument(tesseract):
+    """Attach apply/VJP counters to a served Tesseract client."""
+    counts = {"apply": 0, "vjp": 0}
+
+    def _wrap(name, key):
+        orig = getattr(tesseract, name)
+
+        @wraps(orig)
+        def counted(*args, **kwargs):
+            counts[key] += 1
+            return orig(*args, **kwargs)
+
+        return counted
+
+    tesseract.apply = _wrap("apply", "apply")
+    tesseract.vector_jacobian_product = _wrap("vector_jacobian_product", "vjp")
+    tesseract._eval_counts = counts
+    return tesseract
+
+
+def reset_counts(tesseract):
+    tesseract._eval_counts.update(apply=0, vjp=0)
+
+
 # Reduce sample counts for a faster test
 NUM_WARMUP = 100
 NUM_SAMPLES = 200
 
 # ── Step 1: Serve the JAX Lorenz Tesseract ──────────────────────────────
 print("=== Step 1: Serving JAX Lorenz Tesseract ===")
-lorenz = Tesseract.from_image("lorenz-bayesian")
+lorenz = Tesseract.from_image("lorenz")
 lorenz.serve()
+instrument(lorenz)
 print(f"Available endpoints: {lorenz.available_endpoints}")
 
 # ── Step 2: Generate synthetic observations ─────────────────────────────
@@ -97,6 +124,7 @@ mcmc_nuts = MCMC(
     nuts_kernel, num_warmup=NUM_WARMUP, num_samples=NUM_SAMPLES, num_chains=1
 )
 
+reset_counts(lorenz)
 start = time.time()
 mcmc_nuts.run(
     jax.random.PRNGKey(0),
@@ -108,6 +136,11 @@ mcmc_nuts.run(
 )
 nuts_time = time.time() - start
 mcmc_nuts.print_summary()
+
+nuts_counts = dict(lorenz._eval_counts)
+nuts_fwd_evals = nuts_counts["apply"] + nuts_counts["vjp"]
+print(f"NUTS forward evaluations: {nuts_fwd_evals} ({nuts_counts})")
+assert nuts_counts["vjp"] > 0, "NUTS should call the VJP endpoint"
 
 nuts_samples = mcmc_nuts.get_samples()
 F_mean = float(nuts_samples["F"].mean())
@@ -122,6 +155,7 @@ print("NUTS posterior check PASSED")
 print("\n=== Step 6: Serving finite-diff Lorenz Tesseract ===")
 lorenz_fd = Tesseract.from_image("lorenz-finitediff")
 lorenz_fd.serve()
+instrument(lorenz_fd)
 print(f"Available endpoints: {lorenz_fd.available_endpoints}")
 
 
@@ -142,6 +176,7 @@ mcmc_nuts_fd = MCMC(
     nuts_fd_kernel, num_warmup=NUM_WARMUP, num_samples=NUM_SAMPLES, num_chains=1
 )
 
+reset_counts(lorenz_fd)
 start = time.time()
 mcmc_nuts_fd.run(
     jax.random.PRNGKey(0),
@@ -153,6 +188,12 @@ mcmc_nuts_fd.run(
 )
 nuts_fd_time = time.time() - start
 mcmc_nuts_fd.print_summary()
+
+# Central differences w.r.t. the single parameter F cost 2 forward evals per VJP.
+FD_EVALS_PER_VJP = 2
+fd_counts = dict(lorenz_fd._eval_counts)
+nuts_fd_fwd_evals = fd_counts["apply"] + FD_EVALS_PER_VJP * fd_counts["vjp"]
+print(f"NUTS-FD forward evaluations: {nuts_fd_fwd_evals} ({fd_counts})")
 
 fd_samples = mcmc_nuts_fd.get_samples()
 F_mean_fd = float(fd_samples["F"].mean())
@@ -166,11 +207,14 @@ print("NUTS-FD posterior check PASSED")
 
 # ── Step 7: Gradient-free baseline ──────────────────────────────────────
 print("\n=== Step 7: Running SA (gradient-free) ===")
+# Match SA's forward-evaluation budget to NUTS for a fair comparison.
+sa_total_iters = nuts_fwd_evals
+sa_warmup = sa_total_iters // 2
+sa_samples_n = sa_total_iters - sa_warmup
 sa_kernel = SA(bayesian_lorenz_model)
-mcmc_sa = MCMC(
-    sa_kernel, num_warmup=NUM_WARMUP * 5, num_samples=NUM_SAMPLES, num_chains=1
-)
+mcmc_sa = MCMC(sa_kernel, num_warmup=sa_warmup, num_samples=sa_samples_n, num_chains=1)
 
+reset_counts(lorenz)
 start = time.time()
 mcmc_sa.run(
     jax.random.PRNGKey(0),

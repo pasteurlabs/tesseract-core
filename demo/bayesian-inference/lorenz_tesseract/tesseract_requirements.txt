@@ -1,4 +1,0 @@
-# Tesseract requirements file
-numpy==1.26.0
-jax[cpu]==0.5.2
-equinox
