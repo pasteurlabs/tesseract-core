@@ -78,12 +78,13 @@ Changelog <https://github.com/pasteurlabs/tesseract-core/releases>
 ```
 
 ```{toctree}
-:caption: Tutorials
+:caption: Tutorials & Examples
 :maxdepth: 2
 :hidden:
 
 ../tutorials/get-started.md
 ../tutorials/create.md
+../tutorials/interact.md
 ../demo/demo.md
 ../examples/example_gallery.md
 ../examples/ansys_gallery.md
@@ -94,14 +95,12 @@ Changelog <https://github.com/pasteurlabs/tesseract-core/releases>
 :maxdepth: 2
 :hidden:
 
-../how-to/design-patterns.md
-../how-to/pipelines.md
-../how-to/use.md
-../how-to/advanced-usage.md
 ../how-to/defining-apis.md
-../how-to/llm-assistance.md
-../how-to/debugging.md
+../how-to/pipelines.md
+../how-to/advanced-usage.md
 ../how-to/deploy.md
+../how-to/debugging.md
+../how-to/llm-assistance.md
 ```
 
 ```{toctree}
@@ -109,6 +108,7 @@ Changelog <https://github.com/pasteurlabs/tesseract-core/releases>
 :maxdepth: 2
 :hidden:
 
+../concepts/design-patterns.md
 ../concepts/differentiable-programming.md
 ../concepts/performance.md
 ```

@@ -203,7 +203,7 @@ This file is optional. `tesseract_api.py` can invoke functions written in any la
 Depending on your needs:
 
 - [](../tutorials/create.md) — define schemas, implement endpoints, and build Tesseracts
-- [](../how-to/use.md) — invoke Tesseracts and work with their outputs
+- [](../tutorials/interact.md) — invoke Tesseracts, compute derivatives, and read their schemas
 
 Or jump into end-to-end tutorials:
 

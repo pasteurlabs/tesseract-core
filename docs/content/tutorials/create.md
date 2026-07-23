@@ -1,3 +1,5 @@
+(tr-create)=
+
 # Creating Tesseracts
 
 This page walks through creating your own Tesseracts, starting from a basic example and building up to advanced patterns. We recommend reading the [Get Started page](tr-quickstart) first.
@@ -169,7 +171,7 @@ tess.test({
 ```
 
 ```{note}
-Over HTTP, the `test` endpoint is only exposed when a Tesseract is [served in debug mode](../how-to/use.md) (`tesseract serve --debug`). `tesseract run ... test` and `Tesseract.from_tesseract_api(...)` enable it for you, a plain `tesseract serve` does not.
+Over HTTP, the `test` endpoint is only exposed when a Tesseract is [served in debug mode](../how-to/debugging.md) (`tesseract serve --debug`). `tesseract run ... test` and `Tesseract.from_tesseract_api(...)` enable it for you, a plain `tesseract serve` does not.
 ```
 
 Keeping a `test_cases/` directory next to each Tesseract and running every spec in CI is the pattern the [`cookiecutter-tesseract`](#building-a-multi-tesseract-project) template sets up for you.
