@@ -687,38 +687,29 @@ def test_serve_debug_port_distinct_from_api_port(mocked_docker, monkeypatch):
     to one entry, publishing the wrong container port. This showed up as a rare,
     flaky ``[Errno 98] address already in use`` inside the container.
 
-    We force ``get_free_port`` onto a two-port range so a collision is likely
-    (~50%) without a fix, then assert the two host ports are always distinct.
+    We stub ``get_free_port`` to always hand back the same port unless it is
+    excluded. The two draws can therefore only differ if ``serve`` passes the
+    API port in ``exclude`` on the second draw -- exactly the fix under test.
+    Without it, both draws return the same port and the two ``port_mappings``
+    entries collapse onto one host key. Stubbing removes any dependence on which
+    OS ports happen to be free, which made an earlier socket-based version of
+    this test flaky on CI.
     """
-    # Reserve one port so exactly two ports remain free in the range below.
-    with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as occupied:
-        occupied.bind(("127.0.0.1", 0))
-        anchor = occupied.getsockname()[1]
+    preferred, fallback = 60001, 60002
 
-        # A range wide enough to hold two free ports around the anchor. The
-        # anchor itself is bound, so get_free_port will only ever hand back the
-        # two neighbours -> a naive double-draw collides roughly half the time.
-        within_range = (anchor - 1, anchor + 2)
-        real_get_free_port = engine.get_free_port
-        monkeypatch.setattr(
-            engine,
-            "get_free_port",
-            lambda within_range=within_range, exclude=(): real_get_free_port(
-                within_range=within_range, exclude=exclude
-            ),
-        )
+    def fake_get_free_port(within_range=None, exclude=()):
+        # Return the preferred port unless it is excluded, mirroring
+        # get_free_port's contract that it never returns an excluded port.
+        return fallback if preferred in exclude else preferred
 
-        # Run enough iterations that a collision would almost certainly surface
-        # if the exclusion were missing (P(no collision in 40 tries) ~ 1e-12).
-        for _ in range(40):
-            res, _ = engine.serve("foobar", debug=True)
-            port_mappings = json.loads(res)["ports"]
-            host_ports = [key.split(":")[-1] for key in port_mappings]
-            # Both the API and debugpy mappings must survive as separate entries.
-            assert len(port_mappings) == 2, f"port mapping collapsed: {port_mappings}"
-            assert len(set(host_ports)) == 2, (
-                f"debug and API host ports collided: {host_ports}"
-            )
+    monkeypatch.setattr(engine, "get_free_port", fake_get_free_port)
+
+    res, _ = engine.serve("foobar", debug=True)
+    port_mappings = json.loads(res)["ports"]
+    host_ports = [key.split(":")[-1] for key in port_mappings]
+    # Both the API and debugpy mappings must survive as separate entries.
+    assert len(port_mappings) == 2, f"port mapping collapsed: {port_mappings}"
+    assert len(set(host_ports)) == 2, f"debug and API host ports collided: {host_ports}"
 
 
 def test_serve_container_port_decoupled_from_host_port(mocked_docker):
