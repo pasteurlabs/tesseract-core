@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [1.11.0] - 2026-07-22
+## [1.11.0] - 2026-07-23
 
 ### Features
 
@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 ### Bug Fixes
 
 - Squash all requirement handling bugs (#644)
+- Random port binding collisions (#649)
 
 ### Documentation
 
