@@ -56,6 +56,31 @@ $ export TESSERACT_DOCKER_EXECUTABLE=podman
 $ echo "export TESSERACT_DOCKER_EXECUTABLE=podman" >> ~/.bashrc
 ```
 
+(installation-apptainer)=
+
+### Apptainer (experimental)
+
+On HPC systems, where a root Docker daemon is typically unavailable, Tesseract can
+use [Apptainer](https://apptainer.org/) (formerly Singularity) as its container
+backend. Apptainer runs rootless and is the de-facto standard on Slurm clusters and
+national labs.
+
+```bash
+$ export TESSERACT_CONTAINER_BACKEND=apptainer
+$ echo "export TESSERACT_CONTAINER_BACKEND=apptainer" >> ~/.bashrc
+```
+
+The Apptainer backend runs and serves Tesseracts but **cannot build** them
+(Apptainer cannot build from Dockerfiles). The supported workflow is to build with
+Docker on a workstation or in CI, push to a registry, and then `tesseract pull` on
+the cluster. See {ref}`deploying-on-hpc` for the full guide and the capability
+matrix in {ref}`deploy` for what each backend supports.
+
+```{note}
+The Apptainer backend is experimental. Please report issues and cluster-specific
+findings on the [community forum](https://si-tesseract.discourse.group/).
+```
+
 (installation-runtime)=
 
 ## Runtime installation

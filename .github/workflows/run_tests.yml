@@ -149,6 +149,14 @@ jobs:
             arch: "x64"
             docker-engine: "podman"
             unit-tesseract: "base"
+          # Run the Apptainer backend tests. Docker is still needed to build the
+          # test images, which are then converted to SIF and run with Apptainer —
+          # exactly the workflow we recommend to users.
+          - os: "ubuntu-24.04"
+            python-version: "3.14"
+            arch: "x64"
+            docker-engine: "apptainer"
+            unit-tesseract: "apptainer"
 
       fail-fast: false
 
@@ -193,7 +201,29 @@ jobs:
           echo "DOCKER_HOST=${DOCKER_HOST}" >> $GITHUB_ENV
           echo "TESSERACT_DOCKER_EXECUTABLE=podman" >> $GITHUB_ENV
 
+      - name: Set up Apptainer
+        if: matrix.docker-engine == 'apptainer'
+        run: |
+          sudo apt-get update
+          sudo add-apt-repository -y ppa:apptainer/ppa
+          sudo apt-get update
+          sudo apt-get install -y apptainer
+          apptainer --version
+
+      - name: Run Apptainer backend tests
+        if: matrix.docker-engine == 'apptainer'
+        run: |
+          uv run --no-sync pytest \
+            --always-run-endtoend \
+            --timeout=300 \
+            --cov-branch \
+            --cov-report=term-missing:skip-covered \
+            --cov-report=xml:coverage.xml \
+            --cov=tesseract_core \
+            tests/endtoend_tests/test_apptainer.py
+
       - name: Run test suite
+        if: matrix.docker-engine != 'apptainer'
         run: |
           if [ "${{ matrix.unit-tesseract }}" == "base" ]; then
             uv run --no-sync pytest \

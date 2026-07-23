@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import functools
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -31,21 +32,38 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line("markers", "docker: requires Docker")
+    config.addinivalue_line("markers", "apptainer: requires Apptainer")
 
 
 @pytest.fixture(autouse=True)
-def _require_docker_if_marked(request: pytest.FixtureRequest) -> None:
-    """Fail Docker-marked benchmarks when Docker is not available."""
-    if "docker" not in request.keywords:
-        return
-    if not _check_docker():
+def _require_backend_if_marked(request: pytest.FixtureRequest) -> None:
+    """Fail/skip container-marked benchmarks when the backend is unavailable.
+
+    Docker-marked benchmarks fail loudly (Docker is a hard requirement in CI);
+    Apptainer-marked benchmarks skip when Apptainer is absent, since it is only
+    installed on the dedicated benchmark leg.
+    """
+    if "docker" in request.keywords and not _check_docker():
         pytest.fail("Docker is required for this benchmark but is not available")
+    if "apptainer" in request.keywords and not _check_apptainer():
+        pytest.skip("Apptainer is not available")
 
 
 @functools.cache
 def _check_docker() -> bool:
     try:
         CLIDockerClient().info()
+        return True
+    except Exception:
+        return False
+
+
+@functools.cache
+def _check_apptainer() -> bool:
+    if shutil.which("apptainer") is None:
+        return False
+    try:
+        subprocess.run(["apptainer", "--version"], capture_output=True, check=True)
         return True
     except Exception:
         return False
@@ -85,3 +103,60 @@ def noop_tesseract_image() -> str | None:
     if result.returncode != 0:
         pytest.fail(f"Failed to build noop tesseract: {result.stderr}")
     return image_name
+
+
+# SIF store location for benchmarks, shared between the in-process config and the
+# subprocess-based CLI benchmark (which inherits it via the environment).
+BENCH_SIF_STORE = Path(__file__).parent / ".apptainer-store"
+
+
+@pytest.fixture(scope="session")
+def noop_sif_image(noop_tesseract_image) -> str | None:
+    """Convert the no-op Docker image into a SIF store once per session.
+
+    Returns the store reference (``benchmark-noop:latest``). Requires both Docker
+    (to build, via ``noop_tesseract_image``) and Apptainer (to convert); skips if
+    Apptainer is unavailable. The store dir is exported via
+    ``TESSERACT_APPTAINER_IMAGE_DIR`` so the subprocess CLI benchmark sees it too.
+    """
+    if not _check_apptainer():
+        pytest.skip("Apptainer is not available")
+    import os
+
+    from tesseract_core.sdk import config, engine
+
+    if not hasattr(engine, "build_sif"):
+        # Older Tesseract without the Apptainer backend (e.g. the baseline branch
+        # in the benchmark comparison run). Skip rather than error.
+        pytest.skip("This Tesseract version has no Apptainer backend")
+
+    BENCH_SIF_STORE.mkdir(parents=True, exist_ok=True)
+    os.environ["TESSERACT_APPTAINER_IMAGE_DIR"] = str(BENCH_SIF_STORE)
+    config.update_config(apptainer_image_dir=str(BENCH_SIF_STORE))
+    engine.build_sif("benchmark-noop", "latest")
+    return "benchmark-noop:latest"
+
+
+@pytest.fixture
+def use_backend(request: pytest.FixtureRequest, monkeypatch):
+    """Select the container backend for a parametrized benchmark.
+
+    Used with ``@pytest.mark.parametrize("use_backend", ["docker", "apptainer"],
+    indirect=True)``. Sets ``TESSERACT_CONTAINER_BACKEND`` and refreshes the runtime
+    config so ``Tesseract.from_image`` / ``tesseract run`` pick up the backend.
+    """
+    backend = request.param
+    from tesseract_core.sdk import config
+
+    if "container_backend" not in config.RuntimeConfig.model_fields:
+        # Older Tesseract without the backend abstraction (baseline branch): only
+        # Docker exists. Skip non-docker params; run docker ones unchanged.
+        if backend != "docker":
+            pytest.skip("This Tesseract version has no container backend selection")
+        yield backend
+        return
+
+    monkeypatch.setenv("TESSERACT_CONTAINER_BACKEND", backend)
+    config.update_config(container_backend=backend)
+    yield backend
+    config.update_config(container_backend="docker")

@@ -28,14 +28,23 @@ from jinja2 import Environment, PackageLoader, StrictUndefined
 from packaging.requirements import Requirement
 
 from .api_parse import TesseractConfig, get_config, validate_tesseract_api
-from .docker_client import (
-    APIError,
-    CLIDockerClient,
-    Container,
-    Image,
-    NotFound,
+from .config import get_config as get_runtime_config
+from .container_client import get_client
+from .container_client.base import (
+    AbstractContainer as Container,
+)
+from .container_client.base import (
+    AbstractImage as Image,
+)
+from .container_client.base import (
+    ContainerClient,
+)
+from .container_client.docker import (
     build_docker_image,
-    is_podman,
+)
+from .container_client.exceptions import (
+    APIError,
+    NotFound,
 )
 from .exceptions import UserError
 
@@ -44,7 +53,32 @@ if TYPE_CHECKING:
     from pip._internal.network.session import PipSession
 
 logger = logging.getLogger("tesseract")
-docker_client = CLIDockerClient()
+
+
+def get_container_client() -> "ContainerClient":
+    """Return the container client for the configured backend.
+
+    A module-level accessor (rather than a singleton) so the backend can be
+    switched at runtime via config/env without reimporting the module. Clients are
+    cheap CLI wrappers, so constructing one per call is fine.
+    """
+    return get_client()
+
+
+class _ContainerClientProxy:
+    """Attribute proxy resolving to the configured backend on each access.
+
+    Preserves the ``docker_client.containers.list()`` call style used throughout
+    this module while honoring the runtime ``container_backend`` config, which may
+    change between calls (e.g. across tests). Named ``docker_client`` for backwards
+    compatibility despite now dispatching to any backend.
+    """
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(get_client(), name)
+
+
+docker_client = _ContainerClientProxy()
 
 # Jinja2 Environment
 ENV = Environment(
@@ -53,23 +87,30 @@ ENV = Environment(
 )
 
 
-def needs_docker(func: Callable) -> Callable:
-    """A decorator for functions that rely on docker daemon."""
+def needs_backend(func: Callable) -> Callable:
+    """A decorator for functions that rely on a reachable container backend."""
     import functools
 
     @functools.wraps(func)
-    def wrapper_needs_docker(*args: Any, **kwargs: Any) -> None:
+    def wrapper_needs_backend(*args: Any, **kwargs: Any) -> None:
+        client = get_container_client()
+        backend = client.capabilities.name
         try:
-            docker_client.info()
+            client.info()
         except (APIError, RuntimeError) as ex:
             raise UserError(
-                "Could not reach Docker daemon, check if it is running."
+                f"Could not reach the {backend} backend, check if it is running."
             ) from ex
         except FileNotFoundError as ex:
-            raise UserError("Docker not found, check if it is installed.") from ex
+            raise UserError(f"{backend} not found, check if it is installed.") from ex
         return func(*args, **kwargs)
 
-    return wrapper_needs_docker
+    return wrapper_needs_backend
+
+
+# Backwards-compatible alias; ``needs_docker`` is used as a decorator throughout
+# cli.py and may be imported by downstream code.
+needs_docker = needs_backend
 
 
 def get_free_port(
@@ -676,6 +717,148 @@ def get_tesseract_images() -> list[Image]:
     return docker_client.images.list()
 
 
+def pull_image(reference: str, name: str | None = None, tag: str | None = None) -> Any:
+    """Pull an image from a registry into the configured backend's store.
+
+    Currently the key cluster-side command for the Apptainer backend: it converts
+    ``docker://…`` (or any Apptainer-understood URI) into a SIF in the local store
+    and validates it is a Tesseract image. The signature is backend-neutral so a
+    Docker-backend ``pull`` can be added later.
+
+    Args:
+        reference: Source reference, e.g. ``docker://ghcr.io/org/name:tag``.
+        name: Store name to save under. Defaults to the image's Tesseract name.
+        tag: Store tag to save under. Defaults to the reference's tag or ``latest``.
+
+    Returns:
+        The stored Image object.
+    """
+    from .container_client.apptainer import (
+        Images as ApptainerImages,
+    )
+    from .container_client.apptainer import (
+        _split_ref,
+        get_image_dir,
+        inspect_sif,
+    )
+
+    client = get_container_client()
+    if client.capabilities.name != "apptainer":
+        raise UserError(
+            f"`pull` is only supported for the Apptainer backend, not "
+            f"{client.capabilities.name}."
+        )
+
+    apptainer = get_runtime_config().apptainer_executable
+    if isinstance(apptainer, str):
+        import shlex
+
+        apptainer = tuple(shlex.split(apptainer))
+
+    # Derive default name/tag from the reference's final path segment. Strip the
+    # transport prefix, which may be scheme:// (docker://) or scheme: (docker-daemon:).
+    ref_body = reference
+    for transport in ("docker://", "docker-daemon:", "docker-archive:", "oras://"):
+        if ref_body.startswith(transport):
+            ref_body = ref_body[len(transport) :]
+            break
+    else:
+        ref_body = ref_body.split("://", 1)[-1]
+    ref_name_part = ref_body.lstrip("/").rstrip("/").split("/")[-1]
+    default_name, default_tag = _split_ref(ref_name_part)
+    name = name or default_name
+    tag = tag or default_tag
+
+    # Pull into a temporary SIF, then validate and commit to the store.
+    tmp_sif = get_image_dir() / f".pull-{name}-{tag}.sif"
+    try:
+        pull_cmd = [
+            *apptainer,
+            "pull",
+            "--force",
+            str(tmp_sif),
+            reference,
+        ]
+        logger.info(f"Pulling {reference} ...")
+        returncode, _, stderr = _run_apptainer_process(pull_cmd)
+        if returncode != 0:
+            raise UserError(
+                f"Failed to pull {reference}:\n{stderr.decode('utf-8', 'replace')}"
+            )
+        # Validate + move into the store (raises if not a Tesseract image).
+        inspect_sif(tmp_sif)
+        image = ApptainerImages.store(tmp_sif, name, tag)
+    finally:
+        if tmp_sif.exists():
+            tmp_sif.unlink()
+
+    logger.info(f"Pulled Tesseract into the image store as {name}:{tag}")
+    return image
+
+
+def _run_apptainer_process(cmd: list[str]) -> tuple[int, bytes, bytes]:
+    """Run an apptainer subcommand, streaming progress to the logger."""
+    from .container_client.apptainer import _get_io_callable, _run_process
+
+    return _run_process(
+        cmd,
+        stream_stdout=_get_io_callable(bool(logger.isEnabledFor(10)), logger.debug),
+        stream_stderr=_get_io_callable(True, logger.debug),
+    )
+
+
+def build_sif(name: str, tag: str = "latest") -> Any:
+    """Convert a locally-built Docker image into a SIF in the Apptainer store.
+
+    Runs ``apptainer build <store>/name/tag.sif docker-daemon:<name>:<tag>``. For
+    machines that have both Docker (to build) and Apptainer (to run), so a normal
+    ``tesseract build`` can be followed by conversion into the SIF store.
+
+    Args:
+        name: Docker image name to convert (must already exist locally).
+        tag: Docker image tag to convert.
+
+    Returns:
+        The stored Image object.
+    """
+    from .container_client.apptainer import (
+        Images as ApptainerImages,
+    )
+    from .container_client.apptainer import (
+        get_image_dir,
+    )
+
+    apptainer = get_runtime_config().apptainer_executable
+    if isinstance(apptainer, str):
+        import shlex
+
+        apptainer = tuple(shlex.split(apptainer))
+
+    tmp_sif = get_image_dir() / f".build-{name}-{tag}.sif"
+    try:
+        build_cmd = [
+            *apptainer,
+            "build",
+            "--force",
+            str(tmp_sif),
+            f"docker-daemon:{name}:{tag}",
+        ]
+        logger.info(f"Converting docker-daemon:{name}:{tag} to SIF ...")
+        returncode, _, stderr = _run_apptainer_process(build_cmd)
+        if returncode != 0:
+            raise UserError(
+                f"Failed to convert {name}:{tag} to SIF:\n"
+                f"{stderr.decode('utf-8', 'replace')}"
+            )
+        image = ApptainerImages.store(tmp_sif, name, tag)
+    finally:
+        if tmp_sif.exists():
+            tmp_sif.unlink()
+
+    logger.info(f"Converted Tesseract into the image store as {name}:{tag}")
+    return image
+
+
 # Built-in Docker/Podman networks that can/should not be created.
 _BUILTIN_NETWORKS = {"host", "bridge", "none"}
 
@@ -803,7 +986,8 @@ def serve(
             "to easily retrieve .bin files."
         )
 
-    image = docker_client.images.get(image_name)
+    client = get_container_client()
+    image = client.images.get(image_name)
 
     if not image:
         raise ValueError(f"Image ID {image_name} is not a valid Docker image")
@@ -867,47 +1051,83 @@ def serve(
         ping_ip = host_ip
         port_mappings = {f"{host_ip}:{port}": container_api_port}
 
+    debugpy_port = None
     if debug:
         debugpy_port = str(get_free_port())
         if port_mappings is not None:
             port_mappings[f"{host_ip}:{debugpy_port}"] = container_debugpy_port
         environment["TESSERACT_DEBUG"] = "1"
 
-    extra_args = [
-        "--restart",
-        "unless-stopped",
-    ]
+    caps = client.capabilities
 
-    if is_podman():
-        # This ensures podman behaves like Docker in terms of user namespaces
-        # and allows the container to run with the same user ID as the host.
-        extra_args.extend(["--userns", "keep-id"])
+    if not caps.supports_port_mapping:
+        # Host-network backends (Apptainer): the runtime binds the host port
+        # directly, so there is no port mapping. Reject options with no equivalent
+        # loudly rather than degrading silently.
+        if network is not None and network != "host":
+            raise UserError(
+                f"The {caps.name} backend does not support user-defined networks. "
+                "It is host-network only; serve multiple Tesseracts on distinct "
+                "localhost ports and connect them via their URLs instead."
+            )
+        if network_alias is not None:
+            raise UserError(
+                f"The {caps.name} backend does not support network aliases. Use the "
+                "served Tesseract's host port (localhost) instead."
+            )
+        if not caps.supports_restart_policy and docker_args:
+            logger.warning(
+                "Ignoring restart/extra runtime args unsupported by the %s backend.",
+                caps.name,
+            )
 
-    if network_alias is not None:
-        if network is None:
-            raise ValueError("Network must be specified if network_alias is provided")
-        extra_args.extend(["--network-alias", network_alias])
+        container = client.containers.serve(
+            image=image_name,
+            args=args,
+            volumes=parsed_volumes,
+            device_requests=gpus,
+            environment=environment,
+            memory=memory,
+            debug=debug,
+            debugpy_host_port=debugpy_port,
+        )
+    else:
+        extra_args = [
+            "--restart",
+            "unless-stopped",
+        ]
 
-    if docker_args:
-        extra_args.extend(docker_args)
+        if caps.is_podman:
+            # This ensures podman behaves like Docker in terms of user namespaces
+            # and allows the container to run with the same user ID as the host.
+            extra_args.extend(["--userns", "keep-id"])
 
-    if network is not None:
-        _ensure_network_exists(network)
+        if network_alias is not None:
+            if network is None:
+                raise ValueError(
+                    "Network must be specified if network_alias is provided"
+                )
+            extra_args.extend(["--network-alias", network_alias])
 
-    container = docker_client.containers.run(
-        image=image_name,
-        command=["serve", *args],
-        device_requests=gpus,
-        ports=port_mappings,
-        network=network,
-        detach=True,
-        volumes=parsed_volumes,
-        user=user,
-        memory=memory,
-        environment=environment,
-        extra_args=extra_args,
-    )
-    assert isinstance(container, Container)
+        if docker_args:
+            extra_args.extend(docker_args)
+
+        if network is not None:
+            _ensure_network_exists(network)
+
+        container = client.containers.run(
+            image=image_name,
+            command=["serve", *args],
+            device_requests=gpus,
+            ports=port_mappings,
+            network=network,
+            detach=True,
+            volumes=parsed_volumes,
+            user=user,
+            memory=memory,
+            environment=environment,
+            extra_args=extra_args,
+        )
 
     if skip_health_check:
         logger.info("Skipping health check, Tesseract may not be ready yet")
@@ -917,7 +1137,7 @@ def serve(
 
     logger.info(f"Serving Tesseract at http://{ping_ip}:{port}")
     logger.info(f"View Tesseract: http://{ping_ip}:{port}/docs")
-    if debug:
+    if debug and debugpy_port is not None:
         logger.info(f"Debugpy server listening at http://{ping_ip}:{debugpy_port}")
 
     return container.name, container
@@ -1152,8 +1372,10 @@ def run_tesseract(
             arg = f"@{container_path}"
         cmd.append(arg)
 
+    client = get_container_client()
+
     extra_args = []
-    if is_podman():
+    if client.capabilities.is_podman:
         extra_args.extend(["--userns", "keep-id"])
 
     if docker_args:
@@ -1163,7 +1385,7 @@ def run_tesseract(
         _ensure_network_exists(network)
 
     # Run the container, optionally streaming stderr to the terminal
-    result = docker_client.containers.run(
+    result = client.containers.run(
         image=image,
         command=cmd,
         volumes=parsed_volumes,

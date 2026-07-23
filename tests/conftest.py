@@ -392,8 +392,12 @@ def mocked_docker(monkeypatch):
             """Mock remove method for Container."""
             pass
 
+    from tesseract_core.sdk.container_client.base import Capabilities
+
     class MockedDocker:
         """Mock CLIDockerClient class."""
+
+        capabilities = Capabilities(name="docker")
 
         @staticmethod
         def info() -> tuple:
@@ -454,6 +458,19 @@ def mocked_docker(monkeypatch):
             def buildx(*args, **kwargs) -> Image:
                 return MockedDocker.images.list()[0]
 
+        class networks:
+            """Mock of CLIDockerClient.networks."""
+
+            @staticmethod
+            def get(name: str) -> Any:
+                """Mock of CLIDockerClient.networks.get."""
+                return {"Name": name}
+
+            @staticmethod
+            def create(name: str) -> Any:
+                """Mock of CLIDockerClient.networks.create."""
+                return {"Name": name}
+
         class containers:
             @staticmethod
             def get(name: str) -> MockedContainer:
@@ -479,11 +496,24 @@ def mocked_docker(monkeypatch):
                 )
 
     mock_instance = MockedDocker()
-    monkeypatch.setattr(engine, "docker_client", mock_instance)
-    monkeypatch.setattr(engine, "is_podman", lambda: False)
+
+    # The engine and CLI resolve the backend through the get_client() factory on
+    # each access (see the _ContainerClientProxy in engine.py/cli.py), so patch the
+    # factory to hand back the mock everywhere.
+    from tesseract_core.sdk import cli as cli_module
+    from tesseract_core.sdk import container_client
+
+    monkeypatch.setattr(container_client, "get_client", lambda: mock_instance)
+    monkeypatch.setattr(engine, "get_client", lambda: mock_instance)
+    monkeypatch.setattr(cli_module, "get_client", lambda: mock_instance)
     monkeypatch.setattr(
         tesseract_core.sdk.docker_client, "CLIDockerClient", MockedDocker
     )
+    # build_docker_image() constructs a Docker client directly (build is
+    # Docker-only), so patch the class in the module where it actually lives.
+    from tesseract_core.sdk.container_client import docker as docker_backend
+
+    monkeypatch.setattr(docker_backend, "CLIDockerClient", MockedDocker)
 
     def hacked_get(url, *args, **kwargs):
         if url.endswith("/health"):

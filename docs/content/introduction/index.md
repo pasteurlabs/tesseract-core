@@ -89,6 +89,7 @@ Changelog <https://github.com/pasteurlabs/tesseract-core/releases>
 ../creating-tesseracts/advanced.md
 ../creating-tesseracts/llm-assistance.md
 ../creating-tesseracts/deploy.md
+../creating-tesseracts/hpc.md
 ```
 
 ```{toctree}

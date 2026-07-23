@@ -8,10 +8,15 @@ that does nothing but decode inputs and encode outputs. This gives realistic
 measurements of framework overhead for different interaction modes:
 
 1. Non-containerized via `Tesseract.from_tesseract_api()` - Python-only, no HTTP
-2. Containerized via HTTP (`Tesseract.from_image`) - Full Docker + HTTP stack,
+2. Containerized via HTTP (`Tesseract.from_image`) - Full container + HTTP stack,
    using json+base64 encoding
-3. Containerized via CLI (`tesseract run`) - Full Docker + CLI overhead,
+3. Containerized via CLI (`tesseract run`) - Full container + CLI overhead,
    using json+binref encoding
+
+The containerized benchmarks (2 and 3) run against both the Docker and Apptainer
+backends so their numbers can be compared directly (e.g. Apptainer's faster cold
+container startup shows up in the CLI benchmark). The Apptainer variants skip when
+Apptainer is unavailable.
 
 All benchmarks use the same no-op Tesseract defined in tesseract_noop/.
 """
@@ -55,10 +60,20 @@ def tesseract_api_instance(tmp_path_factory):
     return tesseract
 
 
-@pytest.fixture(scope="module")
-def http_tesseract_instance(tmp_path_factory, noop_tesseract_image):
-    """Create a containerized HTTP Tesseract, reused across the module."""
+@pytest.fixture
+def http_tesseract_instance(
+    tmp_path_factory, use_backend, noop_tesseract_image, request
+):
+    """Create a containerized HTTP Tesseract for the selected backend.
+
+    Function-scoped (rather than module-scoped) because the backend is chosen per
+    parametrization; the image build/convert it depends on is still session-cached.
+    """
     from tesseract_core.sdk.tesseract import Tesseract
+
+    if use_backend == "apptainer":
+        # Ensure the SIF exists in the store for this backend.
+        request.getfixturevalue("noop_sif_image")
 
     tmpdir = tmp_path_factory.mktemp("tesseract_http")
     cm = Tesseract.from_image(
@@ -80,18 +95,35 @@ def test_from_tesseract_api(benchmark, tesseract_api_instance, array_size):
     benchmark(tesseract_api_instance.apply, inputs)
 
 
-@pytest.mark.docker
+@pytest.mark.parametrize(
+    "use_backend",
+    [
+        pytest.param("docker", marks=pytest.mark.docker),
+        pytest.param("apptainer", marks=pytest.mark.apptainer),
+    ],
+    indirect=True,
+)
 def test_containerized_http(benchmark, http_tesseract_instance, array_size):
-    """Benchmark containerized Tesseract via HTTP."""
+    """Benchmark containerized Tesseract via HTTP, per backend."""
     arr = create_test_array(array_size)
     inputs = {"data": arr}
 
     benchmark(http_tesseract_instance.apply, inputs)
 
 
-@pytest.mark.docker
-def test_containerized_cli(benchmark, noop_tesseract_image, array_size):
-    """Benchmark containerized Tesseract via CLI (`tesseract run`)."""
+@pytest.mark.parametrize(
+    "use_backend",
+    [
+        pytest.param("docker", marks=pytest.mark.docker),
+        pytest.param("apptainer", marks=pytest.mark.apptainer),
+    ],
+    indirect=True,
+)
+def test_containerized_cli(
+    benchmark, use_backend, noop_tesseract_image, noop_sif_image, array_size
+):
+    """Benchmark containerized Tesseract via CLI (`tesseract run`), per backend."""
+    image_ref = noop_sif_image if use_backend == "apptainer" else noop_tesseract_image
     with tempfile.TemporaryDirectory() as tmpdir:
         input_dir = Path(tmpdir) / "input"
         output_dir = Path(tmpdir) / "output"
@@ -127,7 +159,7 @@ def test_containerized_cli(benchmark, noop_tesseract_image, array_size):
                 [
                     "tesseract",
                     "run",
-                    noop_tesseract_image,
+                    image_ref,
                     "apply",
                     f"@{payload_file}",
                     "--input-path",
@@ -144,15 +176,15 @@ def test_containerized_cli(benchmark, noop_tesseract_image, array_size):
                 raise RuntimeError(f"CLI failed: {result.stderr}")
             return result
 
-        def wait_for_docker_cleanup():
-            """Let Docker fully release resources before the next cold start."""
+        def wait_for_cleanup():
+            """Let the runtime fully release resources before the next cold start."""
             time.sleep(2)
 
         # Each invocation spawns a full container. We want clean cold-start
-        # timings, so sleep between rounds to let Docker clean up.
+        # timings, so sleep between rounds to let the runtime clean up.
         benchmark.pedantic(
             run_cli,
-            setup=wait_for_docker_cleanup,
+            setup=wait_for_cleanup,
             rounds=3,
             warmup_rounds=1,
             iterations=1,

@@ -23,7 +23,8 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 from pydantic_core import InitErrorDetails, PydanticCustomError, from_json
 
 from . import engine
-from .docker_client import Container, Containers
+from .container_client import get_client
+from .container_client.base import AbstractContainer as Container
 from .logs import LogStreamer
 
 PathLike: TypeAlias = str | Path
@@ -426,7 +427,7 @@ class Tesseract:
                 "`container_info` is only available for served Tesseracts. "
                 "Use `tess.serve()` or `with tess:` first."
             )
-        return Containers.get(self._serve_context["container_name"])
+        return get_client().containers.get(self._serve_context["container_name"])
 
     @requires_client
     def apply(
