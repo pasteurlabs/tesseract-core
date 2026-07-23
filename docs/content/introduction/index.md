@@ -85,6 +85,7 @@ Changelog <https://github.com/pasteurlabs/tesseract-core/releases>
 
 ../creating-tesseracts/create.md
 ../creating-tesseracts/design-patterns.md
+../creating-tesseracts/pipelines.md
 ../creating-tesseracts/advanced.md
 ../creating-tesseracts/llm-assistance.md
 ../creating-tesseracts/deploy.md

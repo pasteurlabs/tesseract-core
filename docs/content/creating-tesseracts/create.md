@@ -126,6 +126,54 @@ The output is a table of Tesseract images with their ID, name, version, and desc
 └─────────────────────┴───────────────────────┴────────────┴─────────┴───────────────────────────────────────────┘
 ```
 
+(testing-a-tesseract)=
+
+## Test your Tesseract
+
+Every Tesseract ships with a built-in `test` endpoint for regression testing. It calls one of your endpoints with a given input and checks the result against a known-good output (or against an expected exception), reporting a simple pass/fail.
+
+A test case is a small JSON file. For the `helloworld` example, `test_cases/test_apply.json` looks like this:
+
+```json
+{
+  "endpoint": "apply",
+  "payload": { "inputs": { "name": "Ozzy" } },
+  "expected_outputs": { "greeting": "Hello Ozzy!" }
+}
+```
+
+Run it against a built image with `tesseract run ... test`, passing the spec as a file with the `@` prefix:
+
+```bash
+$ tesseract run helloworld:latest test @test_cases/test_apply.json
+```
+
+The command prints a JSON result with a `status` of `"passed"`, `"failed"`, or `"error"`. It always exits with code 0 and reports the outcome in the payload, so a test runner must read `status` rather than the exit code.
+
+A spec has a few more knobs:
+
+- **`atol` / `rtol`** — absolute and relative tolerances for numeric comparisons (defaults: `1e-8` and `1e-5`). Loosen these for endpoints whose outputs aren't bit-reproducible.
+- **`expected_exception`** (with optional **`expected_exception_regex`**) — assert that the endpoint _raises_ instead of returning. Give the exception's name (e.g. `"pydantic.ValidationError"`) and, optionally, a regex the message must match. Provide exactly one of `expected_outputs` or `expected_exception`.
+
+To test the Tesseract API directly from Python without building an image, which is convenient while iterating, use the SDK. It imports your `tesseract_api.py` in debug mode so the `test` endpoint is available:
+
+```python
+from tesseract_core import Tesseract
+
+tess = Tesseract.from_tesseract_api("path/to/tesseract_api.py")
+tess.test({
+    "endpoint": "apply",
+    "payload": {"inputs": {"name": "Ozzy"}},
+    "expected_outputs": {"greeting": "Hello Ozzy!"},
+})  # raises AssertionError if the test fails
+```
+
+```{note}
+Over HTTP, the `test` endpoint is only exposed when a Tesseract is [served in debug mode](../using-tesseracts/use.md) (`tesseract serve --debug`). `tesseract run ... test` and `Tesseract.from_tesseract_api(...)` enable it for you, a plain `tesseract serve` does not.
+```
+
+Keeping a `test_cases/` directory next to each Tesseract and running every spec in CI is the pattern the [`cookiecutter-tesseract`](#building-a-multi-tesseract-project) template sets up for you.
+
 ## Arrays in the schema
 
 N-dimensional arrays are central to scientific computing. Use the `tesseract_core.runtime.Array` type annotation to define them:
