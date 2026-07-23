@@ -249,7 +249,7 @@ Ready to build your own? The {doc}`Get Started <content/introduction/get-started
 
 ## Demos
 
-::::{grid} 1 2 2 4
+::::{grid} 1 2 3 3
 :gutter: 3
 
 :::{grid-item-card} 4D-Var Data Assimilation
