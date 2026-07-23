@@ -1,6 +1,38 @@
+(deploy)=
+
 # Deploying Tesseracts
 
 Tesseracts built via `tesseract build` are standard Docker images, so they can be shared, pushed, pulled, and deployed like any other container.
+
+(backend-capability-matrix)=
+
+## Container backends
+
+Tesseract supports two container backends, selected via the
+`TESSERACT_CONTAINER_BACKEND` environment variable (default `docker`):
+
+- **`docker`** — Docker, or any engine with a Docker-compatible CLI such as Podman
+  (select the executable with `TESSERACT_DOCKER_EXECUTABLE`). Full feature set.
+- **`apptainer`** — [Apptainer](https://apptainer.org/) for HPC systems where a
+  root Docker daemon is unavailable. Runs and serves Tesseracts natively; cannot
+  build. See {ref}`deploying-on-hpc`.
+
+The backends differ in the features they support:
+
+| Feature                         | Docker / Podman |                   Apptainer                    |
+| ------------------------------- | :-------------: | :--------------------------------------------: |
+| `build`                         |       ✅        | ❌ (build with Docker, then `pull` or convert) |
+| `run` (one-shot)                |       ✅        |                       ✅                       |
+| `serve` / `ps` / `teardown`     |       ✅        |       ✅ (per-user, per-node instances)        |
+| `pull` into a local store       |        —        |             ✅ (`tesseract pull`)              |
+| GPUs                            |  ✅ (`--gpus`)  |      ✅ (`--nv` + `CUDA_VISIBLE_DEVICES`)      |
+| User-defined networks / aliases |       ✅        |             ❌ (host-network only)             |
+| Port mapping                    |       ✅        |         ❌ (binds host ports directly)         |
+| Restart policies                |       ✅        |                       ❌                       |
+| Memory limits                   |       ✅        |      ⚠️ (requires cgroups v2 delegation)       |
+
+Options with no Apptainer equivalent fail with a clear error rather than degrading
+silently.
 
 ## Using Docker tools
 

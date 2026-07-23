@@ -6,7 +6,7 @@ import shlex
 import shutil
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict
 
@@ -41,6 +41,7 @@ def maybe_split_args(value: str | Sequence[str]) -> tuple[str, ...]:
 class RuntimeConfig(BaseModel):
     """Available runtime configuration."""
 
+    container_backend: Literal["docker", "apptainer"] = "docker"
     docker_executable: Annotated[
         tuple[str, ...], BeforeValidator(validate_executable)
     ] = ("docker",)
@@ -48,6 +49,16 @@ class RuntimeConfig(BaseModel):
         tuple[str, ...], BeforeValidator(maybe_split_args)
     ] = ()
     docker_run_args: Annotated[tuple[str, ...], BeforeValidator(maybe_split_args)] = ()
+    # The Apptainer executable is validated lazily by the Apptainer backend (rather
+    # than eagerly here) so that Docker-only environments, where Apptainer is not
+    # installed, can still construct a config.
+    apptainer_executable: Annotated[
+        tuple[str, ...], BeforeValidator(maybe_split_args)
+    ] = ("apptainer",)
+    # Directory holding the SIF image store used by the Apptainer backend. Defaults
+    # to ~/.local/share/tesseract/images/ but is configurable because $HOME is often
+    # small on clusters where scratch storage is preferred.
+    apptainer_image_dir: str = ""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 

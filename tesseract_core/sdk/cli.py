@@ -34,13 +34,15 @@ from .api_parse import (
     get_submodel_fields_in_tesseract_config,
 )
 from .config import get_config
-from .docker_client import (
+from .container_client import get_client
+from .container_client.docker import (
+    Container,
+    Image,
+)
+from .container_client.exceptions import (
     APIError,
     BuildError,
-    CLIDockerClient,
-    Container,
     ContainerError,
-    Image,
     ImageNotFound,
     NotFound,
 )
@@ -65,7 +67,19 @@ ENV = Environment(
     undefined=StrictUndefined,
 )
 
-docker_client = CLIDockerClient()
+
+class _ContainerClientProxy:
+    """Attribute proxy resolving to the configured backend on each access.
+
+    Mirrors the proxy in engine.py so ``docker_client.images.list()`` call sites
+    keep working while honoring the runtime ``container_backend`` config.
+    """
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(get_client(), name)
+
+
+docker_client = _ContainerClientProxy()
 
 
 class SpellcheckedTyperGroup(typer.core.TyperGroup):
@@ -323,6 +337,17 @@ def build_image(
             help="Only generate the build context and do not actually build the image."
         ),
     ] = False,
+    output_format: Annotated[
+        str,
+        typer.Option(
+            "--output-format",
+            help=(
+                "Output format of the built image. `docker` (default) builds a "
+                "normal Docker image; `sif` additionally converts it into the "
+                "Apptainer SIF image store (requires both Docker and Apptainer)."
+            ),
+        ),
+    ] = "docker",
 ) -> None:
     """Build a new Tesseract from a context directory.
 
@@ -331,7 +356,13 @@ def build_image(
 
     Prints the built images as JSON array to stdout, for example: `["mytesseract:latest"]`.
     If `--generate-only` is set, the path to the build context is printed instead.
+    With `--output-format sif`, the image is converted into the Apptainer store and
+    the stored `name:tag` references are printed instead.
     """
+    if output_format not in ("docker", "sif"):
+        raise UserError(
+            f"Invalid --output-format {output_format!r}; expected 'docker' or 'sif'."
+        )
     if config_override is None:
         config_override = []
 
@@ -383,11 +414,72 @@ def build_image(
         # output is the path to the build context
         build_dir = build_out
         typer.echo(build_dir)
+        return
+
+    # output is the built (Docker) image
+    image = build_out
+    logger.info(f"Built image {image.short_id}, {image.tags}")
+
+    if output_format == "sif":
+        # Convert each built tag into the Apptainer SIF store.
+        stored_refs = []
+        with DEFAULT_CONSOLE.status(
+            "[white]Converting to SIF", spinner="dots", spinner_style="white"
+        ):
+            for full_tag in image.tags or []:
+                name, _, tag_part = full_tag.rpartition(":")
+                sif_image = engine.build_sif(name, tag_part or "latest")
+                stored_refs.extend(sif_image.tags or [])
+        logger.info(f"Converted to SIF store: {stored_refs}")
+        typer.echo(json.dumps(stored_refs))
     else:
-        # output is the built image
-        image = build_out
-        logger.info(f"Built image {image.short_id}, {image.tags}")
         typer.echo(json.dumps(image.tags))
+
+
+@app.command("pull")
+@engine.needs_backend
+def pull_image(
+    reference: Annotated[
+        str,
+        typer.Argument(
+            help=(
+                "Image reference to pull, e.g. "
+                "`docker://ghcr.io/pasteurlabs/my-tesseract:1.0.0`. Any transport "
+                "Apptainer understands (docker://, docker-daemon:, oras://, ...) works."
+            ),
+        ),
+    ],
+    tag: Annotated[
+        str | None,
+        typer.Option(
+            "--tag",
+            "-t",
+            help=(
+                "Store the pulled Tesseract under this `name:tag` (or just `tag`). "
+                "By default, inferred from the reference."
+            ),
+        ),
+    ] = None,
+) -> None:
+    """Pull a Tesseract image into the local Apptainer image store.
+
+    The key cluster-side command for the Apptainer backend: converts a registry
+    image into a SIF in the store so it can be run and served natively. Only
+    supported when the Apptainer backend is selected
+    (`TESSERACT_CONTAINER_BACKEND=apptainer`).
+
+    Prints the stored image as a JSON array to stdout, e.g. `["my-tesseract:1.0.0"]`.
+    """
+    name = None
+    if tag is not None and ":" in tag and "/" not in tag.rsplit(":", 1)[-1]:
+        name, tag = tag.rsplit(":", 1)
+
+    with DEFAULT_CONSOLE.status(
+        "[white]Pulling", spinner="dots", spinner_style="white"
+    ):
+        image = engine.pull_image(reference, name=name, tag=tag)
+    logger.info(f"Pulled image {image.tags}")
+    typer.echo(json.dumps(image.tags))
 
 
 RecipeChoices = make_choice_enum("Recipe", AVAILABLE_RECIPES)

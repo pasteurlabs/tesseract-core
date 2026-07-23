@@ -111,7 +111,7 @@ def test_container_info_returns_container_during_serve(
 ):
     """``container_info()`` returns a fresh ``Container`` while served.
 
-    Each call delegates to ``Containers.get(container_name)``, so we
+    Each call delegates to ``get_client().containers.get(container_name)``, so we
     patch that lookup and verify the call site forwards the running
     container's name through unchanged. Outside the serve window the
     call must raise.
@@ -122,9 +122,12 @@ def test_container_info_returns_container_during_serve(
         name="container-id-123",
         attrs={},
     )
-    get_mock = mocker.patch(
-        "tesseract_core.sdk.tesseract.Containers.get",
-        return_value=fake_container,
+    client = mocker.MagicMock()
+    get_mock = client.containers.get
+    get_mock.return_value = fake_container
+    mocker.patch(
+        "tesseract_core.sdk.tesseract.get_client",
+        return_value=client,
     )
 
     t = Tesseract.from_image("sometesseract:0.2.3")
