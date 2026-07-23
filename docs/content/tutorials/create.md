@@ -95,7 +95,7 @@ description: "A sample Python app"
 You're now ready to build your first Tesseract.
 
 ```{tip}
-Before building, you can test locally without containers using `tesseract-runtime`. See [Debugging and Development](../misc/debugging.md) for details.
+Before building, you can test locally without containers using `tesseract-runtime`. See the [Debugging Guide](../how-to/debugging.md) for details.
 ```
 
 ## Build a Tesseract
@@ -169,7 +169,7 @@ tess.test({
 ```
 
 ```{note}
-Over HTTP, the `test` endpoint is only exposed when a Tesseract is [served in debug mode](../using-tesseracts/use.md) (`tesseract serve --debug`). `tesseract run ... test` and `Tesseract.from_tesseract_api(...)` enable it for you, a plain `tesseract serve` does not.
+Over HTTP, the `test` endpoint is only exposed when a Tesseract is [served in debug mode](../how-to/use.md) (`tesseract serve --debug`). `tesseract run ... test` and `Tesseract.from_tesseract_api(...)` enable it for you, a plain `tesseract serve` does not.
 ```
 
 Keeping a `test_cases/` directory next to each Tesseract and running every spec in CI is the pattern the [`cookiecutter-tesseract`](#building-a-multi-tesseract-project) template sets up for you.
@@ -200,7 +200,7 @@ class InputSchema(BaseModel):
 The first parameter is the `shape`, the second is the `dtype` — both follow NumPy conventions.
 Inside a Tesseract, `Array` fields are cast to `numpy.ndarray` objects with the given dtype and shape, so standard NumPy operations work directly. For example, `r @ x + s` would multiply the matrix `r` by the vector `x` and add the broadcasted scalar `s`.
 
-For scalars, use `tesseract_core.runtime.Float32`, `Float64`, `Int32`, etc. (see the [runtime API reference](../api/tesseract-runtime-api.md) for the full list). Plain `float` works but does not support the [differentiability features](tr-create-diff) described below.
+For scalars, use `tesseract_core.runtime.Float32`, `Float64`, `Int32`, etc. (see the [runtime API reference](../reference/tesseract-runtime-api.md) for the full list). Plain `float` works but does not support the [differentiability features](tr-create-diff) described below.
 
 ## Nested schemas
 

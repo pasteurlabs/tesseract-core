@@ -64,7 +64,7 @@ Array data is stored in separate binary files, with JSON containing only referen
 | **base64** | Binary data encoded as base64 strings in JSON | General-purpose default for HTTP transport                                                       |
 | **binref** | References to binary files on disk            | Large arrays (>10MB), when disk I/O is preferable over HTTP, when data is written to disk anyway |
 
-The chart below shows how encoding format affects serialization and transfer overhead as array size grows. For more on overall Tesseract performance trade-offs, see {doc}`/content/misc/performance`.
+The chart below shows how encoding format affects serialization and transfer overhead as array size grows. For more on overall Tesseract performance trade-offs, see {doc}`/content/concepts/performance`.
 
 ```{figure} /img/benchmark_encoding.png
 :alt: Encoding performance comparison

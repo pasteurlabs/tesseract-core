@@ -59,7 +59,46 @@ extensions = [
     "sphinxcontrib.autodoc_pydantic",
     # Sitemap for SEO
     "sphinx_sitemap",
+    # Redirect stubs for pages moved during the Diátaxis reorganization
+    "sphinx_reredirects",
 ]
+
+# The docs are served with the `dirhtml` builder (clean, extension-less URLs)
+# and Read the Docs has an "HTML to clean URL" redirect configured, so old
+# `.html` URLs are rewritten to their trailing-slash form at the hosting layer.
+# The only thing left to preserve is pages that changed *location* during the
+# Diátaxis reorganization: sphinx-reredirects writes a stub at each old page's
+# (clean) URL that forwards to its new one.
+#
+# Targets are RELATIVE, not absolute. Under dirhtml each stub is written at
+# `<old-docname>/index.html` — one directory deeper than the docname — but
+# sphinx-reredirects relativizes leading-slash targets against the docname's
+# depth, so an absolute target lands one `../` short. Version-pinned absolute
+# URLs would also break RTD's per-version/PR-preview subpaths. Every old page
+# lives at `content/<section>/<page>` (docname depth 3 → stub depth 4), so the
+# route back to the output root is uniformly `../../../`.
+_R = "../../../content"
+redirects = {
+    "content/introduction/get-started": f"{_R}/tutorials/get-started/",
+    "content/creating-tesseracts/create": f"{_R}/tutorials/create/",
+    "content/creating-tesseracts/design-patterns": f"{_R}/how-to/design-patterns/",
+    "content/creating-tesseracts/pipelines": f"{_R}/how-to/pipelines/",
+    "content/creating-tesseracts/deploy": f"{_R}/how-to/deploy/",
+    "content/creating-tesseracts/llm-assistance": f"{_R}/how-to/llm-assistance/",
+    "content/creating-tesseracts/advanced": f"{_R}/how-to/defining-apis/",
+    "content/using-tesseracts/use": f"{_R}/how-to/use/",
+    "content/using-tesseracts/advanced": f"{_R}/how-to/advanced-usage/",
+    "content/using-tesseracts/array-encodings": f"{_R}/reference/array-encodings/",
+    "content/misc/debugging": f"{_R}/how-to/debugging/",
+    "content/misc/differentiable-programming": f"{_R}/concepts/differentiable-programming/",
+    "content/misc/performance": f"{_R}/concepts/performance/",
+    "content/api/config": f"{_R}/reference/config/",
+    "content/api/endpoints": f"{_R}/reference/endpoints/",
+    "content/api/tesseract-api": f"{_R}/reference/tesseract-api/",
+    "content/api/tesseract-cli": f"{_R}/reference/tesseract-cli/",
+    "content/api/tesseract-runtime-api": f"{_R}/reference/tesseract-runtime-api/",
+    "content/api/tesseract-runtime-cli": f"{_R}/reference/tesseract-runtime-cli/",
+}
 
 
 myst_enable_extensions = [

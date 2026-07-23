@@ -150,7 +150,7 @@ This is useful for tuning framework behavior (e.g., JAX memory allocation, OpenM
 
 ## Customizing the build process
 
-The `build_config` section of [`tesseract_config.yaml`](../api/config.md) controls how the Tesseract image is built. Common reasons to customize it:
+The `build_config` section of [`tesseract_config.yaml`](../reference/config.md) controls how the Tesseract image is built. Common reasons to customize it:
 
 - **Your code needs system libraries** (e.g., `gfortran`, `libgomp1`) — use `extra_packages` to install them via `apt-get`.
 - **You need a specific Python version or GPU drivers** — override `base_image` (must be Debian-based).
@@ -159,7 +159,7 @@ The `build_config` section of [`tesseract_config.yaml`](../api/config.md) contro
 - **None of the above cover your case** — use `custom_build_steps` to inject arbitrary Dockerfile commands. See the [Dockerfile template](https://github.com/pasteurlabs/tesseract-core/blob/main/tesseract_core/sdk/templates/Dockerfile.base) for where these are injected.
 
 ```{seealso}
-For the full list of options and their defaults, see the [Configuration reference](../api/config.md).
+For the full list of options and their defaults, see the [Configuration reference](../reference/config.md).
 ```
 
 For worked examples, see the [Package Data](../examples/building-blocks/packagedata.md), [Pyvista on ARM64](../examples/building-blocks/arm64.md), and [Fortran Integration](../examples/building-blocks/fortran.md) building blocks.
