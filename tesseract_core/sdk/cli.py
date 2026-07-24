@@ -1115,6 +1115,17 @@ def run_container(
             help="Enable tracing for detailed debug output.",
         ),
     ] = False,
+    debug: Annotated[
+        bool,
+        typer.Option(
+            "--debug",
+            help=(
+                "Enable debug mode. This starts a debugpy server in the Tesseract and "
+                "blocks until a debugger attaches to the forwarded port. "
+                "WARNING: This may expose sensitive information, use with caution (and never in production)."
+            ),
+        ),
+    ] = False,
     invoke_help: Annotated[
         bool,
         typer.Option(
@@ -1229,6 +1240,9 @@ def run_container(
             user=user,
             memory=memory,
             docker_args=shlex.split(docker_args) if docker_args else None,
+            # `--debug` is meaningless when only forwarding `--help`, and would
+            # otherwise block waiting for a debugger on a help invocation.
+            debug=debug and not invoke_help,
             stream_logs=logger.info,  # Stream logs via logger
         )
 

@@ -96,6 +96,25 @@ green "play" button at the top left corner of the "Run and Debug" tab.
 
 For more information on the VSCode debugger, see [this guide](https://code.visualstudio.com/docs/debugtest/debugging).
 
+### Debugging one-shot commands
+
+`tesseract run` also supports a `--debug` flag, which lets you remotely debug a one-shot command
+rather than a long-running server. It works with any command you can run this way (`apply`,
+`jacobian`, `check-gradients`, `health`, ...):
+
+```bash
+$ tesseract run --debug helloworld apply '{"inputs": {"a": 1.0, "b": 2.0}}'
+```
+
+Because `tesseract run` executes a single command and then exits, the runtime starts a debugpy
+server inside the container and **blocks until a debugger attaches** before running anything. The
+debugger attaches before your `tesseract_api.py` is even imported, so breakpoints in module-level
+code (e.g. model loading at import time) are hit as well as those inside the endpoint itself.
+
+The host port to connect to is printed in the CLI when the command starts. Use the same VSCode
+launch config as above (filling in the printed port number) to attach; execution resumes
+automatically once the debugger is connected.
+
 (profiling)=
 
 ## Profiling

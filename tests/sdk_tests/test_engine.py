@@ -423,6 +423,22 @@ def test_run_tesseract(mocked_docker):
     assert res["device_requests"] is None
 
 
+def test_run_debug(mocked_docker):
+    """Test running a tesseract in debug mode forwards a debugpy port."""
+    res_out, _ = engine.run_tesseract(
+        "foobar",
+        "apply",
+        ['{"inputs": {"a": [1, 2, 3], "b": [4, 5, 6]}}'],
+        debug=True,
+    )
+
+    res = json.loads(res_out)
+    # TESSERACT_DEBUG is set so the runtime starts debugpy and waits for a client.
+    assert res["environment"]["TESSERACT_DEBUG"] == "1"
+    # The container's debugpy port (5678) is forwarded to a free port on the host.
+    assert "5678" in res["ports"].values()
+
+
 def test_run_gpu(mocked_docker):
     """Test running a tesseract with all available GPUs."""
     res_out, _ = engine.run_tesseract(
