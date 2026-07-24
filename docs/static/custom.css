@@ -32,6 +32,27 @@ figure.align-default {
     margin-bottom: 2em;
 }
 
+/* Floated figures (:align: right / left) squeeze body text into a tiny
+   sliver on narrow screens. Below the mobile breakpoint, stop floating and
+   let them span the column, centered. */
+@media (max-width: 767px) {
+    figure.align-right,
+    figure.align-left {
+        float: none;
+        width: auto !important;
+        max-width: 100%;
+        margin-left: auto;
+        margin-right: auto;
+        text-align: center;
+    }
+
+    figure.align-right img,
+    figure.align-left img {
+        max-width: 100%;
+        height: auto;
+    }
+}
+
 
 /* Top-nav bar styles live in top-nav.css (shared across all Tesseract
    ecosystem repos). */

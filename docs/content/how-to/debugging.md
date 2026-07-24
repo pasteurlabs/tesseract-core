@@ -92,7 +92,7 @@ debug mode:
 field of your `launch.json` file, you should be able to attach to the Tesseract being served by clicking on the
 green "play" button at the top left corner of the "Run and Debug" tab.
 
-![Starting remote debug session in VScode](../using-tesseracts/remote_debug.png)
+![Starting remote debug session in VScode](remote_debug.png)
 
 For more information on the VSCode debugger, see [this guide](https://code.visualstudio.com/docs/debugtest/debugging).
 
