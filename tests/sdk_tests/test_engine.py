@@ -435,8 +435,27 @@ def test_run_debug(mocked_docker):
     res = json.loads(res_out)
     # TESSERACT_DEBUG is set so the runtime starts debugpy and waits for a client.
     assert res["environment"]["TESSERACT_DEBUG"] == "1"
-    # The container's debugpy port (5678) is forwarded to a free port on the host.
-    assert "5678" in res["ports"].values()
+
+    assert engine.CONTAINER_DEBUGPY_PORT in res["ports"].values()
+
+
+def test_run_debug_host_network(mocked_docker):
+    """With host networking, debugpy binds the host port directly (no mapping)."""
+    res_out, _ = engine.run_tesseract(
+        "foobar",
+        "apply",
+        ['{"inputs": {"a": [1, 2, 3], "b": [4, 5, 6]}}'],
+        debug=True,
+        network="host",
+    )
+
+    res = json.loads(res_out)
+
+    assert res["network"] == "host"
+    assert res["environment"]["TESSERACT_DEBUG"] == "1"
+    # No port mapping is added: the container binds the debugpy port on the host
+    # directly, so an explicit mapping would be rejected.
+    assert not res["ports"]
 
 
 def test_run_gpu(mocked_docker):
