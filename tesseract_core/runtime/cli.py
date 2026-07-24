@@ -231,8 +231,8 @@ def _schema_to_docstring(schema: Any, current_indent: int = 0) -> str:
     return "\n".join(docstring)
 
 
-def _maybe_start_debugger(wait_for_client: bool, port: int = 5678) -> None:
-    """Start a debugpy server for remote debugging when debug mode is enabled.
+def _start_debug_server(wait_for_client: bool, port: int = 5678) -> None:
+    """Start a debugpy server for remote debugging.
 
     The long-running ``serve`` command launches a non-blocking server that a
     debugger can attach to at any time. One-shot commands instead attach early in
@@ -244,9 +244,6 @@ def _maybe_start_debugger(wait_for_client: bool, port: int = 5678) -> None:
         wait_for_client: If True, block until a debugger attaches.
         port: Port to listen on inside the container.
     """
-    if not get_config().debug:
-        return
-
     # Python 3.11+ freezes stdlib bootstrap modules, which makes debugpy print a
     # noisy "frozen modules" warning (it could only ever miss breakpoints inside
     # those frozen modules, never in user code). Skip the validation check.
@@ -428,8 +425,9 @@ def serve(
     num_workers: Annotated[int, typer.Option(help="Number of worker processes")] = 1,
 ) -> None:
     """Start running this Tesseract's web server."""
-    # The server is long-running, so a debugger can attach at any time.
-    _maybe_start_debugger(wait_for_client=False)
+    if get_config().debug:
+        # The server is long-running, so a debugger can attach at any time.
+        _start_debug_server(wait_for_client=False)
     serve_(host=host, port=port, num_workers=num_workers)
 
 
@@ -611,7 +609,7 @@ def main() -> None:
         # non-blocking debugger and must not block, and help should not block.
         skip_debug_wait_args = {"serve", "-h", "--help"}
         if get_config().debug and not skip_debug_wait_args.intersection(sys.argv):
-            _maybe_start_debugger(wait_for_client=True)
+            _start_debug_server(wait_for_client=True)
 
         _add_user_commands_to_cli(app, out_stream=orig_stdout)
         app(auto_envvar_prefix="TESSERACT_RUNTIME")

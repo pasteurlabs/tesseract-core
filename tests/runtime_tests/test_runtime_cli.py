@@ -619,6 +619,68 @@ def test_check(cli, cli_runner, dummy_tesseract_package):
         )
 
 
+def test_start_debug_server_blocks_until_client(monkeypatch):
+    """One-shot commands must block until a debugger attaches.
+
+    We fake the ``debugpy`` module so ``wait_for_client`` blocks on an event we
+    control, then assert that ``_start_debug_server`` only returns once a
+    (fake) client has "attached".
+    """
+    import threading
+    import types
+
+    from tesseract_core.runtime import cli
+
+    attached = threading.Event()
+    calls = {}
+
+    fake_debugpy = types.SimpleNamespace()
+    fake_debugpy.listen = lambda addr: calls.setdefault("listen", addr)
+    fake_debugpy.wait_for_client = attached.wait
+    monkeypatch.setitem(sys.modules, "debugpy", fake_debugpy)
+
+    returned = threading.Event()
+
+    def run():
+        cli._start_debug_server(wait_for_client=True, port=12345)
+        returned.set()
+
+    server_thread = threading.Thread(target=run, daemon=True)
+    server_thread.start()
+
+    # The server should be listening but blocked, since no client has attached.
+    server_thread.join(timeout=1.0)
+    assert calls["listen"] == ("0.0.0.0", 12345)
+    assert not returned.is_set(), "Debug server returned before a client attached"
+
+    # Simulate a debugger attaching; the call should now return promptly.
+    attached.set()
+    server_thread.join(timeout=5.0)
+    assert returned.is_set(), "Debug server did not return after a client attached"
+
+
+def test_start_debug_server_no_wait(monkeypatch):
+    """The ``serve`` code path listens but does not block on a client."""
+    import types
+
+    from tesseract_core.runtime import cli
+
+    calls = {"wait": 0}
+
+    def wait_for_client():
+        calls["wait"] += 1
+
+    fake_debugpy = types.SimpleNamespace()
+    fake_debugpy.listen = lambda addr: calls.setdefault("listen", addr)
+    fake_debugpy.wait_for_client = wait_for_client
+    monkeypatch.setitem(sys.modules, "debugpy", fake_debugpy)
+
+    cli._start_debug_server(wait_for_client=False, port=12345)
+
+    assert calls["listen"] == ("0.0.0.0", 12345)
+    assert calls["wait"] == 0, "Debug server blocked on a client when it should not"
+
+
 def test_local_module(cli, cli_runner, dummy_tesseract_package):
     """Ensure that a .py file next to tesseract_api.py can be imported."""
     from tesseract_core.runtime.config import update_config
