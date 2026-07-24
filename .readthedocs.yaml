@@ -21,7 +21,10 @@ build:
       - uv sync --extra dev --frozen
     build:
       html:
-        - uv run sphinx-build -T -b html docs $READTHEDOCS_OUTPUT/html
+        # dirhtml serves clean, extension-less URLs (.../pipelines/ instead of
+        # .../pipelines.html). Old .html URLs are preserved via redirect stubs
+        # emitted from docs/conf.py.
+        - uv run sphinx-build -T -b dirhtml docs $READTHEDOCS_OUTPUT/html
 
 # Build documentation in the "docs/" directory with Sphinx
 sphinx:

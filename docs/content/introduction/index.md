@@ -6,7 +6,7 @@ og:description: "Tesseract packages scientific software into portable, self-docu
 # Tesseract Core Documentation
 
 Tesseract packages scientific software into portable, self-documenting, differentiable components.
-New here? Start with the [Get Started](get-started.md) tutorial or the [Installation](installation.md) guide.
+New here? Start with the [Get Started](../tutorials/get-started.md) tutorial or the [Installation](installation.md) guide.
 
 ## How it works
 
@@ -18,14 +18,14 @@ New here? Start with the [Get Started](get-started.md) tutorial or the [Installa
 <small>Internal and external interfaces of a Tesseract.</small>
 ```
 
-Every Tesseract has a primary entrypoint, `apply`, which wraps a software functionality of your choice. All other [endpoints](../api/endpoints.md) relate to this entrypoint: `abstract_eval` returns output structure, `jacobian` computes derivatives, and so on.
+Every Tesseract has a primary entrypoint, `apply`, which wraps a software functionality of your choice. All other [endpoints](../reference/endpoints.md) relate to this entrypoint: `abstract_eval` returns output structure, `jacobian` computes derivatives, and so on.
 
 There are several ways to interact with Tesseracts:
 
 1. **Define** entrypoints in `tesseract_api.py`
 2. **Build** a container with `tesseract build`
 3. **Serve** via HTTP with `tesseract serve`
-4. **Invoke** via CLI, HTTP, or the [Python SDK](../api/tesseract-api.md)
+4. **Invoke** via CLI, HTTP, or the [Python SDK](../reference/tesseract-api.md)
 
 ## Features and limitations
 
@@ -34,7 +34,7 @@ There are several ways to interact with Tesseracts:
 
 - **Self-documenting** — Tesseracts announce their interfaces, so users can inspect them without reading source code and perform static validation without running the code.
 - **Auto-validating** — Input data is automatically validated against the schema, so internal logic can assume the data is in the expected format.
-- **Autodiff-native** — Tesseracts support [differentiable programming](../misc/differentiable-programming.md) and integrate as native operations in PyTorch and JAX — but exposing derivatives is _strictly optional_.
+- **Autodiff-native** — Tesseracts support [differentiable programming](../concepts/differentiable-programming.md) and integrate as native operations in PyTorch and JAX — but exposing derivatives is _strictly optional_.
 - **Batteries included** — Every Tesseract ships with a containerized runtime, a CLI, a REST API, and a Python SDK.
 
 :::
@@ -73,69 +73,63 @@ If you use Tesseract in your research, please cite:
 :hidden:
 
 installation.md
-get-started.md
 Tesseract User Forums <https://si-tesseract.discourse.group/>
 Changelog <https://github.com/pasteurlabs/tesseract-core/releases>
 ```
 
 ```{toctree}
-:caption: Creating Tesseracts
+:caption: Tutorials & Examples
 :maxdepth: 2
 :hidden:
 
-../creating-tesseracts/create.md
-../creating-tesseracts/design-patterns.md
-../creating-tesseracts/advanced.md
-../creating-tesseracts/llm-assistance.md
-../creating-tesseracts/deploy.md
-```
-
-```{toctree}
-:caption: Using Tesseracts
-:maxdepth: 2
-:hidden:
-
-../using-tesseracts/use.md
-../using-tesseracts/array-encodings.md
-../using-tesseracts/advanced.md
-```
-
-```{toctree}
-:caption: Demos & Tutorials
-:maxdepth: 2
-:hidden:
-
+../tutorials/get-started.md
+../tutorials/create.md
+../tutorials/interact.md
 ../demo/demo.md
 ../examples/example_gallery.md
 ../examples/ansys_gallery.md
 ```
 
 ```{toctree}
-:caption: Guides
+:caption: How-to Guides
 :maxdepth: 2
 :hidden:
 
-../misc/differentiable-programming.md
-../misc/debugging.md
-../misc/performance.md
+../how-to/defining-apis.md
+../how-to/pipelines.md
+../how-to/advanced-usage.md
+../how-to/deploy.md
+../how-to/debugging.md
+../how-to/llm-assistance.md
 ```
 
 ```{toctree}
-:caption: API Reference — SDK
+:caption: Concepts
 :maxdepth: 2
 :hidden:
 
-../api/tesseract-cli.md
-../api/tesseract-api.md
-../api/config.md
+../concepts/design-patterns.md
+../concepts/differentiable-programming.md
+../concepts/performance.md
 ```
 
 ```{toctree}
-:caption: API Reference — Runtime
+:caption: Reference — SDK
 :maxdepth: 2
 :hidden:
 
-../api/endpoints.md
-../api/tesseract-runtime-cli.md
-../api/tesseract-runtime-api.md
+../reference/tesseract-cli.md
+../reference/tesseract-api.md
+../reference/config.md
+```
+
+```{toctree}
+:caption: Reference — Runtime
+:maxdepth: 2
+:hidden:
+
+../reference/endpoints.md
+../reference/array-encodings.md
+../reference/tesseract-runtime-cli.md
+../reference/tesseract-runtime-api.md
 ```
