@@ -1,5 +1,7 @@
 jax[cpu]==0.5.2
 equinox==0.13.6
+optimistix==0.1.0
+lineax==0.0.8
 matplotlib==3.10.9
 scipy==1.15.3
 tesseract-jax==0.3.0
