@@ -266,8 +266,25 @@ def _inject_page_context(app, pagename, templatename, context, doctree):
     return "blog_post.html"
 
 
+def _require_dirhtml(app) -> None:
+    """Fail fast if the plain ``html`` builder is used.
+
+    The site is served with ``dirhtml`` (clean, extension-less URLs) and the
+    reredirect stubs are written assuming that layout. Building with ``html``
+    produces subtly broken redirects and mismatched links, so steer devs to
+    ``dirhtml`` instead of letting them ship a broken build.
+    """
+    if app.builder.name == "html":
+        raise RuntimeError(
+            "These docs are built with the 'dirhtml' builder, not 'html'. "
+            "Use `make dirhtml` (or `sphinx-build -b dirhtml`) instead."
+        )
+
+
 def setup(app) -> None:
     """Sphinx setup function. Used to register custom stuff."""
+    # Enforce the dirhtml builder (see _require_dirhtml for why)
+    app.connect("builder-inited", _require_dirhtml)
     # We zip the examples folder here so that it can be downloaded
     app.connect("builder-inited", zip_examples_folder)
     # Inject blog post listing into blog index page context

@@ -1,4 +1,4 @@
-# Array Encodings
+# Array Encodings Reference
 
 Tesseract supports three encoding formats for array data. The encoding determines how numeric arrays are represented in the JSON payload exchanged between client and server, for both inputs and outputs.
 

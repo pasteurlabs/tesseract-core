@@ -129,7 +129,7 @@ Changelog <https://github.com/pasteurlabs/tesseract-core/releases>
 :hidden:
 
 ../reference/endpoints.md
+../reference/array-encodings.md
 ../reference/tesseract-runtime-cli.md
 ../reference/tesseract-runtime-api.md
-../reference/array-encodings.md
 ```
