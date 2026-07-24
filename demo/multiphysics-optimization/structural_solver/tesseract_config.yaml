@@ -1,0 +1,6 @@
+name: "structural-solver"
+version: "0.1.0"
+description: "2D linear thermoelastic stress solver with compliance objective"
+
+build_config:
+  target_platform: "native"

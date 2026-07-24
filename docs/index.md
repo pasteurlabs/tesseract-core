@@ -296,6 +296,17 @@ Compose a geometry Tesseract with a FEM solver Tesseract for end-to-end
 parametric structural optimization.
 :::
 
+:::{grid-item-card} Multi-Physics Optimization
+:link: content/demo/multiphysics-optimization
+:link-type: doc
+:class-card: demo-card
+:img-top: static/demo-multiphysics.svg
+:class-img-top: demo-schematic invert-on-dark
+
+Couple thermal and structural Tesseracts into a two-way thermoelastic
+pipeline and solve an inverse-design problem with end-to-end gradients.
+:::
+
 :::{grid-item-card} Differentiable Fortran (Enzyme)
 :link: content/demo/enzyme-lfortran
 :link-type: doc
