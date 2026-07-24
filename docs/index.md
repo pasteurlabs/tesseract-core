@@ -40,7 +40,7 @@ Open source, published in [JOSS](https://doi.org/10.21105/joss.08385).
 :::
 
 :::{div} landing-cta
-{bdg-ref-primary-line}`Get Started <content/introduction/get-started>`
+{bdg-ref-primary-line}`Get Started <content/tutorials/get-started>`
 {bdg-ref-primary-line}`Demos <content/demo/demo>`
 {bdg-link-primary-line}`GitHub <https://github.com/pasteurlabs/tesseract-core>`
 :::
@@ -241,7 +241,7 @@ t.teardown()
 
 :::{div} section-intro
 The example above defines a differentiable Tesseract and calls it from the CLI, Python, and JAX.
-Ready to build your own? The {doc}`Get Started <content/introduction/get-started>` tutorial walks you through a complete example from scratch.
+Ready to build your own? The {doc}`Get Started <content/tutorials/get-started>` tutorial walks you through a complete example from scratch.
 :::
 
 :::{div} landing-divider
@@ -395,9 +395,9 @@ Show us what you built in the [community showcase](https://si-tesseract.discours
 :::{grid-item}
 **Project**
 
-- {doc}`Get Started <content/introduction/get-started>`
+- {doc}`Get Started <content/tutorials/get-started>`
 - {doc}`Installation <content/introduction/installation>`
-- {doc}`API Reference <content/api/tesseract-api>`
+- {doc}`API Reference <content/reference/tesseract-api>`
 - [JOSS Paper](https://doi.org/10.21105/joss.08385)
 - [Changelog](https://github.com/pasteurlabs/tesseract-core/releases)
   :::
