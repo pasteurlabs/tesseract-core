@@ -263,6 +263,17 @@ A complete 4D-Variational data assimilation scheme for a chaotic dynamical
 system (Lorenz-96), built with a differentiable JAX Tesseract.
 :::
 
+:::{grid-item-card} Bayesian Inference
+:link: content/demo/bayesian-inference
+:link-type: doc
+:class-card: demo-card
+:img-top: static/demo-bayesian-inference.svg
+:class-img-top: demo-schematic invert-on-dark
+
+Use a Lorenz-96 Tesseract as the forward model in a NumPyro workflow and
+recover the posterior over an unknown forcing parameter with gradient-based MCMC.
+:::
+
 :::{grid-item-card} CFD Flow Optimization
 :link: content/demo/cfd-optimization
 :link-type: doc
