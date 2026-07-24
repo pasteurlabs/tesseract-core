@@ -1268,12 +1268,12 @@ def run_tesseract(
         # `network="host"` binds the container's debugpy port directly on the host,
         # so no explicit port mapping is needed (and would actually be rejected).
         if network == "host":
-            debugpy_port = "5678"
+            debugpy_port = CONTAINER_DEBUGPY_PORT
         else:
             debugpy_port = str(get_free_port())
             if ports is None:
                 ports = {}
-            ports[f"127.0.0.1:{debugpy_port}"] = "5678"
+            ports[f"127.0.0.1:{debugpy_port}"] = CONTAINER_DEBUGPY_PORT
         logger.info(
             f"Debug mode enabled. Attach a debugger to localhost:{debugpy_port} "
             "to start execution (see the 'Debug mode' section of the docs for a "
