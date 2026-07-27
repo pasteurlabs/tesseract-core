@@ -9,6 +9,7 @@ in the main pyproject.toml file. It:
 3. Adds new upper bounds based on the resolved versions
 """
 
+import re
 import subprocess
 import sys
 import tempfile
@@ -113,7 +114,8 @@ def get_updated_bounds(pyproject_file: str, resolved_env: str) -> list[str]:
 def write_new_pyproject(final_deps: list[str], pyproject_file: str) -> None:
     """Write updated dependencies with new upper bounds back to pyproject.toml.
 
-    Preserves formatting of other parts of the file.
+    Only the quoted requirement on each dependency line is rewritten, so the rest
+    of the file -- including comments, blank lines, and spacing -- is left as is.
     """
     with open(pyproject_file) as f:
         original_lines = list(f.readlines())
@@ -133,9 +135,21 @@ def write_new_pyproject(final_deps: list[str], pyproject_file: str) -> None:
             f"Could not find '{EXTRA_NAME} = [' section in {pyproject_file}"
         )
 
+    deps_by_name = {Requirement(dep).name: dep for dep in final_deps}
+
+    dep_lines = []
+    for line in original_lines[dep_start_line:dep_end_line]:
+        # Anything that isn't a dependency we still resolve a bound for -- comments,
+        # blank lines, dropped deps -- passes through untouched.
+        match = re.search(r"""(?P<quote>["'])(?P<dep>.+?)(?P=quote)""", line)
+        if match and (new_dep := deps_by_name.get(Requirement(match["dep"]).name)):
+            line = line[: match.start("dep")] + new_dep + line[match.end("dep") :]
+
+        dep_lines.append(line)
+
     new_lines = [
         *original_lines[:dep_start_line],
-        *[f'    "{dep}",\n' for dep in final_deps],
+        *dep_lines,
         *original_lines[dep_end_line:],
     ]
 
