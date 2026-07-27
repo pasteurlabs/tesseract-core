@@ -40,6 +40,8 @@ One of the most common questions is: _"Should I make one big Tesseract or many s
 - You want to swap out implementations (e.g., different solvers for the same interface)
 - Components are reusable across multiple workflows
 
+(designing-good-interfaces)=
+
 ## Designing good interfaces
 
 ### Keep schemas focused

@@ -272,7 +272,7 @@ That U-shaped FD curve is the classic truncation-vs-roundoff trade-off. Enzyme s
 
 Correct gradients are only worth something once you put them to work, whether that means dropping them into an optimizer, solving a real inverse problem, or composing them with other differentiable code. This is most easily done from Python, so the next step is to get the Enzyme gradients out of the compiled library and into JAX.
 
-To wire the Enzyme gradients into JAX, the solver has to look like a differentiable JAX primitive, and this is more or less exactly what Tesseract was built for. It wraps the build process and compiled library, with LFortran, LLVM 19, Enzyme, and the whole toolchain inside it, into a container that exposes autodiff endpoints. [Building and serving it](../content/introduction/get-started.md) is two commands:
+To wire the Enzyme gradients into JAX, the solver has to look like a differentiable JAX primitive, and this is more or less exactly what Tesseract was built for. It wraps the build process and compiled library, with LFortran, LLVM 19, Enzyme, and the whole toolchain inside it, into a container that exposes autodiff endpoints. [Building and serving it](../content/tutorials/get-started.md) is two commands:
 
 ```bash
 # Package the compiled solver as a served, differentiable JAX primitive

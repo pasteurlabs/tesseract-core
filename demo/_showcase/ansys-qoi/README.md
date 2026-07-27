@@ -213,4 +213,4 @@ tesseract run --gpus all qoi_train
 tesseract run --gpus all qoi_inference
 ```
 
-For more details on GPU configuration options, see the [Tesseract CLI documentation](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/api/tesseract-cli.html#cmdoption-tesseract-run-gpus).
+For more details on GPU configuration options, see the [Tesseract CLI documentation](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/reference/tesseract-cli.html#cmdoption-tesseract-run-gpus).

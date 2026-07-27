@@ -28,7 +28,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: "3.13"
 
@@ -118,7 +118,7 @@ jobs:
           body-includes: "## Benchmark Results"
 
       - name: Create or update PR comment
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && github.actor != 'dependabot[bot]'
         uses: peter-evans/create-or-update-comment@v5
         with:
           token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}

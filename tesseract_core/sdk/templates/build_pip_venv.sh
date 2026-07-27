@@ -17,14 +17,10 @@ else
 fi
 source /python-env/bin/activate
 
-# Collect dependencies
-TESSERACT_DEPS=$(find ./local_requirements/ -mindepth 1 -maxdepth 1 2>/dev/null || true)
-
-# Append requirements file
-TESSERACT_DEPS+=" -r tesseract_requirements.txt"
-
-# Install dependencies
-uv -v pip install --compile-bytecode $TESSERACT_DEPS
+# Install dependencies. Local dependencies (if any) are rewritten into the
+# requirements file as paths under ./local_requirements/, so a single install
+# from the requirements file covers both remote and local dependencies.
+uv -v pip install --compile-bytecode -r tesseract_requirements.txt
 
 # HACK: If `tesseract_core` is part of tesseract_requirements.txt, it may install an incompatible version
 # of the runtime from PyPI. We remove the runtime folder and install the local version instead.
