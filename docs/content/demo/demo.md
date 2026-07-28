@@ -70,7 +70,7 @@ Compose a geometry Tesseract (PyVista, finite-difference gradients) with a FEM T
 :::{grid-item-card} Multi-Physics Optimization
 :link: multiphysics-optimization.html
 
-Couple independent thermal and structural Tesseracts into a two-way thermoelastic pipeline and solve an inverse-design problem with end-to-end gradients — including constant-memory gradients via implicit differentiation.
+Couple two independently built thermal and structural Tesseracts with two-way thermoelastic feedback, and differentiate through the resulting equilibrium to solve an inverse-design problem — with constant-memory gradients via implicit differentiation.
 :::
 :::{grid-item-card} Differentiable Fortran (Enzyme)
 :link: enzyme-lfortran.html
