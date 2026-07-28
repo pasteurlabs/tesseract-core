@@ -16,6 +16,7 @@ from typing import Any
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import lineax as lx
 from pydantic import BaseModel, Field
 
 from tesseract_core.runtime import Array, Differentiable, Float32
@@ -82,11 +83,46 @@ def _stress_from_strain(eps_xx, eps_yy, eps_xy, eps_thermal, E, nu):
     return sigma_xx, sigma_yy, sigma_xy
 
 
-def _solve_elasticity_jacobi(temperature, E, nu, alpha, n_iters=500):
-    """Solve 2D linear elasticity with thermal loading via damped Jacobi.
+def _spd_laplacian_solve(rhs, ax, ay, boundary_value=0.0):
+    """Solve  ax·(-u_xx) + ay·(-u_yy) = rhs  on the interior grid, with Dirichlet bc's.
 
-    Simplified: treats the thermal load as a body force and iterates
-    the equilibrium equations on a staggered grid.
+    The 5-point finite-difference operator is symmetric positive-definite, so we
+    solve it directly with a Cholesky factorization (swap in ``lx.CG`` or a sparse
+    direct solver for a much larger system).q
+    """
+    nx, ny = rhs.shape
+    dx = 1.0 / (nx + 1)
+    dy = 1.0 / (ny + 1)
+
+    def neg_laplacian(u):
+        # -(ax·u_xx + ay·u_yy) with zero boundaries, as second differences.
+        uxx = jnp.diff(u, n=2, axis=0, prepend=0.0, append=0.0)
+        uyy = jnp.diff(u, n=2, axis=1, prepend=0.0, append=0.0)
+        return -(ax * uxx / dx**2 + ay * uyy / dy**2)
+
+    # A Dirichlet value on an edge adds a·value/h² to the RHS at the adjacent
+    # interior nodes (a corner picks up a contribution from both of its edges).
+    b = rhs
+    b = b.at[0, :].add(ax * boundary_value / dx**2)
+    b = b.at[-1, :].add(ax * boundary_value / dx**2)
+    b = b.at[:, 0].add(ay * boundary_value / dy**2)
+    b = b.at[:, -1].add(ay * boundary_value / dy**2)
+
+    operator = lx.FunctionLinearOperator(
+        neg_laplacian,
+        jax.ShapeDtypeStruct((nx, ny), rhs.dtype),
+        tags=(lx.positive_semidefinite_tag,),
+    )
+    return lx.linear_solve(operator, b, solver=lx.Cholesky()).value
+
+
+def _solve_elasticity(temperature, E, nu, alpha):
+    """Solve 2D linear thermoelasticity for the displacement field.
+
+    The temperature enters as a body force f_i = -(lambda + 2*mu)*alpha*dT/dx_i.
+    Dropping the mixed-derivative (lambda + mu)*d2u_j/dx_i dx_j term decouples the
+    two displacement components into independent anisotropic Poisson problems, each
+    solved by `_spd_laplacian_solve`.
     """
     nx, ny = temperature.shape
     dx = 1.0 / (nx + 1)
@@ -101,35 +137,12 @@ def _solve_elasticity_jacobi(temperature, E, nu, alpha, n_iters=500):
     fx = thermal_coeff * jnp.gradient(temperature, dx, axis=0)
     fy = thermal_coeff * jnp.gradient(temperature, dy, axis=1)
 
-    # Padded displacement (zero Dirichlet BCs)
-    u = jnp.zeros((nx + 2, ny + 2, 2))
-    omega = 0.6  # relaxation factor
-
-    def iteration(u, _):
-        ux = u[:, :, 0]
-        uy = u[:, :, 1]
-
-        # Equilibrium: (lambda + 2*mu) * d2u_x/dx2 + mu * d2u_x/dy2
-        #            + (lambda + mu) * d2u_y/dxdy = -fx
-        # Simplified Jacobi update for ux on interior
-        ux_new = (
-            (lam + 2 * mu) * (ux[2:, 1:-1] + ux[:-2, 1:-1]) / dx**2
-            + mu * (ux[1:-1, 2:] + ux[1:-1, :-2]) / dy**2
-            + fx
-        ) / (2 * (lam + 2 * mu) / dx**2 + 2 * mu / dy**2)
-
-        uy_new = (
-            mu * (uy[2:, 1:-1] + uy[:-2, 1:-1]) / dx**2
-            + (lam + 2 * mu) * (uy[1:-1, 2:] + uy[1:-1, :-2]) / dy**2
-            + fy
-        ) / (2 * mu / dx**2 + 2 * (lam + 2 * mu) / dy**2)
-
-        u_interior = jnp.stack([ux_new, uy_new], axis=-1)
-        u_new = u.at[1:-1, 1:-1].set(omega * u_interior + (1 - omega) * u[1:-1, 1:-1])
-        return u_new, None
-
-    u_final, _ = jax.lax.scan(iteration, u, None, length=n_iters)
-    return u_final[1:-1, 1:-1]
+    # Decoupled equilibrium (zero-displacement boundaries):
+    #   (lambda + 2*mu) u_x,xx + mu u_x,yy = fx
+    #   mu u_y,xx + (lambda + 2*mu) u_y,yy = fy
+    ux = _spd_laplacian_solve(fx, lam + 2 * mu, mu)
+    uy = _spd_laplacian_solve(fy, mu, lam + 2 * mu)
+    return jnp.stack([ux, uy], axis=-1)
 
 
 @eqx.filter_jit
@@ -142,8 +155,8 @@ def apply_jit(inputs: dict) -> dict:
     dx = 1.0 / (NX + 1)
     dy = 1.0 / (NY + 1)
 
-    # Solve for displacement
-    displacement = _solve_elasticity_jacobi(temperature, E, nu, alpha)
+    # Solve for displacement (linear thermoelasticity; SPD direct solves)
+    displacement = _solve_elasticity(temperature, E, nu, alpha)
 
     # Compute strain and stress
     eps_xx, eps_yy, eps_xy = _compute_strain_from_displacement(displacement, dx, dy)

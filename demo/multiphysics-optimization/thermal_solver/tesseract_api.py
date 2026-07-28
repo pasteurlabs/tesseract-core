@@ -17,6 +17,7 @@ from typing import Any
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import lineax as lx
 from pydantic import BaseModel, Field
 
 from tesseract_core.runtime import Array, Differentiable, Float32
@@ -25,6 +26,8 @@ from tesseract_core.runtime.tree_transforms import filter_func, flatten_with_pat
 # Grid resolution (interior nodes). Kept moderate for demo speed.
 NX = 30
 NY = 30
+DX = 1.0 / (NX + 1)  # grid spacing on the unit square
+DY = 1.0 / (NY + 1)
 
 
 class InputSchema(BaseModel):
@@ -69,32 +72,39 @@ def _gaussian_source(X, Y, cx, cy, intensity, width):
     return intensity * jnp.exp(-r2 / (2 * width**2))
 
 
-def _solve_heat_jacobi(source, conductivity, boundary_temp, n_iters=500):
-    """Solve 2D Poisson equation via damped Jacobi iteration.
+def _neg_laplacian(u):
+    """-(u_xx + u_yy) on the interior grid with zero (homogeneous) boundaries."""
+    uxx = jnp.diff(u, n=2, axis=0, prepend=0.0, append=0.0)
+    uyy = jnp.diff(u, n=2, axis=1, prepend=0.0, append=0.0)
+    return -(uxx / DX**2 + uyy / DY**2)
 
-    This is intentionally simple — not the fastest solver, but fully
-    differentiable through JAX and easy to understand.
-    """
-    nx, ny = source.shape
-    dx = 1.0 / (nx + 1)
-    dy = 1.0 / (ny + 1)
-    dx2 = dx**2
-    dy2 = dy**2
-    coeff = 1.0 / (2.0 * conductivity * (1.0 / dx2 + 1.0 / dy2))
 
-    T = jnp.full((nx + 2, ny + 2), boundary_temp)
+# Once conductivity and boundary values are moved to the RHS, the operator is just
+# the unit Laplacian -- it depends only on the (fixed) grid shape, so it is a
+# compile-time constant. We build it and Cholesky-factor it ONCE at import, then
+# reuse the factorization on every solve via lineax's `state=` (factor once, solve
+# many). Each solve is then only the O(N^2) back-substitution.
+NEG_LAPLACIAN_OP = lx.FunctionLinearOperator(
+    _neg_laplacian,
+    jax.ShapeDtypeStruct((NX, NY), jnp.float32),
+    tags=(lx.positive_semidefinite_tag,),
+)
+SOLVER = lx.Cholesky()
+NEG_LAPLACIAN_FACTOR = SOLVER.init(NEG_LAPLACIAN_OP, options={})
 
-    def iteration(T, _):
-        T_padded = T
-        laplacian = (T_padded[2:, 1:-1] + T_padded[:-2, 1:-1]) / dx2 + (
-            T_padded[1:-1, 2:] + T_padded[1:-1, :-2]
-        ) / dy2
-        T_interior = coeff * (conductivity * laplacian + source)
-        T_new = T_padded.at[1:-1, 1:-1].set(T_interior)
-        return T_new, None
 
-    T_final, _ = jax.lax.scan(iteration, T, None, length=n_iters)
-    return T_final[1:-1, 1:-1]
+def _solve_poisson(rhs, boundary_value=0.0):
+    """Solve  -(u_xx + u_yy) = rhs with Dirichlet bc's reusing global factorization."""
+    # A Dirichlet value on an edge adds value/h² to the RHS at the adjacent interior
+    # nodes (a corner picks up a contribution from both of its edges).
+    b = rhs
+    b = b.at[0, :].add(boundary_value / DX**2)
+    b = b.at[-1, :].add(boundary_value / DX**2)
+    b = b.at[:, 0].add(boundary_value / DY**2)
+    b = b.at[:, -1].add(boundary_value / DY**2)
+    return lx.linear_solve(
+        NEG_LAPLACIAN_OP, b, SOLVER, state=NEG_LAPLACIAN_FACTOR
+    ).value
 
 
 @eqx.filter_jit
@@ -116,11 +126,10 @@ def apply_jit(inputs: dict) -> dict:
         inputs["source_width"],
     )
 
-    temperature = _solve_heat_jacobi(
-        source,
-        inputs["conductivity"],
-        inputs["boundary_temp"],
-    )
+    # Steady-state heat equation -k*laplacian(T) = q. Dividing by the (constant)
+    # conductivity leaves the unit Laplacian, whose factorization is reused above.
+    k = inputs["conductivity"]
+    temperature = _solve_poisson(source / k, inputs["boundary_temp"])
 
     return {"temperature": temperature.astype(jnp.float32)}
 
