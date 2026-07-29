@@ -7,11 +7,8 @@ sys.path.insert(0, "structural_solver")
 
 import jax
 import jax.numpy as jnp
-
-jax.config.update("jax_enable_x64", True)
-
-import structural_solver.tesseract_api as structural_api  # noqa: E402
-import thermal_solver.tesseract_api as thermal_api  # noqa: E402
+import structural_solver.tesseract_api as structural_api
+import thermal_solver.tesseract_api as thermal_api
 
 
 def test_thermal_forward():
