@@ -1,14 +1,14 @@
-# Composing Tesseracts into pipelines
+# Composing Tesseracts into Pipelines
 
 A single Tesseract packages one computation. Real work usually involves several components: a mesher feeds a solver, an encoder feeds a model, a simulation feeds a post-processor. This page is about the step _after_ you've built your Tesseracts, that is, calling them from your own code and chaining them into a larger workflow.
 
 Tesseract Core is deliberately unopinionated about what you build on top. A project that uses Tesseracts might be a training loop, an optimization routine, a notebook, a web service, or a full application, with as much or as little logic of its own as you like. What follows is the small amount of generic advice that applies regardless: _how to call and chain Tesseracts well_.
 
-The [Design Patterns](design-patterns.md) page covers the complementary question of how to split a workflow into Tesseracts in the first place. Read that for the "how many, how granular" decisions, read this for "how do I wire them together."
+The [Design Patterns](../concepts/design-patterns.md) page covers the complementary question of how to split a workflow into Tesseracts in the first place. Read that for the "how many, how granular" decisions, read this for "how do I wire them together."
 
 ## Choosing how to call a Tesseract
 
-Every Tesseract exposes the same three interfaces: a [CLI, a REST API, and a Python SDK](../using-tesseracts/use.md). For composing Tesseracts into a program, there are two approaches worth knowing, and which one you reach for depends on whether you're working inside an autodiff framework.
+Every Tesseract exposes the same three interfaces: a [CLI, a REST API, and a Python SDK](../tutorials/interact.md). For composing Tesseracts into a program, there are two approaches worth knowing, and which one you reach for depends on whether you're working inside an autodiff framework.
 
 ### If you're using JAX or PyTorch: use the framework bindings
 
@@ -61,7 +61,7 @@ t.teardown()                      # stop the container when you're done
 ```
 
 ```{tip}
-These bindings are what makes Tesseracts *differentiable software components*. If your workflow is an optimization, calibration, or training problem, reaching for Tesseract-JAX or Tesseract-Torch usually means you get end-to-end gradients for free. See the [Differentiable Programming guide](../misc/differentiable-programming.md).
+These bindings are what makes Tesseracts *differentiable software components*. If your workflow is an optimization, calibration, or training problem, reaching for Tesseract-JAX or Tesseract-Torch usually means you get end-to-end gradients for free. See the [Differentiable Programming guide](../concepts/differentiable-programming.md).
 ```
 
 ### Otherwise: use the Python SDK
@@ -150,9 +150,9 @@ Take the parts that fit your project and leave the rest. For anything beyond a h
 
 ## What's next
 
-- [Design Patterns](design-patterns.md) — how to split a workflow into Tesseracts and design their interfaces.
-- [Interacting with Tesseracts](../using-tesseracts/use.md) — the full SDK, CLI, and REST interfaces.
-- [Differentiable Programming](../misc/differentiable-programming.md) — propagating gradients through a composed, multi-Tesseract program.
+- [Design Patterns](../concepts/design-patterns.md) — how to split a workflow into Tesseracts and design their interfaces.
+- [Interacting with Tesseracts](../tutorials/interact.md) — the full SDK, CLI, and REST interfaces.
+- [Differentiable Programming](../concepts/differentiable-programming.md) — propagating gradients through a composed, multi-Tesseract program.
 - [Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax) and [Tesseract-Torch](https://github.com/pasteurlabs/tesseract-torch) — the framework bindings.
-- [Performance](../misc/performance.md) — minimizing container and data-transfer overhead in chained workflows.
+- [Performance](../concepts/performance.md) — minimizing container and data-transfer overhead in chained workflows.
 - Questions? Ask on the [Tesseract User Forums](https://si-tesseract.discourse.group/).

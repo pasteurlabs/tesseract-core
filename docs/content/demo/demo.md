@@ -7,6 +7,7 @@ End-to-end examples that show Tesseracts in action — from optimization workflo
 :hidden:
 
 data-assimilation.ipynb
+bayesian-inference.ipynb
 lorenz_tesseract.md
 cfd-optimization.ipynb
 fem-shape-optimization.ipynb
@@ -39,6 +40,11 @@ Full walkthrough of a 4D-Var scheme using a differentiable Lorenz-96 Tesseract �
 :link: lorenz_tesseract.html
 
 Detailed implementation of the JAX-based Lorenz-96 solver Tesseract used in the 4D-Var demo.
+:::
+:::{grid-item-card} Bayesian Inference
+:link: bayesian-inference.html
+
+Use the same Lorenz-96 Tesseract as the forward model inside a NumPyro probabilistic workflow — recover the posterior over an unknown forcing parameter with gradient-based MCMC.
 :::
 
 ::::

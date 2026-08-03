@@ -44,7 +44,7 @@ Open source, published in [JOSS](https://doi.org/10.21105/joss.08385).
 :::
 
 :::{div} landing-cta
-{bdg-ref-primary-line}`Get Started <content/introduction/get-started>`
+{bdg-ref-primary-line}`Get Started <content/tutorials/get-started>`
 {bdg-ref-primary-line}`Demos <content/demo/demo>`
 {bdg-link-primary-line}`GitHub <https://github.com/pasteurlabs/tesseract-core>`
 :::
@@ -245,7 +245,7 @@ t.teardown()
 
 :::{div} section-intro
 The example above defines a differentiable Tesseract and calls it from the CLI, Python, and JAX.
-Ready to build your own? The {doc}`Get Started <content/introduction/get-started>` tutorial walks you through a complete example from scratch.
+Ready to build your own? The {doc}`Get Started <content/tutorials/get-started>` tutorial walks you through a complete example from scratch.
 :::
 
 :::{div} landing-divider
@@ -265,6 +265,17 @@ Ready to build your own? The {doc}`Get Started <content/introduction/get-started
 
 A complete 4D-Variational data assimilation scheme for a chaotic dynamical
 system (Lorenz-96), built with a differentiable JAX Tesseract.
+:::
+
+:::{grid-item-card} Bayesian Inference
+:link: content/demo/bayesian-inference
+:link-type: doc
+:class-card: demo-card
+:img-top: static/demo-bayesian-inference.svg
+:class-img-top: demo-schematic invert-on-dark
+
+Use a Lorenz-96 Tesseract as the forward model in a NumPyro workflow and
+recover the posterior over an unknown forcing parameter with gradient-based MCMC.
 :::
 
 :::{grid-item-card} CFD Flow Optimization
@@ -388,9 +399,9 @@ Show us what you built in the [community showcase](https://si-tesseract.discours
 :::{grid-item}
 **Project**
 
-- {doc}`Get Started <content/introduction/get-started>`
+- {doc}`Get Started <content/tutorials/get-started>`
 - {doc}`Installation <content/introduction/installation>`
-- {doc}`API Reference <content/api/tesseract-api>`
+- {doc}`API Reference <content/reference/tesseract-api>`
 - [JOSS Paper](https://doi.org/10.21105/joss.08385)
 - [Changelog](https://github.com/pasteurlabs/tesseract-core/releases)
   :::

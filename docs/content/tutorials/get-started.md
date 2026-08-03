@@ -5,7 +5,7 @@
 ## Quick install
 
 ```{note}
-This requires Docker and Python 3.10+. See the [installation guide](installation.md) for detailed setup instructions.
+This requires Docker and Python 3.10+. See the [installation guide](../introduction/installation.md) for detailed setup instructions.
 ```
 
 ```bash
@@ -14,7 +14,7 @@ $ pip install tesseract-core
 
 ## Hello Tesseract
 
-The [`tesseract` CLI](../api/tesseract-cli.md) builds Tesseracts as Docker containers from `tesseract_api.py` files. Here, we'll build and invoke a simple Tesseract that greets you by name.
+The [`tesseract` CLI](../reference/tesseract-cli.md) builds Tesseracts as Docker containers from `tesseract_api.py` files. Here, we'll build and invoke a simple Tesseract that greets you by name.
 
 ### Build your first Tesseract
 
@@ -34,7 +34,7 @@ Your first Tesseract is now available as a Docker image on your system.
 
 ### Run your Tesseract
 
-You can interact with any built Tesseract via the CLI, the REST API, or the [Python SDK](../api/tesseract-api.md):
+You can interact with any built Tesseract via the CLI, the REST API, or the [Python SDK](../reference/tesseract-api.md):
 
 ::::{tab-set}
 :::{tab-item} CLI
@@ -86,7 +86,7 @@ $ tesseract teardown tesseract-u7um375qt6dj5
 ::::
 
 ```{tip}
-For faster iteration during development, you can run Tesseracts without building containers. See [Debugging and Development](../misc/debugging.md) for details.
+For faster iteration during development, you can run Tesseracts without building containers. See the [Debugging Guide](../how-to/debugging.md) for details.
 ```
 
 Each Tesseract auto-generates CLI and REST API docs. To view them:
@@ -137,7 +137,7 @@ These are all that's needed to define a Tesseract.
 
 ### `tesseract_api.py`
 
-This file defines the Tesseract's input and output schemas, along with the endpoint functions: `apply`, `abstract_eval`, `jacobian`, `jacobian_vector_product`, and `vector_jacobian_product` (see [endpoints](../api/endpoints.md)). Only `apply` is required.
+This file defines the Tesseract's input and output schemas, along with the endpoint functions: `apply`, `abstract_eval`, `jacobian`, `jacobian_vector_product`, and `vector_jacobian_product` (see [endpoints](../reference/endpoints.md)). Only `apply` is required.
 
 ```{literalinclude} ../../../examples/helloworld/tesseract_api.py
 :pyobject: InputSchema
@@ -184,7 +184,7 @@ This file is optional. `tesseract_api.py` can invoke functions written in any la
 
 - **Self-documenting** — Tesseracts announce their interfaces, so users can inspect them without reading source code and perform static validation without running the code.
 - **Auto-validating** — Input data is automatically validated against the schema, so internal logic can assume the data is in the expected format.
-- **Autodiff-native** — Tesseracts support [differentiable programming](../misc/differentiable-programming.md) and integrate as native operations in PyTorch and JAX — but exposing derivatives is _strictly optional_.
+- **Autodiff-native** — Tesseracts support [differentiable programming](../concepts/differentiable-programming.md) and integrate as native operations in PyTorch and JAX — but exposing derivatives is _strictly optional_.
 - **Batteries included** — Every Tesseract ships with a containerized runtime, a CLI, a REST API, and a Python SDK.
 
 :::
@@ -202,8 +202,8 @@ This file is optional. `tesseract_api.py` can invoke functions written in any la
 
 Depending on your needs:
 
-- [](../creating-tesseracts/create.md) — define schemas, implement endpoints, and build Tesseracts
-- [](../using-tesseracts/use.md) — invoke Tesseracts and work with their outputs
+- [](../tutorials/create.md) — define schemas, implement endpoints, and build Tesseracts
+- [](../tutorials/interact.md) — invoke Tesseracts, compute derivatives, and read their schemas
 
 Or jump into end-to-end tutorials:
 

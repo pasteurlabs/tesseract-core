@@ -38,4 +38,5 @@ jobs:
         working-directory: docs
         run: |
           export SPHINXOPTS="-W"  # treat warnings as errors
-          uv run --no-sync make html
+          # dirhtml matches the production build (see .readthedocs.yaml)
+          uv run --no-sync make dirhtml

@@ -67,6 +67,7 @@ docs = [
     "sphinx_copybutton",
     "sphinxext_opengraph[social_cards]",
     "sphinx-sitemap",
+    "sphinx-reredirects",
     "tesseract-core[runtime]",
 ]
 dev = [
