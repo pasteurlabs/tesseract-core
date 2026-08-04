@@ -1,12 +1,24 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import importlib.util
+from pathlib import Path
+
 import pytest
-from update_runtime_deps import get_updated_bounds, write_new_pyproject
 
 # NOTE: This tests .github/workflows/update_runtime_deps.py, which is not part of the
 # package. It runs unattended every Monday and rewrites pyproject.toml in place, so its
 # failure mode is a silently mangled manifest rather than a crash -- worth locking down.
+# Being outside the package, it is not importable by name, so load it by path here rather
+# than putting .github/workflows on the import path of the whole test suite.
+SCRIPT = Path(__file__).parents[1] / ".github" / "workflows" / "update_runtime_deps.py"
+
+spec = importlib.util.spec_from_file_location("update_runtime_deps", SCRIPT)
+update_runtime_deps = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(update_runtime_deps)
+
+get_updated_bounds = update_runtime_deps.get_updated_bounds
+write_new_pyproject = update_runtime_deps.write_new_pyproject
 
 # Exercises everything the rewrite has to leave alone: trailing comments, standalone
 # comments, blank lines, a comment with no dep after it, single quotes, wide spacing,
