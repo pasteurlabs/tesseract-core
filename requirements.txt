@@ -26,15 +26,15 @@ numpy==2.2.6 ; python_full_version < '3.11'
     # via tesseract-core
 numpy==2.4.6 ; python_full_version == '3.11.*'
     # via tesseract-core
-numpy==2.5.1 ; python_full_version >= '3.12'
+numpy==2.5.2 ; python_full_version >= '3.12'
     # via tesseract-core
 orjson==3.11.9
     # via tesseract-core
-packaging==26.2
+packaging==26.3
     # via tesseract-core
-pip==26.2
+pip==26.2.1
     # via tesseract-core
-pybase64==1.4.3
+pybase64==1.5.0
     # via tesseract-core
 pydantic==2.13.4
     # via tesseract-core
@@ -52,7 +52,7 @@ rich==15.0.0
     #   typer
 shellingham==1.5.4
     # via typer
-typer==0.27.0
+typer==0.27.1
     # via tesseract-core
 typing-extensions==4.16.0
     # via
