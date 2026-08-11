@@ -1104,6 +1104,7 @@ def _stub_serve_docker(monkeypatch):
 
     monkeypatch.setattr(engine.docker_client.containers, "run", fake_run)
     monkeypatch.setattr(engine, "_wait_for_health", lambda *a, **k: None)
+    monkeypatch.setattr(engine, "is_podman", lambda: False)
     return captured
 
 

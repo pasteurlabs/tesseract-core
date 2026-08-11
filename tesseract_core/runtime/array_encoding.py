@@ -232,7 +232,7 @@ def get_array_model(
         ),
         # Choose the appropriate data structure based on the encoding
         "data": (
-            BinrefArrayData | Base64ArrayData | JsonArrayData,
+            BinrefArrayData | Base64ArrayData | JsonArrayData | CudaIpcArrayData,
             Field(discriminator="encoding"),
         ),
         "model_config": (ConfigDict, config),
