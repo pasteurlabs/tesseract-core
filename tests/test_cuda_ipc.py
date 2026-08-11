@@ -48,11 +48,26 @@ try:
 except Exception:
     _TORCH_AVAILABLE = False
 
+try:
+    import jax as _jax
+
+    _JAX_AVAILABLE = any(d.platform == "gpu" for d in _jax.devices())
+except Exception:
+    _JAX_AVAILABLE = False
+
+# Every test in this module drives real CUDA IPC and therefore needs a physical
+# GPU + CuPy. The `gpu` marker lets CI select or skip them (e.g. `-m "not gpu"`)
+# in addition to the runtime skip guards below.
+pytestmark = pytest.mark.gpu
+
 requires_cuda = pytest.mark.skipif(
     not _CUDA_AVAILABLE, reason="CUDA + CuPy not available"
 )
 requires_torch_cuda = pytest.mark.skipif(
     not _TORCH_AVAILABLE, reason="PyTorch CUDA not available"
+)
+requires_jax_cuda = pytest.mark.skipif(
+    not _JAX_AVAILABLE, reason="JAX CUDA not available"
 )
 
 _TIMEOUT = 60
@@ -229,11 +244,53 @@ def _build_torch():
     return [(t, t.cpu().numpy())]
 
 
+def _build_jax():
+    """JAX arrays exercise the VMM staging fallback (see array_encoding._stage_for_legacy_ipc).
+
+    JAX/XLA's default GPU allocator uses CUDA's Virtual Memory Management API
+    (``cuMemCreate``/``cuMemAddressReserve``), which the legacy
+    ``cudaIpcGetMemHandle`` used by the fast path rejects outright. Unlike
+    CuPy/PyTorch (whose default pools use plain ``cudaMalloc`` and hit the fast
+    path), every JAX array here is expected to take the staging-buffer fallback.
+    """
+    import jax.numpy as jnp
+
+    arr = jnp.arange(32 * 64, dtype=jnp.float32).reshape(32, 64)
+    return [(arr, np.asarray(arr))]
+
+
+def _build_force_staging():
+    """A CuPy array plus a global patch that forces the VMM staging fallback.
+
+    Makes the first ``_cuda_ipc_get_mem_handle`` call (on the array's base
+    pointer) raise, so encode falls back to staging; the second call (on the
+    staging buffer) uses the real implementation. The patch runs in the producer
+    process and persists through the subsequent ``_dump_cuda_ipc_arraydict``.
+    """
+    from tesseract_core.runtime import array_encoding as ae
+
+    real = ae._cuda_ipc_get_mem_handle
+    state = {"rejected": False}
+
+    def flaky(ptr):
+        if not state["rejected"]:
+            state["rejected"] = True
+            raise RuntimeError("cudaIpcGetMemHandle failed: simulated VMM reject")
+        return real(ptr)
+
+    ae._cuda_ipc_get_mem_handle = flaky
+
+    arr = cupy.arange(1024, dtype=cupy.float32) + 7.0
+    return [(arr, cupy.asnumpy(arr))]
+
+
 _BUILDERS = {
     "basic": _build_basic,
     "dtypes": _build_dtypes,
     "offset_view": _build_offset_view,
     "torch": _build_torch,
+    "jax": _build_jax,
+    "force_staging": _build_force_staging,
 }
 
 
@@ -273,6 +330,28 @@ def test_encode_requires_cuda_array():
 
     with pytest.raises(ValueError, match="cuda_ipc encoding requires a CUDA array"):
         _dump_cuda_ipc_arraydict(np.zeros((4, 4), dtype=np.float32))
+
+
+@requires_cuda
+def test_encode_rejects_non_contiguous():
+    """Non-contiguous (strided/transposed) arrays are rejected, not corrupted.
+
+    cuda_ipc transfers a flat contiguous byte range; a strided source would be
+    silently misread, so encoding must refuse it.
+    """
+    from tesseract_core.runtime.array_encoding import _dump_cuda_ipc_arraydict
+
+    strided = cupy.arange(100, dtype=cupy.float32)[::2]
+    assert strided.__cuda_array_interface__["strides"] is not None
+    with pytest.raises(ValueError, match="C-contiguous"):
+        _dump_cuda_ipc_arraydict(strided)
+
+    transposed = cupy.arange(12, dtype=cupy.float32).reshape(3, 4).T
+    with pytest.raises(ValueError, match="C-contiguous"):
+        _dump_cuda_ipc_arraydict(transposed)
+
+    # A contiguous copy of the same data encodes fine.
+    _dump_cuda_ipc_arraydict(cupy.ascontiguousarray(strided))
 
 
 @requires_cuda
@@ -318,6 +397,41 @@ def test_cross_process_nonzero_offset():
     view_result = results[1]
     assert view_result["offset"] > 0, "expected a nonzero storage offset"
     assert view_result["match"], view_result
+
+
+@requires_cuda
+@requires_jax_cuda
+def test_cross_process_jax_vmm_fallback():
+    """JAX arrays hit the VMM staging fallback and still round-trip correctly.
+
+    JAX/XLA's GPU allocator is VMM-backed, so the legacy ``cudaIpcGetMemHandle``
+    fast path (which works for CuPy/PyTorch's default cudaMalloc-based pools)
+    rejects it; ``_dump_cuda_ipc_arraydict`` should transparently fall back to
+    staging the array into a fresh ``cudaMalloc`` buffer (see
+    array_encoding._stage_for_legacy_ipc) and export a handle to that instead.
+    """
+    results = run_cross_process("jax")
+    assert len(results) == 1
+    result = results[0]
+    assert result["match"], result
+    # The fallback stages just the array's own bytes at offset 0, not the
+    # (possibly huge) VMM arena the pointer actually lives in.
+    assert result["offset"] == 0
+
+
+@requires_cuda
+def test_cross_process_staging_fallback_forced():
+    """Force the staging fallback (without JAX) and verify correctness + free.
+
+    Simulates a VMM-backed pointer by making the first ``cudaIpcGetMemHandle``
+    call fail, so ``_dump_cuda_ipc_arraydict`` stages a CuPy array into a fresh
+    ``cudaMalloc`` buffer and exports a handle to that. Exercises the real
+    staging cudaMalloc/cudaMemcpy/cudaFree path on GPU.
+    """
+    results = run_cross_process("force_staging")
+    assert len(results) == 1
+    assert results[0]["match"], results[0]
+    assert results[0]["offset"] == 0
 
 
 def _ring1_server(req_q, resp_q):
@@ -534,6 +648,10 @@ def _run_standalone():
             ("cross-process torch encode", test_cross_process_torch_encode),
             ("cupy decode to torch", test_cupy_decode_to_torch),
         ]
+    if _JAX_AVAILABLE:
+        tests.append(
+            ("cross-process jax vmm fallback", test_cross_process_jax_vmm_fallback)
+        )
     tests.append(("tesseract api cuda_ipc", test_tesseract_api_cuda_ipc_local))
 
     failures = 0

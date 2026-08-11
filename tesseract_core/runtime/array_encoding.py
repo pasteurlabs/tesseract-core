@@ -378,6 +378,34 @@ def _get_cuda_array_info(arr: Any) -> tuple[int, int, tuple[int, ...], str]:
     return data_ptr, nbytes, shape, dtype.name
 
 
+def _is_c_contiguous(arr: Any) -> bool:
+    """Whether a CUDA array's memory is C-contiguous per __cuda_array_interface__.
+
+    cuda_ipc transfers a flat, contiguous byte range: encode copies (or hands
+    off) ``prod(shape) * itemsize`` consecutive bytes and decode rebuilds a
+    contiguous array from shape/dtype alone (the payload carries no strides). A
+    non-contiguous source would therefore be silently misread, so callers must
+    reject it.
+
+    Per the protocol, ``strides = None`` means row-major contiguous. A non-None
+    ``strides`` is still contiguous iff it equals the row-major strides implied
+    by shape and itemsize.
+    """
+    iface = arr.__cuda_array_interface__
+    strides = iface.get("strides")
+    if strides is None:
+        return True
+    shape = tuple(iface["shape"])
+    itemsize = np.dtype(iface["typestr"]).itemsize
+    expected = []
+    acc = itemsize
+    for dim in reversed(shape):
+        expected.append(acc)
+        acc *= dim
+    expected.reverse()
+    return tuple(strides) == tuple(expected)
+
+
 # ---------------------------------------------------------------------------
 # CUDA IPC via ctypes (framework-agnostic, no torch/cupy dependency)
 # ---------------------------------------------------------------------------
@@ -464,6 +492,18 @@ def _get_cudart():
     cudart.cudaIpcCloseMemHandle.restype = ctypes.c_int
     cudart.cudaGetErrorString.argtypes = [ctypes.c_int]
     cudart.cudaGetErrorString.restype = ctypes.c_char_p
+    # Used by the VMM staging-buffer fallback (see _stage_for_legacy_ipc).
+    cudart.cudaMalloc.argtypes = [ctypes.POINTER(ctypes.c_void_p), ctypes.c_size_t]
+    cudart.cudaMalloc.restype = ctypes.c_int
+    cudart.cudaFree.argtypes = [ctypes.c_void_p]
+    cudart.cudaFree.restype = ctypes.c_int
+    cudart.cudaMemcpy.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_size_t,
+        ctypes.c_int,
+    ]
+    cudart.cudaMemcpy.restype = ctypes.c_int
 
     _CUDART_HANDLE = cudart
     return _CUDART_HANDLE
@@ -557,6 +597,10 @@ def _cuda_ipc_get_mem_handle(device_ptr: int) -> bytes:
     ``device_ptr`` should be the *base* of the allocation (see
     :func:`_cuda_get_allocation_base`); IPC handles always reference the whole
     underlying allocation.
+
+    Raises ``RuntimeError`` if the pointer is rejected by the legacy IPC API
+    (e.g. VMM/pool-backed memory -- see :func:`_stage_for_legacy_ipc`, which
+    callers should fall back to on failure).
     """
     cudart = _get_cudart()
     handle = _CudaIpcMemHandle()
@@ -613,6 +657,51 @@ def _cuda_ipc_close_mem_handle(device_ptr: int) -> None:
         )
 
 
+_cudaMemcpyDeviceToDevice = 3
+
+
+def _stage_for_legacy_ipc(base_ptr: int, storage_size: int) -> int:
+    """Copy a VMM/pool-backed allocation into a fresh ``cudaMalloc`` buffer.
+
+    The legacy ``cudaIpcGetMemHandle`` API rejects memory that CUDA's Virtual
+    Memory Management API (``cuMemCreate``/``cuMemAddressReserve``) allocated
+    -- which is what modern pool allocators use, including JAX/XLA's default
+    GPU allocator (confirmed: ``cudaIpcGetMemHandle`` returns
+    ``cudaErrorInvalidValue`` for such pointers; CuPy's and PyTorch's default
+    caching allocators happen to use plain ``cudaMalloc`` pools, so they don't
+    hit this).
+
+    Rather than replicate CUDA's VMM export path (which requires transferring
+    a POSIX file descriptor between processes via ``SCM_RIGHTS`` over a Unix
+    domain socket -- a real fd, not just its integer value, is meaningless in
+    another process's fd table), we take the simpler route of copying the data
+    device-to-device into a plain ``cudaMalloc`` allocation, which *is*
+    IPC-exportable via the legacy API. This costs one on-GPU copy but avoids a
+    new cross-process handshake; it is still far cheaper than a host round-trip.
+
+    Returns the device pointer of the new (caller-owned, offset-zero) buffer.
+    The caller is responsible for freeing it via ``cudaFree`` once the export
+    is no longer needed (see :func:`_release_cuda_ipc_exports`).
+    """
+    cudart = _get_cudart()
+    staging_ptr = ctypes.c_void_p()
+    ret = cudart.cudaMalloc(ctypes.byref(staging_ptr), ctypes.c_size_t(storage_size))
+    if ret != 0:
+        raise RuntimeError(f"cudaMalloc failed: {_cuda_error_string(cudart, ret)}")
+
+    ret = cudart.cudaMemcpy(
+        staging_ptr,
+        ctypes.c_void_p(base_ptr),
+        ctypes.c_size_t(storage_size),
+        ctypes.c_int(_cudaMemcpyDeviceToDevice),
+    )
+    if ret != 0:
+        cudart.cudaFree(staging_ptr)
+        raise RuntimeError(f"cudaMemcpy failed: {_cuda_error_string(cudart, ret)}")
+
+    return staging_ptr.value
+
+
 # ---------------------------------------------------------------------------
 # CUDA IPC array encode / decode
 # ---------------------------------------------------------------------------
@@ -641,6 +730,13 @@ def _cuda_ipc_close_mem_handle(device_ptr: int) -> None:
 #      decode path does unconditionally).
 _CUDA_IPC_EXPORT_REGISTRY: list[Any] = []
 
+# Device pointers of VMM-fallback staging buffers (see _stage_for_legacy_ipc)
+# awaiting cudaFree. Kept separate from _CUDA_IPC_EXPORT_REGISTRY (which holds
+# plain pinned array references) since these need an explicit free call
+# instead of just dropping a reference, but are released at the same point and
+# for the same reasons.
+_CUDA_IPC_STAGING_BUFFERS: list[int] = []
+
 
 def _release_cuda_ipc_exports() -> None:
     """Release producer-side arrays pinned for CUDA IPC export by the last request.
@@ -652,6 +748,12 @@ def _release_cuda_ipc_exports() -> None:
     """
     _CUDA_IPC_EXPORT_REGISTRY.clear()
 
+    staging_ptrs, _CUDA_IPC_STAGING_BUFFERS[:] = list(_CUDA_IPC_STAGING_BUFFERS), []
+    if staging_ptrs:
+        cudart = _get_cudart()
+        for ptr in staging_ptrs:
+            cudart.cudaFree(ctypes.c_void_p(ptr))
+
 
 def _pin_cuda_ipc_export(arr: Any) -> None:
     """Retain a reference to a source array so its GPU memory stays valid.
@@ -660,6 +762,15 @@ def _pin_cuda_ipc_export(arr: Any) -> None:
     :func:`_release_cuda_ipc_exports`.
     """
     _CUDA_IPC_EXPORT_REGISTRY.append(arr)
+
+
+def _pin_cuda_ipc_staging_buffer(device_ptr: int) -> None:
+    """Register a VMM-fallback staging buffer (see :func:`_stage_for_legacy_ipc`) for cudaFree.
+
+    Freed at the same point ordinary pinned arrays are released (start of the
+    next request), for the same reasons (see the module comment above).
+    """
+    _CUDA_IPC_STAGING_BUFFERS.append(device_ptr)
 
 
 def _dump_cuda_ipc_arraydict(arr: Any) -> ArrayDict:
@@ -675,6 +786,12 @@ def _dump_cuda_ipc_arraydict(arr: Any) -> ArrayDict:
     :func:`_pin_cuda_ipc_export`) so its GPU memory is not freed or recycled
     before the consumer copies it out; the pin is released at the start of the
     next request (:func:`_release_cuda_ipc_exports`).
+
+    Frameworks with VMM/pool-backed GPU allocators (e.g. JAX/XLA) hand out
+    pointers that the legacy ``cudaIpcGetMemHandle`` API rejects; in that case
+    this transparently falls back to staging the array's bytes into a fresh
+    ``cudaMalloc`` buffer via one on-GPU copy (see :func:`_stage_for_legacy_ipc`)
+    and exports a handle to that instead. Still far cheaper than a host round-trip.
     """
     if not _has_cuda_array_interface(arr):
         raise ValueError(
@@ -682,9 +799,20 @@ def _dump_cuda_ipc_arraydict(arr: Any) -> ArrayDict:
             f"(object with __cuda_array_interface__), got {type(arr).__name__}"
         )
 
-    data_ptr, _nbytes, shape, dtype_name = _get_cuda_array_info(arr)
+    if not _is_c_contiguous(arr):
+        raise ValueError(
+            "cuda_ipc encoding requires a C-contiguous array; got one with "
+            f"strides {arr.__cuda_array_interface__.get('strides')}. Make a "
+            "contiguous copy first (e.g. cupy.ascontiguousarray / "
+            "torch.Tensor.contiguous)."
+        )
+
+    data_ptr, nbytes, shape, dtype_name = _get_cuda_array_info(arr)
 
     # Keep the source allocation alive until exports are explicitly released.
+    # (Still needed even on the VMM fallback path below: _stage_for_legacy_ipc
+    # reads from `arr`'s memory synchronously before returning, but keeping the
+    # pin simplifies the two paths to an identical cleanup story.)
     _pin_cuda_ipc_export(arr)
 
     # IPC handles reference the *whole* backing allocation, not the array's
@@ -696,7 +824,18 @@ def _dump_cuda_ipc_arraydict(arr: Any) -> ArrayDict:
     storage_offset = data_ptr - base_ptr
 
     # Get the IPC handle for the base of the allocation.
-    handle_bytes = _cuda_ipc_get_mem_handle(base_ptr)
+    try:
+        handle_bytes = _cuda_ipc_get_mem_handle(base_ptr)
+    except RuntimeError:
+        # Legacy IPC rejected this pointer -- almost certainly because it's
+        # VMM/pool-backed (see _stage_for_legacy_ipc). Copy just this array's
+        # own bytes (not the whole, possibly huge, backing allocation) into a
+        # fresh cudaMalloc buffer and export a handle to *that* instead.
+        staging_ptr = _stage_for_legacy_ipc(data_ptr, nbytes)
+        _pin_cuda_ipc_staging_buffer(staging_ptr)
+        storage_offset = 0
+        storage_size = nbytes
+        handle_bytes = _cuda_ipc_get_mem_handle(staging_ptr)
 
     # Determine device ordinal
     device = 0

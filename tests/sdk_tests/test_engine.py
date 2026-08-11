@@ -17,7 +17,7 @@ from tesseract_core.sdk.api_parse import (
     validate_tesseract_api,
 )
 from tesseract_core.sdk.cli import AVAILABLE_RECIPES
-from tesseract_core.sdk.docker_client import Image, NotFound
+from tesseract_core.sdk.docker_client import Container, Image, NotFound
 from tesseract_core.sdk.exceptions import UserError
 
 
@@ -425,7 +425,7 @@ def test_serve_skip_health_check(mocked_docker, monkeypatch):
         nonlocal health_called
         if url.endswith("/health"):
             health_called = True
-            return type("Response", (), {"status_code": 200, "json": lambda: {}})()
+            return type("Response", (), {"status_code": 200, "json": dict})()
         raise NotImplementedError(f"Mocked get request to {url} not implemented")
 
     monkeypatch.setattr(engine.requests, "get", health_get_spy)
@@ -657,3 +657,62 @@ def test_split_volume_spec(spec, expected):
 )
 def test_is_local_volume(volume, expected):
     assert engine._is_local_volume(volume) == expected
+
+
+def _stub_serve_docker(monkeypatch):
+    """Stub the Docker seams in engine.serve, returning captured run kwargs."""
+    captured = {}
+
+    monkeypatch.setattr(
+        engine.docker_client.images,
+        "get",
+        lambda name: Image(id="sha256:abc", short_id="abc", tags=[name], attrs={}),
+    )
+
+    def fake_run(**kwargs):
+        captured.update(kwargs)
+        return Container(id="cid", short_id="cid", name="test-container", attrs={})
+
+    monkeypatch.setattr(engine.docker_client.containers, "run", fake_run)
+    monkeypatch.setattr(engine, "_wait_for_health", lambda *a, **k: None)
+    return captured
+
+
+def test_serve_cuda_ipc_adds_ipc_host(monkeypatch):
+    """json+cuda_ipc serving passes --ipc=host to the container runtime."""
+    captured = _stub_serve_docker(monkeypatch)
+
+    engine.serve(
+        "my-image",
+        output_format="json+cuda_ipc",
+        gpus=["all"],
+        skip_health_check=True,
+    )
+    assert "--ipc=host" in captured["extra_args"]
+
+
+def test_serve_cuda_ipc_warns_without_gpus(monkeypatch, caplog):
+    """Serving cuda_ipc without GPU access logs a warning but still wires ipc."""
+    captured = _stub_serve_docker(monkeypatch)
+
+    with caplog.at_level(logging.WARNING):
+        engine.serve(
+            "my-image",
+            output_format="json+cuda_ipc",
+            gpus=None,
+            skip_health_check=True,
+        )
+    assert "--ipc=host" in captured["extra_args"]
+    assert any("requires GPU access" in rec.message for rec in caplog.records)
+
+
+def test_serve_non_cuda_ipc_has_no_ipc_host(monkeypatch):
+    """Other output formats do not add --ipc=host."""
+    captured = _stub_serve_docker(monkeypatch)
+
+    engine.serve(
+        "my-image",
+        output_format="json+base64",
+        skip_health_check=True,
+    )
+    assert "--ipc=host" not in (captured.get("extra_args") or [])
