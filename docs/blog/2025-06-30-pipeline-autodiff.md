@@ -30,19 +30,16 @@ Autodiff works really well for situations where all calculations can be expresse
 
 Our demo is built using JAX-FEM and inspired by the 2D Topology Optimization with the SIMP Method. We've reformulated the problem and solved it as an optimization of a parameterized shape.
 
-<figure>
-<img src="../_static/blog/pipeline-data-flow.png" alt="Data flow through a Tesseract-based pipeline for parametric shape optimization">
-<figcaption>Data flow through a Tesseract-based pipeline for parametric shape optimization, involving two separate Tesseracts: one for computing a signed distance field from a parametric geometry, and another for computing the compliance of a structure given a density field via finite element analysis.</figcaption>
-</figure>
+```{figure} ../static/blog/pipeline-data-flow.png
+:alt: Data flow through a Tesseract-based pipeline for parametric shape optimization
+
+Data flow through a Tesseract-based pipeline for parametric shape optimization, involving two separate Tesseracts: one for computing a signed distance field from a parametric geometry, and another for computing the compliance of a structure given a density field via finite element analysis.
+```
 
 We've implemented this demo using multiple Tesseracts that communicate with each other, forming a multi-step computation pipeline. We then apply end-to-end automatic differentiation to carry out the optimization. The demo clearly shows the feasibility --- and efficacy --- of pipeline-level automatic differentiation with Tesseracts. In particular, Tesseracts simplify heterogeneous gradient computation, as well as managing dependencies, computing resources, and components.
 
-<figure>
-<img src="../_static/blog/pipeline-demo.png" alt="Shape optimization demo">
-<figcaption>Shape optimization results showing the initial and optimized geometries.</figcaption>
-</figure>
+```{figure} ../static/blog/pipeline-demo.png
+:alt: Shape optimization demo
 
----
-
-_Tesseract is a free, open-source framework for differentiable scientific computing. `pip install tesseract-core`.
-[Docs](https://tesseract.pasteurlabs.ai) · [Demos](https://tesseract.pasteurlabs.ai/content/demo/demo.html) · [GitHub](https://github.com/pasteurlabs/tesseract-core) · [Forum](https://si-tesseract.discourse.group/)_
+Shape optimization results showing the initial and optimized geometries.
+```

@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 120" fill="none">
+  <!-- Inverse Heat Transfer: T₀ → Fortran solver Tesseract (Enzyme/LLVM IR) → sensor readings → loss -->
+
+  <!-- Initial temperature field (unknown, optimize) -->
+  <rect x="4" y="35" width="56" height="50" rx="6" stroke="#222" stroke-width="1.2"/>
+  <!-- Heat blob icon -->
+  <circle cx="32" cy="58" r="11" stroke="#222" stroke-width="0.8"/>
+  <circle cx="32" cy="58" r="6.5" stroke="#222" stroke-width="0.8"/>
+  <circle cx="32" cy="58" r="2.5" fill="#222"/>
+  <text x="32" y="30" text-anchor="middle" font-family="system-ui, sans-serif" font-size="7.5" fill="#555">T₀ (recover)</text>
+
+  <!-- Arrow 1 -->
+  <line x1="60" y1="60" x2="82" y2="60" stroke="#222" stroke-width="1"/>
+  <polygon points="82,57 88,60 82,63" fill="#222"/>
+
+  <!-- Fortran solver Tesseract (Enzyme / LLVM IR) -->
+  <rect x="90" y="35" width="64" height="50" rx="6" stroke="#222" stroke-width="1.2"/>
+  <!-- Inner tesseract symbol -->
+  <rect x="109" y="46" width="14" height="14" rx="1" stroke="#222" stroke-width="0.8" stroke-dasharray="2 1.5"/>
+  <rect x="113" y="50" width="6" height="6" rx="0.5" stroke="#222" stroke-width="0.8"/>
+  <text x="122" y="73" text-anchor="middle" font-family="system-ui, sans-serif" font-size="7" fill="#555">Fortran solver</text>
+  <text x="122" y="30" text-anchor="middle" font-family="system-ui, sans-serif" font-size="6.5" fill="#555">Enzyme / LLVM IR</text>
+
+  <!-- Arrow 2 -->
+  <line x1="154" y1="60" x2="176" y2="60" stroke="#222" stroke-width="1"/>
+  <polygon points="176,57 182,60 176,63" fill="#222"/>
+  <text x="165" y="53" text-anchor="middle" font-family="system-ui, sans-serif" font-size="6.5" fill="#555">T(t)</text>
+
+  <!-- Sensor readings + loss -->
+  <rect x="184" y="35" width="92" height="50" rx="6" stroke="#222" stroke-width="1.2"/>
+  <!-- Plate outline with sparse sensor dots -->
+  <rect x="196" y="46" width="40" height="28" rx="1.5" stroke="#222" stroke-width="0.6"/>
+  <circle cx="204" cy="54" r="1.6" fill="#222"/>
+  <circle cx="220" cy="52" r="1.6" fill="#222"/>
+  <circle cx="230" cy="62" r="1.6" fill="#222"/>
+  <circle cx="210" cy="66" r="1.6" fill="#222"/>
+  <text x="256" y="56" text-anchor="middle" font-family="system-ui, sans-serif" font-size="7" fill="#555">100</text>
+  <text x="256" y="64" text-anchor="middle" font-family="system-ui, sans-serif" font-size="7" fill="#555">sensors</text>
+  <text x="230" y="80" text-anchor="middle" font-family="system-ui, sans-serif" font-size="7" fill="#555">MSE(T, obs) + Tikhonov</text>
+
+  <!-- Gradient arrow (backprop via Enzyme VJP) -->
+  <line x1="182" y1="15" x2="10" y2="15" stroke="#222" stroke-width="0.8" stroke-dasharray="3 2"/>
+  <polygon points="10,12 4,15 10,18" fill="#222"/>
+  <text x="96" y="11" text-anchor="middle" font-family="system-ui, sans-serif" font-size="6.5" fill="#555">∇ via Enzyme VJP (reverse-mode)</text>
+</svg>

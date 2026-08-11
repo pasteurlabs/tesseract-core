@@ -1,0 +1,4 @@
+torch
+matplotlib
+tesseract-core
+tesseract-torch

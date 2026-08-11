@@ -153,3 +153,6 @@ logs/
 
 # Jupyter execution artifacts
 jupyter_execute/
+
+# Ruff cache
+.ruff_cache/

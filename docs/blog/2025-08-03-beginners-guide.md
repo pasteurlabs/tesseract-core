@@ -26,26 +26,29 @@ To see how this works, let's start with a simple physics example: projectile mot
 
 ### Newton's challenge
 
-<figure>
-<img src="../_static/blog/beginners-newton-low.png" alt="Newton at a low angle">
-<figcaption>Newton throws a ball at a low angle.</figcaption>
-</figure>
+```{figure} ../static/blog/beginners-newton-low.png
+:alt: Newton at a low angle
+
+Newton throws a ball at a low angle.
+```
 
 Imagine you're playing catch with Isaac Newton. He throws a ball from a fixed distance away, and it arrives after a certain flight time. Newton points out that given a fixed distance and flight time, "only one path" exists --- a unique combination of speed and angle.
 
-<figure>
-<img src="../_static/blog/beginners-newton-high.png" alt="Newton at a high angle">
-<figcaption>The same distance can be reached at a high angle with a different speed.</figcaption>
-</figure>
+```{figure} ../static/blog/beginners-newton-high.png
+:alt: Newton at a high angle
+
+The same distance can be reached at a high angle with a different speed.
+```
 
 ### The equations
 
 Under constant gravitational acceleration, we can describe the projectile's motion with two key equations.
 
-<figure>
-<img src="../_static/blog/beginners-projectile.svg" alt="Projectile trajectory">
-<figcaption>Projectile trajectory under constant gravitational acceleration.</figcaption>
-</figure>
+```{figure} ../static/blog/beginners-projectile.svg
+:alt: Projectile trajectory
+
+Projectile trajectory under constant gravitational acceleration.
+```
 
 **Time of flight:**
 
@@ -57,10 +60,11 @@ $$s_x = \frac{u^2 \sin 2\theta}{g}$$
 
 Where $u$ is the initial velocity, $\theta$ is the launch angle, and $g = 9.81 \, \text{m/s}^2$ is the gravitational acceleration.
 
-<figure>
-<img src="../_static/blog/beginners-resolve-velocity.svg" alt="Velocity vector resolution">
-<figcaption>Resolving the velocity vector into horizontal and vertical components.</figcaption>
-</figure>
+```{figure} ../static/blog/beginners-resolve-velocity.svg
+:alt: Velocity vector resolution
+
+Resolving the velocity vector into horizontal and vertical components.
+```
 
 These equations establish a one-to-one correspondence between input coordinates $(u, \theta)$ and output coordinates $(s_x, t)$.
 
@@ -199,12 +203,8 @@ Verify the Jacobian computation at $u = 10$, $\theta = 0.75$ rad --- the numeric
 
 By wrapping even a simple physics model in a Tesseract, we get a containerized, self-documenting component with a standard JSON interface and built-in derivative support. Now you're ready to explore gradient-based optimization[ via Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax) and interactive visualization [via Tesseract-Streamlit](https://github.com/pasteurlabs/tesseract-streamlit) for these differentiable components.
 
-<figure>
-<img src="../_static/blog/beginners-newton-gravity.jpg" alt="Isaac Newton discovers gravity, 1936">
-<figcaption>"Isaac Newton discovers gravity", 1936.</figcaption>
-</figure>
+```{figure} ../static/blog/beginners-newton-gravity.jpg
+:alt: Isaac Newton discovers gravity, 1936
 
----
-
-_Tesseract is a free, open-source framework for differentiable scientific computing. `pip install tesseract-core`.
-[Docs](https://tesseract.pasteurlabs.ai) · [Demos](https://tesseract.pasteurlabs.ai/content/demo/demo.html) · [GitHub](https://github.com/pasteurlabs/tesseract-core) · [Forum](https://si-tesseract.discourse.group/)_
+"Isaac Newton discovers gravity", 1936.
+```

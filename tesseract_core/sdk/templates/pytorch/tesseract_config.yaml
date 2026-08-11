@@ -17,6 +17,17 @@ build_config:
   # Base image to use for the container, must be Ubuntu or Debian-based
   # base_image: "debian:bookworm-slim"
 
+  # Python version to use inside the container (e.g. "3.12"). When set, the given
+  # version is installed via `uv python install`, decoupling it from the base
+  # image. When unset, the base image's system Python is used. Cannot be combined
+  # with conda requirements; set the version in tesseract_environment.yaml instead.
+  # python_version: "3.12"
+
+  # If true, create the Python virtual environment with --system-site-packages so
+  # it inherits packages pre-installed in the base image. Cannot be combined with
+  # python_version.
+  # inherit_base_image_packages: false
+
   # Platform to build the container for. In general, images can only be executed
   # on the platform they were built for.
   target_platform: "native"

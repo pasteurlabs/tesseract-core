@@ -13,12 +13,12 @@ from pydantic import ValidationError
 
 from tesseract_core.runtime import mpa
 from tesseract_core.runtime.config import update_config
-from tesseract_core.runtime.mpa import (
+from tesseract_core.runtime.experimental import (
     log_artifact,
     log_metric,
     log_parameter,
-    start_run,
 )
+from tesseract_core.runtime.mpa import start_run
 
 
 class Always200Handler(BaseHTTPRequestHandler):

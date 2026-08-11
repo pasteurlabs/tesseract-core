@@ -10,6 +10,7 @@ building-blocks/helloworld.md
 building-blocks/vectoradd.md
 building-blocks/univariate.md
 building-blocks/fortran.md
+building-blocks/enzyme.md
 building-blocks/matlab.md
 building-blocks/packagedata.md
 building-blocks/arm64.md
@@ -50,6 +51,11 @@ A Tesseract that wraps the univariate Rosenbrock function, which is a common tes
 :link: building-blocks/fortran.html
 
 Wrapping a Fortran heat equation solver. Demonstrates subprocess-based integration for legacy compiled code.
+:::
+:::{grid-item-card} Differentiating Compiled Code
+:link: building-blocks/enzyme.html
+
+Differentiating a Fortran solver with Enzyme. Demonstrates exact, machine-precision JVP and VJP for compiled code with no hand-written adjoints.
 :::
 :::{grid-item-card} MATLAB Integration
 :link: building-blocks/matlab.html

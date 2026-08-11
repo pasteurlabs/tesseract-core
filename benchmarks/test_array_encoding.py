@@ -31,13 +31,24 @@ class ArrayModel(BaseModel):
     data: Array[(None,), Float64]
 
 
-ENCODINGS = ["json", "base64", "binref"]
+ENCODINGS = ["json", "base64", "binref", "base64+lz4", "binref+lz4"]
 
 # Maps short encoding name to the format string used by output_to_bytes
 _ENCODING_TO_FORMAT: dict[str, supported_format_type] = {
     "json": "json",
     "base64": "json+base64",
     "binref": "json+binref",
+    "base64+lz4": "json+base64",
+    "binref+lz4": "json+binref",
+}
+
+# Maps short encoding name to extra kwargs passed to output_to_bytes
+_ENCODING_TO_KWARGS: dict[str, dict] = {
+    "json": {},
+    "base64": {},
+    "binref": {},
+    "base64+lz4": {"compression": "lz4"},
+    "binref+lz4": {"compression": "lz4"},
 }
 
 
@@ -78,9 +89,11 @@ def test_encoding(benchmark, encoding_and_size):
     encoding, size = encoding_and_size
     model = ArrayModel(data=create_test_array(size))
     fmt = _ENCODING_TO_FORMAT[encoding]
+    extra_kwargs = _ENCODING_TO_KWARGS[encoding]
+    uses_binref = "binref" in encoding
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        if encoding == "binref":
+        if uses_binref:
 
             def setup():
                 _clear_dir(tmpdir)
@@ -88,34 +101,38 @@ def test_encoding(benchmark, encoding_and_size):
             benchmark.pedantic(
                 output_to_bytes,
                 args=(model, fmt),
-                kwargs={"base_dir": tmpdir},
+                kwargs={"base_dir": tmpdir, **extra_kwargs},
                 setup=setup,
                 rounds=_binref_rounds(size),
             )
         else:
-            benchmark(output_to_bytes, model, fmt)
+            benchmark(output_to_bytes, model, fmt, **extra_kwargs)
 
 
 def test_decoding(benchmark, encoding_and_size):
     encoding, size = encoding_and_size
     model = ArrayModel(data=create_test_array(size))
     fmt = _ENCODING_TO_FORMAT[encoding]
+    extra_kwargs = _ENCODING_TO_KWARGS[encoding]
+    uses_binref = "binref" in encoding
 
     with tempfile.TemporaryDirectory() as tmpdir:
         ctx: dict[str, str] = {}
-        if encoding == "binref":
+        if uses_binref:
             ctx["base_dir"] = tmpdir
 
-        encoded = output_to_bytes(model, fmt, base_dir=tmpdir)
+        encoded = output_to_bytes(model, fmt, base_dir=tmpdir, **extra_kwargs)
 
-        if encoding == "binref":
+        if uses_binref:
             # binref filenames are random UUIDs, so we must re-encode in setup
             # and pass the fresh payload to the decode call via a mutable wrapper.
             payload = [encoded]
 
             def setup():
                 _clear_dir(tmpdir)
-                payload[0] = output_to_bytes(model, fmt, base_dir=tmpdir)
+                payload[0] = output_to_bytes(
+                    model, fmt, base_dir=tmpdir, **extra_kwargs
+                )
 
             def decode():
                 ArrayModel.model_validate_json(payload[0], context=ctx)
@@ -129,17 +146,19 @@ def test_roundtrip(benchmark, encoding_and_size):
     encoding, size = encoding_and_size
     model = ArrayModel(data=create_test_array(size))
     fmt = _ENCODING_TO_FORMAT[encoding]
+    extra_kwargs = _ENCODING_TO_KWARGS[encoding]
+    uses_binref = "binref" in encoding
 
     with tempfile.TemporaryDirectory() as tmpdir:
         ctx: dict[str, str] = {}
-        if encoding == "binref":
+        if uses_binref:
             ctx["base_dir"] = tmpdir
 
         def roundtrip():
-            enc = output_to_bytes(model, fmt, base_dir=tmpdir)
+            enc = output_to_bytes(model, fmt, base_dir=tmpdir, **extra_kwargs)
             ArrayModel.model_validate_json(enc, context=ctx)
 
-        if encoding == "binref":
+        if uses_binref:
 
             def setup():
                 _clear_dir(tmpdir)

@@ -3,7 +3,9 @@
 
 import json
 import logging
+import socket
 import time
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -31,6 +33,30 @@ def test_prepare_build_context(tmp_path_factory):
     assert (build_dir / "__tesseract_source__" / "foo").exists()
     assert (build_dir / "__tesseract_runtime__").exists()
     assert (build_dir / "Dockerfile").exists()
+
+
+def test_prepare_build_context_python_version(tmp_path_factory):
+    """Test that python_version is rendered as ENV in the Dockerfile."""
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "foo").touch()
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(
+        name="foobar",
+        build_config=TesseractBuildConfig(python_version="3.12"),
+    )
+    engine.prepare_build_context(src_dir, build_dir, config)
+
+    dockerfile = (build_dir / "Dockerfile").read_text()
+    assert 'TESSERACT_PYTHON_VERSION="3.12"' in dockerfile
+
+    # Without python_version, the env var should not appear
+    build_dir2 = tmp_path_factory.mktemp("build2")
+    config_default = TesseractConfig(name="foobar")
+    engine.prepare_build_context(src_dir, build_dir2, config_default)
+
+    dockerfile_default = (build_dir2 / "Dockerfile").read_text()
+    assert "TESSERACT_PYTHON_VERSION" not in dockerfile_default
 
 
 def test_prepare_build_context_env(tmp_path_factory):
@@ -158,6 +184,141 @@ def test_prepare_build_context_package_data_not_found(tmp_path_factory):
         engine.prepare_build_context(src_dir, build_dir, config)
 
 
+def test_prepare_build_context_local_dependency_with_extras(tmp_path_factory):
+    """Local pip dependency with an extras specifier is staged (issue #643)."""
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "tesseract_api.py").touch()
+    (src_dir / "mylocaldep").mkdir()
+    (src_dir / "tesseract_requirements.txt").write_text("numpy\n./mylocaldep[extra]\n")
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(name="foobar")
+    engine.prepare_build_context(src_dir, build_dir, config)
+
+    # The directory (without the extras suffix) is staged.
+    assert (build_dir / "local_requirements" / "mylocaldep").is_dir()
+    assert not (build_dir / "local_requirements" / "mylocaldep[extra]").exists()
+
+    # The rewritten requirements file installs it from the staged copy, keeping
+    # the extra so pip installs it.
+    reqs = (
+        (build_dir / "__tesseract_source__" / "tesseract_requirements.txt")
+        .read_text()
+        .splitlines()
+    )
+    assert "numpy" in reqs
+    assert "./local_requirements/mylocaldep[extra]" in reqs
+    # The original local line is rewritten, not carried over verbatim.
+    assert "./mylocaldep[extra]" not in reqs
+
+
+def test_prepare_build_context_local_dependency_file_url(tmp_path_factory):
+    """Local pip dependency given as a file:// URL is staged (issue #643)."""
+    dep_dir = tmp_path_factory.mktemp("dep") / "mylocaldep"
+    dep_dir.mkdir()
+    (dep_dir / "setup.py").touch()
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "tesseract_api.py").touch()
+    # `Path.as_uri()` yields a well-formed file:// URL on any platform.
+    (src_dir / "tesseract_requirements.txt").write_text(f"numpy\n{dep_dir.as_uri()}\n")
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(name="foobar")
+    engine.prepare_build_context(src_dir, build_dir, config)
+
+    # The file:// URL is resolved to a native path and staged by its name.
+    assert (build_dir / "local_requirements" / "mylocaldep").is_dir()
+
+    reqs = (
+        (build_dir / "__tesseract_source__" / "tesseract_requirements.txt")
+        .read_text()
+        .splitlines()
+    )
+    assert "numpy" in reqs
+    assert "./local_requirements/mylocaldep" in reqs
+
+
+def test_prepare_build_context_local_dependency_not_found(tmp_path_factory):
+    """A local dependency that does not exist raises a clear error."""
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "tesseract_api.py").touch()
+    (src_dir / "tesseract_requirements.txt").write_text("./does_not_exist\n")
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(name="foobar")
+    with pytest.raises(RuntimeError, match="local dependency not found"):
+        engine.prepare_build_context(src_dir, build_dir, config)
+
+
+def test_prepare_build_context_local_dependency_parent_path(tmp_path_factory):
+    """Local pip dependency reached via ../.. is staged (issue #630)."""
+    parent_dir = tmp_path_factory.mktemp("parent")
+    # A package that lives two levels above the Tesseract source directory.
+    (parent_dir / "mypkg").mkdir()
+    (parent_dir / "mypkg" / "setup.py").touch()
+    src_dir = parent_dir / "sub" / "tesseract"
+    src_dir.mkdir(parents=True)
+    (src_dir / "tesseract_api.py").touch()
+    (src_dir / "tesseract_requirements.txt").write_text("../../mypkg\n")
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(name="foobar")
+    engine.prepare_build_context(src_dir, build_dir, config)
+
+    # The staged name comes from the resolved path, not from `../..`.
+    assert (build_dir / "local_requirements" / "mypkg").is_dir()
+    assert [p.name for p in (build_dir / "local_requirements").iterdir()] == ["mypkg"]
+    reqs = (
+        (build_dir / "__tesseract_source__" / "tesseract_requirements.txt")
+        .read_text()
+        .splitlines()
+    )
+    assert "./local_requirements/mypkg" in reqs
+    assert "../../mypkg" not in reqs
+
+
+def test_prepare_build_context_conda_local_dependency(tmp_path_factory):
+    """Conda provider stages local-path pip dependencies (issue #641)."""
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "tesseract_api.py").touch()
+    (src_dir / "mypkg_src").mkdir()
+    (src_dir / "mypkg_src" / "setup.py").touch()
+    env_spec = {
+        "name": "tesseract",
+        "channels": ["conda-forge"],
+        "dependencies": [
+            "python=3.12",
+            "pip",
+            {"pip": ["requests", "./mypkg_src"]},
+        ],
+    }
+    with (src_dir / "tesseract_environment.yaml").open("w") as f:
+        yaml.safe_dump(env_spec, f)
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(
+        name="foobar",
+        build_config=TesseractBuildConfig(
+            requirements={"provider": "conda"},
+        ),
+    )
+    engine.prepare_build_context(src_dir, build_dir, config)
+
+    # The local package is staged into the build context.
+    assert (build_dir / "local_requirements" / "mypkg_src").is_dir()
+
+    # The rewritten environment file points pip at the staged copy while leaving
+    # remote dependencies untouched.
+    rewritten = yaml.safe_load(
+        (build_dir / "__tesseract_source__" / "tesseract_environment.yaml").read_text()
+    )
+    pip_entry = next(e["pip"] for e in rewritten["dependencies"] if isinstance(e, dict))
+    assert "requests" in pip_entry
+    assert "./local_requirements/mypkg_src" in pip_entry
+    # The original local path is rewritten, not carried over verbatim.
+    assert "./mypkg_src" not in pip_entry
+
+
 @pytest.mark.parametrize("generate_only", [True, False])
 def test_build_tesseract(dummy_tesseract_package, mocked_docker, generate_only, caplog):
     """Test we can build an image for a package and keep build directory."""
@@ -260,6 +421,41 @@ def test_run_tesseract(mocked_docker):
 
     # Check that we did not request GPUs by accident
     assert res["device_requests"] is None
+
+
+def test_run_debug(mocked_docker):
+    """Test running a tesseract in debug mode forwards a debugpy port."""
+    res_out, _ = engine.run_tesseract(
+        "foobar",
+        "apply",
+        ['{"inputs": {"a": [1, 2, 3], "b": [4, 5, 6]}}'],
+        debug=True,
+    )
+
+    res = json.loads(res_out)
+    # TESSERACT_DEBUG is set so the runtime starts debugpy and waits for a client.
+    assert res["environment"]["TESSERACT_DEBUG"] == "1"
+
+    assert engine.CONTAINER_DEBUGPY_PORT in res["ports"].values()
+
+
+def test_run_debug_host_network(mocked_docker):
+    """With host networking, debugpy binds the host port directly (no mapping)."""
+    res_out, _ = engine.run_tesseract(
+        "foobar",
+        "apply",
+        ['{"inputs": {"a": [1, 2, 3], "b": [4, 5, 6]}}'],
+        debug=True,
+        network="host",
+    )
+
+    res = json.loads(res_out)
+
+    assert res["network"] == "host"
+    assert res["environment"]["TESSERACT_DEBUG"] == "1"
+    # No port mapping is added: the container binds the debugpy port on the host
+    # directly, so an explicit mapping would be rejected.
+    assert not res["ports"]
 
 
 def test_run_gpu(mocked_docker):
@@ -516,6 +712,164 @@ def test_serve_tesseract_volumes(mocked_docker, tmpdir):
         engine.serve("foobar", input_path=str(indir), output_path=str(indir))
 
 
+def test_serve_debug_port_distinct_from_api_port(mocked_docker, monkeypatch):
+    """The debugpy port must never reuse the API port.
+
+    Regression test: in debug mode, ``serve`` picks two free ports (API and
+    debugpy). Both are drawn from the same range, so if the second draw is not
+    told to exclude the first, they can collide. When they do, the two entries
+    in ``port_mappings`` share the same host key and the dict silently collapses
+    to one entry, publishing the wrong container port. This showed up as a rare,
+    flaky ``[Errno 98] address already in use`` inside the container.
+
+    We stub ``get_free_port`` to always hand back the same port unless it is
+    excluded. The two draws can therefore only differ if ``serve`` passes the
+    API port in ``exclude`` on the second draw -- exactly the fix under test.
+    Without it, both draws return the same port and the two ``port_mappings``
+    entries collapse onto one host key. Stubbing removes any dependence on which
+    OS ports happen to be free, which made an earlier socket-based version of
+    this test flaky on CI.
+    """
+    preferred, fallback = 60001, 60002
+
+    def fake_get_free_port(within_range=None, exclude=()):
+        # Return the preferred port unless it is excluded, mirroring
+        # get_free_port's contract that it never returns an excluded port.
+        return fallback if preferred in exclude else preferred
+
+    monkeypatch.setattr(engine, "get_free_port", fake_get_free_port)
+
+    res, _ = engine.serve("foobar", debug=True)
+    port_mappings = json.loads(res)["ports"]
+    host_ports = [key.split(":")[-1] for key in port_mappings]
+    # Both the API and debugpy mappings must survive as separate entries.
+    assert len(port_mappings) == 2, f"port mapping collapsed: {port_mappings}"
+    assert len(set(host_ports)) == 2, f"debug and API host ports collided: {host_ports}"
+
+
+def test_serve_container_port_decoupled_from_host_port(mocked_docker):
+    """The container-side API port is fixed and independent of the host port.
+
+    In port-mapping mode the container binds a fixed internal port; only the
+    host port is dynamic. This mirrors debugpy and removes the coupling that
+    let a host-port collision corrupt the internal mapping.
+    """
+    res, _ = engine.serve("foobar", debug=True)
+    port_mappings = json.loads(res)["ports"]
+
+    # Keys are host side (dynamic), values are container side (fixed constants).
+    assert set(port_mappings.values()) == {
+        engine.CONTAINER_API_PORT,
+        engine.CONTAINER_DEBUGPY_PORT,
+    }
+
+
+def test_serve_retries_on_port_in_use(mocked_docker, monkeypatch):
+    """A port that is taken before the container binds triggers a retry.
+
+    When serve picks the port itself, a lost race for that port (the container
+    fails to bind it) should cause serve to pick a fresh port and try again,
+    rather than surfacing the failure to the caller.
+    """
+    seen_ports = []
+    fail_times = 2  # fail the first two attempts, succeed on the third
+
+    def flaky_health(container, ping_ip, port, timeout=30):
+        seen_ports.append(port)
+        if len(seen_ports) <= fail_times:
+            raise engine._PortInUseError(f"Port {port} was already in use")
+        # success -> return normally
+
+    monkeypatch.setattr(engine, "_wait_for_health", flaky_health)
+
+    res, _ = engine.serve("foobar")
+    assert res
+    # It retried until success and used a distinct port each time.
+    assert len(seen_ports) == fail_times + 1
+    assert len(set(seen_ports)) == len(seen_ports), (
+        f"retries reused a port: {seen_ports}"
+    )
+
+
+def test_serve_retries_on_docker_publish_conflict(mocked_docker, monkeypatch):
+    """A host-port publish collision (ContainerError) triggers a retry.
+
+    In port-mapping mode a lost port race fails when the Docker daemon tries to
+    publish the host port -- ``containers.run`` raises ``ContainerError`` before
+    any container exists. This must be retried like the host-network case.
+    """
+    from tesseract_core.sdk.docker_client import ContainerError
+
+    real_run = mocked_docker.containers.run
+    calls = {"n": 0}
+
+    def flaky_run(**kwargs):
+        calls["n"] += 1
+        if calls["n"] <= 2:
+            raise ContainerError(
+                None,
+                125,
+                "docker run ...",
+                kwargs["image"],
+                b"docker: Error response from daemon: port is already allocated.",
+            )
+        return real_run(**kwargs)
+
+    monkeypatch.setattr(mocked_docker.containers, "run", flaky_run)
+
+    res, _ = engine.serve("foobar")
+    assert res
+    assert calls["n"] == 3  # two conflicts, then success
+
+
+def test_serve_reraises_non_port_container_error(mocked_docker, monkeypatch):
+    """A ContainerError that is not a port conflict is not retried."""
+    from tesseract_core.sdk.docker_client import ContainerError
+
+    def failing_run(**kwargs):
+        raise ContainerError(
+            None, 1, "docker run ...", kwargs["image"], b"some other failure"
+        )
+
+    monkeypatch.setattr(mocked_docker.containers, "run", failing_run)
+
+    with pytest.raises(ContainerError):
+        engine.serve("foobar")
+
+
+def test_serve_gives_up_after_max_port_attempts(mocked_docker, monkeypatch):
+    """If every attempt loses the port race, serve raises rather than looping forever."""
+
+    def always_in_use(container, ping_ip, port, timeout=30):
+        raise engine._PortInUseError(f"Port {port} was already in use")
+
+    monkeypatch.setattr(engine, "_wait_for_health", always_in_use)
+
+    with pytest.raises(RuntimeError, match="Failed to find a free port"):
+        engine.serve("foobar")
+
+
+def test_serve_does_not_retry_user_supplied_port(mocked_docker, monkeypatch):
+    """A user-supplied fixed port is honored verbatim and never retried.
+
+    Retrying would silently move the Tesseract to a different port than the one
+    the caller explicitly asked for, so a bind failure must surface immediately.
+    """
+    attempts = []
+
+    def always_in_use(container, ping_ip, port, timeout=30):
+        attempts.append(port)
+        raise engine._PortInUseError(f"Port {port} was already in use")
+
+    monkeypatch.setattr(engine, "_wait_for_health", always_in_use)
+
+    with pytest.raises(engine._PortInUseError):
+        engine.serve("foobar", port="12345")
+
+    # Exactly one attempt, on the exact port requested.
+    assert attempts == ["12345"]
+
+
 def test_needs_docker(mocked_docker, monkeypatch):
     @engine.needs_docker
     def run_something_with_docker():
@@ -628,6 +982,81 @@ def test_parse_requirements(tmpdir):
     ]
 
 
+def test_prepare_build_context_conda_no_env_file(tmp_path_factory):
+    """Conda provider without an environment file does not error at staging."""
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "tesseract_api.py").touch()
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(
+        name="foobar",
+        build_config=TesseractBuildConfig(requirements={"provider": "conda"}),
+    )
+    engine.prepare_build_context(src_dir, build_dir, config)
+    assert (build_dir / "Dockerfile").exists()
+
+
+@pytest.mark.parametrize(
+    "line, expected",
+    [
+        ("./mylocaldep", ("./mylocaldep", "")),
+        ("./mylocaldep[extra]", ("./mylocaldep", "[extra]")),
+        ("../../pkg[a,b]", ("../../pkg", "[a,b]")),
+        ("/abs/path", ("/abs/path", "")),
+        ("./a[b] ", ("./a", "[b]")),
+    ],
+)
+def test_split_local_dependency(line, expected):
+    assert engine._split_local_dependency(line) == expected
+
+
+def test_split_local_dependency_file_url(tmp_path):
+    """A file:// URL is converted back to a native filesystem path."""
+    target = tmp_path / "mypkg"
+    # `Path.as_uri()` produces a correctly-formed file:// URL on any platform,
+    # so this round-trips regardless of the OS path separator.
+    path, extras = engine._split_local_dependency(target.as_uri())
+    assert path == str(target)
+    assert extras == ""
+
+    path, extras = engine._split_local_dependency(target.as_uri() + "[extra]")
+    assert path == str(target)
+    assert extras == "[extra]"
+
+
+def test_stage_local_dependency_file(tmp_path):
+    """A local file dependency (e.g. a wheel) is copied, not tree-copied."""
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "mypkg-1.0-py3-none-any.whl").write_text("wheel contents")
+    local_requirements = tmp_path / "local_requirements"
+    local_requirements.mkdir()
+
+    spec = engine._stage_local_dependency(
+        "./mypkg-1.0-py3-none-any.whl", src_dir, local_requirements
+    )
+    staged = local_requirements / "mypkg-1.0-py3-none-any.whl"
+    assert spec == "./local_requirements/mypkg-1.0-py3-none-any.whl"
+    assert staged.is_file()
+    assert staged.read_text() == "wheel contents"
+
+
+def test_stage_local_dependency_name_collision(tmp_path):
+    """Two dependencies resolving to the same basename get distinct staged names."""
+    src_dir = tmp_path / "src"
+    (src_dir / "a" / "mypkg").mkdir(parents=True)
+    (src_dir / "b" / "mypkg").mkdir(parents=True)
+    local_requirements = tmp_path / "local_requirements"
+    local_requirements.mkdir()
+
+    spec_a = engine._stage_local_dependency("./a/mypkg", src_dir, local_requirements)
+    spec_b = engine._stage_local_dependency("./b/mypkg", src_dir, local_requirements)
+    assert spec_a == "./local_requirements/mypkg"
+    assert spec_b == "./local_requirements/mypkg_1"
+    assert (local_requirements / "mypkg").is_dir()
+    assert (local_requirements / "mypkg_1").is_dir()
+
+
 @pytest.mark.parametrize(
     "spec, expected",
     [
@@ -716,3 +1145,68 @@ def test_serve_non_cuda_ipc_has_no_ipc_host(monkeypatch):
         skip_health_check=True,
     )
     assert "--ipc=host" not in (captured.get("extra_args") or [])
+
+
+@pytest.mark.parametrize(
+    "within_range",
+    [
+        (-1, 100),
+        (0, 65536),
+        (100, 50),
+    ],
+)
+def test_get_free_port_invalid_range(within_range):
+    with pytest.raises(ValueError, match="Invalid port range"):
+        engine.get_free_port(within_range=within_range)
+
+
+def test_get_free_port_skips_port_in_use():
+    """A port that is already bound is skipped in favor of a free one."""
+    # Reserve two adjacent ports up front so we know both belong to the test,
+    # then release one of them to act as the only free candidate.
+    with (
+        closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as occupied,
+        closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as spare,
+    ):
+        occupied.bind(("127.0.0.1", 0))
+        in_use = occupied.getsockname()[1]
+        # Find an adjacent port we can also reserve, so the range holds exactly
+        # the occupied port plus one known-free port.
+        free = None
+        for candidate in (in_use + 1, in_use - 1):
+            if 0 <= candidate <= 65535:
+                try:
+                    spare.bind(("127.0.0.1", candidate))
+                except OSError:
+                    continue
+                free = candidate
+                break
+        assert free is not None, "could not reserve an adjacent port"
+        # Release the spare port so it becomes the only free port in the range.
+        spare.close()
+
+        within_range = (min(in_use, free), max(in_use, free) + 1)
+        port = engine.get_free_port(within_range=within_range)
+
+    assert port == free
+
+
+def test_get_free_port_no_free_ports():
+    """RuntimeError is raised when every port in the range is in use."""
+    with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as occupied:
+        occupied.bind(("127.0.0.1", 0))
+        in_use = occupied.getsockname()[1]
+
+        # Range containing only the single occupied port (end is exclusive).
+        with pytest.raises(RuntimeError, match="No free ports found"):
+            engine.get_free_port(within_range=(in_use, in_use + 1))
+
+
+def test_get_free_port_all_excluded():
+    """RuntimeError is raised when the only candidate port is excluded."""
+    with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
+        s.bind(("127.0.0.1", 0))
+        free = s.getsockname()[1]
+
+    with pytest.raises(RuntimeError, match="No free ports found"):
+        engine.get_free_port(within_range=(free, free + 1), exclude=(free,))

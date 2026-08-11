@@ -11,15 +11,16 @@ from collections.abc import Callable, Iterable
 from enum import Enum
 from pathlib import Path
 from textwrap import dedent
+from types import UnionType
 from typing import (
     Annotated,
     Any,
     Literal,
+    Union,
     get_args,
     get_origin,
 )
 
-import click
 import typer
 from pydantic import ValidationError
 from pydantic_core import from_json
@@ -45,6 +46,15 @@ from tesseract_core.runtime.testing.finite_differences import (
     check_gradients as check_gradients_,
 )
 
+# typer >= 0.26 vendors its own click (and drops the click dependency), so the
+# Context type and exceptions must come from the click typer actually runs;
+# fall back to real click on older typer (which still ships it).
+try:
+    from typer._click.core import Context
+    from typer._click.exceptions import BadParameter, UsageError
+except ImportError:  # typer < 0.26
+    from click import BadParameter, Context, UsageError
+
 CONFIG_FIELDS = {
     str(field_name): field.annotation
     for field_name, field in RuntimeConfig.model_fields.items()
@@ -66,7 +76,7 @@ def _enum_to_val(val: Any) -> Any:
 class SpellcheckedTyperGroup(typer.core.TyperGroup):
     """A Typer group that suggests similar commands if a command is not found."""
 
-    def get_command(self, ctx: click.Context, invoked_command: str) -> Any:
+    def get_command(self, ctx: Context, invoked_command: str) -> Any:
         """Get a command from the Typer group, suggesting similar commands if the command is not found."""
         import difflib
 
@@ -76,7 +86,7 @@ class SpellcheckedTyperGroup(typer.core.TyperGroup):
                 invoked_command, possible_commands, n=1, cutoff=0.6
             )
             if close_match:
-                raise click.UsageError(
+                raise UsageError(
                     f"No such command '{invoked_command}'. Did you mean '{close_match[0]}'?",
                     ctx,
                 )
@@ -111,7 +121,7 @@ def _parse_payload(value: Any) -> dict[str, Any]:
         try:
             value = read_from_path(value[1:]).decode("utf-8")
         except Exception as e:
-            raise click.BadParameter(f"Could not read data from path {value}.") from e
+            raise BadParameter(f"Could not read data from path {value}.") from e
 
     # Use pydantic from_json here because it is much faster, and the payload may be large.
     return from_json(value)
@@ -139,6 +149,22 @@ def make_callback() -> Callable:
         if field_name == "api_path":
             # Too late to configure here, as the API path is needed to load the Tesseract API
             continue
+
+        # TODO: The Union unwrap + Literal-to-enum conversion below only exists
+        # because our minimal supported Typer (typer>=0.16 in pyproject.toml)
+        # can't handle `Literal` types and raises "Type not yet supported".
+        # Once the minimal Typer is bumped to a version with native `Literal`
+        # support, this whole branch can be removed.
+        #
+        # Unwrap Optional[...] (i.e. `X | None`) to inspect the inner type;
+        # since all options default to None, optionality is already handled
+        # and we only need the concrete type for Typer.
+        if get_origin(field_type) in (Union, UnionType):
+            non_none_args = [
+                arg for arg in get_args(field_type) if arg is not type(None)
+            ]
+            if len(non_none_args) == 1:
+                field_type = non_none_args[0]
 
         if get_origin(field_type) is Literal:
             field_type = make_choice_enum(f"{field_name}Choices", get_args(field_type))
@@ -203,6 +229,37 @@ def _schema_to_docstring(schema: Any, current_indent: int = 0) -> str:
             )
 
     return "\n".join(docstring)
+
+
+def _start_debug_server(wait_for_client: bool, port: int = 5678) -> None:
+    """Start a debugpy server for remote debugging.
+
+    The long-running ``serve`` command launches a non-blocking server that a
+    debugger can attach to at any time. One-shot commands instead attach early in
+    ``main`` (before the Tesseract API is imported, so module-level code can be
+    debugged too) and block until a client connects, since they would otherwise
+    finish before there is a chance to attach.
+
+    Args:
+        wait_for_client: If True, block until a debugger attaches.
+        port: Port to listen on inside the container.
+    """
+    # Python 3.11+ freezes stdlib bootstrap modules, which makes debugpy print a
+    # noisy "frozen modules" warning (it could only ever miss breakpoints inside
+    # those frozen modules, never in user code). Skip the validation check.
+    os.environ.setdefault("PYDEVD_DISABLE_FILE_VALIDATION", "1")
+
+    import debugpy
+
+    debugpy.listen(("0.0.0.0", port))
+    if wait_for_client:
+        print(
+            "Debug mode enabled, waiting for debugger to attach...",
+            file=sys.stderr,
+            flush=True,
+        )
+        debugpy.wait_for_client()
+        print("Debugger attached, resuming execution.", file=sys.stderr, flush=True)
 
 
 @app.command("check")
@@ -368,6 +425,9 @@ def serve(
     num_workers: Annotated[int, typer.Option(help="Number of worker processes")] = 1,
 ) -> None:
     """Start running this Tesseract's web server."""
+    if get_config().debug:
+        # The server is long-running, so a debugger can attach at any time.
+        _start_debug_server(wait_for_client=False)
     serve_(host=host, port=port, num_workers=num_workers)
 
 
@@ -407,7 +467,7 @@ def _create_user_defined_cli_command(
                     context={"base_dir": input_path},
                 )
             except ValidationError as e:
-                raise click.BadParameter(
+                raise BadParameter(
                     str(e),
                     param_hint="payload",
                 ) from e
@@ -428,7 +488,12 @@ def _create_user_defined_cli_command(
             # so they go through stdio redirection to the log file
             profiler.print_stats()
 
-        result = output_to_bytes(result, output_format, output_path)
+        result = output_to_bytes(
+            result,
+            output_format,
+            output_path,
+            compression=config.compression,
+        )
 
         # write raw bytes to out_stream.buffer to support binary data (which may e.g. be piped)
         if not output_file:
@@ -460,6 +525,7 @@ def _create_user_defined_cli_command(
         def command_func(payload: str):
             parsed_payload = _parse_payload(payload)
             return _callback_wrapper(payload=parsed_payload)
+
     else:
 
         def command_func():
@@ -535,6 +601,15 @@ def main() -> None:
             sys.exit(1)
 
         _configure_required_file_load()
+
+        # Attach the debugger before the Tesseract API is imported below (during
+        # command registration) so module-level code can be debugged too. The
+        # command isn't parsed yet, so we inspect argv directly (like
+        # `_configure_required_file_load` above): `serve` launches its own
+        # non-blocking debugger and must not block, and help should not block.
+        skip_debug_wait_args = {"serve", "-h", "--help"}
+        if get_config().debug and not skip_debug_wait_args.intersection(sys.argv):
+            _start_debug_server(wait_for_client=True)
 
         _add_user_commands_to_cli(app, out_stream=orig_stdout)
         app(auto_envvar_prefix="TESSERACT_RUNTIME")

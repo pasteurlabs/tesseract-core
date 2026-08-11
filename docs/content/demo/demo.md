@@ -7,9 +7,12 @@ End-to-end examples that show Tesseracts in action — from optimization workflo
 :hidden:
 
 data-assimilation.ipynb
+bayesian-inference.ipynb
 lorenz_tesseract.md
 cfd-optimization.ipynb
 fem-shape-optimization.ipynb
+enzyme-lfortran.ipynb
+learned-closure.ipynb
 JAX Rosenbrock Minimization <https://si-tesseract.discourse.group/t/jax-based-rosenbrock-function-minimization/48>
 PyTorch Rosenbrock Minimization <https://si-tesseract.discourse.group/t/pytorch-based-rosenbrock-function-minimization/44>
 JAX RBF Fitting <https://si-tesseract.discourse.group/t/jax-auto-diff-templates-gaussian-radial-basis-function-fitting/51>
@@ -38,12 +41,17 @@ Full walkthrough of a 4D-Var scheme using a differentiable Lorenz-96 Tesseract �
 
 Detailed implementation of the JAX-based Lorenz-96 solver Tesseract used in the 4D-Var demo.
 :::
+:::{grid-item-card} Bayesian Inference
+:link: bayesian-inference.html
+
+Use the same Lorenz-96 Tesseract as the forward model inside a NumPyro probabilistic workflow — recover the posterior over an unknown forcing parameter with gradient-based MCMC.
+:::
 
 ::::
 
 ## Simulation & design optimization demos
 
-End-to-end differentiable optimization through physics simulators, using Tesseract-JAX to compose Tesseracts with JAX code.
+End-to-end differentiable optimization through physics simulators, composing Tesseracts with JAX or PyTorch code via Tesseract-JAX and Tesseract-Torch.
 
 ::::{grid} 2
 :gutter: 2
@@ -57,6 +65,16 @@ Optimize the initial velocity field of a 2D Navier-Stokes simulation so its vort
 :link: fem-shape-optimization.html
 
 Compose a geometry Tesseract (PyVista, finite-difference gradients) with a FEM Tesseract (jax-fem) to optimize structural bar configurations for minimum compliance.
+:::
+:::{grid-item-card} Differentiable Fortran (Enzyme)
+:link: enzyme-lfortran.html
+
+Solve two inverse heat-transfer problems by differentiating a Fortran solver end-to-end: Enzyme generates exact derivatives at the LLVM IR level, and `jax.value_and_grad` drives the optimization through Tesseract-JAX.
+:::
+:::{grid-item-card} Learned Closure (PyTorch)
+:link: learned-closure.html
+
+Train a native PyTorch neural viscosity closure end-to-end through a containerized Burgers' equation solver Tesseract used as a differentiable layer. Gradients flow from the loss through the solver's VJP, over HTTP, into the network using Tesseract-Torch.
 :::
 
 ::::

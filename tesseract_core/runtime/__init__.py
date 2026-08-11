@@ -8,17 +8,20 @@ from pathlib import Path
 # Recursive import of the whole package to ensure all deps are present
 try:
     for path in Path(__file__).parent.glob("**/*.py"):
-        if path.stem == "__init__":
+        if not (path.parent / "__init__.py").exists():
+            # Not a Python package, likely a test or example folder that we don't want to import.
             continue
         if path.stem.startswith("app_"):
+            # Instantiated versions of apps for testing and CLI that have side effects at import time.
             continue
-        if not (path.parent / "__init__.py").exists():
+        if path.stem in ("jax_recipes",):
+            # Recipes typically have optional dependencies that we don't want to require
+            # for the core runtime.
             continue
-
         package_path = ".".join(
             path.relative_to(Path(__file__).parent).with_suffix("").parts
         )
-        importlib.import_module(f".{package_path}", __package__)
+        mod = importlib.import_module(f".{package_path}", __package__)
 except ModuleNotFoundError as e:
     print(
         f"Failed to import {path}: {e}\n\n",

@@ -234,22 +234,6 @@ def _get_current_backend() -> BaseBackend:
         ) from exc
 
 
-# Public API functions that work with the current context
-def log_parameter(key: str, value: Any) -> None:
-    """Log a parameter to the current run context."""
-    _get_current_backend().log_parameter(key, value)
-
-
-def log_metric(key: str, value: float, step: int | None = None) -> None:
-    """Log a metric to the current run context."""
-    _get_current_backend().log_metric(key, value, step)
-
-
-def log_artifact(local_path: str) -> None:
-    """Log an artifact to the current run context."""
-    _get_current_backend().log_artifact(local_path)
-
-
 @contextmanager
 def redirect_stdio(
     logfile: str | Path,

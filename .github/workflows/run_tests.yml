@@ -38,7 +38,7 @@ jobs:
 
     steps:
       - name: Set up Git repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v7
@@ -48,12 +48,13 @@ jobs:
       - name: Install package
         run: |
           cp production.uv.lock uv.lock
-          uv sync --python ${{ matrix.python-version }} --extra dev --frozen
-
           if [ "${{ matrix.runtime-deps }}" == "oldest" ]; then
             # replace >= with == in runtime deps section of pyproject.toml to install oldest runtime deps
             sed -i '/^runtime = \[$/,/^]$/s/>=/==/g' ./pyproject.toml
-            uv pip install -e .[runtime]
+            # re-resolve (unfrozen) so the whole env is consistent against the oldest runtime pins
+            uv sync --python ${{ matrix.python-version }} --extra dev
+          else
+            uv sync --python ${{ matrix.python-version }} --extra dev --frozen
           fi
 
       - name: Run test suite
@@ -68,7 +69,7 @@ jobs:
             --cov-branch
 
       - name: Upload coverage reports to Codecov
-        uses: codecov/codecov-action@v6.0.1
+        uses: codecov/codecov-action@v7.0.0
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: pasteurlabs/tesseract-core
@@ -84,19 +85,7 @@ jobs:
 
     steps:
       - name: Set up Git repository
-        uses: actions/checkout@v6
-
-      - name: Get all changed files
-        id: changed-files
-        uses: tj-actions/changed-files@9426d40962ed5378910ee2e21d5f8c6fcbf2dd96 # v47
-        with:
-          files: |
-            tesseract_core/**
-            tests/endtoend_tests/**
-            demo/**
-            examples/**
-            production.uv.lock
-            .github/workflows/run_tests.yml
+        uses: actions/checkout@v7
 
       - name: Get available test matrix
         id: get-matrix
@@ -104,13 +93,6 @@ jobs:
           EXAMPLES_DIR: examples
           DEMO_DIR: demo
         run: |
-          # if no changed files in the current PR, skip E2E tests
-          if [[ "${{ steps.changed-files.outputs.any_changed }}" != "true" && ${{ github.event_name == 'pull_request' }} ]]; then
-            echo "No changed files detected, skipping E2E tests."
-            echo "matrix=[]" >> $GITHUB_OUTPUT
-            echo "demos=[]" >> $GITHUB_OUTPUT
-            exit 0
-          fi
           # get JSON array of directories in EXAMPLES_DIR, except ones that start with _
           subjobs=$(
             find "${{ env.EXAMPLES_DIR }}" -type d -maxdepth 1 -mindepth 1 -exec basename {} \; \
@@ -178,7 +160,7 @@ jobs:
 
     steps:
       - name: Set up Git repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       # Use Conda to install Python (setup-python action doesn't support ARM)
       - uses: conda-incubator/setup-miniconda@v4
@@ -236,7 +218,7 @@ jobs:
           fi
 
       - name: Upload coverage reports to Codecov
-        uses: codecov/codecov-action@v6.0.1
+        uses: codecov/codecov-action@v7.0.0
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: pasteurlabs/tesseract-core
@@ -262,7 +244,7 @@ jobs:
 
     steps:
       - name: Set up Git repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -270,7 +252,7 @@ jobs:
           enable-cache: true
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
 

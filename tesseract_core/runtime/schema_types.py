@@ -5,14 +5,12 @@ from abc import ABCMeta
 from enum import IntEnum
 from functools import partial
 from typing import (
-    TYPE_CHECKING,
     Annotated,
     Any,
     TypeAlias,
     get_args,
 )
 
-import numpy as np
 from pydantic import (
     AfterValidator,
     BaseModel,
@@ -398,21 +396,6 @@ class ShapeDType(BaseModel):
         shape = obj.expected_shape
         dtype = obj.expected_dtype
         return cls[shape, dtype]
-
-
-if TYPE_CHECKING:
-    # HACK: When type checking, we pretend that Array is a subclass of numpy.ndarray.
-    # This gives IDEs and type checkers the ability to infer types correctly
-    # when using Array annotations.
-    BaseArray: TypeAlias = Array
-
-    class Array(np.typing.NDArray, BaseArray):  # noqa: D101
-        pass
-
-    BaseDifferentiable: TypeAlias = Differentiable
-
-    class Differentiable(np.typing.NDArray, BaseDifferentiable):  # noqa: D101
-        pass
 
 
 # Export concrete scalar types

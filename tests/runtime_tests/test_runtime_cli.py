@@ -335,6 +335,50 @@ def test_outputs_to_local_file(
         raise AssertionError(f"Unexpected output format: {output_format}")
 
 
+@pytest.mark.parametrize("via_env", [True, False], ids=["env", "cli_flag"])
+def test_apply_command_binref_lz4(
+    cli, cli_runner, tmpdir, dummy_tesseract_module, via_env
+):
+    """Test that binref lz4 compression works when set via env var or CLI flag."""
+    tmpdir = Path(tmpdir)
+    args = [
+        "--output-path",
+        tmpdir,
+        "--output-format",
+        "json+binref",
+    ]
+    if not via_env:
+        args += ["--compression", "lz4"]
+    args += ["apply", json.dumps({"inputs": test_input})]
+
+    result = cli_runner.invoke(
+        cli,
+        args,
+        env={"TESSERACT_COMPRESSION": "lz4"} if via_env else {},
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0, result.stderr
+
+    output = json.loads(result.stdout)
+    # Verify compression metadata is present on array fields
+    for field in dummy_tesseract_module.OutputSchema.model_fields:
+        val = output[field]
+        if isinstance(val, dict) and val.get("object_type") == "array":
+            assert val["data"]["encoding"] == "binref"
+            assert val["data"]["compression"] == "lz4"
+            # compressed_size is now embedded in the buffer spec as path:offset:compressed_size
+            assert val["data"]["buffer"].count(":") == 2
+
+    # Verify the data roundtrips correctly
+    test_input_val = dummy_tesseract_module.InputSchema.model_validate(test_input)
+    expected = dummy_tesseract_module.apply(test_input_val)
+    roundtrip = dummy_tesseract_module.OutputSchema.model_validate_json(
+        result.stdout, context={"base_dir": tmpdir}
+    )
+    for field in expected.model_fields:
+        assert np.array_equal(getattr(roundtrip, field), getattr(expected, field))
+
+
 @pytest.mark.parametrize(
     "test_server",
     [
@@ -573,6 +617,68 @@ def test_check(cli, cli_runner, dummy_tesseract_package):
             f"{schema_name} is not a subclass of pydantic.BaseModel"
             in result.exception.args[0]
         )
+
+
+def test_start_debug_server_blocks_until_client(monkeypatch):
+    """One-shot commands must block until a debugger attaches.
+
+    We fake the ``debugpy`` module so ``wait_for_client`` blocks on an event we
+    control, then assert that ``_start_debug_server`` only returns once a
+    (fake) client has "attached".
+    """
+    import threading
+    import types
+
+    from tesseract_core.runtime import cli
+
+    attached = threading.Event()
+    calls = {}
+
+    fake_debugpy = types.SimpleNamespace()
+    fake_debugpy.listen = lambda addr: calls.setdefault("listen", addr)
+    fake_debugpy.wait_for_client = attached.wait
+    monkeypatch.setitem(sys.modules, "debugpy", fake_debugpy)
+
+    returned = threading.Event()
+
+    def run():
+        cli._start_debug_server(wait_for_client=True, port=12345)
+        returned.set()
+
+    server_thread = threading.Thread(target=run, daemon=True)
+    server_thread.start()
+
+    # The server should be listening but blocked, since no client has attached.
+    server_thread.join(timeout=1.0)
+    assert calls["listen"] == ("0.0.0.0", 12345)
+    assert not returned.is_set(), "Debug server returned before a client attached"
+
+    # Simulate a debugger attaching; the call should now return promptly.
+    attached.set()
+    server_thread.join(timeout=5.0)
+    assert returned.is_set(), "Debug server did not return after a client attached"
+
+
+def test_start_debug_server_no_wait(monkeypatch):
+    """The ``serve`` code path listens but does not block on a client."""
+    import types
+
+    from tesseract_core.runtime import cli
+
+    calls = {"wait": 0}
+
+    def wait_for_client():
+        calls["wait"] += 1
+
+    fake_debugpy = types.SimpleNamespace()
+    fake_debugpy.listen = lambda addr: calls.setdefault("listen", addr)
+    fake_debugpy.wait_for_client = wait_for_client
+    monkeypatch.setitem(sys.modules, "debugpy", fake_debugpy)
+
+    cli._start_debug_server(wait_for_client=False, port=12345)
+
+    assert calls["listen"] == ("0.0.0.0", 12345)
+    assert calls["wait"] == 0, "Debug server blocked on a client when it should not"
 
 
 def test_local_module(cli, cli_runner, dummy_tesseract_package):

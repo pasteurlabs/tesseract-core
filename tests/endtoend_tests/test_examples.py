@@ -100,6 +100,7 @@ TEST_CASES = {
     ),
     "meshstats_finitediff": Config(check_gradients=True),
     "fortran_heat": Config(),
+    "fortran_enzyme": Config(check_gradients=True),
     "conda": Config(),
     "required_files": Config(input_path="input"),
     "file_io": Config(input_path="test_cases/testdata", output_path="__tmp_path__"),
@@ -108,6 +109,7 @@ TEST_CASES = {
     ),
     "metrics": Config(test_with_random_inputs=True),
     "qp_solve": Config(),
+    "inherit_base_image_packages": Config(),
     "tesseractreference": Config(),  # Can't test requests standalone; needs target Tesseract. Covered in separate test.
     "userhandling": Config(),
 }
@@ -160,6 +162,7 @@ def fix_fake_arrays(fakedata, seed=42):
                 # in the tesseract
                 data["data"]["encoding"] = "base64"
                 data["data"]["buffer"] = base64.b64encode(new_data.tobytes()).decode()
+                data["data"].pop("compression", None)
         elif isinstance(data, dict):
             for key, value in data.items():
                 data[key] = _walk(value)

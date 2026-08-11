@@ -1,0 +1,2 @@
+# No extra requirements — Firedrake is provided by the base image
+# via inherit_base_image_packages: true in tesseract_config.yaml.

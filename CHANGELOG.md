@@ -2,6 +2,36 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.11.0] - 2026-07-23
+
+### Features
+
+- Add optional lz4 compression support for arrays passed via `base64` or `binref` encoding (#579)
+
+### Bug Fixes
+
+- Squash all requirement handling bugs (#644)
+- Random port binding collisions (#649)
+
+### Documentation
+
+- Replace sphinx-click with sphinxcontrib-typer (#634)
+- Add learned closure demo, add T-torch to landing page + docs (#626)
+- Add enzyme integration demo + blog post (#542)
+- Add pipeline guide and document `tesseract run test` (#642)
+
+## [1.10.0] - 2026-06-17
+
+### Features
+
+- Make Python version configurable (#592)
+- Add `inherit_base_image_packages` flag to tesseract_config.yaml (#600)
+- Reduce boilerplate in JAX recipe, add experimental VJP cache (#577)
+
+### Bug Fixes
+
+- Force building for the current arch when platform is set to native (#615)
+
 ## [1.9.0] - 2026-05-27
 
 ### Features

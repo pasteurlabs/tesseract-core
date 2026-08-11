@@ -276,6 +276,7 @@ def fix_fake_arrays(fakedata, seed=42):
                 # replace binref with base64 so we don't need to write files
                 data["data"]["encoding"] = "base64"
                 data["data"]["buffer"] = base64.b64encode(new_data.tobytes()).decode()
+                data["data"].pop("compression", None)
         elif isinstance(data, dict):
             for key, value in data.items():
                 data[key] = _walk(value)

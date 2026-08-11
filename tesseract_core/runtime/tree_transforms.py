@@ -1,8 +1,10 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import collections
 import re
-from collections.abc import Callable, Iterable, Mapping, Sequence
+import threading
+from collections.abc import Callable, Hashable, Iterable, Mapping, Sequence
 from copy import deepcopy
 from typing import Any, Literal
 
@@ -172,3 +174,45 @@ def filter_func(
         return outputs
 
     return filtered_func
+
+
+class LRUCache:
+    """Thread-safe LRU cache with a configurable maximum size.
+
+    Each entry maps a hashable key to an arbitrary value. When the cache is
+    full, the least-recently-used entry is evicted. Set ``maxsize=0`` to
+    disable caching entirely (``put`` becomes a no-op).
+
+    All public methods are protected by a lock, so the cache is safe to use
+    from multiple threads.
+    """
+
+    def __init__(self, maxsize: int = 1) -> None:
+        self._maxsize = maxsize
+        self._lock = threading.Lock()
+        self._cache: collections.OrderedDict[Hashable, Any] = collections.OrderedDict()
+
+    def put(self, key: Hashable, value: Any) -> None:
+        """Insert or update *value* under *key*, evicting LRU entries if needed."""
+        if self._maxsize <= 0:
+            return
+        with self._lock:
+            if key in self._cache:
+                self._cache.move_to_end(key)
+            self._cache[key] = value
+            while len(self._cache) > self._maxsize:
+                self._cache.popitem(last=False)
+
+    def get(self, key: Hashable) -> Any | None:
+        """Return the value for *key* (marking it MRU), or ``None`` on a miss."""
+        with self._lock:
+            if key not in self._cache:
+                return None
+            self._cache.move_to_end(key)
+            return self._cache[key]
+
+    @property
+    def size(self) -> int:
+        """Return the number of entries currently in the cache."""
+        with self._lock:
+            return len(self._cache)
