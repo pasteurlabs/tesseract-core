@@ -4,17 +4,31 @@
 
 """End-to-end tests for CUDA IPC array encoding.
 
-Run on a GPU machine with:
-    python tests/test_cuda_ipc.py
+Run on a GPU machine with either::
+
+    python tests/test_cuda_ipc.py         # standalone runner
+    pytest tests/test_cuda_ipc.py         # via pytest
 
 Requires: cupy (for encode/decode) and optionally torch (for interop tests).
-The CUDA IPC implementation is framework-agnostic — it works with any
-object that implements __cuda_array_interface__ (CuPy, PyTorch, JAX, Numba).
+The CUDA IPC implementation is framework-agnostic on the *encode* side -- it
+works with any object that implements ``__cuda_array_interface__`` (CuPy,
+PyTorch, JAX, Numba). Decoding materialises a ``cupy.ndarray``.
+
+Note on process model
+---------------------
+CUDA does not allow a process to ``cudaIpcOpenMemHandle`` a handle it exported
+itself (it fails with "invalid device context"). IPC is therefore *inherently
+cross-process*: every decode test runs the consumer in a separate process. The
+producer must also keep the source GPU array alive until the consumer has
+opened the handle, otherwise a pooled allocator may recycle and overwrite the
+memory -- the harness below enforces that with an explicit handshake.
 """
 
 import multiprocessing
+import queue as queue_mod
 import sys
 import tempfile
+import traceback
 from pathlib import Path
 
 import numpy as np
@@ -24,14 +38,14 @@ try:
     import cupy
 
     _CUDA_AVAILABLE = cupy.cuda.runtime.getDeviceCount() > 0
-except (ImportError, Exception):
+except Exception:
     _CUDA_AVAILABLE = False
 
 try:
     import torch as _torch
 
     _TORCH_AVAILABLE = _torch.cuda.is_available()
-except ImportError:
+except Exception:
     _TORCH_AVAILABLE = False
 
 requires_cuda = pytest.mark.skipif(
@@ -41,169 +55,143 @@ requires_torch_cuda = pytest.mark.skipif(
     not _TORCH_AVAILABLE, reason="PyTorch CUDA not available"
 )
 
-
-def check_cuda_available():
-    """For standalone script mode."""
-    if not _CUDA_AVAILABLE:
-        print("SKIP: CUDA + CuPy not available")
-        sys.exit(0)
-    print(
-        f"CUDA available: device 0 = {cupy.cuda.runtime.getDeviceProperties(0)['name'].decode()}"
-    )
+_TIMEOUT = 60
 
 
-# ── Test 1: Low-level encode/decode round-trip (CuPy) ───────────────────
+# ── Cross-process harness ───────────────────────────────────────────────
+#
+# A tiny producer/consumer harness that:
+#   * runs the consumer in a *separate* process (required for CUDA IPC),
+#   * keeps the producer's GPU arrays alive until the consumer is done,
+#   * never deadlocks -- every blocking get() has a timeout, and failures
+#     in either process are surfaced rather than hanging the test.
 
 
-@requires_cuda
-def test_roundtrip_same_process():
-    """Encode a CuPy CUDA array, decode it, verify data matches."""
-    from tesseract_core.runtime.array_encoding import (
-        _dump_cuda_ipc_arraydict,
-        _load_cuda_ipc_arraydict,
-    )
+def _producer_main(build_fn_name, args, to_consumer, from_consumer):
+    """Build arrays in this process, send their encodings, keep them alive.
 
-    print("\n=== Test 1: Same-process encode/decode round-trip ===")
+    Mirrors the ring-1 server contract: the exported arrays are pinned by
+    ``_dump_cuda_ipc_arraydict`` and kept alive here until the consumer signals
+    it is done (which, for the real server, is the next request's release).
+    """
+    try:
+        import cupy  # noqa: F401
 
-    original = cupy.random.randn(64, 128, dtype=cupy.float32)
-    encoded = _dump_cuda_ipc_arraydict(original)
+        from tesseract_core.runtime.array_encoding import _dump_cuda_ipc_arraydict
 
-    # Verify the encoded dict structure
-    assert encoded["object_type"] == "array"
-    assert encoded["shape"] == [64, 128]
-    assert encoded["dtype"] == "float32"
-    assert encoded["data"]["encoding"] == "cuda_ipc"
-    assert "handle" in encoded["data"]
-    assert "device" in encoded["data"]
-    assert "storage_size" in encoded["data"]
-    print(
-        f"  Encoded: shape={encoded['shape']}, dtype={encoded['dtype']}, "
-        f"device={encoded['data']['device']}, "
-        f"handle_len={len(encoded['data']['handle'])}"
-    )
+        build_fn = _BUILDERS[build_fn_name]
+        arrays = build_fn(*args)
+        payloads = [
+            (_dump_cuda_ipc_arraydict(arr), expected) for arr, expected in arrays
+        ]
 
-    # Decode — returns a CuPy array
-    decoded = _load_cuda_ipc_arraydict(encoded)
-    assert isinstance(decoded, cupy.ndarray)
-    assert decoded.shape == (64, 128)
-    assert decoded.dtype == cupy.float32
-
-    # Verify data matches
-    cupy.testing.assert_array_equal(original, decoded)
-    print("  PASSED: Data matches after same-process round-trip")
+        to_consumer.put(payloads)
+        from_consumer.get(timeout=_TIMEOUT)
+        del arrays
+    except Exception:
+        traceback.print_exc()
+        try:
+            to_consumer.put(("PRODUCER_ERROR", traceback.format_exc()))
+        except Exception:
+            pass
+        sys.exit(2)
 
 
-# ── Test 2: Cross-process IPC ───────────────────────────────────────────
+def _consumer_main(to_consumer, from_consumer, result_q):
+    """Receive encodings, decode them cross-process, verify, report."""
+    try:
+        import cupy
+
+        from tesseract_core.runtime.array_encoding import _load_cuda_ipc_arraydict
+
+        payloads = to_consumer.get(timeout=_TIMEOUT)
+        if isinstance(payloads, tuple) and payloads[0] == "PRODUCER_ERROR":
+            result_q.put(("PRODUCER_ERROR", payloads[1]))
+            return
+
+        results = []
+        for encoded, expected in payloads:
+            # _load_cuda_ipc_arraydict copies into caller-owned memory and closes
+            # the IPC mapping before returning, so `decoded` no longer aliases
+            # the producer's buffer.
+            decoded = _load_cuda_ipc_arraydict(encoded)
+            assert isinstance(decoded, cupy.ndarray)
+            got = cupy.asnumpy(decoded)
+            results.append(
+                {
+                    "shape": tuple(encoded["shape"]),
+                    "dtype": encoded["dtype"],
+                    "offset": encoded["data"]["storage_offset"],
+                    "match": bool(np.array_equal(got, np.asarray(expected))),
+                }
+            )
+
+        cupy.cuda.runtime.deviceSynchronize()
+        result_q.put(("OK", results))
+    except Exception:
+        traceback.print_exc()
+        result_q.put(("CONSUMER_ERROR", traceback.format_exc()))
+    finally:
+        try:
+            from_consumer.put("done")
+        except Exception:
+            pass
 
 
-def _producer(queue, shape, dtype_name):
-    """Producer: create a CuPy array and send its IPC-encoded dict."""
-    import cupy
+def run_cross_process(build_fn_name, *args):
+    """Run the producer/consumer harness and return the per-array results.
 
-    from tesseract_core.runtime.array_encoding import _dump_cuda_ipc_arraydict
-
-    dtype = np.dtype(dtype_name)
-    arr = cupy.arange(int(np.prod(shape)), dtype=dtype).reshape(shape)
-    encoded = _dump_cuda_ipc_arraydict(arr)
-
-    # Send encoded dict (small JSON-safe dict) over the queue
-    queue.put(encoded)
-    # Also send the expected values for verification
-    queue.put(cupy.asnumpy(arr).tolist())
-
-    # Wait for consumer to signal it's done reading
-    queue.get()  # blocks until consumer is done
-
-
-def _consumer(queue):
-    """Consumer: receive the IPC-encoded dict and reconstruct the array."""
-    import cupy
-
-    from tesseract_core.runtime.array_encoding import _load_cuda_ipc_arraydict
-
-    encoded = queue.get()
-    expected_values = queue.get()
-
-    decoded = _load_cuda_ipc_arraydict(encoded)
-    assert isinstance(decoded, cupy.ndarray)
-
-    actual_values = cupy.asnumpy(decoded).tolist()
-    assert actual_values == expected_values, (
-        f"Data mismatch!\n  Expected: {expected_values[:5]}...\n  Got: {actual_values[:5]}..."
-    )
-
-    # Signal producer we're done
-    queue.put("done")
-    return True
-
-
-@requires_cuda
-def test_cross_process_ipc():
-    """Test CUDA IPC handle transfer between two processes."""
-    print("\n=== Test 2: Cross-process CUDA IPC ===")
-
+    Raises AssertionError with the remote traceback if either side errors.
+    """
     ctx = multiprocessing.get_context("spawn")
-    queue = ctx.Queue()
+    to_consumer = ctx.Queue()
+    from_consumer = ctx.Queue()
+    result_q = ctx.Queue()
 
-    shape = (4, 8)
-
-    producer = ctx.Process(target=_producer, args=(queue, shape, "float32"))
-    consumer = ctx.Process(target=_consumer, args=(queue,))
-
+    producer = ctx.Process(
+        target=_producer_main,
+        args=(build_fn_name, args, to_consumer, from_consumer),
+    )
+    consumer = ctx.Process(
+        target=_consumer_main, args=(to_consumer, from_consumer, result_q)
+    )
     producer.start()
     consumer.start()
-
-    consumer.join(timeout=30)
-    producer.join(timeout=30)
-
-    if consumer.exitcode != 0:
-        print("  FAILED: Consumer process exited with error")
-        sys.exit(1)
-    if producer.exitcode != 0:
-        print("  FAILED: Producer process exited with error")
-        sys.exit(1)
-
-    print("  PASSED: Cross-process CUDA IPC round-trip successful")
-
-
-# ── Test 3: SDK client-side encode/decode ───────────────────────────────
-
-
-@requires_cuda
-def test_sdk_encode_decode():
-    """Test the SDK-level _encode_array_cuda_ipc / _decode_array functions."""
-    from tesseract_core.sdk.tesseract import _decode_array, _encode_array_cuda_ipc
-
-    print("\n=== Test 3: SDK client-side encode/decode ===")
-
-    original = cupy.random.randn(32, 64).astype(cupy.float64)
-    encoded = _encode_array_cuda_ipc(original)
-
-    assert encoded["data"]["encoding"] == "cuda_ipc"
-    print(f"  Encoded via SDK: shape={encoded['shape']}, dtype={encoded['dtype']}")
-
-    decoded = _decode_array(encoded)
-    assert isinstance(decoded, cupy.ndarray)
-    assert decoded.shape == (32, 64)
-    assert decoded.dtype == cupy.float64
-    cupy.testing.assert_array_equal(original, decoded)
-    print("  PASSED: SDK encode/decode round-trip matches")
+    try:
+        try:
+            status, payload = result_q.get(timeout=_TIMEOUT)
+        except queue_mod.Empty:
+            raise AssertionError(
+                "cross-process IPC test timed out (no result from consumer)"
+            ) from None
+        if status == "PRODUCER_ERROR":
+            raise AssertionError(f"producer failed:\n{payload}")
+        if status == "CONSUMER_ERROR":
+            raise AssertionError(f"consumer failed:\n{payload}")
+        return payload
+    finally:
+        consumer.join(timeout=_TIMEOUT)
+        producer.join(timeout=_TIMEOUT)
+        for proc in (consumer, producer):
+            if proc.is_alive():
+                proc.terminate()
+                proc.join(timeout=5)
 
 
-# ── Test 4: Multiple dtypes ─────────────────────────────────────────────
+# ── Array builders (run inside the producer process) ────────────────────
 
 
-@requires_cuda
-def test_multiple_dtypes():
-    """Test CUDA IPC with various dtypes."""
-    from tesseract_core.runtime.array_encoding import (
-        _dump_cuda_ipc_arraydict,
-        _load_cuda_ipc_arraydict,
-    )
+def _build_basic():
+    arr = cupy.arange(64 * 128, dtype=cupy.float32).reshape(64, 128)
+    return [(arr, cupy.asnumpy(arr))]
 
-    print("\n=== Test 4: Multiple dtype support ===")
 
-    test_cases = [
+def _build_dtypes():
+    """Multiple dtypes, forced to have non-trivial pool offsets."""
+    # A few pad allocations so subsequent arrays sit at nonzero offsets within
+    # their pool block.
+    pad = [cupy.arange(777, dtype=cupy.float32) for _ in range(3)]  # noqa: F841
+    cases = [
         ("float16", (10, 20)),
         ("float32", (5, 5, 5)),
         ("float64", (100,)),
@@ -213,213 +201,358 @@ def test_multiple_dtypes():
         ("uint8", (16, 16)),
         ("bool", (4, 4)),
     ]
-
-    for dtype_name, shape in test_cases:
+    out = []
+    for dtype_name, shape in cases:
         dtype = np.dtype(dtype_name)
         if dtype_name == "bool":
-            original = cupy.random.randint(0, 2, shape).astype(dtype)
-        elif dtype.kind == "i" or dtype.kind == "u":
-            original = cupy.random.randint(0, 100, shape).astype(dtype)
+            arr = cupy.random.randint(0, 2, shape).astype(dtype)
+        elif dtype.kind in "iu":
+            arr = cupy.random.randint(0, 100, shape).astype(dtype)
         else:
-            original = cupy.random.randn(*shape).astype(dtype)
-
-        encoded = _dump_cuda_ipc_arraydict(original)
-        decoded = _load_cuda_ipc_arraydict(encoded)
-
-        cupy.testing.assert_array_equal(original, decoded)
-        print(f"  {dtype_name:15s} shape={shape!s:15s} OK")
-
-    print("  PASSED: All dtypes round-trip correctly")
+            arr = cupy.random.randn(*shape).astype(dtype)
+        out.append((arr, cupy.asnumpy(arr)))
+    return out
 
 
-# ── Test 5: Large tensor (benchmark) ────────────────────────────────────
+def _build_offset_view():
+    """A sliced view living at a genuine nonzero offset in its allocation."""
+    parent = cupy.arange(10_000, dtype=cupy.float32)
+    view = parent[1234 : 1234 + 256]
+    # Return both so the parent stays alive (keepalive in producer).
+    return [(parent, cupy.asnumpy(parent)), (view, cupy.asnumpy(view))]
+
+
+def _build_torch():
+    import torch
+
+    t = torch.arange(32 * 64, device="cuda:0", dtype=torch.float32).reshape(32, 64)
+    return [(t, t.cpu().numpy())]
+
+
+_BUILDERS = {
+    "basic": _build_basic,
+    "dtypes": _build_dtypes,
+    "offset_view": _build_offset_view,
+    "torch": _build_torch,
+}
+
+
+# ── Test 1: encode structure (in-process; no IPC open needed) ───────────
 
 
 @requires_cuda
-def test_large_tensor_benchmark():
-    """Benchmark CUDA IPC vs base64 for a large array."""
-    import time
+def test_encode_structure():
+    """The encoded dict has the expected structure and metadata."""
+    from tesseract_core.runtime.array_encoding import _dump_cuda_ipc_arraydict
 
-    from tesseract_core.runtime.array_encoding import (
-        _dump_cuda_ipc_arraydict,
-        _load_cuda_ipc_arraydict,
-    )
-    from tesseract_core.sdk.tesseract import _decode_array, _encode_array
+    arr = cupy.random.randn(64, 128, dtype=cupy.float32)
+    encoded = _dump_cuda_ipc_arraydict(arr)
 
-    print("\n=== Test 5: Large tensor benchmark ===")
+    assert encoded["object_type"] == "array"
+    assert encoded["shape"] == [64, 128]
+    assert encoded["dtype"] == "float32"
+    data = encoded["data"]
+    assert data["encoding"] == "cuda_ipc"
+    # 64-byte handle, base64-encoded.
+    import pybase64
 
-    # 256 MB array
-    size = 64 * 1024 * 1024  # 64M float32 = 256 MB
-    original_gpu = cupy.random.randn(size, dtype=cupy.float32)
-    original_cpu = cupy.asnumpy(original_gpu)
+    from tesseract_core.runtime.array_encoding import _CUDA_IPC_HANDLE_SIZE
 
-    # Benchmark base64
-    t0 = time.perf_counter()
-    encoded_b64 = _encode_array(original_cpu, b64=True)
-    t_encode_b64 = time.perf_counter() - t0
-
-    t0 = time.perf_counter()
-    _decode_array(encoded_b64)
-    t_decode_b64 = time.perf_counter() - t0
-
-    # Benchmark CUDA IPC
-    t0 = time.perf_counter()
-    encoded_ipc = _dump_cuda_ipc_arraydict(original_gpu)
-    t_encode_ipc = time.perf_counter() - t0
-
-    t0 = time.perf_counter()
-    decoded_ipc = _load_cuda_ipc_arraydict(encoded_ipc)
-    t_decode_ipc = time.perf_counter() - t0
-
-    mb = size * 4 / (1024 * 1024)
-    print(f"  Tensor size: {mb:.0f} MB")
-    print(
-        f"  base64 encode: {t_encode_b64 * 1000:8.2f} ms  "
-        f"decode: {t_decode_b64 * 1000:8.2f} ms  "
-        f"total: {(t_encode_b64 + t_decode_b64) * 1000:8.2f} ms"
-    )
-    print(
-        f"  cuda_ipc encode: {t_encode_ipc * 1000:8.2f} ms  "
-        f"decode: {t_decode_ipc * 1000:8.2f} ms  "
-        f"total: {(t_encode_ipc + t_decode_ipc) * 1000:8.2f} ms"
-    )
-    speedup = (t_encode_b64 + t_decode_b64) / max(t_encode_ipc + t_decode_ipc, 1e-9)
-    print(f"  Speedup: {speedup:.1f}x")
-
-    # Verify correctness
-    decoded_ipc_cpu = cupy.asnumpy(decoded_ipc)
-    np.testing.assert_array_equal(original_cpu, decoded_ipc_cpu)
-    print("  PASSED: Large tensor data verified correct")
-
-
-# ── Test 6: PyTorch interop ─────────────────────────────────────────────
-
-
-@requires_torch_cuda
-def test_torch_encode_cupy_decode():
-    """Encode a PyTorch CUDA tensor, decode as CuPy array."""
-    import torch
-
-    from tesseract_core.runtime.array_encoding import (
-        _dump_cuda_ipc_arraydict,
-        _load_cuda_ipc_arraydict,
-    )
-
-    print("\n=== Test 6: PyTorch encode → CuPy decode ===")
-
-    original = torch.randn(32, 64, device="cuda:0", dtype=torch.float32)
-    encoded = _dump_cuda_ipc_arraydict(original)
-
-    # Decode returns CuPy array
-    decoded = _load_cuda_ipc_arraydict(encoded)
-    assert hasattr(decoded, "__cuda_array_interface__")
-
-    # Compare via numpy
-    expected = original.cpu().numpy()
-    actual = (
-        cupy.asnumpy(decoded)
-        if isinstance(decoded, cupy.ndarray)
-        else np.asarray(decoded)
-    )
-    np.testing.assert_array_equal(expected, actual)
-    print("  PASSED: PyTorch → CuPy round-trip matches")
-
-
-@requires_torch_cuda
-def test_cupy_encode_torch_consume():
-    """Encode a CuPy array, consume the decoded result in PyTorch via as_tensor."""
-    import torch
-
-    from tesseract_core.runtime.array_encoding import (
-        _dump_cuda_ipc_arraydict,
-        _load_cuda_ipc_arraydict,
-    )
-
-    print(
-        "\n=== Test 7: CuPy encode → PyTorch consume via __cuda_array_interface__ ==="
-    )
-
-    original = cupy.random.randn(16, 32).astype(cupy.float32)
-    encoded = _dump_cuda_ipc_arraydict(original)
-
-    decoded_cupy = _load_cuda_ipc_arraydict(encoded)
-
-    # Convert CuPy → PyTorch via DLPack (zero-copy)
-    decoded_torch = torch.as_tensor(decoded_cupy, device="cuda:0")
-    assert decoded_torch.is_cuda
-    assert decoded_torch.shape == (16, 32)
-
-    expected = cupy.asnumpy(original)
-    actual = decoded_torch.cpu().numpy()
-    np.testing.assert_array_equal(expected, actual)
-    print("  PASSED: CuPy → PyTorch consume via as_tensor works")
-
-
-# ── Test 8: Full Tesseract API with cuda_ipc output format ──────────────
+    assert len(pybase64.b64decode(data["handle"])) == _CUDA_IPC_HANDLE_SIZE
+    assert isinstance(data["device"], int)
+    assert data["storage_size"] >= arr.nbytes
+    assert data["storage_offset"] >= 0
+    # offset + array bytes must fit inside the reported allocation.
+    assert data["storage_offset"] + arr.nbytes <= data["storage_size"]
 
 
 @requires_cuda
-def test_tesseract_api_cuda_ipc():
-    """Test a real Tesseract with json+cuda_ipc output format via LocalClient."""
-    print("\n=== Test 8: Tesseract API with json+cuda_ipc format ===")
+def test_encode_requires_cuda_array():
+    """Encoding a host array raises a clear error."""
+    from tesseract_core.runtime.array_encoding import _dump_cuda_ipc_arraydict
 
-    # Create a minimal tesseract_api module in a temp directory
+    with pytest.raises(ValueError, match="cuda_ipc encoding requires a CUDA array"):
+        _dump_cuda_ipc_arraydict(np.zeros((4, 4), dtype=np.float32))
+
+
+@requires_cuda
+def test_same_process_open_is_unsupported():
+    """Sanity: CUDA refuses to open an IPC handle in the exporting process.
+
+    This documents *why* every decode test must be cross-process.
+    """
+    from tesseract_core.runtime.array_encoding import (
+        _dump_cuda_ipc_arraydict,
+        _load_cuda_ipc_arraydict,
+    )
+
+    arr = cupy.arange(16, dtype=cupy.float32)
+    encoded = _dump_cuda_ipc_arraydict(arr)
+    with pytest.raises(RuntimeError, match="cudaIpcOpenMemHandle failed"):
+        _load_cuda_ipc_arraydict(encoded)
+
+
+# ── Test 2: cross-process round-trip ────────────────────────────────────
+
+
+@requires_cuda
+def test_cross_process_basic():
+    results = run_cross_process("basic")
+    assert len(results) == 1
+    assert results[0]["match"], results[0]
+
+
+@requires_cuda
+def test_cross_process_dtypes():
+    results = run_cross_process("dtypes")
+    assert len(results) == 8
+    for r in results:
+        assert r["match"], f"dtype {r['dtype']} shape {r['shape']} mismatch"
+
+
+@requires_cuda
+def test_cross_process_nonzero_offset():
+    """A sliced view (nonzero storage_offset) decodes to the correct data."""
+    results = run_cross_process("offset_view")
+    # second entry is the sliced view
+    view_result = results[1]
+    assert view_result["offset"] > 0, "expected a nonzero storage offset"
+    assert view_result["match"], view_result
+
+
+def _ring1_server(req_q, resp_q):
+    """Serial server emulating the ring-1 lifetime contract.
+
+    At the START of each request it releases the previous request's exports and
+    churns the allocator (to force reuse of any freed block), then produces and
+    exports a fresh output. This is exactly what the serve wrapper does.
+    """
+    try:
+        import cupy
+
+        from tesseract_core.runtime.array_encoding import (
+            _dump_cuda_ipc_arraydict,
+            _release_cuda_ipc_exports,
+        )
+
+        while True:
+            req = req_q.get(timeout=_TIMEOUT)
+            if req is None:
+                return
+            i = req
+            _release_cuda_ipc_exports()  # release-at-request-start
+            for _ in range(32):
+                tmp = cupy.zeros(4096, dtype=cupy.float32)
+                del tmp
+            out = cupy.arange(1024, dtype=cupy.float32) + (i + 1) * 100.0
+            resp_q.put((i, _dump_cuda_ipc_arraydict(out)))
+    except Exception:
+        traceback.print_exc()
+        resp_q.put(("SERVER_ERROR", traceback.format_exc()))
+
+
+def _ring1_client(req_q, resp_q, result_q, n):
+    """Serial client: one request at a time; copy each output and keep it."""
+    try:
+        import cupy
+
+        from tesseract_core.runtime.array_encoding import _load_cuda_ipc_arraydict
+
+        kept = []
+        for i in range(n):
+            req_q.put(i)
+            msg = resp_q.get(timeout=_TIMEOUT)
+            if isinstance(msg, tuple) and msg[0] == "SERVER_ERROR":
+                result_q.put(("SERVER_ERROR", msg[1]))
+                return
+            j, encoded = msg
+            owned = _load_cuda_ipc_arraydict(encoded)  # copies + closes mapping
+            kept.append((j, owned))
+        req_q.put(None)
+
+        # Every earlier copy must still be intact, even though the server has
+        # since released and reused those buffers.
+        all_ok = all(
+            bool(np.allclose(cupy.asnumpy(a), np.arange(1024) + (j + 1) * 100.0))
+            for j, a in kept
+        )
+        result_q.put(("OK", all_ok))
+    except Exception:
+        traceback.print_exc()
+        result_q.put(("CLIENT_ERROR", traceback.format_exc()))
+
+
+@requires_cuda
+def test_ring1_serial_reuse():
+    """Serial requests under the ring-1 contract keep every client copy valid.
+
+    The server releases the previous request's exports at the start of the next
+    request and reuses the pool; because the (serial) client has already copied
+    each output into its own buffer, none of its copies are corrupted.
+    """
+    ctx = multiprocessing.get_context("spawn")
+    req_q, resp_q, result_q = (ctx.Queue() for _ in range(3))
+    server = ctx.Process(target=_ring1_server, args=(req_q, resp_q))
+    client = ctx.Process(target=_ring1_client, args=(req_q, resp_q, result_q, 8))
+    server.start()
+    client.start()
+    try:
+        status, payload = result_q.get(timeout=_TIMEOUT)
+        assert status == "OK", f"{status}:\n{payload}"
+        assert payload, "a client-owned copy was corrupted after server reuse"
+    finally:
+        client.join(timeout=_TIMEOUT)
+        server.join(timeout=_TIMEOUT)
+        for proc in (client, server):
+            if proc.is_alive():
+                proc.terminate()
+                proc.join(timeout=5)
+
+
+# ── Test 3: SDK client-side encode path ─────────────────────────────────
+
+
+@requires_cuda
+def test_sdk_encode_structure():
+    """The SDK ``_encode_array_cuda_ipc`` yields the same dict shape."""
+    from tesseract_core.sdk.tesseract import _encode_array_cuda_ipc
+
+    arr = cupy.random.randn(32, 64).astype(cupy.float64)
+    encoded = _encode_array_cuda_ipc(arr)
+    assert encoded["data"]["encoding"] == "cuda_ipc"
+    assert encoded["shape"] == [32, 64]
+    assert encoded["dtype"] == "float64"
+
+
+# ── Test 4: PyTorch interop (encode a torch tensor, decode as CuPy) ──────
+
+
+@requires_cuda
+@requires_torch_cuda
+def test_cross_process_torch_encode():
+    results = run_cross_process("torch")
+    assert len(results) == 1
+    assert results[0]["match"], results[0]
+
+
+@requires_cuda
+@requires_torch_cuda
+def test_cupy_decode_to_torch():
+    """A decoded CuPy array can be adopted by torch via the CUDA interface."""
+    import torch
+
+    from tesseract_core.runtime.array_encoding import _load_cuda_ipc_arraydict
+
+    # Produce in a subprocess, hand the encoded dict back, decode here, then
+    # wrap in torch. We reuse the harness but only need the encoded dict, so
+    # run the decode here.
+    ctx = multiprocessing.get_context("spawn")
+    to_consumer = ctx.Queue()
+    from_consumer = ctx.Queue()
+
+    producer = ctx.Process(
+        target=_producer_main,
+        args=("basic", (), to_consumer, from_consumer),
+    )
+    producer.start()
+    try:
+        payloads = to_consumer.get(timeout=_TIMEOUT)
+        encoded, expected = payloads[0]
+        decoded_cupy = _load_cuda_ipc_arraydict(encoded)
+        decoded_torch = torch.as_tensor(decoded_cupy, device="cuda:0")
+        assert decoded_torch.is_cuda
+        np.testing.assert_array_equal(decoded_torch.cpu().numpy(), np.asarray(expected))
+    finally:
+        from_consumer.put("done")
+        producer.join(timeout=_TIMEOUT)
+        if producer.is_alive():
+            producer.terminate()
+
+
+# ── Test 5: full Tesseract API with json+cuda_ipc output format ─────────
+
+
+@requires_cuda
+def test_tesseract_api_cuda_ipc_local():
+    """A Tesseract served with ``json+cuda_ipc`` returns correct results.
+
+    The apply function returns a NumPy (host) array, which the runtime encodes
+    via base64 fallback; this checks the format plumbs through end to end
+    without breaking non-GPU outputs.
+    """
     api_code = """
 import numpy as np
 from pydantic import BaseModel
-from tesseract_core.runtime import Array
+from tesseract_core.runtime import Array, Float32
 
 class InputSchema(BaseModel):
-    x: Array[(None,), "float32"]
+    x: Array[(None,), Float32]
 
 class OutputSchema(BaseModel):
-    y: Array[(None,), "float32"]
+    y: Array[(None,), Float32]
 
 def apply(inputs: InputSchema) -> OutputSchema:
     x_np = np.asarray(inputs.x)
-    y_np = x_np * 2.0 + 1.0
-    return {"y": y_np}
+    return OutputSchema(y=x_np * 2.0 + 1.0)
 """
-
     with tempfile.TemporaryDirectory() as tmpdir:
         api_path = Path(tmpdir) / "tesseract_api.py"
         api_path.write_text(api_code)
 
         from tesseract_core.sdk.tesseract import Tesseract
 
-        t = Tesseract.from_tesseract_api(
-            api_path,
-            output_format="json+cuda_ipc",
-        )
-
-        x = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
-        result = t.apply({"x": x})
-
-        y = np.asarray(result["y"])
-        expected = x * 2.0 + 1.0
-        np.testing.assert_allclose(y, expected, rtol=1e-6)
-        print(f"  Input:    {x}")
-        print(f"  Output:   {y}")
-        print(f"  Expected: {expected}")
-        print("  PASSED: Tesseract API produces correct results")
+        with Tesseract.from_tesseract_api(api_path, output_format="json+cuda_ipc") as t:
+            x = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
+            result = t.apply({"x": x})
+            y = np.asarray(result["y"])
+            np.testing.assert_allclose(y, x * 2.0 + 1.0, rtol=1e-6)
 
 
-# ── Main ────────────────────────────────────────────────────────────────
+# ── Standalone runner ───────────────────────────────────────────────────
+
+
+def _run_standalone():
+    if not _CUDA_AVAILABLE:
+        print("SKIP: CUDA + CuPy not available")
+        return 0
+
+    name = cupy.cuda.runtime.getDeviceProperties(0)["name"].decode()
+    print(f"CUDA available: device 0 = {name}\n")
+
+    tests = [
+        ("encode structure", test_encode_structure),
+        ("encode requires cuda array", test_encode_requires_cuda_array),
+        ("same-process open unsupported", test_same_process_open_is_unsupported),
+        ("cross-process basic", test_cross_process_basic),
+        ("cross-process dtypes", test_cross_process_dtypes),
+        ("cross-process nonzero offset", test_cross_process_nonzero_offset),
+        ("ring-1 serial reuse", test_ring1_serial_reuse),
+        ("sdk encode structure", test_sdk_encode_structure),
+    ]
+    if _TORCH_AVAILABLE:
+        tests += [
+            ("cross-process torch encode", test_cross_process_torch_encode),
+            ("cupy decode to torch", test_cupy_decode_to_torch),
+        ]
+    tests.append(("tesseract api cuda_ipc", test_tesseract_api_cuda_ipc_local))
+
+    failures = 0
+    for label, fn in tests:
+        try:
+            fn()
+            print(f"  PASSED: {label}")
+        except Exception as exc:  # noqa: BLE001
+            failures += 1
+            print(f"  FAILED: {label}: {exc}")
+
+    print("\n" + "=" * 60)
+    if failures:
+        print(f"{failures} TEST(S) FAILED")
+    else:
+        print("ALL TESTS PASSED")
+    print("=" * 60)
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":
-    check_cuda_available()
-
-    test_roundtrip_same_process()
-    test_cross_process_ipc()
-    test_sdk_encode_decode()
-    test_multiple_dtypes()
-    test_large_tensor_benchmark()
-    if _TORCH_AVAILABLE:
-        test_torch_encode_cupy_decode()
-        test_cupy_encode_torch_consume()
-    test_tesseract_api_cuda_ipc()
-
-    print("\n" + "=" * 60)
-    print("ALL TESTS PASSED")
-    print("=" * 60)
+    sys.exit(_run_standalone())

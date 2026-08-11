@@ -312,7 +312,7 @@ class Tesseract:
         self.serve()
         return self
 
-    def __exit__(self, *args: Any) -> None:
+    def __exit__(self, *args: object) -> None:
         """Exit the Tesseract context.
 
         This will stop the Tesseract server if it is running.
@@ -728,6 +728,10 @@ def _decode_array(
 
         arr = np.frombuffer(data, dtype=dtype)
     elif encoding == "cuda_ipc":
+        # Returns a fresh, client-owned cupy.ndarray: the decode opens the IPC
+        # handle, copies device-to-device into our own memory, and closes the
+        # mapping before returning. The server may reuse/free the exported
+        # buffer as soon as this returns (it holds it until the next request).
         from tesseract_core.runtime.array_encoding import _load_cuda_ipc_arraydict
 
         return _load_cuda_ipc_arraydict(encoded_arr)
