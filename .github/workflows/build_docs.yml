@@ -40,3 +40,11 @@ jobs:
           export SPHINXOPTS="-W"  # treat warnings as errors
           # dirhtml matches the production build (see .readthedocs.yaml)
           uv run --no-sync make dirhtml
+
+      - name: Check links
+        working-directory: docs
+        # Catches broken links that -W cannot, in particular asset paths inside
+        # raw HTML, which Sphinx emits verbatim without resolving. Known false
+        # positives (bot-blocked hosts, JS-generated anchors) are configured via
+        # linkcheck_ignore / linkcheck_anchors_ignore_for_url in conf.py.
+        run: uv run --no-sync make linkcheck
