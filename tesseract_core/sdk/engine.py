@@ -14,7 +14,7 @@ import re
 import socket
 import tempfile
 import time
-from collections.abc import Callable, Collection, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from contextlib import closing
 from importlib.metadata import requires
 from pathlib import Path
@@ -108,6 +108,23 @@ def get_free_port(
             else:
                 return port
     raise RuntimeError(f"No free ports found in range {start}-{end}")
+
+
+def runtime_config_env(runtime_config: Mapping[str, Any] | None) -> dict[str, str]:
+    """Convert runtime configuration to the variables the Tesseract runtime reads.
+
+    Shared so that ``runtime_config`` means the same thing however a Tesseract is
+    served; booleans in particular have to be spelled the way the config parser
+    expects.
+    """
+
+    def encode(value: Any) -> str:
+        return ("1" if value else "0") if isinstance(value, bool) else str(value)
+
+    return {
+        f"TESSERACT_{key.upper()}": encode(value)
+        for key, value in (runtime_config or {}).items()
+    }
 
 
 def parse_requirements(
@@ -726,7 +743,12 @@ class _PortInUseError(RuntimeError):
 
 
 # Substrings container runtimes use to report a host port already being taken.
-_PORT_CONFLICT_MARKERS = ("address already in use", "port is already allocated")
+_PORT_CONFLICT_MARKERS = (
+    "address already in use",
+    "port is already allocated",
+    # Windows' wording for the same condition (WSAEADDRINUSE / WinError 10048)
+    "only one usage of each socket address",
+)
 
 
 def _warn_if_debugger_unreachable(container: Container, expected_port: str) -> None:
@@ -822,7 +844,11 @@ def _resolve_container_debug_address(
 
 def _is_port_conflict(stderr: str) -> bool:
     """Whether runtime stderr/logs indicate a host port collision."""
-    lowered = stderr.lower()
+    # Collapse whitespace before matching. An uncaught error in the runtime is
+    # rendered by rich into a fixed-width box, which wraps long lines -- and
+    # debugpy's "Address already in use" is long enough to be split across two,
+    # so a naive substring search silently misses a genuine conflict.
+    lowered = " ".join(stderr.split()).lower()
     return any(marker in lowered for marker in _PORT_CONFLICT_MARKERS)
 
 
@@ -976,15 +1002,7 @@ def serve(
         environment = {}
     environment.update(volume_environment)
 
-    # Convert runtime_config to TESSERACT_* environment variables
-    if runtime_config is not None:
-        for key, value in runtime_config.items():
-            env_key = f"TESSERACT_{key.upper()}"
-            if isinstance(value, bool):
-                env_value = "1" if value else "0"
-            else:
-                env_value = str(value)
-            environment[env_key] = env_value
+    environment.update(runtime_config_env(runtime_config))
 
     if output_format:
         environment["TESSERACT_OUTPUT_FORMAT"] = output_format

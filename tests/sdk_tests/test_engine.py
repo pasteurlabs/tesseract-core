@@ -905,6 +905,33 @@ def test_container_debugpy_host_defaults_to_all_interfaces(mocked_docker):
     assert json.loads(res)["environment"]["TESSERACT_DEBUGPY_HOST"] == "0.0.0.0"
 
 
+def test_port_conflict_detected_in_wrapped_traceback():
+    """A conflict must be recognised even when rich has wrapped the message.
+
+    An uncaught error in the runtime is rendered into a fixed-width box, and
+    debugpy's message is long enough to be split across two lines. Matching the
+    raw text misses it, so a real port collision is reported as an unexplained
+    startup failure instead of being retried.
+    """
+    # Verbatim from a real debugpy bind failure captured through the runtime CLI
+    wrapped = (
+        "RuntimeError: Can't listen for client connections: [Errno 48] Address "
+        "already in\nuse"
+    )
+
+    assert engine._is_port_conflict(wrapped)
+    # Unwrapped forms must keep working
+    assert engine._is_port_conflict("[Errno 98] Address already in use")
+    assert engine._is_port_conflict("port is already allocated")
+    # Windows words it entirely differently for the same condition
+    assert engine._is_port_conflict(
+        "RuntimeError: Can't listen for client connections: [WinError 10048] Only "
+        "one usage of each socket address (protocol/network address/port) is "
+        "normally permitted"
+    )
+    assert not engine._is_port_conflict("some unrelated failure")
+
+
 def test_serve_container_port_decoupled_from_host_port(mocked_docker):
     """The container-side API port is fixed and independent of the host port.
 
