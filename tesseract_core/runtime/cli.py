@@ -231,7 +231,7 @@ def _schema_to_docstring(schema: Any, current_indent: int = 0) -> str:
     return "\n".join(docstring)
 
 
-def _start_debug_server(wait_for_client: bool, port: int = 5678) -> None:
+def _start_debug_server(wait_for_client: bool, host: str, port: int) -> None:
     """Start a debugpy server for remote debugging.
 
     The long-running ``serve`` command launches a non-blocking server that a
@@ -242,7 +242,11 @@ def _start_debug_server(wait_for_client: bool, port: int = 5678) -> None:
 
     Args:
         wait_for_client: If True, block until a debugger attaches.
-        port: Port to listen on inside the container.
+        host: Address to bind, e.g. "127.0.0.1" for debuggers on this machine
+            only, "0.0.0.0" for any. Whoever reaches this port can run code as
+            this process.
+        port: Port to bind. Two Tesseracts cannot share one unless they are in
+            separate containers.
     """
     # Python 3.11+ freezes stdlib bootstrap modules, which makes debugpy print a
     # noisy "frozen modules" warning (it could only ever miss breakpoints inside
@@ -251,7 +255,19 @@ def _start_debug_server(wait_for_client: bool, port: int = 5678) -> None:
 
     import debugpy
 
-    debugpy.listen(("0.0.0.0", port))
+    debugpy.listen((host, port))
+    # Report the address actually bound. Callers that remap it (a container
+    # publishing it on a different host port) report the reachable address
+    # themselves; this is the only report when there is no remapping.
+    #
+    # WARNING: the SDK parses this line to check a container honoured the port it
+    # was given -- see `_warn_if_debugger_unreachable` in tesseract_core/sdk/engine.py.
+    # Reformatting it will make that check miss and warn about a working setup.
+    print(
+        f"Debugger listening on {host}:{port}",
+        file=sys.stderr,
+        flush=True,
+    )
     if wait_for_client:
         print(
             "Debug mode enabled, waiting for debugger to attach...",
@@ -425,9 +441,14 @@ def serve(
     num_workers: Annotated[int, typer.Option(help="Number of worker processes")] = 1,
 ) -> None:
     """Start running this Tesseract's web server."""
-    if get_config().debug:
+    config = get_config()
+    if config.debug:
         # The server is long-running, so a debugger can attach at any time.
-        _start_debug_server(wait_for_client=False)
+        _start_debug_server(
+            wait_for_client=False,
+            host=config.debugpy_host,
+            port=config.debugpy_port,
+        )
     serve_(host=host, port=port, num_workers=num_workers)
 
 
@@ -608,8 +629,13 @@ def main() -> None:
         # `_configure_required_file_load` above): `serve` launches its own
         # non-blocking debugger and must not block, and help should not block.
         skip_debug_wait_args = {"serve", "-h", "--help"}
-        if get_config().debug and not skip_debug_wait_args.intersection(sys.argv):
-            _start_debug_server(wait_for_client=True)
+        config = get_config()
+        if config.debug and not skip_debug_wait_args.intersection(sys.argv):
+            _start_debug_server(
+                wait_for_client=True,
+                host=config.debugpy_host,
+                port=config.debugpy_port,
+            )
 
         _add_user_commands_to_cli(app, out_stream=orig_stdout)
         app(auto_envvar_prefix="TESSERACT_RUNTIME")
