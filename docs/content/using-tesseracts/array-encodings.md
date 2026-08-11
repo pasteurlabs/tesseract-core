@@ -1,8 +1,6 @@
 # Array Encodings
 
-Tesseract supports four encoding formats for array data. The encoding determines how numeric arrays are represented in the JSON payload exchanged between client and server, for both inputs and outputs.
-
-The first three (`json`, `base64`, `binref`) move the array *bytes* through the payload. The fourth, `cuda_ipc`, keeps GPU arrays **on the device** and moves only a small handle to their GPU memory, so no array data crosses the CPU. It is experimental and has additional requirements (see [cuda_ipc](#cuda-ipc) below).
+Tesseract supports three encoding formats for array data. The encoding determines how numeric arrays are represented in the JSON payload exchanged between client and server, for both inputs and outputs.
 
 ## Available formats
 
@@ -56,36 +54,15 @@ Array data is stored in separate binary files, with JSON containing only referen
     }
 
 ```
-
-```{tab-item} cuda_ipc
-:sync: cuda_ipc
-
-The array stays in GPU memory; the payload carries only a CUDA IPC handle to it (plus the byte offset/size within the backing allocation). No array bytes touch the CPU. Experimental; requires a shared host GPU (see below).
-
-    {
-      "object_type": "array",
-      "shape": [1000000],
-      "dtype": "float32",
-      "data": {
-        "handle": "<base64-encoded 64-byte cudaIpcMemHandle_t>",
-        "device": 0,
-        "storage_offset": 0,
-        "storage_size": 4194304,
-        "encoding": "cuda_ipc"
-      }
-    }
-
-```
 ````
 
 ## Which format should I use?
 
-| Format       | Description                                   | Best For                                                                                         |
-| ------------ | --------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| **json**     | Arrays encoded as nested JSON lists           | Debugging, human-readable output. Avoid for large arrays                                         |
-| **base64**   | Binary data encoded as base64 strings in JSON | General-purpose default for HTTP transport                                                       |
-| **binref**   | References to binary files on disk            | Large arrays (>10MB), when disk I/O is preferable over HTTP, when data is written to disk anyway |
-| **cuda_ipc** | CUDA IPC handle to on-GPU memory (experimental) | GPU→GPU transfer between a client and a Tesseract that share a physical GPU on the same host, e.g. optimization/MCMC loops that would otherwise bounce arrays through the CPU |
+| Format     | Description                                   | Best For                                                                                         |
+| ---------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| **json**   | Arrays encoded as nested JSON lists           | Debugging, human-readable output. Avoid for large arrays                                         |
+| **base64** | Binary data encoded as base64 strings in JSON | General-purpose default for HTTP transport                                                       |
+| **binref** | References to binary files on disk            | Large arrays (>10MB), when disk I/O is preferable over HTTP, when data is written to disk anyway |
 
 The chart below shows how encoding format affects serialization and transfer overhead as array size grows. For more on overall Tesseract performance trade-offs, see {doc}`/content/misc/performance`.
 
@@ -163,42 +140,3 @@ $ curl \
 The `.bin` file references are relative to the `--output-path`.
 :::
 ::::
-
-(cuda-ipc)=
-### cuda_ipc
-
-```{warning}
-`json+cuda_ipc` is **experimental**. It keeps GPU arrays on the device and passes only a CUDA IPC handle, avoiding any CPU round-trip. This is dramatically faster for large GPU arrays (the transfer cost is flat regardless of array size), but only works under the specific conditions below.
-```
-
-**Requirements**
-
-- The client and the Tesseract must run on the **same physical host** and see the **same GPU**. IPC handles are meaningless on another host or a different device, so this format is unusable for remote Tesseracts or serialize-to-disk workflows.
-- Both processes must share an IPC namespace. When serving via the SDK with `json+cuda_ipc`, the container is automatically started with `--ipc=host`; you must additionally grant GPU access (e.g. `gpus=["all"]`).
-- **Encoding** works with any array exposing `__cuda_array_interface__` (CuPy, PyTorch, JAX, Numba). **Decoding** requires [CuPy](https://cupy.dev/) and returns a `cupy.ndarray` (convertible to PyTorch/JAX via DLPack or `__cuda_array_interface__`). CPU (NumPy) arrays in a `cuda_ipc` payload transparently fall back to base64.
-
-**Lifetime model (important)**
-
-Because CUDA memory is not garbage-collected across processes, `cuda_ipc` relies on a simple, explicit ownership contract. It is correct **only** under these assumptions:
-
-1. **Serial requests.** A client must not have more than one `cuda_ipc` request in flight at a time. The server keeps each request's exported GPU buffers alive only until the *next* request arrives (a buffer "ring" of depth 1), then releases them. A serial client has always finished consuming request *N* before it issues request *N+1*, so this is safe; concurrent requests are not supported.
-2. **Copy on decode.** Decoding copies the array into client-owned GPU memory and closes the IPC mapping before returning. The returned `cupy.ndarray` is therefore fully owned by the client and stays valid even after the server reuses or frees the original buffer. This costs one on-GPU copy, still far cheaper than a host round-trip.
-
-You do not need to manage any of this manually; the SDK client and the runtime server implement both halves of the contract. Just keep requests serial.
-
-`cuda_ipc` is available through the **Python SDK only**, since decoding a handle requires GPU-aware client code (CuPy). It is listed as a recognized format by `tesseract run`/`tesseract serve`, but passing it on the command line raises an error directing you to the SDK.
-
-```python
-import numpy as np
-import cupy
-from tesseract_core import Tesseract
-
-with Tesseract.from_image(
-    "my_gpu_tesseract",
-    gpus=["all"],                    # GPU access is required
-    output_format="json+cuda_ipc",   # --ipc=host is added automatically
-) as t:
-    result = t.apply({"x": np.arange(1_000_000, dtype=np.float32)})
-    y = result["y"]                  # a cupy.ndarray, still on the GPU
-    assert isinstance(y, cupy.ndarray)
-```

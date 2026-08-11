@@ -615,7 +615,12 @@ def apply(inputs: InputSchema) -> OutputSchema:
 
         from tesseract_core.sdk.tesseract import Tesseract
 
-        with Tesseract.from_tesseract_api(api_path, output_format="json+cuda_ipc") as t:
+        # json+cuda_ipc is experimental and off by default; opt in explicitly.
+        with Tesseract.from_tesseract_api(
+            api_path,
+            output_format="json+cuda_ipc",
+            runtime_config={"enable_experimental_cuda_ipc": True},
+        ) as t:
             x = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
             result = t.apply({"x": x})
             y = np.asarray(result["y"])
@@ -659,7 +664,7 @@ def _run_standalone():
         try:
             fn()
             print(f"  PASSED: {label}")
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             failures += 1
             print(f"  FAILED: {label}: {exc}")
 

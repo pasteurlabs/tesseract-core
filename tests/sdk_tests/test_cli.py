@@ -7,7 +7,6 @@
 """
 
 import os
-import re
 import subprocess
 
 import pytest
@@ -35,36 +34,23 @@ def test_version(cli_runner):
     assert __version__ in result.stdout
 
 
-@pytest.mark.parametrize(
-    "command",
-    [
-        ["serve", "some-image", "--output-format", "json+cuda_ipc"],
-        ["run", "some-image", "apply", "--output-format", "json+cuda_ipc", "{}"],
-    ],
-)
-def test_cuda_ipc_output_format_rejected_on_cli(cli_runner, command):
-    """json+cuda_ipc is a recognized format but unusable from the CLI.
+@pytest.mark.parametrize("cmd", ["serve", "run"])
+def test_cuda_ipc_not_a_cli_output_format(cli_runner, cmd):
+    """The experimental json+cuda_ipc format is not exposed on the CLI.
 
-    It must fail fast at argument validation (before any Docker interaction)
-    with a message pointing users at the Python SDK.
+    It is neither listed in --help nor accepted as a value; requesting it fails
+    as an invalid choice.
     """
+    help_result = cli_runner.invoke(cli, [cmd, "--help"])
+    assert "json+cuda_ipc" not in help_result.stdout
+
+    command = (
+        ["serve", "some-image", "--output-format", "json+cuda_ipc"]
+        if cmd == "serve"
+        else ["run", "some-image", "apply", "--output-format", "json+cuda_ipc", "{}"]
+    )
     result = cli_runner.invoke(cli, command)
     assert result.exit_code == 2, result.stdout
-    # rich wraps the error and injects box-border characters (and newlines)
-    # mid-message, so strip everything but alphanumerics/spaces before matching
-    # on fragments that won't straddle a wrap boundary.
-    raw = result.stdout + result.stderr
-    output = " ".join(re.sub(r"[^0-9A-Za-z ]+", " ", raw).split())
-    assert "json cuda ipc" in output  # the rejected format name
-    assert "Python SDK" in output
-
-
-def test_cuda_ipc_output_format_listed_in_help(cli_runner):
-    """The format is still discoverable in --help for serve and run."""
-    for cmd in ("serve", "run"):
-        result = cli_runner.invoke(cli, [cmd, "--help"])
-        assert result.exit_code == 0, result.stdout
-        assert "json+cuda_ipc" in result.stdout
 
 
 def test_bad_docker_executable_env_var():

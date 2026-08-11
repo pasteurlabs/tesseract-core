@@ -139,6 +139,28 @@ def test_create_rest_api_apply_endpoint(http_client, dummy_tesseract_module, for
     assert np.array_equal(result, np.array([3.5, 6.0, 8.5]))
 
 
+def test_apply_rejects_experimental_cuda_ipc_by_default(dummy_tesseract_module):
+    """The experimental json+cuda_ipc format is refused unless explicitly enabled.
+
+    A Tesseract must not produce CUDA IPC handles in production unless the
+    ``enable_experimental_cuda_ipc`` runtime flag is set.
+    """
+    from tesseract_core.runtime.config import update_config
+
+    update_config(enable_experimental_cuda_ipc=False)
+    client = TestClient(
+        create_rest_api(dummy_tesseract_module), raise_server_exceptions=False
+    )
+    test_inputs = dummy_tesseract_module.InputSchema.model_validate(test_input)
+    response = client.post(
+        "/apply",
+        json={"inputs": model_to_json(test_inputs)},
+        headers={"Accept": "application/json+cuda_ipc"},
+    )
+    # Rejected server-side (the format is not in the accepted set).
+    assert response.status_code >= 400
+
+
 def test_create_rest_api_jacobian_endpoint(http_client, dummy_tesseract_module):
     """Test we can get a Jacobian endpoint from generated API."""
     test_inputs = dummy_tesseract_module.InputSchema.model_validate(test_input)

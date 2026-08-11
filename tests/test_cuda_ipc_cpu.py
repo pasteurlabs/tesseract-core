@@ -462,13 +462,37 @@ def test_cuda_array_to_host_branches():
         array_encoding._cuda_array_to_host(object())
 
 
+# ── experimental feature flag gating ────────────────────────────────────
+
+
+def test_output_to_bytes_rejects_cuda_ipc_by_default():
+    """Without the experimental flag, json+cuda_ipc is not an accepted format."""
+    from tesseract_core.runtime import config, file_interactions
+
+    config.update_config(enable_experimental_cuda_ipc=False)
+    with pytest.raises(ValueError, match=r"Unsupported format json\+cuda_ipc"):
+        file_interactions.output_to_bytes({"y": 1}, "json+cuda_ipc")
+
+
+def test_available_formats_reflects_flag():
+    from tesseract_core.runtime import config
+    from tesseract_core.runtime.file_interactions import available_formats
+
+    config.update_config(enable_experimental_cuda_ipc=False)
+    assert "json+cuda_ipc" not in available_formats()
+
+    config.update_config(enable_experimental_cuda_ipc=True)
+    assert "json+cuda_ipc" in available_formats()
+
+
 # ── format -> encoding-context mapping ──────────────────────────────────
 
 
 def test_output_to_bytes_cuda_ipc_context(monkeypatch):
-    """json+cuda_ipc maps to the cuda_ipc array-encoding context."""
-    from tesseract_core.runtime import file_interactions
+    """json+cuda_ipc maps to the cuda_ipc array-encoding context (flag enabled)."""
+    from tesseract_core.runtime import config, file_interactions
 
+    config.update_config(enable_experimental_cuda_ipc=True)
     captured = {}
 
     class FakeAdapter:

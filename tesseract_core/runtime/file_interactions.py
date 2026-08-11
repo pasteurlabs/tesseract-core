@@ -12,7 +12,29 @@ from pydantic import TypeAdapter
 PathLike = str | Path
 
 supported_format_type = Literal["json", "json+base64", "json+binref", "json+cuda_ipc"]
+
+# Formats always available. json+cuda_ipc is an experimental, opt-in format (see
+# available_formats) and is deliberately excluded here.
+_STABLE_FORMATS = ("json", "json+base64", "json+binref")
+
+# Kept for backwards compatibility; prefer available_formats(), which reflects
+# whether experimental formats are currently enabled.
 SUPPORTED_FORMATS = get_args(supported_format_type)
+
+
+def available_formats() -> tuple[str, ...]:
+    """Output formats the runtime currently accepts.
+
+    ``json+cuda_ipc`` is experimental and only included when explicitly enabled
+    via the ``enable_experimental_cuda_ipc`` runtime config flag (e.g.
+    ``TESSERACT_ENABLE_EXPERIMENTAL_CUDA_IPC=1``); otherwise a Tesseract never
+    produces CUDA IPC handles.
+    """
+    from tesseract_core.runtime.config import get_config
+
+    if get_config().enable_experimental_cuda_ipc:
+        return (*_STABLE_FORMATS, "json+cuda_ipc")
+    return _STABLE_FORMATS
 
 
 def output_to_bytes(
@@ -25,6 +47,10 @@ def output_to_bytes(
 
     obj may contain pydantic.BaseModel / RootModel instances, or regular Python objects.
     """
+    allowed = available_formats()
+    if format not in allowed:
+        raise ValueError(f"Unsupported format {format} (must be one of {allowed})")
+
     ObjSchema = TypeAdapter(type(obj))
     if format == "json":
         context = {"array_encoding": "json"}
@@ -39,9 +65,7 @@ def output_to_bytes(
     elif format == "json+cuda_ipc":
         context = {"array_encoding": "cuda_ipc"}
     else:
-        raise ValueError(
-            f"Unsupported format {format} (must be one of {SUPPORTED_FORMATS})"
-        )
+        raise ValueError(f"Unsupported format {format} (must be one of {allowed})")
 
     # Two-phase serialization to bypass serde_json's slow UTF-8 scanning
     # on large base64 strings (https://github.com/pydantic/pydantic/issues/12911).

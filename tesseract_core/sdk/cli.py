@@ -122,14 +122,7 @@ for temp_with_path in ENV.list_templates(extensions=["py"]):
 AVAILABLE_RECIPES = sorted(AVAILABLE_RECIPES)
 
 LOGLEVELS = ("debug", "info", "warning", "error", "critical")
-OUTPUT_FORMATS = ("json", "json+base64", "json+binref", "json+cuda_ipc")
-
-# Formats that are not usable from the CLI. json+cuda_ipc returns CUDA IPC
-# handles rather than array data; decoding them requires GPU-aware client code
-# (CuPy) and the Python SDK, so it makes no sense as a CLI output format. We
-# still list it in OUTPUT_FORMATS (so it appears in --help and is a recognized
-# name) but reject it with a helpful error if actually requested.
-CLI_UNSUPPORTED_OUTPUT_FORMATS = ("json+cuda_ipc",)
+OUTPUT_FORMATS = ("json", "json+base64", "json+binref")
 
 
 def make_choice_enum(name: str, choices: Iterable[str]) -> type[Enum]:
@@ -142,18 +135,6 @@ def _enum_to_val(val: Any) -> Any:
     if isinstance(val, Enum):
         return val.value
     return val
-
-
-def _reject_cli_unsupported_output_format(output_format: str | None) -> None:
-    """Reject output formats that are recognized but unusable from the CLI."""
-    if output_format in CLI_UNSUPPORTED_OUTPUT_FORMATS:
-        raise typer.BadParameter(
-            f"Output format '{output_format}' is not supported from the CLI. "
-            "It returns CUDA IPC handles rather than array data, which only make "
-            "sense to a GPU-aware client; use the Python SDK "
-            "(tesseract_core.Tesseract) instead.",
-            param_hint="output_format",
-        )
 
 
 def _validate_tesseract_name(name: str | None) -> str:
@@ -672,7 +653,6 @@ def serve(
     command and its respective port.
     """
     output_format: str | None = _enum_to_val(output_format)
-    _reject_cli_unsupported_output_format(output_format)
 
     parsed_environment = _parse_environment(environment)
 
@@ -1141,7 +1121,6 @@ def run_container(
     """
     cmd: str | None = _enum_to_val(cmd)
     output_format: str | None = _enum_to_val(output_format)
-    _reject_cli_unsupported_output_format(output_format)
 
     if not tesseract_image:
         if invoke_help:
