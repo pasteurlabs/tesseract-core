@@ -158,7 +158,7 @@ store double %130, ptr %kx_east
 
 That's it. Array access is a `getelementptr` + `load`, arithmetic is a flat sequence of `fmul`/`fadd`/`fdiv` that maps line-for-line onto the Fortran. Flang, by contrast, would wrap those same arrays in descriptor structs and reach for runtime helpers, and Enzyme would have to see through every one of them.
 
-The catch is that LFortran is still maturing, so your code has to stay inside what it [supports](https://lfortran.org/progress/).
+The catch is that LFortran is still maturing, so your code has to stay inside what it [supports](https://docs.lfortran.org/en/progress/).
 
 **Why `-O1`, not `-O3`.** Our first pipeline used `-O3` here, and it cost us hours: the forward pass was perfect, but the VJP returned NaN on certain inputs. At `-O3`, LLVM's aggressive vectorization and code motion produce IR patterns Enzyme seems to mishandle in reverse mode. In our case it bit when adjacent cell temperatures were equal, so intermediate terms cancelled and a compiler rearrangement turned that into a division by zero. The fix is to keep optimization mild _before_ the AD pass and save `-O3` for _after_ it.
 
