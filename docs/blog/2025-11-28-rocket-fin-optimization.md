@@ -53,16 +53,18 @@ Tesseract's differentiation endpoints (Jacobian, JVP, VJP) provide a common inte
 
 We ran Adam (learning rate 0.01, 80 iterations) from two starting points: a regular grid and a random bar arrangement.
 
-<div class="double-figure">
-<figure>
-<img src="../_static/blog/rocket-fins-opt-grid.gif" alt="Optimization from grid initial conditions">
-<figcaption>Optimization from grid initial conditions.</figcaption>
-</figure>
-<figure>
-<img src="../_static/blog/rocket-fins-opt-rnd.gif" alt="Optimization from random initial conditions">
-<figcaption>Optimization from random initial conditions.</figcaption>
-</figure>
-</div>
+::::{div} double-figure
+:::{figure} ../static/blog/rocket-fins-opt-grid.gif
+:alt: Optimization from grid initial conditions
+
+Optimization from grid initial conditions.
+:::
+:::{figure} ../static/blog/rocket-fins-opt-rnd.gif
+:alt: Optimization from random initial conditions
+
+Optimization from random initial conditions.
+:::
+::::
 
 Both runs converged to similar topologies, which is a good sign that the optimizer isn't just stuck in a local minimum. Three structural patterns emerged: bars organized into roughly orthogonal members, lateral bars angled diagonally to create direct load paths to the attachment points, and longitudinal bars clustered near the root where strain energy is highest.
 
@@ -72,16 +74,18 @@ The catch is that the raw optimized geometries are asymmetric and impractical to
 
 Rather than using the optimizer's output directly, we used it to inform a hand-designed geometry that incorporates the three structural patterns while enforcing symmetry and manufacturability.
 
-<div class="double-figure">
-<figure>
-<img src="../_static/blog/rocket-fins-manual-design.jpeg" alt="Manufacturable symmetric design">
-<figcaption>Symmetric, manufacturable design informed by optimization insights.</figcaption>
-</figure>
-<figure>
-<img src="../_static/blog/rocket-fins-conv-manual.png" alt="Convergence comparison with manual design">
-<figcaption>Compliance comparison: manual design vs. optimized and baseline configurations.</figcaption>
-</figure>
-</div>
+::::{div} double-figure
+:::{figure} ../static/blog/rocket-fins-manual-design.jpeg
+:alt: Manufacturable symmetric design
+
+Symmetric, manufacturable design informed by optimization insights.
+:::
+:::{figure} ../static/blog/rocket-fins-conv-manual.png
+:alt: Convergence comparison with manual design
+
+Compliance comparison: manual design vs. optimized and baseline configurations.
+:::
+::::
 
 Running this geometry back through the pipeline gave a compliance of 49.8, 24% stiffer than the regular grid baseline at the same mass. It doesn't match the unconstrained optimum, but it's a practical design informed by what the gradients revealed about where material matters most.
 
