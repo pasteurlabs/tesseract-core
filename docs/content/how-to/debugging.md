@@ -75,6 +75,21 @@ Use it when sharing an interpreter is the problem — for instance when the call
 is itself a JAX program, since nesting JAX inside JAX is not safe and can
 deadlock.
 
+Since the Tesseract is no longer in your process, your own debugger cannot step
+into it. A debugger is therefore started alongside it, listening on a free
+loopback port that is logged on startup:
+
+```
+Debug mode enabled. Attach a debugger to 127.0.0.1:54321
+```
+
+Each Tesseract gets its own port, so several can be debugged at once. Attach to
+it as described under "Debug mode" below. If you are using dedicated processes
+for isolation rather than for debugging, pass `runtime_config={"debug": False}`
+to turn debug mode off altogether — as everywhere else, debug mode is what
+starts a debugger. That also drops the full tracebacks and the `test` endpoint,
+which is what you want outside development in any case.
+
 By default the Tesseract runs on the same interpreter as the caller. Point
 `python_executable` at another environment to give it dependencies that conflict
 with yours:
