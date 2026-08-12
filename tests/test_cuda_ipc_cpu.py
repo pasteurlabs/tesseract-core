@@ -26,7 +26,7 @@ from typing import Any
 import numpy as np
 import pytest
 
-from tesseract_core.runtime import array_encoding
+from tesseract_core.runtime import array_encoding, cuda_ipc
 
 # ── Fakes ───────────────────────────────────────────────────────────────
 
@@ -94,7 +94,7 @@ def patched_cuda(monkeypatch):
 
     def fake_get_handle(base_ptr: int) -> bytes:
         calls["get_handle"].append(base_ptr)
-        return b"\x01" * array_encoding._CUDA_IPC_HANDLE_SIZE
+        return b"\x01" * cuda_ipc._CUDA_IPC_HANDLE_SIZE
 
     def fake_open(handle_bytes: bytes, device: int) -> int:
         calls["open"].append((handle_bytes, device))
@@ -107,25 +107,25 @@ def patched_cuda(monkeypatch):
         calls["stage"].append((base_ptr, storage_size))
         return 0x9000  # pretend staging buffer pointer
 
-    monkeypatch.setattr(array_encoding, "_cuda_get_allocation_base", fake_alloc_base)
-    monkeypatch.setattr(array_encoding, "_cuda_ipc_get_mem_handle", fake_get_handle)
-    monkeypatch.setattr(array_encoding, "_cuda_ipc_open_mem_handle", fake_open)
-    monkeypatch.setattr(array_encoding, "_cuda_ipc_close_mem_handle", fake_close)
-    monkeypatch.setattr(array_encoding, "_stage_for_legacy_ipc", fake_stage)
+    monkeypatch.setattr(cuda_ipc, "_cuda_get_allocation_base", fake_alloc_base)
+    monkeypatch.setattr(cuda_ipc, "_cuda_ipc_get_mem_handle", fake_get_handle)
+    monkeypatch.setattr(cuda_ipc, "_cuda_ipc_open_mem_handle", fake_open)
+    monkeypatch.setattr(cuda_ipc, "_cuda_ipc_close_mem_handle", fake_close)
+    monkeypatch.setattr(cuda_ipc, "_stage_for_legacy_ipc", fake_stage)
 
-    # Staging buffers are freed via cudart.cudaFree in _release_cuda_ipc_exports;
+    # Staging buffers are freed via cudart.cudaFree in release_cuda_ipc_exports;
     # stub the cudart accessor so no real driver is touched and frees are logged.
     fake_cudart = types.SimpleNamespace(
         cudaFree=lambda ptr: calls["free"].append(getattr(ptr, "value", ptr))
     )
-    monkeypatch.setattr(array_encoding, "_get_cudart", lambda: fake_cudart)
+    monkeypatch.setattr(cuda_ipc, "_get_cudart", lambda: fake_cudart)
 
     # Each test starts with empty registries.
-    array_encoding._CUDA_IPC_EXPORT_REGISTRY.clear()
-    array_encoding._CUDA_IPC_STAGING_BUFFERS.clear()
+    cuda_ipc._CUDA_IPC_EXPORT_REGISTRY.clear()
+    cuda_ipc._CUDA_IPC_STAGING_BUFFERS.clear()
     yield calls
-    array_encoding._CUDA_IPC_EXPORT_REGISTRY.clear()
-    array_encoding._CUDA_IPC_STAGING_BUFFERS.clear()
+    cuda_ipc._CUDA_IPC_EXPORT_REGISTRY.clear()
+    cuda_ipc._CUDA_IPC_STAGING_BUFFERS.clear()
 
 
 # ── Encode-side orchestration (mocked CUDA) ─────────────────────────────
@@ -133,7 +133,7 @@ def patched_cuda(monkeypatch):
 
 def test_dump_assembles_payload_and_offset(patched_cuda):
     arr = FakeCudaArray((4, 8), "<f4", data_ptr=0x5000)
-    out = array_encoding._dump_cuda_ipc_arraydict(arr)
+    out = cuda_ipc.dump_cuda_ipc_arraydict(arr)
 
     assert out["object_type"] == "array"
     assert out["shape"] == [4, 8]
@@ -148,38 +148,34 @@ def test_dump_assembles_payload_and_offset(patched_cuda):
     # Handle is base64 of the 64 raw bytes.
     import pybase64
 
-    assert (
-        len(pybase64.b64decode(data["handle"])) == array_encoding._CUDA_IPC_HANDLE_SIZE
-    )
+    assert len(pybase64.b64decode(data["handle"])) == cuda_ipc._CUDA_IPC_HANDLE_SIZE
 
 
 def test_dump_device_detection_cupy(patched_cuda):
     arr = FakeCudaArray((3,), "<f4", device=_CuPyDevice(id=2))
-    out = array_encoding._dump_cuda_ipc_arraydict(arr)
+    out = cuda_ipc.dump_cuda_ipc_arraydict(arr)
     assert out["data"]["device"] == 2
 
 
 def test_dump_device_detection_torch(patched_cuda):
     arr = FakeCudaArray((3,), "<f4", device=_TorchDevice(index=3))
-    out = array_encoding._dump_cuda_ipc_arraydict(arr)
+    out = cuda_ipc.dump_cuda_ipc_arraydict(arr)
     assert out["data"]["device"] == 3
 
 
 def test_dump_device_defaults_to_zero(patched_cuda):
     # No .device attribute, and torch tensors with device.index == None.
     assert (
-        array_encoding._dump_cuda_ipc_arraydict(FakeCudaArray((3,), "<f4"))["data"][
-            "device"
-        ]
+        cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((3,), "<f4"))["data"]["device"]
         == 0
     )
     arr = FakeCudaArray((3,), "<f4", device=_TorchDevice(index=None))
-    assert array_encoding._dump_cuda_ipc_arraydict(arr)["data"]["device"] == 0
+    assert cuda_ipc.dump_cuda_ipc_arraydict(arr)["data"]["device"] == 0
 
 
 def test_dump_rejects_non_cuda_array(patched_cuda):
     with pytest.raises(ValueError, match="cuda_ipc encoding requires a CUDA array"):
-        array_encoding._dump_cuda_ipc_arraydict(np.zeros((2, 2), dtype=np.float32))
+        cuda_ipc.dump_cuda_ipc_arraydict(np.zeros((2, 2), dtype=np.float32))
 
 
 @pytest.mark.parametrize(
@@ -192,13 +188,13 @@ def test_dump_rejects_non_cuda_array(patched_cuda):
 def test_dump_rejects_non_contiguous(patched_cuda, shape, strides):
     arr = FakeCudaArray(shape, "<f4", strides=strides)
     with pytest.raises(ValueError, match="C-contiguous"):
-        array_encoding._dump_cuda_ipc_arraydict(arr)
+        cuda_ipc.dump_cuda_ipc_arraydict(arr)
 
 
 def test_dump_accepts_explicit_contiguous_strides(patched_cuda):
     # strides given but equal to the row-major strides -> still contiguous.
     arr = FakeCudaArray((3, 4), "<f4", strides=(16, 4))
-    out = array_encoding._dump_cuda_ipc_arraydict(arr)
+    out = cuda_ipc.dump_cuda_ipc_arraydict(arr)
     assert out["data"]["encoding"] == "cuda_ipc"
 
 
@@ -218,12 +214,12 @@ def test_dump_falls_back_to_staging_on_ipc_reject(patched_cuda, monkeypatch):
     def get_handle(ptr):
         if ptr != staging_ptr:
             raise RuntimeError("cudaIpcGetMemHandle failed: simulated VMM reject")
-        return b"\x01" * array_encoding._CUDA_IPC_HANDLE_SIZE
+        return b"\x01" * cuda_ipc._CUDA_IPC_HANDLE_SIZE
 
-    monkeypatch.setattr(array_encoding, "_cuda_ipc_get_mem_handle", get_handle)
+    monkeypatch.setattr(cuda_ipc, "_cuda_ipc_get_mem_handle", get_handle)
 
     arr = FakeCudaArray((4, 8), "<f4", data_ptr=0x5000)  # nbytes = 4*8*4 = 128
-    out = array_encoding._dump_cuda_ipc_arraydict(arr)
+    out = cuda_ipc.dump_cuda_ipc_arraydict(arr)
 
     # Staging was invoked on the array's own data pointer and byte count.
     assert patched_cuda["stage"] == [(0x5000, 128)]
@@ -231,29 +227,29 @@ def test_dump_falls_back_to_staging_on_ipc_reject(patched_cuda, monkeypatch):
     assert out["data"]["storage_offset"] == 0
     assert out["data"]["storage_size"] == 128
     # Staging pointer registered for cudaFree.
-    assert array_encoding._CUDA_IPC_STAGING_BUFFERS == [0x9000]
+    assert cuda_ipc._CUDA_IPC_STAGING_BUFFERS == [0x9000]
 
 
 # ── Export registry / ring-1 lifetime ───────────────────────────────────
 
 
 def test_export_registry_pins_and_releases(patched_cuda):
-    assert array_encoding._CUDA_IPC_EXPORT_REGISTRY == []
+    assert cuda_ipc._CUDA_IPC_EXPORT_REGISTRY == []
     arr = FakeCudaArray((3,), "<f4")
-    array_encoding._dump_cuda_ipc_arraydict(arr)
+    cuda_ipc.dump_cuda_ipc_arraydict(arr)
     # The source array is retained so its (would-be) GPU memory stays valid.
-    assert arr in array_encoding._CUDA_IPC_EXPORT_REGISTRY
-    array_encoding._release_cuda_ipc_exports()
-    assert array_encoding._CUDA_IPC_EXPORT_REGISTRY == []
+    assert arr in cuda_ipc._CUDA_IPC_EXPORT_REGISTRY
+    cuda_ipc.release_cuda_ipc_exports()
+    assert cuda_ipc._CUDA_IPC_EXPORT_REGISTRY == []
 
 
 def test_release_frees_staging_buffers(patched_cuda, monkeypatch):
     """Releasing exports cudaFree's every registered staging buffer."""
-    array_encoding._pin_cuda_ipc_staging_buffer(0xAAAA)
-    array_encoding._pin_cuda_ipc_staging_buffer(0xBBBB)
-    array_encoding._release_cuda_ipc_exports()
+    cuda_ipc._pin_cuda_ipc_staging_buffer(0xAAAA)
+    cuda_ipc._pin_cuda_ipc_staging_buffer(0xBBBB)
+    cuda_ipc.release_cuda_ipc_exports()
     assert patched_cuda["free"] == [0xAAAA, 0xBBBB]
-    assert array_encoding._CUDA_IPC_STAGING_BUFFERS == []
+    assert cuda_ipc._CUDA_IPC_STAGING_BUFFERS == []
 
 
 # ── Decode-side orchestration (mocked CUDA, no CuPy) ─────────────────────
@@ -310,7 +306,7 @@ def patched_decode(monkeypatch):
             calls["memcpy"].append((dst_v, src_v, size_v, kind_v))
             # For device->host copies, fill the host buffer with the recorded
             # device bytes so copy_to_host yields deterministic data.
-            if kind_v == array_encoding._cudaMemcpyDeviceToHost:
+            if kind_v == cuda_ipc._cudaMemcpyDeviceToHost:
                 src_bytes = state.get("device_bytes")
                 if src_bytes is not None:
                     ctypes.memmove(dst_v, src_bytes, size_v)
@@ -328,7 +324,7 @@ def patched_decode(monkeypatch):
             return b"fake error"
 
     fake = FakeCudart()
-    monkeypatch.setattr(array_encoding, "_get_cudart", lambda: fake)
+    monkeypatch.setattr(cuda_ipc, "_get_cudart", lambda: fake)
 
     def fake_open(handle_bytes, device):
         calls["open"].append((handle_bytes, device))
@@ -337,8 +333,8 @@ def patched_decode(monkeypatch):
     def fake_close(device_ptr):
         calls["close"].append(device_ptr)
 
-    monkeypatch.setattr(array_encoding, "_cuda_ipc_open_mem_handle", fake_open)
-    monkeypatch.setattr(array_encoding, "_cuda_ipc_close_mem_handle", fake_close)
+    monkeypatch.setattr(cuda_ipc, "_cuda_ipc_open_mem_handle", fake_open)
+    monkeypatch.setattr(cuda_ipc, "_cuda_ipc_close_mem_handle", fake_close)
     return calls, state
 
 
@@ -351,7 +347,7 @@ def _encoded(shape, dtype, device, offset, storage_size, fill=b"\x02"):
         "dtype": dtype,
         "data": {
             "handle": pybase64.b64encode_as_string(
-                fill * array_encoding._CUDA_IPC_HANDLE_SIZE
+                fill * cuda_ipc._CUDA_IPC_HANDLE_SIZE
             ),
             "device": device,
             "storage_offset": offset,
@@ -364,10 +360,10 @@ def _encoded(shape, dtype, device, offset, storage_size, fill=b"\x02"):
 def test_load_copies_own_bytes_at_offset_and_closes(patched_decode):
     """Decode allocates the array's own nbytes, copies from base+offset, closes."""
     calls, _state = patched_decode
-    handle = b"\x02" * array_encoding._CUDA_IPC_HANDLE_SIZE
+    handle = b"\x02" * cuda_ipc._CUDA_IPC_HANDLE_SIZE
     encoded = _encoded((4, 8), "float32", device=1, offset=128, storage_size=4096)
 
-    out = array_encoding._load_cuda_ipc_arraydict(encoded)
+    out = cuda_ipc.load_cuda_ipc_arraydict(encoded)
 
     nbytes = 4 * 8 * 4  # 128
     # Opened on the requested device with the decoded handle.
@@ -381,12 +377,12 @@ def test_load_copies_own_bytes_at_offset_and_closes(patched_decode):
     assert dst == 0xD000
     assert src == 0x2000 + 128
     assert size == nbytes
-    assert kind == array_encoding._cudaMemcpyDeviceToDevice
+    assert kind == cuda_ipc._cudaMemcpyDeviceToDevice
     # Synchronised before the mapping was closed.
     assert calls["sync"] == [True]
     assert calls["close"] == [0x2000]
     # Returned wrapper is framework-agnostic and correctly shaped.
-    assert isinstance(out, array_encoding._IpcDeviceArray)
+    assert isinstance(out, cuda_ipc._IpcDeviceArray)
     assert out.shape == (4, 8)
     assert out.dtype == np.float32
     assert hasattr(out, "__cuda_array_interface__")
@@ -401,7 +397,7 @@ def test_load_copies_own_bytes_at_offset_and_closes(patched_decode):
 def test_load_frees_owned_buffer_on_del(patched_decode):
     """When no DLPack consumer adopts it, the wrapper frees its buffer in __del__."""
     calls, _state = patched_decode
-    out = array_encoding._load_cuda_ipc_arraydict(
+    out = cuda_ipc.load_cuda_ipc_arraydict(
         _encoded((2,), "float32", device=0, offset=0, storage_size=8)
     )
     assert calls["free"] == []
@@ -416,7 +412,7 @@ def test_load_closes_handle_even_on_copy_failure(patched_decode, monkeypatch):
     """The IPC mapping is released and the owned buffer freed if the copy fails."""
     calls, _state = patched_decode
 
-    fake = array_encoding._get_cudart()
+    fake = cuda_ipc._get_cudart()
 
     def boom_memcpy(dst, src, size, kind):
         return 999  # non-zero -> error
@@ -424,7 +420,7 @@ def test_load_closes_handle_even_on_copy_failure(patched_decode, monkeypatch):
     monkeypatch.setattr(fake, "cudaMemcpy", boom_memcpy)
 
     with pytest.raises(RuntimeError, match="cudaMemcpy"):
-        array_encoding._load_cuda_ipc_arraydict(
+        cuda_ipc.load_cuda_ipc_arraydict(
             _encoded((2,), "float32", device=0, offset=0, storage_size=8)
         )
     # Owned buffer freed and the IPC mapping closed despite the failure.
@@ -438,13 +434,13 @@ def test_copy_to_host_reads_device_bytes(patched_decode):
     expected = np.arange(6, dtype=np.float32).reshape(2, 3)
     state["device_bytes"] = expected.tobytes()
 
-    out = array_encoding._load_cuda_ipc_arraydict(
+    out = cuda_ipc.load_cuda_ipc_arraydict(
         _encoded((2, 3), "float32", device=0, offset=0, storage_size=24)
     )
     host = out.copy_to_host()
     np.testing.assert_array_equal(host, expected)
     # A device->host copy happened and was synchronised.
-    d2h = [c for c in calls["memcpy"] if c[3] == array_encoding._cudaMemcpyDeviceToHost]
+    d2h = [c for c in calls["memcpy"] if c[3] == cuda_ipc._cudaMemcpyDeviceToHost]
     assert len(d2h) == 1
     # np.asarray goes through __array__ -> copy_to_host too.
     np.testing.assert_array_equal(np.asarray(out), expected)
@@ -456,9 +452,9 @@ def test_copy_to_host_reads_device_bytes(patched_decode):
 def test_validate_cuda_array_passthrough():
     """A matching GPU array validates and is returned unchanged (not copied)."""
     arr = FakeCudaArray((4, 8), "<f4")
-    assert array_encoding._validate_cuda_array(arr, (None, 8), "float32") is arr
+    assert cuda_ipc.validate_cuda_array(arr, (None, 8), "float32") is arr
     # Ellipsis shape means "no shape check".
-    assert array_encoding._validate_cuda_array(arr, ..., None) is arr
+    assert cuda_ipc.validate_cuda_array(arr, ..., None) is arr
 
 
 @pytest.mark.parametrize(
@@ -474,7 +470,7 @@ def test_validate_cuda_array_rejections(expected_shape, expected_dtype, match):
 
     arr = FakeCudaArray((4, 8), "<f4")
     with pytest.raises(PydanticCustomError, match=match):
-        array_encoding._validate_cuda_array(arr, expected_shape, expected_dtype)
+        cuda_ipc.validate_cuda_array(arr, expected_shape, expected_dtype)
 
 
 # ── encode_array dispatch (Python-side, no CUDA calls) ──────────────────
@@ -509,10 +505,10 @@ def test_cuda_array_to_host_branches():
         def numpy(self):
             return np.array([3.0, 4.0])
 
-    assert array_encoding._cuda_array_to_host(CupyLike()).tolist() == [1.0, 2.0]
-    assert array_encoding._cuda_array_to_host(TorchLike()).tolist() == [3.0, 4.0]
+    assert cuda_ipc.cuda_array_to_host(CupyLike()).tolist() == [1.0, 2.0]
+    assert cuda_ipc.cuda_array_to_host(TorchLike()).tolist() == [3.0, 4.0]
     with pytest.raises(TypeError, match="Cannot copy GPU array"):
-        array_encoding._cuda_array_to_host(object())
+        cuda_ipc.cuda_array_to_host(object())
 
 
 # ── experimental feature flag gating ────────────────────────────────────

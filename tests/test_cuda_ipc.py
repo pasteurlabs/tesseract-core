@@ -88,18 +88,18 @@ def _producer_main(build_fn_name, args, to_consumer, from_consumer):
     """Build arrays in this process, send their encodings, keep them alive.
 
     Mirrors the ring-1 server contract: the exported arrays are pinned by
-    ``_dump_cuda_ipc_arraydict`` and kept alive here until the consumer signals
+    ``dump_cuda_ipc_arraydict`` and kept alive here until the consumer signals
     it is done (which, for the real server, is the next request's release).
     """
     try:
         import cupy  # noqa: F401
 
-        from tesseract_core.runtime.array_encoding import _dump_cuda_ipc_arraydict
+        from tesseract_core.runtime.cuda_ipc import dump_cuda_ipc_arraydict
 
         build_fn = _BUILDERS[build_fn_name]
         arrays = build_fn(*args)
         payloads = [
-            (_dump_cuda_ipc_arraydict(arr), expected) for arr, expected in arrays
+            (dump_cuda_ipc_arraydict(arr), expected) for arr, expected in arrays
         ]
 
         to_consumer.put(payloads)
@@ -123,9 +123,9 @@ def _consumer_main(to_consumer, from_consumer, result_q):
     -- so this path proves the decoded result is framework-independent.
     """
     try:
-        from tesseract_core.runtime.array_encoding import (
+        from tesseract_core.runtime.cuda_ipc import (
             _IpcDeviceArray,
-            _load_cuda_ipc_arraydict,
+            load_cuda_ipc_arraydict,
         )
 
         payloads = to_consumer.get(timeout=_TIMEOUT)
@@ -135,10 +135,10 @@ def _consumer_main(to_consumer, from_consumer, result_q):
 
         results = []
         for encoded, expected in payloads:
-            # _load_cuda_ipc_arraydict copies into caller-owned memory and closes
+            # load_cuda_ipc_arraydict copies into caller-owned memory and closes
             # the IPC mapping before returning, so `decoded` no longer aliases
             # the producer's buffer.
-            decoded = _load_cuda_ipc_arraydict(encoded)
+            decoded = load_cuda_ipc_arraydict(encoded)
             assert isinstance(decoded, _IpcDeviceArray)
             assert hasattr(decoded, "__cuda_array_interface__")
             assert hasattr(decoded, "__dlpack__")
@@ -256,7 +256,7 @@ def _build_torch():
 
 
 def _build_jax():
-    """JAX arrays exercise the VMM staging fallback (see array_encoding._stage_for_legacy_ipc).
+    """JAX arrays exercise the VMM staging fallback (see cuda_ipc._stage_for_legacy_ipc).
 
     JAX/XLA's default GPU allocator uses CUDA's Virtual Memory Management API
     (``cuMemCreate``/``cuMemAddressReserve``), which the legacy
@@ -276,7 +276,7 @@ def _build_force_staging():
     Makes the first ``_cuda_ipc_get_mem_handle`` call (on the array's base
     pointer) raise, so encode falls back to staging; the second call (on the
     staging buffer) uses the real implementation. The patch runs in the producer
-    process and persists through the subsequent ``_dump_cuda_ipc_arraydict``.
+    process and persists through the subsequent ``dump_cuda_ipc_arraydict``.
     """
     from tesseract_core.runtime import array_encoding as ae
 
@@ -311,10 +311,10 @@ _BUILDERS = {
 @requires_cuda
 def test_encode_structure():
     """The encoded dict has the expected structure and metadata."""
-    from tesseract_core.runtime.array_encoding import _dump_cuda_ipc_arraydict
+    from tesseract_core.runtime.cuda_ipc import dump_cuda_ipc_arraydict
 
     arr = cupy.random.randn(64, 128, dtype=cupy.float32)
-    encoded = _dump_cuda_ipc_arraydict(arr)
+    encoded = dump_cuda_ipc_arraydict(arr)
 
     assert encoded["object_type"] == "array"
     assert encoded["shape"] == [64, 128]
@@ -324,7 +324,7 @@ def test_encode_structure():
     # 64-byte handle, base64-encoded.
     import pybase64
 
-    from tesseract_core.runtime.array_encoding import _CUDA_IPC_HANDLE_SIZE
+    from tesseract_core.runtime.cuda_ipc import _CUDA_IPC_HANDLE_SIZE
 
     assert len(pybase64.b64decode(data["handle"])) == _CUDA_IPC_HANDLE_SIZE
     assert isinstance(data["device"], int)
@@ -337,10 +337,10 @@ def test_encode_structure():
 @requires_cuda
 def test_encode_requires_cuda_array():
     """Encoding a host array raises a clear error."""
-    from tesseract_core.runtime.array_encoding import _dump_cuda_ipc_arraydict
+    from tesseract_core.runtime.cuda_ipc import dump_cuda_ipc_arraydict
 
     with pytest.raises(ValueError, match="cuda_ipc encoding requires a CUDA array"):
-        _dump_cuda_ipc_arraydict(np.zeros((4, 4), dtype=np.float32))
+        dump_cuda_ipc_arraydict(np.zeros((4, 4), dtype=np.float32))
 
 
 @requires_cuda
@@ -350,19 +350,19 @@ def test_encode_rejects_non_contiguous():
     cuda_ipc transfers a flat contiguous byte range; a strided source would be
     silently misread, so encoding must refuse it.
     """
-    from tesseract_core.runtime.array_encoding import _dump_cuda_ipc_arraydict
+    from tesseract_core.runtime.cuda_ipc import dump_cuda_ipc_arraydict
 
     strided = cupy.arange(100, dtype=cupy.float32)[::2]
     assert strided.__cuda_array_interface__["strides"] is not None
     with pytest.raises(ValueError, match="C-contiguous"):
-        _dump_cuda_ipc_arraydict(strided)
+        dump_cuda_ipc_arraydict(strided)
 
     transposed = cupy.arange(12, dtype=cupy.float32).reshape(3, 4).T
     with pytest.raises(ValueError, match="C-contiguous"):
-        _dump_cuda_ipc_arraydict(transposed)
+        dump_cuda_ipc_arraydict(transposed)
 
     # A contiguous copy of the same data encodes fine.
-    _dump_cuda_ipc_arraydict(cupy.ascontiguousarray(strided))
+    dump_cuda_ipc_arraydict(cupy.ascontiguousarray(strided))
 
 
 @requires_cuda
@@ -371,15 +371,15 @@ def test_same_process_open_is_unsupported():
 
     This documents *why* every decode test must be cross-process.
     """
-    from tesseract_core.runtime.array_encoding import (
-        _dump_cuda_ipc_arraydict,
-        _load_cuda_ipc_arraydict,
+    from tesseract_core.runtime.cuda_ipc import (
+        dump_cuda_ipc_arraydict,
+        load_cuda_ipc_arraydict,
     )
 
     arr = cupy.arange(16, dtype=cupy.float32)
-    encoded = _dump_cuda_ipc_arraydict(arr)
+    encoded = dump_cuda_ipc_arraydict(arr)
     with pytest.raises(RuntimeError, match="cudaIpcOpenMemHandle failed"):
-        _load_cuda_ipc_arraydict(encoded)
+        load_cuda_ipc_arraydict(encoded)
 
 
 # ── Test 2: cross-process round-trip ────────────────────────────────────
@@ -417,9 +417,9 @@ def test_cross_process_jax_vmm_fallback():
 
     JAX/XLA's GPU allocator is VMM-backed, so the legacy ``cudaIpcGetMemHandle``
     fast path (which works for CuPy/PyTorch's default cudaMalloc-based pools)
-    rejects it; ``_dump_cuda_ipc_arraydict`` should transparently fall back to
+    rejects it; ``dump_cuda_ipc_arraydict`` should transparently fall back to
     staging the array into a fresh ``cudaMalloc`` buffer (see
-    array_encoding._stage_for_legacy_ipc) and export a handle to that instead.
+    cuda_ipc._stage_for_legacy_ipc) and export a handle to that instead.
     """
     results = run_cross_process("jax")
     assert len(results) == 1
@@ -435,7 +435,7 @@ def test_cross_process_staging_fallback_forced():
     """Force the staging fallback (without JAX) and verify correctness + free.
 
     Simulates a VMM-backed pointer by making the first ``cudaIpcGetMemHandle``
-    call fail, so ``_dump_cuda_ipc_arraydict`` stages a CuPy array into a fresh
+    call fail, so ``dump_cuda_ipc_arraydict`` stages a CuPy array into a fresh
     ``cudaMalloc`` buffer and exports a handle to that. Exercises the real
     staging cudaMalloc/cudaMemcpy/cudaFree path on GPU.
     """
@@ -455,9 +455,9 @@ def _ring1_server(req_q, resp_q):
     try:
         import cupy
 
-        from tesseract_core.runtime.array_encoding import (
-            _dump_cuda_ipc_arraydict,
-            _release_cuda_ipc_exports,
+        from tesseract_core.runtime.cuda_ipc import (
+            dump_cuda_ipc_arraydict,
+            release_cuda_ipc_exports,
         )
 
         while True:
@@ -465,12 +465,12 @@ def _ring1_server(req_q, resp_q):
             if req is None:
                 return
             i = req
-            _release_cuda_ipc_exports()  # release-at-request-start
+            release_cuda_ipc_exports()  # release-at-request-start
             for _ in range(32):
                 tmp = cupy.zeros(4096, dtype=cupy.float32)
                 del tmp
             out = cupy.arange(1024, dtype=cupy.float32) + (i + 1) * 100.0
-            resp_q.put((i, _dump_cuda_ipc_arraydict(out)))
+            resp_q.put((i, dump_cuda_ipc_arraydict(out)))
     except Exception:
         traceback.print_exc()
         resp_q.put(("SERVER_ERROR", traceback.format_exc()))
@@ -483,7 +483,7 @@ def _ring1_client(req_q, resp_q, result_q, n):
     wrapper); values are read back via its host-copy helper.
     """
     try:
-        from tesseract_core.runtime.array_encoding import _load_cuda_ipc_arraydict
+        from tesseract_core.runtime.cuda_ipc import load_cuda_ipc_arraydict
 
         kept = []
         for i in range(n):
@@ -493,7 +493,7 @@ def _ring1_client(req_q, resp_q, result_q, n):
                 result_q.put(("SERVER_ERROR", msg[1]))
                 return
             j, encoded = msg
-            owned = _load_cuda_ipc_arraydict(encoded)  # copies + closes mapping
+            owned = load_cuda_ipc_arraydict(encoded)  # copies + closes mapping
             kept.append((j, owned))
         req_q.put(None)
 
@@ -576,9 +576,9 @@ def test_decode_to_torch_via_dlpack():
     """
     import torch
 
-    from tesseract_core.runtime.array_encoding import (
+    from tesseract_core.runtime.cuda_ipc import (
         _IpcDeviceArray,
-        _load_cuda_ipc_arraydict,
+        load_cuda_ipc_arraydict,
     )
 
     # Produce in a subprocess, hand the encoded dict back, decode here, then
@@ -595,7 +595,7 @@ def test_decode_to_torch_via_dlpack():
     try:
         payloads = to_consumer.get(timeout=_TIMEOUT)
         encoded, expected = payloads[0]
-        decoded = _load_cuda_ipc_arraydict(encoded)
+        decoded = load_cuda_ipc_arraydict(encoded)
         assert isinstance(decoded, _IpcDeviceArray)
         decoded_torch = torch.from_dlpack(decoded)
         assert decoded_torch.is_cuda
@@ -618,7 +618,7 @@ def test_decode_to_torch_via_cuda_array_interface():
     """
     import torch
 
-    from tesseract_core.runtime.array_encoding import _load_cuda_ipc_arraydict
+    from tesseract_core.runtime.cuda_ipc import load_cuda_ipc_arraydict
 
     ctx = multiprocessing.get_context("spawn")
     to_consumer = ctx.Queue()
@@ -632,7 +632,7 @@ def test_decode_to_torch_via_cuda_array_interface():
     try:
         payloads = to_consumer.get(timeout=_TIMEOUT)
         encoded, expected = payloads[0]
-        decoded = _load_cuda_ipc_arraydict(encoded)
+        decoded = load_cuda_ipc_arraydict(encoded)
         decoded_torch = torch.as_tensor(decoded, device="cuda:0")
         assert decoded_torch.is_cuda
         np.testing.assert_array_equal(decoded_torch.cpu().numpy(), np.asarray(expected))
@@ -664,9 +664,9 @@ def _cupy_free_consumer_main(to_consumer, from_consumer, result_q):
     try:
         import torch
 
-        from tesseract_core.runtime.array_encoding import (
+        from tesseract_core.runtime.cuda_ipc import (
             _IpcDeviceArray,
-            _load_cuda_ipc_arraydict,
+            load_cuda_ipc_arraydict,
         )
 
         payloads = to_consumer.get(timeout=_TIMEOUT)
@@ -678,13 +678,13 @@ def _cupy_free_consumer_main(to_consumer, from_consumer, result_q):
             del sys.modules[mod]
         builtins.__import__ = blocked_import
 
-        decoded = _load_cuda_ipc_arraydict(encoded)
+        decoded = load_cuda_ipc_arraydict(encoded)
         assert isinstance(decoded, _IpcDeviceArray)
         # Host-copy helper path (no framework).
         host = decoded.copy_to_host()
         host_ok = bool(np.array_equal(host, np.asarray(expected)))
         # Torch-via-DLPack path.
-        decoded2 = _load_cuda_ipc_arraydict(encoded)
+        decoded2 = load_cuda_ipc_arraydict(encoded)
         t = torch.from_dlpack(decoded2)
         torch_ok = bool(np.array_equal(t.cpu().numpy(), np.asarray(expected)))
         # The decode path must not have imported cupy.

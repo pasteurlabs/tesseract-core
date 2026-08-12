@@ -68,13 +68,11 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
             # Release GPU buffers exported via cuda_ipc by the previous request.
             # Releasing at the start of each request keeps every export alive
             # long enough for a serial client to copy it out of the response
-            # before it is reclaimed. See array_encoding for the assumptions this
+            # before it is reclaimed. See cuda_ipc for the assumptions this
             # relies on.
-            from tesseract_core.runtime.array_encoding import (
-                _release_cuda_ipc_exports,
-            )
+            from tesseract_core.runtime.cuda_ipc import release_cuda_ipc_exports
 
-            _release_cuda_ipc_exports()
+            release_cuda_ipc_exports()
 
             if run_id is None:
                 run_id = str(uuid.uuid4())

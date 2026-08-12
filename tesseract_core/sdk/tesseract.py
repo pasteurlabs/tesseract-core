@@ -29,7 +29,7 @@ from .logs import LogStreamer
 if TYPE_CHECKING:
     # Only imported for type hints; the cuda_ipc decode path imports it lazily at
     # runtime so the SDK does not eagerly pull in the runtime/CUDA machinery.
-    from tesseract_core.runtime.array_encoding import _IpcDeviceArray
+    from tesseract_core.runtime.cuda_ipc import _IpcDeviceArray
 
 PathLike: TypeAlias = str | Path
 BoolOrCallable: TypeAlias = bool | Callable[[str], Any]
@@ -676,9 +676,9 @@ def _encode_array(arr: Any, b64: bool = True) -> dict:
 
 def _encode_array_cuda_ipc(arr: Any) -> dict:
     """Encode a CUDA tensor via IPC handle for cross-process GPU sharing."""
-    from tesseract_core.runtime.array_encoding import _dump_cuda_ipc_arraydict
+    from tesseract_core.runtime.cuda_ipc import dump_cuda_ipc_arraydict
 
-    return _dump_cuda_ipc_arraydict(arr)
+    return dump_cuda_ipc_arraydict(arr)
 
 
 def _decode_array(
@@ -771,9 +771,9 @@ def _decode_array(
         # __cuda_array_interface__ and __dlpack__ so Torch/JAX/CuPy can adopt it
         # zero-copy. The server may reuse/free the exported buffer as soon as
         # this returns (it holds it until the next request).
-        from tesseract_core.runtime.array_encoding import _load_cuda_ipc_arraydict
+        from tesseract_core.runtime.cuda_ipc import load_cuda_ipc_arraydict
 
-        return _load_cuda_ipc_arraydict(encoded_arr)
+        return load_cuda_ipc_arraydict(encoded_arr)
     else:
         raise ValueError(f"Unexpected array encoding {encoding}. Cannot decode.")
 
