@@ -678,7 +678,10 @@ def _encode_array_cuda_ipc(arr: Any) -> dict:
 
 def _decode_array(
     encoded_arr: dict, output_path: str | Path | None = None
-) -> np.ndarray:
+) -> np.ndarray | Any:
+    # Returns np.ndarray for every encoding except cuda_ipc, which yields a
+    # cupy.ndarray. cupy is an optional, GPU-only dependency, so the union is
+    # widened with Any rather than importing it just to name the type.
     import re
 
     if "data" not in encoded_arr:
@@ -893,7 +896,7 @@ class HTTPClient:
             "vector_jacobian_product",
         ]:
             # Create a decoder with the output_path bound
-            def decode_with_path(arr: dict) -> np.ndarray:
+            def decode_with_path(arr: dict) -> np.ndarray | Any:
                 return _decode_array(arr, output_path=self._output_path)
 
             data = _tree_map(
