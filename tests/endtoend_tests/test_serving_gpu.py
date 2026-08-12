@@ -8,9 +8,11 @@ in-process), these tests build a real GPU Tesseract image, serve it in a
 container with ``--gpus all`` and ``--ipc=host``, and round-trip device memory
 across the process/container boundary via a genuine ``cudaIpcMemHandle_t``.
 
-Requires a physical CUDA GPU, Docker with the NVIDIA container runtime, and
-CuPy on the host (to materialise the decoded device array). They are marked
-``gpu`` so GPU-less CI runners skip them.
+Requires a physical CUDA GPU and Docker with the NVIDIA container runtime. CuPy
+is used only as a convenient GPU-availability probe on the host; the decoded
+result is inspected framework-agnostically (via its host-copy helper), so the
+host does not need CuPy to read cuda_ipc outputs. They are marked ``gpu`` so
+GPU-less CI runners skip them.
 """
 
 from pathlib import Path
@@ -55,8 +57,13 @@ def test_serve_cuda_ipc_roundtrip(gpu_image_name):
 
     Exercises the full export path end-to-end: the served container computes on
     the GPU, exports the result as a CUDA IPC handle (rather than copying to
-    host), and the host client opens the handle and materialises a CuPy array.
+    host), and the host client opens the handle and materialises a client-owned
+    device array. The decode is framework-agnostic -- the result is a device
+    wrapper exposing ``__cuda_array_interface__`` and ``__dlpack__``, read back
+    here via its host-copy helper (no CuPy needed to inspect it).
     """
+    from tesseract_core.runtime.array_encoding import _IpcDeviceArray
+
     a = np.arange(8, dtype=np.float32)
     b = np.ones(8, dtype=np.float32)
     s = 3.0
@@ -70,12 +77,13 @@ def test_serve_cuda_ipc_roundtrip(gpu_image_name):
     ) as t:
         result = t.apply({"a": a, "b": b, "s": s})
 
-    # The cuda_ipc decode path returns a client-owned CuPy array.
     got = result["result"]
-    assert cupy.get_array_module(got) is cupy, (
+    assert isinstance(got, _IpcDeviceArray), (
         f"expected a device array from cuda_ipc, got {type(got)}"
     )
-    np.testing.assert_allclose(cupy.asnumpy(got), expected, rtol=1e-5, atol=1e-5)
+    assert hasattr(got, "__cuda_array_interface__")
+    assert hasattr(got, "__dlpack__")
+    np.testing.assert_allclose(got.copy_to_host(), expected, rtol=1e-5, atol=1e-5)
 
 
 @requires_cuda
@@ -95,5 +103,5 @@ def test_serve_cuda_ipc_serial_reuse(gpu_image_name):
             a = np.full(4, float(i), dtype=np.float32)
             b = np.zeros(4, dtype=np.float32)
             result = t.apply({"a": a, "b": b, "s": 2.0})
-            got = cupy.asnumpy(result["result"])
+            got = result["result"].copy_to_host()
             np.testing.assert_allclose(got, 2.0 * a, rtol=1e-5, atol=1e-5)

@@ -12,7 +12,7 @@ from collections.abc import Callable, Mapping, Sequence
 from functools import cached_property, wraps
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Literal, TypeAlias
+from typing import TYPE_CHECKING, Any, Literal, TypeAlias
 from urllib.parse import urlparse, urlunparse
 
 import numpy as np
@@ -25,6 +25,11 @@ from pydantic_core import InitErrorDetails, PydanticCustomError, from_json
 from . import engine
 from .docker_client import Container, Containers
 from .logs import LogStreamer
+
+if TYPE_CHECKING:
+    # Only imported for type hints; the cuda_ipc decode path imports it lazily at
+    # runtime so the SDK does not eagerly pull in the runtime/CUDA machinery.
+    from tesseract_core.runtime.array_encoding import _IpcDeviceArray
 
 PathLike: TypeAlias = str | Path
 BoolOrCallable: TypeAlias = bool | Callable[[str], Any]
@@ -678,10 +683,11 @@ def _encode_array_cuda_ipc(arr: Any) -> dict:
 
 def _decode_array(
     encoded_arr: dict, output_path: str | Path | None = None
-) -> np.ndarray | Any:
+) -> np.ndarray | _IpcDeviceArray:
     # Returns np.ndarray for every encoding except cuda_ipc, which yields a
-    # cupy.ndarray. cupy is an optional, GPU-only dependency, so the union is
-    # widened with Any rather than importing it just to name the type.
+    # framework-agnostic on-GPU wrapper (_IpcDeviceArray, exposing
+    # __cuda_array_interface__ and __dlpack__). That type is imported only under
+    # TYPE_CHECKING so naming it here adds no runtime import.
     import re
 
     if "data" not in encoded_arr:
@@ -759,10 +765,12 @@ def _decode_array(
 
         arr = np.frombuffer(data, dtype=dtype)
     elif encoding == "cuda_ipc":
-        # Returns a fresh, client-owned cupy.ndarray: the decode opens the IPC
-        # handle, copies device-to-device into our own memory, and closes the
-        # mapping before returning. The server may reuse/free the exported
-        # buffer as soon as this returns (it holds it until the next request).
+        # Returns a fresh, client-owned device-array wrapper (no CuPy needed):
+        # the decode opens the IPC handle, copies device-to-device into our own
+        # memory, and closes the mapping before returning. The result exposes
+        # __cuda_array_interface__ and __dlpack__ so Torch/JAX/CuPy can adopt it
+        # zero-copy. The server may reuse/free the exported buffer as soon as
+        # this returns (it holds it until the next request).
         from tesseract_core.runtime.array_encoding import _load_cuda_ipc_arraydict
 
         return _load_cuda_ipc_arraydict(encoded_arr)
@@ -896,7 +904,7 @@ class HTTPClient:
             "vector_jacobian_product",
         ]:
             # Create a decoder with the output_path bound
-            def decode_with_path(arr: dict) -> np.ndarray | Any:
+            def decode_with_path(arr: dict) -> np.ndarray | _IpcDeviceArray:
                 return _decode_array(arr, output_path=self._output_path)
 
             data = _tree_map(

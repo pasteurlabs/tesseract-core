@@ -20,7 +20,6 @@ covered by the GPU tests in ``test_cuda_ipc.py`` (marked ``@pytest.mark.gpu``).
 
 from __future__ import annotations
 
-import sys
 import types
 from typing import Any
 
@@ -257,144 +256,198 @@ def test_release_frees_staging_buffers(patched_cuda, monkeypatch):
     assert array_encoding._CUDA_IPC_STAGING_BUFFERS == []
 
 
-# ── Decode-side orchestration (mocked CUDA + fake cupy) ──────────────────
+# ── Decode-side orchestration (mocked CUDA, no CuPy) ─────────────────────
+#
+# Decoding no longer depends on CuPy: it uses only the ctypes cudart primitives
+# (cudaSetDevice/cudaMalloc/cudaMemcpy/cudaDeviceSynchronize/cudaFree) plus the
+# IPC open/close helpers. These tests mock those primitives so the *Python
+# orchestration* (offset arithmetic, own-nbytes copy, synchronize-before-close,
+# mapping close, buffer free, DLPack ownership) is exercised on a GPU-less box;
+# the real device-copy correctness lives in the GPU tests in test_cuda_ipc.py.
 
 
-def _install_fake_cupy(monkeypatch):
-    """Install a minimal fake ``cupy`` module into sys.modules.
+@pytest.fixture
+def patched_decode(monkeypatch):
+    """Mock the ctypes cudart decode primitives and the IPC open/close helpers.
 
-    Only the surface used by ``_load_cuda_ipc_arraydict`` is implemented. The
-    returned ``ndarray.copy()`` yields a plain numpy array so tests can inspect
-    shape/dtype; this exercises orchestration, not real device copies.
+    A single fake device buffer is simulated with a Python ``bytearray`` so that
+    ``copy_to_host`` returns real bytes. Records the sequence of primitive calls
+    for ordering/argument assertions.
     """
-    fake = types.ModuleType("cupy")
-    fake.cuda = types.ModuleType("cupy.cuda")
-    record: dict[str, Any] = {}
+    import ctypes
 
-    class UnownedMemory:
-        def __init__(self, ptr, size, owner=None):
-            record["unowned"] = (ptr, size, owner)
+    calls: dict[str, list] = {
+        "set_device": [],
+        "malloc": [],
+        "memcpy": [],
+        "sync": [],
+        "free": [],
+        "open": [],
+        "close": [],
+    }
+    state: dict[str, Any] = {"owned_ptr": 0xD000, "buffer": None}
 
-    class MemoryPointer:
-        def __init__(self, mem, offset):
-            record["memptr_offset"] = offset
+    class FakeCudart:
+        def cudaSetDevice(self, device):
+            calls["set_device"].append(device)
+            return 0
 
-    class _NDArray:
-        def __init__(self, shape, dtype, memptr):
-            self._shape = tuple(shape)
-            self._dtype = np.dtype(dtype)
+        def cudaMalloc(self, pptr, size):
+            size_v = getattr(size, "value", size)
+            calls["malloc"].append(int(size_v))
+            state["buffer"] = bytearray(int(size_v))
+            # Write the owned pointer into the c_void_p the caller passed by ref.
+            ctypes.cast(pptr, ctypes.POINTER(ctypes.c_void_p)).contents.value = state[
+                "owned_ptr"
+            ]
+            return 0
 
-        def copy(self):
-            record["copied"] = True
-            return np.zeros(self._shape, dtype=self._dtype)
+        def cudaMemcpy(self, dst, src, size, kind):
+            dst_v = getattr(dst, "value", dst)
+            src_v = getattr(src, "value", src)
+            size_v = int(getattr(size, "value", size))
+            kind_v = int(getattr(kind, "value", kind))
+            calls["memcpy"].append((dst_v, src_v, size_v, kind_v))
+            # For device->host copies, fill the host buffer with the recorded
+            # device bytes so copy_to_host yields deterministic data.
+            if kind_v == array_encoding._cudaMemcpyDeviceToHost:
+                src_bytes = state.get("device_bytes")
+                if src_bytes is not None:
+                    ctypes.memmove(dst_v, src_bytes, size_v)
+            return 0
 
-    class Device:
-        def __init__(self, device):
-            record["device_ctx"] = device
+        def cudaDeviceSynchronize(self):
+            calls["sync"].append(True)
+            return 0
 
-        def __enter__(self):
-            return self
+        def cudaFree(self, ptr):
+            calls["free"].append(getattr(ptr, "value", ptr))
+            return 0
 
-        def __exit__(self, *exc):
-            return False
+        def cudaGetErrorString(self, code):
+            return b"fake error"
 
-    fake.cuda.UnownedMemory = UnownedMemory
-    fake.cuda.MemoryPointer = MemoryPointer
-    fake.ndarray = _NDArray
-    fake.cuda.Device = Device
-    fake.cuda.runtime = types.SimpleNamespace(
-        deviceSynchronize=lambda: record.setdefault("synced", True)
-    )
+    fake = FakeCudart()
+    monkeypatch.setattr(array_encoding, "_get_cudart", lambda: fake)
 
-    monkeypatch.setitem(sys.modules, "cupy", fake)
-    return record
+    def fake_open(handle_bytes, device):
+        calls["open"].append((handle_bytes, device))
+        return 0x2000  # pretend mapped base pointer
+
+    def fake_close(device_ptr):
+        calls["close"].append(device_ptr)
+
+    monkeypatch.setattr(array_encoding, "_cuda_ipc_open_mem_handle", fake_open)
+    monkeypatch.setattr(array_encoding, "_cuda_ipc_close_mem_handle", fake_close)
+    return calls, state
 
 
-def test_load_applies_offset_and_closes_handle(patched_cuda, monkeypatch):
-    record = _install_fake_cupy(monkeypatch)
-
+def _encoded(shape, dtype, device, offset, storage_size, fill=b"\x02"):
     import pybase64
 
-    encoded = {
+    return {
         "object_type": "array",
-        "shape": [4, 8],
-        "dtype": "float32",
+        "shape": list(shape),
+        "dtype": dtype,
         "data": {
             "handle": pybase64.b64encode_as_string(
-                b"\x02" * array_encoding._CUDA_IPC_HANDLE_SIZE
+                fill * array_encoding._CUDA_IPC_HANDLE_SIZE
             ),
-            "device": 1,
-            "storage_offset": 128,
-            "storage_size": 4096,
+            "device": device,
+            "storage_offset": offset,
+            "storage_size": storage_size,
             "encoding": "cuda_ipc",
         },
     }
+
+
+def test_load_copies_own_bytes_at_offset_and_closes(patched_decode):
+    """Decode allocates the array's own nbytes, copies from base+offset, closes."""
+    calls, _state = patched_decode
+    handle = b"\x02" * array_encoding._CUDA_IPC_HANDLE_SIZE
+    encoded = _encoded((4, 8), "float32", device=1, offset=128, storage_size=4096)
 
     out = array_encoding._load_cuda_ipc_arraydict(encoded)
 
-    # Orchestration assertions (not CUDA correctness):
-    assert patched_cuda["open"] == [(b"\x02" * array_encoding._CUDA_IPC_HANDLE_SIZE, 1)]
-    # The offset from the payload must be applied to the MemoryPointer.
-    assert record["memptr_offset"] == 128
-    # A copy into caller-owned memory happened, and the mapping was closed.
-    assert record.get("copied") is True
-    assert patched_cuda["close"] == [0x2000]
-    # Returned array has the requested shape/dtype.
+    nbytes = 4 * 8 * 4  # 128
+    # Opened on the requested device with the decoded handle.
+    assert calls["open"] == [(handle, 1)]
+    # Allocated exactly the array's own byte size (not the whole storage_size).
+    assert calls["malloc"] == [nbytes]
+    # One device->device copy of nbytes, from base(0x2000)+offset(128) into the
+    # owned buffer (0xD000).
+    assert len(calls["memcpy"]) == 1
+    dst, src, size, kind = calls["memcpy"][0]
+    assert dst == 0xD000
+    assert src == 0x2000 + 128
+    assert size == nbytes
+    assert kind == array_encoding._cudaMemcpyDeviceToDevice
+    # Synchronised before the mapping was closed.
+    assert calls["sync"] == [True]
+    assert calls["close"] == [0x2000]
+    # Returned wrapper is framework-agnostic and correctly shaped.
+    assert isinstance(out, array_encoding._IpcDeviceArray)
     assert out.shape == (4, 8)
     assert out.dtype == np.float32
+    assert hasattr(out, "__cuda_array_interface__")
+    assert hasattr(out, "__dlpack__")
+    iface = out.__cuda_array_interface__
+    assert iface["version"] == 3
+    assert iface["data"] == (0xD000, False)
+    assert iface["strides"] is None
+    assert iface["typestr"] == np.dtype("float32").str
 
 
-def test_load_closes_handle_even_on_copy_failure(patched_cuda, monkeypatch):
-    """The IPC mapping is released even if the copy raises (finally block)."""
-    _install_fake_cupy(monkeypatch)
+def test_load_frees_owned_buffer_on_del(patched_decode):
+    """When no DLPack consumer adopts it, the wrapper frees its buffer in __del__."""
+    calls, _state = patched_decode
+    out = array_encoding._load_cuda_ipc_arraydict(
+        _encoded((2,), "float32", device=0, offset=0, storage_size=8)
+    )
+    assert calls["free"] == []
+    del out
+    import gc
 
-    # Make ndarray.copy() blow up.
-    def boom(self):
-        raise RuntimeError("copy failed")
-
-    sys.modules["cupy"].ndarray.copy = boom
-
-    import pybase64
-
-    encoded = {
-        "object_type": "array",
-        "shape": [2],
-        "dtype": "float32",
-        "data": {
-            "handle": pybase64.b64encode_as_string(
-                b"\x03" * array_encoding._CUDA_IPC_HANDLE_SIZE
-            ),
-            "device": 0,
-            "storage_offset": 0,
-            "storage_size": 8,
-            "encoding": "cuda_ipc",
-        },
-    }
-    with pytest.raises(RuntimeError, match="copy failed"):
-        array_encoding._load_cuda_ipc_arraydict(encoded)
-    # Even though the copy failed, the handle was closed.
-    assert patched_cuda["close"] == [0x2000]
+    gc.collect()
+    assert calls["free"] == [0xD000]
 
 
-def test_load_requires_cupy(monkeypatch):
-    """A helpful error is raised when CuPy is not importable."""
-    # Ensure any import of cupy fails.
-    monkeypatch.setitem(sys.modules, "cupy", None)
-    with pytest.raises(RuntimeError, match="cuda_ipc decoding requires CuPy"):
+def test_load_closes_handle_even_on_copy_failure(patched_decode, monkeypatch):
+    """The IPC mapping is released and the owned buffer freed if the copy fails."""
+    calls, _state = patched_decode
+
+    fake = array_encoding._get_cudart()
+
+    def boom_memcpy(dst, src, size, kind):
+        return 999  # non-zero -> error
+
+    monkeypatch.setattr(fake, "cudaMemcpy", boom_memcpy)
+
+    with pytest.raises(RuntimeError, match="cudaMemcpy"):
         array_encoding._load_cuda_ipc_arraydict(
-            {
-                "object_type": "array",
-                "shape": [1],
-                "dtype": "float32",
-                "data": {
-                    "handle": "AA==",
-                    "device": 0,
-                    "storage_offset": 0,
-                    "storage_size": 4,
-                    "encoding": "cuda_ipc",
-                },
-            }
+            _encoded((2,), "float32", device=0, offset=0, storage_size=8)
         )
+    # Owned buffer freed and the IPC mapping closed despite the failure.
+    assert calls["free"] == [0xD000]
+    assert calls["close"] == [0x2000]
+
+
+def test_copy_to_host_reads_device_bytes(patched_decode):
+    """copy_to_host performs a device->host memcpy + sync and returns the bytes."""
+    calls, state = patched_decode
+    expected = np.arange(6, dtype=np.float32).reshape(2, 3)
+    state["device_bytes"] = expected.tobytes()
+
+    out = array_encoding._load_cuda_ipc_arraydict(
+        _encoded((2, 3), "float32", device=0, offset=0, storage_size=24)
+    )
+    host = out.copy_to_host()
+    np.testing.assert_array_equal(host, expected)
+    # A device->host copy happened and was synchronised.
+    d2h = [c for c in calls["memcpy"] if c[3] == array_encoding._cudaMemcpyDeviceToHost]
+    assert len(d2h) == 1
+    # np.asarray goes through __array__ -> copy_to_host too.
+    np.testing.assert_array_equal(np.asarray(out), expected)
 
 
 # ── GPU-array validation (no CUDA calls at all) ─────────────────────────

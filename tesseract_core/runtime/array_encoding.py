@@ -561,6 +561,10 @@ def _get_cudart():
         ctypes.c_int,
     ]
     cudart.cudaMemcpy.restype = ctypes.c_int
+    # Used by decode to block until a device-to-device copy completes before the
+    # IPC mapping is closed (see _load_cuda_ipc_arraydict).
+    cudart.cudaDeviceSynchronize.argtypes = []
+    cudart.cudaDeviceSynchronize.restype = ctypes.c_int
 
     _CUDART_HANDLE = cudart
     return _CUDART_HANDLE
@@ -715,6 +719,7 @@ def _cuda_ipc_close_mem_handle(device_ptr: int) -> None:
 
 
 _cudaMemcpyDeviceToDevice = 3
+_cudaMemcpyDeviceToHost = 2
 
 
 def _stage_for_legacy_ipc(base_ptr: int, storage_size: int) -> int:
@@ -918,54 +923,370 @@ def _dump_cuda_ipc_arraydict(arr: Any) -> ArrayDict:
     }
 
 
+# ---------------------------------------------------------------------------
+# DLPack ABI (framework-agnostic zero-copy exchange)
+# ---------------------------------------------------------------------------
+#
+# The decode path returns an object (:class:`_IpcDeviceArray`) that owns a
+# device buffer and exposes it via both ``__cuda_array_interface__`` and
+# DLPack, so Torch/JAX/CuPy can all adopt it zero-copy without CuPy being a
+# decode-time dependency. The structs below mirror the DLPack C ABI closely
+# enough for those consumers.
+
+_kDLCUDA = 2  # DLDeviceType for CUDA global memory
+
+
+class _DLDevice(ctypes.Structure):
+    _fields_ = [("device_type", ctypes.c_int), ("device_id", ctypes.c_int)]
+
+
+class _DLDataType(ctypes.Structure):
+    _fields_ = [
+        ("code", ctypes.c_uint8),
+        ("bits", ctypes.c_uint8),
+        ("lanes", ctypes.c_uint16),
+    ]
+
+
+class _DLTensor(ctypes.Structure):
+    _fields_ = [
+        ("data", ctypes.c_void_p),
+        ("device", _DLDevice),
+        ("ndim", ctypes.c_int),
+        ("dtype", _DLDataType),
+        ("shape", ctypes.POINTER(ctypes.c_int64)),
+        ("strides", ctypes.POINTER(ctypes.c_int64)),
+        ("byte_offset", ctypes.c_uint64),
+    ]
+
+
+# void (*)(struct DLManagedTensor *self)
+_DLManagedTensorDeleter = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
+
+
+class _DLManagedTensor(ctypes.Structure):
+    _fields_ = [
+        ("dl_tensor", _DLTensor),
+        ("manager_ctx", ctypes.c_void_p),
+        ("deleter", _DLManagedTensorDeleter),
+    ]
+
+
+# DLDataTypeCode values (kDLInt, kDLUInt, kDLFloat, ..., kDLBool, kDLComplex).
+_DLPACK_TYPE_CODES = {
+    "i": 0,  # kDLInt
+    "u": 1,  # kDLUInt
+    "f": 2,  # kDLFloat
+    "b": 6,  # kDLBool
+    "c": 5,  # kDLComplex
+}
+
+# Keep PyCapsule_* usable from ctypes for the DLPack capsule handshake.
+_ctypes_pythonapi = ctypes.pythonapi
+_ctypes_pythonapi.PyCapsule_New.restype = ctypes.py_object
+_ctypes_pythonapi.PyCapsule_New.argtypes = [
+    ctypes.c_void_p,
+    ctypes.c_char_p,
+    ctypes.c_void_p,
+]
+_ctypes_pythonapi.PyCapsule_GetPointer.restype = ctypes.c_void_p
+_ctypes_pythonapi.PyCapsule_GetPointer.argtypes = [ctypes.py_object, ctypes.c_char_p]
+_ctypes_pythonapi.PyCapsule_SetName.restype = ctypes.c_int
+_ctypes_pythonapi.PyCapsule_SetName.argtypes = [ctypes.py_object, ctypes.c_char_p]
+_ctypes_pythonapi.PyCapsule_IsValid.restype = ctypes.c_int
+_ctypes_pythonapi.PyCapsule_IsValid.argtypes = [ctypes.py_object, ctypes.c_char_p]
+
+
+def _dlpack_dtype(dtype: np.dtype) -> _DLDataType:
+    """Map a NumPy dtype to a DLPack ``DLDataType`` (code/bits/lanes)."""
+    code = _DLPACK_TYPE_CODES.get(dtype.kind)
+    if code is None:
+        raise TypeError(f"dtype {dtype!r} has no DLPack type code")
+    return _DLDataType(code=code, bits=dtype.itemsize * 8, lanes=1)
+
+
+class _IpcDeviceArray:
+    """Owns a device buffer decoded from a CUDA IPC handle.
+
+    The buffer is a fresh, process-owned ``cudaMalloc`` allocation holding the
+    array's own bytes (the producer's IPC mapping is copied into it and then
+    closed by the decoder). The object is framework-agnostic:
+
+    * ``__cuda_array_interface__`` (v3) lets CuPy / Numba / PyTorch adopt it,
+    * ``__dlpack__`` / ``__dlpack_device__`` let Torch and JAX adopt it,
+
+    both zero-copy. ``.copy_to_host()`` / ``np.asarray(...)`` materialise a host
+    NumPy copy so it can be inspected without any GPU framework installed.
+
+    Ownership of the device buffer is released exactly once: either this object
+    frees it in ``__del__``, or a DLPack consumer takes it (the capsule is
+    renamed to ``"used_dltensor"`` on consumption, transferring the free to the
+    consumer's deleter). ``_freed`` guards against a double free.
+    """
+
+    def __init__(
+        self, ptr: int, device: int, shape: tuple[int, ...], dtype: np.dtype
+    ) -> None:
+        self._ptr = ptr
+        self.device = device
+        self.shape = tuple(shape)
+        self.dtype = np.dtype(dtype)
+        self._nbytes = (
+            int(np.prod(self.shape)) * self.dtype.itemsize
+            if self.shape
+            else self.dtype.itemsize
+        )
+        # True once the device buffer has been freed or ownership was handed to
+        # a DLPack capsule; prevents this object's __del__ from (double-)freeing.
+        self._freed = False
+        # Token of the DLPack bundle produced by __dlpack__ (see
+        # _DLPACK_BUNDLES), or None if __dlpack__ was never called. Ownership of
+        # the buffer moves into that bundle when it is created.
+        self._dlpack_token: int | None = None
+
+    # -- inspection ------------------------------------------------------
+
+    @property
+    def nbytes(self) -> int:
+        return self._nbytes
+
+    @property
+    def __cuda_array_interface__(self) -> dict:
+        return {
+            "shape": self.shape,
+            "typestr": self.dtype.str,
+            "data": (self._ptr, False),  # read-write
+            "strides": None,  # C-contiguous
+            "version": 3,
+        }
+
+    def copy_to_host(self) -> np.ndarray:
+        """Copy the owned device buffer into a fresh host NumPy array."""
+        if self._freed:
+            raise RuntimeError("device buffer has been released")
+        cudart = _get_cudart()
+        host = np.empty(self.shape, dtype=self.dtype)
+        ret = cudart.cudaMemcpy(
+            host.ctypes.data_as(ctypes.c_void_p),
+            ctypes.c_void_p(self._ptr),
+            ctypes.c_size_t(self._nbytes),
+            ctypes.c_int(_cudaMemcpyDeviceToHost),
+        )
+        if ret != 0:
+            raise RuntimeError(
+                f"cudaMemcpy (device->host) failed: {_cuda_error_string(cudart, ret)}"
+            )
+        ret = cudart.cudaDeviceSynchronize()
+        if ret != 0:
+            raise RuntimeError(
+                f"cudaDeviceSynchronize failed: {_cuda_error_string(cudart, ret)}"
+            )
+        return host
+
+    def __array__(self, dtype: Any = None) -> np.ndarray:
+        host = self.copy_to_host()
+        return host if dtype is None else host.astype(dtype)
+
+    # -- DLPack ----------------------------------------------------------
+
+    def __dlpack_device__(self) -> tuple[int, int]:
+        return (_kDLCUDA, self.device)
+
+    def __dlpack__(self, stream: Any = None, **kwargs: Any) -> Any:
+        """Return a ``"dltensor"`` PyCapsule wrapping the owned buffer.
+
+        Ownership of the device buffer moves into a self-contained DLPack bundle
+        (see :func:`_make_dlpack_bundle`) whose deleter frees it. The bundle's
+        lifetime is deliberately *not* tied to this object's, because a consumer
+        (Torch/JAX) may keep the tensor long after this ``_IpcDeviceArray`` is
+        gone and will call the deleter then. Whoever ends up owning the capsule
+        -- the consumer, or this object's ``__del__`` for an un-consumed capsule
+        -- frees the buffer exactly once.
+        """
+        if self._freed:
+            raise RuntimeError("device buffer has been released")
+
+        capsule, token = _make_dlpack_bundle(
+            self._ptr, self.device, self.shape, self.dtype
+        )
+        # The buffer now belongs to the bundle; this object must not free it.
+        self._dlpack_token = token
+        self._freed = True
+        return capsule
+
+    # -- cleanup ---------------------------------------------------------
+
+    def __del__(self) -> None:
+        # If __dlpack__ was never called, we still own the buffer -> free it.
+        # If it was called but the capsule was never consumed, the bundle still
+        # holds the buffer; drop the bundle (which frees it). If a consumer took
+        # the capsule, the bundle was already removed on consumption/deletion
+        # and there is nothing to do.
+        try:
+            if self._dlpack_token is None:
+                if not self._freed:
+                    _cuda_free(self._ptr)
+                    self._freed = True
+            else:
+                _drop_unconsumed_dlpack_bundle(self._dlpack_token)
+        except Exception:
+            # __del__ must never raise.
+            pass
+
+
+def _cuda_free(ptr: int) -> None:
+    """Free a device buffer allocated with ``cudaMalloc`` (best effort)."""
+    if not ptr:
+        return
+    cudart = _get_cudart()
+    cudart.cudaFree(ctypes.c_void_p(ptr))
+
+
+# ---------------------------------------------------------------------------
+# DLPack bundle registry
+# ---------------------------------------------------------------------------
+#
+# A DLPack capsule must outlive the object that produced it: the consumer may
+# hold the borrowed tensor arbitrarily long and only calls the deleter when it
+# is done. We therefore keep each capsule's backing ctypes state (the
+# DLManagedTensor, the shape array, the CFUNCTYPE deleter trampoline) alive in a
+# process-global registry keyed by an integer token, rather than on the
+# producing _IpcDeviceArray. The deleter removes its own entry when invoked, so
+# the state is reclaimed exactly when the consumer releases the tensor.
+
+_DLPACK_BUNDLES: dict[int, Any] = {}
+_DLPACK_NEXT_TOKEN = 0
+
+
+def _make_dlpack_bundle(
+    ptr: int, device: int, shape: tuple[int, ...], dtype: np.dtype
+) -> tuple[Any, int]:
+    """Build a ``"dltensor"`` capsule that owns ``ptr`` and register its state.
+
+    Returns ``(capsule, token)``. The buffer is freed exactly once, by the
+    deleter, whether the capsule is consumed by a framework or dropped
+    un-consumed via :func:`_drop_unconsumed_dlpack_bundle`.
+    """
+    global _DLPACK_NEXT_TOKEN
+    token = _DLPACK_NEXT_TOKEN
+    _DLPACK_NEXT_TOKEN += 1
+
+    shape_arr = (ctypes.c_int64 * len(shape))(*shape)
+
+    managed = _DLManagedTensor()
+    managed.dl_tensor.data = ctypes.c_void_p(ptr)
+    managed.dl_tensor.device = _DLDevice(device_type=_kDLCUDA, device_id=device)
+    managed.dl_tensor.ndim = len(shape)
+    managed.dl_tensor.dtype = _dlpack_dtype(dtype)
+    managed.dl_tensor.shape = shape_arr
+    managed.dl_tensor.strides = ctypes.cast(None, ctypes.POINTER(ctypes.c_int64))
+    managed.dl_tensor.byte_offset = 0
+
+    def _deleter(_managed_ptr: int) -> None:
+        # Runs when the consumer releases the tensor. Free the buffer and drop
+        # our registry entry so the ctypes state can be reclaimed. Guard against
+        # a second invocation (bundle already gone).
+        bundle = _DLPACK_BUNDLES.pop(token, None)
+        if bundle is not None:
+            _cuda_free(ptr)
+
+    c_deleter = _DLManagedTensorDeleter(_deleter)
+    managed.deleter = c_deleter
+    managed.manager_ctx = None
+
+    capsule = _ctypes_pythonapi.PyCapsule_New(ctypes.byref(managed), b"dltensor", None)
+
+    # Keep every object the capsule/consumer may still touch alive until the
+    # deleter drops the entry.
+    _DLPACK_BUNDLES[token] = (managed, shape_arr, c_deleter, capsule)
+    return capsule, token
+
+
+def _drop_unconsumed_dlpack_bundle(token: int) -> None:
+    """Free a bundle's buffer iff its capsule was never consumed.
+
+    Called from ``_IpcDeviceArray.__del__``. If the capsule is still named
+    ``"dltensor"`` no framework adopted it, so we invoke the deleter to free the
+    buffer. If it was renamed to ``"used_dltensor"`` a consumer owns it and will
+    (or already did) free it via the deleter -- we leave it alone.
+    """
+    bundle = _DLPACK_BUNDLES.get(token)
+    if bundle is None:
+        return
+    _managed, _shape_arr, c_deleter, capsule = bundle
+    still_dltensor = bool(_ctypes_pythonapi.PyCapsule_IsValid(capsule, b"dltensor"))
+    if still_dltensor:
+        # Nobody adopted it -> free now (the deleter pops the registry entry).
+        c_deleter(0)
+
+
 def _load_cuda_ipc_arraydict(val: ArrayDict) -> Any:
     """Load a CUDA array from a JSON dict with a CUDA IPC handle.
 
     The calling process must share the IPC namespace with the producer
     (e.g. both run with --ipc=host on Docker) and see the same GPU.
 
-    Returns a freshly-allocated, caller-owned ``cupy.ndarray``: the IPC handle
-    is opened, the data is copied device-to-device into memory owned by this
-    process, and the IPC mapping is closed before returning. The borrow of the
-    producer's memory therefore lasts only for a single on-GPU copy, so the
-    producer is free to reuse or release the exported buffer as soon as this
-    call returns.
+    Returns a freshly-allocated, caller-owned :class:`_IpcDeviceArray`: the IPC
+    handle is opened, the array's own bytes are copied device-to-device into a
+    ``cudaMalloc`` buffer owned by this process, the copy is synchronised, and
+    the IPC mapping is closed before returning. The borrow of the producer's
+    memory therefore lasts only for a single on-GPU copy, so the producer is
+    free to reuse or release the exported buffer as soon as this call returns.
 
-    CuPy is the only hard requirement for decoding; downstream code can convert
-    the returned array to PyTorch/JAX via DLPack or __cuda_array_interface__.
+    The result carries no framework dependency: it exposes both
+    ``__cuda_array_interface__`` and ``__dlpack__`` so Torch/JAX/CuPy can adopt
+    it zero-copy, plus ``.copy_to_host()`` / ``np.asarray(...)`` for inspection.
     """
-    try:
-        import cupy
-    except ImportError:
-        raise RuntimeError(
-            "cuda_ipc decoding requires CuPy to be installed "
-            "(pip install cupy-cuda12x or similar)."
-        ) from None
+    cudart = _get_cudart()
 
     data = val["data"]
     handle_bytes = pybase64.b64decode(data["handle"], validate=True)
     device = data["device"]
-    storage_size = data["storage_size"]
     storage_offset = data.get("storage_offset", 0)
 
     dtype = np.dtype(val["dtype"])
     shape = tuple(val["shape"])
+    nbytes = int(np.prod(shape)) * dtype.itemsize if shape else dtype.itemsize
+
+    # Allocate the owned buffer up front (on the target device) so that if the
+    # copy fails we still close the IPC mapping and free the buffer cleanly.
+    ret = cudart.cudaSetDevice(device)
+    if ret != 0:
+        raise RuntimeError(
+            f"cudaSetDevice({device}) failed: {_cuda_error_string(cudart, ret)}"
+        )
+    owned_ptr = ctypes.c_void_p()
+    ret = cudart.cudaMalloc(ctypes.byref(owned_ptr), ctypes.c_size_t(nbytes))
+    if ret != 0:
+        raise RuntimeError(f"cudaMalloc failed: {_cuda_error_string(cudart, ret)}")
 
     base_ptr = _cuda_ipc_open_mem_handle(handle_bytes, device)
     try:
-        # Wrap the producer's (foreign) memory as an unowned view -- owner=None
-        # so cupy never tries to free memory it does not own.
-        mem = cupy.cuda.UnownedMemory(base_ptr, storage_size, owner=None)
-        memptr = cupy.cuda.MemoryPointer(mem, storage_offset)
-        view = cupy.ndarray(shape, dtype=dtype, memptr=memptr)
-        # Copy into caller-owned memory and make sure the copy has completed
-        # before we close the mapping (otherwise we could unmap mid-copy).
-        with cupy.cuda.Device(device):
-            owned = view.copy()
-        cupy.cuda.runtime.deviceSynchronize()
-        return owned
+        # Copy only this array's own bytes out of the producer's (offset)
+        # mapping into our fresh buffer, then block until the copy is done so we
+        # never unmap mid-copy.
+        ret = cudart.cudaMemcpy(
+            owned_ptr,
+            ctypes.c_void_p(base_ptr + storage_offset),
+            ctypes.c_size_t(nbytes),
+            ctypes.c_int(_cudaMemcpyDeviceToDevice),
+        )
+        if ret != 0:
+            raise RuntimeError(
+                f"cudaMemcpy (device->device) failed: {_cuda_error_string(cudart, ret)}"
+            )
+        ret = cudart.cudaDeviceSynchronize()
+        if ret != 0:
+            raise RuntimeError(
+                f"cudaDeviceSynchronize failed: {_cuda_error_string(cudart, ret)}"
+            )
+    except Exception:
+        cudart.cudaFree(owned_ptr)
+        raise
     finally:
         _cuda_ipc_close_mem_handle(base_ptr)
+
+    return _IpcDeviceArray(owned_ptr.value, device, shape, dtype)
 
 
 def _coerce_shape_dtype(
@@ -1179,7 +1500,7 @@ def decode_array(
             data = _load_binref_arraydict(val.model_dump(), base_dir)
 
         elif val.data.encoding == "cuda_ipc":
-            # Returns a cupy.ndarray on GPU — skip numpy coercion
+            # Returns a framework-agnostic on-GPU wrapper — skip numpy coercion
             return _load_cuda_ipc_arraydict(val.model_dump())
 
         # keep checking for "raw" for backwards compat

@@ -9,10 +9,12 @@ Run on a GPU machine with either::
     python tests/test_cuda_ipc.py         # standalone runner
     pytest tests/test_cuda_ipc.py         # via pytest
 
-Requires: cupy (for encode/decode) and optionally torch (for interop tests).
-The CUDA IPC implementation is framework-agnostic on the *encode* side -- it
-works with any object that implements ``__cuda_array_interface__`` (CuPy,
-PyTorch, JAX, Numba). Decoding materialises a ``cupy.ndarray``.
+Requires: cupy (used here only to *produce* GPU inputs) and optionally torch
+(for the DLPack/CUDA-array-interface interop tests). The CUDA IPC implementation
+is framework-agnostic on *both* sides: encode works with any object that
+implements ``__cuda_array_interface__`` (CuPy, PyTorch, JAX, Numba), and decode
+returns a framework-agnostic ``_IpcDeviceArray`` (no CuPy dependency) that
+exposes ``__cuda_array_interface__`` and ``__dlpack__`` plus a host-copy helper.
 
 Note on process model
 ---------------------
@@ -113,11 +115,18 @@ def _producer_main(build_fn_name, args, to_consumer, from_consumer):
 
 
 def _consumer_main(to_consumer, from_consumer, result_q):
-    """Receive encodings, decode them cross-process, verify, report."""
-    try:
-        import cupy
+    """Receive encodings, decode them cross-process, verify, report.
 
-        from tesseract_core.runtime.array_encoding import _load_cuda_ipc_arraydict
+    Decoding is framework-agnostic: it returns an ``_IpcDeviceArray`` that
+    exposes ``__cuda_array_interface__`` and ``__dlpack__``. We read the values
+    back via the wrapper's host-copy helper -- no CuPy needed for the assertions
+    -- so this path proves the decoded result is framework-independent.
+    """
+    try:
+        from tesseract_core.runtime.array_encoding import (
+            _IpcDeviceArray,
+            _load_cuda_ipc_arraydict,
+        )
 
         payloads = to_consumer.get(timeout=_TIMEOUT)
         if isinstance(payloads, tuple) and payloads[0] == "PRODUCER_ERROR":
@@ -130,8 +139,11 @@ def _consumer_main(to_consumer, from_consumer, result_q):
             # the IPC mapping before returning, so `decoded` no longer aliases
             # the producer's buffer.
             decoded = _load_cuda_ipc_arraydict(encoded)
-            assert isinstance(decoded, cupy.ndarray)
-            got = cupy.asnumpy(decoded)
+            assert isinstance(decoded, _IpcDeviceArray)
+            assert hasattr(decoded, "__cuda_array_interface__")
+            assert hasattr(decoded, "__dlpack__")
+            # Host-copy helper: read values back without any GPU framework.
+            got = decoded.copy_to_host()
             results.append(
                 {
                     "shape": tuple(encoded["shape"]),
@@ -141,7 +153,6 @@ def _consumer_main(to_consumer, from_consumer, result_q):
                 }
             )
 
-        cupy.cuda.runtime.deviceSynchronize()
         result_q.put(("OK", results))
     except Exception:
         traceback.print_exc()
@@ -466,10 +477,12 @@ def _ring1_server(req_q, resp_q):
 
 
 def _ring1_client(req_q, resp_q, result_q, n):
-    """Serial client: one request at a time; copy each output and keep it."""
-    try:
-        import cupy
+    """Serial client: one request at a time; copy each output and keep it.
 
+    The client decodes without CuPy (the decode returns a framework-agnostic
+    wrapper); values are read back via its host-copy helper.
+    """
+    try:
         from tesseract_core.runtime.array_encoding import _load_cuda_ipc_arraydict
 
         kept = []
@@ -485,9 +498,10 @@ def _ring1_client(req_q, resp_q, result_q, n):
         req_q.put(None)
 
         # Every earlier copy must still be intact, even though the server has
-        # since released and reused those buffers.
+        # since released and reused those buffers. Read back via the wrapper's
+        # host-copy helper (no CuPy needed on the consumer side).
         all_ok = all(
-            bool(np.allclose(cupy.asnumpy(a), np.arange(1024) + (j + 1) * 100.0))
+            bool(np.allclose(a.copy_to_host(), np.arange(1024) + (j + 1) * 100.0))
             for j, a in kept
         )
         result_q.put(("OK", all_ok))
@@ -538,7 +552,7 @@ def test_sdk_encode_structure():
     assert encoded["dtype"] == "float64"
 
 
-# ── Test 4: PyTorch interop (encode a torch tensor, decode as CuPy) ──────
+# ── Test 4: framework interop (encode a torch tensor; decode CuPy-free) ──
 
 
 @requires_cuda
@@ -551,15 +565,24 @@ def test_cross_process_torch_encode():
 
 @requires_cuda
 @requires_torch_cuda
-def test_cupy_decode_to_torch():
-    """A decoded CuPy array can be adopted by torch via the CUDA interface."""
+def test_decode_to_torch_via_dlpack():
+    """A decoded array is adopted by torch zero-copy via DLPack -- no CuPy.
+
+    This is the framework-agnostic proof: the decode returns an
+    ``_IpcDeviceArray`` (no CuPy involved), ``torch.from_dlpack`` takes ownership
+    of its device buffer, and the values match. ``cupy`` is imported in this
+    process only to *produce* the input in the subprocess harness, never to
+    inspect the decoded result.
+    """
     import torch
 
-    from tesseract_core.runtime.array_encoding import _load_cuda_ipc_arraydict
+    from tesseract_core.runtime.array_encoding import (
+        _IpcDeviceArray,
+        _load_cuda_ipc_arraydict,
+    )
 
     # Produce in a subprocess, hand the encoded dict back, decode here, then
-    # wrap in torch. We reuse the harness but only need the encoded dict, so
-    # run the decode here.
+    # adopt with torch via DLPack.
     ctx = multiprocessing.get_context("spawn")
     to_consumer = ctx.Queue()
     from_consumer = ctx.Queue()
@@ -572,8 +595,9 @@ def test_cupy_decode_to_torch():
     try:
         payloads = to_consumer.get(timeout=_TIMEOUT)
         encoded, expected = payloads[0]
-        decoded_cupy = _load_cuda_ipc_arraydict(encoded)
-        decoded_torch = torch.as_tensor(decoded_cupy, device="cuda:0")
+        decoded = _load_cuda_ipc_arraydict(encoded)
+        assert isinstance(decoded, _IpcDeviceArray)
+        decoded_torch = torch.from_dlpack(decoded)
         assert decoded_torch.is_cuda
         np.testing.assert_array_equal(decoded_torch.cpu().numpy(), np.asarray(expected))
     finally:
@@ -581,6 +605,139 @@ def test_cupy_decode_to_torch():
         producer.join(timeout=_TIMEOUT)
         if producer.is_alive():
             producer.terminate()
+
+
+@requires_cuda
+@requires_torch_cuda
+def test_decode_to_torch_via_cuda_array_interface():
+    """The decoded wrapper is also adoptable via ``__cuda_array_interface__``.
+
+    Complements the DLPack path: ``torch.as_tensor`` consumes the wrapper's
+    ``__cuda_array_interface__`` (leaving DLPack ownership untouched, so the
+    wrapper still frees its own buffer). Again no CuPy touches the result.
+    """
+    import torch
+
+    from tesseract_core.runtime.array_encoding import _load_cuda_ipc_arraydict
+
+    ctx = multiprocessing.get_context("spawn")
+    to_consumer = ctx.Queue()
+    from_consumer = ctx.Queue()
+
+    producer = ctx.Process(
+        target=_producer_main,
+        args=("basic", (), to_consumer, from_consumer),
+    )
+    producer.start()
+    try:
+        payloads = to_consumer.get(timeout=_TIMEOUT)
+        encoded, expected = payloads[0]
+        decoded = _load_cuda_ipc_arraydict(encoded)
+        decoded_torch = torch.as_tensor(decoded, device="cuda:0")
+        assert decoded_torch.is_cuda
+        np.testing.assert_array_equal(decoded_torch.cpu().numpy(), np.asarray(expected))
+    finally:
+        from_consumer.put("done")
+        producer.join(timeout=_TIMEOUT)
+        if producer.is_alive():
+            producer.terminate()
+
+
+def _cupy_free_consumer_main(to_consumer, from_consumer, result_q):
+    """Decode + adopt via torch with any import of ``cupy`` forced to fail.
+
+    Proves the decode path carries no CuPy dependency: cupy is blocked before
+    the decode runs, so if the decode (or torch.from_dlpack of its result) tried
+    to import cupy the test would fail. The producer still uses cupy to build the
+    input, but in its own separate process.
+    """
+    import builtins
+    import sys
+
+    real_import = builtins.__import__
+
+    def blocked_import(name, *args, **kwargs):
+        if name == "cupy" or name.startswith("cupy."):
+            raise ImportError("cupy is blocked in this process")
+        return real_import(name, *args, **kwargs)
+
+    try:
+        import torch
+
+        from tesseract_core.runtime.array_encoding import (
+            _IpcDeviceArray,
+            _load_cuda_ipc_arraydict,
+        )
+
+        payloads = to_consumer.get(timeout=_TIMEOUT)
+        encoded, expected = payloads[0]
+
+        # Purge any cupy the test-module import pulled in, THEN block further
+        # imports, so re-appearance in sys.modules can only be the decode path.
+        for mod in [m for m in sys.modules if m == "cupy" or m.startswith("cupy.")]:
+            del sys.modules[mod]
+        builtins.__import__ = blocked_import
+
+        decoded = _load_cuda_ipc_arraydict(encoded)
+        assert isinstance(decoded, _IpcDeviceArray)
+        # Host-copy helper path (no framework).
+        host = decoded.copy_to_host()
+        host_ok = bool(np.array_equal(host, np.asarray(expected)))
+        # Torch-via-DLPack path.
+        decoded2 = _load_cuda_ipc_arraydict(encoded)
+        t = torch.from_dlpack(decoded2)
+        torch_ok = bool(np.array_equal(t.cpu().numpy(), np.asarray(expected)))
+        # The decode path must not have imported cupy.
+        cupy_absent = "cupy" not in sys.modules
+
+        result_q.put(("OK", (host_ok, torch_ok, cupy_absent)))
+    except Exception:
+        traceback.print_exc()
+        result_q.put(("CONSUMER_ERROR", traceback.format_exc()))
+    finally:
+        try:
+            from_consumer.put("done")
+        except Exception:
+            pass
+
+
+@requires_cuda
+@requires_torch_cuda
+def test_decode_is_cupy_free():
+    """Decode + torch.from_dlpack succeed with ``import cupy`` blocked.
+
+    The consumer process forbids importing cupy entirely; the producer builds
+    the input with cupy in its own process. This is the explicit proof that
+    decoding has no CuPy runtime dependency.
+    """
+    ctx = multiprocessing.get_context("spawn")
+    to_consumer = ctx.Queue()
+    from_consumer = ctx.Queue()
+    result_q = ctx.Queue()
+
+    producer = ctx.Process(
+        target=_producer_main,
+        args=("basic", (), to_consumer, from_consumer),
+    )
+    consumer = ctx.Process(
+        target=_cupy_free_consumer_main, args=(to_consumer, from_consumer, result_q)
+    )
+    producer.start()
+    consumer.start()
+    try:
+        status, payload = result_q.get(timeout=_TIMEOUT)
+        assert status == "OK", f"{status}:\n{payload}"
+        host_ok, torch_ok, cupy_absent = payload
+        assert host_ok, "host-copy values mismatch"
+        assert torch_ok, "torch.from_dlpack values mismatch"
+        assert cupy_absent, "the decode path imported cupy"
+    finally:
+        consumer.join(timeout=_TIMEOUT)
+        producer.join(timeout=_TIMEOUT)
+        for proc in (consumer, producer):
+            if proc.is_alive():
+                proc.terminate()
+                proc.join(timeout=5)
 
 
 # ── Test 5: full Tesseract API with json+cuda_ipc output format ─────────
@@ -651,7 +808,12 @@ def _run_standalone():
     if _TORCH_AVAILABLE:
         tests += [
             ("cross-process torch encode", test_cross_process_torch_encode),
-            ("cupy decode to torch", test_cupy_decode_to_torch),
+            ("decode to torch via dlpack", test_decode_to_torch_via_dlpack),
+            (
+                "decode to torch via cuda array interface",
+                test_decode_to_torch_via_cuda_array_interface,
+            ),
+            ("decode is cupy-free", test_decode_is_cupy_free),
         ]
     if _JAX_AVAILABLE:
         tests.append(
