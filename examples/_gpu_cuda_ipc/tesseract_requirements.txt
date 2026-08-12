@@ -1,0 +1,3 @@
+# CuPy provides the device arrays returned by apply(). The cuda12x wheel bundles
+# its own CUDA runtime, matching the 12.x base image.
+cupy-cuda12x

@@ -298,6 +298,11 @@ jobs:
       - name: Show GPU info
         run: |
           nvidia-smi
+          # Confirm Docker can see the GPU via the NVIDIA container runtime; the
+          # end-to-end tests build and serve a GPU Tesseract, so a broken
+          # runtime must fail loudly here rather than silently skip.
+          docker info
+          docker run --rm --gpus all nvidia/cuda:12.8.1-base-ubuntu24.04 nvidia-smi
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v7
@@ -331,6 +336,7 @@ jobs:
           uv run --no-sync pytest \
             -v \
             -m gpu \
+            --always-run-endtoend \
             --timeout=300 \
             --cov-report=term-missing:skip-covered \
             --cov-report=xml:coverage.xml \
