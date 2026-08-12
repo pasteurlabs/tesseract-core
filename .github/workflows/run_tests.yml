@@ -62,6 +62,7 @@ jobs:
           uv run --no-sync pytest \
             -v \
             --skip-endtoend \
+            -m "not gpu" \
             --timeout=300 \
             --cov-report=term-missing:skip-covered \
             --cov-report=xml:coverage.xml \
@@ -283,9 +284,71 @@ jobs:
           uv pip install jupyter
           uv run --no-sync jupyter nbconvert --to notebook --execute demo.ipynb
 
+  tests-gpu:
+    runs-on: tesseract-ci-gpu
+
+    defaults:
+      run:
+        shell: bash -el {0}
+
+    steps:
+      - name: Set up Git repository
+        uses: actions/checkout@v7
+
+      - name: Show GPU info
+        run: |
+          nvidia-smi
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install package
+        run: |
+          cp production.uv.lock uv.lock
+          uv sync --python 3.12 --extra dev --frozen
+
+      # cupy/torch/jax with CUDA support are not declared dependencies (they are
+      # only needed to *produce* GPU arrays in the tests); install their CUDA 12
+      # builds into the same environment here. The runtime library itself only
+      # needs libcudart, which cupy's wheel bundles.
+      - name: Install GPU array frameworks
+        run: |
+          uv pip install \
+            "cupy-cuda12x" \
+            "torch" \
+            "jax[cuda12]"
+
+      - name: Show installed CUDA frameworks
+        run: |
+          uv run --no-sync python -c "import cupy; print('cupy', cupy.__version__, 'devices', cupy.cuda.runtime.getDeviceCount())"
+          uv run --no-sync python -c "import torch; print('torch', torch.__version__, 'cuda', torch.cuda.is_available())"
+          uv run --no-sync python -c "import jax; print('jax', jax.__version__, 'devices', jax.devices())"
+
+      - name: Run GPU test suite
+        run: |
+          uv run --no-sync pytest \
+            -v \
+            -m gpu \
+            --timeout=300 \
+            --cov-report=term-missing:skip-covered \
+            --cov-report=xml:coverage.xml \
+            --cov=tesseract_core \
+            --cov-branch
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v7.0.0
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: pasteurlabs/tesseract-core
+          files: coverage*.xml
+          flags: gpu
+          fail_ci_if_error: true
+
   all-ok:
     if: always()
-    needs: [tests-base, tests-e2e, tests-demos]
+    needs: [tests-base, tests-e2e, tests-demos, tests-gpu]
 
     runs-on: ubuntu-latest
 
@@ -304,6 +367,11 @@ jobs:
 
           if [[ "${{ needs.tests-demos.result }}" != "success" && "${{ needs.tests-demos.result }}" != "skipped" ]]; then
             echo "Demo tests failed"
+            exit 1
+          fi
+
+          if [[ "${{ needs.tests-gpu.result }}" != "success" && "${{ needs.tests-gpu.result }}" != "skipped" ]]; then
+            echo "GPU tests failed"
             exit 1
           fi
 
