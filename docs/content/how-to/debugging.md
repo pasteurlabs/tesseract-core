@@ -56,6 +56,57 @@ This approach is particularly useful for:
 - Running unit tests against your Tesseract
 - Debugging with Python debuggers like `pdb` or IDE debuggers
 
+### Running in a dedicated process
+
+`from_tesseract_api()` imports your Tesseract API into the current process, so it
+shares an interpreter and all global state with your own code. Use
+`from_source()` instead to run it in a dedicated subprocess, reached over HTTP:
+
+```python
+with Tesseract.from_source("/path/to/your/tesseract_api.py") as tess:
+    result = tess.apply(inputs={"a": np.array([1.0, 2.0]), "b": np.array([3.0, 4.0])})
+```
+
+Unlike `from_tesseract_api()`, this must be used as a context manager (or served
+explicitly with `tess.serve()` and stopped with `tess.teardown()`), since there
+is a process to clean up.
+
+Use it when sharing an interpreter is the problem — for instance when the caller
+is itself a JAX program, since nesting JAX inside JAX is not safe and can
+deadlock.
+
+Since the Tesseract is no longer in your process, your own debugger cannot step
+into it. A debugger is therefore started alongside it, listening on a free
+loopback port that is logged on startup:
+
+```
+Debug mode enabled. Attach a debugger to 127.0.0.1:54321
+```
+
+Each Tesseract gets its own port, so several can be debugged at once. Attach to
+it as described under "Debug mode" below. If you are using dedicated processes
+for isolation rather than for debugging, pass `runtime_config={"debug": False}`
+to turn debug mode off altogether — as everywhere else, debug mode is what
+starts a debugger. That also drops the full tracebacks and the `test` endpoint,
+which is what you want outside development in any case.
+
+By default the Tesseract runs on the same interpreter as the caller. Point
+`python_executable` at another environment to give it dependencies that conflict
+with yours:
+
+```python
+tess = Tesseract.from_source(
+    "/path/to/your/tesseract_api.py",
+    python_executable="/path/to/venv/bin/python",
+)
+```
+
+That environment needs `tesseract-core[runtime]` and the Tesseract's own
+requirements installed; a virtual environment created with
+`uv venv` and populated from the Tesseract's `tesseract_requirements.txt` works.
+Note that this isolates Python dependencies only — for system-level packages and
+everything else a container provides, build an image instead.
+
 ## Debug mode
 
 `tesseract serve` supports a `--debug` flag; this has two effects:
