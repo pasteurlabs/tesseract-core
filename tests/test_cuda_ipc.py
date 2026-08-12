@@ -278,9 +278,9 @@ def _build_force_staging():
     staging buffer) uses the real implementation. The patch runs in the producer
     process and persists through the subsequent ``dump_cuda_ipc_arraydict``.
     """
-    from tesseract_core.runtime import array_encoding as ae
+    from tesseract_core.runtime import cuda_ipc
 
-    real = ae._cuda_ipc_get_mem_handle
+    real = cuda_ipc._cuda_ipc_get_mem_handle
     state = {"rejected": False}
 
     def flaky(ptr):
@@ -289,7 +289,7 @@ def _build_force_staging():
             raise RuntimeError("cudaIpcGetMemHandle failed: simulated VMM reject")
         return real(ptr)
 
-    ae._cuda_ipc_get_mem_handle = flaky
+    cuda_ipc._cuda_ipc_get_mem_handle = flaky
 
     arr = cupy.arange(1024, dtype=cupy.float32) + 7.0
     return [(arr, cupy.asnumpy(arr))]
