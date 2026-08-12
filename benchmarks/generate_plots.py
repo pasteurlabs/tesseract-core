@@ -55,6 +55,7 @@ def extract_suite_data(results: dict, suite_name: str) -> dict[int, float]:
         "from_tesseract_api",
         "containerized_http",
         "containerized_http_shmem",
+        "containerized_http_shmem_pool",
         "containerized_cli",
         "containerized_cli_shmem",
     )
@@ -146,28 +147,18 @@ def generate_guidance_plot(output_path: Path, benchmark_results: dict) -> None:
     containerized_http_data = extract_suite_data(
         benchmark_results, "containerized_http"
     )
-    containerized_http_shmem_data = extract_suite_data(
-        benchmark_results, "containerized_http_shmem"
-    )
-    containerized_cli_data = extract_suite_data(benchmark_results, "containerized_cli")
-    containerized_cli_shmem_data = extract_suite_data(
-        benchmark_results, "containerized_cli_shmem"
+    containerized_http_shmem_pool_data = extract_suite_data(
+        benchmark_results, "containerized_http_shmem_pool"
     )
 
-    # Colorblind-safe palette (blue / orange / sky / purple / pink)
+    # Colorblind-safe palette (blue / orange / green)
     modes = [
         ("Non-containerized, in-memory", from_api_data, "#0072B2"),
         ("Containerized, json+base64 via HTTP", containerized_http_data, "#E69F00"),
         (
             "Containerized, json+binref via HTTP (shmem)",
-            containerized_http_shmem_data,
-            "#56B4E9",
-        ),
-        ("Containerized, json+binref via CLI", containerized_cli_data, "#9467BD"),
-        (
-            "Containerized, json+binref via CLI (shmem)",
-            containerized_cli_shmem_data,
-            "#CC79A7",
+            containerized_http_shmem_pool_data,
+            "#009E73",
         ),
     ]
 
@@ -378,24 +369,22 @@ def generate_overhead_comparison_plot(
     containerized_http_data = extract_suite_data(
         benchmark_results, "containerized_http"
     )
-    containerized_http_shmem_data = extract_suite_data(
-        benchmark_results, "containerized_http_shmem"
+    containerized_http_shmem_pool_data = extract_suite_data(
+        benchmark_results, "containerized_http_shmem_pool"
     )
     containerized_cli_data = extract_suite_data(benchmark_results, "containerized_cli")
-    containerized_cli_shmem_data = extract_suite_data(
-        benchmark_results, "containerized_cli_shmem"
-    )
 
     from_api = [from_api_data.get(s, 0) for s in sizes]
     containerized_http = [containerized_http_data.get(s, 0) for s in sizes]
-    containerized_http_shmem = [containerized_http_shmem_data.get(s, 0) for s in sizes]
+    containerized_http_shmem = [
+        containerized_http_shmem_pool_data.get(s, 0) for s in sizes
+    ]
     containerized_cli = [containerized_cli_data.get(s, 0) for s in sizes]
-    containerized_cli_shmem = [containerized_cli_shmem_data.get(s, 0) for s in sizes]
 
     x = np.arange(len(sizes))
-    width = 0.16
-    # Five bars per group, centered on each tick.
-    offsets = np.array([-2, -1, 0, 1, 2]) * width
+    width = 0.2
+    # Four bars per group, centered on each tick.
+    offsets = np.array([-1.5, -0.5, 0.5, 1.5]) * width
 
     bars1 = ax.bar(
         x + offsets[0],
@@ -416,7 +405,7 @@ def generate_overhead_comparison_plot(
         containerized_http_shmem,
         width,
         label="Containerized, json+binref via HTTP (shmem)",
-        color="#56B4E9",
+        color="#009E73",
     )
     bars4 = ax.bar(
         x + offsets[3],
@@ -425,15 +414,9 @@ def generate_overhead_comparison_plot(
         label="Containerized, json+binref via CLI",
         color="#9467BD",
     )
-    bars5 = ax.bar(
-        x + offsets[4],
-        containerized_cli_shmem,
-        width,
-        label="Containerized, json+binref via CLI (shmem)",
-        color="#CC79A7",
-    )
 
     ax.set_xlabel("Array Size (elements)", fontsize=12)
+    ax.set_ylabel("Overhead (ms, log scale)", fontsize=12)
     ax.set_title("Tesseract Overhead by Interaction Mode", fontsize=18, pad=30)
     ax.text(
         0.5,
@@ -474,8 +457,7 @@ def generate_overhead_comparison_plot(
                     textcoords="offset points",
                     ha="center",
                     va="bottom",
-                    fontsize=7,
-                    rotation=90,
+                    fontsize=8,
                     path_effects=_outline,
                 )
 
@@ -483,7 +465,6 @@ def generate_overhead_comparison_plot(
     add_labels(bars2)
     add_labels(bars3)
     add_labels(bars4)
-    add_labels(bars5)
 
     plt.tight_layout()
     plt.savefig(output_path, dpi=150, bbox_inches="tight")

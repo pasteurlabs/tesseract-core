@@ -56,6 +56,13 @@ Overhead comparison across interaction modes for different array sizes. Uses a n
 | **Containerized, json+base64 via HTTP** (orange) | Full Docker + HTTP stack, served via HTTP (e.g. `tesseract serve`). Includes serialization and network transfer.            | Production, CI/CD, multi-language environments         |
 | **Containerized, json+binref via CLI** (purple)  | CLI invocation via `tesseract run`. Includes container startup and disk I/O, but avoids transferring data over the network. | Shell scripts, one-off runs, pipelines with large data |
 
+For same-machine workloads on large arrays, a fourth mode is worth knowing about:
+serving over HTTP but exchanging arrays as `json+binref` files on a shared-memory
+`tmpfs` (`/dev/shm`), so array data stays in memory instead of being base64-encoded
+into the HTTP body. On the benchmark machine this cut overhead for a 76MB array from
+~1s to ~0.2s, and to ~0.08s with the opt-in `binref_pool` fast path. See
+{doc}`/content/how-to/fast-local-runs` for when to use it and how.
+
 The guidance chart below puts these numbers in context by showing overhead as a percentage of computation time, for three representative I/O sizes (dotted = 1kB, dashed = 1MB, solid = 1GB). For small data, fixed costs (HTTP roundtrip, container startup) dominate. For large data, transfer and serialization take over.
 
 ```{figure} /img/benchmark_guidance.png
@@ -90,6 +97,8 @@ Advice in this section is specific to the benchmarking scenario described above.
 Encoding format affects both serialization time and the volume of data transferred. A 10M-element float64 array is ~76MB as raw binary, ~100MB as base64, and ~230-760MB as JSON. If I/O is slow, data transfer dominates over serialization, and choosing a compact format is the most effective optimization.
 
 In short: use **base64** (default) for HTTP transport, **binref** for large arrays or disk-based pipelines, and **json** only when you need human-readable output. See {doc}`/content/reference/array-encodings` for format details and usage examples.
+
+When the client and a served Tesseract share a machine, you can combine HTTP serving with binref on a shared-memory `tmpfs` to pass large arrays without base64-encoding them into the request body. See {doc}`/content/how-to/fast-local-runs`.
 
 ### 2. Batch small operations
 

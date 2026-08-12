@@ -106,6 +106,36 @@ def http_shmem_tesseract_instance(noop_tesseract_image):
     cm.__exit__(None, None, None)
 
 
+@pytest.fixture(scope="module")
+def http_shmem_pool_tesseract_instance(noop_tesseract_image):
+    """Create a containerized HTTP Tesseract using shmem binref with the pool.
+
+    Same as ``http_shmem_tesseract_instance`` but with ``binref_pool=True``,
+    which enables the client-side warm-buffer write pool and zero-copy lazy
+    mmap decode on the shared-memory binref exchange.
+    """
+    from tesseract_core.sdk.tesseract import Tesseract
+
+    shm_dir = Path("/dev/shm")
+    if not shm_dir.is_dir():
+        pytest.skip("/dev/shm is not available on this platform")
+
+    input_dir = Path(tempfile.mkdtemp(prefix="tess_shmem_pool_in_", dir=shm_dir))
+    output_dir = Path(tempfile.mkdtemp(prefix="tess_shmem_pool_out_", dir=shm_dir))
+    cm = Tesseract.from_image(
+        noop_tesseract_image,
+        input_path=input_dir,
+        output_path=output_dir,
+        output_format="json+binref",
+        binref_pool=True,
+    )
+    tesseract = cm.__enter__()
+    # Warmup - first request is slow due to container startup
+    tesseract.health()
+    yield tesseract
+    cm.__exit__(None, None, None)
+
+
 def test_from_tesseract_api(benchmark, tesseract_api_instance, array_size):
     """Benchmark non-containerized Tesseract via from_tesseract_api()."""
     arr = create_test_array(array_size)
@@ -135,6 +165,22 @@ def test_containerized_http_shmem(benchmark, http_shmem_tesseract_instance, arra
     inputs = {"data": arr}
 
     benchmark(http_shmem_tesseract_instance.apply, inputs)
+
+
+@pytest.mark.docker
+def test_containerized_http_shmem_pool(
+    benchmark, http_shmem_pool_tesseract_instance, array_size
+):
+    """Benchmark containerized HTTP shmem binref with ``binref_pool=True``.
+
+    Same served-container HTTP + shmem binref path as
+    ``test_containerized_http_shmem``, but with the opt-in warm-buffer write
+    pool and zero-copy lazy mmap decode enabled.
+    """
+    arr = create_test_array(array_size)
+    inputs = {"data": arr}
+
+    benchmark(http_shmem_pool_tesseract_instance.apply, inputs)
 
 
 def _run_cli_binref_benchmark(benchmark, noop_tesseract_image, array_size, binref_root):
