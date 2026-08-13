@@ -9,6 +9,8 @@ import numpy as np
 
 from tesseract_core.runtime.jax_recipes import _cache_key
 
+_V = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+
 
 class TestCacheKey:
     """Tests for _cache_key -- the LRUCache key used by the jax-cache recipe."""
@@ -223,3 +225,85 @@ class TestCacheCorrectness:
             assert jax_recipes._jax_vjp_cache.size == 1
         finally:
             set_jax_vjp_cache_size(0)
+
+
+class TestCacheWithNonArrayInputs:
+    """Enabling the cache must not change results, or reject valid schemas.
+
+    ``_build_api`` above carries only float arrays and float scalars, so it
+    exercises neither of the paths here: array leaves are keyed on their
+    bytes and discriminate correctly, and no leaf is a type ``jax.vjp``
+    refuses to trace.
+    """
+
+    @staticmethod
+    def _api():
+        import equinox as eqx
+        import jax.numpy as jnp
+        from pydantic import BaseModel, Field
+
+        from tesseract_core.runtime import Array, Differentiable, Float32
+
+        class InputSchema(BaseModel):
+            v: Differentiable[Array[(3,), Float32]] = Field(description="vec")
+            s: Differentiable[Float32] = Field(default=1.5, description="scale")
+            norm_ord: int = Field(default=2, description="order of norm")
+            mode: str = Field(default="fast", description="a non-JAX leaf")
+
+        @eqx.filter_jit
+        def apply_jit(inputs):
+            scale = 2.0 if inputs["mode"] == "fast" else 3.0
+            y = jnp.tanh(inputs["s"] * inputs["v"]) * scale
+            return {"y": y, "n": jnp.linalg.norm(y, ord=inputs["norm_ord"])}
+
+        return InputSchema, apply_jit
+
+    def _vjp(self, cache_size, norm_ord, prime_with=None):
+        """Optionally prime the cache with ``prime_with``, then vjp at ``norm_ord``."""
+        from tesseract_core.runtime.experimental import set_jax_vjp_cache_size
+        from tesseract_core.runtime.jax_recipes import jax_apply, jax_vjp
+
+        InputSchema, apply_jit = self._api()
+        set_jax_vjp_cache_size(cache_size)
+        try:
+            if prime_with is not None:
+                jax_apply(apply_jit, InputSchema(v=_V, norm_ord=prime_with))
+            inp = InputSchema(v=_V, norm_ord=norm_ord)
+            ct = {"y": np.ones(3, dtype=np.float32)}
+            return jax_vjp(apply_jit, inp, {"v", "s"}, {"y"}, ct)
+        finally:
+            set_jax_vjp_cache_size(0)
+
+    def test_int_input_does_not_serve_a_colliding_entry(self):
+        # hash(-1) == hash(-2), so priming the cache at norm_ord=-1 used to
+        # satisfy a lookup at norm_ord=-2 and return the wrong gradient.
+        expected = self._vjp(0, norm_ord=-2)
+        got = self._vjp(4, norm_ord=-2, prime_with=-1)
+        for k in expected:
+            np.testing.assert_allclose(
+                np.asarray(got[k]), np.asarray(expected[k]), rtol=1e-6
+            )
+
+    def test_non_jax_input_does_not_break_apply(self):
+        # jax.vjp traces every leaf it is handed, so a str leaf aborted the
+        # call outright and merely enabling the cache broke the Tesseract.
+        from tesseract_core.runtime.experimental import set_jax_vjp_cache_size
+        from tesseract_core.runtime.jax_recipes import jax_apply
+
+        InputSchema, apply_jit = self._api()
+        set_jax_vjp_cache_size(4)
+        try:
+            out = jax_apply(apply_jit, InputSchema(v=_V))
+        finally:
+            set_jax_vjp_cache_size(0)
+        assert np.all(np.isfinite(np.asarray(out["y"])))
+
+    def test_scalar_float_field_keeps_its_gradient(self):
+        # The input partition must admit Python floats, not just arrays, or a
+        # scalar Differentiable[Float32] field silently loses its gradient.
+        expected = self._vjp(0, norm_ord=2)
+        got = self._vjp(4, norm_ord=2, prime_with=2)
+        np.testing.assert_allclose(
+            np.asarray(got["s"]), np.asarray(expected["s"]), rtol=1e-6
+        )
+        assert np.asarray(expected["s"]).item() != 0.0

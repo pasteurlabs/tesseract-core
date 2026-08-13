@@ -92,13 +92,25 @@ def jax_apply(apply_jit: Callable, inputs: BaseModel) -> dict:
     # array (differentiable) from non-array outputs; has_aux tells jax.vjp
     # to only differentiate through the array outputs.
     #
-    def _apply_for_vjp(inputs_dict: dict) -> tuple:
-        out = apply_jit(inputs_dict)
+    # The inputs are partitioned the same way before being handed to jax.vjp,
+    # which differentiates every leaf it receives: a str flag or an optional
+    # None would otherwise abort the call outright ("is not a valid JAX
+    # type"), so merely enabling the cache would break a Tesseract that runs
+    # fine without it. Static leaves are threaded back in as constants,
+    # mirroring jax_abstract_eval below. The filter admits Python floats as
+    # well as arrays, so a scalar ``Differentiable[Float32]`` field keeps its
+    # gradient.
+    dynamic_inputs, static_inputs = eqx.partition(
+        inputs_dict, filter_spec=eqx.is_inexact_array_like
+    )
+
+    def _apply_for_vjp(dynamic_inputs: dict) -> tuple:
+        out = apply_jit(eqx.combine(static_inputs, dynamic_inputs))
         diff_out, static_out = eqx.partition(out, eqx.is_array)
         return diff_out, static_out
 
     diff_primals, vjp_func, static_primals = jax.vjp(
-        _apply_for_vjp, inputs_dict, has_aux=True
+        _apply_for_vjp, dynamic_inputs, has_aux=True
     )
     out = eqx.combine(diff_primals, static_primals)
 
