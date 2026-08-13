@@ -6,6 +6,7 @@ import os
 import random
 import string
 import subprocess
+import sys
 import time
 from pathlib import Path
 from shutil import copytree
@@ -141,6 +142,43 @@ def dummy_docker_file(tmp_path):
     with open(dockerfile_path, "w") as f:
         f.write(dockerfile_content)
     return dockerfile_path
+
+
+@pytest.fixture(scope="session", autouse=True)
+def use_this_environments_console_scripts():
+    """Make shelled-out `tesseract`/`tesseract-runtime` this environment's.
+
+    Several tests invoke the console scripts as real subprocesses, which is the
+    point -- it covers the entry points, unlike invoking a module. But a bare
+    name is resolved through PATH, and anyone with tesseract-core installed
+    globally (as a uv tool or pipx app) has that copy first, with its own
+    site-packages. The tests then exercise code that is not the code under test.
+    In CI everything runs under `uv run`, which puts the project environment
+    first, so this only ever bites locally -- and intermittently, since loading
+    a tesseract_api.py sets PYTHONPATH as a side effect, which sometimes lends
+    the shadowing copy enough of this environment to work.
+
+    Applied to os.environ for the whole session rather than offered as an opt-in
+    fixture, so that tests added later cannot forget it. The failure it prevents
+    is silent, so it must not be possible to omit.
+    """
+    scripts_dir = Path(sys.executable).parent
+    if not list(scripts_dir.glob("tesseract-runtime*")):
+        # Prepending a directory that lacks the scripts is not a harmless no-op:
+        # PATH lookup falls straight through to the next entry, which is the
+        # globally installed copy this exists to avoid.
+        raise RuntimeError(
+            f"No tesseract-runtime console script in {scripts_dir}, so PATH would "
+            "fall through to any other copy on it. Install tesseract-core into "
+            "the environment running the tests (e.g. `uv sync`)."
+        )
+
+    original_path = os.environ["PATH"]
+    os.environ["PATH"] = f"{scripts_dir}{os.pathsep}{original_path}"
+    try:
+        yield
+    finally:
+        os.environ["PATH"] = original_path
 
 
 @pytest.fixture(scope="session")
