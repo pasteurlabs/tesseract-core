@@ -29,10 +29,13 @@ from .logs import LogStreamer
 if TYPE_CHECKING:
     # Only imported for type hints; the cuda_ipc decode path imports it lazily at
     # runtime so the SDK does not eagerly pull in the runtime/CUDA machinery.
-    from tesseract_core.runtime.cuda_ipc import _IpcDeviceArray
+    from tesseract_core.runtime.cuda_ipc import IpcDeviceArray
 
 PathLike: TypeAlias = str | Path
 BoolOrCallable: TypeAlias = bool | Callable[[str], Any]
+# Output serialization formats. Mirrors runtime.file_interactions.supported_format_type;
+# defined locally so the SDK does not eagerly import the runtime package.
+OutputFormat: TypeAlias = Literal["json", "json+base64", "json+binref", "json+cuda_ipc"]
 
 
 def requires_client(func: Callable) -> Callable:
@@ -129,9 +132,7 @@ class Tesseract:
         memory: str | None = None,
         input_path: str | Path | None = None,
         output_path: str | Path | None = None,
-        output_format: Literal[
-            "json", "json+base64", "json+binref", "json+cuda_ipc"
-        ] = "json+base64",
+        output_format: OutputFormat = "json+base64",
         docker_args: list[str] | None = None,
         runtime_config: dict[str, Any] | None = None,
         stream_logs: BoolOrCallable = False,
@@ -235,9 +236,7 @@ class Tesseract:
         tesseract_api: str | Path | ModuleType,
         input_path: Path | None = None,
         output_path: Path | None = None,
-        output_format: Literal[
-            "json", "json+base64", "json+binref", "json+cuda_ipc"
-        ] = "json+base64",
+        output_format: OutputFormat = "json+base64",
         runtime_config: dict[str, Any] | None = None,
         stream_logs: BoolOrCallable = False,
     ) -> Tesseract:
@@ -683,9 +682,9 @@ def _encode_array_cuda_ipc(arr: Any) -> dict:
 
 def _decode_array(
     encoded_arr: dict, output_path: str | Path | None = None
-) -> np.ndarray | _IpcDeviceArray:
+) -> np.ndarray | IpcDeviceArray:
     # Returns np.ndarray for every encoding except cuda_ipc, which yields a
-    # framework-agnostic on-GPU wrapper (_IpcDeviceArray, exposing
+    # framework-agnostic on-GPU wrapper (IpcDeviceArray, exposing
     # __cuda_array_interface__ and __dlpack__). That type is imported only under
     # TYPE_CHECKING so naming it here adds no runtime import.
     import re
@@ -765,9 +764,9 @@ def _decode_array(
 
         arr = np.frombuffer(data, dtype=dtype)
     elif encoding == "cuda_ipc":
-        # Returns a fresh, client-owned device-array wrapper (no CuPy needed):
-        # the decode opens the IPC handle, copies device-to-device into our own
-        # memory, and closes the mapping before returning. The result exposes
+        # Returns a fresh, client-owned device-array wrapper: the decode opens
+        # the IPC handle, copies device-to-device into our own memory, and
+        # closes the mapping before returning. The result exposes
         # __cuda_array_interface__ and __dlpack__ so Torch/JAX/CuPy can adopt it
         # zero-copy. The server may reuse/free the exported buffer as soon as
         # this returns (it holds it until the next request).
@@ -788,7 +787,7 @@ class HTTPClient:
         self,
         url: str,
         output_path: str | Path | None = None,
-        output_format: str = "json+base64",
+        output_format: OutputFormat = "json+base64",
         timeout: float | tuple[float, float] | None = None,
     ) -> None:
         self._url = self._sanitize_url(url)
@@ -904,7 +903,7 @@ class HTTPClient:
             "vector_jacobian_product",
         ]:
             # Create a decoder with the output_path bound
-            def decode_with_path(arr: dict) -> np.ndarray | _IpcDeviceArray:
+            def decode_with_path(arr: dict) -> np.ndarray | IpcDeviceArray:
                 return _decode_array(arr, output_path=self._output_path)
 
             data = _tree_map(

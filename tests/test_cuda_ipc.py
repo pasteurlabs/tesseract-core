@@ -13,7 +13,7 @@ Requires: cupy (used here only to *produce* GPU inputs) and optionally torch
 (for the DLPack/CUDA-array-interface interop tests). The CUDA IPC implementation
 is framework-agnostic on *both* sides: encode works with any object that
 implements ``__cuda_array_interface__`` (CuPy, PyTorch, JAX, Numba), and decode
-returns a framework-agnostic ``_IpcDeviceArray`` (no CuPy dependency) that
+returns a framework-agnostic ``IpcDeviceArray`` (no CuPy dependency) that
 exposes ``__cuda_array_interface__`` and ``__dlpack__`` plus a host-copy helper.
 
 Note on process model
@@ -117,14 +117,14 @@ def _producer_main(build_fn_name, args, to_consumer, from_consumer):
 def _consumer_main(to_consumer, from_consumer, result_q):
     """Receive encodings, decode them cross-process, verify, report.
 
-    Decoding is framework-agnostic: it returns an ``_IpcDeviceArray`` that
+    Decoding is framework-agnostic: it returns an ``IpcDeviceArray`` that
     exposes ``__cuda_array_interface__`` and ``__dlpack__``. We read the values
     back via the wrapper's host-copy helper -- no CuPy needed for the assertions
     -- so this path proves the decoded result is framework-independent.
     """
     try:
         from tesseract_core.runtime.cuda_ipc import (
-            _IpcDeviceArray,
+            IpcDeviceArray,
             load_cuda_ipc_arraydict,
         )
 
@@ -139,7 +139,7 @@ def _consumer_main(to_consumer, from_consumer, result_q):
             # the IPC mapping before returning, so `decoded` no longer aliases
             # the producer's buffer.
             decoded = load_cuda_ipc_arraydict(encoded)
-            assert isinstance(decoded, _IpcDeviceArray)
+            assert isinstance(decoded, IpcDeviceArray)
             assert hasattr(decoded, "__cuda_array_interface__")
             assert hasattr(decoded, "__dlpack__")
             # Host-copy helper: read values back without any GPU framework.
@@ -569,7 +569,7 @@ def test_decode_to_torch_via_dlpack():
     """A decoded array is adopted by torch zero-copy via DLPack -- no CuPy.
 
     This is the framework-agnostic proof: the decode returns an
-    ``_IpcDeviceArray`` (no CuPy involved), ``torch.from_dlpack`` takes ownership
+    ``IpcDeviceArray`` (no CuPy involved), ``torch.from_dlpack`` takes ownership
     of its device buffer, and the values match. ``cupy`` is imported in this
     process only to *produce* the input in the subprocess harness, never to
     inspect the decoded result.
@@ -577,7 +577,7 @@ def test_decode_to_torch_via_dlpack():
     import torch
 
     from tesseract_core.runtime.cuda_ipc import (
-        _IpcDeviceArray,
+        IpcDeviceArray,
         load_cuda_ipc_arraydict,
     )
 
@@ -596,7 +596,7 @@ def test_decode_to_torch_via_dlpack():
         payloads = to_consumer.get(timeout=_TIMEOUT)
         encoded, expected = payloads[0]
         decoded = load_cuda_ipc_arraydict(encoded)
-        assert isinstance(decoded, _IpcDeviceArray)
+        assert isinstance(decoded, IpcDeviceArray)
         decoded_torch = torch.from_dlpack(decoded)
         assert decoded_torch.is_cuda
         np.testing.assert_array_equal(decoded_torch.cpu().numpy(), np.asarray(expected))
@@ -665,7 +665,7 @@ def _cupy_free_consumer_main(to_consumer, from_consumer, result_q):
         import torch
 
         from tesseract_core.runtime.cuda_ipc import (
-            _IpcDeviceArray,
+            IpcDeviceArray,
             load_cuda_ipc_arraydict,
         )
 
@@ -679,7 +679,7 @@ def _cupy_free_consumer_main(to_consumer, from_consumer, result_q):
         builtins.__import__ = blocked_import
 
         decoded = load_cuda_ipc_arraydict(encoded)
-        assert isinstance(decoded, _IpcDeviceArray)
+        assert isinstance(decoded, IpcDeviceArray)
         # Host-copy helper path (no framework).
         host = decoded.copy_to_host()
         host_ok = bool(np.array_equal(host, np.asarray(expected)))

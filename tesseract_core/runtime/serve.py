@@ -65,18 +65,22 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
 
         @wraps(endpoint_func)
         async def wrapper(*args: Any, accept: str, run_id: str | None, **kwargs: Any):
+            config = get_config()
+
             # Release GPU buffers exported via cuda_ipc by the previous request.
             # Releasing at the start of each request keeps every export alive
             # long enough for a serial client to copy it out of the response
             # before it is reclaimed. See cuda_ipc for the assumptions this
-            # relies on.
-            from tesseract_core.runtime.cuda_ipc import release_cuda_ipc_exports
+            # relies on. Gated on the experimental flag so the production path
+            # never imports the CUDA machinery.
+            if config.enable_experimental_cuda_ipc:
+                from tesseract_core.runtime.cuda_ipc import release_cuda_ipc_exports
 
-            release_cuda_ipc_exports()
+                release_cuda_ipc_exports()
 
             if run_id is None:
                 run_id = str(uuid.uuid4())
-            output_path = get_config().output_path
+            output_path = config.output_path
             rundir_name = f"run_{run_id}"
             rundir = join_paths(output_path, rundir_name)
             profiler = Profiler()

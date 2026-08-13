@@ -1116,24 +1116,51 @@ def test_serve_cuda_ipc_adds_ipc_host(monkeypatch):
         "my-image",
         output_format="json+cuda_ipc",
         gpus=["all"],
+        runtime_config={"enable_experimental_cuda_ipc": True},
         skip_health_check=True,
     )
     assert "--ipc=host" in captured["extra_args"]
 
 
-def test_serve_cuda_ipc_warns_without_gpus(monkeypatch, caplog):
-    """Serving cuda_ipc without GPU access logs a warning but still wires ipc."""
+def test_serve_experimental_cuda_ipc_adds_ipc_host_any_format(monkeypatch):
+    """Enabling the flag wires --ipc=host regardless of the output format."""
     captured = _stub_serve_docker(monkeypatch)
 
-    with caplog.at_level(logging.WARNING):
+    engine.serve(
+        "my-image",
+        output_format="json+base64",
+        gpus=["all"],
+        runtime_config={"enable_experimental_cuda_ipc": True},
+        skip_health_check=True,
+    )
+    assert "--ipc=host" in captured["extra_args"]
+
+
+def test_serve_experimental_cuda_ipc_errors_without_gpus(monkeypatch):
+    """Enabling the flag without GPU access is a startup error, not a warning."""
+    _stub_serve_docker(monkeypatch)
+
+    with pytest.raises(ValueError, match="requires GPU access"):
+        engine.serve(
+            "my-image",
+            output_format="json+base64",
+            gpus=None,
+            runtime_config={"enable_experimental_cuda_ipc": True},
+            skip_health_check=True,
+        )
+
+
+def test_serve_cuda_ipc_errors_without_experimental_flag(monkeypatch):
+    """Requesting the cuda_ipc format without the flag is a startup error."""
+    _stub_serve_docker(monkeypatch)
+
+    with pytest.raises(ValueError, match="experimental"):
         engine.serve(
             "my-image",
             output_format="json+cuda_ipc",
-            gpus=None,
+            gpus=["all"],
             skip_health_check=True,
         )
-    assert "--ipc=host" in captured["extra_args"]
-    assert any("requires GPU access" in rec.message for rec in caplog.records)
 
 
 def test_serve_non_cuda_ipc_has_no_ipc_host(monkeypatch):

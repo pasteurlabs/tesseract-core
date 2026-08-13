@@ -512,13 +512,13 @@ def python_to_array(
     expected_shape: ShapeType,
     expected_dtype: str | None,
 ) -> ArrayLike:
-    """Convert a Python object to a NumPy array.
+    """Try to coerce a Python object to a NumPy array of the given shape and dtype.
 
     Objects that live in GPU memory (exposing ``__cuda_array_interface__``) are
-    passed through unchanged -- validated but not copied to the host -- so they
-    can be encoded via CUDA IPC during serialization. Coercing them to NumPy
-    here would force a device-to-host transfer (or fail, as CuPy refuses
-    implicit conversion), defeating the purpose of ``json+cuda_ipc``.
+    passed through unchanged (validated but not copied to the host) so they can
+    be encoded via CUDA IPC during serialization. Coercing them to NumPy here
+    would force a device-to-host transfer (or fail, since CuPy refuses implicit
+    conversion), defeating the purpose of ``json+cuda_ipc``.
     """
     from tesseract_core.runtime import cuda_ipc
 
@@ -611,7 +611,7 @@ def encode_array(
     context = info.context if info.context else {}
     array_encoding = context.get("array_encoding", "json")
 
-    # For cuda_ipc, skip numpy conversion — array stays on GPU
+    # For cuda_ipc, skip numpy conversion so the array stays on the GPU.
     if array_encoding == "cuda_ipc":
         if not info.mode_is_json():
             return arr

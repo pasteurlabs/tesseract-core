@@ -62,7 +62,6 @@ jobs:
           uv run --no-sync pytest \
             -v \
             --skip-endtoend \
-            -m "not gpu" \
             --timeout=300 \
             --cov-report=term-missing:skip-covered \
             --cov-report=xml:coverage.xml \
@@ -287,6 +286,20 @@ jobs:
   tests-gpu:
     runs-on: tesseract-ci-gpu
 
+    # Exercise both CUDA major versions so the ctypes loader's version fallbacks
+    # (libcudart.so.12/.13) and the encode/decode path are covered against each.
+    # NOTE: the CUDA 13 entry needs the tesseract-ci-gpu runner's NVIDIA driver
+    # to be new enough for CUDA 13; fail-fast is off so an incompatible entry
+    # does not mask results from the other.
+    strategy:
+      fail-fast: false
+      matrix:
+        cuda:
+          - major: "12"
+            base_image: "nvidia/cuda:12.8.1-base-ubuntu24.04"
+          - major: "13"
+            base_image: "nvidia/cuda:13.0.0-base-ubuntu24.04"
+
     defaults:
       run:
         shell: bash -el {0}
@@ -302,7 +315,7 @@ jobs:
           # end-to-end tests build and serve a GPU Tesseract, so a broken
           # runtime must fail loudly here rather than silently skip.
           docker info
-          docker run --rm --gpus all nvidia/cuda:12.8.1-base-ubuntu24.04 nvidia-smi
+          docker run --rm --gpus all ${{ matrix.cuda.base_image }} nvidia-smi
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v7
@@ -315,15 +328,15 @@ jobs:
           uv sync --python 3.12 --extra dev --frozen
 
       # cupy/torch/jax with CUDA support are not declared dependencies (they are
-      # only needed to *produce* GPU arrays in the tests); install their CUDA 12
-      # builds into the same environment here. The runtime library itself only
-      # needs libcudart, which cupy's wheel bundles.
+      # only needed to *produce* GPU arrays in the tests); install builds for the
+      # matrix CUDA major version into the same environment here. The runtime
+      # library itself only needs libcudart, which cupy's wheel bundles.
       - name: Install GPU array frameworks
         run: |
           uv pip install \
-            "cupy-cuda12x" \
+            "cupy-cuda${{ matrix.cuda.major }}x" \
             "torch" \
-            "jax[cuda12]"
+            "jax[cuda${{ matrix.cuda.major }}]"
 
       - name: Show installed CUDA frameworks
         run: |
@@ -349,7 +362,7 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: pasteurlabs/tesseract-core
           files: coverage*.xml
-          flags: gpu
+          flags: gpu-cuda${{ matrix.cuda.major }}
           fail_ci_if_error: true
 
   all-ok:

@@ -382,7 +382,7 @@ def test_load_copies_own_bytes_at_offset_and_closes(patched_decode):
     assert calls["sync"] == [True]
     assert calls["close"] == [0x2000]
     # Returned wrapper is framework-agnostic and correctly shaped.
-    assert isinstance(out, cuda_ipc._IpcDeviceArray)
+    assert isinstance(out, cuda_ipc.IpcDeviceArray)
     assert out.shape == (4, 8)
     assert out.dtype == np.float32
     assert hasattr(out, "__cuda_array_interface__")
@@ -395,7 +395,7 @@ def test_load_copies_own_bytes_at_offset_and_closes(patched_decode):
 
 
 def test_load_frees_owned_buffer_on_del(patched_decode):
-    """When no DLPack consumer adopts it, the wrapper frees its buffer in __del__."""
+    """When no DLPack consumer adopts it, the wrapper frees its buffer on GC."""
     calls, _state = patched_decode
     out = cuda_ipc.load_cuda_ipc_arraydict(
         _encoded((2,), "float32", device=0, offset=0, storage_size=8)

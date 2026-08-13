@@ -974,14 +974,26 @@ def serve(
         if docker_args:
             extra_args.extend(docker_args)
 
-        # CUDA IPC requires shared IPC namespace between host and container
-        if output_format == "json+cuda_ipc":
-            extra_args.extend(["--ipc=host"])
+        # CUDA IPC needs a GPU and a shared IPC namespace between host and
+        # container. Wire both up whenever the experimental flag is set (the
+        # only reason to enable it is IPC).
+        cuda_ipc_enabled = environment.get(
+            "TESSERACT_ENABLE_EXPERIMENTAL_CUDA_IPC"
+        ) in ("1", "true", "True")
+
+        if cuda_ipc_enabled:
             if not gpus:
-                logger.warning(
-                    "json+cuda_ipc output format requires GPU access. "
-                    "Consider passing gpus=['all'] or specific GPU IDs."
+                raise ValueError(
+                    "enable_experimental_cuda_ipc requires GPU access, but no GPUs "
+                    "were requested. Pass gpus=['all'] or specific GPU IDs."
                 )
+            extra_args.extend(["--ipc=host"])
+        elif output_format == "json+cuda_ipc":
+            raise ValueError(
+                "The 'json+cuda_ipc' output format is experimental and must be "
+                "explicitly enabled. Pass "
+                "runtime_config={'enable_experimental_cuda_ipc': True}."
+            )
 
         if network is not None:
             _ensure_network_exists(network)
