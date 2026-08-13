@@ -102,7 +102,7 @@ def http_shmem_tesseract_instance(noop_tesseract_image):
     tesseract = cm.__enter__()
     # Warmup - first request is slow due to container startup
     tesseract.health()
-    yield tesseract
+    yield tesseract, output_dir
     cm.__exit__(None, None, None)
 
 
@@ -132,7 +132,7 @@ def http_shmem_pool_tesseract_instance(noop_tesseract_image):
     tesseract = cm.__enter__()
     # Warmup - first request is slow due to container startup
     tesseract.health()
-    yield tesseract
+    yield tesseract, output_dir
     cm.__exit__(None, None, None)
 
 
@@ -153,6 +153,18 @@ def test_containerized_http(benchmark, http_tesseract_instance, array_size):
     benchmark(http_tesseract_instance.apply, inputs)
 
 
+def _purge_binref_outputs(output_dir: Path) -> None:
+    """Remove output .bin files left in the mounted shmem output directory.
+
+    The server writes a freshly named .bin file per apply and the client never
+    removes it (the caller owns the output directory). Across the benchmark's
+    many rounds these accumulate and would exhaust the small /dev/shm tmpfs, so
+    we clear them between rounds. Runs untimed via the benchmark ``teardown``.
+    """
+    for binref in output_dir.rglob("*.bin"):
+        binref.unlink(missing_ok=True)
+
+
 @pytest.mark.docker
 def test_containerized_http_shmem(benchmark, http_shmem_tesseract_instance, array_size):
     """Benchmark containerized Tesseract via HTTP, json+binref over shared memory.
@@ -161,10 +173,18 @@ def test_containerized_http_shmem(benchmark, http_shmem_tesseract_instance, arra
     are exchanged as binref files on /dev/shm rather than base64 in the request
     body, so no array data travels over HTTP.
     """
+    tesseract, output_dir = http_shmem_tesseract_instance
     arr = create_test_array(array_size)
     inputs = {"data": arr}
 
-    benchmark(http_shmem_tesseract_instance.apply, inputs)
+    benchmark.pedantic(
+        tesseract.apply,
+        args=(inputs,),
+        teardown=lambda *_: _purge_binref_outputs(output_dir),
+        rounds=100,
+        warmup_rounds=1,
+        iterations=1,
+    )
 
 
 @pytest.mark.docker
@@ -177,10 +197,18 @@ def test_containerized_http_shmem_pool(
     ``test_containerized_http_shmem``, but with the opt-in warm-buffer write
     pool and zero-copy lazy mmap decode enabled.
     """
+    tesseract, output_dir = http_shmem_pool_tesseract_instance
     arr = create_test_array(array_size)
     inputs = {"data": arr}
 
-    benchmark(http_shmem_pool_tesseract_instance.apply, inputs)
+    benchmark.pedantic(
+        tesseract.apply,
+        args=(inputs,),
+        teardown=lambda *_: _purge_binref_outputs(output_dir),
+        rounds=100,
+        warmup_rounds=1,
+        iterations=1,
+    )
 
 
 def _run_cli_binref_benchmark(benchmark, noop_tesseract_image, array_size, binref_root):
@@ -243,15 +271,22 @@ def _run_cli_binref_benchmark(benchmark, noop_tesseract_image, array_size, binre
                 raise RuntimeError(f"CLI failed: {result.stderr}")
             return result
 
-        def wait_for_docker_cleanup():
-            """Let Docker fully release resources before the next cold start."""
+        def before_round():
+            """Prepare for the next cold-start round.
+
+            Clears the previous round's binref outputs so they don't accumulate
+            in the (possibly small) shared-memory output directory, then lets
+            Docker fully release resources before the next cold start.
+            """
+            for binref in output_dir.rglob("*.bin"):
+                binref.unlink(missing_ok=True)
             time.sleep(2)
 
         # Each invocation spawns a full container. We want clean cold-start
         # timings, so sleep between rounds to let Docker clean up.
         benchmark.pedantic(
             run_cli,
-            setup=wait_for_docker_cleanup,
+            setup=before_round,
             rounds=3,
             warmup_rounds=1,
             iterations=1,
