@@ -276,11 +276,14 @@ def test_apply_with_shmem_binref_pool(built_image_name):
     inputs = {"a": np.array([1, 2]), "b": np.array([3, 4]), "s": 1}
     expected = np.array([4.0, 6.0])
 
-    with tempfile.TemporaryDirectory(
-        prefix="tess_shmem_pool_in_", dir=shm_dir
-    ) as input_dir, tempfile.TemporaryDirectory(
-        prefix="tess_shmem_pool_out_", dir=shm_dir
-    ) as output_dir:
+    with (
+        tempfile.TemporaryDirectory(
+            prefix="tess_shmem_pool_in_", dir=shm_dir
+        ) as input_dir,
+        tempfile.TemporaryDirectory(
+            prefix="tess_shmem_pool_out_", dir=shm_dir
+        ) as output_dir,
+    ):
         with Tesseract.from_image(
             built_image_name,
             input_path=input_dir,

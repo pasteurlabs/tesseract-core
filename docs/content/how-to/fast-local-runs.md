@@ -106,14 +106,14 @@ The benefit grows with array size. The table below shows median per-call
 overhead for a no-op Tesseract (which only decodes inputs and encodes outputs)
 across encodings, measured on one Linux machine with bare-metal Docker and
 loopback networking. Absolute numbers depend heavily on hardware; treat them as
-illustrative of the *shape* of the trade-off, not as guarantees.
+illustrative of the _shape_ of the trade-off, not as guarantees.
 
-| Array size (float64)   | HTTP + base64 | HTTP + shmem binref | HTTP + shmem binref, `binref_pool` |
-| ---------------------- | ------------- | ------------------- | ---------------------------------- |
-| 1,000 (~8 kB)          | ~3.8 ms       | ~4.5 ms             | ~4.4 ms                            |
-| 100,000 (~0.8 MB)      | ~9.2 ms       | ~5.7 ms             | ~4.9 ms                            |
-| 10,000,000 (~76 MB)    | ~1,130 ms     | ~206 ms             | ~87 ms                             |
-| 100,000,000 (~760 MB)  | ~13,170 ms    | ~1,990 ms           | ~880 ms                            |
+| Array size (float64)  | HTTP + base64 | HTTP + shmem binref | HTTP + shmem binref, `binref_pool` |
+| --------------------- | ------------- | ------------------- | ---------------------------------- |
+| 1,000 (~8 kB)         | ~3.8 ms       | ~4.5 ms             | ~4.4 ms                            |
+| 100,000 (~0.8 MB)     | ~9.2 ms       | ~5.7 ms             | ~4.9 ms                            |
+| 10,000,000 (~76 MB)   | ~1,130 ms     | ~206 ms             | ~87 ms                             |
+| 100,000,000 (~760 MB) | ~13,170 ms    | ~1,990 ms           | ~880 ms                            |
 
 For small arrays, base64 is competitive or slightly faster: the payload is tiny,
 so HTTP round-trip latency dominates and the extra file handling of binref is
