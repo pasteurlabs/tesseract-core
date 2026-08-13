@@ -9,7 +9,7 @@ These functions remove the boilerplate from a JAX-backed Tesseract
 ``vector_jacobian_product`` and ``abstract_eval`` endpoints.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Hashable
 from typing import Any
 
 import equinox as eqx
@@ -37,14 +37,24 @@ def _set_jax_vjp_cache_size(size: int) -> None:
     _jax_vjp_cache = LRUCache(maxsize=size) if size > 0 else None
 
 
-def _hash_tree(tree: Any) -> int:
-    """Compute a hash of a pytree's structure and leaves.
+def _cache_key(tree: Any) -> Hashable:
+    """Build an :class:`LRUCache` key from a pytree's structure and leaves.
 
-    Suitable for use as an :class:`LRUCache` key. Array leaves contribute
-    their dtype + shape + raw bytes so leaves with identical bytes but
-    different interpretations (e.g. ``int64[4]`` vs ``int64[2,2]``) don't
-    collide. Non-array leaves contribute themselves directly; they must be
-    hashable.
+    Array leaves contribute their dtype + shape + raw bytes so leaves with
+    identical bytes but different interpretations (e.g. ``int64[4]`` vs
+    ``int64[2,2]``) don't collide. Non-array leaves contribute their type
+    alongside their value; they must be hashable.
+
+    The key is returned as a tuple rather than collapsed with :func:`hash`,
+    so that :class:`LRUCache`'s dict lookup compares it with ``__eq__``
+    instead of trusting the hash alone. Collapsing to an ``int`` made every
+    hash collision a silent wrong-gradient bug: CPython reserves ``-1`` as an
+    error sentinel, so ``hash(-1) == hash(-2)``, and a Tesseract taking an
+    integer parameter could serve the backward pass of a different input.
+
+    The per-leaf type tag covers the other direction, where values compare
+    equal across types: ``1 == 1.0 == True``, so a bare value would still
+    collide for a field typed as a union.
     """
     leaves, treedef = jax.tree.flatten(tree)
     # jax.PyTreeDef's __hash__ collides on dicts with different keys, so we
@@ -54,8 +64,8 @@ def _hash_tree(tree: Any) -> int:
         if hasattr(leaf, "tobytes"):
             items.append((leaf.dtype.str, leaf.shape, bytes(_fast_tobytes(leaf))))
         else:
-            items.append(leaf)
-    return hash(tuple(items))
+            items.append((type(leaf).__qualname__, leaf))
+    return tuple(items)
 
 
 def jax_apply(apply_jit: Callable, inputs: BaseModel) -> dict:
@@ -81,6 +91,7 @@ def jax_apply(apply_jit: Callable, inputs: BaseModel) -> dict:
     # subsequent vector_jacobian_product call. eqx.partition separates
     # array (differentiable) from non-array outputs; has_aux tells jax.vjp
     # to only differentiate through the array outputs.
+    #
     def _apply_for_vjp(inputs_dict: dict) -> tuple:
         out = apply_jit(inputs_dict)
         diff_out, static_out = eqx.partition(out, eqx.is_array)
@@ -92,7 +103,7 @@ def jax_apply(apply_jit: Callable, inputs: BaseModel) -> dict:
     out = eqx.combine(diff_primals, static_primals)
 
     cotangent_template = jax.tree.map(jnp.zeros_like, diff_primals)
-    _jax_vjp_cache.put(_hash_tree(inputs_dict), (vjp_func, cotangent_template))
+    _jax_vjp_cache.put(_cache_key(inputs_dict), (vjp_func, cotangent_template))
     return out
 
 
@@ -119,7 +130,7 @@ def jax_vjp(
     # vjp calls per output basis vector.
     if (
         _jax_vjp_cache is not None
-        and (cached := _jax_vjp_cache.get(_hash_tree(inputs_dict))) is not None
+        and (cached := _jax_vjp_cache.get(_cache_key(inputs_dict))) is not None
     ):
         vjp_func, cotangent_template = cached
         full_cotangent = jax.tree.map(jnp.zeros_like, cotangent_template)

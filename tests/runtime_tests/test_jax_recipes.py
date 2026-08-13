@@ -7,23 +7,23 @@ from collections.abc import Hashable
 
 import numpy as np
 
-from tesseract_core.runtime.jax_recipes import _hash_tree as hash_tree
+from tesseract_core.runtime.jax_recipes import _cache_key
 
 
-class TestHashTree:
-    """Tests for hash_tree -- used as the LRUCache key in the jax-cache recipe."""
+class TestCacheKey:
+    """Tests for _cache_key -- the LRUCache key used by the jax-cache recipe."""
 
     def test_deterministic(self):
         tree = {"a": np.array([1.0, 2.0]), "b": 42}
-        assert hash_tree(tree) == hash_tree(tree)
+        assert _cache_key(tree) == _cache_key(tree)
 
     def test_returns_hashable(self):
-        h = hash_tree({"x": np.array([1.0])})
+        h = _cache_key({"x": np.array([1.0])})
         assert isinstance(h, Hashable)
 
     def test_different_values_differ(self):
-        h1 = hash_tree({"x": np.array([1.0, 2.0])})
-        h2 = hash_tree({"x": np.array([1.0, 3.0])})
+        h1 = _cache_key({"x": np.array([1.0, 2.0])})
+        h2 = _cache_key({"x": np.array([1.0, 3.0])})
         assert h1 != h2
 
     def test_different_shape_with_same_bytes_differ(self):
@@ -33,7 +33,7 @@ class TestHashTree:
         flat = np.array([1, 2, 3, 4], dtype=np.int64)
         reshaped = flat.reshape(2, 2)
         assert flat.tobytes() == reshaped.tobytes()
-        assert hash_tree({"x": flat}) != hash_tree({"x": reshaped})
+        assert _cache_key({"x": flat}) != _cache_key({"x": reshaped})
 
     def test_different_dtype_with_same_bytes_differ(self):
         # int64 [1, 2, 3, 4] and float64 array reinterpretation share buffer
@@ -42,35 +42,51 @@ class TestHashTree:
         a = np.array([1, 2, 3, 4], dtype=np.int64)
         b = a.view(np.float64)  # same bytes, different dtype interpretation
         assert a.tobytes() == b.tobytes()
-        assert hash_tree({"x": a}) != hash_tree({"x": b})
+        assert _cache_key({"x": a}) != _cache_key({"x": b})
 
     def test_different_treedef_differs(self):
-        h1 = hash_tree({"x": np.array([1.0])})
-        h2 = hash_tree({"y": np.array([1.0])})
+        h1 = _cache_key({"x": np.array([1.0])})
+        h2 = _cache_key({"y": np.array([1.0])})
         assert h1 != h2
 
     def test_nested_structure(self):
         tree = {"outer": {"inner": np.array([1.0]), "scalar": 2.0}}
-        assert hash_tree(tree) == hash_tree(tree)
+        assert _cache_key(tree) == _cache_key(tree)
 
     def test_scalar_leaves(self):
-        assert hash_tree({"i": 42, "f": 3.14, "b": True}) == hash_tree(
+        assert _cache_key({"i": 42, "f": 3.14, "b": True}) == _cache_key(
             {"i": 42, "f": 3.14, "b": True}
         )
-        assert hash_tree({"i": 42}) != hash_tree({"i": 43})
+        assert _cache_key({"i": 42}) != _cache_key({"i": 43})
+
+    def test_colliding_scalar_hashes_stay_distinct(self):
+        # CPython reserves -1 as an error sentinel, so hash(-1) == hash(-2).
+        # A key collapsed with hash() cannot tell these two apart, and the
+        # LRUCache dict has no second key to compare against, so a Tesseract
+        # taking an integer parameter would serve the wrong backward pass.
+        assert hash(-1) == hash(-2)
+        assert _cache_key({"i": -1}) != _cache_key({"i": -2})
+
+    def test_numerically_equal_leaves_of_different_types_stay_distinct(self):
+        # The other direction: 1 == 1.0 == True compare equal *and* hash
+        # equal, so the value alone is not enough to discriminate a leaf whose
+        # field is typed as a union.
+        assert hash(1) == hash(1.0) == hash(True)
+        keys = [_cache_key({"x": v}) for v in (1, 1.0, True)]
+        assert len(set(keys)) == 3
 
     def test_string_leaf_stable_within_call(self):
         tree1 = {"name": "alpha"}
         tree2 = {"name": "alpha"}
-        assert hash_tree(tree1) == hash_tree(tree2)
-        assert hash_tree({"name": "alpha"}) != hash_tree({"name": "beta"})
+        assert _cache_key(tree1) == _cache_key(tree2)
+        assert _cache_key({"name": "alpha"}) != _cache_key({"name": "beta"})
 
     def test_bytes_leaf(self):
-        assert hash_tree({"k": b"abc"}) == hash_tree({"k": b"abc"})
-        assert hash_tree({"k": b"abc"}) != hash_tree({"k": b"abd"})
+        assert _cache_key({"k": b"abc"}) == _cache_key({"k": b"abc"})
+        assert _cache_key({"k": b"abc"}) != _cache_key({"k": b"abd"})
 
     def test_empty_tree(self):
-        h = hash_tree({})
+        h = _cache_key({})
         assert isinstance(h, Hashable)
 
 
