@@ -55,9 +55,7 @@ def extract_suite_data(results: dict, suite_name: str) -> dict[int, float]:
         "from_tesseract_api",
         "containerized_http",
         "containerized_http_shmem",
-        "containerized_http_shmem_pool",
         "containerized_cli",
-        "containerized_cli_shmem",
     )
     if suite_name not in suite_names:
         return {}
@@ -147,8 +145,8 @@ def generate_guidance_plot(output_path: Path, benchmark_results: dict) -> None:
     containerized_http_data = extract_suite_data(
         benchmark_results, "containerized_http"
     )
-    containerized_http_shmem_pool_data = extract_suite_data(
-        benchmark_results, "containerized_http_shmem_pool"
+    containerized_http_shmem_data = extract_suite_data(
+        benchmark_results, "containerized_http_shmem"
     )
 
     # Colorblind-safe palette (blue / orange / green)
@@ -157,7 +155,7 @@ def generate_guidance_plot(output_path: Path, benchmark_results: dict) -> None:
         ("Containerized, json+base64 via HTTP", containerized_http_data, "#E69F00"),
         (
             "Containerized, json+binref via HTTP (shmem)",
-            containerized_http_shmem_pool_data,
+            containerized_http_shmem_data,
             "#009E73",
         ),
     ]
@@ -369,16 +367,14 @@ def generate_overhead_comparison_plot(
     containerized_http_data = extract_suite_data(
         benchmark_results, "containerized_http"
     )
-    containerized_http_shmem_pool_data = extract_suite_data(
-        benchmark_results, "containerized_http_shmem_pool"
+    containerized_http_shmem_data = extract_suite_data(
+        benchmark_results, "containerized_http_shmem"
     )
     containerized_cli_data = extract_suite_data(benchmark_results, "containerized_cli")
 
     from_api = [from_api_data.get(s, 0) for s in sizes]
     containerized_http = [containerized_http_data.get(s, 0) for s in sizes]
-    containerized_http_shmem = [
-        containerized_http_shmem_pool_data.get(s, 0) for s in sizes
-    ]
+    containerized_http_shmem = [containerized_http_shmem_data.get(s, 0) for s in sizes]
     containerized_cli = [containerized_cli_data.get(s, 0) for s in sizes]
 
     x = np.arange(len(sizes))

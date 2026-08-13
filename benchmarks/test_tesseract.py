@@ -12,11 +12,10 @@ measurements of framework overhead for different interaction modes:
    using json+base64 encoding
 3. Containerized via HTTP with json+binref encoding and the binref directory on
    a shared-memory tmpfs (/dev/shm), so array payloads are exchanged through
-   shared memory rather than base64 in the HTTP body
+   shared memory rather than base64 in the HTTP body; uses binref_pool=True for
+   warm-buffer writes and zero-copy mmap decode
 4. Containerized via CLI (`tesseract run`) - Full Docker + CLI overhead,
    using json+binref encoding with the binref directory on local disk
-5. Containerized via CLI (`tesseract run`) - same as (4), but with the binref
-   directory on a shared-memory tmpfs (/dev/shm)
 
 All benchmarks use the same no-op Tesseract defined in tesseract_noop/.
 """
@@ -83,7 +82,9 @@ def http_shmem_tesseract_instance(noop_tesseract_image):
 
     Uses json+binref encoding with the input and output directories on a
     shared-memory tmpfs (/dev/shm), so array payloads are passed to and from the
-    container through shared memory instead of base64 over HTTP.
+    container through shared memory instead of base64 over HTTP. ``binref_pool``
+    enables the client-side warm-buffer write pool and zero-copy lazy mmap
+    decode, which is the recommended configuration for this fast path.
     """
     from tesseract_core.sdk.tesseract import Tesseract
 
@@ -93,35 +94,6 @@ def http_shmem_tesseract_instance(noop_tesseract_image):
 
     input_dir = Path(tempfile.mkdtemp(prefix="tess_shmem_in_", dir=shm_dir))
     output_dir = Path(tempfile.mkdtemp(prefix="tess_shmem_out_", dir=shm_dir))
-    cm = Tesseract.from_image(
-        noop_tesseract_image,
-        input_path=input_dir,
-        output_path=output_dir,
-        output_format="json+binref",
-    )
-    tesseract = cm.__enter__()
-    # Warmup - first request is slow due to container startup
-    tesseract.health()
-    yield tesseract, output_dir
-    cm.__exit__(None, None, None)
-
-
-@pytest.fixture(scope="module")
-def http_shmem_pool_tesseract_instance(noop_tesseract_image):
-    """Create a containerized HTTP Tesseract using shmem binref with the pool.
-
-    Same as ``http_shmem_tesseract_instance`` but with ``binref_pool=True``,
-    which enables the client-side warm-buffer write pool and zero-copy lazy
-    mmap decode on the shared-memory binref exchange.
-    """
-    from tesseract_core.sdk.tesseract import Tesseract
-
-    shm_dir = Path("/dev/shm")
-    if not shm_dir.is_dir():
-        pytest.skip("/dev/shm is not available on this platform")
-
-    input_dir = Path(tempfile.mkdtemp(prefix="tess_shmem_pool_in_", dir=shm_dir))
-    output_dir = Path(tempfile.mkdtemp(prefix="tess_shmem_pool_out_", dir=shm_dir))
     cm = Tesseract.from_image(
         noop_tesseract_image,
         input_path=input_dir,
@@ -171,33 +143,10 @@ def test_containerized_http_shmem(benchmark, http_shmem_tesseract_instance, arra
 
     Same served-container HTTP path as ``test_containerized_http``, but arrays
     are exchanged as binref files on /dev/shm rather than base64 in the request
-    body, so no array data travels over HTTP.
+    body, so no array data travels over HTTP. Runs with ``binref_pool=True``,
+    the recommended configuration for this fast path.
     """
     tesseract, output_dir = http_shmem_tesseract_instance
-    arr = create_test_array(array_size)
-    inputs = {"data": arr}
-
-    benchmark.pedantic(
-        tesseract.apply,
-        args=(inputs,),
-        teardown=lambda *_: _purge_binref_outputs(output_dir),
-        rounds=100,
-        warmup_rounds=1,
-        iterations=1,
-    )
-
-
-@pytest.mark.docker
-def test_containerized_http_shmem_pool(
-    benchmark, http_shmem_pool_tesseract_instance, array_size
-):
-    """Benchmark containerized HTTP shmem binref with ``binref_pool=True``.
-
-    Same served-container HTTP + shmem binref path as
-    ``test_containerized_http_shmem``, but with the opt-in warm-buffer write
-    pool and zero-copy lazy mmap decode enabled.
-    """
-    tesseract, output_dir = http_shmem_pool_tesseract_instance
     arr = create_test_array(array_size)
     inputs = {"data": arr}
 
@@ -298,20 +247,4 @@ def test_containerized_cli(benchmark, noop_tesseract_image, array_size):
     """Benchmark containerized Tesseract via CLI, binref on disk."""
     _run_cli_binref_benchmark(
         benchmark, noop_tesseract_image, array_size, binref_root=None
-    )
-
-
-@pytest.mark.docker
-def test_containerized_cli_shmem(benchmark, noop_tesseract_image, array_size):
-    """Benchmark containerized Tesseract via CLI, binref on shared-memory tmpfs.
-
-    Identical to ``test_containerized_cli`` except the binref exchange directory
-    lives on /dev/shm, so arrays are passed to and from the container through
-    shared memory instead of disk.
-    """
-    shm_dir = Path("/dev/shm")
-    if not shm_dir.is_dir():
-        pytest.skip("/dev/shm is not available on this platform")
-    _run_cli_binref_benchmark(
-        benchmark, noop_tesseract_image, array_size, binref_root=str(shm_dir)
     )
