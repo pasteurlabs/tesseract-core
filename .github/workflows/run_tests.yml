@@ -288,6 +288,10 @@ jobs:
 
     # Exercise both CUDA major versions so the ctypes loader's version fallbacks
     # (libcudart.so.12/.13) and the encode/decode path are covered against each.
+    # The array frameworks are pinned to a matching CUDA build (cupy-cuda1Nx,
+    # torch's per-CUDA wheel index, jax[cuda1N]) so the libcudart the runtime
+    # actually binds to differs between entries -- installing plain "torch"
+    # resolves to the newest CUDA build for both, defeating the point.
     # NOTE: the CUDA 13 entry needs the tesseract-ci-gpu runner's NVIDIA driver
     # to be new enough for CUDA 13; fail-fast is off so an incompatible entry
     # does not mask results from the other.
@@ -297,8 +301,10 @@ jobs:
         cuda:
           - major: "12"
             base_image: "nvidia/cuda:12.8.1-base-ubuntu24.04"
+            torch_index: "cu126"
           - major: "13"
             base_image: "nvidia/cuda:13.0.0-base-ubuntu24.04"
+            torch_index: "cu130"
 
     defaults:
       run:
@@ -331,17 +337,23 @@ jobs:
       # only needed to *produce* GPU arrays in the tests); install builds for the
       # matrix CUDA major version into the same environment here. The runtime
       # library itself only needs libcudart, which cupy's wheel bundles.
+      #
+      # torch must come from its per-CUDA wheel index: plain "torch" from PyPI
+      # always resolves to the newest CUDA build regardless of the requested
+      # major, so it is installed separately against the matching cuNNN index.
       - name: Install GPU array frameworks
         run: |
           uv pip install \
+            --index-url "https://download.pytorch.org/whl/${{ matrix.cuda.torch_index }}" \
+            "torch"
+          uv pip install \
             "cupy-cuda${{ matrix.cuda.major }}x" \
-            "torch" \
             "jax[cuda${{ matrix.cuda.major }}]"
 
       - name: Show installed CUDA frameworks
         run: |
-          uv run --no-sync python -c "import cupy; print('cupy', cupy.__version__, 'devices', cupy.cuda.runtime.getDeviceCount())"
-          uv run --no-sync python -c "import torch; print('torch', torch.__version__, 'cuda', torch.cuda.is_available())"
+          uv run --no-sync python -c "import cupy; print('cupy', cupy.__version__, 'runtime', cupy.cuda.runtime.runtimeGetVersion(), 'devices', cupy.cuda.runtime.getDeviceCount())"
+          uv run --no-sync python -c "import torch; print('torch', torch.__version__, 'cuda', torch.version.cuda, torch.cuda.is_available())"
           uv run --no-sync python -c "import jax; print('jax', jax.__version__, 'devices', jax.devices())"
 
       - name: Run GPU test suite
