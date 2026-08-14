@@ -27,6 +27,7 @@ Tesseract Core is deliberately unopinionated about what you build on top, but on
 The [`cookiecutter-tesseract`](https://github.com/pasteurlabs/cookiecutter-tesseract) template gives you that structure as a batteries-included starting point, so you don't have to assemble it by hand. If you’re building an app out of a single Tesseract, `tesseract init` is still the right tool; if you’re building one out of many, you may want to consider this template in addition to the above guide.
 
 ### What's inside
+
 - **Monorepo layout**: components (Tesseracts), shared code, and the pipeline app in one repo with a standardized structure.
 - **A `make` workflow**: `make new`, `build`, `test`, `data`, and `run` wrap the common Tesseract commands so you don’t have to memorize them.
 - **Component scaffolding**: `make new <name> [RECIPE=base|jax|pytorch]` spins up a new Tesseract, pre-wired to depend on your shared code.
