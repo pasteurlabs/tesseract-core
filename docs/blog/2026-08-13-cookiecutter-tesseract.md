@@ -14,7 +14,7 @@ A single Tesseract packages one computation unit into a standardized component. 
 
 ## You've built your Tesseracts, now what?
 
-Real-world projects usually involve multiple components, for example a mesher feeding a solver, an encoder feeding a model, a simulation feeding a post-processor. Once you've packaged your code as Tesseracts, the next step is to determine how you'll call and chain your components together. Our new guide on [composing Tesseracts into pipelines](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/how-to/pipelines/) walks you through three important considerations as you build: 
+Real-world projects usually involve multiple components, for example a mesher feeding a solver, an encoder feeding a model, a simulation feeding a post-processor. Once you've packaged your code as Tesseracts, the next step is to determine how you'll call and chain your components together. Our new guide on [composing Tesseracts into pipelines](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/how-to/pipelines/) walks you through three important considerations as you build:
 
 1. **Calling each Tesseract:** Every Tesseract exposes a CLI, a REST API, and a Python SDK, how do you decide which is the right interface to reach for?
 2. **Chaining Tesseracts:** How should data flow between Tesseracts, and how can you debug when the chain misbehaves?
