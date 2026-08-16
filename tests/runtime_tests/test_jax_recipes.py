@@ -10,6 +10,9 @@ import numpy as np
 from tesseract_core.runtime.jax_recipes import _cache_key
 
 _V = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+# Supplied rather than defaulted: pydantic validates provided values but not
+# defaults, so a bare float default would reach the array encoder un-coerced.
+_S = np.float32(1.5)
 
 
 class TestCacheKey:
@@ -267,8 +270,8 @@ class TestCacheWithNonArrayInputs:
         set_jax_vjp_cache_size(cache_size)
         try:
             if prime_with is not None:
-                jax_apply(apply_jit, InputSchema(v=_V, norm_ord=prime_with))
-            inp = InputSchema(v=_V, norm_ord=norm_ord)
+                jax_apply(apply_jit, InputSchema(v=_V, s=_S, norm_ord=prime_with))
+            inp = InputSchema(v=_V, s=_S, norm_ord=norm_ord)
             ct = {"y": np.ones(3, dtype=np.float32)}
             return jax_vjp(apply_jit, inp, {"v", "s"}, {"y"}, ct)
         finally:
@@ -293,7 +296,7 @@ class TestCacheWithNonArrayInputs:
         InputSchema, apply_jit = self._api()
         set_jax_vjp_cache_size(4)
         try:
-            out = jax_apply(apply_jit, InputSchema(v=_V))
+            out = jax_apply(apply_jit, InputSchema(v=_V, s=_S))
         finally:
             set_jax_vjp_cache_size(0)
         assert np.all(np.isfinite(np.asarray(out["y"])))
