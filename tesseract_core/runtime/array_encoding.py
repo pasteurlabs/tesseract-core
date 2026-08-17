@@ -512,21 +512,14 @@ def python_to_array(
     info: ValidationInfo,
     expected_shape: ShapeType,
     expected_dtype: str | None,
-) -> ArrayLike | GPUArray:
-    """Coerce a Python object to a NumPy array, or pass a GPU array through.
+) -> ArrayLike:
+    """Coerce a Python object to a NumPy array of the given shape and dtype.
 
-    Returns a NumPy array (``ArrayLike``) for host objects. Objects that live in
-    GPU memory (exposing ``__cuda_array_interface__``) are instead returned
-    unchanged -- validated but not copied to the host -- so they can be encoded
-    via CUDA IPC during serialization. Coercing them to NumPy here would force a
-    device-to-host transfer (or fail, since CuPy refuses implicit conversion),
-    defeating the purpose of ``json+cuda_ipc``.
+    Always materialises a host NumPy array. Callers that want to keep a GPU
+    array on-device (e.g. to encode it via CUDA IPC) must special-case it
+    *before* calling this -- see :func:`validate_python_or_gpu_array` for the
+    input-validation path and :func:`encode_array` for serialization.
     """
-    from tesseract_core.runtime import cuda_ipc
-
-    if cuda_ipc.has_cuda_array_interface(val):
-        return cuda_ipc.validate_cuda_array(val, expected_shape, expected_dtype)
-
     val = np.asarray(val, order="C")
     if not np.issubdtype(val.dtype, np.number) and not np.issubdtype(
         val.dtype, np.bool_
@@ -538,6 +531,29 @@ def python_to_array(
         )
     context = info.context if info.context else {}
     return _coerce_shape_dtype(val, expected_shape, expected_dtype, context)
+
+
+def validate_python_or_gpu_array(
+    val: Any,
+    info: ValidationInfo,
+    expected_shape: ShapeType,
+    expected_dtype: str | None,
+) -> ArrayLike | GPUArray:
+    """Validate a Python array-like input, keeping GPU arrays on-device.
+
+    Used as the "load from a Python object" validator. Objects that live in GPU
+    memory (exposing ``__cuda_array_interface__``) are validated but returned
+    unchanged, so they can later be encoded via CUDA IPC without a host copy;
+    coercing them to NumPy here would force a device-to-host transfer (or fail,
+    since CuPy refuses implicit conversion). Everything else is coerced to a
+    NumPy array via :func:`python_to_array`.
+    """
+    from tesseract_core.runtime import cuda_ipc
+
+    if cuda_ipc.has_cuda_array_interface(val):
+        return cuda_ipc.validate_cuda_array(val, expected_shape, expected_dtype)
+
+    return python_to_array(val, info, expected_shape, expected_dtype)
 
 
 def decode_array(
@@ -634,8 +650,8 @@ def encode_array(
         return python_to_array(arr, info, expected_shape, expected_dtype)
 
     # JSON, non-IPC encoding: the data must reach the host. A GPU array survived
-    # validation untouched (see python_to_array), so materialise it here with an
-    # explicit device-to-host copy before the numpy-based coercion.
+    # validation untouched (see validate_python_or_gpu_array), so materialise it
+    # here with an explicit device-to-host copy before the numpy-based coercion.
     if cuda_ipc.has_cuda_array_interface(arr) and not isinstance(arr, np.ndarray):
         arr = cuda_ipc.cuda_array_to_host(arr)
 
