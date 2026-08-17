@@ -64,7 +64,7 @@ def _cache_key(tree: Any) -> Hashable:
         if hasattr(leaf, "tobytes"):
             items.append((leaf.dtype.str, leaf.shape, bytes(_fast_tobytes(leaf))))
         else:
-            items.append((type(leaf).__qualname__, leaf))
+            items.append((type(leaf), leaf))
     return tuple(items)
 
 
@@ -97,12 +97,10 @@ def jax_apply(apply_jit: Callable, inputs: BaseModel) -> dict:
     # None would otherwise abort the call outright ("is not a valid JAX
     # type"), so merely enabling the cache would break a Tesseract that runs
     # fine without it. Static leaves are threaded back in as constants,
-    # mirroring jax_abstract_eval below. The filter admits Python floats as
-    # well as arrays, so a scalar ``Differentiable[Float32]`` field keeps its
-    # gradient.
-    dynamic_inputs, static_inputs = eqx.partition(
-        inputs_dict, filter_spec=eqx.is_inexact_array_like
-    )
+    # mirroring jax_abstract_eval below. A scalar ``Differentiable[Float32]``
+    # validates to a numpy scalar, which ``is_array`` accepts, so it stays
+    # dynamic and keeps its gradient.
+    dynamic_inputs, static_inputs = eqx.partition(inputs_dict, filter_spec=eqx.is_array)
 
     def _apply_for_vjp(dynamic_inputs: dict) -> tuple:
         out = apply_jit(eqx.combine(static_inputs, dynamic_inputs))
