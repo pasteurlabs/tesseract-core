@@ -48,6 +48,7 @@ AllowedDtypes = Literal[
     "complex128",
 ]
 
+GPUArray: TypeAlias = Any  # Placeholder for GPU array types (e.g., CuPy, PyTorch, etc.)
 EllipsisType: TypeAlias = type(Ellipsis)
 ArrayLike: TypeAlias = np.ndarray | np.number | np.bool_
 ShapeType: TypeAlias = tuple[int | None, ...] | EllipsisType
@@ -511,14 +512,15 @@ def python_to_array(
     info: ValidationInfo,
     expected_shape: ShapeType,
     expected_dtype: str | None,
-) -> ArrayLike:
-    """Try to coerce a Python object to a NumPy array of the given shape and dtype.
+) -> ArrayLike | GPUArray:
+    """Coerce a Python object to a NumPy array, or pass a GPU array through.
 
-    Objects that live in GPU memory (exposing ``__cuda_array_interface__``) are
-    passed through unchanged (validated but not copied to the host) so they can
-    be encoded via CUDA IPC during serialization. Coercing them to NumPy here
-    would force a device-to-host transfer (or fail, since CuPy refuses implicit
-    conversion), defeating the purpose of ``json+cuda_ipc``.
+    Returns a NumPy array (``ArrayLike``) for host objects. Objects that live in
+    GPU memory (exposing ``__cuda_array_interface__``) are instead returned
+    unchanged -- validated but not copied to the host -- so they can be encoded
+    via CUDA IPC during serialization. Coercing them to NumPy here would force a
+    device-to-host transfer (or fail, since CuPy refuses implicit conversion),
+    defeating the purpose of ``json+cuda_ipc``.
     """
     from tesseract_core.runtime import cuda_ipc
 
@@ -611,10 +613,11 @@ def encode_array(
     context = info.context if info.context else {}
     array_encoding = context.get("array_encoding", "json")
 
-    # For cuda_ipc, skip numpy conversion so the array stays on the GPU.
-    if array_encoding == "cuda_ipc":
-        if not info.mode_is_json():
-            return arr
+    # For cuda_ipc, skip numpy conversion so the array stays on the GPU. In
+    # Python mode there is nothing to serialize, so pass the array through
+    # untouched (the on-device passthrough handled generally below); only the
+    # JSON path emits an IPC handle, and there the input must be a CUDA array.
+    if array_encoding == "cuda_ipc" and info.mode_is_json():
         if not cuda_ipc.has_cuda_array_interface(arr):
             raise ValueError(
                 "cuda_ipc encoding requires a CUDA array "

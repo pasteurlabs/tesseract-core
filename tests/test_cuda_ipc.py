@@ -457,7 +457,7 @@ def _ring1_server(req_q, resp_q):
 
         from tesseract_core.runtime.cuda_ipc import (
             dump_cuda_ipc_arraydict,
-            release_cuda_ipc_exports,
+            release_pinned_ipc_exports,
         )
 
         while True:
@@ -465,7 +465,7 @@ def _ring1_server(req_q, resp_q):
             if req is None:
                 return
             i = req
-            release_cuda_ipc_exports()  # release-at-request-start
+            release_pinned_ipc_exports()  # release-at-request-start
             for _ in range(32):
                 tmp = cupy.zeros(4096, dtype=cupy.float32)
                 del tmp
@@ -542,11 +542,11 @@ def test_ring1_serial_reuse():
 
 @requires_cuda
 def test_sdk_encode_structure():
-    """The SDK ``_encode_array_cuda_ipc`` yields the same dict shape."""
-    from tesseract_core.sdk.tesseract import _encode_array_cuda_ipc
+    """The SDK ``_encode_array`` cuda_ipc path yields the expected dict shape."""
+    from tesseract_core.sdk.tesseract import _encode_array
 
     arr = cupy.random.randn(32, 64).astype(cupy.float64)
-    encoded = _encode_array_cuda_ipc(arr)
+    encoded = _encode_array(arr, cuda_ipc=True)
     assert encoded["data"]["encoding"] == "cuda_ipc"
     assert encoded["shape"] == [32, 64]
     assert encoded["dtype"] == "float64"

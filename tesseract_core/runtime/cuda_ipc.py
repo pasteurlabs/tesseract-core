@@ -18,8 +18,8 @@ runtime machinery. The public entry points used by :mod:`array_encoding` are:
 * :func:`validate_cuda_array` -- shape/dtype validation without a device copy,
 * :func:`dump_cuda_ipc_arraydict` / :func:`load_cuda_ipc_arraydict` -- the
   encode/decode pair,
-* :func:`release_cuda_ipc_exports` -- producer-side keepalive cleanup, called
-  once per request by the runtime server.
+* :func:`release_pinned_ipc_exports` -- keepalive cleanup, called once per
+  request by both the server (for its outputs) and the client (for its inputs).
 """
 
 import ctypes
@@ -46,8 +46,10 @@ def has_cuda_array_interface(obj: Any) -> bool:
 def cuda_array_to_host(arr: Any) -> np.ndarray:
     """Copy a GPU array to a host NumPy array (explicit device-to-host copy).
 
-    Handles CuPy (``.get()``) and PyTorch (``.cpu().numpy()``). Used for non-IPC
-    encodings, where the bytes must reach the host.
+    Used for non-IPC encodings, where the bytes must reach the host. Handles
+    CuPy (``.get()``) and PyTorch (``.cpu().numpy()``) explicitly, then falls
+    back to ``np.asarray`` for any other framework whose arrays support
+    ``__array__`` (e.g. JAX, which fetches to host on conversion).
     """
     get = getattr(arr, "get", None)
     if callable(get):  # CuPy
@@ -55,9 +57,17 @@ def cuda_array_to_host(arr: Any) -> np.ndarray:
     cpu = getattr(arr, "cpu", None)
     if callable(cpu):  # PyTorch
         return np.asarray(cpu().numpy())
+    # JAX arrays (and any other framework exposing __array__) fetch to host here;
+    # CuPy deliberately raises rather than copy implicitly, which is why it is
+    # handled explicitly above. Require __array__ so a bare object does not slip
+    # through as a useless object-dtype array.
+    if hasattr(arr, "__array__"):
+        host = np.asarray(arr)
+        if host.dtype != object:
+            return host
     raise TypeError(
         f"Cannot copy GPU array of type {type(arr).__name__} to host; "
-        "expected a CuPy or PyTorch array."
+        "expected a CuPy, PyTorch, or __array__-convertible numeric array."
     )
 
 
@@ -384,7 +394,7 @@ def _stage_for_legacy_ipc(base_ptr: int, storage_size: int) -> int:
 
     Returns the device pointer of the new (caller-owned, offset-zero) buffer.
     The caller is responsible for freeing it via ``cudaFree`` once the export
-    is no longer needed (see :func:`_release_cuda_ipc_exports`).
+    is no longer needed (see :func:`release_pinned_ipc_exports`).
     """
     cudart = _get_cudart()
     staging_ptr = ctypes.c_void_p()
@@ -409,28 +419,41 @@ def _stage_for_legacy_ipc(base_ptr: int, storage_size: int) -> int:
 # CUDA IPC array encode / decode
 # ---------------------------------------------------------------------------
 
-# Producer-side keepalive registry (a "ring" of depth 1).
+# Keepalive registry for arrays exported via CUDA IPC by the current request.
 #
-# A CUDA IPC handle is only valid while the *producer* keeps the source
-# allocation alive. In a request/response server the output array would
-# otherwise be freed the instant the handler returns (possibly before the
-# client has copied it out) and a pooled allocator (CuPy/PyTorch) could then
-# recycle the block, so the client would silently read *wrong* data.
+# A CUDA IPC handle is only valid while the *exporting* process keeps the source
+# allocation alive. If the exported array were freed the instant it is handed
+# off (before the consumer opens and copies it out) a pooled allocator
+# (CuPy/PyTorch) could recycle the block, so the consumer would silently read
+# *wrong* data.
 #
-# We therefore retain the arrays exported during the *current* request here, and
-# release them at the START of the next request (see
-# :func:`release_cuda_ipc_exports`). This bounds pinned GPU memory to a single
-# request's worth of outputs.
+# Both sides of a request/response exchange export arrays and share this global
+# registry: the server exports its outputs, and the client exports its inputs.
+# Each side retains the arrays it exported until it has positive evidence the
+# consumer is done borrowing them, then calls :func:`release_pinned_ipc_exports`.
+# This bounds pinned GPU memory to a single request's worth of exports per side.
 #
-# This is correct under two documented assumptions:
-#   1. Clients issue cuda_ipc requests *serially* (never concurrently). A serial
-#      client's call to request N+1 cannot begin until its handling of the
-#      response to request N has fully returned, and the client copies each
-#      output into its own buffer before returning (see
-#      :func:`load_cuda_ipc_arraydict`). So by the time request N+1 releases
-#      request N's exports, the client is provably done borrowing them.
-#   2. The client copies decoded outputs into client-owned memory (which the
-#      decode path does unconditionally).
+# The two sides release at different moments because the evidence arrives at
+# different moments:
+#
+#   * Server: releases at the START of the next request. The server's outputs
+#     must outlive the handler's return -- the response (carrying the IPC
+#     handles) is only serialized and sent afterwards, so the client has not yet
+#     copied them out. A serial client cannot issue request N+1 until it has
+#     fully handled response N, so start-of-request N+1 is the first moment the
+#     server knows request N's outputs are safe to reclaim.
+#
+#   * Client: releases at the END of the request. The server decodes the
+#     client's inputs *during* request handling -- :func:`load_cuda_ipc_arraydict`
+#     copies each input into server-owned memory and closes the mapping before
+#     the response is sent -- so by the time the HTTP call returns (with the body
+#     buffered) the inputs are provably dead and can be released immediately.
+#
+# Both rely on the same two assumptions:
+#   1. Requests are issued *serially* (never concurrently).
+#   2. The consumer copies decoded arrays into consumer-owned memory before it
+#      releases the exporter's buffer (which the decode path does
+#      unconditionally; see :func:`load_cuda_ipc_arraydict`).
 _CUDA_IPC_EXPORT_REGISTRY: list[Any] = []
 
 # Device pointers of VMM-fallback staging buffers (see _stage_for_legacy_ipc)
@@ -441,13 +464,14 @@ _CUDA_IPC_EXPORT_REGISTRY: list[Any] = []
 _CUDA_IPC_STAGING_BUFFERS: list[int] = []
 
 
-def release_cuda_ipc_exports() -> None:
-    """Release producer-side arrays pinned for CUDA IPC export by the last request.
+def release_pinned_ipc_exports() -> None:
+    """Release arrays pinned for CUDA IPC export and free their staging buffers.
 
-    Called at the start of each runtime request so the previous request's
-    exported GPU buffers are freed just before the next request runs, while
-    still having survived the (serial) client's copy-out of that request's
-    outputs.
+    Drops the keepalive references held since the last release and frees any
+    VMM-fallback staging buffers. Driven by both sides of a cuda_ipc exchange
+    but at different points in the request lifecycle (server: start of the next
+    request; client: end of the current request); see the registry comment above
+    for why each timing is safe.
     """
     _CUDA_IPC_EXPORT_REGISTRY.clear()
 
@@ -461,8 +485,8 @@ def release_cuda_ipc_exports() -> None:
 def _pin_cuda_ipc_export(arr: Any) -> None:
     """Retain a reference to a source array so its GPU memory stays valid.
 
-    The reference is held until the next request calls
-    :func:`release_cuda_ipc_exports`.
+    The reference is held until the exporting side calls
+    :func:`release_pinned_ipc_exports`.
     """
     _CUDA_IPC_EXPORT_REGISTRY.append(arr)
 
@@ -470,8 +494,9 @@ def _pin_cuda_ipc_export(arr: Any) -> None:
 def _pin_cuda_ipc_staging_buffer(device_ptr: int) -> None:
     """Register a VMM-fallback staging buffer (see :func:`_stage_for_legacy_ipc`) for cudaFree.
 
-    Freed at the same point ordinary pinned arrays are released (start of the
-    next request), for the same reasons (see the module comment above).
+    Freed at the same point ordinary pinned arrays are released (when the
+    exporting side calls :func:`release_pinned_ipc_exports`), for the same
+    reasons (see the module comment above).
     """
     _CUDA_IPC_STAGING_BUFFERS.append(device_ptr)
 
@@ -487,8 +512,8 @@ def dump_cuda_ipc_arraydict(arr: Any) -> ArrayDict:
 
     The source array is pinned in a process-global registry (see
     :func:`_pin_cuda_ipc_export`) so its GPU memory is not freed or recycled
-    before the consumer copies it out; the pin is released at the start of the
-    next request (:func:`release_cuda_ipc_exports`).
+    before the consumer copies it out; the pin is released once the exporting
+    side calls :func:`release_pinned_ipc_exports`.
 
     Frameworks with VMM/pool-backed GPU allocators (e.g. JAX/XLA) hand out
     pointers that the legacy ``cudaIpcGetMemHandle`` API rejects; in that case
@@ -877,7 +902,7 @@ def _drop_unconsumed_dlpack_bundle(token: int) -> None:
         c_deleter(0)
 
 
-def load_cuda_ipc_arraydict(val: ArrayDict) -> Any:
+def load_cuda_ipc_arraydict(val: ArrayDict) -> "IpcDeviceArray":
     """Load a CUDA array from a JSON dict with a CUDA IPC handle.
 
     The calling process must share the IPC namespace with the producer

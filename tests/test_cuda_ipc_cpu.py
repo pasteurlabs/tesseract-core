@@ -113,7 +113,7 @@ def patched_cuda(monkeypatch):
     monkeypatch.setattr(cuda_ipc, "_cuda_ipc_close_mem_handle", fake_close)
     monkeypatch.setattr(cuda_ipc, "_stage_for_legacy_ipc", fake_stage)
 
-    # Staging buffers are freed via cudart.cudaFree in release_cuda_ipc_exports;
+    # Staging buffers are freed via cudart.cudaFree in release_pinned_ipc_exports;
     # stub the cudart accessor so no real driver is touched and frees are logged.
     fake_cudart = types.SimpleNamespace(
         cudaFree=lambda ptr: calls["free"].append(getattr(ptr, "value", ptr))
@@ -239,7 +239,7 @@ def test_export_registry_pins_and_releases(patched_cuda):
     cuda_ipc.dump_cuda_ipc_arraydict(arr)
     # The source array is retained so its (would-be) GPU memory stays valid.
     assert arr in cuda_ipc._CUDA_IPC_EXPORT_REGISTRY
-    cuda_ipc.release_cuda_ipc_exports()
+    cuda_ipc.release_pinned_ipc_exports()
     assert cuda_ipc._CUDA_IPC_EXPORT_REGISTRY == []
 
 
@@ -247,9 +247,128 @@ def test_release_frees_staging_buffers(patched_cuda, monkeypatch):
     """Releasing exports cudaFree's every registered staging buffer."""
     cuda_ipc._pin_cuda_ipc_staging_buffer(0xAAAA)
     cuda_ipc._pin_cuda_ipc_staging_buffer(0xBBBB)
-    cuda_ipc.release_cuda_ipc_exports()
+    cuda_ipc.release_pinned_ipc_exports()
     assert patched_cuda["free"] == [0xAAAA, 0xBBBB]
     assert cuda_ipc._CUDA_IPC_STAGING_BUFFERS == []
+
+
+def test_client_request_releases_input_exports(patched_cuda):
+    """HTTPClient._request must release the GPU inputs it pinned while encoding.
+
+    Regression test: the client shares the process-global export registry with
+    the server, and encoding a GPU input pins it there. If _request does not
+    release afterward the registry grows without bound across calls (each call's
+    inputs leaked). The pin must survive long enough for the server to decode --
+    i.e. until the response body is buffered -- so we assert it is still present
+    when the (fake) request is dispatched, and gone once _request returns.
+    """
+    from tesseract_core.sdk.tesseract import HTTPClient
+
+    seen_during_request = {}
+
+    class FakeResponse:
+        status_code = 200
+        ok = True
+        content = b"{}"
+
+    class FakeSession:
+        def __init__(self) -> None:
+            self.headers = {}
+
+        def request(self, **kwargs):
+            # The input must still be pinned here: a real server has not yet
+            # decoded and copied it out.
+            seen_during_request["pinned"] = list(cuda_ipc._CUDA_IPC_EXPORT_REGISTRY)
+            return FakeResponse()
+
+    client = HTTPClient.__new__(HTTPClient)
+    client._url = "http://localhost:8000"
+    client._output_path = None
+    client._output_format = "json+cuda_ipc"
+    client._timeout = None
+    client._session = FakeSession()
+
+    arr = FakeCudaArray((3,), "<f4")
+    assert cuda_ipc._CUDA_IPC_EXPORT_REGISTRY == []
+    client._request("apply", method="POST", payload={"a": arr})
+
+    # Pinned during the request (so the server can copy it out) ...
+    assert arr in seen_during_request["pinned"]
+    # ... and released once the request returned (no leak across calls).
+    assert cuda_ipc._CUDA_IPC_EXPORT_REGISTRY == []
+
+
+def test_client_request_cpu_only_payload_skips_release(monkeypatch):
+    """A cuda_ipc request with no GPU inputs must not touch the release path.
+
+    Nothing gets pinned, so _request must not import/call the cuda_ipc runtime
+    for cleanup -- otherwise a base install (no runtime extra) would spuriously
+    fail on an all-CPU payload. Guard by making the release helper explode if
+    called.
+    """
+    from tesseract_core.sdk import tesseract as sdk
+    from tesseract_core.sdk.tesseract import HTTPClient
+
+    def _boom():
+        raise AssertionError("release must not be called for a CPU-only payload")
+
+    monkeypatch.setattr(
+        sdk,
+        "_import_cuda_ipc",
+        lambda: types.SimpleNamespace(release_pinned_ipc_exports=_boom),
+    )
+
+    class FakeResponse:
+        status_code = 200
+        ok = True
+        content = b"{}"
+
+    class FakeSession:
+        def __init__(self) -> None:
+            self.headers = {}
+
+        def request(self, **kwargs):
+            return FakeResponse()
+
+    client = HTTPClient.__new__(HTTPClient)
+    client._url = "http://localhost:8000"
+    client._output_path = None
+    client._output_format = "json+cuda_ipc"
+    client._timeout = None
+    client._session = FakeSession()
+
+    # Plain host array -> encodes as base64, pins nothing, releases nothing.
+    client._request("apply", method="POST", payload={"a": np.zeros(3)})
+
+
+def test_import_cuda_ipc_explains_missing_runtime_extra(monkeypatch):
+    """Without the runtime extra, cuda_ipc use points at tesseract-core[runtime].
+
+    Simulate a base SDK install (no runtime deps) by making the cuda_ipc import
+    fail, and assert the friendly ImportError naming the extra is raised instead
+    of a bare ModuleNotFoundError from deep in the import chain.
+    """
+    import builtins
+
+    from tesseract_core.sdk import tesseract as sdk
+
+    real_import = builtins.__import__
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        # Mimic the module being unimportable on a base install (its deep
+        # dependencies, e.g. fsspec, are absent). Covers both `import
+        # tesseract_core.runtime.cuda_ipc` and `from tesseract_core.runtime
+        # import cuda_ipc`.
+        if name == "tesseract_core.runtime.cuda_ipc" or (
+            name == "tesseract_core.runtime" and "cuda_ipc" in (fromlist or ())
+        ):
+            raise ImportError("No module named 'fsspec'")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    with pytest.raises(ImportError, match=r"tesseract-core\[runtime\]"):
+        sdk._import_cuda_ipc()
 
 
 # ── Decode-side orchestration (mocked CUDA, no CuPy) ─────────────────────
@@ -492,7 +611,7 @@ def test_encode_array_cuda_ipc_requires_cuda_array():
 
 
 def test_cuda_array_to_host_branches():
-    """_cuda_array_to_host handles CuPy-like, torch-like, and rejects others."""
+    """cuda_array_to_host handles CuPy-, torch-, __array__-like, and rejects others."""
 
     class CupyLike:
         def get(self):
@@ -505,8 +624,16 @@ def test_cuda_array_to_host_branches():
         def numpy(self):
             return np.array([3.0, 4.0])
 
+    class ArrayLike:
+        # Mirrors JAX arrays, which expose neither .get() nor .cpu() but fetch to
+        # host via __array__ / np.asarray.
+        def __array__(self, dtype=None):
+            out = np.array([5.0, 6.0])
+            return out if dtype is None else out.astype(dtype)
+
     assert cuda_ipc.cuda_array_to_host(CupyLike()).tolist() == [1.0, 2.0]
     assert cuda_ipc.cuda_array_to_host(TorchLike()).tolist() == [3.0, 4.0]
+    assert cuda_ipc.cuda_array_to_host(ArrayLike()).tolist() == [5.0, 6.0]
     with pytest.raises(TypeError, match="Cannot copy GPU array"):
         cuda_ipc.cuda_array_to_host(object())
 
