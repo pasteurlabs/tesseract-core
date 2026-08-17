@@ -305,12 +305,15 @@ linkcheck_ignore = [
     r"https://www\.linkedin\.com/",
     # Annual Reviews blocks headless requests (403); the DOI resolves in a browser.
     r"https://doi\.org/10\.1146/annurev-fluid-010518-040547",
+    # MIT's shared script hosting (scripts-vhosts.mit.edu) intermittently refuses
+    # HTTPS connections, causing flaky connect timeouts in CI even though the site
+    # is fine in a browser. Retries don't help — it can be down for minutes.
+    r"https://enzyme\.mit\.edu/.*",
 ]
 
 # Pages whose in-page anchors are generated client-side (or are browser text
 # fragments), so linkcheck's static anchor check yields false negatives.
 linkcheck_anchors_ignore_for_url = [
-    r"https://enzyme\.mit\.edu/.*",
     r"https://www\.ecmwf\.int/.*",
 ]
 
