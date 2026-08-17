@@ -32,7 +32,7 @@ Multi-Agent Differentiable Predictive Control architecture for zero-shot PDE sca
 
 <figure>
 <video autoplay loop muted playsinline>
-  <source src="../_static/blog/hackathon-heat2d-decentralized.mp4" type="video/mp4">
+  <source src="../../_static/blog/hackathon-heat2d-decentralized.mp4" type="video/mp4">
 </video>
 <figcaption>Visualization of decentralized agents shaping a 2D heat field without direct communication.</figcaption>
 </figure>

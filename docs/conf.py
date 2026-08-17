@@ -291,6 +291,45 @@ def setup(app) -> None:
     app.connect("html-page-context", _inject_page_context)
 
 
+# -- Options for the linkcheck builder ---------------------------------------
+# `make linkcheck` (run in CI) validates every external URL and, crucially,
+# every raw-HTML asset path — the one class of broken link that `-W` cannot
+# catch, since Sphinx emits raw HTML verbatim without resolving it.
+
+# URLs that linkcheck cannot validate but that are fine in a browser. Keep this
+# list tight and annotated so it stays a set of known false positives, not a
+# dumping ground for genuinely broken links.
+linkcheck_ignore = [
+    # Anti-bot / login walls return 403/redirects to headless requests.
+    r"https://www\.mathworks\.com/",
+    r"https://www\.linkedin\.com/",
+    # Annual Reviews blocks headless requests (403); the DOI resolves in a browser.
+    r"https://doi\.org/10\.1146/annurev-fluid-010518-040547",
+    # MIT's shared script hosting (scripts-vhosts.mit.edu) intermittently refuses
+    # HTTPS connections, causing flaky connect timeouts in CI even though the site
+    # is fine in a browser. Retries don't help — it can be down for minutes.
+    r"https://enzyme\.mit\.edu/.*",
+]
+
+# Pages whose in-page anchors are generated client-side (or are browser text
+# fragments), so linkcheck's static anchor check yields false negatives.
+linkcheck_anchors_ignore_for_url = [
+    r"https://www\.ecmwf\.int/.*",
+]
+
+# Some CDNs (e.g. Netlify, which fronts pasteurlabs.ai) throttle bursts of
+# concurrent requests from datacenter IPs like GitHub Actions runners, stalling
+# the surplus connections until they time out — even though each link is fine in
+# a browser. This surfaced as flaky `read timeout=30` failures in CI. Keeping the
+# worker pool small shrinks those bursts, and a generous timeout plus retries
+# lets a throttled connection recover. Timeouts are retried up to
+# linkcheck_retries before being reported broken; genuine 4xx failures still fail
+# fast, so real broken links are not masked.
+linkcheck_workers = 2
+linkcheck_timeout = 60
+linkcheck_retries = 2
+
+
 # -- Handle Jupyter notebooks ------------------------------------------------
 
 # Do not execute notebooks during build (just take existing output)

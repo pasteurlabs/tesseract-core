@@ -33,17 +33,20 @@ A complete 4D-Variational data assimilation scheme for a chaotic dynamical syste
 :gutter: 2
 
 :::{grid-item-card} 4D-Var Data Assimilation
-:link: data-assimilation.html
+:link: data-assimilation
+:link-type: doc
 
 Full walkthrough of a 4D-Var scheme using a differentiable Lorenz-96 Tesseract — from building the Tesseract to running the optimization loop.
 :::
 :::{grid-item-card} Lorenz Tesseract
-:link: lorenz_tesseract.html
+:link: lorenz_tesseract
+:link-type: doc
 
 Detailed implementation of the JAX-based Lorenz-96 solver Tesseract used in the 4D-Var demo.
 :::
 :::{grid-item-card} Bayesian Inference
-:link: bayesian-inference.html
+:link: bayesian-inference
+:link-type: doc
 
 Use the same Lorenz-96 Tesseract as the forward model inside a NumPyro probabilistic workflow — recover the posterior over an unknown forcing parameter with gradient-based MCMC.
 :::
@@ -58,12 +61,14 @@ End-to-end differentiable optimization through physics simulators, composing Tes
 :gutter: 2
 
 :::{grid-item-card} CFD Flow Optimization
-:link: cfd-optimization.html
+:link: cfd-optimization
+:link-type: doc
 
 Optimize the initial velocity field of a 2D Navier-Stokes simulation so its vorticity evolves into a target image — gradient-based optimization through a JAX-CFD Tesseract.
 :::
 :::{grid-item-card} FEM Shape Optimization
-:link: fem-shape-optimization.html
+:link: fem-shape-optimization
+:link-type: doc
 
 Compose a geometry Tesseract (PyVista, finite-difference gradients) with a FEM Tesseract (jax-fem) to optimize structural bar configurations for minimum compliance.
 :::
@@ -73,12 +78,14 @@ Compose a geometry Tesseract (PyVista, finite-difference gradients) with a FEM T
 Couple two independently built thermal and structural Tesseracts with two-way thermoelastic feedback, and differentiate through the resulting equilibrium to solve an inverse-design problem — with constant-memory gradients via implicit differentiation.
 :::
 :::{grid-item-card} Differentiable Fortran (Enzyme)
-:link: enzyme-lfortran.html
+:link: enzyme-lfortran
+:link-type: doc
 
 Solve two inverse heat-transfer problems by differentiating a Fortran solver end-to-end: Enzyme generates exact derivatives at the LLVM IR level, and `jax.value_and_grad` drives the optimization through Tesseract-JAX.
 :::
 :::{grid-item-card} Learned Closure (PyTorch)
-:link: learned-closure.html
+:link: learned-closure
+:link-type: doc
 
 Train a native PyTorch neural viscosity closure end-to-end through a containerized Burgers' equation solver Tesseract used as a differentiable layer. Gradients flow from the loss through the solver's VJP, over HTTP, into the network using Tesseract-Torch.
 :::
