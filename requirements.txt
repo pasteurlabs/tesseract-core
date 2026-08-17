@@ -6,7 +6,7 @@ annotated-types==0.8.0
     # via pydantic
 certifi==2026.7.22
     # via requests
-charset-normalizer==3.4.9
+charset-normalizer==3.5.1
     # via requests
 colorama==0.4.6 ; sys_platform == 'win32'
     # via typer
@@ -28,7 +28,7 @@ numpy==2.4.6 ; python_full_version == '3.11.*'
     # via tesseract-core
 numpy==2.5.2 ; python_full_version >= '3.12'
     # via tesseract-core
-orjson==3.11.9
+orjson==3.12.0
     # via tesseract-core
 packaging==26.3
     # via tesseract-core
@@ -59,7 +59,7 @@ typing-extensions==4.16.0
     #   pydantic
     #   pydantic-core
     #   typing-inspection
-typing-inspection==0.4.2
+typing-inspection==0.4.4
     # via pydantic
 urllib3==2.7.0
     # via requests
