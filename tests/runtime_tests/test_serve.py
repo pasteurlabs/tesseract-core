@@ -17,6 +17,7 @@ import numpy as np
 import pytest
 import requests
 from fastapi.testclient import TestClient
+from typeguard import suppress_type_checks
 
 from tesseract_core.runtime.config import get_config
 from tesseract_core.runtime.serve import create_rest_api
@@ -385,7 +386,9 @@ def test_custom_validation_error_over_http(dummy_tesseract_module):
         "data": {"buffer": [1, 2], "encoding": "json"},
     }
 
-    with pytest.raises(PydanticValidationError) as exc_info:
+    # The injected TestClient returns httpx responses instead of requests ones,
+    # which trips typeguard's return type check on HTTPClient._send
+    with suppress_type_checks(), pytest.raises(PydanticValidationError) as exc_info:
         tess.apply({"a": non_numeric_array, "b": valid_array, "s": 1})
 
     err_types = {e["type"] for e in exc_info.value.errors()}
