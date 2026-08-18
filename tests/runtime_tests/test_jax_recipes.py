@@ -7,23 +7,23 @@ from collections.abc import Hashable
 
 import numpy as np
 
-from tesseract_core.runtime.jax_recipes import _hash_tree as hash_tree
+from tesseract_core.runtime.jax_recipes import _cache_key
 
 
-class TestHashTree:
-    """Tests for hash_tree -- used as the LRUCache key in the jax-cache recipe."""
+class TestCacheKey:
+    """Tests for _cache_key -- the LRUCache key used by the jax-cache recipe."""
 
     def test_deterministic(self):
         tree = {"a": np.array([1.0, 2.0]), "b": 42}
-        assert hash_tree(tree) == hash_tree(tree)
+        assert _cache_key(tree) == _cache_key(tree)
 
     def test_returns_hashable(self):
-        h = hash_tree({"x": np.array([1.0])})
+        h = _cache_key({"x": np.array([1.0])})
         assert isinstance(h, Hashable)
 
     def test_different_values_differ(self):
-        h1 = hash_tree({"x": np.array([1.0, 2.0])})
-        h2 = hash_tree({"x": np.array([1.0, 3.0])})
+        h1 = _cache_key({"x": np.array([1.0, 2.0])})
+        h2 = _cache_key({"x": np.array([1.0, 3.0])})
         assert h1 != h2
 
     def test_different_shape_with_same_bytes_differ(self):
@@ -33,7 +33,7 @@ class TestHashTree:
         flat = np.array([1, 2, 3, 4], dtype=np.int64)
         reshaped = flat.reshape(2, 2)
         assert flat.tobytes() == reshaped.tobytes()
-        assert hash_tree({"x": flat}) != hash_tree({"x": reshaped})
+        assert _cache_key({"x": flat}) != _cache_key({"x": reshaped})
 
     def test_different_dtype_with_same_bytes_differ(self):
         # int64 [1, 2, 3, 4] and float64 array reinterpretation share buffer
@@ -42,35 +42,51 @@ class TestHashTree:
         a = np.array([1, 2, 3, 4], dtype=np.int64)
         b = a.view(np.float64)  # same bytes, different dtype interpretation
         assert a.tobytes() == b.tobytes()
-        assert hash_tree({"x": a}) != hash_tree({"x": b})
+        assert _cache_key({"x": a}) != _cache_key({"x": b})
 
     def test_different_treedef_differs(self):
-        h1 = hash_tree({"x": np.array([1.0])})
-        h2 = hash_tree({"y": np.array([1.0])})
+        h1 = _cache_key({"x": np.array([1.0])})
+        h2 = _cache_key({"y": np.array([1.0])})
         assert h1 != h2
 
     def test_nested_structure(self):
         tree = {"outer": {"inner": np.array([1.0]), "scalar": 2.0}}
-        assert hash_tree(tree) == hash_tree(tree)
+        assert _cache_key(tree) == _cache_key(tree)
 
     def test_scalar_leaves(self):
-        assert hash_tree({"i": 42, "f": 3.14, "b": True}) == hash_tree(
+        assert _cache_key({"i": 42, "f": 3.14, "b": True}) == _cache_key(
             {"i": 42, "f": 3.14, "b": True}
         )
-        assert hash_tree({"i": 42}) != hash_tree({"i": 43})
+        assert _cache_key({"i": 42}) != _cache_key({"i": 43})
+
+    def test_colliding_scalar_hashes_stay_distinct(self):
+        # CPython reserves -1 as an error sentinel, so hash(-1) == hash(-2).
+        # A key collapsed with hash() cannot tell these two apart, and the
+        # LRUCache dict has no second key to compare against, so a Tesseract
+        # taking an integer parameter would serve the wrong backward pass.
+        assert hash(-1) == hash(-2)
+        assert _cache_key({"i": -1}) != _cache_key({"i": -2})
+
+    def test_numerically_equal_leaves_of_different_types_stay_distinct(self):
+        # The other direction: 1 == 1.0 == True compare equal *and* hash
+        # equal, so the value alone is not enough to discriminate a leaf whose
+        # field is typed as a union.
+        assert hash(1) == hash(1.0) == hash(True)
+        keys = [_cache_key({"x": v}) for v in (1, 1.0, True)]
+        assert len(set(keys)) == 3
 
     def test_string_leaf_stable_within_call(self):
         tree1 = {"name": "alpha"}
         tree2 = {"name": "alpha"}
-        assert hash_tree(tree1) == hash_tree(tree2)
-        assert hash_tree({"name": "alpha"}) != hash_tree({"name": "beta"})
+        assert _cache_key(tree1) == _cache_key(tree2)
+        assert _cache_key({"name": "alpha"}) != _cache_key({"name": "beta"})
 
     def test_bytes_leaf(self):
-        assert hash_tree({"k": b"abc"}) == hash_tree({"k": b"abc"})
-        assert hash_tree({"k": b"abc"}) != hash_tree({"k": b"abd"})
+        assert _cache_key({"k": b"abc"}) == _cache_key({"k": b"abc"})
+        assert _cache_key({"k": b"abc"}) != _cache_key({"k": b"abd"})
 
     def test_empty_tree(self):
-        h = hash_tree({})
+        h = _cache_key({})
         assert isinstance(h, Hashable)
 
 
@@ -101,21 +117,29 @@ def _build_api():
     class InputSchema(BaseModel):
         a: Vec
         b: Vec
+        # Non-array leaves: an int reaches the cache key, a str is a type
+        # jax.vjp refuses to trace. Both are static.
+        norm_ord: int = Field(default=2, description="order of norm")
+        mode: str = Field(default="fast", description="non-JAX leaf")
 
     @eqx.filter_jit
     def apply_jit(inputs):
         a = inputs["a"]["s"] * inputs["a"]["v"]
         b = inputs["b"]["s"] * inputs["b"]["v"]
         # Genuinely nonlinear so vjp residuals are non-trivial.
-        return {"y": jnp.tanh(a + b) * (a - b)}
+        y = jnp.tanh(a + b) * (a - b)
+        scale = 2.0 if inputs["mode"] == "fast" else 3.0
+        return {"y": y * scale, "n": jnp.linalg.norm(y, ord=inputs["norm_ord"])}
 
     return InputSchema, apply_jit
 
 
-def _make_inputs(InputSchema, offset=0.0):
+def _make_inputs(InputSchema, offset=0.0, norm_ord=2):
     return InputSchema(
         a={"v": np.array([1.0, 2.0, 3.0], dtype=np.float32) + offset, "s": 1.5},
         b={"v": np.array([0.5, 1.0, 1.5], dtype=np.float32) + offset, "s": -0.25},
+        norm_ord=norm_ord,
+        mode="fast",
     )
 
 
@@ -207,3 +231,63 @@ class TestCacheCorrectness:
             assert jax_recipes._jax_vjp_cache.size == 1
         finally:
             set_jax_vjp_cache_size(0)
+
+
+class TestCacheWithNonArrayInputs:
+    """Non-array leaves must not collide in the key, or break the forward pass.
+
+    Both paths are invisible to ``test_cache_on_matches_cache_off``: array
+    leaves are keyed on their bytes and discriminate correctly, and that test
+    never varies a non-array leaf between the ``apply`` and the ``vjp``.
+    """
+
+    @staticmethod
+    def _vjp(cache_size, norm_ord, prime_with=None):
+        """Optionally prime the cache at ``prime_with``, then vjp at ``norm_ord``."""
+        from tesseract_core.runtime.experimental import set_jax_vjp_cache_size
+        from tesseract_core.runtime.jax_recipes import jax_apply, jax_vjp
+
+        InputSchema, apply_jit = _build_api()
+        set_jax_vjp_cache_size(cache_size)
+        try:
+            if prime_with is not None:
+                jax_apply(apply_jit, _make_inputs(InputSchema, norm_ord=prime_with))
+            inp = _make_inputs(InputSchema, norm_ord=norm_ord)
+            ct = {"y": np.ones(3, dtype=np.float32)}
+            return jax_vjp(apply_jit, inp, {"a.v", "a.s"}, {"y"}, ct)
+        finally:
+            set_jax_vjp_cache_size(0)
+
+    def test_int_input_does_not_serve_a_colliding_entry(self):
+        # hash(-1) == hash(-2), so priming at norm_ord=-1 used to satisfy a
+        # lookup at norm_ord=-2 and return the wrong gradient.
+        expected = self._vjp(0, norm_ord=-2)
+        got = self._vjp(4, norm_ord=-2, prime_with=-1)
+        for k in expected:
+            np.testing.assert_allclose(
+                np.asarray(got[k]), np.asarray(expected[k]), rtol=1e-6
+            )
+
+    def test_non_jax_input_does_not_break_apply(self):
+        # jax.vjp traces every leaf it is handed, so the str leaf aborted the
+        # call outright and merely enabling the cache broke the Tesseract.
+        from tesseract_core.runtime.experimental import set_jax_vjp_cache_size
+        from tesseract_core.runtime.jax_recipes import jax_apply
+
+        InputSchema, apply_jit = _build_api()
+        set_jax_vjp_cache_size(4)
+        try:
+            out = jax_apply(apply_jit, _make_inputs(InputSchema))
+        finally:
+            set_jax_vjp_cache_size(0)
+        assert np.all(np.isfinite(np.asarray(out["y"])))
+
+    def test_scalar_float_field_keeps_its_gradient(self):
+        # A scalar Differentiable[Float32] validates to a numpy scalar, so it
+        # must stay on the dynamic side of the input partition.
+        expected = self._vjp(0, norm_ord=2)
+        got = self._vjp(4, norm_ord=2, prime_with=2)
+        np.testing.assert_allclose(
+            np.asarray(got["a.s"]), np.asarray(expected["a.s"]), rtol=1e-6
+        )
+        assert np.asarray(expected["a.s"]).item() != 0.0
