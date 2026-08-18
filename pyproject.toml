@@ -121,6 +121,9 @@ include = [
 [tool.pytest.ini_options]
 addopts = ["--typeguard-packages=tesseract_core", "--durations=10"]
 testpaths = ["tests"]
+markers = [
+    "gpu: requires a physical CUDA GPU (plus CuPy) and is skipped on GPU-less CI runners",
+]
 filterwarnings = [
     "error",
     # ignored by default
