@@ -6,7 +6,7 @@ authors = [
     {name = "The Tesseract team @ Pasteur Labs + OSS contributors", email = "info@simulation.science"},
 ]
 license = { text = "Apache-2.0" }
-requires-python = ">=3.10,<3.15"
+requires-python = ">=3.10,<4"
 dependencies = [
     "jinja2",
     "rich",
@@ -102,6 +102,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.version]
 source = "vcs"
+fallback-version = "0.0.0+unknown"
 
 [tool.hatch.build.hooks.vcs]
 version-file = "tesseract_core/_version.py"
