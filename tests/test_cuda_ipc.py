@@ -546,7 +546,7 @@ def test_sdk_encode_structure():
     from tesseract_core.sdk.tesseract import _encode_array
 
     arr = cupy.random.randn(32, 64).astype(cupy.float64)
-    encoded = _encode_array(arr, cuda_ipc=True)
+    encoded = _encode_array(arr, encoding="cuda_ipc")
     assert encoded["data"]["encoding"] == "cuda_ipc"
     assert encoded["shape"] == [32, 64]
     assert encoded["dtype"] == "float64"

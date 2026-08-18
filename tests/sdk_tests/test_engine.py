@@ -1238,3 +1238,17 @@ def test_get_free_port_all_excluded():
 
     with pytest.raises(RuntimeError, match="No free ports found"):
         engine.get_free_port(within_range=(free, free + 1), exclude=(free,))
+
+
+def test_output_format_matches_runtime_source_of_truth():
+    """engine.OutputFormat mirrors the runtime canonical format list.
+
+    The SDK defines the format literal locally (in engine) to avoid eagerly
+    importing the optional runtime package. This guards against the two copies
+    drifting apart.
+    """
+    from typing import get_args
+
+    from tesseract_core.runtime.file_interactions import supported_format_type
+
+    assert get_args(engine.OutputFormat) == get_args(supported_format_type)

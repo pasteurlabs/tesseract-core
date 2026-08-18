@@ -8,11 +8,12 @@ import traceback
 import uuid
 import warnings
 import weakref
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from functools import cached_property, wraps
 from pathlib import Path
 from types import ModuleType
-from typing import TYPE_CHECKING, Any, TypeAlias
+from typing import TYPE_CHECKING, Any, Literal, TypeAlias
 from urllib.parse import urlparse, urlunparse
 
 import numpy as np
@@ -32,10 +33,8 @@ if TYPE_CHECKING:
     # runtime and the SDK does not eagerly pull in the runtime/CUDA machinery.
     from tesseract_core.runtime.cuda_ipc import IpcDeviceArray
 
-    # Output serialization formats; single source of truth lives in the runtime.
-    from tesseract_core.runtime.file_interactions import (
-        supported_format_type as OutputFormat,
-    )
+# Output serialization formats; single SDK-side definition lives in engine.
+OutputFormat: TypeAlias = engine.OutputFormat
 
 PathLike: TypeAlias = str | Path
 BoolOrCallable: TypeAlias = bool | Callable[[str], Any]
@@ -172,7 +171,6 @@ class Tesseract:
             output_path: Output path to write output files to, such as local directory or S3 URI.
                 Required when using json+binref output format.
             output_format: Format to use for the output data. json+binref requires output_path to be set.
-                json+cuda_ipc is experimental and requires the runtime extra (``pip install tesseract-core[runtime]``).
                 This has no impact on what is returned to Python and only affects the format that is used internally.
             docker_args: Additional arguments to pass to the container runtime (e.g., Docker).
             runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
@@ -259,7 +257,6 @@ class Tesseract:
             output_path: Path of output directory. All paths in the tesseract
                 result with be given relative to this path. Required when using json+binref.
             output_format: Format to use for the output data. json+binref requires output_path.
-                json+cuda_ipc is experimental and requires the runtime extra (``pip install tesseract-core[runtime]``).
                 This has no impact on what is returned to Python and only affects the format that is used internally.
             runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
                 For example, `{"profiling": True}` enables profiling.
@@ -676,25 +673,28 @@ def _import_cuda_ipc() -> ModuleType:
     return cuda_ipc
 
 
-def _encode_array(arr: Any, b64: bool = True, cuda_ipc: bool = False) -> dict:
-    # In cuda_ipc mode, GPU arrays are exported by reference via a CUDA IPC
-    # handle, keeping the data on-device. Any other array (or any array outside
-    # cuda_ipc mode) falls through to a host copy below, so a mixed payload
-    # (some GPU, some CPU arrays) encodes correctly either way.
-    if cuda_ipc and hasattr(arr, "__cuda_array_interface__"):
+def _encode_array(
+    arr: Any, encoding: Literal["base64", "raw", "cuda_ipc"] = "base64"
+) -> dict:
+    # With cuda_ipc encoding, GPU arrays are exported by reference via a CUDA IPC
+    # handle, keeping the data on-device. Any other array (or any other encoding)
+    # falls through to a host copy below, so a mixed payload (some GPU, some CPU
+    # arrays) encodes correctly either way.
+    if encoding == "cuda_ipc" and hasattr(arr, "__cuda_array_interface__"):
         return _import_cuda_ipc().dump_cuda_ipc_arraydict(arr)
 
     # Ensure arr is a numpy-compatible array so we guarantee it has a compatible dtype (not e.g. torch bfloat16)
     arr = np.asanyarray(arr, order="A")
-    if b64:
-        data = {
-            "buffer": pybase64.b64encode_as_string(_fast_tobytes(arr)),
-            "encoding": "base64",
-        }
-    else:
+    if encoding == "raw":
         data = {
             "buffer": arr.tolist(),
             "encoding": "raw",
+        }
+    else:
+        # base64 (also the host-copy fallback for a CPU array under cuda_ipc)
+        data = {
+            "buffer": pybase64.b64encode_as_string(_fast_tobytes(arr)),
+            "encoding": "base64",
         }
 
     return {
@@ -702,6 +702,51 @@ def _encode_array(arr: Any, b64: bool = True, cuda_ipc: bool = False) -> dict:
         "dtype": arr.dtype.name,
         "data": data,
     }
+
+
+@contextmanager
+def _encode_payload(payload: dict | None, output_format: str) -> Iterator[dict | None]:
+    """Encode a request payload's arrays, managing CUDA IPC export lifetime.
+
+    Yields the encoded payload (or None for an empty payload). For the
+    ``json+cuda_ipc`` format, GPU arrays are exported by reference (base64 for
+    CPU arrays), which pins each exported allocation in a process-global registry
+    on the runtime side. Those pins are released on context exit -- by then the
+    caller has read the full response, so the server has copied the inputs out
+    and they are provably dead. The release is skipped (and cuda_ipc never
+    imported) when no GPU array was actually exported.
+
+    Releasing on exit rather than at the start of the next request keeps pinned
+    GPU memory bounded to a single in-flight request.
+    """
+    if not payload:
+        yield None
+        return
+
+    if output_format != "json+cuda_ipc":
+        yield _tree_map(
+            _encode_array, payload, is_leaf=lambda x: hasattr(x, "__array__")
+        )
+        return
+
+    # cuda_ipc: a leaf is any array-like on either protocol; GPU leaves are
+    # exported by handle and pin their allocation until we release below.
+    exported = False
+
+    def _encode_leaf(x: Any) -> dict:
+        nonlocal exported
+        if hasattr(x, "__cuda_array_interface__"):
+            exported = True
+        return _encode_array(x, encoding="cuda_ipc")
+
+    def _is_leaf(x: Any) -> bool:
+        return hasattr(x, "__array__") or hasattr(x, "__cuda_array_interface__")
+
+    try:
+        yield _tree_map(_encode_leaf, payload, is_leaf=_is_leaf)
+    finally:
+        if exported:
+            _import_cuda_ipc().release_pinned_ipc_exports()
 
 
 def _decode_array(
@@ -836,6 +881,29 @@ class HTTPClient:
         """(Sanitized) URL to connect to."""
         return self._url
 
+    def _send(
+        self, url: str, method: str, data: bytes, params: dict
+    ) -> requests.Response:
+        # Only forward timeout when set; omitting it is equivalent to None for
+        # requests.Session, and avoids passing a kwarg that some session
+        # implementations (e.g. starlette's TestClient) don't accept.
+        request_kwargs: dict[str, Any] = {
+            "method": method,
+            "url": url,
+            "data": data,
+            "params": params,
+        }
+        if self._timeout is not None:
+            request_kwargs["timeout"] = self._timeout
+        try:
+            return self._session.request(**request_kwargs)
+        except requests.ConnectionError:
+            # Retry once on stale keep-alive connections. There is a race between
+            # urllib3's is_connection_dropped check and the server closing idle
+            # connections (uvicorn timeout_keep_alive) that can cause
+            # ConnectionError on an otherwise healthy server.
+            return self._session.request(**request_kwargs)
+
     def _request(
         self,
         endpoint: str,
@@ -844,74 +912,14 @@ class HTTPClient:
         run_id: str | None = None,
     ) -> dict:
         url = f"{self.url}/{endpoint.lstrip('/')}"
-        cuda_ipc_mode = self._output_format == "json+cuda_ipc"
-        # Set once a GPU input is actually exported (pinning it in the process-
-        # global registry, which must be released afterwards). Stays False if no
-        # GPU input was encoded, so the finally never touches cuda_ipc when there
-        # is nothing to release.
-        pinned_inputs = False
+        params = {"run_id": run_id} if run_id is not None else {}
 
-        try:
-            if payload:
-                # For CUDA IPC, encode GPU arrays via IPC handles and fall back to
-                # base64 for CPU arrays; a leaf is anything array-like on either
-                # protocol. Encoding a GPU input pins its allocation in the
-                # process-global IPC export registry (see cuda_ipc), released in
-                # the finally below once the server has decoded it.
-                if cuda_ipc_mode:
-
-                    def _is_leaf(x: Any) -> bool:
-                        return hasattr(x, "__array__") or hasattr(
-                            x, "__cuda_array_interface__"
-                        )
-
-                    def _encode_leaf(x: Any) -> dict:
-                        nonlocal pinned_inputs
-                        if hasattr(x, "__cuda_array_interface__"):
-                            pinned_inputs = True
-                        return _encode_array(x, cuda_ipc=True)
-                else:
-
-                    def _is_leaf(x: Any) -> bool:
-                        return hasattr(x, "__array__")
-
-                    _encode_leaf = _encode_array
-
-                encoded_payload = _tree_map(_encode_leaf, payload, is_leaf=_is_leaf)
-            else:
-                encoded_payload = None
-
-            params = {"run_id": run_id} if run_id is not None else {}
-            data = orjson.dumps(encoded_payload)
-            # Only forward timeout when set; omitting it is equivalent to None for
-            # requests.Session, and avoids passing a kwarg that some session
-            # implementations (e.g. starlette's TestClient) don't accept.
-            request_kwargs = {
-                "method": method,
-                "url": url,
-                "data": data,
-                "params": params,
-            }
-            if self._timeout is not None:
-                request_kwargs["timeout"] = self._timeout
-            try:
-                response = self._session.request(**request_kwargs)
-            except requests.ConnectionError:
-                # Retry once on stale keep-alive connections. There is a race
-                # between urllib3's is_connection_dropped check and the server
-                # closing idle connections (uvicorn timeout_keep_alive) that
-                # can cause ConnectionError on an otherwise healthy server.
-                response = self._session.request(**request_kwargs)
-        finally:
-            # Release the GPU inputs we pinned while encoding this request. By
-            # now `requests` has buffered the full response body, so the server
-            # has decoded and copied our inputs into its own memory
-            # (load_cuda_ipc_arraydict copies device-to-device and closes the
-            # mapping before responding); the inputs are provably dead. Guarded
-            # on pinned_inputs so we skip (and never re-import cuda_ipc) when
-            # encoding pinned nothing.
-            if pinned_inputs:
-                _import_cuda_ipc().release_pinned_ipc_exports()
+        # The context manager holds any exported GPU inputs alive until the
+        # response has been fully read (see _encode_payload). `requests` buffers
+        # the whole body before `_send` returns, so exiting the block afterwards
+        # releases them at the earliest safe point.
+        with _encode_payload(payload, self._output_format) as encoded_payload:
+            response = self._send(url, method, orjson.dumps(encoded_payload), params)
 
         if response.status_code == requests.codes.unprocessable_entity:
             # Try and raise a more helpful error if the response is a Pydantic error

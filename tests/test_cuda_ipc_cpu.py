@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import types
 from typing import Any
+from unittest.mock import Mock
 
 import numpy as np
 import pytest
@@ -266,10 +267,7 @@ def test_client_request_releases_input_exports(patched_cuda):
 
     seen_during_request = {}
 
-    class FakeResponse:
-        status_code = 200
-        ok = True
-        content = b"{}"
+    response = Mock(status_code=200, ok=True, content=b"{}")
 
     class FakeSession:
         def __init__(self) -> None:
@@ -279,7 +277,7 @@ def test_client_request_releases_input_exports(patched_cuda):
             # The input must still be pinned here: a real server has not yet
             # decoded and copied it out.
             seen_during_request["pinned"] = list(cuda_ipc._CUDA_IPC_EXPORT_REGISTRY)
-            return FakeResponse()
+            return response
 
     client = HTTPClient.__new__(HTTPClient)
     client._url = "http://localhost:8000"
@@ -318,17 +316,14 @@ def test_client_request_cpu_only_payload_skips_release(monkeypatch):
         lambda: types.SimpleNamespace(release_pinned_ipc_exports=_boom),
     )
 
-    class FakeResponse:
-        status_code = 200
-        ok = True
-        content = b"{}"
+    response = Mock(status_code=200, ok=True, content=b"{}")
 
     class FakeSession:
         def __init__(self) -> None:
             self.headers = {}
 
         def request(self, **kwargs):
-            return FakeResponse()
+            return response
 
     client = HTTPClient.__new__(HTTPClient)
     client._url = "http://localhost:8000"

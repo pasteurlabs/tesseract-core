@@ -18,7 +18,7 @@ from contextlib import closing
 from importlib.metadata import requires
 from pathlib import Path
 from shutil import copy, copytree, rmtree
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, TypeAlias
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 
@@ -46,6 +46,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("tesseract")
 docker_client = CLIDockerClient()
+
+# Output serialization formats. Single SDK-side source of truth (re-used across
+# the SDK, e.g. sdk.tesseract). Mirrors runtime.file_interactions.supported_format_type
+# but is defined here so the SDK does not eagerly import the (optional) runtime
+# package; a test asserts the two stay in sync.
+OutputFormat: TypeAlias = Literal["json", "json+base64", "json+binref", "json+cuda_ipc"]
 
 # Fixed port the API server binds *inside* the container when port-mapping is
 # used (i.e. everything except host networking). The container has its own
@@ -816,8 +822,7 @@ def serve(
     memory: str | None = None,
     input_path: str | Path | None = None,
     output_path: str | Path | None = None,
-    output_format: Literal["json", "json+base64", "json+binref", "json+cuda_ipc"]
-    | None = None,
+    output_format: OutputFormat | None = None,
     docker_args: list[str] | None = None,
     runtime_config: dict[str, Any] | None = None,
     skip_health_check: bool = False,
@@ -1187,8 +1192,7 @@ def run_tesseract(
     memory: str | None = None,
     input_path: str | Path | None = None,
     output_path: str | Path | None = None,
-    output_format: Literal["json", "json+base64", "json+binref", "json+cuda_ipc"]
-    | None = None,
+    output_format: OutputFormat | None = None,
     output_file: str | None = None,
     docker_args: list[str] | None = None,
     debug: bool = False,
