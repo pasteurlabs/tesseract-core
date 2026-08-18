@@ -509,16 +509,18 @@ def _coerce_shape_dtype(
 
 def python_to_array(
     val: Any,
-    info: ValidationInfo,
     expected_shape: ShapeType,
     expected_dtype: str | None,
+    context: dict[str, Any] | None = None,
 ) -> ArrayLike:
     """Coerce a Python object to a NumPy array of the given shape and dtype.
 
-    Always materialises a host NumPy array. Callers that want to keep a GPU
-    array on-device (e.g. to encode it via CUDA IPC) must special-case it
-    *before* calling this -- see :func:`validate_python_or_gpu_array` for the
-    input-validation path and :func:`encode_array` for serialization.
+    Always materialises a host NumPy array. ``context`` carries the validation
+    flags consumed by :func:`_coerce_shape_dtype` (e.g. ``strict_shapes`` /
+    ``strict_types``). Callers that want to keep a GPU array on-device (e.g. to
+    encode it via CUDA IPC) must special-case it *before* calling this -- see
+    :func:`validate_python_or_gpu_array` for the input-validation path and
+    :func:`encode_array` for serialization.
     """
     val = np.asarray(val, order="C")
     if not np.issubdtype(val.dtype, np.number) and not np.issubdtype(
@@ -529,7 +531,6 @@ def python_to_array(
             "Could not parse value as a numeric array (contains non-numeric data)",
             {},
         )
-    context = info.context if info.context else {}
     return _coerce_shape_dtype(val, expected_shape, expected_dtype, context)
 
 
@@ -553,7 +554,8 @@ def validate_python_or_gpu_array(
     if cuda_ipc.has_cuda_array_interface(val):
         return cuda_ipc.validate_cuda_array(val, expected_shape, expected_dtype)
 
-    return python_to_array(val, info, expected_shape, expected_dtype)
+    context = info.context if info.context else {}
+    return python_to_array(val, expected_shape, expected_dtype, context)
 
 
 def decode_array(
@@ -647,7 +649,7 @@ def encode_array(
     if not info.mode_is_json():
         if cuda_ipc.has_cuda_array_interface(arr):
             return arr
-        return python_to_array(arr, info, expected_shape, expected_dtype)
+        return python_to_array(arr, expected_shape, expected_dtype, context)
 
     # JSON, non-IPC encoding: the data must reach the host. A GPU array survived
     # validation untouched (see validate_python_or_gpu_array), so materialise it
@@ -656,7 +658,7 @@ def encode_array(
         arr = cuda_ipc.cuda_array_to_host(arr)
 
     # Convert to a NumPy array if necessary
-    arr = python_to_array(arr, info, expected_shape, expected_dtype)
+    arr = python_to_array(arr, expected_shape, expected_dtype, context)
     if array_encoding == "base64":
         return _dump_base64_arraydict(arr, compression=context.get("compression"))
     elif array_encoding == "binref":
