@@ -290,11 +290,7 @@ jobs:
     # (libcudart.so.12/.13) and the encode/decode path are covered against each.
     # The array frameworks are pinned to a matching CUDA build (cupy-cuda1Nx,
     # torch's per-CUDA wheel index, jax[cuda1N]) so the libcudart the runtime
-    # actually binds to differs between entries -- installing plain "torch"
-    # resolves to the newest CUDA build for both, defeating the point.
-    # NOTE: the CUDA 13 entry needs the tesseract-ci-gpu runner's NVIDIA driver
-    # to be new enough for CUDA 13; fail-fast is off so an incompatible entry
-    # does not mask results from the other.
+    # actually binds to differs between entries.
     strategy:
       fail-fast: false
       matrix:
