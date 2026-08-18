@@ -86,9 +86,7 @@ jobs:
           echo "has_baseline=true" >> $GITHUB_OUTPUT
 
       # Secrets are withheld from `pull_request` runs on fork PRs, so the comment
-      # is posted by the privileged `Benchmark Report` workflow instead. It works
-      # out which PR this is from the `workflow_run` event payload, so nothing
-      # needs to be handed over here beyond the report itself.
+      # is posted by the privileged `Benchmark Report` workflow instead.
       - name: Generate comparison report
         if: github.event_name == 'pull_request'
         env:
