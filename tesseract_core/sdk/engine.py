@@ -566,24 +566,27 @@ def _coerce_config_override(value: Any, annotation: Any, path: tuple[str, ...]) 
     if not isinstance(value, str):
         return adapter.validate_python(value)
 
-    candidates = []
+    # Try the YAML-interpreted value first so structured values (lists, dicts,
+    # ints, bools) work, then fall back to the raw string so string fields accept
+    # unquoted scalars. If both fail, report the error from the YAML-interpreted
+    # value: it matches the user's evident intent, whereas the raw-string error
+    # is often a misleading "not a valid <type>" for non-string fields.
     try:
-        candidates.append(yaml.safe_load(value))
+        parsed = yaml.safe_load(value)
     except yaml.YAMLError:
-        pass
-    candidates.append(value)
+        parsed = value
 
-    last_error: PydanticValidationError | None = None
-    for candidate in candidates:
+    try:
+        return adapter.validate_python(parsed)
+    except PydanticValidationError as parsed_error:
         try:
-            return adapter.validate_python(candidate)
-        except PydanticValidationError as e:
-            last_error = e
-
-    keypath = ".".join(path)
-    raise UserError(
-        f'Invalid value "{value}" for config override "{keypath}": {last_error}'
-    ) from last_error
+            return adapter.validate_python(value)
+        except PydanticValidationError:
+            keypath = ".".join(path)
+            raise UserError(
+                f'Invalid value "{value}" for config override "{keypath}": '
+                f"{parsed_error}"
+            ) from parsed_error
 
 
 def build_tesseract(

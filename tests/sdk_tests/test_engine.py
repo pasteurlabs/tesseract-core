@@ -87,6 +87,23 @@ def test_coerce_config_override(keypath, raw_value, expected):
     setattr(c, keypath[-1], coerced)
 
 
+def test_coerce_config_override_reports_structured_error():
+    """A structurally-wrong value surfaces the error against the parsed value.
+
+    The raw-string fallback exists for string fields; for a non-string field it
+    would report a misleading "not a valid <type>", masking the real problem. The
+    error must instead describe the parsed value (e.g. wrong tuple arity).
+    """
+    keypath = ("build_config", "package_data")
+    annotation = TesseractBuildConfig.model_fields["package_data"].annotation
+    # package_data entries are (source, destination) pairs; three items is wrong.
+    with pytest.raises(UserError) as excinfo:
+        engine._coerce_config_override("[[a, b, c]]", annotation, keypath)
+    message = str(excinfo.value)
+    assert "at most 2 items" in message
+    assert "not a valid tuple" not in message
+
+
 def test_prepare_build_context_env(tmp_path_factory):
     """Test that env variables are rendered as ENV lines in the Dockerfile."""
     src_dir = tmp_path_factory.mktemp("src")
