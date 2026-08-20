@@ -59,6 +59,34 @@ def test_prepare_build_context_python_version(tmp_path_factory):
     assert "TESSERACT_PYTHON_VERSION" not in dockerfile_default
 
 
+@pytest.mark.parametrize(
+    "keypath,raw_value,expected",
+    [
+        # Numeric-looking string fields must not be parsed as numbers (#678).
+        (("build_config", "python_version"), "3.12", "3.12"),
+        # Trailing zero must be preserved (YAML would parse 3.10 -> 3.1).
+        (("build_config", "python_version"), "3.10", "3.10"),
+        # Explicit quoting still works.
+        (("build_config", "python_version"), '"3.12"', "3.12"),
+        (("build_config", "target_platform"), "linux/arm64", "linux/arm64"),
+        # Non-string fields still get their structured value.
+        (("build_config", "inherit_base_image_packages"), "true", True),
+        (("build_config", "extra_packages"), "[a, b]", ("a", "b")),
+    ],
+)
+def test_coerce_config_override(keypath, raw_value, expected):
+    """Config override values are coerced to the target field's declared type."""
+    config = TesseractConfig(name="demo")
+    c = config
+    for k in keypath[:-1]:
+        c = getattr(c, k)
+    annotation = type(c).model_fields[keypath[-1]].annotation
+    coerced = engine._coerce_config_override(raw_value, annotation, keypath)
+    assert coerced == expected
+    # The coerced value must be assignable without a validation error.
+    setattr(c, keypath[-1], coerced)
+
+
 def test_prepare_build_context_env(tmp_path_factory):
     """Test that env variables are rendered as ENV lines in the Dockerfile."""
     src_dir = tmp_path_factory.mktemp("src")
