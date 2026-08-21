@@ -310,7 +310,7 @@ def build_image(
                 "the image). Format: ``id=<name>,env=<VAR>`` to read from an "
                 "environment variable, or ``id=<name>,src=<file>`` to read from a "
                 "file. The ``<name>`` matches a ``secret`` reference declared under "
-                "an entry in ``build_config.requirements.index_credentials``. "
+                "an entry in ``build_config.host_credentials``. "
                 "Repeatable."
             ),
             metavar="id=NAME,env=VAR|src=FILE",

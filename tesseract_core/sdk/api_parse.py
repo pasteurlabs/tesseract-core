@@ -103,21 +103,22 @@ def _normalize_provider(value: Any) -> Any:
 ProviderName = Annotated[Literal["uv"], BeforeValidator(_normalize_provider)]
 
 
-class IndexCredential(BaseModel):
-    """Credentials for authenticating against a package index host.
+class HostCredential(BaseModel):
+    """Credentials for authenticating HTTPS access to a host during the build.
 
     The credential is keyed by host and applies to everything fetched from that
-    host during the build -- an ``--extra-index-url`` on that host as well as any
-    PEP 508 direct reference (``pkg @ https://host/...whl``). The token itself is
-    supplied out-of-band at build time via a build secret and is assembled into a
-    netrc entry inside the build; it never lands in the config or an image layer.
+    host at build time -- package indices (``--extra-index-url``), PEP 508 direct
+    references (``pkg @ https://host/...whl``), conda channels, and
+    ``git+https://host/...`` dependencies alike. The token is supplied
+    out-of-band via a build secret and assembled into netrc and git-credential
+    entries inside the build stage; it never lands in the config or an image layer.
     """
 
     host: StrictStr = Field(
         ...,
         description=(
-            "Host the credential authenticates against (e.g. ``pkgs.dev.azure.com``). "
-            "Just the host, not a full URL."
+            "Host the credential authenticates against (e.g. ``pkgs.dev.azure.com`` "
+            "or ``github.com``). Just the host, not a full URL."
         ),
     )
     secret: StrictStr = Field(
@@ -131,9 +132,8 @@ class IndexCredential(BaseModel):
     username: StrictStr = Field(
         "__token__",
         description=(
-            "Username paired with the secret in the netrc entry. Defaults to "
-            "``__token__``, which suits PAT-style feeds; set it for feeds that "
-            "require a real username."
+            "Username paired with the secret. Defaults to ``__token__``, which "
+            "suits PAT-style tokens; set it for hosts that require a real username."
         ),
     )
     model_config: ConfigDict = ConfigDict(extra="forbid")
@@ -143,15 +143,6 @@ class PipRequirements(BaseModel):
     """Configuration options for Python environments built via uv."""
 
     provider: ProviderName
-    index_credentials: tuple[IndexCredential, ...] = Field(
-        (),
-        description=(
-            "Credentials for authenticated package index hosts. Each entry maps a "
-            "host to a build secret; the secret is supplied out-of-band at build "
-            "time (see ``IndexCredential``). Index URLs themselves are declared as "
-            "usual in ``tesseract_requirements.txt`` (e.g. ``--extra-index-url``)."
-        ),
-    )
     _filename: Literal["tesseract_requirements.txt"] = "tesseract_requirements.txt"
     _build_script: Literal["build_pip_venv.sh"] = "build_pip_venv.sh"
     model_config: ConfigDict = ConfigDict(extra="forbid")
@@ -223,6 +214,17 @@ class TesseractBuildConfig(BaseModel, validate_assignment=True):
     )
 
     requirements: PythonRequirements = PipRequirements(provider="uv")
+
+    host_credentials: tuple[HostCredential, ...] = Field(
+        (),
+        description=(
+            "Credentials for authenticated hosts accessed during the build. Each "
+            "entry maps a host to a build secret supplied out-of-band at build time "
+            "(see ``HostCredential`` and ``tesseract build --secret``). Applies to "
+            "package indices, direct-reference wheels, conda channels, and "
+            "``git+https`` dependencies on that host."
+        ),
+    )
 
     build_env: dict[StrictStr, StrictStr] = Field(
         default_factory=dict,

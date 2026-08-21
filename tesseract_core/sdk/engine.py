@@ -29,7 +29,6 @@ from jinja2 import Environment, PackageLoader, StrictUndefined
 from packaging.requirements import Requirement
 
 from .api_parse import (
-    PipRequirements,
     TesseractConfig,
     get_config,
     validate_tesseract_api,
@@ -413,8 +412,27 @@ def prepare_build_context(
     requirement_config = user_config.build_config.requirements
     extra_files.append(template_dir / requirement_config._build_script)
 
+    # Shared credential-setup script, sourced by both provider build scripts.
+    if user_config.build_config.host_credentials:
+        extra_files.append(template_dir / "setup_host_credentials.sh")
+
     for path in extra_files:
         copy(path, context_dir / path.relative_to(template_dir))
+
+    # Write the declared host credentials (host + secret id + username, never
+    # tokens) into a file both build scripts read. At install time the script
+    # reads each token from its secret mount and assembles netrc + git-credential
+    # entries. This is provider-agnostic: netrc/git auth applies to uv, pip, and
+    # conda alike.
+    if user_config.build_config.host_credentials:
+        credentials_file_path = context_dir / "host_credentials.txt"
+        with credentials_file_path.open("w", encoding="utf-8") as f:
+            for credential in user_config.build_config.host_credentials:
+                # Tab-separated host, secret id, and username. None of these may
+                # contain a tab; hosts, secret names, and usernames never do.
+                f.write(
+                    f"{credential.host}\t{credential.secret}\t{credential.username}\n"
+                )
 
     # When building from a requirements.txt we support local dependencies.
     # We separate local dep. lines from the requirements.txt and copy the
@@ -447,18 +465,6 @@ def prepare_build_context(
         with requirements_file_path.open("w", encoding="utf-8") as f:
             if lines:
                 f.write("\n".join(lines) + "\n")
-
-        # Write the declared index credentials (host + secret id + username, never
-        # tokens) into a file the build script reads. At install time the script
-        # reads each token from its secret mount and assembles a netrc entry.
-        credentials_file_path = context_dir / "index_credentials.txt"
-        with credentials_file_path.open("w", encoding="utf-8") as f:
-            for credential in requirement_config.index_credentials:
-                # Tab-separated host, secret id, and username. None of these may
-                # contain a tab; hosts, secret names, and usernames never do.
-                f.write(
-                    f"{credential.host}\t{credential.secret}\t{credential.username}\n"
-                )
 
     elif requirement_config.provider == "conda":
         # The conda environment file may declare local-path pip dependencies via
@@ -644,18 +650,17 @@ def build_tesseract(
         keep_build_dir = True
 
     # Build secrets are supplied generically on the command line and mounted into
-    # the dependency install step. Any secret referenced by an index credential
-    # must be backed by a --secret; check that up front.
+    # the dependency install step. Any secret referenced by a host credential must
+    # be backed by a --secret; check that up front.
     secrets = list(secrets or [])
     provided_secret_ids = [_parse_secret_id(spec) for spec in secrets]
-    required_secret_ids = []
-    if isinstance(config.build_config.requirements, PipRequirements):
-        for credential in config.build_config.requirements.index_credentials:
-            required_secret_ids.append(credential.secret)
+    required_secret_ids = [
+        credential.secret for credential in config.build_config.host_credentials
+    ]
     missing = sorted(set(required_secret_ids) - set(provided_secret_ids))
     if missing:
         raise ValueError(
-            "Missing build secret(s) for authenticated index credentials: "
+            "Missing build secret(s) for authenticated host credentials: "
             f"{', '.join(missing)}. Provide them with "
             "`tesseract build --secret id=<name>,env=<VAR>` (or `,src=<file>`)."
         )
