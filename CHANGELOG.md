@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Bug Fixes
+
+- Building for a non-native `target_platform` together with a pinned `python_version` no longer fails: the `uv` image is now pinned to the target platform so `uv python install` fetches an interpreter for the target architecture instead of the host's. The `uv` image is also pinned to a released version instead of `latest` for reproducible builds (#684).
+
 ## [1.11.0] - 2026-07-23
 
 ### Features
