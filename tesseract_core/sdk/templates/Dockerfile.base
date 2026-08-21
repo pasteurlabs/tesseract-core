@@ -18,11 +18,7 @@ FROM --platform={{ config.build_config.target_platform }} {{ config.build_config
 # Ensure root user for build commands (some base images set a non-root default)
 USER root
 
-# Obtain uv and companions. The uv stage is pinned to the same platform as the
-# build stage so that `uv python install` downloads an interpreter matching the
-# target architecture. A bare `COPY --from=ghcr.io/astral-sh/uv` would resolve
-# the image for $BUILDPLATFORM (the host) instead, causing a wrong-arch
-# interpreter to be fetched when target_platform differs from the host.
+# Obtain uv and companions
 COPY --from=uv /uv /uvx /bin/
 
 ENV UV_LINK_MODE=copy
