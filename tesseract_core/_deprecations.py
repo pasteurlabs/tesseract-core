@@ -45,7 +45,16 @@ class Tombstone(NamedTuple):
 
 # Deprecations awaiting removal. Delete an entry together with its code once the
 # scheduled version arrives.
-TOMBSTONES: tuple[Tombstone, ...] = ()
+TOMBSTONES: tuple[Tombstone, ...] = (
+    Tombstone(
+        remove_at="1.13.0",
+        what="'python-pip' requirements provider alias",
+        hint=(
+            "Remove the 'python-pip' -> 'uv' normalization in "
+            "tesseract_core/sdk/api_parse.py (_normalize_provider) and its test."
+        ),
+    ),
+)
 
 
 def _repo_changelog_path() -> Path:

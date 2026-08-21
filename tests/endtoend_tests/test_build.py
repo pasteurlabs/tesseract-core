@@ -170,6 +170,123 @@ def test_tarball_install(cli_runner, dummy_tesseract_package, docker_cleanup):
     docker_cleanup["images"].append(img_tag)
 
 
+def test_build_extra_index_url_with_local_dep(
+    cli_runner, dummy_tesseract_package, docker_cleanup
+):
+    """A supplementary index (--extra-index-url) must not shadow PyPI.
+
+    Regression test for #651: an ``--index-url`` pins resolution to a single
+    index that does not host build backends, so a local path dependency using a
+    non-setuptools backend (here hatchling) fails to build. ``--extra-index-url``
+    supplements PyPI instead of replacing it, so the backend still resolves.
+    """
+    local_dep = dummy_tesseract_package / "mylib"
+    (local_dep / "mylib").mkdir(parents=True)
+    (local_dep / "mylib" / "__init__.py").touch()
+    (local_dep / "pyproject.toml").write_text(
+        dedent(
+            """
+            [build-system]
+            requires = ["hatchling"]
+            build-backend = "hatchling.build"
+
+            [project]
+            name = "mylib"
+            version = "0.1.0"
+            """
+        )
+    )
+
+    (dummy_tesseract_package / "tesseract_requirements.txt").write_text(
+        dedent(
+            """
+            --extra-index-url https://download.pytorch.org/whl/cpu
+            ./mylib
+            """
+        )
+    )
+
+    result = cli_runner.invoke(
+        app,
+        ["build", str(dummy_tesseract_package)],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0, result.stderr
+    docker_cleanup["images"].append(json.loads(result.stdout)[0])
+
+
+def test_build_env_and_host_credential_with_secret(
+    cli_runner, dummy_tesseract_package, docker_cleanup
+):
+    """build_env + an authenticated host credential build, with no credential leak.
+
+    Exercises #676 (build_env reaching the resolver) and #675 (a host credential
+    whose token is supplied out-of-band via ``--secret``, mounted at build time,
+    and assembled into netrc + git-credential entries). PyTorch's CPU host is used
+    as the credentialed host; with the default first-index strategy numpy still
+    resolves from PyPI, so the authenticated host is never actually queried and
+    the build stays deterministic while the secret-mount + credential-setup code
+    path runs. An invalid build_env value would make uv error, so a successful
+    build also proves build_env reaches the resolver. Afterwards we assert the
+    secret value never lands in the image config or history.
+    """
+    secret_value = "s3cr3t-token-value"
+
+    config_path = dummy_tesseract_package / "tesseract_config.yaml"
+    config = yaml.safe_load(config_path.read_text())
+    build_config = config.setdefault("build_config", {})
+    build_config["build_env"] = {"UV_INDEX_STRATEGY": "first-index"}
+    build_config["host_credentials"] = [
+        {"host": "download.pytorch.org", "secret": "host_token"},
+    ]
+    config_path.write_text(yaml.dump(config))
+
+    result = cli_runner.invoke(
+        app,
+        [
+            "build",
+            str(dummy_tesseract_package),
+            "--secret",
+            "id=host_token,env=HOST_TOKEN",
+        ],
+        env={"HOST_TOKEN": secret_value},
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0, result.stderr
+    image_tag = json.loads(result.stdout)[0]
+    docker_cleanup["images"].append(image_tag)
+
+    # The secret must not be recoverable from image metadata or layer history
+    # (covers both the netrc and git-credentials files, which live only in the
+    # build stage).
+    inspect = subprocess.run(
+        ["docker", "inspect", image_tag], capture_output=True, text=True
+    )
+    assert secret_value not in inspect.stdout
+    history = subprocess.run(
+        ["docker", "history", "--no-trunc", image_tag],
+        capture_output=True,
+        text=True,
+    )
+    assert secret_value not in history.stdout
+    # The credentials must also not survive into the final image filesystem.
+    grep = subprocess.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--entrypoint",
+            "sh",
+            image_tag,
+            "-c",
+            "cat ~/.netrc ~/.git-credentials 2>/dev/null || true",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert secret_value not in grep.stdout
+
+
 def test_metadata_label(built_image_name):
     """Test that metadata from tesseract_config.yaml is stored as a Docker label."""
     result = subprocess.run(

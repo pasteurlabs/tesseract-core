@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import ast
+import logging
 import re
 from pathlib import Path
 from typing import Annotated, Any, Literal, NamedTuple
@@ -14,6 +15,7 @@ from pydantic import (
     ConfigDict,
     Field,
     Strict,
+    ValidationInfo,
     field_validator,
     model_validator,
 )
@@ -78,10 +80,79 @@ RelativePath = Annotated[str, AfterValidator(assert_relative_path)]
 StrictStr = Annotated[str, Strict()]
 
 
-class PipRequirements(BaseModel):
-    """Configuration options for Python environments built via pip."""
+def _normalize_provider(value: Any) -> Any:
+    """Accept the deprecated ``python-pip`` provider name as an alias for ``uv``."""
+    if value == "python-pip":
+        # Emit through the logger rather than warnings.warn: a library-emitted
+        # DeprecationWarning is suppressed under Python's default filters, so a
+        # real CLI user would never see it.
+        # Scheduled for removal in 1.13.0; see tesseract_core/_deprecations.py.
+        logging.getLogger("tesseract").warning(
+            "The 'python-pip' requirements provider has been renamed to 'uv' "
+            "(the build has always used uv under the hood). Set `provider: uv` "
+            "in tesseract_config.yaml; 'python-pip' still works but will be "
+            "removed in Tesseract 1.13.0."
+        )
+        return "uv"
+    return value
 
-    provider: Literal["python-pip"]
+
+ProviderName = Annotated[Literal["uv"], BeforeValidator(_normalize_provider)]
+
+
+class HostCredential(BaseModel):
+    """Credentials for authenticating HTTPS access to a host during the build.
+
+    The credential is keyed by host and applies to everything fetched from that
+    host at build time -- package indices (``--extra-index-url``), PEP 508 direct
+    references (``pkg @ https://host/...whl``), conda channels, and
+    ``git+https://host/...`` dependencies alike. The token is supplied
+    out-of-band via a build secret and assembled into netrc and git-credential
+    entries inside the build stage; it never lands in the config or an image layer.
+    """
+
+    host: StrictStr = Field(
+        ...,
+        description=(
+            "Host the credential authenticates against (e.g. ``pkgs.dev.azure.com`` "
+            "or ``github.com``). Just the host, not a full URL."
+        ),
+    )
+    secret: StrictStr = Field(
+        ...,
+        description=(
+            "Name of the build secret carrying the token/password for this host. "
+            "Supply it at build time with ``tesseract build --secret "
+            "id=<name>,env=<VAR>`` (or ``,src=<file>``)."
+        ),
+    )
+    username: StrictStr = Field(
+        "__token__",
+        description=(
+            "Username paired with the secret. Defaults to ``__token__``, which "
+            "suits PAT-style tokens; set it for hosts that require a real username."
+        ),
+    )
+    model_config: ConfigDict = ConfigDict(extra="forbid")
+
+    @field_validator("host", "secret", "username")
+    @classmethod
+    def _no_whitespace(cls, value: str, info: "ValidationInfo") -> str:
+        # These values are written verbatim into the tab-separated credentials
+        # file and, at build time, into netrc and git-credential entries. Rejecting
+        # whitespace keeps them on a single field and prevents a crafted value from
+        # injecting extra credential lines.
+        if value != value.strip() or any(c.isspace() for c in value):
+            raise ValueError(
+                f"{info.field_name} must not contain whitespace (got {value!r})"
+            )
+        return value
+
+
+class PipRequirements(BaseModel):
+    """Configuration options for Python environments built via uv."""
+
+    provider: ProviderName
     _filename: Literal["tesseract_requirements.txt"] = "tesseract_requirements.txt"
     _build_script: Literal["build_pip_venv.sh"] = "build_pip_venv.sh"
     model_config: ConfigDict = ConfigDict(extra="forbid")
@@ -152,7 +223,29 @@ class TesseractBuildConfig(BaseModel, validate_assignment=True):
         ),
     )
 
-    requirements: PythonRequirements = PipRequirements(provider="python-pip")
+    requirements: PythonRequirements = PipRequirements(provider="uv")
+
+    host_credentials: tuple[HostCredential, ...] = Field(
+        (),
+        description=(
+            "Credentials for authenticated hosts accessed during the build. Each "
+            "entry maps a host to a build secret supplied out-of-band at build time "
+            "(see ``HostCredential`` and ``tesseract build --secret``). Applies to "
+            "package indices, direct-reference wheels, conda channels, and "
+            "``git+https`` dependencies on that host."
+        ),
+    )
+
+    build_env: dict[StrictStr, StrictStr] = Field(
+        default_factory=dict,
+        description=(
+            "Environment variables to set during the build stage only (not in the "
+            "final image). Useful for configuring the package resolver, e.g. "
+            "``{UV_INDEX_STRATEGY: unsafe-best-match}``. "
+            "Do not put secrets here: values are written into the build context. "
+            "Use ``tesseract build --secret`` for credentials instead."
+        ),
+    )
 
     model_config = ConfigDict(extra="forbid")
 

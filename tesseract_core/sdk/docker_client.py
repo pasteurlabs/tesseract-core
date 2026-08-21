@@ -317,6 +317,7 @@ class Images:
         tags: list_[str],  # noqa: UP006
         dockerfile: str | Path,
         ssh: str | None = None,
+        secrets: list_[str] | None = None,  # noqa: UP006
     ) -> list_[str]:  # noqa: UP006
         """Get the buildx command for building Docker images.
 
@@ -326,6 +327,9 @@ class Images:
         config = get_config()
         docker = _get_docker_executable()
         extra_args = config.docker_build_args
+
+        for secret in secrets or []:
+            extra_args = ("--secret", secret, *extra_args)
 
         if ssh is not None:
             extra_args = ("--ssh", ssh, *extra_args)
@@ -353,6 +357,7 @@ class Images:
         tags: list_[str],  # noqa: UP006
         dockerfile: str | Path,
         ssh: str | None = None,
+        secrets: list_[str] | None = None,  # noqa: UP006
         stream_logs: BoolOrCallable = False,
     ) -> Image:
         """Build a Docker image from a Dockerfile using BuildKit.
@@ -362,6 +367,7 @@ class Images:
             tag: The name of the image to build.
             dockerfile: path within the build context to the Dockerfile.
             ssh: If not None, pass given argument to buildx --ssh command.
+            secrets: BuildKit secret specs to pass as buildx --secret arguments.
             stream_logs: If True, stream build logs to sys.stdout in real-time instead of
                     buffering. Can also be a callable that accepts a string to use as a custom
                     sink.
@@ -382,6 +388,7 @@ class Images:
             tags=tags,
             dockerfile=dockerfile,
             ssh=ssh,
+            secrets=secrets,
         )
 
         returncode, stdout_data, _ = _run_process(
@@ -1226,6 +1233,7 @@ def build_docker_image(
     tags: list[str],
     dockerfile: str | Path,
     inject_ssh: bool = False,
+    secrets: list[str] | None = None,
     print_and_exit: bool = False,
     stream_logs: BoolOrCallable = False,
 ) -> Image | None:
@@ -1236,6 +1244,8 @@ def build_docker_image(
         tag: The name of the image to build.
         dockerfile: path within the build context to the Dockerfile.
         inject_ssh: If True, inject SSH keys into the build.
+        secrets: BuildKit secret specs (``id=name,env=VAR`` or ``id=name,src=file``)
+            forwarded to the build as ``--secret`` arguments.
         print_and_exit: If True, log the build command and exit without building.
         stream_logs: If True, stream build logs to sys.stdout in real-time instead of buffering.
             Can also be a callable that accepts a string to use as a custom sink.
@@ -1246,6 +1256,8 @@ def build_docker_image(
     # use an instantiated client here, which may be mocked in tests
     client = CLIDockerClient()
     build_args = dict(path=path, tags=tags, dockerfile=dockerfile)
+    if secrets:
+        build_args["secrets"] = secrets
 
     if inject_ssh:
         ssh_keys = subprocess.run(["ssh-add", "-L"], capture_output=True)
