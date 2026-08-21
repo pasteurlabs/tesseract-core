@@ -72,6 +72,8 @@ def test_prepare_build_context_python_version(tmp_path_factory):
         # Non-string fields still get their structured value.
         (("build_config", "inherit_base_image_packages"), "true", True),
         (("build_config", "extra_packages"), "[a, b]", ("a", "b")),
+        # Values that aren't valid YAML fall back to the raw string.
+        (("build_config", "target_platform"), "@invalid", "@invalid"),
     ],
 )
 def test_coerce_config_override(keypath, raw_value, expected):
@@ -85,6 +87,23 @@ def test_coerce_config_override(keypath, raw_value, expected):
     assert coerced == expected
     # The coerced value must be assignable without a validation error.
     setattr(c, keypath[-1], coerced)
+
+
+def test_coerce_config_override_native_value():
+    """Non-string values (e.g. from the Python SDK) are validated as-is."""
+    annotation = TesseractBuildConfig.model_fields["extra_packages"].annotation
+    coerced = engine._coerce_config_override(
+        ["a", "b"], annotation, ("build_config", "extra_packages")
+    )
+    assert coerced == ("a", "b")
+
+
+def test_coerce_config_override_unknown_field():
+    """An unknown field (no annotation) passes the value through unchanged.
+
+    The subsequent assignment then raises the usual validation error.
+    """
+    assert engine._coerce_config_override("whatever", None, ("nope",)) == "whatever"
 
 
 def test_coerce_config_override_reports_structured_error():
