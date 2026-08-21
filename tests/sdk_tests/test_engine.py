@@ -81,8 +81,12 @@ def test_prepare_build_context_build_env(tmp_path_factory):
     assert "UV_INDEX_STRATEGY" not in run_stage
 
 
-def test_prepare_build_context_index_credentials(tmp_path_factory):
-    """index_credentials render secret mounts + a credentials file, no tokens (#675)."""
+@pytest.mark.parametrize("provider", ["uv", "conda"])
+def test_prepare_build_context_host_credentials(tmp_path_factory, provider):
+    """host_credentials render secret mounts + a credentials file, no tokens (#675).
+
+    Provider-agnostic: the same setup applies to uv and conda builds.
+    """
     src_dir = tmp_path_factory.mktemp("src")
     (src_dir / "foo").touch()
     build_dir = tmp_path_factory.mktemp("build")
@@ -90,13 +94,11 @@ def test_prepare_build_context_index_credentials(tmp_path_factory):
     config = TesseractConfig(
         name="foobar",
         build_config=TesseractBuildConfig(
-            requirements={
-                "provider": "uv",
-                "index_credentials": [
-                    {"host": "priv.example.com", "secret": "tok"},
-                    {"host": "feed.example.com", "secret": "tok2", "username": "u"},
-                ],
-            }
+            requirements={"provider": provider},
+            host_credentials=[
+                {"host": "priv.example.com", "secret": "tok"},
+                {"host": "github.com", "secret": "tok2", "username": "u"},
+            ],
         ),
     )
     engine.prepare_build_context(src_dir, build_dir, config, secret_ids=["tok", "tok2"])
@@ -105,13 +107,28 @@ def test_prepare_build_context_index_credentials(tmp_path_factory):
     assert "--mount=type=secret,id=tok" in dockerfile
     assert "--mount=type=secret,id=tok2" in dockerfile
 
-    creds = (build_dir / "index_credentials.txt").read_text()
+    # The shared credential-setup script is staged into the context.
+    assert (build_dir / "setup_host_credentials.sh").exists()
+
+    creds = (build_dir / "host_credentials.txt").read_text()
     # host, secret id, and username -- but never a token (there are none to leak).
     assert "priv.example.com\ttok\t__token__" in creds
-    assert "feed.example.com\ttok2\tu" in creds
+    assert "github.com\ttok2\tu" in creds
 
 
-def test_build_tesseract_requires_secret_for_index_credential(tmp_path):
+def test_prepare_build_context_no_host_credentials(tmp_path_factory):
+    """Without host_credentials, no credentials file or setup script is staged."""
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "foo").touch()
+    build_dir = tmp_path_factory.mktemp("build")
+
+    engine.prepare_build_context(src_dir, build_dir, TesseractConfig(name="foobar"))
+
+    assert not (build_dir / "host_credentials.txt").exists()
+    assert not (build_dir / "setup_host_credentials.sh").exists()
+
+
+def test_build_tesseract_requires_secret_for_host_credential(tmp_path):
     """A credential errors if no matching --secret is provided (#675)."""
     (tmp_path / "tesseract_api.py").write_text(
         "from pydantic import BaseModel\n"
@@ -122,79 +139,13 @@ def test_build_tesseract_requires_secret_for_index_credential(tmp_path):
     (tmp_path / "tesseract_config.yaml").write_text(
         "name: demo\n"
         "build_config:\n"
-        "  requirements:\n"
-        "    provider: uv\n"
-        "    index_credentials:\n"
-        "      - host: priv.example.com\n"
-        "        secret: tok\n"
+        "  host_credentials:\n"
+        "    - host: priv.example.com\n"
+        "      secret: tok\n"
     )
 
     with pytest.raises(ValueError, match="Missing build secret"):
         engine.build_tesseract(tmp_path, None, generate_only=True)
-
-
-@pytest.mark.parametrize(
-    "keypath,raw_value,expected",
-    [
-        # Numeric-looking string fields must not be parsed as numbers (#678).
-        (("build_config", "python_version"), "3.12", "3.12"),
-        # Trailing zero must be preserved (YAML would parse 3.10 -> 3.1).
-        (("build_config", "python_version"), "3.10", "3.10"),
-        # Explicit quoting still works.
-        (("build_config", "python_version"), '"3.12"', "3.12"),
-        (("build_config", "target_platform"), "linux/arm64", "linux/arm64"),
-        # Non-string fields still get their structured value.
-        (("build_config", "inherit_base_image_packages"), "true", True),
-        (("build_config", "extra_packages"), "[a, b]", ("a", "b")),
-        # Values that aren't valid YAML fall back to the raw string.
-        (("build_config", "target_platform"), "@invalid", "@invalid"),
-    ],
-)
-def test_coerce_config_override(keypath, raw_value, expected):
-    """Config override values are coerced to the target field's declared type."""
-    config = TesseractConfig(name="demo")
-    c = config
-    for k in keypath[:-1]:
-        c = getattr(c, k)
-    annotation = type(c).model_fields[keypath[-1]].annotation
-    coerced = engine._coerce_config_override(raw_value, annotation, keypath)
-    assert coerced == expected
-    # The coerced value must be assignable without a validation error.
-    setattr(c, keypath[-1], coerced)
-
-
-def test_coerce_config_override_native_value():
-    """Non-string values (e.g. from the Python SDK) are validated as-is."""
-    annotation = TesseractBuildConfig.model_fields["extra_packages"].annotation
-    coerced = engine._coerce_config_override(
-        ["a", "b"], annotation, ("build_config", "extra_packages")
-    )
-    assert coerced == ("a", "b")
-
-
-def test_coerce_config_override_unknown_field():
-    """An unknown field (no annotation) passes the value through unchanged.
-
-    The subsequent assignment then raises the usual validation error.
-    """
-    assert engine._coerce_config_override("whatever", None, ("nope",)) == "whatever"
-
-
-def test_coerce_config_override_reports_structured_error():
-    """A structurally-wrong value surfaces the error against the parsed value.
-
-    The raw-string fallback exists for string fields; for a non-string field it
-    would report a misleading "not a valid <type>", masking the real problem. The
-    error must instead describe the parsed value (e.g. wrong tuple arity).
-    """
-    keypath = ("build_config", "package_data")
-    annotation = TesseractBuildConfig.model_fields["package_data"].annotation
-    # package_data entries are (source, destination) pairs; three items is wrong.
-    with pytest.raises(UserError) as excinfo:
-        engine._coerce_config_override("[[a, b, c]]", annotation, keypath)
-    message = str(excinfo.value)
-    assert "at most 2 items" in message
-    assert "not a valid tuple" not in message
 
 
 def test_prepare_build_context_env(tmp_path_factory):

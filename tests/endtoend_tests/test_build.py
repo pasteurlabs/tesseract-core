@@ -215,20 +215,20 @@ def test_build_extra_index_url_with_local_dep(
     docker_cleanup["images"].append(json.loads(result.stdout)[0])
 
 
-def test_build_env_and_index_credential_with_secret(
+def test_build_env_and_host_credential_with_secret(
     cli_runner, dummy_tesseract_package, docker_cleanup
 ):
-    """build_env + an authenticated index credential build, with no credential leak.
+    """build_env + an authenticated host credential build, with no credential leak.
 
-    Exercises #676 (build_env reaching the resolver) and #675 (an index
-    credential whose token is supplied out-of-band via ``--secret``, mounted at
-    build time, and assembled into a netrc entry). PyTorch's CPU host is used as
-    the credentialed host; with the default first-index strategy numpy still
+    Exercises #676 (build_env reaching the resolver) and #675 (a host credential
+    whose token is supplied out-of-band via ``--secret``, mounted at build time,
+    and assembled into netrc + git-credential entries). PyTorch's CPU host is used
+    as the credentialed host; with the default first-index strategy numpy still
     resolves from PyPI, so the authenticated host is never actually queried and
-    the build stays deterministic while the secret-mount + netrc code path runs.
-    An invalid build_env value would make uv error, so a successful build also
-    proves build_env reaches the resolver. Afterwards we assert the secret value
-    never lands in the image config or history.
+    the build stays deterministic while the secret-mount + credential-setup code
+    path runs. An invalid build_env value would make uv error, so a successful
+    build also proves build_env reaches the resolver. Afterwards we assert the
+    secret value never lands in the image config or history.
     """
     secret_value = "s3cr3t-token-value"
 
@@ -236,12 +236,9 @@ def test_build_env_and_index_credential_with_secret(
     config = yaml.safe_load(config_path.read_text())
     build_config = config.setdefault("build_config", {})
     build_config["build_env"] = {"UV_INDEX_STRATEGY": "first-index"}
-    build_config["requirements"] = {
-        "provider": "uv",
-        "index_credentials": [
-            {"host": "download.pytorch.org", "secret": "idx_token"},
-        ],
-    }
+    build_config["host_credentials"] = [
+        {"host": "download.pytorch.org", "secret": "host_token"},
+    ]
     config_path.write_text(yaml.dump(config))
 
     result = cli_runner.invoke(
@@ -250,16 +247,18 @@ def test_build_env_and_index_credential_with_secret(
             "build",
             str(dummy_tesseract_package),
             "--secret",
-            "id=idx_token,env=IDX_TOKEN",
+            "id=host_token,env=HOST_TOKEN",
         ],
-        env={"IDX_TOKEN": secret_value},
+        env={"HOST_TOKEN": secret_value},
         catch_exceptions=False,
     )
     assert result.exit_code == 0, result.stderr
     image_tag = json.loads(result.stdout)[0]
     docker_cleanup["images"].append(image_tag)
 
-    # The secret must not be recoverable from image metadata or layer history.
+    # The secret must not be recoverable from image metadata or layer history
+    # (covers both the netrc and git-credentials files, which live only in the
+    # build stage).
     inspect = subprocess.run(
         ["docker", "inspect", image_tag], capture_output=True, text=True
     )
@@ -270,6 +269,22 @@ def test_build_env_and_index_credential_with_secret(
         text=True,
     )
     assert secret_value not in history.stdout
+    # The credentials must also not survive into the final image filesystem.
+    grep = subprocess.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--entrypoint",
+            "sh",
+            image_tag,
+            "-c",
+            "cat ~/.netrc ~/.git-credentials 2>/dev/null || true",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert secret_value not in grep.stdout
 
 
 def test_metadata_label(built_image_name):

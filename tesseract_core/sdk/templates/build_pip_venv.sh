@@ -17,25 +17,10 @@ else
 fi
 source /python-env/bin/activate
 
-# Assemble a netrc file from any authenticated index credentials declared in
-# tesseract_config.yaml. Each line of index_credentials.txt is
-# "<host>\t<secret_id>\t<username>"; the token is read from the BuildKit secret
-# mount at /run/secrets/<id> and written into a netrc entry. netrc is keyed by
-# host, so this authenticates both index URLs and PEP 508 direct references on
-# that host. The token only ever lives on the mounted tmpfs and in this netrc
-# file inside the build stage -- never in a layer or in index_credentials.txt.
-if [ -f index_credentials.txt ]; then
-    netrc_file=$(mktemp)
-    chmod 600 "$netrc_file"
-    while IFS=$'\t' read -r host secret_id username; do
-        [ -z "$host" ] && continue
-        if [ -f "/run/secrets/$secret_id" ]; then
-            password=$(cat "/run/secrets/$secret_id")
-            printf 'machine %s login %s password %s\n' \
-                "$host" "$username" "$password" >> "$netrc_file"
-        fi
-    done < index_credentials.txt
-    export NETRC="$netrc_file"
+# Set up host credentials (netrc + git-credentials) for authenticated indices,
+# direct-reference wheels, and git+https dependencies. No-op if none declared.
+if [ -f setup_host_credentials.sh ]; then
+    source setup_host_credentials.sh
 fi
 
 # Install dependencies. Local dependencies (if any) are rewritten into the
