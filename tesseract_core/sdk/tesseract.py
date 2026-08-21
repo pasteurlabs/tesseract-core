@@ -2,8 +2,11 @@
 # SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
+import mmap
+import os
 import sys
 import tempfile
+import threading
 import traceback
 import uuid
 import warnings
@@ -130,6 +133,7 @@ class Tesseract:
         stream_logs: BoolOrCallable = False,
         skip_health_check: bool = False,
         timeout: float | tuple[float, float] | None = None,
+        binref_pool: bool = False,
     ) -> Tesseract:
         """Create a Tesseract instance from a Docker image.
 
@@ -179,6 +183,17 @@ class Tesseract:
                 disables timeouts. See the `requests documentation
                 <https://requests.readthedocs.io/en/latest/user/advanced/#timeouts>`_
                 for details.
+            binref_pool: Opt-in fast path for ``json+binref``. Reuses a small
+                pool of pre-faulted, memory-mapped input buffers instead of
+                writing a fresh file per request, and (on POSIX) decodes outputs
+                as zero-copy memory-mapped views instead of eager copies. This
+                speeds up passing large arrays in and out (most effective when
+                the input/output paths are a shared-memory tmpfs), at the cost of
+                some resident memory held until teardown. Note the decoded result
+                arrays are then read-only views backed by the output files, valid
+                until the next request or teardown; on non-POSIX platforms the
+                eager (owned, writable) decode is used regardless. Off by default;
+                has no effect for other output formats.
 
         Returns:
             A Tesseract instance.
@@ -192,6 +207,10 @@ class Tesseract:
             volumes = []
         if input_path is not None:
             input_path = Path(input_path).resolve()
+        elif output_format == "json+binref":
+            # Auto-create an input directory so binref-encoded inputs have a
+            # mounted location to be written to and read from by the container.
+            input_path = Path(tempfile.mkdtemp(prefix="tesseract_input_"))
         if output_path is not None:
             output_path = Path(output_path).resolve()
         else:
@@ -200,6 +219,7 @@ class Tesseract:
 
         obj._stream_logs = stream_logs
         obj._timeout = timeout
+        obj._binref_pool_enabled = binref_pool
         obj._spawn_config = dict(
             image_name=image_name,
             volumes=volumes,
@@ -348,10 +368,15 @@ class Tesseract:
         host_ip = self._spawn_config["host_ip"]
         self._lastlog = None
         output_path = self._spawn_config.get("output_path")
+        input_path = self._spawn_config.get("input_path")
+        output_format = self._spawn_config.get("output_format", "json+base64")
         self._client = HTTPClient(
             f"http://{host_ip}:{container.host_port}",
             output_path=Path(output_path) if output_path else None,
             timeout=self._timeout,
+            input_path=Path(input_path) if input_path else None,
+            output_format=output_format,
+            binref_pool=getattr(self, "_binref_pool_enabled", False),
         )
 
         # Ensure that the Tesseract is torn down once the object is garbage collected,
@@ -377,6 +402,8 @@ class Tesseract:
             raise RuntimeError("Tesseract is not being served.")
         self._lastlog = self.server_logs()
         engine.teardown(self._serve_context["container_name"])
+        if self._client is not None:
+            self._client.close()
         self._client = None
         self._serve_context = None
         self._atexit_finalizer.detach()
@@ -663,8 +690,223 @@ def _encode_array(arr: Any, b64: bool = True) -> dict:
     }
 
 
+def _encode_array_binref(arr: Any, input_dir: Path, written_files: list[Path]) -> dict:
+    """Encode an array as a binref reference, writing its buffer to ``input_dir``.
+
+    The array is written to a uniquely named ``.bin`` file directly under
+    ``input_dir``, which must be mounted into the Tesseract container as its
+    input path. The returned reference is relative to that directory, so the
+    server resolves it against its configured input path. Written files are
+    appended to ``written_files`` so the caller can clean them up afterwards.
+    """
+    arr = np.asanyarray(arr, order="A")
+    filename = f"{uuid.uuid4()}.bin"
+    target = input_dir / filename
+    target.write_bytes(_fast_tobytes(arr))
+    written_files.append(target)
+    return {
+        "shape": arr.shape,
+        "dtype": arr.dtype.name,
+        "data": {
+            "buffer": f"{filename}:0",
+            "encoding": "binref",
+        },
+    }
+
+
+class _BinrefSlot:
+    """A reusable, pre-faulted, file-backed buffer for binref inputs.
+
+    The slot owns a ``.bin`` file under the mounted input directory, kept open
+    and memory-mapped read-write. Writing an array copies it into the mapping at
+    memory-copy bandwidth (the pages stay resident between uses), avoiding the
+    page-fault cost of writing a fresh file each request.
+    """
+
+    def __init__(self, input_dir: Path, capacity: int) -> None:
+        self.filename = f"pool_{uuid.uuid4()}.bin"
+        self.path = input_dir / self.filename
+        self.capacity = 0
+        self._fd = os.open(self.path, os.O_RDWR | os.O_CREAT | os.O_TRUNC, 0o644)
+        self._mm: mmap.mmap | None = None
+        self._grow(capacity)
+
+    def _grow(self, capacity: int) -> None:
+        if self._mm is not None:
+            self._mm.close()
+        os.ftruncate(self._fd, capacity)
+        self._mm = mmap.mmap(self._fd, capacity)
+        # Pre-fault the pages so the first real write runs at memcpy speed.
+        self._mm[:] = b"\x00" * capacity
+        self.capacity = capacity
+
+    def write(self, data: memoryview) -> None:
+        """Copy ``data`` into the slot's mapping, growing it if needed."""
+        n = data.nbytes
+        if n > self.capacity:
+            self._grow(n)
+        self._mm[:n] = data
+
+    def close(self) -> None:
+        if self._mm is not None:
+            self._mm.close()
+            self._mm = None
+        os.close(self._fd)
+        self.path.unlink(missing_ok=True)
+
+
+class _BinrefWritePool:
+    """Opt-in pool of reusable warm buffers for binref input encoding.
+
+    A pool of :class:`_BinrefSlot` objects, each a mounted ``.bin`` file kept
+    memory-mapped and pre-faulted. Checking out a slot and copying into its warm
+    mapping runs at memory-copy bandwidth, versus writing a fresh file per
+    request which pays a page fault on every page.
+
+    Bounded by ``max_slots`` and ``max_bytes``: a checkout that cannot be served
+    from the pool (all slots busy, or granting it would exceed the byte cap)
+    returns ``None`` so the caller falls back to a plain fresh-file write. The
+    pool is safe for concurrent requests: each in-flight request holds its own
+    slot until it returns the slot after the server has read it.
+    """
+
+    def __init__(
+        self, input_dir: Path, max_slots: int = 4, max_bytes: int | None = None
+    ) -> None:
+        self._input_dir = input_dir
+        self._max_slots = max_slots
+        self._max_bytes = max_bytes
+        self._free: list[_BinrefSlot] = []
+        self._all: list[_BinrefSlot] = []
+        self._lock = threading.Lock()
+
+    def _total_bytes(self) -> int:
+        return sum(s.capacity for s in self._all)
+
+    def checkout(self, nbytes: int) -> _BinrefSlot | None:
+        """Return a warm slot for ``nbytes``, or ``None`` to signal fallback."""
+        with self._lock:
+            # Prefer a free slot that already fits, to avoid a re-map/re-fault.
+            fitting = [s for s in self._free if s.capacity >= nbytes]
+            if fitting:
+                slot = min(fitting, key=lambda s: s.capacity)
+                self._free.remove(slot)
+                return slot
+            # Reuse a free (smaller) slot by growing it, if still within caps.
+            if self._free:
+                slot = self._free.pop()
+                extra = nbytes - slot.capacity
+                if (
+                    self._max_bytes is None
+                    or self._total_bytes() + extra <= self._max_bytes
+                ):
+                    # write() grows the slot's mapping to fit before copying.
+                    return slot
+                # Growing would exceed the cap: keep it free and fall back.
+                self._free.append(slot)
+                return None
+            # Allocate a new slot if we are under both caps.
+            if len(self._all) >= self._max_slots:
+                return None
+            if (
+                self._max_bytes is not None
+                and self._total_bytes() + nbytes > self._max_bytes
+            ):
+                return None
+            slot = _BinrefSlot(self._input_dir, nbytes)
+            self._all.append(slot)
+            return slot
+
+    def checkin(self, slot: _BinrefSlot) -> None:
+        with self._lock:
+            self._free.append(slot)
+
+    def close(self) -> None:
+        with self._lock:
+            for slot in self._all:
+                slot.close()
+            self._all.clear()
+            self._free.clear()
+
+
+def _encode_array_binref_pooled(
+    arr: Any, pool: _BinrefWritePool, checked_out: list, written_files: list[Path]
+) -> dict:
+    """Encode an array as binref using a warm pool slot, or fall back to a file.
+
+    On a pool hit, copies the array into a checked-out warm slot and records it
+    in ``checked_out`` for return after the request. On a miss (pool exhausted
+    or over cap), falls back to :func:`_encode_array_binref`.
+    """
+    arr = np.asanyarray(arr, order="A")
+    data = _fast_tobytes(arr)
+    slot = pool.checkout(data.nbytes)
+    if slot is None:
+        return _encode_array_binref(arr, pool._input_dir, written_files)
+    slot.write(data)
+    checked_out.append(slot)
+    return {
+        "shape": arr.shape,
+        "dtype": arr.dtype.name,
+        "data": {
+            "buffer": f"{slot.filename}:0",
+            "encoding": "binref",
+        },
+    }
+
+
+# Lazy (zero-copy) binref decode relies on POSIX mmap semantics: a read-only
+# PROT_READ mapping, and a mapped inode staying valid after the file is removed.
+# On Windows neither holds (PROT_READ is absent; a mapped file cannot be
+# deleted), so lazy decode is only offered on POSIX platforms.
+_SUPPORTS_LAZY_BINREF = os.name == "posix"
+
+
+def _read_binref_array(
+    full_path: Path, offset: int, num_bytes: int, dtype: np.dtype, count: int
+) -> np.ndarray:
+    """Read an uncompressed binref buffer into an owned, writable array.
+
+    Copies the buffer into a freshly allocated array via ``readinto``. The array
+    owns its data and does not depend on the file afterwards, so the file may be
+    removed or recycled once this returns. Portable across platforms; the
+    default decode path.
+    """
+    out = np.empty(count, dtype=dtype)
+    with open(full_path, "rb") as f:
+        if offset:
+            f.seek(offset)
+        f.readinto(memoryview(out).cast("B"))
+    return out
+
+
+def _mmap_binref_array(
+    full_path: Path, offset: int, num_bytes: int, dtype: np.dtype, count: int
+) -> np.ndarray:
+    """Map an uncompressed binref buffer as a read-only array without copying.
+
+    The returned array is a view over a memory map of the file, so decoding does
+    not copy the buffer and pages fault in lazily as the array is read. numpy
+    keeps the map alive via the array's ``base``, so the data stays valid even
+    if the file is later removed (the OS keeps the mapped inode alive). The
+    array is read-only.
+
+    POSIX only (see :data:`_SUPPORTS_LAZY_BINREF`). The mapped file must not be
+    overwritten while a returned view is still in use.
+    """
+    map_len = offset + num_bytes
+    fd = os.open(full_path, os.O_RDONLY)
+    try:
+        mm = mmap.mmap(fd, map_len, prot=mmap.PROT_READ)
+    finally:
+        os.close(fd)
+    return np.frombuffer(mm, dtype=dtype, count=count, offset=offset)
+
+
 def _decode_array(
-    encoded_arr: dict, output_path: str | Path | None = None
+    encoded_arr: dict,
+    output_path: str | Path | None = None,
+    lazy: bool = False,
 ) -> np.ndarray:
     import re
 
@@ -721,27 +963,34 @@ def _decode_array(
 
         compression = encoded_arr["data"].get("compression")
 
-        # Read the binary data
-        with open(full_path, "rb") as f:
-            f.seek(offset)
-            if compression is None:
-                data = f.read(num_bytes)
+        if compression is None:
+            count = 1 if len(shape) == 0 else size
+            if num_bytes == 0:
+                arr = np.frombuffer(b"", dtype=dtype)
+            elif lazy:
+                # Zero-copy read-only view (POSIX only, see caller gating).
+                arr = _mmap_binref_array(full_path, offset, num_bytes, dtype, count)
             else:
-                if compressed_size_str is None:
-                    raise ValueError(
-                        "compressed_size missing from buffer spec when compression is set "
-                        "(expected format: '<path>:<offset>:<compressed_size>')"
-                    )
+                # Eager copy into an owned, writable array (portable default).
+                arr = _read_binref_array(full_path, offset, num_bytes, dtype, count)
+        else:
+            if compressed_size_str is None:
+                raise ValueError(
+                    "compressed_size missing from buffer spec when compression is set "
+                    "(expected format: '<path>:<offset>:<compressed_size>')"
+                )
+            with open(full_path, "rb") as f:
+                f.seek(offset)
                 data = f.read(int(compressed_size_str))
 
-        if compression == "lz4":
-            import lz4.frame
+            if compression == "lz4":
+                import lz4.frame
 
-            data = lz4.frame.decompress(data)
-        elif compression is not None:
-            raise ValueError(f"Unknown compression: {compression}")
+                data = lz4.frame.decompress(data)
+            else:
+                raise ValueError(f"Unknown compression: {compression}")
 
-        arr = np.frombuffer(data, dtype=dtype)
+            arr = np.frombuffer(data, dtype=dtype)
     else:
         raise ValueError(f"Unexpected array encoding {encoding}. Cannot decode.")
 
@@ -757,12 +1006,38 @@ class HTTPClient:
         url: str,
         output_path: str | Path | None = None,
         timeout: float | tuple[float, float] | None = None,
+        input_path: str | Path | None = None,
+        output_format: Literal["json", "json+base64", "json+binref"] = "json+base64",
+        binref_pool: bool = False,
     ) -> None:
         self._url = self._sanitize_url(url)
         self._output_path = output_path
+        self._output_format = output_format
+        self._input_path = Path(input_path) if input_path is not None else None
         self._timeout = timeout
         self._session = requests.Session()
         self._session.headers["Content-Type"] = "application/json"
+        # Opt-in warm-buffer pool for binref inputs. Only meaningful when passing
+        # inputs as binref into a mounted (ideally shared-memory) input dir.
+        self._binref_pool: _BinrefWritePool | None = None
+        if binref_pool and self._input_path is not None:
+            self._binref_pool = _BinrefWritePool(self._input_path)
+            warnings.warn(
+                "binref_pool=True writes array data as .bin files into "
+                f"{self._input_path} (and the server writes outputs into the "
+                "output path). These files are not cleaned up automatically and "
+                "will accumulate across calls; on a shared-memory tmpfs like "
+                "/dev/shm they can exhaust available space. Remove the scratch "
+                "directories when done, e.g. with tempfile.TemporaryDirectory().",
+                UserWarning,
+                stacklevel=2,
+            )
+
+    def close(self) -> None:
+        """Release resources held by the client (e.g. the binref write pool)."""
+        if self._binref_pool is not None:
+            self._binref_pool.close()
+            self._binref_pool = None
 
     @staticmethod
     def _sanitize_url(url: str) -> str:
@@ -790,10 +1065,34 @@ class HTTPClient:
     ) -> dict:
         url = f"{self.url}/{endpoint.lstrip('/')}"
 
+        # Track binref input files written for this request so we can remove
+        # them once the server has read them (after the response returns).
+        binref_input_files: list[Path] = []
+        # Track pool slots checked out for this request so we can return them.
+        checked_out_slots: list[_BinrefSlot] = []
+
         if payload:
-            encoded_payload = _tree_map(
-                _encode_array, payload, is_leaf=lambda x: hasattr(x, "__array__")
-            )
+            if self._output_format == "json+binref" and self._input_path is not None:
+                # Pass input arrays as binref files in the mounted input
+                # directory instead of base64-in-body. The server reads them
+                # via its input path, so no array data travels over HTTP.
+                if self._binref_pool is not None:
+                    encode_binref = lambda x: _encode_array_binref_pooled(
+                        x, self._binref_pool, checked_out_slots, binref_input_files
+                    )
+                else:
+                    encode_binref = lambda x: _encode_array_binref(
+                        x, self._input_path, binref_input_files
+                    )
+                encoded_payload = _tree_map(
+                    encode_binref,
+                    payload,
+                    is_leaf=lambda x: hasattr(x, "__array__"),
+                )
+            else:
+                encoded_payload = _tree_map(
+                    _encode_array, payload, is_leaf=lambda x: hasattr(x, "__array__")
+                )
         else:
             encoded_payload = None
 
@@ -805,6 +1104,16 @@ class HTTPClient:
         request_kwargs = {"method": method, "url": url, "data": data, "params": params}
         if self._timeout is not None:
             request_kwargs["timeout"] = self._timeout
+        try:
+            return self._send_and_decode(request_kwargs, endpoint)
+        finally:
+            for f in binref_input_files:
+                f.unlink(missing_ok=True)
+            if self._binref_pool is not None:
+                for slot in checked_out_slots:
+                    self._binref_pool.checkin(slot)
+
+    def _send_and_decode(self, request_kwargs: dict, endpoint: str) -> dict:
         try:
             response = self._session.request(**request_kwargs)
         except requests.ConnectionError:
@@ -852,9 +1161,13 @@ class HTTPClient:
             "jacobian_vector_product",
             "vector_jacobian_product",
         ]:
-            # Create a decoder with the output_path bound
+            # Use the zero-copy lazy decode only on the opt-in fast path
+            # (binref pool enabled) and only where POSIX mmap semantics hold;
+            # otherwise decode eagerly into an owned, writable array.
+            lazy = self._binref_pool is not None and _SUPPORTS_LAZY_BINREF
+
             def decode_with_path(arr: dict) -> np.ndarray:
-                return _decode_array(arr, output_path=self._output_path)
+                return _decode_array(arr, output_path=self._output_path, lazy=lazy)
 
             data = _tree_map(
                 decode_with_path,

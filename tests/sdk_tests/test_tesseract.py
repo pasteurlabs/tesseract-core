@@ -458,6 +458,208 @@ def test_decode_array_lz4(encoding, tmp_path):
     np.testing.assert_array_equal(decoded, arr, strict=True)
 
 
+def test_binref_pool_checkout_reuses_slot(tmp_path):
+    from tesseract_core.sdk.tesseract import _BinrefWritePool
+
+    pool = _BinrefWritePool(tmp_path, max_slots=4)
+    try:
+        arr = np.array([1.0, 2.0, 3.0], dtype="float64")
+        slot = pool.checkout(arr.nbytes)
+        assert slot is not None
+        assert slot.path.exists()
+        pool.checkin(slot)
+
+        # Checking out the same size again should reuse the same slot, not
+        # allocate a new one.
+        slot2 = pool.checkout(arr.nbytes)
+        assert slot2 is slot
+    finally:
+        pool.close()
+
+
+def test_binref_pool_grows_slot_for_larger_array(tmp_path):
+    from tesseract_core.sdk.tesseract import _BinrefWritePool
+
+    pool = _BinrefWritePool(tmp_path, max_slots=4)
+    try:
+        small = np.array([1.0, 2.0], dtype="float64")
+        slot = pool.checkout(small.nbytes)
+        original_capacity = slot.capacity
+        pool.checkin(slot)
+
+        big = np.zeros(10_000, dtype="float64")
+        slot2 = pool.checkout(big.nbytes)
+        assert slot2 is slot
+        # Growth happens lazily in write(), not in checkout() itself.
+        slot2.write(memoryview(big))
+        assert slot2.capacity >= big.nbytes
+        assert slot2.capacity > original_capacity
+    finally:
+        pool.close()
+
+
+def test_binref_pool_falls_back_when_slots_exhausted(tmp_path):
+    from tesseract_core.sdk.tesseract import _BinrefWritePool
+
+    pool = _BinrefWritePool(tmp_path, max_slots=2)
+    try:
+        arr = np.array([1.0, 2.0], dtype="float64")
+        slot_a = pool.checkout(arr.nbytes)
+        slot_b = pool.checkout(arr.nbytes)
+        assert slot_a is not None
+        assert slot_b is not None
+
+        # Both slots are checked out (never returned), so a third checkout
+        # must signal fallback rather than exceeding max_slots.
+        assert pool.checkout(arr.nbytes) is None
+
+        pool.checkin(slot_a)
+        # Now that a slot was returned, a checkout should succeed again.
+        assert pool.checkout(arr.nbytes) is slot_a
+    finally:
+        pool.close()
+
+
+def test_binref_pool_falls_back_when_over_byte_cap(tmp_path):
+    from tesseract_core.sdk.tesseract import _BinrefWritePool
+
+    small = np.array([1.0, 2.0], dtype="float64")
+    pool = _BinrefWritePool(tmp_path, max_slots=4, max_bytes=small.nbytes)
+    try:
+        slot = pool.checkout(small.nbytes)
+        assert slot is not None
+        pool.checkin(slot)
+
+        # A request that would exceed max_bytes by growing the existing slot
+        # must fall back, not silently exceed the cap.
+        big = np.zeros(10_000, dtype="float64")
+        assert pool.checkout(big.nbytes) is None
+    finally:
+        pool.close()
+
+
+def test_binref_pool_close_removes_slot_files(tmp_path):
+    from tesseract_core.sdk.tesseract import _BinrefWritePool
+
+    pool = _BinrefWritePool(tmp_path, max_slots=4)
+    arr = np.array([1.0, 2.0], dtype="float64")
+    slot = pool.checkout(arr.nbytes)
+    assert slot.path.exists()
+
+    pool.close()
+    assert not slot.path.exists()
+
+
+def test_encode_array_binref_pooled_writes_and_decodes_correctly(tmp_path):
+    from tesseract_core.sdk.tesseract import (
+        _BinrefWritePool,
+        _encode_array_binref_pooled,
+    )
+
+    pool = _BinrefWritePool(tmp_path, max_slots=4)
+    try:
+        arr = np.array([1.0, 2.0, 3.0], dtype="float64")
+        checked_out = []
+        written_files = []
+        encoded = _encode_array_binref_pooled(arr, pool, checked_out, written_files)
+
+        assert encoded["data"]["encoding"] == "binref"
+        assert len(checked_out) == 1
+        # A pool hit must not fall back to a plain written file.
+        assert written_files == []
+
+        decoded = _decode_array(encoded, output_path=tmp_path)
+        np.testing.assert_array_equal(decoded, arr, strict=True)
+    finally:
+        pool.close()
+
+
+def test_encode_array_binref_pooled_falls_back_and_decodes_correctly(tmp_path):
+    from tesseract_core.sdk.tesseract import (
+        _BinrefWritePool,
+        _encode_array_binref_pooled,
+    )
+
+    pool = _BinrefWritePool(tmp_path, max_slots=1)
+    try:
+        arr_a = np.array([1.0, 2.0], dtype="float64")
+        arr_b = np.array([3.0, 4.0, 5.0], dtype="float64")
+        checked_out = []
+        written_files = []
+
+        encoded_a = _encode_array_binref_pooled(arr_a, pool, checked_out, written_files)
+        # Pool is now exhausted (max_slots=1, slot not checked in yet), so the
+        # second encode must fall back to a plain file write.
+        encoded_b = _encode_array_binref_pooled(arr_b, pool, checked_out, written_files)
+
+        assert len(checked_out) == 1
+        assert len(written_files) == 1
+
+        decoded_a = _decode_array(encoded_a, output_path=tmp_path)
+        decoded_b = _decode_array(encoded_b, output_path=tmp_path)
+        np.testing.assert_array_equal(decoded_a, arr_a, strict=True)
+        np.testing.assert_array_equal(decoded_b, arr_b, strict=True)
+    finally:
+        pool.close()
+        for f in written_files:
+            f.unlink(missing_ok=True)
+
+
+def test_binref_pool_lazy_decode_is_readonly_view(tmp_path):
+    from tesseract_core.sdk.tesseract import (
+        _SUPPORTS_LAZY_BINREF,
+        _BinrefWritePool,
+        _encode_array_binref_pooled,
+    )
+
+    if not _SUPPORTS_LAZY_BINREF:
+        pytest.skip("lazy binref decode is POSIX-only")
+
+    pool = _BinrefWritePool(tmp_path, max_slots=4)
+    try:
+        arr = np.array([1.0, 2.0, 3.0], dtype="float64")
+        checked_out = []
+        written_files = []
+        encoded = _encode_array_binref_pooled(arr, pool, checked_out, written_files)
+
+        decoded = _decode_array(encoded, output_path=tmp_path, lazy=True)
+        np.testing.assert_array_equal(decoded, arr, strict=True)
+        assert not decoded.flags.writeable
+        with pytest.raises(ValueError):
+            decoded[0] = 99.0
+    finally:
+        pool.close()
+
+
+def test_HTTPClient_binref_pool_only_created_with_input_path(tmp_path):
+    from tesseract_core.sdk.tesseract import HTTPClient
+
+    # binref_pool=True without an input_path is meaningless (no mounted dir
+    # to put pooled files in), so no pool should be created.
+    client_no_input_path = HTTPClient("localhost", binref_pool=True)
+    assert client_no_input_path._binref_pool is None
+
+    with pytest.warns(UserWarning, match="not cleaned up automatically"):
+        client_with_input_path = HTTPClient(
+            "localhost", input_path=tmp_path, binref_pool=True
+        )
+    assert client_with_input_path._binref_pool is not None
+    client_with_input_path.close()
+    assert client_with_input_path._binref_pool is None
+
+
+def test_HTTPClient_close_is_idempotent(tmp_path):
+    from tesseract_core.sdk.tesseract import HTTPClient
+
+    with pytest.warns(UserWarning, match="not cleaned up automatically"):
+        client = HTTPClient("localhost", input_path=tmp_path, binref_pool=True)
+    client.close()
+    # Closing twice must not raise (e.g. via context-manager __exit__ after
+    # an explicit close).
+    client.close()
+    assert client._binref_pool is None
+
+
 def test_tree_map():
     tree = {
         "a": [10, 20],

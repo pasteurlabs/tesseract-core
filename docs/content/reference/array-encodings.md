@@ -141,6 +141,13 @@ The `.bin` file references are relative to the `--output-path`.
 :::
 ::::
 
+```{tip}
+When the client and a served Tesseract share a machine, placing the binref
+input/output directories on a shared-memory `tmpfs` (`/dev/shm`) lets large
+arrays move between them without base64-encoding into the HTTP body. See
+{doc}`/content/how-to/fast-local-runs`.
+```
+
 ### lz4 compression
 
 Set the `TESSERACT_COMPRESSION=lz4` config variable to compress arrays in the output. This applies to both `json+binref` and `json+base64` formats. For binref, each array is compressed individually, preserving offset-based random access, with the compressed size embedded in the buffer path (`<file>:<offset>:<compressed_size>`).
