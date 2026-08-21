@@ -278,3 +278,48 @@ def test_schema_parent_class_is_checked(
             ValidationError, match=f"{schema} must inherit from pydantic.BaseModel"
         ):
             validate_tesseract_api(tmp_path)
+
+
+def test_generated_config_schema_is_wellformed():
+    from tesseract_core.sdk.api_parse import CONFIG_SCHEMA_URL, generate_config_schema
+
+    schema = generate_config_schema()
+
+    assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
+    assert schema["$id"] == CONFIG_SCHEMA_URL
+    assert schema["type"] == "object"
+    # Unknown keys must be rejected by the editor, mirroring extra="forbid".
+    assert schema["additionalProperties"] is False
+    # Top-level properties must cover exactly the fields TesseractConfig accepts,
+    # so the published schema never drifts from the model it is generated from.
+    from tesseract_core.sdk.api_parse import TesseractConfig
+
+    assert set(schema["properties"]) == set(TesseractConfig.model_fields)
+    assert schema["required"] == ["name"]
+
+
+def test_generated_config_schema_matches_get_config(
+    tmp_path, valid_tesseract_config, monkeypatch
+):
+    """A config that passes the model must satisfy the generated schema, and vice versa.
+
+    The generated schema is a first-line editor check, not a replacement for the
+    Pydantic validators (e.g. the semantic version regex), so we only assert
+    agreement on structural acceptance/rejection here.
+    """
+    jsonschema = pytest.importorskip("jsonschema")
+
+    from tesseract_core.sdk.api_parse import generate_config_schema, get_config
+
+    schema = generate_config_schema()
+    jsonschema.Draft202012Validator.check_schema(schema)
+
+    # A valid config satisfies both the model and the schema.
+    _write_tesseract_config_to_file(valid_tesseract_config, tmp_path)
+    config_dict = yaml.safe_load(valid_tesseract_config)
+    get_config(tmp_path)  # does not raise
+    jsonschema.validate(config_dict, schema)  # does not raise
+
+    # The issue's counter-example (an unknown top-level key) is rejected.
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate({"name": "foo", "general": "kenobi"}, schema)

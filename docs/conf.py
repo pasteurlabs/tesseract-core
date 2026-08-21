@@ -175,6 +175,23 @@ def zip_examples_folder(_app) -> None:
     assert archive_path.exists()
 
 
+def _emit_config_schema(app) -> None:
+    """Write the tesseract_config.yaml JSON Schema into the build output root.
+
+    Served at ``<site>/schema.json``, this is the URL scaffolded into new
+    configs and registered with SchemaStore, so IDEs can validate
+    ``tesseract_config.yaml``. Generating it here (rather than committing it)
+    keeps it in lockstep with the TesseractConfig model on every build.
+    """
+    import json
+
+    from tesseract_core.sdk.api_parse import generate_config_schema
+
+    out_dir = Path(app.outdir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "schema.json").write_text(json.dumps(generate_config_schema(), indent=2))
+
+
 def _collect_blog_posts() -> list[dict]:
     """Collect metadata from all blog posts for the blog index."""
     import logging
@@ -287,6 +304,8 @@ def setup(app) -> None:
     app.connect("builder-inited", _require_dirhtml)
     # We zip the examples folder here so that it can be downloaded
     app.connect("builder-inited", zip_examples_folder)
+    # Emit the tesseract_config.yaml JSON Schema into the output root
+    app.connect("build-finished", lambda app, exc: exc or _emit_config_schema(app))
     # Inject blog post listing into blog index page context
     app.connect("html-page-context", _inject_page_context)
 

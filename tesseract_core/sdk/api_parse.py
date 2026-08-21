@@ -28,6 +28,14 @@ class _ApiObject(NamedTuple):
     optional: bool = False
 
 
+# Canonical location of the published JSON Schema for tesseract_config.yaml.
+# The `stable` alias on Read the Docs tracks the latest tagged *release* (not the
+# tip of main), so this one URL is both stable and correctly versioned. It is the
+# URL scaffolded into new configs and registered with SchemaStore.
+CONFIG_SCHEMA_URL = (
+    "https://docs.pasteurlabs.ai/projects/tesseract-core/stable/schema.json"
+)
+
 ORDINALS = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth"]
 
 EXPECTED_OBJECTS = (
@@ -236,6 +244,34 @@ class TesseractConfig(BaseModel, validate_assignment=True):
             )
 
         return v
+
+
+def generate_config_schema() -> dict:
+    """Generate a JSON Schema for ``tesseract_config.yaml``.
+
+    The schema is derived directly from the :class:`TesseractConfig` model, so it
+    always matches the fields, defaults, and descriptions the SDK actually
+    accepts. It is published to the docs site and registered with SchemaStore so
+    IDEs can validate ``tesseract_config.yaml`` and offer inline help.
+
+    A ``tesseract_config.yaml`` may carry an editor schema reference as a
+    ``# yaml-language-server: $schema=...`` comment, which the YAML parser
+    ignores. The schema therefore does not need to allow a ``$schema`` property
+    (and cannot, since the model forbids extra fields).
+    """
+    schema = TesseractConfig.model_json_schema()
+    # Draft 2020-12 is what pydantic emits; declare it so validators don't guess.
+    schema = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": CONFIG_SCHEMA_URL,
+        "$comment": (
+            "Auto-generated from tesseract_core.sdk.api_parse.TesseractConfig. "
+            "Do not edit by hand."
+        ),
+        "title": "Tesseract configuration",
+        **schema,
+    }
+    return schema
 
 
 class ValidationError(Exception):
