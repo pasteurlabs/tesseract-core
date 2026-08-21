@@ -167,6 +167,31 @@ def test_del_tesseract_triggers_teardown(mock_serving):
     assert teardown_mock.call_count == 1
 
 
+def test_del_tesseract_purges_auto_tempdir(mock_serving):
+    """The auto-created output tempdir is removed when the Tesseract is collected."""
+    import gc
+
+    t = Tesseract.from_image("sometesseract:0.2.3")
+    output_path = t._spawn_config["output_path"]
+    assert output_path.is_dir()
+
+    del t
+    gc.collect()
+    assert not output_path.exists()
+
+
+def test_user_output_path_is_not_purged(mock_serving, tmp_path):
+    """A user-supplied output path must survive garbage collection of the Tesseract."""
+    import gc
+
+    t = Tesseract.from_image("sometesseract:0.2.3", output_path=tmp_path)
+    assert t._spawn_config["output_path"] == tmp_path.resolve()
+
+    del t
+    gc.collect()
+    assert tmp_path.is_dir()
+
+
 def test_Tesseract_schema_method(mocker, mock_serving):
     mocked_run = mocker.patch("tesseract_core.sdk.tesseract.HTTPClient.run_tesseract")
     mocked_run.return_value = {"#defs": {"some": "stuff"}}

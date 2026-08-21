@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Bug Fixes
+
+- Auto-created output temp directories are now purged when the `Tesseract` client is garbage collected, instead of accumulating under the system temp directory. User-supplied output paths are left untouched.
+
 ## [1.11.0] - 2026-07-23
 
 ### Features
