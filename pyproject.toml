@@ -19,7 +19,6 @@ dependencies = [
     "packaging",
     "pybase64",
     "orjson",
-    "deprecated",
 ]
 dynamic = [
     # Injected via hatch-vcs

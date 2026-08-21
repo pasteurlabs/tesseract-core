@@ -10,8 +10,6 @@ charset-normalizer==3.5.1
     # via requests
 colorama==0.4.6 ; sys_platform == 'win32'
     # via typer
-deprecated==1.3.1
-    # via tesseract-core
 idna==3.18
     # via requests
 jinja2==3.1.6
@@ -65,5 +63,3 @@ typing-inspection==0.4.4
     # via pydantic
 urllib3==2.7.0
     # via requests
-wrapt==2.3.0
-    # via deprecated

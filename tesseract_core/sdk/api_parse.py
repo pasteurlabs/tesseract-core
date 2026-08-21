@@ -2,12 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import ast
+import logging
 import re
 from pathlib import Path
 from typing import Annotated, Any, Literal, NamedTuple
 
 import yaml
-from deprecated import deprecated
 from pydantic import (
     AfterValidator,
     BaseModel,
@@ -15,6 +15,7 @@ from pydantic import (
     ConfigDict,
     Field,
     Strict,
+    ValidationInfo,
     field_validator,
     model_validator,
 )
@@ -79,23 +80,19 @@ RelativePath = Annotated[str, AfterValidator(assert_relative_path)]
 StrictStr = Annotated[str, Strict()]
 
 
-@deprecated(
-    version="1.12.0",
-    reason=(
-        "The 'python-pip' requirements provider has been renamed to 'uv' "
-        "(the build has always used uv under the hood). Set `provider: uv` in "
-        "tesseract_config.yaml. 'python-pip' still works but will be removed in "
-        "a future release."
-    ),
-)
-def _warn_python_pip_alias() -> None:
-    """Emit the deprecation warning for the legacy ``python-pip`` provider name."""
-
-
 def _normalize_provider(value: Any) -> Any:
     """Accept the deprecated ``python-pip`` provider name as an alias for ``uv``."""
     if value == "python-pip":
-        _warn_python_pip_alias()
+        # Emit through the logger rather than warnings.warn: a library-emitted
+        # DeprecationWarning is suppressed under Python's default filters, so a
+        # real CLI user would never see it.
+        # Scheduled for removal in 1.13.0; see tesseract_core/_deprecations.py.
+        logging.getLogger("tesseract").warning(
+            "The 'python-pip' requirements provider has been renamed to 'uv' "
+            "(the build has always used uv under the hood). Set `provider: uv` "
+            "in tesseract_config.yaml; 'python-pip' still works but will be "
+            "removed in Tesseract 1.13.0."
+        )
         return "uv"
     return value
 
@@ -137,6 +134,19 @@ class HostCredential(BaseModel):
         ),
     )
     model_config: ConfigDict = ConfigDict(extra="forbid")
+
+    @field_validator("host", "secret", "username")
+    @classmethod
+    def _no_whitespace(cls, value: str, info: "ValidationInfo") -> str:
+        # These values are written verbatim into the tab-separated credentials
+        # file and, at build time, into netrc and git-credential entries. Rejecting
+        # whitespace keeps them on a single field and prevents a crafted value from
+        # injecting extra credential lines.
+        if value != value.strip() or any(c.isspace() for c in value):
+            raise ValueError(
+                f"{info.field_name} must not contain whitespace (got {value!r})"
+            )
+        return value
 
 
 class PipRequirements(BaseModel):
