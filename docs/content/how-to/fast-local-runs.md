@@ -39,31 +39,39 @@ import numpy as np
 from tesseract_core import Tesseract
 
 shm = Path("/dev/shm")
-input_dir = Path(tempfile.mkdtemp(prefix="tess_in_", dir=shm))
-output_dir = Path(tempfile.mkdtemp(prefix="tess_out_", dir=shm))
-
 x = np.random.default_rng(0).standard_normal(10_000_000)
 
-with Tesseract.from_image(
-    "my-tesseract",
-    input_path=input_dir,
-    output_path=output_dir,
-    output_format="json+binref",
-) as t:
+# Use TemporaryDirectory so the scratch dirs (and any .bin files left in them)
+# are removed on exit, rather than accumulating on /dev/shm.
+with (
+    tempfile.TemporaryDirectory(prefix="tess_in_", dir=shm) as input_dir,
+    tempfile.TemporaryDirectory(prefix="tess_out_", dir=shm) as output_dir,
+    Tesseract.from_image(
+        "my-tesseract",
+        input_path=input_dir,
+        output_path=output_dir,
+        output_format="json+binref",
+    ) as t,
+):
     result = t.apply({"x": x})
     # result["y"] is a NumPy array, decoded from a .bin file on /dev/shm
 ```
 
 The `output_format` argument controls only how arrays are exchanged internally;
 `apply` still returns ordinary NumPy arrays, so the rest of your code does not
-change. `input_path` and `output_path` are bind-mounted into the container, and
-the `.bin` files written for each request are cleaned up afterwards.
+change. `input_path` and `output_path` are bind-mounted into the container.
+
+Input `.bin` files written for each request are cleaned up after that request.
+Output `.bin` files, however, are written into `output_path` by the server and
+are _not_ removed automatically — the directory is yours to manage. Wrapping the
+scratch directories in `tempfile.TemporaryDirectory()`, as above, is the easiest
+way to guarantee they are cleared when you are done.
 
 ```{tip}
-`/dev/shm` counts against a size limit (often half of RAM by default) and holds
-data in memory. Large arrays and repeated runs can fill it, so remove scratch
-directories when you are done, and size `/dev/shm` for your largest expected
-payload.
+`/dev/shm` is a `tmpfs` with its own size cap (often half of host RAM by
+default), separate from any container memory limit, and it holds all data in
+memory. Large arrays and repeated runs fill it up, so remove scratch directories
+when you are done and size `/dev/shm` for your largest expected payload.
 ```
 
 ## The `binref_pool` fast path
@@ -89,6 +97,11 @@ POSIX platforms) decodes outputs as zero-copy memory-mapped views rather than
 eager copies. On the shared-memory setup above, this roughly halves the
 remaining overhead for large arrays.
 
+Enabling the pool emits a one-time warning reminding you that the scratch `.bin`
+files are not cleaned up automatically, since the pool makes it easy to run many
+large requests in a row. Manage the scratch directories as shown in
+[Basic usage](#basic-usage) above.
+
 Two things to keep in mind when opting in:
 
 - **Decoded results are read-only views** backed by the output files, valid only
@@ -104,7 +117,7 @@ The pool has no effect for output formats other than `json+binref`.
 
 The benefit grows with array size. The table below shows median per-call
 overhead for a no-op Tesseract (which only decodes inputs and encodes outputs)
-across encodings, measured on one Linux machine with bare-metal Docker and
+across encodings, measured on one bare-metal Linux machine with Docker and
 loopback networking. Absolute numbers depend heavily on hardware; treat them as
 illustrative of the _shape_ of the trade-off, not as guarantees.
 

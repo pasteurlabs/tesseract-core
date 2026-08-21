@@ -284,13 +284,16 @@ def test_apply_with_shmem_binref_pool(built_image_name):
             prefix="tess_shmem_pool_out_", dir=shm_dir
         ) as output_dir,
     ):
-        with Tesseract.from_image(
-            built_image_name,
-            input_path=input_dir,
-            output_path=output_dir,
-            output_format="json+binref",
-            binref_pool=True,
-        ) as vecadd:
+        with (
+            pytest.warns(UserWarning, match="not cleaned up automatically"),
+            Tesseract.from_image(
+                built_image_name,
+                input_path=input_dir,
+                output_path=output_dir,
+                output_format="json+binref",
+                binref_pool=True,
+            ) as vecadd,
+        ):
             out = vecadd.apply(inputs)
             assert set(out.keys()) == {"result"}
             np.testing.assert_array_equal(out["result"], expected)

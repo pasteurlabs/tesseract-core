@@ -639,9 +639,10 @@ def test_HTTPClient_binref_pool_only_created_with_input_path(tmp_path):
     client_no_input_path = HTTPClient("localhost", binref_pool=True)
     assert client_no_input_path._binref_pool is None
 
-    client_with_input_path = HTTPClient(
-        "localhost", input_path=tmp_path, binref_pool=True
-    )
+    with pytest.warns(UserWarning, match="not cleaned up automatically"):
+        client_with_input_path = HTTPClient(
+            "localhost", input_path=tmp_path, binref_pool=True
+        )
     assert client_with_input_path._binref_pool is not None
     client_with_input_path.close()
     assert client_with_input_path._binref_pool is None
@@ -650,7 +651,8 @@ def test_HTTPClient_binref_pool_only_created_with_input_path(tmp_path):
 def test_HTTPClient_close_is_idempotent(tmp_path):
     from tesseract_core.sdk.tesseract import HTTPClient
 
-    client = HTTPClient("localhost", input_path=tmp_path, binref_pool=True)
+    with pytest.warns(UserWarning, match="not cleaned up automatically"):
+        client = HTTPClient("localhost", input_path=tmp_path, binref_pool=True)
     client.close()
     # Closing twice must not raise (e.g. via context-manager __exit__ after
     # an explicit close).

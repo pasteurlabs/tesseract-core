@@ -1022,6 +1022,16 @@ class HTTPClient:
         self._binref_pool: _BinrefWritePool | None = None
         if binref_pool and self._input_path is not None:
             self._binref_pool = _BinrefWritePool(self._input_path)
+            warnings.warn(
+                "binref_pool=True writes array data as .bin files into "
+                f"{self._input_path} (and the server writes outputs into the "
+                "output path). These files are not cleaned up automatically and "
+                "will accumulate across calls; on a shared-memory tmpfs like "
+                "/dev/shm they can exhaust available space. Remove the scratch "
+                "directories when done, e.g. with tempfile.TemporaryDirectory().",
+                UserWarning,
+                stacklevel=2,
+            )
 
     def close(self) -> None:
         """Release resources held by the client (e.g. the binref write pool)."""
