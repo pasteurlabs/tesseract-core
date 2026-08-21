@@ -22,7 +22,7 @@ import requests
 from pydantic import BaseModel, TypeAdapter, ValidationError
 from pydantic_core import InitErrorDetails, PydanticCustomError, from_json
 
-from . import engine
+from . import engine, local_engine
 from .docker_client import Container, Containers
 from .logs import LogStreamer
 
@@ -36,8 +36,12 @@ def requires_client(func: Callable) -> Callable:
     @wraps(func)
     def wrapper(self: Tesseract, *args: Any, **kwargs: Any) -> Any:
         if not self._client:
+            if self._spawn_backend == "subprocess":
+                constructor = "from_source"
+            else:
+                constructor = "from_image"
             raise RuntimeError(
-                f"When creating a {self.__class__.__name__} via `from_image`, "
+                f"When creating a {self.__class__.__name__} via `{constructor}`, "
                 "you must either use it as a context manager or call .serve() before use."
             )
         return func(self, *args, **kwargs)
@@ -56,6 +60,10 @@ class Tesseract:
     """
 
     _spawn_config: dict | None = None
+    # Which engine `serve()` should hand `_spawn_config` to. "container" rather
+    # than "docker" because any docker-compatible CLI works here (see
+    # `is_podman`), matching how `container_info` and `Container` are named.
+    _spawn_backend: Literal["container", "subprocess"] | None = None
     _serve_context: dict | None = None
     _lastlog: str | None = None
     _client: HTTPClient | LocalClient | None = None
@@ -220,6 +228,7 @@ class Tesseract:
             docker_args=docker_args,
             skip_health_check=skip_health_check,
         )
+        obj._spawn_backend = "container"
         return obj
 
     @classmethod
@@ -293,6 +302,76 @@ class Tesseract:
         obj._client = LocalClient(tesseract_api, output_path=resolved_output_path)
         return obj
 
+    @classmethod
+    def from_source(
+        cls,
+        tesseract_api: str | Path,
+        input_path: Path | None = None,
+        output_path: Path | None = None,
+        output_format: Literal["json", "json+base64", "json+binref"] = "json+base64",
+        runtime_config: dict[str, Any] | None = None,
+        stream_logs: BoolOrCallable = False,
+        python_executable: str | Path | None = None,
+        startup_timeout: float = local_engine.DEFAULT_STARTUP_TIMEOUT,
+    ) -> Tesseract:
+        """Create a Tesseract instance from a Tesseract API file, in its own process.
+
+        The Tesseract is served by a dedicated ``tesseract-runtime serve``
+        subprocess and reached over HTTP, so it does not share an interpreter,
+        global state or signal handlers with the caller. That matters when
+        sharing them is unsafe -- nesting JAX inside JAX can deadlock -- and it
+        lets the Tesseract run in a different environment than the caller.
+
+        Unlike :meth:`from_tesseract_api`, which imports the API into this
+        process, this must be used as a context manager or served explicitly,
+        since there is a process to clean up:
+
+            >>> with Tesseract.from_source("tesseract_api.py") as tess:
+            ...     tess.apply({"a": 1})
+
+        This is not a substitute for a container: the Tesseract inherits this
+        process's environment, working directory, filesystem access and user.
+
+        Args:
+            tesseract_api: Path to the `tesseract_api.py` file. Unlike
+                :meth:`from_tesseract_api`, an already imported module cannot be
+                used, since it cannot be shared with another process.
+            input_path: Path of input directory. All paths in the tesseract
+                payload have to be relative to this path.
+            output_path: Path of output directory. All paths in the tesseract
+                result with be given relative to this path. Required when using json+binref.
+            output_format: Format to use for the output data. json+binref requires output_path.
+                This has no impact on what is returned to Python and only affects the format that is used internally.
+            runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
+                For example, `{"profiling": True}` enables profiling.
+            stream_logs: If True, stream logs to stdout while endpoints run.
+                If a callable, stream logs to that callable instead.
+            python_executable: Interpreter used to run the Tesseract. Defaults to
+                the one running this process; point it at another environment's
+                ``python`` (for example one created with ``uv venv``) to give the
+                Tesseract dependencies that conflict with the caller's. That
+                environment must have ``tesseract-core[runtime]`` and the
+                Tesseract's own requirements installed.
+            startup_timeout: How long to wait, in seconds, for the Tesseract to
+                become healthy before giving up.
+
+        Returns:
+            A Tesseract instance.
+        """
+        obj = cls.__new__(cls)
+        obj._stream_logs = stream_logs
+        obj._spawn_backend = "subprocess"
+        obj._spawn_config = _subprocess_spawn_config(
+            tesseract_api,
+            input_path=input_path,
+            output_path=output_path,
+            output_format=output_format,
+            runtime_config=runtime_config,
+            python_executable=python_executable,
+            startup_timeout=startup_timeout,
+        )
+        return obj
+
     def __enter__(self) -> Tesseract:
         """Enter the Tesseract context.
 
@@ -326,57 +405,74 @@ class Tesseract:
         """
         if self._spawn_config is None:
             raise RuntimeError(
-                "Can only retrieve logs for a Tesseract created via from_image."
+                "Can only retrieve logs for a Tesseract created via `from_image` "
+                "or `from_source`."
             )
         if self._serve_context is None:
             return self._lastlog or ""
+        if self._spawn_backend == "subprocess":
+            return local_engine.logs(self._serve_context["served"])
         return engine.logs(self._serve_context["container_name"])
 
     def serve(self) -> None:
         """Serve the Tesseract until it is stopped."""
         if self._spawn_config is None:
-            raise RuntimeError("Can only serve a Tesseract created via from_image.")
+            raise RuntimeError(
+                "Can only serve a Tesseract created via `from_image` or `from_source`."
+            )
         if self._serve_context is not None:
             raise RuntimeError("Tesseract is already being served.")
-        container_name, container = engine.serve(**self._spawn_config)
-        self._serve_context = dict(
-            container_name=container_name,
-            port=container.host_port,
-            network=self._spawn_config["network"],
-            network_alias=self._spawn_config["network_alias"],
-        )
-        host_ip = self._spawn_config["host_ip"]
+
+        if self._spawn_backend == "subprocess":
+            served = local_engine.serve(**self._spawn_config)
+            url = served.url
+            self._serve_context = dict(served=served)
+            reap = (local_engine.teardown, served)
+        else:
+            # Ensure that the Tesseract is torn down once the object is garbage
+            # collected, to avoid orphaned containers if the user forgets to
+            # call .teardown()
+            def _silent_teardown(name: str) -> None:
+                from tesseract_core.sdk.docker_client import NotFound
+
+                try:
+                    engine.teardown(name)
+                except NotFound:
+                    pass
+
+            container_name, container = engine.serve(**self._spawn_config)
+            url = f"http://{self._spawn_config['host_ip']}:{container.host_port}"
+            self._serve_context = dict(
+                container_name=container_name,
+                port=container.host_port,
+                network=self._spawn_config["network"],
+                network_alias=self._spawn_config["network_alias"],
+            )
+            reap = (_silent_teardown, container_name)
+
         self._lastlog = None
         output_path = self._spawn_config.get("output_path")
         self._client = HTTPClient(
-            f"http://{host_ip}:{container.host_port}",
+            url,
             output_path=Path(output_path) if output_path else None,
             timeout=self._timeout,
         )
 
-        # Ensure that the Tesseract is torn down once the object is garbage collected,
-        # to avoid orphaned containers if the user forgets to call .teardown()
-        def _silent_teardown(name: str) -> None:
-            from tesseract_core.sdk.docker_client import NotFound
-
-            try:
-                engine.teardown(name)
-            except NotFound:
-                pass
-
-        self._atexit_finalizer = weakref.finalize(
-            self, _silent_teardown, container_name
-        )
+        self._atexit_finalizer = weakref.finalize(self, *reap)
 
     def teardown(self) -> None:
         """Teardown the Tesseract.
 
-        This will stop and remove the Tesseract container.
+        This will stop and remove the Tesseract container, or stop the dedicated
+        process serving it.
         """
         if self._serve_context is None:
             raise RuntimeError("Tesseract is not being served.")
-        self._lastlog = self.server_logs()
-        engine.teardown(self._serve_context["container_name"])
+        if self._spawn_backend == "subprocess":
+            self._lastlog = local_engine.teardown(self._serve_context["served"])
+        else:
+            self._lastlog = self.server_logs()
+            engine.teardown(self._serve_context["container_name"])
         self._client = None
         self._serve_context = None
         self._atexit_finalizer.detach()
@@ -416,7 +512,7 @@ class Tesseract:
             tesseract_core.sdk.docker_client.NotFound: if the container
                 disappeared between :meth:`serve` and this call.
         """
-        if self._spawn_config is None:
+        if self._spawn_backend != "container":
             raise RuntimeError(
                 "`container_info` is only available when using "
                 "`Tesseract.from_image(...)`."
@@ -619,6 +715,66 @@ class Tesseract:
             raise AssertionError(result["message"])
         elif result["status"] == "error":
             raise RuntimeError(result["message"])
+
+
+def _subprocess_spawn_config(
+    tesseract_api: str | Path | ModuleType,
+    *,
+    input_path: Path | None,
+    output_path: Path | None,
+    output_format: Literal["json", "json+base64", "json+binref"],
+    runtime_config: dict[str, Any] | None,
+    python_executable: str | Path | None,
+    startup_timeout: float,
+) -> dict[str, Any]:
+    """Validate arguments for a dedicated-process Tesseract and build its config.
+
+    Unlike the in-process path, nothing here touches this process's runtime
+    config: it all reaches the child as environment variables, so several
+    Tesseracts can be configured independently.
+    """
+    if not isinstance(tesseract_api, str | Path):
+        raise ValueError(
+            "`from_source` requires a path to a `tesseract_api.py` file, but an "
+            f"already imported module was given "
+            f"({getattr(tesseract_api, '__name__', tesseract_api)!r}). A module "
+            "cannot be shared with another process; pass `module.__file__`, or "
+            "use `from_tesseract_api` to run it in this one."
+        )
+
+    tesseract_api_path = Path(tesseract_api).resolve(strict=True)
+    if not tesseract_api_path.is_file():
+        raise RuntimeError(f"Tesseract API path {tesseract_api_path} is not a file.")
+
+    if output_path is not None:
+        resolved_output_path = engine._resolve_file_path(output_path, make_dir=True)
+    elif output_format == "json+binref":
+        raise ValueError(
+            "output_path is required when using the 'json+binref' output format."
+        )
+    else:
+        # Same as `from_image` and the in-process path: an output directory
+        # always exists, which is what makes `stream_logs` work without the
+        # caller having to specify one.
+        resolved_output_path = Path(tempfile.mkdtemp(prefix="tesseract_output_"))
+
+    # Debug mode gives full tracebacks from the child and enables the `test`
+    # endpoint, matching what the in-process path configures. The debugpy
+    # listener it would normally imply is disabled separately, in
+    # `local_engine.serve`.
+    config_kwargs: dict[str, Any] = {"debug": True}
+    if runtime_config is not None:
+        config_kwargs.update(runtime_config)
+
+    return dict(
+        api_path=tesseract_api_path,
+        input_path=input_path.resolve() if input_path is not None else None,
+        output_path=resolved_output_path,
+        output_format=output_format,
+        runtime_config=config_kwargs,
+        python_executable=python_executable,
+        startup_timeout=startup_timeout,
+    )
 
 
 def _tree_map(func: Callable, tree: Any, is_leaf: Callable | None = None) -> Any:
