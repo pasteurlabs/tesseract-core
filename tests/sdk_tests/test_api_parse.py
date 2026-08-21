@@ -255,7 +255,7 @@ def test_config_python_version_rejects_inherit_base_image_packages(
 
 
 def test_provider_python_pip_alias(
-    tmp_path, valid_tesseract_api, valid_tesseract_config
+    tmp_path, valid_tesseract_api, valid_tesseract_config, caplog
 ):
     """The legacy 'python-pip' provider name is accepted as a deprecated alias."""
     _write_tesseract_api_to_file(valid_tesseract_api, tmp_path)
@@ -266,10 +266,31 @@ def test_provider_python_pip_alias(
 
     from tesseract_core.sdk.api_parse import get_config
 
-    with pytest.warns(DeprecationWarning, match="renamed to 'uv'"):
+    with caplog.at_level(logging.WARNING, logger="tesseract"):
         parsed = get_config(tmp_path)
 
     assert parsed.build_config.requirements.provider == "uv"
+    # The rename must be surfaced to the user (via the logger, since a
+    # library-emitted DeprecationWarning would be suppressed by default).
+    assert "renamed to 'uv'" in caplog.text
+
+
+def test_host_credential_rejects_whitespace():
+    """Whitespace in credential fields is rejected to prevent line injection."""
+    from pydantic import ValidationError as PydanticValidationError
+
+    from tesseract_core.sdk.api_parse import HostCredential
+
+    HostCredential(host="ok.example.com", secret="tok", username="user")
+    for bad in (
+        {"host": "a b.com", "secret": "tok"},
+        {"host": "ok.com", "secret": "tok", "username": "u\nmachine evil.com"},
+        {"host": "ok.com", "secret": "with space"},
+    ):
+        with pytest.raises(
+            PydanticValidationError, match="must not contain whitespace"
+        ):
+            HostCredential(**bad)
 
 
 def test_config_python_version_defaults_to_none(

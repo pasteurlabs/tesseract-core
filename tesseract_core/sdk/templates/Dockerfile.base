@@ -73,7 +73,7 @@ ENV {{ key }}="{{ value | replace('\\', '\\\\') | replace('"', '\\"') }}"
 
 # Build a python venv from python provider build scripts.
 # The build script has to create a venv at /python-env
-RUN --mount=type=cache,target=/root/.cache/uv {% if use_ssh_mount %}--mount=type=ssh{% endif %}{% for secret_id in secret_ids %} --mount=type=secret,id={{ secret_id }}{% endfor %} bash {{ config.build_config.requirements._build_script }}
+RUN --mount=type=cache,target=/root/.cache/uv {% if use_ssh_mount %}--mount=type=ssh{% endif %}{% for secret_id in secret_ids %} --mount=type=secret,id={{ secret_id }}{% endfor %}{% if config.build_config.host_credentials %} --mount=type=tmpfs,target=/tmp/tesseract-credentials{% endif %} bash {{ config.build_config.requirements._build_script }}
 ENV PATH="/python-env/bin:$PATH"
 
 # Stage 2: Set up runtime environment
