@@ -301,6 +301,21 @@ def build_image(
             ),
         ),
     ] = False,
+    secret: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--secret",
+            help=(
+                "Supply a build secret via a BuildKit secret mount (never stored in "
+                "the image). Format: ``id=<name>,env=<VAR>`` to read from an "
+                "environment variable, or ``id=<name>,src=<file>`` to read from a "
+                "file. The ``<name>`` matches a ``secret`` reference declared under "
+                "an entry in ``build_config.requirements.index_credentials``. "
+                "Repeatable."
+            ),
+            metavar="id=NAME,env=VAR|src=FILE",
+        ),
+    ] = None,
     config_override: Annotated[
         list[str] | None,
         typer.Option(
@@ -351,6 +366,7 @@ def build_image(
                 tag,
                 build_dir=build_dir,
                 inject_ssh=forward_ssh_agent,
+                secrets=secret,
                 config_override=parsed_config_override,
                 generate_only=generate_only,
                 stream_logs=logger.debug,

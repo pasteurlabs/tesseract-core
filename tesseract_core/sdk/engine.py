@@ -27,7 +27,12 @@ import yaml
 from jinja2 import Environment, PackageLoader, StrictUndefined
 from packaging.requirements import Requirement
 
-from .api_parse import TesseractConfig, get_config, validate_tesseract_api
+from .api_parse import (
+    PipRequirements,
+    TesseractConfig,
+    get_config,
+    validate_tesseract_api,
+)
 from .docker_client import (
     APIError,
     CLIDockerClient,
@@ -166,6 +171,18 @@ def _is_local_dependency(spec: str) -> bool:
     return spec.startswith(_LOCAL_DEPENDENCY_PREFIXES)
 
 
+def _parse_secret_id(spec: str) -> str:
+    """Extract the ``id`` from a BuildKit ``--secret`` spec (``id=name,env=VAR``)."""
+    for part in spec.split(","):
+        key, _, value = part.partition("=")
+        if key.strip() == "id":
+            return value.strip()
+    raise ValueError(
+        f"Invalid --secret spec {spec!r}: expected 'id=<name>,env=<VAR>' "
+        "or 'id=<name>,src=<file>'."
+    )
+
+
 def _ignore_pycache(_: Any, names: list[str]) -> list[str]:
     """`copytree` ignore filter that drops ``__pycache__`` directories."""
     return ["__pycache__"] if "__pycache__" in names else []
@@ -273,6 +290,7 @@ def prepare_build_context(
     context_dir: str | Path,
     user_config: TesseractConfig,
     use_ssh_mount: bool = False,
+    secret_ids: list[str] | None = None,
 ) -> Path:
     """Populate the build context for a Tesseract.
 
@@ -297,10 +315,13 @@ def prepare_build_context(
         context_dir: The directory where the build context will be created.
         user_config: The Tesseract configuration object.
         use_ssh_mount: Whether to use SSH mount to install dependencies (prevents caching).
+        secret_ids: BuildKit secret ids to mount during the dependency install step
+            (one per authenticated package index).
 
     Returns:
         The path to the build context directory.
     """
+    secret_ids = list(secret_ids or [])
     src_dir = Path(src_dir)
     context_dir = Path(context_dir)
     context_dir.mkdir(parents=True, exist_ok=True)
@@ -372,6 +393,7 @@ def prepare_build_context(
         "tesseract_runtime_location": "__tesseract_runtime__",
         "config": resolved_config,
         "use_ssh_mount": use_ssh_mount,
+        "secret_ids": secret_ids,
     }
 
     logger.debug(f"Generating Dockerfile from template: {template_name}")
@@ -399,7 +421,7 @@ def prepare_build_context(
     local_requirements_path = context_dir / "local_requirements"
     Path.mkdir(local_requirements_path, parents=True, exist_ok=True)
 
-    if requirement_config.provider == "python-pip":
+    if requirement_config.provider == "uv":
         reqstxt = src_dir / requirement_config._filename
         if reqstxt.exists():
             local_dependencies, remote_dependencies = parse_requirements(reqstxt)
@@ -425,13 +447,25 @@ def prepare_build_context(
             if lines:
                 f.write("\n".join(lines) + "\n")
 
+        # Write the declared index credentials (host + secret id + username, never
+        # tokens) into a file the build script reads. At install time the script
+        # reads each token from its secret mount and assembles a netrc entry.
+        credentials_file_path = context_dir / "index_credentials.txt"
+        with credentials_file_path.open("w", encoding="utf-8") as f:
+            for credential in requirement_config.index_credentials:
+                # Tab-separated host, secret id, and username. None of these may
+                # contain a tab; hosts, secret names, and usernames never do.
+                f.write(
+                    f"{credential.host}\t{credential.secret}\t{credential.username}\n"
+                )
+
     elif requirement_config.provider == "conda":
         # The conda environment file may declare local-path pip dependencies via
         # a `pip:` sub-list (e.g. `- ./mypkg_src`). conda resolves those paths
         # relative to the environment file, but only the file itself is copied
         # into the build stage, not the surrounding Tesseract source. Stage each
         # local path into the build context and rewrite it to point at the
-        # staged copy, mirroring the python-pip provider.
+        # staged copy, mirroring the uv provider.
         env_file = src_dir / requirement_config._filename
         env_dest = context_dir / "__tesseract_source__" / requirement_config._filename
         if env_file.exists():
@@ -549,6 +583,7 @@ def build_tesseract(
     image_tag: str | None,
     build_dir: Path | None = None,
     inject_ssh: bool = False,
+    secrets: list[str] | None = None,
     config_override: dict[tuple[str, ...], Any] | None = None,
     generate_only: bool = False,
     stream_logs: Callable[[str], Any] | bool = False,
@@ -563,6 +598,9 @@ def build_tesseract(
         build_dir: directory to be used to store the build context.
           If not provided, a temporary directory will be created.
         inject_ssh: whether or not to forward SSH agent when building the image.
+        secrets: BuildKit secret specs (e.g. ``id=name,env=VAR`` or
+          ``id=name,src=file``) to forward to the build for authenticated
+          package indices. Credentials are mounted, never stored in a layer.
         config_override: overrides for configuration options in the Tesseract.
         generate_only: only generate the build context but do not build the image.
         stream_logs: if True, stream build logs to stderr. If a callable is provided,
@@ -604,8 +642,29 @@ def build_tesseract(
         build_dir.mkdir(exist_ok=True)
         keep_build_dir = True
 
+    # Build secrets are supplied generically on the command line and mounted into
+    # the dependency install step. Any secret referenced by an index credential
+    # must be backed by a --secret; check that up front.
+    secrets = list(secrets or [])
+    provided_secret_ids = [_parse_secret_id(spec) for spec in secrets]
+    required_secret_ids = []
+    if isinstance(config.build_config.requirements, PipRequirements):
+        for credential in config.build_config.requirements.index_credentials:
+            required_secret_ids.append(credential.secret)
+    missing = sorted(set(required_secret_ids) - set(provided_secret_ids))
+    if missing:
+        raise ValueError(
+            "Missing build secret(s) for authenticated index credentials: "
+            f"{', '.join(missing)}. Provide them with "
+            "`tesseract build --secret id=<name>,env=<VAR>` (or `,src=<file>`)."
+        )
+
     context_dir = prepare_build_context(
-        src_dir, build_dir, config, use_ssh_mount=inject_ssh
+        src_dir,
+        build_dir,
+        config,
+        use_ssh_mount=inject_ssh,
+        secret_ids=provided_secret_ids,
     )
 
     if generate_only:
@@ -619,6 +678,7 @@ def build_tesseract(
             tags=tags,
             dockerfile=context_dir / "Dockerfile",
             inject_ssh=inject_ssh,
+            secrets=secrets,
             print_and_exit=generate_only,
             stream_logs=stream_logs,
         )
