@@ -245,8 +245,7 @@ def _start_debug_server(wait_for_client: bool, host: str, port: int) -> None:
         host: Address to bind, e.g. "127.0.0.1" for debuggers on this machine
             only, "0.0.0.0" for any. Whoever reaches this port can run code as
             this process.
-        port: Port to bind. Two Tesseracts cannot share one unless they are in
-            separate containers.
+        port: Port to bind, must be unique per host/container.
     """
     # Python 3.11+ freezes stdlib bootstrap modules, which makes debugpy print a
     # noisy "frozen modules" warning (it could only ever miss breakpoints inside
