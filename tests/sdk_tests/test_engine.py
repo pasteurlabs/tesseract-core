@@ -454,7 +454,7 @@ def test_run_warns_about_a_chosen_debugpy_port(mocked_docker, caplog):
             environment={"TESSERACT_DEBUGPY_PORT": "6789"},
         )
 
-    assert any("rebuild the Tesseract" in r.message for r in caplog.records)
+    assert any("debugger cannot attach" in r.message for r in caplog.records)
 
 
 def test_run_debugpy_host_network(mocked_docker):

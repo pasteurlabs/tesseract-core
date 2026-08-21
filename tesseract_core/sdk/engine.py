@@ -753,8 +753,8 @@ def _warn_if_debugger_unreachable(container: Container, expected_port: str) -> N
     )
 
 
-def _debug_setting(environment: dict[str, str], setting: str) -> str | None:
-    """Read a runtime setting, honouring both names it can arrive under.
+def _get_runtime_setting(environment: dict[str, str], setting: str) -> str | None:
+    """Read a runtime setting from an environment, under either name it takes.
 
     Typer binds every config option to ``TESSERACT_RUNTIME_*`` as well, and that
     takes precedence over the ``TESSERACT_*`` the config itself reads.
@@ -992,7 +992,7 @@ def serve(
     # Read after runtime_config lands in the environment, which is how the SDK
     # passes it. Only a port the caller asked for needs checking afterwards; the
     # default works whatever the image was built with.
-    requested_debugpy_port = _debug_setting(environment, "DEBUGPY_PORT")
+    requested_debugpy_port = _get_runtime_setting(environment, "DEBUGPY_PORT")
 
     # A port picked by get_free_port can be grabbed by another process between
     # our check and the container binding it (an unavoidable race, since the
@@ -1045,7 +1045,7 @@ def serve(
             environment["TESSERACT_DEBUG"] = "1"
             debug_updates, container_debugpy_port = _resolve_container_debug_address(
                 requested_debugpy_port,
-                _debug_setting(environment, "DEBUGPY_HOST"),
+                _get_runtime_setting(environment, "DEBUGPY_HOST"),
                 port_mapped=port_mappings is not None,
                 reserved_ports={container_api_port},
             )
@@ -1378,11 +1378,11 @@ def run_tesseract(
         _ensure_network_exists(network)
 
     if debug:
-        requested_debugpy_port = _debug_setting(environment, "DEBUGPY_PORT")
+        requested_debugpy_port = _get_runtime_setting(environment, "DEBUGPY_PORT")
         environment["TESSERACT_DEBUG"] = "1"
         debug_updates, container_debugpy_port = _resolve_container_debug_address(
             requested_debugpy_port,
-            _debug_setting(environment, "DEBUGPY_HOST"),
+            _get_runtime_setting(environment, "DEBUGPY_HOST"),
             port_mapped=network != "host",
             reserved_ports=set(),
         )
@@ -1394,7 +1394,7 @@ def run_tesseract(
             logger.warning(
                 "Cannot verify whether the debugpy port is configurable when "
                 "using `tesseract run`. Configuration is not possible for some "
-                "old Tesseracts; rebuild the Tesseract if your debugger cannot "
+                "old Tesseracts. Rebuild the Tesseract if your debugger cannot "
                 "attach."
             )
         # `network="host"` binds the container's debugpy port directly on the host,
