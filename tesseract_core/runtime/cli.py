@@ -243,8 +243,8 @@ def _start_debug_server(wait_for_client: bool, host: str, port: int) -> None:
     Args:
         wait_for_client: If True, block until a debugger attaches.
         host: Address to bind, e.g. "127.0.0.1" for debuggers on this machine
-            only, "0.0.0.0" for any. Whoever reaches this port can run code as
-            this process.
+            only, "0.0.0.0" for any. WARNING: Whoever connects to the debugger
+            can run arbitrary code, use with caution.
         port: Port to bind, must be unique per host/container.
     """
     # Python 3.11+ freezes stdlib bootstrap modules, which makes debugpy print a
