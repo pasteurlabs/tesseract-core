@@ -3,7 +3,7 @@
 
 import traceback
 from collections.abc import Callable, Iterator, Sequence
-from functools import wraps
+from functools import partial, wraps
 from pathlib import Path
 from types import ModuleType
 from typing import (
@@ -109,14 +109,29 @@ def get_differentiable_paths(
     return ad_inputs, ad_outputs
 
 
-def _cached_jacobian(fn: Callable) -> Callable:
-    """Cache the result of the jacobian computation based on input_path, output_path, and input_idx."""
+def _cached_jacobian(
+    fn: Callable | None = None, *, key_fn: Callable | None = None
+) -> Callable:
+    """Cache the result of the jacobian computation.
+
+    Keyed on ``(input_path, output_path, input_idx)`` by default. Pass
+    ``key_fn`` to key on something else, which the VJP sweep needs: one sweep
+    answers for every sampled index of a path pair, so keying it on a single
+    index would defeat the sharing.
+    """
+    if fn is None:
+        return partial(_cached_jacobian, key_fn=key_fn)
+
     cache = {}
 
     @wraps(fn)
     def _wrapper(*args: Any, **kwargs: Any) -> Any:
-        _, _, input_path, output_path, input_idx, *_ = args
-        key = (input_path, output_path, tuple(input_idx))
+        _, _, input_path, output_path, fifth, *_ = args
+        key = (
+            key_fn(input_path, output_path, fifth)
+            if key_fn is not None
+            else (input_path, output_path, tuple(fifth))
+        )
         if key not in cache:
             try:
                 cache[key] = fn(*args, **kwargs)
@@ -313,25 +328,32 @@ def _jacobian_via_jvp(
     return jvp[output_path]
 
 
-@_cached_jacobian
-def _jacobian_via_vjp(
+@_cached_jacobian(key_fn=lambda i, o, sampled: (i, o, tuple(sampled)))
+def _vjp_jacobian_columns(
     endpoints_func: dict[str, Callable],
     inputs: dict[str, Any],
     input_path: Sequence[str],
     output_path: Sequence[str],
-    input_idx: tuple[int, ...],
-) -> ArrayLike:
-    """Compute a Jacobian row using the vector_jacobian_product endpoint."""
+    sampled_input_idx: tuple[tuple[int, ...], ...],
+) -> dict[tuple[int, ...], ArrayLike]:
+    """Sweep the output elements once, returning a Jacobian row per sampled index.
+
+    One VJP call with a one-hot cotangent already returns the gradient with
+    respect to *every* element of ``input_path``, so a single sweep answers
+    for all sampled indices of this pair at once. Only the sampled columns are
+    retained, so this does not materialise the full Jacobian.
+    """
     apply_fn = endpoints_func["apply"]
     ApplySchema = get_input_schema(apply_fn)
     outputs = apply_fn(ApplySchema.model_validate({"inputs": inputs})).model_dump()
 
     vjp_fn = endpoints_func["vector_jacobian_product"]
     VjpSchema = get_input_schema(vjp_fn)
-    jac_row = np.zeros_like(get_at_path(outputs, output_path))
+    template = np.zeros_like(get_at_path(outputs, output_path))
+    rows = {idx: np.zeros_like(template) for idx in sampled_input_idx}
 
-    for col_idx in np.ndindex(jac_row.shape):
-        cotangent = np.zeros_like(jac_row)
+    for col_idx in np.ndindex(template.shape):
+        cotangent = np.zeros_like(template)
         cotangent[col_idx] = 1
         vjp = vjp_fn(
             VjpSchema.model_validate(
@@ -343,9 +365,35 @@ def _jacobian_via_vjp(
                 }
             )
         ).model_dump()
-        jac_row[col_idx] = vjp[input_path][input_idx]
+        grad = vjp[input_path]
+        for idx in sampled_input_idx:
+            rows[idx][col_idx] = grad[idx]
 
-    return jac_row
+    return rows
+
+
+def _jacobian_via_vjp(
+    endpoints_func: dict[str, Callable],
+    inputs: dict[str, Any],
+    input_path: Sequence[str],
+    output_path: Sequence[str],
+    input_idx: tuple[int, ...],
+    sampled_input_idx: tuple[tuple[int, ...], ...] = (),
+) -> ArrayLike:
+    """Compute a Jacobian row using the vector_jacobian_product endpoint.
+
+    Re-running the sweep per index made this endpoint cost
+    ``n_sampled x n_output_elements`` calls, where ``jacobian`` and
+    ``jacobian_vector_product`` cost one per item.
+    """
+    wanted = tuple(dict.fromkeys((*sampled_input_idx, tuple(input_idx))))
+    return _vjp_jacobian_columns(
+        endpoints_func, inputs, input_path, output_path, wanted
+    )[tuple(input_idx)]
+
+
+# The cache now lives on the sweep, but callers clear it through this name.
+_jacobian_via_vjp.clear_cache = _vjp_jacobian_columns.clear_cache
 
 
 def _sample_indices(
@@ -409,6 +457,13 @@ def check_endpoint_gradients(
     items_to_check = _sample_indices(inputs, diff_inputs, diff_outputs, max_evals, rng)
     num_evals = 0
 
+    # Indices this run will ask for, per path pair. The VJP sweep answers for
+    # all of them in one pass, so it needs to know them up front.
+    sampled_by_pair: dict[tuple[str, str], tuple] = {}
+    for in_path, out_path, idx in items_to_check:
+        sampled_by_pair.setdefault((in_path, out_path), ())
+        sampled_by_pair[(in_path, out_path)] += (tuple(idx),)
+
     try:
         with Progress(disable=not show_progress) as progress:
             subtask = progress.add_task(
@@ -428,12 +483,18 @@ def check_endpoint_gradients(
                         idx,
                         eps=eps,
                     )
+                    grad_kwargs = (
+                        {"sampled_input_idx": sampled_by_pair[(in_path, out_path)]}
+                        if endpoint == "vector_jacobian_product"
+                        else {}
+                    )
                     result_grad = _jacobian_via_grad(
                         endpoint_functions,
                         inputs,
                         in_path,
                         out_path,
                         idx,
+                        **grad_kwargs,
                     )
                 except Exception as e:
                     tb = traceback.extract_tb(e.__traceback__)
