@@ -5,7 +5,10 @@ import pytest
 from pydantic import BaseModel
 
 from tesseract_core.runtime import Array, Differentiable, Float32
-from tesseract_core.runtime.testing.finite_differences import check_gradients
+from tesseract_core.runtime.testing.finite_differences import (
+    check_gradients,
+    expand_path_pattern,
+)
 from tesseract_core.runtime.tree_transforms import get_at_path
 
 
@@ -153,3 +156,42 @@ def test_check_gradients(input_paths, output_paths, endpoints):
             "jacobian_vector_product",
             "vector_jacobian_product",
         ]
+
+
+class TestExpandPathPatternOptionalFields:
+    """Optional container fields must not abort path expansion.
+
+    The pattern comes from the schema, so an optional field that was simply
+    not supplied is a normal input rather than a bad path. Every branch of
+    the walk raises on ``None`` though: ``[]`` and ``{}`` iterate it and a
+    named part subscripts it, so a Tesseract with an optional container
+    input used to fail before checking a single gradient.
+    """
+
+    @pytest.mark.parametrize(
+        "pattern,inputs",
+        [
+            ("a.[].b", {"a": None}),
+            ("a.b", {"a": None}),
+            ("a.{}.b", {"a": None}),
+        ],
+        ids=["optional_list", "optional_submodel", "optional_dict"],
+    )
+    def test_absent_optional_container_expands_to_nothing(self, pattern, inputs):
+        assert expand_path_pattern(pattern, inputs) == []
+
+    def test_none_entry_inside_a_populated_list_is_skipped(self):
+        """The present entries still expand; only the missing one drops out."""
+        assert expand_path_pattern("a.[].b", {"a": [{"b": 1}, None]}) == ["a.[0].b"]
+
+    @pytest.mark.parametrize(
+        "pattern,inputs,expected",
+        [
+            ("a.[].b", {"a": [{"b": 1}, {"b": 2}]}, ["a.[0].b", "a.[1].b"]),
+            ("a.{}.b", {"a": {"x": {"b": 1}}}, ["a.{x}.b"]),
+            ("a.b", {"a": {"b": 1}}, ["a.b"]),
+        ],
+        ids=["list", "dict", "plain"],
+    )
+    def test_populated_paths_are_unchanged(self, pattern, inputs, expected):
+        assert expand_path_pattern(pattern, inputs) == expected

@@ -61,6 +61,14 @@ def expand_path_pattern(path_pattern: str, inputs: dict[str, Any]) -> list[str]:
         if not parts:
             return [".".join(current_path)]
 
+        if current_inputs is None:
+            # An optional container that was not supplied. There is nothing
+            # left to expand, and every branch below would raise on None:
+            # `[]` and `{}` iterate it, and a named part subscripts it. The
+            # pattern comes from the schema, so this is a normal absent
+            # field rather than a bad path.
+            return []
+
         paths = []
         part = parts[0]
 
