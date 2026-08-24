@@ -195,3 +195,67 @@ class TestExpandPathPatternOptionalFields:
     )
     def test_populated_paths_are_unchanged(self, pattern, inputs, expected):
         assert expand_path_pattern(pattern, inputs) == expected
+
+
+class _OptionalExtra(BaseModel):
+    w: Differentiable[Array[(3,), Float32]]
+
+
+class OptionalContainerModule(ModuleType):
+    """A schema with an optional sub-model, as real Tesseracts have.
+
+    Optional initial conditions, boundary data or preconditioner state are
+    ordinary inputs. The differentiable path ``extra.w`` is still declared
+    when ``extra`` is absent, so the path walk meets ``None``.
+    """
+
+    class InputSchema(BaseModel):
+        x: Differentiable[Array[(3,), Float32]]
+        extra: _OptionalExtra | None = None
+
+    class OutputSchema(BaseModel):
+        y: Differentiable[Array[(3,), Float32]]
+
+    def apply(self, inputs: InputSchema) -> OutputSchema:
+        y = 2.0 * np.asarray(inputs.x, dtype=np.float32)
+        if inputs.extra is not None:
+            y = y + np.asarray(inputs.extra.w, dtype=np.float32)
+        return {"y": y}
+
+    def jacobian(
+        self,
+        inputs: InputSchema,
+        jac_inputs: set[str],
+        jac_outputs: set[str],
+    ):
+        return {
+            "y": {
+                p: (2.0 if p == "x" else 1.0) * np.eye(3, dtype=np.float32)
+                for p in jac_inputs
+            }
+        }
+
+
+def test_check_gradients_runs_with_an_absent_optional_container():
+    """End-to-end: an absent optional input must not abort the whole check.
+
+    ``extra.w`` stays in ``differentiable_arrays`` whether or not ``extra``
+    was supplied, so the path walk meets ``None`` and every branch of it
+    raises. On an unguarded tree this fails with ``TypeError: 'NoneType'
+    object is not subscriptable`` before a single gradient is checked.
+    """
+    module = OptionalContainerModule("optional_container_module")
+
+    num_evals_total = 0
+    for _endpoint, failures, num_evals in check_gradients(
+        module,
+        {"inputs": {"x": np.ones(3, dtype=np.float32), "extra": None}},
+        base_dir=None,
+        endpoints=["jacobian"],
+        max_evals=6,
+        seed=0,
+    ):
+        num_evals_total += num_evals
+        assert not failures
+
+    assert num_evals_total > 0, "nothing was checked, so this proves nothing"
