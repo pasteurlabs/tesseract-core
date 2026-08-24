@@ -3,7 +3,7 @@
 
 import traceback
 from collections.abc import Callable, Iterator, Sequence
-from functools import partial, wraps
+from functools import wraps
 from pathlib import Path
 from types import ModuleType
 from typing import (
@@ -109,40 +109,47 @@ def get_differentiable_paths(
     return ad_inputs, ad_outputs
 
 
-def _cached_jacobian(
-    fn: Callable | None = None, *, key_fn: Callable | None = None
-) -> Callable:
-    """Cache the result of the jacobian computation.
+def _by_index(input_path: Any, output_path: Any, input_idx: Any) -> tuple:
+    """Key a per-index Jacobian row on the triple it depends on."""
+    return (input_path, output_path, tuple(input_idx))
 
-    Keyed on ``(input_path, output_path, input_idx)`` by default. Pass
-    ``key_fn`` to key on something else, which the VJP sweep needs: one sweep
-    answers for every sampled index of a path pair, so keying it on a single
-    index would defeat the sharing.
+
+def _by_sampled_set(input_path: Any, output_path: Any, sampled: Any) -> tuple:
+    """Key a VJP sweep on the path pair and the set it answers for.
+
+    One sweep covers every sampled index of a pair, so keying it per index
+    would defeat the sharing.
     """
-    if fn is None:
-        return partial(_cached_jacobian, key_fn=key_fn)
+    return (input_path, output_path, tuple(sampled))
 
-    cache = {}
 
-    @wraps(fn)
-    def _wrapper(*args: Any, **kwargs: Any) -> Any:
-        _, _, input_path, output_path, fifth, *_ = args
-        key = (
-            key_fn(input_path, output_path, fifth)
-            if key_fn is not None
-            else (input_path, output_path, tuple(fifth))
-        )
-        if key not in cache:
-            try:
-                cache[key] = fn(*args, **kwargs)
-            except Exception as e:
-                cache[key] = e
-        if isinstance(cache[key], Exception):
-            raise cache[key]
-        return cache[key]
+def _cached_function(*, key_fn: Callable) -> Callable:
+    """Memoise on a key derived from the call's path arguments.
 
-    _wrapper.clear_cache = cache.clear
-    return _wrapper
+    ``key_fn`` receives ``(input_path, output_path, fifth_positional)`` and
+    returns the cache key, so the caller decides the granularity.
+    """
+
+    def _decorate(fn: Callable) -> Callable:
+        cache = {}
+
+        @wraps(fn)
+        def _wrapper(*args: Any, **kwargs: Any) -> Any:
+            _, _, input_path, output_path, fifth, *_ = args
+            key = key_fn(input_path, output_path, fifth)
+            if key not in cache:
+                try:
+                    cache[key] = fn(*args, **kwargs)
+                except Exception as e:
+                    cache[key] = e
+            if isinstance(cache[key], Exception):
+                raise cache[key]
+            return cache[key]
+
+        _wrapper.clear_cache = cache.clear
+        return _wrapper
+
+    return _decorate
 
 
 def _perturb_input(
@@ -240,7 +247,7 @@ def _compute_forward_diff_row(
     ) / eps
 
 
-@_cached_jacobian
+@_cached_function(key_fn=_by_index)
 def _jacobian_via_apply(
     endpoints_func: dict[str, Callable],
     inputs: dict[str, Any],
@@ -270,7 +277,7 @@ def _jacobian_via_apply(
     )
 
 
-@_cached_jacobian
+@_cached_function(key_fn=_by_index)
 def _jacobian_via_jacobian(
     endpoints_func: dict[str, Callable],
     inputs: dict[str, Any],
@@ -301,7 +308,7 @@ def _jacobian_via_jacobian(
     return output_val[jac_slice]
 
 
-@_cached_jacobian
+@_cached_function(key_fn=_by_index)
 def _jacobian_via_jvp(
     endpoints_func: dict[str, Callable],
     inputs: dict[str, Any],
@@ -328,48 +335,11 @@ def _jacobian_via_jvp(
     return jvp[output_path]
 
 
-@_cached_jacobian(key_fn=lambda i, o, sampled: (i, o, tuple(sampled)))
-def _vjp_jacobian_columns(
-    endpoints_func: dict[str, Callable],
-    inputs: dict[str, Any],
-    input_path: Sequence[str],
-    output_path: Sequence[str],
-    sampled_input_idx: tuple[tuple[int, ...], ...],
-) -> dict[tuple[int, ...], ArrayLike]:
-    """Sweep the output elements once, returning a Jacobian row per sampled index.
-
-    One VJP call with a one-hot cotangent already returns the gradient with
-    respect to *every* element of ``input_path``, so a single sweep answers
-    for all sampled indices of this pair at once. Only the sampled columns are
-    retained, so this does not materialise the full Jacobian.
-    """
-    apply_fn = endpoints_func["apply"]
-    ApplySchema = get_input_schema(apply_fn)
-    outputs = apply_fn(ApplySchema.model_validate({"inputs": inputs})).model_dump()
-
-    vjp_fn = endpoints_func["vector_jacobian_product"]
-    VjpSchema = get_input_schema(vjp_fn)
-    template = np.zeros_like(get_at_path(outputs, output_path))
-    rows = {idx: np.zeros_like(template) for idx in sampled_input_idx}
-
-    for col_idx in np.ndindex(template.shape):
-        cotangent = np.zeros_like(template)
-        cotangent[col_idx] = 1
-        vjp = vjp_fn(
-            VjpSchema.model_validate(
-                {
-                    "inputs": inputs,
-                    "vjp_inputs": [input_path],
-                    "vjp_outputs": [output_path],
-                    "cotangent_vector": {output_path: cotangent},
-                }
-            )
-        ).model_dump()
-        grad = vjp[input_path]
-        for idx in sampled_input_idx:
-            rows[idx][col_idx] = grad[idx]
-
-    return rows
+#: One VJP sweep answers for every sampled index of a path pair, so the cache
+#: sits on the pair rather than on the index the caller happens to want back.
+#: That granularity mismatch is why this is a plain dict rather than
+#: ``_cached_function``, which memoises whatever the function returns.
+_vjp_sweep_cache: dict = {}
 
 
 def _jacobian_via_vjp(
@@ -382,18 +352,59 @@ def _jacobian_via_vjp(
 ) -> ArrayLike:
     """Compute a Jacobian row using the vector_jacobian_product endpoint.
 
-    Re-running the sweep per index made this endpoint cost
+    One VJP call with a one-hot cotangent returns the gradient with respect
+    to every element of ``input_path``, so a single sweep over the output
+    elements answers for all sampled indices at once. Keeping just one
+    element and re-running the sweep per index cost
     ``n_sampled x n_output_elements`` calls, where ``jacobian`` and
     ``jacobian_vector_product`` cost one per item.
+
+    ``sampled_input_idx`` is the set this pair will be asked for, so only
+    those rows are retained and the full Jacobian is never materialised.
     """
     wanted = tuple(dict.fromkeys((*sampled_input_idx, tuple(input_idx))))
-    return _vjp_jacobian_columns(
-        endpoints_func, inputs, input_path, output_path, wanted
-    )[tuple(input_idx)]
+    key = (input_path, output_path, wanted)
+
+    if key not in _vjp_sweep_cache:
+        try:
+            apply_fn = endpoints_func["apply"]
+            ApplySchema = get_input_schema(apply_fn)
+            outputs = apply_fn(
+                ApplySchema.model_validate({"inputs": inputs})
+            ).model_dump()
+
+            vjp_fn = endpoints_func["vector_jacobian_product"]
+            VjpSchema = get_input_schema(vjp_fn)
+            template = np.zeros_like(get_at_path(outputs, output_path))
+            rows = {idx: np.zeros_like(template) for idx in wanted}
+
+            for col_idx in np.ndindex(template.shape):
+                cotangent = np.zeros_like(template)
+                cotangent[col_idx] = 1
+                vjp = vjp_fn(
+                    VjpSchema.model_validate(
+                        {
+                            "inputs": inputs,
+                            "vjp_inputs": [input_path],
+                            "vjp_outputs": [output_path],
+                            "cotangent_vector": {output_path: cotangent},
+                        }
+                    )
+                ).model_dump()
+                grad = vjp[input_path]
+                for idx in wanted:
+                    rows[idx][col_idx] = grad[idx]
+            _vjp_sweep_cache[key] = rows
+        except Exception as e:  # noqa: BLE001 - cached and re-raised per key
+            _vjp_sweep_cache[key] = e
+
+    cached = _vjp_sweep_cache[key]
+    if isinstance(cached, Exception):
+        raise cached
+    return cached[tuple(input_idx)]
 
 
-# The cache now lives on the sweep, but callers clear it through this name.
-_jacobian_via_vjp.clear_cache = _vjp_jacobian_columns.clear_cache
+_jacobian_via_vjp.clear_cache = _vjp_sweep_cache.clear
 
 
 def _sample_indices(
