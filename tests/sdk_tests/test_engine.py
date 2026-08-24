@@ -81,11 +81,11 @@ def test_prepare_build_context_build_env(tmp_path_factory):
     assert "UV_INDEX_STRATEGY" not in run_stage
 
 
-@pytest.mark.parametrize("provider", ["uv", "conda"])
+@pytest.mark.parametrize("provider", ["uv-pip", "conda"])
 def test_prepare_build_context_host_credentials(tmp_path_factory, provider):
     """host_credentials render secret mounts + a credentials file, no tokens (#675).
 
-    Provider-agnostic: the same setup applies to uv and conda builds.
+    Provider-agnostic: the same setup applies to uv-pip and conda builds.
     """
     src_dir = tmp_path_factory.mktemp("src")
     (src_dir / "foo").touch()

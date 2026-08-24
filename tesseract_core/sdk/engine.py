@@ -440,7 +440,7 @@ def prepare_build_context(
     local_requirements_path = context_dir / "local_requirements"
     Path.mkdir(local_requirements_path, parents=True, exist_ok=True)
 
-    if requirement_config.provider == "uv":
+    if requirement_config.provider == "uv-pip":
         reqstxt = src_dir / requirement_config._filename
         if reqstxt.exists():
             local_dependencies, remote_dependencies = parse_requirements(reqstxt)

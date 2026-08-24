@@ -269,10 +269,10 @@ def test_provider_python_pip_alias(
     with caplog.at_level(logging.WARNING, logger="tesseract"):
         parsed = get_config(tmp_path)
 
-    assert parsed.build_config.requirements.provider == "uv"
+    assert parsed.build_config.requirements.provider == "uv-pip"
     # The rename must be surfaced to the user (via the logger, since a
     # library-emitted DeprecationWarning would be suppressed by default).
-    assert "renamed to 'uv'" in caplog.text
+    assert "renamed to 'uv-pip'" in caplog.text
 
 
 def test_host_credential_rejects_whitespace():

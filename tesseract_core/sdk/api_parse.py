@@ -81,23 +81,20 @@ StrictStr = Annotated[str, Strict()]
 
 
 def _normalize_provider(value: Any) -> Any:
-    """Accept the deprecated ``python-pip`` provider name as an alias for ``uv``."""
+    """Accept the deprecated ``python-pip`` provider name as an alias for ``uv-pip``."""
     if value == "python-pip":
         # Emit through the logger rather than warnings.warn: a library-emitted
         # DeprecationWarning is suppressed under Python's default filters, so a
         # real CLI user would never see it.
         # Scheduled for removal in 1.13.0; see tesseract_core/_deprecations.py.
         logging.getLogger("tesseract").warning(
-            "The 'python-pip' requirements provider has been renamed to 'uv' "
-            "(the build has always used uv under the hood). Set `provider: uv` "
+            "The 'python-pip' requirements provider has been renamed to 'uv-pip' "
+            "(the build has always used uv under the hood). Set `provider: uv-pip` "
             "in tesseract_config.yaml; 'python-pip' still works but will be "
             "removed in Tesseract 1.13.0."
         )
-        return "uv"
+        return "uv-pip"
     return value
-
-
-ProviderName = Annotated[Literal["uv"], BeforeValidator(_normalize_provider)]
 
 
 class HostCredential(BaseModel):
@@ -152,7 +149,7 @@ class HostCredential(BaseModel):
 class PipRequirements(BaseModel):
     """Configuration options for Python environments built via uv."""
 
-    provider: ProviderName
+    provider: Annotated[Literal["uv-pip"], BeforeValidator(_normalize_provider)]
     _filename: Literal["tesseract_requirements.txt"] = "tesseract_requirements.txt"
     _build_script: Literal["build_pip_venv.sh"] = "build_pip_venv.sh"
     model_config: ConfigDict = ConfigDict(extra="forbid")
@@ -223,7 +220,7 @@ class TesseractBuildConfig(BaseModel, validate_assignment=True):
         ),
     )
 
-    requirements: PythonRequirements = PipRequirements(provider="uv")
+    requirements: PythonRequirements = PipRequirements(provider="uv-pip")
 
     host_credentials: tuple[HostCredential, ...] = Field(
         (),
