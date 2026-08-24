@@ -192,6 +192,8 @@ If you would rather not authenticate at build time at all, use `pip download` to
 fetch a dependency on the build machine and add it as a
 [local dependency](../examples/building-blocks/localpackage.md).
 
+(tuning-dependency-resolution)=
+
 ## Tuning dependency resolution
 
 To pass options to the package resolver during the build, set `build_config.build_env`.
