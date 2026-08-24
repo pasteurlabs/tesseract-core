@@ -32,7 +32,10 @@ _urlencode() {
     done < <(printf '%s' "$1" | od -An -tx1 | tr -s ' ' '\n')
 }
 
-if [ -f host_credentials.txt ]; then
+# Guard on a non-empty file: host_credentials.txt is always staged (so the
+# Dockerfile can COPY it unconditionally) but is empty when no credentials are
+# declared, in which case the tmpfs credential dir is not mounted either.
+if [ -s host_credentials.txt ]; then
     credentials_dir=/tmp/tesseract-credentials
     netrc_file="$credentials_dir/netrc"
     git_credentials_file="$credentials_dir/git-credentials"

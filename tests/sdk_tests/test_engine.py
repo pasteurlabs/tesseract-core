@@ -117,15 +117,26 @@ def test_prepare_build_context_host_credentials(tmp_path_factory, provider):
 
 
 def test_prepare_build_context_no_host_credentials(tmp_path_factory):
-    """Without host_credentials, no credentials file or setup script is staged."""
+    """Without host_credentials, files are still staged but the build step is clean.
+
+    The setup script and an empty credentials file are always staged (so the
+    Dockerfile can COPY them unconditionally), and no secret or tmpfs mounts
+    appear in the build step.
+    """
     src_dir = tmp_path_factory.mktemp("src")
     (src_dir / "foo").touch()
     build_dir = tmp_path_factory.mktemp("build")
 
     engine.prepare_build_context(src_dir, build_dir, TesseractConfig(name="foobar"))
 
-    assert not (build_dir / "host_credentials.txt").exists()
-    assert not (build_dir / "setup_host_credentials.sh").exists()
+    # Both files are always staged; the credentials file is empty, which the
+    # setup script treats as a no-op.
+    assert (build_dir / "setup_host_credentials.sh").exists()
+    assert (build_dir / "host_credentials.txt").read_text() == ""
+
+    dockerfile = (build_dir / "Dockerfile").read_text()
+    assert "--mount=type=secret" not in dockerfile
+    assert "--mount=type=tmpfs" not in dockerfile
 
 
 def test_build_tesseract_requires_secret_for_host_credential(tmp_path):

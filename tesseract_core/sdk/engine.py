@@ -413,8 +413,9 @@ def prepare_build_context(
     extra_files.append(template_dir / requirement_config._build_script)
 
     # Shared credential-setup script, sourced by both provider build scripts.
-    if user_config.build_config.host_credentials:
-        extra_files.append(template_dir / "setup_host_credentials.sh")
+    # Always staged (and COPYed by the Dockerfile) so the build scripts can source
+    # it unconditionally; it is a no-op when host_credentials.txt is empty.
+    extra_files.append(template_dir / "setup_host_credentials.sh")
 
     for path in extra_files:
         copy(path, context_dir / path.relative_to(template_dir))
@@ -423,16 +424,14 @@ def prepare_build_context(
     # tokens) into a file both build scripts read. At install time the script
     # reads each token from its secret mount and assembles netrc + git-credential
     # entries. This is provider-agnostic: netrc/git auth applies to uv, pip, and
-    # conda alike.
-    if user_config.build_config.host_credentials:
-        credentials_file_path = context_dir / "host_credentials.txt"
-        with credentials_file_path.open("w", encoding="utf-8") as f:
-            for credential in user_config.build_config.host_credentials:
-                # Tab-separated host, secret id, and username. None of these may
-                # contain a tab; hosts, secret names, and usernames never do.
-                f.write(
-                    f"{credential.host}\t{credential.secret}\t{credential.username}\n"
-                )
+    # conda alike. The file is always written (empty when none are declared) so the
+    # Dockerfile can COPY it unconditionally.
+    credentials_file_path = context_dir / "host_credentials.txt"
+    with credentials_file_path.open("w", encoding="utf-8") as f:
+        for credential in user_config.build_config.host_credentials:
+            # Tab-separated host, secret id, and username. None of these may
+            # contain a tab; hosts, secret names, and usernames never do.
+            f.write(f"{credential.host}\t{credential.secret}\t{credential.username}\n")
 
     # When building from a requirements.txt we support local dependencies.
     # We separate local dep. lines from the requirements.txt and copy the
