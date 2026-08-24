@@ -10,7 +10,7 @@ charset-normalizer==3.5.1
     # via requests
 colorama==0.4.6 ; sys_platform == 'win32'
     # via typer
-idna==3.18
+idna==3.19
     # via requests
 jinja2==3.1.6
     # via tesseract-core
@@ -40,7 +40,7 @@ pydantic==2.13.4
     # via tesseract-core
 pydantic-core==2.46.4
     # via pydantic
-pygments==2.20.0
+pygments==2.21.0
     # via rich
 pyyaml==6.0.3
     # via tesseract-core
