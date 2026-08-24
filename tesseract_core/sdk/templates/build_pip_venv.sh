@@ -19,9 +19,7 @@ source /python-env/bin/activate
 
 # Set up host credentials (netrc + git-credentials) for authenticated indices,
 # direct-reference wheels, and git+https dependencies. No-op if none declared.
-if [ -f setup_host_credentials.sh ]; then
-    source setup_host_credentials.sh
-fi
+source setup_host_credentials.sh
 
 # Install dependencies. Local dependencies (if any) are rewritten into the
 # requirements file as paths under ./local_requirements/, so a single install

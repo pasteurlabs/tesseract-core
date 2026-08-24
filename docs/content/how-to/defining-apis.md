@@ -226,7 +226,7 @@ env:
 This is useful for tuning framework behavior (e.g., JAX memory allocation, OpenMP thread counts) without modifying your code. You can also override or extend these at runtime with `tesseract serve --env` or `tesseract run --env`.
 
 ```{warning}
-`env` values are baked into the image and visible via `docker inspect`, so they must not contain secrets. For build-time credentials use `host_credentials` with `--secret`; for build-only, non-secret settings use `build_config.build_env` (see [Tuning dependency resolution](#tuning-dependency-resolution)).
+`env` values are baked into the image and visible via `docker inspect`, so they must not contain secrets. For build-time credentials use `host_credentials` with `--secret`. For build-only, non-secret settings use `build_config.build_env` (see [Tuning dependency resolution](#tuning-dependency-resolution)).
 ```
 
 ## Customizing the build process
