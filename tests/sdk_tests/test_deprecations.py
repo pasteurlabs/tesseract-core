@@ -10,13 +10,13 @@ ships. On ordinary PRs the top changelog version is the last release, so the tes
 only fires once a release actually crosses a tombstone's target.
 """
 
-import pytest
 from packaging.version import Version
 
 from tesseract_core import _deprecations
 from tesseract_core._deprecations import (
     Tombstone,
     _repo_changelog_path,
+    _version_from_changelog,
     latest_changelog_version,
     overdue_tombstones,
 )
@@ -25,14 +25,13 @@ from tesseract_core._deprecations import (
 def test_no_overdue_deprecations():
     changelog_path = _repo_changelog_path()
     if not changelog_path.exists():
-        pytest.skip("CHANGELOG.md not available (not a source checkout)")
+        raise FileNotFoundError(
+            f"Could not find {changelog_path} to check for overdue deprecations"
+        )
 
-    version = latest_changelog_version(changelog_path.read_text(encoding="utf-8"))
-    if version is None:
-        pytest.skip("Could not determine a version from CHANGELOG.md")
-
+    version = latest_changelog_version()
     overdue = overdue_tombstones(version)
-    assert not overdue, "Deprecations due for removal by version {}:\n{}".format(
+    assert len(overdue) == 0, "Deprecations due for removal by version {}:\n{}".format(
         version,
         "\n".join(f"  - {t.what} (remove_at {t.remove_at}): {t.hint}" for t in overdue),
     )
@@ -40,8 +39,8 @@ def test_no_overdue_deprecations():
 
 def test_latest_changelog_version_parses_top_entry():
     changelog = "# Changelog\n\n## [1.13.0] - 2026-09-01\n\n## [1.12.0] - 2026-08-01\n"
-    assert latest_changelog_version(changelog) == Version("1.13.0")
-    assert latest_changelog_version("# Changelog\n\nnothing here") is None
+    assert _version_from_changelog(changelog) == Version("1.13.0")
+    assert _version_from_changelog("# Changelog\n\nnothing here") is None
 
 
 def test_overdue_fires_at_target_but_not_on_prerelease(monkeypatch):

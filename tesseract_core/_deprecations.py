@@ -3,12 +3,10 @@
 
 """Registry of scheduled deprecation removals ("tombstones").
 
-Deprecations rot: a warning ships, the shim stays forever because nothing forces
-anyone to revisit it. A tombstone pins a deprecation to the version it must be
+A tombstone pins a deprecation to the version it must be
 gone by, and :func:`overdue_tombstones` reports any that are due. The
 accompanying test checks this against the version being cut, so a release PR
-that would ship a stale shim fails before it merges (merging a release PR is what
-triggers the actual release).
+with active tombstones fails.
 
 To schedule a removal:
 
@@ -17,17 +15,14 @@ To schedule a removal:
 2. When the release-PR test starts failing, delete the deprecated code *and* its
    tombstone in the same PR.
 
-Target a version the release automation can actually reach. Automated bumps are
-capped at ``minor`` (see ``.github/workflows/get_bump_type.sh``), so a new major
-is never cut automatically; a ``2.0.0`` target would never fire. Use the next
-minor or a later minor instead.
+Deprecations always target a *minor* version (no breaking changes on patch releases).
 """
 
 import re
 from pathlib import Path
 from typing import NamedTuple
 
-from packaging.version import Version
+from packaging.version import VERSION_PATTERN, InvalidVersion, Version
 
 
 class Tombstone(NamedTuple):
@@ -45,7 +40,14 @@ class Tombstone(NamedTuple):
 
 # Deprecations awaiting removal. Delete an entry together with its code once the
 # scheduled version arrives.
-TOMBSTONES: tuple[Tombstone, ...] = ()
+TOMBSTONES: tuple[Tombstone, ...] = (
+    # Example:
+    # Tombstone(
+    #     remove_at="0.99.0",
+    #     what="--foo alias from `tesseract build`",
+    #     hint="remove backend support from engine.py, too"
+    # ),
+)
 
 
 def _repo_changelog_path() -> Path:
@@ -53,19 +55,37 @@ def _repo_changelog_path() -> Path:
     return Path(__file__).resolve().parent.parent / "CHANGELOG.md"
 
 
-def latest_changelog_version(changelog: str) -> Version | None:
-    """Return the topmost ``## [version]`` entry in a changelog, or None if absent.
-
-    On a release PR the changelog is regenerated with the version being cut at the
-    top, so this is the version a merge would release.
-    """
-    match = re.search(r"^##\s*\[([^\]]+)\]", changelog, re.MULTILINE)
+def _version_from_changelog(changelog: str) -> Version | None:
+    """Return the topmost ``## [version]`` entry in a changelog, or None if absent."""
+    match = re.search(
+        rf"^\#\#\s*\[({VERSION_PATTERN})\]",
+        changelog,
+        re.MULTILINE | re.VERBOSE | re.IGNORECASE,
+    )
     if match is None:
         return None
     try:
         return Version(match.group(1))
-    except ValueError:
+    except InvalidVersion:
         return None
+
+
+def latest_changelog_version() -> Version:
+    """Return the topmost ``## [version]`` entry in a changelog.
+
+    On a release PR the changelog is regenerated with the version being cut at the
+    top, so this is the version a merge would release.
+    """
+    changelog_path = _repo_changelog_path()
+    if not changelog_path.exists():
+        raise FileNotFoundError(
+            f"Could not find {changelog_path} to check for overdue deprecations"
+        )
+    changelog = changelog_path.read_text(encoding="utf-8")
+    version = _version_from_changelog(changelog)
+    if version is None:
+        raise ValueError(f"Could not find a valid version entry in {changelog_path}")
+    return version
 
 
 def overdue_tombstones(version: Version) -> list[Tombstone]:
