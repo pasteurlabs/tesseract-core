@@ -47,6 +47,14 @@ TOMBSTONES: tuple[Tombstone, ...] = (
     #     what="--foo alias from `tesseract build`",
     #     hint="remove backend support from engine.py, too"
     # ),
+    Tombstone(
+        remove_at="1.13.0",
+        what="'python-pip' requirements provider alias",
+        hint=(
+            "Remove the 'python-pip' -> 'uv' normalization in "
+            "tesseract_core/sdk/api_parse.py (_normalize_provider) and its test."
+        ),
+    ),
 )
 
 
