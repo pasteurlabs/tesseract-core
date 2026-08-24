@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Annotated, Any, Literal, NamedTuple
 
 import yaml
+from deprecated import deprecated
 from pydantic import (
     AfterValidator,
     BaseModel,
@@ -78,10 +79,79 @@ RelativePath = Annotated[str, AfterValidator(assert_relative_path)]
 StrictStr = Annotated[str, Strict()]
 
 
-class PipRequirements(BaseModel):
-    """Configuration options for Python environments built via pip."""
+@deprecated(
+    version="1.12.0",
+    reason=(
+        "The 'python-pip' requirements provider has been renamed to 'uv' "
+        "(the build has always used uv under the hood). Set `provider: uv` in "
+        "tesseract_config.yaml. 'python-pip' still works but will be removed in "
+        "a future release."
+    ),
+)
+def _warn_python_pip_alias() -> None:
+    """Emit the deprecation warning for the legacy ``python-pip`` provider name."""
 
-    provider: Literal["python-pip"]
+
+def _normalize_provider(value: Any) -> Any:
+    """Accept the deprecated ``python-pip`` provider name as an alias for ``uv``."""
+    if value == "python-pip":
+        _warn_python_pip_alias()
+        return "uv"
+    return value
+
+
+ProviderName = Annotated[Literal["uv"], BeforeValidator(_normalize_provider)]
+
+
+class IndexCredential(BaseModel):
+    """Credentials for authenticating against a package index host.
+
+    The credential is keyed by host and applies to everything fetched from that
+    host during the build -- an ``--extra-index-url`` on that host as well as any
+    PEP 508 direct reference (``pkg @ https://host/...whl``). The token itself is
+    supplied out-of-band at build time via a build secret and is assembled into a
+    netrc entry inside the build; it never lands in the config or an image layer.
+    """
+
+    host: StrictStr = Field(
+        ...,
+        description=(
+            "Host the credential authenticates against (e.g. ``pkgs.dev.azure.com``). "
+            "Just the host, not a full URL."
+        ),
+    )
+    secret: StrictStr = Field(
+        ...,
+        description=(
+            "Name of the build secret carrying the token/password for this host. "
+            "Supply it at build time with ``tesseract build --secret "
+            "id=<name>,env=<VAR>`` (or ``,src=<file>``)."
+        ),
+    )
+    username: StrictStr = Field(
+        "__token__",
+        description=(
+            "Username paired with the secret in the netrc entry. Defaults to "
+            "``__token__``, which suits PAT-style feeds; set it for feeds that "
+            "require a real username."
+        ),
+    )
+    model_config: ConfigDict = ConfigDict(extra="forbid")
+
+
+class PipRequirements(BaseModel):
+    """Configuration options for Python environments built via uv."""
+
+    provider: ProviderName
+    index_credentials: tuple[IndexCredential, ...] = Field(
+        (),
+        description=(
+            "Credentials for authenticated package index hosts. Each entry maps a "
+            "host to a build secret; the secret is supplied out-of-band at build "
+            "time (see ``IndexCredential``). Index URLs themselves are declared as "
+            "usual in ``tesseract_requirements.txt`` (e.g. ``--extra-index-url``)."
+        ),
+    )
     _filename: Literal["tesseract_requirements.txt"] = "tesseract_requirements.txt"
     _build_script: Literal["build_pip_venv.sh"] = "build_pip_venv.sh"
     model_config: ConfigDict = ConfigDict(extra="forbid")
@@ -152,7 +222,18 @@ class TesseractBuildConfig(BaseModel, validate_assignment=True):
         ),
     )
 
-    requirements: PythonRequirements = PipRequirements(provider="python-pip")
+    requirements: PythonRequirements = PipRequirements(provider="uv")
+
+    build_env: dict[StrictStr, StrictStr] = Field(
+        default_factory=dict,
+        description=(
+            "Environment variables to set during the build stage only (not in the "
+            "final image). Useful for configuring the package resolver, e.g. "
+            "``{UV_INDEX_STRATEGY: unsafe-best-match}``. "
+            "Do not put secrets here: values are written into the build context. "
+            "Use ``tesseract build --secret`` for credentials instead."
+        ),
+    )
 
     model_config = ConfigDict(extra="forbid")
 

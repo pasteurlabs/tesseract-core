@@ -254,6 +254,24 @@ def test_config_python_version_rejects_inherit_base_image_packages(
         validate_tesseract_api(tmp_path)
 
 
+def test_provider_python_pip_alias(
+    tmp_path, valid_tesseract_api, valid_tesseract_config
+):
+    """The legacy 'python-pip' provider name is accepted as a deprecated alias."""
+    _write_tesseract_api_to_file(valid_tesseract_api, tmp_path)
+
+    config = yaml.safe_load(valid_tesseract_config)
+    config["build_config"]["requirements"] = {"provider": "python-pip"}
+    _write_tesseract_config_to_file(yaml.dump(config), tmp_path)
+
+    from tesseract_core.sdk.api_parse import get_config
+
+    with pytest.warns(DeprecationWarning, match="renamed to 'uv'"):
+        parsed = get_config(tmp_path)
+
+    assert parsed.build_config.requirements.provider == "uv"
+
+
 def test_config_python_version_defaults_to_none(
     tmp_path, valid_tesseract_api, valid_tesseract_config
 ):
