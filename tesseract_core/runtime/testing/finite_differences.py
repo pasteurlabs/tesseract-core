@@ -395,7 +395,7 @@ def _jacobian_via_vjp(
                 for idx in wanted:
                     rows[idx][col_idx] = grad[idx]
             _vjp_sweep_cache[key] = rows
-        except Exception as e:  # noqa: BLE001 - cached and re-raised per key
+        except Exception as e:
             _vjp_sweep_cache[key] = e
 
     cached = _vjp_sweep_cache[key]
