@@ -63,7 +63,7 @@ change. `input_path` and `output_path` are bind-mounted into the container.
 
 Input `.bin` files written for each request are cleaned up after that request.
 Output `.bin` files, however, are written into `output_path` by the server and
-are _not_ removed automatically — the directory is yours to manage. Wrapping the
+are _not_ removed automatically. Wrapping the
 scratch directories in `tempfile.TemporaryDirectory()`, as above, is the easiest
 way to guarantee they are cleared when you are done.
 
