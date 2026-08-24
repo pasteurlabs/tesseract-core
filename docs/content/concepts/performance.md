@@ -60,7 +60,7 @@ For same-machine workloads on large arrays, a fourth mode is worth knowing about
 serving over HTTP but exchanging arrays as `json+binref` files on a shared-memory
 `tmpfs` (`/dev/shm`), so array data stays in memory instead of being base64-encoded
 into the HTTP body. On the benchmark machine this cut overhead for a 76MB array from
-~1s to ~0.2s, and to ~0.08s with the opt-in `binref_pool` fast path. See
+~1s to ~0.2s, and to ~0.08s with the opt-in `experimental_binref_pool` fast path. See
 {doc}`/content/how-to/fast-local-runs` for when to use it and how.
 
 The guidance chart below puts these numbers in context by showing overhead as a percentage of computation time, for three representative I/O sizes (dotted = 1kB, dashed = 1MB, solid = 1GB). For small data, fixed costs (HTTP roundtrip, container startup) dominate. For large data, transfer and serialization take over.

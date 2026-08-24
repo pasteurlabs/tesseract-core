@@ -631,17 +631,53 @@ def test_binref_pool_lazy_decode_is_readonly_view(tmp_path):
         pool.close()
 
 
+def test_binref_pool_lazy_decode_survives_unlink(tmp_path):
+    from tesseract_core.sdk.tesseract import (
+        _SUPPORTS_LAZY_BINREF,
+        _BinrefWritePool,
+        _encode_array_binref_pooled,
+    )
+
+    if not _SUPPORTS_LAZY_BINREF:
+        pytest.skip("lazy binref decode is POSIX-only")
+
+    pool = _BinrefWritePool(tmp_path, max_slots=4)
+    try:
+        arr = np.array([1.0, 2.0, 3.0], dtype="float64")
+        checked_out = []
+        written_files = []
+        encoded = _encode_array_binref_pooled(arr, pool, checked_out, written_files)
+
+        mapped_paths = []
+        decoded = _decode_array(
+            encoded, output_path=tmp_path, lazy=True, mapped_paths=mapped_paths
+        )
+        # The lazy decode records the backing file so the caller can unlink it.
+        assert len(mapped_paths) == 1
+        mapped = mapped_paths[0]
+        assert mapped.exists()
+
+        # After unlinking, the mmap keeps the inode alive: the view stays valid
+        # and read-only, and the disk space is reclaimed.
+        mapped.unlink()
+        assert not mapped.exists()
+        np.testing.assert_array_equal(decoded, arr, strict=True)
+        assert not decoded.flags.writeable
+    finally:
+        pool.close()
+
+
 def test_HTTPClient_binref_pool_only_created_with_input_path(tmp_path):
     from tesseract_core.sdk.tesseract import HTTPClient
 
-    # binref_pool=True without an input_path is meaningless (no mounted dir
-    # to put pooled files in), so no pool should be created.
-    client_no_input_path = HTTPClient("localhost", binref_pool=True)
+    # experimental_binref_pool=True without an input_path is meaningless (no
+    # mounted dir to put pooled files in), so no pool should be created.
+    client_no_input_path = HTTPClient("localhost", experimental_binref_pool=True)
     assert client_no_input_path._binref_pool is None
 
-    with pytest.warns(UserWarning, match="not cleaned up automatically"):
+    with pytest.warns(UserWarning, match="read-only"):
         client_with_input_path = HTTPClient(
-            "localhost", input_path=tmp_path, binref_pool=True
+            "localhost", input_path=tmp_path, experimental_binref_pool=True
         )
     assert client_with_input_path._binref_pool is not None
     client_with_input_path.close()
@@ -651,8 +687,10 @@ def test_HTTPClient_binref_pool_only_created_with_input_path(tmp_path):
 def test_HTTPClient_close_is_idempotent(tmp_path):
     from tesseract_core.sdk.tesseract import HTTPClient
 
-    with pytest.warns(UserWarning, match="not cleaned up automatically"):
-        client = HTTPClient("localhost", input_path=tmp_path, binref_pool=True)
+    with pytest.warns(UserWarning, match="read-only"):
+        client = HTTPClient(
+            "localhost", input_path=tmp_path, experimental_binref_pool=True
+        )
     client.close()
     # Closing twice must not raise (e.g. via context-manager __exit__ after
     # an explicit close).

@@ -12,8 +12,8 @@ measurements of framework overhead for different interaction modes:
    using json+base64 encoding
 3. Containerized via HTTP with json+binref encoding and the binref directory on
    a shared-memory tmpfs (/dev/shm), so array payloads are exchanged through
-   shared memory rather than base64 in the HTTP body; uses binref_pool=True for
-   warm-buffer writes and zero-copy mmap decode
+   shared memory rather than base64 in the HTTP body; uses
+   experimental_binref_pool=True for warm-buffer writes and zero-copy mmap decode
 4. Containerized via CLI (`tesseract run`) - Full Docker + CLI overhead,
    using json+binref encoding with the binref directory on local disk
 
@@ -82,8 +82,9 @@ def http_shmem_tesseract_instance(noop_tesseract_image):
 
     Uses json+binref encoding with the input and output directories on a
     shared-memory tmpfs (/dev/shm), so array payloads are passed to and from the
-    container through shared memory instead of base64 over HTTP. ``binref_pool``
-    enables the client-side warm-buffer write pool and zero-copy lazy mmap
+    container through shared memory instead of base64 over HTTP.
+    ``experimental_binref_pool`` enables the client-side warm-buffer write pool
+    and zero-copy lazy mmap
     decode, which is the recommended configuration for this fast path.
     """
     from tesseract_core.sdk.tesseract import Tesseract
@@ -99,7 +100,7 @@ def http_shmem_tesseract_instance(noop_tesseract_image):
         input_path=input_dir,
         output_path=output_dir,
         output_format="json+binref",
-        binref_pool=True,
+        experimental_binref_pool=True,
     )
     tesseract = cm.__enter__()
     # Warmup - first request is slow due to container startup
@@ -126,12 +127,12 @@ def test_containerized_http(benchmark, http_tesseract_instance, array_size):
 
 
 def _purge_binref_outputs(output_dir: Path) -> None:
-    """Remove output .bin files left in the mounted shmem output directory.
+    """Remove any output .bin files left in the mounted shmem output directory.
 
-    The server writes a freshly named .bin file per apply and the client never
-    removes it (the caller owns the output directory). Across the benchmark's
-    many rounds these accumulate and would exhaust the small /dev/shm tmpfs, so
-    we clear them between rounds. Runs untimed via the benchmark ``teardown``.
+    With ``experimental_binref_pool=True`` the client unlinks each output file
+    as soon as it is decoded, so little should remain. This runs untimed via the
+    benchmark ``teardown`` as a safety net to keep the small /dev/shm tmpfs from
+    filling if any file is left behind across the benchmark's many rounds.
     """
     for binref in output_dir.rglob("*.bin"):
         binref.unlink(missing_ok=True)
@@ -143,8 +144,9 @@ def test_containerized_http_shmem(benchmark, http_shmem_tesseract_instance, arra
 
     Same served-container HTTP path as ``test_containerized_http``, but arrays
     are exchanged as binref files on /dev/shm rather than base64 in the request
-    body, so no array data travels over HTTP. Runs with ``binref_pool=True``,
-    the recommended configuration for this fast path.
+    body, so no array data travels over HTTP. Runs with
+    ``experimental_binref_pool=True``, the recommended configuration for this
+    fast path.
     """
     tesseract, output_dir = http_shmem_tesseract_instance
     arr = create_test_array(array_size)

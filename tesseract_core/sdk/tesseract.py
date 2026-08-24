@@ -64,6 +64,7 @@ class Tesseract:
     _client: HTTPClient | LocalClient | None = None
     _stream_logs: BoolOrCallable = False
     _timeout: float | tuple[float, float] | None = None
+    _binref_pool_enabled: bool = False
 
     def __init__(
         self,
@@ -133,7 +134,7 @@ class Tesseract:
         stream_logs: BoolOrCallable = False,
         skip_health_check: bool = False,
         timeout: float | tuple[float, float] | None = None,
-        binref_pool: bool = False,
+        experimental_binref_pool: bool = False,
     ) -> Tesseract:
         """Create a Tesseract instance from a Docker image.
 
@@ -183,17 +184,13 @@ class Tesseract:
                 disables timeouts. See the `requests documentation
                 <https://requests.readthedocs.io/en/latest/user/advanced/#timeouts>`_
                 for details.
-            binref_pool: Opt-in fast path for ``json+binref``. Reuses a small
-                pool of pre-faulted, memory-mapped input buffers instead of
-                writing a fresh file per request, and (on POSIX) decodes outputs
-                as zero-copy memory-mapped views instead of eager copies. This
-                speeds up passing large arrays in and out (most effective when
-                the input/output paths are a shared-memory tmpfs), at the cost of
-                some resident memory held until teardown. Note the decoded result
-                arrays are then read-only views backed by the output files, valid
-                until the next request or teardown; on non-POSIX platforms the
-                eager (owned, writable) decode is used regardless. Off by default;
-                has no effect for other output formats.
+            experimental_binref_pool: Opt-in fast path for ``json+binref`` that
+                only makes sense when ``input_path`` and ``output_path`` point at
+                a shared-memory tmpfs (``/dev/shm`` on Linux). Reuses a small pool
+                of pre-faulted, memory-mapped input buffers instead of writing a
+                fresh file per request, and decodes outputs as zero-copy
+                memory-mapped views instead of eager copies. POSIX only (raises on
+                other platforms).
 
         Returns:
             A Tesseract instance.
@@ -219,7 +216,7 @@ class Tesseract:
 
         obj._stream_logs = stream_logs
         obj._timeout = timeout
-        obj._binref_pool_enabled = binref_pool
+        obj._binref_pool_enabled = experimental_binref_pool
         obj._spawn_config = dict(
             image_name=image_name,
             volumes=volumes,
@@ -376,7 +373,7 @@ class Tesseract:
             timeout=self._timeout,
             input_path=Path(input_path) if input_path else None,
             output_format=output_format,
-            binref_pool=getattr(self, "_binref_pool_enabled", False),
+            experimental_binref_pool=getattr(self, "_binref_pool_enabled", False),
         )
 
         # Ensure that the Tesseract is torn down once the object is garbage collected,
@@ -907,7 +904,15 @@ def _decode_array(
     encoded_arr: dict,
     output_path: str | Path | None = None,
     lazy: bool = False,
+    mapped_paths: list[Path] | None = None,
 ) -> np.ndarray:
+    """Decode an encoded array dict into a numpy array.
+
+    When ``lazy`` is set and the array is decoded as a zero-copy mmap view, the
+    backing file path is appended to ``mapped_paths`` (if given) so the caller
+    can unlink it once the whole response is decoded. The mmap keeps the inode
+    alive after unlink, so the returned view stays valid.
+    """
     import re
 
     if "data" not in encoded_arr:
@@ -970,6 +975,8 @@ def _decode_array(
             elif lazy:
                 # Zero-copy read-only view (POSIX only, see caller gating).
                 arr = _mmap_binref_array(full_path, offset, num_bytes, dtype, count)
+                if mapped_paths is not None:
+                    mapped_paths.append(full_path)
             else:
                 # Eager copy into an owned, writable array (portable default).
                 arr = _read_binref_array(full_path, offset, num_bytes, dtype, count)
@@ -1008,7 +1015,7 @@ class HTTPClient:
         timeout: float | tuple[float, float] | None = None,
         input_path: str | Path | None = None,
         output_format: Literal["json", "json+base64", "json+binref"] = "json+base64",
-        binref_pool: bool = False,
+        experimental_binref_pool: bool = False,
     ) -> None:
         self._url = self._sanitize_url(url)
         self._output_path = output_path
@@ -1020,18 +1027,14 @@ class HTTPClient:
         # Opt-in warm-buffer pool for binref inputs. Only meaningful when passing
         # inputs as binref into a mounted (ideally shared-memory) input dir.
         self._binref_pool: _BinrefWritePool | None = None
-        if binref_pool and self._input_path is not None:
+        if experimental_binref_pool and self._input_path is not None:
+            if not _SUPPORTS_LAZY_BINREF:
+                raise RuntimeError(
+                    "experimental_binref_pool=True is only supported on POSIX "
+                    "platforms, since it relies on shared-memory tmpfs and mmap "
+                    "semantics that are not available here."
+                )
             self._binref_pool = _BinrefWritePool(self._input_path)
-            warnings.warn(
-                "binref_pool=True writes array data as .bin files into "
-                f"{self._input_path} (and the server writes outputs into the "
-                "output path). These files are not cleaned up automatically and "
-                "will accumulate across calls; on a shared-memory tmpfs like "
-                "/dev/shm they can exhaust available space. Remove the scratch "
-                "directories when done, e.g. with tempfile.TemporaryDirectory().",
-                UserWarning,
-                stacklevel=2,
-            )
 
     def close(self) -> None:
         """Release resources held by the client (e.g. the binref write pool)."""
@@ -1162,18 +1165,34 @@ class HTTPClient:
             "vector_jacobian_product",
         ]:
             # Use the zero-copy lazy decode only on the opt-in fast path
-            # (binref pool enabled) and only where POSIX mmap semantics hold;
-            # otherwise decode eagerly into an owned, writable array.
-            lazy = self._binref_pool is not None and _SUPPORTS_LAZY_BINREF
+            # (binref pool enabled), which requires POSIX (enforced at client
+            # construction); otherwise decode eagerly into an owned array.
+            lazy = self._binref_pool is not None
+
+            # Files mapped by the lazy decode, unlinked once the whole response
+            # is decoded so the server's output files don't accumulate. Each
+            # returned view keeps its own mmap (and thus the inode) alive after
+            # unlink, so the arrays stay valid; the space is reclaimed when the
+            # user drops them. Unlinking eagerly per-array would break responses
+            # where several arrays share one file at different offsets.
+            mapped_paths: list[Path] = []
 
             def decode_with_path(arr: dict) -> np.ndarray:
-                return _decode_array(arr, output_path=self._output_path, lazy=lazy)
+                return _decode_array(
+                    arr,
+                    output_path=self._output_path,
+                    lazy=lazy,
+                    mapped_paths=mapped_paths,
+                )
 
             data = _tree_map(
                 decode_with_path,
                 data,
                 is_leaf=lambda x: type(x) is dict and "shape" in x,
             )
+
+            for path in set(mapped_paths):
+                path.unlink(missing_ok=True)
 
         return data
 

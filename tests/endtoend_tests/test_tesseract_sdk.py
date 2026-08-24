@@ -218,9 +218,9 @@ def test_signature_consistency():
         "stream_logs",
         # timeout is a client-side HTTP parameter, not relevant for serve
         "timeout",
-        # binref_pool is a client-side HTTP encode/decode optimization, not
-        # relevant for serve
-        "binref_pool",
+        # experimental_binref_pool is a client-side HTTP encode/decode
+        # optimization, not relevant for serve
+        "experimental_binref_pool",
     ]
 
     from_image_sig = dict(inspect.signature(Tesseract.from_image).parameters)
@@ -261,7 +261,7 @@ def test_apply_with_binref_format(built_image_name, tmp_path):
 
 
 def test_apply_with_shmem_binref_pool(built_image_name):
-    """Test json+binref exchange over /dev/shm with binref_pool=True end-to-end.
+    """Test json+binref exchange over /dev/shm with experimental_binref_pool=True end-to-end.
 
     Exercises the full opt-in fast path: client-side warm-buffer input pool
     (``_BinrefWritePool``) writing into a shared-memory input dir, and the
@@ -285,13 +285,13 @@ def test_apply_with_shmem_binref_pool(built_image_name):
         ) as output_dir,
     ):
         with (
-            pytest.warns(UserWarning, match="not cleaned up automatically"),
+            pytest.warns(UserWarning, match="read-only"),
             Tesseract.from_image(
                 built_image_name,
                 input_path=input_dir,
                 output_path=output_dir,
                 output_format="json+binref",
-                binref_pool=True,
+                experimental_binref_pool=True,
             ) as vecadd,
         ):
             out = vecadd.apply(inputs)

@@ -74,11 +74,12 @@ memory. Large arrays and repeated runs fill it up, so remove scratch directories
 when you are done and size `/dev/shm` for your largest expected payload.
 ```
 
-## The `binref_pool` fast path
+## The `experimental_binref_pool` fast path
 
 By default, each request writes its input arrays to freshly allocated `.bin`
 files. Allocating and faulting in fresh pages for a large array is a significant
-part of the remaining cost. The opt-in `binref_pool=True` flag addresses this:
+part of the remaining cost. The opt-in `experimental_binref_pool=True` flag
+addresses this:
 
 ```python
 with Tesseract.from_image(
@@ -86,32 +87,31 @@ with Tesseract.from_image(
     input_path=input_dir,
     output_path=output_dir,
     output_format="json+binref",
-    binref_pool=True,
+    experimental_binref_pool=True,
 ) as t:
     result = t.apply({"x": x})
 ```
 
 With the pool enabled, the client reuses a small set of pre-faulted,
-memory-mapped input buffers instead of writing a fresh file per request, and (on
-POSIX platforms) decodes outputs as zero-copy memory-mapped views rather than
-eager copies. On the shared-memory setup above, this roughly halves the
-remaining overhead for large arrays.
+memory-mapped input buffers instead of writing a fresh file per request, and
+decodes outputs as zero-copy memory-mapped views rather than eager copies. On the
+shared-memory setup above, this roughly halves the remaining overhead for large
+arrays.
 
-Enabling the pool emits a one-time warning reminding you that the scratch `.bin`
-files are not cleaned up automatically, since the pool makes it easy to run many
-large requests in a row. Manage the scratch directories as shown in
-[Basic usage](#basic-usage) above.
+The server's output `.bin` files are unlinked as soon as they are decoded, so
+they do not accumulate on disk: each result array keeps its own memory map (and
+thus the backing data) alive, and the space is reclaimed once you drop the array.
 
 Two things to keep in mind when opting in:
 
-- **Decoded results are read-only views** backed by the output files, valid only
-  until the next request or until teardown. If you need to keep a result across
-  calls or mutate it in place, copy it first (for example `np.array(result["y"])`),
-  or leave the pool off. On non-POSIX platforms the eager, owned, writable decode
-  is used regardless, so this caveat does not apply there.
-- **The pool holds some resident memory** until the Tesseract is torn down.
+- **Decoded results are read-only views** backed by memory-mapped files. If you
+  need to mutate a result in place, copy it first (for example
+  `np.array(result["y"])`), or leave the pool off.
+- **The pool holds some resident memory** until the Tesseract is torn down, and
+  each result you keep pins its backing pages until it is dropped.
 
-The pool has no effect for output formats other than `json+binref`.
+The pool is POSIX-only (it raises on other platforms) and has no effect for
+output formats other than `json+binref`.
 
 ## When this helps
 
@@ -121,12 +121,12 @@ across encodings, measured on one bare-metal Linux machine with Docker and
 loopback networking. Absolute numbers depend heavily on hardware; treat them as
 illustrative of the _shape_ of the trade-off, not as guarantees.
 
-| Array size (float64)  | HTTP + base64 | HTTP + shmem binref | HTTP + shmem binref, `binref_pool` |
-| --------------------- | ------------- | ------------------- | ---------------------------------- |
-| 1,000 (~8 kB)         | ~3.8 ms       | ~4.5 ms             | ~4.4 ms                            |
-| 100,000 (~0.8 MB)     | ~9.2 ms       | ~5.7 ms             | ~4.9 ms                            |
-| 10,000,000 (~76 MB)   | ~1,130 ms     | ~206 ms             | ~87 ms                             |
-| 100,000,000 (~760 MB) | ~13,170 ms    | ~1,990 ms           | ~880 ms                            |
+| Array size (float64)  | HTTP + base64 | HTTP + shmem binref | HTTP + shmem binref, `experimental_binref_pool` |
+| --------------------- | ------------- | ------------------- | ----------------------------------------------- |
+| 1,000 (~8 kB)         | ~3.8 ms       | ~4.5 ms             | ~4.4 ms                                         |
+| 100,000 (~0.8 MB)     | ~9.2 ms       | ~5.7 ms             | ~4.9 ms                                         |
+| 10,000,000 (~76 MB)   | ~1,130 ms     | ~206 ms             | ~87 ms                                          |
+| 100,000,000 (~760 MB) | ~13,170 ms    | ~1,990 ms           | ~880 ms                                         |
 
 For small arrays, base64 is competitive or slightly faster: the payload is tiny,
 so HTTP round-trip latency dominates and the extra file handling of binref is
