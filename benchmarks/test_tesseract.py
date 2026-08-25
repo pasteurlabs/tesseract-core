@@ -65,15 +65,13 @@ def http_tesseract_instance(tmp_path_factory, noop_tesseract_image):
     from tesseract_core.sdk.tesseract import Tesseract
 
     tmpdir = tmp_path_factory.mktemp("tesseract_http")
-    cm = Tesseract.from_image(
+    with Tesseract.from_image(
         noop_tesseract_image,
         output_path=tmpdir,
-    )
-    tesseract = cm.__enter__()
-    # Warmup - first request is slow due to container startup
-    tesseract.health()
-    yield tesseract
-    cm.__exit__(None, None, None)
+    ) as tesseract:
+        # Warmup - first request is slow due to container startup
+        tesseract.health()
+        yield tesseract
 
 
 @pytest.fixture(scope="module")
@@ -95,18 +93,16 @@ def http_shmem_tesseract_instance(noop_tesseract_image):
 
     input_dir = Path(tempfile.mkdtemp(prefix="tess_shmem_in_", dir=shm_dir))
     output_dir = Path(tempfile.mkdtemp(prefix="tess_shmem_out_", dir=shm_dir))
-    cm = Tesseract.from_image(
+    with Tesseract.from_image(
         noop_tesseract_image,
         input_path=input_dir,
         output_path=output_dir,
         output_format="json+binref",
         experimental_binref_pool=True,
-    )
-    tesseract = cm.__enter__()
-    # Warmup - first request is slow due to container startup
-    tesseract.health()
-    yield tesseract, output_dir
-    cm.__exit__(None, None, None)
+    ) as tesseract:
+        # Warmup - first request is slow due to container startup
+        tesseract.health()
+        yield tesseract, output_dir
 
 
 def test_from_tesseract_api(benchmark, tesseract_api_instance, array_size):

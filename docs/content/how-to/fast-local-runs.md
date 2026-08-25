@@ -12,15 +12,15 @@ body, base64-encodes it, and copies it out again on the other side. For arrays
 in the tens or hundreds of megabytes, that encode/transfer/decode round-trip
 dominates the call.
 
-You can avoid it. Point a served Tesseract at a shared-memory directory
-(`/dev/shm` on Linux) and use `json+binref` encoding: arrays are written to
+You can avoid that by pointing a served Tesseract at a shared-memory directory
+(`/dev/shm` on Linux) and using `json+binref` encoding: arrays are written to
 `.bin` files in that directory, and only lightweight file references travel over
 HTTP. Because `/dev/shm` is a `tmpfs` shared between the host and the container,
 the array data never leaves memory and is never copied through the socket.
 
 ```{note}
 This is a Linux optimization. It relies on `/dev/shm` (a shared-memory `tmpfs`)
-being available and bind-mounted into the container. It is most useful when the
+being available and bind-mounted into the container. This is only possible when the
 client and the Tesseract share a host; for remote Tesseracts, array data has to
 cross the network regardless, so a compact wire encoding is what matters instead
 (see {doc}`/content/reference/array-encodings`).

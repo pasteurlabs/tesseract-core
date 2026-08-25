@@ -374,7 +374,7 @@ class Tesseract:
             timeout=self._timeout,
             input_path=Path(input_path) if input_path else None,
             output_format=output_format,
-            experimental_binref_pool=getattr(self, "_binref_pool_enabled", False),
+            experimental_binref_pool=self._binref_pool_enabled,
         )
 
         # Ensure that the Tesseract is torn down once the object is garbage collected,
