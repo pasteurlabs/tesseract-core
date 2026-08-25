@@ -278,17 +278,6 @@ Use a Lorenz-96 Tesseract as the forward model in a NumPyro workflow and
 recover the posterior over an unknown forcing parameter with gradient-based MCMC.
 :::
 
-:::{grid-item-card} CFD Flow Optimization
-:link: content/demo/cfd-optimization
-:link-type: doc
-:class-card: demo-card
-:img-top: static/demo-cfd.svg
-:class-img-top: demo-schematic invert-on-dark
-
-Optimize initial conditions of a 2D Navier-Stokes simulation so the
-vorticity evolves into a target image, via a JAX-CFD Tesseract.
-:::
-
 :::{grid-item-card} FEM Shape Optimization
 :link: content/demo/fem-shape-optimization
 :link-type: doc
@@ -298,6 +287,18 @@ vorticity evolves into a target image, via a JAX-CFD Tesseract.
 
 Compose a geometry Tesseract with a FEM solver Tesseract for end-to-end
 parametric structural optimization.
+:::
+
+:::{grid-item-card} Multi-Physics Optimization
+:link: content/demo/multiphysics-optimization
+:link-type: doc
+:class-card: demo-card
+:img-top: static/demo-multiphysics.svg
+:class-img-top: demo-schematic invert-on-dark
+
+Couple two independently built Tesseracts — a thermal and a structural solver —
+with two-way thermoelastic feedback, and differentiate through the resulting
+equilibrium to solve an inverse-design problem.
 :::
 
 :::{grid-item-card} Differentiable Fortran (Enzyme)
