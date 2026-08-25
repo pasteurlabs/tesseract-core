@@ -12,6 +12,7 @@ import docker
 import pytest
 from common import image_exists
 
+from tesseract_core.sdk.config import get_config
 from tesseract_core.sdk.docker_client import (
     ContainerError,
     ImageNotFound,
@@ -396,6 +397,50 @@ def test_volume_uid_permissions(
     )
     stdout = run_tesseract_with_volume(cmd, volume=volume_args)
     assert stdout == b"hello\n"
+
+
+def test_container_status_needs_a_reload_like_docker_py(docker_client):
+    """`status` reports the last read; `reload` and `is_running` ask again.
+
+    Matching docker-py, which caches `attrs` and refreshes on `reload`. A
+    container that has gone entirely must report "unknown" rather than raising,
+    since callers wait on containers expected to disappear.
+    """
+    import time
+
+    cid = subprocess.run(
+        [*get_config().docker_executable, "run", "-d", "alpine", "sleep", "60"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    try:
+        container = docker_client.containers.get(cid, tesseract_only=False)
+        assert container.status == "running"
+        assert container.is_running()
+
+        subprocess.run(
+            [*get_config().docker_executable, "stop", "-t", "0", cid],
+            capture_output=True,
+            check=True,
+        )
+        time.sleep(2)
+
+        # Cached, as docker-py would be, until asked again
+        assert container.status == "running"
+        assert not container.is_running()
+        assert container.status == "exited"
+
+        # Immutable config survives a reload
+        assert container.attrs["Config"]["Image"] == "alpine"
+    finally:
+        subprocess.run(
+            [*get_config().docker_executable, "rm", "-f", cid], capture_output=True
+        )
+
+    container.reload()
+    assert container.status == "unknown"
+    assert not container.is_running()
 
 
 def test_get_image_not_found(docker_client):

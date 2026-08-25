@@ -928,9 +928,7 @@ def _wait_for_health(
         time.sleep(0.1)
         timeout -= 0.1
 
-        container_status = docker_client.containers.get(container.id).status
-
-        if timeout < 0 or container_status != "running":
+        if timeout < 0 or not container.is_running():
             logs_text = ""
             try:
                 logs_text = container.logs(stdout=True, stderr=True).decode()

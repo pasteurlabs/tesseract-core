@@ -525,8 +525,31 @@ class Container:
 
     @property
     def status(self) -> str:
-        """Gets the status of the container."""
+        """Gets the status of the container, as of the last read.
+
+        Like docker-py, this reports what ``docker inspect`` said when this
+        object was built or last reloaded, so it goes stale once the container
+        stops. Call :meth:`reload` first, or use :meth:`is_running`, to ask about
+        the container now.
+        """
         return self.attrs.get("State", {}).get("Status", "unknown")
+
+    def reload(self) -> None:
+        """Read the container again, updating ``attrs`` with the new data.
+
+        A container that no longer exists leaves ``attrs`` untouched apart from
+        its state, which becomes "unknown" -- callers wait on containers that are
+        expected to disappear, so that must not raise.
+        """
+        try:
+            self.attrs = Containers.get(self.id, tesseract_only=False).attrs
+        except NotFound:
+            self.attrs = {**self.attrs, "State": {"Status": "unknown"}}
+
+    def is_running(self) -> bool:
+        """Whether the container is running now, reading it again to find out."""
+        self.reload()
+        return self.status == "running"
 
     def exec_run(self, command: list) -> tuple[int, bytes]:
         """Run a command in this container.
