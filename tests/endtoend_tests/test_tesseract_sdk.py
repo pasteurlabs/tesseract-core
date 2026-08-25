@@ -264,7 +264,7 @@ def test_apply_with_shmem_binref_pool(built_image_name):
     """Test json+binref exchange over /dev/shm with experimental_binref_pool=True end-to-end.
 
     Exercises the full opt-in fast path: client-side warm-buffer input pool
-    (``_BinrefWritePool``) writing into a shared-memory input dir, and the
+    (``BinrefWritePool``) writing into a shared-memory input dir, and the
     zero-copy lazy mmap decode of the (shared-memory) output.
     """
     shm_dir = Path("/dev/shm")

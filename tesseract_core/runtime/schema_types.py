@@ -26,7 +26,7 @@ from tesseract_core.runtime.array_encoding import (
     decode_array,
     encode_array,
     get_array_model,
-    python_to_array,
+    validate_python_or_gpu_array,
 )
 
 AnnotatedType: TypeAlias = type(Annotated[Any, Any])
@@ -111,7 +111,7 @@ class PydanticArrayAnnotation(metaclass=ArrayAnnotationType):
         )
 
         python_to_array_ = partial(
-            python_to_array,
+            validate_python_or_gpu_array,
             expected_shape=cls.expected_shape,
             expected_dtype=cls.expected_dtype,
         )

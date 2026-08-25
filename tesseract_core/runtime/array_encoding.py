@@ -49,6 +49,7 @@ AllowedDtypes = Literal[
     "complex128",
 ]
 
+GPUArray: TypeAlias = Any  # Placeholder for GPU array types (e.g., CuPy, PyTorch, etc.)
 EllipsisType: TypeAlias = type(Ellipsis)
 ArrayLike: TypeAlias = np.ndarray | np.number | np.bool_
 ShapeType: TypeAlias = tuple[int | None, ...] | EllipsisType
@@ -121,6 +122,35 @@ class JsonArrayData(BaseModel):
 
     buffer: JsonValue
     encoding: Literal["json"]
+    compression: None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class CudaIpcArrayData(BaseModel):
+    """Data structure for CUDA IPC shared GPU memory handles.
+
+    The buffer field packs all four components as
+    ``<device>:<handle>:<storage_offset>:<storage_size>``, where:
+
+    - ``device`` is the CUDA device ordinal the memory lives on,
+    - ``handle`` is the base64-encoded 64-byte cudaIpcMemHandle_t (its base64
+      alphabet never contains ``:``, so it is safe as a field delimiter),
+    - ``storage_offset`` is the byte offset within the cudaMalloc allocation,
+    - ``storage_size`` is the total size in bytes of the cudaMalloc allocation.
+
+    This is only the JSON *schema* for the encoding; all the CUDA runtime
+    machinery that produces and consumes it lives in
+    :mod:`tesseract_core.runtime.cuda_ipc`.
+    """
+
+    buffer: StrictStr = Field(
+        pattern=r"^\d+:[A-Za-z0-9+/=]+:\d+:\d+$",
+        description="Packed CUDA IPC descriptor: <device>:<handle>:<storage_offset>:<storage_size>",
+    )
+    encoding: Literal["cuda_ipc"]
+    compression: None = None
+
     model_config = ConfigDict(extra="forbid")
 
 
@@ -133,7 +163,7 @@ class EncodedArrayModel(BaseModel):
     object_type: Literal["array"]
     shape: tuple[PositiveInt, ...]
     dtype: AllowedDtypes
-    data: BinrefArrayData | Base64ArrayData | JsonArrayData
+    data: BinrefArrayData | Base64ArrayData | JsonArrayData | CudaIpcArrayData
     model_config = ConfigDict(extra="forbid")
 
 
@@ -213,7 +243,7 @@ def get_array_model(
         ),
         # Choose the appropriate data structure based on the encoding
         "data": (
-            BinrefArrayData | Base64ArrayData | JsonArrayData,
+            BinrefArrayData | Base64ArrayData | JsonArrayData | CudaIpcArrayData,
             Field(discriminator="encoding"),
         ),
         "model_config": (ConfigDict, config),
@@ -518,11 +548,19 @@ def _coerce_shape_dtype(
 
 def python_to_array(
     val: Any,
-    info: ValidationInfo,
     expected_shape: ShapeType,
     expected_dtype: str | None,
+    context: dict[str, Any] | None = None,
 ) -> ArrayLike:
-    """Convert a Python object to a NumPy array."""
+    """Coerce a Python object to a NumPy array of the given shape and dtype.
+
+    Always materialises a host NumPy array. ``context`` carries the validation
+    flags consumed by :func:`_coerce_shape_dtype` (e.g. ``strict_shapes`` /
+    ``strict_types``). Callers that want to keep a GPU array on-device (e.g. to
+    encode it via CUDA IPC) must special-case it *before* calling this -- see
+    :func:`validate_python_or_gpu_array` for the input-validation path and
+    :func:`encode_array` for serialization.
+    """
     val = np.asarray(val, order="C")
     if not np.issubdtype(val.dtype, np.number) and not np.issubdtype(
         val.dtype, np.bool_
@@ -532,8 +570,31 @@ def python_to_array(
             "Could not parse value as a numeric array (contains non-numeric data)",
             {},
         )
-    context = info.context if info.context else {}
     return _coerce_shape_dtype(val, expected_shape, expected_dtype, context)
+
+
+def validate_python_or_gpu_array(
+    val: Any,
+    info: ValidationInfo,
+    expected_shape: ShapeType,
+    expected_dtype: str | None,
+) -> ArrayLike | GPUArray:
+    """Validate a Python array-like input, keeping GPU arrays on-device.
+
+    Used as the "load from a Python object" validator. Objects that live in GPU
+    memory (exposing ``__cuda_array_interface__``) are validated but returned
+    unchanged, so they can later be encoded via CUDA IPC without a host copy;
+    coercing them to NumPy here would force a device-to-host transfer (or fail,
+    since CuPy refuses implicit conversion). Everything else is coerced to a
+    NumPy array via :func:`python_to_array`.
+    """
+    from tesseract_core.runtime import cuda_ipc
+
+    if cuda_ipc.has_cuda_array_interface(val):
+        return cuda_ipc.validate_cuda_array(val, expected_shape, expected_dtype)
+
+    context = info.context if info.context else {}
+    return python_to_array(val, expected_shape, expected_dtype, context)
 
 
 def decode_array(
@@ -557,6 +618,12 @@ def decode_array(
             if subdir is not None:
                 base_dir = join_paths(base_dir, subdir)
             data = _load_binref_arraydict(val.model_dump(), base_dir)
+
+        elif val.data.encoding == "cuda_ipc":
+            from tesseract_core.runtime import cuda_ipc
+
+            # Returns a framework-agnostic on-GPU wrapper — skip numpy coercion
+            return cuda_ipc.load_cuda_ipc_arraydict(val.model_dump())
 
         # keep checking for "raw" for backwards compat
         elif val.data.encoding in {"json", "raw"}:
@@ -597,18 +664,40 @@ def encode_array(
 
     In Python mode, returns the raw array as-is.
     """
+    from tesseract_core.runtime import cuda_ipc
     from tesseract_core.runtime.config import get_config
 
-    # Convert to a NumPy array if necessary
-    arr = python_to_array(arr, info, expected_shape, expected_dtype)
-
     context = info.context if info.context else {}
-
-    # Python mode -> just return the array without encoding
-    if not info.mode_is_json():
-        return arr
-
     array_encoding = context.get("array_encoding", "json")
+
+    # For cuda_ipc, skip numpy conversion so the array stays on the GPU. In
+    # Python mode there is nothing to serialize, so pass the array through
+    # untouched (the on-device passthrough handled generally below); only the
+    # JSON path emits an IPC handle, and there the input must be a CUDA array.
+    if array_encoding == "cuda_ipc" and info.mode_is_json():
+        if not cuda_ipc.has_cuda_array_interface(arr):
+            raise ValueError(
+                "cuda_ipc encoding requires a CUDA array "
+                f"(object with __cuda_array_interface__), got {type(arr).__name__}"
+            )
+        return cuda_ipc.dump_cuda_ipc_arraydict(arr)
+
+    # Python mode -> return the array as-is, without any host copy. GPU arrays
+    # are preserved on-device so that the intermediate model_dump()/validate
+    # round-trip in the runtime (see runtime.core.apply) is lossless.
+    if not info.mode_is_json():
+        if cuda_ipc.has_cuda_array_interface(arr):
+            return arr
+        return python_to_array(arr, expected_shape, expected_dtype, context)
+
+    # JSON, non-IPC encoding: the data must reach the host. A GPU array survived
+    # validation untouched (see validate_python_or_gpu_array), so materialise it
+    # here with an explicit device-to-host copy before the numpy-based coercion.
+    if cuda_ipc.has_cuda_array_interface(arr) and not isinstance(arr, np.ndarray):
+        arr = cuda_ipc.cuda_array_to_host(arr)
+
+    # Convert to a NumPy array if necessary
+    arr = python_to_array(arr, expected_shape, expected_dtype, context)
     if array_encoding == "base64":
         return _dump_base64_arraydict(arr, compression=context.get("compression"))
     elif array_encoding == "binref":

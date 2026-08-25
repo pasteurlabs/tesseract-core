@@ -34,6 +34,25 @@ def test_version(cli_runner):
     assert __version__ in result.stdout
 
 
+@pytest.mark.parametrize("cmd", ["serve", "run"])
+def test_cuda_ipc_not_a_cli_output_format(cli_runner, cmd):
+    """The experimental json+cuda_ipc format is not exposed on the CLI.
+
+    It is neither listed in --help nor accepted as a value; requesting it fails
+    as an invalid choice.
+    """
+    help_result = cli_runner.invoke(cli, [cmd, "--help"])
+    assert "json+cuda_ipc" not in help_result.stdout
+
+    command = (
+        ["serve", "some-image", "--output-format", "json+cuda_ipc"]
+        if cmd == "serve"
+        else ["run", "some-image", "apply", "--output-format", "json+cuda_ipc", "{}"]
+    )
+    result = cli_runner.invoke(cli, command)
+    assert result.exit_code == 2, result.stdout
+
+
 def test_bad_docker_executable_env_var():
     env = os.environ.copy()
     env.update({"TESSERACT_DOCKER_EXECUTABLE": "not-a-docker"})
@@ -86,11 +105,11 @@ def test_config_override(
         argpairs = (
             (
                 "[RUN foo='bar']",
-                {("build_config", "custom_build_steps"): ["RUN foo='bar'"]},
+                {("build_config", "custom_build_steps"): "[RUN foo='bar']"},
             ),
             (
                 '[RUN echo "hello world"]',
-                {("build_config", "custom_build_steps"): ['RUN echo "hello world"']},
+                {("build_config", "custom_build_steps"): '[RUN echo "hello world"]'},
             ),
         )
     elif arg_to_override == "build_config.base_image":
@@ -105,9 +124,9 @@ def test_config_override(
             (
                 '["data/file.txt:/app/data/file.txt"]',
                 {
-                    ("build_config", "package_data"): [
-                        "data/file.txt:/app/data/file.txt"
-                    ]
+                    ("build_config", "package_data"): (
+                        '["data/file.txt:/app/data/file.txt"]'
+                    )
                 },
             ),
         )

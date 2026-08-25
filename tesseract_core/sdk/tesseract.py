@@ -2,20 +2,18 @@
 # SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
-import mmap
-import os
 import sys
 import tempfile
-import threading
 import traceback
 import uuid
 import warnings
 import weakref
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from functools import cached_property, wraps
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Literal, TypeAlias
+from typing import TYPE_CHECKING, Any, Literal, TypeAlias
 from urllib.parse import urlparse, urlunparse
 
 import numpy as np
@@ -26,8 +24,27 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 from pydantic_core import InitErrorDetails, PydanticCustomError, from_json
 
 from . import engine
+from .binref import (
+    SUPPORTS_BINREF_POOL,
+    BinrefSlot,
+    BinrefWritePool,
+    _fast_tobytes,
+    encode_array_binref,
+    encode_array_binref_pooled,
+    mmap_binref_array,
+    read_binref_array,
+)
 from .docker_client import Container, Containers
 from .logs import LogStreamer
+
+if TYPE_CHECKING:
+    # Imported for type hints only. `from __future__ import annotations` makes
+    # every annotation below a string, so these names are never needed at
+    # runtime and the SDK does not eagerly pull in the runtime/CUDA machinery.
+    from tesseract_core.runtime.cuda_ipc import IpcDeviceArray
+
+# Output serialization formats; single SDK-side definition lives in engine.
+OutputFormat: TypeAlias = engine.OutputFormat
 
 PathLike: TypeAlias = str | Path
 BoolOrCallable: TypeAlias = bool | Callable[[str], Any]
@@ -128,7 +145,7 @@ class Tesseract:
         memory: str | None = None,
         input_path: str | Path | None = None,
         output_path: str | Path | None = None,
-        output_format: Literal["json", "json+base64", "json+binref"] = "json+base64",
+        output_format: OutputFormat = "json+base64",
         docker_args: list[str] | None = None,
         runtime_config: dict[str, Any] | None = None,
         stream_logs: BoolOrCallable = False,
@@ -246,7 +263,7 @@ class Tesseract:
         tesseract_api: str | Path | ModuleType,
         input_path: Path | None = None,
         output_path: Path | None = None,
-        output_format: Literal["json", "json+base64", "json+binref"] = "json+base64",
+        output_format: OutputFormat = "json+base64",
         runtime_config: dict[str, Any] | None = None,
         stream_logs: BoolOrCallable = False,
     ) -> Tesseract:
@@ -326,7 +343,7 @@ class Tesseract:
         self.serve()
         return self
 
-    def __exit__(self, *args: Any) -> None:
+    def __exit__(self, *args: object) -> None:
         """Exit the Tesseract context.
 
         This will stop the Tesseract server if it is running.
@@ -371,9 +388,9 @@ class Tesseract:
         self._client = HTTPClient(
             f"http://{host_ip}:{container.host_port}",
             output_path=Path(output_path) if output_path else None,
+            output_format=output_format,
             timeout=self._timeout,
             input_path=Path(input_path) if input_path else None,
-            output_format=output_format,
             experimental_binref_pool=self._binref_pool_enabled,
         )
 
@@ -662,23 +679,47 @@ def _tree_map(func: Callable, tree: Any, is_leaf: Callable | None = None) -> Any
     return tree
 
 
-def _fast_tobytes(arr: np.ndarray) -> memoryview:
-    """Convert a numpy array to bytes without copying if possible."""
-    return np.ascontiguousarray(arr).data
+def _import_cuda_ipc() -> ModuleType:
+    """Import the cuda_ipc runtime module, or explain the missing extra.
+
+    The ``json+cuda_ipc`` output format lives in ``tesseract_core.runtime``,
+    which is an optional install (``tesseract-core[runtime]``). A base SDK
+    install lacks its dependencies, so surface a clear message pointing at the
+    extra instead of a bare ``ModuleNotFoundError`` from deep in the import chain.
+    """
+    try:
+        from tesseract_core.runtime import cuda_ipc
+    except ImportError as exc:
+        raise ImportError(
+            "The 'json+cuda_ipc' output format requires the Tesseract runtime, "
+            "which is an optional dependency. Install it with "
+            "'pip install tesseract-core[runtime]'."
+        ) from exc
+    return cuda_ipc
 
 
-def _encode_array(arr: Any, b64: bool = True) -> dict:
+def _encode_array(
+    arr: Any, encoding: Literal["base64", "raw", "cuda_ipc"] = "base64"
+) -> dict:
+    # With cuda_ipc encoding, GPU arrays are exported by reference via a CUDA IPC
+    # handle, keeping the data on-device. Any other array (or any other encoding)
+    # falls through to a host copy below, so a mixed payload (some GPU, some CPU
+    # arrays) encodes correctly either way.
+    if encoding == "cuda_ipc" and hasattr(arr, "__cuda_array_interface__"):
+        return _import_cuda_ipc().dump_cuda_ipc_arraydict(arr)
+
     # Ensure arr is a numpy-compatible array so we guarantee it has a compatible dtype (not e.g. torch bfloat16)
     arr = np.asanyarray(arr, order="A")
-    if b64:
-        data = {
-            "buffer": pybase64.b64encode_as_string(_fast_tobytes(arr)),
-            "encoding": "base64",
-        }
-    else:
+    if encoding == "raw":
         data = {
             "buffer": arr.tolist(),
             "encoding": "raw",
+        }
+    else:
+        # base64 (also the host-copy fallback for a CPU array under cuda_ipc)
+        data = {
+            "buffer": pybase64.b64encode_as_string(_fast_tobytes(arr)),
+            "encoding": "base64",
         }
 
     return {
@@ -688,222 +729,49 @@ def _encode_array(arr: Any, b64: bool = True) -> dict:
     }
 
 
-def _encode_array_binref(arr: Any, input_dir: Path, written_files: list[Path]) -> dict:
-    """Encode an array as a binref reference, writing its buffer to ``input_dir``.
+@contextmanager
+def _encode_payload(payload: dict | None, output_format: str) -> Iterator[dict | None]:
+    """Encode a request payload's arrays, managing CUDA IPC export lifetime.
 
-    The array is written to a uniquely named ``.bin`` file directly under
-    ``input_dir``, which must be mounted into the Tesseract container as its
-    input path. The returned reference is relative to that directory, so the
-    server resolves it against its configured input path. Written files are
-    appended to ``written_files`` so the caller can clean them up afterwards.
+    Yields the encoded payload (or None for an empty payload). For the
+    ``json+cuda_ipc`` format, GPU arrays are exported by reference (base64 for
+    CPU arrays), which pins each exported allocation in a process-global registry
+    on the runtime side. Those pins are released on context exit -- by then the
+    caller has read the full response, so the server has copied the inputs out
+    and they are provably dead. The release is skipped (and cuda_ipc never
+    imported) when no GPU array was actually exported.
+
+    Releasing on exit rather than at the start of the next request keeps pinned
+    GPU memory bounded to a single in-flight request.
     """
-    arr = np.asanyarray(arr, order="A")
-    filename = f"{uuid.uuid4()}.bin"
-    target = input_dir / filename
-    target.write_bytes(_fast_tobytes(arr))
-    written_files.append(target)
-    return {
-        "shape": arr.shape,
-        "dtype": arr.dtype.name,
-        "data": {
-            "buffer": f"{filename}:0",
-            "encoding": "binref",
-        },
-    }
+    if not payload:
+        yield None
+        return
 
+    if output_format != "json+cuda_ipc":
+        yield _tree_map(
+            _encode_array, payload, is_leaf=lambda x: hasattr(x, "__array__")
+        )
+        return
 
-class _BinrefSlot:
-    """A reusable, pre-faulted, file-backed buffer for binref inputs.
+    # cuda_ipc: a leaf is any array-like on either protocol; GPU leaves are
+    # exported by handle and pin their allocation until we release below.
+    exported = False
 
-    The slot owns a ``.bin`` file under the mounted input directory, kept open
-    and memory-mapped read-write. Writing an array copies it into the mapping at
-    memory-copy bandwidth (the pages stay resident between uses), avoiding the
-    page-fault cost of writing a fresh file each request.
-    """
+    def _encode_leaf(x: Any) -> dict:
+        nonlocal exported
+        if hasattr(x, "__cuda_array_interface__"):
+            exported = True
+        return _encode_array(x, encoding="cuda_ipc")
 
-    def __init__(self, input_dir: Path, capacity: int) -> None:
-        self.filename = f"pool_{uuid.uuid4()}.bin"
-        self.path = input_dir / self.filename
-        self.capacity = 0
-        self._fd = os.open(self.path, os.O_RDWR | os.O_CREAT | os.O_TRUNC, 0o644)
-        self._mm: mmap.mmap | None = None
-        self._grow(capacity)
+    def _is_leaf(x: Any) -> bool:
+        return hasattr(x, "__array__") or hasattr(x, "__cuda_array_interface__")
 
-    def _grow(self, capacity: int) -> None:
-        if self._mm is not None:
-            self._mm.close()
-        os.ftruncate(self._fd, capacity)
-        self._mm = mmap.mmap(self._fd, capacity)
-        # Pre-fault the pages so the first real write runs at memcpy speed.
-        self._mm[:] = b"\x00" * capacity
-        self.capacity = capacity
-
-    def write(self, data: memoryview) -> None:
-        """Copy ``data`` into the slot's mapping, growing it if needed."""
-        n = data.nbytes
-        if n > self.capacity:
-            self._grow(n)
-        self._mm[:n] = data
-
-    def close(self) -> None:
-        if self._mm is not None:
-            self._mm.close()
-            self._mm = None
-        os.close(self._fd)
-        self.path.unlink(missing_ok=True)
-
-
-class _BinrefWritePool:
-    """Opt-in pool of reusable warm buffers for binref input encoding.
-
-    A pool of :class:`_BinrefSlot` objects, each a mounted ``.bin`` file kept
-    memory-mapped and pre-faulted. Checking out a slot and copying into its warm
-    mapping runs at memory-copy bandwidth, versus writing a fresh file per
-    request which pays a page fault on every page.
-
-    Bounded by ``max_slots`` and ``max_bytes``: a checkout that cannot be served
-    from the pool (all slots busy, or granting it would exceed the byte cap)
-    returns ``None`` so the caller falls back to a plain fresh-file write. The
-    pool is safe for concurrent requests: each in-flight request holds its own
-    slot until it returns the slot after the server has read it.
-    """
-
-    def __init__(
-        self, input_dir: Path, max_slots: int = 4, max_bytes: int | None = None
-    ) -> None:
-        self._input_dir = input_dir
-        self._max_slots = max_slots
-        self._max_bytes = max_bytes
-        self._free: list[_BinrefSlot] = []
-        self._all: list[_BinrefSlot] = []
-        self._lock = threading.Lock()
-
-    def _total_bytes(self) -> int:
-        return sum(s.capacity for s in self._all)
-
-    def checkout(self, nbytes: int) -> _BinrefSlot | None:
-        """Return a warm slot for ``nbytes``, or ``None`` to signal fallback."""
-        with self._lock:
-            # Prefer a free slot that already fits, to avoid a re-map/re-fault.
-            fitting = [s for s in self._free if s.capacity >= nbytes]
-            if fitting:
-                slot = min(fitting, key=lambda s: s.capacity)
-                self._free.remove(slot)
-                return slot
-            # Reuse a free (smaller) slot by growing it, if still within caps.
-            if self._free:
-                slot = self._free.pop()
-                extra = nbytes - slot.capacity
-                if (
-                    self._max_bytes is None
-                    or self._total_bytes() + extra <= self._max_bytes
-                ):
-                    # write() grows the slot's mapping to fit before copying.
-                    return slot
-                # Growing would exceed the cap: keep it free and fall back.
-                self._free.append(slot)
-                return None
-            # Allocate a new slot if we are under both caps.
-            if len(self._all) >= self._max_slots:
-                return None
-            if (
-                self._max_bytes is not None
-                and self._total_bytes() + nbytes > self._max_bytes
-            ):
-                return None
-            slot = _BinrefSlot(self._input_dir, nbytes)
-            self._all.append(slot)
-            return slot
-
-    def checkin(self, slot: _BinrefSlot) -> None:
-        with self._lock:
-            self._free.append(slot)
-
-    def close(self) -> None:
-        with self._lock:
-            for slot in self._all:
-                slot.close()
-            self._all.clear()
-            self._free.clear()
-
-
-def _encode_array_binref_pooled(
-    arr: Any, pool: _BinrefWritePool, checked_out: list, written_files: list[Path]
-) -> dict:
-    """Encode an array as binref using a warm pool slot, or fall back to a file.
-
-    On a pool hit, copies the array into a checked-out warm slot and records it
-    in ``checked_out`` for return after the request. On a miss (pool exhausted
-    or over cap), falls back to :func:`_encode_array_binref`.
-    """
-    arr = np.asanyarray(arr, order="A")
-    data = _fast_tobytes(arr)
-    slot = pool.checkout(data.nbytes)
-    if slot is None:
-        return _encode_array_binref(arr, pool._input_dir, written_files)
-    slot.write(data)
-    checked_out.append(slot)
-    return {
-        "shape": arr.shape,
-        "dtype": arr.dtype.name,
-        "data": {
-            "buffer": f"{slot.filename}:0",
-            "encoding": "binref",
-        },
-    }
-
-
-# The binref write pool is a fast same-machine IPC path: the client writes binref
-# inputs into a directory the server container reads directly, ideally a shared-
-# memory tmpfs (/dev/shm), and decodes outputs as zero-copy mmap views. That only
-# pays off when client and server share a page cache, i.e. a native Linux host
-# running Linux containers. On macOS (and Windows) the container runs inside a
-# Linux VM, so bind mounts cross the VM boundary and there is no host tmpfs the
-# container sees as the same memory — the premise does not hold. So the pool
-# (and, with it, the lazy zero-copy decode) is offered on Linux only.
-_SUPPORTS_BINREF_POOL = sys.platform.startswith("linux")
-
-
-def _read_binref_array(
-    full_path: Path, offset: int, num_bytes: int, dtype: np.dtype, count: int
-) -> np.ndarray:
-    """Read an uncompressed binref buffer into an owned, writable array.
-
-    Copies the buffer into a freshly allocated array via ``readinto``. The array
-    owns its data and does not depend on the file afterwards, so the file may be
-    removed or recycled once this returns. Portable across platforms; the
-    default decode path.
-    """
-    out = np.empty(count, dtype=dtype)
-    with open(full_path, "rb") as f:
-        if offset:
-            f.seek(offset)
-        f.readinto(memoryview(out).cast("B"))
-    return out
-
-
-def _mmap_binref_array(
-    full_path: Path, offset: int, num_bytes: int, dtype: np.dtype, count: int
-) -> np.ndarray:
-    """Map an uncompressed binref buffer as a read-only array without copying.
-
-    The returned array is a view over a memory map of the file, so decoding does
-    not copy the buffer and pages fault in lazily as the array is read. numpy
-    keeps the map alive via the array's ``base``, so the data stays valid even
-    if the file is later removed (the OS keeps the mapped inode alive). The
-    array is read-only.
-
-    Relies on POSIX mmap semantics (a read-only ``PROT_READ`` mapping, and a
-    mapped inode staying valid after the file is removed). The mapped file must
-    not be overwritten while a returned view is still in use.
-    """
-    map_len = offset + num_bytes
-    fd = os.open(full_path, os.O_RDONLY)
     try:
-        mm = mmap.mmap(fd, map_len, prot=mmap.PROT_READ)
+        yield _tree_map(_encode_leaf, payload, is_leaf=_is_leaf)
     finally:
-        os.close(fd)
-    return np.frombuffer(mm, dtype=dtype, count=count, offset=offset)
+        if exported:
+            _import_cuda_ipc().release_pinned_ipc_exports()
 
 
 def _decode_array(
@@ -911,13 +779,18 @@ def _decode_array(
     output_path: str | Path | None = None,
     lazy: bool = False,
     mapped_paths: list[Path] | None = None,
-) -> np.ndarray:
+) -> np.ndarray | IpcDeviceArray:
     """Decode an encoded array dict into a numpy array.
 
     When ``lazy`` is set and the array is decoded as a zero-copy mmap view, the
     backing file path is appended to ``mapped_paths`` (if given) so the caller
     can unlink it once the whole response is decoded. The mmap keeps the inode
     alive after unlink, so the returned view stays valid.
+
+    Returns np.ndarray for every encoding except cuda_ipc, which yields a
+    framework-agnostic on-GPU wrapper (IpcDeviceArray, exposing
+    __cuda_array_interface__ and __dlpack__). That type is imported only under
+    TYPE_CHECKING so naming it here adds no runtime import.
     """
     import re
 
@@ -980,12 +853,12 @@ def _decode_array(
                 arr = np.frombuffer(b"", dtype=dtype)
             elif lazy:
                 # Zero-copy read-only view (POSIX only, see caller gating).
-                arr = _mmap_binref_array(full_path, offset, num_bytes, dtype, count)
+                arr = mmap_binref_array(full_path, offset, num_bytes, dtype, count)
                 if mapped_paths is not None:
                     mapped_paths.append(full_path)
             else:
                 # Eager copy into an owned, writable array (portable default).
-                arr = _read_binref_array(full_path, offset, num_bytes, dtype, count)
+                arr = read_binref_array(full_path, offset, num_bytes, dtype, count)
         else:
             if compressed_size_str is None:
                 raise ValueError(
@@ -1004,6 +877,14 @@ def _decode_array(
                 raise ValueError(f"Unknown compression: {compression}")
 
             arr = np.frombuffer(data, dtype=dtype)
+    elif encoding == "cuda_ipc":
+        # Returns a fresh, client-owned device-array wrapper: the decode opens
+        # the IPC handle, copies device-to-device into our own memory, and
+        # closes the mapping before returning. The result exposes
+        # __cuda_array_interface__ and __dlpack__ so Torch/JAX/CuPy can adopt it
+        # zero-copy. The server may reuse/free the exported buffer as soon as
+        # this returns (it holds it until the next request).
+        return _import_cuda_ipc().load_cuda_ipc_arraydict(encoded_arr)
     else:
         raise ValueError(f"Unexpected array encoding {encoding}. Cannot decode.")
 
@@ -1018,9 +899,9 @@ class HTTPClient:
         self,
         url: str,
         output_path: str | Path | None = None,
+        output_format: OutputFormat = "json+base64",
         timeout: float | tuple[float, float] | None = None,
         input_path: str | Path | None = None,
-        output_format: Literal["json", "json+base64", "json+binref"] = "json+base64",
         experimental_binref_pool: bool = False,
     ) -> None:
         self._url = self._sanitize_url(url)
@@ -1032,16 +913,16 @@ class HTTPClient:
         self._session.headers["Content-Type"] = "application/json"
         # Opt-in warm-buffer pool for binref inputs. Only meaningful when passing
         # inputs as binref into a mounted (ideally shared-memory) input dir.
-        self._binref_pool: _BinrefWritePool | None = None
+        self._binref_pool: BinrefWritePool | None = None
         if experimental_binref_pool and self._input_path is not None:
-            if not _SUPPORTS_BINREF_POOL:
+            if not SUPPORTS_BINREF_POOL:
                 raise RuntimeError(
                     "experimental_binref_pool=True is only supported on Linux, "
                     "since it relies on the client and server container sharing a "
                     "page cache via a shared-memory tmpfs. On other platforms the "
                     "container runs inside a VM, so this premise does not hold."
                 )
-            self._binref_pool = _BinrefWritePool(self._input_path)
+            self._binref_pool = BinrefWritePool(self._input_path)
 
     def close(self) -> None:
         """Release resources held by the client (e.g. the binref write pool)."""
@@ -1066,6 +947,29 @@ class HTTPClient:
         """(Sanitized) URL to connect to."""
         return self._url
 
+    def _send(
+        self, url: str, method: str, data: bytes, params: dict
+    ) -> requests.Response:
+        # Only forward timeout when set; omitting it is equivalent to None for
+        # requests.Session, and avoids passing a kwarg that some session
+        # implementations (e.g. starlette's TestClient) don't accept.
+        request_kwargs: dict[str, Any] = {
+            "method": method,
+            "url": url,
+            "data": data,
+            "params": params,
+        }
+        if self._timeout is not None:
+            request_kwargs["timeout"] = self._timeout
+        try:
+            return self._session.request(**request_kwargs)
+        except requests.ConnectionError:
+            # Retry once on stale keep-alive connections. There is a race between
+            # urllib3's is_connection_dropped check and the server closing idle
+            # connections (uvicorn timeout_keep_alive) that can cause
+            # ConnectionError on an otherwise healthy server.
+            return self._session.request(**request_kwargs)
+
     def _request(
         self,
         endpoint: str,
@@ -1074,65 +978,48 @@ class HTTPClient:
         run_id: str | None = None,
     ) -> dict:
         url = f"{self.url}/{endpoint.lstrip('/')}"
+        params = {"run_id": run_id} if run_id is not None else {}
 
-        # Track binref input files written for this request so we can remove
-        # them once the server has read them (after the response returns).
-        binref_input_files: list[Path] = []
-        # Track pool slots checked out for this request so we can return them.
-        checked_out_slots: list[_BinrefSlot] = []
-
-        if payload:
-            if self._output_format == "json+binref" and self._input_path is not None:
-                # Pass input arrays as binref files in the mounted input
-                # directory instead of base64-in-body. The server reads them
-                # via its input path, so no array data travels over HTTP.
-                if self._binref_pool is not None:
-                    encode_binref = lambda x: _encode_array_binref_pooled(
-                        x, self._binref_pool, checked_out_slots, binref_input_files
-                    )
-                else:
-                    encode_binref = lambda x: _encode_array_binref(
-                        x, self._input_path, binref_input_files
-                    )
-                encoded_payload = _tree_map(
-                    encode_binref,
-                    payload,
-                    is_leaf=lambda x: hasattr(x, "__array__"),
+        if payload and self._output_format == "json+binref" and self._input_path:
+            # Pass input arrays as binref files in the mounted input directory
+            # instead of base64-in-body. The server reads them via its input
+            # path, so no array data travels over HTTP. Files (and any pooled
+            # slots) live only until the response returns, so clean them up in a
+            # finally once the server has read them.
+            binref_input_files: list[Path] = []
+            checked_out_slots: list[BinrefSlot] = []
+            if self._binref_pool is not None:
+                encode_binref = lambda x: encode_array_binref_pooled(
+                    x, self._binref_pool, checked_out_slots, binref_input_files
                 )
             else:
-                encoded_payload = _tree_map(
-                    _encode_array, payload, is_leaf=lambda x: hasattr(x, "__array__")
+                encode_binref = lambda x: encode_array_binref(
+                    x, self._input_path, binref_input_files
                 )
-        else:
-            encoded_payload = None
+            encoded_payload = _tree_map(
+                encode_binref, payload, is_leaf=lambda x: hasattr(x, "__array__")
+            )
+            try:
+                response = self._send(
+                    url, method, orjson.dumps(encoded_payload), params
+                )
+                return self._decode_response(response, endpoint)
+            finally:
+                for f in binref_input_files:
+                    f.unlink(missing_ok=True)
+                if self._binref_pool is not None:
+                    for slot in checked_out_slots:
+                        self._binref_pool.checkin(slot)
 
-        params = {"run_id": run_id} if run_id is not None else {}
-        data = orjson.dumps(encoded_payload)
-        # Only forward timeout when set; omitting it is equivalent to None for
-        # requests.Session, and avoids passing a kwarg that some session
-        # implementations (e.g. starlette's TestClient) don't accept.
-        request_kwargs = {"method": method, "url": url, "data": data, "params": params}
-        if self._timeout is not None:
-            request_kwargs["timeout"] = self._timeout
-        try:
-            return self._send_and_decode(request_kwargs, endpoint)
-        finally:
-            for f in binref_input_files:
-                f.unlink(missing_ok=True)
-            if self._binref_pool is not None:
-                for slot in checked_out_slots:
-                    self._binref_pool.checkin(slot)
+        # Non-binref path: _encode_payload handles base64 and cuda_ipc, holding
+        # any exported GPU inputs alive until the response has been fully read.
+        # `requests` buffers the whole body before `_send` returns, so exiting
+        # the block afterwards releases them at the earliest safe point.
+        with _encode_payload(payload, self._output_format) as encoded_payload:
+            response = self._send(url, method, orjson.dumps(encoded_payload), params)
+        return self._decode_response(response, endpoint)
 
-    def _send_and_decode(self, request_kwargs: dict, endpoint: str) -> dict:
-        try:
-            response = self._session.request(**request_kwargs)
-        except requests.ConnectionError:
-            # Retry once on stale keep-alive connections. There is a race
-            # between urllib3's is_connection_dropped check and the server
-            # closing idle connections (uvicorn timeout_keep_alive) that
-            # can cause ConnectionError on an otherwise healthy server.
-            response = self._session.request(**request_kwargs)
-
+    def _decode_response(self, response: requests.Response, endpoint: str) -> dict:
         if response.status_code == requests.codes.unprocessable_entity:
             # Try and raise a more helpful error if the response is a Pydantic error
             try:
@@ -1184,7 +1071,7 @@ class HTTPClient:
             # where several arrays share one file at different offsets.
             mapped_paths: list[Path] = []
 
-            def decode_with_path(arr: dict) -> np.ndarray:
+            def decode_with_path(arr: dict) -> np.ndarray | IpcDeviceArray:
                 return _decode_array(
                     arr,
                     output_path=self._output_path,

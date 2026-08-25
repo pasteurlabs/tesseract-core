@@ -60,6 +60,104 @@ def test_prepare_build_context_python_version(tmp_path_factory):
     assert "TESSERACT_PYTHON_VERSION" not in dockerfile_default
 
 
+@pytest.mark.parametrize(
+    "keypath,raw_value,expected",
+    [
+        # Numeric-looking string fields must not be parsed as numbers (#678).
+        (("build_config", "python_version"), "3.12", "3.12"),
+        # Trailing zero must be preserved (YAML would parse 3.10 -> 3.1).
+        (("build_config", "python_version"), "3.10", "3.10"),
+        # Explicit quoting still works.
+        (("build_config", "python_version"), '"3.12"', "3.12"),
+        (("build_config", "target_platform"), "linux/arm64", "linux/arm64"),
+        # Non-string fields still get their structured value.
+        (("build_config", "inherit_base_image_packages"), "true", True),
+        (("build_config", "extra_packages"), "[a, b]", ("a", "b")),
+        # Values that aren't valid YAML fall back to the raw string.
+        (("build_config", "target_platform"), "@invalid", "@invalid"),
+    ],
+)
+def test_coerce_config_override(keypath, raw_value, expected):
+    """Config override values are coerced to the target field's declared type."""
+    config = TesseractConfig(name="demo")
+    c = config
+    for k in keypath[:-1]:
+        c = getattr(c, k)
+    annotation = type(c).model_fields[keypath[-1]].annotation
+    coerced = engine._coerce_config_override(raw_value, annotation, keypath)
+    assert coerced == expected
+    # The coerced value must be assignable without a validation error.
+    setattr(c, keypath[-1], coerced)
+
+
+def test_coerce_config_override_native_value():
+    """Non-string values (e.g. from the Python SDK) are validated as-is."""
+    annotation = TesseractBuildConfig.model_fields["extra_packages"].annotation
+    coerced = engine._coerce_config_override(
+        ["a", "b"], annotation, ("build_config", "extra_packages")
+    )
+    assert coerced == ("a", "b")
+
+
+def test_coerce_config_override_unknown_field():
+    """An unknown field (no annotation) passes the value through unchanged.
+
+    The subsequent assignment then raises the usual validation error.
+    """
+    assert engine._coerce_config_override("whatever", None, ("nope",)) == "whatever"
+
+
+def test_coerce_config_override_reports_structured_error():
+    """A structurally-wrong value surfaces the error against the parsed value.
+
+    The raw-string fallback exists for string fields; for a non-string field it
+    would report a misleading "not a valid <type>", masking the real problem. The
+    error must instead describe the parsed value (e.g. wrong tuple arity).
+    """
+    keypath = ("build_config", "package_data")
+    annotation = TesseractBuildConfig.model_fields["package_data"].annotation
+    # package_data entries are (source, destination) pairs; three items is wrong.
+    with pytest.raises(UserError) as excinfo:
+        engine._coerce_config_override("[[a, b, c]]", annotation, keypath)
+    message = str(excinfo.value)
+    assert "at most 2 items" in message
+    assert "not a valid tuple" not in message
+
+
+@pytest.mark.parametrize(
+    "keypath,offending",
+    [
+        # Unknown top-level option.
+        (("nonexistent",), "nonexistent"),
+        # Unknown intermediate group (nothing under it can be valid).
+        (("nonexistent", "python_version"), "nonexistent"),
+        # Unknown leaf under a valid group.
+        (("build_config", "nonexistent"), "build_config.nonexistent"),
+        # Descending into a non-model field (e.g. a dict) is also rejected.
+        (("env", "SOME_VAR"), "env.SOME_VAR"),
+    ],
+)
+def test_build_tesseract_unknown_config_override(
+    dummy_tesseract_package, keypath, offending
+):
+    """An unknown config override path raises a helpful UserError, not a traceback.
+
+    The path is validated before the image build, so no Docker mock is needed.
+    """
+    with pytest.raises(UserError) as excinfo:
+        engine.build_tesseract(
+            dummy_tesseract_package,
+            None,
+            config_override={keypath: "whatever"},
+            generate_only=True,
+        )
+    message = str(excinfo.value)
+    assert ".".join(keypath) in message
+    assert f'"{offending}" is not a known config option' in message
+    # The valid options at the offending level are listed to guide the user.
+    assert "Valid options under" in message
+
+
 def test_prepare_build_context_uv_platform(tmp_path_factory):
     """The uv image must be pinned to the same platform as the build stage.
 
@@ -673,7 +771,7 @@ def test_serve_skip_health_check(mocked_docker, monkeypatch):
         nonlocal health_called
         if url.endswith("/health"):
             health_called = True
-            return type("Response", (), {"status_code": 200, "json": lambda: {}})()
+            return type("Response", (), {"status_code": 200, "json": dict})()
         raise NotImplementedError(f"Mocked get request to {url} not implemented")
 
     monkeypatch.setattr(engine.requests, "get", health_get_spy)
@@ -1280,6 +1378,93 @@ def test_is_local_volume(volume, expected):
     assert engine._is_local_volume(volume) == expected
 
 
+def _stub_serve_docker(monkeypatch):
+    """Stub the Docker seams in engine.serve, returning captured run kwargs."""
+    captured = {}
+
+    monkeypatch.setattr(
+        engine.docker_client.images,
+        "get",
+        lambda name: Image(id="sha256:abc", short_id="abc", tags=[name], attrs={}),
+    )
+
+    def fake_run(**kwargs):
+        captured.update(kwargs)
+        return Container(id="cid", short_id="cid", name="test-container", attrs={})
+
+    monkeypatch.setattr(engine.docker_client.containers, "run", fake_run)
+    monkeypatch.setattr(engine, "_wait_for_health", lambda *a, **k: None)
+    monkeypatch.setattr(engine, "is_podman", lambda: False)
+    return captured
+
+
+def test_serve_cuda_ipc_adds_ipc_host(monkeypatch):
+    """json+cuda_ipc serving passes --ipc=host to the container runtime."""
+    captured = _stub_serve_docker(monkeypatch)
+
+    engine.serve(
+        "my-image",
+        output_format="json+cuda_ipc",
+        gpus=["all"],
+        runtime_config={"enable_experimental_cuda_ipc": True},
+        skip_health_check=True,
+    )
+    assert "--ipc=host" in captured["extra_args"]
+
+
+def test_serve_experimental_cuda_ipc_adds_ipc_host_any_format(monkeypatch):
+    """Enabling the flag wires --ipc=host regardless of the output format."""
+    captured = _stub_serve_docker(monkeypatch)
+
+    engine.serve(
+        "my-image",
+        output_format="json+base64",
+        gpus=["all"],
+        runtime_config={"enable_experimental_cuda_ipc": True},
+        skip_health_check=True,
+    )
+    assert "--ipc=host" in captured["extra_args"]
+
+
+def test_serve_experimental_cuda_ipc_errors_without_gpus(monkeypatch):
+    """Enabling the flag without GPU access is a startup error, not a warning."""
+    _stub_serve_docker(monkeypatch)
+
+    with pytest.raises(ValueError, match="requires GPU access"):
+        engine.serve(
+            "my-image",
+            output_format="json+base64",
+            gpus=None,
+            runtime_config={"enable_experimental_cuda_ipc": True},
+            skip_health_check=True,
+        )
+
+
+def test_serve_cuda_ipc_errors_without_experimental_flag(monkeypatch):
+    """Requesting the cuda_ipc format without the flag is a startup error."""
+    _stub_serve_docker(monkeypatch)
+
+    with pytest.raises(ValueError, match="experimental"):
+        engine.serve(
+            "my-image",
+            output_format="json+cuda_ipc",
+            gpus=["all"],
+            skip_health_check=True,
+        )
+
+
+def test_serve_non_cuda_ipc_has_no_ipc_host(monkeypatch):
+    """Other output formats do not add --ipc=host."""
+    captured = _stub_serve_docker(monkeypatch)
+
+    engine.serve(
+        "my-image",
+        output_format="json+base64",
+        skip_health_check=True,
+    )
+    assert "--ipc=host" not in (captured.get("extra_args") or [])
+
+
 @pytest.mark.parametrize(
     "within_range",
     [
@@ -1343,3 +1528,17 @@ def test_get_free_port_all_excluded():
 
     with pytest.raises(RuntimeError, match="No free ports found"):
         engine.get_free_port(within_range=(free, free + 1), exclude=(free,))
+
+
+def test_output_format_matches_runtime_source_of_truth():
+    """engine.OutputFormat mirrors the runtime canonical format list.
+
+    The SDK defines the format literal locally (in engine) to avoid eagerly
+    importing the optional runtime package. This guards against the two copies
+    drifting apart.
+    """
+    from typing import get_args
+
+    from tesseract_core.runtime.file_interactions import supported_format_type
+
+    assert get_args(engine.OutputFormat) == get_args(supported_format_type)

@@ -1,0 +1,5 @@
+# CuPy provides the device arrays returned by apply(). The [ctk] extra pulls in
+# the CUDA toolkit headers (nvrtc etc.) that CuPy needs to JIT-compile the
+# elementwise kernel for `s * a + b` -- the runtime base image ships only the
+# CUDA runtime, not headers. The cuda12x wheel matches the 12.x base image.
+cupy-cuda12x[ctk]
