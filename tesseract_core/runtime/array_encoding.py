@@ -1,6 +1,7 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import os
 import re
 from collections.abc import Sequence
 from pathlib import Path
@@ -352,6 +353,28 @@ def _load_base64_arraydict(val: ArrayDict) -> np.ndarray:
     return np.frombuffer(buffer, dtype=val["dtype"]).reshape(val["shape"])
 
 
+def _read_binref_array(
+    full_path: str | Path,
+    offset: int,
+    num_bytes: int,
+    dtype: np.dtype,
+    count: int,
+) -> np.ndarray:
+    """Read an uncompressed binref buffer into an owned, writable array.
+
+    The array owns its data and does not depend on the file afterwards, so the
+    backing file may be safely recycled (e.g. by a client-side input write pool
+    that reuses buffers across requests) once this returns. The result is
+    writable, matching what the caller-facing schema expects for array inputs.
+    """
+    out = np.empty(count, dtype=dtype)
+    with open(full_path, "rb") as f:
+        if offset:
+            f.seek(offset)
+        f.readinto(memoryview(out).cast("B"))
+    return out
+
+
 def _load_binref_arraydict(val: ArrayDict, base_dir: str | Path | None) -> np.ndarray:
     """Load array from json+binref encoded array dict."""
     path_match = re.match(
@@ -388,6 +411,16 @@ def _load_binref_arraydict(val: ArrayDict, base_dir: str | Path | None) -> np.nd
         bufferpath = join_paths(base_dir, bufferpath)
 
     if compression is None:
+        # For uncompressed data on a local filesystem, read directly into an
+        # owned array via readinto, avoiding an intermediate bytes copy. The
+        # result owns its data, so a client-side input write pool may recycle
+        # the backing file after the request. Non-local paths (URLs, object
+        # stores) and empty arrays fall back to a plain read.
+        if num_bytes > 0 and not is_url(bufferpath) and os.path.isfile(bufferpath):
+            count = 1 if len(shape) == 0 else int(size)
+            return _read_binref_array(
+                bufferpath, offset, num_bytes, dtype, count
+            ).reshape(shape)
         buffer = read_from_path(bufferpath, offset=offset, length=num_bytes)
     else:
         if compressed_size_str is None:

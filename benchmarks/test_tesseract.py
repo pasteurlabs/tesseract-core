@@ -10,8 +10,12 @@ measurements of framework overhead for different interaction modes:
 1. Non-containerized via `Tesseract.from_tesseract_api()` - Python-only, no HTTP
 2. Containerized via HTTP (`Tesseract.from_image`) - Full Docker + HTTP stack,
    using json+base64 encoding
-3. Containerized via CLI (`tesseract run`) - Full Docker + CLI overhead,
-   using json+binref encoding
+3. Containerized via HTTP with json+binref encoding and the binref directory on
+   a shared-memory tmpfs (/dev/shm), so array payloads are exchanged through
+   shared memory rather than base64 in the HTTP body; uses
+   experimental_binref_pool=True for warm-buffer writes and zero-copy mmap decode
+4. Containerized via CLI (`tesseract run`) - Full Docker + CLI overhead,
+   using json+binref encoding with the binref directory on local disk
 
 All benchmarks use the same no-op Tesseract defined in tesseract_noop/.
 """
@@ -61,15 +65,44 @@ def http_tesseract_instance(tmp_path_factory, noop_tesseract_image):
     from tesseract_core.sdk.tesseract import Tesseract
 
     tmpdir = tmp_path_factory.mktemp("tesseract_http")
-    cm = Tesseract.from_image(
+    with Tesseract.from_image(
         noop_tesseract_image,
         output_path=tmpdir,
-    )
-    tesseract = cm.__enter__()
-    # Warmup - first request is slow due to container startup
-    tesseract.health()
-    yield tesseract
-    cm.__exit__(None, None, None)
+    ) as tesseract:
+        # Warmup - first request is slow due to container startup
+        tesseract.health()
+        yield tesseract
+
+
+@pytest.fixture(scope="module")
+def http_shmem_tesseract_instance(noop_tesseract_image):
+    """Create a containerized HTTP Tesseract that exchanges arrays via shmem.
+
+    Uses json+binref encoding with the input and output directories on a
+    shared-memory tmpfs (/dev/shm), so array payloads are passed to and from the
+    container through shared memory instead of base64 over HTTP.
+    ``experimental_binref_pool`` enables the client-side warm-buffer write pool
+    and zero-copy lazy mmap
+    decode, which is the recommended configuration for this fast path.
+    """
+    from tesseract_core.sdk.tesseract import Tesseract
+
+    shm_dir = Path("/dev/shm")
+    if not shm_dir.is_dir():
+        pytest.skip("/dev/shm is not available on this platform")
+
+    input_dir = Path(tempfile.mkdtemp(prefix="tess_shmem_in_", dir=shm_dir))
+    output_dir = Path(tempfile.mkdtemp(prefix="tess_shmem_out_", dir=shm_dir))
+    with Tesseract.from_image(
+        noop_tesseract_image,
+        input_path=input_dir,
+        output_path=output_dir,
+        output_format="json+binref",
+        experimental_binref_pool=True,
+    ) as tesseract:
+        # Warmup - first request is slow due to container startup
+        tesseract.health()
+        yield tesseract, output_dir
 
 
 def test_from_tesseract_api(benchmark, tesseract_api_instance, array_size):
@@ -82,17 +115,58 @@ def test_from_tesseract_api(benchmark, tesseract_api_instance, array_size):
 
 @pytest.mark.docker
 def test_containerized_http(benchmark, http_tesseract_instance, array_size):
-    """Benchmark containerized Tesseract via HTTP."""
+    """Benchmark containerized Tesseract via HTTP, json+base64 encoding."""
     arr = create_test_array(array_size)
     inputs = {"data": arr}
 
     benchmark(http_tesseract_instance.apply, inputs)
 
 
+def _purge_binref_outputs(output_dir: Path) -> None:
+    """Remove any output .bin files left in the mounted shmem output directory.
+
+    With ``experimental_binref_pool=True`` the client unlinks each output file
+    as soon as it is decoded, so little should remain. This runs untimed via the
+    benchmark ``teardown`` as a safety net to keep the small /dev/shm tmpfs from
+    filling if any file is left behind across the benchmark's many rounds.
+    """
+    for binref in output_dir.rglob("*.bin"):
+        binref.unlink(missing_ok=True)
+
+
 @pytest.mark.docker
-def test_containerized_cli(benchmark, noop_tesseract_image, array_size):
-    """Benchmark containerized Tesseract via CLI (`tesseract run`)."""
-    with tempfile.TemporaryDirectory() as tmpdir:
+def test_containerized_http_shmem(benchmark, http_shmem_tesseract_instance, array_size):
+    """Benchmark containerized Tesseract via HTTP, json+binref over shared memory.
+
+    Same served-container HTTP path as ``test_containerized_http``, but arrays
+    are exchanged as binref files on /dev/shm rather than base64 in the request
+    body, so no array data travels over HTTP. Runs with
+    ``experimental_binref_pool=True``, the recommended configuration for this
+    fast path.
+    """
+    tesseract, output_dir = http_shmem_tesseract_instance
+    arr = create_test_array(array_size)
+    inputs = {"data": arr}
+
+    benchmark.pedantic(
+        tesseract.apply,
+        args=(inputs,),
+        teardown=lambda *_: _purge_binref_outputs(output_dir),
+        rounds=100,
+        warmup_rounds=1,
+        iterations=1,
+    )
+
+
+def _run_cli_binref_benchmark(benchmark, noop_tesseract_image, array_size, binref_root):
+    """Benchmark a containerized CLI apply with json+binref exchange.
+
+    Writes the input array as a .bin file under ``binref_root`` and runs
+    ``tesseract run`` with the binref directory as both input and output path.
+    ``binref_root`` selects where those .bin files live: a regular temp
+    directory (disk) or a shared-memory tmpfs (/dev/shm).
+    """
+    with tempfile.TemporaryDirectory(dir=binref_root) as tmpdir:
         input_dir = Path(tmpdir) / "input"
         output_dir = Path(tmpdir) / "output"
         input_dir.mkdir()
@@ -144,16 +218,31 @@ def test_containerized_cli(benchmark, noop_tesseract_image, array_size):
                 raise RuntimeError(f"CLI failed: {result.stderr}")
             return result
 
-        def wait_for_docker_cleanup():
-            """Let Docker fully release resources before the next cold start."""
+        def before_round():
+            """Prepare for the next cold-start round.
+
+            Clears the previous round's binref outputs so they don't accumulate
+            in the (possibly small) shared-memory output directory, then lets
+            Docker fully release resources before the next cold start.
+            """
+            for binref in output_dir.rglob("*.bin"):
+                binref.unlink(missing_ok=True)
             time.sleep(2)
 
         # Each invocation spawns a full container. We want clean cold-start
         # timings, so sleep between rounds to let Docker clean up.
         benchmark.pedantic(
             run_cli,
-            setup=wait_for_docker_cleanup,
+            setup=before_round,
             rounds=3,
             warmup_rounds=1,
             iterations=1,
         )
+
+
+@pytest.mark.docker
+def test_containerized_cli(benchmark, noop_tesseract_image, array_size):
+    """Benchmark containerized Tesseract via CLI, binref on disk."""
+    _run_cli_binref_benchmark(
+        benchmark, noop_tesseract_image, array_size, binref_root=None
+    )

@@ -99,6 +99,7 @@ Changelog <https://github.com/pasteurlabs/tesseract-core/releases>
 ../how-to/pipelines.md
 ../how-to/advanced-usage.md
 ../how-to/deploy.md
+../how-to/fast-local-runs.md
 ../how-to/debugging.md
 ../how-to/llm-assistance.md
 ```

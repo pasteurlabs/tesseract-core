@@ -25,6 +25,16 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 from pydantic_core import InitErrorDetails, PydanticCustomError, from_json
 
 from . import engine
+from .binref import (
+    SUPPORTS_BINREF_POOL,
+    BinrefSlot,
+    BinrefWritePool,
+    _fast_tobytes,
+    encode_array_binref,
+    encode_array_binref_pooled,
+    mmap_binref_array,
+    read_binref_array,
+)
 from .docker_client import Container, Containers
 from .logs import LogStreamer
 
@@ -81,6 +91,7 @@ class Tesseract:
     _client: HTTPClient | LocalClient | None = None
     _stream_logs: BoolOrCallable = False
     _timeout: float | tuple[float, float] | None = None
+    _binref_pool_enabled: bool = False
 
     def __init__(
         self,
@@ -150,6 +161,7 @@ class Tesseract:
         stream_logs: BoolOrCallable = False,
         skip_health_check: bool = False,
         timeout: float | tuple[float, float] | None = None,
+        experimental_binref_pool: bool = False,
     ) -> Tesseract:
         """Create a Tesseract instance from a Docker image.
 
@@ -199,6 +211,14 @@ class Tesseract:
                 disables timeouts. See the `requests documentation
                 <https://requests.readthedocs.io/en/latest/user/advanced/#timeouts>`_
                 for details.
+            experimental_binref_pool: Opt-in fast path for ``json+binref`` that
+                only makes sense when ``input_path`` and ``output_path`` point at
+                a shared-memory tmpfs (``/dev/shm`` on Linux). Reuses a small pool
+                of pre-faulted, memory-mapped input buffers instead of writing a
+                fresh file per request, and decodes outputs as zero-copy
+                memory-mapped views instead of eager copies. Linux only (raises on
+                other platforms), since elsewhere the container runs in a VM and
+                does not share a page cache with the client.
 
         Returns:
             A Tesseract instance.
@@ -210,8 +230,15 @@ class Tesseract:
 
         if volumes is None:
             volumes = []
+        auto_input_path = False
         if input_path is not None:
             input_path = Path(input_path).resolve()
+        elif output_format == "json+binref":
+            # Auto-create an input directory so binref-encoded inputs have a
+            # mounted location to be written to and read from by the container.
+            input_path = Path(tempfile.mkdtemp(prefix="tesseract_input_"))
+            auto_input_path = True
+
         auto_output_path = output_path is None
         if output_path is not None:
             output_path = Path(output_path).resolve()
@@ -221,8 +248,11 @@ class Tesseract:
 
         obj._stream_logs = stream_logs
         obj._timeout = timeout
-        # Purge the auto-created tempdir when the object is garbage collected.
-        # User-supplied output paths are left untouched.
+        obj._binref_pool_enabled = experimental_binref_pool
+        # Purge auto-created tempdirs when the object is garbage collected.
+        # User-supplied paths are left untouched.
+        if auto_input_path:
+            weakref.finalize(obj, _purge_tempdir, str(input_path))
         if auto_output_path:
             weakref.finalize(obj, _purge_tempdir, str(output_path))
         obj._spawn_config = dict(
@@ -373,12 +403,15 @@ class Tesseract:
         host_ip = self._spawn_config["host_ip"]
         self._lastlog = None
         output_path = self._spawn_config.get("output_path")
+        input_path = self._spawn_config.get("input_path")
         output_format = self._spawn_config.get("output_format", "json+base64")
         self._client = HTTPClient(
             f"http://{host_ip}:{container.host_port}",
             output_path=Path(output_path) if output_path else None,
             output_format=output_format,
             timeout=self._timeout,
+            input_path=Path(input_path) if input_path else None,
+            experimental_binref_pool=self._binref_pool_enabled,
         )
 
         # Ensure that the Tesseract is torn down once the object is garbage collected,
@@ -404,6 +437,8 @@ class Tesseract:
             raise RuntimeError("Tesseract is not being served.")
         self._lastlog = self.server_logs()
         engine.teardown(self._serve_context["container_name"])
+        if self._client is not None:
+            self._client.close()
         self._client = None
         self._serve_context = None
         self._atexit_finalizer.detach()
@@ -664,11 +699,6 @@ def _tree_map(func: Callable, tree: Any, is_leaf: Callable | None = None) -> Any
     return tree
 
 
-def _fast_tobytes(arr: np.ndarray) -> memoryview:
-    """Convert a numpy array to bytes without copying if possible."""
-    return np.ascontiguousarray(arr).data
-
-
 def _import_cuda_ipc() -> ModuleType:
     """Import the cuda_ipc runtime module, or explain the missing extra.
 
@@ -765,12 +795,23 @@ def _encode_payload(payload: dict | None, output_format: str) -> Iterator[dict |
 
 
 def _decode_array(
-    encoded_arr: dict, output_path: str | Path | None = None
+    encoded_arr: dict,
+    output_path: str | Path | None = None,
+    lazy: bool = False,
+    mapped_paths: list[Path] | None = None,
 ) -> np.ndarray | IpcDeviceArray:
-    # Returns np.ndarray for every encoding except cuda_ipc, which yields a
-    # framework-agnostic on-GPU wrapper (IpcDeviceArray, exposing
-    # __cuda_array_interface__ and __dlpack__). That type is imported only under
-    # TYPE_CHECKING so naming it here adds no runtime import.
+    """Decode an encoded array dict into a numpy array.
+
+    When ``lazy`` is set and the array is decoded as a zero-copy mmap view, the
+    backing file path is appended to ``mapped_paths`` (if given) so the caller
+    can unlink it once the whole response is decoded. The mmap keeps the inode
+    alive after unlink, so the returned view stays valid.
+
+    Returns np.ndarray for every encoding except cuda_ipc, which yields a
+    framework-agnostic on-GPU wrapper (IpcDeviceArray, exposing
+    __cuda_array_interface__ and __dlpack__). That type is imported only under
+    TYPE_CHECKING so naming it here adds no runtime import.
+    """
     import re
 
     if "data" not in encoded_arr:
@@ -826,27 +867,36 @@ def _decode_array(
 
         compression = encoded_arr["data"].get("compression")
 
-        # Read the binary data
-        with open(full_path, "rb") as f:
-            f.seek(offset)
-            if compression is None:
-                data = f.read(num_bytes)
+        if compression is None:
+            count = 1 if len(shape) == 0 else size
+            if num_bytes == 0:
+                arr = np.frombuffer(b"", dtype=dtype)
+            elif lazy:
+                # Zero-copy read-only view (POSIX only, see caller gating).
+                arr = mmap_binref_array(full_path, offset, num_bytes, dtype, count)
+                if mapped_paths is not None:
+                    mapped_paths.append(full_path)
             else:
-                if compressed_size_str is None:
-                    raise ValueError(
-                        "compressed_size missing from buffer spec when compression is set "
-                        "(expected format: '<path>:<offset>:<compressed_size>')"
-                    )
+                # Eager copy into an owned, writable array (portable default).
+                arr = read_binref_array(full_path, offset, num_bytes, dtype, count)
+        else:
+            if compressed_size_str is None:
+                raise ValueError(
+                    "compressed_size missing from buffer spec when compression is set "
+                    "(expected format: '<path>:<offset>:<compressed_size>')"
+                )
+            with open(full_path, "rb") as f:
+                f.seek(offset)
                 data = f.read(int(compressed_size_str))
 
-        if compression == "lz4":
-            import lz4.frame
+            if compression == "lz4":
+                import lz4.frame
 
-            data = lz4.frame.decompress(data)
-        elif compression is not None:
-            raise ValueError(f"Unknown compression: {compression}")
+                data = lz4.frame.decompress(data)
+            else:
+                raise ValueError(f"Unknown compression: {compression}")
 
-        arr = np.frombuffer(data, dtype=dtype)
+            arr = np.frombuffer(data, dtype=dtype)
     elif encoding == "cuda_ipc":
         # Returns a fresh, client-owned device-array wrapper: the decode opens
         # the IPC handle, copies device-to-device into our own memory, and
@@ -865,19 +915,45 @@ def _decode_array(
 class HTTPClient:
     """HTTP Client for Tesseracts."""
 
+    # Class-level defaults so instances built via ``__new__`` (e.g. in tests)
+    # still expose the binref attributes the request/decode paths read.
+    _input_path: Path | None = None
+    _binref_pool: BinrefWritePool | None = None
+
     def __init__(
         self,
         url: str,
         output_path: str | Path | None = None,
         output_format: OutputFormat = "json+base64",
         timeout: float | tuple[float, float] | None = None,
+        input_path: str | Path | None = None,
+        experimental_binref_pool: bool = False,
     ) -> None:
         self._url = self._sanitize_url(url)
         self._output_path = output_path
         self._output_format = output_format
+        self._input_path = Path(input_path) if input_path is not None else None
         self._timeout = timeout
         self._session = requests.Session()
         self._session.headers["Content-Type"] = "application/json"
+        # Opt-in warm-buffer pool for binref inputs. Only meaningful when passing
+        # inputs as binref into a mounted (ideally shared-memory) input dir.
+        self._binref_pool: BinrefWritePool | None = None
+        if experimental_binref_pool and self._input_path is not None:
+            if not SUPPORTS_BINREF_POOL:
+                raise RuntimeError(
+                    "experimental_binref_pool=True is only supported on Linux, "
+                    "since it relies on the client and server container sharing a "
+                    "page cache via a shared-memory tmpfs. On other platforms the "
+                    "container runs inside a VM, so this premise does not hold."
+                )
+            self._binref_pool = BinrefWritePool(self._input_path)
+
+    def close(self) -> None:
+        """Release resources held by the client (e.g. the binref write pool)."""
+        if self._binref_pool is not None:
+            self._binref_pool.close()
+            self._binref_pool = None
 
     @staticmethod
     def _sanitize_url(url: str) -> str:
@@ -929,13 +1005,46 @@ class HTTPClient:
         url = f"{self.url}/{endpoint.lstrip('/')}"
         params = {"run_id": run_id} if run_id is not None else {}
 
-        # The context manager holds any exported GPU inputs alive until the
-        # response has been fully read (see _encode_payload). `requests` buffers
-        # the whole body before `_send` returns, so exiting the block afterwards
-        # releases them at the earliest safe point.
+        if payload and self._output_format == "json+binref" and self._input_path:
+            # Pass input arrays as binref files in the mounted input directory
+            # instead of base64-in-body. The server reads them via its input
+            # path, so no array data travels over HTTP. Files (and any pooled
+            # slots) live only until the response returns, so clean them up in a
+            # finally once the server has read them.
+            binref_input_files: list[Path] = []
+            checked_out_slots: list[BinrefSlot] = []
+            if self._binref_pool is not None:
+                encode_binref = lambda x: encode_array_binref_pooled(
+                    x, self._binref_pool, checked_out_slots, binref_input_files
+                )
+            else:
+                encode_binref = lambda x: encode_array_binref(
+                    x, self._input_path, binref_input_files
+                )
+            encoded_payload = _tree_map(
+                encode_binref, payload, is_leaf=lambda x: hasattr(x, "__array__")
+            )
+            try:
+                response = self._send(
+                    url, method, orjson.dumps(encoded_payload), params
+                )
+                return self._decode_response(response, endpoint)
+            finally:
+                for f in binref_input_files:
+                    f.unlink(missing_ok=True)
+                if self._binref_pool is not None:
+                    for slot in checked_out_slots:
+                        self._binref_pool.checkin(slot)
+
+        # Non-binref path: _encode_payload handles base64 and cuda_ipc, holding
+        # any exported GPU inputs alive until the response has been fully read.
+        # `requests` buffers the whole body before `_send` returns, so exiting
+        # the block afterwards releases them at the earliest safe point.
         with _encode_payload(payload, self._output_format) as encoded_payload:
             response = self._send(url, method, orjson.dumps(encoded_payload), params)
+        return self._decode_response(response, endpoint)
 
+    def _decode_response(self, response: requests.Response, endpoint: str) -> dict:
         if response.status_code == requests.codes.unprocessable_entity:
             # Try and raise a more helpful error if the response is a Pydantic error
             try:
@@ -974,15 +1083,35 @@ class HTTPClient:
             "jacobian_vector_product",
             "vector_jacobian_product",
         ]:
-            # Create a decoder with the output_path bound
+            # Use the zero-copy lazy decode only on the opt-in fast path
+            # (binref pool enabled), which requires POSIX (enforced at client
+            # construction); otherwise decode eagerly into an owned array.
+            lazy = self._binref_pool is not None
+
+            # Files mapped by the lazy decode, unlinked once the whole response
+            # is decoded so the server's output files don't accumulate. Each
+            # returned view keeps its own mmap (and thus the inode) alive after
+            # unlink, so the arrays stay valid; the space is reclaimed when the
+            # user drops them. Unlinking eagerly per-array would break responses
+            # where several arrays share one file at different offsets.
+            mapped_paths: list[Path] = []
+
             def decode_with_path(arr: dict) -> np.ndarray | IpcDeviceArray:
-                return _decode_array(arr, output_path=self._output_path)
+                return _decode_array(
+                    arr,
+                    output_path=self._output_path,
+                    lazy=lazy,
+                    mapped_paths=mapped_paths,
+                )
 
             data = _tree_map(
                 decode_with_path,
                 data,
                 is_leaf=lambda x: type(x) is dict and "shape" in x,
             )
+
+            for path in set(mapped_paths):
+                path.unlink(missing_ok=True)
 
         return data
 
