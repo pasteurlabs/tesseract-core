@@ -334,6 +334,11 @@ linkcheck_ignore = [
     # in a browser. The docs.pasteurlabs.ai subdomain is hosted elsewhere (Read
     # the Docs) and is left checked.
     r"https://pasteurlabs\.ai(/.*)?$",
+    # The config JSON Schema is emitted into this build's output root (see
+    # _emit_config_schema) and served alongside the docs, but the `stable` alias
+    # only resolves once a release carrying this feature is deployed. Until then
+    # the published URL 404s even though it is correct in the rendered docs.
+    r"https://docs\.pasteurlabs\.ai/projects/tesseract-core/stable/schema\.json",
 ]
 
 # Pages whose in-page anchors are generated client-side (or are browser text
