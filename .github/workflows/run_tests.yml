@@ -283,9 +283,99 @@ jobs:
           uv pip install jupyter
           uv run --no-sync jupyter nbconvert --to notebook --execute demo.ipynb
 
+  tests-gpu:
+    runs-on: tesseract-ci-gpu
+
+    # Exercise both CUDA major versions so the ctypes loader's version fallbacks
+    # (libcudart.so.12/.13) and the encode/decode path are covered against each.
+    # The array frameworks are pinned to a matching CUDA build (cupy-cuda1Nx,
+    # torch's per-CUDA wheel index, jax[cuda1N]) so the libcudart the runtime
+    # actually binds to differs between entries.
+    strategy:
+      fail-fast: false
+      matrix:
+        cuda:
+          - major: "12"
+            base_image: "nvidia/cuda:12.8.1-base-ubuntu24.04"
+            torch_index: "cu126"
+          - major: "13"
+            base_image: "nvidia/cuda:13.3.1-base-ubuntu24.04"
+            torch_index: "cu130"
+
+    defaults:
+      run:
+        shell: bash -el {0}
+
+    steps:
+      - name: Set up Git repository
+        uses: actions/checkout@v7
+
+      - name: Show GPU info
+        run: |
+          nvidia-smi
+          # Confirm Docker can see the GPU via the NVIDIA container runtime; the
+          # end-to-end tests build and serve a GPU Tesseract, so a broken
+          # runtime must fail loudly here rather than silently skip.
+          docker info
+          docker run --rm --gpus all ${{ matrix.cuda.base_image }} nvidia-smi
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install package
+        run: |
+          cp production.uv.lock uv.lock
+          uv sync --python 3.12 --extra dev --frozen
+
+      # cupy/torch/jax with CUDA support are not declared dependencies (they are
+      # only needed to *produce* GPU arrays in the tests); install builds for the
+      # matrix CUDA major version into the same environment here. The runtime
+      # library itself only needs libcudart, which cupy's wheel bundles.
+      #
+      # torch must come from its per-CUDA wheel index: plain "torch" from PyPI
+      # always resolves to the newest CUDA build regardless of the requested
+      # major, so it is installed separately against the matching cuNNN index.
+      - name: Install GPU array frameworks
+        run: |
+          uv pip install \
+            --index-url "https://download.pytorch.org/whl/${{ matrix.cuda.torch_index }}" \
+            "torch"
+          uv pip install \
+            "cupy-cuda${{ matrix.cuda.major }}x" \
+            "jax[cuda${{ matrix.cuda.major }}]"
+
+      - name: Show installed CUDA frameworks
+        run: |
+          uv run --no-sync python -c "import cupy; print('cupy', cupy.__version__, 'runtime', cupy.cuda.runtime.runtimeGetVersion(), 'devices', cupy.cuda.runtime.getDeviceCount())"
+          uv run --no-sync python -c "import torch; print('torch', torch.__version__, 'cuda', torch.version.cuda, torch.cuda.is_available())"
+          uv run --no-sync python -c "import jax; print('jax', jax.__version__, 'devices', jax.devices())"
+
+      - name: Run GPU test suite
+        run: |
+          uv run --no-sync pytest \
+            -v \
+            -m gpu \
+            --always-run-endtoend \
+            --timeout=300 \
+            --cov-report=term-missing:skip-covered \
+            --cov-report=xml:coverage.xml \
+            --cov=tesseract_core \
+            --cov-branch
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v7.0.0
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: pasteurlabs/tesseract-core
+          files: coverage*.xml
+          flags: gpu-cuda${{ matrix.cuda.major }}
+          fail_ci_if_error: true
+
   all-ok:
     if: always()
-    needs: [tests-base, tests-e2e, tests-demos]
+    needs: [tests-base, tests-e2e, tests-demos, tests-gpu]
 
     runs-on: ubuntu-latest
 
@@ -304,6 +394,11 @@ jobs:
 
           if [[ "${{ needs.tests-demos.result }}" != "success" && "${{ needs.tests-demos.result }}" != "skipped" ]]; then
             echo "Demo tests failed"
+            exit 1
+          fi
+
+          if [[ "${{ needs.tests-gpu.result }}" != "success" && "${{ needs.tests-gpu.result }}" != "skipped" ]]; then
+            echo "GPU tests failed"
             exit 1
           fi
 
