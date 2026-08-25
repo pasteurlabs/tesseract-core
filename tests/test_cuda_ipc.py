@@ -75,6 +75,22 @@ requires_jax_cuda = pytest.mark.skipif(
 _TIMEOUT = 60
 
 
+def _unpack_cuda_ipc(data: dict) -> dict:
+    """Split a packed cuda_ipc ``buffer`` back into its named components.
+
+    The wire format packs everything into a single string as
+    ``<device>:<handle>:<storage_offset>:<storage_size>`` (see
+    :class:`tesseract_core.runtime.array_encoding.CudaIpcArrayData`).
+    """
+    device, handle, storage_offset, storage_size = data["buffer"].split(":")
+    return {
+        "device": int(device),
+        "handle": handle,
+        "storage_offset": int(storage_offset),
+        "storage_size": int(storage_size),
+    }
+
+
 # ── Cross-process harness ───────────────────────────────────────────────
 #
 # A tiny producer/consumer harness that:
@@ -148,7 +164,7 @@ def _consumer_main(to_consumer, from_consumer, result_q):
                 {
                     "shape": tuple(encoded["shape"]),
                     "dtype": encoded["dtype"],
-                    "offset": encoded["data"]["storage_offset"],
+                    "offset": _unpack_cuda_ipc(encoded["data"])["storage_offset"],
                     "match": bool(np.array_equal(got, np.asarray(expected))),
                 }
             )
@@ -321,17 +337,18 @@ def test_encode_structure():
     assert encoded["dtype"] == "float32"
     data = encoded["data"]
     assert data["encoding"] == "cuda_ipc"
-    # 64-byte handle, base64-encoded.
+    # 64-byte handle, base64-encoded, packed into the single `buffer` string.
     import pybase64
 
     from tesseract_core.runtime.cuda_ipc import _CUDA_IPC_HANDLE_SIZE
 
-    assert len(pybase64.b64decode(data["handle"])) == _CUDA_IPC_HANDLE_SIZE
-    assert isinstance(data["device"], int)
-    assert data["storage_size"] >= arr.nbytes
-    assert data["storage_offset"] >= 0
+    unpacked = _unpack_cuda_ipc(data)
+    assert len(pybase64.b64decode(unpacked["handle"])) == _CUDA_IPC_HANDLE_SIZE
+    assert isinstance(unpacked["device"], int)
+    assert unpacked["storage_size"] >= arr.nbytes
+    assert unpacked["storage_offset"] >= 0
     # offset + array bytes must fit inside the reported allocation.
-    assert data["storage_offset"] + arr.nbytes <= data["storage_size"]
+    assert unpacked["storage_offset"] + arr.nbytes <= unpacked["storage_size"]
 
 
 @requires_cuda
