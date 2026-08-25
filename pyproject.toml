@@ -6,7 +6,7 @@ authors = [
     {name = "The Tesseract team @ Pasteur Labs + OSS contributors", email = "info@simulation.science"},
 ]
 license = { text = "Apache-2.0" }
-requires-python = ">=3.10,<3.15"
+requires-python = ">=3.10,<4"
 dependencies = [
     "jinja2",
     "rich",
@@ -42,7 +42,7 @@ runtime = [
     "pydantic<=2.13.4,>=2.10",
     "fastapi<=0.141.1,>=0.115",
     "requests<=2.34.2,>=2.32.4",
-    "uvicorn<=0.52.3,>=0.34",
+    "uvicorn<=0.52.4,>=0.34",
     "typer<=0.27.1,>=0.26.8",  # sphinxcontrib-typer needs >=0.26.8
     "fsspec[http,s3]<=2026.7.0,>=2024.12",
     "s3fs<=2026.7.0,>=2024.12",  # enters via fsspec[s3]; pin explicitly so the oldest resolution can't pair an ancient s3fs with a modern aiobotocore
@@ -102,6 +102,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.version]
 source = "vcs"
+fallback-version = "0.0.0+unknown"
 
 [tool.hatch.build.hooks.vcs]
 version-file = "tesseract_core/_version.py"

@@ -6,6 +6,7 @@ This file contains counter-intuitive rules and aspects of the Tesseract codebase
 
 - **Read the actual code before proposing an architecture or approach.** Do not speculate about capabilities or patterns.
 - **Reproduce the problem before trying to solve it.** If a user reports a bug, try to reproduce it locally before proposing a fix. If you have a hypothesis regarding a root cause, verify it. If that's not possible, communicate it clearly.
+- **Do not touch `CHANGELOG.md`.** It is auto-generated from PR titles when a release is triggered.
 
 ## Environment setup
 
@@ -22,6 +23,7 @@ This file contains counter-intuitive rules and aspects of the Tesseract codebase
 - **Don't add mocks for Docker.** Tests that need Docker should be marked as end-to-end tests and skipped in fast test runs.
 - **Rarely test exceptions.** Only test exception handling when control flow is complex or the error message is critical for UX. Don't write tests that just verify an exception is raised.
 - **Never skip or disable tests without asking.** If a test is failing and you want to skip it, ask the user first. Don't add `@pytest.skip`, `@pytest.mark.xfail`, or comment out tests without explicit approval.
+- **Do not add new markers or skip conditions without asking.** If you want to add a new marker or skip condition, ask the user first. Don't add `@pytest.mark.skipif` or similar without approval.
 - **Always run appropriate tests and verify code you touched works end-to-end before presenting it as complete.** Do not wait for the user to ask 'did you test this?'
 
 ## Code style
@@ -50,3 +52,4 @@ Each of these is a separate repository/Python package.
 - **Tesseract-JAX** is a mature package that supports full integration of Tesseract calls into JAX programs, including JIT compilation and automatic differentiation of code that mixes Tesseract calls and JAX operations.
 - **Tesseract-Torch** is the PyTorch counterpart to Tesseract-JAX: it embeds Tesseract calls as PyTorch operators so that `torch.autograd` flows through code that mixes Tesseract calls and PyTorch operations.
 - **Tesseract-Streamlit** provides tools to auto-generate Streamlit apps from (externally running / locally built) Tesseracts. It can be used to quickly create interactive demos for Tesseracts and custom visualization without writing any Streamlit code, but is limited to forward application (`apply`).
+- **cookiecutter-tesseract** is a template for creating new Tesseract repositories. It includes a pre-configured Python package, Dockerfile, and GitHub Actions CI/CD pipeline.
