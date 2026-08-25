@@ -132,12 +132,14 @@ def test_config_override(
             ),
         )
     elif arg_to_override == "build_config.requirements.python_version":
-        # Nested keypath into a sub-model (the uv-pip provider settings). Quote the
-        # value so YAML keeps it a string rather than parsing 3.12 as a float.
+        # Nested keypath into a sub-model (the uv-pip provider settings). Values
+        # reach build_tesseract as raw strings and are coerced against the target
+        # field's type there (see engine._coerce_config_override), so the quoted
+        # value is passed through verbatim.
         argpairs = (
             (
                 "'3.12'",
-                {("build_config", "requirements", "python_version"): "3.12"},
+                {("build_config", "requirements", "python_version"): "'3.12'"},
             ),
         )
     else:
