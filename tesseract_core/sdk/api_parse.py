@@ -32,9 +32,7 @@ class _ApiObject(NamedTuple):
 # The `stable` alias on Read the Docs tracks the latest tagged *release* (not the
 # tip of main), so this one URL is both stable and correctly versioned. It is the
 # URL scaffolded into new configs and registered with SchemaStore.
-CONFIG_SCHEMA_URL = (
-    "https://docs.pasteurlabs.ai/projects/tesseract-core/stable/schema.json"
-)
+CONFIG_SCHEMA_URL = "https://docs.pasteurlabs.ai/projects/tesseract-core/stable/tesseract_config.schema.json"
 
 ORDINALS = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth"]
 

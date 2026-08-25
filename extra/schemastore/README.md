@@ -14,7 +14,7 @@ not shipped with the package.
 
 SchemaStore can point at a schema we host ourselves, so we only register a
 catalog entry — the schema content stays served from our docs site at
-`https://docs.pasteurlabs.ai/projects/tesseract-core/stable/schema.json`
+`https://docs.pasteurlabs.ai/projects/tesseract-core/stable/tesseract_config.schema.json`
 (regenerated from `TesseractConfig` on every docs build).
 
 ### 1. Catalog entry

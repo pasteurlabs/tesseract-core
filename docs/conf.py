@@ -178,7 +178,7 @@ def zip_examples_folder(_app) -> None:
 def _emit_config_schema(app) -> None:
     """Write the tesseract_config.yaml JSON Schema into the build output root.
 
-    Served at ``<site>/schema.json``, this is the URL scaffolded into new
+    Served at ``<site>/tesseract_config.schema.json``, this is the URL scaffolded into new
     configs and registered with SchemaStore, so IDEs can validate
     ``tesseract_config.yaml``. Generating it here (rather than committing it)
     keeps it in lockstep with the TesseractConfig model on every build.
@@ -189,7 +189,9 @@ def _emit_config_schema(app) -> None:
 
     out_dir = Path(app.outdir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "schema.json").write_text(json.dumps(generate_config_schema(), indent=2))
+    (out_dir / "tesseract_config.schema.json").write_text(
+        json.dumps(generate_config_schema(), indent=2)
+    )
 
 
 def _collect_blog_posts() -> list[dict]:
@@ -334,11 +336,6 @@ linkcheck_ignore = [
     # in a browser. The docs.pasteurlabs.ai subdomain is hosted elsewhere (Read
     # the Docs) and is left checked.
     r"https://pasteurlabs\.ai(/.*)?$",
-    # The config JSON Schema is emitted into this build's output root (see
-    # _emit_config_schema) and served alongside the docs, but the `stable` alias
-    # only resolves once a release carrying this feature is deployed. Until then
-    # the published URL 404s even though it is correct in the rendered docs.
-    r"https://docs\.pasteurlabs\.ai/projects/tesseract-core/stable/schema\.json",
 ]
 
 # Pages whose in-page anchors are generated client-side (or are browser text
