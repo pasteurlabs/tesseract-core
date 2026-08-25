@@ -55,6 +55,7 @@ def test_bad_docker_executable_env_var():
         "build_config.custom_build_steps",
         "build_config.base_image",
         "build_config.package_data",
+        "build_config.requirements.python_version",
     ],
 )
 def test_config_override(
@@ -109,6 +110,15 @@ def test_config_override(
                         "data/file.txt:/app/data/file.txt"
                     ]
                 },
+            ),
+        )
+    elif arg_to_override == "build_config.requirements.python_version":
+        # Nested keypath into a sub-model (the uv-pip provider settings). Quote the
+        # value so YAML keeps it a string rather than parsing 3.12 as a float.
+        argpairs = (
+            (
+                "'3.12'",
+                {("build_config", "requirements", "python_version"): "3.12"},
             ),
         )
     else:

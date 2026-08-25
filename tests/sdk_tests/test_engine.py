@@ -43,7 +43,9 @@ def test_prepare_build_context_python_version(tmp_path_factory):
 
     config = TesseractConfig(
         name="foobar",
-        build_config=TesseractBuildConfig(python_version="3.12"),
+        build_config=TesseractBuildConfig(
+            requirements={"provider": "uv-pip", "python_version": "3.12"}
+        ),
     )
     engine.prepare_build_context(src_dir, build_dir, config)
 
