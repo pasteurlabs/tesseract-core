@@ -20,7 +20,7 @@ from tesseract_core.sdk.api_parse import (
     validate_tesseract_api,
 )
 from tesseract_core.sdk.cli import AVAILABLE_RECIPES
-from tesseract_core.sdk.docker_client import Image, NotFound
+from tesseract_core.sdk.docker_client import Container, Image, NotFound
 from tesseract_core.sdk.exceptions import UserError
 
 
@@ -473,7 +473,25 @@ def test_run_debug(mocked_docker):
     assert engine.CONTAINER_DEBUGPY_PORT in res["ports"].values()
 
 
-def test_run_debug_host_network(mocked_docker):
+def test_run_warns_about_a_chosen_debugpy_port(mocked_docker, caplog):
+    """This command never hands control back, so there is nothing to check.
+
+    An image that ignores the request waits for a debugger on an unpublished
+    port, so say up front that a rebuild is what fixes it.
+    """
+    with caplog.at_level(logging.WARNING, logger="tesseract"):
+        engine.run_tesseract(
+            "foobar",
+            "apply",
+            ["{}"],
+            debug=True,
+            environment={"TESSERACT_DEBUGPY_PORT": "6789"},
+        )
+
+    assert any("debugger cannot attach" in r.message for r in caplog.records)
+
+
+def test_run_debugpy_host_network(mocked_docker):
     """With host networking, debugpy binds the host port directly (no mapping)."""
     res_out, _ = engine.run_tesseract(
         "foobar",
@@ -746,7 +764,7 @@ def test_serve_tesseract_volumes(mocked_docker, tmpdir):
         engine.serve("foobar", input_path=str(indir), output_path=str(indir))
 
 
-def test_serve_debug_port_distinct_from_api_port(mocked_docker, monkeypatch):
+def test_serve_debugpy_port_distinct_from_api_port(mocked_docker, monkeypatch):
     """The debugpy port must never reuse the API port.
 
     Regression test: in debug mode, ``serve`` picks two free ports (API and
@@ -779,6 +797,146 @@ def test_serve_debug_port_distinct_from_api_port(mocked_docker, monkeypatch):
     # Both the API and debugpy mappings must survive as separate entries.
     assert len(port_mappings) == 2, f"port mapping collapsed: {port_mappings}"
     assert len(set(host_ports)) == 2, f"debug and API host ports collided: {host_ports}"
+
+
+@pytest.fixture
+def skip_debugger_check(monkeypatch):
+    """The mocked container cannot report a debug address; tested separately."""
+    monkeypatch.setattr(engine, "_warn_if_debugger_unreachable", lambda *a: None)
+
+
+def test_chosen_container_debugpy_port_is_published(mocked_docker, skip_debugger_check):
+    """A caller-chosen port must be honoured, with the mapping following it.
+
+    Nothing is special about the default: the only requirement is that the port
+    debugpy binds and the container side of the published mapping agree.
+    """
+    res, _ = engine.serve(
+        "foobar", debug=True, environment={"TESSERACT_DEBUGPY_PORT": "6789"}
+    )
+    parsed = json.loads(res)
+
+    assert parsed["environment"]["TESSERACT_DEBUGPY_PORT"] == "6789"
+    # Both spellings, since TESSERACT_RUNTIME_* would otherwise take precedence
+    assert parsed["environment"]["TESSERACT_RUNTIME_DEBUGPY_PORT"] == "6789"
+    # The mapping must target what the container actually binds
+    assert "6789" in parsed["ports"].values()
+    assert engine.CONTAINER_DEBUGPY_PORT not in parsed["ports"].values()
+
+
+def test_default_container_debugpy_port_is_unchanged(mocked_docker):
+    """Left unset, the container side stays fixed, as #649 established."""
+    res, _ = engine.serve("foobar", debug=True)
+    parsed = json.loads(res)
+
+    assert parsed["environment"]["TESSERACT_DEBUGPY_PORT"] == (
+        engine.CONTAINER_DEBUGPY_PORT
+    )
+    assert engine.CONTAINER_DEBUGPY_PORT in parsed["ports"].values()
+
+
+def test_container_debugpy_port_colliding_with_api_is_rejected(mocked_docker):
+    """The one port that cannot work: the API already has it inside the container."""
+    with pytest.raises(UserError, match="already in use inside the container"):
+        engine.serve(
+            "foobar",
+            debug=True,
+            environment={"TESSERACT_DEBUGPY_PORT": engine.CONTAINER_API_PORT},
+        )
+
+
+class _ReportingContainer(Container):
+    """Minimal container that reports a given startup log."""
+
+    def __init__(self, report: bytes):
+        self._report = report
+
+    def logs(self, **kwargs):
+        return self._report
+
+
+@pytest.mark.parametrize(
+    "report,should_warn",
+    [
+        (b"Debugger listening on 0.0.0.0:6789\n", False),
+        # An image whose runtime ignores the setting binds the old default
+        (b"Debugger listening on 0.0.0.0:5678\n", True),
+        # One old enough not to report at all, or a reformatted line
+        (b"Uvicorn running\n", True),
+    ],
+)
+def test_warn_if_debugger_unreachable(report, should_warn, caplog):
+    """The container's own report of where it listens is what gives it away.
+
+    Nothing else fails when a request is ignored: the Tesseract is healthy and
+    only the debugger is unreachable. A warning rather than an error, since a
+    reformatted log line would otherwise condemn a working setup.
+    """
+    with caplog.at_level(logging.WARNING, logger="tesseract"):
+        engine._warn_if_debugger_unreachable(_ReportingContainer(report), "6789")
+
+    warned = any("no debugger can attach" in r.message for r in caplog.records)
+    assert warned is should_warn
+
+
+def test_serve_checks_only_a_requested_debugpy_port(mocked_docker, monkeypatch):
+    """The check costs a log read, and the default needs none."""
+    checked = []
+    monkeypatch.setattr(
+        engine, "_warn_if_debugger_unreachable", lambda _c, port: checked.append(port)
+    )
+
+    engine.serve("foobar", debug=True)
+    assert checked == []
+
+    engine.serve("foobar", debug=True, environment={"TESSERACT_DEBUGPY_PORT": "6789"})
+    assert checked == ["6789"]
+
+    # The SDK passes it as runtime_config, which only reaches the environment
+    # further down; capturing the request too early would skip the check there.
+    engine.serve("foobar", debug=True, runtime_config={"debugpy_port": 4321})
+    assert checked == ["6789", "4321"]
+
+
+@pytest.mark.parametrize(
+    "host",
+    ["127.0.0.1", "localhost", "::1", "127.1.2.3"],
+)
+def test_container_debugpy_loopback_host_is_rejected(mocked_docker, host):
+    """Only a loopback bind is impossible, and it is impossible at any version.
+
+    Publishing reaches the container from outside, which an address accepting
+    only local connections rejects -- and it fails unhelpfully, with docker's
+    proxy accepting on the host before failing to reach the container. Verified
+    against a current image.
+    """
+    with pytest.raises(UserError, match="only accepts local connections"):
+        engine.serve("foobar", debug=True, environment={"TESSERACT_DEBUGPY_HOST": host})
+
+
+@pytest.mark.parametrize("host", ["0.0.0.0", "172.17.0.3", "some-hostname"])
+def test_routable_container_debugpy_host_is_honoured(
+    mocked_docker, skip_debugger_check, host
+):
+    """Anything the published port can actually reach is fine, not just 0.0.0.0.
+
+    A container's own address on its network works, so do not insist on all
+    interfaces.
+    """
+    res, _ = engine.serve(
+        "foobar", debug=True, environment={"TESSERACT_DEBUGPY_HOST": host}
+    )
+    parsed = json.loads(res)
+
+    assert parsed["environment"]["TESSERACT_DEBUGPY_HOST"] == host
+    assert parsed["environment"]["TESSERACT_RUNTIME_DEBUGPY_HOST"] == host
+
+
+def test_container_debugpy_host_defaults_to_all_interfaces(mocked_docker):
+    """Unset, it must not inherit the runtime's loopback default."""
+    res, _ = engine.serve("foobar", debug=True)
+
+    assert json.loads(res)["environment"]["TESSERACT_DEBUGPY_HOST"] == "0.0.0.0"
 
 
 def test_serve_container_port_decoupled_from_host_port(mocked_docker):
