@@ -328,6 +328,12 @@ linkcheck_ignore = [
     # HTTPS connections, causing flaky connect timeouts in CI even though the site
     # is fine in a browser. Retries don't help — it can be down for minutes.
     r"https://enzyme\.mit\.edu/.*",
+    # The pasteurlabs.ai marketing site is fronted by Netlify, which throttles
+    # bursts of requests from datacenter IPs like GitHub Actions runners, causing
+    # read timeouts that outlast linkcheck_retries even though the links are fine
+    # in a browser. The docs.pasteurlabs.ai subdomain is hosted elsewhere (Read
+    # the Docs) and is left checked.
+    r"https://pasteurlabs\.ai(/.*)?$",
 ]
 
 # Pages whose in-page anchors are generated client-side (or are browser text

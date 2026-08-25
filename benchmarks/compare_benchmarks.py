@@ -29,6 +29,7 @@ def _short_name(bench: dict) -> str:
     Maps pytest-benchmark names like:
         "test_from_tesseract_api[1,000]" -> "api/apply_1,000"
         "test_containerized_http[100]"   -> "http/apply_100"
+        "test_containerized_http_shmem[100]" -> "http-shmem/apply_100"
         "test_containerized_cli[100]"    -> "cli/apply_100"
         "test_encoding[json_100]"        -> "encoding/json_100"
         "test_decoding[base64_10,000]"   -> "decoding/base64_10,000"
@@ -48,6 +49,8 @@ def _short_name(bench: dict) -> str:
         return f"api/apply_{params}"
     if func == "containerized_http":
         return f"http/apply_{params}"
+    if func == "containerized_http_shmem":
+        return f"http-shmem/apply_{params}"
     if func == "containerized_cli":
         return f"cli/apply_{params}"
 

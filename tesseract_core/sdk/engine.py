@@ -4,6 +4,7 @@
 """Engine to power Tesseract commands."""
 
 import datetime
+import ipaddress
 import linecache
 import logging
 import optparse
@@ -18,7 +19,7 @@ from contextlib import closing
 from importlib.metadata import requires
 from pathlib import Path
 from shutil import copy, copytree, rmtree
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, TypeAlias
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 
@@ -26,6 +27,8 @@ import requests
 import yaml
 from jinja2 import Environment, PackageLoader, StrictUndefined
 from packaging.requirements import Requirement
+from pydantic import TypeAdapter
+from pydantic import ValidationError as PydanticValidationError
 
 from .api_parse import TesseractConfig, get_config, validate_tesseract_api
 from .docker_client import (
@@ -46,6 +49,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("tesseract")
 docker_client = CLIDockerClient()
+
+# Output serialization formats. Single SDK-side source of truth (re-used across
+# the SDK, e.g. sdk.tesseract). Mirrors runtime.file_interactions.supported_format_type
+# but is defined here so the SDK does not eagerly import the (optional) runtime
+# package; a test asserts the two stay in sync.
+OutputFormat: TypeAlias = Literal["json", "json+base64", "json+binref", "json+cuda_ipc"]
 
 # Fixed port the API server binds *inside* the container when port-mapping is
 # used (i.e. everything except host networking). The container has its own
@@ -544,6 +553,49 @@ def init_api(
     return target_dir / "tesseract_api.py"
 
 
+def _coerce_config_override(value: Any, annotation: Any, path: tuple[str, ...]) -> Any:
+    """Coerce a config override value to the target field's declared type.
+
+    CLI overrides arrive as raw strings (see ``_parse_config_override``). We first
+    interpret the string as YAML so that structured values (lists, dicts, ints,
+    bools) work, then fall back to the raw string if that fails to validate. This
+    lets string fields like ``python_version=3.12`` work without the user having
+    to quote the value, while ``3.10`` is preserved verbatim instead of being
+    parsed as the float ``3.1``. Non-string values (e.g. passed via the Python
+    SDK) are validated as-is.
+    """
+    if annotation is None:
+        # Unknown field; let the assignment raise a validation error as usual.
+        return value
+
+    adapter = TypeAdapter(annotation)
+
+    if not isinstance(value, str):
+        return adapter.validate_python(value)
+
+    # Try the YAML-interpreted value first so structured values (lists, dicts,
+    # ints, bools) work, then fall back to the raw string so string fields accept
+    # unquoted scalars. If both fail, report the error from the YAML-interpreted
+    # value: it matches the user's evident intent, whereas the raw-string error
+    # is often a misleading "not a valid <type>" for non-string fields.
+    try:
+        parsed = yaml.safe_load(value)
+    except yaml.YAMLError:
+        parsed = value
+
+    try:
+        return adapter.validate_python(parsed)
+    except PydanticValidationError as parsed_error:
+        try:
+            return adapter.validate_python(value)
+        except PydanticValidationError:
+            keypath = ".".join(path)
+            raise UserError(
+                f'Invalid value "{value}" for config override "{keypath}": '
+                f"{parsed_error}"
+            ) from parsed_error
+
+
 def build_tesseract(
     src_dir: str | Path,
     image_tag: str | None,
@@ -581,9 +633,24 @@ def build_tesseract(
     if config_override is not None:
         for path, value in config_override.items():
             c = config
-            for k in path[:-1]:
-                c = getattr(c, k)
-            setattr(c, path[-1], value)
+            for depth, k in enumerate(path):
+                fields = getattr(type(c), "model_fields", None)
+                if fields is None or k not in fields:
+                    keypath = ".".join(path)
+                    reached = ".".join(path[:depth]) or "(top level)"
+                    valid = (
+                        ", ".join(sorted(fields)) if fields is not None else "(none)"
+                    )
+                    raise UserError(
+                        f'Invalid config override "{keypath}": '
+                        f'"{".".join(path[: depth + 1])}" is not a known config '
+                        f"option. Valid options under {reached}: {valid}."
+                    )
+                if depth == len(path) - 1:
+                    annotation = fields[k].annotation
+                    setattr(c, k, _coerce_config_override(value, annotation, path))
+                else:
+                    c = getattr(c, k)
 
     image_name = config.name
     if image_tag:
@@ -728,6 +795,97 @@ class _PortInUseError(RuntimeError):
 _PORT_CONFLICT_MARKERS = ("address already in use", "port is already allocated")
 
 
+def _warn_if_debugger_unreachable(container: Container, expected_port: str) -> None:
+    """Warn if the container did not bind the debug port we published a mapping to.
+
+    Which port it binds is decided by the runtime inside the image, and one built
+    before the port was configurable ignores it and uses the default, leaving the
+    mapping published with nothing behind it. Nothing else fails -- the Tesseract
+    is healthy and only the debugger is unreachable -- so it would otherwise look
+    like it worked.
+
+    A warning rather than an error, because this reads a log line the runtime
+    prints: reformatting it there would make this miss and condemn a working
+    setup. Serving is still useful either way.
+    """
+    logs = container.logs(stdout=True, stderr=True).decode("utf-8", errors="replace")
+    match = re.search(r"Debugger listening on \S+?:(\d+)", logs)
+    if match is not None and match.group(1) == expected_port:
+        return
+    bound = f"port {match.group(1)}" if match else "an unknown port"
+    logger.warning(
+        f"Tesseract is debugging on {bound}, not the requested {expected_port}, "
+        "so no debugger can attach. Rebuild it to choose the port."
+    )
+
+
+def _get_runtime_setting(environment: dict[str, str], setting: str) -> str | None:
+    """Read a runtime setting from an environment, under either name it takes.
+
+    Typer binds every config option to ``TESSERACT_RUNTIME_*`` as well, and that
+    takes precedence over the ``TESSERACT_*`` the config itself reads.
+    """
+    return environment.get(f"TESSERACT_RUNTIME_{setting}") or environment.get(
+        f"TESSERACT_{setting}"
+    )
+
+
+def _is_loopback(host: str) -> bool:
+    """Whether an address only accepts connections from the same host."""
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return host.lower() == "localhost"
+
+
+def _resolve_container_debug_address(
+    requested_port: str | None,
+    requested_host: str | None,
+    *,
+    port_mapped: bool,
+    reserved_ports: Collection[str],
+) -> tuple[dict[str, str], str]:
+    """Settle the debugpy address for a container, without touching the caller's.
+
+    A published mapping sends a host port to a port on the container, so the port
+    debugpy binds and the container side of that mapping must agree. Nothing is
+    special about the default, so a chosen port is honoured and published against.
+    Refused only where it cannot work: a port already taken inside the container,
+    or, under port mapping, a loopback host -- publishing reaches the container
+    over its network interface, so it cannot see a debugger that only accepts
+    connections from inside. Any routable address is fine, including the
+    container's own.
+
+    Returns:
+        Environment entries to apply, and the port debugpy will bind, which the
+        caller must publish against.
+    """
+    port = requested_port or CONTAINER_DEBUGPY_PORT
+
+    if port in reserved_ports:
+        raise UserError(
+            f"Port {port} is already in use inside the container. Choose another "
+            f"debug port, or leave it unset to use {CONTAINER_DEBUGPY_PORT}."
+        )
+
+    if port_mapped and requested_host is not None and _is_loopback(requested_host):
+        raise UserError(
+            f"TESSERACT_DEBUGPY_HOST={requested_host} will not work in a "
+            "container: its published port reaches the container from outside, "
+            "which an address that only accepts local connections rejects. Leave "
+            "it unset."
+        )
+
+    # Written under both names, so a value inherited under the other cannot win.
+    updates = {f"TESSERACT{p}_DEBUGPY_PORT": port for p in ("", "_RUNTIME")}
+    if port_mapped:
+        # All interfaces unless asked for something specific, which the runtime
+        # would otherwise default to loopback and be unreachable.
+        host = requested_host or "0.0.0.0"
+        updates.update({f"TESSERACT{p}_DEBUGPY_HOST": host for p in ("", "_RUNTIME")})
+    return updates, port
+
+
 def _is_port_conflict(stderr: str) -> bool:
     """Whether runtime stderr/logs indicate a host port collision."""
     lowered = stderr.lower()
@@ -816,7 +974,7 @@ def serve(
     memory: str | None = None,
     input_path: str | Path | None = None,
     output_path: str | Path | None = None,
-    output_format: Literal["json", "json+base64", "json+binref"] | None = None,
+    output_format: OutputFormat | None = None,
     docker_args: list[str] | None = None,
     runtime_config: dict[str, Any] | None = None,
     skip_health_check: bool = False,
@@ -860,9 +1018,10 @@ def serve(
         raise ValueError("Tesseract image name must be provided")
 
     if output_format == "json+binref" and output_path is None:
-        logger.warning(
-            "Consider specifying --output-path when using the 'json+binref' output format "
-            "to easily retrieve .bin files."
+        raise UserError(
+            "The 'json+binref' output format writes array buffers to .bin files, "
+            "which are lost when the container is torn down unless an output path "
+            "is set. Specify one with --output-path (or output_path=...)."
         )
 
     image = docker_client.images.get(image_name)
@@ -896,6 +1055,11 @@ def serve(
 
     if output_format:
         environment["TESSERACT_OUTPUT_FORMAT"] = output_format
+
+    # Read after runtime_config lands in the environment, which is how the SDK
+    # passes it. Only a port the caller asked for needs checking afterwards; the
+    # default works whatever the image was built with.
+    requested_debugpy_port = _get_runtime_setting(environment, "DEBUGPY_PORT")
 
     # A port picked by get_free_port can be grabbed by another process between
     # our check and the container binding it (an unavoidable race, since the
@@ -945,13 +1109,25 @@ def serve(
         args.extend(["--host", "0.0.0.0"])
 
         if debug:
-            # debugpy binds a fixed port inside the container; only its host
-            # mapping is dynamic. Exclude the host API port so the two host
-            # ports never collide (they share the same range).
+            environment["TESSERACT_DEBUG"] = "1"
+            debug_updates, container_debugpy_port = _resolve_container_debug_address(
+                requested_debugpy_port,
+                _get_runtime_setting(environment, "DEBUGPY_HOST"),
+                port_mapped=port_mappings is not None,
+                reserved_ports={container_api_port},
+            )
+            environment.update(debug_updates)
+            # Only the host side of the debugger's mapping is dynamic. Exclude
+            # the host API port so the two host ports never collide (they share
+            # the same range).
             debugpy_port = str(get_free_port(exclude=(int(port),)))
             if port_mappings is not None:
-                port_mappings[f"{host_ip}:{debugpy_port}"] = CONTAINER_DEBUGPY_PORT
-            environment["TESSERACT_DEBUG"] = "1"
+                port_mappings[f"{host_ip}:{debugpy_port}"] = container_debugpy_port
+            else:
+                # Host networking: the container binds the host's namespace
+                # directly, so there is nothing to map and the port it binds is
+                # the one to attach to.
+                debugpy_port = container_debugpy_port
 
         extra_args = [
             "--restart",
@@ -972,6 +1148,27 @@ def serve(
 
         if docker_args:
             extra_args.extend(docker_args)
+
+        # CUDA IPC needs a GPU and a shared IPC namespace between host and
+        # container. Wire both up whenever the experimental flag is set (the
+        # only reason to enable it is IPC).
+        cuda_ipc_enabled = environment.get(
+            "TESSERACT_ENABLE_EXPERIMENTAL_CUDA_IPC"
+        ) in ("1", "true", "True")
+
+        if cuda_ipc_enabled:
+            if not gpus:
+                raise ValueError(
+                    "enable_experimental_cuda_ipc requires GPU access, but no GPUs "
+                    "were requested. Pass gpus=['all'] or specific GPU IDs."
+                )
+            extra_args.extend(["--ipc=host"])
+        elif output_format == "json+cuda_ipc":
+            raise ValueError(
+                "The 'json+cuda_ipc' output format is experimental and must be "
+                "explicitly enabled. Pass "
+                "runtime_config={'enable_experimental_cuda_ipc': True}."
+            )
 
         if network is not None:
             _ensure_network_exists(network)
@@ -1013,10 +1210,15 @@ def serve(
             continue
         break
 
+    if debug and requested_debugpy_port and not skip_health_check:
+        _warn_if_debugger_unreachable(container, container_debugpy_port)
+
     logger.info(f"Serving Tesseract at http://{ping_ip}:{port}")
     logger.info(f"View Tesseract: http://{ping_ip}:{port}/docs")
     if debug:
-        logger.info(f"Debugpy server listening at http://{ping_ip}:{debugpy_port}")
+        logger.info(
+            f"Debug mode enabled. Attach a debugger to {ping_ip}:{debugpy_port}"
+        )
 
     return container.name, container
 
@@ -1165,7 +1367,7 @@ def run_tesseract(
     memory: str | None = None,
     input_path: str | Path | None = None,
     output_path: str | Path | None = None,
-    output_format: Literal["json", "json+base64", "json+binref"] | None = None,
+    output_format: OutputFormat | None = None,
     output_file: str | None = None,
     docker_args: list[str] | None = None,
     debug: bool = False,
@@ -1202,9 +1404,10 @@ def run_tesseract(
         Tuple with the stdout and stderr of the Tesseract.
     """
     if output_format == "json+binref" and output_path is None:
-        logger.warning(
-            "Consider specifying --output-path when using the 'json+binref' output format "
-            "to easily retrieve .bin files."
+        raise UserError(
+            "The 'json+binref' output format writes array buffers to .bin files, "
+            "which are lost when the container is torn down unless an output path "
+            "is set. Specify one with --output-path (or output_path=...)."
         )
 
     if user is None:
@@ -1264,16 +1467,34 @@ def run_tesseract(
         _ensure_network_exists(network)
 
     if debug:
+        requested_debugpy_port = _get_runtime_setting(environment, "DEBUGPY_PORT")
         environment["TESSERACT_DEBUG"] = "1"
+        debug_updates, container_debugpy_port = _resolve_container_debug_address(
+            requested_debugpy_port,
+            _get_runtime_setting(environment, "DEBUGPY_HOST"),
+            port_mapped=network != "host",
+            reserved_ports=set(),
+        )
+        environment.update(debug_updates)
+        if requested_debugpy_port:
+            # This command blocks until a debugger attaches and never hands
+            # control back, so unlike `serve` there is no point at which we could
+            # check the port was honoured.
+            logger.warning(
+                "Cannot verify whether the debugpy port is configurable when "
+                "using `tesseract run`. Configuration is not possible for some "
+                "old Tesseracts. Rebuild the Tesseract if your debugger cannot "
+                "attach."
+            )
         # `network="host"` binds the container's debugpy port directly on the host,
         # so no explicit port mapping is needed (and would actually be rejected).
         if network == "host":
-            debugpy_port = CONTAINER_DEBUGPY_PORT
+            debugpy_port = container_debugpy_port
         else:
             debugpy_port = str(get_free_port())
             if ports is None:
                 ports = {}
-            ports[f"127.0.0.1:{debugpy_port}"] = CONTAINER_DEBUGPY_PORT
+            ports[f"127.0.0.1:{debugpy_port}"] = container_debugpy_port
         logger.info(
             f"Debug mode enabled. Attach a debugger to localhost:{debugpy_port} "
             "to start execution (see the 'Debug mode' section of the docs for a "

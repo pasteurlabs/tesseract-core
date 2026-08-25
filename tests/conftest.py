@@ -4,6 +4,7 @@
 import json
 import os
 import random
+import shutil
 import string
 import subprocess
 import sys
@@ -77,6 +78,36 @@ def pytest_collection_modifyitems(config, items):
         for item in items:
             if dir_mapping[item] == "endtoend_tests":
                 item.add_marker(pytest.mark.skip(reason=skip_reason))
+
+    # Auto-skip GPU-marked tests when no CUDA GPU is present, so a full test run
+    # on a GPU-less machine (including CI) is a benign skip rather than a failure
+    # and does not depend on passing `-m "not gpu"`.
+    if not _has_cuda_gpu():
+        skip_gpu = pytest.mark.skip(reason="No CUDA GPU available")
+        for item in items:
+            if item.get_closest_marker("gpu") is not None:
+                item.add_marker(skip_gpu)
+
+
+def _has_cuda_gpu() -> bool:
+    """Whether a CUDA GPU is visible on this host (best effort, via nvidia-smi).
+
+    Probed through ``nvidia-smi`` rather than importing CuPy/torch so the check
+    stays dependency-free and cheap on GPU-less runners.
+    """
+    if not shutil.which("nvidia-smi"):
+        return False
+    try:
+        return (
+            subprocess.run(
+                ["nvidia-smi", "-L"],
+                capture_output=True,
+                timeout=10,
+            ).returncode
+            == 0
+        )
+    except Exception:
+        return False
 
 
 @pytest.fixture(scope="session", autouse=True)

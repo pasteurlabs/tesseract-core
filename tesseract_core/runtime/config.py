@@ -36,6 +36,8 @@ class RuntimeConfig(BaseModel):
     description: str = ""
     version: str = "unknown"
     debug: bool = False
+    debugpy_host: str = "127.0.0.1"
+    debugpy_port: int = 5678
     input_path: str = "."
     output_path: str = "."
     output_format: supported_format_type = "json"
@@ -47,6 +49,12 @@ class RuntimeConfig(BaseModel):
     )
     profiling: bool = False
     tracing: bool = False
+    # Experimental, unstable opt-in: allow the json+cuda_ipc output format, which
+    # passes GPU arrays by CUDA IPC handle instead of serializing their data.
+    # Off by default so a Tesseract never produces IPC handles unless explicitly
+    # enabled (e.g. TESSERACT_ENABLE_EXPERIMENTAL_CUDA_IPC=1). May change or be
+    # removed without notice.
+    enable_experimental_cuda_ipc: bool = False
 
     @field_validator("input_path", "output_path")
     @classmethod

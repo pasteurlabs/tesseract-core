@@ -2,12 +2,16 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Stage 1: Build Python environment and install requirements
+# uv is pinned to a released version for reproducible builds; bump it manually
+# to pick up new uv features and newer bundled CPython builds.
 # For "native", pin to $BUILDPLATFORM (the host platform BuildKit runs on) so the
 # base image manifest is re-resolved for the host architecture instead of reusing a
 # wrong-arch image that may already be in the local cache.
 {% if config.build_config.target_platform.strip() == "native" %}
+FROM --platform=$BUILDPLATFORM ghcr.io/astral-sh/uv:0.12.5 AS uv
 FROM --platform=$BUILDPLATFORM {{ config.build_config.base_image }} AS build_stage
 {% else %}
+FROM --platform={{ config.build_config.target_platform }} ghcr.io/astral-sh/uv:0.12.5 AS uv
 FROM --platform={{ config.build_config.target_platform }} {{ config.build_config.base_image }} AS build_stage
 {% endif %}
 
@@ -15,7 +19,7 @@ FROM --platform={{ config.build_config.target_platform }} {{ config.build_config
 USER root
 
 # Obtain uv and companions
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+COPY --from=uv /uv /uvx /bin/
 
 ENV UV_LINK_MODE=copy
 
