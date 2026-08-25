@@ -575,15 +575,13 @@ def dump_cuda_ipc_arraydict(arr: Any) -> ArrayDict:
         elif hasattr(dev, "index") and dev.index is not None:
             device = dev.index  # PyTorch
 
+    handle_b64 = pybase64.b64encode_as_string(handle_bytes)
     return {
         "object_type": "array",
         "shape": list(shape),
         "dtype": dtype_name,
         "data": {
-            "handle": pybase64.b64encode_as_string(handle_bytes),
-            "device": device,
-            "storage_offset": storage_offset,
-            "storage_size": storage_size,
+            "buffer": f"{device}:{handle_b64}:{storage_offset}:{storage_size}",
             "encoding": "cuda_ipc",
         },
     }
@@ -921,10 +919,12 @@ def load_cuda_ipc_arraydict(val: ArrayDict) -> "IpcDeviceArray":
     """
     cudart = _get_cudart()
 
-    data = val["data"]
-    handle_bytes = pybase64.b64decode(data["handle"], validate=True)
-    device = data["device"]
-    storage_offset = data.get("storage_offset", 0)
+    device_str, handle_b64, storage_offset_str, _storage_size_str = val["data"][
+        "buffer"
+    ].split(":")
+    handle_bytes = pybase64.b64decode(handle_b64, validate=True)
+    device = int(device_str)
+    storage_offset = int(storage_offset_str)
 
     dtype = np.dtype(val["dtype"])
     shape = tuple(val["shape"])

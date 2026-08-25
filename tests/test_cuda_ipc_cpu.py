@@ -29,6 +29,18 @@ import pytest
 
 from tesseract_core.runtime import array_encoding, cuda_ipc
 
+
+def _unpack_cuda_ipc(data: dict) -> dict:
+    """Split a packed cuda_ipc ``buffer`` back into its named components."""
+    device, handle, storage_offset, storage_size = data["buffer"].split(":")
+    return {
+        "device": int(device),
+        "handle": handle,
+        "storage_offset": int(storage_offset),
+        "storage_size": int(storage_size),
+    }
+
+
 # ── Fakes ───────────────────────────────────────────────────────────────
 
 
@@ -141,37 +153,42 @@ def test_dump_assembles_payload_and_offset(patched_cuda):
     assert out["dtype"] == "float32"
     data = out["data"]
     assert data["encoding"] == "cuda_ipc"
+    unpacked = _unpack_cuda_ipc(data)
     # base = 0x5000 - 256; offset = data_ptr - base = 256; size from fake = 4096
-    assert data["storage_offset"] == 256
-    assert data["storage_size"] == 4096
+    assert unpacked["storage_offset"] == 256
+    assert unpacked["storage_size"] == 4096
     # The handle must be taken on the allocation *base*, not the data pointer.
     assert patched_cuda["get_handle"] == [0x5000 - 256]
     # Handle is base64 of the 64 raw bytes.
     import pybase64
 
-    assert len(pybase64.b64decode(data["handle"])) == cuda_ipc._CUDA_IPC_HANDLE_SIZE
+    assert len(pybase64.b64decode(unpacked["handle"])) == cuda_ipc._CUDA_IPC_HANDLE_SIZE
 
 
 def test_dump_device_detection_cupy(patched_cuda):
     arr = FakeCudaArray((3,), "<f4", device=_CuPyDevice(id=2))
     out = cuda_ipc.dump_cuda_ipc_arraydict(arr)
-    assert out["data"]["device"] == 2
+    assert _unpack_cuda_ipc(out["data"])["device"] == 2
 
 
 def test_dump_device_detection_torch(patched_cuda):
     arr = FakeCudaArray((3,), "<f4", device=_TorchDevice(index=3))
     out = cuda_ipc.dump_cuda_ipc_arraydict(arr)
-    assert out["data"]["device"] == 3
+    assert _unpack_cuda_ipc(out["data"])["device"] == 3
 
 
 def test_dump_device_defaults_to_zero(patched_cuda):
     # No .device attribute, and torch tensors with device.index == None.
     assert (
-        cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((3,), "<f4"))["data"]["device"]
+        _unpack_cuda_ipc(
+            cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((3,), "<f4"))["data"]
+        )["device"]
         == 0
     )
     arr = FakeCudaArray((3,), "<f4", device=_TorchDevice(index=None))
-    assert cuda_ipc.dump_cuda_ipc_arraydict(arr)["data"]["device"] == 0
+    assert (
+        _unpack_cuda_ipc(cuda_ipc.dump_cuda_ipc_arraydict(arr)["data"])["device"] == 0
+    )
 
 
 def test_dump_rejects_non_cuda_array(patched_cuda):
@@ -225,8 +242,9 @@ def test_dump_falls_back_to_staging_on_ipc_reject(patched_cuda, monkeypatch):
     # Staging was invoked on the array's own data pointer and byte count.
     assert patched_cuda["stage"] == [(0x5000, 128)]
     # Payload reflects the staging buffer: offset 0, size == nbytes.
-    assert out["data"]["storage_offset"] == 0
-    assert out["data"]["storage_size"] == 128
+    unpacked = _unpack_cuda_ipc(out["data"])
+    assert unpacked["storage_offset"] == 0
+    assert unpacked["storage_size"] == 128
     # Staging pointer registered for cudaFree.
     assert cuda_ipc._CUDA_IPC_STAGING_BUFFERS == [0x9000]
 
@@ -455,17 +473,13 @@ def patched_decode(monkeypatch):
 def _encoded(shape, dtype, device, offset, storage_size, fill=b"\x02"):
     import pybase64
 
+    handle = pybase64.b64encode_as_string(fill * cuda_ipc._CUDA_IPC_HANDLE_SIZE)
     return {
         "object_type": "array",
         "shape": list(shape),
         "dtype": dtype,
         "data": {
-            "handle": pybase64.b64encode_as_string(
-                fill * cuda_ipc._CUDA_IPC_HANDLE_SIZE
-            ),
-            "device": device,
-            "storage_offset": offset,
-            "storage_size": storage_size,
+            "buffer": f"{device}:{handle}:{offset}:{storage_size}",
             "encoding": "cuda_ipc",
         },
     }

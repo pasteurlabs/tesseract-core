@@ -121,29 +121,35 @@ class JsonArrayData(BaseModel):
 
     buffer: JsonValue
     encoding: Literal["json"]
+    compression: None = None
+
     model_config = ConfigDict(extra="forbid")
 
 
 class CudaIpcArrayData(BaseModel):
     """Data structure for CUDA IPC shared GPU memory handles.
 
-    The handle is the base64-encoded 64-byte cudaIpcMemHandle_t.
-    The device is the CUDA device ordinal the memory lives on.
-    storage_offset is the byte offset within the cudaMalloc allocation.
-    storage_size is the total size in bytes of the cudaMalloc allocation.
+    The buffer field packs all four components as
+    ``<device>:<handle>:<storage_offset>:<storage_size>``, where:
+
+    - ``device`` is the CUDA device ordinal the memory lives on,
+    - ``handle`` is the base64-encoded 64-byte cudaIpcMemHandle_t (its base64
+      alphabet never contains ``:``, so it is safe as a field delimiter),
+    - ``storage_offset`` is the byte offset within the cudaMalloc allocation,
+    - ``storage_size`` is the total size in bytes of the cudaMalloc allocation.
 
     This is only the JSON *schema* for the encoding; all the CUDA runtime
     machinery that produces and consumes it lives in
     :mod:`tesseract_core.runtime.cuda_ipc`.
     """
 
-    handle: StrictStr = Field(
-        description="Base64-encoded cudaIpcMemHandle_t (64 bytes)"
+    buffer: StrictStr = Field(
+        pattern=r"^\d+:[A-Za-z0-9+/=]+:\d+:\d+$",
+        description="Packed CUDA IPC descriptor: <device>:<handle>:<storage_offset>:<storage_size>",
     )
-    device: int = Field(description="CUDA device ordinal")
-    storage_offset: int = Field(default=0, description="Byte offset within allocation")
-    storage_size: int = Field(description="Total allocation size in bytes")
     encoding: Literal["cuda_ipc"]
+    compression: None = None
+
     model_config = ConfigDict(extra="forbid")
 
 
