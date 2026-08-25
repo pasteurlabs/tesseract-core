@@ -61,6 +61,10 @@ def expand_path_pattern(path_pattern: str, inputs: dict[str, Any]) -> list[str]:
         if not parts:
             return [".".join(current_path)]
 
+        if current_inputs is None:
+            # An optional container (e.g. `list | None`) that was not supplied.
+            return []
+
         paths = []
         part = parts[0]
 

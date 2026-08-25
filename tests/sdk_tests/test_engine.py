@@ -3,6 +3,7 @@
 
 import json
 import logging
+import re
 import socket
 import time
 from contextlib import closing
@@ -159,6 +160,39 @@ def test_build_tesseract_requires_secret_for_host_credential(tmp_path):
 
     with pytest.raises(ValueError, match="Missing build secret"):
         engine.build_tesseract(tmp_path, None, generate_only=True)
+
+
+def test_prepare_build_context_uv_platform(tmp_path_factory):
+    """The uv image must be pinned to the same platform as the build stage.
+
+    Otherwise `uv python install` fetches an interpreter for the host arch
+    instead of the target arch (see #684).
+    """
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "foo").touch()
+
+    # Non-native target: uv stage is pinned to the target platform, not the host.
+    build_dir = tmp_path_factory.mktemp("build")
+    config = TesseractConfig(
+        name="foobar",
+        build_config=TesseractBuildConfig(target_platform="linux/amd64"),
+    )
+    engine.prepare_build_context(src_dir, build_dir, config)
+    dockerfile = (build_dir / "Dockerfile").read_text()
+    assert re.search(
+        r"FROM --platform=linux/amd64 ghcr\.io/astral-sh/uv:\S+ AS uv", dockerfile
+    )
+    assert "COPY --from=uv /uv /uvx /bin/" in dockerfile
+
+    # Native target: uv stage follows $BUILDPLATFORM.
+    build_dir2 = tmp_path_factory.mktemp("build2")
+    config_native = TesseractConfig(name="foobar")
+    engine.prepare_build_context(src_dir, build_dir2, config_native)
+    dockerfile_native = (build_dir2 / "Dockerfile").read_text()
+    assert re.search(
+        r"FROM --platform=\$BUILDPLATFORM ghcr\.io/astral-sh/uv:\S+ AS uv",
+        dockerfile_native,
+    )
 
 
 def test_prepare_build_context_env(tmp_path_factory):
