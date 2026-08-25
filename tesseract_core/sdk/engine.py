@@ -44,6 +44,7 @@ from .docker_client import (
     NotFound,
     build_docker_image,
     is_podman,
+    is_running,
 )
 from .exceptions import UserError
 
@@ -994,9 +995,7 @@ def _wait_for_health(
         time.sleep(0.1)
         timeout -= 0.1
 
-        container_status = docker_client.containers.get(container.id).status
-
-        if timeout < 0 or container_status != "running":
+        if timeout < 0 or not is_running(container):
             logs_text = ""
             try:
                 logs_text = container.logs(stdout=True, stderr=True).decode()
