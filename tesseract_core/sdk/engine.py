@@ -626,11 +626,24 @@ def build_tesseract(
     if config_override is not None:
         for path, value in config_override.items():
             c = config
-            for k in path[:-1]:
-                c = getattr(c, k)
-            field = type(c).model_fields.get(path[-1])
-            annotation = field.annotation if field is not None else None
-            setattr(c, path[-1], _coerce_config_override(value, annotation, path))
+            for depth, k in enumerate(path):
+                fields = getattr(type(c), "model_fields", None)
+                if fields is None or k not in fields:
+                    keypath = ".".join(path)
+                    reached = ".".join(path[:depth]) or "(top level)"
+                    valid = (
+                        ", ".join(sorted(fields)) if fields is not None else "(none)"
+                    )
+                    raise UserError(
+                        f'Invalid config override "{keypath}": '
+                        f'"{".".join(path[: depth + 1])}" is not a known config '
+                        f"option. Valid options under {reached}: {valid}."
+                    )
+                if depth == len(path) - 1:
+                    annotation = fields[k].annotation
+                    setattr(c, k, _coerce_config_override(value, annotation, path))
+                else:
+                    c = getattr(c, k)
 
     image_name = config.name
     if image_tag:

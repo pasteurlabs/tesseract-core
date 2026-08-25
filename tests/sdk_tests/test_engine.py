@@ -123,6 +123,40 @@ def test_coerce_config_override_reports_structured_error():
     assert "not a valid tuple" not in message
 
 
+@pytest.mark.parametrize(
+    "keypath,offending",
+    [
+        # Unknown top-level option.
+        (("nonexistent",), "nonexistent"),
+        # Unknown intermediate group (nothing under it can be valid).
+        (("nonexistent", "python_version"), "nonexistent"),
+        # Unknown leaf under a valid group.
+        (("build_config", "nonexistent"), "build_config.nonexistent"),
+        # Descending into a non-model field (e.g. a dict) is also rejected.
+        (("env", "SOME_VAR"), "env.SOME_VAR"),
+    ],
+)
+def test_build_tesseract_unknown_config_override(
+    dummy_tesseract_package, keypath, offending
+):
+    """An unknown config override path raises a helpful UserError, not a traceback.
+
+    The path is validated before the image build, so no Docker mock is needed.
+    """
+    with pytest.raises(UserError) as excinfo:
+        engine.build_tesseract(
+            dummy_tesseract_package,
+            None,
+            config_override={keypath: "whatever"},
+            generate_only=True,
+        )
+    message = str(excinfo.value)
+    assert ".".join(keypath) in message
+    assert f'"{offending}" is not a known config option' in message
+    # The valid options at the offending level are listed to guide the user.
+    assert "Valid options under" in message
+
+
 def test_prepare_build_context_env(tmp_path_factory):
     """Test that env variables are rendered as ENV lines in the Dockerfile."""
     src_dir = tmp_path_factory.mktemp("src")
