@@ -1,0 +1,6 @@
+name: "thermal-solver"
+version: "0.1.0"
+description: "2D steady-state heat equation solver with Gaussian source parameterization"
+
+build_config:
+  target_platform: "native"
