@@ -60,6 +60,104 @@ def test_prepare_build_context_python_version(tmp_path_factory):
     assert "TESSERACT_PYTHON_VERSION" not in dockerfile_default
 
 
+@pytest.mark.parametrize(
+    "keypath,raw_value,expected",
+    [
+        # Numeric-looking string fields must not be parsed as numbers (#678).
+        (("build_config", "python_version"), "3.12", "3.12"),
+        # Trailing zero must be preserved (YAML would parse 3.10 -> 3.1).
+        (("build_config", "python_version"), "3.10", "3.10"),
+        # Explicit quoting still works.
+        (("build_config", "python_version"), '"3.12"', "3.12"),
+        (("build_config", "target_platform"), "linux/arm64", "linux/arm64"),
+        # Non-string fields still get their structured value.
+        (("build_config", "inherit_base_image_packages"), "true", True),
+        (("build_config", "extra_packages"), "[a, b]", ("a", "b")),
+        # Values that aren't valid YAML fall back to the raw string.
+        (("build_config", "target_platform"), "@invalid", "@invalid"),
+    ],
+)
+def test_coerce_config_override(keypath, raw_value, expected):
+    """Config override values are coerced to the target field's declared type."""
+    config = TesseractConfig(name="demo")
+    c = config
+    for k in keypath[:-1]:
+        c = getattr(c, k)
+    annotation = type(c).model_fields[keypath[-1]].annotation
+    coerced = engine._coerce_config_override(raw_value, annotation, keypath)
+    assert coerced == expected
+    # The coerced value must be assignable without a validation error.
+    setattr(c, keypath[-1], coerced)
+
+
+def test_coerce_config_override_native_value():
+    """Non-string values (e.g. from the Python SDK) are validated as-is."""
+    annotation = TesseractBuildConfig.model_fields["extra_packages"].annotation
+    coerced = engine._coerce_config_override(
+        ["a", "b"], annotation, ("build_config", "extra_packages")
+    )
+    assert coerced == ("a", "b")
+
+
+def test_coerce_config_override_unknown_field():
+    """An unknown field (no annotation) passes the value through unchanged.
+
+    The subsequent assignment then raises the usual validation error.
+    """
+    assert engine._coerce_config_override("whatever", None, ("nope",)) == "whatever"
+
+
+def test_coerce_config_override_reports_structured_error():
+    """A structurally-wrong value surfaces the error against the parsed value.
+
+    The raw-string fallback exists for string fields; for a non-string field it
+    would report a misleading "not a valid <type>", masking the real problem. The
+    error must instead describe the parsed value (e.g. wrong tuple arity).
+    """
+    keypath = ("build_config", "package_data")
+    annotation = TesseractBuildConfig.model_fields["package_data"].annotation
+    # package_data entries are (source, destination) pairs; three items is wrong.
+    with pytest.raises(UserError) as excinfo:
+        engine._coerce_config_override("[[a, b, c]]", annotation, keypath)
+    message = str(excinfo.value)
+    assert "at most 2 items" in message
+    assert "not a valid tuple" not in message
+
+
+@pytest.mark.parametrize(
+    "keypath,offending",
+    [
+        # Unknown top-level option.
+        (("nonexistent",), "nonexistent"),
+        # Unknown intermediate group (nothing under it can be valid).
+        (("nonexistent", "python_version"), "nonexistent"),
+        # Unknown leaf under a valid group.
+        (("build_config", "nonexistent"), "build_config.nonexistent"),
+        # Descending into a non-model field (e.g. a dict) is also rejected.
+        (("env", "SOME_VAR"), "env.SOME_VAR"),
+    ],
+)
+def test_build_tesseract_unknown_config_override(
+    dummy_tesseract_package, keypath, offending
+):
+    """An unknown config override path raises a helpful UserError, not a traceback.
+
+    The path is validated before the image build, so no Docker mock is needed.
+    """
+    with pytest.raises(UserError) as excinfo:
+        engine.build_tesseract(
+            dummy_tesseract_package,
+            None,
+            config_override={keypath: "whatever"},
+            generate_only=True,
+        )
+    message = str(excinfo.value)
+    assert ".".join(keypath) in message
+    assert f'"{offending}" is not a known config option' in message
+    # The valid options at the offending level are listed to guide the user.
+    assert "Valid options under" in message
+
+
 def test_prepare_build_context_uv_platform(tmp_path_factory):
     """The uv image must be pinned to the same platform as the build stage.
 
