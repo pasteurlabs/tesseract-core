@@ -110,7 +110,7 @@ Two things to keep in mind when opting in:
 - **The pool holds some resident memory** until the Tesseract is torn down, and
   each result you keep pins its backing pages until it is dropped.
 
-The pool is POSIX-only (it raises on other platforms) and has no effect for
+The pool is Linux-only (it raises on other platforms) and has no effect for
 output formats other than `json+binref`.
 
 ## When this helps

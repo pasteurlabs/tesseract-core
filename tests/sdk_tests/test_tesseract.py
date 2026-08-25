@@ -607,13 +607,13 @@ def test_encode_array_binref_pooled_falls_back_and_decodes_correctly(tmp_path):
 
 def test_binref_pool_lazy_decode_is_readonly_view(tmp_path):
     from tesseract_core.sdk.tesseract import (
-        _SUPPORTS_LAZY_BINREF,
+        _SUPPORTS_BINREF_POOL,
         _BinrefWritePool,
         _encode_array_binref_pooled,
     )
 
-    if not _SUPPORTS_LAZY_BINREF:
-        pytest.skip("lazy binref decode is POSIX-only")
+    if not _SUPPORTS_BINREF_POOL:
+        pytest.skip("binref pool / lazy decode is Linux-only")
 
     pool = _BinrefWritePool(tmp_path, max_slots=4)
     try:
@@ -633,13 +633,13 @@ def test_binref_pool_lazy_decode_is_readonly_view(tmp_path):
 
 def test_binref_pool_lazy_decode_survives_unlink(tmp_path):
     from tesseract_core.sdk.tesseract import (
-        _SUPPORTS_LAZY_BINREF,
+        _SUPPORTS_BINREF_POOL,
         _BinrefWritePool,
         _encode_array_binref_pooled,
     )
 
-    if not _SUPPORTS_LAZY_BINREF:
-        pytest.skip("lazy binref decode is POSIX-only")
+    if not _SUPPORTS_BINREF_POOL:
+        pytest.skip("binref pool / lazy decode is Linux-only")
 
     pool = _BinrefWritePool(tmp_path, max_slots=4)
     try:
@@ -668,10 +668,10 @@ def test_binref_pool_lazy_decode_survives_unlink(tmp_path):
 
 
 def test_HTTPClient_binref_pool_only_created_with_input_path(tmp_path):
-    from tesseract_core.sdk.tesseract import _SUPPORTS_LAZY_BINREF, HTTPClient
+    from tesseract_core.sdk.tesseract import _SUPPORTS_BINREF_POOL, HTTPClient
 
-    if not _SUPPORTS_LAZY_BINREF:
-        pytest.skip("experimental_binref_pool is POSIX-only")
+    if not _SUPPORTS_BINREF_POOL:
+        pytest.skip("experimental_binref_pool is Linux-only")
 
     # experimental_binref_pool=True without an input_path is meaningless (no
     # mounted dir to put pooled files in), so no pool should be created.
@@ -687,10 +687,10 @@ def test_HTTPClient_binref_pool_only_created_with_input_path(tmp_path):
 
 
 def test_HTTPClient_close_is_idempotent(tmp_path):
-    from tesseract_core.sdk.tesseract import _SUPPORTS_LAZY_BINREF, HTTPClient
+    from tesseract_core.sdk.tesseract import _SUPPORTS_BINREF_POOL, HTTPClient
 
-    if not _SUPPORTS_LAZY_BINREF:
-        pytest.skip("experimental_binref_pool is POSIX-only")
+    if not _SUPPORTS_BINREF_POOL:
+        pytest.skip("experimental_binref_pool is Linux-only")
 
     client = HTTPClient("localhost", input_path=tmp_path, experimental_binref_pool=True)
     client.close()

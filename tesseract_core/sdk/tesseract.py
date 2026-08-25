@@ -189,8 +189,9 @@ class Tesseract:
                 a shared-memory tmpfs (``/dev/shm`` on Linux). Reuses a small pool
                 of pre-faulted, memory-mapped input buffers instead of writing a
                 fresh file per request, and decodes outputs as zero-copy
-                memory-mapped views instead of eager copies. POSIX only (raises on
-                other platforms).
+                memory-mapped views instead of eager copies. Linux only (raises on
+                other platforms), since elsewhere the container runs in a VM and
+                does not share a page cache with the client.
 
         Returns:
             A Tesseract instance.
@@ -852,11 +853,15 @@ def _encode_array_binref_pooled(
     }
 
 
-# Lazy (zero-copy) binref decode relies on POSIX mmap semantics: a read-only
-# PROT_READ mapping, and a mapped inode staying valid after the file is removed.
-# On Windows neither holds (PROT_READ is absent; a mapped file cannot be
-# deleted), so lazy decode is only offered on POSIX platforms.
-_SUPPORTS_LAZY_BINREF = os.name == "posix"
+# The binref write pool is a fast same-machine IPC path: the client writes binref
+# inputs into a directory the server container reads directly, ideally a shared-
+# memory tmpfs (/dev/shm), and decodes outputs as zero-copy mmap views. That only
+# pays off when client and server share a page cache, i.e. a native Linux host
+# running Linux containers. On macOS (and Windows) the container runs inside a
+# Linux VM, so bind mounts cross the VM boundary and there is no host tmpfs the
+# container sees as the same memory — the premise does not hold. So the pool
+# (and, with it, the lazy zero-copy decode) is offered on Linux only.
+_SUPPORTS_BINREF_POOL = sys.platform.startswith("linux")
 
 
 def _read_binref_array(
@@ -888,8 +893,9 @@ def _mmap_binref_array(
     if the file is later removed (the OS keeps the mapped inode alive). The
     array is read-only.
 
-    POSIX only (see :data:`_SUPPORTS_LAZY_BINREF`). The mapped file must not be
-    overwritten while a returned view is still in use.
+    Relies on POSIX mmap semantics (a read-only ``PROT_READ`` mapping, and a
+    mapped inode staying valid after the file is removed). The mapped file must
+    not be overwritten while a returned view is still in use.
     """
     map_len = offset + num_bytes
     fd = os.open(full_path, os.O_RDONLY)
@@ -1028,11 +1034,12 @@ class HTTPClient:
         # inputs as binref into a mounted (ideally shared-memory) input dir.
         self._binref_pool: _BinrefWritePool | None = None
         if experimental_binref_pool and self._input_path is not None:
-            if not _SUPPORTS_LAZY_BINREF:
+            if not _SUPPORTS_BINREF_POOL:
                 raise RuntimeError(
-                    "experimental_binref_pool=True is only supported on POSIX "
-                    "platforms, since it relies on shared-memory tmpfs and mmap "
-                    "semantics that are not available here."
+                    "experimental_binref_pool=True is only supported on Linux, "
+                    "since it relies on the client and server container sharing a "
+                    "page cache via a shared-memory tmpfs. On other platforms the "
+                    "container runs inside a VM, so this premise does not hold."
                 )
             self._binref_pool = _BinrefWritePool(self._input_path)
 
