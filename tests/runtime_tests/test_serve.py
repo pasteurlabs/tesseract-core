@@ -17,6 +17,7 @@ import numpy as np
 import pytest
 import requests
 from fastapi.testclient import TestClient
+from typeguard import suppress_type_checks
 
 from tesseract_core.runtime.config import get_config
 from tesseract_core.runtime.serve import create_rest_api
@@ -137,6 +138,28 @@ def test_create_rest_api_apply_endpoint(http_client, dummy_tesseract_module, for
 
     result = array_from_json(response.json()["result"], Path(get_config().output_path))
     assert np.array_equal(result, np.array([3.5, 6.0, 8.5]))
+
+
+def test_apply_rejects_experimental_cuda_ipc_by_default(dummy_tesseract_module):
+    """The experimental json+cuda_ipc format is refused unless explicitly enabled.
+
+    A Tesseract must not produce CUDA IPC handles in production unless the
+    ``enable_experimental_cuda_ipc`` runtime flag is set.
+    """
+    from tesseract_core.runtime.config import update_config
+
+    update_config(enable_experimental_cuda_ipc=False)
+    client = TestClient(
+        create_rest_api(dummy_tesseract_module), raise_server_exceptions=False
+    )
+    test_inputs = dummy_tesseract_module.InputSchema.model_validate(test_input)
+    response = client.post(
+        "/apply",
+        json={"inputs": model_to_json(test_inputs)},
+        headers={"Accept": "application/json+cuda_ipc"},
+    )
+    # Rejected server-side (the format is not in the accepted set).
+    assert response.status_code >= 400
 
 
 def test_create_rest_api_jacobian_endpoint(http_client, dummy_tesseract_module):
@@ -363,7 +386,9 @@ def test_custom_validation_error_over_http(dummy_tesseract_module):
         "data": {"buffer": [1, 2], "encoding": "json"},
     }
 
-    with pytest.raises(PydanticValidationError) as exc_info:
+    # The injected TestClient returns httpx responses instead of requests ones,
+    # which trips typeguard's return type check on HTTPClient._send
+    with suppress_type_checks(), pytest.raises(PydanticValidationError) as exc_info:
         tess.apply({"a": non_numeric_array, "b": valid_array, "s": 1})
 
     err_types = {e["type"] for e in exc_info.value.errors()}

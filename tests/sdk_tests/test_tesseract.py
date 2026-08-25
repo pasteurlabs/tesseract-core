@@ -393,16 +393,16 @@ def test_HTTPClient_run_tesseract_raises_validation_error(mocker):
 
 
 @pytest.mark.parametrize(
-    "b64, expected_data",
+    "encoding, expected_data",
     [
-        (True, {"buffer": "AACAPwAAAEAAAEBA", "encoding": "base64"}),
-        (False, {"buffer": [1.0, 2.0, 3.0], "encoding": "raw"}),
+        ("base64", {"buffer": "AACAPwAAAEAAAEBA", "encoding": "base64"}),
+        ("raw", {"buffer": [1.0, 2.0, 3.0], "encoding": "raw"}),
     ],
 )
-def test_encode_array(b64, expected_data):
+def test_encode_array(encoding, expected_data):
     a = np.array([1.0, 2.0, 3.0], dtype="float32")
 
-    encoded = _encode_array(a, b64=b64)
+    encoded = _encode_array(a, encoding=encoding)
 
     assert encoded["shape"] == (3,)
     assert encoded["dtype"] == "float32"
@@ -448,7 +448,7 @@ def test_decode_array_various_dtypes(dtype):
         original = np.array([1, 2, 3], dtype=dtype)
 
     # Encode using _encode_array with base64
-    encoded = _encode_array(original, b64=True)
+    encoded = _encode_array(original, encoding="base64")
 
     # Decode back
     decoded = _decode_array(encoded)

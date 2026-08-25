@@ -19,7 +19,7 @@ from contextlib import closing
 from importlib.metadata import requires
 from pathlib import Path
 from shutil import copy, copytree, rmtree
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, TypeAlias
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 
@@ -27,6 +27,8 @@ import requests
 import yaml
 from jinja2 import Environment, PackageLoader, StrictUndefined
 from packaging.requirements import Requirement
+from pydantic import TypeAdapter
+from pydantic import ValidationError as PydanticValidationError
 
 from .api_parse import TesseractConfig, get_config, validate_tesseract_api
 from .docker_client import (
@@ -47,6 +49,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("tesseract")
 docker_client = CLIDockerClient()
+
+# Output serialization formats. Single SDK-side source of truth (re-used across
+# the SDK, e.g. sdk.tesseract). Mirrors runtime.file_interactions.supported_format_type
+# but is defined here so the SDK does not eagerly import the (optional) runtime
+# package; a test asserts the two stay in sync.
+OutputFormat: TypeAlias = Literal["json", "json+base64", "json+binref", "json+cuda_ipc"]
 
 # Fixed port the API server binds *inside* the container when port-mapping is
 # used (i.e. everything except host networking). The container has its own
@@ -545,6 +553,49 @@ def init_api(
     return target_dir / "tesseract_api.py"
 
 
+def _coerce_config_override(value: Any, annotation: Any, path: tuple[str, ...]) -> Any:
+    """Coerce a config override value to the target field's declared type.
+
+    CLI overrides arrive as raw strings (see ``_parse_config_override``). We first
+    interpret the string as YAML so that structured values (lists, dicts, ints,
+    bools) work, then fall back to the raw string if that fails to validate. This
+    lets string fields like ``python_version=3.12`` work without the user having
+    to quote the value, while ``3.10`` is preserved verbatim instead of being
+    parsed as the float ``3.1``. Non-string values (e.g. passed via the Python
+    SDK) are validated as-is.
+    """
+    if annotation is None:
+        # Unknown field; let the assignment raise a validation error as usual.
+        return value
+
+    adapter = TypeAdapter(annotation)
+
+    if not isinstance(value, str):
+        return adapter.validate_python(value)
+
+    # Try the YAML-interpreted value first so structured values (lists, dicts,
+    # ints, bools) work, then fall back to the raw string so string fields accept
+    # unquoted scalars. If both fail, report the error from the YAML-interpreted
+    # value: it matches the user's evident intent, whereas the raw-string error
+    # is often a misleading "not a valid <type>" for non-string fields.
+    try:
+        parsed = yaml.safe_load(value)
+    except yaml.YAMLError:
+        parsed = value
+
+    try:
+        return adapter.validate_python(parsed)
+    except PydanticValidationError as parsed_error:
+        try:
+            return adapter.validate_python(value)
+        except PydanticValidationError:
+            keypath = ".".join(path)
+            raise UserError(
+                f'Invalid value "{value}" for config override "{keypath}": '
+                f"{parsed_error}"
+            ) from parsed_error
+
+
 def build_tesseract(
     src_dir: str | Path,
     image_tag: str | None,
@@ -582,9 +633,24 @@ def build_tesseract(
     if config_override is not None:
         for path, value in config_override.items():
             c = config
-            for k in path[:-1]:
-                c = getattr(c, k)
-            setattr(c, path[-1], value)
+            for depth, k in enumerate(path):
+                fields = getattr(type(c), "model_fields", None)
+                if fields is None or k not in fields:
+                    keypath = ".".join(path)
+                    reached = ".".join(path[:depth]) or "(top level)"
+                    valid = (
+                        ", ".join(sorted(fields)) if fields is not None else "(none)"
+                    )
+                    raise UserError(
+                        f'Invalid config override "{keypath}": '
+                        f'"{".".join(path[: depth + 1])}" is not a known config '
+                        f"option. Valid options under {reached}: {valid}."
+                    )
+                if depth == len(path) - 1:
+                    annotation = fields[k].annotation
+                    setattr(c, k, _coerce_config_override(value, annotation, path))
+                else:
+                    c = getattr(c, k)
 
     image_name = config.name
     if image_tag:
@@ -908,7 +974,7 @@ def serve(
     memory: str | None = None,
     input_path: str | Path | None = None,
     output_path: str | Path | None = None,
-    output_format: Literal["json", "json+base64", "json+binref"] | None = None,
+    output_format: OutputFormat | None = None,
     docker_args: list[str] | None = None,
     runtime_config: dict[str, Any] | None = None,
     skip_health_check: bool = False,
@@ -1082,6 +1148,27 @@ def serve(
 
         if docker_args:
             extra_args.extend(docker_args)
+
+        # CUDA IPC needs a GPU and a shared IPC namespace between host and
+        # container. Wire both up whenever the experimental flag is set (the
+        # only reason to enable it is IPC).
+        cuda_ipc_enabled = environment.get(
+            "TESSERACT_ENABLE_EXPERIMENTAL_CUDA_IPC"
+        ) in ("1", "true", "True")
+
+        if cuda_ipc_enabled:
+            if not gpus:
+                raise ValueError(
+                    "enable_experimental_cuda_ipc requires GPU access, but no GPUs "
+                    "were requested. Pass gpus=['all'] or specific GPU IDs."
+                )
+            extra_args.extend(["--ipc=host"])
+        elif output_format == "json+cuda_ipc":
+            raise ValueError(
+                "The 'json+cuda_ipc' output format is experimental and must be "
+                "explicitly enabled. Pass "
+                "runtime_config={'enable_experimental_cuda_ipc': True}."
+            )
 
         if network is not None:
             _ensure_network_exists(network)
@@ -1280,7 +1367,7 @@ def run_tesseract(
     memory: str | None = None,
     input_path: str | Path | None = None,
     output_path: str | Path | None = None,
-    output_format: Literal["json", "json+base64", "json+binref"] | None = None,
+    output_format: OutputFormat | None = None,
     output_file: str | None = None,
     docker_args: list[str] | None = None,
     debug: bool = False,
