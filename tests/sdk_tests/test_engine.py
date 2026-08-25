@@ -555,6 +555,30 @@ def test_run_tesseract(mocked_docker):
     assert res["device_requests"] is None
 
 
+def test_run_binref_without_output_path_errors(mocked_docker, tmp_path):
+    """json+binref without an output path is a hard error, not silent data loss.
+
+    Without an output path, the runtime writes .bin buffers inside the container,
+    which are discarded on teardown, leaving dangling references in the result.
+    """
+    with pytest.raises(UserError, match="json\\+binref"):
+        engine.run_tesseract(
+            "foobar",
+            "apply",
+            ['{"inputs": {"a": [1, 2, 3], "b": [4, 5, 6]}}'],
+            output_format="json+binref",
+        )
+
+    # With an output path it goes through.
+    engine.run_tesseract(
+        "foobar",
+        "apply",
+        ['{"inputs": {"a": [1, 2, 3], "b": [4, 5, 6]}}'],
+        output_format="json+binref",
+        output_path=str(tmp_path),
+    )
+
+
 def test_run_debug(mocked_docker):
     """Test running a tesseract in debug mode forwards a debugpy port."""
     res_out, _ = engine.run_tesseract(
