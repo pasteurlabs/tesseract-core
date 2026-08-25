@@ -915,6 +915,11 @@ def _decode_array(
 class HTTPClient:
     """HTTP Client for Tesseracts."""
 
+    # Class-level defaults so instances built via ``__new__`` (e.g. in tests)
+    # still expose the binref attributes the request/decode paths read.
+    _input_path: Path | None = None
+    _binref_pool: BinrefWritePool | None = None
+
     def __init__(
         self,
         url: str,
