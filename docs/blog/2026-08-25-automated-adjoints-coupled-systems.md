@@ -2,7 +2,7 @@
 orphan: true
 og:title: "Automated adjoints of coupled systems"
 og:description: "Coupled multi-physics used to mean a hand-written adjoint or a monolithic rewrite. Compose independent Tesseracts and jax.grad differentiates the whole two-way coupling end-to-end."
-blog_date: "2026-08-20"
+blog_date: "2026-08-25"
 blog_author: "@jpbrodrick89"
 blog_title: "Automated adjoints of coupled systems"
 blog_description: "Coupled multi-physics used to mean a hand-written adjoint or a monolithic rewrite. Compose independent Tesseracts and jax.grad differentiates the whole two-way coupling end-to-end."
@@ -22,7 +22,7 @@ Tesseracts offer you a third path that allows each physics component to stay exa
 Our new [multi-physics optimization demo](../content/demo/multiphysics-optimization) shows this on the thermal–structural case from the turbine example. A thermal solver and a structural solver are built as two _independent_ Tesseracts, coupled both ways: temperature drives thermal expansion, and the resulting deformation changes how heat flows. We iterate them to a coupled equilibrium and then ask an inverse question. _Find the heat-source location and intensity that produce a target set of sensor temperatures at equilibrium._
 
 ```{figure} ../static/blog/coupled-systems-hero.png
-:alt: "Two panels. Left: a temperature field from the thermal Tesseract. Right: a deformed mesh from the structural Tesseract. Two arrows between them show temperature flowing one way and displacement feeding back the other, and a dashed arrow wrapping the pair shows the jax.grad backward pass."
+:alt: "Two panels. Left: a temperature field from the thermal Tesseract. Right: a deformed mesh from the structural Tesseract, coloured by displacement magnitude. Two curved arrows between them, labelled TWO-WAY COUPLING, show temperature flowing one way and displacement feeding back the other, and a dashed arrow beneath the pair shows the backward pass, taken via the implicit function theorem."
 
 Two independent Tesseracts exchanging fields both ways: temperature drives the structural deformation, and the resulting displacement feeds back into the thermal solve. Because each Tesseract exposes its derivatives, `jax.grad` differentiates through the whole loop end-to-end, with no hand-written adjoint.
 ```
