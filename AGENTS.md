@@ -6,6 +6,7 @@ This file contains counter-intuitive rules and aspects of the Tesseract codebase
 
 - **Read the actual code before proposing an architecture or approach.** Do not speculate about capabilities or patterns.
 - **Reproduce the problem before trying to solve it.** If a user reports a bug, try to reproduce it locally before proposing a fix. If you have a hypothesis regarding a root cause, verify it. If that's not possible, communicate it clearly.
+- **Do not touch `CHANGELOG.md`.** It is auto-generated from PR titles when a release is triggered.
 
 ## Environment setup
 
@@ -51,3 +52,4 @@ Each of these is a separate repository/Python package.
 - **Tesseract-JAX** is a mature package that supports full integration of Tesseract calls into JAX programs, including JIT compilation and automatic differentiation of code that mixes Tesseract calls and JAX operations.
 - **Tesseract-Torch** is the PyTorch counterpart to Tesseract-JAX: it embeds Tesseract calls as PyTorch operators so that `torch.autograd` flows through code that mixes Tesseract calls and PyTorch operations.
 - **Tesseract-Streamlit** provides tools to auto-generate Streamlit apps from (externally running / locally built) Tesseracts. It can be used to quickly create interactive demos for Tesseracts and custom visualization without writing any Streamlit code, but is limited to forward application (`apply`).
+- **cookiecutter-tesseract** is a template for creating new Tesseract repositories. It includes a pre-configured Python package, Dockerfile, and GitHub Actions CI/CD pipeline.
