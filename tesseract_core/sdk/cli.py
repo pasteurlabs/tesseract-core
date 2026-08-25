@@ -19,7 +19,6 @@ from types import SimpleNamespace
 from typing import Annotated, Any, NoReturn
 
 import typer
-import yaml
 from jinja2 import Environment, PackageLoader, StrictUndefined
 from pydantic import ValidationError as PydanticValidationError
 from rich.console import Console as RichConsole
@@ -223,12 +222,17 @@ def main_callback(
 
 def _parse_config_override(
     options: list[str] | None,
-) -> dict[tuple[str, ...], Any]:
-    """Parse `["path1.path2.path3=value"]` into `[(["path1", "path2", "path3"], "value")]`."""
+) -> dict[tuple[str, ...], str]:
+    """Parse `["path1.path2.path3=value"]` into `{("path1", "path2", "path3"): "value"}`.
+
+    Values are kept as raw strings and coerced to the target field's declared type
+    when applied (see ``engine._coerce_config_override``), so that e.g.
+    ``build_config.python_version=3.12`` does not need to be quoted.
+    """
     if options is None:
         return {}
 
-    def _parse_option(option: str) -> tuple[tuple[str, ...], Any]:
+    def _parse_option(option: str) -> tuple[tuple[str, ...], str]:
         if "=" not in option:
             raise typer.BadParameter(
                 f'Invalid config override "{option}" (must be `keypath=value`)',
@@ -243,15 +247,6 @@ def _parse_config_override(
             )
 
         path = tuple(key.split("."))
-
-        try:
-            value = yaml.safe_load(value)
-        except yaml.YAMLError as e:
-            raise typer.BadParameter(
-                f'Invalid value for config override "{option}", could not parse value as YAML: {e}',
-                param_hint="config_override",
-            ) from e
-
         return path, value
 
     return dict(_parse_option(option) for option in options)

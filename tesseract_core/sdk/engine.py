@@ -27,6 +27,8 @@ import requests
 import yaml
 from jinja2 import Environment, PackageLoader, StrictUndefined
 from packaging.requirements import Requirement
+from pydantic import TypeAdapter
+from pydantic import ValidationError as PydanticValidationError
 
 from .api_parse import TesseractConfig, get_config, validate_tesseract_api
 from .docker_client import (
@@ -551,6 +553,49 @@ def init_api(
     return target_dir / "tesseract_api.py"
 
 
+def _coerce_config_override(value: Any, annotation: Any, path: tuple[str, ...]) -> Any:
+    """Coerce a config override value to the target field's declared type.
+
+    CLI overrides arrive as raw strings (see ``_parse_config_override``). We first
+    interpret the string as YAML so that structured values (lists, dicts, ints,
+    bools) work, then fall back to the raw string if that fails to validate. This
+    lets string fields like ``python_version=3.12`` work without the user having
+    to quote the value, while ``3.10`` is preserved verbatim instead of being
+    parsed as the float ``3.1``. Non-string values (e.g. passed via the Python
+    SDK) are validated as-is.
+    """
+    if annotation is None:
+        # Unknown field; let the assignment raise a validation error as usual.
+        return value
+
+    adapter = TypeAdapter(annotation)
+
+    if not isinstance(value, str):
+        return adapter.validate_python(value)
+
+    # Try the YAML-interpreted value first so structured values (lists, dicts,
+    # ints, bools) work, then fall back to the raw string so string fields accept
+    # unquoted scalars. If both fail, report the error from the YAML-interpreted
+    # value: it matches the user's evident intent, whereas the raw-string error
+    # is often a misleading "not a valid <type>" for non-string fields.
+    try:
+        parsed = yaml.safe_load(value)
+    except yaml.YAMLError:
+        parsed = value
+
+    try:
+        return adapter.validate_python(parsed)
+    except PydanticValidationError as parsed_error:
+        try:
+            return adapter.validate_python(value)
+        except PydanticValidationError:
+            keypath = ".".join(path)
+            raise UserError(
+                f'Invalid value "{value}" for config override "{keypath}": '
+                f"{parsed_error}"
+            ) from parsed_error
+
+
 def build_tesseract(
     src_dir: str | Path,
     image_tag: str | None,
@@ -588,9 +633,24 @@ def build_tesseract(
     if config_override is not None:
         for path, value in config_override.items():
             c = config
-            for k in path[:-1]:
-                c = getattr(c, k)
-            setattr(c, path[-1], value)
+            for depth, k in enumerate(path):
+                fields = getattr(type(c), "model_fields", None)
+                if fields is None or k not in fields:
+                    keypath = ".".join(path)
+                    reached = ".".join(path[:depth]) or "(top level)"
+                    valid = (
+                        ", ".join(sorted(fields)) if fields is not None else "(none)"
+                    )
+                    raise UserError(
+                        f'Invalid config override "{keypath}": '
+                        f'"{".".join(path[: depth + 1])}" is not a known config '
+                        f"option. Valid options under {reached}: {valid}."
+                    )
+                if depth == len(path) - 1:
+                    annotation = fields[k].annotation
+                    setattr(c, k, _coerce_config_override(value, annotation, path))
+                else:
+                    c = getattr(c, k)
 
     image_name = config.name
     if image_tag:

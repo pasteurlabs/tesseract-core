@@ -105,11 +105,11 @@ def test_config_override(
         argpairs = (
             (
                 "[RUN foo='bar']",
-                {("build_config", "custom_build_steps"): ["RUN foo='bar'"]},
+                {("build_config", "custom_build_steps"): "[RUN foo='bar']"},
             ),
             (
                 '[RUN echo "hello world"]',
-                {("build_config", "custom_build_steps"): ['RUN echo "hello world"']},
+                {("build_config", "custom_build_steps"): '[RUN echo "hello world"]'},
             ),
         )
     elif arg_to_override == "build_config.base_image":
@@ -124,9 +124,9 @@ def test_config_override(
             (
                 '["data/file.txt:/app/data/file.txt"]',
                 {
-                    ("build_config", "package_data"): [
-                        "data/file.txt:/app/data/file.txt"
-                    ]
+                    ("build_config", "package_data"): (
+                        '["data/file.txt:/app/data/file.txt"]'
+                    )
                 },
             ),
         )
