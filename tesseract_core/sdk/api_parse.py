@@ -529,7 +529,15 @@ def _submodels_in_annotation(annotation: Any) -> list[type[BaseModel]]:
     candidates = args if args else (annotation,)
     seen: dict[type[BaseModel], None] = {}
     for arg in candidates:
-        if isinstance(arg, type) and issubclass(arg, BaseModel):
+        # ``isinstance(arg, type)`` is not enough to guarantee ``issubclass`` won't
+        # raise: some parameterized generics report as types on older pydantic/typing
+        # versions but reject ``issubclass``. Guard the check so such args are simply
+        # treated as non-models.
+        try:
+            is_model = isinstance(arg, type) and issubclass(arg, BaseModel)
+        except TypeError:
+            is_model = False
+        if is_model:
             seen.setdefault(arg, None)
     return list(seen)
 
