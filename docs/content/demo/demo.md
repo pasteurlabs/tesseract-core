@@ -73,7 +73,8 @@ Optimize the initial velocity field of a 2D Navier-Stokes simulation so its vort
 Compose a geometry Tesseract (PyVista, finite-difference gradients) with a FEM Tesseract (jax-fem) to optimize structural bar configurations for minimum compliance.
 :::
 :::{grid-item-card} Multi-Physics Optimization
-:link: multiphysics-optimization.html
+:link: multiphysics-optimization
+:link-type: doc
 
 Couple two independently built thermal and structural Tesseracts with two-way thermoelastic feedback, and differentiate through the resulting equilibrium to solve an inverse-design problem — with constant-memory gradients via implicit differentiation.
 :::
