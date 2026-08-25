@@ -8,11 +8,12 @@ import traceback
 import uuid
 import warnings
 import weakref
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from functools import cached_property, wraps
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Literal, TypeAlias
+from typing import TYPE_CHECKING, Any, Literal, TypeAlias
 from urllib.parse import urlparse, urlunparse
 
 import numpy as np
@@ -25,6 +26,15 @@ from pydantic_core import InitErrorDetails, PydanticCustomError, from_json
 from . import engine
 from .docker_client import Container, Containers
 from .logs import LogStreamer
+
+if TYPE_CHECKING:
+    # Imported for type hints only. `from __future__ import annotations` makes
+    # every annotation below a string, so these names are never needed at
+    # runtime and the SDK does not eagerly pull in the runtime/CUDA machinery.
+    from tesseract_core.runtime.cuda_ipc import IpcDeviceArray
+
+# Output serialization formats; single SDK-side definition lives in engine.
+OutputFormat: TypeAlias = engine.OutputFormat
 
 PathLike: TypeAlias = str | Path
 BoolOrCallable: TypeAlias = bool | Callable[[str], Any]
@@ -124,7 +134,7 @@ class Tesseract:
         memory: str | None = None,
         input_path: str | Path | None = None,
         output_path: str | Path | None = None,
-        output_format: Literal["json", "json+base64", "json+binref"] = "json+base64",
+        output_format: OutputFormat = "json+base64",
         docker_args: list[str] | None = None,
         runtime_config: dict[str, Any] | None = None,
         stream_logs: BoolOrCallable = False,
@@ -228,7 +238,7 @@ class Tesseract:
         tesseract_api: str | Path | ModuleType,
         input_path: Path | None = None,
         output_path: Path | None = None,
-        output_format: Literal["json", "json+base64", "json+binref"] = "json+base64",
+        output_format: OutputFormat = "json+base64",
         runtime_config: dict[str, Any] | None = None,
         stream_logs: BoolOrCallable = False,
     ) -> Tesseract:
@@ -308,7 +318,7 @@ class Tesseract:
         self.serve()
         return self
 
-    def __exit__(self, *args: Any) -> None:
+    def __exit__(self, *args: object) -> None:
         """Exit the Tesseract context.
 
         This will stop the Tesseract server if it is running.
@@ -348,9 +358,11 @@ class Tesseract:
         host_ip = self._spawn_config["host_ip"]
         self._lastlog = None
         output_path = self._spawn_config.get("output_path")
+        output_format = self._spawn_config.get("output_format", "json+base64")
         self._client = HTTPClient(
             f"http://{host_ip}:{container.host_port}",
             output_path=Path(output_path) if output_path else None,
+            output_format=output_format,
             timeout=self._timeout,
         )
 
@@ -642,18 +654,47 @@ def _fast_tobytes(arr: np.ndarray) -> memoryview:
     return np.ascontiguousarray(arr).data
 
 
-def _encode_array(arr: Any, b64: bool = True) -> dict:
+def _import_cuda_ipc() -> ModuleType:
+    """Import the cuda_ipc runtime module, or explain the missing extra.
+
+    The ``json+cuda_ipc`` output format lives in ``tesseract_core.runtime``,
+    which is an optional install (``tesseract-core[runtime]``). A base SDK
+    install lacks its dependencies, so surface a clear message pointing at the
+    extra instead of a bare ``ModuleNotFoundError`` from deep in the import chain.
+    """
+    try:
+        from tesseract_core.runtime import cuda_ipc
+    except ImportError as exc:
+        raise ImportError(
+            "The 'json+cuda_ipc' output format requires the Tesseract runtime, "
+            "which is an optional dependency. Install it with "
+            "'pip install tesseract-core[runtime]'."
+        ) from exc
+    return cuda_ipc
+
+
+def _encode_array(
+    arr: Any, encoding: Literal["base64", "raw", "cuda_ipc"] = "base64"
+) -> dict:
+    # With cuda_ipc encoding, GPU arrays are exported by reference via a CUDA IPC
+    # handle, keeping the data on-device. Any other array (or any other encoding)
+    # falls through to a host copy below, so a mixed payload (some GPU, some CPU
+    # arrays) encodes correctly either way.
+    if encoding == "cuda_ipc" and hasattr(arr, "__cuda_array_interface__"):
+        return _import_cuda_ipc().dump_cuda_ipc_arraydict(arr)
+
     # Ensure arr is a numpy-compatible array so we guarantee it has a compatible dtype (not e.g. torch bfloat16)
     arr = np.asanyarray(arr, order="A")
-    if b64:
-        data = {
-            "buffer": pybase64.b64encode_as_string(_fast_tobytes(arr)),
-            "encoding": "base64",
-        }
-    else:
+    if encoding == "raw":
         data = {
             "buffer": arr.tolist(),
             "encoding": "raw",
+        }
+    else:
+        # base64 (also the host-copy fallback for a CPU array under cuda_ipc)
+        data = {
+            "buffer": pybase64.b64encode_as_string(_fast_tobytes(arr)),
+            "encoding": "base64",
         }
 
     return {
@@ -663,9 +704,58 @@ def _encode_array(arr: Any, b64: bool = True) -> dict:
     }
 
 
+@contextmanager
+def _encode_payload(payload: dict | None, output_format: str) -> Iterator[dict | None]:
+    """Encode a request payload's arrays, managing CUDA IPC export lifetime.
+
+    Yields the encoded payload (or None for an empty payload). For the
+    ``json+cuda_ipc`` format, GPU arrays are exported by reference (base64 for
+    CPU arrays), which pins each exported allocation in a process-global registry
+    on the runtime side. Those pins are released on context exit -- by then the
+    caller has read the full response, so the server has copied the inputs out
+    and they are provably dead. The release is skipped (and cuda_ipc never
+    imported) when no GPU array was actually exported.
+
+    Releasing on exit rather than at the start of the next request keeps pinned
+    GPU memory bounded to a single in-flight request.
+    """
+    if not payload:
+        yield None
+        return
+
+    if output_format != "json+cuda_ipc":
+        yield _tree_map(
+            _encode_array, payload, is_leaf=lambda x: hasattr(x, "__array__")
+        )
+        return
+
+    # cuda_ipc: a leaf is any array-like on either protocol; GPU leaves are
+    # exported by handle and pin their allocation until we release below.
+    exported = False
+
+    def _encode_leaf(x: Any) -> dict:
+        nonlocal exported
+        if hasattr(x, "__cuda_array_interface__"):
+            exported = True
+        return _encode_array(x, encoding="cuda_ipc")
+
+    def _is_leaf(x: Any) -> bool:
+        return hasattr(x, "__array__") or hasattr(x, "__cuda_array_interface__")
+
+    try:
+        yield _tree_map(_encode_leaf, payload, is_leaf=_is_leaf)
+    finally:
+        if exported:
+            _import_cuda_ipc().release_pinned_ipc_exports()
+
+
 def _decode_array(
     encoded_arr: dict, output_path: str | Path | None = None
-) -> np.ndarray:
+) -> np.ndarray | IpcDeviceArray:
+    # Returns np.ndarray for every encoding except cuda_ipc, which yields a
+    # framework-agnostic on-GPU wrapper (IpcDeviceArray, exposing
+    # __cuda_array_interface__ and __dlpack__). That type is imported only under
+    # TYPE_CHECKING so naming it here adds no runtime import.
     import re
 
     if "data" not in encoded_arr:
@@ -742,6 +832,14 @@ def _decode_array(
             raise ValueError(f"Unknown compression: {compression}")
 
         arr = np.frombuffer(data, dtype=dtype)
+    elif encoding == "cuda_ipc":
+        # Returns a fresh, client-owned device-array wrapper: the decode opens
+        # the IPC handle, copies device-to-device into our own memory, and
+        # closes the mapping before returning. The result exposes
+        # __cuda_array_interface__ and __dlpack__ so Torch/JAX/CuPy can adopt it
+        # zero-copy. The server may reuse/free the exported buffer as soon as
+        # this returns (it holds it until the next request).
+        return _import_cuda_ipc().load_cuda_ipc_arraydict(encoded_arr)
     else:
         raise ValueError(f"Unexpected array encoding {encoding}. Cannot decode.")
 
@@ -756,10 +854,12 @@ class HTTPClient:
         self,
         url: str,
         output_path: str | Path | None = None,
+        output_format: OutputFormat = "json+base64",
         timeout: float | tuple[float, float] | None = None,
     ) -> None:
         self._url = self._sanitize_url(url)
         self._output_path = output_path
+        self._output_format = output_format
         self._timeout = timeout
         self._session = requests.Session()
         self._session.headers["Content-Type"] = "application/json"
@@ -781,6 +881,29 @@ class HTTPClient:
         """(Sanitized) URL to connect to."""
         return self._url
 
+    def _send(
+        self, url: str, method: str, data: bytes, params: dict
+    ) -> requests.Response:
+        # Only forward timeout when set; omitting it is equivalent to None for
+        # requests.Session, and avoids passing a kwarg that some session
+        # implementations (e.g. starlette's TestClient) don't accept.
+        request_kwargs: dict[str, Any] = {
+            "method": method,
+            "url": url,
+            "data": data,
+            "params": params,
+        }
+        if self._timeout is not None:
+            request_kwargs["timeout"] = self._timeout
+        try:
+            return self._session.request(**request_kwargs)
+        except requests.ConnectionError:
+            # Retry once on stale keep-alive connections. There is a race between
+            # urllib3's is_connection_dropped check and the server closing idle
+            # connections (uvicorn timeout_keep_alive) that can cause
+            # ConnectionError on an otherwise healthy server.
+            return self._session.request(**request_kwargs)
+
     def _request(
         self,
         endpoint: str,
@@ -789,30 +912,14 @@ class HTTPClient:
         run_id: str | None = None,
     ) -> dict:
         url = f"{self.url}/{endpoint.lstrip('/')}"
-
-        if payload:
-            encoded_payload = _tree_map(
-                _encode_array, payload, is_leaf=lambda x: hasattr(x, "__array__")
-            )
-        else:
-            encoded_payload = None
-
         params = {"run_id": run_id} if run_id is not None else {}
-        data = orjson.dumps(encoded_payload)
-        # Only forward timeout when set; omitting it is equivalent to None for
-        # requests.Session, and avoids passing a kwarg that some session
-        # implementations (e.g. starlette's TestClient) don't accept.
-        request_kwargs = {"method": method, "url": url, "data": data, "params": params}
-        if self._timeout is not None:
-            request_kwargs["timeout"] = self._timeout
-        try:
-            response = self._session.request(**request_kwargs)
-        except requests.ConnectionError:
-            # Retry once on stale keep-alive connections. There is a race
-            # between urllib3's is_connection_dropped check and the server
-            # closing idle connections (uvicorn timeout_keep_alive) that
-            # can cause ConnectionError on an otherwise healthy server.
-            response = self._session.request(**request_kwargs)
+
+        # The context manager holds any exported GPU inputs alive until the
+        # response has been fully read (see _encode_payload). `requests` buffers
+        # the whole body before `_send` returns, so exiting the block afterwards
+        # releases them at the earliest safe point.
+        with _encode_payload(payload, self._output_format) as encoded_payload:
+            response = self._send(url, method, orjson.dumps(encoded_payload), params)
 
         if response.status_code == requests.codes.unprocessable_entity:
             # Try and raise a more helpful error if the response is a Pydantic error
@@ -853,7 +960,7 @@ class HTTPClient:
             "vector_jacobian_product",
         ]:
             # Create a decoder with the output_path bound
-            def decode_with_path(arr: dict) -> np.ndarray:
+            def decode_with_path(arr: dict) -> np.ndarray | IpcDeviceArray:
                 return _decode_array(arr, output_path=self._output_path)
 
             data = _tree_map(

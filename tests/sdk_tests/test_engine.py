@@ -673,7 +673,7 @@ def test_serve_skip_health_check(mocked_docker, monkeypatch):
         nonlocal health_called
         if url.endswith("/health"):
             health_called = True
-            return type("Response", (), {"status_code": 200, "json": lambda: {}})()
+            return type("Response", (), {"status_code": 200, "json": dict})()
         raise NotImplementedError(f"Mocked get request to {url} not implemented")
 
     monkeypatch.setattr(engine.requests, "get", health_get_spy)
@@ -1280,6 +1280,93 @@ def test_is_local_volume(volume, expected):
     assert engine._is_local_volume(volume) == expected
 
 
+def _stub_serve_docker(monkeypatch):
+    """Stub the Docker seams in engine.serve, returning captured run kwargs."""
+    captured = {}
+
+    monkeypatch.setattr(
+        engine.docker_client.images,
+        "get",
+        lambda name: Image(id="sha256:abc", short_id="abc", tags=[name], attrs={}),
+    )
+
+    def fake_run(**kwargs):
+        captured.update(kwargs)
+        return Container(id="cid", short_id="cid", name="test-container", attrs={})
+
+    monkeypatch.setattr(engine.docker_client.containers, "run", fake_run)
+    monkeypatch.setattr(engine, "_wait_for_health", lambda *a, **k: None)
+    monkeypatch.setattr(engine, "is_podman", lambda: False)
+    return captured
+
+
+def test_serve_cuda_ipc_adds_ipc_host(monkeypatch):
+    """json+cuda_ipc serving passes --ipc=host to the container runtime."""
+    captured = _stub_serve_docker(monkeypatch)
+
+    engine.serve(
+        "my-image",
+        output_format="json+cuda_ipc",
+        gpus=["all"],
+        runtime_config={"enable_experimental_cuda_ipc": True},
+        skip_health_check=True,
+    )
+    assert "--ipc=host" in captured["extra_args"]
+
+
+def test_serve_experimental_cuda_ipc_adds_ipc_host_any_format(monkeypatch):
+    """Enabling the flag wires --ipc=host regardless of the output format."""
+    captured = _stub_serve_docker(monkeypatch)
+
+    engine.serve(
+        "my-image",
+        output_format="json+base64",
+        gpus=["all"],
+        runtime_config={"enable_experimental_cuda_ipc": True},
+        skip_health_check=True,
+    )
+    assert "--ipc=host" in captured["extra_args"]
+
+
+def test_serve_experimental_cuda_ipc_errors_without_gpus(monkeypatch):
+    """Enabling the flag without GPU access is a startup error, not a warning."""
+    _stub_serve_docker(monkeypatch)
+
+    with pytest.raises(ValueError, match="requires GPU access"):
+        engine.serve(
+            "my-image",
+            output_format="json+base64",
+            gpus=None,
+            runtime_config={"enable_experimental_cuda_ipc": True},
+            skip_health_check=True,
+        )
+
+
+def test_serve_cuda_ipc_errors_without_experimental_flag(monkeypatch):
+    """Requesting the cuda_ipc format without the flag is a startup error."""
+    _stub_serve_docker(monkeypatch)
+
+    with pytest.raises(ValueError, match="experimental"):
+        engine.serve(
+            "my-image",
+            output_format="json+cuda_ipc",
+            gpus=["all"],
+            skip_health_check=True,
+        )
+
+
+def test_serve_non_cuda_ipc_has_no_ipc_host(monkeypatch):
+    """Other output formats do not add --ipc=host."""
+    captured = _stub_serve_docker(monkeypatch)
+
+    engine.serve(
+        "my-image",
+        output_format="json+base64",
+        skip_health_check=True,
+    )
+    assert "--ipc=host" not in (captured.get("extra_args") or [])
+
+
 @pytest.mark.parametrize(
     "within_range",
     [
@@ -1343,3 +1430,17 @@ def test_get_free_port_all_excluded():
 
     with pytest.raises(RuntimeError, match="No free ports found"):
         engine.get_free_port(within_range=(free, free + 1), exclude=(free,))
+
+
+def test_output_format_matches_runtime_source_of_truth():
+    """engine.OutputFormat mirrors the runtime canonical format list.
+
+    The SDK defines the format literal locally (in engine) to avoid eagerly
+    importing the optional runtime package. This guards against the two copies
+    drifting apart.
+    """
+    from typing import get_args
+
+    from tesseract_core.runtime.file_interactions import supported_format_type
+
+    assert get_args(engine.OutputFormat) == get_args(supported_format_type)

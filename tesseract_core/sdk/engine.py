@@ -19,7 +19,7 @@ from contextlib import closing
 from importlib.metadata import requires
 from pathlib import Path
 from shutil import copy, copytree, rmtree
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, TypeAlias
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 
@@ -47,6 +47,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("tesseract")
 docker_client = CLIDockerClient()
+
+# Output serialization formats. Single SDK-side source of truth (re-used across
+# the SDK, e.g. sdk.tesseract). Mirrors runtime.file_interactions.supported_format_type
+# but is defined here so the SDK does not eagerly import the (optional) runtime
+# package; a test asserts the two stay in sync.
+OutputFormat: TypeAlias = Literal["json", "json+base64", "json+binref", "json+cuda_ipc"]
 
 # Fixed port the API server binds *inside* the container when port-mapping is
 # used (i.e. everything except host networking). The container has its own
@@ -908,7 +914,7 @@ def serve(
     memory: str | None = None,
     input_path: str | Path | None = None,
     output_path: str | Path | None = None,
-    output_format: Literal["json", "json+base64", "json+binref"] | None = None,
+    output_format: OutputFormat | None = None,
     docker_args: list[str] | None = None,
     runtime_config: dict[str, Any] | None = None,
     skip_health_check: bool = False,
@@ -1081,6 +1087,27 @@ def serve(
 
         if docker_args:
             extra_args.extend(docker_args)
+
+        # CUDA IPC needs a GPU and a shared IPC namespace between host and
+        # container. Wire both up whenever the experimental flag is set (the
+        # only reason to enable it is IPC).
+        cuda_ipc_enabled = environment.get(
+            "TESSERACT_ENABLE_EXPERIMENTAL_CUDA_IPC"
+        ) in ("1", "true", "True")
+
+        if cuda_ipc_enabled:
+            if not gpus:
+                raise ValueError(
+                    "enable_experimental_cuda_ipc requires GPU access, but no GPUs "
+                    "were requested. Pass gpus=['all'] or specific GPU IDs."
+                )
+            extra_args.extend(["--ipc=host"])
+        elif output_format == "json+cuda_ipc":
+            raise ValueError(
+                "The 'json+cuda_ipc' output format is experimental and must be "
+                "explicitly enabled. Pass "
+                "runtime_config={'enable_experimental_cuda_ipc': True}."
+            )
 
         if network is not None:
             _ensure_network_exists(network)
@@ -1279,7 +1306,7 @@ def run_tesseract(
     memory: str | None = None,
     input_path: str | Path | None = None,
     output_path: str | Path | None = None,
-    output_format: Literal["json", "json+base64", "json+binref"] | None = None,
+    output_format: OutputFormat | None = None,
     output_file: str | None = None,
     docker_args: list[str] | None = None,
     debug: bool = False,
