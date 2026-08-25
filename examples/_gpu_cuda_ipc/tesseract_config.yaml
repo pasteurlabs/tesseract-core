@@ -1,0 +1,8 @@
+name: "gpu-cuda-ipc"
+version: "0.1.0"
+description: "GPU Tesseract returning device memory, for CUDA IPC end-to-end tests."
+
+build_config:
+  # CUDA runtime base image so libcudart is present for the IPC export path.
+  base_image: "nvidia/cuda:12.8.1-runtime-ubuntu24.04"
+  target_platform: "native"

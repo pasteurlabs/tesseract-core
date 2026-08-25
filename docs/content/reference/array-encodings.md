@@ -108,6 +108,8 @@ $ curl \
 
 The `json+binref` format stores array data in separate `.bin` files and puts only references in the JSON. This enables lazy loading via [LazySequence](#tesseract_core.runtime.experimental.LazySequence). See the [`Array` docstring](#tesseract_core.runtime.Array) for more details.
 
+Because the `.bin` files are written to disk, an output path is required: `tesseract run` and `tesseract serve` reject `json+binref` unless `--output-path` is set. Without it, the `.bin` files would be written inside the container and lost on teardown, leaving the JSON references dangling.
+
 ::::{tab-set}
 :::{tab-item} CLI
 :sync: cli
@@ -140,6 +142,13 @@ $ curl \
 The `.bin` file references are relative to the `--output-path`.
 :::
 ::::
+
+```{tip}
+When the client and a served Tesseract share a machine, placing the binref
+input/output directories on a shared-memory `tmpfs` (`/dev/shm`) lets large
+arrays move between them without base64-encoding into the HTTP body. See
+{doc}`/content/how-to/fast-local-runs`.
+```
 
 ### lz4 compression
 
