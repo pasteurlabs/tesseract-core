@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
+import shutil
 import sys
 import tempfile
 import traceback
@@ -48,6 +49,15 @@ OutputFormat: TypeAlias = engine.OutputFormat
 
 PathLike: TypeAlias = str | Path
 BoolOrCallable: TypeAlias = bool | Callable[[str], Any]
+
+
+def _purge_tempdir(path: str) -> None:
+    """Remove an auto-created output tempdir. Used as a weakref finalizer.
+
+    Errors are ignored: the dir may already be gone, and a finalizer must never
+    raise (it can run at interpreter shutdown).
+    """
+    shutil.rmtree(path, ignore_errors=True)
 
 
 def requires_client(func: Callable) -> Callable:
@@ -220,12 +230,16 @@ class Tesseract:
 
         if volumes is None:
             volumes = []
+        auto_input_path = False
         if input_path is not None:
             input_path = Path(input_path).resolve()
         elif output_format == "json+binref":
             # Auto-create an input directory so binref-encoded inputs have a
             # mounted location to be written to and read from by the container.
             input_path = Path(tempfile.mkdtemp(prefix="tesseract_input_"))
+            auto_input_path = True
+
+        auto_output_path = output_path is None
         if output_path is not None:
             output_path = Path(output_path).resolve()
         else:
@@ -235,6 +249,12 @@ class Tesseract:
         obj._stream_logs = stream_logs
         obj._timeout = timeout
         obj._binref_pool_enabled = experimental_binref_pool
+        # Purge auto-created tempdirs when the object is garbage collected.
+        # User-supplied paths are left untouched.
+        if auto_input_path:
+            weakref.finalize(obj, _purge_tempdir, str(input_path))
+        if auto_output_path:
+            weakref.finalize(obj, _purge_tempdir, str(output_path))
         obj._spawn_config = dict(
             image_name=image_name,
             volumes=volumes,
@@ -1168,6 +1188,8 @@ class LocalClient:
 
         if output_path is None:
             output_path = Path(tempfile.mkdtemp(prefix="tesseract_output_"))
+            # Purge the auto-created tempdir when this client is garbage collected.
+            weakref.finalize(self, _purge_tempdir, str(output_path))
         self._output_path = output_path
 
     def run_tesseract(

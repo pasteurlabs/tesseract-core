@@ -1018,9 +1018,10 @@ def serve(
         raise ValueError("Tesseract image name must be provided")
 
     if output_format == "json+binref" and output_path is None:
-        logger.warning(
-            "Consider specifying --output-path when using the 'json+binref' output format "
-            "to easily retrieve .bin files."
+        raise UserError(
+            "The 'json+binref' output format writes array buffers to .bin files, "
+            "which are lost when the container is torn down unless an output path "
+            "is set. Specify one with --output-path (or output_path=...)."
         )
 
     image = docker_client.images.get(image_name)
@@ -1403,9 +1404,10 @@ def run_tesseract(
         Tuple with the stdout and stderr of the Tesseract.
     """
     if output_format == "json+binref" and output_path is None:
-        logger.warning(
-            "Consider specifying --output-path when using the 'json+binref' output format "
-            "to easily retrieve .bin files."
+        raise UserError(
+            "The 'json+binref' output format writes array buffers to .bin files, "
+            "which are lost when the container is torn down unless an output path "
+            "is set. Specify one with --output-path (or output_path=...)."
         )
 
     if user is None:
