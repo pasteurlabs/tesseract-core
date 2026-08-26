@@ -13,7 +13,7 @@ import pytest
 import yaml
 from jinja2.exceptions import TemplateNotFound
 
-from tesseract_core.sdk import engine
+from tesseract_core.sdk import engine, serving
 from tesseract_core.sdk.api_parse import (
     TesseractBuildConfig,
     TesseractConfig,
@@ -798,7 +798,7 @@ def test_serve_skip_health_check(mocked_docker, monkeypatch):
             return type("Response", (), {"status_code": 200, "json": dict})()
         raise NotImplementedError(f"Mocked get request to {url} not implemented")
 
-    monkeypatch.setattr(engine.requests, "get", health_get_spy)
+    monkeypatch.setattr(serving.requests, "get", health_get_spy)
 
     res, _ = engine.serve("foobar", skip_health_check=True)
     assert res

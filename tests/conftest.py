@@ -424,7 +424,7 @@ def dummy_network_name():
 def mocked_docker(monkeypatch):
     """Mock CLIDockerClient class."""
     import tesseract_core.sdk.docker_client
-    from tesseract_core.sdk import engine
+    from tesseract_core.sdk import engine, serving
     from tesseract_core.sdk.docker_client import Container, Image, NotFound
 
     class MockedContainer(Container):
@@ -560,7 +560,7 @@ def mocked_docker(monkeypatch):
             return type("Response", (), {"status_code": 200, "json": lambda: {}})()
         raise NotImplementedError(f"Mocked get request to {url} not implemented")
 
-    monkeypatch.setattr(engine.requests, "get", hacked_get)
+    monkeypatch.setattr(serving.requests, "get", hacked_get)
 
     yield mock_instance
 
