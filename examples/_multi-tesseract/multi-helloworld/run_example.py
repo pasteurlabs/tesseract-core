@@ -8,7 +8,7 @@ with Tesseract.from_image(
     ) as helloworld_tess:
         payload = {
             "name": "YOU",
-            "helloworld_tesseract_url": f"http://helloworld:{helloworld_tess._serve_context['port']}",
+            "helloworld_tesseract_url": f"http://helloworld:{helloworld_tess.container_info().host_port}",
         }
         result = multi_helloworld_tess.apply(inputs=payload)
         print(result["greeting"])

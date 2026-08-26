@@ -433,9 +433,9 @@ def mocked_docker(monkeypatch):
         def __init__(self, return_args: dict):
             self.return_args = return_args
 
-        def wait(self, **kwargs: Any):
+        def wait(self, timeout: float | None = None) -> dict:
             """Mock wait method for Container."""
-            return {"StatusCode": 0, "Error": None}
+            return {"StatusCode": 0}
 
         @property
         def name(self):
@@ -457,9 +457,9 @@ def mocked_docker(monkeypatch):
                 return res_stdout
             return res_stderr
 
-        def remove(self, **kwargs: Any):
+        def remove(self, v: bool = False, link: bool = False, force: bool = False):
             """Mock remove method for Container."""
-            pass
+            return ""
 
     class MockedDocker:
         """Mock CLIDockerClient class."""

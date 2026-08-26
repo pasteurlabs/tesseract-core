@@ -1,4 +1,3 @@
-from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock
 
 import numpy as np
@@ -19,21 +18,50 @@ from tesseract_core.sdk.tesseract import (
 )
 
 
+class FakeContainer(Container):
+    """Stands in for a served container, without touching docker.
+
+    A real `Container` subclass rather than a bare stub, so it satisfies both the
+    `ServedTesseract` interface and the `Container` that `container_info` returns
+    -- a member added to either without one here is an error, not a surprise in
+    production.
+    """
+
+    host_ip = "127.0.0.1"
+    host_port = "1234"
+
+    def __init__(self):
+        super().__init__(
+            id="container-id-123",
+            short_id="container-id",
+            name="container-id-123",
+            attrs={},
+        )
+        self.removals = []
+
+    def reload(self) -> None:
+        pass
+
+    def is_running(self) -> bool:
+        return True
+
+    def remove(self, v: bool = False, link: bool = False, force: bool = False) -> None:
+        self.removals.append(force)
+
+    def logs(self) -> bytes:
+        return b"fake container logs"
+
+
 @pytest.fixture
 def mock_serving(mocker):
-    fake_container = SimpleNamespace()
-    fake_container.host_port = 1234
-    fake_container.id = "container-id-123"
+    fake_container = FakeContainer()
 
     serve_mock = mocker.patch("tesseract_core.sdk.engine.serve")
     serve_mock.return_value = fake_container.id, fake_container
 
-    teardown_mock = mocker.patch("tesseract_core.sdk.engine.teardown")
-    logs_mock = mocker.patch("tesseract_core.sdk.engine.logs")
     return {
         "serve_mock": serve_mock,
-        "teardown_mock": teardown_mock,
-        "logs_mock": logs_mock,
+        "container": fake_container,
     }
 
 
@@ -107,27 +135,14 @@ def test_Tesseract_from_image(mock_serving, mock_clients):
         t.teardown()
 
 
-def test_container_info_returns_container_during_serve(
-    mock_serving, mock_clients, mocker
-):
-    """``container_info()`` returns a fresh ``Container`` while served.
+def test_container_info_returns_container_during_serve(mock_serving, mock_clients):
+    """``container_info()`` returns the container being served.
 
     Each call delegates to ``Containers.get(container_name)``, so we
     patch that lookup and verify the call site forwards the running
     container's name through unchanged. Outside the serve window the
     call must raise.
     """
-    fake_container = Container(
-        id="container-id-123",
-        short_id="container-id",
-        name="container-id-123",
-        attrs={},
-    )
-    get_mock = mocker.patch(
-        "tesseract_core.sdk.tesseract.Containers.get",
-        return_value=fake_container,
-    )
-
     t = Tesseract.from_image("sometesseract:0.2.3")
 
     # Pre-serve: not yet running, so the call raises.
@@ -135,9 +150,8 @@ def test_container_info_returns_container_during_serve(
         t.container_info()
 
     with t:
-        info = t.container_info()
-        assert info is fake_container
-        get_mock.assert_called_with("container-id-123")
+        # The container we are already holding, rather than a fresh lookup
+        assert t.container_info() is mock_serving["container"]
 
     # Post-teardown: container is gone, so the call raises again.
     with pytest.raises(RuntimeError, match="only available for served Tesseracts"):
@@ -157,15 +171,14 @@ def test_del_tesseract_triggers_teardown(mock_serving):
     """Deleting a served Tesseract must tear down its container via weakref.finalize."""
     import gc
 
-    teardown_mock = mock_serving["teardown_mock"]
-
+    container = mock_serving["container"]
     t = Tesseract.from_image("sometesseract:0.2.3")
     t.serve()
-    assert teardown_mock.call_count == 0
+    assert container.removals == []
 
     del t
     gc.collect()
-    assert teardown_mock.call_count == 1
+    assert container.removals == [True]
 
 
 def test_del_tesseract_purges_auto_tempdir(mock_serving):
@@ -241,7 +254,7 @@ def test_serve_lifecycle(mock_serving, mock_clients):
     # Check that no unexpected kwargs were passed
     assert call_kwargs.keys() == expected_kwargs.keys() | {"output_path"}
 
-    mock_serving["teardown_mock"].assert_called_with("container-id-123")
+    assert mock_serving["container"].removals == [True]
 
     # check that the same Tesseract obj cannot be used to instantiate two containers
     with pytest.raises(RuntimeError):
