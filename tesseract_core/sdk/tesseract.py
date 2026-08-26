@@ -26,7 +26,7 @@ from pydantic_core import InitErrorDetails, PydanticCustomError, from_json
 
 from . import engine, local_engine, serving
 from .binref import (
-    SUPPORTS_BINREF_POOL,
+    CONTAINERS_SUPPORT_BINREF_POOL,
     BinrefSlot,
     BinrefWritePool,
     _fast_tobytes,
@@ -261,6 +261,14 @@ class Tesseract:
 
         obj._stream_logs = stream_logs
         obj._timeout = timeout
+        if experimental_binref_pool and not CONTAINERS_SUPPORT_BINREF_POOL:
+            raise RuntimeError(
+                "experimental_binref_pool=True is only supported for containerized "
+                "Tesseracts on Linux, since it relies on the client and the "
+                "container sharing a page cache. Elsewhere the container runs "
+                "inside a VM, so bind mounts cross the VM boundary and the premise "
+                "does not hold. `from_source` has no VM to cross and is unrestricted."
+            )
         obj._binref_pool_enabled = experimental_binref_pool
         # Purge auto-created tempdirs when the object is garbage collected.
         # User-supplied paths are left untouched.
@@ -374,6 +382,7 @@ class Tesseract:
         stream_logs: BoolOrCallable = False,
         python_executable: str | Path | None = None,
         startup_timeout: float = serving.DEFAULT_STARTUP_TIMEOUT,
+        experimental_binref_pool: bool = False,
     ) -> Tesseract:
         """Create a Tesseract instance from a Tesseract API file, in its own process.
 
@@ -415,6 +424,12 @@ class Tesseract:
                 Tesseract's own requirements installed.
             startup_timeout: How long to wait, in seconds, for the Tesseract to
                 become healthy before giving up.
+            experimental_binref_pool: Opt-in fast path for ``json+binref`` that
+                reuses warm memory-mapped buffers instead of allocating a file
+                per call. Only pays off when the binref directory is
+                memory-backed (a ``tmpfs``); on an ordinary disk-backed
+                filesystem it is several times *slower* than plain
+                ``json+binref``. See :doc:`/content/how-to/fast-local-runs`.
 
         Returns:
             A Tesseract instance.
@@ -422,6 +437,7 @@ class Tesseract:
         obj = cls.__new__(cls)
         obj._stream_logs = stream_logs
         obj._spawn_backend = "subprocess"
+        obj._binref_pool_enabled = experimental_binref_pool
         auto_dirs, obj._spawn_config = _subprocess_spawn_config(
             tesseract_api,
             input_path=input_path,
@@ -1099,14 +1115,10 @@ class HTTPClient:
         # Opt-in warm-buffer pool for binref inputs. Only meaningful when passing
         # inputs as binref into a mounted (ideally shared-memory) input dir.
         self._binref_pool: BinrefWritePool | None = None
+        # Whether the pool can work at all depends on how the Tesseract is
+        # served, which is not something a client reached over HTTP can know.
+        # Whoever served it decides; this honours the decision.
         if experimental_binref_pool and self._input_path is not None:
-            if not SUPPORTS_BINREF_POOL:
-                raise RuntimeError(
-                    "experimental_binref_pool=True is only supported on Linux, "
-                    "since it relies on the client and server container sharing a "
-                    "page cache via a shared-memory tmpfs. On other platforms the "
-                    "container runs inside a VM, so this premise does not hold."
-                )
             self._binref_pool = BinrefWritePool(self._input_path)
 
     def close(self) -> None:

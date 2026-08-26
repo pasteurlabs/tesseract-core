@@ -1,3 +1,4 @@
+import os
 from unittest.mock import MagicMock, Mock
 
 import numpy as np
@@ -647,13 +648,12 @@ def testencode_array_binref_pooled_falls_back_and_decodes_correctly(tmp_path):
 
 def test_binref_pool_lazy_decode_is_readonly_view(tmp_path):
     from tesseract_core.sdk.binref import (
-        SUPPORTS_BINREF_POOL,
         BinrefWritePool,
         encode_array_binref_pooled,
     )
 
-    if not SUPPORTS_BINREF_POOL:
-        pytest.skip("binref pool / lazy decode is Linux-only")
+    if os.name != "posix":
+        pytest.skip("the pool and its mmap decode are POSIX-only")
 
     pool = BinrefWritePool(tmp_path, max_slots=4)
     try:
@@ -673,13 +673,12 @@ def test_binref_pool_lazy_decode_is_readonly_view(tmp_path):
 
 def test_binref_pool_lazy_decode_survives_unlink(tmp_path):
     from tesseract_core.sdk.binref import (
-        SUPPORTS_BINREF_POOL,
         BinrefWritePool,
         encode_array_binref_pooled,
     )
 
-    if not SUPPORTS_BINREF_POOL:
-        pytest.skip("binref pool / lazy decode is Linux-only")
+    if os.name != "posix":
+        pytest.skip("the pool and its mmap decode are POSIX-only")
 
     pool = BinrefWritePool(tmp_path, max_slots=4)
     try:
@@ -708,11 +707,7 @@ def test_binref_pool_lazy_decode_survives_unlink(tmp_path):
 
 
 def test_HTTPClient_binref_pool_only_created_with_input_path(tmp_path):
-    from tesseract_core.sdk.binref import SUPPORTS_BINREF_POOL
     from tesseract_core.sdk.tesseract import HTTPClient
-
-    if not SUPPORTS_BINREF_POOL:
-        pytest.skip("experimental_binref_pool is Linux-only")
 
     # experimental_binref_pool=True without an input_path is meaningless (no
     # mounted dir to put pooled files in), so no pool should be created.
@@ -728,11 +723,7 @@ def test_HTTPClient_binref_pool_only_created_with_input_path(tmp_path):
 
 
 def test_HTTPClient_close_is_idempotent(tmp_path):
-    from tesseract_core.sdk.binref import SUPPORTS_BINREF_POOL
     from tesseract_core.sdk.tesseract import HTTPClient
-
-    if not SUPPORTS_BINREF_POOL:
-        pytest.skip("experimental_binref_pool is Linux-only")
 
     client = HTTPClient("localhost", input_path=tmp_path, experimental_binref_pool=True)
     client.close()
