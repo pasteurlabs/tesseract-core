@@ -52,6 +52,41 @@ PathLike: TypeAlias = str | Path
 BoolOrCallable: TypeAlias = bool | Callable[[str], Any]
 
 
+def _scratch_dirs(
+    input_path: str | Path | None,
+    output_path: str | Path | None,
+    output_format: str,
+) -> tuple[Path | None, Path, list[Path]]:
+    """Work out the directories a served Tesseract reads and writes through.
+
+    An output directory always exists, which is what lets `stream_logs` work
+    without the caller naming one, and `json+binref` additionally needs somewhere
+    to put its inputs.
+
+    Returns:
+        The input directory (None unless binref needs one), the output directory,
+        and whichever of them were created here -- the caller purges those and
+        leaves any it was given alone.
+    """
+    created = []
+
+    if input_path is not None:
+        resolved_input = Path(input_path).resolve()
+    elif output_format == "json+binref":
+        resolved_input = Path(tempfile.mkdtemp(prefix="tesseract_input_"))
+        created.append(resolved_input)
+    else:
+        resolved_input = None
+
+    if output_path is not None:
+        resolved_output = engine._resolve_file_path(output_path, make_dir=True)
+    else:
+        resolved_output = Path(tempfile.mkdtemp(prefix="tesseract_output_"))
+        created.append(resolved_output)
+
+    return resolved_input, resolved_output, created
+
+
 def _purge_tempdir(path: str) -> None:
     """Remove an auto-created output tempdir. Used as a weakref finalizer.
 
@@ -243,31 +278,17 @@ class Tesseract:
 
         if volumes is None:
             volumes = []
-        auto_input_path = False
-        if input_path is not None:
-            input_path = Path(input_path).resolve()
-        elif output_format == "json+binref":
-            # Auto-create an input directory so binref-encoded inputs have a
-            # mounted location to be written to and read from by the container.
-            input_path = Path(tempfile.mkdtemp(prefix="tesseract_input_"))
-            auto_input_path = True
-
-        auto_output_path = output_path is None
-        if output_path is not None:
-            output_path = Path(output_path).resolve()
-        else:
-            # Auto-create temp directory for output (enables stream_logs without explicit output_path)
-            output_path = Path(tempfile.mkdtemp(prefix="tesseract_output_"))
+        input_path, output_path, auto_dirs = _scratch_dirs(
+            input_path, output_path, output_format
+        )
 
         obj._stream_logs = stream_logs
         obj._timeout = timeout
         obj._binref_pool_enabled = experimental_binref_pool
         # Purge auto-created tempdirs when the object is garbage collected.
         # User-supplied paths are left untouched.
-        if auto_input_path:
-            weakref.finalize(obj, _purge_tempdir, str(input_path))
-        if auto_output_path:
-            weakref.finalize(obj, _purge_tempdir, str(output_path))
+        for scratch in auto_dirs:
+            weakref.finalize(obj, _purge_tempdir, str(scratch))
         obj._spawn_config = dict(
             image_name=image_name,
             volumes=volumes,
@@ -425,7 +446,7 @@ class Tesseract:
         obj = cls.__new__(cls)
         obj._stream_logs = stream_logs
         obj._spawn_backend = "subprocess"
-        obj._spawn_config = _subprocess_spawn_config(
+        auto_dirs, obj._spawn_config = _subprocess_spawn_config(
             tesseract_api,
             input_path=input_path,
             output_path=output_path,
@@ -434,6 +455,9 @@ class Tesseract:
             python_executable=python_executable,
             startup_timeout=startup_timeout,
         )
+        # Purge auto-created scratch dirs when the object is garbage collected.
+        for scratch in auto_dirs:
+            weakref.finalize(obj, _purge_tempdir, str(scratch))
         return obj
 
     def __enter__(self) -> Tesseract:
@@ -491,9 +515,22 @@ class Tesseract:
         else:
             _, self._serve_context = engine.serve(**self._spawn_config)
 
-        # Ensure that the Tesseract is torn down once the object is garbage
-        # collected, to avoid orphaned containers or processes if the user
-        # forgets to call .teardown()
+        self._lastlog = None
+        output_path = self._spawn_config.get("output_path")
+        input_path = self._spawn_config.get("input_path")
+        output_format = self._spawn_config.get("output_format", "json+base64")
+        self._client = HTTPClient(
+            self._serve_context.url,
+            output_path=Path(output_path) if output_path else None,
+            output_format=output_format,
+            timeout=self._timeout,
+            input_path=Path(input_path) if input_path else None,
+            experimental_binref_pool=self._binref_pool_enabled,
+        )
+
+        # Ensure that the Tesseract is torn down once the object is garbage collected,
+        # to avoid orphaned containers or processes if the user forgets to call
+        # .teardown()
         def _silent_teardown(handle: ServedTesseract) -> None:
             from tesseract_core.sdk.docker_client import NotFound
 
@@ -502,23 +539,9 @@ class Tesseract:
             except NotFound:
                 pass
 
-        reap = (_silent_teardown, self._serve_context)
-        url = self._serve_context.url
-
-        self._lastlog = None
-        output_path = self._spawn_config.get("output_path")
-        input_path = self._spawn_config.get("input_path")
-        output_format = self._spawn_config.get("output_format", "json+base64")
-        self._client = HTTPClient(
-            url,
-            output_path=Path(output_path) if output_path else None,
-            output_format=output_format,
-            timeout=self._timeout,
-            input_path=Path(input_path) if input_path else None,
-            experimental_binref_pool=self._binref_pool_enabled,
+        self._atexit_finalizer = weakref.finalize(
+            self, _silent_teardown, self._serve_context
         )
-
-        self._atexit_finalizer = weakref.finalize(self, *reap)
 
     def teardown(self) -> None:
         """Teardown the Tesseract.
@@ -785,7 +808,7 @@ def _subprocess_spawn_config(
     runtime_config: dict[str, Any] | None,
     python_executable: str | Path | None,
     startup_timeout: float,
-) -> dict[str, Any]:
+) -> tuple[list[Path], dict[str, Any]]:
     """Validate arguments for a dedicated-process Tesseract and build its config.
 
     Unlike the in-process path, nothing here touches this process's runtime
@@ -805,17 +828,9 @@ def _subprocess_spawn_config(
     if not tesseract_api_path.is_file():
         raise RuntimeError(f"Tesseract API path {tesseract_api_path} is not a file.")
 
-    if output_path is not None:
-        resolved_output_path = engine._resolve_file_path(output_path, make_dir=True)
-    elif output_format == "json+binref":
-        raise ValueError(
-            "output_path is required when using the 'json+binref' output format."
-        )
-    else:
-        # Same as `from_image` and the in-process path: an output directory
-        # always exists, which is what makes `stream_logs` work without the
-        # caller having to specify one.
-        resolved_output_path = Path(tempfile.mkdtemp(prefix="tesseract_output_"))
+    resolved_input_path, resolved_output_path, auto_dirs = _scratch_dirs(
+        input_path, output_path, output_format
+    )
 
     # Debug mode gives full tracebacks from the child and enables the `test`
     # endpoint, matching what the in-process path configures. The debugpy
@@ -825,9 +840,9 @@ def _subprocess_spawn_config(
     if runtime_config is not None:
         config_kwargs.update(runtime_config)
 
-    return dict(
+    return auto_dirs, dict(
         api_path=tesseract_api_path,
-        input_path=input_path.resolve() if input_path is not None else None,
+        input_path=resolved_input_path,
         output_path=resolved_output_path,
         output_format=output_format,
         runtime_config=config_kwargs,
