@@ -10,6 +10,7 @@ from contextlib import closing
 from pathlib import Path
 
 import pytest
+import requests
 import yaml
 from jinja2.exceptions import TemplateNotFound
 
@@ -1088,7 +1089,7 @@ def test_serve_retries_on_port_in_use(mocked_docker, monkeypatch):
     seen_ports = []
     fail_times = 2  # fail the first two attempts, succeed on the third
 
-    def flaky_health(container, ping_ip, port, timeout=30):
+    def flaky_health(container, ping_ip, port, timeout):
         seen_ports.append(port)
         if len(seen_ports) <= fail_times:
             raise engine._PortInUseError(f"Port {port} was already in use")
@@ -1151,10 +1152,62 @@ def test_serve_reraises_non_port_container_error(mocked_docker, monkeypatch):
         engine.serve("foobar")
 
 
+# `docker inspect` state, as recorded for a container that has stopped. Verified
+# against Docker: an OOM kill reports both the flag and code 137.
+_OOM_KILLED = {"Running": False, "OOMKilled": True, "ExitCode": 137, "Error": ""}
+_EXITED = {"Running": False, "OOMKilled": False, "ExitCode": 1, "Error": ""}
+_DAEMON_ERROR = {
+    "Running": False,
+    "OOMKilled": False,
+    "ExitCode": 127,
+    "Error": 'exec: "tesseract-runtime": not found',
+}
+
+
+@pytest.mark.parametrize(
+    "state,expected",
+    [
+        (_OOM_KILLED, "exceeding its memory limit"),
+        (_DAEMON_ERROR, 'Docker reported: exec: "tesseract-runtime": not found'),
+        (_EXITED, ""),
+    ],
+)
+def test_container_diagnoses_its_own_exit(state, expected):
+    """A stopped container can say things its logs cannot -- an OOM kill writes nothing."""
+    container = Container(
+        id="abc123", short_id="abc123", name="vectoradd", attrs={"State": state}
+    )
+    assert expected in container.diagnose_exit(logs="")
+    assert container.exit_code() == state["ExitCode"]
+
+
+def test_serve_disposes_of_a_container_that_never_starts(mocked_docker, monkeypatch):
+    """A container that fails to become healthy is removed, not left lying around.
+
+    Everything it knew goes into the error before it goes, and the port-conflict
+    retry path would otherwise leave one behind per attempt.
+    """
+    torn_down = []
+
+    def unreachable(*args, **kwargs):
+        raise requests.exceptions.ConnectionError("nothing listening")
+
+    # The fixture answers /health with a 200; this container never will, and is
+    # not running, so waiting gives up on it immediately.
+    monkeypatch.setattr(serving.requests, "get", unreachable)
+    monkeypatch.setattr(Container, "is_running", lambda self: False)
+    monkeypatch.setattr(Container, "teardown", lambda self: torn_down.append(self))
+
+    with pytest.raises(RuntimeError, match="stopped running during startup"):
+        engine.serve("foobar")
+
+    assert len(torn_down) == 1
+
+
 def test_serve_gives_up_after_max_port_attempts(mocked_docker, monkeypatch):
     """If every attempt loses the port race, serve raises rather than looping forever."""
 
-    def always_in_use(container, ping_ip, port, timeout=30):
+    def always_in_use(container, ping_ip, port, timeout):
         raise engine._PortInUseError(f"Port {port} was already in use")
 
     monkeypatch.setattr(engine, "_wait_for_health", always_in_use)
@@ -1171,7 +1224,7 @@ def test_serve_does_not_retry_user_supplied_port(mocked_docker, monkeypatch):
     """
     attempts = []
 
-    def always_in_use(container, ping_ip, port, timeout=30):
+    def always_in_use(container, ping_ip, port, timeout):
         attempts.append(port)
         raise engine._PortInUseError(f"Port {port} was already in use")
 

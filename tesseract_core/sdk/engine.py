@@ -715,7 +715,7 @@ def teardown(
     }
 
     for container_id, container in containers.items():
-        container.remove(force=True)
+        container.teardown()
         logger.info(f"Tesseract is shutdown for Docker container ID: {container_id}")
 
 

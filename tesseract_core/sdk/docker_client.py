@@ -573,6 +573,45 @@ class Container:
             )
         return result.returncode, result.stdout
 
+    def __repr__(self) -> str:
+        return f"Tesseract container {self.name}"
+
+    def exit_code(self) -> int | None:
+        """The code this container exited with, from the last state read of it."""
+        state = self.attrs.get("State", {})
+        if state.get("Running"):
+            return None
+        return state.get("ExitCode")
+
+    def diagnose_exit(self, logs: str) -> str:
+        """Report what `docker inspect` recorded and the logs cannot say.
+
+        Reads the recorded state rather than the container, which by now has been
+        disposed of: liveness is what noticed it had stopped, and reading it
+        refreshed that state, so what it holds is how it stopped.
+        """
+        del logs  # a container's own output is all the other evidence there is
+        state = self.attrs.get("State", {})
+        if state.get("OOMKilled"):
+            # Nothing else can report this: the process is killed outright, so it
+            # has no chance to say anything about it in its own logs.
+            return (
+                "It was killed for exceeding its memory limit, which is why it "
+                "may have written nothing. Give it a higher `memory` limit."
+            )
+        if state.get("Error"):
+            return f"Docker reported: {state['Error']}"
+        return ""
+
+    def teardown(self) -> None:
+        """Stop this container and remove it, leaving nothing behind.
+
+        Neither `stop` nor `remove` will do on its own: the first leaves a stopped
+        container in place, and the second refuses to touch a running one unless
+        forced. Named for what `tesseract teardown` already means.
+        """
+        self.remove(force=True)
+
     def stop(self) -> None:
         """Stop the container."""
         docker = _get_docker_executable()
