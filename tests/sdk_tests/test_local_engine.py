@@ -418,6 +418,25 @@ def test_given_scratch_dirs_are_left_alone(dummy_api_path, sample_inputs, tmp_pa
     assert given_in.exists() and given_out.exists()
 
 
+def test_binref_pool_is_available_without_a_linux_host(dummy_api_path, sample_inputs):
+    """The pool is barred for containers off Linux, not for a plain subprocess.
+
+    A container elsewhere runs in a VM, so bind mounts cross the VM boundary and
+    client and server never share a page cache. Two processes on one host do.
+    """
+    if os.name != "posix":
+        pytest.skip("the pool decodes with a read-only mmap, which needs POSIX")
+
+    tess = Tesseract.from_source(
+        dummy_api_path, output_format="json+binref", experimental_binref_pool=True
+    )
+    with tess:
+        assert tess._client._binref_pool is not None
+        result = tess.apply(sample_inputs)
+
+    assert result["result"].shape == sample_inputs["a"].shape
+
+
 def test_container_info_unavailable(dummy_api_path):
     tess = Tesseract.from_source(dummy_api_path)
     with pytest.raises(RuntimeError, match="from_image"):

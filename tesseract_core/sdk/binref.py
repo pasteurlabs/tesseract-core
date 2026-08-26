@@ -16,9 +16,9 @@ This module holds the client-side machinery for that path:
 - :func:`read_binref_array` / :func:`mmap_binref_array` decode a binref buffer
   eagerly (portable) or as a zero-copy mmap view (POSIX only).
 
-The pool and the lazy mmap decode are gated on Linux via
-:data:`SUPPORTS_BINREF_POOL`; see the note there for why other platforms do not
-qualify.
+The pool and the lazy mmap decode are opt-in, and only pay off when the binref
+directory is memory-backed. A containerized Tesseract can additionally only meet
+the premise on Linux -- see :data:`CONTAINERS_SUPPORT_BINREF_POOL`.
 """
 
 from __future__ import annotations
@@ -208,14 +208,21 @@ def encode_array_binref_pooled(
 
 
 # The binref write pool is a fast same-machine IPC path: the client writes binref
-# inputs into a directory the server container reads directly, ideally a shared-
-# memory tmpfs (/dev/shm), and decodes outputs as zero-copy mmap views. That only
-# pays off when client and server share a page cache, i.e. a native Linux host
-# running Linux containers. On macOS (and Windows) the container runs inside a
-# Linux VM, so bind mounts cross the VM boundary and there is no host tmpfs the
-# container sees as the same memory -- the premise does not hold. So the pool
-# (and, with it, the lazy zero-copy decode) is offered on Linux only.
-SUPPORTS_BINREF_POOL = sys.platform.startswith("linux")
+# inputs into a directory the server reads directly, and decodes outputs as
+# zero-copy mmap views. It only pays off when the two share a page cache and the
+# directory is memory-backed; on a disk-backed filesystem the mmap machinery
+# costs more than it saves, so it is opt-in and never chosen for you.
+#
+# Two separate conditions. The pooled path maps its output buffers read-only with
+# `PROT_READ`, which only exists on POSIX, so it is unavailable on Windows however
+# the Tesseract is served.
+SUPPORTS_BINREF_POOL = os.name == "posix"
+
+# And a *containerized* Tesseract can only share a page cache on a native Linux
+# host: elsewhere the container runs inside a Linux VM, so bind mounts cross the
+# VM boundary and there is no host tmpfs the container sees as the same memory.
+# A Tesseract served as a subprocess has no VM to cross, so POSIX is enough.
+CONTAINERS_SUPPORT_BINREF_POOL = sys.platform.startswith("linux")
 
 
 def read_binref_array(
