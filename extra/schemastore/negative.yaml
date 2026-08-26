@@ -1,0 +1,4 @@
+# Reproduces https://github.com/pasteurlabs/tesseract-core/issues/459:
+# an unknown top-level key must be rejected by the schema.
+name: "helloworld"
+general: "kenobi"
