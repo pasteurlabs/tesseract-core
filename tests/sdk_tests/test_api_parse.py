@@ -323,3 +323,33 @@ def test_generated_config_schema_matches_get_config(
     # The issue's counter-example (an unknown top-level key) is rejected.
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate({"name": "foo", "general": "kenobi"}, schema)
+
+
+SCHEMASTORE_DIR = Path(__file__).parents[2] / "extra" / "schemastore"
+
+
+def test_schemastore_fixtures_match_generated_schema(tmp_path):
+    """The fixtures staged for the SchemaStore submission must stay valid.
+
+    ``positive.yaml`` and ``negative.yaml`` are the artifacts we submit to
+    SchemaStore, but nothing else exercises them, so they can silently drift out
+    of sync with the schema. Validate them here so the positive one is provably
+    accepted (and by the model) and the negative one provably rejected.
+    """
+    jsonschema = pytest.importorskip("jsonschema")
+
+    from tesseract_core.sdk.api_parse import generate_config_schema, get_config
+
+    schema = generate_config_schema()
+
+    positive = (SCHEMASTORE_DIR / "positive.yaml").read_text()
+    negative = (SCHEMASTORE_DIR / "negative.yaml").read_text()
+
+    # The positive fixture must satisfy both the schema and the Pydantic model.
+    jsonschema.validate(yaml.safe_load(positive), schema)  # does not raise
+    _write_tesseract_config_to_file(positive, tmp_path)
+    get_config(tmp_path)  # does not raise
+
+    # The negative fixture must be rejected by the schema.
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(yaml.safe_load(negative), schema)
