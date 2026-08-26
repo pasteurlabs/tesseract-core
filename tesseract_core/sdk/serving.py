@@ -21,6 +21,11 @@ from .docker_client import APIError, Container
 
 logger = logging.getLogger("tesseract")
 
+# How long to wait for a freshly started Tesseract to answer /health. Generous,
+# because the cost of being wrong is asymmetric: a Tesseract that crashes is
+# reported the moment it stops running, so this only bounds one that hangs.
+DEFAULT_STARTUP_TIMEOUT = 60.0
+
 
 class _PortInUseError(RuntimeError):
     """Container failed to start because its port was already bound.
@@ -95,7 +100,10 @@ def _retry_or_raise_port_conflict(
 
 
 def _wait_for_health(
-    container: Container, ping_ip: str, port: str, timeout: float = 30
+    container: Container,
+    ping_ip: str,
+    port: str,
+    timeout: float = DEFAULT_STARTUP_TIMEOUT,
 ) -> None:
     """Poll a container's /health endpoint until it responds 200 or timeout expires."""
     while True:
