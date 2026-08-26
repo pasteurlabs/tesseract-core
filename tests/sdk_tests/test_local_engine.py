@@ -6,6 +6,7 @@ These spawn real ``tesseract-runtime serve`` processes (but no containers), so
 they exercise the actual startup / health-check / teardown path.
 """
 
+import gc
 import os
 import re
 import shutil
@@ -341,12 +342,48 @@ def test_rejects_imported_module(dummy_tesseract_module):
         )
 
 
-def test_rejects_binref_without_output_path(dummy_api_path):
-    with pytest.raises(ValueError, match="output_path is required"):
-        Tesseract.from_source(
-            dummy_api_path,
-            output_format="json+binref",
-        )
+def test_binref_works_without_being_given_directories(dummy_api_path, sample_inputs):
+    """Binref needs scratch dirs; not being told about them is not the user's problem."""
+    with Tesseract.from_source(dummy_api_path, output_format="json+binref") as tess:
+        result = tess.apply(sample_inputs)
+
+    assert result["result"].shape == sample_inputs["a"].shape
+
+
+def test_auto_created_scratch_dirs_are_purged(dummy_api_path, sample_inputs):
+    """What we made, we clean up -- unlike directories the caller passed in."""
+    tess = Tesseract.from_source(dummy_api_path, output_format="json+binref")
+    scratch = [
+        Path(tess._spawn_config["input_path"]),
+        Path(tess._spawn_config["output_path"]),
+    ]
+    assert all(d.exists() for d in scratch)
+
+    with tess:
+        tess.apply(sample_inputs)
+    del tess
+    gc.collect()
+
+    assert not any(d.exists() for d in scratch)
+
+
+def test_given_scratch_dirs_are_left_alone(dummy_api_path, sample_inputs, tmp_path):
+    given_in, given_out = tmp_path / "in", tmp_path / "out"
+    given_in.mkdir()
+    given_out.mkdir()
+
+    tess = Tesseract.from_source(
+        dummy_api_path,
+        input_path=given_in,
+        output_path=given_out,
+        output_format="json+binref",
+    )
+    with tess:
+        tess.apply(sample_inputs)
+    del tess
+    gc.collect()
+
+    assert given_in.exists() and given_out.exists()
 
 
 def test_container_info_unavailable(dummy_api_path):

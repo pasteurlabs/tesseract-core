@@ -422,7 +422,7 @@ class Tesseract:
         obj = cls.__new__(cls)
         obj._stream_logs = stream_logs
         obj._spawn_backend = "subprocess"
-        obj._spawn_config = _subprocess_spawn_config(
+        auto_dirs, obj._spawn_config = _subprocess_spawn_config(
             tesseract_api,
             input_path=input_path,
             output_path=output_path,
@@ -431,6 +431,9 @@ class Tesseract:
             python_executable=python_executable,
             startup_timeout=startup_timeout,
         )
+        # Purge auto-created scratch dirs when the object is garbage collected.
+        for scratch in auto_dirs:
+            weakref.finalize(obj, _purge_tempdir, str(scratch))
         return obj
 
     def __enter__(self) -> Tesseract:
@@ -782,7 +785,7 @@ def _subprocess_spawn_config(
     runtime_config: dict[str, Any] | None,
     python_executable: str | Path | None,
     startup_timeout: float,
-) -> dict[str, Any]:
+) -> tuple[list[Path], dict[str, Any]]:
     """Validate arguments for a dedicated-process Tesseract and build its config.
 
     Unlike the in-process path, nothing here touches this process's runtime
@@ -802,17 +805,24 @@ def _subprocess_spawn_config(
     if not tesseract_api_path.is_file():
         raise RuntimeError(f"Tesseract API path {tesseract_api_path} is not a file.")
 
+    # Scratch directories, as `from_image` does it: an output directory always
+    # exists, which is what makes `stream_logs` work without the caller
+    # specifying one, and binref additionally needs somewhere to put its inputs.
+    # Auto-created ones are purged with the Tesseract; given ones are left alone.
+    auto_dirs = []
     if output_path is not None:
         resolved_output_path = engine._resolve_file_path(output_path, make_dir=True)
-    elif output_format == "json+binref":
-        raise ValueError(
-            "output_path is required when using the 'json+binref' output format."
-        )
     else:
-        # Same as `from_image` and the in-process path: an output directory
-        # always exists, which is what makes `stream_logs` work without the
-        # caller having to specify one.
         resolved_output_path = Path(tempfile.mkdtemp(prefix="tesseract_output_"))
+        auto_dirs.append(resolved_output_path)
+
+    if input_path is not None:
+        resolved_input_path = Path(input_path).resolve()
+    elif output_format == "json+binref":
+        resolved_input_path = Path(tempfile.mkdtemp(prefix="tesseract_input_"))
+        auto_dirs.append(resolved_input_path)
+    else:
+        resolved_input_path = None
 
     # Debug mode gives full tracebacks from the child and enables the `test`
     # endpoint, matching what the in-process path configures. The debugpy
@@ -822,9 +832,9 @@ def _subprocess_spawn_config(
     if runtime_config is not None:
         config_kwargs.update(runtime_config)
 
-    return dict(
+    return auto_dirs, dict(
         api_path=tesseract_api_path,
-        input_path=input_path.resolve() if input_path is not None else None,
+        input_path=resolved_input_path,
         output_path=resolved_output_path,
         output_format=output_format,
         runtime_config=config_kwargs,
