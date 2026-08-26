@@ -43,11 +43,11 @@ from .docker_client import (
 from .exceptions import UserError
 from .serving import (
     DEFAULT_STARTUP_TIMEOUT,
-    _is_port_conflict,
-    _PortInUseError,
-    _retry_or_raise_port_conflict,
-    _wait_for_health,
+    PortInUseError,
     get_free_port,
+    is_port_conflict,
+    retry_or_raise_port_conflict,
+    wait_for_health_or_dispose,
 )
 
 if TYPE_CHECKING:
@@ -1131,7 +1131,7 @@ def serve(
         try:
             # In port-mapping mode a host-port collision fails here, when the
             # daemon tries to publish the port. In host-network mode it instead
-            # surfaces from _wait_for_health (uvicorn's own bind fails).
+            # surfaces from wait_for_health_or_dispose (uvicorn's own bind fails).
             container = docker_client.containers.run(
                 image=image_name,
                 command=["serve", *args],
@@ -1152,16 +1152,16 @@ def serve(
                 break
 
             logger.info("Waiting for Tesseract to start...")
-            _wait_for_health(container, ping_ip, port, startup_timeout)
+            wait_for_health_or_dispose(container, ping_ip, port, startup_timeout)
         except ContainerError as ex:
-            if not _is_port_conflict(ex.stderr.decode("utf-8", errors="ignore")):
+            if not is_port_conflict(ex.stderr.decode("utf-8", errors="ignore")):
                 raise
             # Publish failed; no container was created, nothing to clean up.
-            _retry_or_raise_port_conflict(port, auto_port, attempt, max_attempts)
+            retry_or_raise_port_conflict(port, auto_port, attempt, max_attempts)
             continue
-        except _PortInUseError:
+        except PortInUseError:
             container.remove(force=True)
-            _retry_or_raise_port_conflict(port, auto_port, attempt, max_attempts)
+            retry_or_raise_port_conflict(port, auto_port, attempt, max_attempts)
             continue
         break
 
