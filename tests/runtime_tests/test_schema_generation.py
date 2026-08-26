@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
+import re
 from collections.abc import Iterable
 from copy import deepcopy
 from typing import Annotated, Optional
@@ -13,11 +14,14 @@ from pydantic import BaseModel, ConfigDict, RootModel, ValidationError
 from tesseract_core.runtime import Array, Differentiable, Float32, Float64, Int64, UInt8
 from tesseract_core.runtime.experimental import LazySequence
 from tesseract_core.runtime.schema_generation import (
+    SEQ_INDEX_SENTINEL,
+    _path_to_pattern,
     apply_function_to_model_tree,
     create_abstract_eval_schema,
     create_apply_schema,
     create_gradient_schema,
 )
+from tesseract_core.runtime.tree_transforms import path_to_index_op
 
 
 class SubModel(BaseModel):
@@ -822,3 +826,23 @@ def test_model_config_extra_forbid():
 
     with pytest.raises(ValidationError):
         ApplyParent.model_validate({"child": {"x": "foo"}, "extra": 1})
+
+
+@pytest.mark.parametrize("index", ["[0]", "[7]", "[-1]", "[-7]"])
+def test_advertised_sequence_indices_are_resolvable(index):
+    """Concrete indices the advertised pattern matches must also parse as paths.
+
+    The pattern reaches users through the OpenAPI schema and through the
+    validation error naming it, so anything it accepts has to survive
+    path_to_index_op.
+    """
+    pattern = _path_to_pattern((SEQ_INDEX_SENTINEL,))
+    if re.fullmatch(pattern, index):
+        path_to_index_op(index)
+
+
+def test_negative_sequence_indices_are_not_advertised():
+    """Nothing in a generated gradient schema should promise negative indexing."""
+    InputSchema, _ = create_gradient_schema(NestedModel, NestedModel, "vjp")
+    schema = json.dumps(InputSchema.model_json_schema())
+    assert "-?" not in schema
