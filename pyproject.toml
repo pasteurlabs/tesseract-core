@@ -124,6 +124,9 @@ addopts = ["--typeguard-packages=tesseract_core", "--durations=10"]
 testpaths = ["tests"]
 markers = [
     "gpu: requires a physical CUDA GPU (plus CuPy) and is skipped on GPU-less CI runners",
+    # Builds a throwaway virtualenv with uv; needs network on a cold uv cache.
+    # Deselect with: -m "not foreign_venv"
+    "foreign_venv: test that runs a Tesseract in a separate Python environment",
 ]
 filterwarnings = [
     "error",

@@ -21,6 +21,7 @@ from typing import Any, TypeAlias
 from typing import List as list_  # noqa: UP035
 
 from tesseract_core.sdk.config import get_config
+from tesseract_core.sdk.served_client import ServedTesseract
 
 logger = logging.getLogger("tesseract")
 
@@ -442,7 +443,7 @@ class Images:
 
 
 @dataclass
-class Container:
+class Container(ServedTesseract):
     """Container class to wrap Docker container details.
 
     Container class has additional member variables `host_port` and `host_ip` that

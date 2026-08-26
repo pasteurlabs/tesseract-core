@@ -2,22 +2,24 @@
 # SPDX-License-Identifier: Apache-2.0
 """Primitives shared by everything that serves a Tesseract over HTTP.
 
-Choosing a port to serve on, waiting for the server to answer, and telling a lost
-race for a port apart from a Tesseract that is genuinely broken. None of it is
-particular to how the Tesseract is run, so none of it belongs in the module that
-knows how to run one.
+Choosing a port to serve on, telling the Tesseract how it is configured, waiting
+for it to answer, and telling a lost race for a port apart from a Tesseract that
+is genuinely broken. None of it is particular to how the Tesseract is run, so none
+of it belongs in a module that knows how to run one.
 """
 
 import logging
 import random
 import socket
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from contextlib import closing
+from typing import Any
 
 import requests
 
-from .docker_client import APIError, Container
+from .docker_client import APIError
+from .served_client import ServedTesseract
 
 logger = logging.getLogger("tesseract")
 
@@ -43,7 +45,12 @@ class _PortInUseError(RuntimeError):
 
 
 # Substrings container runtimes use to report a host port already being taken.
-_PORT_CONFLICT_MARKERS = ("address already in use", "port is already allocated")
+_PORT_CONFLICT_MARKERS = (
+    "address already in use",
+    "port is already allocated",
+    # Windows' wording for the same condition (WSAEADDRINUSE / WinError 10048)
+    "only one usage of each socket address",
+)
 
 
 def get_free_port(
@@ -73,9 +80,30 @@ def get_free_port(
     raise RuntimeError(f"No free ports found in range {start}-{end}")
 
 
+def runtime_config_env(runtime_config: Mapping[str, Any] | None) -> dict[str, str]:
+    """Convert runtime configuration to the variables the Tesseract runtime reads.
+
+    Shared so that ``runtime_config`` means the same thing however a Tesseract is
+    served; booleans in particular have to be spelled the way the config parser
+    expects.
+    """
+
+    def encode(value: Any) -> str:
+        return ("1" if value else "0") if isinstance(value, bool) else str(value)
+
+    return {
+        f"TESSERACT_{key.upper()}": encode(value)
+        for key, value in (runtime_config or {}).items()
+    }
+
+
 def _is_port_conflict(stderr: str) -> bool:
     """Whether runtime stderr/logs indicate a host port collision."""
-    lowered = stderr.lower()
+    # Collapse whitespace before matching. An uncaught error in the runtime is
+    # rendered by rich into a fixed-width box, which wraps long lines -- and
+    # debugpy's "Address already in use" is long enough to be split across two,
+    # so a naive substring search silently misses a genuine conflict.
+    lowered = " ".join(stderr.split()).lower()
     return any(marker in lowered for marker in _PORT_CONFLICT_MARKERS)
 
 
@@ -106,15 +134,10 @@ _HEALTH_REQUEST_TIMEOUT = 5.0
 _HEALTH_POLL_INTERVAL = 0.1
 
 
-def _wait_for_health(
-    container: Container,
-    ping_ip: str,
-    port: str,
-    timeout: float = DEFAULT_STARTUP_TIMEOUT,
-) -> None:
-    """Wait for a container to serve /health, and dispose of it if it never does.
+def _wait_for_health(served: ServedTesseract, url: str, timeout: float) -> None:
+    """Wait for a Tesseract to serve /health, and dispose of it if it never does.
 
-    Takes ``ping_ip`` rather than asking the container: one that published its
+    Takes ``url`` rather than using ``served.url``: a container that published its
     port on every interface is not reached at the address it reports binding to.
 
     Raises:
@@ -127,9 +150,7 @@ def _wait_for_health(
 
     while True:
         try:
-            response = requests.get(
-                f"http://{ping_ip}:{port}/health", timeout=_HEALTH_REQUEST_TIMEOUT
-            )
+            response = requests.get(f"{url}/health", timeout=_HEALTH_REQUEST_TIMEOUT)
         except requests.exceptions.RequestException:
             pass
         else:
@@ -137,12 +158,11 @@ def _wait_for_health(
                 return
 
         # Liveness is only asked once /health has failed to answer, so a healthy
-        # container never pays for it -- worth having, as it is a `docker inspect`
-        # every poll. Checked before the deadline: "it exited" tells whoever asked
-        # more than "it did not answer in time", and a container that has exited
-        # is never going to answer. Reading it also leaves the state it stopped in
-        # on the container, for the message below to use.
-        if not container.is_running():
+        # Tesseract never pays for it -- worth having, as for a container it is a
+        # `docker inspect` every poll. Checked before the deadline: "it exited"
+        # tells whoever asked more than "it did not answer in time", and a
+        # Tesseract that has exited is never going to answer.
+        if not served.is_running():
             timed_out = False
             break
         if time.monotonic() > deadline:
@@ -153,34 +173,39 @@ def _wait_for_health(
 
     # Read the logs before disposing of what wrote them. Neither reading nor
     # disposing may raise: they are how we report the failure, not the failure
-    # itself, and an error here would replace it with a less useful one.
+    # itself, and an error here would replace it with a less useful one. Both
+    # implementations raise `APIError` and nothing else, but a handle holding an
+    # operating system resource is entitled to an `OSError`.
     try:
-        logs = container.logs(stdout=True, stderr=True).decode(errors="replace")
-    except APIError as ex:
-        logger.warning(f"Failed to get logs for {container}: {ex}")
+        logs = served.logs().decode(errors="replace")
+    except (APIError, OSError) as ex:
+        logger.warning(f"Failed to get logs for {served}: {ex}")
         logs = ""
 
     try:
-        container.teardown()
-    except APIError as ex:
-        logger.warning(f"Failed to tear down {container}: {ex}")
+        served.teardown()
+    except (APIError, OSError) as ex:
+        logger.warning(f"Failed to tear down {served}: {ex}")
 
     # A port collision is racy and worth retrying with a fresh port; distinguish
     # it from genuine startup failures so those still fail fast.
     if _is_port_conflict(logs):
-        raise _PortInUseError(f"Port {port} was already in use")
+        raise _PortInUseError(f"Port {served.host_port} was already in use")
 
+    # Only what the Tesseract itself can add differs between transports; naming
+    # it, saying which of the two ways it failed, and quoting its output do not.
     if timed_out:
-        headline = f"{container} did not respond to a health check in time."
+        headline = f"{served} did not respond to a health check in time."
+        # Advice neither transport can improve on: both take the same argument.
         diagnosis = (
             "If it is simply slow to initialize (e.g. loading a large model), "
             "increase `startup_timeout`."
         )
     else:
-        exit_code = container.exit_code()
+        exit_code = served.exit_code()
         exited = "" if exit_code is None else f" (exit code {exit_code})"
-        headline = f"{container} stopped running during startup{exited}."
-        diagnosis = container.diagnose_exit(logs)
+        headline = f"{served} stopped running during startup{exited}."
+        diagnosis = served.diagnose_exit(logs)
     output = (
         f"Output from the Tesseract:\n{logs.strip()}"
         if logs.strip()

@@ -1062,6 +1062,33 @@ def test_container_debugpy_host_defaults_to_all_interfaces(mocked_docker):
     assert json.loads(res)["environment"]["TESSERACT_DEBUGPY_HOST"] == "0.0.0.0"
 
 
+def test_port_conflict_detected_in_wrapped_traceback():
+    """A conflict must be recognised even when rich has wrapped the message.
+
+    An uncaught error in the runtime is rendered into a fixed-width box, and
+    debugpy's message is long enough to be split across two lines. Matching the
+    raw text misses it, so a real port collision is reported as an unexplained
+    startup failure instead of being retried.
+    """
+    # Verbatim from a real debugpy bind failure captured through the runtime CLI
+    wrapped = (
+        "RuntimeError: Can't listen for client connections: [Errno 48] Address "
+        "already in\nuse"
+    )
+
+    assert engine._is_port_conflict(wrapped)
+    # Unwrapped forms must keep working
+    assert engine._is_port_conflict("[Errno 98] Address already in use")
+    assert engine._is_port_conflict("port is already allocated")
+    # Windows words it entirely differently for the same condition
+    assert engine._is_port_conflict(
+        "RuntimeError: Can't listen for client connections: [WinError 10048] Only "
+        "one usage of each socket address (protocol/network address/port) is "
+        "normally permitted"
+    )
+    assert not engine._is_port_conflict("some unrelated failure")
+
+
 def test_serve_container_port_decoupled_from_host_port(mocked_docker):
     """The container-side API port is fixed and independent of the host port.
 
@@ -1086,13 +1113,13 @@ def test_serve_retries_on_port_in_use(mocked_docker, monkeypatch):
     fails to bind it) should cause serve to pick a fresh port and try again,
     rather than surfacing the failure to the caller.
     """
-    seen_ports = []
+    seen_urls = []
     fail_times = 2  # fail the first two attempts, succeed on the third
 
-    def flaky_health(container, ping_ip, port, timeout):
-        seen_ports.append(port)
-        if len(seen_ports) <= fail_times:
-            raise engine._PortInUseError(f"Port {port} was already in use")
+    def flaky_health(served, url, timeout):
+        seen_urls.append(url)
+        if len(seen_urls) <= fail_times:
+            raise engine._PortInUseError(f"{url} was already in use")
         # success -> return normally
 
     monkeypatch.setattr(engine, "_wait_for_health", flaky_health)
@@ -1100,10 +1127,8 @@ def test_serve_retries_on_port_in_use(mocked_docker, monkeypatch):
     res, _ = engine.serve("foobar")
     assert res
     # It retried until success and used a distinct port each time.
-    assert len(seen_ports) == fail_times + 1
-    assert len(set(seen_ports)) == len(seen_ports), (
-        f"retries reused a port: {seen_ports}"
-    )
+    assert len(seen_urls) == fail_times + 1
+    assert len(set(seen_urls)) == len(seen_urls), f"retries reused a port: {seen_urls}"
 
 
 def test_serve_retries_on_docker_publish_conflict(mocked_docker, monkeypatch):
@@ -1152,6 +1177,29 @@ def test_serve_reraises_non_port_container_error(mocked_docker, monkeypatch):
         engine.serve("foobar")
 
 
+def test_serve_disposes_of_a_container_that_never_starts(mocked_docker, monkeypatch):
+    """A container that fails to become healthy is removed, not left lying around.
+
+    Its logs are reported before it goes, so nothing is lost by removing it -- and
+    the port-conflict retry path would otherwise leave one behind per attempt.
+    """
+    torn_down = []
+
+    def unreachable(*args, **kwargs):
+        raise requests.exceptions.ConnectionError("nothing listening")
+
+    # The fixture answers /health with a 200; this container never will, and is
+    # not running, so waiting gives up on it immediately.
+    monkeypatch.setattr(serving.requests, "get", unreachable)
+    monkeypatch.setattr(Container, "is_running", lambda self: False)
+    monkeypatch.setattr(Container, "teardown", lambda self: torn_down.append(self))
+
+    with pytest.raises(RuntimeError, match="stopped running during startup"):
+        engine.serve("foobar")
+
+    assert len(torn_down) == 1
+
+
 # `docker inspect` state, as recorded for a container that has stopped. Verified
 # against Docker: an OOM kill reports both the flag and code 137.
 _OOM_KILLED = {"Running": False, "OOMKilled": True, "ExitCode": 137, "Error": ""}
@@ -1172,7 +1220,7 @@ _DAEMON_ERROR = {
         (_EXITED, ""),
     ],
 )
-def test_container_diagnoses_its_own_exit(state, expected):
+def test_container_diagnoses_its_own_failure(state, expected):
     """A stopped container can say things its logs cannot -- an OOM kill writes nothing."""
     container = Container(
         id="abc123", short_id="abc123", name="vectoradd", attrs={"State": state}
@@ -1181,34 +1229,11 @@ def test_container_diagnoses_its_own_exit(state, expected):
     assert container.exit_code() == state["ExitCode"]
 
 
-def test_serve_disposes_of_a_container_that_never_starts(mocked_docker, monkeypatch):
-    """A container that fails to become healthy is removed, not left lying around.
-
-    Everything it knew goes into the error before it goes, and the port-conflict
-    retry path would otherwise leave one behind per attempt.
-    """
-    torn_down = []
-
-    def unreachable(*args, **kwargs):
-        raise requests.exceptions.ConnectionError("nothing listening")
-
-    # The fixture answers /health with a 200; this container never will, and is
-    # not running, so waiting gives up on it immediately.
-    monkeypatch.setattr(serving.requests, "get", unreachable)
-    monkeypatch.setattr(Container, "is_running", lambda self: False)
-    monkeypatch.setattr(Container, "teardown", lambda self: torn_down.append(self))
-
-    with pytest.raises(RuntimeError, match="stopped running during startup"):
-        engine.serve("foobar")
-
-    assert len(torn_down) == 1
-
-
 def test_serve_gives_up_after_max_port_attempts(mocked_docker, monkeypatch):
     """If every attempt loses the port race, serve raises rather than looping forever."""
 
-    def always_in_use(container, ping_ip, port, timeout):
-        raise engine._PortInUseError(f"Port {port} was already in use")
+    def always_in_use(served, url, timeout):
+        raise engine._PortInUseError(f"{url} was already in use")
 
     monkeypatch.setattr(engine, "_wait_for_health", always_in_use)
 
@@ -1224,9 +1249,9 @@ def test_serve_does_not_retry_user_supplied_port(mocked_docker, monkeypatch):
     """
     attempts = []
 
-    def always_in_use(container, ping_ip, port, timeout):
-        attempts.append(port)
-        raise engine._PortInUseError(f"Port {port} was already in use")
+    def always_in_use(served, url, timeout):
+        attempts.append(url)
+        raise engine._PortInUseError(f"{url} was already in use")
 
     monkeypatch.setattr(engine, "_wait_for_health", always_in_use)
 
@@ -1234,7 +1259,7 @@ def test_serve_does_not_retry_user_supplied_port(mocked_docker, monkeypatch):
         engine.serve("foobar", port="12345")
 
     # Exactly one attempt, on the exact port requested.
-    assert attempts == ["12345"]
+    assert attempts == ["http://127.0.0.1:12345"]
 
 
 def test_needs_docker(mocked_docker, monkeypatch):
