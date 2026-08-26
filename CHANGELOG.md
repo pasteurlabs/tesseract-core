@@ -2,6 +2,36 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.12.0] - 2026-08-26
+
+### Features
+
+- Add debug mode to one-shot commands (#631)
+- Make the debugpy address configurable (#663)
+- *(sdk)* Add deprecation tombstone registry (#681)
+- Add `json+cuda_ipc` array encoding for GPU-direct tensor transfer (#588)
+- Add shared memory tooling, docs, and example for fast same-machine IPC on Linux (#664)
+
+### Bug Fixes
+
+- Get rid of hardcoded ports in run_tesseract's debug logic (#657)
+- Run the console scripts under test, not whichever are on PATH (#662)
+- *(runtime)* Compare VJP cache keys, and don't trace non-JAX inputs (#667)
+- *(sdk)* Pin uv image to target platform for cross-arch builds (#686)
+- *(runtime)* Skip absent optional containers when expanding paths (#689)
+- Config parsing with string fallbacks (#679)
+- *(sdk)* Purge auto-created output tempdirs on garbage collection (#685)
+
+### Documentation
+
+- Refactor according to Diátaxis, eliminate .html suffixes (#655)
+- Add Bayesian inference via NumPyro demo (#628)
+- Add hackathon banner (#653)
+- Set runtime license (#659)
+- Fix dead links and broken images throughout docs (#661)
+- Blog post on cookiecutter-tesseract announcement (#665)
+- Add multiphysics demo (#627)
+
 ## [1.11.0] - 2026-07-23
 
 ### Features
