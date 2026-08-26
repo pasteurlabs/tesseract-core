@@ -42,6 +42,7 @@ from .docker_client import (
 )
 from .exceptions import UserError
 from .serving import (
+    DEFAULT_STARTUP_TIMEOUT,
     _is_port_conflict,
     _PortInUseError,
     _retry_or_raise_port_conflict,
@@ -928,6 +929,7 @@ def serve(
     docker_args: list[str] | None = None,
     runtime_config: dict[str, Any] | None = None,
     skip_health_check: bool = False,
+    startup_timeout: float = DEFAULT_STARTUP_TIMEOUT,
 ) -> tuple:
     """Serve one or more Tesseract images.
 
@@ -960,6 +962,9 @@ def serve(
             Tesseracts with slow initialization (e.g., Julia runtime startup, large
             model loading). The caller is responsible for ensuring readiness,
             e.g. by polling ``/health``, before calling other endpoints.
+        startup_timeout: How long to wait for the Tesseract to answer a health
+            check, in seconds. Raise it for one that is slow to initialize, in
+            preference to skipping the check altogether.
 
     Returns:
         A tuple of the Tesseract container name and the port it is serving on.
@@ -1147,7 +1152,7 @@ def serve(
                 break
 
             logger.info("Waiting for Tesseract to start...")
-            _wait_for_health(container, ping_ip, port)
+            _wait_for_health(container, ping_ip, port, startup_timeout)
         except ContainerError as ex:
             if not _is_port_conflict(ex.stderr.decode("utf-8", errors="ignore")):
                 raise
