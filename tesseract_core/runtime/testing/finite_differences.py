@@ -335,11 +335,52 @@ def _jacobian_via_jvp(
     return jvp[output_path]
 
 
-#: One VJP sweep answers for every sampled index of a path pair, so the cache
-#: sits on the pair rather than on the index the caller happens to want back.
-#: That granularity mismatch is why this is a plain dict rather than
-#: ``_cached_function``, which memoises whatever the function returns.
-_vjp_sweep_cache: dict = {}
+@_cached_function(key_fn=_by_sampled_set)
+def _vjp_sweep(
+    endpoints_func: dict[str, Callable],
+    inputs: dict[str, Any],
+    input_path: Sequence[str],
+    output_path: Sequence[str],
+    wanted: tuple[tuple[int, ...], ...],
+) -> dict[tuple[int, ...], ArrayLike]:
+    """Sweep one-hot cotangents over the output and keep the wanted rows.
+
+    One VJP call with a one-hot cotangent returns the gradient with respect
+    to every element of ``input_path``, so a single sweep over the output
+    elements answers for all sampled indices at once. Keeping just one
+    element and re-running the sweep per index cost
+    ``n_sampled x n_output_elements`` calls, where ``jacobian`` and
+    ``jacobian_vector_product`` cost one per item.
+
+    Only the wanted rows are retained, so the full Jacobian is never
+    materialised.
+    """
+    apply_fn = endpoints_func["apply"]
+    ApplySchema = get_input_schema(apply_fn)
+    outputs = apply_fn(ApplySchema.model_validate({"inputs": inputs})).model_dump()
+
+    vjp_fn = endpoints_func["vector_jacobian_product"]
+    VjpSchema = get_input_schema(vjp_fn)
+    template = np.zeros_like(get_at_path(outputs, output_path))
+    rows = {idx: np.zeros_like(template) for idx in wanted}
+
+    for col_idx in np.ndindex(template.shape):
+        cotangent = np.zeros_like(template)
+        cotangent[col_idx] = 1
+        vjp = vjp_fn(
+            VjpSchema.model_validate(
+                {
+                    "inputs": inputs,
+                    "vjp_inputs": [input_path],
+                    "vjp_outputs": [output_path],
+                    "cotangent_vector": {output_path: cotangent},
+                }
+            )
+        ).model_dump()
+        grad = vjp[input_path]
+        for idx in wanted:
+            rows[idx][col_idx] = grad[idx]
+    return rows
 
 
 def _jacobian_via_vjp(
@@ -350,61 +391,20 @@ def _jacobian_via_vjp(
     input_idx: tuple[int, ...],
     sampled_input_idx: tuple[tuple[int, ...], ...] = (),
 ) -> ArrayLike:
-    """Compute a Jacobian row using the vector_jacobian_product endpoint.
+    """Return one Jacobian row from the sweep shared by this path pair.
 
-    One VJP call with a one-hot cotangent returns the gradient with respect
-    to every element of ``input_path``, so a single sweep over the output
-    elements answers for all sampled indices at once. Keeping just one
-    element and re-running the sweep per index cost
-    ``n_sampled x n_output_elements`` calls, where ``jacobian`` and
-    ``jacobian_vector_product`` cost one per item.
-
-    ``sampled_input_idx`` is the set this pair will be asked for, so only
-    those rows are retained and the full Jacobian is never materialised.
+    ``sampled_input_idx`` is the set this pair will be asked for. It goes
+    into the cache key so that one sweep serves every index in it, which is
+    the granularity the sweep actually answers at, while callers keep asking
+    for a single row like the other three helpers.
     """
     wanted = tuple(dict.fromkeys((*sampled_input_idx, tuple(input_idx))))
-    key = (input_path, output_path, wanted)
-
-    if key not in _vjp_sweep_cache:
-        try:
-            apply_fn = endpoints_func["apply"]
-            ApplySchema = get_input_schema(apply_fn)
-            outputs = apply_fn(
-                ApplySchema.model_validate({"inputs": inputs})
-            ).model_dump()
-
-            vjp_fn = endpoints_func["vector_jacobian_product"]
-            VjpSchema = get_input_schema(vjp_fn)
-            template = np.zeros_like(get_at_path(outputs, output_path))
-            rows = {idx: np.zeros_like(template) for idx in wanted}
-
-            for col_idx in np.ndindex(template.shape):
-                cotangent = np.zeros_like(template)
-                cotangent[col_idx] = 1
-                vjp = vjp_fn(
-                    VjpSchema.model_validate(
-                        {
-                            "inputs": inputs,
-                            "vjp_inputs": [input_path],
-                            "vjp_outputs": [output_path],
-                            "cotangent_vector": {output_path: cotangent},
-                        }
-                    )
-                ).model_dump()
-                grad = vjp[input_path]
-                for idx in wanted:
-                    rows[idx][col_idx] = grad[idx]
-            _vjp_sweep_cache[key] = rows
-        except Exception as e:
-            _vjp_sweep_cache[key] = e
-
-    cached = _vjp_sweep_cache[key]
-    if isinstance(cached, Exception):
-        raise cached
-    return cached[tuple(input_idx)]
+    return _vjp_sweep(endpoints_func, inputs, input_path, output_path, wanted)[
+        tuple(input_idx)
+    ]
 
 
-_jacobian_via_vjp.clear_cache = _vjp_sweep_cache.clear
+_jacobian_via_vjp.clear_cache = _vjp_sweep.clear_cache
 
 
 def _sample_indices(
