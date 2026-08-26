@@ -19,12 +19,15 @@ HTTP. Because `/dev/shm` is a `tmpfs` shared between the host and the container,
 the array data never leaves memory and is never copied through the socket.
 
 ```{note}
-This is a Linux optimization. It relies on `/dev/shm` (a shared-memory `tmpfs`)
-being available and bind-mounted into the container. This is only possible when the
-client and the Tesseract share a host; for remote Tesseracts, array data has to
-cross the network regardless, so a compact wire encoding is what matters instead
-(see {doc}`/content/reference/array-encodings`).
+This only helps when the client and the Tesseract share a host. For remote
+Tesseracts, array data has to cross the network regardless, so a compact wire
+encoding is what matters instead (see
+{doc}`/content/reference/array-encodings`).
 ```
+
+A containerized Tesseract needs `/dev/shm` bind-mounted into it, which means a
+Linux host. A Tesseract served in a dedicated process needs nothing of the sort
+-- see [Without a container](#without-a-container) below.
 
 ## Basic usage
 
@@ -110,8 +113,61 @@ Two things to keep in mind when opting in:
 - **The pool holds some resident memory** until the Tesseract is torn down, and
   each result you keep pins its backing pages until it is dropped.
 
-The pool is Linux-only (it raises on other platforms) and has no effect for
-output formats other than `json+binref`.
+The pool needs the binref directory to be **memory-backed**. That is what makes
+its memory-mapped writes free; on an ordinary disk-backed directory the mapping
+machinery costs more than it saves, and the pool is measurably _slower_ than
+plain `json+binref`. It has no effect for output formats other than
+`json+binref`.
+
+For a containerized Tesseract the pool additionally requires a Linux host, and
+raises elsewhere: on macOS and Windows the container runs inside a Linux VM, so
+bind mounts cross the VM boundary and the client and the container never share a
+page cache. A Tesseract served in a dedicated process has no VM to cross, so the
+pool is available on any platform.
+
+## Without a container
+
+`Tesseract.from_source()` serves a `tesseract_api.py` in a dedicated subprocess
+rather than a container (see {doc}`/content/how-to/debugging`). Client and server
+are then two ordinary processes on one host, which removes both of the
+constraints above -- and you do not have to name any directories, because
+scratch directories are created and cleaned up for you:
+
+```python
+with Tesseract.from_source(
+    "/path/to/tesseract_api.py", output_format="json+binref"
+) as t:
+    result = t.apply({"x": x})
+```
+
+This is enough to get most of the benefit. Measured on an Apple silicon laptop,
+a 40 MB `float64` round trip takes ~26 ms this way against ~168 ms for the
+default `json+base64`.
+
+Note that a directory in `/tmp` is not memory-backed, even though it performs as
+if it were: writeback happens asynchronously and the reader is served from the
+page cache, so the call never waits for the disk. The bytes do reach the disk
+eventually. In one measurement, moving 720 MB of arrays produced 687 MB of
+device writes. If that matters -- for SSD wear, or to enable the pool -- put the
+scratch directories on a memory-backed filesystem and pass them explicitly.
+
+On Linux that is `/dev/shm`, as above. macOS has no `/dev/shm`, but it does have
+a `tmpfs`:
+
+```bash
+mkdir -p /tmp/tess-shm
+sudo mount_tmpfs -s 1g /tmp/tess-shm   # a cap, not a reservation
+```
+
+```{warning}
+Do not use `hdiutil attach ram://` for this. That allocates **wired** memory,
+which the memory compressor cannot reclaim, and a large one can wedge the
+machine. A `tmpfs` mounted with `-s` is a ceiling on pages that are allocated on
+demand and stay reclaimable.
+```
+
+With the scratch directories on that mount and the pool enabled, the same 40 MB
+round trip takes ~20 ms.
 
 ## When this helps
 
@@ -137,6 +193,11 @@ overhead again.
 If your arrays are small, or your Tesseract runs remotely, stay with the default
 `json+base64`. Reach for shared-memory binref when you are passing large arrays
 to a Tesseract on the same machine and per-call overhead is limiting you.
+
+The crossover is low: 64 kB is 8192 `float64` elements, so anything much larger
+than a short vector is already on the binref side of it. Below the crossover the
+penalty is a fixed fraction of a millisecond -- the cost of handling a file per
+call -- which is the same order as the HTTP round trip you are paying anyway.
 
 For the broader picture of where overhead comes from and how to reason about it,
 see {doc}`/content/concepts/performance`. For encoding-format details, see
