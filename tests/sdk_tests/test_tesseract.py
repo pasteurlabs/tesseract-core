@@ -1,3 +1,4 @@
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock
 
@@ -81,6 +82,33 @@ def test_Tesseract_from_tesseract_api(dummy_tesseract_location, dummy_tesseract_
     t = Tesseract.from_tesseract_api(dummy_tesseract_module)
     endpoints = set(t.available_endpoints)
     assert endpoints == all_endpoints
+
+
+def test_Tesseract_from_tesseract_api_does_not_leak_config_between_instances(
+    dummy_tesseract_module, tmp_path
+):
+    """Check that a second in-process Tesseract stays isolated from a prior one.
+
+    Each instance's configuration must be independent, the same way it
+    already is for from_image (#672).
+    """
+    from tesseract_core.runtime.config import get_config
+
+    first_output = tmp_path / "first_output"
+    first_output.mkdir()
+    Tesseract.from_tesseract_api(
+        dummy_tesseract_module,
+        output_path=first_output,
+        output_format="json",
+    )
+    assert Path(get_config().output_path) == first_output
+    assert get_config().output_format == "json"
+
+    # A fresh instance that requests neither option must not see the first
+    # instance's explicit overrides leaking into its runtime config.
+    Tesseract.from_tesseract_api(dummy_tesseract_module)
+    assert Path(get_config().output_path) != first_output
+    assert get_config().output_format == "json+base64"  # from_tesseract_api's default
 
 
 def test_Tesseract_from_image(mock_serving, mock_clients):

@@ -311,7 +311,14 @@ class Tesseract:
         Returns:
             A Tesseract instance.
         """
-        from tesseract_core.runtime.config import update_config
+        from tesseract_core.runtime.config import reset_config, update_config
+
+        # Runtime config is process-global (unlike from_image, which passes
+        # it via TESSERACT_* environment variables to an isolated
+        # subprocess), so a prior in-process Tesseract's explicit overrides
+        # must not leak into this one: start from environment variables and
+        # this call's own arguments only (#672).
+        reset_config()
 
         if isinstance(tesseract_api, str | Path):
             from tesseract_core.runtime.core import load_module_from_path

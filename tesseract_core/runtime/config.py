@@ -91,6 +91,23 @@ _current_config = None
 _config_overrides = set()
 
 
+def reset_config() -> None:
+    """Discard all remembered runtime configuration overrides.
+
+    update_config() re-applies every previously overridden field on each
+    call, which a single Tesseract's config setup relies on to accumulate
+    correctly across its several update_config() calls (input_path, then
+    output_path, then general kwargs). But that same stickiness means a
+    later, independent in-process Tesseract silently inherits an earlier
+    one's explicit overrides instead of starting from environment variables
+    and its own arguments. Callers that build config for a fresh instance
+    should call this first.
+    """
+    global _current_config, _config_overrides
+    _current_config = None
+    _config_overrides = set()
+
+
 def get_config() -> RuntimeConfig:
     """Return the current runtime configuration."""
     if _current_config is None:
