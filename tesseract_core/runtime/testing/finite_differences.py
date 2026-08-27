@@ -113,25 +113,47 @@ def get_differentiable_paths(
     return ad_inputs, ad_outputs
 
 
-def _cached_jacobian(fn: Callable) -> Callable:
-    """Cache the result of the jacobian computation based on input_path, output_path, and input_idx."""
-    cache = {}
+def _by_index(input_path: Any, output_path: Any, input_idx: Any) -> tuple:
+    """Key a per-index Jacobian row on the triple it depends on."""
+    return (input_path, output_path, tuple(input_idx))
 
-    @wraps(fn)
-    def _wrapper(*args: Any, **kwargs: Any) -> Any:
-        _, _, input_path, output_path, input_idx, *_ = args
-        key = (input_path, output_path, tuple(input_idx))
-        if key not in cache:
-            try:
-                cache[key] = fn(*args, **kwargs)
-            except Exception as e:
-                cache[key] = e
-        if isinstance(cache[key], Exception):
-            raise cache[key]
-        return cache[key]
 
-    _wrapper.clear_cache = cache.clear
-    return _wrapper
+def _by_sampled_set(input_path: Any, output_path: Any, sampled: Any) -> tuple:
+    """Key a VJP sweep on the path pair and the set it answers for.
+
+    One sweep covers every sampled index of a pair, so keying it per index
+    would defeat the sharing.
+    """
+    return (input_path, output_path, tuple(sampled))
+
+
+def _cached_function(*, key_fn: Callable) -> Callable:
+    """Memoise on a key derived from the call's path arguments.
+
+    ``key_fn`` receives ``(input_path, output_path, fifth_positional)`` and
+    returns the cache key, so the caller decides the granularity.
+    """
+
+    def _decorate(fn: Callable) -> Callable:
+        cache = {}
+
+        @wraps(fn)
+        def _wrapper(*args: Any, **kwargs: Any) -> Any:
+            _, _, input_path, output_path, fifth, *_ = args
+            key = key_fn(input_path, output_path, fifth)
+            if key not in cache:
+                try:
+                    cache[key] = fn(*args, **kwargs)
+                except Exception as e:
+                    cache[key] = e
+            if isinstance(cache[key], Exception):
+                raise cache[key]
+            return cache[key]
+
+        _wrapper.clear_cache = cache.clear
+        return _wrapper
+
+    return _decorate
 
 
 def _perturb_input(
@@ -229,7 +251,7 @@ def _compute_forward_diff_row(
     ) / eps
 
 
-@_cached_jacobian
+@_cached_function(key_fn=_by_index)
 def _jacobian_via_apply(
     endpoints_func: dict[str, Callable],
     inputs: dict[str, Any],
@@ -259,7 +281,7 @@ def _jacobian_via_apply(
     )
 
 
-@_cached_jacobian
+@_cached_function(key_fn=_by_index)
 def _jacobian_via_jacobian(
     endpoints_func: dict[str, Callable],
     inputs: dict[str, Any],
@@ -290,7 +312,7 @@ def _jacobian_via_jacobian(
     return output_val[jac_slice]
 
 
-@_cached_jacobian
+@_cached_function(key_fn=_by_index)
 def _jacobian_via_jvp(
     endpoints_func: dict[str, Callable],
     inputs: dict[str, Any],
@@ -317,25 +339,37 @@ def _jacobian_via_jvp(
     return jvp[output_path]
 
 
-@_cached_jacobian
-def _jacobian_via_vjp(
+@_cached_function(key_fn=_by_sampled_set)
+def _vjp_sweep(
     endpoints_func: dict[str, Callable],
     inputs: dict[str, Any],
     input_path: Sequence[str],
     output_path: Sequence[str],
-    input_idx: tuple[int, ...],
-) -> ArrayLike:
-    """Compute a Jacobian row using the vector_jacobian_product endpoint."""
+    wanted: tuple[tuple[int, ...], ...],
+) -> dict[tuple[int, ...], ArrayLike]:
+    """Sweep one-hot cotangents over the output and keep the wanted rows.
+
+    One VJP call with a one-hot cotangent returns the gradient with respect
+    to every element of ``input_path``, so a single sweep over the output
+    elements answers for all sampled indices at once. Keeping just one
+    element and re-running the sweep per index cost
+    ``n_sampled x n_output_elements`` calls, where ``jacobian`` and
+    ``jacobian_vector_product`` cost one per item.
+
+    Only the wanted rows are retained, so the full Jacobian is never
+    materialised.
+    """
     apply_fn = endpoints_func["apply"]
     ApplySchema = get_input_schema(apply_fn)
     outputs = apply_fn(ApplySchema.model_validate({"inputs": inputs})).model_dump()
 
     vjp_fn = endpoints_func["vector_jacobian_product"]
     VjpSchema = get_input_schema(vjp_fn)
-    jac_row = np.zeros_like(get_at_path(outputs, output_path))
+    template = np.zeros_like(get_at_path(outputs, output_path))
+    rows = {idx: np.zeros_like(template) for idx in wanted}
 
-    for col_idx in np.ndindex(jac_row.shape):
-        cotangent = np.zeros_like(jac_row)
+    for col_idx in np.ndindex(template.shape):
+        cotangent = np.zeros_like(template)
         cotangent[col_idx] = 1
         vjp = vjp_fn(
             VjpSchema.model_validate(
@@ -347,9 +381,34 @@ def _jacobian_via_vjp(
                 }
             )
         ).model_dump()
-        jac_row[col_idx] = vjp[input_path][input_idx]
+        grad = vjp[input_path]
+        for idx in wanted:
+            rows[idx][col_idx] = grad[idx]
+    return rows
 
-    return jac_row
+
+def _jacobian_via_vjp(
+    endpoints_func: dict[str, Callable],
+    inputs: dict[str, Any],
+    input_path: Sequence[str],
+    output_path: Sequence[str],
+    input_idx: tuple[int, ...],
+    sampled_input_idx: tuple[tuple[int, ...], ...] = (),
+) -> ArrayLike:
+    """Return one Jacobian row from the sweep shared by this path pair.
+
+    ``sampled_input_idx`` is the set this pair will be asked for. It goes
+    into the cache key so that one sweep serves every index in it, which is
+    the granularity the sweep actually answers at, while callers keep asking
+    for a single row like the other three helpers.
+    """
+    wanted = tuple(dict.fromkeys((*sampled_input_idx, tuple(input_idx))))
+    return _vjp_sweep(endpoints_func, inputs, input_path, output_path, wanted)[
+        tuple(input_idx)
+    ]
+
+
+_jacobian_via_vjp.clear_cache = _vjp_sweep.clear_cache
 
 
 def _sample_indices(
@@ -413,6 +472,13 @@ def check_endpoint_gradients(
     items_to_check = _sample_indices(inputs, diff_inputs, diff_outputs, max_evals, rng)
     num_evals = 0
 
+    # Indices this run will ask for, per path pair. The VJP sweep answers for
+    # all of them in one pass, so it needs to know them up front.
+    sampled_by_pair: dict[tuple[str, str], tuple] = {}
+    for in_path, out_path, idx in items_to_check:
+        sampled_by_pair.setdefault((in_path, out_path), ())
+        sampled_by_pair[(in_path, out_path)] += (tuple(idx),)
+
     try:
         with Progress(disable=not show_progress) as progress:
             subtask = progress.add_task(
@@ -432,12 +498,18 @@ def check_endpoint_gradients(
                         idx,
                         eps=eps,
                     )
+                    grad_kwargs = (
+                        {"sampled_input_idx": sampled_by_pair[(in_path, out_path)]}
+                        if endpoint == "vector_jacobian_product"
+                        else {}
+                    )
                     result_grad = _jacobian_via_grad(
                         endpoint_functions,
                         inputs,
                         in_path,
                         out_path,
                         idx,
+                        **grad_kwargs,
                     )
                 except Exception as e:
                     tb = traceback.extract_tb(e.__traceback__)

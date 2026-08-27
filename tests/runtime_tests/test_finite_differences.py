@@ -259,3 +259,46 @@ def test_check_gradients_runs_with_an_absent_optional_container():
         assert not failures
 
     assert num_evals_total > 0, "nothing was checked, so this proves nothing"
+
+
+class CountingVjpModule(DummyModule):
+    """DummyModule that records how many times the VJP endpoint is called."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.vjp_calls = 0
+
+    def vector_jacobian_product(self, *args, **kwargs):
+        self.vjp_calls += 1
+        return super().vector_jacobian_product(*args, **kwargs)
+
+
+def test_vjp_sweep_is_shared_across_sampled_indices():
+    """The VJP path must not re-sweep the outputs once per sampled index.
+
+    One VJP call with a one-hot cotangent already returns the gradient with
+    respect to every element of the input path, so a single sweep answers for
+    every sampled index of that path pair. Keeping only one element and
+    re-running the sweep cost ``n_sampled x n_output_elements`` calls, where
+    ``jacobian`` and ``jacobian_vector_product`` cost one per item.
+    """
+    module = CountingVjpModule("dummy_module", correct_gradients=True)
+
+    num_evals_total = 0
+    for _endpoint, failures, num_evals in check_gradients(
+        module,
+        {"inputs": input_data},
+        base_dir=None,
+        input_paths=["in_data"],
+        output_paths=["out_dict.{key}"],
+        endpoints=["vector_jacobian_product"],
+        max_evals=10,
+        seed=0,
+    ):
+        num_evals_total += num_evals
+        assert not failures
+
+    n_output_elements = int(np.prod(input_data["in_dict"]["key"].shape))
+    # One sweep, reused by every sampled index, rather than one sweep each.
+    assert module.vjp_calls == n_output_elements
+    assert module.vjp_calls < num_evals_total * n_output_elements
