@@ -3,6 +3,8 @@
 
 import ast
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -114,3 +116,40 @@ def get_config() -> RuntimeConfig:
         update_config()
     assert _current_config is not None
     return _current_config
+
+
+ConfigSnapshot = tuple[RuntimeConfig | None, frozenset[str]]
+
+
+def snapshot_config() -> ConfigSnapshot:
+    """Capture the current (config, overrides) pair, to restore later.
+
+    A Tesseract built via from_tesseract_api takes one right after its own
+    update_config() calls settle, so its endpoints can later run under
+    exactly that config -- see active_config().
+    """
+    return _current_config, frozenset(_config_overrides)
+
+
+@contextmanager
+def active_config(snapshot: ConfigSnapshot) -> Iterator[None]:
+    """Run a block under `snapshot` as the process-global runtime config.
+
+    Restores whatever was active before on exit -- success or failure.
+    Config is process-global (get_config()/update_config() share module
+    state), which one in-process Tesseract's own setup relies on to
+    accumulate correctly across several update_config() calls. That same
+    globalness means the config a Tesseract was built with is not
+    necessarily the config active by the time one of its endpoints actually
+    runs: another in-process Tesseract, or another call on this one, may
+    have changed it in between. Bracketing an endpoint call in this context
+    manager makes the config it sees match the instance it belongs to,
+    independent of what ran before or runs after.
+    """
+    global _current_config, _config_overrides
+    previous = (_current_config, frozenset(_config_overrides))
+    _current_config, _config_overrides = snapshot[0], set(snapshot[1])
+    try:
+        yield
+    finally:
+        _current_config, _config_overrides = previous[0], set(previous[1])
