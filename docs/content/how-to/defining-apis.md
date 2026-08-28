@@ -129,11 +129,91 @@ class InputSchema(BaseModel):
 
 ## Building Tesseracts with private dependencies
 
-In case you have some dependencies in `tesseract_requirements.txt` for which you need to
-ssh into a server (e.g., private repositories which you specify via "git+ssh://..."),
-you can make your ssh agent available to `tesseract build` with the option
-`--forward-ssh-agent`. Alternatively you can use `pip download` to download a dependency
-to the machine that builds the Tesseract.
+Tesseracts can depend on packages that are not publicly available: private git
+repositories, authenticated package indices, or internal wheels. There are three
+ways to supply these at build time, depending on how the dependency is fetched.
+
+### Private git repositories over SSH
+
+For dependencies pulled over SSH (e.g. `git+ssh://git@github.com/org/repo.git`),
+forward your SSH agent to the build with `--forward-ssh-agent`:
+
+```bash
+$ tesseract build . --forward-ssh-agent
+```
+
+The agent is mounted into the build only for the dependency install step, so your
+keys are never written into an image layer.
+
+### Authenticated hosts over HTTPS
+
+For anything fetched over HTTPS that needs credentials (a private package index,
+a `pkg @ https://host/...whl` direct reference, or a `git+https://host/...`
+dependency), declare the host under `build_config.host_credentials` and supply the
+token out-of-band at build time.
+
+Credentials are keyed by host, i.e., the domain name alone without any path. A single
+entry therefore authenticates _every_ request to that host during the build (all
+indices, wheels, and repositories served from it), so you cannot pair different tokens with different paths on the same host.
+
+```yaml
+# tesseract_config.yaml
+build_config:
+  host_credentials:
+    - host: pkgs.dev.azure.com
+      secret_id: azure_token # matches the --secret id below
+```
+
+```bash
+$ tesseract build . --secret id=azure_token,env=AZURE_TOKEN
+```
+
+The `--secret` value follows [BuildKit's secret syntax](https://docs.docker.com/build/building/secrets/):
+`id=<id>,env=<VAR>` reads the token from an environment variable, and
+`id=<id>,src=<file>` reads it from a file. The `id` must match the `secret_id`
+of an entry in `host_credentials`. The token is mounted into the build as a secret
+and assembled into netrc and git credential entries on an in-memory mount for the
+install step, so it never lands in the config, the build context, an image layer,
+or the build cache. On shared machines, prefer `src=<file>` over `env=<VAR>`, since
+an environment variable is visible to other processes of the same user.
+
+By default the credential uses the username `__token__`, which works for
+personal-access-token style feeds. Set `username` on the entry for hosts that
+require a real username.
+
+```{warning}
+Do not put tokens directly in `tesseract_config.yaml` or `tesseract_requirements.txt`.
+Both are part of the committed source and the build context. Always pass credentials
+through `--secret`.
+```
+
+### Vendoring a dependency
+
+If you would rather not authenticate at build time at all, use `pip download` to
+fetch a dependency on the build machine and add it as a
+[local dependency](../examples/building-blocks/localpackage.md).
+
+(tuning-dependency-resolution)=
+
+## Tuning dependency resolution
+
+To pass options to the package resolver during the build, set `build_config.build_env`.
+These environment variables apply only to the build stage, not the final image, which
+makes them a good fit for [uv resolver settings](https://docs.astral.sh/uv/reference/environment/).
+For example, when drawing from multiple indices that share package names, let uv pick
+the best match across all of them:
+
+```yaml
+# tesseract_config.yaml
+build_config:
+  build_env:
+    UV_INDEX_STRATEGY: unsafe-best-match
+```
+
+```{warning}
+`build_env` values are written into the build context, so they must not contain
+secrets. Use `host_credentials` and `--secret` for credentials.
+```
 
 ## Setting environment variables
 
@@ -147,6 +227,10 @@ env:
 ```
 
 This is useful for tuning framework behavior (e.g., JAX memory allocation, OpenMP thread counts) without modifying your code. You can also override or extend these at runtime with `tesseract serve --env` or `tesseract run --env`.
+
+```{warning}
+`env` values are baked into the image and visible via `docker inspect`, so they must not contain secrets. For build-time credentials use `host_credentials` with `--secret`. For build-only, non-secret settings use `build_config.build_env` (see [Tuning dependency resolution](#tuning-dependency-resolution)).
+```
 
 ## Customizing the build process
 
