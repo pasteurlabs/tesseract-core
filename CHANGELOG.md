@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [1.12.0] - 2026-08-26
+## [1.12.0] - 2026-08-28
 
 ### Features
 
@@ -11,6 +11,8 @@ All notable changes to this project will be documented in this file.
 - *(sdk)* Add deprecation tombstone registry (#681)
 - Add `json+cuda_ipc` array encoding for GPU-direct tensor transfer (#588)
 - Add shared memory tooling, docs, and example for fast same-machine IPC on Linux (#664)
+- Add yaml schema for tesseract_config.yaml, ready for integration with SchemaStore (#683)
+- Secret handling for private dependencies + more configurability of the build process (#680)
 
 ### Bug Fixes
 
@@ -31,6 +33,14 @@ All notable changes to this project will be documented in this file.
 - Fix dead links and broken images throughout docs (#661)
 - Blog post on cookiecutter-tesseract announcement (#665)
 - Add multiphysics demo (#627)
+
+### Performance
+
+- *(runtime)* Sweep the VJP once per path pair in check-gradients (#688)
+
+### Testing
+
+- *(runtime)* Cover the gradient fallbacks with more than one key (#701)
 
 ## [1.11.0] - 2026-07-23
 
