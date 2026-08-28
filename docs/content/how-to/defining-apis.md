@@ -152,8 +152,9 @@ a `pkg @ https://host/...whl` direct reference, or a `git+https://host/...`
 dependency), declare the host under `build_config.host_credentials` and supply the
 token out-of-band at build time.
 
-Credentials are keyed by host, so a single entry authenticates every request to
-that host during the build:
+Credentials are keyed by host, i.e., the domain name alone without any path. A single
+entry therefore authenticates _every_ request to that host during the build (all
+indices, wheels, and repositories served from it), so you cannot pair different tokens with different paths on the same host.
 
 ```yaml
 # tesseract_config.yaml

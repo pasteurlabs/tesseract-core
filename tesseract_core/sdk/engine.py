@@ -438,7 +438,7 @@ def prepare_build_context(
     with credentials_file_path.open("w", encoding="utf-8") as f:
         for credential in user_config.build_config.host_credentials:
             # Tab-separated host, secret id, and username. None of these may
-            # contain a tab; hosts, secret names, and usernames never do.
+            # contain a tab; the allowlist validators guarantee that.
             f.write(
                 f"{credential.host}\t{credential.secret_id}\t{credential.username}\n"
             )
