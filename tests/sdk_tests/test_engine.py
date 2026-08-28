@@ -44,7 +44,9 @@ def test_prepare_build_context_python_version(tmp_path_factory):
 
     config = TesseractConfig(
         name="foobar",
-        build_config=TesseractBuildConfig(python_version="3.12"),
+        build_config=TesseractBuildConfig(
+            requirements={"provider": "uv-pip", "python_version": "3.12"}
+        ),
     )
     engine.prepare_build_context(src_dir, build_dir, config)
 
@@ -58,6 +60,106 @@ def test_prepare_build_context_python_version(tmp_path_factory):
 
     dockerfile_default = (build_dir2 / "Dockerfile").read_text()
     assert "TESSERACT_PYTHON_VERSION" not in dockerfile_default
+
+
+def test_prepare_build_context_build_env(tmp_path_factory):
+    """build_env is rendered in the build stage only, not the final image (#676)."""
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "foo").touch()
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(
+        name="foobar",
+        build_config=TesseractBuildConfig(
+            build_env={"UV_INDEX_STRATEGY": "unsafe-best-match"}
+        ),
+    )
+    engine.prepare_build_context(src_dir, build_dir, config)
+
+    dockerfile = (build_dir / "Dockerfile").read_text()
+    build_stage, run_stage = dockerfile.split("AS run_stage", 1)
+    # Present in the build stage, before the run stage begins.
+    assert 'UV_INDEX_STRATEGY="unsafe-best-match"' in build_stage
+    # Never carried into the final image.
+    assert "UV_INDEX_STRATEGY" not in run_stage
+
+
+@pytest.mark.parametrize("provider", ["uv-pip", "conda"])
+def test_prepare_build_context_host_credentials(tmp_path_factory, provider):
+    """host_credentials render secret mounts + a credentials file, no tokens (#675).
+
+    Provider-agnostic: the same setup applies to uv-pip and conda builds.
+    """
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "foo").touch()
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(
+        name="foobar",
+        build_config=TesseractBuildConfig(
+            requirements={"provider": provider},
+            host_credentials=[
+                {"host": "priv.example.com", "secret_id": "tok"},
+                {"host": "github.com", "secret_id": "tok2", "username": "u"},
+            ],
+        ),
+    )
+    engine.prepare_build_context(src_dir, build_dir, config, secret_ids=["tok", "tok2"])
+
+    dockerfile = (build_dir / "Dockerfile").read_text()
+    assert "--mount=type=secret,id=tok" in dockerfile
+    assert "--mount=type=secret,id=tok2" in dockerfile
+
+    # The shared credential-setup script is staged into the context.
+    assert (build_dir / "setup_host_credentials.sh").exists()
+
+    creds = (build_dir / "host_credentials.txt").read_text()
+    # host, secret id, and username -- but never a token (there are none to leak).
+    assert "priv.example.com\ttok\t__token__" in creds
+    assert "github.com\ttok2\tu" in creds
+
+
+def test_prepare_build_context_no_host_credentials(tmp_path_factory):
+    """Without host_credentials, files are still staged but the build step is clean.
+
+    The setup script and an empty credentials file are always staged (so the
+    Dockerfile can COPY them unconditionally), and no secret or tmpfs mounts
+    appear in the build step.
+    """
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "foo").touch()
+    build_dir = tmp_path_factory.mktemp("build")
+
+    engine.prepare_build_context(src_dir, build_dir, TesseractConfig(name="foobar"))
+
+    # Both files are always staged; the credentials file is empty, which the
+    # setup script treats as a no-op.
+    assert (build_dir / "setup_host_credentials.sh").exists()
+    assert (build_dir / "host_credentials.txt").read_text() == ""
+
+    dockerfile = (build_dir / "Dockerfile").read_text()
+    assert "--mount=type=secret" not in dockerfile
+    assert "--mount=type=tmpfs" not in dockerfile
+
+
+def test_build_tesseract_requires_secret_for_host_credential(tmp_path):
+    """A credential errors if no matching --secret is provided (#675)."""
+    (tmp_path / "tesseract_api.py").write_text(
+        "from pydantic import BaseModel\n"
+        "class InputSchema(BaseModel):\n    x: int = 0\n"
+        "class OutputSchema(BaseModel):\n    y: int = 0\n"
+        "def apply(inputs: InputSchema) -> OutputSchema:\n    return OutputSchema()\n"
+    )
+    (tmp_path / "tesseract_config.yaml").write_text(
+        "name: demo\n"
+        "build_config:\n"
+        "  host_credentials:\n"
+        "    - host: priv.example.com\n"
+        "      secret_id: tok\n"
+    )
+
+    with pytest.raises(ValueError, match="Missing build secret"):
+        engine.build_tesseract(tmp_path, None, generate_only=True)
 
 
 @pytest.mark.parametrize(

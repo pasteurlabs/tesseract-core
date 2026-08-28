@@ -27,9 +27,8 @@ from rich.table import Table as RichTable
 from . import engine
 from .api_parse import (
     EXPECTED_OBJECTS,
-    TesseractBuildConfig,
-    TesseractConfig,
     ValidationError,
+    get_config_keypaths,
     get_submodel_fields_in_tesseract_config,
 )
 from .config import get_config
@@ -115,11 +114,11 @@ POSSIBLE_CMDS.update(
     }
 )
 
-# All fields in TesseractConfig and TesseractBuildConfig for config override
-POSSIBLE_KEYPATHS = TesseractConfig.model_fields.keys()
 # Check that the only field that has nested models is build_config
 assert len(get_submodel_fields_in_tesseract_config()) == 1
-POSSIBLE_BUILD_CONFIGS = TesseractBuildConfig.model_fields.keys()
+# Dot-separated keypaths a --config-override may target, recursing into nested
+# sub-models (e.g. build_config.requirements.python_version).
+POSSIBLE_KEYPATHS = get_config_keypaths()
 
 # Traverse templates folder to seach for recipes
 AVAILABLE_RECIPES = set()
@@ -296,6 +295,22 @@ def build_image(
             ),
         ),
     ] = False,
+    secret: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--secret",
+            help=(
+                "Supply a build secret via a BuildKit secret mount (never stored in "
+                "the image). The only thing that currently consumes a secret is a "
+                "``build_config.host_credentials`` entry: the ``id`` here must "
+                "match the ``secret_id`` declared on such an entry. "
+                "Format: ``id=<id>,env=<VAR>`` to read from an environment "
+                "variable, or ``id=<id>,src=<file>`` to read from a file. "
+                "Repeatable."
+            ),
+            metavar="id=NAME,env=VAR|src=FILE",
+        ),
+    ] = None,
     config_override: Annotated[
         list[str] | None,
         typer.Option(
@@ -305,8 +320,6 @@ def build_image(
                 "attribute in tesseract_config.yaml. "
                 "Possible keypaths are: "
                 f"{', '.join(POSSIBLE_KEYPATHS)}. \n"
-                "\n Possible build_config options are: "
-                f"{', '.join(POSSIBLE_BUILD_CONFIGS)}. \n"
                 "\nExample: ``--config-override build_config.target_platform=linux/arm64``."
             ),
             metavar="KEYPATH=VALUE",
@@ -346,6 +359,7 @@ def build_image(
                 tag,
                 build_dir=build_dir,
                 inject_ssh=forward_ssh_agent,
+                secrets=secret,
                 config_override=parsed_config_override,
                 generate_only=generate_only,
                 stream_logs=logger.debug,
