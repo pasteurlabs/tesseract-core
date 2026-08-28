@@ -15,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 from pathlib import Path
 
 import numpy as np
@@ -25,6 +26,15 @@ from tesseract_core import Tesseract
 from tesseract_core.sdk import local_client, local_engine
 
 pytestmark = pytest.mark.timeout(120)
+
+
+def _process_alive(pid: int) -> bool:
+    """Whether `pid` still exists, without reaping or signalling it."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
 
 
 def _env_without_pythonpath() -> dict[str, str]:
@@ -86,6 +96,49 @@ def test_wait_times_out_on_a_running_process(dummy_api_path):
             served.wait(timeout=0.2)
     finally:
         served.remove(force=True)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX signals")
+def test_orphaned_tesseract_shuts_itself_down(dummy_api_path, tmp_path):
+    """A Tesseract must not outlive the process that served it.
+
+    `remove` covers an orderly exit, but nothing runs when the parent is killed
+    outright -- and a served subprocess is otherwise invisible and immortal,
+    unlike a container, which at least still shows up in `docker ps -a`.
+    """
+    helper = tmp_path / "helper.py"
+    helper.write_text(
+        textwrap.dedent(f"""
+        import time
+        from tesseract_core.sdk import local_engine
+
+        served = local_engine.serve({str(dummy_api_path)!r})
+        print(served.process.pid, flush=True)
+        time.sleep(600)
+        """)
+    )
+    with subprocess.Popen(
+        [sys.executable, str(helper)], stdout=subprocess.PIPE, text=True
+    ) as parent:
+        try:
+            tesseract_pid = int(parent.stdout.readline().strip())
+            assert _process_alive(tesseract_pid)
+
+            parent.kill()  # no cleanup runs, so only the Tesseract can react
+            parent.wait(timeout=10)
+
+            deadline = time.monotonic() + 15
+            while _process_alive(tesseract_pid) and time.monotonic() < deadline:
+                time.sleep(0.2)
+            assert not _process_alive(tesseract_pid), (
+                "Tesseract outlived the process that served it"
+            )
+        finally:
+            parent.kill()
+            # If the mechanism under test is broken, the Tesseract is orphaned --
+            # do not leave behind the very thing this is here to prevent.
+            if _process_alive(tesseract_pid):
+                os.kill(tesseract_pid, signal.SIGKILL)
 
 
 def test_remove_refuses_a_running_process(dummy_api_path):

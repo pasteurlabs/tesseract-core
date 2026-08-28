@@ -6,7 +6,9 @@
 import inspect
 import io
 import os
+import signal
 import sys
+import threading
 from collections.abc import Callable, Iterable
 from enum import Enum
 from pathlib import Path
@@ -433,6 +435,35 @@ def check_gradients(
         sys.exit(1)
 
 
+# Set by whoever spawned us to the read end of a pipe they hold open. Not a
+# config field: it is plumbing between a parent and its child, not something a
+# user sets, and a containerized Tesseract has no parent to watch.
+_PARENT_PIPE_ENV_VAR = "TESSERACT_PARENT_PIPE_FD"
+
+
+def _exit_when_parent_closes(fd: int) -> None:
+    """Shut down once the far end of `fd` is closed.
+
+    A served Tesseract outlives its parent otherwise: nothing else ties the two
+    together, and a parent that is killed outright runs no cleanup. Reading a
+    pipe the parent holds open covers every way it can go -- exiting, crashing,
+    or being killed -- because the read returns EOF in all of them.
+    """
+
+    def watch() -> None:
+        try:
+            while os.read(fd, 1):
+                # Nothing is expected to be written; a stray byte is not EOF.
+                pass
+        except OSError:
+            pass
+        # Ask uvicorn to stop rather than dying where we stand, so workers are
+        # shut down and the port is released.
+        os.kill(os.getpid(), signal.SIGTERM)
+
+    threading.Thread(target=watch, daemon=True, name="parent-watch").start()
+
+
 @app.command("serve")
 def serve(
     host: Annotated[str, typer.Option(help="Host IP address")] = "127.0.0.1",
@@ -440,6 +471,10 @@ def serve(
     num_workers: Annotated[int, typer.Option(help="Number of worker processes")] = 1,
 ) -> None:
     """Start running this Tesseract's web server."""
+    parent_pipe_fd = os.environ.get(_PARENT_PIPE_ENV_VAR)
+    if parent_pipe_fd is not None:
+        _exit_when_parent_closes(int(parent_pipe_fd))
+
     config = get_config()
     if config.debug:
         # The server is long-running, so a debugger can attach at any time.

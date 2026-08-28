@@ -22,8 +22,27 @@ from .served_client import diagnose_exit, is_running
 
 logger = logging.getLogger("tesseract")
 
+# Names the read end of a pipe the parent holds open, so a served Tesseract can
+# tell when it has been orphaned. Read by `tesseract-runtime serve`.
+PARENT_PIPE_ENV_VAR = "TESSERACT_PARENT_PIPE_FD"
+
 # How long to give a child process to exit on SIGTERM before escalating.
 _TERMINATE_TIMEOUT = 10.0
+
+
+def parent_watch_pipe() -> tuple[int | None, int | None]:
+    """A pipe a child can watch to notice it has been orphaned.
+
+    Returns the read end to hand over and the write end to hold, or a pair of
+    Nones where that is not possible. `subprocess` will not pass a descriptor to
+    a child on Windows, so there a Tesseract can still outlive its parent, as it
+    always could.
+    """
+    if os.name != "posix":
+        return None, None
+    read_fd, write_fd = os.pipe()
+    os.set_inheritable(read_fd, True)
+    return read_fd, write_fd
 
 
 def popen_kwargs() -> dict[str, Any]:
@@ -74,6 +93,9 @@ class TesseractProcess:
     log_path: Path
     python_executable: str
     api_path: Path
+    # Our end of the pipe the child watches. Held open for as long as the child
+    # should live; closing it is what tells the child we are gone.
+    parent_pipe_write_fd: int | None = None
 
     @property
     def url(self) -> str:
@@ -120,6 +142,12 @@ class TesseractProcess:
                 f"{self} is still running. Pass force=True to stop and remove it."
             )
         self._stop()
+        if self.parent_pipe_write_fd is not None:
+            try:
+                os.close(self.parent_pipe_write_fd)
+            except OSError:
+                pass
+            self.parent_pipe_write_fd = None
         try:
             self.log_path.unlink(missing_ok=True)
         except OSError:

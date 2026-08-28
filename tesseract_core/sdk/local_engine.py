@@ -24,7 +24,12 @@ import tempfile
 from pathlib import Path
 from typing import Any, Literal
 
-from .local_client import TesseractProcess, popen_kwargs
+from .local_client import (
+    PARENT_PIPE_ENV_VAR,
+    TesseractProcess,
+    parent_watch_pipe,
+    popen_kwargs,
+)
 from .serving import (
     DEFAULT_STARTUP_TIMEOUT,
     PortInUseError,
@@ -227,18 +232,40 @@ def serve(
 
         logger.debug("Serving Tesseract %s on port %s", api_path, chosen_port)
 
+        # A pipe whose read end the child watches and whose write end we hold, so
+        # that a Tesseract outlives us only for as long as it takes to notice. It
+        # sees EOF however we go -- returning, crashing, or being killed outright
+        # -- which is the case cleanup in `remove` cannot cover.
+        #
+        # POSIX only: `pass_fds` is not supported on Windows, where handing a
+        # descriptor to a child means inheriting handles wholesale. A Windows
+        # Tesseract can still be orphaned, as it could before this.
+        watch_read, watch_write = parent_watch_pipe()
+        pass_fds = (watch_read,) if watch_read is not None else ()
+        watch_env = (
+            {PARENT_PIPE_ENV_VAR: str(watch_read)} if watch_read is not None else {}
+        )
+
         try:
             process = subprocess.Popen(
                 command,
-                env=env,
+                env={**env, **watch_env},
                 stdout=log_fd,
                 stderr=subprocess.STDOUT,
                 stdin=subprocess.DEVNULL,
+                pass_fds=pass_fds,
                 **popen_kwargs(),
             )
+        except BaseException:
+            if watch_write is not None:
+                os.close(watch_write)
+            raise
         finally:
-            # The child holds its own duplicate of the descriptor.
+            # Both are the child's now: the descriptor it logs to, and the end of
+            # the pipe it watches.
             os.close(log_fd)
+            if watch_read is not None:
+                os.close(watch_read)
 
         served = TesseractProcess(
             process=process,
@@ -247,6 +274,7 @@ def serve(
             log_path=log_path,
             python_executable=python_executable,
             api_path=api_path,
+            parent_pipe_write_fd=watch_write,
         )
 
         if skip_health_check:
