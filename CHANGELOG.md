@@ -2,6 +2,46 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.12.0] - 2026-08-28
+
+### Features
+
+- Add debug mode to one-shot commands (#631)
+- Make the debugpy address configurable (#663)
+- *(sdk)* Add deprecation tombstone registry (#681)
+- Add `json+cuda_ipc` array encoding for GPU-direct tensor transfer (#588)
+- Add shared memory tooling, docs, and example for fast same-machine IPC on Linux (#664)
+- Add yaml schema for tesseract_config.yaml, ready for integration with SchemaStore (#683)
+- Secret handling for private dependencies + more configurability of the build process (#680)
+
+### Bug Fixes
+
+- Get rid of hardcoded ports in run_tesseract's debug logic (#657)
+- Run the console scripts under test, not whichever are on PATH (#662)
+- *(runtime)* Compare VJP cache keys, and don't trace non-JAX inputs (#667)
+- *(sdk)* Pin uv image to target platform for cross-arch builds (#686)
+- *(runtime)* Skip absent optional containers when expanding paths (#689)
+- Config parsing with string fallbacks (#679)
+- *(sdk)* Purge auto-created output tempdirs on garbage collection (#685)
+
+### Documentation
+
+- Refactor according to Diátaxis, eliminate .html suffixes (#655)
+- Add Bayesian inference via NumPyro demo (#628)
+- Add hackathon banner (#653)
+- Set runtime license (#659)
+- Fix dead links and broken images throughout docs (#661)
+- Blog post on cookiecutter-tesseract announcement (#665)
+- Add multiphysics demo (#627)
+
+### Performance
+
+- *(runtime)* Sweep the VJP once per path pair in check-gradients (#688)
+
+### Testing
+
+- *(runtime)* Cover the gradient fallbacks with more than one key (#701)
+
 ## [1.11.0] - 2026-07-23
 
 ### Features
