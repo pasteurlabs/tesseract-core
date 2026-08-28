@@ -302,10 +302,10 @@ def build_image(
             help=(
                 "Supply a build secret via a BuildKit secret mount (never stored in "
                 "the image). The only thing that currently consumes a secret is a "
-                "``build_config.host_credentials`` entry: the ``<name>`` here must "
-                "match the ``secret`` reference declared on such an entry. "
-                "Format: ``id=<name>,env=<VAR>`` to read from an environment "
-                "variable, or ``id=<name>,src=<file>`` to read from a file. "
+                "``build_config.host_credentials`` entry: the ``id`` here must "
+                "match the ``secret_id`` declared on such an entry. "
+                "Format: ``id=<id>,env=<VAR>`` to read from an environment "
+                "variable, or ``id=<id>,src=<file>`` to read from a file. "
                 "Repeatable."
             ),
             metavar="id=NAME,env=VAR|src=FILE",

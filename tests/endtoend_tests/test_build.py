@@ -237,7 +237,7 @@ def test_build_env_and_host_credential_with_secret(
     build_config = config.setdefault("build_config", {})
     build_config["build_env"] = {"UV_INDEX_STRATEGY": "first-index"}
     build_config["host_credentials"] = [
-        {"host": "download.pytorch.org", "secret": "host_token"},
+        {"host": "download.pytorch.org", "secret_id": "host_token"},
     ]
     config_path.write_text(yaml.dump(config))
 

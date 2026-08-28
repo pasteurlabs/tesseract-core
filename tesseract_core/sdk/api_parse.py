@@ -97,6 +97,22 @@ def _normalize_provider(value: Any) -> Any:
     return value
 
 
+# Host credential fields are written verbatim into the tab-separated credentials
+# file and, at build time, into netrc and git-credential entries. Each field is
+# constrained to an allowlist so no crafted value -- whitespace, NUL, or any other
+# control character -- can span fields or inject extra credential lines. The sets
+# differ per field: ``secret_id`` also becomes a ``/run/secrets/<id>`` path, and
+# ``host`` is written unencoded into the netrc ``machine`` entry.
+_HOST_CREDENTIAL_ALLOWED = {
+    # Valid DNS hostname characters, plus ``:`` for an optional ``host:port``.
+    "host": re.compile(r"^[A-Za-z0-9.\-:]+$"),
+    # BuildKit secret IDs; also safe as a path component under /run/secrets.
+    "secret_id": re.compile(r"^[A-Za-z0-9._-]+$"),
+    # Usernames are looser but must stay printable-ASCII and single-field.
+    "username": re.compile(r"^[\x21-\x7e]+$"),
+}
+
+
 class HostCredential(BaseModel):
     """Credentials for authenticating HTTPS access to a host during the build.
 
@@ -115,12 +131,12 @@ class HostCredential(BaseModel):
             "or ``github.com``). Just the host, not a full URL."
         ),
     )
-    secret: StrictStr = Field(
+    secret_id: StrictStr = Field(
         ...,
         description=(
-            "Name of the build secret carrying the token/password for this host. "
-            "Supply it at build time with ``tesseract build --secret "
-            "id=<name>,env=<VAR>`` (or ``,src=<file>``)."
+            "ID of the build secret carrying the token/password for this host, "
+            "matching the ``id`` of a ``tesseract build --secret "
+            "id=<id>,env=<VAR>`` (or ``,src=<file>``)."
         ),
     )
     username: StrictStr = Field(
@@ -132,16 +148,14 @@ class HostCredential(BaseModel):
     )
     model_config: ConfigDict = ConfigDict(extra="forbid")
 
-    @field_validator("host", "secret", "username")
+    @field_validator("host", "secret_id", "username")
     @classmethod
-    def _no_whitespace(cls, value: str, info: "ValidationInfo") -> str:
-        # These values are written verbatim into the tab-separated credentials
-        # file and, at build time, into netrc and git-credential entries. Rejecting
-        # whitespace keeps them on a single field and prevents a crafted value from
-        # injecting extra credential lines.
-        if value != value.strip() or any(c.isspace() for c in value):
+    def _allowed_characters(cls, value: str, info: "ValidationInfo") -> str:
+        pattern = _HOST_CREDENTIAL_ALLOWED[info.field_name]
+        if not pattern.match(value):
             raise ValueError(
-                f"{info.field_name} must not contain whitespace (got {value!r})"
+                f"{info.field_name} contains disallowed characters "
+                f"(must match {pattern.pattern}, got {value!r})"
             )
         return value
 

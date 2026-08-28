@@ -99,8 +99,8 @@ def test_prepare_build_context_host_credentials(tmp_path_factory, provider):
         build_config=TesseractBuildConfig(
             requirements={"provider": provider},
             host_credentials=[
-                {"host": "priv.example.com", "secret": "tok"},
-                {"host": "github.com", "secret": "tok2", "username": "u"},
+                {"host": "priv.example.com", "secret_id": "tok"},
+                {"host": "github.com", "secret_id": "tok2", "username": "u"},
             ],
         ),
     )
@@ -155,7 +155,7 @@ def test_build_tesseract_requires_secret_for_host_credential(tmp_path):
         "build_config:\n"
         "  host_credentials:\n"
         "    - host: priv.example.com\n"
-        "      secret: tok\n"
+        "      secret_id: tok\n"
     )
 
     with pytest.raises(ValueError, match="Missing build secret"):

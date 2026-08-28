@@ -439,7 +439,9 @@ def prepare_build_context(
         for credential in user_config.build_config.host_credentials:
             # Tab-separated host, secret id, and username. None of these may
             # contain a tab; hosts, secret names, and usernames never do.
-            f.write(f"{credential.host}\t{credential.secret}\t{credential.username}\n")
+            f.write(
+                f"{credential.host}\t{credential.secret_id}\t{credential.username}\n"
+            )
 
     # When building from a requirements.txt we support local dependencies.
     # We separate local dep. lines from the requirements.txt and copy the
@@ -720,7 +722,7 @@ def build_tesseract(
     secrets = list(secrets or [])
     provided_secret_ids = [_parse_secret_id(spec) for spec in secrets]
     required_secret_ids = [
-        credential.secret for credential in config.build_config.host_credentials
+        credential.secret_id for credential in config.build_config.host_credentials
     ]
     missing = sorted(set(required_secret_ids) - set(provided_secret_ids))
     if missing:

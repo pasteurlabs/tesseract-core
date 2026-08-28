@@ -129,7 +129,7 @@ class InputSchema(BaseModel):
 
 ## Building Tesseracts with private dependencies
 
-Tesseracts often depend on packages that are not publicly available: private git
+Tesseracts can depend on packages that are not publicly available: private git
 repositories, authenticated package indices, or internal wheels. There are three
 ways to supply these at build time, depending on how the dependency is fetched.
 
@@ -160,7 +160,7 @@ that host during the build:
 build_config:
   host_credentials:
     - host: pkgs.dev.azure.com
-      secret: azure_token # a reference, resolved at build time
+      secret_id: azure_token # matches the --secret id below
 ```
 
 ```bash
@@ -168,9 +168,9 @@ $ tesseract build . --secret id=azure_token,env=AZURE_TOKEN
 ```
 
 The `--secret` value follows [BuildKit's secret syntax](https://docs.docker.com/build/building/secrets/):
-`id=<name>,env=<VAR>` reads the token from an environment variable, and
-`id=<name>,src=<file>` reads it from a file. The `<name>` must match the `secret`
-reference in `host_credentials`. The token is mounted into the build as a secret
+`id=<id>,env=<VAR>` reads the token from an environment variable, and
+`id=<id>,src=<file>` reads it from a file. The `id` must match the `secret_id`
+of an entry in `host_credentials`. The token is mounted into the build as a secret
 and assembled into netrc and git credential entries on an in-memory mount for the
 install step, so it never lands in the config, the build context, an image layer,
 or the build cache. On shared machines, prefer `src=<file>` over `env=<VAR>`, since

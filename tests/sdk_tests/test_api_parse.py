@@ -304,20 +304,25 @@ def test_provider_python_pip_alias(
     assert "renamed to 'uv-pip'" in caplog.text
 
 
-def test_host_credential_rejects_whitespace():
-    """Whitespace in credential fields is rejected to prevent line injection."""
+def test_host_credential_rejects_disallowed_characters():
+    """Credential fields are allowlisted to prevent line/field injection."""
     from pydantic import ValidationError as PydanticValidationError
 
     from tesseract_core.sdk.api_parse import HostCredential
 
-    HostCredential(host="ok.example.com", secret="tok", username="user")
+    HostCredential(host="ok.example.com", secret_id="tok", username="user")
+    HostCredential(host="ok.example.com:8080", secret_id="azure_token")
     for bad in (
-        {"host": "a b.com", "secret": "tok"},
-        {"host": "ok.com", "secret": "tok", "username": "u\nmachine evil.com"},
-        {"host": "ok.com", "secret": "with space"},
+        {"host": "a b.com", "secret_id": "tok"},
+        {"host": "ok.com", "secret_id": "tok", "username": "u\nmachine evil.com"},
+        {"host": "ok.com", "secret_id": "with space"},
+        {"host": "ok.com\x00evil", "secret_id": "tok"},
+        {"host": "ok.com", "secret_id": "tok\x00", "username": "user"},
+        {"host": "ok.com", "secret_id": "tok", "username": "u\x01ser"},
+        {"host": "ok.com", "secret_id": "bad/id"},
     ):
         with pytest.raises(
-            PydanticValidationError, match="must not contain whitespace"
+            PydanticValidationError, match="contains disallowed characters"
         ):
             HostCredential(**bad)
 
