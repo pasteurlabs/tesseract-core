@@ -211,14 +211,40 @@ def test_config_with_python_version(
     _write_tesseract_api_to_file(valid_tesseract_api, tmp_path)
 
     config_with_python_version = yaml.safe_load(valid_tesseract_config)
-    config_with_python_version["build_config"]["python_version"] = "3.12"
+    config_with_python_version["build_config"]["requirements"] = {
+        "provider": "uv-pip",
+        "python_version": "3.12",
+    }
     _write_tesseract_config_to_file(yaml.dump(config_with_python_version), tmp_path)
     validate_tesseract_api(tmp_path)
 
     from tesseract_core.sdk.api_parse import get_config
 
     config = get_config(tmp_path)
-    assert config.build_config.python_version == "3.12"
+    assert config.build_config.requirements.python_version == "3.12"
+    assert config.build_config.effective_python_version == "3.12"
+
+
+def test_config_python_version_deprecated_location(
+    tmp_path, valid_tesseract_api, valid_tesseract_config, caplog
+):
+    """The old build_config.python_version location is forwarded onto the provider."""
+    _write_tesseract_api_to_file(valid_tesseract_api, tmp_path)
+
+    config = yaml.safe_load(valid_tesseract_config)
+    config["build_config"]["python_version"] = "3.12"
+    _write_tesseract_config_to_file(yaml.dump(config), tmp_path)
+
+    from tesseract_core.sdk.api_parse import get_config
+
+    with caplog.at_level(logging.WARNING, logger="tesseract"):
+        parsed = get_config(tmp_path)
+
+    assert parsed.build_config.requirements.python_version == "3.12"
+    assert parsed.build_config.effective_python_version == "3.12"
+    # The move must be surfaced to the user (via the logger, since a
+    # library-emitted DeprecationWarning would be suppressed by default).
+    assert "has moved to the uv-pip provider" in caplog.text
 
 
 def test_config_python_version_rejects_conda(
@@ -243,7 +269,10 @@ def test_config_python_version_rejects_inherit_base_image_packages(
     _write_tesseract_api_to_file(valid_tesseract_api, tmp_path)
 
     config = yaml.safe_load(valid_tesseract_config)
-    config["build_config"]["python_version"] = "3.12"
+    config["build_config"]["requirements"] = {
+        "provider": "uv-pip",
+        "python_version": "3.12",
+    }
     config["build_config"]["inherit_base_image_packages"] = True
     _write_tesseract_config_to_file(yaml.dump(config), tmp_path)
 
@@ -252,6 +281,50 @@ def test_config_python_version_rejects_inherit_base_image_packages(
         match="python_version cannot be used with inherit_base_image_packages",
     ):
         validate_tesseract_api(tmp_path)
+
+
+def test_provider_python_pip_alias(
+    tmp_path, valid_tesseract_api, valid_tesseract_config, caplog
+):
+    """The legacy 'python-pip' provider name is accepted as a deprecated alias."""
+    _write_tesseract_api_to_file(valid_tesseract_api, tmp_path)
+
+    config = yaml.safe_load(valid_tesseract_config)
+    config["build_config"]["requirements"] = {"provider": "python-pip"}
+    _write_tesseract_config_to_file(yaml.dump(config), tmp_path)
+
+    from tesseract_core.sdk.api_parse import get_config
+
+    with caplog.at_level(logging.WARNING, logger="tesseract"):
+        parsed = get_config(tmp_path)
+
+    assert parsed.build_config.requirements.provider == "uv-pip"
+    # The rename must be surfaced to the user (via the logger, since a
+    # library-emitted DeprecationWarning would be suppressed by default).
+    assert "renamed to 'uv-pip'" in caplog.text
+
+
+def test_host_credential_rejects_disallowed_characters():
+    """Credential fields are allowlisted to prevent line/field injection."""
+    from pydantic import ValidationError as PydanticValidationError
+
+    from tesseract_core.sdk.api_parse import HostCredential
+
+    HostCredential(host="ok.example.com", secret_id="tok", username="user")
+    HostCredential(host="ok.example.com:8080", secret_id="azure_token")
+    for bad in (
+        {"host": "a b.com", "secret_id": "tok"},
+        {"host": "ok.com", "secret_id": "tok", "username": "u\nmachine evil.com"},
+        {"host": "ok.com", "secret_id": "with space"},
+        {"host": "ok.com\x00evil", "secret_id": "tok"},
+        {"host": "ok.com", "secret_id": "tok\x00", "username": "user"},
+        {"host": "ok.com", "secret_id": "tok", "username": "u\x01ser"},
+        {"host": "ok.com", "secret_id": "bad/id"},
+    ):
+        with pytest.raises(
+            PydanticValidationError, match="contains disallowed characters"
+        ):
+            HostCredential(**bad)
 
 
 def test_config_python_version_defaults_to_none(
@@ -263,7 +336,7 @@ def test_config_python_version_defaults_to_none(
     from tesseract_core.sdk.api_parse import get_config
 
     config = get_config(tmp_path)
-    assert config.build_config.python_version is None
+    assert config.build_config.effective_python_version is None
 
 
 def test_schema_parent_class_is_checked(
