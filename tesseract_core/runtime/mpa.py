@@ -8,6 +8,7 @@ import json
 import os
 import shutil
 import sys
+import threading
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Generator
 from contextlib import ExitStack, contextmanager
@@ -23,6 +24,9 @@ import requests
 
 from tesseract_core.runtime.config import get_config
 from tesseract_core.runtime.logs import LogStreamer
+
+# File descriptor redirection changes process-global state and must remain nested.
+_STDIO_REDIRECT_LOCK = threading.RLock()
 
 
 class BaseBackend(ABC):
@@ -251,6 +255,9 @@ def redirect_stdio(
     If *log_sink* is provided, a :class:`LogStreamer` thread tails the log
     file and forwards each line to the sink in near-real-time.
 
+    Because file descriptor redirection changes process-global state,
+    concurrent uses are serialized for the entire context.
+
     Args:
         logfile: Path to the log file to write to.
         log_sink: Optional callable that receives each log line. If provided,
@@ -270,6 +277,8 @@ def redirect_stdio(
         return
 
     with ExitStack() as stack:
+        # Hold the lock through descriptor restoration and all other cleanup.
+        stack.enter_context(_STDIO_REDIRECT_LOCK)
         f = stack.enter_context(open(logfile, "w"))
 
         # Duplicate the original stdout/stderr fds before any redirection so
