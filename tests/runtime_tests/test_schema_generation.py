@@ -828,21 +828,17 @@ def test_model_config_extra_forbid():
         ApplyParent.model_validate({"child": {"x": "foo"}, "extra": 1})
 
 
-@pytest.mark.parametrize("index", ["[0]", "[7]", "[-1]", "[-7]"])
-def test_advertised_sequence_indices_are_resolvable(index):
-    """Concrete indices the advertised pattern matches must also parse as paths.
+@pytest.mark.parametrize(
+    "index,advertised",
+    [("[0]", True), ("[7]", True), ("[-1]", False), ("[-7]", False)],
+)
+def test_advertised_sequence_indices_are_resolvable(index, advertised):
+    """What the sequence pattern advertises has to survive path_to_index_op.
 
     The pattern reaches users through the OpenAPI schema and through the
-    validation error naming it, so anything it accepts has to survive
-    path_to_index_op.
+    validation error that quotes it.
     """
     pattern = _path_to_pattern((SEQ_INDEX_SENTINEL,))
-    if re.fullmatch(pattern, index):
+    assert bool(re.fullmatch(pattern, index)) is advertised
+    if advertised:
         path_to_index_op(index)
-
-
-def test_negative_sequence_indices_are_not_advertised():
-    """Nothing in a generated gradient schema should promise negative indexing."""
-    InputSchema, _ = create_gradient_schema(NestedModel, NestedModel, "vjp")
-    schema = json.dumps(InputSchema.model_json_schema())
-    assert "-?" not in schema
