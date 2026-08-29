@@ -83,6 +83,47 @@ def test_Tesseract_from_tesseract_api(dummy_tesseract_location, dummy_tesseract_
     assert endpoints == all_endpoints
 
 
+def test_Tesseract_from_tesseract_api_does_not_inherit_config(
+    dummy_tesseract_location, tmp_path
+):
+    """A second in-process Tesseract must not pick up the first one's config.
+
+    The runtime config is process-global and ``update_config`` replays the
+    fields earlier calls set, so an instance that asks for nothing used to be
+    handed the previous instance's paths while its own client wrote somewhere
+    else entirely.
+    """
+    from tesseract_core.runtime.config import get_config
+
+    api = dummy_tesseract_location / "tesseract_api.py"
+    first_out = tmp_path / "first"
+    first_out.mkdir()
+
+    Tesseract.from_tesseract_api(api, output_path=first_out)
+    assert get_config().output_path == str(first_out.resolve())
+
+    second = Tesseract.from_tesseract_api(api)
+    assert get_config().output_path != str(first_out.resolve())
+    # The client picks its own temp directory, so the config must not claim
+    # to know better than it does.
+    assert str(second._client._output_path) != str(first_out.resolve())
+
+
+def test_Tesseract_from_tesseract_api_does_not_inherit_runtime_config(
+    dummy_tesseract_location,
+):
+    """runtime_config is per instance, not a process-wide switch."""
+    from tesseract_core.runtime.config import get_config
+
+    api = dummy_tesseract_location / "tesseract_api.py"
+
+    Tesseract.from_tesseract_api(api, runtime_config={"profiling": True})
+    assert get_config().profiling is True
+
+    Tesseract.from_tesseract_api(api)
+    assert get_config().profiling is False
+
+
 def test_Tesseract_from_image(mock_serving, mock_clients):
     # Object is built and has the correct attributes set
     t = Tesseract.from_image(

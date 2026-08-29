@@ -91,6 +91,20 @@ _current_config = None
 _config_overrides = set()
 
 
+def reset_config() -> None:
+    """Drop every override recorded by :func:`update_config`.
+
+    ``update_config`` replays previously set fields on each call so a caller
+    can add to the configuration incrementally. A caller that owns a whole
+    configuration rather than an increment, such as an in-process Tesseract,
+    needs the previous one gone first, or it inherits fields it never asked
+    for. The next read rebuilds from the environment.
+    """
+    global _current_config
+    _config_overrides.clear()
+    _current_config = None
+
+
 def get_config() -> RuntimeConfig:
     """Return the current runtime configuration."""
     if _current_config is None:
