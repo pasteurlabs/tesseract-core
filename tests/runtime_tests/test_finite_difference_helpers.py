@@ -325,3 +325,143 @@ class TestNestedSchema:
         # d(y)/d(scale) = inner.x = [1, 2]
         expected_jac_scale = np.array([1.0, 2.0])
         assert np.allclose(jac["y"]["scale"], expected_jac_scale, atol=1e-6)
+
+
+class ScaleSpreadInputSchema(BaseModel):
+    """Inputs whose nominal values sit nine orders of magnitude apart."""
+
+    big: Differentiable[Float64] = Field(description="Nominally 5.0")
+    small: Differentiable[Float64] = Field(description="Nominally 2.6e-5")
+
+
+class ScaleSpreadOutputSchema(BaseModel):
+    from_big: Differentiable[Float64] = Field(description="big ** 3")
+    from_small: Differentiable[Float64] = Field(description="sqrt(small)")
+
+
+def scale_spread_apply(inputs: ScaleSpreadInputSchema) -> ScaleSpreadOutputSchema:
+    """Depends on each input through a function only defined for positive values."""
+    return ScaleSpreadOutputSchema(
+        from_big=inputs.big**3, from_small=np.sqrt(inputs.small)
+    )
+
+
+BIG = 5.0
+SMALL = 2.6e-5
+
+
+@pytest.fixture
+def scale_spread_inputs():
+    return ScaleSpreadInputSchema(big=np.float64(BIG), small=np.float64(SMALL))
+
+
+class TestPerInputEps:
+    """A step size chosen for one input can be wrong for another.
+
+    ``small`` is 2.6e-5, so the default ``eps`` of 1e-4 does not perturb it, it
+    replaces it: ``small - eps`` is -7.4e-5 and ``sqrt`` of that is undefined.
+    ``big`` at 5.0 is differenced accurately by that same step.
+    """
+
+    def test_scalar_eps_cannot_serve_both_scales(self, scale_spread_inputs):
+        """The step reaches outside the domain, so the derivative comes back NaN."""
+        with pytest.warns(RuntimeWarning, match="invalid value encountered in sqrt"):
+            jac = finite_difference_jacobian(
+                scale_spread_apply,
+                scale_spread_inputs,
+                jac_inputs={"big", "small"},
+                jac_outputs={"from_big", "from_small"},
+                eps=1e-4,
+            )
+        assert np.allclose(jac["from_big"]["big"], 3 * BIG**2)
+        assert np.isnan(jac["from_small"]["small"])
+
+    def test_per_input_eps_recovers_both_derivatives(self, scale_spread_inputs):
+        jac = finite_difference_jacobian(
+            scale_spread_apply,
+            scale_spread_inputs,
+            jac_inputs={"big", "small"},
+            jac_outputs={"from_big", "from_small"},
+            eps={"big": 1e-4, "small": 1e-9},
+        )
+        assert np.allclose(jac["from_big"]["big"], 3 * BIG**2, rtol=1e-6)
+        assert np.allclose(jac["from_small"]["small"], 0.5 / np.sqrt(SMALL), rtol=1e-6)
+
+    @pytest.mark.parametrize("algorithm", ["central", "forward", "stochastic"])
+    def test_scalar_and_uniform_dict_agree_exactly(self, simple_inputs, algorithm):
+        """A dict of equal values must be the scalar path, bit for bit.
+
+        This is what keeps the default cost of the stochastic and JVP algorithms
+        unchanged: one step size means one perturbation group.
+        """
+        kwargs = {
+            "jac_inputs": {"a", "b", "s"},
+            "jac_outputs": {"result"},
+            "algorithm": algorithm,
+            "num_samples": 4,
+            "seed": 7,
+        }
+        from_scalar = finite_difference_jacobian(
+            nonlinear_apply, simple_inputs, eps=1e-6, **kwargs
+        )
+        from_dict = finite_difference_jacobian(
+            nonlinear_apply,
+            simple_inputs,
+            eps={"a": 1e-6, "b": 1e-6, "s": 1e-6},
+            **kwargs,
+        )
+        for in_path in ("a", "b", "s"):
+            np.testing.assert_array_equal(
+                from_scalar["result"][in_path], from_dict["result"][in_path]
+            )
+
+    def test_jvp_sums_over_step_size_groups(self, scale_spread_inputs):
+        """A JVP is linear in the tangent, so disjoint groups add.
+
+        Two distinct step sizes means two directional derivatives rather than
+        one, and their sum has to be the whole JVP.
+        """
+        jvp = finite_difference_jvp(
+            scale_spread_apply,
+            scale_spread_inputs,
+            jvp_inputs={"big", "small"},
+            jvp_outputs={"from_big", "from_small"},
+            tangent_vector={"big": np.float64(1.0), "small": np.float64(1.0)},
+            eps={"big": 1e-4, "small": 1e-9},
+        )
+        assert np.allclose(jvp["from_big"], 3 * BIG**2, rtol=1e-6)
+        assert np.allclose(jvp["from_small"], 0.5 / np.sqrt(SMALL), rtol=1e-6)
+
+    def test_vjp_uses_each_inputs_own_step(self, scale_spread_inputs):
+        vjp = finite_difference_vjp(
+            scale_spread_apply,
+            scale_spread_inputs,
+            vjp_inputs={"big", "small"},
+            vjp_outputs={"from_big", "from_small"},
+            cotangent_vector={
+                "from_big": np.float64(1.0),
+                "from_small": np.float64(1.0),
+            },
+            eps={"big": 1e-4, "small": 1e-9},
+        )
+        assert np.allclose(vjp["big"], 3 * BIG**2, rtol=1e-6)
+        assert np.allclose(vjp["small"], 0.5 / np.sqrt(SMALL), rtol=1e-6)
+
+    @pytest.mark.parametrize(
+        "eps", [{"big": 1e-4}, {"big": 1e-4, "small": 1e-9, "medium": 1e-6}]
+    )
+    def test_dict_eps_must_match_the_differentiated_paths(
+        self, scale_spread_inputs, eps
+    ):
+        """A path that is misspelled or forgotten silently changes the step size.
+
+        Nothing downstream can detect that, so it is rejected up front.
+        """
+        with pytest.raises(KeyError):
+            finite_difference_jacobian(
+                scale_spread_apply,
+                scale_spread_inputs,
+                jac_inputs={"big", "small"},
+                jac_outputs={"from_big", "from_small"},
+                eps=eps,
+            )
