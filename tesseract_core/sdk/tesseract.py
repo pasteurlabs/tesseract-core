@@ -823,10 +823,10 @@ def _encode_payload(
     ``gpu_transport`` other than ``none`` is set, GPU arrays are exported by
     reference (host arrays still go base64), which pins each exported allocation
     in a process-global registry on the runtime side. Those pins are released on
-    context exit -- by then the caller has read the full response, so the server
-    has copied the inputs out and they are provably dead. The release is skipped
-    (and the transport machinery never imported) when no GPU array was actually
-    exported.
+    context exit, by which point the caller has read the full response, so the
+    server has copied the inputs out and they are provably dead. The release is
+    skipped (and the transport machinery never imported) when no GPU array was
+    actually exported.
 
     Releasing on exit rather than at the start of the next request keeps pinned
     GPU memory bounded to a single in-flight request.
@@ -1356,9 +1356,9 @@ class LocalClient:
         # This instance's own config, not whatever the process-global config
         # happens to be by now: another in-process Tesseract (or a later call
         # on this one) may have changed it since __init__ captured it (#672).
-        # Everything below that can read get_config() -- the profiler flag
+        # Everything below that can read get_config(), the profiler flag
         # here, and the endpoint itself, which may consult input_path/
-        # output_path/etc. deep inside tesseract_api.py -- runs under it.
+        # output_path/etc. deep inside tesseract_api.py, runs under it.
         with active_config(self._config_snapshot):
             # Set up profiler
             profiler = Profiler(enabled=get_config().profiling)
