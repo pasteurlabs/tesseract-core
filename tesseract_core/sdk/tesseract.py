@@ -778,7 +778,7 @@ def _encode_payload(payload: dict | None, output_format: str) -> Iterator[dict |
     Yields the encoded payload (or None for an empty payload). For the
     ``json+cuda_ipc`` format, GPU arrays are exported by reference (base64 for
     CPU arrays), which pins each exported allocation in a process-global registry
-    on the runtime side. Those pins are released on context exit -- by then the
+    on the runtime side. Those pins are released on context exit, by which point the
     caller has read the full response, so the server has copied the inputs out
     and they are provably dead. The release is skipped (and cuda_ipc never
     imported) when no GPU array was actually exported.
@@ -1290,9 +1290,9 @@ class LocalClient:
         # This instance's own config, not whatever the process-global config
         # happens to be by now: another in-process Tesseract (or a later call
         # on this one) may have changed it since __init__ captured it (#672).
-        # Everything below that can read get_config() -- the profiler flag
+        # Everything below that can read get_config(), the profiler flag
         # here, and the endpoint itself, which may consult input_path/
-        # output_path/etc. deep inside tesseract_api.py -- runs under it.
+        # output_path/etc. deep inside tesseract_api.py, runs under it.
         with active_config(self._config_snapshot):
             # Set up profiler
             profiler = Profiler(enabled=get_config().profiling)

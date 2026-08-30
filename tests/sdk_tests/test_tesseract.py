@@ -117,7 +117,7 @@ def test_Tesseract_apply_runs_under_its_own_config_after_a_later_instance_is_bui
     """A call on an *earlier* Tesseract must still see its own config.
 
     Not whatever a later, independent in-process Tesseract left as the
-    process-global one -- construction-time isolation alone (#672) does not
+    process-global one. Construction-time isolation alone (#672) does not
     cover this, since the global config can move again after either
     instance's __init__ has already returned.
 
@@ -156,7 +156,7 @@ def test_Tesseract_apply_runs_under_its_own_config_after_a_later_instance_is_bui
     assert len(run_dirs) == 1
 
     # And the process-global config is exactly as the second instance left
-    # it -- first.apply() must not leak its own config forward either.
+    # it. first.apply() must not leak its own config forward either.
     assert get_config().output_path == global_output_path_before_call
     assert get_config().profiling is False
 

@@ -126,7 +126,7 @@ def snapshot_config() -> ConfigSnapshot:
 
     A Tesseract built via from_tesseract_api takes one right after its own
     update_config() calls settle, so its endpoints can later run under
-    exactly that config -- see active_config().
+    exactly that config; see active_config().
     """
     return _current_config, frozenset(_config_overrides)
 
@@ -135,7 +135,7 @@ def snapshot_config() -> ConfigSnapshot:
 def active_config(snapshot: ConfigSnapshot) -> Iterator[None]:
     """Run a block under `snapshot` as the process-global runtime config.
 
-    Restores whatever was active before on exit -- success or failure.
+    Restores whatever was active before on exit, whether it succeeded or failed.
     Config is process-global (get_config()/update_config() share module
     state), which one in-process Tesseract's own setup relies on to
     accumulate correctly across several update_config() calls. That same
