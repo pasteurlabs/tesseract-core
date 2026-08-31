@@ -435,7 +435,7 @@ def _path_to_pattern(path: Sequence[str | object]) -> str:
     for part in path:
         if part is SEQ_INDEX_SENTINEL:
             is_literal = False
-            part = r"\[-?\d+\]"
+            part = r"\[\d+\]"
         elif part is DICT_INDEX_SENTINEL:
             is_literal = False
             part = r"\{[\w \-]+\}"
