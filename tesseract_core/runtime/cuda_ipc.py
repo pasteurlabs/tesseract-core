@@ -23,7 +23,11 @@ runtime machinery. The public entry points used by :mod:`array_encoding` are:
 """
 
 import ctypes
+import ctypes.util
+import importlib.util
 import weakref
+from collections.abc import Iterable, Iterator
+from pathlib import Path
 from typing import Any, get_args
 
 import numpy as np
@@ -138,44 +142,113 @@ class _CudaIpcMemHandle(ctypes.Structure):
     _fields_ = [("reserved", ctypes.c_byte * _CUDA_IPC_HANDLE_SIZE)]
 
 
+# Library filenames for the CUDA runtime, per platform, newest major first.
+_CUDART_SONAMES = (
+    "libcudart.so",
+    "libcudart.so.13",
+    "libcudart.so.12",
+    "libcudart.so.11",
+    "libcudart.dylib",
+    "cudart64_13.dll",
+    "cudart64_12.dll",
+)
+
+
+def _iter_wheel_cudart_paths() -> Iterator[str]:
+    """Yield candidate absolute paths to libcudart shipped inside pip wheels.
+
+    The pip CUDA wheels (``nvidia-cuda-runtime-cuXX``, pulled in transitively by
+    ``jax[cudaXX]`` / ``cupy-cudaXXx``) install the runtime under a
+    ``site-packages/nvidia/<pkg>/lib/libcudart.so.NN`` directory (``<pkg>`` is
+    typically ``cuda_runtime``). That directory is on neither
+    ``LD_LIBRARY_PATH`` nor the ``ldconfig`` cache, so both
+    :func:`ctypes.util.find_library` and a bare ``ctypes.CDLL(soname)`` can miss
+    it -- observed on GPU CI runners with no system CUDA toolkit installed. When
+    that happens we locate the wheel directory ourselves.
+    """
+
+    def _spec_locations(name: str) -> Iterable[str]:
+        try:
+            spec = importlib.util.find_spec(name)
+        except (ImportError, ValueError):
+            return ()
+        return () if spec is None else (spec.submodule_search_locations or ())
+
+    lib_dirs: list[Path] = []
+    seen: set[str] = set()
+
+    def _add(lib_dir: Path) -> None:
+        key = str(lib_dir)
+        if key not in seen:
+            seen.add(key)
+            lib_dirs.append(lib_dir)
+
+    # Preferred: ask importlib where the runtime wheel's package lives, so we do
+    # not hardcode the site-packages layout.
+    for location in _spec_locations("nvidia.cuda_runtime"):
+        _add(Path(location) / "lib")
+
+    # Fallback: glob every nvidia namespace package on the import path, in case
+    # the runtime is bundled under a differently named package. Anchoring on the
+    # nvidia namespace itself (rather than a fixed depth off __file__) keeps this
+    # correct for editable installs and non-standard layouts.
+    for location in _spec_locations("nvidia"):
+        for lib in Path(location).glob("*/lib"):
+            _add(lib)
+
+    for lib_dir in lib_dirs:
+        for soname in _CUDART_SONAMES:
+            candidate = lib_dir / soname
+            if candidate.exists():
+                yield str(candidate)
+
+
+def _find_cudart() -> Any:
+    """Locate and load libcudart (a ``ctypes.CDLL``), or ``None`` if not found.
+
+    Search order: the system loader (``find_library`` then bare sonames), then
+    pip-wheel CUDA installs (see :func:`_iter_wheel_cudart_paths`).
+    """
+    # System loader: honours LD_LIBRARY_PATH and the ldconfig cache.
+    for name in ("cudart", "cudart64_13", "cudart64_12", "cudart64_11"):
+        path = ctypes.util.find_library(name)
+        if path:
+            try:
+                return ctypes.CDLL(path)
+            except OSError:
+                pass
+
+    # Bare sonames: covers systems where find_library misses the versioned name
+    # but the loader can still resolve it (e.g. an already-loaded copy).
+    for soname in _CUDART_SONAMES:
+        try:
+            return ctypes.CDLL(soname)
+        except OSError:
+            continue
+
+    # pip-wheel CUDA: load by absolute path from the wheel's lib directory.
+    for path in _iter_wheel_cudart_paths():
+        try:
+            return ctypes.CDLL(path)
+        except OSError:
+            continue
+
+    return None
+
+
 def _get_cudart():
     """Lazily load the CUDA runtime shared library and declare signatures."""
     global _CUDART_HANDLE
     if _CUDART_HANDLE is not None:
         return _CUDART_HANDLE
 
-    import ctypes.util
-
-    cudart = None
-    # Try common names for the CUDA runtime library
-    for name in ("cudart", "cudart64_13", "cudart64_12", "cudart64_11"):
-        path = ctypes.util.find_library(name)
-        if path:
-            cudart = ctypes.CDLL(path)
-            break
-
-    if cudart is None:
-        # Fallback: try loading directly (covers systems where find_library
-        # misses the versioned soname).
-        for path in (
-            "libcudart.so",
-            "libcudart.so.13",
-            "libcudart.so.12",
-            "libcudart.so.11",
-            "libcudart.dylib",
-            "cudart64_13.dll",
-            "cudart64_12.dll",
-        ):
-            try:
-                cudart = ctypes.CDLL(path)
-                break
-            except OSError:
-                continue
+    cudart = _find_cudart()
 
     if cudart is None:
         raise RuntimeError(
-            "Could not find CUDA runtime library (libcudart). "
-            "Make sure CUDA is installed and LD_LIBRARY_PATH is set."
+            "Could not find CUDA runtime library (libcudart). Make sure CUDA is "
+            "installed and on the loader path (set LD_LIBRARY_PATH), or install a "
+            "CUDA runtime wheel (e.g. nvidia-cuda-runtime-cu12)."
         )
 
     # Declare argument/return types so ctypes marshals 64-bit pointers and the

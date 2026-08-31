@@ -693,3 +693,64 @@ def test_output_to_bytes_cuda_ipc_context(monkeypatch):
 
     file_interactions.output_to_bytes({"y": 1}, "json+cuda_ipc")
     assert captured["context"] == {"array_encoding": "cuda_ipc"}
+
+
+# ── libcudart discovery (wheel-installed CUDA) ──────────────────────────
+#
+# The pip CUDA wheels (nvidia-cuda-runtime-cuXX, pulled in by jax[cudaXX] /
+# cupy-cudaXXx) install libcudart under site-packages/nvidia/cuda_runtime/lib/,
+# which is on neither LD_LIBRARY_PATH nor the ldconfig cache. _find_cudart must
+# still discover it there after the system-loader probes come up empty.
+
+
+def _fake_cudart_wheel(tmp_path, soname="libcudart.so.12"):
+    """Create a fake ``nvidia/cuda_runtime/lib/<soname>`` layout; return its lib dir."""
+    lib_dir = tmp_path / "nvidia" / "cuda_runtime" / "lib"
+    lib_dir.mkdir(parents=True)
+    (lib_dir / soname).write_bytes(b"")
+    return lib_dir
+
+
+def test_iter_wheel_cudart_paths_finds_runtime_wheel(tmp_path, monkeypatch):
+    """The runtime wheel's lib dir is discovered via its importlib spec."""
+    lib_dir = _fake_cudart_wheel(tmp_path)
+
+    real_find_spec = cuda_ipc.importlib.util.find_spec
+
+    def fake_find_spec(name):
+        if name == "nvidia.cuda_runtime":
+            spec = types.SimpleNamespace()
+            spec.submodule_search_locations = [str(lib_dir.parent)]
+            return spec
+        return real_find_spec(name)
+
+    monkeypatch.setattr(cuda_ipc.importlib.util, "find_spec", fake_find_spec)
+
+    found = list(cuda_ipc._iter_wheel_cudart_paths())
+    assert str(lib_dir / "libcudart.so.12") in found
+
+
+def test_find_cudart_falls_back_to_wheel(tmp_path, monkeypatch):
+    """When the system loader misses libcudart, the wheel copy is loaded."""
+    lib_dir = _fake_cudart_wheel(tmp_path)
+    loaded = {}
+
+    # System-loader probes find nothing.
+    monkeypatch.setattr(cuda_ipc.ctypes.util, "find_library", lambda name: None)
+    monkeypatch.setattr(
+        cuda_ipc, "_iter_wheel_cudart_paths", lambda: [str(lib_dir / "libcudart.so.12")]
+    )
+
+    def fake_cdll(path):
+        # Bare sonames (no path separator) are the system-loader attempts; only
+        # the absolute wheel path should succeed.
+        if "/" not in path and "\\" not in path:
+            raise OSError(f"{path}: not found")
+        loaded["path"] = path
+        return object()
+
+    monkeypatch.setattr(cuda_ipc.ctypes, "CDLL", fake_cdll)
+
+    handle = cuda_ipc._find_cudart()
+    assert handle is not None
+    assert loaded["path"] == str(lib_dir / "libcudart.so.12")
