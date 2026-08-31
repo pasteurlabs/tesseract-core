@@ -10,7 +10,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
-
 DICT_KEY_SPECIALS = "{}\\"
 
 
