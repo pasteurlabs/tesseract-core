@@ -11,18 +11,22 @@ knows how to run one.
 import logging
 import random
 import socket
+import subprocess
 import time
 from collections.abc import Sequence
 from contextlib import closing
 
 import requests
 
-from .docker_client import APIError, Container, is_running
+from .docker_client import APIError, Container, diagnose_exit, is_running
 
 logger = logging.getLogger("tesseract")
 
+# How long to wait for a freshly started Tesseract to answer /health.
+DEFAULT_STARTUP_TIMEOUT = 30.0
 
-class _PortInUseError(RuntimeError):
+
+class PortInUseError(RuntimeError):
     """Container failed to start because its port was already bound.
 
     Signals that a fresh port should be picked and startup retried. Only raised
@@ -33,12 +37,12 @@ class _PortInUseError(RuntimeError):
       ``containers.run`` raises ``ContainerError`` ("port is already allocated").
     - host networking: the container binds the host port directly, so the
       failure appears in the container logs as uvicorn's "address already in
-      use" and is detected in ``_wait_for_health``.
+      use" and is detected in ``wait_for_health_or_dispose``.
     """
 
 
 # Substrings container runtimes use to report a host port already being taken.
-_PORT_CONFLICT_MARKERS = ("address already in use", "port is already allocated")
+PORT_CONFLICT_MARKERS = ("address already in use", "port is already allocated")
 
 
 def get_free_port(
@@ -68,13 +72,13 @@ def get_free_port(
     raise RuntimeError(f"No free ports found in range {start}-{end}")
 
 
-def _is_port_conflict(stderr: str) -> bool:
+def is_port_conflict(stderr: str) -> bool:
     """Whether runtime stderr/logs indicate a host port collision."""
     lowered = stderr.lower()
-    return any(marker in lowered for marker in _PORT_CONFLICT_MARKERS)
+    return any(marker in lowered for marker in PORT_CONFLICT_MARKERS)
 
 
-def _retry_or_raise_port_conflict(
+def retry_or_raise_port_conflict(
     port: str, auto_port: bool, attempt: int, max_attempts: int
 ) -> None:
     """Decide whether a port collision should be retried.
@@ -86,7 +90,7 @@ def _retry_or_raise_port_conflict(
     """
     if not auto_port:
         # User asked for this exact port; surface the collision as-is.
-        raise _PortInUseError(f"Port {port} was already in use")
+        raise PortInUseError(f"Port {port} was already in use")
     if attempt + 1 >= max_attempts:
         raise RuntimeError(
             f"Failed to find a free port after {max_attempts} attempts"
@@ -94,45 +98,105 @@ def _retry_or_raise_port_conflict(
     logger.info(f"Port {port} was taken, retrying with a new port...")
 
 
-def _wait_for_health(
-    container: Container, ping_ip: str, port: str, timeout: float = 30
+# How long to give a single /health request before assuming it will not answer.
+# A published port whose target is unreachable is accepted by the proxy and then
+# dropped, so without this a poll can block indefinitely.
+_HEALTH_REQUEST_TIMEOUT = 5.0
+_HEALTH_POLL_INTERVAL = 0.1
+
+
+def wait_for_health_or_dispose(
+    container: Container,
+    ping_ip: str,
+    port: str,
+    timeout: float = DEFAULT_STARTUP_TIMEOUT,
 ) -> None:
-    """Poll a container's /health endpoint until it responds 200 or timeout expires."""
+    """Wait for a container to serve /health, and dispose of it if it never does.
+
+    Takes ``ping_ip`` rather than asking the container: one that published its
+    port on every interface is not reached at the address it reports binding to.
+
+    Raises:
+        PortInUseError: if it failed because its port was taken, which the caller
+            may want to retry on a fresh one.
+        TimeoutError: if it never answered in time.
+        RuntimeError: if it stopped running before it could.
+    """
+    deadline = time.monotonic() + timeout
+    timed_out = False
+
     while True:
         try:
-            response = requests.get(f"http://{ping_ip}:{port}/health")
-        except requests.exceptions.ConnectionError:
+            response = requests.get(
+                f"http://{ping_ip}:{port}/health", timeout=_HEALTH_REQUEST_TIMEOUT
+            )
+        except requests.exceptions.RequestException:
             pass
         else:
             if response.status_code == 200:
                 return
 
-        time.sleep(0.1)
-        timeout -= 0.1
+        # /health did not answer, so we check for dead containers first, timeouts second
+        if not is_running(container):
+            break
+        if time.monotonic() > deadline:
+            timed_out = True
+            break
 
-        if timeout < 0 or not is_running(container):
-            logs_text = ""
-            try:
-                logs_text = container.logs(stdout=True, stderr=True).decode()
-                logger.error(
-                    f"Tesseract container {container.name} failed to start:\n{logs_text}"
-                )
-            except APIError as ex:
-                logger.warning(
-                    f"Failed to get logs for container {container.name}: {ex}"
-                )
-            try:
-                container.stop()
-            except APIError as ex:
-                logger.warning(f"Failed to stop container {container.name}: {ex}")
+        time.sleep(_HEALTH_POLL_INTERVAL)
 
-            # A port collision is racy and worth retrying with a fresh port;
-            # distinguish it from genuine startup failures so those still fail
-            # fast.
-            if _is_port_conflict(logs_text):
-                raise _PortInUseError(f"Port {port} was already in use")
+    # Read the logs before disposing of what wrote them. Neither reading nor
+    # disposing may raise: they are how we report the failure, not the failure
+    # itself, and an error here would replace it with a less useful one.
+    try:
+        logs = container.logs(stdout=True, stderr=True).decode(errors="replace")
+    except APIError as ex:
+        logger.warning(f"Failed to get logs for {container}: {ex}")
+        logs = ""
 
-            if timeout < 0:
-                raise TimeoutError("Tesseract did not start in time")
-            else:
-                raise RuntimeError("Tesseract failed to start")
+    # Only worth asking about one that stopped, and only before it is removed: a
+    # container that is merely slow would block `wait` for as long as it runs.
+    exit_code = None
+    if not timed_out:
+        try:
+            exit_code = container.wait(timeout=_HEALTH_REQUEST_TIMEOUT)["StatusCode"]
+        except APIError as ex:
+            logger.warning(f"Failed to read the exit code of {container}: {ex}")
+
+    # Everything the container knew has now been read, so it can go -- in a
+    # `finally`, because every path out of here raises and none of them should
+    # leave it behind. The port-collision one especially: it is retried, so a
+    # container per attempt would pile up.
+    try:
+        # A port collision is racy and worth retrying with a fresh port;
+        # distinguish it from genuine startup failures so those still fail fast.
+        if is_port_conflict(logs):
+            raise PortInUseError(f"Port {port} was already in use")
+
+        if timed_out:
+            headline = f"{container} did not respond to a health check in time."
+            diagnosis = (
+                "If it is simply slow to initialize (e.g. loading a large model), "
+                "increase `startup_timeout`."
+            )
+        else:
+            exited = "" if exit_code is None else f" (exit code {exit_code})"
+            headline = f"{container} stopped running during startup{exited}."
+            diagnosis = diagnose_exit(container, logs)
+        output = (
+            f"Output from the Tesseract:\n{logs.strip()}"
+            if logs.strip()
+            else "The Tesseract produced no output."
+        )
+        paragraphs = [headline, diagnosis, output]
+        message = "\n\n".join(p for p in paragraphs if p)
+        raise TimeoutError(message) if timed_out else RuntimeError(message)
+    finally:
+        try:
+            # Forced: it may still be running, and an unforced remove would refuse.
+            container.remove(force=True)
+        except (APIError, subprocess.CalledProcessError) as ex:
+            # `Container.remove` raises `APIError` only when it recognises the
+            # stderr as Docker's, and passes the raw error through otherwise;
+            # either way it must not replace the failure we are reporting.
+            logger.warning(f"Failed to remove {container}: {ex}")
