@@ -12,12 +12,14 @@ import docker
 import pytest
 from common import image_exists
 
+from tesseract_core.sdk.config import get_config
 from tesseract_core.sdk.docker_client import (
     ContainerError,
     ImageNotFound,
     _is_valid_docker_tag,
     build_docker_image,
     is_podman,
+    is_running,
 )
 
 
@@ -396,6 +398,54 @@ def test_volume_uid_permissions(
     )
     stdout = run_tesseract_with_volume(cmd, volume=volume_args)
     assert stdout == b"hello\n"
+
+
+def test_container_status_needs_a_reload_like_docker_py(docker_client):
+    """`status` reports the last read; `reload` and `is_running` ask again.
+
+    Matching docker-py, which caches `attrs` and refreshes on `reload`. A
+    container that has gone entirely must report "unknown" rather than raising,
+    since callers wait on containers expected to disappear.
+    """
+    import time
+
+    cid = subprocess.run(
+        [*get_config().docker_executable, "run", "-d", "alpine", "sleep", "60"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    try:
+        container = docker_client.containers.get(cid, tesseract_only=False)
+        # Whatever the runtime chose to call the image -- podman normalises it to
+        # docker.io/library/alpine:latest, Docker keeps what was asked for --
+        # reloading must leave it alone.
+        image_ref = container.attrs["Config"]["Image"]
+        assert container.status == "running"
+        assert is_running(container)
+
+        subprocess.run(
+            [*get_config().docker_executable, "stop", "-t", "0", cid],
+            capture_output=True,
+            check=True,
+        )
+        time.sleep(2)
+
+        # Cached, as docker-py would be, until asked again
+        assert container.status == "running"
+        assert not is_running(container)
+        assert container.status == "exited"
+
+        # Immutable config survives a reload
+        assert container.attrs["Config"]["Image"] == image_ref
+    finally:
+        subprocess.run(
+            [*get_config().docker_executable, "rm", "-f", cid], capture_output=True
+        )
+
+    container.reload()
+    assert container.status == "unknown"
+    assert not is_running(container)
 
 
 def test_get_image_not_found(docker_client):
