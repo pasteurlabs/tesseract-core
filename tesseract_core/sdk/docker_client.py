@@ -532,8 +532,26 @@ class Container:
 
     @property
     def status(self) -> str:
-        """Gets the status of the container."""
+        """Gets the status of the container, as of the last read.
+
+        Like docker-py, this reports what ``docker inspect`` said when this
+        object was built or last reloaded, so it goes stale once the container
+        stops. Call :meth:`reload` first, or use :meth:`is_running`, to ask about
+        the container now.
+        """
         return self.attrs.get("State", {}).get("Status", "unknown")
+
+    def reload(self) -> None:
+        """Read the container again, updating ``attrs`` with the new data.
+
+        A container that no longer exists leaves ``attrs`` untouched apart from
+        its state, which becomes "unknown" -- callers wait on containers that are
+        expected to disappear, so that must not raise.
+        """
+        try:
+            self.attrs = Containers.get(self.id, tesseract_only=False).attrs
+        except NotFound:
+            self.attrs = {**self.attrs, "State": {"Status": "unknown"}}
 
     def exec_run(self, command: list) -> tuple[int, bytes]:
         """Run a command in this container.
@@ -556,6 +574,14 @@ class Container:
                 result.stderr,
             )
         return result.returncode, result.stdout
+
+    def __str__(self) -> str:
+        """Name this container in a message meant for a person.
+
+        `__repr__` is left to the dataclass, which spells out the constructor as
+        it should; this is what belongs in an error someone has to read.
+        """
+        return f"Tesseract container {self.name}"
 
     def stop(self) -> None:
         """Stop the container."""
@@ -611,11 +637,22 @@ class Container:
 
         return getattr(result, output_attr)
 
-    def wait(self) -> dict:
-        """Wait for container to finish running.
+    def wait(self, timeout: float | None = None) -> dict:
+        """Block until the container stops, then report the status it stopped with.
+
+        Params:
+            timeout: Seconds to wait before giving up. `docker wait` blocks for as
+                long as the container runs, so without this a live container waits
+                forever.
 
         Returns:
             A dict with the exit code of the container.
+
+        Raises:
+            TimeoutError: If the container is still running when `timeout` expires.
+                Note this differs from docker-py, which raises
+                `requests.exceptions.ReadTimeout`; nothing here speaks HTTP.
+            APIError: If the command fails, e.g. for a container that is gone.
         """
         docker = _get_docker_executable()
 
@@ -625,9 +662,14 @@ class Container:
                 check=True,
                 capture_output=True,
                 text=True,
+                timeout=timeout,
             )
             # Container's exit code is printed by the wait command
             return {"StatusCode": int(result.stdout)}
+        except subprocess.TimeoutExpired as ex:
+            raise TimeoutError(
+                f"Container {self.id} was still running after {timeout}s"
+            ) from ex
         except subprocess.CalledProcessError as ex:
             raise APIError(f"Cannot wait for container {self.id}: {ex}") from ex
 
@@ -662,6 +704,48 @@ class Container:
             if "docker" in ex.stderr:
                 raise APIError(f"Cannot remove container {self.id}: {ex}") from ex
             raise ex
+
+
+def is_running(container: Container) -> bool:
+    """Whether a container is running now, reading it again to find out.
+
+    A function rather than a method: `Container` mirrors docker-py, where you ask
+    by comparing `status` yourself. This is that comparison, with the read that
+    has to come first so the answer is not a stale one.
+    """
+    container.reload()
+    return container.status == "running"
+
+
+def diagnose_exit(container: Container, logs: str) -> str:
+    """Anything `docker inspect` recorded about why a container stopped.
+
+    A function rather than a method: `Container` mirrors docker-py, and docker-py
+    has nothing like this. Reads the recorded state rather than the container,
+    which by the time anything is said about a failure has been disposed of --
+    liveness is what noticed it had stopped, and reading it refreshed that state,
+    so what it holds is how it stopped.
+
+    Params:
+        container: The container that stopped.
+        logs: What it wrote, for context. Not repeated in the result.
+
+    Returns:
+        A sentence for whoever has to read the failure, or an empty string if
+        there is nothing to add beyond the exit code and the logs.
+    """
+    del logs  # a container's own output is all the other evidence there is
+    state = container.attrs.get("State", {})
+    if state.get("OOMKilled"):
+        # Nothing else can report this: the process is killed outright, so it has
+        # no chance to say anything about it in its own logs.
+        return (
+            "It was killed for exceeding its memory limit, which is why it may "
+            "have written nothing. Give it a higher `memory` limit."
+        )
+    if state.get("Error"):
+        return f"Docker reported: {state['Error']}"
+    return ""
 
 
 class Containers:
