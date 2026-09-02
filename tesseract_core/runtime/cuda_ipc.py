@@ -142,16 +142,60 @@ class _CudaIpcMemHandle(ctypes.Structure):
     _fields_ = [("reserved", ctypes.c_byte * _CUDA_IPC_HANDLE_SIZE)]
 
 
-# Library filenames for the CUDA runtime, per platform, newest major first.
-_CUDART_SONAMES = (
-    "libcudart.so",
-    "libcudart.so.13",
-    "libcudart.so.12",
-    "libcudart.so.11",
-    "libcudart.dylib",
-    "cudart64_13.dll",
-    "cudart64_12.dll",
-)
+# CUDA runtime major versions we probe for by number, newest first. cuda_ipc
+# only calls a handful of long-stable runtime symbols (cudaIpc*, cudaMemcpy,
+# cudaMalloc, cudaSetDevice, cudaDeviceSynchronize), so a newer major than any
+# listed here is very likely to work -- the range is generous and open-ended at
+# the top precisely so a freshly released CUDA does not need a code change. The
+# floor is the oldest major whose ABI we still expect to encounter in the wild.
+_CUDART_MAJOR_NEWEST = 20
+_CUDART_MAJOR_OLDEST = 11
+_CUDART_MAJORS = tuple(range(_CUDART_MAJOR_NEWEST, _CUDART_MAJOR_OLDEST - 1, -1))
+
+
+def _cudart_sonames() -> tuple[str, ...]:
+    """Candidate CUDA runtime library filenames, most-preferred first.
+
+    Unversioned names come first: on a system with a CUDA toolkit the loader
+    resolves ``libcudart.so`` / ``libcudart.dylib`` via the dev symlink to
+    whatever major is installed, so we never have to know the number. The
+    versioned names that follow are generated over :data:`_CUDART_MAJORS`
+    (newest first) rather than hand-enumerated, so a new CUDA major is picked up
+    without editing this file.
+    """
+    names = ["libcudart.so", "libcudart.dylib"]
+    names += [f"libcudart.so.{major}" for major in _CUDART_MAJORS]
+    names += [f"cudart64_{major}.dll" for major in _CUDART_MAJORS]
+    return tuple(names)
+
+
+# Glob patterns for locating a wheel-shipped runtime by filename in a known lib
+# directory. Unlike the loader-name list above, here we have a concrete
+# directory to scan, so we can match *any* version present rather than probe a
+# fixed set -- fully forward-compatible for the wheel case.
+_CUDART_GLOBS = ("libcudart.so.*", "libcudart.so", "libcudart.dylib", "cudart64_*.dll")
+
+
+def _cudart_soname_sort_key(path: Path) -> tuple[int, int]:
+    """Sort key placing higher CUDA majors first among wheel candidates.
+
+    Returns ``(-major, tiebreak)`` so ``sorted`` yields newest-major-first. The
+    major is parsed from ``libcudart.so.<major>`` / ``cudart64_<major>.dll``;
+    names without a parseable version (e.g. an unversioned ``libcudart.so``
+    symlink) sort after all versioned ones so a concrete version wins.
+    """
+    name = path.name
+    major = -1
+    if name.startswith("libcudart.so."):
+        tail = name[len("libcudart.so.") :].split(".", 1)[0]
+        if tail.isdigit():
+            major = int(tail)
+    elif name.startswith("cudart64_") and name.endswith(".dll"):
+        tail = name[len("cudart64_") : -len(".dll")]
+        if tail.isdigit():
+            major = int(tail)
+    # Versioned first (-major ascending == major descending); unversioned last.
+    return (0 if major >= 0 else 1, -major)
 
 
 def _iter_wheel_cudart_paths() -> Iterator[str]:
@@ -197,10 +241,13 @@ def _iter_wheel_cudart_paths() -> Iterator[str]:
             _add(lib)
 
     for lib_dir in lib_dirs:
-        for soname in _CUDART_SONAMES:
-            candidate = lib_dir / soname
-            if candidate.exists():
-                yield str(candidate)
+        candidates: set[Path] = set()
+        for pattern in _CUDART_GLOBS:
+            candidates.update(p for p in lib_dir.glob(pattern) if p.is_file())
+        # Newest major first, so a wheel dir that somehow holds several runtimes
+        # (or a dev symlink alongside a versioned .so) prefers the highest one.
+        for candidate in sorted(candidates, key=_cudart_soname_sort_key):
+            yield str(candidate)
 
 
 def _find_cudart() -> Any:
@@ -209,8 +256,11 @@ def _find_cudart() -> Any:
     Search order: the system loader (``find_library`` then bare sonames), then
     pip-wheel CUDA installs (see :func:`_iter_wheel_cudart_paths`).
     """
-    # System loader: honours LD_LIBRARY_PATH and the ldconfig cache.
-    for name in ("cudart", "cudart64_13", "cudart64_12", "cudart64_11"):
+    # System loader: honours LD_LIBRARY_PATH and the ldconfig cache. Try the
+    # unversioned name first, then generated per-major Windows names (find_library
+    # wants a stem, not a full soname).
+    find_library_names = ["cudart"] + [f"cudart64_{major}" for major in _CUDART_MAJORS]
+    for name in find_library_names:
         path = ctypes.util.find_library(name)
         if path:
             try:
@@ -220,7 +270,7 @@ def _find_cudart() -> Any:
 
     # Bare sonames: covers systems where find_library misses the versioned name
     # but the loader can still resolve it (e.g. an already-loaded copy).
-    for soname in _CUDART_SONAMES:
+    for soname in _cudart_sonames():
         try:
             return ctypes.CDLL(soname)
         except OSError:

@@ -754,3 +754,50 @@ def test_find_cudart_falls_back_to_wheel(tmp_path, monkeypatch):
     handle = cuda_ipc._find_cudart()
     assert handle is not None
     assert loaded["path"] == str(lib_dir / "libcudart.so.12")
+
+
+def test_iter_wheel_cudart_paths_finds_unenumerated_future_major(tmp_path, monkeypatch):
+    """A wheel shipping a CUDA major we never hardcoded is still discovered.
+
+    The wheel search globs by filename rather than probing a fixed set, so a
+    runtime released after this code was written (here ``.so.99``) is picked up
+    without any change to the version lists.
+    """
+    future_soname = f"libcudart.so.{cuda_ipc._CUDART_MAJOR_NEWEST + 79}"
+    lib_dir = _fake_cudart_wheel(tmp_path, soname=future_soname)
+
+    real_find_spec = cuda_ipc.importlib.util.find_spec
+
+    def fake_find_spec(name):
+        if name == "nvidia.cuda_runtime":
+            spec = types.SimpleNamespace()
+            spec.submodule_search_locations = [str(lib_dir.parent)]
+            return spec
+        return real_find_spec(name)
+
+    monkeypatch.setattr(cuda_ipc.importlib.util, "find_spec", fake_find_spec)
+
+    found = list(cuda_ipc._iter_wheel_cudart_paths())
+    assert str(lib_dir / future_soname) in found
+
+
+def test_iter_wheel_cudart_paths_prefers_newest_major(tmp_path, monkeypatch):
+    """When a wheel lib dir holds several runtimes, the newest major comes first."""
+    lib_dir = tmp_path / "nvidia" / "cuda_runtime" / "lib"
+    lib_dir.mkdir(parents=True)
+    for soname in ("libcudart.so.11", "libcudart.so.13", "libcudart.so.12"):
+        (lib_dir / soname).write_bytes(b"")
+
+    real_find_spec = cuda_ipc.importlib.util.find_spec
+
+    def fake_find_spec(name):
+        if name == "nvidia.cuda_runtime":
+            spec = types.SimpleNamespace()
+            spec.submodule_search_locations = [str(lib_dir.parent)]
+            return spec
+        return real_find_spec(name)
+
+    monkeypatch.setattr(cuda_ipc.importlib.util, "find_spec", fake_find_spec)
+
+    found = list(cuda_ipc._iter_wheel_cudart_paths())
+    assert found[0] == str(lib_dir / "libcudart.so.13")
