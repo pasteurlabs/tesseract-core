@@ -76,8 +76,8 @@ def path_to_index_op(
     if seq_idx_re:
         return ("seq", int(seq_idx_re.group(1)))
 
-    dict_idx_re = re.match(r"^\{(.*)\}$", path, re.DOTALL)
-    if dict_idx_re and dict_idx_re.group(1):
+    dict_idx_re = re.match(r"^\{(.+)\}$", path, re.DOTALL)
+    if dict_idx_re:
         return ("dict", unescape_dict_key(dict_idx_re.group(1)))
 
     # Use Python's built-in identifier validation for attribute names
@@ -99,7 +99,7 @@ def get_at_path(tree: Any, path: str) -> Any:
     if not path:
         return tree
 
-    split_path_ = split_path(path)
+    path_parts = split_path(path)
 
     def _get_recursive(tree: Any, path: list[str]) -> Any:
         if not path:
@@ -121,7 +121,7 @@ def get_at_path(tree: Any, path: str) -> Any:
         else:
             raise AssertionError(f"Invalid method: {method}")
 
-    return _get_recursive(tree, split_path_)
+    return _get_recursive(tree, path_parts)
 
 
 def set_at_path(tree: Any, values: dict[str, Any]) -> Any:
@@ -163,8 +163,8 @@ def set_at_path(tree: Any, values: dict[str, Any]) -> Any:
             raise AssertionError(f"Invalid method: {method}")
 
     for path, value in values.items():
-        split_path_ = split_path(path)
-        _set_recursive(tree, split_path_, value)
+        path_parts = split_path(path)
+        _set_recursive(tree, path_parts, value)
 
     return tree
 
