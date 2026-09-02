@@ -20,6 +20,12 @@ runtime machinery. The public entry points used by :mod:`array_encoding` are:
   encode/decode pair,
 * :func:`release_pinned_ipc_exports` -- keepalive cleanup, called once per
   request by both the server (for its outputs) and the client (for its inputs).
+
+:func:`iter_cudart_candidates` is also public, but for a different audience:
+out-of-process consumers that ``dlopen`` libcudart themselves (e.g. the
+``tesseract_jax`` C++ FFI shim) can reuse this module's discovery -- including
+the pip-wheel fallback and forward-compatible version range -- instead of
+maintaining their own soname list.
 """
 
 import ctypes
@@ -250,39 +256,67 @@ def _iter_wheel_cudart_paths() -> Iterator[str]:
             yield str(candidate)
 
 
-def _find_cudart() -> Any:
-    """Locate and load libcudart (a ``ctypes.CDLL``), or ``None`` if not found.
+def iter_cudart_candidates() -> Iterator[str]:
+    """Yield libcudart names/paths to try loading, most-preferred first.
 
-    Search order: the system loader (``find_library`` then bare sonames), then
-    pip-wheel CUDA installs (see :func:`_iter_wheel_cudart_paths`).
+    Each item is an argument suitable for ``ctypes.CDLL`` **and** for a raw
+    ``dlopen``/``LoadLibrary``: either a bare soname the system loader resolves
+    (e.g. ``"libcudart.so.12"``) or an absolute path to a wheel-shipped runtime.
+    The order encodes the search strategy:
+
+    1. ``ctypes.util.find_library`` results (honours ``LD_LIBRARY_PATH`` and the
+       ``ldconfig`` cache), unversioned name first then generated per-major
+       Windows stems;
+    2. bare sonames, for systems where ``find_library`` misses the versioned name
+       but the loader can still resolve it (e.g. an already-loaded copy);
+    3. absolute paths to pip-wheel CUDA installs (see
+       :func:`_iter_wheel_cudart_paths`).
+
+    This is the public discovery surface: non-Python consumers (e.g. the
+    ``tesseract_jax`` C++ FFI shim, which ``dlopen``s libcudart itself) can use
+    it to locate the same runtime this module loads, so both agree on the wheel
+    fallback and stay forward-compatible with new CUDA majors without their own
+    hardcoded soname list. Discovery only -- the caller does the actual load.
+
+    Items are de-duplicated preserving order; existence is not guaranteed (a
+    candidate may still fail to load), so callers should try each in turn.
     """
-    # System loader: honours LD_LIBRARY_PATH and the ldconfig cache. Try the
-    # unversioned name first, then generated per-major Windows names (find_library
-    # wants a stem, not a full soname).
+    seen: set[str] = set()
+
+    def _fresh(candidate: str) -> bool:
+        if candidate in seen:
+            return False
+        seen.add(candidate)
+        return True
+
+    # find_library wants a stem (not a full soname): the unversioned name first,
+    # then generated per-major Windows stems.
     find_library_names = ["cudart"] + [f"cudart64_{major}" for major in _CUDART_MAJORS]
     for name in find_library_names:
         path = ctypes.util.find_library(name)
-        if path:
-            try:
-                return ctypes.CDLL(path)
-            except OSError:
-                pass
+        if path and _fresh(path):
+            yield path
 
-    # Bare sonames: covers systems where find_library misses the versioned name
-    # but the loader can still resolve it (e.g. an already-loaded copy).
     for soname in _cudart_sonames():
-        try:
-            return ctypes.CDLL(soname)
-        except OSError:
-            continue
+        if _fresh(soname):
+            yield soname
 
-    # pip-wheel CUDA: load by absolute path from the wheel's lib directory.
     for path in _iter_wheel_cudart_paths():
+        if _fresh(path):
+            yield path
+
+
+def _find_cudart() -> Any:
+    """Locate and load libcudart (a ``ctypes.CDLL``), or ``None`` if not found.
+
+    Tries each candidate from :func:`iter_cudart_candidates` in order and
+    returns the first that loads.
+    """
+    for candidate in iter_cudart_candidates():
         try:
-            return ctypes.CDLL(path)
+            return ctypes.CDLL(candidate)
         except OSError:
             continue
-
     return None
 
 

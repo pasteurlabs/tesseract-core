@@ -801,3 +801,69 @@ def test_iter_wheel_cudart_paths_prefers_newest_major(tmp_path, monkeypatch):
 
     found = list(cuda_ipc._iter_wheel_cudart_paths())
     assert found[0] == str(lib_dir / "libcudart.so.13")
+
+
+# ── iter_cudart_candidates (public discovery surface) ───────────────────
+#
+# Public API: out-of-process consumers (the tesseract_jax C++ shim) dlopen
+# libcudart using these candidates, so its contract -- ordering, dedup, and that
+# every item is a bare soname or absolute path -- is part of the interface.
+
+
+def test_iter_cudart_candidates_orders_system_then_wheel(monkeypatch):
+    """find_library hits come first, then bare sonames, then wheel paths."""
+    monkeypatch.setattr(
+        cuda_ipc.ctypes.util,
+        "find_library",
+        lambda name: "/usr/lib/libcudart.so.12" if name == "cudart" else None,
+    )
+    monkeypatch.setattr(
+        cuda_ipc,
+        "_iter_wheel_cudart_paths",
+        lambda: ["/wheel/nvidia/lib/libcudart.so.12"],
+    )
+
+    candidates = list(cuda_ipc.iter_cudart_candidates())
+
+    # System loader's resolved path leads.
+    assert candidates[0] == "/usr/lib/libcudart.so.12"
+    # Bare sonames sit in the middle, wheel path last.
+    assert "libcudart.so" in candidates
+    assert candidates[-1] == "/wheel/nvidia/lib/libcudart.so.12"
+    assert candidates.index("libcudart.so") < candidates.index(
+        "/wheel/nvidia/lib/libcudart.so.12"
+    )
+
+
+def test_iter_cudart_candidates_dedups_preserving_order(monkeypatch):
+    """A path surfaced by both find_library and the wheel search appears once."""
+    dup = "/wheel/nvidia/lib/libcudart.so.12"
+    monkeypatch.setattr(
+        cuda_ipc.ctypes.util,
+        "find_library",
+        lambda name: dup if name == "cudart" else None,
+    )
+    monkeypatch.setattr(cuda_ipc, "_iter_wheel_cudart_paths", lambda: [dup])
+
+    candidates = list(cuda_ipc.iter_cudart_candidates())
+
+    assert candidates.count(dup) == 1
+    # The earlier (find_library) occurrence wins its position.
+    assert candidates[0] == dup
+
+
+def test_iter_cudart_candidates_are_dlopen_arguments(monkeypatch):
+    """Every candidate is a bare soname or an absolute path (never a stem).
+
+    C++ consumers pass these straight to dlopen/LoadLibrary, which need a real
+    library name or path -- not a find_library stem like ``"cudart"``.
+    """
+    monkeypatch.setattr(cuda_ipc.ctypes.util, "find_library", lambda name: None)
+    monkeypatch.setattr(cuda_ipc, "_iter_wheel_cudart_paths", list)
+
+    for candidate in cuda_ipc.iter_cudart_candidates():
+        # A real soname (lib*.so*/lib*.dylib), a Windows DLL, or an absolute
+        # path -- never a bare find_library stem like "cudart" / "cudart64_12".
+        is_soname = candidate.startswith("lib") or candidate.endswith(".dll")
+        is_path = candidate.startswith("/")
+        assert is_soname or is_path, candidate
