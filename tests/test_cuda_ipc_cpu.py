@@ -810,8 +810,12 @@ def test_iter_wheel_cudart_paths_prefers_newest_major(tmp_path, monkeypatch):
 # every item is a bare soname or absolute path -- is part of the interface.
 
 
-def test_iter_cudart_candidates_orders_system_then_wheel(monkeypatch):
-    """find_library hits come first, then bare sonames, then wheel paths."""
+def test_iter_cudart_candidates_orders_wheel_then_system(monkeypatch):
+    """Wheel paths come first, then find_library hits, then bare sonames.
+
+    Wheel-first matches how JAX and PyTorch load libcudart (venv copy over a
+    system one), so a codec handing device memory to them agrees on the runtime.
+    """
     monkeypatch.setattr(
         cuda_ipc.ctypes.util,
         "find_library",
@@ -825,13 +829,15 @@ def test_iter_cudart_candidates_orders_system_then_wheel(monkeypatch):
 
     candidates = list(cuda_ipc.iter_cudart_candidates())
 
-    # System loader's resolved path leads.
-    assert candidates[0] == "/usr/lib/libcudart.so.12"
-    # Bare sonames sit in the middle, wheel path last.
+    # Wheel (venv) path leads, ahead of the system loader's resolved path.
+    assert candidates[0] == "/wheel/nvidia/lib/libcudart.so.12"
+    assert candidates.index("/wheel/nvidia/lib/libcudart.so.12") < candidates.index(
+        "/usr/lib/libcudart.so.12"
+    )
+    # Bare sonames trail the find_library hits.
     assert "libcudart.so" in candidates
-    assert candidates[-1] == "/wheel/nvidia/lib/libcudart.so.12"
-    assert candidates.index("libcudart.so") < candidates.index(
-        "/wheel/nvidia/lib/libcudart.so.12"
+    assert candidates.index("/usr/lib/libcudart.so.12") < candidates.index(
+        "libcudart.so"
     )
 
 
@@ -848,7 +854,7 @@ def test_iter_cudart_candidates_dedups_preserving_order(monkeypatch):
     candidates = list(cuda_ipc.iter_cudart_candidates())
 
     assert candidates.count(dup) == 1
-    # The earlier (find_library) occurrence wins its position.
+    # The earlier (wheel) occurrence wins its position.
     assert candidates[0] == dup
 
 

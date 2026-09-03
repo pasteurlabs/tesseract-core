@@ -33,6 +33,7 @@ import ctypes.util
 import importlib.util
 import weakref
 from collections.abc import Iterable, Iterator
+from itertools import chain
 from pathlib import Path
 from typing import Any, get_args
 
@@ -185,10 +186,11 @@ _CUDART_GLOBS = ("libcudart.so.*", "libcudart.so", "libcudart.dylib", "cudart64_
 def _cudart_soname_sort_key(path: Path) -> tuple[int, int]:
     """Sort key placing higher CUDA majors first among wheel candidates.
 
-    Returns ``(-major, tiebreak)`` so ``sorted`` yields newest-major-first. The
-    major is parsed from ``libcudart.so.<major>`` / ``cudart64_<major>.dll``;
-    names without a parseable version (e.g. an unversioned ``libcudart.so``
-    symlink) sort after all versioned ones so a concrete version wins.
+    Returns ``(0 if versioned else 1, -major)`` so ``sorted`` yields versioned
+    names first and, among them, newest-major-first. The major is parsed from
+    ``libcudart.so.<major>`` / ``cudart64_<major>.dll``; names without a
+    parseable version (e.g. an unversioned ``libcudart.so`` symlink) sort after
+    all versioned ones so a concrete version wins.
     """
     name = path.name
     major = -1
@@ -212,9 +214,10 @@ def _iter_wheel_cudart_paths() -> Iterator[str]:
     ``site-packages/nvidia/<pkg>/lib/libcudart.so.NN`` directory (``<pkg>`` is
     typically ``cuda_runtime``). That directory is on neither
     ``LD_LIBRARY_PATH`` nor the ``ldconfig`` cache, so both
-    :func:`ctypes.util.find_library` and a bare ``ctypes.CDLL(soname)`` can miss
-    it -- observed on GPU CI runners with no system CUDA toolkit installed. When
-    that happens we locate the wheel directory ourselves.
+    :func:`ctypes.util.find_library` and a bare ``ctypes.CDLL(soname)`` miss it
+    -- observed on GPU CI runners with no system CUDA toolkit installed. We
+    locate the wheel directory ourselves so this venv-local runtime is found
+    (and, per :func:`iter_cudart_candidates`, preferred over a system one).
     """
 
     def _spec_locations(name: str) -> Iterable[str]:
@@ -264,46 +267,44 @@ def iter_cudart_candidates() -> Iterator[str]:
     (e.g. ``"libcudart.so.12"``) or an absolute path to a wheel-shipped runtime.
     The order encodes the search strategy:
 
-    1. ``ctypes.util.find_library`` results (honours ``LD_LIBRARY_PATH`` and the
-       ``ldconfig`` cache), unversioned name first then generated per-major
-       Windows stems;
-    2. bare sonames, for systems where ``find_library`` misses the versioned name
-       but the loader can still resolve it (e.g. an already-loaded copy);
-    3. absolute paths to pip-wheel CUDA installs (see
-       :func:`_iter_wheel_cudart_paths`).
+    1. absolute paths to pip-wheel CUDA installs (see
+       :func:`_iter_wheel_cudart_paths`), so a venv's runtime wins over a system
+       one -- this matches how JAX and PyTorch load libcudart (their loaders
+       ``dlopen`` the wheel copy by absolute path first, falling back to the
+       system library only if no wheel is present). Agreeing with them on which
+       runtime is loaded matters for a codec that hands device memory to them;
+    2. ``ctypes.util.find_library`` results (search the ``ldconfig`` cache, and
+       on non-glibc platforms other loader paths), unversioned name first then
+       generated per-major Windows stems;
+    3. bare sonames, for systems where ``find_library`` misses the versioned name
+       but the loader can still resolve it (e.g. an already-loaded copy, or via
+       ``LD_LIBRARY_PATH``, which ``dlopen`` honours but ``find_library`` does
+       not).
 
     This is the public discovery surface: non-Python consumers (e.g. the
     ``tesseract_jax`` C++ FFI shim, which ``dlopen``s libcudart itself) can use
     it to locate the same runtime this module loads, so both agree on the wheel
-    fallback and stay forward-compatible with new CUDA majors without their own
+    preference and stay forward-compatible with new CUDA majors without their own
     hardcoded soname list. Discovery only -- the caller does the actual load.
 
     Items are de-duplicated preserving order; existence is not guaranteed (a
     candidate may still fail to load), so callers should try each in turn.
     """
-    seen: set[str] = set()
-
-    def _fresh(candidate: str) -> bool:
-        if candidate in seen:
-            return False
-        seen.add(candidate)
-        return True
-
     # find_library wants a stem (not a full soname): the unversioned name first,
     # then generated per-major Windows stems.
-    find_library_names = ["cudart"] + [f"cudart64_{major}" for major in _CUDART_MAJORS]
-    for name in find_library_names:
-        path = ctypes.util.find_library(name)
-        if path and _fresh(path):
-            yield path
+    find_library_stems = ("cudart", *(f"cudart64_{major}" for major in _CUDART_MAJORS))
+    from_find_library = (ctypes.util.find_library(stem) for stem in find_library_stems)
+    candidates = chain(
+        _iter_wheel_cudart_paths(),
+        filter(None, from_find_library),
+        _cudart_sonames(),
+    )
 
-    for soname in _cudart_sonames():
-        if _fresh(soname):
-            yield soname
-
-    for path in _iter_wheel_cudart_paths():
-        if _fresh(path):
-            yield path
+    seen: set[str] = set()
+    for candidate in candidates:
+        if candidate not in seen:
+            seen.add(candidate)
+            yield candidate
 
 
 def _find_cudart() -> Any:
@@ -332,7 +333,7 @@ def _get_cudart():
         raise RuntimeError(
             "Could not find CUDA runtime library (libcudart). Make sure CUDA is "
             "installed and on the loader path (set LD_LIBRARY_PATH), or install a "
-            "CUDA runtime wheel (e.g. nvidia-cuda-runtime-cu12)."
+            "CUDA runtime wheel (e.g. nvidia-cuda-runtime-cu13)."
         )
 
     # Declare argument/return types so ctypes marshals 64-bit pointers and the
