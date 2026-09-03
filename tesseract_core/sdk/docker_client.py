@@ -11,6 +11,7 @@ import shlex
 import subprocess
 import sys
 import threading
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from io import IOBase
@@ -898,6 +899,14 @@ class Containers:
             raise ValueError(
                 "Cannot use stream_stdout or stream_stderr with detach=True."
             )
+
+        # A name we control lets us find this specific container after the
+        # fact, regardless of what (if anything) the CLI prints to stdout when
+        # the run fails partway through: Docker prints the new id before a
+        # port-publish failure, Podman prints nothing on the same failure.
+        run_name = f"tesseract-run-{uuid.uuid4().hex[:12]}" if detach else None
+        if run_name is not None:
+            optional_args.extend(["--name", run_name])
         if detach:
             optional_args.append("--detach")
         if remove:
@@ -932,14 +941,19 @@ class Containers:
             stderr_str = stderr_data.decode("utf-8", errors="ignore")
             if "repository" in stderr_str:
                 raise ImageNotFound(stderr_str)
-            # In detach mode, `docker run` prints the container's id to stdout as
-            # soon as it is created, before the step that can still fail (e.g.
-            # publishing a port). A non-empty stdout here means that id belongs
-            # to a container the daemon actually created and left behind in a
-            # Created state, not a container that never existed.
-            leaked_container_id = (
-                stdout_data.decode("utf-8", errors="ignore").strip() if detach else ""
-            ) or None
+            # A failure past the "does the image exist" check can still have
+            # created a container before whatever step actually failed (e.g.
+            # publishing a port); look it up by the name we gave it rather than
+            # guessing from stdout, since that only exists on the daemon if the
+            # daemon actually created it.
+            leaked_container_id = None
+            if run_name is not None:
+                try:
+                    leaked_container_id = Containers.get(
+                        run_name, tesseract_only=False
+                    ).id
+                except NotFound:
+                    pass
             raise ContainerError(
                 leaked_container_id,
                 returncode,
