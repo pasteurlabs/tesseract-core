@@ -693,3 +693,190 @@ def test_output_to_bytes_cuda_ipc_context(monkeypatch):
 
     file_interactions.output_to_bytes({"y": 1}, "json+cuda_ipc")
     assert captured["context"] == {"array_encoding": "cuda_ipc"}
+
+
+# ── libcudart discovery (wheel-installed CUDA) ──────────────────────────
+#
+# The pip CUDA wheels (nvidia-cuda-runtime-cuXX, pulled in by jax[cudaXX] /
+# cupy-cudaXXx) install libcudart under site-packages/nvidia/cuda_runtime/lib/,
+# which is on neither LD_LIBRARY_PATH nor the ldconfig cache. _find_cudart must
+# still discover it there after the system-loader probes come up empty.
+
+
+def _fake_cudart_wheel(tmp_path, soname="libcudart.so.12"):
+    """Create a fake ``nvidia/cuda_runtime/lib/<soname>`` layout; return its lib dir."""
+    lib_dir = tmp_path / "nvidia" / "cuda_runtime" / "lib"
+    lib_dir.mkdir(parents=True)
+    (lib_dir / soname).write_bytes(b"")
+    return lib_dir
+
+
+def test_iter_wheel_cudart_paths_finds_runtime_wheel(tmp_path, monkeypatch):
+    """The runtime wheel's lib dir is discovered via its importlib spec."""
+    lib_dir = _fake_cudart_wheel(tmp_path)
+
+    real_find_spec = cuda_ipc.importlib.util.find_spec
+
+    def fake_find_spec(name):
+        if name == "nvidia.cuda_runtime":
+            spec = types.SimpleNamespace()
+            spec.submodule_search_locations = [str(lib_dir.parent)]
+            return spec
+        return real_find_spec(name)
+
+    monkeypatch.setattr(cuda_ipc.importlib.util, "find_spec", fake_find_spec)
+
+    found = list(cuda_ipc._iter_wheel_cudart_paths())
+    assert str(lib_dir / "libcudart.so.12") in found
+
+
+def test_find_cudart_prefers_wheel_over_system(tmp_path, monkeypatch):
+    """The wheel copy is loaded even when a system soname would also resolve.
+
+    The wheel is tried before the system loader, so on a host with both a venv
+    runtime and a system one the venv copy wins -- matching how JAX/torch load
+    libcudart.
+    """
+    lib_dir = _fake_cudart_wheel(tmp_path)
+    wheel_path = str(lib_dir / "libcudart.so.12")
+
+    # A system runtime is also resolvable, so both sources could satisfy the load.
+    monkeypatch.setattr(
+        cuda_ipc.ctypes.util,
+        "find_library",
+        lambda name: "libcudart.so.12" if name == "cudart" else None,
+    )
+    monkeypatch.setattr(cuda_ipc, "_iter_wheel_cudart_paths", lambda: [wheel_path])
+
+    # Everything loads; _find_cudart returns the first candidate it tries.
+    loaded = {}
+
+    def fake_cdll(path):
+        loaded["path"] = path
+        return object()
+
+    monkeypatch.setattr(cuda_ipc.ctypes, "CDLL", fake_cdll)
+
+    handle = cuda_ipc._find_cudart()
+    assert handle is not None
+    # The wheel path is first in the candidate order, so it is what gets loaded.
+    assert loaded["path"] == wheel_path
+
+
+def test_iter_wheel_cudart_paths_finds_unenumerated_future_major(tmp_path, monkeypatch):
+    """A wheel shipping a CUDA major we never hardcoded is still discovered.
+
+    The wheel search globs by filename rather than probing a fixed set, so a
+    runtime released after this code was written (here ``.so.99``) is picked up
+    without any change to the version lists.
+    """
+    future_soname = f"libcudart.so.{cuda_ipc._CUDART_MAJOR_NEWEST + 79}"
+    lib_dir = _fake_cudart_wheel(tmp_path, soname=future_soname)
+
+    real_find_spec = cuda_ipc.importlib.util.find_spec
+
+    def fake_find_spec(name):
+        if name == "nvidia.cuda_runtime":
+            spec = types.SimpleNamespace()
+            spec.submodule_search_locations = [str(lib_dir.parent)]
+            return spec
+        return real_find_spec(name)
+
+    monkeypatch.setattr(cuda_ipc.importlib.util, "find_spec", fake_find_spec)
+
+    found = list(cuda_ipc._iter_wheel_cudart_paths())
+    assert str(lib_dir / future_soname) in found
+
+
+def test_iter_wheel_cudart_paths_prefers_newest_major(tmp_path, monkeypatch):
+    """When a wheel lib dir holds several runtimes, the newest major comes first."""
+    lib_dir = tmp_path / "nvidia" / "cuda_runtime" / "lib"
+    lib_dir.mkdir(parents=True)
+    for soname in ("libcudart.so.11", "libcudart.so.13", "libcudart.so.12"):
+        (lib_dir / soname).write_bytes(b"")
+
+    real_find_spec = cuda_ipc.importlib.util.find_spec
+
+    def fake_find_spec(name):
+        if name == "nvidia.cuda_runtime":
+            spec = types.SimpleNamespace()
+            spec.submodule_search_locations = [str(lib_dir.parent)]
+            return spec
+        return real_find_spec(name)
+
+    monkeypatch.setattr(cuda_ipc.importlib.util, "find_spec", fake_find_spec)
+
+    found = list(cuda_ipc._iter_wheel_cudart_paths())
+    assert found[0] == str(lib_dir / "libcudart.so.13")
+
+
+# ── iter_cudart_candidates (public discovery surface) ───────────────────
+#
+# Public API: out-of-process consumers (the tesseract_jax C++ shim) dlopen
+# libcudart using these candidates, so its contract -- ordering, dedup, and that
+# every item is a bare soname or absolute path -- is part of the interface.
+
+
+def test_iter_cudart_candidates_orders_wheel_then_system(monkeypatch):
+    """Wheel paths come first, then find_library hits, then bare sonames.
+
+    Wheel-first matches how JAX and PyTorch load libcudart (venv copy over a
+    system one), so a codec handing device memory to them agrees on the runtime.
+    """
+    monkeypatch.setattr(
+        cuda_ipc.ctypes.util,
+        "find_library",
+        lambda name: "/usr/lib/libcudart.so.12" if name == "cudart" else None,
+    )
+    monkeypatch.setattr(
+        cuda_ipc,
+        "_iter_wheel_cudart_paths",
+        lambda: ["/wheel/nvidia/lib/libcudart.so.12"],
+    )
+
+    candidates = list(cuda_ipc.iter_cudart_candidates())
+
+    # Wheel (venv) path leads, ahead of the system loader's resolved path.
+    assert candidates[0] == "/wheel/nvidia/lib/libcudart.so.12"
+    assert candidates.index("/wheel/nvidia/lib/libcudart.so.12") < candidates.index(
+        "/usr/lib/libcudart.so.12"
+    )
+    # Bare sonames trail the find_library hits.
+    assert "libcudart.so" in candidates
+    assert candidates.index("/usr/lib/libcudart.so.12") < candidates.index(
+        "libcudart.so"
+    )
+
+
+def test_iter_cudart_candidates_dedups_preserving_order(monkeypatch):
+    """A path surfaced by both find_library and the wheel search appears once."""
+    dup = "/wheel/nvidia/lib/libcudart.so.12"
+    monkeypatch.setattr(
+        cuda_ipc.ctypes.util,
+        "find_library",
+        lambda name: dup if name == "cudart" else None,
+    )
+    monkeypatch.setattr(cuda_ipc, "_iter_wheel_cudart_paths", lambda: [dup])
+
+    candidates = list(cuda_ipc.iter_cudart_candidates())
+
+    assert candidates.count(dup) == 1
+    # The earlier (wheel) occurrence wins its position.
+    assert candidates[0] == dup
+
+
+def test_iter_cudart_candidates_are_dlopen_arguments(monkeypatch):
+    """Every candidate is a bare soname or an absolute path (never a stem).
+
+    C++ consumers pass these straight to dlopen/LoadLibrary, which need a real
+    library name or path -- not a find_library stem like ``"cudart"``.
+    """
+    monkeypatch.setattr(cuda_ipc.ctypes.util, "find_library", lambda name: None)
+    monkeypatch.setattr(cuda_ipc, "_iter_wheel_cudart_paths", list)
+
+    for candidate in cuda_ipc.iter_cudart_candidates():
+        # A real soname (lib*.so*/lib*.dylib), a Windows DLL, or an absolute
+        # path -- never a bare find_library stem like "cudart" / "cudart64_12".
+        is_soname = candidate.startswith("lib") or candidate.endswith(".dll")
+        is_path = candidate.startswith("/")
+        assert is_soname or is_path, candidate
