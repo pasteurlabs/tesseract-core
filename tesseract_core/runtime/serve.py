@@ -74,9 +74,9 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
             # relies on. Gated on the experimental flag so the production path
             # never imports the CUDA machinery.
             if config.enable_experimental_cuda_ipc:
-                from tesseract_core.runtime.cuda_ipc import release_pinned_ipc_exports
+                from tesseract_core.runtime.device_transport import get_transport
 
-                release_pinned_ipc_exports()
+                get_transport("cuda_ipc").release()
 
             if run_id is None:
                 run_id = str(uuid.uuid4())

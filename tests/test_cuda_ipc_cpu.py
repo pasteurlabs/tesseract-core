@@ -880,3 +880,53 @@ def test_iter_cudart_candidates_are_dlopen_arguments(monkeypatch):
         is_soname = candidate.startswith("lib") or candidate.endswith(".dll")
         is_path = candidate.startswith("/")
         assert is_soname or is_path, candidate
+
+
+# ── DeviceTransport interface ───────────────────────────────────────────
+#
+# cuda_ipc is exposed through the shared DeviceTransport interface so further
+# transports slot in behind one lookup. These check the registry wiring and that
+# the cuda_ipc backend routes to the same functions the direct API uses.
+
+
+def test_cuda_ipc_registered_as_transport():
+    """The cuda_ipc backend is discoverable by name and satisfies the protocol."""
+    from tesseract_core.runtime.device_transport import DeviceTransport, get_transport
+
+    transport = get_transport("cuda_ipc")
+    assert transport.name == "cuda_ipc"
+    assert transport.reach == "same_host"
+    assert isinstance(transport, DeviceTransport)
+
+
+def test_get_transport_rejects_unknown():
+    from tesseract_core.runtime.device_transport import get_transport
+
+    with pytest.raises(KeyError, match="No device transport registered"):
+        get_transport("does_not_exist")
+
+
+def test_cuda_ipc_transport_delegates(patched_cuda, monkeypatch):
+    """register/descriptor/flush/receive/release drive the same cuda_ipc code.
+
+    A pull transport's flush is a no-op and its bootstrap needs no shared state,
+    so those return None; register+descriptor produce the same payload the direct
+    dump does, and release drops the export pins.
+    """
+    from tesseract_core.runtime.device_transport import get_transport
+
+    transport = get_transport("cuda_ipc")
+
+    # bootstrap + flush are no-ops for a receiver-driven transport.
+    assert transport.bootstrap("producer", None) is None
+    assert transport.flush() is None
+
+    arr = FakeCudaArray((4, 8), "<f4", data_ptr=0x5000)
+    payload = transport.descriptor(transport.register(arr))
+    # Same structure the direct dump produces (offset/size from the fake base).
+    assert payload["data"]["encoding"] == "cuda_ipc"
+    assert _unpack_cuda_ipc(payload["data"])["storage_offset"] == 256
+    # register pinned the source array; release drops it.
+    assert arr in cuda_ipc._CUDA_IPC_EXPORT_REGISTRY
+    transport.release()
+    assert cuda_ipc._CUDA_IPC_EXPORT_REGISTRY == []

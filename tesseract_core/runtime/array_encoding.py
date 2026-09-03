@@ -620,10 +620,11 @@ def decode_array(
             data = _load_binref_arraydict(val.model_dump(), base_dir)
 
         elif val.data.encoding == "cuda_ipc":
-            from tesseract_core.runtime import cuda_ipc
+            from tesseract_core.runtime.device_transport import get_transport
 
             # Returns a framework-agnostic on-GPU wrapper — skip numpy coercion
-            return cuda_ipc.load_cuda_ipc_arraydict(val.model_dump())
+            transport = get_transport(val.data.encoding)
+            return transport.receive(val.model_dump())
 
         # keep checking for "raw" for backwards compat
         elif val.data.encoding in {"json", "raw"}:
@@ -680,7 +681,10 @@ def encode_array(
                 "cuda_ipc encoding requires a CUDA array "
                 f"(object with __cuda_array_interface__), got {type(arr).__name__}"
             )
-        return cuda_ipc.dump_cuda_ipc_arraydict(arr)
+        from tesseract_core.runtime.device_transport import get_transport
+
+        transport = get_transport(array_encoding)
+        return transport.descriptor(transport.register(arr))
 
     # Python mode -> return the array as-is, without any host copy. GPU arrays
     # are preserved on-device so that the intermediate model_dump()/validate
