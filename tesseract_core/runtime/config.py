@@ -135,16 +135,16 @@ def snapshot_config() -> ConfigSnapshot:
 def active_config(snapshot: ConfigSnapshot) -> Iterator[None]:
     """Run a block under `snapshot` as the process-global runtime config.
 
-    Restores whatever was active before on exit, whether it succeeded or failed.
-    Config is process-global (get_config()/update_config() share module
-    state), which one in-process Tesseract's own setup relies on to
-    accumulate correctly across several update_config() calls. That same
-    globalness means the config a Tesseract was built with is not
-    necessarily the config active by the time one of its endpoints actually
-    runs: another in-process Tesseract, or another call on this one, may
-    have changed it in between. Bracketing an endpoint call in this context
-    manager makes the config it sees match the instance it belongs to,
-    independent of what ran before or runs after.
+    Restores whatever was active before on exit, whether the block succeeds
+    or raises. Config is process-global (get_config()/update_config() share
+    module state), which both a single Tesseract's own setup and this
+    function itself rely on to freely rebuild it from scratch without
+    disturbing anyone else. Two distinct uses: `from_tesseract_api` wraps
+    its whole construction in this so a prior or concurrent in-process
+    Tesseract's config is untouched once construction returns; `run_tesseract`
+    wraps a single call in this so the config it sees matches the instance
+    it belongs to, regardless of what any other in-process Tesseract's
+    construction or calls do to the global in between.
     """
     global _current_config, _config_overrides
     previous = (_current_config, frozenset(_config_overrides))

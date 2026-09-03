@@ -313,6 +313,7 @@ class Tesseract:
             A Tesseract instance.
         """
         from tesseract_core.runtime.config import (
+            active_config,
             reset_config,
             snapshot_config,
             update_config,
@@ -320,46 +321,59 @@ class Tesseract:
 
         # Runtime config is process-global (unlike from_image, which passes
         # it via TESSERACT_* environment variables to an isolated
-        # subprocess), so a prior in-process Tesseract's explicit overrides
-        # must not leak into this one: start from environment variables and
-        # this call's own arguments only (#672).
-        reset_config()
+        # subprocess). reset_config() and the update_config() calls below
+        # need to freely rebuild it from scratch for this instance alone,
+        # without a prior in-process Tesseract's explicit overrides leaking
+        # in (#672), so all of that happens inside active_config(), which
+        # puts back whatever was globally active before this call started
+        # once we're done, success or failure. Construction is therefore
+        # invisible outside this function; only run_tesseract() ever
+        # installs a snapshot for longer than that, and only for the
+        # duration of one call.
+        with active_config(snapshot_config()):
+            reset_config()
 
-        if isinstance(tesseract_api, str | Path):
-            from tesseract_core.runtime.core import load_module_from_path
+            if isinstance(tesseract_api, str | Path):
+                from tesseract_core.runtime.core import load_module_from_path
 
-            tesseract_api_path = Path(tesseract_api).resolve(strict=True)
-            if not tesseract_api_path.is_file():
-                raise RuntimeError(
-                    f"Tesseract API path {tesseract_api_path} is not a file."
+                tesseract_api_path = Path(tesseract_api).resolve(strict=True)
+                if not tesseract_api_path.is_file():
+                    raise RuntimeError(
+                        f"Tesseract API path {tesseract_api_path} is not a file."
+                    )
+
+                try:
+                    tesseract_api = load_module_from_path(tesseract_api_path)
+                except ImportError as ex:
+                    raise RuntimeError(
+                        f"Cannot load Tesseract API from {tesseract_api_path}"
+                    ) from ex
+
+            if input_path is not None:
+                update_config(input_path=str(input_path.resolve()))
+
+            resolved_output_path = None
+            if output_path is not None:
+                resolved_output_path = engine._resolve_file_path(
+                    output_path, make_dir=True
                 )
+                update_config(output_path=str(resolved_output_path))
 
-            try:
-                tesseract_api = load_module_from_path(tesseract_api_path)
-            except ImportError as ex:
-                raise RuntimeError(
-                    f"Cannot load Tesseract API from {tesseract_api_path}"
-                ) from ex
+            # Apply runtime_config options
+            config_kwargs: dict[str, Any] = {
+                "output_format": output_format,
+                "debug": True,
+            }
+            if runtime_config is not None:
+                config_kwargs.update(runtime_config)
+            update_config(**config_kwargs)
 
-        if input_path is not None:
-            update_config(input_path=str(input_path.resolve()))
-
-        resolved_output_path = None
-        if output_path is not None:
-            resolved_output_path = engine._resolve_file_path(output_path, make_dir=True)
-            update_config(output_path=str(resolved_output_path))
-
-        # Apply runtime_config options
-        config_kwargs: dict[str, Any] = {"output_format": output_format, "debug": True}
-        if runtime_config is not None:
-            config_kwargs.update(runtime_config)
-        update_config(**config_kwargs)
-
-        # Captured now, after this instance's own config settles, so its
-        # endpoints run under exactly this config later regardless of what
-        # any other in-process Tesseract (or a later call to this same
-        # classmethod) does to the process-global config in the meantime.
-        config_snapshot = snapshot_config()
+            # Captured now, after this instance's own config settles, so its
+            # endpoints run under exactly this config later regardless of
+            # what any other in-process Tesseract (or a later call to this
+            # same classmethod) does to the process-global config in the
+            # meantime.
+            config_snapshot = snapshot_config()
 
         obj = cls.__new__(cls)
         obj._stream_logs = stream_logs
@@ -1208,28 +1222,33 @@ class LocalClient:
         config_snapshot: ConfigSnapshot | None = None,
     ) -> None:
         # Import here to not depend on runtime dependencies globally
-        from tesseract_core.runtime.config import snapshot_config
+        from tesseract_core.runtime.config import active_config, snapshot_config
         from tesseract_core.runtime.core import create_endpoints
         from tesseract_core.runtime.serve import create_rest_api
 
-        self._endpoints = {
-            func.__name__: func for func in create_endpoints(tesseract_api)
-        }
-        self._openapi_schema = create_rest_api(tesseract_api).openapi()
+        # Whatever the process-global config happens to be right now, if the
+        # caller didn't capture one of its own (e.g. a direct LocalClient
+        # user rather than Tesseract.from_tesseract_api). Endpoints run
+        # under this snapshot regardless of what runs before or after them,
+        # starting right here: create_endpoints()/create_rest_api() below
+        # read get_config() too, and must see this instance's own config,
+        # not whatever get_config() would lazily default to if nothing had
+        # set it yet, or whatever another in-process Tesseract leaves behind.
+        self._config_snapshot = (
+            config_snapshot if config_snapshot is not None else snapshot_config()
+        )
+
+        with active_config(self._config_snapshot):
+            self._endpoints = {
+                func.__name__: func for func in create_endpoints(tesseract_api)
+            }
+            self._openapi_schema = create_rest_api(tesseract_api).openapi()
 
         if output_path is None:
             output_path = Path(tempfile.mkdtemp(prefix="tesseract_output_"))
             # Purge the auto-created tempdir when this client is garbage collected.
             weakref.finalize(self, _purge_tempdir, str(output_path))
         self._output_path = output_path
-
-        # Whatever the process-global config happens to be right now, if the
-        # caller didn't capture one of its own (e.g. a direct LocalClient
-        # user rather than Tesseract.from_tesseract_api). Endpoints run
-        # under this snapshot regardless of what runs before or after them.
-        self._config_snapshot = (
-            config_snapshot if config_snapshot is not None else snapshot_config()
-        )
 
     def run_tesseract(
         self,

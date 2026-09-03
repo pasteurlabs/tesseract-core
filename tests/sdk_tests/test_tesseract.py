@@ -90,25 +90,35 @@ def test_Tesseract_from_tesseract_api_does_not_leak_config_between_instances(
     """Check that a second in-process Tesseract stays isolated from a prior one.
 
     Each instance's configuration must be independent, the same way it
-    already is for from_image (#672).
+    already is for from_image (#672). Construction must also leave the
+    process-global config exactly as it found it, since a Tesseract's own
+    config lives in its client's captured snapshot, not in global state.
     """
-    from tesseract_core.runtime.config import get_config
+    from tesseract_core.runtime.config import snapshot_config
+
+    outer_snapshot = snapshot_config()
 
     first_output = tmp_path / "first_output"
     first_output.mkdir()
-    Tesseract.from_tesseract_api(
+    first = Tesseract.from_tesseract_api(
         dummy_tesseract_module,
         output_path=first_output,
         output_format="json",
     )
-    assert Path(get_config().output_path) == first_output
-    assert get_config().output_format == "json"
+    first_config = first._client._config_snapshot[0]
+    assert Path(first_config.output_path) == first_output
+    assert first_config.output_format == "json"
 
     # A fresh instance that requests neither option must not see the first
     # instance's explicit overrides leaking into its runtime config.
-    Tesseract.from_tesseract_api(dummy_tesseract_module)
-    assert Path(get_config().output_path) != first_output
-    assert get_config().output_format == "json+base64"  # from_tesseract_api's default
+    second = Tesseract.from_tesseract_api(dummy_tesseract_module)
+    second_config = second._client._config_snapshot[0]
+    assert Path(second_config.output_path) != first_output
+    assert second_config.output_format == "json+base64"  # from_tesseract_api's default
+
+    # Neither construction should have left a mark on the process-global
+    # config that anything outside these two instances could observe.
+    assert snapshot_config() == outer_snapshot
 
 
 def test_Tesseract_apply_runs_under_its_own_config_after_a_later_instance_is_built(
@@ -116,16 +126,19 @@ def test_Tesseract_apply_runs_under_its_own_config_after_a_later_instance_is_bui
 ):
     """A call on an *earlier* Tesseract must still see its own config.
 
-    Not whatever a later, independent in-process Tesseract left as the
-    process-global one. Construction-time isolation alone (#672) does not
-    cover this, since the global config can move again after either
-    instance's __init__ has already returned.
+    Not whichever config happens to be globally active at call time.
+    Construction no longer leaves any trace on the process-global config
+    once it returns (#672 and the follow-up review on #703), so this
+    simulates the case that guard still has to cover: some other code
+    (another in-process Tesseract's own call, most plausibly) is the one
+    genuinely, transiently active as the global config while first.apply()
+    runs.
 
     profiling is the config value run_tesseract() itself reads via
-    get_config(), so it directly shows whether a later instance's config
-    leaks into an earlier instance's call.
+    get_config(), so it directly shows whether that other config leaks
+    into this call.
     """
-    from tesseract_core.runtime.config import get_config
+    from tesseract_core.runtime.config import active_config
 
     first_output = tmp_path / "first_output"
     first_output.mkdir()
@@ -135,30 +148,24 @@ def test_Tesseract_apply_runs_under_its_own_config_after_a_later_instance_is_bui
         runtime_config={"profiling": True},
     )
 
-    # Second instance moves the process-global config away from first's:
-    # profiling reverts to its default (False), and output_path to a fresh
-    # temp dir.
-    Tesseract.from_tesseract_api(dummy_tesseract_module)
-    assert get_config().profiling is False
-    global_output_path_before_call = get_config().output_path
-    assert Path(global_output_path_before_call) != first_output
+    second = Tesseract.from_tesseract_api(dummy_tesseract_module)
+    assert second._client._config_snapshot[0].profiling is False
+    assert Path(second._client._config_snapshot[0].output_path) != first_output
 
-    profiler_spy = mocker.patch("tesseract_core.runtime.profiler.Profiler")
-    result = first.apply({"a": [1.0, 2.0], "b": [0.0, 0.0], "s": 1})
-    assert list(result["result"]) == [1.0, 2.0]
+    # While second's own snapshot is (hypothetically) the active global
+    # config, e.g. because second.apply() is itself mid-call right now.
+    with active_config(second._client._config_snapshot):
+        profiler_spy = mocker.patch("tesseract_core.runtime.profiler.Profiler")
+        result = first.apply({"a": [1.0, 2.0], "b": [0.0, 0.0], "s": 1})
+        assert list(result["result"]) == [1.0, 2.0]
 
-    # first's own profiling=True setting reached the Profiler, not the
-    # profiling=False left active by the second instance.
-    assert profiler_spy.call_args.kwargs["enabled"] is True
+        # first's own profiling=True setting reached the Profiler, not the
+        # profiling=False that's globally active for second's sake.
+        assert profiler_spy.call_args.kwargs["enabled"] is True
 
-    # The run went to first's own output dir, not the second instance's.
-    run_dirs = list(first_output.glob("run_*"))
-    assert len(run_dirs) == 1
-
-    # And the process-global config is exactly as the second instance left
-    # it. first.apply() must not leak its own config forward either.
-    assert get_config().output_path == global_output_path_before_call
-    assert get_config().profiling is False
+        # The run went to first's own output dir, not second's.
+        run_dirs = list(first_output.glob("run_*"))
+        assert len(run_dirs) == 1
 
 
 def test_Tesseract_from_image(mock_serving, mock_clients):
