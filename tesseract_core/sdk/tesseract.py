@@ -726,15 +726,45 @@ def _import_cuda_ipc() -> ModuleType:
     return cuda_ipc
 
 
+def _import_device_transport(name: str) -> ModuleType:
+    """Import the runtime module implementing a device transport by name.
+
+    Mirrors :func:`_import_cuda_ipc` for the pluggable transports: it surfaces a
+    clear message pointing at the required extra rather than a bare import error.
+    """
+    if name == "cuda_ipc":
+        return _import_cuda_ipc()
+    if name == "nixl":
+        try:
+            from tesseract_core.runtime import nixl_transport
+        except ImportError as exc:
+            raise ImportError(
+                "The 'json+nixl' output format requires the Tesseract runtime and "
+                "NIXL. Install them with "
+                "'pip install tesseract-core[runtime,nixl]'."
+            ) from exc
+        return nixl_transport
+    raise ValueError(f"Unknown device transport {name!r}.")
+
+
+# Array-data dump function on each device-transport runtime module, keyed by the
+# transport name the client uses to encode a GPU input by reference.
+_DEVICE_TRANSPORT_DUMP = {
+    "cuda_ipc": "dump_cuda_ipc_arraydict",
+    "nixl": "dump_nixl_arraydict",
+}
+
+
 def _encode_array(
-    arr: Any, encoding: Literal["base64", "raw", "cuda_ipc"] = "base64"
+    arr: Any, encoding: Literal["base64", "raw", "cuda_ipc", "nixl"] = "base64"
 ) -> dict:
-    # With cuda_ipc encoding, GPU arrays are exported by reference via a CUDA IPC
-    # handle, keeping the data on-device. Any other array (or any other encoding)
-    # falls through to a host copy below, so a mixed payload (some GPU, some CPU
-    # arrays) encodes correctly either way.
-    if encoding == "cuda_ipc" and hasattr(arr, "__cuda_array_interface__"):
-        return _import_cuda_ipc().dump_cuda_ipc_arraydict(arr)
+    # With an on-device transport encoding (cuda_ipc / nixl), GPU arrays are
+    # exported by reference, keeping the data on-device. Any other array (or any
+    # other encoding) falls through to a host copy below, so a mixed payload
+    # (some GPU, some CPU arrays) encodes correctly either way.
+    if encoding in _DEVICE_TRANSPORT_DUMP and hasattr(arr, "__cuda_array_interface__"):
+        module = _import_device_transport(encoding)
+        return getattr(module, _DEVICE_TRANSPORT_DUMP[encoding])(arr)
 
     # Ensure arr is a numpy-compatible array so we guarantee it has a compatible dtype (not e.g. torch bfloat16)
     arr = np.asanyarray(arr, order="A")
@@ -757,17 +787,26 @@ def _encode_array(
     }
 
 
+# Release function on each device-transport runtime module, keyed by the client
+# output format that exports GPU inputs by reference through that transport.
+_DEVICE_TRANSPORT_FORMATS = {
+    "json+cuda_ipc": ("cuda_ipc", "release_pinned_ipc_exports"),
+    "json+nixl": ("nixl", "release_nixl_exports"),
+}
+
+
 @contextmanager
 def _encode_payload(payload: dict | None, output_format: str) -> Iterator[dict | None]:
-    """Encode a request payload's arrays, managing CUDA IPC export lifetime.
+    """Encode a request payload's arrays, managing on-device export lifetime.
 
-    Yields the encoded payload (or None for an empty payload). For the
-    ``json+cuda_ipc`` format, GPU arrays are exported by reference (base64 for
-    CPU arrays), which pins each exported allocation in a process-global registry
-    on the runtime side. Those pins are released on context exit -- by then the
-    caller has read the full response, so the server has copied the inputs out
-    and they are provably dead. The release is skipped (and cuda_ipc never
-    imported) when no GPU array was actually exported.
+    Yields the encoded payload (or None for an empty payload). For an on-device
+    transport format (``json+cuda_ipc`` / ``json+nixl``), GPU arrays are exported
+    by reference (base64 for CPU arrays), which pins/registers each exported
+    allocation in a process-global registry on the runtime side. Those exports
+    are released on context exit -- by then the caller has read the full response,
+    so the server has copied the inputs out and they are provably dead. The
+    release is skipped (and the transport never imported) when no GPU array was
+    actually exported.
 
     Releasing on exit rather than at the start of the next request keeps pinned
     GPU memory bounded to a single in-flight request.
@@ -776,21 +815,24 @@ def _encode_payload(payload: dict | None, output_format: str) -> Iterator[dict |
         yield None
         return
 
-    if output_format != "json+cuda_ipc":
+    transport = _DEVICE_TRANSPORT_FORMATS.get(output_format)
+    if transport is None:
         yield _tree_map(
             _encode_array, payload, is_leaf=lambda x: hasattr(x, "__array__")
         )
         return
 
-    # cuda_ipc: a leaf is any array-like on either protocol; GPU leaves are
-    # exported by handle and pin their allocation until we release below.
+    transport_name, release_fn = transport
+
+    # On-device transport: a leaf is any array-like on either protocol; GPU leaves
+    # are exported by reference and pin/register their allocation until release.
     exported = False
 
     def _encode_leaf(x: Any) -> dict:
         nonlocal exported
         if hasattr(x, "__cuda_array_interface__"):
             exported = True
-        return _encode_array(x, encoding="cuda_ipc")
+        return _encode_array(x, encoding=transport_name)
 
     def _is_leaf(x: Any) -> bool:
         return hasattr(x, "__array__") or hasattr(x, "__cuda_array_interface__")
@@ -799,7 +841,7 @@ def _encode_payload(payload: dict | None, output_format: str) -> Iterator[dict |
         yield _tree_map(_encode_leaf, payload, is_leaf=_is_leaf)
     finally:
         if exported:
-            _import_cuda_ipc().release_pinned_ipc_exports()
+            getattr(_import_device_transport(transport_name), release_fn)()
 
 
 def _decode_array(
@@ -913,6 +955,11 @@ def _decode_array(
         # zero-copy. The server may reuse/free the exported buffer as soon as
         # this returns (it holds it until the next request).
         return _import_cuda_ipc().load_cuda_ipc_arraydict(encoded_arr)
+    elif encoding == "nixl":
+        # Like cuda_ipc, returns a fresh client-owned device-array wrapper, but
+        # the bytes are pulled across via a matched NIXL READ (same-host IPC or
+        # cross-host transfer) rather than an IPC mapping + copy.
+        return _import_device_transport("nixl").load_nixl_arraydict(encoded_arr)
     else:
         raise ValueError(f"Unexpected array encoding {encoding}. Cannot decode.")
 

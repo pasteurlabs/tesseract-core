@@ -61,7 +61,9 @@ docker_client = CLIDockerClient()
 # the SDK, e.g. sdk.tesseract). Mirrors runtime.file_interactions.supported_format_type
 # but is defined here so the SDK does not eagerly import the (optional) runtime
 # package; a test asserts the two stay in sync.
-OutputFormat: TypeAlias = Literal["json", "json+base64", "json+binref", "json+cuda_ipc"]
+OutputFormat: TypeAlias = Literal[
+    "json", "json+base64", "json+binref", "json+cuda_ipc", "json+nixl"
+]
 
 # Fixed port the API server binds *inside* the container when port-mapping is
 # used (i.e. everything except host networking). The container has its own
@@ -1123,6 +1125,31 @@ def serve(
                 "The 'json+cuda_ipc' output format is experimental and must be "
                 "explicitly enabled. Pass "
                 "runtime_config={'enable_experimental_cuda_ipc': True}."
+            )
+
+        # NIXL needs a GPU, a shared IPC namespace (its same-host backend rides
+        # CUDA IPC), and host networking (its UCX agent advertises its own address
+        # to the client, which is unreachable across a container network
+        # namespace). Wire all three up when the experimental flag is set.
+        nixl_enabled = environment.get("TESSERACT_ENABLE_EXPERIMENTAL_CUDA_NIXL") in (
+            "1",
+            "true",
+            "True",
+        )
+        if nixl_enabled:
+            if not gpus:
+                raise ValueError(
+                    "enable_experimental_cuda_nixl requires GPU access, but no GPUs "
+                    "were requested. Pass gpus=['all'] or specific GPU IDs."
+                )
+            if "--ipc=host" not in extra_args:
+                extra_args.append("--ipc=host")
+            extra_args.extend(["--network=host"])
+        elif output_format == "json+nixl":
+            raise ValueError(
+                "The 'json+nixl' output format is experimental and must be "
+                "explicitly enabled. Pass "
+                "runtime_config={'enable_experimental_cuda_nixl': True}."
             )
 
         if network is not None:

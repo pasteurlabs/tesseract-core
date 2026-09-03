@@ -54,6 +54,12 @@ EllipsisType: TypeAlias = type(Ellipsis)
 ArrayLike: TypeAlias = np.ndarray | np.number | np.bool_
 ShapeType: TypeAlias = tuple[int | None, ...] | EllipsisType
 
+# Array encodings that pass a GPU array by reference through a device transport
+# (see tesseract_core.runtime.device_transport) instead of serializing its bytes.
+# The encode/decode dispatch routes these through the transport interface and
+# keeps the array on-device rather than coercing it to NumPy.
+_DEVICE_TRANSPORT_ENCODINGS = frozenset({"cuda_ipc", "nixl"})
+
 
 class ArrayDict(TypedDict):
     """TypedDict for the JSON representation of an encoded array."""
@@ -154,6 +160,31 @@ class CudaIpcArrayData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class NixlArrayData(BaseModel):
+    """Data structure for a NIXL point-to-point GPU transfer descriptor.
+
+    The buffer field packs ``<agent_meta>:<descs>:<device>``, where:
+
+    - ``agent_meta`` is the base64-encoded NIXL agent metadata of the producer,
+    - ``descs`` is the base64-encoded serialized NIXL transfer descriptor list
+      for the array (base64's alphabet never contains ``:``, so it is safe as a
+      field delimiter),
+    - ``device`` is the CUDA device ordinal the memory lives on.
+
+    This is only the JSON *schema*; the NIXL runtime machinery that produces and
+    consumes it lives in :mod:`tesseract_core.runtime.nixl_transport`.
+    """
+
+    buffer: StrictStr = Field(
+        pattern=r"^[A-Za-z0-9+/=]+:[A-Za-z0-9+/=]+:\d+$",
+        description="Packed NIXL descriptor: <agent_meta>:<descs>:<device>",
+    )
+    encoding: Literal["nixl"]
+    compression: None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class EncodedArrayModel(BaseModel):
     """Base class for general encoded arrays.
 
@@ -163,7 +194,13 @@ class EncodedArrayModel(BaseModel):
     object_type: Literal["array"]
     shape: tuple[PositiveInt, ...]
     dtype: AllowedDtypes
-    data: BinrefArrayData | Base64ArrayData | JsonArrayData | CudaIpcArrayData
+    data: (
+        BinrefArrayData
+        | Base64ArrayData
+        | JsonArrayData
+        | CudaIpcArrayData
+        | NixlArrayData
+    )
     model_config = ConfigDict(extra="forbid")
 
 
@@ -243,7 +280,11 @@ def get_array_model(
         ),
         # Choose the appropriate data structure based on the encoding
         "data": (
-            BinrefArrayData | Base64ArrayData | JsonArrayData | CudaIpcArrayData,
+            BinrefArrayData
+            | Base64ArrayData
+            | JsonArrayData
+            | CudaIpcArrayData
+            | NixlArrayData,
             Field(discriminator="encoding"),
         ),
         "model_config": (ConfigDict, config),
@@ -619,7 +660,7 @@ def decode_array(
                 base_dir = join_paths(base_dir, subdir)
             data = _load_binref_arraydict(val.model_dump(), base_dir)
 
-        elif val.data.encoding == "cuda_ipc":
+        elif val.data.encoding in _DEVICE_TRANSPORT_ENCODINGS:
             from tesseract_core.runtime.device_transport import get_transport
 
             # Returns a framework-agnostic on-GPU wrapper — skip numpy coercion
@@ -671,14 +712,15 @@ def encode_array(
     context = info.context if info.context else {}
     array_encoding = context.get("array_encoding", "json")
 
-    # For cuda_ipc, skip numpy conversion so the array stays on the GPU. In
-    # Python mode there is nothing to serialize, so pass the array through
-    # untouched (the on-device passthrough handled generally below); only the
-    # JSON path emits an IPC handle, and there the input must be a CUDA array.
-    if array_encoding == "cuda_ipc" and info.mode_is_json():
+    # For an on-device transport (cuda_ipc / nixl), skip numpy conversion so the
+    # array stays on the GPU. In Python mode there is nothing to serialize, so
+    # pass the array through untouched (the on-device passthrough handled
+    # generally below); only the JSON path emits a transfer descriptor, and there
+    # the input must be a CUDA array.
+    if array_encoding in _DEVICE_TRANSPORT_ENCODINGS and info.mode_is_json():
         if not cuda_ipc.has_cuda_array_interface(arr):
             raise ValueError(
-                "cuda_ipc encoding requires a CUDA array "
+                f"{array_encoding} encoding requires a CUDA array "
                 f"(object with __cuda_array_interface__), got {type(arr).__name__}"
             )
         from tesseract_core.runtime.device_transport import get_transport

@@ -77,6 +77,10 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
                 from tesseract_core.runtime.device_transport import get_transport
 
                 get_transport("cuda_ipc").release()
+            if config.enable_experimental_cuda_nixl:
+                from tesseract_core.runtime.device_transport import get_transport
+
+                get_transport("nixl").release()
 
             if run_id is None:
                 run_id = str(uuid.uuid4())

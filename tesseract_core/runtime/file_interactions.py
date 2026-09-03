@@ -11,10 +11,12 @@ from pydantic import TypeAdapter
 
 PathLike = str | Path
 
-supported_format_type = Literal["json", "json+base64", "json+binref", "json+cuda_ipc"]
+supported_format_type = Literal[
+    "json", "json+base64", "json+binref", "json+cuda_ipc", "json+nixl"
+]
 
-# Formats always available. json+cuda_ipc is an experimental, opt-in format (see
-# available_formats) and is deliberately excluded here.
+# Formats always available. json+cuda_ipc and json+nixl are experimental, opt-in
+# formats (see available_formats) and are deliberately excluded here.
 _STABLE_FORMATS = ("json", "json+base64", "json+binref")
 
 # Kept for backwards compatibility; prefer available_formats(), which reflects
@@ -32,9 +34,13 @@ def available_formats() -> tuple[str, ...]:
     """
     from tesseract_core.runtime.config import get_config
 
-    if get_config().enable_experimental_cuda_ipc:
-        return (*_STABLE_FORMATS, "json+cuda_ipc")
-    return _STABLE_FORMATS
+    config = get_config()
+    formats = list(_STABLE_FORMATS)
+    if config.enable_experimental_cuda_ipc:
+        formats.append("json+cuda_ipc")
+    if config.enable_experimental_cuda_nixl:
+        formats.append("json+nixl")
+    return tuple(formats)
 
 
 def output_to_bytes(
@@ -66,6 +72,8 @@ def output_to_bytes(
         }
     elif format == "json+cuda_ipc":
         context = {"array_encoding": "cuda_ipc"}
+    elif format == "json+nixl":
+        context = {"array_encoding": "nixl"}
     else:
         raise ValueError(f"Unsupported format {format} (must be one of {allowed})")
 

@@ -346,11 +346,19 @@ jobs:
             "cupy-cuda${{ matrix.cuda.major }}x" \
             "jax[cuda${{ matrix.cuda.major }}]"
 
+      # NIXL for the json+nixl transport tests. Its cuNN wheel bundles UCX, so no
+      # system UCX is needed; install the build matching the matrix CUDA major so
+      # the GPU nixl tests run (rather than skip) on this runner.
+      - name: Install NIXL
+        run: |
+          uv pip install "nixl[cu${{ matrix.cuda.major }}]"
+
       - name: Show installed CUDA frameworks
         run: |
           uv run --no-sync python -c "import cupy; print('cupy', cupy.__version__, 'runtime', cupy.cuda.runtime.runtimeGetVersion(), 'devices', cupy.cuda.runtime.getDeviceCount())"
           uv run --no-sync python -c "import torch; print('torch', torch.__version__, 'cuda', torch.version.cuda, torch.cuda.is_available())"
           uv run --no-sync python -c "import jax; print('jax', jax.__version__, 'devices', jax.devices())"
+          uv run --no-sync python -c "from nixl._api import nixl_agent, nixl_agent_config; nixl_agent('ci', nixl_agent_config(backends=['UCX'])); print('nixl agent OK')"
 
       - name: Run GPU test suite
         run: |
