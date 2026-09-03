@@ -9,13 +9,9 @@ import linecache
 import logging
 import optparse
 import os
-import random
 import re
-import socket
 import tempfile
-import time
-from collections.abc import Callable, Collection, Sequence
-from contextlib import closing
+from collections.abc import Callable, Collection
 from importlib.metadata import requires
 from pathlib import Path
 from shutil import copy, copytree, rmtree
@@ -23,7 +19,6 @@ from typing import TYPE_CHECKING, Any, Literal, TypeAlias
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 
-import requests
 import yaml
 from jinja2 import Environment, PackageLoader, StrictUndefined
 from packaging.requirements import Requirement
@@ -46,6 +41,14 @@ from .docker_client import (
     is_podman,
 )
 from .exceptions import UserError
+from .serving import (
+    DEFAULT_STARTUP_TIMEOUT,
+    PortInUseError,
+    get_free_port,
+    is_port_conflict,
+    retry_or_raise_port_conflict,
+    wait_for_health_or_dispose,
+)
 
 if TYPE_CHECKING:
     from pip._internal.index.package_finder import PackageFinder
@@ -93,33 +96,6 @@ def needs_docker(func: Callable) -> Callable:
         return func(*args, **kwargs)
 
     return wrapper_needs_docker
-
-
-def get_free_port(
-    within_range: tuple[int, int] = (49152, 65535),
-    exclude: Sequence[int] = (),
-) -> int:
-    """Find a random free port to use for HTTP."""
-    start, end = within_range
-    if start < 0 or end > 65535 or start > end:
-        raise ValueError("Invalid port range, must be between 0 and 65535")
-
-    # Try random ports in the given range
-    portlist = list(range(start, end))
-    random.shuffle(portlist)
-    for port in portlist:
-        if port in exclude:
-            continue
-        # Check if the port is free
-        with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
-            try:
-                s.bind(("127.0.0.1", port))
-            except OSError:
-                # Port is already in use
-                continue
-            else:
-                return port
-    raise RuntimeError(f"No free ports found in range {start}-{end}")
 
 
 def parse_requirements(
@@ -842,25 +818,6 @@ def _ensure_network_exists(network: str) -> None:
         docker_client.networks.create(network)
 
 
-class _PortInUseError(RuntimeError):
-    """Container failed to start because its port was already bound.
-
-    Signals that a fresh port should be picked and startup retried. Only raised
-    when we chose the port ourselves; a user-supplied port is never retried.
-
-    A port collision surfaces in one of two ways depending on network mode:
-    - port-mapping mode: the Docker daemon fails to publish the host port and
-      ``containers.run`` raises ``ContainerError`` ("port is already allocated").
-    - host networking: the container binds the host port directly, so the
-      failure appears in the container logs as uvicorn's "address already in
-      use" and is detected in ``_wait_for_health``.
-    """
-
-
-# Substrings container runtimes use to report a host port already being taken.
-_PORT_CONFLICT_MARKERS = ("address already in use", "port is already allocated")
-
-
 def _warn_if_debugger_unreachable(container: Container, expected_port: str) -> None:
     """Warn if the container did not bind the debug port we published a mapping to.
 
@@ -952,78 +909,6 @@ def _resolve_container_debug_address(
     return updates, port
 
 
-def _is_port_conflict(stderr: str) -> bool:
-    """Whether runtime stderr/logs indicate a host port collision."""
-    lowered = stderr.lower()
-    return any(marker in lowered for marker in _PORT_CONFLICT_MARKERS)
-
-
-def _retry_or_raise_port_conflict(
-    port: str, auto_port: bool, attempt: int, max_attempts: int
-) -> None:
-    """Decide whether a port collision should be retried.
-
-    Returns normally if the caller should retry with a fresh port; raises
-    otherwise. A user-supplied fixed port is never retried (we must not
-    silently move the Tesseract elsewhere), and auto-selected ports raise once
-    the attempt budget is exhausted.
-    """
-    if not auto_port:
-        # User asked for this exact port; surface the collision as-is.
-        raise _PortInUseError(f"Port {port} was already in use")
-    if attempt + 1 >= max_attempts:
-        raise RuntimeError(
-            f"Failed to find a free port after {max_attempts} attempts"
-        ) from None
-    logger.info(f"Port {port} was taken, retrying with a new port...")
-
-
-def _wait_for_health(
-    container: Container, ping_ip: str, port: str, timeout: float = 30
-) -> None:
-    """Poll a container's /health endpoint until it responds 200 or timeout expires."""
-    while True:
-        try:
-            response = requests.get(f"http://{ping_ip}:{port}/health")
-        except requests.exceptions.ConnectionError:
-            pass
-        else:
-            if response.status_code == 200:
-                return
-
-        time.sleep(0.1)
-        timeout -= 0.1
-
-        container_status = docker_client.containers.get(container.id).status
-
-        if timeout < 0 or container_status != "running":
-            logs_text = ""
-            try:
-                logs_text = container.logs(stdout=True, stderr=True).decode()
-                logger.error(
-                    f"Tesseract container {container.name} failed to start:\n{logs_text}"
-                )
-            except APIError as ex:
-                logger.warning(
-                    f"Failed to get logs for container {container.name}: {ex}"
-                )
-            try:
-                container.stop()
-            except APIError as ex:
-                logger.warning(f"Failed to stop container {container.name}: {ex}")
-
-            # A port collision is racy and worth retrying with a fresh port;
-            # distinguish it from genuine startup failures so those still fail
-            # fast.
-            if _is_port_conflict(logs_text):
-                raise _PortInUseError(f"Port {port} was already in use")
-
-            if timeout < 0:
-                raise TimeoutError("Tesseract did not start in time")
-            else:
-                raise RuntimeError("Tesseract failed to start")
-
-
 def serve(
     image_name: str,
     *,
@@ -1044,6 +929,7 @@ def serve(
     docker_args: list[str] | None = None,
     runtime_config: dict[str, Any] | None = None,
     skip_health_check: bool = False,
+    startup_timeout: float = DEFAULT_STARTUP_TIMEOUT,
 ) -> tuple:
     """Serve one or more Tesseract images.
 
@@ -1076,6 +962,9 @@ def serve(
             Tesseracts with slow initialization (e.g., Julia runtime startup, large
             model loading). The caller is responsible for ensuring readiness,
             e.g. by polling ``/health``, before calling other endpoints.
+        startup_timeout: How long to wait for the Tesseract to answer a health
+            check, in seconds. Raise it for one that is slow to initialize, in
+            preference to skipping the check altogether.
 
     Returns:
         A tuple of the Tesseract container name and the port it is serving on.
@@ -1242,7 +1131,7 @@ def serve(
         try:
             # In port-mapping mode a host-port collision fails here, when the
             # daemon tries to publish the port. In host-network mode it instead
-            # surfaces from _wait_for_health (uvicorn's own bind fails).
+            # surfaces from wait_for_health_or_dispose (uvicorn's own bind fails).
             container = docker_client.containers.run(
                 image=image_name,
                 command=["serve", *args],
@@ -1263,16 +1152,16 @@ def serve(
                 break
 
             logger.info("Waiting for Tesseract to start...")
-            _wait_for_health(container, ping_ip, port)
+            wait_for_health_or_dispose(container, ping_ip, port, startup_timeout)
         except ContainerError as ex:
-            if not _is_port_conflict(ex.stderr.decode("utf-8", errors="ignore")):
+            if not is_port_conflict(ex.stderr.decode("utf-8", errors="ignore")):
                 raise
             # Publish failed; no container was created, nothing to clean up.
-            _retry_or_raise_port_conflict(port, auto_port, attempt, max_attempts)
+            retry_or_raise_port_conflict(port, auto_port, attempt, max_attempts)
             continue
-        except _PortInUseError:
+        except PortInUseError:
             container.remove(force=True)
-            _retry_or_raise_port_conflict(port, auto_port, attempt, max_attempts)
+            retry_or_raise_port_conflict(port, auto_port, attempt, max_attempts)
             continue
         break
 

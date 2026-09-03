@@ -9,6 +9,7 @@ import requests
 from pydantic import ValidationError
 
 from tesseract_core import Tesseract
+from tesseract_core.sdk import engine
 from tesseract_core.sdk.docker_client import Container
 from tesseract_core.sdk.tesseract import (
     HTTPClient,
@@ -229,6 +230,7 @@ def test_serve_lifecycle(mock_serving, mock_clients):
         "docker_args": None,
         "runtime_config": None,
         "skip_health_check": False,
+        "startup_timeout": engine.DEFAULT_STARTUP_TIMEOUT,
     }
 
     for key, expected_value in expected_kwargs.items():

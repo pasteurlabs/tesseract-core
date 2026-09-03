@@ -160,6 +160,7 @@ class Tesseract:
         runtime_config: dict[str, Any] | None = None,
         stream_logs: BoolOrCallable = False,
         skip_health_check: bool = False,
+        startup_timeout: float = engine.DEFAULT_STARTUP_TIMEOUT,
         timeout: float | tuple[float, float] | None = None,
         experimental_binref_pool: bool = False,
     ) -> Tesseract:
@@ -205,6 +206,9 @@ class Tesseract:
                 model loading). The caller is responsible for ensuring
                 readiness, e.g. by calling :meth:`health`, before calling
                 other endpoints.
+            startup_timeout: How long to wait, in seconds, for the Tesseract to
+                answer a health check. Raise it for one that is slow to
+                initialize, in preference to skipping the check altogether.
             timeout: Request timeout in seconds for HTTP calls to the Tesseract.
                 Can be a float for both connect and read timeouts, or a
                 ``(connect, read)`` tuple for separate control. ``None`` (the default)
@@ -274,6 +278,7 @@ class Tesseract:
             debug=True,
             docker_args=docker_args,
             skip_health_check=skip_health_check,
+            startup_timeout=startup_timeout,
         )
         return obj
 
