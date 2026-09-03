@@ -47,6 +47,7 @@ from .serving import (
     get_free_port,
     is_port_conflict,
     retry_or_raise_port_conflict,
+    runtime_config_env,
     wait_for_health_or_dispose,
 )
 
@@ -998,15 +999,7 @@ def serve(
         environment = {}
     environment.update(volume_environment)
 
-    # Convert runtime_config to TESSERACT_* environment variables
-    if runtime_config is not None:
-        for key, value in runtime_config.items():
-            env_key = f"TESSERACT_{key.upper()}"
-            if isinstance(value, bool):
-                env_value = "1" if value else "0"
-            else:
-                env_value = str(value)
-            environment[env_key] = env_value
+    environment.update(runtime_config_env(runtime_config))
 
     if output_format:
         environment["TESSERACT_OUTPUT_FORMAT"] = output_format
@@ -1152,7 +1145,9 @@ def serve(
                 break
 
             logger.info("Waiting for Tesseract to start...")
-            wait_for_health_or_dispose(container, ping_ip, port, startup_timeout)
+            wait_for_health_or_dispose(
+                container, f"http://{ping_ip}:{port}", startup_timeout
+            )
         except ContainerError as ex:
             if not is_port_conflict(ex.stderr.decode("utf-8", errors="ignore")):
                 raise
@@ -1489,16 +1484,3 @@ def _resolve_file_path(path: str | Path, make_dir: bool = False) -> Path:
         raise RuntimeError(f"Path {local_path} provided is not a directory")
 
     return local_path
-
-
-def logs(container_id: str) -> str:
-    """Get logs from a container.
-
-    Args:
-        container_id: the ID of the container.
-
-    Returns:
-        The logs of the container.
-    """
-    container = docker_client.containers.get(container_id)
-    return container.logs().decode("utf-8")
