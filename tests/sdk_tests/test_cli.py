@@ -8,6 +8,7 @@
 
 import os
 import subprocess
+import sys
 
 import pytest
 
@@ -149,3 +150,39 @@ def test_config_override(
         result = _run_with_override(arg_to_override, value)
         assert result.exit_code == 0, result.stderr
         assert mocked_build.call_args[1]["config_override"] == expected
+
+
+@pytest.mark.parametrize("module", ["tesseract_core", "tesseract_core.runtime"])
+def test_runnable_as_a_module(module, dummy_tesseract_package):
+    """Both packages must be reachable by interpreter path alone.
+
+    The console scripts need their directory on PATH, and `tesseract` collides
+    with the OCR engine of the same name; `python -m` sidesteps both. The runtime
+    also relies on this to serve a Tesseract from another environment, where only
+    the interpreter is known.
+    """
+    result = subprocess.run(
+        [sys.executable, "-m", module, "--help"],
+        capture_output=True,
+        text=True,
+        # The runtime builds its commands from a Tesseract, so it needs one to
+        # have something to describe.
+        env={
+            **os.environ,
+            # The runtime builds its commands from a Tesseract, so it needs one
+            # to have something to describe.
+            "TESSERACT_API_PATH": str(dummy_tesseract_package / "tesseract_api.py"),
+            # As elsewhere in the suite: no colour codes chopping up the text we
+            # match on, and wide enough that rich does not wrap it either.
+            "TERM": "dumb",
+            "COLUMNS": "1000",
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    # The two CLIs print help to different streams, and which one is not the point
+    # here -- that the module was found and ran under its own name is.
+    assert f"python -m {module}" in result.stdout + result.stderr
+    # Importing a package should not drag in its own __main__; runpy warns if it
+    # has, and a warning on every invocation would land in captured logs.
+    assert "RuntimeWarning" not in result.stderr

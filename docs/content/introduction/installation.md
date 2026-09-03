@@ -104,6 +104,14 @@ We recommend always using a dedicated Python virtual environment. If you use `zs
 $ hash -r
 ```
 
+You can also bypass the name entirely and invoke Tesseract through the
+interpreter you installed it into, which is unambiguous:
+
+```bash
+$ python -m tesseract_core build examples/vectoradd/ vectoradd
+$ python -m tesseract_core.runtime --help   # the runtime, likewise
+```
+
 To confirm which executable `tesseract` resolves to:
 
 ```bash
