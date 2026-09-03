@@ -730,22 +730,28 @@ def test_iter_wheel_cudart_paths_finds_runtime_wheel(tmp_path, monkeypatch):
     assert str(lib_dir / "libcudart.so.12") in found
 
 
-def test_find_cudart_falls_back_to_wheel(tmp_path, monkeypatch):
-    """When the system loader misses libcudart, the wheel copy is loaded."""
+def test_find_cudart_prefers_wheel_over_system(tmp_path, monkeypatch):
+    """The wheel copy is loaded even when a system soname would also resolve.
+
+    The wheel is tried before the system loader, so on a host with both a venv
+    runtime and a system one the venv copy wins -- matching how JAX/torch load
+    libcudart.
+    """
     lib_dir = _fake_cudart_wheel(tmp_path)
+    wheel_path = str(lib_dir / "libcudart.so.12")
+
+    # A system runtime is also resolvable, so both sources could satisfy the load.
+    monkeypatch.setattr(
+        cuda_ipc.ctypes.util,
+        "find_library",
+        lambda name: "libcudart.so.12" if name == "cudart" else None,
+    )
+    monkeypatch.setattr(cuda_ipc, "_iter_wheel_cudart_paths", lambda: [wheel_path])
+
+    # Everything loads; _find_cudart returns the first candidate it tries.
     loaded = {}
 
-    # System-loader probes find nothing.
-    monkeypatch.setattr(cuda_ipc.ctypes.util, "find_library", lambda name: None)
-    monkeypatch.setattr(
-        cuda_ipc, "_iter_wheel_cudart_paths", lambda: [str(lib_dir / "libcudart.so.12")]
-    )
-
     def fake_cdll(path):
-        # Bare sonames (no path separator) are the system-loader attempts; only
-        # the absolute wheel path should succeed.
-        if "/" not in path and "\\" not in path:
-            raise OSError(f"{path}: not found")
         loaded["path"] = path
         return object()
 
@@ -753,7 +759,8 @@ def test_find_cudart_falls_back_to_wheel(tmp_path, monkeypatch):
 
     handle = cuda_ipc._find_cudart()
     assert handle is not None
-    assert loaded["path"] == str(lib_dir / "libcudart.so.12")
+    # The wheel path is first in the candidate order, so it is what gets loaded.
+    assert loaded["path"] == wheel_path
 
 
 def test_iter_wheel_cudart_paths_finds_unenumerated_future_major(tmp_path, monkeypatch):
