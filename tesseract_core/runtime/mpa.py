@@ -256,7 +256,8 @@ def redirect_stdio(
     file and forwards each line to the sink in near-real-time.
 
     Because file descriptor redirection changes process-global state,
-    concurrent uses are serialized for the entire context.
+    concurrent uses are serialized for the entire context. Streams without
+    a file descriptor are not redirected and therefore not serialized.
 
     Args:
         logfile: Path to the log file to write to.

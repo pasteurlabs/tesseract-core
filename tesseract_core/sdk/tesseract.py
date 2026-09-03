@@ -299,6 +299,11 @@ class Tesseract:
         but requires a matching runtime environment + all dependencies to be
         installed locally.
 
+        Note: Endpoint calls redirect process-global stdout and stderr to a
+        per-run log file, so concurrent calls to a local Tesseract are
+        serialized. Served Tesseracts, whose concurrency comes from separate
+        worker processes, are unaffected.
+
         Args:
             tesseract_api: Path to the `tesseract_api.py` file, or an
                 already imported Tesseract API module.
