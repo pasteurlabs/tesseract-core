@@ -299,6 +299,9 @@ class Tesseract:
         but requires a matching runtime environment + all dependencies to be
         installed locally.
 
+        Note: Uses a thread lock internally, so concurrent calls to Tesseracts
+        created via `from_tesseract_api` will always run sequentially.
+
         Args:
             tesseract_api: Path to the `tesseract_api.py` file, or an
                 already imported Tesseract API module.
