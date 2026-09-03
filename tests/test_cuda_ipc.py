@@ -399,6 +399,41 @@ def test_same_process_open_is_unsupported():
         load_cuda_ipc_arraydict(encoded)
 
 
+@requires_cuda
+def test_failed_get_mem_handle_clears_sticky_error():
+    """A failed cudaIpcGetMemHandle must not leave a sticky runtime error.
+
+    cudaIpcGetMemHandle rejects VMM/pool-backed memory and, left uncleared, its
+    failure sets the runtime API's sticky last-error -- which the next CUDA
+    consumer in the process (e.g. JAX/XLA's next kernel launch) then reads as its
+    own failure ("error before calling cuModuleGetFunction: cudaErrorInvalidValue").
+    _cuda_ipc_get_mem_handle consumes that error on failure; assert it did.
+    """
+    import ctypes
+
+    from tesseract_core.runtime.cuda_ipc import (
+        _cuda_ipc_get_mem_handle,
+        _get_cudart,
+    )
+
+    cudart = _get_cudart()
+    cudart.cudaGetLastError.argtypes = []
+    cudart.cudaGetLastError.restype = ctypes.c_int
+    # Drain any pre-existing error so we measure only this call's effect.
+    cudart.cudaGetLastError()
+
+    # A VMM allocation is what cudaIpcGetMemHandle rejects. CuPy's async
+    # (stream-ordered) pool uses the VMM API, so its pointers trigger the reject.
+    pool = cupy.cuda.MemoryAsyncPool()
+    with cupy.cuda.using_allocator(pool.malloc):
+        vmm_arr = cupy.arange(1024, dtype=cupy.float32)
+        with pytest.raises(RuntimeError, match="cudaIpcGetMemHandle failed"):
+            _cuda_ipc_get_mem_handle(vmm_arr.data.ptr)
+
+    # The fix must have consumed the sticky error: the next read is cudaSuccess.
+    assert cudart.cudaGetLastError() == 0
+
+
 # ── Test 2: cross-process round-trip ────────────────────────────────────
 
 

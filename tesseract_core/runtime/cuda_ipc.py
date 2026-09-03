@@ -358,6 +358,11 @@ def _get_cudart():
     cudart.cudaIpcCloseMemHandle.restype = ctypes.c_int
     cudart.cudaGetErrorString.argtypes = [ctypes.c_int]
     cudart.cudaGetErrorString.restype = ctypes.c_char_p
+    # Consumes and returns the runtime API's sticky last-error, resetting it to
+    # cudaSuccess (used to contain an expected failure, e.g. cudaIpcGetMemHandle
+    # on VMM memory, so it does not surface in an unrelated later CUDA call).
+    cudart.cudaGetLastError.argtypes = []
+    cudart.cudaGetLastError.restype = ctypes.c_int
     # Used by the VMM staging-buffer fallback (see _stage_for_legacy_ipc).
     cudart.cudaMalloc.argtypes = [ctypes.POINTER(ctypes.c_void_p), ctypes.c_size_t]
     cudart.cudaMalloc.restype = ctypes.c_int
@@ -476,6 +481,14 @@ def _cuda_ipc_get_mem_handle(device_ptr: int) -> bytes:
     handle = _CudaIpcMemHandle()
     ret = cudart.cudaIpcGetMemHandle(ctypes.byref(handle), ctypes.c_void_p(device_ptr))
     if ret != 0:
+        # A failed cudaIpcGetMemHandle (notably on VMM/pool-backed memory, which
+        # this call rejects) sets the runtime API's *sticky* last-error. Left
+        # uncleared, the next CUDA consumer in the process reads it as its own
+        # failure -- e.g. JAX/XLA's next kernel launch aborts with
+        # cudaErrorInvalidValue "before calling cuModuleGetFunction". This call
+        # is expected to fail on the staging fallback path, so consume the sticky
+        # error before raising so the failure stays contained to this function.
+        cudart.cudaGetLastError()
         raise RuntimeError(
             f"cudaIpcGetMemHandle failed: {_cuda_error_string(cudart, ret)}"
         )
