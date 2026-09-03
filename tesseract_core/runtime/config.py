@@ -55,6 +55,12 @@ class RuntimeConfig(BaseModel):
     # enabled (e.g. TESSERACT_ENABLE_EXPERIMENTAL_CUDA_IPC=1). May change or be
     # removed without notice.
     enable_experimental_cuda_ipc: bool = False
+    # Experimental, unstable opt-in: allow the json+nixl output format, which
+    # passes GPU arrays by NIXL transfer descriptor (point-to-point, same-host or
+    # cross-host) instead of serializing their data. Off by default; enable via
+    # TESSERACT_ENABLE_EXPERIMENTAL_CUDA_NIXL=1. Requires the ``nixl`` extra. May
+    # change or be removed without notice.
+    enable_experimental_cuda_nixl: bool = False
 
     @field_validator("input_path", "output_path")
     @classmethod
