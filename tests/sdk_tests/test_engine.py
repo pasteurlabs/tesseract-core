@@ -1239,6 +1239,56 @@ def test_serve_retries_on_docker_publish_conflict(mocked_docker, monkeypatch):
     assert calls["n"] == 3  # two conflicts, then success
 
 
+def test_serve_cleans_up_the_leaked_container_on_publish_conflict(
+    mocked_docker, monkeypatch
+):
+    """A port-publish ContainerError with a container id cleans that container up.
+
+    Docker prints the container's id to stdout before the publish step can
+    fail, so it is a container the daemon actually created and left behind in
+    a Created state -- invisible to containers.list()'s running-only default,
+    and so to `tesseract teardown --all`, unless serve() removes it itself.
+    """
+    from tesseract_core.sdk.docker_client import ContainerError
+
+    real_run = mocked_docker.containers.run
+    removed = []
+    calls = {"n": 0}
+
+    def flaky_run(**kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise ContainerError(
+                "deadbeefcafe",
+                125,
+                "docker run ...",
+                kwargs["image"],
+                b"docker: Error response from daemon: port is already allocated.",
+            )
+        return real_run(**kwargs)
+
+    def fake_get(id_or_name, tesseract_only=True):
+        assert id_or_name == "deadbeefcafe"
+        assert tesseract_only is False, (
+            "the leaked container is known to be ours from the run() call that "
+            "created it, so the usual Tesseract-only filter must not apply"
+        )
+
+        class _Leaked:
+            def remove(self, force=False):
+                assert force
+                removed.append(id_or_name)
+
+        return _Leaked()
+
+    monkeypatch.setattr(mocked_docker.containers, "run", flaky_run)
+    monkeypatch.setattr(mocked_docker.containers, "get", fake_get)
+
+    res, _ = engine.serve("foobar")
+    assert res
+    assert removed == ["deadbeefcafe"]
+
+
 def test_serve_reraises_non_port_container_error(mocked_docker, monkeypatch):
     """A ContainerError that is not a port conflict is not retried."""
     from tesseract_core.sdk.docker_client import ContainerError

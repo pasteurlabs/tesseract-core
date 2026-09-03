@@ -932,8 +932,16 @@ class Containers:
             stderr_str = stderr_data.decode("utf-8", errors="ignore")
             if "repository" in stderr_str:
                 raise ImageNotFound(stderr_str)
+            # In detach mode, `docker run` prints the container's id to stdout as
+            # soon as it is created, before the step that can still fail (e.g.
+            # publishing a port). A non-empty stdout here means that id belongs
+            # to a container the daemon actually created and left behind in a
+            # Created state, not a container that never existed.
+            leaked_container_id = (
+                stdout_data.decode("utf-8", errors="ignore").strip() if detach else ""
+            ) or None
             raise ContainerError(
-                None,
+                leaked_container_id,
                 returncode,
                 shlex.join(full_cmd),
                 image,

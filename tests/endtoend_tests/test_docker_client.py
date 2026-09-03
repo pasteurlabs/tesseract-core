@@ -16,6 +16,7 @@ from tesseract_core.sdk.config import get_config
 from tesseract_core.sdk.docker_client import (
     ContainerError,
     ImageNotFound,
+    NotFound,
     _is_valid_docker_tag,
     build_docker_image,
     is_podman,
@@ -490,3 +491,72 @@ def test_is_valid_docker_tag():
     ]
     for tag in invalid_tags:
         assert not _is_valid_docker_tag(tag)
+
+
+def test_run_reports_the_leaked_container_on_publish_conflict(
+    docker_client, docker_client_built_image_name, docker_py_client
+):
+    """A host-port publish collision leaves a real container behind.
+
+    ``docker run -d`` prints the new container's id to stdout as soon as it is
+    created, before the step that publishes the host port can still fail --
+    so a container the daemon actually created is left in a Created state,
+    invisible to ``containers.list()``'s running-only default. ``run()`` must
+    report that id on ``ContainerError`` so a caller can remove it, rather
+    than assuming (as the id used to be hardcoded to None) that nothing was
+    created.
+
+    Neither container here is a Tesseract, so this manages its own cleanup
+    directly (by id, not filtered to Tesseract-only) rather than through the
+    shared ``docker_cleanup`` fixture, which assumes exactly the opposite.
+    """
+    hog = docker_py_client.containers.run(
+        "nginx:alpine", detach=True, ports={"80/tcp": None}
+    )
+    leaked_id = None
+    try:
+        hog.reload()
+        busy_port = int(hog.ports["80/tcp"][0]["HostPort"])
+
+        with pytest.raises(ContainerError) as excinfo:
+            docker_client.containers.run(
+                docker_client_built_image_name,
+                [],
+                ports={busy_port: 8000},
+                detach=True,
+            )
+
+        leaked_id = excinfo.value.container
+        assert leaked_id is not None, (
+            "the daemon created this container before the publish step "
+            "failed, so its id must be reported rather than discarded"
+        )
+
+        all_ids = {
+            c.id for c in docker_client.containers.list(all=True, tesseract_only=False)
+        }
+        assert leaked_id in all_ids, (
+            "the reported id must be a container that really exists"
+        )
+        running_ids = {
+            c.id for c in docker_client.containers.list(tesseract_only=False)
+        }
+        assert leaked_id not in running_ids, (
+            "it never started, so it is invisible to the running-only default "
+            "that get_tesseract_containers() and teardown() use"
+        )
+
+        # Cleanup must work by id alone, the way engine.serve()'s retry path
+        # does it -- not filtered to only Tesseract-labelled containers,
+        # since we already know this one is ours from the run() call that
+        # created it.
+        docker_client.containers.get(leaked_id, tesseract_only=False).remove(force=True)
+        with pytest.raises(NotFound):
+            docker_client.containers.get(leaked_id, tesseract_only=False)
+        leaked_id = None  # removed successfully, nothing left for finally to do
+    finally:
+        hog.remove(force=True)
+        if leaked_id is not None:
+            docker_client.containers.get(leaked_id, tesseract_only=False).remove(
+                force=True
+            )
