@@ -904,7 +904,7 @@ class Containers:
         # fact, regardless of what (if anything) the CLI prints to stdout when
         # the run fails partway through: Docker prints the new id before a
         # port-publish failure, Podman prints nothing on the same failure.
-        run_name = f"tesseract-run-{uuid.uuid4().hex[:12]}" if detach else None
+        run_name = f"tesseract-{uuid.uuid4().hex[:12]}" if detach else None
         if run_name is not None:
             optional_args.extend(["--name", run_name])
         if detach:
