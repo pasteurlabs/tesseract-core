@@ -139,14 +139,24 @@ class CudaIpcArrayData(BaseModel):
     - ``storage_offset`` is the byte offset within the cudaMalloc allocation,
     - ``storage_size`` is the total size in bytes of the cudaMalloc allocation.
 
-    This is only the JSON *schema* for the encoding; all the CUDA runtime
-    machinery that produces and consumes it lives in
-    :mod:`tesseract_core.runtime.cuda_ipc`.
+    Two variants share this schema (see :mod:`tesseract_core.runtime.cuda_ipc`):
+
+    - the legacy IPC handle ``<device>:<handle>:<storage_offset>:<storage_size>``,
+    - the copy-free VMM variant, prefixed ``vmm:`` and carrying the fd-passing
+      socket path (see :mod:`tesseract_core.runtime.vmm_transport`), selected
+      transparently when the source memory is VMM-exportable.
+
+    This is only the JSON *schema*; all the CUDA runtime machinery that produces
+    and consumes it lives in those modules.
     """
 
     buffer: StrictStr = Field(
-        pattern=r"^\d+:[A-Za-z0-9+/=]+:\d+:\d+$",
-        description="Packed CUDA IPC descriptor: <device>:<handle>:<storage_offset>:<storage_size>",
+        pattern=r"^(\d+:[A-Za-z0-9+/=]+:\d+:\d+|vmm:[A-Za-z0-9+/=]+:\d+:\d+:\d+:\d+)$",
+        description=(
+            "Packed CUDA IPC descriptor: either the legacy "
+            "<device>:<handle>:<storage_offset>:<storage_size> or the VMM variant "
+            "vmm:<sockpath>:<export_id>:<storage_offset>:<storage_size>:<device>"
+        ),
     )
     encoding: Literal["cuda_ipc"]
     compression: None = None

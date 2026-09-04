@@ -639,6 +639,13 @@ def release_pinned_ipc_exports() -> None:
         for ptr in staging_ptrs:
             cudart.cudaFree(ctypes.c_void_p(ptr))
 
+    # The VMM fast path (reached transparently from dump_cuda_ipc_arraydict)
+    # retains allocation handles in its own registry; release them on the same
+    # lifecycle tick. Imported lazily so a non-VMM request never touches it.
+    from tesseract_core.runtime import vmm_transport
+
+    vmm_transport.release_vmm_exports()
+
 
 def _pin_cuda_ipc_export(arr: Any) -> None:
     """Retain a reference to a source array so its GPU memory stays valid.
@@ -695,11 +702,39 @@ def dump_cuda_ipc_arraydict(arr: Any) -> ArrayDict:
 
     data_ptr, nbytes, shape, dtype_name = _get_cuda_array_info(arr)
 
+    # Copy-free fast path: if the source memory was allocated through the CUDA
+    # VMM API (JAX/XLA's allocator, PyTorch expandable_segments, ...), export the
+    # allocation by reference over a POSIX fd instead of staging a copy. Reached
+    # transparently through json+cuda_ipc; falls through to the legacy handle /
+    # staging path below for non-VMM memory (default CuPy/PyTorch pools).
+    from tesseract_core.runtime import vmm_transport
+
+    if vmm_transport.is_vmm_exportable(data_ptr):
+        return vmm_transport.dump_vmm_arraydict(arr)
+
     # Keep the source allocation alive until exports are explicitly released.
     # (Still needed even on the VMM fallback path below: _stage_for_legacy_ipc
     # reads from `arr`'s memory synchronously before returning, but keeping the
     # pin simplifies the two paths to an identical cleanup story.)
     _pin_cuda_ipc_export(arr)
+
+    # The handle is only meaningful once the device work that writes `arr` has
+    # completed. Nothing else on this path orders that: the consumer copies the
+    # bytes from another process, so it cannot wait on our streams, and a
+    # handler routinely returns with the kernels that produce its outputs still
+    # in flight. Synchronize before exporting, as the VMM path does with
+    # cuCtxSynchronize in dump_vmm_arraydict. (Until now the consumer usually
+    # read correct data only because freeing the decoded *input* buffers
+    # (cudaFree in the IpcDeviceArray finalizer) happened to synchronize the
+    # device between the handler's return and the response; a handler that
+    # keeps a decoded input alive, or a cold process whose first request delays
+    # that collection, read stale bytes.)
+    cudart = _get_cudart()
+    ret = cudart.cudaDeviceSynchronize()
+    if ret != 0:
+        raise RuntimeError(
+            f"cudaDeviceSynchronize failed: {_cuda_error_string(cudart, ret)}"
+        )
 
     # IPC handles reference the *whole* backing allocation, not the array's
     # (possibly offset) data pointer. Pooled allocators (CuPy, PyTorch) hand
@@ -1074,7 +1109,16 @@ def load_cuda_ipc_arraydict(val: ArrayDict) -> "IpcDeviceArray":
     The result carries no framework dependency: it exposes both
     ``__cuda_array_interface__`` and ``__dlpack__`` so Torch/JAX/CuPy can adopt
     it zero-copy, plus ``.copy_to_host()`` / ``np.asarray(...)`` for inspection.
+
+    A ``vmm:``-prefixed buffer is the copy-free VMM variant (see
+    :mod:`tesseract_core.runtime.vmm_transport`) and is dispatched there; the
+    body below handles the legacy 64-byte IPC handle form.
     """
+    if val["data"]["buffer"].startswith("vmm:"):
+        from tesseract_core.runtime import vmm_transport
+
+        return vmm_transport.load_vmm_arraydict(val)
+
     cudart = _get_cudart()
 
     device_str, handle_b64, storage_offset_str, _storage_size_str = val["data"][

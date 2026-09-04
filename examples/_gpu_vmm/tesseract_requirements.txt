@@ -1,0 +1,9 @@
+# JAX provides the VMM-backed device buffer returned by apply(): XLA's default
+# GPU allocator uses the CUDA VMM API (single, contiguous allocations), which is
+# what the VMM export path (cuMemExportToShareableHandle) requires. The cuda12
+# wheel matches the 12.x base image and bundles the CUDA libraries JAX needs.
+jax[cuda12]
+# CuPy adopts the JAX buffer zero-copy via DLPack so the result exposes
+# __cuda_array_interface__ for the cuda_ipc encoder. The [ctk] extra supplies
+# the CUDA toolkit libraries CuPy loads; cuda12x matches the 12.x base image.
+cupy-cuda12x[ctk]

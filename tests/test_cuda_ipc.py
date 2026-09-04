@@ -78,12 +78,31 @@ _TIMEOUT = 60
 def _unpack_cuda_ipc(data: dict) -> dict:
     """Split a packed cuda_ipc ``buffer`` back into its named components.
 
-    The wire format packs everything into a single string as
-    ``<device>:<handle>:<storage_offset>:<storage_size>`` (see
-    :class:`tesseract_core.runtime.array_encoding.CudaIpcArrayData`).
+    Two wire variants share the ``cuda_ipc`` encoding (see
+    :class:`tesseract_core.runtime.array_encoding.CudaIpcArrayData`):
+
+    - legacy handle: ``<device>:<handle>:<storage_offset>:<storage_size>``
+    - VMM by-reference:
+      ``vmm:<sockpath_b64>:<export_id>:<storage_offset>:<storage_size>:<device>``
+
+    Both carry a ``storage_offset``/``storage_size`` and a device; ``handle`` is
+    the legacy handle or, for the VMM variant, the export id.
     """
-    device, handle, storage_offset, storage_size = data["buffer"].split(":")
+    buffer = data["buffer"]
+    if buffer.startswith("vmm:"):
+        _tag, _sock_b64, export_id, storage_offset, storage_size, device = buffer.split(
+            ":"
+        )
+        return {
+            "variant": "vmm",
+            "device": int(device),
+            "handle": export_id,
+            "storage_offset": int(storage_offset),
+            "storage_size": int(storage_size),
+        }
+    device, handle, storage_offset, storage_size = buffer.split(":")
     return {
+        "variant": "legacy",
         "device": int(device),
         "handle": handle,
         "storage_offset": int(storage_offset),
@@ -160,11 +179,13 @@ def _consumer_main(to_consumer, from_consumer, result_q):
             assert hasattr(decoded, "__dlpack__")
             # Host-copy helper: read values back without any GPU framework.
             got = decoded.copy_to_host()
+            unpacked = _unpack_cuda_ipc(encoded["data"])
             results.append(
                 {
                     "shape": tuple(encoded["shape"]),
                     "dtype": encoded["dtype"],
-                    "offset": _unpack_cuda_ipc(encoded["data"])["storage_offset"],
+                    "offset": unpacked["storage_offset"],
+                    "variant": unpacked["variant"],
                     "match": bool(np.array_equal(got, np.asarray(expected))),
                 }
             )
@@ -429,22 +450,22 @@ def test_cross_process_nonzero_offset():
 
 @requires_cuda
 @requires_jax_cuda
-def test_cross_process_jax_vmm_fallback():
-    """JAX arrays hit the VMM staging fallback and still round-trip correctly.
+def test_cross_process_jax_vmm_export():
+    """JAX arrays take the VMM export path and round-trip correctly.
 
-    JAX/XLA's GPU allocator is VMM-backed, so the legacy ``cudaIpcGetMemHandle``
-    fast path (which works for CuPy/PyTorch's default cudaMalloc-based pools)
-    rejects it; ``dump_cuda_ipc_arraydict`` should transparently fall back to
-    staging the array into a fresh ``cudaMalloc`` buffer (see
-    cuda_ipc._stage_for_legacy_ipc) and export a handle to that instead.
+    JAX/XLA's GPU allocator is VMM-backed, which the legacy
+    ``cudaIpcGetMemHandle`` path rejects. ``dump_cuda_ipc_arraydict`` detects
+    this (``is_vmm_exportable``) and routes to the VMM export path: it exports
+    the allocation by reference over a POSIX fd rather than staging a copy and
+    handing out a legacy handle. The consumer imports and maps it, copies out
+    just this array's bytes, and returns the same ``IpcDeviceArray``.
     """
     results = run_cross_process("jax")
     assert len(results) == 1
     result = results[0]
     assert result["match"], result
-    # The fallback stages just the array's own bytes at offset 0, not the
-    # (possibly huge) VMM arena the pointer actually lives in.
-    assert result["offset"] == 0
+    # It genuinely took the VMM variant, not the legacy staging path.
+    assert result["variant"] == "vmm", result
 
 
 @requires_cuda
@@ -578,6 +599,84 @@ def test_cross_process_torch_encode():
     results = run_cross_process("torch")
     assert len(results) == 1
     assert results[0]["match"], results[0]
+
+
+def _inflight_producer_main(n, spin_cycles, to_consumer, from_consumer):
+    """Export a tensor whose final value is still being written on the GPU.
+
+    ``y`` starts equal to ``x``; a long spin kernel and then ``y += 1`` are
+    queued on the producer's stream, and ``y`` is exported *immediately*, the
+    way a served ``apply`` returns with its kernels still in flight. The export
+    must not hand out the handle until that work is done: the consumer copies
+    from another process, so nothing on its side can wait for our stream.
+    """
+    try:
+        import torch
+
+        from tesseract_core.runtime.cuda_ipc import dump_cuda_ipc_arraydict
+
+        x = torch.arange(n, device="cuda", dtype=torch.float32)
+        y = x.clone()
+        # Warm both kernels once: in a fresh process the first launch of each
+        # loads its module, which synchronizes the context and would hide the
+        # race by making the launches below block until the spin is done.
+        torch.cuda._sleep(1)
+        y.add_(0.0)
+        torch.cuda.synchronize()  # from here on, only the spin and the add are queued
+        torch.cuda._sleep(spin_cycles)
+        y.add_(1.0)
+        encoded = dump_cuda_ipc_arraydict(y)
+        to_consumer.put(encoded)
+        from_consumer.get(timeout=_TIMEOUT)
+        del y, x
+    except Exception:
+        traceback.print_exc()
+        try:
+            to_consumer.put(("PRODUCER_ERROR", traceback.format_exc()))
+        except Exception:
+            pass
+        sys.exit(2)
+
+
+@requires_cuda
+@requires_torch_cuda
+def test_export_waits_for_inflight_device_writes():
+    """The legacy export must synchronize the producer's device work first.
+
+    Regression test for reading stale bytes: without a synchronize in
+    ``dump_cuda_ipc_arraydict`` the consumer's copy raced the producer's queued
+    kernels and returned ``x`` instead of ``x + 1`` (in production this was
+    masked, most of the time, by the ``cudaFree`` of decoded inputs that
+    happened to run before the response was sent).
+    """
+    from tesseract_core.runtime.cuda_ipc import load_cuda_ipc_arraydict
+
+    n = 1 << 20
+    spin_cycles = 2_000_000_000  # roughly a second of GPU time on the default stream
+
+    ctx = multiprocessing.get_context("spawn")
+    to_consumer = ctx.Queue()
+    from_consumer = ctx.Queue()
+    producer = ctx.Process(
+        target=_inflight_producer_main,
+        args=(n, spin_cycles, to_consumer, from_consumer),
+    )
+    producer.start()
+    try:
+        encoded = to_consumer.get(timeout=_TIMEOUT)
+        if isinstance(encoded, tuple) and encoded[0] == "PRODUCER_ERROR":
+            pytest.fail(f"producer failed:\n{encoded[1]}")
+        got = load_cuda_ipc_arraydict(encoded).copy_to_host()
+        expected = np.arange(n, dtype=np.float32) + 1.0
+        stale = int(np.sum(got != expected))
+        assert stale == 0, (
+            f"{stale}/{n} elements read before the producer's write landed"
+        )
+    finally:
+        from_consumer.put("done")
+        producer.join(timeout=_TIMEOUT)
+        if producer.is_alive():
+            producer.terminate()
 
 
 @requires_cuda
@@ -834,7 +933,7 @@ def _run_standalone():
         ]
     if _JAX_AVAILABLE:
         tests.append(
-            ("cross-process jax vmm fallback", test_cross_process_jax_vmm_fallback)
+            ("cross-process jax vmm export", test_cross_process_jax_vmm_export)
         )
     tests.append(("tesseract api cuda_ipc", test_tesseract_api_cuda_ipc_local))
 
