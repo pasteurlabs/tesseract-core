@@ -601,6 +601,84 @@ def test_cross_process_torch_encode():
     assert results[0]["match"], results[0]
 
 
+def _inflight_producer_main(n, spin_cycles, to_consumer, from_consumer):
+    """Export a tensor whose final value is still being written on the GPU.
+
+    ``y`` starts equal to ``x``; a long spin kernel and then ``y += 1`` are
+    queued on the producer's stream, and ``y`` is exported *immediately*, the
+    way a served ``apply`` returns with its kernels still in flight. The export
+    must not hand out the handle until that work is done: the consumer copies
+    from another process, so nothing on its side can wait for our stream.
+    """
+    try:
+        import torch
+
+        from tesseract_core.runtime.cuda_ipc import dump_cuda_ipc_arraydict
+
+        x = torch.arange(n, device="cuda", dtype=torch.float32)
+        y = x.clone()
+        # Warm both kernels once: in a fresh process the first launch of each
+        # loads its module, which synchronizes the context and would hide the
+        # race by making the launches below block until the spin is done.
+        torch.cuda._sleep(1)
+        y.add_(0.0)
+        torch.cuda.synchronize()  # from here on, only the spin and the add are queued
+        torch.cuda._sleep(spin_cycles)
+        y.add_(1.0)
+        encoded = dump_cuda_ipc_arraydict(y)
+        to_consumer.put(encoded)
+        from_consumer.get(timeout=_TIMEOUT)
+        del y, x
+    except Exception:
+        traceback.print_exc()
+        try:
+            to_consumer.put(("PRODUCER_ERROR", traceback.format_exc()))
+        except Exception:
+            pass
+        sys.exit(2)
+
+
+@requires_cuda
+@requires_torch_cuda
+def test_export_waits_for_inflight_device_writes():
+    """The legacy export must synchronize the producer's device work first.
+
+    Regression test for reading stale bytes: without a synchronize in
+    ``dump_cuda_ipc_arraydict`` the consumer's copy raced the producer's queued
+    kernels and returned ``x`` instead of ``x + 1`` (in production this was
+    masked, most of the time, by the ``cudaFree`` of decoded inputs that
+    happened to run before the response was sent).
+    """
+    from tesseract_core.runtime.cuda_ipc import load_cuda_ipc_arraydict
+
+    n = 1 << 20
+    spin_cycles = 2_000_000_000  # roughly a second of GPU time on the default stream
+
+    ctx = multiprocessing.get_context("spawn")
+    to_consumer = ctx.Queue()
+    from_consumer = ctx.Queue()
+    producer = ctx.Process(
+        target=_inflight_producer_main,
+        args=(n, spin_cycles, to_consumer, from_consumer),
+    )
+    producer.start()
+    try:
+        encoded = to_consumer.get(timeout=_TIMEOUT)
+        if isinstance(encoded, tuple) and encoded[0] == "PRODUCER_ERROR":
+            pytest.fail(f"producer failed:\n{encoded[1]}")
+        got = load_cuda_ipc_arraydict(encoded).copy_to_host()
+        expected = np.arange(n, dtype=np.float32) + 1.0
+        stale = int(np.sum(got != expected))
+        assert stale == 0, (
+            f"{stale}/{n} elements read before the producer's write landed"
+        )
+    finally:
+        from_consumer.put("done")
+        producer.join(timeout=_TIMEOUT)
+        if producer.is_alive():
+            producer.terminate()
+
+
 @requires_cuda
 @requires_torch_cuda
 def test_decode_to_torch_via_dlpack():

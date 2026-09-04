@@ -128,8 +128,11 @@ def patched_cuda(monkeypatch):
 
     # Staging buffers are freed via cudart.cudaFree in release_pinned_ipc_exports;
     # stub the cudart accessor so no real driver is touched and frees are logged.
+    # dump_cuda_ipc_arraydict synchronizes the device before taking a handle, so
+    # the stub needs cudaDeviceSynchronize too (returns cudaSuccess).
     fake_cudart = types.SimpleNamespace(
-        cudaFree=lambda ptr: calls["free"].append(getattr(ptr, "value", ptr))
+        cudaFree=lambda ptr: calls["free"].append(getattr(ptr, "value", ptr)),
+        cudaDeviceSynchronize=lambda: 0,
     )
     monkeypatch.setattr(cuda_ipc, "_get_cudart", lambda: fake_cudart)
 

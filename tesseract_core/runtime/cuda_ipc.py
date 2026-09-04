@@ -718,6 +718,24 @@ def dump_cuda_ipc_arraydict(arr: Any) -> ArrayDict:
     # pin simplifies the two paths to an identical cleanup story.)
     _pin_cuda_ipc_export(arr)
 
+    # The handle is only meaningful once the device work that writes `arr` has
+    # completed. Nothing else on this path orders that: the consumer copies the
+    # bytes from another process, so it cannot wait on our streams, and a
+    # handler routinely returns with the kernels that produce its outputs still
+    # in flight. Synchronize before exporting, as the VMM path does with
+    # cuCtxSynchronize in dump_vmm_arraydict. (Until now the consumer usually
+    # read correct data only because freeing the decoded *input* buffers
+    # (cudaFree in the IpcDeviceArray finalizer) happened to synchronize the
+    # device between the handler's return and the response; a handler that
+    # keeps a decoded input alive, or a cold process whose first request delays
+    # that collection, read stale bytes.)
+    cudart = _get_cudart()
+    ret = cudart.cudaDeviceSynchronize()
+    if ret != 0:
+        raise RuntimeError(
+            f"cudaDeviceSynchronize failed: {_cuda_error_string(cudart, ret)}"
+        )
+
     # IPC handles reference the *whole* backing allocation, not the array's
     # (possibly offset) data pointer. Pooled allocators (CuPy, PyTorch) hand
     # out many arrays from a single cudaMalloc block, so we must resolve the
