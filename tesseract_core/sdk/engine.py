@@ -1156,7 +1156,20 @@ def serve(
         except ContainerError as ex:
             if not is_port_conflict(ex.stderr.decode("utf-8", errors="ignore")):
                 raise
-            # Publish failed; no container was created, nothing to clean up.
+            # Publish failing after the container is created leaves it behind in
+            # a Created (never-started) state, invisible to containers.list()'s
+            # running-only default and so to `tesseract teardown --all`.
+            if ex.container is not None:
+                # tesseract_only=False: we already know this is the container we
+                # just tried to create, from our own docker run invocation, so
+                # the usual "is this a Tesseract container" filter would only
+                # risk leaving the leak behind unremoved.
+                try:
+                    docker_client.containers.get(
+                        ex.container, tesseract_only=False
+                    ).remove(force=True)
+                except NotFound:
+                    pass
             retry_or_raise_port_conflict(port, auto_port, attempt, max_attempts)
             continue
         except PortInUseError:
