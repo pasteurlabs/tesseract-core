@@ -323,7 +323,12 @@ def check_gradients(
         float,
         typer.Option(
             "--eps",
-            help="Step size for finite differences.",
+            help=(
+                "Absolute step size for finite differences, applied unscaled to "
+                "every differentiated input. Inputs whose magnitudes differ by "
+                "orders of magnitude need one invocation per --input-paths with "
+                "a step chosen for each."
+            ),
             show_default=True,
         ),
     ] = 1e-4,
@@ -362,7 +367,7 @@ def check_gradients(
     show_progress: Annotated[
         bool,
         typer.Option(
-            "--show-progress",
+            "--show-progress/--no-show-progress",
             help="Show progress bar.",
         ),
     ] = True,

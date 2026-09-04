@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from pydantic import BaseModel
 
-from tesseract_core.runtime import Array, Differentiable, Float32
+from tesseract_core.runtime import Array, Differentiable, Float32, Float64
 from tesseract_core.runtime.testing.finite_differences import (
     check_gradients,
     expand_path_pattern,
@@ -302,3 +302,98 @@ def test_vjp_sweep_is_shared_across_sampled_indices():
     # One sweep, reused by every sampled index, rather than one sweep each.
     assert module.vjp_calls == n_output_elements
     assert module.vjp_calls < num_evals_total * n_output_elements
+
+
+class CubicModule(ModuleType):
+    """Two inputs three orders apart, each with its own output.
+
+    A cubic is the simplest function whose central difference carries a
+    step-dependent error: ((x+h)^3 - (x-h)^3) / 2h is 3x^2 + h^2, so the
+    difference is wrong by h^2 while the analytic Jacobian is exact. That makes
+    the step size observable, which is what these tests need.
+
+    The two inputs feed separate outputs on purpose. Summing them into one
+    output instead makes the small input's contribution vanish into the large
+    one's magnitude -- at 1e3 cubed, a perturbation of the 1.0 input moves the
+    sum below float64 resolution and the difference comes back exactly zero.
+    That is a real effect worth knowing about, but it is not what these tests
+    are measuring.
+    """
+
+    class InputSchema(BaseModel):
+        small: Differentiable[Array[(1,), Float64]]
+        large: Differentiable[Array[(1,), Float64]]
+
+    class OutputSchema(BaseModel):
+        out_small: Differentiable[Array[(1,), Float64]]
+        out_large: Differentiable[Array[(1,), Float64]]
+
+    def apply(self, inputs: InputSchema) -> OutputSchema:
+        return {
+            "out_small": np.asarray(inputs.small) ** 3,
+            "out_large": np.asarray(inputs.large) ** 3,
+        }
+
+    def jacobian(
+        self, inputs: InputSchema, jac_inputs: set[str], jac_outputs: set[str]
+    ):
+        exact = {
+            ("out_small", "small"): 3.0 * np.asarray(inputs.small) ** 2,
+            ("out_large", "large"): 3.0 * np.asarray(inputs.large) ** 2,
+        }
+        return {
+            key_out: {
+                key_in: exact.get((key_out, key_in), np.zeros(1)).reshape(1, 1)
+                for key_in in jac_inputs
+            }
+            for key_out in jac_outputs
+        }
+
+
+cubic_input = {"small": np.array([1.0]), "large": np.array([1e3])}
+
+
+def _cubic_failures(**kwargs):
+    return {
+        endpoint: len(failures)
+        for endpoint, failures, _ in check_gradients(
+            CubicModule("cubic"),
+            {"inputs": cubic_input},
+            base_dir=None,
+            endpoints=["jacobian"],
+            max_evals=4,
+            rtol=1e-6,
+            seed=0,
+            show_progress=False,
+            **kwargs,
+        )
+    }
+
+
+def test_eps_mapping_of_equal_steps_matches_the_scalar():
+    """A dict whose values are all equal must behave exactly like that scalar."""
+    scalar = _cubic_failures(eps=1e-5)
+    mapping = _cubic_failures(eps={"small": 1e-5, "large": 1e-5})
+    assert scalar == mapping == {"jacobian": 0}
+
+
+def test_eps_mapping_gives_each_input_its_own_step():
+    """The per-path step has to reach the difference, not merely be accepted.
+
+    A cubic differenced with step h is wrong by h^2, so a step large enough on
+    one input fails that input's check while the other keeps passing. Were the
+    mapping ignored, both paths would share a step and these two runs could not
+    differ.
+    """
+    assert _cubic_failures(eps={"small": 1e-5, "large": 1e-5}) == {"jacobian": 0}
+    assert _cubic_failures(eps={"small": 1e-5, "large": 1e2})["jacobian"] > 0
+
+
+def test_eps_mapping_must_name_every_checked_path():
+    with pytest.raises(ValueError, match="missing a step size"):
+        _cubic_failures(eps={"small": 1e-5})
+
+
+def test_eps_mapping_rejects_paths_that_are_not_being_checked():
+    with pytest.raises(ValueError, match="not being checked"):
+        _cubic_failures(eps={"small": 1e-5, "large": 1e-5, "nonexistent": 1e-5})
