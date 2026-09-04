@@ -15,6 +15,7 @@ host does not need CuPy to read cuda_ipc outputs. They are marked ``gpu`` so
 GPU-less CI runners skip them.
 """
 
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -45,6 +46,18 @@ def gpu_image_name(docker_client, docker_cleanup_module, shared_dummy_image_name
     source = EXAMPLES_DIR / "_gpu_cuda_ipc"
     image_tag = build_tesseract(
         docker_client, source, shared_dummy_image_name, tag="sometag"
+    )
+    assert image_exists(docker_client, image_tag)
+    docker_cleanup_module["images"].append(image_tag)
+    return image_tag
+
+
+@pytest.fixture(scope="module")
+def gpu_vmm_image_name(docker_client, docker_cleanup_module, shared_dummy_image_name):
+    """Build the VMM (JAX-output) example image once for this module."""
+    source = EXAMPLES_DIR / "_gpu_vmm"
+    image_tag = build_tesseract(
+        docker_client, source, shared_dummy_image_name, tag="vmmtag"
     )
     assert image_exists(docker_client, image_tag)
     docker_cleanup_module["images"].append(image_tag)
@@ -105,3 +118,41 @@ def test_serve_cuda_ipc_serial_reuse(gpu_image_name):
             result = t.apply({"a": a, "b": b, "s": 2.0})
             got = result["result"].copy_to_host()
             np.testing.assert_allclose(got, 2.0 * a, rtol=1e-5, atol=1e-5)
+
+
+@requires_cuda
+def test_serve_vmm_roundtrip(gpu_vmm_image_name):
+    """A served JAX (VMM) output round-trips over json+cuda_ipc via the VMM path.
+
+    The Tesseract computes on JAX, so its result is VMM-backed and the runtime
+    exports it with ``cuMemExportToShareableHandle`` rather than legacy
+    ``cudaIpcGetMemHandle``. The fd that names the export is passed out-of-band
+    over a Unix socket, so host and container must share the directory the
+    socket lives in: mount a shared dir and point ``TESSERACT_VMM_SOCKET_DIR``
+    at it. ``--ipc=host`` is added automatically for the cuda_ipc format.
+    """
+    from tesseract_core.runtime.cuda_ipc import IpcDeviceArray
+
+    a = np.arange(8, dtype=np.float32)
+    b = np.ones(8, dtype=np.float32)
+    s = 3.0
+    expected = s * a + b
+
+    with tempfile.TemporaryDirectory() as sock_dir:
+        with Tesseract.from_image(
+            gpu_vmm_image_name,
+            gpus=["all"],
+            output_format="json+cuda_ipc",
+            # Mount read-write: the server binds its fd-passing socket here.
+            volumes=[f"{sock_dir}:{sock_dir}:rw"],
+            environment={"TESSERACT_VMM_SOCKET_DIR": sock_dir},
+            runtime_config={"enable_experimental_cuda_ipc": True},
+        ) as t:
+            result = t.apply({"a": a, "b": b, "s": s})
+
+        got = result["result"]
+        assert isinstance(got, IpcDeviceArray), (
+            f"expected a device array from the VMM path, got {type(got)}"
+        )
+        assert hasattr(got, "__cuda_array_interface__")
+        np.testing.assert_allclose(got.copy_to_host(), expected, rtol=1e-5, atol=1e-5)

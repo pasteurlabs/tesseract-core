@@ -1,0 +1,9 @@
+name: "gpu-vmm"
+version: "0.1.0"
+description: "GPU Tesseract returning VMM-backed device memory, for the VMM end-to-end test."
+
+build_config:
+  # CUDA runtime base image so libcudart / the CUDA driver API are present for
+  # the VMM export path.
+  base_image: "nvidia/cuda:12.8.1-runtime-ubuntu24.04"
+  target_platform: "native"

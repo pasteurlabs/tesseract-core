@@ -431,6 +431,16 @@ def _device_ordinal(arr: Any) -> int:
 
 def _fetch_fd(sock_path: str, export_id: int) -> int:
     """Fetch the exported fd for ``export_id`` from the producer's fd server."""
+    # TODO(perf): this opens a fresh connection per array. The connect/accept
+    # round-trip is a fixed ~ few-ms cost per transfer that is independent of
+    # array size, and it dominates for small/medium arrays -- it is what makes
+    # the VMM path lose to legacy IPC below ~150 MB. Two cheap wins: (1) reuse
+    # one persistent connection per (client, server) pair across the session
+    # instead of connect-per-array, and (2) fetch all of an apply's fds in a
+    # single request -- SCM_RIGHTS can carry multiple fds in one control
+    # message -- collapsing N rendezvous into one. Both move the VMM crossover
+    # point well below the current ~150 MB. Left as a follow-up to keep this
+    # transfer stateless and independent.
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
         s.connect(sock_path)
