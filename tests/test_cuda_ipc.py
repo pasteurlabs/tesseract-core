@@ -78,12 +78,31 @@ _TIMEOUT = 60
 def _unpack_cuda_ipc(data: dict) -> dict:
     """Split a packed cuda_ipc ``buffer`` back into its named components.
 
-    The wire format packs everything into a single string as
-    ``<device>:<handle>:<storage_offset>:<storage_size>`` (see
-    :class:`tesseract_core.runtime.array_encoding.CudaIpcArrayData`).
+    Two wire variants share the ``cuda_ipc`` encoding (see
+    :class:`tesseract_core.runtime.array_encoding.CudaIpcArrayData`):
+
+    - legacy handle: ``<device>:<handle>:<storage_offset>:<storage_size>``
+    - VMM by-reference:
+      ``vmm:<sockpath_b64>:<export_id>:<storage_offset>:<storage_size>:<device>``
+
+    Both carry a ``storage_offset``/``storage_size`` and a device; ``handle`` is
+    the legacy handle or, for the VMM variant, the export id.
     """
-    device, handle, storage_offset, storage_size = data["buffer"].split(":")
+    buffer = data["buffer"]
+    if buffer.startswith("vmm:"):
+        _tag, _sock_b64, export_id, storage_offset, storage_size, device = buffer.split(
+            ":"
+        )
+        return {
+            "variant": "vmm",
+            "device": int(device),
+            "handle": export_id,
+            "storage_offset": int(storage_offset),
+            "storage_size": int(storage_size),
+        }
+    device, handle, storage_offset, storage_size = buffer.split(":")
     return {
+        "variant": "legacy",
         "device": int(device),
         "handle": handle,
         "storage_offset": int(storage_offset),
@@ -160,11 +179,13 @@ def _consumer_main(to_consumer, from_consumer, result_q):
             assert hasattr(decoded, "__dlpack__")
             # Host-copy helper: read values back without any GPU framework.
             got = decoded.copy_to_host()
+            unpacked = _unpack_cuda_ipc(encoded["data"])
             results.append(
                 {
                     "shape": tuple(encoded["shape"]),
                     "dtype": encoded["dtype"],
-                    "offset": _unpack_cuda_ipc(encoded["data"])["storage_offset"],
+                    "offset": unpacked["storage_offset"],
+                    "variant": unpacked["variant"],
                     "match": bool(np.array_equal(got, np.asarray(expected))),
                 }
             )
@@ -429,22 +450,22 @@ def test_cross_process_nonzero_offset():
 
 @requires_cuda
 @requires_jax_cuda
-def test_cross_process_jax_vmm_fallback():
-    """JAX arrays hit the VMM staging fallback and still round-trip correctly.
+def test_cross_process_jax_vmm_export():
+    """JAX arrays take the VMM export path and round-trip correctly.
 
-    JAX/XLA's GPU allocator is VMM-backed, so the legacy ``cudaIpcGetMemHandle``
-    fast path (which works for CuPy/PyTorch's default cudaMalloc-based pools)
-    rejects it; ``dump_cuda_ipc_arraydict`` should transparently fall back to
-    staging the array into a fresh ``cudaMalloc`` buffer (see
-    cuda_ipc._stage_for_legacy_ipc) and export a handle to that instead.
+    JAX/XLA's GPU allocator is VMM-backed, which the legacy
+    ``cudaIpcGetMemHandle`` path rejects. ``dump_cuda_ipc_arraydict`` detects
+    this (``is_vmm_exportable``) and routes to the VMM export path: it exports
+    the allocation by reference over a POSIX fd rather than staging a copy and
+    handing out a legacy handle. The consumer imports and maps it, copies out
+    just this array's bytes, and returns the same ``IpcDeviceArray``.
     """
     results = run_cross_process("jax")
     assert len(results) == 1
     result = results[0]
     assert result["match"], result
-    # The fallback stages just the array's own bytes at offset 0, not the
-    # (possibly huge) VMM arena the pointer actually lives in.
-    assert result["offset"] == 0
+    # It genuinely took the VMM variant, not the legacy staging path.
+    assert result["variant"] == "vmm", result
 
 
 @requires_cuda
@@ -834,7 +855,7 @@ def _run_standalone():
         ]
     if _JAX_AVAILABLE:
         tests.append(
-            ("cross-process jax vmm fallback", test_cross_process_jax_vmm_fallback)
+            ("cross-process jax vmm export", test_cross_process_jax_vmm_export)
         )
     tests.append(("tesseract api cuda_ipc", test_tesseract_api_cuda_ipc_local))
 

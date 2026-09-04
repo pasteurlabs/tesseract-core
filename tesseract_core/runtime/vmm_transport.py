@@ -336,10 +336,15 @@ def release_vmm_exports() -> None:
     Mirrors :func:`tesseract_core.runtime.cuda_ipc.release_pinned_ipc_exports`.
     The fd-passing server itself is process-global and left running.
     """
-    driver = _get_cuda_driver()
     with _EXPORT_LOCK:
         entries = list(_VMM_EXPORT_REGISTRY.items())
         _VMM_EXPORT_REGISTRY.clear()
+    # Nothing was exported via the VMM path (the usual case, and always so on a
+    # host with no CUDA driver -- e.g. the mocked CPU encode tests): don't touch
+    # the driver at all, so this stays a no-op rather than failing to load it.
+    if not entries:
+        return
+    driver = _get_cuda_driver()
     for _export_id, (handle, _arr) in entries:
         driver.cuMemRelease(ctypes.c_ulonglong(handle))
 
