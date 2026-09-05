@@ -16,7 +16,9 @@ from tesseract_core.runtime.schema_types import (
     ArrayFlags,
     Bool,
     Differentiable,
+    Float32,
     Float64,
+    Int8,
     Int32,
     Int64,
     is_differentiable,
@@ -515,6 +517,47 @@ def test_dtype_casting():
         ValidationError, match="Could not parse value as a numeric array"
     ):
         MyModel.model_validate(json_payload)
+
+
+def test_narrowing_casts_must_preserve_values():
+    class Narrow(BaseModel):
+        i8: Array[(None,), Int8]
+        f32: Array[(None,), Float32]
+
+    def json_array(dtype, buffer):
+        return {
+            "object_type": "array",
+            "shape": [len(buffer)],
+            "dtype": dtype,
+            "data": {"buffer": buffer, "encoding": "json"},
+        }
+
+    # Narrowing is fine as long as the values survive it: precision loss and
+    # non-finite values passing through are not errors.
+    res = Narrow.model_validate(
+        {"i8": [1, -2, 127], "f32": [0.1, 1e30, float("inf"), float("nan")]}
+    )
+    assert res.i8.dtype == np.int8 and res.i8.tolist() == [1, -2, 127]
+    assert res.f32.dtype == np.float32 and res.f32[0] == np.float32(0.1)
+    assert np.isinf(res.f32[2]) and np.isnan(res.f32[3])
+
+    res = Narrow.model_validate(
+        {"i8": json_array("int8", [1.0, -2.0]), "f32": json_array("float32", [1e30])}
+    )
+    assert res.i8.tolist() == [1, -2]
+
+    # Values that wrap or overflow are rejected instead of silently changed,
+    # on both the Python and the JSON-encoded path.
+    for bad in (
+        {"i8": [300], "f32": [0.0]},
+        {"i8": np.array([300]), "f32": [0.0]},
+        {"i8": [0], "f32": [1e40]},
+        {"i8": json_array("int8", [300]), "f32": [0.0]},
+        {"i8": json_array("int8", [-129.0]), "f32": [0.0]},
+        {"i8": [0], "f32": json_array("float32", [1e40])},
+    ):
+        with pytest.raises(ValidationError, match="do not fit into dtype"):
+            Narrow.model_validate(bad)
 
 
 def test_strict_types():

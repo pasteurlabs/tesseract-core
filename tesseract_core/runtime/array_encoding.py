@@ -435,6 +435,27 @@ def _load_binref_arraydict(val: ArrayDict, base_dir: str | Path | None) -> np.nd
     return np.frombuffer(buffer, dtype=dtype).reshape(shape)
 
 
+def _astype_checked(arr: ArrayLike, dtype: str) -> ArrayLike:
+    """Cast to ``dtype``, refusing casts that wrap an integer or overflow a float."""
+    if np.can_cast(arr.dtype, dtype, casting="safe"):
+        return arr.astype(dtype, copy=False)
+
+    with np.errstate(over="ignore", invalid="ignore"):
+        out = arr.astype(dtype, copy=False)
+    if np.issubdtype(out.dtype, np.integer):
+        lossy = out.astype(arr.dtype) != arr
+    else:
+        lossy = np.isfinite(arr) & ~np.isfinite(out)
+    if np.any(lossy):
+        example = np.asarray(arr)[np.asarray(lossy)].ravel()[0]
+        raise PydanticCustomError(
+            "array_value_out_of_range",
+            "Array values do not fit into dtype '{expected_dtype}' (e.g. {value})",
+            {"expected_dtype": str(out.dtype), "value": example.item()},
+        )
+    return out
+
+
 def _coerce_shape_dtype(
     arr: ArrayLike,
     expected_shape: ShapeType,
@@ -526,7 +547,7 @@ def _coerce_shape_dtype(
                     "expected_dtype": expected_dtype,
                 },
             )
-        arr = arr.astype(expected_dtype, copy=False)
+        arr = _astype_checked(arr, expected_dtype)
 
     allowed_dtypes = [dtype.lower() for dtype in get_args(AllowedDtypes)]
     if arr.dtype.name not in allowed_dtypes:
@@ -637,7 +658,7 @@ def decode_array(
                         "Expected integer data, but array contains floating point values",
                         {},
                     )
-            data = data.astype(val.dtype, casting="unsafe", copy=False)
+            data = _astype_checked(data, val.dtype)
 
         else:
             # Unreachable
