@@ -135,6 +135,16 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
         http_methods = ["GET"] if endpoint_name in GET_ENDPOINTS else ["POST"]
         app.add_api_route(f"/{endpoint_name}", wrapped_endpoint, methods=http_methods)
 
+    generate_openapi = app.openapi
+
+    def openapi_with_output_formats() -> dict:
+        from .file_interactions import available_formats
+
+        schema = generate_openapi()
+        schema["x-supported-output-formats"] = list(available_formats())
+        return schema
+
+    app.openapi = openapi_with_output_formats
     return app
 
 

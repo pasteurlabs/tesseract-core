@@ -256,6 +256,20 @@ The OpenAPI schema covers every endpoint, though they're all derived from the
 view, run `tesseract apidoc vectoradd` or open a running Tesseract's `/docs`
 endpoint.
 
+The schema also carries the output formats this Tesseract accepts in the
+`Accept` header, under `x-supported-output-formats`. Which formats are on offer
+depends on how the Tesseract was served, so read them rather than assume:
+
+```python
+>>> with Tesseract.from_image("vectoradd") as vectoradd:
+...     print(vectoradd.supported_output_formats)
+['json', 'json+base64', 'json+binref']
+```
+
+A Tesseract built before this was advertised does not report them, and the
+property is `None` there. That means "this Tesseract did not say", not "it
+offers nothing else".
+
 ## What's next
 
 You can now build a Tesseract and drive it through all three interfaces,
