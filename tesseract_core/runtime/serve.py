@@ -23,27 +23,48 @@ GET_ENDPOINTS = {"health"}
 
 
 def negotiate_output_format(accept: str | None) -> str:
-    """Resolve the Accept header to an output format the runtime currently offers."""
-    if accept is None or accept == "*/*":
+    """Resolve the Accept header to an output format the runtime currently offers.
+
+    Media ranges are tried by descending q-value, so a client listing several
+    types gets the first one this runtime can actually produce.
+    """
+    if not accept:
         return get_config().output_format
 
-    output_format = accept.split("/")[-1]
+    def quality(media_range: str) -> float:
+        _, _, params = media_range.partition(";")
+        for param in params.split(";"):
+            key, sep, value = param.partition("=")
+            if sep and key.strip() == "q":
+                try:
+                    return float(value.strip())
+                except ValueError:
+                    return 0.0
+        return 1.0
+
     allowed = available_formats()
-    if output_format not in allowed:
-        raise HTTPException(
-            status_code=406,
-            detail={
-                "message": f"Unsupported output format {output_format!r}",
-                "available_formats": list(allowed),
-            },
-        )
-    return output_format
+    ranges = [r.strip() for r in accept.split(",") if r.strip()]
+    # Sorting is stable, so equal-quality ranges keep the client's ordering.
+    for media_range in sorted(ranges, key=quality, reverse=True):
+        media_type = media_range.partition(";")[0].strip().lower()
+        if media_type in ("*/*", "application/*"):
+            return get_config().output_format
+        output_format = media_type.rpartition("/")[2]
+        if output_format in allowed:
+            return output_format
+
+    raise HTTPException(
+        status_code=406,
+        detail={
+            "message": f"Cannot produce any format accepted by {accept!r}",
+            "available_formats": list(allowed),
+        },
+    )
 
 
 def create_response(
     model: BaseModel,
     output_format: str,
-    media_type: str | None,
     base_dir: str | None,
     binref_dir: str | None,
 ) -> Response:
@@ -54,7 +75,11 @@ def create_response(
     content = output_to_bytes(
         model, output_format, base_dir=base_dir, binref_dir=binref_dir
     )
-    return Response(status_code=200, content=content, media_type=media_type)
+    # Name the format actually produced, which is not necessarily what the
+    # client asked for: an Accept header may hold several media ranges.
+    return Response(
+        status_code=200, content=content, media_type=f"application/{output_format}"
+    )
 
 
 def create_rest_api(api_module: ModuleType) -> FastAPI:
@@ -110,7 +135,6 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
             return create_response(
                 result,
                 output_format,
-                accept,
                 base_dir=output_path,
                 binref_dir=rundir_name,
             )

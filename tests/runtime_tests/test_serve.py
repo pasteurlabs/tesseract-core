@@ -184,6 +184,53 @@ def test_apply_unknown_output_format_is_not_acceptable(dummy_tesseract_module):
     assert set(detail["available_formats"]) >= {"json", "json+base64", "json+binref"}
 
 
+def test_apply_rejects_an_accept_header_with_nothing_on_offer(dummy_tesseract_module):
+    """A header naming only types the server cannot produce is a 406."""
+    client = TestClient(
+        create_rest_api(dummy_tesseract_module), raise_server_exceptions=False
+    )
+    test_inputs = dummy_tesseract_module.InputSchema.model_validate(test_input)
+    response = client.post(
+        "/apply",
+        json={"inputs": model_to_json(test_inputs)},
+        headers={"Accept": "text/html"},
+    )
+    assert response.status_code == 406, response.text
+
+
+@pytest.mark.parametrize(
+    "accept,expected_encoding",
+    [
+        # Whatever a client happens to send, the server answers in a format it
+        # actually offers, and only refuses when it can offer none.
+        ("application/json, text/plain, */*", "json"),
+        ("text/html,application/xhtml+xml,*/*;q=0.8", "json"),
+        ("application/*", "json"),
+        ("APPLICATION/JSON", "json"),
+        ("application/json;q=0.9", "json"),
+        ("", "json"),
+        ("text/html, application/json+base64", "base64"),
+        ("application/json+nonsense, application/json+binref", "binref"),
+        # Higher q wins, even when it is listed second.
+        ("application/json;q=0.2, application/json+base64;q=0.8", "base64"),
+    ],
+)
+def test_apply_negotiates_the_best_offered_format(
+    http_client, dummy_tesseract_module, accept, expected_encoding
+):
+    """Media ranges are honoured by q-value, and wildcards fall back to the default."""
+    test_inputs = dummy_tesseract_module.InputSchema.model_validate(test_input)
+    response = http_client.post(
+        "/apply",
+        json={"inputs": model_to_json(test_inputs)},
+        headers={"Accept": accept},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["result"]["data"]["encoding"] == expected_encoding
+    # The Content-Type names the format produced, not the header sent.
+    assert response.headers["content-type"].startswith("application/json")
+
+
 def test_unacceptable_output_format_is_rejected_before_running(
     dummy_tesseract_module, monkeypatch
 ):
