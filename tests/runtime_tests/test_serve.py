@@ -227,6 +227,30 @@ def test_get_openapi_schema(http_client):
     assert "run_id" not in response.json()
 
 
+def test_openapi_schema_advertises_output_formats(dummy_tesseract_module):
+    """Clients can read which output formats this server accepts from openapi.json."""
+    from tesseract_core.runtime.config import update_config
+
+    update_config(enable_experimental_cuda_ipc=False)
+    client = TestClient(create_rest_api(dummy_tesseract_module))
+    schema = client.get("/openapi.json").json()
+    assert schema["x-supported-output-formats"] == [
+        "json",
+        "json+base64",
+        "json+binref",
+    ]
+
+    update_config(enable_experimental_cuda_ipc=True)
+    client = TestClient(create_rest_api(dummy_tesseract_module))
+    schema = client.get("/openapi.json").json()
+    assert schema["x-supported-output-formats"] == [
+        "json",
+        "json+base64",
+        "json+binref",
+        "json+cuda_ipc",
+    ]
+
+
 @pytest.mark.skipif(
     is_wsl(),
     reason="flaky on Windows",

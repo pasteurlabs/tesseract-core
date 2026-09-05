@@ -203,6 +203,32 @@ def test_Tesseract_schema_method(mocker, mock_serving):
     assert openapi_schema == mocked_run.return_value
 
 
+def test_Tesseract_supported_output_formats(mocker, mock_serving):
+    mocked_run = mocker.patch("tesseract_core.sdk.tesseract.HTTPClient.run_tesseract")
+
+    mocked_run.return_value = {
+        "paths": {},
+        "x-supported-output-formats": [
+            "json",
+            "json+base64",
+            "json+binref",
+            "json+cuda_ipc",
+        ],
+    }
+    with Tesseract.from_image("sometesseract:0.2.3") as t:
+        assert t.supported_output_formats == [
+            "json",
+            "json+base64",
+            "json+binref",
+            "json+cuda_ipc",
+        ]
+
+    # A server that predates the advertisement offers the stable formats.
+    mocked_run.return_value = {"paths": {}}
+    with Tesseract.from_image("sometesseract:0.2.3") as t:
+        assert t.supported_output_formats == ["json", "json+base64", "json+binref"]
+
+
 def test_serve_lifecycle(mock_serving, mock_clients):
     t = Tesseract.from_image("sometesseract:0.2.3")
 

@@ -471,6 +471,22 @@ class Tesseract:
         """
         return [endpoint.lstrip("/") for endpoint in self.openapi_schema["paths"]]
 
+    @property
+    @requires_client
+    def supported_output_formats(self) -> list[str]:
+        """Get the output formats this Tesseract accepts in the Accept header.
+
+        Servers that predate the advertisement offer the three stable formats.
+
+        Returns:
+            a list of format names, e.g. ``["json", "json+base64", "json+binref"]``.
+        """
+        return list(
+            self.openapi_schema.get(
+                "x-supported-output-formats", ["json", "json+base64", "json+binref"]
+            )
+        )
+
     def container_info(self) -> Container:
         """Retrieve information on the Docker container serving this Tesseract.
 
