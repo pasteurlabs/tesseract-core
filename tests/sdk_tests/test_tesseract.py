@@ -223,10 +223,12 @@ def test_Tesseract_supported_output_formats(mocker, mock_serving):
             "json+cuda_ipc",
         ]
 
-    # A server that predates the advertisement offers the stable formats.
+    # A server that does not advertise is unknown, not "stable formats only":
+    # guessing here would report an experimental format as unavailable when the
+    # server may well accept it.
     mocked_run.return_value = {"paths": {}}
     with Tesseract.from_image("sometesseract:0.2.3") as t:
-        assert t.supported_output_formats == ["json", "json+base64", "json+binref"]
+        assert t.supported_output_formats is None
 
 
 def test_serve_lifecycle(mock_serving, mock_clients):

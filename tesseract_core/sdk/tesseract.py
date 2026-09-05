@@ -473,19 +473,21 @@ class Tesseract:
 
     @property
     @requires_client
-    def supported_output_formats(self) -> list[str]:
+    def supported_output_formats(self) -> list[str] | None:
         """Get the output formats this Tesseract accepts in the Accept header.
 
-        Servers that predate the advertisement offer the three stable formats.
+        Returns ``None`` for a Tesseract served by a version that does not
+        advertise them. That is not the same as offering nothing beyond the
+        stable formats: such a server may well accept an experimental format,
+        it just never said so, and reporting a guess here would tell a caller
+        the format is unavailable when it is not.
 
         Returns:
-            a list of format names, e.g. ``["json", "json+base64", "json+binref"]``.
+            a list of format names, e.g. ``["json", "json+base64",
+            "json+binref"]``, or ``None`` if this Tesseract does not say.
         """
-        return list(
-            self.openapi_schema.get(
-                "x-supported-output-formats", ["json", "json+base64", "json+binref"]
-            )
-        )
+        advertised = self.openapi_schema.get("x-supported-output-formats")
+        return list(advertised) if advertised is not None else None
 
     def container_info(self) -> Container:
         """Retrieve information on the Docker container serving this Tesseract.
