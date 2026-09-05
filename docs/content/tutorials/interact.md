@@ -266,6 +266,10 @@ depends on how the Tesseract was served, so read them rather than assume:
 ['json', 'json+base64', 'json+binref']
 ```
 
+A Tesseract built before this was advertised does not report them, and the
+property is `None` there. That means "this Tesseract did not say", not "it
+offers nothing else".
+
 ## What's next
 
 You can now build a Tesseract and drive it through all three interfaces,
