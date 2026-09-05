@@ -9,12 +9,12 @@ from types import ModuleType
 from typing import Annotated, Any
 
 import uvicorn
-from fastapi import FastAPI, Header, Query, Response
+from fastapi import FastAPI, Header, HTTPException, Query, Response
 from pydantic import BaseModel
 
 from .config import get_config
 from .core import create_endpoints
-from .file_interactions import SUPPORTED_FORMATS, join_paths, output_to_bytes
+from .file_interactions import available_formats, join_paths, output_to_bytes
 from .mpa import start_run
 from .profiler import Profiler
 
@@ -22,24 +22,39 @@ from .profiler import Profiler
 GET_ENDPOINTS = {"health"}
 
 
-def create_response(
-    model: BaseModel, accept: str, base_dir: str | None, binref_dir: str | None
-) -> Response:
-    """Create a response of the format specified by the Accept header."""
-    config = get_config()
-
+def negotiate_output_format(accept: str | None) -> str:
+    """Resolve the Accept header to an output format the runtime currently offers."""
     if accept is None or accept == "*/*":
-        output_format = config.output_format
-    else:
-        output_format: SUPPORTED_FORMATS = accept.split("/")[-1]
+        return get_config().output_format
 
+    output_format = accept.split("/")[-1]
+    allowed = available_formats()
+    if output_format not in allowed:
+        raise HTTPException(
+            status_code=406,
+            detail={
+                "message": f"Unsupported output format {output_format!r}",
+                "available_formats": list(allowed),
+            },
+        )
+    return output_format
+
+
+def create_response(
+    model: BaseModel,
+    output_format: str,
+    media_type: str | None,
+    base_dir: str | None,
+    binref_dir: str | None,
+) -> Response:
+    """Create a response in the given (already negotiated) output format."""
     if base_dir is None:
-        base_dir = config.output_path
+        base_dir = get_config().output_path
 
     content = output_to_bytes(
         model, output_format, base_dir=base_dir, binref_dir=binref_dir
     )
-    return Response(status_code=200, content=content, media_type=accept)
+    return Response(status_code=200, content=content, media_type=media_type)
 
 
 def create_rest_api(api_module: ModuleType) -> FastAPI:
@@ -66,6 +81,7 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
         @wraps(endpoint_func)
         async def wrapper(*args: Any, accept: str, run_id: str | None, **kwargs: Any):
             config = get_config()
+            output_format = negotiate_output_format(accept)
 
             # Release GPU buffers exported via cuda_ipc by the previous request.
             # Releasing at the start of each request keeps every export alive
@@ -92,7 +108,11 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
                 # so they go through stdio redirection to the log file
                 profiler.print_stats()
             return create_response(
-                result, accept, base_dir=output_path, binref_dir=rundir_name
+                result,
+                output_format,
+                accept,
+                base_dir=output_path,
+                binref_dir=rundir_name,
             )
 
         if endpoint_func.__name__ not in endpoints_to_wrap:

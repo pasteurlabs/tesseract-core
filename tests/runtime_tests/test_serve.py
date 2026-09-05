@@ -158,8 +158,54 @@ def test_apply_rejects_experimental_cuda_ipc_by_default(dummy_tesseract_module):
         json={"inputs": model_to_json(test_inputs)},
         headers={"Accept": "application/json+cuda_ipc"},
     )
-    # Rejected server-side (the format is not in the accepted set).
-    assert response.status_code >= 400
+    assert response.status_code == 406, response.text
+    detail = response.json()["detail"]
+    assert "json+cuda_ipc" in detail["message"]
+    assert detail["available_formats"] == ["json", "json+base64", "json+binref"]
+
+
+def test_apply_unknown_output_format_is_not_acceptable(dummy_tesseract_module):
+    """An Accept header naming a format the runtime does not know is a client error.
+
+    The 406 body lists what the server does offer, so a client can fall back.
+    """
+    client = TestClient(
+        create_rest_api(dummy_tesseract_module), raise_server_exceptions=False
+    )
+    test_inputs = dummy_tesseract_module.InputSchema.model_validate(test_input)
+    response = client.post(
+        "/apply",
+        json={"inputs": model_to_json(test_inputs)},
+        headers={"Accept": "application/json+nonsense"},
+    )
+    assert response.status_code == 406, response.text
+    detail = response.json()["detail"]
+    assert "json+nonsense" in detail["message"]
+    assert set(detail["available_formats"]) >= {"json", "json+base64", "json+binref"}
+
+
+def test_unacceptable_output_format_is_rejected_before_running(
+    dummy_tesseract_module, monkeypatch
+):
+    """Format negotiation fails before the endpoint does any work."""
+    calls = []
+
+    def apply_that_records(inputs):
+        calls.append(inputs)
+        return dummy_tesseract_module.OutputSchema(result=np.zeros(3))
+
+    monkeypatch.setattr(dummy_tesseract_module, "apply", apply_that_records)
+    client = TestClient(
+        create_rest_api(dummy_tesseract_module), raise_server_exceptions=False
+    )
+    test_inputs = dummy_tesseract_module.InputSchema.model_validate(test_input)
+    response = client.post(
+        "/apply",
+        json={"inputs": model_to_json(test_inputs)},
+        headers={"Accept": "application/json+nonsense"},
+    )
+    assert response.status_code == 406, response.text
+    assert calls == []
 
 
 def test_create_rest_api_jacobian_endpoint(http_client, dummy_tesseract_module):
