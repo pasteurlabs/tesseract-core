@@ -451,7 +451,7 @@ def _astype_checked(arr: ArrayLike, dtype: str) -> ArrayLike:
         raise PydanticCustomError(
             "array_value_out_of_range",
             "Array values do not fit into dtype '{expected_dtype}' (e.g. {value})",
-            {"expected_dtype": str(out.dtype), "value": example.item()},
+            {"expected_dtype": str(out.dtype), "value": str(example.item())},
         )
     return out
 
