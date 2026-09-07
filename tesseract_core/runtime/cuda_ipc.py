@@ -506,8 +506,6 @@ def _cuda_ipc_open_mem_handle(handle_bytes: bytes, device: int) -> int:
     # on).
     ret = cudart.cudaSetDevice(device)
     if ret != 0:
-        # Drain the sticky last-error so it does not leak into an unrelated later
-        # CUDA call (see _cuda_ipc_get_mem_handle for the full rationale).
         cudart.cudaGetLastError()
         raise RuntimeError(
             f"cudaSetDevice({device}) failed: {_cuda_error_string(cudart, ret)}"
@@ -538,8 +536,6 @@ def _cuda_ipc_close_mem_handle(device_ptr: int) -> None:
     cudart = _get_cudart()
     ret = cudart.cudaIpcCloseMemHandle(ctypes.c_void_p(device_ptr))
     if ret != 0:
-        # Drain the sticky last-error so it does not leak into an unrelated later
-        # CUDA call (see _cuda_ipc_get_mem_handle for the full rationale).
         cudart.cudaGetLastError()
         raise RuntimeError(
             f"cudaIpcCloseMemHandle failed: {_cuda_error_string(cudart, ret)}"
@@ -577,8 +573,6 @@ def _stage_for_legacy_ipc(base_ptr: int, storage_size: int) -> int:
     staging_ptr = ctypes.c_void_p()
     ret = cudart.cudaMalloc(ctypes.byref(staging_ptr), ctypes.c_size_t(storage_size))
     if ret != 0:
-        # Drain the sticky last-error a failed call leaves behind, so it does not
-        # surface in an unrelated later CUDA call (see _cuda_ipc_get_mem_handle).
         cudart.cudaGetLastError()
         raise RuntimeError(f"cudaMalloc failed: {_cuda_error_string(cudart, ret)}")
 
@@ -951,8 +945,6 @@ class IpcDeviceArray:
             ctypes.c_int(_cudaMemcpyDeviceToHost),
         )
         if ret != 0:
-            # Drain the sticky last-error so it does not leak into an unrelated
-            # later CUDA call (see _cuda_ipc_get_mem_handle for the rationale).
             cudart.cudaGetLastError()
             raise RuntimeError(
                 f"cudaMemcpy (device->host) failed: {_cuda_error_string(cudart, ret)}"
@@ -1119,9 +1111,6 @@ def load_cuda_ipc_arraydict(val: ArrayDict) -> "IpcDeviceArray":
     # later step fails we still close the IPC mapping and free the buffer cleanly.
     ret = cudart.cudaSetDevice(device)
     if ret != 0:
-        # Drain the sticky last-error so it does not leak into an unrelated later
-        # CUDA call (see _cuda_ipc_get_mem_handle for the full rationale). Applies
-        # to every runtime-API failure in this function.
         cudart.cudaGetLastError()
         raise RuntimeError(
             f"cudaSetDevice({device}) failed: {_cuda_error_string(cudart, ret)}"
