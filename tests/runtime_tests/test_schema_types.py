@@ -524,7 +524,6 @@ def test_narrowing_casts_must_preserve_values():
     class Narrow(BaseModel):
         i8: Array[(None,), Int8]
         f32: Array[(None,), Float32]
-        c64: Array[(None,), Complex64]
 
     def json_array(dtype, buffer):
         return {
@@ -534,43 +533,60 @@ def test_narrowing_casts_must_preserve_values():
             "data": {"buffer": buffer, "encoding": "json"},
         }
 
-    ok = {"c64": [0j]}
-
     # Narrowing is fine as long as the values survive it: precision loss and
     # non-finite values passing through are not errors.
     res = Narrow.model_validate(
-        {"i8": [1, -2, 127], "f32": [0.1, 1e30, float("inf"), float("nan")], **ok}
+        {"i8": [1, -2, 127], "f32": [0.1, 1e30, float("inf"), float("nan")]}
     )
     assert res.i8.dtype == np.int8 and res.i8.tolist() == [1, -2, 127]
     assert res.f32.dtype == np.float32 and res.f32[0] == np.float32(0.1)
     assert np.isinf(res.f32[2]) and np.isnan(res.f32[3])
 
     res = Narrow.model_validate(
-        {
-            "i8": json_array("int8", [1.0, -2.0]),
-            "f32": json_array("float32", [1e30]),
-            **ok,
-        }
+        {"i8": json_array("int8", [1.0, -2.0]), "f32": json_array("float32", [1e30])}
     )
     assert res.i8.tolist() == [1, -2]
 
     # Values that wrap or overflow are rejected instead of silently changed,
-    # on both the Python and the JSON-encoded path. The offending value is
-    # reported as text so the error survives JSON serialization whatever its
-    # type (a complex number would otherwise break the 422 response).
+    # on both the Python and the JSON-encoded path.
     for bad in (
-        {"i8": [300], "f32": [0.0], **ok},
-        {"i8": np.array([300]), "f32": [0.0], **ok},
-        {"i8": [0], "f32": [1e40], **ok},
-        {"i8": json_array("int8", [300]), "f32": [0.0], **ok},
-        {"i8": json_array("int8", [-129.0]), "f32": [0.0], **ok},
-        {"i8": [0], "f32": json_array("float32", [1e40]), **ok},
-        {"i8": [0], "f32": [0.0], "c64": np.array([1e40 + 0j])},
-        {"i8": [0], "f32": [0.0], "c64": json_array("complex128", [1e40])},
+        {"i8": [300], "f32": [0.0]},
+        {"i8": np.array([300]), "f32": [0.0]},
+        {"i8": [-129], "f32": [0.0]},
+        {"i8": [0], "f32": [1e40]},
+        {"i8": json_array("int8", [300]), "f32": [0.0]},
+        {"i8": json_array("int8", [-129.0]), "f32": [0.0]},
+        {"i8": [0], "f32": json_array("float32", [1e40])},
+    ):
+        with pytest.raises(ValidationError, match="do not fit into dtype"):
+            Narrow.model_validate(bad)
+
+
+def test_out_of_range_error_survives_json():
+    """A complex value in the error context must not break the 422 response.
+
+    FastAPI encodes the error context to build the response body, and cannot
+    encode a Python complex, so an overflow here used to surface as a 500.
+    """
+
+    class Complex(BaseModel):
+        c64: Array[(None,), Complex64]
+
+    for bad in (
+        {"c64": np.array([1e40 + 0j])},
+        {
+            "c64": {
+                "object_type": "array",
+                "shape": [1],
+                "dtype": "complex128",
+                "data": {"buffer": [1e40], "encoding": "json"},
+            }
+        },
     ):
         with pytest.raises(ValidationError, match="do not fit into dtype") as exc:
-            Narrow.model_validate(bad)
-        json.dumps([e["ctx"] for e in exc.value.errors(include_url=False)])
+            Complex.model_validate(bad)
+        context = [error["ctx"] for error in exc.value.errors(include_url=False)]
+        assert json.dumps(context)
 
 
 def test_strict_types():

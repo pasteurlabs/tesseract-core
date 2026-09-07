@@ -435,25 +435,47 @@ def _load_binref_arraydict(val: ArrayDict, base_dir: str | Path | None) -> np.nd
     return np.frombuffer(buffer, dtype=dtype).reshape(shape)
 
 
+def _out_of_range(arr: ArrayLike, dtype: str, value: Any) -> PydanticCustomError:
+    """Build the error for a value the target dtype cannot hold."""
+    return PydanticCustomError(
+        "array_value_out_of_range",
+        "Array values do not fit into dtype '{expected_dtype}' (e.g. {value})",
+        # str(), so the context stays JSON-serializable for a complex value.
+        {"expected_dtype": str(np.dtype(dtype)), "value": str(value)},
+    )
+
+
 def _astype_checked(arr: ArrayLike, dtype: str) -> ArrayLike:
-    """Cast to ``dtype``, refusing casts that wrap an integer or overflow a float."""
+    """Cast to ``dtype``, refusing casts that wrap an integer or overflow a float.
+
+    Only narrowing casts are checked, and each kind is checked the cheapest way
+    it can be: NumPy raises on a float or complex overflow by itself, so those
+    cost nothing extra, while an integer cast wraps silently and is caught by
+    comparing the extremes against what the target can hold.
+    """
     if np.can_cast(arr.dtype, dtype, casting="safe"):
         return arr.astype(dtype, copy=False)
 
-    with np.errstate(over="ignore", invalid="ignore"):
-        out = arr.astype(dtype, copy=False)
-    if np.issubdtype(out.dtype, np.integer):
-        lossy = out.astype(arr.dtype) != arr
-    else:
-        lossy = np.isfinite(arr) & ~np.isfinite(out)
-    if np.any(lossy):
-        example = np.asarray(arr)[np.asarray(lossy)].ravel()[0]
-        raise PydanticCustomError(
-            "array_value_out_of_range",
-            "Array values do not fit into dtype '{expected_dtype}' (e.g. {value})",
-            {"expected_dtype": str(out.dtype), "value": str(example.item())},
-        )
-    return out
+    if np.issubdtype(np.dtype(dtype), np.integer):
+        if arr.size:
+            info = np.iinfo(dtype)
+            low, high = arr.min(), arr.max()
+            if low < info.min:
+                raise _out_of_range(arr, dtype, low)
+            if high > info.max:
+                raise _out_of_range(arr, dtype, high)
+        return arr.astype(dtype, copy=False)
+
+    try:
+        with np.errstate(over="raise"):
+            return arr.astype(dtype, copy=False)
+    except FloatingPointError:
+        # Rare, and we are raising anyway, so pay for the scan that names a value.
+        with np.errstate(over="ignore"):
+            out = arr.astype(dtype, copy=False)
+        overflowed = np.isfinite(arr) & ~np.isfinite(out)
+        example = np.asarray(arr)[np.asarray(overflowed)].ravel()[0]
+        raise _out_of_range(arr, dtype, example.item()) from None
 
 
 def _coerce_shape_dtype(
