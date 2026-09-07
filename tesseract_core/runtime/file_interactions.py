@@ -11,11 +11,23 @@ from pydantic import TypeAdapter
 
 PathLike = str | Path
 
-supported_format_type = Literal["json", "json+base64", "json+binref", "json+cuda_ipc"]
+supported_format_type = Literal[
+    "json", "json+base64", "json+binref", "json+cuda_ipc", "json+cuda_vmm"
+]
 
-# Formats always available. json+cuda_ipc is an experimental, opt-in format (see
-# available_formats) and is deliberately excluded here.
+# Formats always available. json+cuda_ipc and json+cuda_vmm are experimental,
+# opt-in formats (see available_formats) and are deliberately excluded here.
 _STABLE_FORMATS = ("json", "json+base64", "json+binref")
+
+# Experimental GPU device-transport formats, gated on enable_experimental_cuda_ipc.
+# Both share the cuda_ipc wire encoding (encoding: "cuda_ipc"); they differ only
+# in how the producer exports device memory:
+#   json+cuda_ipc  -- legacy cudaIpcGetMemHandle, with a device-to-device staging
+#                     copy for VMM/pool-backed memory it cannot export directly.
+#   json+cuda_vmm  -- copy-free export of VMM-backed memory by POSIX fd. Requires
+#                     the source allocation to be VMM-backed (JAX/XLA, PyTorch
+#                     expandable_segments); errors otherwise. An expert opt-in.
+_CUDA_TRANSPORT_FORMATS = ("json+cuda_ipc", "json+cuda_vmm")
 
 # Kept for backwards compatibility; prefer available_formats(), which reflects
 # whether experimental formats are currently enabled.
@@ -25,15 +37,15 @@ SUPPORTED_FORMATS = get_args(supported_format_type)
 def available_formats() -> tuple[str, ...]:
     """Output formats the runtime currently accepts.
 
-    ``json+cuda_ipc`` is experimental and only included when explicitly enabled
-    via the ``enable_experimental_cuda_ipc`` runtime config flag (e.g.
-    ``TESSERACT_ENABLE_EXPERIMENTAL_CUDA_IPC=1``); otherwise a Tesseract never
-    produces CUDA IPC handles.
+    ``json+cuda_ipc`` and ``json+cuda_vmm`` are experimental and only included
+    when explicitly enabled via the ``enable_experimental_cuda_ipc`` runtime
+    config flag (e.g. ``TESSERACT_ENABLE_EXPERIMENTAL_CUDA_IPC=1``); otherwise a
+    Tesseract never produces CUDA device-transport handles.
     """
     from tesseract_core.runtime.config import get_config
 
     if get_config().enable_experimental_cuda_ipc:
-        return (*_STABLE_FORMATS, "json+cuda_ipc")
+        return (*_STABLE_FORMATS, *_CUDA_TRANSPORT_FORMATS)
     return _STABLE_FORMATS
 
 
@@ -66,6 +78,8 @@ def output_to_bytes(
         }
     elif format == "json+cuda_ipc":
         context = {"array_encoding": "cuda_ipc"}
+    elif format == "json+cuda_vmm":
+        context = {"array_encoding": "vmm"}
     else:
         raise ValueError(f"Unsupported format {format} (must be one of {allowed})")
 

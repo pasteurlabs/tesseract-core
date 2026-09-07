@@ -726,15 +726,30 @@ def _import_cuda_ipc() -> ModuleType:
     return cuda_ipc
 
 
+# Output formats that select a GPU device transport, mapped to the transport
+# name the client uses to export inputs by reference (see _encode_payload). Both
+# share the cuda_ipc wire encoding; they differ only in the export mechanism.
+_DEVICE_TRANSPORT_BY_FORMAT: dict[str, Literal["cuda_ipc", "vmm"]] = {
+    "json+cuda_ipc": "cuda_ipc",
+    "json+cuda_vmm": "vmm",
+}
+
+
 def _encode_array(
-    arr: Any, encoding: Literal["base64", "raw", "cuda_ipc"] = "base64"
+    arr: Any, encoding: Literal["base64", "raw", "cuda_ipc", "vmm"] = "base64"
 ) -> dict:
-    # With cuda_ipc encoding, GPU arrays are exported by reference via a CUDA IPC
-    # handle, keeping the data on-device. Any other array (or any other encoding)
-    # falls through to a host copy below, so a mixed payload (some GPU, some CPU
-    # arrays) encodes correctly either way.
-    if encoding == "cuda_ipc" and hasattr(arr, "__cuda_array_interface__"):
-        return _import_cuda_ipc().dump_cuda_ipc_arraydict(arr)
+    # With a GPU device-transport encoding, GPU arrays are exported by reference,
+    # keeping the data on-device. ``cuda_ipc`` uses the legacy handle (staging a
+    # copy for memory it cannot export directly); ``vmm`` exports VMM-backed
+    # memory copy-free by fd and errors on non-VMM memory. Any other array (or
+    # any other encoding) falls through to a host copy below, so a mixed payload
+    # (some GPU, some CPU arrays) encodes correctly either way.
+    if encoding in ("cuda_ipc", "vmm") and hasattr(arr, "__cuda_array_interface__"):
+        _import_cuda_ipc()  # ensures the runtime + transports are importable
+        from tesseract_core.runtime.device_transport import get_transport
+
+        transport = get_transport(encoding)
+        return transport.descriptor(transport.register(arr))
 
     # Ensure arr is a numpy-compatible array so we guarantee it has a compatible dtype (not e.g. torch bfloat16)
     arr = np.asanyarray(arr, order="A")
@@ -761,13 +776,13 @@ def _encode_array(
 def _encode_payload(payload: dict | None, output_format: str) -> Iterator[dict | None]:
     """Encode a request payload's arrays, managing CUDA IPC export lifetime.
 
-    Yields the encoded payload (or None for an empty payload). For the
-    ``json+cuda_ipc`` format, GPU arrays are exported by reference (base64 for
-    CPU arrays), which pins each exported allocation in a process-global registry
-    on the runtime side. Those pins are released on context exit -- by then the
-    caller has read the full response, so the server has copied the inputs out
-    and they are provably dead. The release is skipped (and cuda_ipc never
-    imported) when no GPU array was actually exported.
+    Yields the encoded payload (or None for an empty payload). For the GPU
+    device-transport formats (``json+cuda_ipc`` / ``json+cuda_vmm``), GPU arrays
+    are exported by reference (base64 for CPU arrays), which pins each exported
+    allocation on the runtime side. Those pins are released on context exit -- by
+    then the caller has read the full response, so the server has copied the
+    inputs out and they are provably dead. The release is skipped (and the
+    runtime never imported) when no GPU array was actually exported.
 
     Releasing on exit rather than at the start of the next request keeps pinned
     GPU memory bounded to a single in-flight request.
@@ -776,21 +791,22 @@ def _encode_payload(payload: dict | None, output_format: str) -> Iterator[dict |
         yield None
         return
 
-    if output_format != "json+cuda_ipc":
+    transport_name = _DEVICE_TRANSPORT_BY_FORMAT.get(output_format)
+    if transport_name is None:
         yield _tree_map(
             _encode_array, payload, is_leaf=lambda x: hasattr(x, "__array__")
         )
         return
 
-    # cuda_ipc: a leaf is any array-like on either protocol; GPU leaves are
-    # exported by handle and pin their allocation until we release below.
+    # Device transport: a leaf is any array-like on either protocol; GPU leaves
+    # are exported by reference and pin their allocation until we release below.
     exported = False
 
     def _encode_leaf(x: Any) -> dict:
         nonlocal exported
         if hasattr(x, "__cuda_array_interface__"):
             exported = True
-        return _encode_array(x, encoding="cuda_ipc")
+        return _encode_array(x, encoding=transport_name)
 
     def _is_leaf(x: Any) -> bool:
         return hasattr(x, "__array__") or hasattr(x, "__cuda_array_interface__")
@@ -799,7 +815,10 @@ def _encode_payload(payload: dict | None, output_format: str) -> Iterator[dict |
         yield _tree_map(_encode_leaf, payload, is_leaf=_is_leaf)
     finally:
         if exported:
-            _import_cuda_ipc().release_pinned_ipc_exports()
+            _import_cuda_ipc()  # ensure the transport registry is importable
+            from tesseract_core.runtime.device_transport import get_transport
+
+            get_transport(transport_name).release()
 
 
 def _decode_array(

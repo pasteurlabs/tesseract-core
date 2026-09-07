@@ -681,14 +681,17 @@ def encode_array(
     context = info.context if info.context else {}
     array_encoding = context.get("array_encoding", "json")
 
-    # For cuda_ipc, skip numpy conversion so the array stays on the GPU. In
-    # Python mode there is nothing to serialize, so pass the array through
-    # untouched (the on-device passthrough handled generally below); only the
-    # JSON path emits an IPC handle, and there the input must be a CUDA array.
-    if array_encoding == "cuda_ipc" and info.mode_is_json():
+    # For the GPU device transports, skip numpy conversion so the array stays on
+    # the GPU. In Python mode there is nothing to serialize, so pass the array
+    # through untouched (the on-device passthrough handled generally below); only
+    # the JSON path emits a device handle, and there the input must be a CUDA
+    # array. ``cuda_ipc`` and ``vmm`` are sibling transports selected here by the
+    # request's format (see file_interactions.output_to_bytes); both share the
+    # cuda_ipc wire encoding but differ in how the producer exports memory.
+    if array_encoding in ("cuda_ipc", "vmm") and info.mode_is_json():
         if not cuda_ipc.has_cuda_array_interface(arr):
             raise ValueError(
-                "cuda_ipc encoding requires a CUDA array "
+                f"{array_encoding} encoding requires a CUDA array "
                 f"(object with __cuda_array_interface__), got {type(arr).__name__}"
             )
         from tesseract_core.runtime.device_transport import get_transport

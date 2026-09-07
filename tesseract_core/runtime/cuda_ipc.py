@@ -639,13 +639,6 @@ def release_pinned_ipc_exports() -> None:
         for ptr in staging_ptrs:
             cudart.cudaFree(ctypes.c_void_p(ptr))
 
-    # The VMM fast path (reached transparently from dump_cuda_ipc_arraydict)
-    # retains allocation handles in its own registry; release them on the same
-    # lifecycle tick. Imported lazily so a non-VMM request never touches it.
-    from tesseract_core.runtime import vmm_transport
-
-    vmm_transport.release_vmm_exports()
-
 
 def _pin_cuda_ipc_export(arr: Any) -> None:
     """Retain a reference to a source array so its GPU memory stays valid.
@@ -680,11 +673,13 @@ def dump_cuda_ipc_arraydict(arr: Any) -> ArrayDict:
     before the consumer copies it out; the pin is released once the exporting
     side calls :func:`release_pinned_ipc_exports`.
 
-    Frameworks with VMM/pool-backed GPU allocators (e.g. JAX/XLA) hand out
-    pointers that the legacy ``cudaIpcGetMemHandle`` API rejects; in that case
-    this transparently falls back to staging the array's bytes into a fresh
-    ``cudaMalloc`` buffer via one on-GPU copy (see :func:`_stage_for_legacy_ipc`)
-    and exports a handle to that instead. Still far cheaper than a host round-trip.
+    Memory the legacy ``cudaIpcGetMemHandle`` API rejects -- notably VMM/pool-
+    backed allocations (JAX/XLA, PyTorch ``expandable_segments``) -- is staged
+    into a fresh ``cudaMalloc`` buffer via one on-GPU copy (see
+    :func:`_stage_for_legacy_ipc`) and a handle to *that* is exported. This is
+    the always-works path; the copy-free VMM export is a separate transport,
+    selected explicitly via the ``json+cuda_vmm`` format (see
+    :mod:`tesseract_core.runtime.vmm_transport`), not chosen here.
     """
     if not has_cuda_array_interface(arr):
         raise ValueError(
@@ -702,20 +697,10 @@ def dump_cuda_ipc_arraydict(arr: Any) -> ArrayDict:
 
     data_ptr, nbytes, shape, dtype_name = _get_cuda_array_info(arr)
 
-    # Copy-free fast path: if the source memory was allocated through the CUDA
-    # VMM API (JAX/XLA's allocator, PyTorch expandable_segments, ...), export the
-    # allocation by reference over a POSIX fd instead of staging a copy. Reached
-    # transparently through json+cuda_ipc; falls through to the legacy handle /
-    # staging path below for non-VMM memory (default CuPy/PyTorch pools).
-    from tesseract_core.runtime import vmm_transport
-
-    if vmm_transport.is_vmm_exportable(data_ptr):
-        return vmm_transport.dump_vmm_arraydict(arr)
-
     # Keep the source allocation alive until exports are explicitly released.
-    # (Still needed even on the VMM fallback path below: _stage_for_legacy_ipc
-    # reads from `arr`'s memory synchronously before returning, but keeping the
-    # pin simplifies the two paths to an identical cleanup story.)
+    # (Still needed on the staging path below: _stage_for_legacy_ipc reads from
+    # `arr`'s memory synchronously before returning, but keeping the pin
+    # simplifies the two paths to an identical cleanup story.)
     _pin_cuda_ipc_export(arr)
 
     # The handle is only meaningful once the device work that writes `arr` has

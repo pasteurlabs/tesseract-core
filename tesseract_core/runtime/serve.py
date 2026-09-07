@@ -3,7 +3,8 @@
 
 import inspect
 import uuid
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from functools import wraps
 from types import ModuleType
 from typing import Annotated, Any
@@ -42,6 +43,30 @@ def create_response(
     return Response(status_code=200, content=content, media_type=accept)
 
 
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """App-scoped setup/teardown for the served Tesseract.
+
+    When cuda_ipc is enabled, bootstrap the VMM fd-passing server here so its
+    Unix socket is created at startup and closed at shutdown -- owned by the app
+    rather than leaked as a lazily-started daemon thread. Bootstrapping also
+    installs it as the process fallback the encode path uses, so exports and this
+    server share one instance. No CUDA machinery is touched when the flag is off.
+    """
+    config = get_config()
+    vmm = None
+    if config.enable_experimental_cuda_ipc:
+        from tesseract_core.runtime.device_transport import get_transport
+
+        vmm = get_transport("vmm")
+        vmm.bootstrap("producer")
+    try:
+        yield
+    finally:
+        if vmm is not None:
+            vmm.shutdown()
+
+
 def create_rest_api(api_module: ModuleType) -> FastAPI:
     """Create the Tesseract REST API."""
     config = get_config()
@@ -52,6 +77,7 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
         docs_url=None,
         redoc_url="/docs",
         debug=config.debug,
+        lifespan=_lifespan,
     )
     tesseract_endpoints = create_endpoints(api_module)
 
@@ -76,7 +102,12 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
             if config.enable_experimental_cuda_ipc:
                 from tesseract_core.runtime.device_transport import get_transport
 
+                # Both device transports may have pinned exports for the previous
+                # request (cuda_ipc: staging buffers/keepalives; vmm: retained
+                # allocation handles). Release each -- they are independent now
+                # that selection is per-format rather than a branch in cuda_ipc.
                 get_transport("cuda_ipc").release()
+                get_transport("vmm").release()
 
             if run_id is None:
                 run_id = str(uuid.uuid4())

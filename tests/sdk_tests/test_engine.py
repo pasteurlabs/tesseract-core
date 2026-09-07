@@ -1696,6 +1696,34 @@ def test_serve_experimental_cuda_ipc_errors_without_gpus(monkeypatch):
         )
 
 
+def test_serve_experimental_cuda_ipc_errors_with_multiple_workers(monkeypatch):
+    """cuda_ipc requires a single serial producer; >1 worker is a startup error."""
+    _stub_serve_docker(monkeypatch)
+
+    with pytest.raises(ValueError, match="requires num_workers=1"):
+        engine.serve(
+            "my-image",
+            output_format="json+base64",
+            gpus=["all"],
+            num_workers=2,
+            runtime_config={"enable_experimental_cuda_ipc": True},
+            skip_health_check=True,
+        )
+
+
+def test_serve_multiple_workers_allowed_without_cuda_ipc(monkeypatch):
+    """The single-worker restriction applies only when cuda_ipc is enabled."""
+    captured = _stub_serve_docker(monkeypatch)
+
+    engine.serve(
+        "my-image",
+        output_format="json+base64",
+        num_workers=2,
+        skip_health_check=True,
+    )
+    assert "--num-workers" in captured["command"]
+
+
 def test_serve_cuda_ipc_errors_without_experimental_flag(monkeypatch):
     """Requesting the cuda_ipc format without the flag is a startup error."""
     _stub_serve_docker(monkeypatch)

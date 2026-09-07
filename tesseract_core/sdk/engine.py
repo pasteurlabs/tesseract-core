@@ -61,7 +61,9 @@ docker_client = CLIDockerClient()
 # the SDK, e.g. sdk.tesseract). Mirrors runtime.file_interactions.supported_format_type
 # but is defined here so the SDK does not eagerly import the (optional) runtime
 # package; a test asserts the two stay in sync.
-OutputFormat: TypeAlias = Literal["json", "json+base64", "json+binref", "json+cuda_ipc"]
+OutputFormat: TypeAlias = Literal[
+    "json", "json+base64", "json+binref", "json+cuda_ipc", "json+cuda_vmm"
+]
 
 # Fixed port the API server binds *inside* the container when port-mapping is
 # used (i.e. everything except host networking). The container has its own
@@ -1117,10 +1119,20 @@ def serve(
                     "enable_experimental_cuda_ipc requires GPU access, but no GPUs "
                     "were requested. Pass gpus=['all'] or specific GPU IDs."
                 )
+            if num_workers > 1:
+                raise ValueError(
+                    "enable_experimental_cuda_ipc requires num_workers=1. The IPC "
+                    "export lifecycle assumes a single serial producer: exports are "
+                    "pinned until the next request releases them, and the fd-passing "
+                    "server retains handles in the worker process that produced them. "
+                    "Multiple workers would load-balance requests across processes, so "
+                    "a release (or an fd fetch) could hit a worker that never held the "
+                    "export, silently returning wrong data. Pass num_workers=1."
+                )
             extra_args.extend(["--ipc=host"])
-        elif output_format == "json+cuda_ipc":
+        elif output_format in ("json+cuda_ipc", "json+cuda_vmm"):
             raise ValueError(
-                "The 'json+cuda_ipc' output format is experimental and must be "
+                f"The {output_format!r} output format is experimental and must be "
                 "explicitly enabled. Pass "
                 "runtime_config={'enable_experimental_cuda_ipc': True}."
             )

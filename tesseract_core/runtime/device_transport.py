@@ -134,6 +134,7 @@ def register_transport(transport: DeviceTransport) -> DeviceTransport:
 # even when a backend module has not been imported yet.)
 _BUILTIN_TRANSPORT_MODULES = {
     "cuda_ipc": "tesseract_core.runtime.cuda_ipc",
+    "vmm": "tesseract_core.runtime.vmm_transport",
 }
 
 
