@@ -300,7 +300,8 @@ def test_client_request_releases_input_exports(patched_cuda):
     client = HTTPClient.__new__(HTTPClient)
     client._url = "http://localhost:8000"
     client._output_path = None
-    client._output_format = "json+cuda_ipc"
+    client._output_format = "json+base64"
+    client._gpu_transport = "cuda_ipc"
     client._timeout = None
     client._session = FakeSession()
 
@@ -315,7 +316,7 @@ def test_client_request_releases_input_exports(patched_cuda):
 
 
 def test_client_request_cpu_only_payload_skips_release(monkeypatch):
-    """A cuda_ipc request with no GPU inputs must not touch the release path.
+    """A cuda_ipc-transport request with no GPU inputs skips the release path.
 
     Nothing gets pinned, so _request must not import/call the cuda_ipc runtime
     for cleanup -- otherwise a base install (no runtime extra) would spuriously
@@ -346,7 +347,8 @@ def test_client_request_cpu_only_payload_skips_release(monkeypatch):
     client = HTTPClient.__new__(HTTPClient)
     client._url = "http://localhost:8000"
     client._output_path = None
-    client._output_format = "json+cuda_ipc"
+    client._output_format = "json+base64"
+    client._gpu_transport = "cuda_ipc"
     client._timeout = None
     client._session = FakeSession()
 
@@ -608,15 +610,74 @@ def _info(json_mode: bool, ctx: dict):
     return types.SimpleNamespace(context=ctx, mode_is_json=lambda: json_mode)
 
 
-def test_encode_array_cuda_ipc_requires_cuda_array():
-    """cuda_ipc in JSON mode rejects a plain host array."""
-    with pytest.raises(ValueError, match="cuda_ipc encoding requires a CUDA array"):
-        array_encoding.encode_array(
-            np.arange(3),
-            _info(True, {"array_encoding": "cuda_ipc"}),
-            (None,),
-            "int64",
-        )
+def test_encode_array_cuda_ipc_falls_back_to_host_for_cpu_array():
+    """A host array under a cuda_ipc device transport falls back to host encoding.
+
+    array_encoding (CPU) and device_transport (GPU) are orthogonal: a GPU leaf is
+    exported by handle, but a plain CPU leaf in the same response is serialized
+    over the host encoding (base64 here) rather than failing the whole response.
+    """
+    import pybase64
+
+    out = array_encoding.encode_array(
+        np.arange(3, dtype=np.int64),
+        _info(True, {"array_encoding": "base64", "device_transport": "cuda_ipc"}),
+        (None,),
+        "int64",
+    )
+    assert out["data"]["encoding"] == "base64"
+    decoded = np.frombuffer(pybase64.b64decode(out["data"]["buffer"]), dtype=np.int64)
+    np.testing.assert_array_equal(decoded, np.arange(3))
+
+
+def test_encode_array_cuda_ipc_exports_gpu_leaf(patched_cuda):
+    """A GPU leaf under a cuda_ipc device transport is exported by handle."""
+    out = array_encoding.encode_array(
+        FakeCudaArray((3,), "<f4"),
+        _info(True, {"array_encoding": "base64", "device_transport": "cuda_ipc"}),
+        (None,),
+        "float32",
+    )
+    assert out["data"]["encoding"] == "cuda_ipc"
+
+
+def test_output_to_bytes_mixed_gpu_and_cpu_arrays(patched_cuda):
+    """A single response carries a GPU leaf and a CPU leaf together.
+
+    The GPU array is exported over the cuda_ipc device transport; the plain host
+    array in the same model falls back to the base64 host encoding. Before the
+    host/device axes were split this raised, because cuda_ipc was applied to
+    every leaf uniformly and rejected the CPU one.
+    """
+    import orjson
+    import pybase64
+    from pydantic import BaseModel
+
+    from tesseract_core.runtime import config
+    from tesseract_core.runtime.file_interactions import output_to_bytes
+    from tesseract_core.runtime.schema_types import Array, Float32
+
+    config.update_config(gpu_transport="cuda_ipc")
+
+    class MixedModel(BaseModel):
+        model_config = {"arbitrary_types_allowed": True}
+        gpu: Array[(3,), Float32]
+        cpu: Array[(3,), Float32]
+
+    model = MixedModel.model_construct(
+        gpu=FakeCudaArray((3,), "<f4"),
+        cpu=np.arange(3, dtype=np.float32),
+    )
+    payload = orjson.loads(
+        output_to_bytes(model, "json+base64", gpu_transport="cuda_ipc")
+    )
+
+    assert payload["gpu"]["data"]["encoding"] == "cuda_ipc"
+    assert payload["cpu"]["data"]["encoding"] == "base64"
+    decoded_cpu = np.frombuffer(
+        pybase64.b64decode(payload["cpu"]["data"]["buffer"]), dtype=np.float32
+    )
+    np.testing.assert_array_equal(decoded_cpu, np.arange(3, dtype=np.float32))
 
 
 def test_cuda_array_to_host_branches():
@@ -647,37 +708,46 @@ def test_cuda_array_to_host_branches():
         cuda_ipc.cuda_array_to_host(object())
 
 
-# ── experimental feature flag gating ────────────────────────────────────
+# ── GPU-transport gating ────────────────────────────────────────────────
 
 
-def test_output_to_bytes_rejects_cuda_ipc_by_default():
-    """Without the experimental flag, json+cuda_ipc is not an accepted format."""
+def test_output_to_bytes_rejects_cuda_ipc_transport_by_default():
+    """Without a configured gpu_transport, cuda_ipc is not an accepted transport."""
     from tesseract_core.runtime import config, file_interactions
 
-    config.update_config(enable_experimental_cuda_ipc=False)
-    with pytest.raises(ValueError, match=r"Unsupported format json\+cuda_ipc"):
-        file_interactions.output_to_bytes({"y": 1}, "json+cuda_ipc")
+    config.update_config(gpu_transport="none")
+    with pytest.raises(ValueError, match=r"Unsupported GPU transport cuda_ipc"):
+        file_interactions.output_to_bytes(
+            {"y": 1}, "json+base64", gpu_transport="cuda_ipc"
+        )
 
 
-def test_available_formats_reflects_flag():
+def test_available_gpu_transports_reflects_config():
     from tesseract_core.runtime import config
+    from tesseract_core.runtime.file_interactions import available_gpu_transports
+
+    config.update_config(gpu_transport="none")
+    assert available_gpu_transports() == ("none",)
+
+    config.update_config(gpu_transport="cuda_ipc")
+    assert "cuda_ipc" in available_gpu_transports()
+
+
+def test_output_formats_never_include_cuda_ipc():
+    """The host-array output formats are the three stable ones, always."""
     from tesseract_core.runtime.file_interactions import available_formats
 
-    config.update_config(enable_experimental_cuda_ipc=False)
-    assert "json+cuda_ipc" not in available_formats()
-
-    config.update_config(enable_experimental_cuda_ipc=True)
-    assert "json+cuda_ipc" in available_formats()
+    assert available_formats() == ("json", "json+base64", "json+binref")
 
 
-# ── format -> encoding-context mapping ──────────────────────────────────
+# ── format + transport -> encoding-context mapping ──────────────────────
 
 
-def test_output_to_bytes_cuda_ipc_context(monkeypatch):
-    """json+cuda_ipc maps to the cuda_ipc array-encoding context (flag enabled)."""
+def test_output_to_bytes_splits_host_encoding_and_device_transport(monkeypatch):
+    """Format sets array_encoding (CPU); gpu_transport sets device_transport (GPU)."""
     from tesseract_core.runtime import config, file_interactions
 
-    config.update_config(enable_experimental_cuda_ipc=True)
+    config.update_config(gpu_transport="cuda_ipc")
     captured = {}
 
     class FakeAdapter:
@@ -691,8 +761,16 @@ def test_output_to_bytes_cuda_ipc_context(monkeypatch):
     monkeypatch.setattr(file_interactions, "TypeAdapter", FakeAdapter)
     monkeypatch.setattr(file_interactions.orjson, "dumps", lambda d: b"{}")
 
-    file_interactions.output_to_bytes({"y": 1}, "json+cuda_ipc")
-    assert captured["context"] == {"array_encoding": "cuda_ipc"}
+    file_interactions.output_to_bytes({"y": 1}, "json+base64", gpu_transport="cuda_ipc")
+    assert captured["context"] == {
+        "array_encoding": "base64",
+        "compression": None,
+        "device_transport": "cuda_ipc",
+    }
+
+    # Default gpu_transport leaves device_transport unset (None).
+    file_interactions.output_to_bytes({"y": 1}, "json")
+    assert captured["context"] == {"array_encoding": "json", "device_transport": None}
 
 
 # ── libcudart discovery (wheel-installed CUDA) ──────────────────────────

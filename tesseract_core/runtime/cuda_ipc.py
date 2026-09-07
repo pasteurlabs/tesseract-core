@@ -3,10 +3,11 @@
 
 """CUDA IPC array encoding: zero-copy GPU array exchange between processes.
 
-This module holds everything specific to the ``json+cuda_ipc`` encoding, kept
-separate from the framework-agnostic host encodings in
-:mod:`tesseract_core.runtime.array_encoding`. Nothing here is imported unless a
-Tesseract actually encodes or decodes a CUDA IPC array, so the CUDA runtime and
+This module holds everything specific to the ``cuda_ipc`` GPU transport (the
+``encoding: "cuda_ipc"`` wire form), kept separate from the framework-agnostic
+host encodings in :mod:`tesseract_core.runtime.array_encoding`. Nothing here is
+imported unless a Tesseract actually encodes or decodes a CUDA IPC array, so the
+CUDA runtime and
 driver libraries are only touched on that path.
 
 The JSON schema for this encoding (``CudaIpcArrayData``) lives alongside the
@@ -1190,7 +1191,7 @@ def validate_cuda_array(
 
 
 class CudaIpcTransport:
-    """DeviceTransport backend for the legacy same-host ``json+cuda_ipc`` mode."""
+    """DeviceTransport backend for the same-host ``cuda_ipc`` GPU transport."""
 
     name = "cuda_ipc"
     reach = "same_host"

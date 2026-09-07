@@ -140,15 +140,16 @@ def test_create_rest_api_apply_endpoint(http_client, dummy_tesseract_module, for
     assert np.array_equal(result, np.array([3.5, 6.0, 8.5]))
 
 
-def test_apply_rejects_experimental_cuda_ipc_by_default(dummy_tesseract_module):
-    """The experimental json+cuda_ipc format is refused unless explicitly enabled.
+def test_apply_rejects_cuda_ipc_as_output_format(dummy_tesseract_module):
+    """``json+cuda_ipc`` is not a host output format and is refused via Accept.
 
-    A Tesseract must not produce CUDA IPC handles in production unless the
-    ``enable_experimental_cuda_ipc`` runtime flag is set.
+    cuda_ipc is a GPU *transport* (chosen by the server's ``gpu_transport``
+    config), not a host-array output format, so it is never an accepted
+    ``Accept`` value regardless of configuration.
     """
     from tesseract_core.runtime.config import update_config
 
-    update_config(enable_experimental_cuda_ipc=False)
+    update_config(gpu_transport="none")
     client = TestClient(
         create_rest_api(dummy_tesseract_module), raise_server_exceptions=False
     )
@@ -158,8 +159,60 @@ def test_apply_rejects_experimental_cuda_ipc_by_default(dummy_tesseract_module):
         json={"inputs": model_to_json(test_inputs)},
         headers={"Accept": "application/json+cuda_ipc"},
     )
-    # Rejected server-side (the format is not in the accepted set).
+    # Rejected server-side (not a host output format).
     assert response.status_code >= 400
+
+
+def test_apply_accept_gpu_transport_param_reaches_validation(dummy_tesseract_module):
+    """A gpu_transport Accept parameter is honoured (and validated) per request.
+
+    With no transport configured, an Accept requesting ``gpu_transport=cuda_ipc``
+    is rejected -- proving the header parameter reaches ``output_to_bytes``'s
+    accepted-transport check rather than being silently ignored.
+    """
+    from tesseract_core.runtime.config import update_config
+
+    update_config(gpu_transport="none")
+    client = TestClient(
+        create_rest_api(dummy_tesseract_module), raise_server_exceptions=False
+    )
+    test_inputs = dummy_tesseract_module.InputSchema.model_validate(test_input)
+    response = client.post(
+        "/apply",
+        json={"inputs": model_to_json(test_inputs)},
+        headers={"Accept": "application/json+base64; gpu_transport=cuda_ipc"},
+    )
+    assert response.status_code >= 400
+
+
+def test_apply_accept_gpu_transport_param_overrides_config(dummy_tesseract_module):
+    """An Accept ``gpu_transport=none`` overrides a configured transport per request.
+
+    The dummy Tesseract returns host arrays, so opting the transport back to
+    ``none`` for this request must succeed and serialize normally, even though
+    the server is configured with cuda_ipc. Proves the header wins over config
+    when present.
+    """
+    from tesseract_core.runtime.config import update_config
+
+    update_config(gpu_transport="cuda_ipc")
+    try:
+        client = TestClient(
+            create_rest_api(dummy_tesseract_module), raise_server_exceptions=False
+        )
+        test_inputs = dummy_tesseract_module.InputSchema.model_validate(test_input)
+        response = client.post(
+            "/apply",
+            json={"inputs": model_to_json(test_inputs)},
+            headers={"Accept": "application/json+base64; gpu_transport=none"},
+        )
+        assert response.status_code == 200, response.text
+        result = array_from_json(
+            response.json()["result"], Path(get_config().output_path)
+        )
+        assert np.array_equal(result, np.array([3.5, 6.0, 8.5]))
+    finally:
+        update_config(gpu_transport="none")
 
 
 def test_create_rest_api_jacobian_endpoint(http_client, dummy_tesseract_module):

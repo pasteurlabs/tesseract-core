@@ -757,16 +757,16 @@ def test_decode_is_cupy_free():
                 proc.join(timeout=5)
 
 
-# ── Test 5: full Tesseract API with json+cuda_ipc output format ─────────
+# ── Test 5: full Tesseract API with the cuda_ipc GPU transport ──────────
 
 
 @requires_cuda
 def test_tesseract_api_cuda_ipc_local():
-    """A Tesseract served with ``json+cuda_ipc`` returns correct results.
+    """A Tesseract served with ``gpu_transport='cuda_ipc'`` returns correct results.
 
     The apply function returns a NumPy (host) array, which the runtime encodes
-    via base64 fallback; this checks the format plumbs through end to end
-    without breaking non-GPU outputs.
+    via the host output format; this checks the transport plumbs through end to
+    end without breaking non-GPU outputs.
     """
     api_code = """
 import numpy as np
@@ -789,11 +789,12 @@ def apply(inputs: InputSchema) -> OutputSchema:
 
         from tesseract_core.sdk.tesseract import Tesseract
 
-        # json+cuda_ipc is experimental and off by default; opt in explicitly.
+        # The cuda_ipc GPU transport is experimental and off by default; opt in
+        # explicitly via gpu_transport (independent of the host output format).
         with Tesseract.from_tesseract_api(
             api_path,
-            output_format="json+cuda_ipc",
-            runtime_config={"enable_experimental_cuda_ipc": True},
+            output_format="json+base64",
+            runtime_config={"gpu_transport": "cuda_ipc"},
         ) as t:
             x = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
             result = t.apply({"x": x})

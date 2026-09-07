@@ -1654,36 +1654,37 @@ def _stub_serve_docker(monkeypatch):
     return captured
 
 
-def test_serve_cuda_ipc_adds_ipc_host(monkeypatch):
-    """json+cuda_ipc serving passes --ipc=host to the container runtime."""
-    captured = _stub_serve_docker(monkeypatch)
-
-    engine.serve(
-        "my-image",
-        output_format="json+cuda_ipc",
-        gpus=["all"],
-        runtime_config={"enable_experimental_cuda_ipc": True},
-        skip_health_check=True,
-    )
-    assert "--ipc=host" in captured["extra_args"]
-
-
-def test_serve_experimental_cuda_ipc_adds_ipc_host_any_format(monkeypatch):
-    """Enabling the flag wires --ipc=host regardless of the output format."""
+def test_serve_cuda_ipc_transport_adds_ipc_host(monkeypatch):
+    """gpu_transport='cuda_ipc' serving passes --ipc=host to the container runtime."""
     captured = _stub_serve_docker(monkeypatch)
 
     engine.serve(
         "my-image",
         output_format="json+base64",
         gpus=["all"],
-        runtime_config={"enable_experimental_cuda_ipc": True},
+        runtime_config={"gpu_transport": "cuda_ipc"},
         skip_health_check=True,
     )
     assert "--ipc=host" in captured["extra_args"]
 
 
-def test_serve_experimental_cuda_ipc_errors_without_gpus(monkeypatch):
-    """Enabling the flag without GPU access is a startup error, not a warning."""
+def test_serve_cuda_ipc_transport_ipc_host_independent_of_format(monkeypatch):
+    """The transport wires --ipc=host regardless of the host output format."""
+    captured = _stub_serve_docker(monkeypatch)
+
+    engine.serve(
+        "my-image",
+        output_format="json+binref",
+        output_path="/tmp",
+        gpus=["all"],
+        runtime_config={"gpu_transport": "cuda_ipc"},
+        skip_health_check=True,
+    )
+    assert "--ipc=host" in captured["extra_args"]
+
+
+def test_serve_cuda_ipc_transport_errors_without_gpus(monkeypatch):
+    """Selecting the cuda_ipc transport without GPU access is a startup error."""
     _stub_serve_docker(monkeypatch)
 
     with pytest.raises(ValueError, match="requires GPU access"):
@@ -1691,20 +1692,21 @@ def test_serve_experimental_cuda_ipc_errors_without_gpus(monkeypatch):
             "my-image",
             output_format="json+base64",
             gpus=None,
-            runtime_config={"enable_experimental_cuda_ipc": True},
+            runtime_config={"gpu_transport": "cuda_ipc"},
             skip_health_check=True,
         )
 
 
-def test_serve_cuda_ipc_errors_without_experimental_flag(monkeypatch):
-    """Requesting the cuda_ipc format without the flag is a startup error."""
+def test_serve_unknown_gpu_transport_errors(monkeypatch):
+    """An unknown gpu_transport value is a startup error."""
     _stub_serve_docker(monkeypatch)
 
-    with pytest.raises(ValueError, match="experimental"):
+    with pytest.raises(ValueError, match="Unknown gpu_transport"):
         engine.serve(
             "my-image",
-            output_format="json+cuda_ipc",
+            output_format="json+base64",
             gpus=["all"],
+            runtime_config={"gpu_transport": "bogus"},
             skip_health_check=True,
         )
 

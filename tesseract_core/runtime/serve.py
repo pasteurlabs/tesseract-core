@@ -14,7 +14,7 @@ from pydantic import BaseModel
 
 from .config import get_config
 from .core import create_endpoints
-from .file_interactions import SUPPORTED_FORMATS, join_paths, output_to_bytes
+from .file_interactions import join_paths, output_to_bytes, parse_accept_header
 from .mpa import start_run
 from .profiler import Profiler
 
@@ -25,19 +25,38 @@ GET_ENDPOINTS = {"health"}
 def create_response(
     model: BaseModel, accept: str, base_dir: str | None, binref_dir: str | None
 ) -> Response:
-    """Create a response of the format specified by the Accept header."""
+    """Create a response of the format specified by the Accept header.
+
+    The ``Accept`` media type selects the host-array output format. How GPU
+    arrays leave the process is a separate axis: it may ride the header as a
+    ``gpu_transport`` media-type parameter
+    (``application/json+base64; gpu_transport=cuda_ipc``), and when the header
+    omits it the served Tesseract's ``gpu_transport`` config applies. So a raw
+    HTTP client can opt in (or out) per request on top of the served default.
+    """
     config = get_config()
 
     if accept is None or accept == "*/*":
         output_format = config.output_format
+        gpu_transport = config.gpu_transport
     else:
-        output_format: SUPPORTED_FORMATS = accept.split("/")[-1]
+        output_format, requested_transport = parse_accept_header(accept)
+        # Header wins when it names a transport; otherwise fall back to config.
+        gpu_transport = (
+            requested_transport
+            if requested_transport is not None
+            else config.gpu_transport
+        )
 
     if base_dir is None:
         base_dir = config.output_path
 
     content = output_to_bytes(
-        model, output_format, base_dir=base_dir, binref_dir=binref_dir
+        model,
+        output_format,
+        base_dir=base_dir,
+        binref_dir=binref_dir,
+        gpu_transport=gpu_transport,
     )
     return Response(status_code=200, content=content, media_type=accept)
 
@@ -67,16 +86,16 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
         async def wrapper(*args: Any, accept: str, run_id: str | None, **kwargs: Any):
             config = get_config()
 
-            # Release GPU buffers exported via cuda_ipc by the previous request.
-            # Releasing at the start of each request keeps every export alive
-            # long enough for a serial client to copy it out of the response
-            # before it is reclaimed. See cuda_ipc for the assumptions this
-            # relies on. Gated on the experimental flag so the production path
-            # never imports the CUDA machinery.
-            if config.enable_experimental_cuda_ipc:
+            # Release device buffers exported by the previous request's GPU
+            # transport. Releasing at the start of each request keeps every
+            # export alive long enough for a serial client to copy it out of the
+            # response before it is reclaimed. See cuda_ipc for the assumptions
+            # this relies on. Gated on a configured GPU transport so the default
+            # path never imports the CUDA machinery.
+            if config.gpu_transport != "none":
                 from tesseract_core.runtime.device_transport import get_transport
 
-                get_transport("cuda_ipc").release()
+                get_transport(config.gpu_transport).release()
 
             if run_id is None:
                 run_id = str(uuid.uuid4())

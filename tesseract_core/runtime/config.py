@@ -15,7 +15,10 @@ from pydantic import (
     field_validator,
 )
 
-from tesseract_core.runtime.file_interactions import supported_format_type
+from tesseract_core.runtime.file_interactions import (
+    gpu_transport_type,
+    supported_format_type,
+)
 
 
 def _eval_str(obj: Any) -> Any:
@@ -49,12 +52,14 @@ class RuntimeConfig(BaseModel):
     )
     profiling: bool = False
     tracing: bool = False
-    # Experimental, unstable opt-in: allow the json+cuda_ipc output format, which
-    # passes GPU arrays by CUDA IPC handle instead of serializing their data.
-    # Off by default so a Tesseract never produces IPC handles unless explicitly
-    # enabled (e.g. TESSERACT_ENABLE_EXPERIMENTAL_CUDA_IPC=1). May change or be
-    # removed without notice.
-    enable_experimental_cuda_ipc: bool = False
+    # How device (GPU) arrays leave the process. ``none`` (default) copies them
+    # to the host and serializes them via ``output_format`` like any CPU array,
+    # so a Tesseract never emits by-reference handles unless explicitly opted in.
+    # Any other value (e.g. ``cuda_ipc``, set via TESSERACT_GPU_TRANSPORT=cuda_ipc)
+    # exports device memory by reference without a host round-trip. This is an
+    # experimental, unstable capability that may change or be removed without
+    # notice. Independent of ``output_format``, which only governs CPU arrays.
+    gpu_transport: gpu_transport_type = "none"
 
     @field_validator("input_path", "output_path")
     @classmethod

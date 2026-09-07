@@ -61,7 +61,7 @@ docker_client = CLIDockerClient()
 # the SDK, e.g. sdk.tesseract). Mirrors runtime.file_interactions.supported_format_type
 # but is defined here so the SDK does not eagerly import the (optional) runtime
 # package; a test asserts the two stay in sync.
-OutputFormat: TypeAlias = Literal["json", "json+base64", "json+binref", "json+cuda_ipc"]
+OutputFormat: TypeAlias = Literal["json", "json+base64", "json+binref"]
 
 # Fixed port the API server binds *inside* the container when port-mapping is
 # used (i.e. everything except host networking). The container has its own
@@ -1104,25 +1104,22 @@ def serve(
         if docker_args:
             extra_args.extend(docker_args)
 
-        # CUDA IPC needs a GPU and a shared IPC namespace between host and
-        # container. Wire both up whenever the experimental flag is set (the
+        # The cuda_ipc GPU transport needs a GPU and a shared IPC namespace
+        # between host and container. Wire both up whenever it is selected (the
         # only reason to enable it is IPC).
-        cuda_ipc_enabled = environment.get(
-            "TESSERACT_ENABLE_EXPERIMENTAL_CUDA_IPC"
-        ) in ("1", "true", "True")
+        gpu_transport = environment.get("TESSERACT_GPU_TRANSPORT", "none")
 
-        if cuda_ipc_enabled:
+        if gpu_transport == "cuda_ipc":
             if not gpus:
                 raise ValueError(
-                    "enable_experimental_cuda_ipc requires GPU access, but no GPUs "
+                    "gpu_transport='cuda_ipc' requires GPU access, but no GPUs "
                     "were requested. Pass gpus=['all'] or specific GPU IDs."
                 )
             extra_args.extend(["--ipc=host"])
-        elif output_format == "json+cuda_ipc":
+        elif gpu_transport != "none":
             raise ValueError(
-                "The 'json+cuda_ipc' output format is experimental and must be "
-                "explicitly enabled. Pass "
-                "runtime_config={'enable_experimental_cuda_ipc': True}."
+                f"Unknown gpu_transport {gpu_transport!r}. "
+                "Supported values: 'none', 'cuda_ipc'."
             )
 
         if network is not None:

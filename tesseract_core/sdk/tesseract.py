@@ -413,6 +413,10 @@ class Tesseract:
         output_path = self._spawn_config.get("output_path")
         input_path = self._spawn_config.get("input_path")
         output_format = self._spawn_config.get("output_format", "json+base64")
+        # The served container's gpu_transport (set via runtime_config) also
+        # governs how the client exports GPU *inputs*, so mirror it here.
+        runtime_config = self._spawn_config.get("runtime_config") or {}
+        gpu_transport = runtime_config.get("gpu_transport", "none")
         self._client = HTTPClient(
             f"http://{host_ip}:{container.host_port}",
             output_path=Path(output_path) if output_path else None,
@@ -420,6 +424,7 @@ class Tesseract:
             timeout=self._timeout,
             input_path=Path(input_path) if input_path else None,
             experimental_binref_pool=self._binref_pool_enabled,
+            gpu_transport=gpu_transport,
         )
 
         # Ensure that the Tesseract is torn down once the object is garbage collected,
@@ -710,16 +715,16 @@ def _tree_map(func: Callable, tree: Any, is_leaf: Callable | None = None) -> Any
 def _import_cuda_ipc() -> ModuleType:
     """Import the cuda_ipc runtime module, or explain the missing extra.
 
-    The ``json+cuda_ipc`` output format lives in ``tesseract_core.runtime``,
-    which is an optional install (``tesseract-core[runtime]``). A base SDK
-    install lacks its dependencies, so surface a clear message pointing at the
-    extra instead of a bare ``ModuleNotFoundError`` from deep in the import chain.
+    The ``cuda_ipc`` GPU transport lives in ``tesseract_core.runtime``, which is
+    an optional install (``tesseract-core[runtime]``). A base SDK install lacks
+    its dependencies, so surface a clear message pointing at the extra instead of
+    a bare ``ModuleNotFoundError`` from deep in the import chain.
     """
     try:
         from tesseract_core.runtime import cuda_ipc
     except ImportError as exc:
         raise ImportError(
-            "The 'json+cuda_ipc' output format requires the Tesseract runtime, "
+            "The 'cuda_ipc' GPU transport requires the Tesseract runtime, "
             "which is an optional dependency. Install it with "
             "'pip install tesseract-core[runtime]'."
         ) from exc
@@ -729,10 +734,10 @@ def _import_cuda_ipc() -> ModuleType:
 def _encode_array(
     arr: Any, encoding: Literal["base64", "raw", "cuda_ipc"] = "base64"
 ) -> dict:
-    # With cuda_ipc encoding, GPU arrays are exported by reference via a CUDA IPC
-    # handle, keeping the data on-device. Any other array (or any other encoding)
-    # falls through to a host copy below, so a mixed payload (some GPU, some CPU
-    # arrays) encodes correctly either way.
+    # With the cuda_ipc device transport, GPU arrays are exported by reference via
+    # a CUDA IPC handle, keeping the data on-device. Any other array (or any other
+    # encoding) falls through to a host copy below, so a mixed payload (some GPU,
+    # some CPU arrays) encodes correctly either way.
     if encoding == "cuda_ipc" and hasattr(arr, "__cuda_array_interface__"):
         return _import_cuda_ipc().dump_cuda_ipc_arraydict(arr)
 
@@ -758,16 +763,19 @@ def _encode_array(
 
 
 @contextmanager
-def _encode_payload(payload: dict | None, output_format: str) -> Iterator[dict | None]:
-    """Encode a request payload's arrays, managing CUDA IPC export lifetime.
+def _encode_payload(
+    payload: dict | None, gpu_transport: str = "none"
+) -> Iterator[dict | None]:
+    """Encode a request payload's arrays, managing device-export lifetime.
 
-    Yields the encoded payload (or None for an empty payload). For the
-    ``json+cuda_ipc`` format, GPU arrays are exported by reference (base64 for
-    CPU arrays), which pins each exported allocation in a process-global registry
-    on the runtime side. Those pins are released on context exit -- by then the
-    caller has read the full response, so the server has copied the inputs out
-    and they are provably dead. The release is skipped (and cuda_ipc never
-    imported) when no GPU array was actually exported.
+    Yields the encoded payload (or None for an empty payload). When a
+    ``gpu_transport`` other than ``none`` is set, GPU arrays are exported by
+    reference (host arrays still go base64), which pins each exported allocation
+    in a process-global registry on the runtime side. Those pins are released on
+    context exit -- by then the caller has read the full response, so the server
+    has copied the inputs out and they are provably dead. The release is skipped
+    (and the transport machinery never imported) when no GPU array was actually
+    exported.
 
     Releasing on exit rather than at the start of the next request keeps pinned
     GPU memory bounded to a single in-flight request.
@@ -776,21 +784,23 @@ def _encode_payload(payload: dict | None, output_format: str) -> Iterator[dict |
         yield None
         return
 
-    if output_format != "json+cuda_ipc":
+    if gpu_transport == "none":
         yield _tree_map(
             _encode_array, payload, is_leaf=lambda x: hasattr(x, "__array__")
         )
         return
 
-    # cuda_ipc: a leaf is any array-like on either protocol; GPU leaves are
-    # exported by handle and pin their allocation until we release below.
+    # A device transport is set: a leaf is any array-like on either protocol;
+    # GPU leaves are exported by handle and pin their allocation until we release
+    # below. CPU leaves fall back to base64 inside _encode_array, so a mixed
+    # payload encodes correctly.
     exported = False
 
     def _encode_leaf(x: Any) -> dict:
         nonlocal exported
         if hasattr(x, "__cuda_array_interface__"):
             exported = True
-        return _encode_array(x, encoding="cuda_ipc")
+        return _encode_array(x, encoding=gpu_transport)
 
     def _is_leaf(x: Any) -> bool:
         return hasattr(x, "__array__") or hasattr(x, "__cuda_array_interface__")
@@ -927,6 +937,7 @@ class HTTPClient:
     # still expose the binref attributes the request/decode paths read.
     _input_path: Path | None = None
     _binref_pool: BinrefWritePool | None = None
+    _gpu_transport: str = "none"
 
     def __init__(
         self,
@@ -936,10 +947,12 @@ class HTTPClient:
         timeout: float | tuple[float, float] | None = None,
         input_path: str | Path | None = None,
         experimental_binref_pool: bool = False,
+        gpu_transport: str = "none",
     ) -> None:
         self._url = self._sanitize_url(url)
         self._output_path = output_path
         self._output_format = output_format
+        self._gpu_transport = gpu_transport
         self._input_path = Path(input_path) if input_path is not None else None
         self._timeout = timeout
         self._session = requests.Session()
@@ -1044,11 +1057,11 @@ class HTTPClient:
                     for slot in checked_out_slots:
                         self._binref_pool.checkin(slot)
 
-        # Non-binref path: _encode_payload handles base64 and cuda_ipc, holding
-        # any exported GPU inputs alive until the response has been fully read.
-        # `requests` buffers the whole body before `_send` returns, so exiting
-        # the block afterwards releases them at the earliest safe point.
-        with _encode_payload(payload, self._output_format) as encoded_payload:
+        # Non-binref path: _encode_payload handles base64 and the GPU transport,
+        # holding any exported GPU inputs alive until the response has been fully
+        # read. `requests` buffers the whole body before `_send` returns, so
+        # exiting the block afterwards releases them at the earliest safe point.
+        with _encode_payload(payload, self._gpu_transport) as encoded_payload:
             response = self._send(url, method, orjson.dumps(encoded_payload), params)
         return self._decode_response(response, endpoint)
 

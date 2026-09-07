@@ -4,11 +4,12 @@
 """Pluggable device-array transports.
 
 A *device transport* moves a GPU array's bytes from a producer process to a
-consumer process without a host round-trip. The legacy ``json+cuda_ipc``
-encoding is the first such transport; this module defines the common interface
-they share so further transports (VMM-fd map-and-read, and later cross-host
-NCCL/NIXL) slot in behind one negotiation path instead of each bolting a new
-encoder, wire format, and release hook onto the runtime.
+consumer process without a host round-trip. It is selected via the runtime's
+``gpu_transport`` config, independently of the host-array output format;
+``cuda_ipc`` is the first such transport. This module defines the common
+interface they share so further transports (VMM-fd map-and-read, and later
+cross-host NCCL/NIXL) slot in behind one negotiation path instead of each
+bolting a new encoder, wire format, and release hook onto the runtime.
 
 The interface deliberately mirrors the lifecycle the ``cuda_ipc`` code already
 follows, so wrapping it changes no behavior:
@@ -156,11 +157,13 @@ def available_transports() -> tuple[str, ...]:
 
     This reports what has been *registered*, not what a Tesseract will actually
     accept: registration says the code exists, whereas whether a transport may be
-    used is gated separately (e.g. ``json+cuda_ipc`` is only an accepted output
-    format when ``enable_experimental_cuda_ipc`` is set; see
-    :func:`tesseract_core.runtime.file_interactions.available_formats`). A caller
-    deciding what to offer a client -- a transport-negotiation endpoint, say --
-    must apply that gating itself and not treat this list as the enabled set.
+    used is gated separately (a by-reference transport such as ``cuda_ipc`` is
+    only offered when the runtime is configured with a non-``none``
+    ``gpu_transport``; see
+    :func:`tesseract_core.runtime.file_interactions.available_gpu_transports`). A
+    caller deciding what to offer a client -- a transport-negotiation endpoint,
+    say -- must apply that gating itself and not treat this list as the enabled
+    set.
 
     Note also that a built-in transport registers on first
     :func:`get_transport`, so a name can be usable before it appears here.
