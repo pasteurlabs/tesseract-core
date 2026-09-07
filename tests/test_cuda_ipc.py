@@ -386,17 +386,26 @@ def test_encode_rejects_non_contiguous():
 def test_same_process_open_is_unsupported():
     """Sanity: CUDA refuses to open an IPC handle in the exporting process.
 
-    This documents *why* every decode test must be cross-process.
+    This documents *why* every decode test must be cross-process. It also covers
+    the decode path's sticky-error draining: the expected cudaIpcOpenMemHandle
+    failure must not leak into an unrelated later CUDA call (see
+    test_failed_get_mem_handle_clears_sticky_error for the full rationale).
     """
     from tesseract_core.runtime.cuda_ipc import (
+        _get_cudart,
         dump_cuda_ipc_arraydict,
         load_cuda_ipc_arraydict,
     )
+
+    cudart = _get_cudart()
+    cudart.cudaGetLastError()  # drain any pre-existing error
 
     arr = cupy.arange(16, dtype=cupy.float32)
     encoded = dump_cuda_ipc_arraydict(arr)
     with pytest.raises(RuntimeError, match="cudaIpcOpenMemHandle failed"):
         load_cuda_ipc_arraydict(encoded)
+
+    assert cudart.cudaGetLastError() == 0
 
 
 @requires_cuda
