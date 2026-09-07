@@ -477,23 +477,29 @@ def load_cuda_ipc_arraydict(val: ArrayDict) -> "IpcDeviceArray":
     shape = tuple(val["shape"])
     nbytes = int(np.prod(shape)) * dtype.itemsize if shape else dtype.itemsize
 
-    # Allocate the owned buffer up front (on the target device) so that if the
-    # copy fails we still close the IPC mapping and free the buffer cleanly.
+    # Allocate the owned buffer up front (on the target device) so that if any
+    # later step fails we still close the IPC mapping and free the buffer cleanly.
     cuda_api.set_device(device)
     owned_ptr = cuda_api.malloc(nbytes)
 
-    base_ptr = cuda_api.ipc_open_mem_handle(handle_bytes, device)
     try:
-        # Copy only this array's own bytes out of the producer's (offset)
-        # mapping into our fresh buffer, then block until the copy is done so we
-        # never unmap mid-copy.
-        cuda_api.memcpy_device_to_device(owned_ptr, base_ptr + storage_offset, nbytes)
-        cuda_api.device_synchronize()
+        # Opening the IPC handle can fail too; if it does, we still own the
+        # buffer allocated above and must free it (the except below).
+        base_ptr = cuda_api.ipc_open_mem_handle(handle_bytes, device)
+        try:
+            # Copy only this array's own bytes out of the producer's (offset)
+            # mapping into our fresh buffer, then block until the copy is done so
+            # we never unmap mid-copy.
+            cuda_api.memcpy_device_to_device(
+                owned_ptr, base_ptr + storage_offset, nbytes
+            )
+            cuda_api.device_synchronize()
+        finally:
+            # Only reached once the mapping was opened; always unmap it.
+            cuda_api.ipc_close_mem_handle(base_ptr)
     except Exception:
         cuda_api.free(owned_ptr)
         raise
-    finally:
-        cuda_api.ipc_close_mem_handle(base_ptr)
 
     return IpcDeviceArray(owned_ptr, device, shape, dtype)
 

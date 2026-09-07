@@ -1208,12 +1208,22 @@ def test_serve_retries_on_port_in_use(mocked_docker, monkeypatch):
     )
 
 
-def test_serve_retries_on_docker_publish_conflict(mocked_docker, monkeypatch):
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        b"docker: Error response from daemon: port is already allocated.",
+        b"Error: rootlessport listen tcp 0.0.0.0:8000: bind: address already in use",
+        b'Error: something went wrong with the request: "proxy already running"',
+    ],
+    ids=["docker", "podman-linux", "podman-machine"],
+)
+def test_serve_retries_on_docker_publish_conflict(mocked_docker, monkeypatch, stderr):
     """A host-port publish collision (ContainerError) triggers a retry.
 
     In port-mapping mode a lost port race fails when the Docker daemon tries to
     publish the host port -- ``containers.run`` raises ``ContainerError`` before
-    any container exists. This must be retried like the host-network case.
+    any container exists. This must be retried like the host-network case,
+    whichever runtime's wording reports it.
     """
     from tesseract_core.sdk.docker_client import ContainerError
 
@@ -1223,13 +1233,7 @@ def test_serve_retries_on_docker_publish_conflict(mocked_docker, monkeypatch):
     def flaky_run(**kwargs):
         calls["n"] += 1
         if calls["n"] <= 2:
-            raise ContainerError(
-                None,
-                125,
-                "docker run ...",
-                kwargs["image"],
-                b"docker: Error response from daemon: port is already allocated.",
-            )
+            raise ContainerError(None, 125, "docker run ...", kwargs["image"], stderr)
         return real_run(**kwargs)
 
     monkeypatch.setattr(mocked_docker.containers, "run", flaky_run)

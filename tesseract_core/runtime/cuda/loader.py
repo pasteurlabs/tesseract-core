@@ -247,7 +247,11 @@ def load_cudart() -> Any:
     cudart.cudaIpcCloseMemHandle.restype = ctypes.c_int
     cudart.cudaGetErrorString.argtypes = [ctypes.c_int]
     cudart.cudaGetErrorString.restype = ctypes.c_char_p
-    # Used by the VMM staging-buffer fallback (see runtime.stage_for_legacy_ipc).
+    # Used to drain the runtime API's sticky last-error after an expected failure
+    # (see the ``_check`` helper in the api module).
+    cudart.cudaGetLastError.argtypes = []
+    cudart.cudaGetLastError.restype = ctypes.c_int
+    # Used by the VMM staging-buffer fallback (see api.stage_for_legacy_ipc).
     cudart.cudaMalloc.argtypes = [ctypes.POINTER(ctypes.c_void_p), ctypes.c_size_t]
     cudart.cudaMalloc.restype = ctypes.c_int
     cudart.cudaFree.argtypes = [ctypes.c_void_p]

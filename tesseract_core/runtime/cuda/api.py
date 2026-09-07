@@ -62,8 +62,17 @@ def _error_string(code: int) -> str:
 
 
 def _check(code: int, what: str) -> None:
-    """Raise ``RuntimeError`` if a CUDA call returned a non-zero error code."""
+    """Raise ``RuntimeError`` if a CUDA call returned a non-zero error code.
+
+    A failed runtime call also sets the CUDA runtime API's *sticky* last-error.
+    Left uncleared, the next CUDA consumer in the process reads it as its own
+    failure -- e.g. after ``cudaIpcGetMemHandle`` rejects VMM/pool-backed memory
+    on the staging fallback path, JAX/XLA's next kernel launch aborts with
+    ``cudaErrorInvalidValue`` "before calling cuModuleGetFunction". Draining the
+    sticky error here keeps every expected failure contained to its own call.
+    """
     if code != 0:
+        _get_cudart().cudaGetLastError()
         raise RuntimeError(f"{what} failed: {_error_string(code)}")
 
 

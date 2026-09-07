@@ -416,6 +416,27 @@ def test_load_closes_handle_even_on_copy_failure(mocked_cuda, monkeypatch):
     assert mocked_cuda.calls["close"] == [0x2000]
 
 
+def test_load_frees_owned_buffer_on_open_failure(mocked_cuda, monkeypatch):
+    """A failed IPC open still frees the already-allocated owned buffer.
+
+    The owned buffer is allocated before the mapping is opened; if the open
+    fails there is no mapping to close, but the owned buffer must not leak.
+    """
+
+    def boom_open(handle_bytes, device):
+        raise RuntimeError("cudaIpcOpenMemHandle failed: simulated")
+
+    monkeypatch.setattr(cuda_api, "ipc_open_mem_handle", boom_open)
+
+    with pytest.raises(RuntimeError, match="cudaIpcOpenMemHandle"):
+        cuda_ipc.load_cuda_ipc_arraydict(
+            _encoded((2,), "float32", device=0, offset=0, storage_size=8)
+        )
+    # Owned buffer freed; nothing to close since the mapping never opened.
+    assert mocked_cuda.calls["free"] == [0xD000]
+    assert mocked_cuda.calls["close"] == []
+
+
 def test_copy_to_host_reads_device_bytes(mocked_cuda):
     """copy_to_host performs a device->host memcpy + sync and returns the bytes."""
     expected = np.arange(6, dtype=np.float32).reshape(2, 3)
