@@ -412,6 +412,7 @@ def patched_decode(monkeypatch):
         "free": [],
         "open": [],
         "close": [],
+        "get_last_error": [],
     }
     state: dict[str, Any] = {"owned_ptr": 0xD000, "buffer": None}
 
@@ -450,6 +451,10 @@ def patched_decode(monkeypatch):
 
         def cudaFree(self, ptr):
             calls["free"].append(getattr(ptr, "value", ptr))
+            return 0
+
+        def cudaGetLastError(self):
+            calls["get_last_error"].append(True)
             return 0
 
         def cudaGetErrorString(self, code):
@@ -554,6 +559,29 @@ def test_load_closes_handle_even_on_copy_failure(patched_decode, monkeypatch):
     # Owned buffer freed and the IPC mapping closed despite the failure.
     assert calls["free"] == [0xD000]
     assert calls["close"] == [0x2000]
+
+
+def test_load_frees_owned_buffer_on_open_failure(patched_decode, monkeypatch):
+    """A failed IPC open still frees the already-allocated owned buffer.
+
+    cudaMalloc runs before the mapping is opened; if the open fails there is no
+    mapping to close, but the owned buffer must not leak.
+    """
+    calls, _state = patched_decode
+
+    def boom_open(handle_bytes, device):
+        calls["open"].append((handle_bytes, device))
+        raise RuntimeError("cudaIpcOpenMemHandle failed")
+
+    monkeypatch.setattr(cuda_ipc, "_cuda_ipc_open_mem_handle", boom_open)
+
+    with pytest.raises(RuntimeError, match="cudaIpcOpenMemHandle"):
+        cuda_ipc.load_cuda_ipc_arraydict(
+            _encoded((2,), "float32", device=0, offset=0, storage_size=8)
+        )
+    # Owned buffer freed; nothing to close since the mapping never opened.
+    assert calls["free"] == [0xD000]
+    assert calls["close"] == []
 
 
 def test_copy_to_host_reads_device_bytes(patched_decode):

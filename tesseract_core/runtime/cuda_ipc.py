@@ -358,6 +358,10 @@ def _get_cudart():
     cudart.cudaIpcCloseMemHandle.restype = ctypes.c_int
     cudart.cudaGetErrorString.argtypes = [ctypes.c_int]
     cudart.cudaGetErrorString.restype = ctypes.c_char_p
+    # Needed to drain the runtime API's sticky last-error after an expected
+    # failure (see the callers of cudaGetLastError below).
+    cudart.cudaGetLastError.argtypes = []
+    cudart.cudaGetLastError.restype = ctypes.c_int
     # Used by the VMM staging-buffer fallback (see _stage_for_legacy_ipc).
     cudart.cudaMalloc.argtypes = [ctypes.POINTER(ctypes.c_void_p), ctypes.c_size_t]
     cudart.cudaMalloc.restype = ctypes.c_int
@@ -476,6 +480,14 @@ def _cuda_ipc_get_mem_handle(device_ptr: int) -> bytes:
     handle = _CudaIpcMemHandle()
     ret = cudart.cudaIpcGetMemHandle(ctypes.byref(handle), ctypes.c_void_p(device_ptr))
     if ret != 0:
+        # A failed cudaIpcGetMemHandle (notably on VMM/pool-backed memory, which
+        # this call rejects) sets the runtime API's *sticky* last-error. Left
+        # uncleared, the next CUDA consumer in the process reads it as its own
+        # failure -- e.g. JAX/XLA's next kernel launch aborts with
+        # cudaErrorInvalidValue "before calling cuModuleGetFunction". This call
+        # is expected to fail on the staging fallback path, so consume the sticky
+        # error before raising so the failure stays contained to this function.
+        cudart.cudaGetLastError()
         raise RuntimeError(
             f"cudaIpcGetMemHandle failed: {_cuda_error_string(cudart, ret)}"
         )
@@ -494,6 +506,7 @@ def _cuda_ipc_open_mem_handle(handle_bytes: bytes, device: int) -> int:
     # on).
     ret = cudart.cudaSetDevice(device)
     if ret != 0:
+        cudart.cudaGetLastError()
         raise RuntimeError(
             f"cudaSetDevice({device}) failed: {_cuda_error_string(cudart, ret)}"
         )
@@ -505,6 +518,7 @@ def _cuda_ipc_open_mem_handle(handle_bytes: bytes, device: int) -> int:
         ctypes.byref(dev_ptr), handle, ctypes.c_uint(_CUDA_IPC_LAZY_ENABLE_PEER_ACCESS)
     )
     if ret != 0:
+        cudart.cudaGetLastError()
         raise RuntimeError(
             f"cudaIpcOpenMemHandle failed: {_cuda_error_string(cudart, ret)}"
         )
@@ -522,6 +536,7 @@ def _cuda_ipc_close_mem_handle(device_ptr: int) -> None:
     cudart = _get_cudart()
     ret = cudart.cudaIpcCloseMemHandle(ctypes.c_void_p(device_ptr))
     if ret != 0:
+        cudart.cudaGetLastError()
         raise RuntimeError(
             f"cudaIpcCloseMemHandle failed: {_cuda_error_string(cudart, ret)}"
         )
@@ -558,6 +573,7 @@ def _stage_for_legacy_ipc(base_ptr: int, storage_size: int) -> int:
     staging_ptr = ctypes.c_void_p()
     ret = cudart.cudaMalloc(ctypes.byref(staging_ptr), ctypes.c_size_t(storage_size))
     if ret != 0:
+        cudart.cudaGetLastError()
         raise RuntimeError(f"cudaMalloc failed: {_cuda_error_string(cudart, ret)}")
 
     ret = cudart.cudaMemcpy(
@@ -568,6 +584,7 @@ def _stage_for_legacy_ipc(base_ptr: int, storage_size: int) -> int:
     )
     if ret != 0:
         cudart.cudaFree(staging_ptr)
+        cudart.cudaGetLastError()
         raise RuntimeError(f"cudaMemcpy failed: {_cuda_error_string(cudart, ret)}")
 
     return staging_ptr.value
@@ -928,11 +945,13 @@ class IpcDeviceArray:
             ctypes.c_int(_cudaMemcpyDeviceToHost),
         )
         if ret != 0:
+            cudart.cudaGetLastError()
             raise RuntimeError(
                 f"cudaMemcpy (device->host) failed: {_cuda_error_string(cudart, ret)}"
             )
         ret = cudart.cudaDeviceSynchronize()
         if ret != 0:
+            cudart.cudaGetLastError()
             raise RuntimeError(
                 f"cudaDeviceSynchronize failed: {_cuda_error_string(cudart, ret)}"
             )
@@ -1088,43 +1107,51 @@ def load_cuda_ipc_arraydict(val: ArrayDict) -> "IpcDeviceArray":
     shape = tuple(val["shape"])
     nbytes = int(np.prod(shape)) * dtype.itemsize if shape else dtype.itemsize
 
-    # Allocate the owned buffer up front (on the target device) so that if the
-    # copy fails we still close the IPC mapping and free the buffer cleanly.
+    # Allocate the owned buffer up front (on the target device) so that if any
+    # later step fails we still close the IPC mapping and free the buffer cleanly.
     ret = cudart.cudaSetDevice(device)
     if ret != 0:
+        cudart.cudaGetLastError()
         raise RuntimeError(
             f"cudaSetDevice({device}) failed: {_cuda_error_string(cudart, ret)}"
         )
     owned_ptr = ctypes.c_void_p()
     ret = cudart.cudaMalloc(ctypes.byref(owned_ptr), ctypes.c_size_t(nbytes))
     if ret != 0:
+        cudart.cudaGetLastError()
         raise RuntimeError(f"cudaMalloc failed: {_cuda_error_string(cudart, ret)}")
 
-    base_ptr = _cuda_ipc_open_mem_handle(handle_bytes, device)
     try:
-        # Copy only this array's own bytes out of the producer's (offset)
-        # mapping into our fresh buffer, then block until the copy is done so we
-        # never unmap mid-copy.
-        ret = cudart.cudaMemcpy(
-            owned_ptr,
-            ctypes.c_void_p(base_ptr + storage_offset),
-            ctypes.c_size_t(nbytes),
-            ctypes.c_int(_cudaMemcpyDeviceToDevice),
-        )
-        if ret != 0:
-            raise RuntimeError(
-                f"cudaMemcpy (device->device) failed: {_cuda_error_string(cudart, ret)}"
+        # Opening the IPC handle can fail too; if it does, we still own the
+        # cudaMalloc buffer above and must free it (the except below).
+        base_ptr = _cuda_ipc_open_mem_handle(handle_bytes, device)
+        try:
+            # Copy only this array's own bytes out of the producer's (offset)
+            # mapping into our fresh buffer, then block until the copy is done so
+            # we never unmap mid-copy.
+            ret = cudart.cudaMemcpy(
+                owned_ptr,
+                ctypes.c_void_p(base_ptr + storage_offset),
+                ctypes.c_size_t(nbytes),
+                ctypes.c_int(_cudaMemcpyDeviceToDevice),
             )
-        ret = cudart.cudaDeviceSynchronize()
-        if ret != 0:
-            raise RuntimeError(
-                f"cudaDeviceSynchronize failed: {_cuda_error_string(cudart, ret)}"
-            )
+            if ret != 0:
+                cudart.cudaGetLastError()
+                raise RuntimeError(
+                    f"cudaMemcpy (device->device) failed: {_cuda_error_string(cudart, ret)}"
+                )
+            ret = cudart.cudaDeviceSynchronize()
+            if ret != 0:
+                cudart.cudaGetLastError()
+                raise RuntimeError(
+                    f"cudaDeviceSynchronize failed: {_cuda_error_string(cudart, ret)}"
+                )
+        finally:
+            # Only reached once the mapping was opened; always unmap it.
+            _cuda_ipc_close_mem_handle(base_ptr)
     except Exception:
         cudart.cudaFree(owned_ptr)
         raise
-    finally:
-        _cuda_ipc_close_mem_handle(base_ptr)
 
     return IpcDeviceArray(owned_ptr.value, device, shape, dtype)
 
