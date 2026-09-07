@@ -358,9 +358,8 @@ def _get_cudart():
     cudart.cudaIpcCloseMemHandle.restype = ctypes.c_int
     cudart.cudaGetErrorString.argtypes = [ctypes.c_int]
     cudart.cudaGetErrorString.restype = ctypes.c_char_p
-    # Consumes and returns the runtime API's sticky last-error, resetting it to
-    # cudaSuccess (used to contain an expected failure, e.g. cudaIpcGetMemHandle
-    # on VMM memory, so it does not surface in an unrelated later CUDA call).
+    # Needed to drain the runtime API's sticky last-error after an expected
+    # failure (see the callers of cudaGetLastError below).
     cudart.cudaGetLastError.argtypes = []
     cudart.cudaGetLastError.restype = ctypes.c_int
     # Used by the VMM staging-buffer fallback (see _stage_for_legacy_ipc).
@@ -571,6 +570,9 @@ def _stage_for_legacy_ipc(base_ptr: int, storage_size: int) -> int:
     staging_ptr = ctypes.c_void_p()
     ret = cudart.cudaMalloc(ctypes.byref(staging_ptr), ctypes.c_size_t(storage_size))
     if ret != 0:
+        # Drain the sticky last-error a failed call leaves behind, so it does not
+        # surface in an unrelated later CUDA call (see _cuda_ipc_get_mem_handle).
+        cudart.cudaGetLastError()
         raise RuntimeError(f"cudaMalloc failed: {_cuda_error_string(cudart, ret)}")
 
     ret = cudart.cudaMemcpy(
@@ -581,6 +583,7 @@ def _stage_for_legacy_ipc(base_ptr: int, storage_size: int) -> int:
     )
     if ret != 0:
         cudart.cudaFree(staging_ptr)
+        cudart.cudaGetLastError()
         raise RuntimeError(f"cudaMemcpy failed: {_cuda_error_string(cudart, ret)}")
 
     return staging_ptr.value

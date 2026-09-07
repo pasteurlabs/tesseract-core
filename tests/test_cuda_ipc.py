@@ -409,16 +409,12 @@ def test_failed_get_mem_handle_clears_sticky_error():
     own failure ("error before calling cuModuleGetFunction: cudaErrorInvalidValue").
     _cuda_ipc_get_mem_handle consumes that error on failure; assert it did.
     """
-    import ctypes
-
     from tesseract_core.runtime.cuda_ipc import (
         _cuda_ipc_get_mem_handle,
         _get_cudart,
     )
 
     cudart = _get_cudart()
-    cudart.cudaGetLastError.argtypes = []
-    cudart.cudaGetLastError.restype = ctypes.c_int
     # Drain any pre-existing error so we measure only this call's effect.
     cudart.cudaGetLastError()
 
