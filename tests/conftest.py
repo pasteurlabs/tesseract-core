@@ -571,7 +571,7 @@ def mocked_cuda(monkeypatch):
     """Mock the CUDA runtime so cuda_ipc encode/decode runs without a GPU.
 
     Mirrors ``mocked_docker``: rather than reaching into ctypes internals, it
-    swaps the plain-Python functions in ``tesseract_core.runtime.cuda.runtime``
+    swaps the plain-Python functions in ``tesseract_core.runtime.cuda.api``
     for an in-process fake, so the ``cuda_ipc`` encoding *policy* exercises its
     real module boundary. Device memory is modelled with Python ``bytearray``s
     keyed by pointer, and every primitive call is recorded so tests can assert
@@ -583,9 +583,9 @@ def mocked_cuda(monkeypatch):
     device-to-host reads or force the VMM staging fallback.
     """
     from tesseract_core.runtime import cuda_ipc
-    from tesseract_core.runtime.cuda import runtime as cuda_runtime
+    from tesseract_core.runtime.cuda import api as cuda_api
 
-    IPC_HANDLE_SIZE = cuda_runtime.IPC_HANDLE_SIZE
+    IPC_HANDLE_SIZE = cuda_api.IPC_HANDLE_SIZE
 
     class FakeCuda:
         def __init__(self) -> None:
@@ -685,7 +685,7 @@ def mocked_cuda(monkeypatch):
         "ipc_close_mem_handle",
         "stage_for_legacy_ipc",
     ):
-        monkeypatch.setattr(cuda_runtime, name, getattr(fake, name))
+        monkeypatch.setattr(cuda_api, name, getattr(fake, name))
 
     # Each test starts with empty export registries.
     cuda_ipc._CUDA_IPC_EXPORT_REGISTRY.clear()

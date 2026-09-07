@@ -9,7 +9,7 @@ sonames) and returning a loaded, signature-declared ``ctypes.CDLL`` for each.
 
 Everything ctypes here stays here. The only ctypes objects that escape are the
 two ``CDLL`` handles, consumed exclusively by
-:mod:`tesseract_core.runtime.cuda.runtime`, which wraps them in a plain-Python
+:mod:`tesseract_core.runtime.cuda.api`, which wraps them in a plain-Python
 API. The one exception is :func:`iter_cudart_candidates`, a *string*-only
 discovery surface (soname/path list) exported for out-of-process consumers.
 """

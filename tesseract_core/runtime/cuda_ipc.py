@@ -27,11 +27,11 @@ by :mod:`array_encoding` are:
 * :func:`release_pinned_ipc_exports` -- keepalive cleanup, called once per
   request by both the server (for its outputs) and the client (for its inputs).
 
-:func:`iter_cudart_candidates` is re-exported here (defined in
-:mod:`tesseract_core.runtime.cuda.loader`) for out-of-process consumers that
-``dlopen`` libcudart themselves (e.g. the ``tesseract_jax`` C++ FFI shim): they
-can reuse this discovery -- including the pip-wheel fallback and forward-
-compatible version range -- instead of maintaining their own soname list.
+Out-of-process consumers that ``dlopen`` libcudart themselves (e.g. the
+``tesseract_jax`` C++ FFI shim) can reuse the library discovery -- including the
+pip-wheel fallback and forward-compatible version range -- via
+:func:`tesseract_core.runtime.cuda.iter_cudart_candidates` instead of
+maintaining their own soname list.
 """
 
 import weakref
@@ -42,16 +42,14 @@ import pybase64
 from pydantic_core import PydanticCustomError
 
 from tesseract_core.runtime.array_encoding import AllowedDtypes, ArrayDict, ShapeType
-from tesseract_core.runtime.cuda import dlpack as _dlpack
-from tesseract_core.runtime.cuda import runtime as _cuda
-from tesseract_core.runtime.cuda.loader import iter_cudart_candidates
+from tesseract_core.runtime.cuda import api as cuda_api
+from tesseract_core.runtime.cuda import dlpack
 
 __all__ = [
     "IpcDeviceArray",
     "cuda_array_to_host",
     "dump_cuda_ipc_arraydict",
     "has_cuda_array_interface",
-    "iter_cudart_candidates",
     "load_cuda_ipc_arraydict",
     "release_pinned_ipc_exports",
     "validate_cuda_array",
@@ -201,7 +199,7 @@ def release_pinned_ipc_exports() -> None:
 
     staging_ptrs, _CUDA_IPC_STAGING_BUFFERS[:] = list(_CUDA_IPC_STAGING_BUFFERS), []
     for ptr in staging_ptrs:
-        _cuda.free(ptr)
+        cuda_api.free(ptr)
 
 
 def _pin_cuda_ipc_export(arr: Any) -> None:
@@ -241,7 +239,7 @@ def dump_cuda_ipc_arraydict(arr: Any) -> ArrayDict:
     pointers that the legacy ``cudaIpcGetMemHandle`` API rejects; in that case
     this transparently falls back to staging the array's bytes into a fresh
     ``cudaMalloc`` buffer via one on-GPU copy (see
-    :func:`tesseract_core.runtime.cuda.runtime.stage_for_legacy_ipc`) and
+    :func:`tesseract_core.runtime.cuda.api.stage_for_legacy_ipc`) and
     exports a handle to that instead. Still far cheaper than a host round-trip.
     """
     if not has_cuda_array_interface(arr):
@@ -271,22 +269,22 @@ def dump_cuda_ipc_arraydict(arr: Any) -> ArrayDict:
     # out many arrays from a single cudaMalloc block, so we must resolve the
     # allocation base, take the handle on that base, and record the byte offset
     # of this array within the allocation.
-    base_ptr, storage_size = _cuda.get_allocation_base(data_ptr)
+    base_ptr, storage_size = cuda_api.get_allocation_base(data_ptr)
     storage_offset = data_ptr - base_ptr
 
     # Get the IPC handle for the base of the allocation.
     try:
-        handle_bytes = _cuda.ipc_get_mem_handle(base_ptr)
+        handle_bytes = cuda_api.ipc_get_mem_handle(base_ptr)
     except RuntimeError:
         # Legacy IPC rejected this pointer, almost certainly because it's
         # VMM/pool-backed. Copy just this array's own bytes (not the whole,
         # possibly huge, backing allocation) into a fresh cudaMalloc buffer and
         # export a handle to *that* instead.
-        staging_ptr = _cuda.stage_for_legacy_ipc(data_ptr, nbytes)
+        staging_ptr = cuda_api.stage_for_legacy_ipc(data_ptr, nbytes)
         _pin_cuda_ipc_staging_buffer(staging_ptr)
         storage_offset = 0
         storage_size = nbytes
-        handle_bytes = _cuda.ipc_get_mem_handle(staging_ptr)
+        handle_bytes = cuda_api.ipc_get_mem_handle(staging_ptr)
 
     # Determine device ordinal
     device = 0
@@ -338,10 +336,10 @@ def _finalize_ipc_device_array(state: dict) -> None:
     try:
         if state["dlpack_token"] is None:
             if not state["freed"]:
-                _cuda.free(state["ptr"])
+                cuda_api.free(state["ptr"])
                 state["freed"] = True
         else:
-            _dlpack.drop_unconsumed_bundle(state["dlpack_token"])
+            dlpack.drop_unconsumed_bundle(state["dlpack_token"])
     except Exception:
         # Finalizers must never raise.
         pass
@@ -413,8 +411,8 @@ class IpcDeviceArray:
         if self._state["freed"]:
             raise RuntimeError("device buffer has been released")
         host = np.empty(self.shape, dtype=self.dtype)
-        _cuda.memcpy_device_to_host(host.ctypes.data, self._ptr, self._nbytes)
-        _cuda.device_synchronize()
+        cuda_api.memcpy_device_to_host(host.ctypes.data, self._ptr, self._nbytes)
+        cuda_api.device_synchronize()
         return host
 
     def __array__(self, dtype: Any = None) -> np.ndarray:
@@ -424,7 +422,7 @@ class IpcDeviceArray:
     # -- DLPack ----------------------------------------------------------
 
     def __dlpack_device__(self) -> tuple[int, int]:
-        return (_dlpack.DLDEVICE_CUDA, self.device)
+        return (dlpack.DLDEVICE_CUDA, self.device)
 
     def __dlpack__(self, stream: Any = None, **kwargs: Any) -> Any:
         """Return a ``"dltensor"`` PyCapsule wrapping the owned buffer.
@@ -440,7 +438,7 @@ class IpcDeviceArray:
         if self._state["freed"]:
             raise RuntimeError("device buffer has been released")
 
-        capsule, token = _dlpack.make_dlpack_capsule(
+        capsule, token = dlpack.make_dlpack_capsule(
             self._ptr, self.device, self.shape, self.dtype
         )
         # The buffer now belongs to the bundle; this object must not free it.
@@ -481,21 +479,21 @@ def load_cuda_ipc_arraydict(val: ArrayDict) -> "IpcDeviceArray":
 
     # Allocate the owned buffer up front (on the target device) so that if the
     # copy fails we still close the IPC mapping and free the buffer cleanly.
-    _cuda.set_device(device)
-    owned_ptr = _cuda.malloc(nbytes)
+    cuda_api.set_device(device)
+    owned_ptr = cuda_api.malloc(nbytes)
 
-    base_ptr = _cuda.ipc_open_mem_handle(handle_bytes, device)
+    base_ptr = cuda_api.ipc_open_mem_handle(handle_bytes, device)
     try:
         # Copy only this array's own bytes out of the producer's (offset)
         # mapping into our fresh buffer, then block until the copy is done so we
         # never unmap mid-copy.
-        _cuda.memcpy_device_to_device(owned_ptr, base_ptr + storage_offset, nbytes)
-        _cuda.device_synchronize()
+        cuda_api.memcpy_device_to_device(owned_ptr, base_ptr + storage_offset, nbytes)
+        cuda_api.device_synchronize()
     except Exception:
-        _cuda.free(owned_ptr)
+        cuda_api.free(owned_ptr)
         raise
     finally:
-        _cuda.ipc_close_mem_handle(base_ptr)
+        cuda_api.ipc_close_mem_handle(base_ptr)
 
     return IpcDeviceArray(owned_ptr, device, shape, dtype)
 

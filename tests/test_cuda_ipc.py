@@ -272,7 +272,7 @@ def _build_torch():
 
 
 def _build_jax():
-    """JAX arrays exercise the VMM staging fallback (see cuda.runtime.stage_for_legacy_ipc).
+    """JAX arrays exercise the VMM staging fallback (see cuda.api.stage_for_legacy_ipc).
 
     JAX/XLA's default GPU allocator uses CUDA's Virtual Memory Management API
     (``cuMemCreate``/``cuMemAddressReserve``), which the legacy
@@ -294,9 +294,9 @@ def _build_force_staging():
     buffer) uses the real implementation. The patch runs in the producer process
     and persists through the subsequent ``dump_cuda_ipc_arraydict``.
     """
-    from tesseract_core.runtime.cuda import runtime as cuda_runtime
+    from tesseract_core.runtime.cuda import api as cuda_api
 
-    real = cuda_runtime.ipc_get_mem_handle
+    real = cuda_api.ipc_get_mem_handle
     state = {"rejected": False}
 
     def flaky(ptr):
@@ -305,7 +305,7 @@ def _build_force_staging():
             raise RuntimeError("cudaIpcGetMemHandle failed: simulated VMM reject")
         return real(ptr)
 
-    cuda_runtime.ipc_get_mem_handle = flaky
+    cuda_api.ipc_get_mem_handle = flaky
 
     arr = cupy.arange(1024, dtype=cupy.float32) + 7.0
     return [(arr, cupy.asnumpy(arr))]
@@ -340,7 +340,7 @@ def test_encode_structure():
     # 64-byte handle, base64-encoded, packed into the single `buffer` string.
     import pybase64
 
-    from tesseract_core.runtime.cuda.runtime import IPC_HANDLE_SIZE
+    from tesseract_core.runtime.cuda.api import IPC_HANDLE_SIZE
 
     unpacked = _unpack_cuda_ipc(data)
     assert len(pybase64.b64decode(unpacked["handle"])) == IPC_HANDLE_SIZE
@@ -436,7 +436,7 @@ def test_cross_process_jax_vmm_fallback():
     fast path (which works for CuPy/PyTorch's default cudaMalloc-based pools)
     rejects it; ``dump_cuda_ipc_arraydict`` should transparently fall back to
     staging the array into a fresh ``cudaMalloc`` buffer (see
-    cuda.runtime.stage_for_legacy_ipc) and export a handle to that instead.
+    cuda.api.stage_for_legacy_ipc) and export a handle to that instead.
     """
     results = run_cross_process("jax")
     assert len(results) == 1

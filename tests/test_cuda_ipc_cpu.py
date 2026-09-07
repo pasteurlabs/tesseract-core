@@ -11,7 +11,7 @@ serve-side release hook, the ``--ipc=host`` wiring, and the CLI guard -- by
   * feeding fake objects that expose ``__cuda_array_interface__`` (no device
     memory), and
   * running against the ``mocked_cuda`` fixture, which swaps the plain-Python
-    CUDA runtime layer (``tesseract_core.runtime.cuda.runtime``) for an
+    CUDA runtime layer (``tesseract_core.runtime.cuda.api``) for an
     in-process fake. Because the fake replaces the module's real public seam --
     not scattered ctypes internals -- the encoding policy is exercised exactly as
     it ships.
@@ -36,8 +36,8 @@ import numpy as np
 import pytest
 
 from tesseract_core.runtime import array_encoding, cuda_ipc
+from tesseract_core.runtime.cuda import api as cuda_api
 from tesseract_core.runtime.cuda import loader
-from tesseract_core.runtime.cuda import runtime as cuda_runtime
 
 
 def _unpack_cuda_ipc(data: dict) -> dict:
@@ -111,7 +111,7 @@ def test_dump_assembles_payload_and_offset(mocked_cuda):
     # Handle is base64 of the 64 raw bytes.
     import pybase64
 
-    assert len(pybase64.b64decode(unpacked["handle"])) == cuda_runtime.IPC_HANDLE_SIZE
+    assert len(pybase64.b64decode(unpacked["handle"])) == cuda_api.IPC_HANDLE_SIZE
 
 
 def test_dump_device_detection_cupy(mocked_cuda):
@@ -339,7 +339,7 @@ def test_import_cuda_ipc_explains_missing_runtime_extra(monkeypatch):
 def _encoded(shape, dtype, device, offset, storage_size, fill=b"\x02"):
     import pybase64
 
-    handle = pybase64.b64encode_as_string(fill * cuda_runtime.IPC_HANDLE_SIZE)
+    handle = pybase64.b64encode_as_string(fill * cuda_api.IPC_HANDLE_SIZE)
     return {
         "object_type": "array",
         "shape": list(shape),
@@ -353,7 +353,7 @@ def _encoded(shape, dtype, device, offset, storage_size, fill=b"\x02"):
 
 def test_load_copies_own_bytes_at_offset_and_closes(mocked_cuda):
     """Decode allocates the array's own nbytes, copies from base+offset, closes."""
-    handle = b"\x02" * cuda_runtime.IPC_HANDLE_SIZE
+    handle = b"\x02" * cuda_api.IPC_HANDLE_SIZE
     encoded = _encoded((4, 8), "float32", device=1, offset=128, storage_size=4096)
 
     out = cuda_ipc.load_cuda_ipc_arraydict(encoded)
@@ -405,7 +405,7 @@ def test_load_closes_handle_even_on_copy_failure(mocked_cuda, monkeypatch):
     def boom_memcpy(dst, src, nbytes):
         raise RuntimeError("cudaMemcpy (device->device) failed: simulated")
 
-    monkeypatch.setattr(cuda_runtime, "memcpy_device_to_device", boom_memcpy)
+    monkeypatch.setattr(cuda_api, "memcpy_device_to_device", boom_memcpy)
 
     with pytest.raises(RuntimeError, match="cudaMemcpy"):
         cuda_ipc.load_cuda_ipc_arraydict(
@@ -742,6 +742,8 @@ def test_iter_cudart_candidates_are_dlopen_arguments(monkeypatch):
         assert is_soname or is_path, candidate
 
 
-def test_iter_cudart_candidates_reexported_from_cuda_ipc():
-    """The discovery surface is still importable from cuda_ipc for FFI consumers."""
-    assert cuda_ipc.iter_cudart_candidates is loader.iter_cudart_candidates
+def test_iter_cudart_candidates_exported_from_cuda_package():
+    """The discovery surface is importable from the cuda package for FFI consumers."""
+    from tesseract_core.runtime import cuda
+
+    assert cuda.iter_cudart_candidates is loader.iter_cudart_candidates

@@ -11,7 +11,7 @@ to expose its buffer via ``__dlpack__`` without depending on any GPU framework.
 All ctypes and the CPython capsule API stay here. The public surface is two
 functions -- :func:`make_dlpack_capsule` and :func:`drop_unconsumed_bundle` --
 and the buffer is always freed through
-:func:`tesseract_core.runtime.cuda.runtime.free`.
+:func:`tesseract_core.runtime.cuda.api.free`.
 """
 
 import ctypes
@@ -19,7 +19,7 @@ from typing import Any
 
 import numpy as np
 
-from tesseract_core.runtime.cuda import runtime
+from tesseract_core.runtime.cuda import api
 
 _kDLCUDA = 2  # DLDeviceType for CUDA global memory
 
@@ -142,7 +142,7 @@ def make_dlpack_capsule(
         # a second invocation (bundle already gone).
         bundle = _BUNDLES.pop(token, None)
         if bundle is not None:
-            runtime.free(ptr)
+            api.free(ptr)
 
     c_deleter = _DLManagedTensorDeleter(_deleter)
     managed.deleter = c_deleter

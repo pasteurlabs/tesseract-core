@@ -11,7 +11,7 @@ capsule handshake -- so the rest of the codebase works with plain Python values
 Layers:
 
 * :mod:`~tesseract_core.runtime.cuda.loader` -- find and load libcudart/libcuda.
-* :mod:`~tesseract_core.runtime.cuda.runtime` -- the plain-Python CUDA API
+* :mod:`~tesseract_core.runtime.cuda.api` -- the plain-Python CUDA API
   (memory management, IPC, device-to-device/host copies).
 * :mod:`~tesseract_core.runtime.cuda.dlpack` -- export an owned device buffer
   as a DLPack capsule.
@@ -20,12 +20,12 @@ The main consumer is :mod:`tesseract_core.runtime.cuda_ipc`, which layers the
 ``json+cuda_ipc`` array-encoding policy on top of this API.
 """
 
-from tesseract_core.runtime.cuda import dlpack, loader, runtime
+from tesseract_core.runtime.cuda import api, dlpack, loader
 from tesseract_core.runtime.cuda.loader import iter_cudart_candidates
 
 __all__ = [
+    "api",
     "dlpack",
     "iter_cudart_candidates",
     "loader",
-    "runtime",
 ]
