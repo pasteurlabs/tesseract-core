@@ -12,7 +12,7 @@ env:
   DOCKERFILE_PATH: "tesseract_core/sdk/templates/Dockerfile.base"
 
 jobs:
-  auto-update-hooks:
+  auto-update-uv:
     runs-on: ubuntu-latest
 
     steps:
