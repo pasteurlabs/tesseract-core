@@ -65,7 +65,7 @@ class DeviceTransport(Protocol):
         """Encode side: pin ``arr`` and return an opaque per-array handle.
 
         Keeps the source allocation alive until :meth:`release`, exactly as the
-        legacy export registry does.
+        cuda_ipc export registry does.
         """
         ...
 
