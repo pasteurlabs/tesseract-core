@@ -24,7 +24,7 @@ import requests
 from pydantic import BaseModel, TypeAdapter, ValidationError
 from pydantic_core import InitErrorDetails, PydanticCustomError, from_json
 
-from . import engine, local_engine, serving
+from . import engine, local_client, serving
 from .binref import (
     CONTAINERS_SUPPORT_BINREF_POOL,
     SUPPORTS_BINREF_POOL,
@@ -534,7 +534,7 @@ class Tesseract:
 
         # The only part that has to know which backend it is: what to start.
         if self._spawn_backend == "subprocess":
-            self._serve_context = local_engine.serve(**self._spawn_config)
+            self._serve_context = local_client.serve(**self._spawn_config)
         else:
             _, self._serve_context = engine.serve(**self._spawn_config)
 
@@ -858,7 +858,7 @@ def _subprocess_spawn_config(
     # Debug mode gives full tracebacks from the child and enables the `test`
     # endpoint, matching what the in-process path configures. The debugpy
     # listener it would normally imply is disabled separately, in
-    # `local_engine.serve`.
+    # `local_client.serve`.
     config_kwargs: dict[str, Any] = {"debug": True}
     if runtime_config is not None:
         config_kwargs.update(runtime_config)
