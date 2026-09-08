@@ -30,7 +30,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
-if TYPE_CHECKING:
+if TYPE_CHECKING:  # pragma: no cover
     from tesseract_core.runtime.array_encoding import ArrayDict
 
 # Reach describes where a transport can move data, so negotiation can reject a
@@ -59,7 +59,7 @@ class DeviceTransport(Protocol):
         other methods. Receiver-driven transports whose handle is self-contained
         (``cuda_ipc``) return ``None`` and ignore the session everywhere.
         """
-        ...
+        ...  # pragma: no cover
 
     def register(self, arr: Any, session: Any = None) -> Any:
         """Encode side: pin ``arr`` and return an opaque per-array handle.
@@ -67,7 +67,7 @@ class DeviceTransport(Protocol):
         Keeps the source allocation alive until :meth:`release`, exactly as the
         cuda_ipc export registry does.
         """
-        ...
+        ...  # pragma: no cover
 
     def descriptor(self, handle: Any) -> ArrayDict:
         """Turn a handle from :meth:`register` into the JSON array dict.
@@ -75,11 +75,11 @@ class DeviceTransport(Protocol):
         The returned dict carries the transport's wire string in
         ``data.buffer`` and its name in ``data.encoding``.
         """
-        ...
+        ...  # pragma: no cover
 
     def flush(self, session: Any = None) -> None:
         """Post any pending transfers. No-op for pull transports."""
-        ...
+        ...  # pragma: no cover
 
     def receive(self, val: ArrayDict, session: Any = None) -> Any:
         """Decode side: materialise ``val`` into a fresh consumer-owned buffer.
@@ -88,11 +88,11 @@ class DeviceTransport(Protocol):
         (``IpcDeviceArray`` for the CUDA transports), unchanged across
         transports so the consumer-facing surface never forks.
         """
-        ...
+        ...  # pragma: no cover
 
     def release(self, session: Any = None) -> None:
         """Drop producer-side pins once the borrow is provably complete."""
-        ...
+        ...  # pragma: no cover
 
 
 # ---------------------------------------------------------------------------

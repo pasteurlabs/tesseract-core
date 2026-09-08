@@ -794,6 +794,77 @@ def test_get_transport_rejects_unknown():
         get_transport("does_not_exist")
 
 
+def test_available_transports_lists_registered_cuda_ipc():
+    """available_transports reports the built-in cuda_ipc backend, sorted."""
+    from tesseract_core.runtime.device_transport import available_transports
+
+    transports = available_transports()
+    assert "cuda_ipc" in transports
+    # Sorted tuple, so a caller can rely on a stable order.
+    assert list(transports) == sorted(transports)
+
+
+def test_register_transport_returns_and_registers():
+    """register_transport adds a backend by name and returns it (usable as a decorator)."""
+    from tesseract_core.runtime import device_transport
+    from tesseract_core.runtime.device_transport import (
+        available_transports,
+        get_transport,
+        register_transport,
+    )
+
+    class _StubTransport:
+        name = "stub_test_transport"
+        reach = "both"
+
+        def bootstrap(self, role, peer_offer):
+            return None
+
+        def register(self, arr, session=None):
+            return arr
+
+        def descriptor(self, handle):
+            return handle
+
+        def flush(self, session=None):
+            return None
+
+        def receive(self, val, session=None):
+            return val
+
+        def release(self, session=None):
+            return None
+
+    stub = _StubTransport()
+    try:
+        assert register_transport(stub) is stub
+        assert get_transport("stub_test_transport") is stub
+        assert "stub_test_transport" in available_transports()
+    finally:
+        # Keep the process-global registry clean for other tests.
+        device_transport._TRANSPORTS.pop("stub_test_transport", None)
+
+
+def test_cuda_ipc_transport_receive_materialises_wrapper(mocked_cuda):
+    """The cuda_ipc transport's receive() decodes into an on-GPU wrapper.
+
+    This is the decode seam array_encoding.decode_array drives for cuda_ipc; the
+    end-to-end decode through decode_array is covered by the GPU suite (its
+    return type is the framework-agnostic wrapper, outside decode_array's
+    host-array return annotation).
+    """
+    from tesseract_core.runtime.device_transport import get_transport
+
+    transport = get_transport("cuda_ipc")
+    encoded = _encoded((2, 3), "float32", device=0, offset=0, storage_size=24)
+
+    out = transport.receive(encoded)
+
+    assert isinstance(out, cuda_ipc.IpcDeviceArray)
+    assert out.shape == (2, 3)
+    assert out.dtype == np.float32
+
+
 def test_cuda_ipc_transport_delegates(mocked_cuda, monkeypatch):
     """register/descriptor/flush/receive/release drive the same cuda_ipc code.
 
