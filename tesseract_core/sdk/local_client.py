@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .served_client import diagnose_exit, is_running
+from .serving import diagnose_exit, is_running
 
 logger = logging.getLogger("tesseract")
 

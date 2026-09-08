@@ -22,7 +22,7 @@ from typing import Any, TypeAlias
 from typing import List as list_  # noqa: UP035
 
 from tesseract_core.sdk.config import get_config
-from tesseract_core.sdk.served_client import diagnose_exit, is_running
+from tesseract_core.sdk.serving import diagnose_exit, is_running
 
 logger = logging.getLogger("tesseract")
 
