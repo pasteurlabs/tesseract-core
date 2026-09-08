@@ -11,7 +11,6 @@ knows how to run one.
 import logging
 import random
 import socket
-import subprocess
 import time
 from collections.abc import Mapping, Sequence
 from contextlib import closing
@@ -20,7 +19,6 @@ from typing import Any
 
 import requests
 
-from .docker_client import APIError
 from .exceptions import UserError
 from .served_client import ServedTesseract, diagnose_exit, is_running
 
@@ -201,20 +199,29 @@ def wait_for_health_or_dispose(
     # Read the logs before disposing of what wrote them. Neither reading nor
     # disposing may raise: they are how we report the failure, not the failure
     # itself, and an error here would replace it with a less useful one.
+    #
+    # Broad on purpose, and narrow in scope to match: each transport fails in
+    # its own vocabulary -- a container reports `APIError`, a subprocess whose
+    # log file is gone reports `FileNotFoundError` -- and naming them here would
+    # put one transport's spelling in the module that exists to not have any.
+    # Only the call itself is guarded, so a mistake of ours still raises.
     try:
-        logs = served.logs().decode(errors="replace")
-    except APIError as ex:
+        raw_logs = served.logs()
+    except Exception as ex:
         logger.warning(f"Failed to get logs for {served}: {ex}")
-        logs = ""
+        raw_logs = b""
+    logs = raw_logs.decode(errors="replace")
 
     # Only worth asking about one that stopped, and only before it is removed: a
     # Tesseract that is merely slow would block `wait` for as long as it runs.
     exit_code = None
     if not timed_out:
         try:
-            exit_code = served.wait(timeout=_HEALTH_REQUEST_TIMEOUT)["StatusCode"]
-        except APIError as ex:
+            status = served.wait(timeout=_HEALTH_REQUEST_TIMEOUT)
+        except Exception as ex:
             logger.warning(f"Failed to read the exit code of {served}: {ex}")
+        else:
+            exit_code = status["StatusCode"]
 
     # Everything the Tesseract knew has now been read, so it can go -- in a
     # `finally`, because every path out of here raises and none of them should
@@ -248,8 +255,8 @@ def wait_for_health_or_dispose(
         try:
             # Forced: it may still be running, and an unforced remove would refuse.
             served.remove(force=True)
-        except (APIError, subprocess.CalledProcessError) as ex:
-            # `Container.remove` raises `APIError` only when it recognises the
-            # stderr as Docker's, and passes the raw error through otherwise;
-            # either way it must not replace the failure we are reporting.
+        except Exception as ex:
+            # Broadest of the three: an exception raised in a `finally` replaces
+            # the one in flight, so anything at all escaping here would destroy
+            # the failure we came to report.
             logger.warning(f"Failed to remove {served}: {ex}")
