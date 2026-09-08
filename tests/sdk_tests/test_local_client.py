@@ -24,7 +24,7 @@ import pytest
 import requests
 
 from tesseract_core import Tesseract
-from tesseract_core.sdk import local_client, local_engine, serving
+from tesseract_core.sdk import local_client, serving
 from tesseract_core.sdk.exceptions import UserError
 
 pytestmark = pytest.mark.timeout(120)
@@ -64,7 +64,7 @@ def sample_inputs():
 
 
 def test_serve_and_remove(dummy_api_path):
-    served = local_engine.serve(dummy_api_path)
+    served = local_client.serve(dummy_api_path)
     try:
         assert local_client.is_running(served)
         assert served.port != 0
@@ -84,7 +84,7 @@ def test_serve_and_remove(dummy_api_path):
 
 def test_wait_reports_the_exit_code(dummy_api_path):
     """`wait` answers with a StatusCode dict, as a container's does."""
-    served = local_engine.serve(dummy_api_path)
+    served = local_client.serve(dummy_api_path)
     served.remove(force=True)
 
     assert served.wait(timeout=5)["StatusCode"] is not None
@@ -92,7 +92,7 @@ def test_wait_reports_the_exit_code(dummy_api_path):
 
 def test_wait_times_out_on_a_running_process(dummy_api_path):
     """Waiting on a live Tesseract gives up rather than blocking for its lifetime."""
-    served = local_engine.serve(dummy_api_path)
+    served = local_client.serve(dummy_api_path)
     try:
         with pytest.raises(TimeoutError, match="still running"):
             served.wait(timeout=0.2)
@@ -112,9 +112,9 @@ def test_orphaned_tesseract_shuts_itself_down(dummy_api_path, tmp_path):
     helper.write_text(
         textwrap.dedent(f"""
         import time
-        from tesseract_core.sdk import local_engine
+        from tesseract_core.sdk import local_client
 
-        served = local_engine.serve({str(dummy_api_path)!r})
+        served = local_client.serve({str(dummy_api_path)!r})
         print(served.process.pid, flush=True)
         time.sleep(600)
         """)
@@ -145,7 +145,7 @@ def test_orphaned_tesseract_shuts_itself_down(dummy_api_path, tmp_path):
 
 def test_remove_refuses_a_running_process(dummy_api_path):
     """Unforced removal refuses a live Tesseract, as removing a container does."""
-    served = local_engine.serve(dummy_api_path)
+    served = local_client.serve(dummy_api_path)
     try:
         with pytest.raises(RuntimeError, match="still running"):
             served.remove()
@@ -155,7 +155,7 @@ def test_remove_refuses_a_running_process(dummy_api_path):
 
 
 def test_remove_is_idempotent(dummy_api_path):
-    served = local_engine.serve(dummy_api_path)
+    served = local_client.serve(dummy_api_path)
     served.remove(force=True)
     # Must not raise, even though the process and its log file are gone
     served.remove(force=True)
@@ -178,7 +178,7 @@ def test_unreadable_logs_do_not_mask_a_subprocess_startup_failure(
     """
     monkeypatch.setattr(serving, "is_running", lambda served: False)
 
-    served = local_engine.serve(dummy_api_path, skip_health_check=True)
+    served = local_client.serve(dummy_api_path, skip_health_check=True)
     try:
         served.log_path.unlink()
         with pytest.raises((RuntimeError, TimeoutError)) as excinfo:
@@ -195,19 +195,19 @@ def test_serve_rejects_binref_without_an_output_path(dummy_api_path):
     different exceptions for one mistake.
     """
     with pytest.raises(UserError, match=r"json\+binref"):
-        local_engine.serve(dummy_api_path, output_format="json+binref")
+        local_client.serve(dummy_api_path, output_format="json+binref")
 
 
 def test_serve_rejects_missing_api():
     with pytest.raises(FileNotFoundError, match="is not a file"):
-        local_engine.serve("/nonexistent/tesseract_api.py")
+        local_client.serve("/nonexistent/tesseract_api.py")
 
 
 def test_serve_on_explicit_port(dummy_api_path):
     from tesseract_core.sdk.engine import get_free_port
 
     port = get_free_port()
-    served = local_engine.serve(dummy_api_path, port=port)
+    served = local_client.serve(dummy_api_path, port=port)
     try:
         assert served.port == port
         assert served.url.endswith(f":{port}")
@@ -319,7 +319,7 @@ def test_reported_debug_address_honours_an_inherited_runtime_override(
     monkeypatch.setenv("TESSERACT_RUNTIME_DEBUGPY_HOST", "0.0.0.0")
     caplog.set_level(logging.INFO, logger="tesseract")
 
-    served = local_engine.serve(dummy_api_path, runtime_config={"debug": True})
+    served = local_client.serve(dummy_api_path, runtime_config={"debug": True})
     try:
         bound_host, _ = _debug_address(served)
         assert bound_host == "0.0.0.0", "override did not reach the runtime"
@@ -337,7 +337,7 @@ def test_debugger_listens_on_loopback_by_default(dummy_api_path):
     ...but on loopback: unlike a container, there is no network namespace here,
     and debugpy is unauthenticated code execution.
     """
-    served = local_engine.serve(dummy_api_path, runtime_config={"debug": True})
+    served = local_client.serve(dummy_api_path, runtime_config={"debug": True})
     try:
         host, port = _debug_address(served)
         assert host == "127.0.0.1"
@@ -348,8 +348,8 @@ def test_debugger_listens_on_loopback_by_default(dummy_api_path):
 
 def test_two_tesseracts_get_distinct_debugpy_ports(dummy_api_path):
     """The whole reason the address is configurable: both must be debuggable."""
-    first = local_engine.serve(dummy_api_path, runtime_config={"debug": True})
-    second = local_engine.serve(dummy_api_path, runtime_config={"debug": True})
+    first = local_client.serve(dummy_api_path, runtime_config={"debug": True})
+    second = local_client.serve(dummy_api_path, runtime_config={"debug": True})
     try:
         assert _debug_address(first) != _debug_address(second)
     finally:
@@ -380,13 +380,13 @@ def test_debugpy_port_collision_recovers_even_with_a_pinned_api_port(
         calls.append(1)
         return taken if len(calls) == 1 else get_free_port(exclude=(api_port, taken))
 
-    monkeypatch.setattr(local_engine, "get_free_port", fake_get_free_port)
+    monkeypatch.setattr(local_client, "get_free_port", fake_get_free_port)
 
     with closing(socket.socket()) as occupied:
         occupied.bind(("127.0.0.1", taken))
         occupied.listen(1)
 
-        served = local_engine.serve(
+        served = local_client.serve(
             dummy_api_path, port=api_port, runtime_config={"debug": True}
         )
         try:
@@ -428,7 +428,7 @@ def test_debugger_can_be_opted_out(dummy_api_path):
     processes for isolation rather than debugging wants anyway, since debug mode
     also exposes tracebacks and the `test` endpoint.
     """
-    served = local_engine.serve(dummy_api_path, runtime_config={"debug": False})
+    served = local_client.serve(dummy_api_path, runtime_config={"debug": False})
     try:
         assert _debug_address(served) is None
     finally:
@@ -576,7 +576,7 @@ def test_failed_startup_leaves_no_log_file(tmp_path):
     before = set(temp_dir.glob("tesseract_serve_*.log"))
 
     with pytest.raises(RuntimeError):
-        local_engine.serve(api_path)
+        local_client.serve(api_path)
 
     assert not set(temp_dir.glob("tesseract_serve_*.log")) - before
 
@@ -590,11 +590,11 @@ def test_startup_timeout_is_reported(dummy_api_path, monkeypatch):
     monkeypatch.setattr(requests, "get", never_healthy)
 
     with pytest.raises(TimeoutError, match="did not respond to a health check"):
-        local_engine.serve(dummy_api_path, startup_timeout=1.0)
+        local_client.serve(dummy_api_path, startup_timeout=1.0)
 
 
 def test_skip_health_check_returns_immediately(dummy_api_path):
-    served = local_engine.serve(dummy_api_path, skip_health_check=True)
+    served = local_client.serve(dummy_api_path, skip_health_check=True)
     try:
         assert local_client.is_running(served)
     finally:
@@ -643,7 +643,7 @@ def test_foreign_interpreter_does_not_inherit_our_import_paths(monkeypatch):
     monkeypatch.setenv("PYTHONPATH", "/some/other/site-packages")
     monkeypatch.setenv("VIRTUAL_ENV", "/some/other/env")
 
-    same = local_engine._runtime_env(
+    same = local_client._runtime_env(
         Path("tesseract_api.py"),
         input_path=None,
         output_path=None,
@@ -654,7 +654,7 @@ def test_foreign_interpreter_does_not_inherit_our_import_paths(monkeypatch):
     )
     assert same["PYTHONPATH"] == "/some/other/site-packages"
 
-    foreign = local_engine._runtime_env(
+    foreign = local_client._runtime_env(
         Path("tesseract_api.py"),
         input_path=None,
         output_path=None,
@@ -667,7 +667,7 @@ def test_foreign_interpreter_does_not_inherit_our_import_paths(monkeypatch):
     assert "VIRTUAL_ENV" not in foreign
 
     # ...unless the caller insists
-    explicit = local_engine._runtime_env(
+    explicit = local_client._runtime_env(
         Path("tesseract_api.py"),
         input_path=None,
         output_path=None,
@@ -681,7 +681,7 @@ def test_foreign_interpreter_does_not_inherit_our_import_paths(monkeypatch):
 
 def test_missing_interpreter_is_reported(dummy_api_path):
     with pytest.raises(FileNotFoundError, match="does not exist"):
-        local_engine.serve(dummy_api_path, python_executable="/nonexistent/bin/python")
+        local_client.serve(dummy_api_path, python_executable="/nonexistent/bin/python")
 
 
 @pytest.mark.foreign_venv
@@ -713,7 +713,7 @@ def test_tesseract_in_foreign_environment(foreign_venv, dummy_api_path, sample_i
 @pytest.mark.skipif(os.name == "nt", reason="POSIX process groups")
 def test_child_runs_in_its_own_process_group(dummy_api_path):
     """So that a Ctrl-C in the parent's terminal doesn't race us to the child."""
-    served = local_engine.serve(dummy_api_path)
+    served = local_client.serve(dummy_api_path)
     try:
         assert os.getpgid(served.process.pid) != os.getpgid(os.getpid())
     finally:
@@ -723,7 +723,7 @@ def test_child_runs_in_its_own_process_group(dummy_api_path):
 @pytest.mark.skipif(os.name == "nt", reason="POSIX signals")
 def test_remove_escalates_to_sigkill(dummy_api_path):
     """A Tesseract that ignores SIGTERM still gets cleaned up."""
-    served = local_engine.serve(dummy_api_path)
+    served = local_client.serve(dummy_api_path)
 
     # Make the child ignore SIGTERM by shortening our patience instead of
     # modifying the child: escalation must happen either way.
