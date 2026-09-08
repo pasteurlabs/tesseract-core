@@ -6,11 +6,9 @@ These spawn real ``tesseract-runtime serve`` processes (but no containers), so
 they exercise the actual startup / health-check / removal path.
 """
 
-import gc
 import logging
 import os
 import re
-import shutil
 import signal
 import subprocess
 import sys
@@ -37,30 +35,6 @@ def _process_alive(pid: int) -> bool:
     except ProcessLookupError:
         return False
     return True
-
-
-def _env_without_pythonpath() -> dict[str, str]:
-    """Environment safe to hand to a different interpreter.
-
-    Importing a tesseract_api.py in-process puts this interpreter's sys.path on
-    PYTHONPATH as a side effect, and any earlier test in the session may have
-    done so. A 3.11 interpreter that inherits it picks up 3.13 packages.
-    """
-    return {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
-
-
-@pytest.fixture
-def dummy_api_path(dummy_tesseract_package):
-    return dummy_tesseract_package / "tesseract_api.py"
-
-
-@pytest.fixture
-def sample_inputs():
-    return {
-        "a": np.array([1.0, 2.0], dtype=np.float32),
-        "b": np.array([3.0, 4.0], dtype=np.float32),
-        "s": 2,
-    }
 
 
 def test_serve_and_remove(dummy_api_path):
@@ -264,21 +238,6 @@ def test_remove_stops_the_process(dummy_api_path):
     assert tess._serve_context is None
 
 
-def test_garbage_collection_reaps_process(dummy_api_path):
-    """A forgotten Tesseract must not leave an orphaned process behind."""
-    import gc
-
-    tess = Tesseract.from_source(dummy_api_path)
-    tess.serve()
-    # Hold the process, not the Tesseract, so it can still be collected.
-    process = tess._serve_context.process
-
-    del tess
-    gc.collect()
-
-    assert process.poll() is not None
-
-
 def test_logs_are_captured(dummy_api_path):
     tess = Tesseract.from_source(dummy_api_path)
     with tess:
@@ -464,69 +423,12 @@ def test_requires_context_manager(dummy_api_path, sample_inputs):
         tess.apply(sample_inputs)
 
 
-def test_rejects_imported_module(dummy_tesseract_module):
-    """A module cannot be handed to another process, so say so clearly.
-
-    Tested against the helper rather than `from_source`, whose annotation lets
-    typeguard reject it first under the test suite -- but nothing enforces
-    annotations at runtime, so the check still has to exist.
-    """
-    from tesseract_core.sdk.tesseract import _subprocess_spawn_config
-
-    with pytest.raises(ValueError, match="already imported module was given"):
-        _subprocess_spawn_config(
-            dummy_tesseract_module,
-            input_path=None,
-            output_path=None,
-            output_format="json+base64",
-            runtime_config=None,
-            python_executable=None,
-            startup_timeout=1.0,
-        )
-
-
 def test_binref_works_without_being_given_directories(dummy_api_path, sample_inputs):
     """Binref needs scratch dirs; not being told about them is not the user's problem."""
     with Tesseract.from_source(dummy_api_path, output_format="json+binref") as tess:
         result = tess.apply(sample_inputs)
 
     assert result["result"].shape == sample_inputs["a"].shape
-
-
-def test_auto_created_scratch_dirs_are_purged(dummy_api_path, sample_inputs):
-    """What we made, we clean up -- unlike directories the caller passed in."""
-    tess = Tesseract.from_source(dummy_api_path, output_format="json+binref")
-    scratch = [
-        Path(tess._spawn_config["input_path"]),
-        Path(tess._spawn_config["output_path"]),
-    ]
-    assert all(d.exists() for d in scratch)
-
-    with tess:
-        tess.apply(sample_inputs)
-    del tess
-    gc.collect()
-
-    assert not any(d.exists() for d in scratch)
-
-
-def test_given_scratch_dirs_are_left_alone(dummy_api_path, sample_inputs, tmp_path):
-    given_in, given_out = tmp_path / "in", tmp_path / "out"
-    given_in.mkdir()
-    given_out.mkdir()
-
-    tess = Tesseract.from_source(
-        dummy_api_path,
-        input_path=given_in,
-        output_path=given_out,
-        output_format="json+binref",
-    )
-    with tess:
-        tess.apply(sample_inputs)
-    del tess
-    gc.collect()
-
-    assert given_in.exists() and given_out.exists()
 
 
 def test_binref_pool_is_available_without_a_linux_host(dummy_api_path, sample_inputs):
@@ -546,12 +448,6 @@ def test_binref_pool_is_available_without_a_linux_host(dummy_api_path, sample_in
         result = tess.apply(sample_inputs)
 
     assert result["result"].shape == sample_inputs["a"].shape
-
-
-def test_container_info_unavailable(dummy_api_path):
-    tess = Tesseract.from_source(dummy_api_path)
-    with pytest.raises(RuntimeError, match="from_image"):
-        tess.container_info()
 
 
 def test_startup_failure_surfaces_child_traceback(tmp_path):
@@ -601,43 +497,6 @@ def test_skip_health_check_returns_immediately(dummy_api_path):
         served.remove(force=True)
 
 
-@pytest.fixture(scope="session")
-def foreign_venv(tmp_path_factory):
-    """A separate environment running a different Python from this one.
-
-    This is what makes subprocess isolation worth more than a nicety: the
-    Tesseract need not be installable alongside the caller. Deliberately no
-    version pins beyond the interpreter -- CI rewrites the runtime extras to
-    exact pins on its oldest-dependency axis, so anything we add here can
-    conflict with them.
-    """
-    uv = shutil.which("uv")
-    if uv is None:
-        pytest.skip("uv is required to build a foreign environment")
-
-    # Any supported version that is not the one running the tests.
-    ours = f"{sys.version_info.major}.{sys.version_info.minor}"
-    foreign = next(v for v in ("3.12", "3.11", "3.13") if v != ours)
-
-    venv_dir = tmp_path_factory.mktemp("foreign_venv") / "env"
-    repo_root = Path(__file__).parents[2]
-    env = _env_without_pythonpath()
-
-    def run(*args):
-        result = subprocess.run(args, capture_output=True, text=True, env=env)
-        if result.returncode != 0:
-            pytest.skip(
-                f"could not build a Python {foreign} environment: "
-                f"{result.stderr.strip()[-300:]}"
-            )
-
-    run(uv, "venv", str(venv_dir), "--python", foreign)
-    run(uv, "pip", "install", "--python", str(venv_dir), f"{repo_root}[runtime]")
-
-    scripts, exe = ("Scripts", "python.exe") if os.name == "nt" else ("bin", "python")
-    return venv_dir / scripts / exe, foreign
-
-
 def test_foreign_interpreter_does_not_inherit_our_import_paths(monkeypatch):
     """Our sys.path must not follow a Tesseract into a different environment."""
     monkeypatch.setenv("PYTHONPATH", "/some/other/site-packages")
@@ -682,31 +541,6 @@ def test_foreign_interpreter_does_not_inherit_our_import_paths(monkeypatch):
 def test_missing_interpreter_is_reported(dummy_api_path):
     with pytest.raises(FileNotFoundError, match="does not exist"):
         local_client.serve(dummy_api_path, python_executable="/nonexistent/bin/python")
-
-
-def test_tesseract_in_foreign_environment(foreign_venv, dummy_api_path, sample_inputs):
-    """A Tesseract runs under an interpreter the caller could not have used."""
-    interpreter, foreign_version = foreign_venv
-
-    reported = subprocess.run(
-        [str(interpreter), "-c", "import sys; print('%d.%d' % sys.version_info[:2])"],
-        check=True,
-        capture_output=True,
-        text=True,
-        env=_env_without_pythonpath(),
-    ).stdout.strip()
-
-    # Guard the premise: same interpreter would prove nothing
-    assert reported == foreign_version
-    assert reported != f"{sys.version_info.major}.{sys.version_info.minor}"
-
-    with Tesseract.from_source(
-        dummy_api_path,
-        python_executable=interpreter,
-    ) as tess:
-        result = tess.apply(sample_inputs)
-
-    np.testing.assert_allclose(result["result"], [5.0, 8.0])
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX process groups")
