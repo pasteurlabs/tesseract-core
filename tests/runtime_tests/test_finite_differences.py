@@ -1,4 +1,5 @@
 from types import ModuleType
+from typing import Any
 
 import numpy as np
 import pytest
@@ -302,3 +303,333 @@ def test_vjp_sweep_is_shared_across_sampled_indices():
     # One sweep, reused by every sampled index, rather than one sweep each.
     assert module.vjp_calls == n_output_elements
     assert module.vjp_calls < num_evals_total * n_output_elements
+
+
+class RecordingVjpModule(CountingVjpModule):
+    """CountingVjpModule that additionally records cotangent one-hot coordinates."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.recorded_cotangent_coords = []
+
+    def vector_jacobian_product(
+        self,
+        inputs: DummyModule.InputSchema,
+        vjp_inputs: set[str],
+        vjp_outputs: set[str],
+        cotangent_vector: dict[str, Any],
+    ):
+        for out_key in vjp_outputs:
+            cot = np.asarray(cotangent_vector[out_key])
+            nonzero = np.argwhere(cot != 0)
+            for coord in nonzero:
+                self.recorded_cotangent_coords.append(tuple(int(c) for c in coord))
+        return super().vector_jacobian_product(
+            inputs, vjp_inputs, vjp_outputs, cotangent_vector
+        )
+
+
+def test_vjp_output_sampling_bounds_calls():
+    """Output sampling bounds VJP endpoint calls to min(n_output_elements, max_output_samples)."""
+    module = CountingVjpModule("dummy_module", correct_gradients=True)
+    num_evals_total = 0
+    for _endpoint, failures, num_evals in check_gradients(
+        module,
+        {"inputs": input_data},
+        base_dir=None,
+        input_paths=["in_data"],
+        output_paths=["out_dict.{key}"],
+        endpoints=["vector_jacobian_product"],
+        max_evals=10,
+        max_output_samples=5,
+        seed=0,
+    ):
+        num_evals_total += num_evals
+        assert not failures
+
+    assert num_evals_total > 0
+    assert module.vjp_calls == 5
+
+
+def test_vjp_output_sampling_shared_across_sampled_input_rows():
+    """All sampled input rows for a path pair must share the same sampled VJP sweep."""
+    module = CountingVjpModule("dummy_module", correct_gradients=True)
+    num_evals_total = 0
+    for _endpoint, failures, num_evals in check_gradients(
+        module,
+        {"inputs": input_data},
+        base_dir=None,
+        input_paths=["in_data"],
+        output_paths=["out_dict.{key}"],
+        endpoints=["vector_jacobian_product"],
+        max_evals=20,
+        max_output_samples=5,
+        seed=0,
+    ):
+        num_evals_total += num_evals
+        assert not failures
+
+    assert num_evals_total > 1
+    # Exactly 5 VJP calls shared across all sampled input rows, NOT num_evals * 5
+    assert module.vjp_calls == 5
+
+
+def test_vjp_output_sampling_cap_greater_than_output_size_stays_exhaustive():
+    """When max_output_samples >= output elements, the check stays exhaustive without random sampling."""
+    module = CountingVjpModule("dummy_module", correct_gradients=True)
+    for _endpoint, failures, _ in check_gradients(
+        module,
+        {"inputs": input_data},
+        base_dir=None,
+        input_paths=["in_data"],
+        output_paths=["out_dict.{key}"],
+        endpoints=["vector_jacobian_product"],
+        max_evals=10,
+        max_output_samples=100,
+        seed=0,
+    ):
+        assert not failures
+
+    n_output_elements = int(np.prod(input_data["in_dict"]["key"].shape))
+    assert module.vjp_calls == n_output_elements
+
+
+def test_vjp_output_sampling_coordinates_are_unique():
+    """Sampled output coordinates must be distinct (sampled without replacement)."""
+    module = RecordingVjpModule("dummy_module", correct_gradients=True)
+    for _endpoint, failures, _ in check_gradients(
+        module,
+        {"inputs": input_data},
+        base_dir=None,
+        input_paths=["in_data"],
+        output_paths=["out_dict.{key}"],
+        endpoints=["vector_jacobian_product"],
+        max_evals=10,
+        max_output_samples=7,
+        seed=42,
+    ):
+        assert not failures
+
+    assert len(module.recorded_cotangent_coords) == 7
+    assert len(set(module.recorded_cotangent_coords)) == 7
+
+
+def test_vjp_output_sampling_is_deterministic_with_seed():
+    """Identical seeds must yield identical sampled output coordinates in the same order."""
+    module1 = RecordingVjpModule("dummy_module", correct_gradients=True)
+    for _endpoint, failures, _ in check_gradients(
+        module1,
+        {"inputs": input_data},
+        base_dir=None,
+        input_paths=["in_data"],
+        output_paths=["out_dict.{key}"],
+        endpoints=["vector_jacobian_product"],
+        max_evals=10,
+        max_output_samples=5,
+        seed=123,
+    ):
+        assert not failures
+
+    module2 = RecordingVjpModule("dummy_module", correct_gradients=True)
+    for _endpoint, failures, _ in check_gradients(
+        module2,
+        {"inputs": input_data},
+        base_dir=None,
+        input_paths=["in_data"],
+        output_paths=["out_dict.{key}"],
+        endpoints=["vector_jacobian_product"],
+        max_evals=10,
+        max_output_samples=5,
+        seed=123,
+    ):
+        assert not failures
+
+    assert len(module1.recorded_cotangent_coords) == 5
+    assert module1.recorded_cotangent_coords == module2.recorded_cotangent_coords
+
+
+class NonzeroLinearModule(ModuleType):
+    """Module where y = W @ x with non-zero, distinct Jacobian elements.
+
+    This ensures that testing catches any incorrect coordinate alignment
+    or zero-filling bug in the checker.
+    """
+
+    # Non-zero matrix of shape (6, 4)
+    W = np.arange(1, 25, dtype=np.float32).reshape(6, 4)
+
+    def __init__(self, *args, correct_gradients: bool = True, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.correct_gradients = correct_gradients
+
+    class InputSchema(BaseModel):
+        x: Differentiable[Array[(4,), Float32]]
+
+    class OutputSchema(BaseModel):
+        y: Differentiable[Array[(6,), Float32]]
+
+    def apply(self, inputs: InputSchema) -> OutputSchema:
+        x = np.asarray(inputs.x, dtype=np.float32)
+        return {"y": self.W @ x}
+
+    def vector_jacobian_product(
+        self,
+        inputs: InputSchema,
+        vjp_inputs: set[str],
+        vjp_outputs: set[str],
+        cotangent_vector: dict[str, Any],
+    ):
+        cot = np.asarray(cotangent_vector["y"], dtype=np.float32)
+        if self.correct_gradients:
+            grad_x = cot @ self.W
+        else:
+            grad_x = (cot @ self.W) + 50.0
+        return {"x": grad_x}
+
+
+def test_vjp_output_sampling_coordinate_alignment():
+    """Finite differences and VJP values must be compared at exactly the same sampled coordinates.
+
+    With a non-zero linear Jacobian, zero-filling unsampled positions would cause
+    finite differences (which evaluate the full row with non-zero values) to mismatch
+    the fake zeros. This test verifies that coordinate extraction is correctly aligned.
+    """
+    module = NonzeroLinearModule("nonzero_linear_module", correct_gradients=True)
+    linear_inputs = {"x": np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)}
+
+    num_evals_total = 0
+    for _endpoint, failures, num_evals in check_gradients(
+        module,
+        {"inputs": linear_inputs},
+        base_dir=None,
+        input_paths=["x"],
+        output_paths=["y"],
+        endpoints=["vector_jacobian_product"],
+        max_evals=4,
+        max_output_samples=2,
+        seed=0,
+    ):
+        num_evals_total += num_evals
+        assert not failures
+
+    assert num_evals_total > 0
+
+
+def test_vjp_output_sampling_wrong_gradients_fail():
+    """Sampling must not mask real gradient errors: incorrect VJPs must still be caught."""
+    bad_module = NonzeroLinearModule("nonzero_linear_module", correct_gradients=False)
+    linear_inputs = {"x": np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)}
+
+    failures_found = []
+    for _endpoint, failures, _num_evals in check_gradients(
+        bad_module,
+        {"inputs": linear_inputs},
+        base_dir=None,
+        input_paths=["x"],
+        output_paths=["y"],
+        endpoints=["vector_jacobian_product"],
+        max_evals=4,
+        max_output_samples=3,
+        seed=0,
+    ):
+        failures_found.extend(failures)
+
+    assert len(failures_found) > 0
+    for failure in failures_found:
+        assert failure.exception is None
+        assert failure.ref_val is not None
+        assert failure.grad_val is not None
+        assert len(failure.ref_val) == 3
+        assert len(failure.grad_val) == 3
+
+
+def test_vjp_output_sampling_scalar_output():
+    """Scalar outputs must produce exactly one VJP call with coordinate () regardless of cap."""
+    module = CountingVjpModule("dummy_module", correct_gradients=True)
+    num_evals_total = 0
+    for _endpoint, failures, num_evals in check_gradients(
+        module,
+        {"inputs": input_data},
+        base_dir=None,
+        input_paths=["in_scalar"],
+        output_paths=["out_scalar"],
+        endpoints=["vector_jacobian_product"],
+        max_evals=5,
+        max_output_samples=10,
+        seed=0,
+    ):
+        num_evals_total += num_evals
+        assert not failures
+
+    assert num_evals_total > 0
+    assert module.vjp_calls == 1
+
+
+@pytest.mark.parametrize("invalid_sample_count", [0, -1, -10])
+def test_check_gradients_rejects_invalid_max_output_samples(invalid_sample_count):
+    """max_output_samples <= 0 must be rejected with ValueError."""
+    module = DummyModule("dummy_module", correct_gradients=True)
+    with pytest.raises(ValueError, match="max_output_samples must be greater than 0"):
+        list(
+            check_gradients(
+                module,
+                {"inputs": input_data},
+                endpoints=["vector_jacobian_product"],
+                max_output_samples=invalid_sample_count,
+            )
+        )
+
+
+def test_cli_max_output_samples_option(cli_runner):
+    """CLI must expose --max-output-samples in check-gradients help."""
+    from tesseract_core.runtime.cli import app
+
+    result = cli_runner.invoke(app, ["check-gradients", "--help"])
+    assert result.exit_code == 0
+    assert "--max-output-samples" in result.stdout
+
+
+class LargeOutputModule(ModuleType):
+    """Module with 256x256 (65,536) elements to test asymptotic call count."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.vjp_calls = 0
+
+    class InputSchema(BaseModel):
+        x: Differentiable[Array[(2,), Float32]]
+
+    class OutputSchema(BaseModel):
+        y: Differentiable[Array[(256, 256), Float32]]
+
+    def apply(self, inputs: InputSchema) -> OutputSchema:
+        return {"y": np.zeros((256, 256), dtype=np.float32)}
+
+    def vector_jacobian_product(
+        self,
+        inputs: InputSchema,
+        vjp_inputs: set[str],
+        vjp_outputs: set[str],
+        cotangent_vector: dict[str, Any],
+    ):
+        self.vjp_calls += 1
+        return {"x": np.zeros((2,), dtype=np.float32)}
+
+
+def test_vjp_output_sampling_large_output_asymptotics():
+    """65,536-element output runs exactly 10 VJP calls when max_output_samples=10."""
+    module = LargeOutputModule("large_output_module")
+    for _endpoint, failures, _num_evals in check_gradients(
+        module,
+        {"inputs": {"x": np.zeros(2, dtype=np.float32)}},
+        base_dir=None,
+        input_paths=["x"],
+        output_paths=["y"],
+        endpoints=["vector_jacobian_product"],
+        max_evals=1,
+        max_output_samples=10,
+        seed=0,
+    ):
+        assert not failures
+
+    assert module.vjp_calls == 10

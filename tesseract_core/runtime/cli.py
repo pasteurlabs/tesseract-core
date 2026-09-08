@@ -343,6 +343,17 @@ def check_gradients(
             show_default=True,
         ),
     ] = 1000,
+    max_output_samples: Annotated[
+        int | None,
+        typer.Option(
+            "--max-output-samples",
+            help=(
+                "Maximum number of output elements to sample when checking "
+                "vector_jacobian_product."
+            ),
+            show_default="check all",
+        ),
+    ] = None,
     max_failures: Annotated[
         int,
         typer.Option(
@@ -397,6 +408,7 @@ def check_gradients(
         output_paths=output_paths,
         endpoints=endpoints,
         max_evals=max_evals,
+        max_output_samples=max_output_samples,
         eps=eps,
         rtol=rtol,
         seed=seed,

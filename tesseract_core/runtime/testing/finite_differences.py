@@ -120,13 +120,23 @@ def _by_index(input_path: Any, output_path: Any, input_idx: Any) -> tuple:
     return (input_path, output_path, tuple(input_idx))
 
 
-def _by_sampled_set(input_path: Any, output_path: Any, sampled: Any) -> tuple:
-    """Key a VJP sweep on the path pair and the set it answers for.
+class _VjpSweepTarget(NamedTuple):
+    """Target indices for a shared VJP sweep across inputs and outputs."""
 
-    One sweep covers every sampled index of a pair, so keying it per index
-    would defeat the sharing.
-    """
-    return (input_path, output_path, tuple(sampled))
+    wanted_inputs: tuple[tuple[int, ...], ...]
+    sampled_outputs: tuple[tuple[int, ...], ...] | None
+
+
+def _by_sampled_set(
+    input_path: Any,
+    output_path: Any,
+    target: _VjpSweepTarget,
+) -> tuple:
+    """Key a VJP sweep on the path pair and the input/output sets it answers for."""
+    out_key = (
+        tuple(target.sampled_outputs) if target.sampled_outputs is not None else None
+    )
+    return (input_path, output_path, tuple(target.wanted_inputs), out_key)
 
 
 def _cached_function(*, key_fn: Callable) -> Callable:
@@ -347,7 +357,8 @@ def _vjp_sweep(
     inputs: dict[str, Any],
     input_path: Sequence[str],
     output_path: Sequence[str],
-    wanted: tuple[tuple[int, ...], ...],
+    target: _VjpSweepTarget,
+    outputs: dict[str, Any],
 ) -> dict[tuple[int, ...], ArrayLike]:
     """Sweep one-hot cotangents over the output and keep the wanted rows.
 
@@ -361,16 +372,35 @@ def _vjp_sweep(
     Only the wanted rows are retained, so the full Jacobian is never
     materialised.
     """
-    apply_fn = endpoints_func["apply"]
-    ApplySchema = get_input_schema(apply_fn)
-    outputs = apply_fn(ApplySchema.model_validate({"inputs": inputs})).model_dump()
-
     vjp_fn = endpoints_func["vector_jacobian_product"]
     VjpSchema = get_input_schema(vjp_fn)
     template = np.zeros_like(get_at_path(outputs, output_path))
-    rows = {idx: np.zeros_like(template) for idx in wanted}
 
-    for col_idx in np.ndindex(template.shape):
+    if target.sampled_outputs is None:
+        rows = {idx: np.zeros_like(template) for idx in target.wanted_inputs}
+        for col_idx in np.ndindex(template.shape):
+            cotangent = np.zeros_like(template)
+            cotangent[col_idx] = 1
+            vjp = vjp_fn(
+                VjpSchema.model_validate(
+                    {
+                        "inputs": inputs,
+                        "vjp_inputs": [input_path],
+                        "vjp_outputs": [output_path],
+                        "cotangent_vector": {output_path: cotangent},
+                    }
+                )
+            ).model_dump()
+            grad = vjp[input_path]
+            for idx in target.wanted_inputs:
+                rows[idx][col_idx] = grad[idx]
+        return rows
+
+    rows = {
+        idx: np.zeros(len(target.sampled_outputs), dtype=template.dtype)
+        for idx in target.wanted_inputs
+    }
+    for col_pos, col_idx in enumerate(target.sampled_outputs):
         cotangent = np.zeros_like(template)
         cotangent[col_idx] = 1
         vjp = vjp_fn(
@@ -384,8 +414,8 @@ def _vjp_sweep(
             )
         ).model_dump()
         grad = vjp[input_path]
-        for idx in wanted:
-            rows[idx][col_idx] = grad[idx]
+        for idx in target.wanted_inputs:
+            rows[idx][col_pos] = grad[idx]
     return rows
 
 
@@ -395,7 +425,9 @@ def _jacobian_via_vjp(
     input_path: Sequence[str],
     output_path: Sequence[str],
     input_idx: tuple[int, ...],
+    outputs: dict[str, Any],
     sampled_input_idx: tuple[tuple[int, ...], ...] = (),
+    sampled_output_idx: tuple[tuple[int, ...], ...] | None = None,
 ) -> ArrayLike:
     """Return one Jacobian row from the sweep shared by this path pair.
 
@@ -405,7 +437,8 @@ def _jacobian_via_vjp(
     for a single row like the other three helpers.
     """
     wanted = tuple(dict.fromkeys((*sampled_input_idx, tuple(input_idx))))
-    return _vjp_sweep(endpoints_func, inputs, input_path, output_path, wanted)[
+    target = _VjpSweepTarget(wanted_inputs=wanted, sampled_outputs=sampled_output_idx)
+    return _vjp_sweep(endpoints_func, inputs, input_path, output_path, target, outputs)[
         tuple(input_idx)
     ]
 
@@ -450,13 +483,16 @@ def check_endpoint_gradients(
     endpoint_functions: dict[str, Callable],
     inputs: dict[str, Any],
     endpoint: str,
+    outputs: dict[str, Any],
     *,
     diff_inputs: list[str],
     diff_outputs: list[str],
     max_evals: int,
+    max_output_samples: int | None = None,
     eps: float,
     rtol: float,
     rng: np.random.RandomState,
+    output_rng: np.random.RandomState | None = None,
     show_progress: bool,
 ) -> tuple[list[GradientCheckResult], int]:
     """Check gradients of an endpoint against a finite difference approximation."""
@@ -481,6 +517,30 @@ def check_endpoint_gradients(
         sampled_by_pair.setdefault((in_path, out_path), ())
         sampled_by_pair[(in_path, out_path)] += (tuple(idx),)
 
+    sampled_outputs_by_pair: dict[
+        tuple[str, str], tuple[tuple[int, ...], ...] | None
+    ] = {}
+    if endpoint == "vector_jacobian_product" and max_output_samples is not None:
+        actual_output_rng = output_rng if output_rng is not None else rng
+        for in_path, out_path in sampled_by_pair:
+            out_val = get_at_path(outputs, out_path)
+            out_shape = np.shape(out_val)
+            n_output_elements = int(np.prod(out_shape, dtype=int)) if out_shape else 1
+            if max_output_samples < n_output_elements:
+                flat_idx = actual_output_rng.choice(
+                    n_output_elements, size=max_output_samples, replace=False
+                )
+                unraveled = np.unravel_index(flat_idx, out_shape)
+                sampled_outputs_by_pair[(in_path, out_path)] = tuple(
+                    tuple(int(dim[i]) for dim in unraveled)
+                    for i in range(max_output_samples)
+                )
+            else:
+                sampled_outputs_by_pair[(in_path, out_path)] = None
+    else:
+        for in_path, out_path in sampled_by_pair:
+            sampled_outputs_by_pair[(in_path, out_path)] = None
+
     try:
         with Progress(disable=not show_progress) as progress:
             subtask = progress.add_task(
@@ -500,11 +560,16 @@ def check_endpoint_gradients(
                         idx,
                         eps=eps,
                     )
-                    grad_kwargs = (
-                        {"sampled_input_idx": sampled_by_pair[(in_path, out_path)]}
-                        if endpoint == "vector_jacobian_product"
-                        else {}
-                    )
+                    if endpoint == "vector_jacobian_product":
+                        col_indices = sampled_outputs_by_pair.get((in_path, out_path))
+                        grad_kwargs = {
+                            "outputs": outputs,
+                            "sampled_input_idx": sampled_by_pair[(in_path, out_path)],
+                            "sampled_output_idx": col_indices,
+                        }
+                    else:
+                        col_indices = None
+                        grad_kwargs = {}
                     result_grad = _jacobian_via_grad(
                         endpoint_functions,
                         inputs,
@@ -525,13 +590,21 @@ def check_endpoint_gradients(
                         exception=exc_info,
                     )
                 else:
-                    if not np.allclose(result_apply, result_grad, atol=1e-8, rtol=rtol):
+                    if col_indices is not None:
+                        reference = np.asarray(result_apply)
+                        ref_val = np.asarray([reference[c] for c in col_indices])
+                        grad_val = np.asarray(result_grad)
+                    else:
+                        ref_val = result_apply
+                        grad_val = result_grad
+
+                    if not np.allclose(ref_val, grad_val, atol=1e-8, rtol=rtol):
                         failure = GradientCheckResult(
                             in_path=in_path,
                             out_path=out_path,
                             idx=idx,
-                            ref_val=result_apply,
-                            grad_val=result_grad,
+                            ref_val=ref_val,
+                            grad_val=grad_val,
                             exception=None,
                         )
 
@@ -563,6 +636,7 @@ def check_gradients(
     base_dir: Path | None = None,
     endpoints: Sequence[GradientEndpointName] | None = None,
     max_evals: int = 1000,
+    max_output_samples: int | None = None,
     eps: float = 1e-4,
     rtol: float = 0.1,
     seed: int | None = None,
@@ -578,11 +652,16 @@ def check_gradients(
         base_dir: The base directory to resolve relative paths.
         endpoints: The gradient endpoints to check. If not provided, all available endpoints are checked.
         max_evals: The target number of ``apply`` evaluations to perform.
+        max_output_samples: Maximum number of output elements sampled when checking the
+            vector_jacobian_product endpoint. If None, all output elements are checked.
         eps: The epsilon to use for finite differences, as a fraction of the maximum absolute value of each input.
         rtol: The relative tolerance to use for comparison.
         seed: The random seed to use for sampling. If not provided, a random seed is used.
         show_progress: Whether to show a progress bar.
     """
+    if max_output_samples is not None and max_output_samples <= 0:
+        raise ValueError("max_output_samples must be greater than 0")
+
     # We apply a global cache to these functions to avoid hashing `inputs` multiple times,
     # so we need to clear the cache before each run.
     _jacobian_via_apply.clear_cache()
@@ -641,18 +720,22 @@ def check_gradients(
 
     # Check gradients for each endpoint separately
     rng = np.random.RandomState(seed)
+    output_rng = np.random.RandomState(seed)
 
     for endpoint in endpoints:
         failures, num_evals = check_endpoint_gradients(
             endpoint_functions,
             inputs,
             endpoint,
+            outputs=outputs,
             diff_inputs=input_paths,
             diff_outputs=output_paths,
             max_evals=max_evals,
+            max_output_samples=max_output_samples,
             eps=eps,
             rtol=rtol,
             rng=rng,
+            output_rng=output_rng,
             show_progress=show_progress,
         )
         yield endpoint, failures, num_evals
