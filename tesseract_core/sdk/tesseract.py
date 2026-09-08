@@ -38,7 +38,7 @@ from .binref import (
 )
 from .docker_client import Container
 from .logs import LogStreamer
-from .served_client import ServedTesseract
+from .serving import ServedTesseract
 
 if TYPE_CHECKING:
     # Imported for type hints only. `from __future__ import annotations` makes
