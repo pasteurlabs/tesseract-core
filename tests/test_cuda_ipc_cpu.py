@@ -10,12 +10,20 @@ serve-side release hook, the ``--ipc=host`` wiring, and the CLI guard -- by
 
   * feeding fake objects that expose ``__cuda_array_interface__`` (no device
     memory), and
-  * monkeypatching the thin ctypes/CuPy wrappers that actually talk to CUDA.
+  * running against the ``mocked_cuda`` fixture, which swaps the plain-Python
+    CUDA runtime layer (``tesseract_core.runtime.cuda.api``) for an
+    in-process fake. Because the fake replaces the module's real public seam --
+    not scattered ctypes internals -- the encoding policy is exercised exactly as
+    it ships.
 
 They deliberately do NOT verify that IPC transfers the correct bytes, that the
 by-value handle marshalling is right, or that offsets read the right data: those
-are CUDA-runtime properties with no meaning against a mock. Those guarantees are
+are CUDA-runtime properties with no meaning against a fake. Those guarantees are
 covered by the GPU tests in ``test_cuda_ipc.py`` (marked ``@pytest.mark.gpu``).
+
+Library-discovery tests (wheel/soname resolution) live at the bottom and target
+``tesseract_core.runtime.cuda.loader`` directly, since that is where discovery
+now lives.
 """
 
 from __future__ import annotations
@@ -28,6 +36,8 @@ import numpy as np
 import pytest
 
 from tesseract_core.runtime import array_encoding, cuda_ipc
+from tesseract_core.runtime.cuda import api as cuda_api
+from tesseract_core.runtime.cuda import loader
 
 
 def _unpack_cuda_ipc(data: dict) -> dict:
@@ -80,71 +90,10 @@ class _TorchDevice:
         self.index = index
 
 
-@pytest.fixture
-def patched_cuda(monkeypatch):
-    """Patch the CUDA wrapper functions so encode/decode run without a GPU.
-
-    Yields a record dict capturing the calls made, so tests can assert on the
-    orchestration (which pointer the handle was taken on, that close was called,
-    etc.) rather than on real CUDA behavior.
-    """
-    calls: dict[str, list] = {
-        "get_handle": [],
-        "open": [],
-        "close": [],
-        "alloc_base": [],
-        "stage": [],
-        "free": [],
-    }
-
-    # Report an allocation whose base sits 256 bytes below the data pointer, so
-    # storage_offset arithmetic is exercised with a non-zero value.
-    def fake_alloc_base(device_ptr: int) -> tuple[int, int]:
-        calls["alloc_base"].append(device_ptr)
-        base = device_ptr - 256
-        size = 4096
-        return base, size
-
-    def fake_get_handle(base_ptr: int) -> bytes:
-        calls["get_handle"].append(base_ptr)
-        return b"\x01" * cuda_ipc._CUDA_IPC_HANDLE_SIZE
-
-    def fake_open(handle_bytes: bytes, device: int) -> int:
-        calls["open"].append((handle_bytes, device))
-        return 0x2000  # pretend mapped base pointer
-
-    def fake_close(device_ptr: int) -> None:
-        calls["close"].append(device_ptr)
-
-    def fake_stage(base_ptr: int, storage_size: int) -> int:
-        calls["stage"].append((base_ptr, storage_size))
-        return 0x9000  # pretend staging buffer pointer
-
-    monkeypatch.setattr(cuda_ipc, "_cuda_get_allocation_base", fake_alloc_base)
-    monkeypatch.setattr(cuda_ipc, "_cuda_ipc_get_mem_handle", fake_get_handle)
-    monkeypatch.setattr(cuda_ipc, "_cuda_ipc_open_mem_handle", fake_open)
-    monkeypatch.setattr(cuda_ipc, "_cuda_ipc_close_mem_handle", fake_close)
-    monkeypatch.setattr(cuda_ipc, "_stage_for_legacy_ipc", fake_stage)
-
-    # Staging buffers are freed via cudart.cudaFree in release_pinned_ipc_exports;
-    # stub the cudart accessor so no real driver is touched and frees are logged.
-    fake_cudart = types.SimpleNamespace(
-        cudaFree=lambda ptr: calls["free"].append(getattr(ptr, "value", ptr))
-    )
-    monkeypatch.setattr(cuda_ipc, "_get_cudart", lambda: fake_cudart)
-
-    # Each test starts with empty registries.
-    cuda_ipc._CUDA_IPC_EXPORT_REGISTRY.clear()
-    cuda_ipc._CUDA_IPC_STAGING_BUFFERS.clear()
-    yield calls
-    cuda_ipc._CUDA_IPC_EXPORT_REGISTRY.clear()
-    cuda_ipc._CUDA_IPC_STAGING_BUFFERS.clear()
-
-
 # ── Encode-side orchestration (mocked CUDA) ─────────────────────────────
 
 
-def test_dump_assembles_payload_and_offset(patched_cuda):
+def test_dump_assembles_payload_and_offset(mocked_cuda):
     arr = FakeCudaArray((4, 8), "<f4", data_ptr=0x5000)
     out = cuda_ipc.dump_cuda_ipc_arraydict(arr)
 
@@ -158,26 +107,26 @@ def test_dump_assembles_payload_and_offset(patched_cuda):
     assert unpacked["storage_offset"] == 256
     assert unpacked["storage_size"] == 4096
     # The handle must be taken on the allocation *base*, not the data pointer.
-    assert patched_cuda["get_handle"] == [0x5000 - 256]
+    assert mocked_cuda.calls["get_handle"] == [0x5000 - 256]
     # Handle is base64 of the 64 raw bytes.
     import pybase64
 
-    assert len(pybase64.b64decode(unpacked["handle"])) == cuda_ipc._CUDA_IPC_HANDLE_SIZE
+    assert len(pybase64.b64decode(unpacked["handle"])) == cuda_api.IPC_HANDLE_SIZE
 
 
-def test_dump_device_detection_cupy(patched_cuda):
+def test_dump_device_detection_cupy(mocked_cuda):
     arr = FakeCudaArray((3,), "<f4", device=_CuPyDevice(id=2))
     out = cuda_ipc.dump_cuda_ipc_arraydict(arr)
     assert _unpack_cuda_ipc(out["data"])["device"] == 2
 
 
-def test_dump_device_detection_torch(patched_cuda):
+def test_dump_device_detection_torch(mocked_cuda):
     arr = FakeCudaArray((3,), "<f4", device=_TorchDevice(index=3))
     out = cuda_ipc.dump_cuda_ipc_arraydict(arr)
     assert _unpack_cuda_ipc(out["data"])["device"] == 3
 
 
-def test_dump_device_defaults_to_zero(patched_cuda):
+def test_dump_device_defaults_to_zero(mocked_cuda):
     # No .device attribute, and torch tensors with device.index == None.
     assert (
         _unpack_cuda_ipc(
@@ -191,7 +140,7 @@ def test_dump_device_defaults_to_zero(patched_cuda):
     )
 
 
-def test_dump_rejects_non_cuda_array(patched_cuda):
+def test_dump_rejects_non_cuda_array(mocked_cuda):
     with pytest.raises(ValueError, match="cuda_ipc encoding requires a CUDA array"):
         cuda_ipc.dump_cuda_ipc_arraydict(np.zeros((2, 2), dtype=np.float32))
 
@@ -203,13 +152,13 @@ def test_dump_rejects_non_cuda_array(patched_cuda):
         ((4, 3), (4, 16)),  # transposed 3x4 float32
     ],
 )
-def test_dump_rejects_non_contiguous(patched_cuda, shape, strides):
+def test_dump_rejects_non_contiguous(mocked_cuda, shape, strides):
     arr = FakeCudaArray(shape, "<f4", strides=strides)
     with pytest.raises(ValueError, match="C-contiguous"):
         cuda_ipc.dump_cuda_ipc_arraydict(arr)
 
 
-def test_dump_accepts_explicit_contiguous_strides(patched_cuda):
+def test_dump_accepts_explicit_contiguous_strides(mocked_cuda):
     # strides given but equal to the row-major strides -> still contiguous.
     arr = FakeCudaArray((3, 4), "<f4", strides=(16, 4))
     out = cuda_ipc.dump_cuda_ipc_arraydict(arr)
@@ -219,7 +168,7 @@ def test_dump_accepts_explicit_contiguous_strides(patched_cuda):
 # ── VMM staging fallback (legacy IPC reject) ────────────────────────────
 
 
-def test_dump_falls_back_to_staging_on_ipc_reject(patched_cuda, monkeypatch):
+def test_dump_falls_back_to_staging_on_ipc_reject(mocked_cuda):
     """When the base pointer is rejected, encode stages into a fresh buffer.
 
     The staged handle uses offset 0 / size == the array's own nbytes, and the
@@ -227,32 +176,25 @@ def test_dump_falls_back_to_staging_on_ipc_reject(patched_cuda, monkeypatch):
     """
     # Reject the base pointer (VMM-backed) but let the staging buffer succeed,
     # matching real behavior where the fresh cudaMalloc buffer is IPC-exportable.
-    staging_ptr = 0x9000
-
-    def get_handle(ptr):
-        if ptr != staging_ptr:
-            raise RuntimeError("cudaIpcGetMemHandle failed: simulated VMM reject")
-        return b"\x01" * cuda_ipc._CUDA_IPC_HANDLE_SIZE
-
-    monkeypatch.setattr(cuda_ipc, "_cuda_ipc_get_mem_handle", get_handle)
+    mocked_cuda.reject_non_staging_ipc = True
 
     arr = FakeCudaArray((4, 8), "<f4", data_ptr=0x5000)  # nbytes = 4*8*4 = 128
     out = cuda_ipc.dump_cuda_ipc_arraydict(arr)
 
     # Staging was invoked on the array's own data pointer and byte count.
-    assert patched_cuda["stage"] == [(0x5000, 128)]
+    assert mocked_cuda.calls["stage"] == [(0x5000, 128)]
     # Payload reflects the staging buffer: offset 0, size == nbytes.
     unpacked = _unpack_cuda_ipc(out["data"])
     assert unpacked["storage_offset"] == 0
     assert unpacked["storage_size"] == 128
-    # Staging pointer registered for cudaFree.
+    # Staging pointer registered for a later free.
     assert cuda_ipc._CUDA_IPC_STAGING_BUFFERS == [0x9000]
 
 
 # ── Export registry / ring-1 lifetime ───────────────────────────────────
 
 
-def test_export_registry_pins_and_releases(patched_cuda):
+def test_export_registry_pins_and_releases(mocked_cuda):
     assert cuda_ipc._CUDA_IPC_EXPORT_REGISTRY == []
     arr = FakeCudaArray((3,), "<f4")
     cuda_ipc.dump_cuda_ipc_arraydict(arr)
@@ -262,16 +204,16 @@ def test_export_registry_pins_and_releases(patched_cuda):
     assert cuda_ipc._CUDA_IPC_EXPORT_REGISTRY == []
 
 
-def test_release_frees_staging_buffers(patched_cuda, monkeypatch):
-    """Releasing exports cudaFree's every registered staging buffer."""
+def test_release_frees_staging_buffers(mocked_cuda):
+    """Releasing exports frees every registered staging buffer."""
     cuda_ipc._pin_cuda_ipc_staging_buffer(0xAAAA)
     cuda_ipc._pin_cuda_ipc_staging_buffer(0xBBBB)
     cuda_ipc.release_pinned_ipc_exports()
-    assert patched_cuda["free"] == [0xAAAA, 0xBBBB]
+    assert mocked_cuda.calls["free"] == [0xAAAA, 0xBBBB]
     assert cuda_ipc._CUDA_IPC_STAGING_BUFFERS == []
 
 
-def test_client_request_releases_input_exports(patched_cuda):
+def test_client_request_releases_input_exports(mocked_cuda):
     """HTTPClient._request must release the GPU inputs it pinned while encoding.
 
     Regression test: the client shares the process-global export registry with
@@ -386,94 +328,18 @@ def test_import_cuda_ipc_explains_missing_runtime_extra(monkeypatch):
 
 # ── Decode-side orchestration (mocked CUDA, no CuPy) ─────────────────────
 #
-# Decoding no longer depends on CuPy: it uses only the ctypes cudart primitives
-# (cudaSetDevice/cudaMalloc/cudaMemcpy/cudaDeviceSynchronize/cudaFree) plus the
-# IPC open/close helpers. These tests mock those primitives so the *Python
+# Decoding no longer depends on CuPy: it uses only the plain-Python CUDA runtime
+# primitives (set_device/malloc/memcpy/device_synchronize/free) plus the IPC
+# open/close helpers. The mocked_cuda fixture replaces those so the *Python
 # orchestration* (offset arithmetic, own-nbytes copy, synchronize-before-close,
 # mapping close, buffer free, DLPack ownership) is exercised on a GPU-less box;
 # the real device-copy correctness lives in the GPU tests in test_cuda_ipc.py.
 
 
-@pytest.fixture
-def patched_decode(monkeypatch):
-    """Mock the ctypes cudart decode primitives and the IPC open/close helpers.
-
-    A single fake device buffer is simulated with a Python ``bytearray`` so that
-    ``copy_to_host`` returns real bytes. Records the sequence of primitive calls
-    for ordering/argument assertions.
-    """
-    import ctypes
-
-    calls: dict[str, list] = {
-        "set_device": [],
-        "malloc": [],
-        "memcpy": [],
-        "sync": [],
-        "free": [],
-        "open": [],
-        "close": [],
-    }
-    state: dict[str, Any] = {"owned_ptr": 0xD000, "buffer": None}
-
-    class FakeCudart:
-        def cudaSetDevice(self, device):
-            calls["set_device"].append(device)
-            return 0
-
-        def cudaMalloc(self, pptr, size):
-            size_v = getattr(size, "value", size)
-            calls["malloc"].append(int(size_v))
-            state["buffer"] = bytearray(int(size_v))
-            # Write the owned pointer into the c_void_p the caller passed by ref.
-            ctypes.cast(pptr, ctypes.POINTER(ctypes.c_void_p)).contents.value = state[
-                "owned_ptr"
-            ]
-            return 0
-
-        def cudaMemcpy(self, dst, src, size, kind):
-            dst_v = getattr(dst, "value", dst)
-            src_v = getattr(src, "value", src)
-            size_v = int(getattr(size, "value", size))
-            kind_v = int(getattr(kind, "value", kind))
-            calls["memcpy"].append((dst_v, src_v, size_v, kind_v))
-            # For device->host copies, fill the host buffer with the recorded
-            # device bytes so copy_to_host yields deterministic data.
-            if kind_v == cuda_ipc._cudaMemcpyDeviceToHost:
-                src_bytes = state.get("device_bytes")
-                if src_bytes is not None:
-                    ctypes.memmove(dst_v, src_bytes, size_v)
-            return 0
-
-        def cudaDeviceSynchronize(self):
-            calls["sync"].append(True)
-            return 0
-
-        def cudaFree(self, ptr):
-            calls["free"].append(getattr(ptr, "value", ptr))
-            return 0
-
-        def cudaGetErrorString(self, code):
-            return b"fake error"
-
-    fake = FakeCudart()
-    monkeypatch.setattr(cuda_ipc, "_get_cudart", lambda: fake)
-
-    def fake_open(handle_bytes, device):
-        calls["open"].append((handle_bytes, device))
-        return 0x2000  # pretend mapped base pointer
-
-    def fake_close(device_ptr):
-        calls["close"].append(device_ptr)
-
-    monkeypatch.setattr(cuda_ipc, "_cuda_ipc_open_mem_handle", fake_open)
-    monkeypatch.setattr(cuda_ipc, "_cuda_ipc_close_mem_handle", fake_close)
-    return calls, state
-
-
 def _encoded(shape, dtype, device, offset, storage_size, fill=b"\x02"):
     import pybase64
 
-    handle = pybase64.b64encode_as_string(fill * cuda_ipc._CUDA_IPC_HANDLE_SIZE)
+    handle = pybase64.b64encode_as_string(fill * cuda_api.IPC_HANDLE_SIZE)
     return {
         "object_type": "array",
         "shape": list(shape),
@@ -485,30 +351,28 @@ def _encoded(shape, dtype, device, offset, storage_size, fill=b"\x02"):
     }
 
 
-def test_load_copies_own_bytes_at_offset_and_closes(patched_decode):
+def test_load_copies_own_bytes_at_offset_and_closes(mocked_cuda):
     """Decode allocates the array's own nbytes, copies from base+offset, closes."""
-    calls, _state = patched_decode
-    handle = b"\x02" * cuda_ipc._CUDA_IPC_HANDLE_SIZE
+    handle = b"\x02" * cuda_api.IPC_HANDLE_SIZE
     encoded = _encoded((4, 8), "float32", device=1, offset=128, storage_size=4096)
 
     out = cuda_ipc.load_cuda_ipc_arraydict(encoded)
 
     nbytes = 4 * 8 * 4  # 128
     # Opened on the requested device with the decoded handle.
-    assert calls["open"] == [(handle, 1)]
+    assert mocked_cuda.calls["open"] == [(handle, 1)]
     # Allocated exactly the array's own byte size (not the whole storage_size).
-    assert calls["malloc"] == [nbytes]
+    assert mocked_cuda.calls["malloc"] == [nbytes]
     # One device->device copy of nbytes, from base(0x2000)+offset(128) into the
     # owned buffer (0xD000).
-    assert len(calls["memcpy"]) == 1
-    dst, src, size, kind = calls["memcpy"][0]
+    assert len(mocked_cuda.calls["memcpy_d2d"]) == 1
+    dst, src, size = mocked_cuda.calls["memcpy_d2d"][0]
     assert dst == 0xD000
     assert src == 0x2000 + 128
     assert size == nbytes
-    assert kind == cuda_ipc._cudaMemcpyDeviceToDevice
     # Synchronised before the mapping was closed.
-    assert calls["sync"] == [True]
-    assert calls["close"] == [0x2000]
+    assert mocked_cuda.calls["sync"] == [True]
+    assert mocked_cuda.calls["close"] == [0x2000]
     # Returned wrapper is framework-agnostic and correctly shaped.
     assert isinstance(out, cuda_ipc.IpcDeviceArray)
     assert out.shape == (4, 8)
@@ -522,54 +386,69 @@ def test_load_copies_own_bytes_at_offset_and_closes(patched_decode):
     assert iface["typestr"] == np.dtype("float32").str
 
 
-def test_load_frees_owned_buffer_on_del(patched_decode):
+def test_load_frees_owned_buffer_on_del(mocked_cuda):
     """When no DLPack consumer adopts it, the wrapper frees its buffer on GC."""
-    calls, _state = patched_decode
     out = cuda_ipc.load_cuda_ipc_arraydict(
         _encoded((2,), "float32", device=0, offset=0, storage_size=8)
     )
-    assert calls["free"] == []
+    assert mocked_cuda.calls["free"] == []
     del out
     import gc
 
     gc.collect()
-    assert calls["free"] == [0xD000]
+    assert mocked_cuda.calls["free"] == [0xD000]
 
 
-def test_load_closes_handle_even_on_copy_failure(patched_decode, monkeypatch):
+def test_load_closes_handle_even_on_copy_failure(mocked_cuda, monkeypatch):
     """The IPC mapping is released and the owned buffer freed if the copy fails."""
-    calls, _state = patched_decode
 
-    fake = cuda_ipc._get_cudart()
+    def boom_memcpy(dst, src, nbytes):
+        raise RuntimeError("cudaMemcpy (device->device) failed: simulated")
 
-    def boom_memcpy(dst, src, size, kind):
-        return 999  # non-zero -> error
-
-    monkeypatch.setattr(fake, "cudaMemcpy", boom_memcpy)
+    monkeypatch.setattr(cuda_api, "memcpy_device_to_device", boom_memcpy)
 
     with pytest.raises(RuntimeError, match="cudaMemcpy"):
         cuda_ipc.load_cuda_ipc_arraydict(
             _encoded((2,), "float32", device=0, offset=0, storage_size=8)
         )
     # Owned buffer freed and the IPC mapping closed despite the failure.
-    assert calls["free"] == [0xD000]
-    assert calls["close"] == [0x2000]
+    assert mocked_cuda.calls["free"] == [0xD000]
+    assert mocked_cuda.calls["close"] == [0x2000]
 
 
-def test_copy_to_host_reads_device_bytes(patched_decode):
+def test_load_frees_owned_buffer_on_open_failure(mocked_cuda, monkeypatch):
+    """A failed IPC open still frees the already-allocated owned buffer.
+
+    The owned buffer is allocated before the mapping is opened; if the open
+    fails there is no mapping to close, but the owned buffer must not leak.
+    """
+
+    def boom_open(handle_bytes, device):
+        raise RuntimeError("cudaIpcOpenMemHandle failed: simulated")
+
+    monkeypatch.setattr(cuda_api, "ipc_open_mem_handle", boom_open)
+
+    with pytest.raises(RuntimeError, match="cudaIpcOpenMemHandle"):
+        cuda_ipc.load_cuda_ipc_arraydict(
+            _encoded((2,), "float32", device=0, offset=0, storage_size=8)
+        )
+    # Owned buffer freed; nothing to close since the mapping never opened.
+    assert mocked_cuda.calls["free"] == [0xD000]
+    assert mocked_cuda.calls["close"] == []
+
+
+def test_copy_to_host_reads_device_bytes(mocked_cuda):
     """copy_to_host performs a device->host memcpy + sync and returns the bytes."""
-    calls, state = patched_decode
     expected = np.arange(6, dtype=np.float32).reshape(2, 3)
-    state["device_bytes"] = expected.tobytes()
+    mocked_cuda.device_bytes = expected.tobytes()
 
     out = cuda_ipc.load_cuda_ipc_arraydict(
         _encoded((2, 3), "float32", device=0, offset=0, storage_size=24)
     )
     host = out.copy_to_host()
     np.testing.assert_array_equal(host, expected)
-    # A device->host copy happened and was synchronised.
-    d2h = [c for c in calls["memcpy"] if c[3] == cuda_ipc._cudaMemcpyDeviceToHost]
-    assert len(d2h) == 1
+    # A device->host copy happened.
+    assert len(mocked_cuda.calls["memcpy_d2h"]) == 1
     # np.asarray goes through __array__ -> copy_to_host too.
     np.testing.assert_array_equal(np.asarray(out), expected)
 
@@ -699,8 +578,9 @@ def test_output_to_bytes_cuda_ipc_context(monkeypatch):
 #
 # The pip CUDA wheels (nvidia-cuda-runtime-cuXX, pulled in by jax[cudaXX] /
 # cupy-cudaXXx) install libcudart under site-packages/nvidia/cuda_runtime/lib/,
-# which is on neither LD_LIBRARY_PATH nor the ldconfig cache. _find_cudart must
-# still discover it there after the system-loader probes come up empty.
+# which is on neither LD_LIBRARY_PATH nor the ldconfig cache. Discovery lives in
+# tesseract_core.runtime.cuda.loader and must still find it there after the
+# system-loader probes come up empty.
 
 
 def _fake_cudart_wheel(tmp_path, soname="libcudart.so.12"):
@@ -715,7 +595,7 @@ def test_iter_wheel_cudart_paths_finds_runtime_wheel(tmp_path, monkeypatch):
     """The runtime wheel's lib dir is discovered via its importlib spec."""
     lib_dir = _fake_cudart_wheel(tmp_path)
 
-    real_find_spec = cuda_ipc.importlib.util.find_spec
+    real_find_spec = loader.importlib.util.find_spec
 
     def fake_find_spec(name):
         if name == "nvidia.cuda_runtime":
@@ -724,9 +604,9 @@ def test_iter_wheel_cudart_paths_finds_runtime_wheel(tmp_path, monkeypatch):
             return spec
         return real_find_spec(name)
 
-    monkeypatch.setattr(cuda_ipc.importlib.util, "find_spec", fake_find_spec)
+    monkeypatch.setattr(loader.importlib.util, "find_spec", fake_find_spec)
 
-    found = list(cuda_ipc._iter_wheel_cudart_paths())
+    found = list(loader._iter_wheel_cudart_paths())
     assert str(lib_dir / "libcudart.so.12") in found
 
 
@@ -742,11 +622,11 @@ def test_find_cudart_prefers_wheel_over_system(tmp_path, monkeypatch):
 
     # A system runtime is also resolvable, so both sources could satisfy the load.
     monkeypatch.setattr(
-        cuda_ipc.ctypes.util,
+        loader.ctypes.util,
         "find_library",
         lambda name: "libcudart.so.12" if name == "cudart" else None,
     )
-    monkeypatch.setattr(cuda_ipc, "_iter_wheel_cudart_paths", lambda: [wheel_path])
+    monkeypatch.setattr(loader, "_iter_wheel_cudart_paths", lambda: [wheel_path])
 
     # Everything loads; _find_cudart returns the first candidate it tries.
     loaded = {}
@@ -755,9 +635,9 @@ def test_find_cudart_prefers_wheel_over_system(tmp_path, monkeypatch):
         loaded["path"] = path
         return object()
 
-    monkeypatch.setattr(cuda_ipc.ctypes, "CDLL", fake_cdll)
+    monkeypatch.setattr(loader.ctypes, "CDLL", fake_cdll)
 
-    handle = cuda_ipc._find_cudart()
+    handle = loader._find_cudart()
     assert handle is not None
     # The wheel path is first in the candidate order, so it is what gets loaded.
     assert loaded["path"] == wheel_path
@@ -770,10 +650,10 @@ def test_iter_wheel_cudart_paths_finds_unenumerated_future_major(tmp_path, monke
     runtime released after this code was written (here ``.so.99``) is picked up
     without any change to the version lists.
     """
-    future_soname = f"libcudart.so.{cuda_ipc._CUDART_MAJOR_NEWEST + 79}"
+    future_soname = f"libcudart.so.{loader.CUDART_MAJOR_NEWEST + 79}"
     lib_dir = _fake_cudart_wheel(tmp_path, soname=future_soname)
 
-    real_find_spec = cuda_ipc.importlib.util.find_spec
+    real_find_spec = loader.importlib.util.find_spec
 
     def fake_find_spec(name):
         if name == "nvidia.cuda_runtime":
@@ -782,9 +662,9 @@ def test_iter_wheel_cudart_paths_finds_unenumerated_future_major(tmp_path, monke
             return spec
         return real_find_spec(name)
 
-    monkeypatch.setattr(cuda_ipc.importlib.util, "find_spec", fake_find_spec)
+    monkeypatch.setattr(loader.importlib.util, "find_spec", fake_find_spec)
 
-    found = list(cuda_ipc._iter_wheel_cudart_paths())
+    found = list(loader._iter_wheel_cudart_paths())
     assert str(lib_dir / future_soname) in found
 
 
@@ -795,7 +675,7 @@ def test_iter_wheel_cudart_paths_prefers_newest_major(tmp_path, monkeypatch):
     for soname in ("libcudart.so.11", "libcudart.so.13", "libcudart.so.12"):
         (lib_dir / soname).write_bytes(b"")
 
-    real_find_spec = cuda_ipc.importlib.util.find_spec
+    real_find_spec = loader.importlib.util.find_spec
 
     def fake_find_spec(name):
         if name == "nvidia.cuda_runtime":
@@ -804,9 +684,9 @@ def test_iter_wheel_cudart_paths_prefers_newest_major(tmp_path, monkeypatch):
             return spec
         return real_find_spec(name)
 
-    monkeypatch.setattr(cuda_ipc.importlib.util, "find_spec", fake_find_spec)
+    monkeypatch.setattr(loader.importlib.util, "find_spec", fake_find_spec)
 
-    found = list(cuda_ipc._iter_wheel_cudart_paths())
+    found = list(loader._iter_wheel_cudart_paths())
     assert found[0] == str(lib_dir / "libcudart.so.13")
 
 
@@ -814,7 +694,8 @@ def test_iter_wheel_cudart_paths_prefers_newest_major(tmp_path, monkeypatch):
 #
 # Public API: out-of-process consumers (the tesseract_jax C++ shim) dlopen
 # libcudart using these candidates, so its contract -- ordering, dedup, and that
-# every item is a bare soname or absolute path -- is part of the interface.
+# every item is a bare soname or absolute path -- is part of the interface. It is
+# re-exported from cuda_ipc for those consumers, but defined in cuda.loader.
 
 
 def test_iter_cudart_candidates_orders_wheel_then_system(monkeypatch):
@@ -824,17 +705,17 @@ def test_iter_cudart_candidates_orders_wheel_then_system(monkeypatch):
     system one), so a codec handing device memory to them agrees on the runtime.
     """
     monkeypatch.setattr(
-        cuda_ipc.ctypes.util,
+        loader.ctypes.util,
         "find_library",
         lambda name: "/usr/lib/libcudart.so.12" if name == "cudart" else None,
     )
     monkeypatch.setattr(
-        cuda_ipc,
+        loader,
         "_iter_wheel_cudart_paths",
         lambda: ["/wheel/nvidia/lib/libcudart.so.12"],
     )
 
-    candidates = list(cuda_ipc.iter_cudart_candidates())
+    candidates = list(loader.iter_cudart_candidates())
 
     # Wheel (venv) path leads, ahead of the system loader's resolved path.
     assert candidates[0] == "/wheel/nvidia/lib/libcudart.so.12"
@@ -852,13 +733,13 @@ def test_iter_cudart_candidates_dedups_preserving_order(monkeypatch):
     """A path surfaced by both find_library and the wheel search appears once."""
     dup = "/wheel/nvidia/lib/libcudart.so.12"
     monkeypatch.setattr(
-        cuda_ipc.ctypes.util,
+        loader.ctypes.util,
         "find_library",
         lambda name: dup if name == "cudart" else None,
     )
-    monkeypatch.setattr(cuda_ipc, "_iter_wheel_cudart_paths", lambda: [dup])
+    monkeypatch.setattr(loader, "_iter_wheel_cudart_paths", lambda: [dup])
 
-    candidates = list(cuda_ipc.iter_cudart_candidates())
+    candidates = list(loader.iter_cudart_candidates())
 
     assert candidates.count(dup) == 1
     # The earlier (wheel) occurrence wins its position.
@@ -871,15 +752,22 @@ def test_iter_cudart_candidates_are_dlopen_arguments(monkeypatch):
     C++ consumers pass these straight to dlopen/LoadLibrary, which need a real
     library name or path -- not a find_library stem like ``"cudart"``.
     """
-    monkeypatch.setattr(cuda_ipc.ctypes.util, "find_library", lambda name: None)
-    monkeypatch.setattr(cuda_ipc, "_iter_wheel_cudart_paths", list)
+    monkeypatch.setattr(loader.ctypes.util, "find_library", lambda name: None)
+    monkeypatch.setattr(loader, "_iter_wheel_cudart_paths", list)
 
-    for candidate in cuda_ipc.iter_cudart_candidates():
+    for candidate in loader.iter_cudart_candidates():
         # A real soname (lib*.so*/lib*.dylib), a Windows DLL, or an absolute
         # path -- never a bare find_library stem like "cudart" / "cudart64_12".
         is_soname = candidate.startswith("lib") or candidate.endswith(".dll")
         is_path = candidate.startswith("/")
         assert is_soname or is_path, candidate
+
+
+def test_iter_cudart_candidates_exported_from_cuda_package():
+    """The discovery surface is importable from the cuda package for FFI consumers."""
+    from tesseract_core.runtime import cuda
+
+    assert cuda.iter_cudart_candidates is loader.iter_cudart_candidates
 
 
 # ── DeviceTransport interface ───────────────────────────────────────────
