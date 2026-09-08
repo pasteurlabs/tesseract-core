@@ -7,6 +7,7 @@ they exercise the actual startup / health-check / removal path.
 """
 
 import gc
+import logging
 import os
 import re
 import shutil
@@ -282,6 +283,31 @@ def _debug_address(served):
     """Read the debug address a served Tesseract reported binding."""
     match = re.search(r"Debugger listening on ([\d.]+):(\d+)", served.logs().decode())
     return (match.group(1), int(match.group(2))) if match else None
+
+
+def test_reported_debug_address_honours_an_inherited_runtime_override(
+    dummy_api_path, monkeypatch, caplog
+):
+    """The address we log must be the one the runtime actually binds.
+
+    We never write DEBUGPY_HOST ourselves, so an inherited
+    TESSERACT_RUNTIME_DEBUGPY_HOST is what typer hands the runtime -- and it
+    outranks the TESSERACT_ spelling. Reading only the latter would send the
+    user's debugger to the default while the Tesseract listened elsewhere.
+    """
+    monkeypatch.setenv("TESSERACT_RUNTIME_DEBUGPY_HOST", "0.0.0.0")
+    caplog.set_level(logging.INFO, logger="tesseract")
+
+    served = local_engine.serve(dummy_api_path, runtime_config={"debug": True})
+    try:
+        bound_host, _ = _debug_address(served)
+        assert bound_host == "0.0.0.0", "override did not reach the runtime"
+
+        reported = re.search(r"Attach a debugger to ([\d.]+):(\d+)", caplog.text)
+        assert reported is not None, f"no attach address logged: {caplog.text}"
+        assert reported.group(1) == bound_host
+    finally:
+        served.remove(force=True)
 
 
 def test_debugger_listens_on_loopback_by_default(dummy_api_path):
