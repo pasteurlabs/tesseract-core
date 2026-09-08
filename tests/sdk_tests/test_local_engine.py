@@ -24,7 +24,7 @@ import pytest
 import requests
 
 from tesseract_core import Tesseract
-from tesseract_core.sdk import local_client, local_engine
+from tesseract_core.sdk import local_client, local_engine, serving
 from tesseract_core.sdk.exceptions import UserError
 
 pytestmark = pytest.mark.timeout(120)
@@ -165,6 +165,27 @@ def test_remove_is_idempotent(dummy_api_path):
         # still hold -- removal tolerates that and leaves it behind.
         with pytest.raises(FileNotFoundError):
             served.logs()
+
+
+def test_unreadable_logs_do_not_mask_a_subprocess_startup_failure(
+    dummy_api_path, monkeypatch
+):
+    """A local Tesseract fails in its own vocabulary, not Docker's.
+
+    The startup path used to catch only `APIError`, so the `FileNotFoundError`
+    a vanished log file raises escaped and replaced the failure it was being
+    read to explain.
+    """
+    monkeypatch.setattr(serving, "is_running", lambda served: False)
+
+    served = local_engine.serve(dummy_api_path, skip_health_check=True)
+    try:
+        served.log_path.unlink()
+        with pytest.raises((RuntimeError, TimeoutError)) as excinfo:
+            serving.wait_for_health_or_dispose(served, served.url, timeout=0.05)
+        assert "stopped running during startup" in str(excinfo.value)
+    finally:
+        served.remove(force=True)
 
 
 def test_serve_rejects_binref_without_an_output_path(dummy_api_path):
