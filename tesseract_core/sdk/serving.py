@@ -42,7 +42,11 @@ class PortInUseError(RuntimeError):
 
 
 # Substrings container runtimes use to report a host port already being taken.
-PORT_CONFLICT_MARKERS = ("address already in use", "port is already allocated")
+PORT_CONFLICT_MARKERS = (
+    "address already in use",
+    "port is already allocated",
+    "proxy already running",
+)
 
 
 def get_free_port(
