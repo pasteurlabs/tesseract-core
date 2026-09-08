@@ -48,6 +48,7 @@ from .serving import (
     is_port_conflict,
     retry_or_raise_port_conflict,
     runtime_config_env,
+    validate_output_format,
     wait_for_health_or_dispose,
 )
 
@@ -973,12 +974,7 @@ def serve(
     if not image_name or not isinstance(image_name, str):
         raise ValueError("Tesseract image name must be provided")
 
-    if output_format == "json+binref" and output_path is None:
-        raise UserError(
-            "The 'json+binref' output format writes array buffers to .bin files, "
-            "which are lost when the container is torn down unless an output path "
-            "is set. Specify one with --output-path (or output_path=...)."
-        )
+    validate_output_format(output_format, output_path)
 
     image = docker_client.images.get(image_name)
 
@@ -1366,12 +1362,7 @@ def run_tesseract(
     Returns:
         Tuple with the stdout and stderr of the Tesseract.
     """
-    if output_format == "json+binref" and output_path is None:
-        raise UserError(
-            "The 'json+binref' output format writes array buffers to .bin files, "
-            "which are lost when the container is torn down unless an output path "
-            "is set. Specify one with --output-path (or output_path=...)."
-        )
+    validate_output_format(output_format, output_path)
 
     if user is None:
         # Use the current user if not specified
