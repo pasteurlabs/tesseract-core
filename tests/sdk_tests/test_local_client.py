@@ -684,7 +684,6 @@ def test_missing_interpreter_is_reported(dummy_api_path):
         local_client.serve(dummy_api_path, python_executable="/nonexistent/bin/python")
 
 
-@pytest.mark.foreign_venv
 def test_tesseract_in_foreign_environment(foreign_venv, dummy_api_path, sample_inputs):
     """A Tesseract runs under an interpreter the caller could not have used."""
     interpreter, foreign_version = foreign_venv

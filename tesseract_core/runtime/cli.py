@@ -435,12 +435,6 @@ def check_gradients(
         sys.exit(1)
 
 
-# Set by whoever spawned us to the read end of a pipe they hold open. Not a
-# config field: it is plumbing between a parent and its child, not something a
-# user sets, and a containerized Tesseract has no parent to watch.
-_PARENT_PIPE_ENV_VAR = "TESSERACT_PARENT_PIPE_FD"
-
-
 def _exit_when_parent_closes(fd: int) -> None:
     """Shut down once the far end of `fd` is closed.
 
@@ -469,11 +463,23 @@ def serve(
     host: Annotated[str, typer.Option(help="Host IP address")] = "127.0.0.1",
     port: Annotated[int, typer.Option(help="Port number")] = 8000,
     num_workers: Annotated[int, typer.Option(help="Number of worker processes")] = 1,
+    parent_pipe_fd: Annotated[
+        int | None,
+        typer.Option(
+            # Plumbing between a parent and the child it spawned, not something a
+            # user sets: hidden from --help, and kept out of the environment so
+            # that nothing the child spawns in turn inherits it. `--parent-pipe-fd`
+            # names a descriptor that only exists in this process, so an inherited
+            # value would name whatever happened to land on that number here.
+            hidden=True,
+            allow_from_autoenv=False,
+            help="Read end of a pipe the spawning process holds open.",
+        ),
+    ] = None,
 ) -> None:
     """Start running this Tesseract's web server."""
-    parent_pipe_fd = os.environ.get(_PARENT_PIPE_ENV_VAR)
     if parent_pipe_fd is not None:
-        _exit_when_parent_closes(int(parent_pipe_fd))
+        _exit_when_parent_closes(parent_pipe_fd)
 
     config = get_config()
     if config.debug:

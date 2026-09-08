@@ -35,16 +35,12 @@ from .serving import (
     get_free_port,
     is_running,
     retry_or_raise_port_conflict,
-    runtime_config_env,
+    runtime_config_to_env,
     validate_output_format,
     wait_for_health_or_dispose,
 )
 
 logger = logging.getLogger("tesseract")
-
-# Names the read end of a pipe the parent holds open, so a served Tesseract can
-# tell when it has been orphaned. Read by `tesseract-runtime serve`.
-PARENT_PIPE_ENV_VAR = "TESSERACT_PARENT_PIPE_FD"
 
 # How long to give a child process to exit on SIGTERM before escalating.
 _TERMINATE_TIMEOUT = 10.0
@@ -284,7 +280,7 @@ def _runtime_env(
         env[key] = value
         env[key.replace("TESSERACT_", "TESSERACT_RUNTIME_", 1)] = value
 
-    for key, value in runtime_config_env(runtime_config).items():
+    for key, value in runtime_config_to_env(runtime_config).items():
         mirror(key, value)
 
     if input_path is not None:
@@ -412,6 +408,17 @@ def serve(
         log_fd, log_name = tempfile.mkstemp(prefix="tesseract_serve_", suffix=".log")
         log_path = Path(log_name)
 
+        # A pipe whose read end the child watches and whose write end we hold, so
+        # that a Tesseract outlives us only for as long as it takes to notice. It
+        # sees EOF however we go -- returning, crashing, or being killed outright
+        # -- which is the case cleanup in `remove` cannot cover.
+        #
+        # POSIX only: `pass_fds` is not supported on Windows, where handing a
+        # descriptor to a child means inheriting handles wholesale. A Windows
+        # Tesseract can still be orphaned, as it could before this.
+        watch_read, watch_write = parent_watch_pipe()
+        pass_fds = (watch_read,) if watch_read is not None else ()
+
         command = [
             python_executable,
             "-m",
@@ -424,27 +431,18 @@ def serve(
             "--num-workers",
             str(num_workers),
         ]
+        if watch_read is not None:
+            # In argv rather than the environment: a descriptor number means
+            # something only in the process we hand it to, and the environment is
+            # inherited by everything that process goes on to spawn.
+            command.extend(["--parent-pipe-fd", str(watch_read)])
 
         logger.debug("Serving Tesseract %s on port %s", api_path, chosen_port)
-
-        # A pipe whose read end the child watches and whose write end we hold, so
-        # that a Tesseract outlives us only for as long as it takes to notice. It
-        # sees EOF however we go -- returning, crashing, or being killed outright
-        # -- which is the case cleanup in `remove` cannot cover.
-        #
-        # POSIX only: `pass_fds` is not supported on Windows, where handing a
-        # descriptor to a child means inheriting handles wholesale. A Windows
-        # Tesseract can still be orphaned, as it could before this.
-        watch_read, watch_write = parent_watch_pipe()
-        pass_fds = (watch_read,) if watch_read is not None else ()
-        watch_env = (
-            {PARENT_PIPE_ENV_VAR: str(watch_read)} if watch_read is not None else {}
-        )
 
         try:
             process = subprocess.Popen(
                 command,
-                env={**env, **watch_env},
+                env=env,
                 stdout=log_fd,
                 stderr=subprocess.STDOUT,
                 stdin=subprocess.DEVNULL,

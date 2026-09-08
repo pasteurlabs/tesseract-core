@@ -47,7 +47,7 @@ from .serving import (
     get_free_port,
     is_port_conflict,
     retry_or_raise_port_conflict,
-    runtime_config_env,
+    runtime_config_to_env,
     validate_output_format,
     wait_for_health_or_dispose,
 )
@@ -995,7 +995,7 @@ def serve(
         environment = {}
     environment.update(volume_environment)
 
-    environment.update(runtime_config_env(runtime_config))
+    environment.update(runtime_config_to_env(runtime_config))
 
     if output_format:
         environment["TESSERACT_OUTPUT_FORMAT"] = output_format

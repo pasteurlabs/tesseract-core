@@ -17,8 +17,8 @@ This module holds the client-side machinery for that path:
   eagerly (portable) or as a zero-copy mmap view (POSIX only).
 
 The pool and the lazy mmap decode are opt-in, and only pay off when the binref
-directory is memory-backed. A containerized Tesseract can additionally only meet
-the premise on Linux -- see :data:`CONTAINERS_SUPPORT_BINREF_POOL`.
+directory is memory-backed. For a containerized Tesseract that is only possible
+on Linux -- see :data:`CONTAINERS_SUPPORT_BINREF_POOL`.
 """
 
 from __future__ import annotations

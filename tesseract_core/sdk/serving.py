@@ -205,7 +205,7 @@ def validate_output_format(
         )
 
 
-def runtime_config_env(runtime_config: Mapping[str, Any] | None) -> dict[str, str]:
+def runtime_config_to_env(runtime_config: Mapping[str, Any] | None) -> dict[str, str]:
     """Convert runtime configuration to the variables the Tesseract runtime reads.
 
     Shared so that ``runtime_config`` means the same thing however a Tesseract is
@@ -260,12 +260,12 @@ _HEALTH_POLL_INTERVAL = 0.1
 
 
 def wait_for_health_or_dispose(
-    served: ServedTesseract, url: str, timeout: float = DEFAULT_STARTUP_TIMEOUT
+    served: ServedTesseract, ping_url: str, timeout: float = DEFAULT_STARTUP_TIMEOUT
 ) -> None:
     """Wait for a Tesseract to serve /health, and dispose of it if it never does.
 
-    Takes ``url`` rather than using ``served.url``: a container that published its
-    port on every interface is not reached at the address it reports binding to.
+    Takes ``ping_url`` rather than using ``served.url``: a container that published
+    its port on every interface is not reached at the address it reports binding to.
 
     Raises:
         PortInUseError: if it failed because its port was taken, which the caller
@@ -278,7 +278,9 @@ def wait_for_health_or_dispose(
 
     while True:
         try:
-            response = requests.get(f"{url}/health", timeout=_HEALTH_REQUEST_TIMEOUT)
+            response = requests.get(
+                f"{ping_url}/health", timeout=_HEALTH_REQUEST_TIMEOUT
+            )
         except requests.exceptions.RequestException:
             pass
         else:
