@@ -24,6 +24,7 @@ import requests
 
 from tesseract_core import Tesseract
 from tesseract_core.sdk import local_client, local_engine
+from tesseract_core.sdk.exceptions import UserError
 
 pytestmark = pytest.mark.timeout(120)
 
@@ -163,6 +164,16 @@ def test_remove_is_idempotent(dummy_api_path):
         # still hold -- removal tolerates that and leaves it behind.
         with pytest.raises(FileNotFoundError):
             served.logs()
+
+
+def test_serve_rejects_binref_without_an_output_path(dummy_api_path):
+    """The same error as the containerized path, and the same type.
+
+    A caller that moves between the two engines should not have to catch two
+    different exceptions for one mistake.
+    """
+    with pytest.raises(UserError, match=r"json\+binref"):
+        local_engine.serve(dummy_api_path, output_format="json+binref")
 
 
 def test_serve_rejects_missing_api():
