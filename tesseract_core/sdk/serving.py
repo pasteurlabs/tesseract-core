@@ -15,11 +15,13 @@ import subprocess
 import time
 from collections.abc import Mapping, Sequence
 from contextlib import closing
+from pathlib import Path
 from typing import Any
 
 import requests
 
 from .docker_client import APIError
+from .exceptions import UserError
 from .served_client import ServedTesseract, diagnose_exit, is_running
 
 logger = logging.getLogger("tesseract")
@@ -79,6 +81,32 @@ def get_free_port(
             else:
                 return port
     raise RuntimeError(f"No free ports found in range {start}-{end}")
+
+
+def validate_output_format(
+    output_format: str | None, output_path: str | Path | None
+) -> None:
+    """Reject an output format the given output path cannot support.
+
+    ``json+binref`` writes array buffers to .bin sidecar files instead of
+    inlining them, so it needs somewhere durable to put them. Without an output
+    path they land wherever the Tesseract happens to be running -- inside a
+    container that is about to be torn down, or loose in a subprocess's working
+    directory -- and the paths in the response lead nowhere the caller picked.
+
+    Shared so that the check fires the same way, with the same error type,
+    however the Tesseract is served: a caller that switches between the two has
+    no reason to catch two different exceptions.
+
+    Raises:
+        UserError: if the combination cannot produce output the caller can read.
+    """
+    if output_format == "json+binref" and output_path is None:
+        raise UserError(
+            "The 'json+binref' output format writes array buffers to .bin files, "
+            "which are lost unless an output path is set. Specify one with "
+            "--output-path (or output_path=...)."
+        )
 
 
 def runtime_config_env(runtime_config: Mapping[str, Any] | None) -> dict[str, str]:

@@ -36,6 +36,7 @@ from .serving import (
     get_free_port,
     retry_or_raise_port_conflict,
     runtime_config_env,
+    validate_output_format,
     wait_for_health_or_dispose,
 )
 
@@ -169,10 +170,7 @@ def serve(
             f"Python interpreter {python_executable} does not exist."
         )
 
-    if output_format == "json+binref" and output_path is None:
-        raise ValueError(
-            "output_path is required when using the 'json+binref' output format."
-        )
+    validate_output_format(output_format, output_path)
 
     auto_port = port is None
 
