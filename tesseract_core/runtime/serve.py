@@ -117,7 +117,8 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
             if config.enable_experimental_cuda_ipc:
                 from tesseract_core.runtime.device_transport import get_transport
 
-                get_transport("cuda_ipc").release()
+                transport = get_transport("cuda_ipc")
+                transport.release()
 
             if run_id is None:
                 run_id = str(uuid.uuid4())

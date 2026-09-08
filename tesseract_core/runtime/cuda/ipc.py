@@ -552,20 +552,8 @@ def validate_cuda_array(
     return val
 
 
-# ---------------------------------------------------------------------------
-# DeviceTransport backend
-# ---------------------------------------------------------------------------
-#
-# The functions above are the cuda_ipc encode/decode/release machinery. The
-# thin adapter below exposes them through the shared DeviceTransport interface
-# so cuda_ipc is one registered transport among (eventually) several, driven by
-# the same lifecycle rather than a bespoke branch in the encode/decode dispatch.
-# It adds no behavior: each method delegates to the corresponding function, and
-# cuda_ipc's inert handle needs no bootstrap and no flush (the consumer pulls).
-
-
 class CudaIpcTransport:
-    """DeviceTransport backend for the legacy same-host ``json+cuda_ipc`` mode."""
+    """DeviceTransport backend for the same-host ``json+cuda_ipc`` mode."""
 
     name = "cuda_ipc"
     reach = "same_host"
@@ -596,13 +584,3 @@ class CudaIpcTransport:
     def release(self, session: Any = None) -> None:
         """Drop the producer-side pins from this request's exports."""
         release_pinned_ipc_exports()
-
-
-def _register_cuda_ipc_transport() -> None:
-    """Register the cuda_ipc backend once this module is imported."""
-    from tesseract_core.runtime.device_transport import register_transport
-
-    register_transport(CudaIpcTransport())
-
-
-_register_cuda_ipc_transport()

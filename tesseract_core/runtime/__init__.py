@@ -32,7 +32,9 @@ except ModuleNotFoundError as e:
     )
     sys.exit(1)
 
-# Import public API
+# Public API and built-in device-transport registration
+from .cuda.ipc import CudaIpcTransport
+from .device_transport import register_transport
 from .schema_types import (
     Array,
     Differentiable,
@@ -49,6 +51,10 @@ from .schema_types import (
     UInt32,
     UInt64,
 )
+
+# Register built-in device transports here rather than as an import-time side
+# effect in the backend modules, so get_transport stays a plain registry lookup.
+register_transport(CudaIpcTransport())
 
 __all__ = [
     "Array",

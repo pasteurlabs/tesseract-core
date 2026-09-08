@@ -4,41 +4,26 @@
 """Pluggable device-array transports.
 
 A *device transport* moves a GPU array's bytes from a producer process to a
-consumer process without a host round-trip. The legacy ``json+cuda_ipc``
-encoding is the first such transport; this module defines the common interface
-they share so further transports (VMM-fd map-and-read, and later cross-host
-NCCL/NIXL) slot in behind one negotiation path instead of each bolting a new
+consumer process without a host round-trip. ``json+cuda_ipc`` is the first such
+transport; this module defines the common interface they share so further
+transports slot in behind one dispatch path instead of each bolting a new
 encoder, wire format, and release hook onto the runtime.
 
-The interface deliberately mirrors the lifecycle the ``cuda_ipc`` code already
-follows, so wrapping it changes no behavior:
+The interface mirrors the lifecycle the ``cuda_ipc`` code follows:
 
 * :meth:`DeviceTransport.register` -- encode side: pin the source array and
-  return an opaque per-array handle (the analog of ``dump_*_arraydict``).
-* :meth:`DeviceTransport.descriptor` -- turn that handle into the wire string
-  packed into the JSON ``data.buffer`` field.
+  return an opaque per-array handle.
+* :meth:`DeviceTransport.descriptor` -- turn that handle into the array dict
+  whose ``data.buffer`` field carries the wire string.
 * :meth:`DeviceTransport.flush` -- post any pending transfers. A no-op for
   receiver-driven transports like ``cuda_ipc`` (the consumer pulls); the seam
-  where a push transport (NCCL) posts its matched sends.
+  where a push transport posts its matched sends.
 * :meth:`DeviceTransport.receive` -- decode side: materialise the array into a
-  fresh, consumer-owned buffer (the analog of ``load_*_arraydict``). Returns the
-  framework-agnostic wrapper the consumer adopts.
+  fresh, consumer-owned buffer.
+* :meth:`DeviceTransport.bootstrap` -- establish any shared state a handshake
+  transport needs before transferring. A no-op for ``cuda_ipc``.
 * :meth:`DeviceTransport.release` -- drop the producer-side pins once the borrow
-  is provably done.
-
-:meth:`DeviceTransport.bootstrap` is the one axis genuinely new versus
-``cuda_ipc``: transports that need a handshake (a shared communicator, a socket
-for fd passing) establish it here; ``cuda_ipc``'s inert handle needs none, so its
-bootstrap is a no-op.
-
-This module itself imports no CUDA/driver libraries: a backend's native
-machinery loads only when its module is imported (via :func:`get_transport` for a
-name not yet registered). Note, though, that the CUDA libraries are still only
-*touched* lazily -- importing ``cuda_ipc`` binds ctypes signatures but does not
-dlopen libcudart until an encode/decode actually runs -- because the runtime
-package's ``__init__`` eagerly imports every submodule (including ``cuda_ipc``),
-so merely importing the ``tesseract_core.runtime`` package pulls this backend's
-module in regardless of this lazy path.
+  is done.
 """
 
 from __future__ import annotations
@@ -114,9 +99,10 @@ class DeviceTransport(Protocol):
 # Registry
 # ---------------------------------------------------------------------------
 #
-# Transports register here by name. The lookup is by the ``json+<name>`` format
-# suffix, so the encode/decode dispatch and the eventual negotiation endpoint go
-# through one table rather than a chain of ``if encoding == ...`` branches.
+# Transports register here by name, keyed by the ``json+<name>`` format suffix,
+# so the encode/decode dispatch goes through one table rather than a chain of
+# ``if encoding == ...`` branches. Built-in transports are registered by the
+# runtime package ``__init__``.
 
 _TRANSPORTS: dict[str, DeviceTransport] = {}
 
@@ -127,22 +113,8 @@ def register_transport(transport: DeviceTransport) -> DeviceTransport:
     return transport
 
 
-# Built-in transports and the module whose import registers each one. Importing
-# that module is what registers the backend; a name absent from _TRANSPORTS is
-# resolved by importing its module here. (In the full runtime the package
-# __init__ has usually imported these already; this makes get_transport work
-# even when a backend module has not been imported yet.)
-_BUILTIN_TRANSPORT_MODULES = {
-    "cuda_ipc": "tesseract_core.runtime.cuda_ipc",
-}
-
-
 def get_transport(name: str) -> DeviceTransport:
-    """Look up a registered transport by name, importing built-ins on demand."""
-    if name not in _TRANSPORTS and name in _BUILTIN_TRANSPORT_MODULES:
-        import importlib
-
-        importlib.import_module(_BUILTIN_TRANSPORT_MODULES[name])
+    """Look up a registered transport by name."""
     if name not in _TRANSPORTS:
         raise KeyError(
             f"No device transport registered under {name!r} "
@@ -155,14 +127,11 @@ def available_transports() -> tuple[str, ...]:
     """Names of transports currently registered in this process.
 
     This reports what has been *registered*, not what a Tesseract will actually
-    accept: registration says the code exists, whereas whether a transport may be
-    used is gated separately (e.g. ``json+cuda_ipc`` is only an accepted output
-    format when ``enable_experimental_cuda_ipc`` is set; see
+    accept: whether a transport may be used is gated separately (e.g.
+    ``json+cuda_ipc`` is only an accepted output format when
+    ``enable_experimental_cuda_ipc`` is set; see
     :func:`tesseract_core.runtime.file_interactions.available_formats`). A caller
-    deciding what to offer a client -- a transport-negotiation endpoint, say --
-    must apply that gating itself and not treat this list as the enabled set.
-
-    Note also that a built-in transport registers on first
-    :func:`get_transport`, so a name can be usable before it appears here.
+    deciding what to offer a client must apply that gating itself and not treat
+    this list as the enabled set.
     """
     return tuple(sorted(_TRANSPORTS))

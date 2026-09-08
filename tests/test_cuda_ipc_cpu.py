@@ -35,8 +35,9 @@ from unittest.mock import Mock
 import numpy as np
 import pytest
 
-from tesseract_core.runtime import array_encoding, cuda_ipc
+from tesseract_core.runtime import array_encoding
 from tesseract_core.runtime.cuda import api as cuda_api
+from tesseract_core.runtime.cuda import ipc as cuda_ipc
 from tesseract_core.runtime.cuda import loader
 
 
@@ -311,11 +312,10 @@ def test_import_cuda_ipc_explains_missing_runtime_extra(monkeypatch):
 
     def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
         # Mimic the module being unimportable on a base install (its deep
-        # dependencies, e.g. fsspec, are absent). Covers both `import
-        # tesseract_core.runtime.cuda_ipc` and `from tesseract_core.runtime
-        # import cuda_ipc`.
-        if name == "tesseract_core.runtime.cuda_ipc" or (
-            name == "tesseract_core.runtime" and "cuda_ipc" in (fromlist or ())
+        # dependencies, e.g. fsspec, are absent). Covers `from
+        # tesseract_core.runtime.cuda import ipc`.
+        if name == "tesseract_core.runtime.cuda.ipc" or (
+            name == "tesseract_core.runtime.cuda" and "ipc" in (fromlist or ())
         ):
             raise ImportError("No module named 'fsspec'")
         return real_import(name, globals, locals, fromlist, level)
@@ -794,7 +794,7 @@ def test_get_transport_rejects_unknown():
         get_transport("does_not_exist")
 
 
-def test_cuda_ipc_transport_delegates(patched_cuda, monkeypatch):
+def test_cuda_ipc_transport_delegates(mocked_cuda, monkeypatch):
     """register/descriptor/flush/receive/release drive the same cuda_ipc code.
 
     A pull transport's flush is a no-op and its bootstrap needs no shared state,
