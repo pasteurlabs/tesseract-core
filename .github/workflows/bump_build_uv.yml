@@ -49,6 +49,7 @@ jobs:
           commit-message: Update uv version in Dockerfile.base
           title: "chore: ✅ Update uv version in Dockerfile.base"
           branch: _bot/update-dockerfile-uv
-          draft: false
+          draft: true
+          base: main
           body: |
             Dockerfile.base updated to latest uv version
