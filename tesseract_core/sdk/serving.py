@@ -1,11 +1,20 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Primitives shared by everything that serves a Tesseract over HTTP.
+"""What a served Tesseract is, and what everything serving one needs.
 
-Choosing a port to serve on, waiting for the server to answer, and telling a lost
-race for a port apart from a Tesseract that is genuinely broken. None of it is
-particular to how the Tesseract is run, so none of it belongs in the module that
-knows how to run one.
+The interface a running Tesseract presents -- :class:`ServedTesseract`, and the
+handful of questions worth asking one that docker-py has no method for -- plus
+choosing a port to serve on, waiting for the server to answer, and telling a lost
+race for a port apart from a Tesseract that is genuinely broken.
+
+None of it is particular to how the Tesseract is run, so none of it belongs in
+the module that knows how to run one. That cuts both ways: nothing here may
+import a transport, which is why the startup path catches broadly rather than
+naming one transport's exceptions.
+
+Implemented by :mod:`tesseract_core.sdk.docker_client` for containers and by
+:mod:`tesseract_core.sdk.local_client` for subprocesses. Both import this to
+register their answers; neither is imported back.
 """
 
 import logging
@@ -14,18 +23,107 @@ import socket
 import time
 from collections.abc import Mapping, Sequence
 from contextlib import closing
+from functools import singledispatch
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import requests
 
 from .exceptions import UserError
-from .served_client import ServedTesseract, diagnose_exit, is_running
 
 logger = logging.getLogger("tesseract")
 
 # How long to wait for a freshly started Tesseract to answer /health.
 DEFAULT_STARTUP_TIMEOUT = 30.0
+
+
+class ServedTesseract(Protocol):
+    """A Tesseract that has been started and can be reached, inspected and stopped.
+
+    Satisfied by :class:`~tesseract_core.sdk.docker_client.Container` and by
+    :class:`~tesseract_core.sdk.local_client.TesseractProcess`, so callers that
+    only need to talk to a Tesseract, read its output or shut it down need not
+    know which of the two they hold.
+
+    Structural, so neither has to declare allegiance to it: a `Container` is a
+    mirror of docker-py's, and fits this by having the methods docker-py gave it
+    rather than by inheriting anything from us.
+
+    Deliberately narrow: it promises nothing about separating stdout from stderr,
+    since a Tesseract served as a bare process writes both to one file.
+    """
+
+    host_ip: str | None
+    host_port: str | None
+
+    @property
+    def url(self) -> str:
+        """Base URL the Tesseract is serving on."""
+
+    def reload(self) -> None:
+        """Read the Tesseract's state again."""
+
+    def remove(self, v: bool = False, link: bool = False, force: bool = False) -> None:
+        """Dispose of the Tesseract, leaving nothing of it behind.
+
+        docker-py's ``Container.remove`` signature exactly, since that is what a
+        `Container` has and this is structural -- including refusing one that is
+        still running unless ``force`` is set. ``v`` and ``link`` are Docker's
+        and mean nothing to a Tesseract served any other way.
+        """
+
+    def wait(self, timeout: float | None = None) -> dict:
+        """Wait for the Tesseract to stop, and report the status it stopped with.
+
+        Shaped after docker-py's ``Container.wait``, down to returning a dict
+        keyed by ``StatusCode``. Waits for as long as the Tesseract runs unless
+        ``timeout`` says otherwise, so ask only about one you expect to have
+        stopped -- and before disposing of it, since a Tesseract that is gone can
+        no longer be asked.
+        """
+
+    def logs(self) -> bytes:
+        """Everything the Tesseract has written so far."""
+
+
+@singledispatch
+def diagnose_exit(served: ServedTesseract, logs: str) -> str:
+    """Anything this Tesseract can add about why it stopped running.
+
+    The code it exited with and what it wrote are reported by whoever noticed.
+    This is for what remains: a cause the transport can name and the logs cannot.
+    Takes the logs as evidence, not to repeat them.
+
+    Dispatched rather than a method, so a `Container` keeps to the shape of
+    docker-py, which has nothing like this. Implementations are registered beside
+    the class they are for, which is also why nothing above the clients has to
+    know they exist.
+
+    Raises:
+        NotImplementedError: if nothing is registered for this kind of Tesseract.
+    """
+    del logs
+    raise NotImplementedError(
+        f"No diagnose_exit is registered for {type(served).__name__}. Register one "
+        "with `@diagnose_exit.register` in the module that defines the class, "
+        "returning an empty string if there is nothing to add."
+    )
+
+
+@singledispatch
+def is_running(served: ServedTesseract) -> bool:
+    """Whether this Tesseract is running now, asking again rather than recalling.
+
+    Dispatched for the same reason as :func:`diagnose_exit`: docker-py has no
+    such method, and asks you to compare `status` yourself after a `reload`.
+
+    Raises:
+        NotImplementedError: if nothing is registered for this kind of Tesseract.
+    """
+    raise NotImplementedError(
+        f"No is_running is registered for {type(served).__name__}. Register one "
+        "with `@is_running.register` in the module that defines the class."
+    )
 
 
 class PortInUseError(RuntimeError):
