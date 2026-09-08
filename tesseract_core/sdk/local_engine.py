@@ -202,8 +202,15 @@ def serve(
             # The runtime reports this too, but into the captured log file, which
             # nobody sees unless they go looking. Read the host back out of the
             # environment, since it may be the runtime's default rather than
-            # something we set.
-            debugpy_host = env.get("TESSERACT_DEBUGPY_HOST", "127.0.0.1")
+            # something we set. Under both names, in typer's order of precedence:
+            # we never write this one, so an inherited TESSERACT_RUNTIME_ value is
+            # what the runtime will bind, and reporting the TESSERACT_ one (or the
+            # default) would send the user's debugger to the wrong address.
+            debugpy_host = (
+                env.get("TESSERACT_RUNTIME_DEBUGPY_HOST")
+                or env.get("TESSERACT_DEBUGPY_HOST")
+                or "127.0.0.1"
+            )
             logger.info(
                 "Debug mode enabled. Attach a debugger to "
                 f"{debugpy_host}:{attempt_config['debugpy_port']}"
