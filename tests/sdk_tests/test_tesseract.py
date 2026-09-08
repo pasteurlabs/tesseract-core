@@ -1,4 +1,8 @@
+import gc
 import os
+import subprocess
+import sys
+from pathlib import Path
 from unittest.mock import MagicMock, Mock
 
 import numpy as np
@@ -113,6 +117,27 @@ def test_Tesseract_from_tesseract_api(dummy_tesseract_location, dummy_tesseract_
     assert endpoints == all_endpoints
 
 
+def test_rejects_imported_module(dummy_tesseract_module):
+    """A module cannot be handed to another process, so say so clearly.
+
+    Tested against the helper rather than `from_source`, whose annotation lets
+    typeguard reject it first under the test suite -- but nothing enforces
+    annotations at runtime, so the check still has to exist.
+    """
+    from tesseract_core.sdk.tesseract import _subprocess_spawn_config
+
+    with pytest.raises(ValueError, match="already imported module was given"):
+        _subprocess_spawn_config(
+            dummy_tesseract_module,
+            input_path=None,
+            output_path=None,
+            output_format="json+base64",
+            runtime_config=None,
+            python_executable=None,
+            startup_timeout=1.0,
+        )
+
+
 def test_Tesseract_from_image(mock_serving, mock_clients):
     # Object is built and has the correct attributes set
     t = Tesseract.from_image(
@@ -168,6 +193,12 @@ def test_container_info_raises_for_non_image_tesseract():
         t.container_info()
 
 
+def test_container_info_unavailable(dummy_api_path):
+    tess = Tesseract.from_source(dummy_api_path)
+    with pytest.raises(RuntimeError, match="from_image"):
+        tess.container_info()
+
+
 def test_del_tesseract_triggers_teardown(mock_serving):
     """Deleting a served Tesseract must tear down its container via weakref.finalize."""
     import gc
@@ -180,6 +211,21 @@ def test_del_tesseract_triggers_teardown(mock_serving):
     del t
     gc.collect()
     assert container.removals == [True]
+
+
+def test_garbage_collection_reaps_process(dummy_api_path):
+    """A forgotten Tesseract must not leave an orphaned process behind."""
+    import gc
+
+    tess = Tesseract.from_source(dummy_api_path)
+    tess.serve()
+    # Hold the process, not the Tesseract, so it can still be collected.
+    process = tess._serve_context.process
+
+    del tess
+    gc.collect()
+
+    assert process.poll() is not None
 
 
 def test_del_tesseract_purges_auto_tempdir(mock_serving):
@@ -195,6 +241,23 @@ def test_del_tesseract_purges_auto_tempdir(mock_serving):
     assert not output_path.exists()
 
 
+def test_auto_created_scratch_dirs_are_purged(dummy_api_path, sample_inputs):
+    """What we made, we clean up -- unlike directories the caller passed in."""
+    tess = Tesseract.from_source(dummy_api_path, output_format="json+binref")
+    scratch = [
+        Path(tess._spawn_config["input_path"]),
+        Path(tess._spawn_config["output_path"]),
+    ]
+    assert all(d.exists() for d in scratch)
+
+    with tess:
+        tess.apply(sample_inputs)
+    del tess
+    gc.collect()
+
+    assert not any(d.exists() for d in scratch)
+
+
 def test_user_output_path_is_not_purged(mock_serving, tmp_path):
     """A user-supplied output path must survive garbage collection of the Tesseract."""
     import gc
@@ -205,6 +268,52 @@ def test_user_output_path_is_not_purged(mock_serving, tmp_path):
     del t
     gc.collect()
     assert tmp_path.is_dir()
+
+
+def test_given_scratch_dirs_are_left_alone(dummy_api_path, sample_inputs, tmp_path):
+    given_in, given_out = tmp_path / "in", tmp_path / "out"
+    given_in.mkdir()
+    given_out.mkdir()
+
+    tess = Tesseract.from_source(
+        dummy_api_path,
+        input_path=given_in,
+        output_path=given_out,
+        output_format="json+binref",
+    )
+    with tess:
+        tess.apply(sample_inputs)
+    del tess
+    gc.collect()
+
+    assert given_in.exists() and given_out.exists()
+
+
+def test_tesseract_in_foreign_environment(
+    foreign_venv, dummy_api_path, sample_inputs, env_without_pythonpath
+):
+    """A Tesseract runs under an interpreter the caller could not have used."""
+    interpreter, foreign_version = foreign_venv
+
+    reported = subprocess.run(
+        [str(interpreter), "-c", "import sys; print('%d.%d' % sys.version_info[:2])"],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env_without_pythonpath,
+    ).stdout.strip()
+
+    # Guard the premise: same interpreter would prove nothing
+    assert reported == foreign_version
+    assert reported != f"{sys.version_info.major}.{sys.version_info.minor}"
+
+    with Tesseract.from_source(
+        dummy_api_path,
+        python_executable=interpreter,
+    ) as tess:
+        result = tess.apply(sample_inputs)
+
+    np.testing.assert_allclose(result["result"], [5.0, 8.0])
 
 
 def test_Tesseract_schema_method(mocker, mock_serving):
