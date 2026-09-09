@@ -570,3 +570,67 @@ def test_remove_escalates_to_sigkill(dummy_api_path):
         local_client._TERMINATE_TIMEOUT = original
 
     assert served.process.poll() is not None
+
+
+# Real Tesseracts from examples/, chosen because each breaks a different
+# assumption that dummy_api_path never exercises. Deliberately not the whole
+# corpus: a third of it cannot run here at all, and which third depends on what
+# happens to be installed. Once a venv is built on demand, most of the rest
+# becomes reachable and this can grow.
+
+
+EXAMPLES = Path(__file__).parents[2] / "examples"
+
+
+def test_serves_a_tesseract_whose_dependencies_we_do_not_have(example_venv):
+    """The case `python_executable` exists for.
+
+    `localpackage` needs a local package installed (``./helloworld``) that this
+    interpreter does not have, and imports a sibling module shipped as
+    package_data (``goodbyeworld``) which only resolves because the runtime puts
+    the API's own directory on sys.path. The greeting proves both halves.
+    """
+    interpreter = example_venv("localpackage")
+
+    with Tesseract.from_source(
+        EXAMPLES / "localpackage" / "tesseract_api.py",
+        python_executable=interpreter,
+    ) as tess:
+        result = tess.apply({"name": "World"})
+
+    assert "Hello World!" in result["message"], "local package dependency missing"
+    assert "Goodbye World!" in result["message"], "package_data sibling missing"
+
+
+def test_required_files_resolve_against_the_input_path(tmp_path):
+    """A Tesseract that reads a file at import time, not just at apply time.
+
+    `require_file` is resolved against the input path while `tesseract_api.py` is
+    being imported, so the setting has to be in the child's environment before it
+    starts -- not passed with the first request.
+    """
+    with Tesseract.from_source(
+        EXAMPLES / "required_files" / "tesseract_api.py",
+        input_path=EXAMPLES / "required_files" / "input",
+    ) as tess:
+        result = tess.apply({})
+
+    # Read straight out of input/parameters1.json at import time.
+    assert result == {"a": 1.0, "b": 100.0}
+
+
+def test_a_container_only_tesseract_fails_legibly():
+    """Some Tesseracts cannot be served this way, and must say so clearly.
+
+    `userhandling` creates /home/tesseract-user at import time, which exists only
+    in the image. No interpreter choice fixes that, so the value here is the
+    diagnosis: the child's own traceback has to reach the caller instead of a
+    bare "stopped running".
+    """
+    with pytest.raises(RuntimeError) as excinfo:
+        with Tesseract.from_source(EXAMPLES / "userhandling" / "tesseract_api.py"):
+            pass
+
+    message = str(excinfo.value)
+    assert "/home/tesseract-user" in message, "child traceback did not reach us"
+    assert "stopped running during startup" in message
