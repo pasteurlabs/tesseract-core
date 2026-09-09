@@ -1,0 +1,49 @@
+{
+  "endpoint": "apply",
+  "skip_output_path_checks": true,
+  "expected_outputs": {
+    "result": {
+      "object_type": "array",
+      "shape": [4],
+      "dtype": "float64",
+      "data": {
+        "buffer": [0.0, 2.5, 5.0, 7.5],
+        "encoding": "json"
+      }
+    },
+    "grad": {
+      "object_type": "array",
+      "shape": [4],
+      "dtype": "float64",
+      "data": {
+        "buffer": [2.5, 2.5, 2.5, 2.5],
+        "encoding": "json"
+      }
+    },
+    "chunks": [
+      {
+        "object_type": "array",
+        "shape": [4],
+        "dtype": "float64",
+        "data": { "buffer": [0.0, 0.0, 0.0, 0.0], "encoding": "json" }
+      },
+      {
+        "object_type": "array",
+        "shape": [4],
+        "dtype": "float64",
+        "data": { "buffer": [1.0, 1.0, 1.0, 1.0], "encoding": "json" }
+      }
+    ]
+  },
+  "expected_exception": null,
+  "expected_exception_regex": null,
+  "atol": 1e-8,
+  "rtol": 1e-5,
+  "payload": {
+    "inputs": {
+      "n": 4,
+      "scale": 2.5,
+      "parts": 2
+    }
+  }
+}

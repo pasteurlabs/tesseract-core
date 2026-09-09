@@ -775,3 +775,44 @@ class TestArrayDiscrepancyMsg:
         )
 
         assert "all expected values are zero" in msg
+
+
+# =============================================================================
+# Section 6: Array-like leaf coercion (custom output types)
+# =============================================================================
+
+
+class _FakeArrayLike:
+    """A minimal ndarray-like leaf, exposing shape + __array__ but not being one."""
+
+    def __init__(self, arr):
+        self._arr = np.asarray(arr)
+
+    @property
+    def shape(self):
+        return self._arr.shape
+
+    def __array__(self, dtype=None):
+        return self._arr.astype(dtype) if dtype is not None else self._arr
+
+
+def test_arraylike_leaf_compares_against_ndarray_template():
+    """A non-ndarray array-like leaf is materialized and compared structurally."""
+    tree = {"result": _FakeArrayLike([1.0, 2.0, 3.0])}
+    template = {"result": np.array([1.0, 2.0, 3.0])}
+
+    leaves, errors = _validate_tree_structure(tree, template)
+    assert errors == []
+    (obtained, expected) = leaves[("{result}",)]
+    # Both sides are plain arrays after coercion, ready for value comparison.
+    assert isinstance(obtained, np.ndarray)
+    np.testing.assert_array_equal(obtained, expected)
+
+
+def test_arraylike_leaf_shape_mismatch_is_reported():
+    tree = {"result": _FakeArrayLike([1.0, 2.0])}
+    template = {"result": np.array([1.0, 2.0, 3.0])}
+
+    _leaves, errors = _validate_tree_structure(tree, template)
+    assert errors
+    assert "Shape mismatch" in errors[0]
