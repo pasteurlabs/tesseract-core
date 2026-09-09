@@ -64,11 +64,17 @@ def parent_watch_pipe() -> tuple[int | None, int | None]:
 def popen_kwargs() -> dict[str, Any]:
     """Platform-specific options to isolate a child in its own process group.
 
-    Two reasons to do this: a Ctrl-C in the parent's terminal must not race us to
-    the child (we want to shut it down in an orderly way ourselves), and on
-    removal we need to be able to kill uvicorn's worker processes along with the
-    parent it spawned them from. Paired with :func:`_stop_process`, which relies
-    on the group existing.
+    Chiefly so that :func:`_stop_process` can signal the whole group and take
+    uvicorn's workers down with the process that spawned them. A child left in
+    our group would make that signal land on us as well, so disposing of a
+    Tesseract would kill the caller.
+
+    Secondarily, it decides who stops the child. A Ctrl-C in the terminal goes to
+    the whole foreground group, so a child sharing ours would receive it
+    directly: not a worse shutdown -- uvicorn handles SIGINT perfectly well --
+    but one that happens on the terminal's schedule rather than ours, leaving
+    anything the caller still wanted from it (its logs, its exit code) to race
+    against its exit. Its own group means it stops when we say so.
     """
     if os.name == "nt":
         return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
