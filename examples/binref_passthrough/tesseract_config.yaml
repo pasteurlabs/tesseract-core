@@ -1,0 +1,5 @@
+name: "binref_passthrough"
+version: "1.0.0"
+description: "Forwards an already-written binref into the output without loading it."
+
+build_config: {}
