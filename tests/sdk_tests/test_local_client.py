@@ -141,13 +141,17 @@ def test_remove_is_idempotent(dummy_api_path):
             served.logs()
 
 
+# Nothing listens on port 1, so the health poll fails at once rather than
+# racing a Tesseract that may already have come up. These tests are about
+# what happens after the poll gives up, not about the poll.
+_DEAD_URL = "http://127.0.0.1:1"
+
+
 @pytest.mark.skipif(
     os.name == "nt",
     reason="Windows will not unlink a file the live child still holds open",
 )
-def test_unreadable_logs_do_not_mask_a_subprocess_startup_failure(
-    dummy_api_path, monkeypatch
-):
+def test_unreadable_logs_do_not_mask_a_subprocess_startup_failure(dummy_api_path):
     """A local Tesseract fails in its own vocabulary, not Docker's.
 
     The startup path used to catch only `APIError`, so the `FileNotFoundError`
@@ -159,38 +163,40 @@ def test_unreadable_logs_do_not_mask_a_subprocess_startup_failure(
     `test_any_unreadable_log_does_not_mask_the_startup_failure` makes the same
     point everywhere, without needing the file to actually go away.
     """
-    monkeypatch.setattr(serving, "is_running", lambda served: False)
-
     served = local_client.serve(dummy_api_path, skip_health_check=True)
     try:
+        # Really stopped, rather than pretended so by patching `is_running`:
+        # otherwise the startup path asks a live process for its exit code and
+        # waits the full health timeout to be told it has none.
+        served.process.terminate()
+        served.process.wait(timeout=30)
         served.log_path.unlink()
+
         with pytest.raises((RuntimeError, TimeoutError)) as excinfo:
-            serving.wait_for_health_or_dispose(served, served.url, timeout=0.05)
+            serving.wait_for_health_or_dispose(served, _DEAD_URL, timeout=0.05)
         assert "stopped running during startup" in str(excinfo.value)
     finally:
         served.remove(force=True)
 
 
-def test_any_unreadable_log_does_not_mask_the_startup_failure(
-    dummy_api_path, monkeypatch
-):
+def test_any_unreadable_log_does_not_mask_the_startup_failure(dummy_api_path):
     """Whatever reading the logs raises, the startup failure is what surfaces.
 
     The point of catching broadly rather than naming a transport's exceptions:
     reading the logs is how the failure gets reported, so it must not become the
     failure. Runs on every platform, unlike the vanished-file case above.
     """
-    monkeypatch.setattr(serving, "is_running", lambda served: False)
-
     served = local_client.serve(dummy_api_path, skip_health_check=True)
     try:
+        served.process.terminate()
+        served.process.wait(timeout=30)
 
         def unreadable():
             raise RuntimeError("log storage is on fire")
 
         served.logs = unreadable
         with pytest.raises((RuntimeError, TimeoutError)) as excinfo:
-            serving.wait_for_health_or_dispose(served, served.url, timeout=0.05)
+            serving.wait_for_health_or_dispose(served, _DEAD_URL, timeout=0.05)
         assert "stopped running during startup" in str(excinfo.value)
         assert "on fire" not in str(excinfo.value)
     finally:
