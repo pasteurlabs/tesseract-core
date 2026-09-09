@@ -34,7 +34,6 @@ buffers rather than one file each::
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import numpy as np
@@ -46,9 +45,6 @@ from tesseract_core.runtime.array_encoding import (
     _dump_binref_arraydict,
 )
 from tesseract_core.runtime.config import get_config
-
-if TYPE_CHECKING:
-    from typing import Self
 
 
 class BinrefWriter:
@@ -106,7 +102,7 @@ class BinrefWriter:
         )
         return BinrefArray._from_arraydict(arraydict)
 
-    def __enter__(self) -> Self:
+    def __enter__(self) -> BinrefWriter:
         return self
 
     def __exit__(self, *exc: object) -> None:
