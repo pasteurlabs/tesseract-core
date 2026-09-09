@@ -141,6 +141,10 @@ def test_remove_is_idempotent(dummy_api_path):
             served.logs()
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="Windows will not unlink a file the live child still holds open",
+)
 def test_unreadable_logs_do_not_mask_a_subprocess_startup_failure(
     dummy_api_path, monkeypatch
 ):
@@ -149,6 +153,11 @@ def test_unreadable_logs_do_not_mask_a_subprocess_startup_failure(
     The startup path used to catch only `APIError`, so the `FileNotFoundError`
     a vanished log file raises escaped and replaced the failure it was being
     read to explain.
+
+    POSIX only, because the premise needs a log file deleted from under a
+    running process, which Windows refuses -- see `TesseractProcess.remove`.
+    `test_any_unreadable_log_does_not_mask_the_startup_failure` makes the same
+    point everywhere, without needing the file to actually go away.
     """
     monkeypatch.setattr(serving, "is_running", lambda served: False)
 
@@ -159,6 +168,33 @@ def test_unreadable_logs_do_not_mask_a_subprocess_startup_failure(
             serving.wait_for_health_or_dispose(served, served.url, timeout=0.05)
         assert "stopped running during startup" in str(excinfo.value)
     finally:
+        served.remove(force=True)
+
+
+def test_any_unreadable_log_does_not_mask_the_startup_failure(
+    dummy_api_path, monkeypatch
+):
+    """Whatever reading the logs raises, the startup failure is what surfaces.
+
+    The point of catching broadly rather than naming a transport's exceptions:
+    reading the logs is how the failure gets reported, so it must not become the
+    failure. Runs on every platform, unlike the vanished-file case above.
+    """
+    monkeypatch.setattr(serving, "is_running", lambda served: False)
+
+    served = local_client.serve(dummy_api_path, skip_health_check=True)
+    try:
+
+        def unreadable():
+            raise RuntimeError("log storage is on fire")
+
+        served.logs = unreadable
+        with pytest.raises((RuntimeError, TimeoutError)) as excinfo:
+            serving.wait_for_health_or_dispose(served, served.url, timeout=0.05)
+        assert "stopped running during startup" in str(excinfo.value)
+        assert "on fire" not in str(excinfo.value)
+    finally:
+        del served.logs
         served.remove(force=True)
 
 
@@ -632,5 +668,11 @@ def test_a_container_only_tesseract_fails_legibly():
             pass
 
     message = str(excinfo.value)
-    assert "/home/tesseract-user" in message, "child traceback did not reach us"
     assert "stopped running during startup" in message
+    # The child's own traceback, not just our summary of it.
+    assert "Traceback (most recent call last)" in message
+    assert "userhandling" in message, "child traceback did not reach us"
+    # Why it cannot be served differs by platform: POSIX gets as far as the
+    # container-only directory, Windows has no `pwd` module to import first.
+    cause = "No module named 'pwd'" if os.name == "nt" else "/home/tesseract-user"
+    assert cause in message
