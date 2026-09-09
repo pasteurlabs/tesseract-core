@@ -82,3 +82,61 @@ def foreign_venv(tmp_path_factory):
 
     scripts, exe = ("Scripts", "python.exe") if os.name == "nt" else ("bin", "python")
     return venv_dir / scripts / exe, foreign
+
+
+@pytest.fixture(scope="session")
+def example_venv(tmp_path_factory):
+    """Build a venv holding one example's dependencies, and return its interpreter.
+
+    What `python_executable` is for: a Tesseract whose dependencies the caller
+    neither has nor could install alongside its own. Until a venv is built
+    automatically this has to be done by hand, so only examples whose
+    requirements are cheap to install are worth covering here.
+
+    Cached per example for the session -- building one costs seconds, and
+    nothing a test does can change it.
+    """
+    uv = shutil.which("uv")
+    built: dict[str, Path] = {}
+
+    def build(example: str) -> Path:
+        if example in built:
+            return built[example]
+        if uv is None:
+            pytest.skip("uv is required to build an example environment")
+
+        example_dir = Path(__file__).parents[2] / "examples" / example
+        repo_root = Path(__file__).parents[2]
+        venv_dir = tmp_path_factory.mktemp(f"venv_{example}") / "env"
+        env = _env_without_pythonpath()
+
+        def run(*args):
+            result = subprocess.run(args, capture_output=True, text=True, env=env)
+            if result.returncode != 0:
+                pytest.skip(
+                    f"could not build an environment for {example}: "
+                    f"{result.stderr.strip()[-300:]}"
+                )
+
+        run(uv, "venv", str(venv_dir))
+        run(uv, "pip", "install", "--python", str(venv_dir), f"{repo_root}[runtime]")
+
+        # Requirements are written relative to the example, as the build would
+        # read them; a bare `./helloworld` means nothing from anywhere else.
+        requirements = example_dir / "tesseract_requirements.txt"
+        specs = [
+            line.strip()
+            for line in requirements.read_text().splitlines()
+            if line.strip() and not line.startswith("#")
+        ]
+        for spec in specs:
+            resolved = str(example_dir / spec) if spec.startswith(".") else spec
+            run(uv, "pip", "install", "--python", str(venv_dir), resolved)
+
+        scripts, exe = (
+            ("Scripts", "python.exe") if os.name == "nt" else ("bin", "python")
+        )
+        built[example] = venv_dir / scripts / exe
+        return built[example]
+
+    return build
