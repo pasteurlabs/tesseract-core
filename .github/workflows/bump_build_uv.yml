@@ -33,6 +33,7 @@ jobs:
         run: |
           uv_version=$(sed -n -E 's/^ENV UV_VERSION=(.*)/\1/p' < ${DOCKERFILE_PATH})
           echo "uv-version=${uv_version}" >> ${GITHUB_OUTPUT}
+          git diff
 
       - name: Compare and update uv version
         id: compare-and-update
