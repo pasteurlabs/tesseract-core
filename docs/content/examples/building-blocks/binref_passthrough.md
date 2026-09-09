@@ -1,7 +1,5 @@
 # Returning on-disk arrays with `BinrefArray`
 
-[View on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/binref_passthrough)
-
 ## Context
 
 A transient solver often produces more output than fits comfortably in memory: a
