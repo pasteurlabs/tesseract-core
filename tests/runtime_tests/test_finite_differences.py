@@ -582,11 +582,13 @@ def test_check_gradients_rejects_invalid_max_output_samples(invalid_sample_count
 
 def test_cli_max_output_samples_option(cli_runner):
     """CLI must expose --max-output-samples in check-gradients help."""
+    from click import unstyle
+
     from tesseract_core.runtime.cli import app
 
     result = cli_runner.invoke(app, ["check-gradients", "--help"])
     assert result.exit_code == 0
-    assert "--max-output-samples" in result.stdout
+    assert "--max-output-samples" in unstyle(result.stdout)
 
 
 class LargeOutputModule(ModuleType):
