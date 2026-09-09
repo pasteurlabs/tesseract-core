@@ -1,68 +1,79 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Forward arrays written to disk during apply, without loading them back.
+"""Return a large simulation trajectory without holding it all in memory.
 
-This Tesseract writes its results to disk in binref format *during* ``apply``
-(standing in for a solver that streams results to disk to bound peak memory) and
-returns lightweight references. With ``json+binref`` output the on-disk bytes
-flow straight to the client, never round-tripped through memory on the server.
+A transient solver often produces far more output than fits comfortably in RAM:
+a 2D field snapshotted at every timestep is a 3D array that grows without bound
+as the simulation runs. The usual options are both bad -- keep every snapshot in
+memory and risk running out, or stream them to disk during the solve but then
+read the whole thing *back* into memory just to hand it to the Tesseract runtime,
+which promptly writes it out again.
 
-The output fields are ordinary ``Array`` types. An ``Array`` accepts a
-``BinrefArray`` (a reference to an on-disk buffer) in place of a NumPy array and
-forwards it verbatim for ``json+binref`` output, loading + re-encoding it only
-for other formats. Because the fields are plain ``Array`` types,
-``Differentiable[Array[...]]`` composes with the passthrough out of the box.
+``BinrefArray`` removes that round-trip. The solver writes each snapshot straight
+to a binref buffer on disk as it is computed, and returns a lightweight
+reference. When the client asks for ``json+binref`` output, the on-disk bytes are
+forwarded verbatim -- never read back into the server's memory. The output field
+is an ordinary ``Array``, so nothing about the schema is special.
 
-``BinrefArray`` can be built three ways:
-
-* ``BinrefArray.write(arr)`` -- write a NumPy array to its own buffer.
-* ``BinrefArray.from_file(path, shape, dtype)`` -- reference a buffer some other
-  code (e.g. a compiled solver) already wrote.
-* ``BinrefWriter`` -- pack many arrays into a few shared, rotating buffers.
+This example runs a tiny explicit heat-diffusion solver on a 2D grid, checkpoints
+every timestep, and returns the trajectory plus the final field.
 """
 
 import numpy as np
 from pydantic import BaseModel, Field
 
-from tesseract_core.runtime import Array, Differentiable, Float64
+from tesseract_core.runtime import Array, Float64
 from tesseract_core.runtime.experimental import BinrefArray, BinrefWriter
 
 
 class InputSchema(BaseModel):
-    n: int = Field(description="Length of each array to generate.", default=8)
-    scale: float = Field(
-        description="Value to scale the generated arrays by.", default=1.0
-    )
-    parts: int = Field(description="How many array chunks to emit.", default=3)
+    size: int = Field(default=16, description="Side length of the square grid.")
+    steps: int = Field(default=20, description="Number of timesteps to integrate.")
+    diffusivity: float = Field(default=0.1, description="Diffusion coefficient.")
 
 
 class OutputSchema(BaseModel):
-    result: Array[(None,), Float64] = Field(
-        description="A single array forwarded as a binref (written via BinrefArray.write)."
+    # Ordinary Array fields -- they happen to be fed on-disk references. A client
+    # requesting json+binref gets the bytes straight from disk, with no server
+    # round-trip through memory.
+    trajectory: list[Array[(None, None), Float64]] = Field(
+        description="The temperature field at every timestep."
     )
-    # A plain Array field accepts a binref reference, so it composes with
-    # Differentiable for free.
-    grad: Differentiable[Array[(None,), Float64]] = Field(
-        description="A differentiable array, also forwarded as a binref."
+    final: Array[(None, None), Float64] = Field(
+        description="The temperature field after the last step."
     )
-    chunks: list[Array[(None,), Float64]] = Field(
-        description="Several arrays packed into shared buffers (written via BinrefWriter)."
+
+
+def _step(field: np.ndarray, diffusivity: float) -> np.ndarray:
+    """One explicit forward-Euler diffusion step with a 5-point Laplacian."""
+    laplacian = (
+        np.roll(field, 1, 0)
+        + np.roll(field, -1, 0)
+        + np.roll(field, 1, 1)
+        + np.roll(field, -1, 1)
+        - 4.0 * field
     )
+    return field + diffusivity * laplacian
 
 
 def apply(inputs: InputSchema) -> OutputSchema:
-    # A real component would produce these buffers as a side effect of its solve.
-    # One-off: write a single array to its own file.
-    result = BinrefArray.write(np.arange(inputs.n, dtype=np.float64) * inputs.scale)
-    grad = BinrefArray.write(np.ones(inputs.n, dtype=np.float64) * inputs.scale)
+    # A hot square in the middle of a cold grid.
+    field = np.zeros((inputs.size, inputs.size), dtype=np.float64)
+    lo, hi = inputs.size // 4, 3 * inputs.size // 4
+    field[lo:hi, lo:hi] = 1.0
 
-    # Many small arrays: pack them into a few shared, rotating buffers rather
-    # than one file each.
-    with BinrefWriter() as writer:
-        chunks = [
-            writer.write(np.full(inputs.n, i, dtype=np.float64))
-            for i in range(inputs.parts)
-        ]
+    # Checkpoint every timestep to disk as the solve proceeds. BinrefWriter packs
+    # all the snapshots into a few shared buffers instead of one file each, and
+    # never keeps more than the current field in memory.
+    with BinrefWriter() as checkpoints:
+        trajectory = [checkpoints.write(field)]
+        for _ in range(inputs.steps):
+            field = _step(field, inputs.diffusivity)
+            trajectory.append(checkpoints.write(field))
 
-    # No np.load / np.frombuffer here: the bytes on disk are forwarded as-is.
-    return OutputSchema(result=result, grad=grad, chunks=chunks)
+    # The final field gets its own buffer.
+    final = BinrefArray.write(field)
+
+    # Every array in the output already lives on disk; returning them copies no
+    # array data back into memory.
+    return OutputSchema(trajectory=trajectory, final=final)
