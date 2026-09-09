@@ -20,6 +20,15 @@ behaves identically to a plain `Array` either way.
 `BinrefArray` and `BinrefWriter` live in `tesseract_core.runtime.experimental`.
 ```
 
+```{warning}
+The memory saving only applies to `json+binref` output. If a client requests
+`json` or `base64` from a `BinrefArray`-backed field, the buffer **must** be read
+into memory to inline it — exactly the cost the reference exists to avoid. The
+result is still correct, and the runtime emits a `RuntimeWarning` so the load is
+not silent, but a Tesseract that returns arrays too large to fit in memory should
+be served (and requested) with `json+binref`.
+```
+
 ## Example Tesseract (`examples/binref_passthrough`)
 
 The output fields are ordinary `Array` types — nothing about the schema signals

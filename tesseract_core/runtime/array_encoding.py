@@ -3,6 +3,7 @@
 
 import os
 import re
+import warnings
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Annotated, Any, Literal, TypeAlias, TypedDict, get_args
@@ -971,6 +972,19 @@ def encode_array(
             return arr
         if array_encoding == "binref":
             return arr.to_arraydict()
+        # Any other encoding must inline the data, so the on-disk buffer has to
+        # be read into memory -- the exact cost a BinrefArray exists to avoid.
+        # Warn loudly (the values are still correct) so this is not a silent
+        # memory blow-up; request json+binref output to forward it from disk.
+        nbytes = int(np.prod(arr.shape)) * np.dtype(arr.dtype).itemsize
+        warnings.warn(
+            f"A BinrefArray ({nbytes / 1024**2:.1f} MiB) is being read into "
+            f"memory to satisfy a '{array_encoding}' response; the on-disk buffer "
+            "cannot be forwarded for this encoding. Request 'json+binref' output "
+            "to stream it from disk without loading it.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
         arr = _load_ref(arr, context)
 
     is_gpu_array = cuda_ipc.has_cuda_array_interface(arr)

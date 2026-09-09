@@ -9,6 +9,12 @@ from tesseract_core.runtime import Array, Differentiable, Float64
 from tesseract_core.runtime.experimental import BinrefArray, BinrefWriter
 from tesseract_core.runtime.schema_types import is_differentiable
 
+# Serializing a BinrefArray to a non-binref encoding reads it into memory and
+# warns (see test_non_binref_output_warns). Most tests here exercise that path
+# only to check the resulting values, so silence the expected warning module-wide;
+# the dedicated test re-asserts it explicitly via pytest.warns.
+pytestmark = pytest.mark.filterwarnings("ignore::RuntimeWarning")
+
 
 class OneDModel(BaseModel):
     result: Array[(4,), Float64]
@@ -124,6 +130,31 @@ def test_non_binref_output_loads_and_reencodes(tmp_path, encoding):
     assert dumped["shape"] == [4] and dumped["dtype"] == "float64"
     if encoding == "json":
         assert dumped["data"]["buffer"] == arr.tolist()
+
+
+@pytest.mark.filterwarnings("default::RuntimeWarning")
+@pytest.mark.parametrize("encoding", ["json", "base64"])
+def test_non_binref_output_warns(tmp_path, encoding):
+    """Loading a binref into memory to satisfy a non-binref encoding is loud."""
+    ref = BinrefArray.write(np.arange(4, dtype=np.float64), output_dir=tmp_path)
+    with pytest.warns(RuntimeWarning, match="read into memory"):
+        OneDModel(result=ref).model_dump(
+            mode="json",
+            context={"array_encoding": encoding, "base_dir": tmp_path},
+        )
+
+
+def test_binref_output_does_not_warn(tmp_path):
+    """Forwarding a binref verbatim must not trip the memory warning."""
+    import warnings
+
+    ref = BinrefArray.write(np.arange(4, dtype=np.float64), output_dir=tmp_path)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        OneDModel(result=ref).model_dump(
+            mode="json",
+            context={"array_encoding": "binref", "base_dir": tmp_path},
+        )
 
 
 def test_python_roundtrip_preserves_reference(tmp_path):
