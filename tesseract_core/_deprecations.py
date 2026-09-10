@@ -65,6 +65,27 @@ TOMBSTONES: tuple[Tombstone, ...] = (
             "PipRequirements. Update the tests, too."
         ),
     ),
+    Tombstone(
+        remove_at="1.13.0",
+        what="Tesseract(url) constructor",
+        hint=(
+            "Remove the deprecated Tesseract.__init__ shim in "
+            "tesseract_core/sdk/tesseract.py (callers use Tesseract.from_url / "
+            "from_image / from_tesseract_api); make __init__ raise instead. "
+            "Update the tests, too."
+        ),
+    ),
+    Tombstone(
+        remove_at="1.13.0",
+        what="InputFileReference / OutputFileReference aliases",
+        hint=(
+            "Remove InputFileReference, OutputFileReference and their validators "
+            "(_resolve_input_file, _strip_output_file) from "
+            "tesseract_core/runtime/experimental/paths.py, and drop them from the "
+            "experimental __init__ exports; use InputPath / OutputPath instead. "
+            "Update the tests, too."
+        ),
+    ),
 )
 
 
