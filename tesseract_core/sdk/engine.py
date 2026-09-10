@@ -926,7 +926,7 @@ def serve(
     input_path: str | Path | None = None,
     output_path: str | Path | None = None,
     output_format: OutputFormat | None = None,
-    gpu_transport: str | None = None,
+    gpu_transport: str = "none",
     docker_args: list[str] | None = None,
     runtime_config: dict[str, Any] | None = None,
     skip_health_check: bool = False,
@@ -1017,8 +1017,10 @@ def serve(
 
     # The gpu_transport kwarg is the canonical way to select a transport and
     # wins over any gpu_transport passed through runtime_config, so it is applied
-    # after the runtime_config conversion.
-    if gpu_transport:
+    # after the runtime_config conversion. Its "none" default is a no-op here
+    # rather than an explicit override, so a transport set via runtime_config
+    # survives when the kwarg is left at its default.
+    if gpu_transport and gpu_transport != "none":
         environment["TESSERACT_GPU_TRANSPORT"] = gpu_transport
 
     # Read after runtime_config lands in the environment, which is how the SDK
