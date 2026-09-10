@@ -16,7 +16,7 @@ Layers:
 * :mod:`~tesseract_core.runtime.cuda.dlpack` -- export an owned device buffer
   as a DLPack capsule.
 
-The main consumer is :mod:`tesseract_core.runtime.cuda_ipc`, which layers the
+The main consumer is :mod:`tesseract_core.runtime.cuda.ipc`, which layers the
 ``json+cuda_ipc`` array-encoding policy on top of this API.
 """
 
