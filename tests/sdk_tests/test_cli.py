@@ -37,10 +37,10 @@ def test_version(cli_runner):
 
 @pytest.mark.parametrize("cmd", ["serve", "run"])
 def test_cuda_ipc_not_a_cli_output_format(cli_runner, cmd):
-    """The experimental json+cuda_ipc format is not exposed on the CLI.
+    """cuda_ipc is a GPU transport, not a host output format, and never on the CLI.
 
-    It is neither listed in --help nor accepted as a value; requesting it fails
-    as an invalid choice.
+    ``json+cuda_ipc`` is not a valid ``--output-format``: it is neither listed in
+    --help nor accepted as a value; requesting it fails as an invalid choice.
     """
     help_result = cli_runner.invoke(cli, [cmd, "--help"])
     assert "json+cuda_ipc" not in help_result.stdout

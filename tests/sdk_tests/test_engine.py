@@ -1706,36 +1706,37 @@ def _stub_serve_docker(monkeypatch):
     return captured
 
 
-def test_serve_cuda_ipc_adds_ipc_host(monkeypatch):
-    """json+cuda_ipc serving passes --ipc=host to the container runtime."""
-    captured = _stub_serve_docker(monkeypatch)
-
-    engine.serve(
-        "my-image",
-        output_format="json+cuda_ipc",
-        gpus=["all"],
-        runtime_config={"enable_experimental_cuda_ipc": True},
-        skip_health_check=True,
-    )
-    assert "--ipc=host" in captured["extra_args"]
-
-
-def test_serve_experimental_cuda_ipc_adds_ipc_host_any_format(monkeypatch):
-    """Enabling the flag wires --ipc=host regardless of the output format."""
+def test_serve_cuda_ipc_transport_adds_ipc_host(monkeypatch):
+    """gpu_transport='cuda_ipc' serving passes --ipc=host to the container runtime."""
     captured = _stub_serve_docker(monkeypatch)
 
     engine.serve(
         "my-image",
         output_format="json+base64",
         gpus=["all"],
-        runtime_config={"enable_experimental_cuda_ipc": True},
+        runtime_config={"gpu_transport": "cuda_ipc"},
         skip_health_check=True,
     )
     assert "--ipc=host" in captured["extra_args"]
 
 
-def test_serve_experimental_cuda_ipc_errors_without_gpus(monkeypatch):
-    """Enabling the flag without GPU access is a startup error, not a warning."""
+def test_serve_cuda_ipc_transport_ipc_host_independent_of_format(monkeypatch):
+    """The transport wires --ipc=host regardless of the host output format."""
+    captured = _stub_serve_docker(monkeypatch)
+
+    engine.serve(
+        "my-image",
+        output_format="json+binref",
+        output_path="/tmp",
+        gpus=["all"],
+        runtime_config={"gpu_transport": "cuda_ipc"},
+        skip_health_check=True,
+    )
+    assert "--ipc=host" in captured["extra_args"]
+
+
+def test_serve_cuda_ipc_transport_errors_without_gpus(monkeypatch):
+    """Selecting the cuda_ipc transport without GPU access is a startup error."""
     _stub_serve_docker(monkeypatch)
 
     with pytest.raises(ValueError, match="requires GPU access"):
@@ -1743,20 +1744,21 @@ def test_serve_experimental_cuda_ipc_errors_without_gpus(monkeypatch):
             "my-image",
             output_format="json+base64",
             gpus=None,
-            runtime_config={"enable_experimental_cuda_ipc": True},
+            runtime_config={"gpu_transport": "cuda_ipc"},
             skip_health_check=True,
         )
 
 
-def test_serve_cuda_ipc_errors_without_experimental_flag(monkeypatch):
-    """Requesting the cuda_ipc format without the flag is a startup error."""
+def test_serve_unknown_gpu_transport_errors(monkeypatch):
+    """An unknown gpu_transport value is a startup error."""
     _stub_serve_docker(monkeypatch)
 
-    with pytest.raises(ValueError, match="experimental"):
+    with pytest.raises(ValueError, match="Unknown gpu_transport"):
         engine.serve(
             "my-image",
-            output_format="json+cuda_ipc",
+            output_format="json+base64",
             gpus=["all"],
+            runtime_config={"gpu_transport": "bogus"},
             skip_health_check=True,
         )
 
@@ -1771,6 +1773,46 @@ def test_serve_non_cuda_ipc_has_no_ipc_host(monkeypatch):
         skip_health_check=True,
     )
     assert "--ipc=host" not in (captured.get("extra_args") or [])
+
+
+_UNSET = object()
+
+
+@pytest.mark.parametrize(
+    ("kwarg", "runtime_config", "expected"),
+    [
+        # Neither channel names a transport -> pinned to the explicit default.
+        (_UNSET, None, "none"),
+        # runtime_config selects it while the kwarg is left unset -> deferred to.
+        (_UNSET, {"gpu_transport": "cuda_ipc"}, "cuda_ipc"),
+        # An explicit kwarg wins over runtime_config, in both directions.
+        ("cuda_ipc", {"gpu_transport": "none"}, "cuda_ipc"),
+        ("none", {"gpu_transport": "cuda_ipc"}, "none"),
+        # Passing None explicitly is the same as not passing it: defer.
+        (None, {"gpu_transport": "cuda_ipc"}, "cuda_ipc"),
+    ],
+)
+def test_serve_gpu_transport_precedence(monkeypatch, kwarg, runtime_config, expected):
+    """The gpu_transport kwarg and runtime_config resolve with a defined precedence.
+
+    An explicit kwarg (including ``none``) wins; an unset (``None``) kwarg defers
+    to runtime_config; when neither names a transport the container still gets a
+    definite ``none`` rather than inheriting the image default.
+    """
+    captured = _stub_serve_docker(monkeypatch)
+
+    kwargs = dict(output_format="json+base64", gpus=["all"], skip_health_check=True)
+    if kwarg is not _UNSET:
+        kwargs["gpu_transport"] = kwarg
+    if runtime_config is not None:
+        kwargs["runtime_config"] = runtime_config
+
+    engine.serve("my-image", **kwargs)
+
+    assert captured["environment"]["TESSERACT_GPU_TRANSPORT"] == expected
+    assert ("--ipc=host" in (captured.get("extra_args") or [])) == (
+        expected == "cuda_ipc"
+    )
 
 
 @pytest.mark.parametrize(
