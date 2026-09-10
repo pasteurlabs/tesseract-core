@@ -348,7 +348,7 @@ def check_gradients(
         typer.Option(
             "--max-output-samples",
             help=(
-                "Maximum number of output elements to sample when checking "
+                "Maximum number of random cotangent probes used when checking "
                 "vector_jacobian_product."
             ),
             show_default="check all",

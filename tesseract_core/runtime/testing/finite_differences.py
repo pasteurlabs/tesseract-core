@@ -121,10 +121,16 @@ def _by_index(input_path: Any, output_path: Any, input_idx: Any) -> tuple:
 
 
 class _VjpSweepTarget(NamedTuple):
-    """Target indices for a shared VJP sweep across inputs and outputs."""
+    """Target specification for a shared VJP sweep.
+
+    When ``probe_seed`` is ``None`` the sweep uses exhaustive one-hot
+    cotangents.  Otherwise it generates ``num_probes`` dense Gaussian
+    cotangent probes from the given seed.
+    """
 
     wanted_inputs: tuple[tuple[int, ...], ...]
-    sampled_outputs: tuple[tuple[int, ...], ...] | None
+    probe_seed: int | None = None
+    num_probes: int | None = None
 
 
 def _by_sampled_set(
@@ -132,11 +138,14 @@ def _by_sampled_set(
     output_path: Any,
     target: _VjpSweepTarget,
 ) -> tuple:
-    """Key a VJP sweep on the path pair and the input/output sets it answers for."""
-    out_key = (
-        tuple(target.sampled_outputs) if target.sampled_outputs is not None else None
+    """Key a VJP sweep on the path pair and the probe specification it answers for."""
+    return (
+        input_path,
+        output_path,
+        tuple(target.wanted_inputs),
+        target.probe_seed,
+        target.num_probes,
     )
-    return (input_path, output_path, tuple(target.wanted_inputs), out_key)
 
 
 def _cached_function(*, key_fn: Callable) -> Callable:
@@ -351,6 +360,34 @@ def _jacobian_via_jvp(
     return jvp[output_path]
 
 
+def _generate_vjp_probes(
+    probe_seed: int,
+    num_probes: int,
+    output_shape: tuple[int, ...],
+    output_dtype: np.dtype,
+) -> list[np.ndarray]:
+    """Generate deterministic unit-norm Gaussian cotangent probes.
+
+    The same ``probe_seed`` and ``num_probes`` always produce the identical
+    sequence, so both the VJP sweep and the finite-difference projection
+    reconstruct exactly the same directions.
+    """
+    if num_probes == 0 or int(np.prod(output_shape, dtype=int)) == 0:
+        return [np.zeros(output_shape, dtype=output_dtype) for _ in range(num_probes)]
+
+    rng = np.random.RandomState(probe_seed)
+    probes: list[np.ndarray] = []
+    for _ in range(num_probes):
+        raw = rng.standard_normal(output_shape)
+        norm = np.linalg.norm(raw.reshape(-1))
+        while not np.isfinite(norm) or norm == 0.0:
+            raw = rng.standard_normal(output_shape)
+            norm = np.linalg.norm(raw.reshape(-1))
+        probe = (raw / norm).astype(output_dtype, copy=False)
+        probes.append(probe)
+    return probes
+
+
 @_cached_function(key_fn=_by_sampled_set)
 def _vjp_sweep(
     endpoints_func: dict[str, Callable],
@@ -360,23 +397,20 @@ def _vjp_sweep(
     target: _VjpSweepTarget,
     outputs: dict[str, Any],
 ) -> dict[tuple[int, ...], ArrayLike]:
-    """Sweep one-hot cotangents over the output and keep the wanted rows.
+    """Sweep cotangents over the output and keep the wanted input rows.
 
-    One VJP call with a one-hot cotangent returns the gradient with respect
-    to every element of ``input_path``, so a single sweep over the output
-    elements answers for all sampled indices at once. Keeping just one
-    element and re-running the sweep per index cost
-    ``n_sampled x n_output_elements`` calls, where ``jacobian`` and
-    ``jacobian_vector_product`` cost one per item.
-
-    Only the wanted rows are retained, so the full Jacobian is never
-    materialised.
+    When ``target.probe_seed`` is ``None`` the sweep uses exhaustive one-hot
+    cotangents (one VJP call per output element).  Otherwise it generates
+    ``target.num_probes`` dense Gaussian cotangent probes and performs one
+    VJP call per probe.  Each VJP call returns gradients for all input
+    elements, so the sweep is shared across every sampled input index.
     """
     vjp_fn = endpoints_func["vector_jacobian_product"]
     VjpSchema = get_input_schema(vjp_fn)
     template = np.zeros_like(get_at_path(outputs, output_path))
 
-    if target.sampled_outputs is None:
+    if target.probe_seed is None:
+        # Exhaustive one-hot sweep
         rows = {idx: np.zeros_like(template) for idx in target.wanted_inputs}
         for col_idx in np.ndindex(template.shape):
             cotangent = np.zeros_like(template)
@@ -396,26 +430,28 @@ def _vjp_sweep(
                 rows[idx][col_idx] = grad[idx]
         return rows
 
+    # Dense Gaussian probe sweep: (u^T J) v = u^T (J v)
+    probes = _generate_vjp_probes(
+        target.probe_seed, target.num_probes, template.shape, template.dtype
+    )
     rows = {
-        idx: np.zeros(len(target.sampled_outputs), dtype=template.dtype)
+        idx: np.zeros(target.num_probes, dtype=template.dtype)
         for idx in target.wanted_inputs
     }
-    for col_pos, col_idx in enumerate(target.sampled_outputs):
-        cotangent = np.zeros_like(template)
-        cotangent[col_idx] = 1
+    for k, probe in enumerate(probes):
         vjp = vjp_fn(
             VjpSchema.model_validate(
                 {
                     "inputs": inputs,
                     "vjp_inputs": [input_path],
                     "vjp_outputs": [output_path],
-                    "cotangent_vector": {output_path: cotangent},
+                    "cotangent_vector": {output_path: probe},
                 }
             )
         ).model_dump()
         grad = vjp[input_path]
         for idx in target.wanted_inputs:
-            rows[idx][col_pos] = grad[idx]
+            rows[idx][k] = grad[idx]
     return rows
 
 
@@ -427,9 +463,10 @@ def _jacobian_via_vjp(
     input_idx: tuple[int, ...],
     outputs: dict[str, Any],
     sampled_input_idx: tuple[tuple[int, ...], ...] = (),
-    sampled_output_idx: tuple[tuple[int, ...], ...] | None = None,
+    probe_seed: int | None = None,
+    num_probes: int | None = None,
 ) -> ArrayLike:
-    """Return one Jacobian row from the sweep shared by this path pair.
+    """Return one Jacobian row (or probe projections) from the shared VJP sweep.
 
     ``sampled_input_idx`` is the set this pair will be asked for. It goes
     into the cache key so that one sweep serves every index in it, which is
@@ -437,7 +474,9 @@ def _jacobian_via_vjp(
     for a single row like the other three helpers.
     """
     wanted = tuple(dict.fromkeys((*sampled_input_idx, tuple(input_idx))))
-    target = _VjpSweepTarget(wanted_inputs=wanted, sampled_outputs=sampled_output_idx)
+    target = _VjpSweepTarget(
+        wanted_inputs=wanted, probe_seed=probe_seed, num_probes=num_probes
+    )
     return _vjp_sweep(endpoints_func, inputs, input_path, output_path, target, outputs)[
         tuple(input_idx)
     ]
@@ -517,9 +556,9 @@ def check_endpoint_gradients(
         sampled_by_pair.setdefault((in_path, out_path), ())
         sampled_by_pair[(in_path, out_path)] += (tuple(idx),)
 
-    sampled_outputs_by_pair: dict[
-        tuple[str, str], tuple[tuple[int, ...], ...] | None
-    ] = {}
+    # Determine probe specification for each path pair.
+    # probe_seed=None means exhaustive one-hot sweep.
+    probe_spec_by_pair: dict[tuple[str, str], tuple[int | None, int | None]] = {}
     if endpoint == "vector_jacobian_product" and max_output_samples is not None:
         actual_output_rng = output_rng if output_rng is not None else rng
         for in_path, out_path in sampled_by_pair:
@@ -527,19 +566,18 @@ def check_endpoint_gradients(
             out_shape = np.shape(out_val)
             n_output_elements = int(np.prod(out_shape, dtype=int)) if out_shape else 1
             if max_output_samples < n_output_elements:
-                flat_idx = actual_output_rng.choice(
-                    n_output_elements, size=max_output_samples, replace=False
+                probe_seed = int(
+                    actual_output_rng.randint(0, 2**32 - 1, dtype=np.int64)
                 )
-                unraveled = np.unravel_index(flat_idx, out_shape)
-                sampled_outputs_by_pair[(in_path, out_path)] = tuple(
-                    tuple(int(dim[i]) for dim in unraveled)
-                    for i in range(max_output_samples)
+                probe_spec_by_pair[(in_path, out_path)] = (
+                    probe_seed,
+                    max_output_samples,
                 )
             else:
-                sampled_outputs_by_pair[(in_path, out_path)] = None
+                probe_spec_by_pair[(in_path, out_path)] = (None, None)
     else:
         for in_path, out_path in sampled_by_pair:
-            sampled_outputs_by_pair[(in_path, out_path)] = None
+            probe_spec_by_pair[(in_path, out_path)] = (None, None)
 
     try:
         with Progress(disable=not show_progress) as progress:
@@ -561,14 +599,18 @@ def check_endpoint_gradients(
                         eps=eps,
                     )
                     if endpoint == "vector_jacobian_product":
-                        col_indices = sampled_outputs_by_pair.get((in_path, out_path))
+                        p_seed, n_probes = probe_spec_by_pair.get(
+                            (in_path, out_path), (None, None)
+                        )
                         grad_kwargs = {
                             "outputs": outputs,
                             "sampled_input_idx": sampled_by_pair[(in_path, out_path)],
-                            "sampled_output_idx": col_indices,
+                            "probe_seed": p_seed,
+                            "num_probes": n_probes,
                         }
                     else:
-                        col_indices = None
+                        p_seed = None
+                        n_probes = None
                         grad_kwargs = {}
                     result_grad = _jacobian_via_grad(
                         endpoint_functions,
@@ -590,9 +632,22 @@ def check_endpoint_gradients(
                         exception=exc_info,
                     )
                 else:
-                    if col_indices is not None:
-                        reference = np.asarray(result_apply)
-                        ref_val = np.asarray([reference[c] for c in col_indices])
+                    if p_seed is not None and n_probes is not None:
+                        # Dense probe comparison: (u^T J) v = u^T (J v)
+                        out_val = get_at_path(outputs, out_path)
+                        probes = _generate_vjp_probes(
+                            p_seed,
+                            n_probes,
+                            np.shape(out_val),
+                            np.asarray(out_val).dtype,
+                        )
+                        fd_row = np.asarray(result_apply).reshape(-1)
+                        ref_val = np.asarray(
+                            [
+                                np.dot(np.asarray(probe).reshape(-1), fd_row)
+                                for probe in probes
+                            ]
+                        )
                         grad_val = np.asarray(result_grad)
                     else:
                         ref_val = result_apply
@@ -652,8 +707,9 @@ def check_gradients(
         base_dir: The base directory to resolve relative paths.
         endpoints: The gradient endpoints to check. If not provided, all available endpoints are checked.
         max_evals: The target number of ``apply`` evaluations to perform.
-        max_output_samples: Maximum number of output elements sampled when checking the
-            vector_jacobian_product endpoint. If None, all output elements are checked.
+        max_output_samples: Maximum number of random cotangent probes used when checking
+            the vector_jacobian_product endpoint. If None, all output elements are checked
+            exhaustively.
         eps: The epsilon to use for finite differences, as a fraction of the maximum absolute value of each input.
         rtol: The relative tolerance to use for comparison.
         seed: The random seed to use for sampling. If not provided, a random seed is used.
