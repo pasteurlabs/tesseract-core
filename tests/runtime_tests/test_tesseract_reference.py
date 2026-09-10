@@ -58,7 +58,7 @@ def patch_tesseract_class(monkeypatch):
 
 
 def test_type_adapter_round_trip():
-    """Test A: Validate using TypeAdapter and serialize back to the exact original envelope."""
+    """Validate using TypeAdapter and serialize back to the exact original envelope."""
     envelope = {"type": "url", "ref": "http://solver-b:8000"}
     ta = TypeAdapter(TesseractReference)
 
@@ -73,7 +73,7 @@ def test_type_adapter_round_trip():
 
 
 def test_base_model_model_dump():
-    """Test B: OutputSchema.model_dump() contains the exact reference envelope."""
+    """OutputSchema.model_dump() contains the exact reference envelope."""
 
     class OutputSchema(BaseModel):
         best: TesseractReference
@@ -89,7 +89,7 @@ def test_base_model_model_dump():
 
 
 def test_base_model_model_dump_json():
-    """Test C: OutputSchema.model_dump_json() outputs JSON matching the exact envelope."""
+    """OutputSchema.model_dump_json() outputs JSON matching the exact envelope."""
 
     class OutputSchema(BaseModel):
         best: TesseractReference
@@ -105,7 +105,7 @@ def test_base_model_model_dump_json():
 
 
 def test_input_to_output_pass_through():
-    """Test D: End-to-end pass-through from InputSchema to OutputSchema preserves the envelope."""
+    """End-to-end pass-through from InputSchema to OutputSchema preserves the envelope."""
 
     class InputSchema(BaseModel):
         target: TesseractReference
@@ -122,7 +122,7 @@ def test_input_to_output_pass_through():
 
 
 def test_runtime_output_to_bytes():
-    """Test E: Real unmocked output_to_bytes() serializes OutputSchema correctly."""
+    """Real unmocked output_to_bytes() serializes OutputSchema correctly."""
 
     class OutputSchema(BaseModel):
         target: TesseractReference
@@ -139,7 +139,7 @@ def test_runtime_output_to_bytes():
 
 
 def test_delegation_remains_intact():
-    """Test F: Delegation to underlying Tesseract via __getattr__ functions normally."""
+    """Delegation to underlying Tesseract via __getattr__ functions normally."""
     envelope = {"type": "url", "ref": "http://solver-b:8000"}
     ta = TypeAdapter(TesseractReference)
     ref = ta.validate_python(envelope)
@@ -167,7 +167,7 @@ def test_delegation_remains_intact():
     ],
 )
 def test_all_reference_kinds_and_provenance(tesseract_type: str, raw_ref: str):
-    """Test G: All reference kinds preserve raw originating metadata and image calls serve()."""
+    """All reference kinds preserve raw originating metadata and image calls serve()."""
     envelope = {"type": tesseract_type, "ref": raw_ref}
     ta = TypeAdapter(TesseractReference)
     ref = ta.validate_python(envelope)
@@ -183,7 +183,7 @@ def test_all_reference_kinds_and_provenance(tesseract_type: str, raw_ref: str):
 
 
 def test_direct_constructor_compatibility():
-    """Test H: Direct construction TesseractReference(tesseract) remains supported and fails gracefully on serialization."""
+    """Direct construction TesseractReference(tesseract) is supported, fails gracefully on serialization."""
     underlying = FakeTesseract("direct", "direct-target")
     ref = TesseractReference(underlying)
 
