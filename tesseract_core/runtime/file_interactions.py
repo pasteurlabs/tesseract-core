@@ -30,8 +30,7 @@ supported_format_type = Literal["json", "json+base64", "json+binref"]
 # available_gpu_transports).
 #
 # The disabled state is the explicit string ``"none"`` rather than ``None``, so
-# the value stays a plain ``str`` as it flows through configs, env vars, and
-# Accept headers without a None/str special case at every hop.
+# it is clear to users that this means "disabled", not "unspecified".
 gpu_transport_type = Literal["none", "cuda_ipc"]
 
 # Every output format is always available (none of them are experimental).
