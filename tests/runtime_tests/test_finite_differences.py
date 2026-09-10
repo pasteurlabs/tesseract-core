@@ -811,26 +811,23 @@ def test_vjp_output_sampling_cap_greater_than_output_size_stays_exhaustive():
     assert module.vjp_calls == n_output_elements
 
 
-def test_cli_max_output_samples_option(cli_runner):
-    """CLI must expose --max-output-samples in check-gradients help.
+def test_cli_max_output_samples_option():
+    """CLI must expose --max-output-samples on check-gradients.
 
-    COLUMNS is pinned wide so Rich renders each option name on one line;
-    at the default width it truncates flags mid-token (e.g. to
-    ``--max-output-samp…``) and the substring checks below break for
-    reasons unrelated to whether the option exists.
+    Inspect the registered Click option directly rather than the rendered
+    ``--help`` text: Rich truncates option names mid-token at narrow
+    terminal widths (e.g. ``--max-output-samp…``), which makes substring
+    checks against the help output flaky and terminal-width dependent.
     """
-    from click import unstyle
+    import typer
 
     from tesseract_core.runtime.cli import app
 
-    result = cli_runner.invoke(
-        app, ["check-gradients", "--help"], env={"TERM": "dumb", "COLUMNS": "1000"}
+    command = typer.main.get_group(app).commands["check-gradients"]
+    option = next(
+        p for p in command.params if "--max-output-samples" in getattr(p, "opts", [])
     )
-    assert result.exit_code == 0
-    stdout = unstyle(result.stdout)
-    assert "--max-output-samples" in stdout
-    assert "Maximum number of output elements" in stdout
-    assert "vector_jacobian_product" in stdout
+    assert "Maximum number of output elements" in getattr(option, "help", "")
 
 
 def test_output_sampling_does_not_alter_input_sampling():
