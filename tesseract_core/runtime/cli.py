@@ -7,7 +7,7 @@ import inspect
 import io
 import os
 import sys
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from enum import Enum
 from pathlib import Path
 from textwrap import dedent
@@ -125,6 +125,51 @@ def _parse_payload(value: Any) -> dict[str, Any]:
 
     # Use pydantic from_json here because it is much faster, and the payload may be large.
     return from_json(value)
+
+
+class _EpsMap(Mapping):
+    """Per-input eps mapping that falls back to a global default.
+
+    Explicit overrides are returned for their paths; every other path
+    resolves to ``default``. Iteration yields only the explicit override
+    paths so that unknown-path validation can still catch typos, while
+    ``__contains__`` reports every path as present so no path is ever
+    treated as missing.
+    """
+
+    def __init__(self, overrides: Mapping[str, float], default: float) -> None:
+        self._overrides = dict(overrides)
+        self._default = default
+
+    def __getitem__(self, path: str) -> float:
+        return self._overrides.get(path, self._default)
+
+    def __contains__(self, path: object) -> bool:
+        return True
+
+    def __iter__(self) -> Iterable[str]:
+        return iter(self._overrides)
+
+    def __len__(self) -> int:
+        return len(self._overrides)
+
+
+def _parse_eps_for(values: list[str], default: float) -> _EpsMap:
+    """Parse ``--eps-for PATH=VALUE`` options into a per-input eps mapping."""
+    overrides: dict[str, float] = {}
+    for item in values:
+        path, sep, raw = item.partition("=")
+        if not sep or not path:
+            raise BadParameter(
+                f"Invalid --eps-for value {item!r}, expected PATH=VALUE."
+            )
+        try:
+            overrides[path] = float(raw)
+        except ValueError as e:
+            raise BadParameter(
+                f"Invalid --eps-for step size for {path!r}: {raw!r} is not a number."
+            ) from e
+    return _EpsMap(overrides, default)
 
 
 def make_callback() -> Callable:
@@ -323,10 +368,27 @@ def check_gradients(
         float,
         typer.Option(
             "--eps",
-            help="Step size for finite differences.",
+            help=(
+                "Absolute step size for finite differences, applied unscaled to "
+                "every differentiated input that is not given its own step via "
+                "--eps-for."
+            ),
             show_default=True,
         ),
     ] = 1e-4,
+    eps_for: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--eps-for",
+            help=(
+                "Per-input step size as PATH=VALUE, e.g. --eps-for inputs.a=1e-3. "
+                "Overrides --eps for that input path; repeat for multiple paths. "
+                "Use this for inputs whose magnitudes differ by orders of magnitude."
+            ),
+            metavar="PATH=VALUE",
+            show_default=False,
+        ),
+    ] = None,
     rtol: Annotated[
         float,
         typer.Option(
@@ -362,7 +424,7 @@ def check_gradients(
     show_progress: Annotated[
         bool,
         typer.Option(
-            "--show-progress",
+            "--show-progress/--no-show-progress",
             help="Show progress bar.",
         ),
     ] = True,
@@ -389,6 +451,10 @@ def check_gradients(
     api_module = get_tesseract_api()
     inputs = _parse_payload(payload)
 
+    eps_arg: float | Mapping[str, float] = eps
+    if eps_for:
+        eps_arg = _parse_eps_for(eps_for, default=eps)
+
     result_iter = check_gradients_(
         api_module,
         inputs,
@@ -397,7 +463,7 @@ def check_gradients(
         output_paths=output_paths,
         endpoints=endpoints,
         max_evals=max_evals,
-        eps=eps,
+        eps=eps_arg,
         rtol=rtol,
         seed=seed,
         show_progress=show_progress,
