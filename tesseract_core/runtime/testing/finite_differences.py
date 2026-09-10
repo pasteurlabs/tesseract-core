@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import traceback
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from functools import wraps
 from pathlib import Path
 from types import ModuleType
@@ -522,7 +522,7 @@ def check_endpoint_gradients(
     diff_outputs: list[str],
     max_evals: int,
     max_output_samples: int | None = None,
-    eps: float,
+    eps: float | Mapping[str, float],
     rtol: float,
     rng: np.random.RandomState,
     output_rng: np.random.RandomState | None = None,
@@ -591,7 +591,7 @@ def check_endpoint_gradients(
                         in_path,
                         out_path,
                         idx,
-                        eps=eps,
+                        eps=eps[in_path] if isinstance(eps, Mapping) else eps,
                     )
                     if endpoint == "vector_jacobian_product":
                         col_indices = sampled_outputs_by_pair.get((in_path, out_path))
@@ -670,7 +670,7 @@ def check_gradients(
     endpoints: Sequence[GradientEndpointName] | None = None,
     max_evals: int = 1000,
     max_output_samples: int | None = None,
-    eps: float = 1e-4,
+    eps: float | Mapping[str, float] = 1e-4,
     rtol: float = 0.1,
     seed: int | None = None,
     show_progress: bool = True,
@@ -688,7 +688,11 @@ def check_gradients(
         max_output_samples: Maximum number of output elements sampled when checking the
             vector_jacobian_product endpoint. If None, all output elements are checked
             exhaustively.
-        eps: The epsilon to use for finite differences, as a fraction of the maximum absolute value of each input.
+        eps: The step size to use for finite differences, as an absolute
+            perturbation. A single float is applied unscaled to every
+            differentiated input; a mapping gives one step per input path,
+            which is what inputs of differing magnitude need, and must name
+            every path being checked.
         rtol: The relative tolerance to use for comparison.
         seed: The random seed to use for sampling. If not provided, a random seed is used.
         show_progress: Whether to show a progress bar.
@@ -745,6 +749,19 @@ def check_gradients(
 
     if not output_paths:
         output_paths = diff_outputs
+
+    if isinstance(eps, Mapping):
+        missing = [path for path in input_paths if path not in eps]
+        if missing:
+            raise ValueError(
+                f"eps is missing a step size for input path(s): {', '.join(missing)}"
+            )
+        unknown = [path for path in eps if path not in input_paths]
+        if unknown:
+            raise ValueError(
+                f"eps names input path(s) that are not being checked: "
+                f"{', '.join(unknown)}"
+            )
 
     for path in output_paths:
         if path not in diff_outputs:
