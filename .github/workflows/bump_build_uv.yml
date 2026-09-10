@@ -40,7 +40,10 @@ jobs:
         env:
             NEW_VERSION: ${{ steps.latest.outputs.uv-version }}
         run: |
+          sed "s/^\(ARG UV_VERSION=\).*/\1${NEW_VERSION}/" ${DOCKERFILE_PATH}
           sed -i "s/^\(ARG UV_VERSION=\).*/\1${NEW_VERSION}/" ${DOCKERFILE_PATH}
+          RETURN_CODE=$?
+          echo $RETURN_CODE
           echo "updated=true" >> ${GITHUB_OUTPUT}
           echo $(git status)
           git diff | cat
