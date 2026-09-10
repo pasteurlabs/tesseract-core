@@ -1,29 +1,129 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Primitives shared by everything that serves a Tesseract over HTTP.
+"""What a served Tesseract is, and what everything serving one needs.
 
-Choosing a port to serve on, waiting for the server to answer, and telling a lost
-race for a port apart from a Tesseract that is genuinely broken. None of it is
-particular to how the Tesseract is run, so none of it belongs in the module that
-knows how to run one.
+The interface a running Tesseract presents -- :class:`ServedTesseract`, and the
+handful of questions worth asking one that docker-py has no method for -- plus
+choosing a port to serve on, waiting for the server to answer, and telling a lost
+race for a port apart from a Tesseract that is genuinely broken.
+
+None of it is particular to how the Tesseract is run, so none of it belongs in
+the module that knows how to run one. That cuts both ways: nothing here may
+import a transport, which is why the startup path catches broadly rather than
+naming one transport's exceptions.
+
+Implemented by :mod:`tesseract_core.sdk.docker_client` for containers and by
+:mod:`tesseract_core.sdk.local_client` for subprocesses. Both import this to
+register their answers; neither is imported back.
 """
 
 import logging
 import random
 import socket
-import subprocess
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from contextlib import closing
+from functools import singledispatch
+from pathlib import Path
+from typing import Any, Protocol
 
 import requests
 
-from .docker_client import APIError, Container, diagnose_exit, is_running
+from .exceptions import UserError
 
 logger = logging.getLogger("tesseract")
 
 # How long to wait for a freshly started Tesseract to answer /health.
 DEFAULT_STARTUP_TIMEOUT = 30.0
+
+
+class ServedTesseract(Protocol):
+    """A Tesseract that has been started and can be reached, inspected and stopped.
+
+    Satisfied by :class:`~tesseract_core.sdk.docker_client.Container` and by
+    :class:`~tesseract_core.sdk.local_client.TesseractProcess`, so callers that
+    only need to talk to a Tesseract, read its output or shut it down need not
+    know which of the two they hold.
+
+    Structural, so neither has to declare allegiance to it: a `Container` is a
+    mirror of docker-py's, and fits this by having the methods docker-py gave it
+    rather than by inheriting anything from us.
+
+    Deliberately narrow: it promises nothing about separating stdout from stderr,
+    since a Tesseract served as a bare process writes both to one file.
+    """
+
+    host_ip: str | None
+    host_port: str | None
+
+    @property
+    def url(self) -> str:
+        """Base URL the Tesseract is serving on."""
+
+    def reload(self) -> None:
+        """Read the Tesseract's state again."""
+
+    def remove(self, v: bool = False, link: bool = False, force: bool = False) -> None:
+        """Dispose of the Tesseract, leaving nothing of it behind.
+
+        docker-py's ``Container.remove`` signature exactly, since that is what a
+        `Container` has and this is structural -- including refusing one that is
+        still running unless ``force`` is set. ``v`` and ``link`` are Docker's
+        and mean nothing to a Tesseract served any other way.
+        """
+
+    def wait(self, timeout: float | None = None) -> dict:
+        """Wait for the Tesseract to stop, and report the status it stopped with.
+
+        Shaped after docker-py's ``Container.wait``, down to returning a dict
+        keyed by ``StatusCode``. Waits for as long as the Tesseract runs unless
+        ``timeout`` says otherwise, so ask only about one you expect to have
+        stopped -- and before disposing of it, since a Tesseract that is gone can
+        no longer be asked.
+        """
+
+    def logs(self) -> bytes:
+        """Everything the Tesseract has written so far."""
+
+
+@singledispatch
+def diagnose_exit(served: ServedTesseract, logs: str) -> str:
+    """Anything this Tesseract can add about why it stopped running.
+
+    The code it exited with and what it wrote are reported by whoever noticed.
+    This is for what remains: a cause the transport can name and the logs cannot.
+    Takes the logs as evidence, not to repeat them.
+
+    Dispatched rather than a method, so a `Container` keeps to the shape of
+    docker-py, which has nothing like this. Implementations are registered beside
+    the class they are for, which is also why nothing above the clients has to
+    know they exist.
+
+    Raises:
+        NotImplementedError: if nothing is registered for this kind of Tesseract.
+    """
+    del logs
+    raise NotImplementedError(
+        f"No diagnose_exit is registered for {type(served).__name__}. Register one "
+        "with `@diagnose_exit.register` in the module that defines the class, "
+        "returning an empty string if there is nothing to add."
+    )
+
+
+@singledispatch
+def is_running(served: ServedTesseract) -> bool:
+    """Whether this Tesseract is running now, asking again rather than recalling.
+
+    Dispatched for the same reason as :func:`diagnose_exit`: docker-py has no
+    such method, and asks you to compare `status` yourself after a `reload`.
+
+    Raises:
+        NotImplementedError: if nothing is registered for this kind of Tesseract.
+    """
+    raise NotImplementedError(
+        f"No is_running is registered for {type(served).__name__}. Register one "
+        "with `@is_running.register` in the module that defines the class."
+    )
 
 
 class PortInUseError(RuntimeError):
@@ -45,7 +145,10 @@ class PortInUseError(RuntimeError):
 PORT_CONFLICT_MARKERS = (
     "address already in use",
     "port is already allocated",
+    # Podman machine's wording when its port-forward proxy holds the port
     "proxy already running",
+    # Windows' wording for the same condition (WSAEADDRINUSE / WinError 10048)
+    "only one usage of each socket address",
 )
 
 
@@ -76,9 +179,56 @@ def get_free_port(
     raise RuntimeError(f"No free ports found in range {start}-{end}")
 
 
+def validate_output_format(
+    output_format: str | None, output_path: str | Path | None
+) -> None:
+    """Reject an output format the given output path cannot support.
+
+    ``json+binref`` writes array buffers to .bin sidecar files instead of
+    inlining them, so it needs somewhere durable to put them. Without an output
+    path they land wherever the Tesseract happens to be running -- inside a
+    container that is about to be torn down, or loose in a subprocess's working
+    directory -- and the paths in the response lead nowhere the caller picked.
+
+    Shared so that the check fires the same way, with the same error type,
+    however the Tesseract is served: a caller that switches between the two has
+    no reason to catch two different exceptions.
+
+    Raises:
+        UserError: if the combination cannot produce output the caller can read.
+    """
+    if output_format == "json+binref" and output_path is None:
+        raise UserError(
+            "The 'json+binref' output format writes array buffers to .bin files, "
+            "which are lost unless an output path is set. Specify one with "
+            "--output-path (or output_path=...)."
+        )
+
+
+def runtime_config_to_env(runtime_config: Mapping[str, Any] | None) -> dict[str, str]:
+    """Convert runtime configuration to the variables the Tesseract runtime reads.
+
+    Shared so that ``runtime_config`` means the same thing however a Tesseract is
+    served; booleans in particular have to be spelled the way the config parser
+    expects.
+    """
+
+    def encode(value: Any) -> str:
+        return ("1" if value else "0") if isinstance(value, bool) else str(value)
+
+    return {
+        f"TESSERACT_{key.upper()}": encode(value)
+        for key, value in (runtime_config or {}).items()
+    }
+
+
 def is_port_conflict(stderr: str) -> bool:
     """Whether runtime stderr/logs indicate a host port collision."""
-    lowered = stderr.lower()
+    # Collapse whitespace before matching. An uncaught error in the runtime is
+    # rendered by rich into a fixed-width box, which wraps long lines -- and
+    # debugpy's "Address already in use" is long enough to be split across two,
+    # so a naive substring search silently misses a genuine conflict.
+    lowered = " ".join(stderr.split()).lower()
     return any(marker in lowered for marker in PORT_CONFLICT_MARKERS)
 
 
@@ -110,15 +260,12 @@ _HEALTH_POLL_INTERVAL = 0.1
 
 
 def wait_for_health_or_dispose(
-    container: Container,
-    ping_ip: str,
-    port: str,
-    timeout: float = DEFAULT_STARTUP_TIMEOUT,
+    served: ServedTesseract, ping_url: str, timeout: float = DEFAULT_STARTUP_TIMEOUT
 ) -> None:
-    """Wait for a container to serve /health, and dispose of it if it never does.
+    """Wait for a Tesseract to serve /health, and dispose of it if it never does.
 
-    Takes ``ping_ip`` rather than asking the container: one that published its
-    port on every interface is not reached at the address it reports binding to.
+    Takes ``ping_url`` rather than using ``served.url``: a container that published
+    its port on every interface is not reached at the address it reports binding to.
 
     Raises:
         PortInUseError: if it failed because its port was taken, which the caller
@@ -132,7 +279,7 @@ def wait_for_health_or_dispose(
     while True:
         try:
             response = requests.get(
-                f"http://{ping_ip}:{port}/health", timeout=_HEALTH_REQUEST_TIMEOUT
+                f"{ping_url}/health", timeout=_HEALTH_REQUEST_TIMEOUT
             )
         except requests.exceptions.RequestException:
             pass
@@ -140,8 +287,8 @@ def wait_for_health_or_dispose(
             if response.status_code == 200:
                 return
 
-        # /health did not answer, so we check for dead containers first, timeouts second
-        if not is_running(container):
+        # /health did not answer, so we check for a dead Tesseract first, timeouts second
+        if not is_running(served):
             break
         if time.monotonic() > deadline:
             timed_out = True
@@ -152,22 +299,31 @@ def wait_for_health_or_dispose(
     # Read the logs before disposing of what wrote them. Neither reading nor
     # disposing may raise: they are how we report the failure, not the failure
     # itself, and an error here would replace it with a less useful one.
+    #
+    # Broad on purpose, and narrow in scope to match: each transport fails in
+    # its own vocabulary -- a container reports `APIError`, a subprocess whose
+    # log file is gone reports `FileNotFoundError` -- and naming them here would
+    # put one transport's spelling in the module that exists to not have any.
+    # Only the call itself is guarded, so a mistake of ours still raises.
     try:
-        logs = container.logs(stdout=True, stderr=True).decode(errors="replace")
-    except APIError as ex:
-        logger.warning(f"Failed to get logs for {container}: {ex}")
-        logs = ""
+        raw_logs = served.logs()
+    except Exception as ex:
+        logger.warning(f"Failed to get logs for {served}: {ex}")
+        raw_logs = b""
+    logs = raw_logs.decode(errors="replace")
 
     # Only worth asking about one that stopped, and only before it is removed: a
-    # container that is merely slow would block `wait` for as long as it runs.
+    # Tesseract that is merely slow would block `wait` for as long as it runs.
     exit_code = None
     if not timed_out:
         try:
-            exit_code = container.wait(timeout=_HEALTH_REQUEST_TIMEOUT)["StatusCode"]
-        except APIError as ex:
-            logger.warning(f"Failed to read the exit code of {container}: {ex}")
+            status = served.wait(timeout=_HEALTH_REQUEST_TIMEOUT)
+        except Exception as ex:
+            logger.warning(f"Failed to read the exit code of {served}: {ex}")
+        else:
+            exit_code = status["StatusCode"]
 
-    # Everything the container knew has now been read, so it can go -- in a
+    # Everything the Tesseract knew has now been read, so it can go -- in a
     # `finally`, because every path out of here raises and none of them should
     # leave it behind. The port-collision one especially: it is retried, so a
     # container per attempt would pile up.
@@ -175,18 +331,18 @@ def wait_for_health_or_dispose(
         # A port collision is racy and worth retrying with a fresh port;
         # distinguish it from genuine startup failures so those still fail fast.
         if is_port_conflict(logs):
-            raise PortInUseError(f"Port {port} was already in use")
+            raise PortInUseError(f"Port {served.host_port} was already in use")
 
         if timed_out:
-            headline = f"{container} did not respond to a health check in time."
+            headline = f"{served} did not respond to a health check in time."
             diagnosis = (
                 "If it is simply slow to initialize (e.g. loading a large model), "
                 "increase `startup_timeout`."
             )
         else:
             exited = "" if exit_code is None else f" (exit code {exit_code})"
-            headline = f"{container} stopped running during startup{exited}."
-            diagnosis = diagnose_exit(container, logs)
+            headline = f"{served} stopped running during startup{exited}."
+            diagnosis = diagnose_exit(served, logs)
         output = (
             f"Output from the Tesseract:\n{logs.strip()}"
             if logs.strip()
@@ -198,9 +354,9 @@ def wait_for_health_or_dispose(
     finally:
         try:
             # Forced: it may still be running, and an unforced remove would refuse.
-            container.remove(force=True)
-        except (APIError, subprocess.CalledProcessError) as ex:
-            # `Container.remove` raises `APIError` only when it recognises the
-            # stderr as Docker's, and passes the raw error through otherwise;
-            # either way it must not replace the failure we are reporting.
-            logger.warning(f"Failed to remove {container}: {ex}")
+            served.remove(force=True)
+        except Exception as ex:
+            # Broadest of the three: an exception raised in a `finally` replaces
+            # the one in flight, so anything at all escaping here would destroy
+            # the failure we came to report.
+            logger.warning(f"Failed to remove {served}: {ex}")

@@ -1,4 +1,8 @@
-from types import SimpleNamespace
+import gc
+import os
+import subprocess
+import sys
+from pathlib import Path
 from unittest.mock import MagicMock, Mock
 
 import numpy as np
@@ -19,21 +23,50 @@ from tesseract_core.sdk.tesseract import (
 )
 
 
+class FakeContainer(Container):
+    """Stands in for a served container, without touching docker.
+
+    A real `Container` subclass rather than a bare stub, so it satisfies both the
+    `ServedTesseract` interface and the `Container` that `container_info` returns
+    -- a member added to either without one here is an error, not a surprise in
+    production.
+    """
+
+    host_ip = "127.0.0.1"
+    host_port = "1234"
+
+    def __init__(self):
+        super().__init__(
+            id="container-id-123",
+            short_id="container-id",
+            name="container-id-123",
+            attrs={},
+        )
+        self.removals = []
+
+    def reload(self) -> None:
+        pass
+
+    def is_running(self) -> bool:
+        return True
+
+    def remove(self, v: bool = False, link: bool = False, force: bool = False) -> None:
+        self.removals.append(force)
+
+    def logs(self) -> bytes:
+        return b"fake container logs"
+
+
 @pytest.fixture
 def mock_serving(mocker):
-    fake_container = SimpleNamespace()
-    fake_container.host_port = 1234
-    fake_container.id = "container-id-123"
+    fake_container = FakeContainer()
 
     serve_mock = mocker.patch("tesseract_core.sdk.engine.serve")
     serve_mock.return_value = fake_container.id, fake_container
 
-    teardown_mock = mocker.patch("tesseract_core.sdk.engine.teardown")
-    logs_mock = mocker.patch("tesseract_core.sdk.engine.logs")
     return {
         "serve_mock": serve_mock,
-        "teardown_mock": teardown_mock,
-        "logs_mock": logs_mock,
+        "container": fake_container,
     }
 
 
@@ -84,6 +117,27 @@ def test_Tesseract_from_tesseract_api(dummy_tesseract_location, dummy_tesseract_
     assert endpoints == all_endpoints
 
 
+def test_rejects_imported_module(dummy_tesseract_module):
+    """A module cannot be handed to another process, so say so clearly.
+
+    Tested against the helper rather than `from_source`, whose annotation lets
+    typeguard reject it first under the test suite -- but nothing enforces
+    annotations at runtime, so the check still has to exist.
+    """
+    from tesseract_core.sdk.tesseract import _subprocess_spawn_config
+
+    with pytest.raises(ValueError, match="already imported module was given"):
+        _subprocess_spawn_config(
+            dummy_tesseract_module,
+            input_path=None,
+            output_path=None,
+            output_format="json+base64",
+            runtime_config=None,
+            python_executable=None,
+            startup_timeout=1.0,
+        )
+
+
 def test_Tesseract_from_image(mock_serving, mock_clients):
     # Object is built and has the correct attributes set
     t = Tesseract.from_image(
@@ -107,27 +161,14 @@ def test_Tesseract_from_image(mock_serving, mock_clients):
         t.teardown()
 
 
-def test_container_info_returns_container_during_serve(
-    mock_serving, mock_clients, mocker
-):
-    """``container_info()`` returns a fresh ``Container`` while served.
+def test_container_info_returns_container_during_serve(mock_serving, mock_clients):
+    """``container_info()`` returns the container being served.
 
     Each call delegates to ``Containers.get(container_name)``, so we
     patch that lookup and verify the call site forwards the running
     container's name through unchanged. Outside the serve window the
     call must raise.
     """
-    fake_container = Container(
-        id="container-id-123",
-        short_id="container-id",
-        name="container-id-123",
-        attrs={},
-    )
-    get_mock = mocker.patch(
-        "tesseract_core.sdk.tesseract.Containers.get",
-        return_value=fake_container,
-    )
-
     t = Tesseract.from_image("sometesseract:0.2.3")
 
     # Pre-serve: not yet running, so the call raises.
@@ -135,9 +176,8 @@ def test_container_info_returns_container_during_serve(
         t.container_info()
 
     with t:
-        info = t.container_info()
-        assert info is fake_container
-        get_mock.assert_called_with("container-id-123")
+        # The container we are already holding, rather than a fresh lookup
+        assert t.container_info() is mock_serving["container"]
 
     # Post-teardown: container is gone, so the call raises again.
     with pytest.raises(RuntimeError, match="only available for served Tesseracts"):
@@ -153,19 +193,39 @@ def test_container_info_raises_for_non_image_tesseract():
         t.container_info()
 
 
+def test_container_info_unavailable(dummy_api_path):
+    tess = Tesseract.from_source(dummy_api_path)
+    with pytest.raises(RuntimeError, match="from_image"):
+        tess.container_info()
+
+
 def test_del_tesseract_triggers_teardown(mock_serving):
     """Deleting a served Tesseract must tear down its container via weakref.finalize."""
     import gc
 
-    teardown_mock = mock_serving["teardown_mock"]
-
+    container = mock_serving["container"]
     t = Tesseract.from_image("sometesseract:0.2.3")
     t.serve()
-    assert teardown_mock.call_count == 0
+    assert container.removals == []
 
     del t
     gc.collect()
-    assert teardown_mock.call_count == 1
+    assert container.removals == [True]
+
+
+def test_garbage_collection_reaps_process(dummy_api_path):
+    """A forgotten Tesseract must not leave an orphaned process behind."""
+    import gc
+
+    tess = Tesseract.from_source(dummy_api_path)
+    tess.serve()
+    # Hold the process, not the Tesseract, so it can still be collected.
+    process = tess._serve_context.process
+
+    del tess
+    gc.collect()
+
+    assert process.poll() is not None
 
 
 def test_del_tesseract_purges_auto_tempdir(mock_serving):
@@ -181,6 +241,23 @@ def test_del_tesseract_purges_auto_tempdir(mock_serving):
     assert not output_path.exists()
 
 
+def test_auto_created_scratch_dirs_are_purged(dummy_api_path, sample_inputs):
+    """What we made, we clean up -- unlike directories the caller passed in."""
+    tess = Tesseract.from_source(dummy_api_path, output_format="json+binref")
+    scratch = [
+        Path(tess._spawn_config["input_path"]),
+        Path(tess._spawn_config["output_path"]),
+    ]
+    assert all(d.exists() for d in scratch)
+
+    with tess:
+        tess.apply(sample_inputs)
+    del tess
+    gc.collect()
+
+    assert not any(d.exists() for d in scratch)
+
+
 def test_user_output_path_is_not_purged(mock_serving, tmp_path):
     """A user-supplied output path must survive garbage collection of the Tesseract."""
     import gc
@@ -191,6 +268,52 @@ def test_user_output_path_is_not_purged(mock_serving, tmp_path):
     del t
     gc.collect()
     assert tmp_path.is_dir()
+
+
+def test_given_scratch_dirs_are_left_alone(dummy_api_path, sample_inputs, tmp_path):
+    given_in, given_out = tmp_path / "in", tmp_path / "out"
+    given_in.mkdir()
+    given_out.mkdir()
+
+    tess = Tesseract.from_source(
+        dummy_api_path,
+        input_path=given_in,
+        output_path=given_out,
+        output_format="json+binref",
+    )
+    with tess:
+        tess.apply(sample_inputs)
+    del tess
+    gc.collect()
+
+    assert given_in.exists() and given_out.exists()
+
+
+def test_tesseract_in_foreign_environment(
+    foreign_venv, dummy_api_path, sample_inputs, env_without_pythonpath
+):
+    """A Tesseract runs under an interpreter the caller could not have used."""
+    interpreter, foreign_version = foreign_venv
+
+    reported = subprocess.run(
+        [str(interpreter), "-c", "import sys; print('%d.%d' % sys.version_info[:2])"],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env_without_pythonpath,
+    ).stdout.strip()
+
+    # Guard the premise: same interpreter would prove nothing
+    assert reported == foreign_version
+    assert reported != f"{sys.version_info.major}.{sys.version_info.minor}"
+
+    with Tesseract.from_source(
+        dummy_api_path,
+        python_executable=interpreter,
+    ) as tess:
+        result = tess.apply(sample_inputs)
+
+    np.testing.assert_allclose(result["result"], [5.0, 8.0])
 
 
 def test_Tesseract_schema_method(mocker, mock_serving):
@@ -241,7 +364,7 @@ def test_serve_lifecycle(mock_serving, mock_clients):
     # Check that no unexpected kwargs were passed
     assert call_kwargs.keys() == expected_kwargs.keys() | {"output_path"}
 
-    mock_serving["teardown_mock"].assert_called_with("container-id-123")
+    assert mock_serving["container"].removals == [True]
 
     # check that the same Tesseract obj cannot be used to instantiate two containers
     with pytest.raises(RuntimeError):
@@ -634,13 +757,12 @@ def testencode_array_binref_pooled_falls_back_and_decodes_correctly(tmp_path):
 
 def test_binref_pool_lazy_decode_is_readonly_view(tmp_path):
     from tesseract_core.sdk.binref import (
-        SUPPORTS_BINREF_POOL,
         BinrefWritePool,
         encode_array_binref_pooled,
     )
 
-    if not SUPPORTS_BINREF_POOL:
-        pytest.skip("binref pool / lazy decode is Linux-only")
+    if os.name != "posix":
+        pytest.skip("the pool and its mmap decode are POSIX-only")
 
     pool = BinrefWritePool(tmp_path, max_slots=4)
     try:
@@ -660,13 +782,12 @@ def test_binref_pool_lazy_decode_is_readonly_view(tmp_path):
 
 def test_binref_pool_lazy_decode_survives_unlink(tmp_path):
     from tesseract_core.sdk.binref import (
-        SUPPORTS_BINREF_POOL,
         BinrefWritePool,
         encode_array_binref_pooled,
     )
 
-    if not SUPPORTS_BINREF_POOL:
-        pytest.skip("binref pool / lazy decode is Linux-only")
+    if os.name != "posix":
+        pytest.skip("the pool and its mmap decode are POSIX-only")
 
     pool = BinrefWritePool(tmp_path, max_slots=4)
     try:
@@ -695,11 +816,7 @@ def test_binref_pool_lazy_decode_survives_unlink(tmp_path):
 
 
 def test_HTTPClient_binref_pool_only_created_with_input_path(tmp_path):
-    from tesseract_core.sdk.binref import SUPPORTS_BINREF_POOL
     from tesseract_core.sdk.tesseract import HTTPClient
-
-    if not SUPPORTS_BINREF_POOL:
-        pytest.skip("experimental_binref_pool is Linux-only")
 
     # experimental_binref_pool=True without an input_path is meaningless (no
     # mounted dir to put pooled files in), so no pool should be created.
@@ -715,11 +832,7 @@ def test_HTTPClient_binref_pool_only_created_with_input_path(tmp_path):
 
 
 def test_HTTPClient_close_is_idempotent(tmp_path):
-    from tesseract_core.sdk.binref import SUPPORTS_BINREF_POOL
     from tesseract_core.sdk.tesseract import HTTPClient
-
-    if not SUPPORTS_BINREF_POOL:
-        pytest.skip("experimental_binref_pool is Linux-only")
 
     client = HTTPClient("localhost", input_path=tmp_path, experimental_binref_pool=True)
     client.close()

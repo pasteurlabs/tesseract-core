@@ -116,6 +116,18 @@ def served_tesseract_module(dummy_tesseract_location):
     yield vecadd
 
 
+@pytest.fixture(scope="module")
+def served_tesseract_from_source(dummy_tesseract_location):
+    """The same Tesseract in its own process, rather than in a container.
+
+    Serving it needs no image, so this arm would pass even if the build were
+    broken; it is here to catch an endpoint that works over one transport and
+    not the other.
+    """
+    with Tesseract.from_source(dummy_tesseract_location / "tesseract_api.py") as vecadd:
+        yield vecadd
+
+
 @pytest.mark.parametrize(
     "endpoint_name",
     sorted(expected_endpoints | {"openapi_schema"}),
@@ -125,6 +137,7 @@ def test_all_endpoints(
     served_tesseract_module,
     served_tesseract_from_image,
     served_tesseract_remote,
+    served_tesseract_from_source,
 ):
     """Test that all endpoints can be invoked without errors."""
     inputs = {"a": [1, 2], "b": [3, 4], "s": 1}
@@ -197,6 +210,11 @@ def test_all_endpoints(
 
     # Test from_image
     out = getattr(served_tesseract_from_image, endpoint_name)
+    if callable(out):
+        out(**inputs)
+
+    # Test from_source
+    out = getattr(served_tesseract_from_source, endpoint_name)
     if callable(out):
         out(**inputs)
 

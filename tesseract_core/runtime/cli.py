@@ -6,7 +6,9 @@
 import inspect
 import io
 import os
+import signal
 import sys
+import threading
 from collections.abc import Callable, Iterable
 from enum import Enum
 from pathlib import Path
@@ -433,13 +435,52 @@ def check_gradients(
         sys.exit(1)
 
 
+def _exit_when_parent_closes(fd: int) -> None:
+    """Shut down once the far end of `fd` is closed.
+
+    A served Tesseract outlives its parent otherwise: nothing else ties the two
+    together, and a parent that is killed outright runs no cleanup. Reading a
+    pipe the parent holds open covers every way it can go -- exiting, crashing,
+    or being killed -- because the read returns EOF in all of them.
+    """
+
+    def watch() -> None:
+        try:
+            while os.read(fd, 1):
+                # Nothing is expected to be written; a stray byte is not EOF.
+                pass
+        except OSError:
+            pass
+        # Ask uvicorn to stop rather than dying where we stand, so workers are
+        # shut down and the port is released.
+        os.kill(os.getpid(), signal.SIGTERM)
+
+    threading.Thread(target=watch, daemon=True, name="parent-watch").start()
+
+
 @app.command("serve")
 def serve(
     host: Annotated[str, typer.Option(help="Host IP address")] = "127.0.0.1",
     port: Annotated[int, typer.Option(help="Port number")] = 8000,
     num_workers: Annotated[int, typer.Option(help="Number of worker processes")] = 1,
+    parent_pipe_fd: Annotated[
+        int | None,
+        typer.Option(
+            # Plumbing between a parent and the child it spawned, not something a
+            # user sets: hidden from --help, and kept out of the environment so
+            # that nothing the child spawns in turn inherits it. `--parent-pipe-fd`
+            # names a descriptor that only exists in this process, so an inherited
+            # value would name whatever happened to land on that number here.
+            hidden=True,
+            allow_from_autoenv=False,
+            help="Read end of a pipe the spawning process holds open.",
+        ),
+    ] = None,
 ) -> None:
     """Start running this Tesseract's web server."""
+    if parent_pipe_fd is not None:
+        _exit_when_parent_closes(parent_pipe_fd)
+
     config = get_config()
     if config.debug:
         # The server is long-running, so a debugger can attach at any time.
