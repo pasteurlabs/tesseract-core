@@ -278,9 +278,7 @@ def test_prepare_build_context_uv_platform(tmp_path_factory):
     )
     engine.prepare_build_context(src_dir, build_dir, config)
     dockerfile = (build_dir / "Dockerfile").read_text()
-    assert re.search(
-        r"FROM --platform=linux/amd64 ghcr\.io/astral-sh/uv:\S+ AS uv", dockerfile
-    )
+    assert re.search(r"FROM --platform=linux/amd64 \"\$\{UV_URL\}\" AS uv", dockerfile)
     assert "COPY --from=uv /uv /uvx /bin/" in dockerfile
 
     # Native target: uv stage follows $BUILDPLATFORM.
@@ -289,7 +287,7 @@ def test_prepare_build_context_uv_platform(tmp_path_factory):
     engine.prepare_build_context(src_dir, build_dir2, config_native)
     dockerfile_native = (build_dir2 / "Dockerfile").read_text()
     assert re.search(
-        r"FROM --platform=\$BUILDPLATFORM ghcr\.io/astral-sh/uv:\S+ AS uv",
+        r"FROM --platform=\$BUILDPLATFORM \"\$\{UV_URL\}\" AS uv",
         dockerfile_native,
     )
 
