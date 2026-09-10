@@ -227,7 +227,9 @@ def test_serve_lifecycle(mock_serving, mock_clients):
         "memory": None,
         "input_path": None,
         "output_format": "json+base64",
-        "gpu_transport": "none",
+        # Unset by the caller: forwarded as None so serve() defers to
+        # runtime_config, falling back to "none" when neither sets it.
+        "gpu_transport": None,
         "docker_args": None,
         "runtime_config": None,
         "skip_health_check": False,

@@ -926,7 +926,7 @@ def serve(
     input_path: str | Path | None = None,
     output_path: str | Path | None = None,
     output_format: OutputFormat | None = None,
-    gpu_transport: str = "none",
+    gpu_transport: str | None = None,
     docker_args: list[str] | None = None,
     runtime_config: dict[str, Any] | None = None,
     skip_health_check: bool = False,
@@ -955,9 +955,12 @@ def serve(
         input_path: Input path to read input files from, such as local directory or S3 URI.
         output_path: Output path to write output files to, such as local directory or S3 URI.
         output_format: Output format to use for the results.
-        gpu_transport: How GPU arrays leave the container. ``none`` (default) copies
-            them to the host and serializes them via ``output_format``; ``cuda_ipc``
-            exports them by reference (requires ``gpus`` and a shared IPC namespace).
+        gpu_transport: How GPU arrays leave the container. ``none`` copies them to
+            the host and serializes them via ``output_format``; ``cuda_ipc`` exports
+            them by reference (requires ``gpus`` and a shared IPC namespace). An
+            explicit value (including ``none``) wins over a ``gpu_transport`` in
+            ``runtime_config``; leaving it unset (``None``) defers to
+            ``runtime_config``, falling back to ``none`` when neither sets it.
         docker_args: Additional arguments to pass to the container runtime (e.g., Docker).
         runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
             These are converted to TESSERACT_* environment variables. For example,
@@ -1015,13 +1018,16 @@ def serve(
     if output_format:
         environment["TESSERACT_OUTPUT_FORMAT"] = output_format
 
-    # The gpu_transport kwarg is the canonical way to select a transport and
-    # wins over any gpu_transport passed through runtime_config, so it is applied
-    # after the runtime_config conversion. Its "none" default is a no-op here
-    # rather than an explicit override, so a transport set via runtime_config
-    # survives when the kwarg is left at its default.
-    if gpu_transport and gpu_transport != "none":
+    # Resolve the GPU transport across its two spellings. The dedicated kwarg is
+    # canonical: any explicit value (including "none", which disables the
+    # transport) wins over one passed through runtime_config. Leaving the kwarg
+    # unset (None) defers to runtime_config, already written to the environment
+    # above. When neither names a transport, pin it to "none" so the container
+    # always receives a definite value rather than inheriting the image default.
+    if gpu_transport is not None:
         environment["TESSERACT_GPU_TRANSPORT"] = gpu_transport
+    else:
+        environment.setdefault("TESSERACT_GPU_TRANSPORT", "none")
 
     # Read after runtime_config lands in the environment, which is how the SDK
     # passes it. Only a port the caller asked for needs checking afterwards; the
