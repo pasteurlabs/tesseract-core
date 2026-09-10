@@ -582,8 +582,8 @@ def mocked_cuda(monkeypatch):
     whose ``.device_bytes`` / ``.reject_ipc_below`` attributes let a test seed
     device-to-host reads or force the VMM staging fallback.
     """
-    from tesseract_core.runtime import cuda_ipc
     from tesseract_core.runtime.cuda import api as cuda_api
+    from tesseract_core.runtime.cuda import ipc as cuda_ipc
 
     IPC_HANDLE_SIZE = cuda_api.IPC_HANDLE_SIZE
 
