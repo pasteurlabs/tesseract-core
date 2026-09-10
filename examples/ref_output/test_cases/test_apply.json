@@ -1,0 +1,88 @@
+{
+  "endpoint": "apply",
+  "payload": {
+    "inputs": {
+      "scale": 2.0,
+      "n_nodes": 2,
+      "n_frames": 3
+    }
+  },
+  "expected_outputs": {
+    "frames": [
+      {
+        "name": "frame_000",
+        "displacement": {
+          "object_type": "array",
+          "shape": [2, 3],
+          "dtype": "float32",
+          "data": {
+            "buffer": [
+              [0.0, 0.0, 0.0],
+              [2.0, 2.0, 2.0]
+            ],
+            "encoding": "json"
+          }
+        },
+        "pressure": {
+          "object_type": "array",
+          "shape": [2],
+          "dtype": "float64",
+          "data": {
+            "buffer": [0.0, 2.0],
+            "encoding": "json"
+          }
+        }
+      },
+      {
+        "name": "frame_001",
+        "displacement": {
+          "object_type": "array",
+          "shape": [2, 3],
+          "dtype": "float32",
+          "data": {
+            "buffer": [
+              [0.0, 2.0, -2.0],
+              [2.0, 4.0, 0.0]
+            ],
+            "encoding": "json"
+          }
+        },
+        "pressure": {
+          "object_type": "array",
+          "shape": [2],
+          "dtype": "float64",
+          "data": {
+            "buffer": [2.0, 4.0],
+            "encoding": "json"
+          }
+        }
+      },
+      {
+        "name": "frame_002",
+        "displacement": {
+          "object_type": "array",
+          "shape": [2, 3],
+          "dtype": "float32",
+          "data": {
+            "buffer": [
+              [0.0, 4.0, -4.0],
+              [2.0, 6.0, -2.0]
+            ],
+            "encoding": "json"
+          }
+        },
+        "pressure": {
+          "object_type": "array",
+          "shape": [2],
+          "dtype": "float64",
+          "data": {
+            "buffer": [4.0, 6.0],
+            "encoding": "json"
+          }
+        }
+      }
+    ]
+  },
+  "atol": 1e-8,
+  "rtol": 1e-5
+}
