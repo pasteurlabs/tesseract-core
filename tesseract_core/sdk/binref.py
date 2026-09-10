@@ -39,6 +39,12 @@ def _fast_tobytes(arr: np.ndarray) -> memoryview:
     return np.ascontiguousarray(arr).data
 
 
+# Discriminator for an encoded Ref: {"object_type": "ref", "path": ...}. Kept in
+# sync with tesseract_core.runtime.experimental.refs.REF_OBJECT_TYPE by hand --
+# runtime and SDK share no code (they run in different environments).
+REF_OBJECT_TYPE = "ref"
+
+
 def encode_array_binref(arr: Any, input_dir: Path, written_files: list[Path]) -> dict:
     """Encode an array as a binref reference, writing its buffer to ``input_dir``.
 

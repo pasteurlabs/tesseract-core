@@ -1,0 +1,10 @@
+name: ref_output
+version: "1.0.0"
+description: |
+  Tesseract that returns a list of nested models, each serialized to its own
+  JSON file via Ref. Demonstrates sidecar-file outputs that stay transparent
+  to differentiation and abstract evaluation.
+
+build_config:
+  package_data: []
+  custom_build_steps: []

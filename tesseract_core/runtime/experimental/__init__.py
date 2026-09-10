@@ -27,6 +27,9 @@ from .paths import (
     OutputPath,
     require_file,
 )
+from .refs import (
+    Ref,
+)
 from .tesseract_reference import TesseractReference
 from .vjp_cache import set_jax_vjp_cache_size
 
@@ -44,6 +47,7 @@ for _obj in (
     LazySequence,
     InputPath,
     OutputPath,
+    Ref,
     TesseractReference,
     require_file,
     set_jax_vjp_cache_size,
@@ -67,6 +71,7 @@ __all__ = [
     "LazySequence",
     "OutputFileReference",
     "OutputPath",
+    "Ref",
     "TesseractReference",
     "finite_difference_jacobian",
     "finite_difference_jvp",

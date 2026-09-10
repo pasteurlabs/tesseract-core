@@ -336,6 +336,12 @@ linkcheck_ignore = [
     # in a browser. The docs.pasteurlabs.ai subdomain is hosted elsewhere (Read
     # the Docs) and is left checked.
     r"https://pasteurlabs\.ai(/.*)?$",
+    # TEMPORARY -- remove when this PR merges. Example pages link to
+    # tree/main/examples/<name>, which 404s for an example that only exists on
+    # the PR branch. linkcheck was added after the last example was added, so
+    # this is the first new example to hit it; a general fix (checking the
+    # current ref, or dropping these links) is worth considering separately.
+    r"https://github\.com/pasteurlabs/tesseract-core/tree/main/examples/ref_output",
 ]
 
 # Pages whose in-page anchors are generated client-side (or are browser text

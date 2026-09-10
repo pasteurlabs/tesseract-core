@@ -17,6 +17,7 @@ building-blocks/arm64.md
 building-blocks/localpackage.md
 building-blocks/dataloader.md
 building-blocks/file_io.md
+building-blocks/ref_output.md
 building-blocks/finitediff.md
 building-blocks/gradient-fallbacks.md
 ```
@@ -101,6 +102,15 @@ Tesseract that passes files and directories through the input/output mounts
 instead of serializing their contents into the request payload.
 Useful when inputs or outputs are large on disk, or consist of
 many (or a variable number of) files.
+:::
+
+:::{grid-item-card} Sidecar Model Outputs
+:link: building-blocks/ref_output
+:link-type: doc
+
+Tesseract that writes each nested output model to its own JSON file and returns
+only the paths, the way `json+binref` does for array buffers. Stays transparent
+to differentiation. _(Experimental)_
 :::
 
 :::{grid-item-card} Finite Difference Gradients
