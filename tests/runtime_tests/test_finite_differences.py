@@ -334,9 +334,6 @@ class RecordingVjpModule(CountingVjpModule):
         )
 
 
-# ── A. VJP CALL BOUND ──
-
-
 def test_vjp_output_sampling_bounds_calls():
     """With max_output_samples=K < n_output_elements, exactly K VJP calls are made."""
     module = RecordingVjpModule("dummy_module", correct_gradients=True)
@@ -363,9 +360,6 @@ def test_vjp_output_sampling_bounds_calls():
         assert np.sum(cot != 0.0) == 1
 
 
-# ── B. SHARED SWEEP ACROSS INPUT INDICES ──
-
-
 def test_vjp_output_sampling_shared_across_sampled_input_rows():
     """All sampled input rows for a path pair must share the same output coordinate sweep."""
     module = CountingVjpModule("dummy_module", correct_gradients=True)
@@ -389,9 +383,6 @@ def test_vjp_output_sampling_shared_across_sampled_input_rows():
     assert module.vjp_calls == 5
 
 
-# ── C. WITHOUT REPLACEMENT ──
-
-
 def test_vjp_output_sampling_without_replacement():
     """Sampled output coordinates must be sampled without replacement (all unique)."""
     module = RecordingVjpModule("dummy_module", correct_gradients=True)
@@ -410,9 +401,6 @@ def test_vjp_output_sampling_without_replacement():
 
     assert len(module.recorded_coords) == 15
     assert len(set(module.recorded_coords)) == 15
-
-
-# ── D. DETERMINISM ──
 
 
 def test_vjp_output_sampling_is_deterministic_with_seed():
@@ -450,9 +438,6 @@ def test_vjp_output_sampling_is_deterministic_with_seed():
     assert module1.recorded_coords == module2.recorded_coords
 
 
-# ── E. DIFFERENT SEEDS ──
-
-
 def test_vjp_output_sampling_different_seeds_differ():
     """Different seeds should produce different sampled output coordinates."""
     module1 = RecordingVjpModule("dummy_module", correct_gradients=True)
@@ -486,9 +471,6 @@ def test_vjp_output_sampling_different_seeds_differ():
     assert len(module1.recorded_coords) == 5
     assert len(module2.recorded_coords) == 5
     assert module1.recorded_coords != module2.recorded_coords
-
-
-# ── F. COORDINATE ALIGNMENT ──
 
 
 class NonzeroLinearModule(ModuleType):
@@ -552,9 +534,6 @@ def test_vjp_output_sampling_coordinate_alignment():
     assert num_evals_total > 0
 
 
-# ── G. INCORRECT GRADIENTS ──
-
-
 def test_vjp_output_sampling_wrong_gradients_fail():
     """Sampling must not mask real gradient errors: incorrect VJPs must still be caught."""
     bad_module = NonzeroLinearModule("nonzero_linear_module", correct_gradients=False)
@@ -583,9 +562,6 @@ def test_vjp_output_sampling_wrong_gradients_fail():
         assert len(failure.grad_val) == 3
         for ref, grad in zip(failure.ref_val, failure.grad_val, strict=True):
             assert abs(grad - ref) >= 49.0
-
-
-# ── H. MULTIDIMENSIONAL OUTPUT ──
 
 
 class MultidimensionalModule(ModuleType):
@@ -713,9 +689,6 @@ def test_vjp_output_sampling_cap_greater_than_multidimensional_output_stays_exha
     assert module.vjp_calls == 24
 
 
-# ── I. LARGE OUTPUT ASYMPTOTICS ──
-
-
 class LargeOutputModule(ModuleType):
     """Module with 256x256 (65,536) elements to test asymptotic call count."""
 
@@ -762,9 +735,6 @@ def test_vjp_output_sampling_large_output_asymptotics():
     assert module.vjp_calls == 10
 
 
-# ── J. SCALAR OUTPUT ──
-
-
 def test_vjp_output_sampling_scalar_output():
     """Scalar outputs: exactly 1 VJP call occurs."""
     module = CountingVjpModule("dummy_module", correct_gradients=True)
@@ -787,9 +757,6 @@ def test_vjp_output_sampling_scalar_output():
     assert module.vjp_calls == 1
 
 
-# ── K. INVALID VALUES ──
-
-
 @pytest.mark.parametrize("invalid_sample_count", [0, -1, -10])
 def test_check_gradients_rejects_invalid_max_output_samples(invalid_sample_count):
     """max_output_samples <= 0 must be rejected with ValueError."""
@@ -803,9 +770,6 @@ def test_check_gradients_rejects_invalid_max_output_samples(invalid_sample_count
                 max_output_samples=invalid_sample_count,
             )
         )
-
-
-# ── L. DEFAULT EXHAUSTIVE BEHAVIOR ──
 
 
 def test_vjp_exhaustive_when_max_output_samples_none():
@@ -847,9 +811,6 @@ def test_vjp_output_sampling_cap_greater_than_output_size_stays_exhaustive():
     assert module.vjp_calls == n_output_elements
 
 
-# ── M. CLI ──
-
-
 def test_cli_max_output_samples_option(cli_runner):
     """CLI must expose --max-output-samples in check-gradients help."""
     from click import unstyle
@@ -862,9 +823,6 @@ def test_cli_max_output_samples_option(cli_runner):
     assert "--max-output-samples" in stdout
     assert "Maximum number of output elements" in stdout
     assert "vector_jacobian_product" in stdout
-
-
-# ── N. RNG ISOLATION ──
 
 
 def test_output_sampling_does_not_alter_input_sampling():
