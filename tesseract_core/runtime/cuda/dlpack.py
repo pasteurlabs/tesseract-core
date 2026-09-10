@@ -5,7 +5,7 @@
 
 This module mirrors just enough of the DLPack C ABI to export a device buffer
 as a ``"dltensor"`` PyCapsule, plus the capsule handshake and lifetime
-bookkeeping. It is used by :class:`tesseract_core.runtime.cuda_ipc.IpcDeviceArray`
+bookkeeping. It is used by :class:`tesseract_core.runtime.cuda.ipc.IpcDeviceArray`
 to expose its buffer via ``__dlpack__`` without depending on any GPU framework.
 
 All ctypes and the CPython capsule API stay here. The public surface is two
