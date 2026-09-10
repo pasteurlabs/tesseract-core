@@ -42,7 +42,7 @@ if TYPE_CHECKING:
     # Imported for type hints only. `from __future__ import annotations` makes
     # every annotation below a string, so these names are never needed at
     # runtime and the SDK does not eagerly pull in the runtime/CUDA machinery.
-    from tesseract_core.runtime.cuda_ipc import IpcDeviceArray
+    from tesseract_core.runtime.cuda.ipc import IpcDeviceArray
 
 # Output serialization formats; single SDK-side definition lives in engine.
 OutputFormat: TypeAlias = engine.OutputFormat
@@ -721,7 +721,7 @@ def _import_cuda_ipc() -> ModuleType:
     a bare ``ModuleNotFoundError`` from deep in the import chain.
     """
     try:
-        from tesseract_core.runtime import cuda_ipc
+        from tesseract_core.runtime.cuda import ipc as cuda_ipc
     except ImportError as exc:
         raise ImportError(
             "The 'cuda_ipc' GPU transport requires the Tesseract runtime, "

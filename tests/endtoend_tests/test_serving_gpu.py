@@ -62,7 +62,7 @@ def test_serve_cuda_ipc_roundtrip(gpu_image_name):
     wrapper exposing ``__cuda_array_interface__`` and ``__dlpack__``, read back
     here via its host-copy helper (no CuPy needed to inspect it).
     """
-    from tesseract_core.runtime.cuda_ipc import IpcDeviceArray
+    from tesseract_core.runtime.cuda.ipc import IpcDeviceArray
 
     a = np.arange(8, dtype=np.float32)
     b = np.ones(8, dtype=np.float32)

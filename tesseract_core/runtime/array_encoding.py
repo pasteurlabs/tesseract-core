@@ -141,7 +141,7 @@ class CudaIpcArrayData(BaseModel):
 
     This is only the JSON *schema* for the encoding; all the CUDA runtime
     machinery that produces and consumes it lives in
-    :mod:`tesseract_core.runtime.cuda_ipc`.
+    :mod:`tesseract_core.runtime.cuda.ipc`.
     """
 
     buffer: StrictStr = Field(
@@ -588,7 +588,7 @@ def validate_python_or_gpu_array(
     since CuPy refuses implicit conversion). Everything else is coerced to a
     NumPy array via :func:`python_to_array`.
     """
-    from tesseract_core.runtime import cuda_ipc
+    from tesseract_core.runtime.cuda import ipc as cuda_ipc
 
     if cuda_ipc.has_cuda_array_interface(val):
         return cuda_ipc.validate_cuda_array(val, expected_shape, expected_dtype)
@@ -681,8 +681,8 @@ def encode_array(
     on-device and on-host arrays. In Python mode there is nothing to serialize,
     so arrays pass through as-is.
     """
-    from tesseract_core.runtime import cuda_ipc
     from tesseract_core.runtime.config import get_config
+    from tesseract_core.runtime.cuda import ipc as cuda_ipc
 
     context = info.context if info.context else {}
     array_encoding = context.get("array_encoding", "json")
