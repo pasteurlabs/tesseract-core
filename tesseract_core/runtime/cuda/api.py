@@ -6,7 +6,7 @@
 Every function here takes and returns ordinary Python values -- device pointers
 are plain ``int``s, IPC handles are ``bytes``, sizes are ``int``s. No ctypes
 object crosses the boundary, so callers (chiefly
-:mod:`tesseract_core.runtime.cuda_ipc`) never touch ctypes. The loaded
+:mod:`tesseract_core.runtime.cuda.ipc`) never touch ctypes. The loaded
 libraries are held as module globals and initialised lazily on first use.
 
 Errors are raised as ``RuntimeError`` with a decoded CUDA error string. To run

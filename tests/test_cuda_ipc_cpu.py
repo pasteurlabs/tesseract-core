@@ -35,8 +35,9 @@ from unittest.mock import Mock
 import numpy as np
 import pytest
 
-from tesseract_core.runtime import array_encoding, cuda_ipc
+from tesseract_core.runtime import array_encoding
 from tesseract_core.runtime.cuda import api as cuda_api
+from tesseract_core.runtime.cuda import ipc as cuda_ipc
 from tesseract_core.runtime.cuda import loader
 
 
@@ -242,7 +243,8 @@ def test_client_request_releases_input_exports(mocked_cuda):
     client = HTTPClient.__new__(HTTPClient)
     client._url = "http://localhost:8000"
     client._output_path = None
-    client._output_format = "json+cuda_ipc"
+    client._output_format = "json+base64"
+    client._gpu_transport = "cuda_ipc"
     client._timeout = None
     client._session = FakeSession()
 
@@ -257,7 +259,7 @@ def test_client_request_releases_input_exports(mocked_cuda):
 
 
 def test_client_request_cpu_only_payload_skips_release(monkeypatch):
-    """A cuda_ipc request with no GPU inputs must not touch the release path.
+    """A cuda_ipc-transport request with no GPU inputs skips the release path.
 
     Nothing gets pinned, so _request must not import/call the cuda_ipc runtime
     for cleanup -- otherwise a base install (no runtime extra) would spuriously
@@ -288,7 +290,8 @@ def test_client_request_cpu_only_payload_skips_release(monkeypatch):
     client = HTTPClient.__new__(HTTPClient)
     client._url = "http://localhost:8000"
     client._output_path = None
-    client._output_format = "json+cuda_ipc"
+    client._output_format = "json+base64"
+    client._gpu_transport = "cuda_ipc"
     client._timeout = None
     client._session = FakeSession()
 
@@ -311,11 +314,10 @@ def test_import_cuda_ipc_explains_missing_runtime_extra(monkeypatch):
 
     def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
         # Mimic the module being unimportable on a base install (its deep
-        # dependencies, e.g. fsspec, are absent). Covers both `import
-        # tesseract_core.runtime.cuda_ipc` and `from tesseract_core.runtime
-        # import cuda_ipc`.
-        if name == "tesseract_core.runtime.cuda_ipc" or (
-            name == "tesseract_core.runtime" and "cuda_ipc" in (fromlist or ())
+        # dependencies, e.g. fsspec, are absent). Covers `from
+        # tesseract_core.runtime.cuda import ipc`.
+        if name == "tesseract_core.runtime.cuda.ipc" or (
+            name == "tesseract_core.runtime.cuda" and "ipc" in (fromlist or ())
         ):
             raise ImportError("No module named 'fsspec'")
         return real_import(name, globals, locals, fromlist, level)
@@ -324,6 +326,32 @@ def test_import_cuda_ipc_explains_missing_runtime_extra(monkeypatch):
 
     with pytest.raises(ImportError, match=r"tesseract-core\[runtime\]"):
         sdk._import_cuda_ipc()
+
+
+def test_decode_cuda_ipc_failure_gives_actionable_error(monkeypatch):
+    """A cuda_ipc response this client can't open yields a helpful RuntimeError.
+
+    cuda_ipc is opt-in, so a cuda_ipc-encoded array only comes back when the
+    caller asked for it. If this process has no usable CUDA context (no driver,
+    no matching device, or the runtime extra missing), opening the handle fails
+    deep in the runtime; the SDK decode must translate that into a message
+    naming the fix (drop the transport to get a host copy) instead of leaking a
+    bare CUDA/import error.
+    """
+    from tesseract_core.sdk import tesseract as sdk
+
+    def boom_load(_val):
+        raise RuntimeError("cudaIpcOpenMemHandle failed: simulated")
+
+    monkeypatch.setattr(
+        sdk,
+        "_import_cuda_ipc",
+        lambda: types.SimpleNamespace(load_cuda_ipc_arraydict=boom_load),
+    )
+
+    encoded = _encoded((2,), "float32", device=0, offset=0, storage_size=8)
+    with pytest.raises(RuntimeError, match="gpu_transport='cuda_ipc'"):
+        sdk._decode_array(encoded)
 
 
 # ── Decode-side orchestration (mocked CUDA, no CuPy) ─────────────────────
@@ -487,15 +515,75 @@ def _info(json_mode: bool, ctx: dict):
     return types.SimpleNamespace(context=ctx, mode_is_json=lambda: json_mode)
 
 
-def test_encode_array_cuda_ipc_requires_cuda_array():
-    """cuda_ipc in JSON mode rejects a plain host array."""
-    with pytest.raises(ValueError, match="cuda_ipc encoding requires a CUDA array"):
-        array_encoding.encode_array(
-            np.arange(3),
-            _info(True, {"array_encoding": "cuda_ipc"}),
-            (None,),
-            "int64",
-        )
+def test_encode_array_cuda_ipc_falls_back_to_host_for_cpu_array():
+    """A host array under a cuda_ipc device transport falls back to host encoding.
+
+    array_encoding (CPU) and device_transport (GPU) are orthogonal: a GPU leaf is
+    exported by handle, but a plain CPU leaf in the same response is serialized
+    over the host encoding (base64 here) rather than failing the whole response.
+    """
+    import pybase64
+
+    out = array_encoding.encode_array(
+        np.arange(3, dtype=np.int64),
+        _info(True, {"array_encoding": "base64", "device_transport": "cuda_ipc"}),
+        (None,),
+        "int64",
+    )
+    assert out["data"]["encoding"] == "base64"
+    decoded = np.frombuffer(pybase64.b64decode(out["data"]["buffer"]), dtype=np.int64)
+    np.testing.assert_array_equal(decoded, np.arange(3))
+
+
+def test_encode_array_cuda_ipc_exports_gpu_leaf(mocked_cuda):
+    """A GPU leaf under a cuda_ipc device transport is exported by handle."""
+    out = array_encoding.encode_array(
+        FakeCudaArray((3,), "<f4"),
+        _info(True, {"array_encoding": "base64", "device_transport": "cuda_ipc"}),
+        (None,),
+        "float32",
+    )
+    assert out["data"]["encoding"] == "cuda_ipc"
+
+
+def test_output_to_bytes_mixed_gpu_and_cpu_arrays(mocked_cuda):
+    """A single response carries a GPU leaf and a CPU leaf together.
+
+    The GPU array is exported over the cuda_ipc device transport; the plain host
+    array in the same model falls back to the base64 host encoding.
+
+    The config only makes cuda_ipc *available*; the per-call ``gpu_transport``
+    kwarg is what *selects* it for this response.
+    """
+    import orjson
+    import pybase64
+    from pydantic import BaseModel
+
+    from tesseract_core.runtime import config
+    from tesseract_core.runtime.file_interactions import output_to_bytes
+    from tesseract_core.runtime.schema_types import Array, Float32
+
+    config.update_config(gpu_transport="cuda_ipc")
+
+    class MixedModel(BaseModel):
+        model_config = {"arbitrary_types_allowed": True}
+        gpu: Array[(3,), Float32]
+        cpu: Array[(3,), Float32]
+
+    model = MixedModel.model_construct(
+        gpu=FakeCudaArray((3,), "<f4"),
+        cpu=np.arange(3, dtype=np.float32),
+    )
+    payload = orjson.loads(
+        output_to_bytes(model, "json+base64", gpu_transport="cuda_ipc")
+    )
+
+    assert payload["gpu"]["data"]["encoding"] == "cuda_ipc"
+    assert payload["cpu"]["data"]["encoding"] == "base64"
+    decoded_cpu = np.frombuffer(
+        pybase64.b64decode(payload["cpu"]["data"]["buffer"]), dtype=np.float32
+    )
+    np.testing.assert_array_equal(decoded_cpu, np.arange(3, dtype=np.float32))
 
 
 def test_cuda_array_to_host_branches():
@@ -526,37 +614,46 @@ def test_cuda_array_to_host_branches():
         cuda_ipc.cuda_array_to_host(object())
 
 
-# ── experimental feature flag gating ────────────────────────────────────
+# ── GPU-transport gating ────────────────────────────────────────────────
 
 
-def test_output_to_bytes_rejects_cuda_ipc_by_default():
-    """Without the experimental flag, json+cuda_ipc is not an accepted format."""
+def test_output_to_bytes_rejects_cuda_ipc_transport_by_default():
+    """Without a configured gpu_transport, cuda_ipc is not an accepted transport."""
     from tesseract_core.runtime import config, file_interactions
 
-    config.update_config(enable_experimental_cuda_ipc=False)
-    with pytest.raises(ValueError, match=r"Unsupported format json\+cuda_ipc"):
-        file_interactions.output_to_bytes({"y": 1}, "json+cuda_ipc")
+    config.update_config(gpu_transport="none")
+    with pytest.raises(ValueError, match=r"Unsupported GPU transport cuda_ipc"):
+        file_interactions.output_to_bytes(
+            {"y": 1}, "json+base64", gpu_transport="cuda_ipc"
+        )
 
 
-def test_available_formats_reflects_flag():
+def test_available_gpu_transports_reflects_config():
     from tesseract_core.runtime import config
+    from tesseract_core.runtime.file_interactions import available_gpu_transports
+
+    config.update_config(gpu_transport="none")
+    assert available_gpu_transports() == ("none",)
+
+    config.update_config(gpu_transport="cuda_ipc")
+    assert "cuda_ipc" in available_gpu_transports()
+
+
+def test_output_formats_never_include_cuda_ipc():
+    """The host-array output formats are the three stable ones, always."""
     from tesseract_core.runtime.file_interactions import available_formats
 
-    config.update_config(enable_experimental_cuda_ipc=False)
-    assert "json+cuda_ipc" not in available_formats()
-
-    config.update_config(enable_experimental_cuda_ipc=True)
-    assert "json+cuda_ipc" in available_formats()
+    assert available_formats() == ("json", "json+base64", "json+binref")
 
 
-# ── format -> encoding-context mapping ──────────────────────────────────
+# ── format + transport -> encoding-context mapping ──────────────────────
 
 
-def test_output_to_bytes_cuda_ipc_context(monkeypatch):
-    """json+cuda_ipc maps to the cuda_ipc array-encoding context (flag enabled)."""
+def test_output_to_bytes_splits_host_encoding_and_device_transport(monkeypatch):
+    """Format sets array_encoding (CPU); gpu_transport sets device_transport (GPU)."""
     from tesseract_core.runtime import config, file_interactions
 
-    config.update_config(enable_experimental_cuda_ipc=True)
+    config.update_config(gpu_transport="cuda_ipc")
     captured = {}
 
     class FakeAdapter:
@@ -570,8 +667,16 @@ def test_output_to_bytes_cuda_ipc_context(monkeypatch):
     monkeypatch.setattr(file_interactions, "TypeAdapter", FakeAdapter)
     monkeypatch.setattr(file_interactions.orjson, "dumps", lambda d: b"{}")
 
-    file_interactions.output_to_bytes({"y": 1}, "json+cuda_ipc")
-    assert captured["context"] == {"array_encoding": "cuda_ipc"}
+    file_interactions.output_to_bytes({"y": 1}, "json+base64", gpu_transport="cuda_ipc")
+    assert captured["context"] == {
+        "array_encoding": "base64",
+        "compression": None,
+        "device_transport": "cuda_ipc",
+    }
+
+    # Default gpu_transport leaves device_transport unset (None).
+    file_interactions.output_to_bytes({"y": 1}, "json")
+    assert captured["context"] == {"array_encoding": "json", "device_transport": None}
 
 
 # ── libcudart discovery (wheel-installed CUDA) ──────────────────────────
@@ -768,3 +873,67 @@ def test_iter_cudart_candidates_exported_from_cuda_package():
     from tesseract_core.runtime import cuda
 
     assert cuda.iter_cudart_candidates is loader.iter_cudart_candidates
+
+
+# ── cuda_ipc as a DeviceTransport backend ────────────────────────────────
+#
+# cuda_ipc is exposed through the shared DeviceTransport interface so further
+# transports slot in behind one lookup. These check that the cuda_ipc backend
+# is registered and routes to the same functions the direct API uses; the
+# transport-agnostic registry machinery is covered in test_device_transport.py.
+
+
+def test_cuda_ipc_registered_as_transport():
+    """The cuda_ipc backend is discoverable by name and satisfies the interface."""
+    from tesseract_core.runtime.device_transport import DeviceTransport, get_transport
+
+    transport = get_transport("cuda_ipc")
+    assert transport.name == "cuda_ipc"
+    assert transport.reach == "same_host"
+    assert isinstance(transport, DeviceTransport)
+
+
+def test_cuda_ipc_transport_receive_materialises_wrapper(mocked_cuda):
+    """The cuda_ipc transport's receive() decodes into an on-GPU wrapper.
+
+    This is the decode seam array_encoding.decode_array drives for cuda_ipc; the
+    end-to-end decode through decode_array is covered by the GPU suite (its
+    return type is the framework-agnostic wrapper, outside decode_array's
+    host-array return annotation).
+    """
+    from tesseract_core.runtime.device_transport import get_transport
+
+    transport = get_transport("cuda_ipc")
+    encoded = _encoded((2, 3), "float32", device=0, offset=0, storage_size=24)
+
+    out = transport.receive(encoded)
+
+    assert isinstance(out, cuda_ipc.IpcDeviceArray)
+    assert out.shape == (2, 3)
+    assert out.dtype == np.float32
+
+
+def test_cuda_ipc_transport_delegates(mocked_cuda, monkeypatch):
+    """register/descriptor/flush/receive/release drive the same cuda_ipc code.
+
+    A pull transport's flush is a no-op and its bootstrap needs no shared state,
+    so those return None; register+descriptor produce the same payload the direct
+    dump does, and release drops the export pins.
+    """
+    from tesseract_core.runtime.device_transport import get_transport
+
+    transport = get_transport("cuda_ipc")
+
+    # bootstrap + flush are no-ops for a receiver-driven transport.
+    assert transport.bootstrap("producer", None) is None
+    assert transport.flush() is None
+
+    arr = FakeCudaArray((4, 8), "<f4", data_ptr=0x5000)
+    payload = transport.descriptor(transport.register(arr))
+    # Same structure the direct dump produces (offset/size from the fake base).
+    assert payload["data"]["encoding"] == "cuda_ipc"
+    assert _unpack_cuda_ipc(payload["data"])["storage_offset"] == 256
+    # register pinned the source array; release drops it.
+    assert arr in cuda_ipc._CUDA_IPC_EXPORT_REGISTRY
+    transport.release()
+    assert cuda_ipc._CUDA_IPC_EXPORT_REGISTRY == []

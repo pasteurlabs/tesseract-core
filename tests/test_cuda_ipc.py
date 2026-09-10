@@ -4,10 +4,7 @@
 
 """End-to-end tests for CUDA IPC array encoding.
 
-Run on a GPU machine with either::
-
-    python tests/test_cuda_ipc.py         # standalone runner
-    pytest tests/test_cuda_ipc.py         # via pytest
+Run on a GPU machine with ``pytest tests/test_cuda_ipc.py``.
 
 Requires: cupy (used here only to *produce* GPU inputs) and optionally torch
 (for the DLPack/CUDA-array-interface interop tests). The CUDA IPC implementation
@@ -110,7 +107,7 @@ def _producer_main(build_fn_name, args, to_consumer, from_consumer):
     try:
         import cupy  # noqa: F401
 
-        from tesseract_core.runtime.cuda_ipc import dump_cuda_ipc_arraydict
+        from tesseract_core.runtime.cuda.ipc import dump_cuda_ipc_arraydict
 
         build_fn = _BUILDERS[build_fn_name]
         arrays = build_fn(*args)
@@ -139,7 +136,7 @@ def _consumer_main(to_consumer, from_consumer, result_q):
     -- so this path proves the decoded result is framework-independent.
     """
     try:
-        from tesseract_core.runtime.cuda_ipc import (
+        from tesseract_core.runtime.cuda.ipc import (
             IpcDeviceArray,
             load_cuda_ipc_arraydict,
         )
@@ -327,7 +324,7 @@ _BUILDERS = {
 @requires_cuda
 def test_encode_structure():
     """The encoded dict has the expected structure and metadata."""
-    from tesseract_core.runtime.cuda_ipc import dump_cuda_ipc_arraydict
+    from tesseract_core.runtime.cuda.ipc import dump_cuda_ipc_arraydict
 
     arr = cupy.random.randn(64, 128, dtype=cupy.float32)
     encoded = dump_cuda_ipc_arraydict(arr)
@@ -354,7 +351,7 @@ def test_encode_structure():
 @requires_cuda
 def test_encode_requires_cuda_array():
     """Encoding a host array raises a clear error."""
-    from tesseract_core.runtime.cuda_ipc import dump_cuda_ipc_arraydict
+    from tesseract_core.runtime.cuda.ipc import dump_cuda_ipc_arraydict
 
     with pytest.raises(ValueError, match="cuda_ipc encoding requires a CUDA array"):
         dump_cuda_ipc_arraydict(np.zeros((4, 4), dtype=np.float32))
@@ -367,7 +364,7 @@ def test_encode_rejects_non_contiguous():
     cuda_ipc transfers a flat contiguous byte range; a strided source would be
     silently misread, so encoding must refuse it.
     """
-    from tesseract_core.runtime.cuda_ipc import dump_cuda_ipc_arraydict
+    from tesseract_core.runtime.cuda.ipc import dump_cuda_ipc_arraydict
 
     strided = cupy.arange(100, dtype=cupy.float32)[::2]
     assert strided.__cuda_array_interface__["strides"] is not None
@@ -392,7 +389,7 @@ def test_same_process_open_is_unsupported():
     test_failed_get_mem_handle_clears_sticky_error for the full rationale).
     """
     from tesseract_core.runtime.cuda.api import _get_cudart
-    from tesseract_core.runtime.cuda_ipc import (
+    from tesseract_core.runtime.cuda.ipc import (
         dump_cuda_ipc_arraydict,
         load_cuda_ipc_arraydict,
     )
@@ -510,7 +507,7 @@ def _ring1_server(req_q, resp_q):
     try:
         import cupy
 
-        from tesseract_core.runtime.cuda_ipc import (
+        from tesseract_core.runtime.cuda.ipc import (
             dump_cuda_ipc_arraydict,
             release_pinned_ipc_exports,
         )
@@ -538,7 +535,7 @@ def _ring1_client(req_q, resp_q, result_q, n):
     wrapper); values are read back via its host-copy helper.
     """
     try:
-        from tesseract_core.runtime.cuda_ipc import load_cuda_ipc_arraydict
+        from tesseract_core.runtime.cuda.ipc import load_cuda_ipc_arraydict
 
         kept = []
         for i in range(n):
@@ -631,7 +628,7 @@ def test_decode_to_torch_via_dlpack():
     """
     import torch
 
-    from tesseract_core.runtime.cuda_ipc import (
+    from tesseract_core.runtime.cuda.ipc import (
         IpcDeviceArray,
         load_cuda_ipc_arraydict,
     )
@@ -673,7 +670,7 @@ def test_decode_to_torch_via_cuda_array_interface():
     """
     import torch
 
-    from tesseract_core.runtime.cuda_ipc import load_cuda_ipc_arraydict
+    from tesseract_core.runtime.cuda.ipc import load_cuda_ipc_arraydict
 
     ctx = multiprocessing.get_context("spawn")
     to_consumer = ctx.Queue()
@@ -719,7 +716,7 @@ def _cupy_free_consumer_main(to_consumer, from_consumer, result_q):
     try:
         import torch
 
-        from tesseract_core.runtime.cuda_ipc import (
+        from tesseract_core.runtime.cuda.ipc import (
             IpcDeviceArray,
             load_cuda_ipc_arraydict,
         )
@@ -795,16 +792,16 @@ def test_decode_is_cupy_free():
                 proc.join(timeout=5)
 
 
-# ── Test 5: full Tesseract API with json+cuda_ipc output format ─────────
+# ── Test 5: full Tesseract API with the cuda_ipc GPU transport ──────────
 
 
 @requires_cuda
 def test_tesseract_api_cuda_ipc_local():
-    """A Tesseract served with ``json+cuda_ipc`` returns correct results.
+    """A Tesseract served with ``gpu_transport='cuda_ipc'`` returns correct results.
 
     The apply function returns a NumPy (host) array, which the runtime encodes
-    via base64 fallback; this checks the format plumbs through end to end
-    without breaking non-GPU outputs.
+    via the host output format; this checks the transport plumbs through end to
+    end without breaking non-GPU outputs.
     """
     api_code = """
 import numpy as np
@@ -827,11 +824,13 @@ def apply(inputs: InputSchema) -> OutputSchema:
 
         from tesseract_core.sdk.tesseract import Tesseract
 
-        # json+cuda_ipc is experimental and off by default; opt in explicitly.
+        # The cuda_ipc GPU transport is experimental and off by default; opt in
+        # via the dedicated gpu_transport kwarg, independent of the host output
+        # format.
         with Tesseract.from_tesseract_api(
             api_path,
-            output_format="json+cuda_ipc",
-            runtime_config={"enable_experimental_cuda_ipc": True},
+            output_format="json+base64",
+            gpu_transport="cuda_ipc",
         ) as t:
             x = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
             result = t.apply({"x": x})
@@ -839,60 +838,81 @@ def apply(inputs: InputSchema) -> OutputSchema:
             np.testing.assert_allclose(y, x * 2.0 + 1.0, rtol=1e-6)
 
 
-# ── Standalone runner ───────────────────────────────────────────────────
+# ── Test 6: served HTTP round-trip over the cuda_ipc transport ──────────
 
 
-def _run_standalone():
-    if not _CUDA_AVAILABLE:
-        print("SKIP: CUDA + CuPy not available")
-        return 0
+_MIXED_API_CODE = """
+import cupy as cp
+import numpy as np
+from pydantic import BaseModel
+from tesseract_core.runtime import Array, Float32
 
-    name = cupy.cuda.runtime.getDeviceProperties(0)["name"].decode()
-    print(f"CUDA available: device 0 = {name}\n")
+class InputSchema(BaseModel):
+    x: Array[(None,), Float32]
 
-    tests = [
-        ("encode structure", test_encode_structure),
-        ("encode requires cuda array", test_encode_requires_cuda_array),
-        ("same-process open unsupported", test_same_process_open_is_unsupported),
-        ("cross-process basic", test_cross_process_basic),
-        ("cross-process dtypes", test_cross_process_dtypes),
-        ("cross-process nonzero offset", test_cross_process_nonzero_offset),
-        ("ring-1 serial reuse", test_ring1_serial_reuse),
-        ("sdk encode structure", test_sdk_encode_structure),
-    ]
-    if _TORCH_AVAILABLE:
-        tests += [
-            ("cross-process torch encode", test_cross_process_torch_encode),
-            ("decode to torch via dlpack", test_decode_to_torch_via_dlpack),
-            (
-                "decode to torch via cuda array interface",
-                test_decode_to_torch_via_cuda_array_interface,
-            ),
-            ("decode is cupy-free", test_decode_is_cupy_free),
-        ]
-    if _JAX_AVAILABLE:
-        tests.append(
-            ("cross-process jax vmm fallback", test_cross_process_jax_vmm_fallback)
-        )
-    tests.append(("tesseract api cuda_ipc", test_tesseract_api_cuda_ipc_local))
+class OutputSchema(BaseModel):
+    # gpu stays on the device (cuda_ipc transport); cpu is a host array
+    # serialized via the output format.
+    gpu: Array[(None,), Float32]
+    cpu: Array[(None,), Float32]
 
-    failures = 0
-    for label, fn in tests:
-        try:
-            fn()
-            print(f"  PASSED: {label}")
-        except Exception as exc:
-            failures += 1
-            print(f"  FAILED: {label}: {exc}")
-
-    print("\n" + "=" * 60)
-    if failures:
-        print(f"{failures} TEST(S) FAILED")
-    else:
-        print("ALL TESTS PASSED")
-    print("=" * 60)
-    return 1 if failures else 0
+def apply(inputs: InputSchema) -> OutputSchema:
+    x = np.asarray(inputs.x)
+    return OutputSchema(gpu=cp.asarray(x * 2.0), cpu=x + 1.0)
+"""
 
 
-if __name__ == "__main__":
-    sys.exit(_run_standalone())
+@requires_cuda
+def test_tesseract_api_cuda_ipc_mixed_http(free_port, serve_in_subprocess):
+    """A served endpoint returns a GPU and a CPU array in one response.
+
+    The server makes ``cuda_ipc`` available via its config. The client selects it
+    per request through the ``Accept`` header, so the response encodes the device
+    array as a cuda_ipc handle and the host array as base64. This exercises the
+    mixed CPU/GPU path end to end over real HTTP. The client decodes the handle
+    from a separate process, as CUDA IPC requires (see the module docstring).
+    """
+    import pybase64
+    import requests
+
+    from tesseract_core.runtime.cuda.ipc import load_cuda_ipc_arraydict
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        api_path = Path(tmpdir) / "tesseract_api.py"
+        api_path.write_text(_MIXED_API_CODE)
+
+        server_env = {
+            "TESSERACT_OUTPUT_FORMAT": "json+base64",
+            "TESSERACT_GPU_TRANSPORT": "cuda_ipc",
+        }
+        with serve_in_subprocess(api_path, free_port, env=server_env) as url:
+            x = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
+            inputs = {
+                "x": {
+                    "object_type": "array",
+                    "shape": list(x.shape),
+                    "dtype": "float32",
+                    "data": {"buffer": x.tolist(), "encoding": "json"},
+                }
+            }
+            response = requests.post(
+                f"{url}/apply",
+                json={"inputs": inputs},
+                headers={"Accept": "application/json+base64; gpu_transport=cuda_ipc"},
+                timeout=_TIMEOUT,
+            )
+            assert response.status_code == 200, response.text
+            payload = response.json()
+
+            # GPU leaf exported by handle; CPU leaf serialized inline as base64.
+            assert payload["gpu"]["data"]["encoding"] == "cuda_ipc"
+            assert payload["cpu"]["data"]["encoding"] == "base64"
+
+            # Decode the handle cross-process and compare against expectations.
+            gpu = load_cuda_ipc_arraydict(payload["gpu"])
+            np.testing.assert_allclose(gpu.copy_to_host(), x * 2.0, rtol=1e-6)
+
+            cpu = np.frombuffer(
+                pybase64.b64decode(payload["cpu"]["data"]["buffer"]), dtype=np.float32
+            )
+            np.testing.assert_allclose(cpu, x + 1.0, rtol=1e-6)

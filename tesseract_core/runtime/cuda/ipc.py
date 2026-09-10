@@ -1,9 +1,9 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""CUDA IPC array encoding: zero-copy GPU array exchange between processes.
+"""CUDA IPC transport: zero-copy GPU array exchange between processes.
 
-This module holds everything specific to the ``json+cuda_ipc`` encoding, kept
+This module holds everything specific to the ``cuda_ipc`` GPU transport, kept
 separate from the framework-agnostic host encodings in
 :mod:`tesseract_core.runtime.array_encoding`. Nothing here is imported unless a
 Tesseract actually encodes or decodes a CUDA IPC array, so the CUDA runtime and
@@ -12,7 +12,7 @@ driver libraries are only touched on that path.
 All low-level CUDA access lives in the :mod:`tesseract_core.runtime.cuda`
 package: this module works purely with plain Python values (device pointers as
 ``int``, IPC handles as ``bytes``) and never imports ctypes. It contributes only
-the *encoding policy* -- how a GPU array maps to and from the ``cuda_ipc`` JSON
+the *transport policy* -- how a GPU array maps to and from the ``cuda_ipc`` JSON
 payload, plus the keepalive bookkeeping that the transfer protocol requires.
 
 The JSON schema for this encoding (``CudaIpcArrayData``) lives alongside the
@@ -44,6 +44,7 @@ from pydantic_core import PydanticCustomError
 from tesseract_core.runtime.array_encoding import AllowedDtypes, ArrayDict, ShapeType
 from tesseract_core.runtime.cuda import api as cuda_api
 from tesseract_core.runtime.cuda import dlpack
+from tesseract_core.runtime.device_transport import DeviceTransport
 
 __all__ = [
     "IpcDeviceArray",
@@ -550,3 +551,37 @@ def validate_cuda_array(
         )
 
     return val
+
+
+class CudaIpcTransport(DeviceTransport):
+    """DeviceTransport backend for the same-host ``cuda_ipc`` transport."""
+
+    name = "cuda_ipc"
+    reach = "same_host"
+
+    def bootstrap(self, role: Any, peer_offer: Any) -> None:
+        """No-op: the IPC handle is self-contained, so no shared state to set up."""
+
+    def register(self, arr: Any, session: Any = None) -> ArrayDict:
+        """Pin ``arr`` and build its IPC descriptor (the finished array dict).
+
+        cuda_ipc mints the handle and packs the wire string in one call, so the
+        per-array handle *is* the array dict and :meth:`descriptor` is a
+        passthrough. Splitting them would take the IPC handle twice for nothing.
+        """
+        return dump_cuda_ipc_arraydict(arr)
+
+    def descriptor(self, handle: ArrayDict) -> ArrayDict:
+        """Return the array dict :meth:`register` already produced."""
+        return handle
+
+    def flush(self, session: Any = None) -> None:
+        """No-op: cuda_ipc is receiver-driven, so there is nothing to post."""
+
+    def receive(self, val: ArrayDict, session: Any = None) -> "IpcDeviceArray":
+        """Copy the exported bytes into a fresh consumer-owned ``IpcDeviceArray``."""
+        return load_cuda_ipc_arraydict(val)
+
+    def release(self, session: Any = None) -> None:
+        """Drop the producer-side pins from this request's exports."""
+        release_pinned_ipc_exports()

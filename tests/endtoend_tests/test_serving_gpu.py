@@ -53,7 +53,7 @@ def gpu_image_name(docker_client, docker_cleanup_module, shared_dummy_image_name
 
 @requires_cuda
 def test_serve_cuda_ipc_roundtrip(gpu_image_name):
-    """A GPU Tesseract served with json+cuda_ipc returns correct device memory.
+    """A GPU Tesseract with gpu_transport='cuda_ipc' returns correct device memory.
 
     Exercises the full export path end-to-end: the served container computes on
     the GPU, exports the result as a CUDA IPC handle (rather than copying to
@@ -62,7 +62,7 @@ def test_serve_cuda_ipc_roundtrip(gpu_image_name):
     wrapper exposing ``__cuda_array_interface__`` and ``__dlpack__``, read back
     here via its host-copy helper (no CuPy needed to inspect it).
     """
-    from tesseract_core.runtime.cuda_ipc import IpcDeviceArray
+    from tesseract_core.runtime.cuda.ipc import IpcDeviceArray
 
     a = np.arange(8, dtype=np.float32)
     b = np.ones(8, dtype=np.float32)
@@ -72,8 +72,8 @@ def test_serve_cuda_ipc_roundtrip(gpu_image_name):
     with Tesseract.from_image(
         gpu_image_name,
         gpus=["all"],
-        output_format="json+cuda_ipc",
-        runtime_config={"enable_experimental_cuda_ipc": True},
+        output_format="json+base64",
+        runtime_config={"gpu_transport": "cuda_ipc"},
     ) as t:
         result = t.apply({"a": a, "b": b, "s": s})
 
@@ -96,8 +96,8 @@ def test_serve_cuda_ipc_serial_reuse(gpu_image_name):
     with Tesseract.from_image(
         gpu_image_name,
         gpus=["all"],
-        output_format="json+cuda_ipc",
-        runtime_config={"enable_experimental_cuda_ipc": True},
+        output_format="json+base64",
+        runtime_config={"gpu_transport": "cuda_ipc"},
     ) as t:
         for i in range(3):
             a = np.full(4, float(i), dtype=np.float32)
