@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
+import re
 from collections.abc import Iterable
 from copy import deepcopy
 from typing import Annotated, Optional
@@ -13,11 +14,15 @@ from pydantic import BaseModel, ConfigDict, RootModel, ValidationError
 from tesseract_core.runtime import Array, Differentiable, Float32, Float64, Int64, UInt8
 from tesseract_core.runtime.experimental import LazySequence
 from tesseract_core.runtime.schema_generation import (
+    DICT_INDEX_SENTINEL,
+    SEQ_INDEX_SENTINEL,
+    _path_to_pattern,
     apply_function_to_model_tree,
     create_abstract_eval_schema,
     create_apply_schema,
     create_gradient_schema,
 )
+from tesseract_core.runtime.tree_transforms import escape_dict_key, path_to_index_op
 
 
 class SubModel(BaseModel):
@@ -822,3 +827,44 @@ def test_model_config_extra_forbid():
 
     with pytest.raises(ValidationError):
         ApplyParent.model_validate({"child": {"x": "foo"}, "extra": 1})
+
+
+@pytest.mark.parametrize(
+    "index,advertised",
+    [("[0]", True), ("[7]", True), ("[-1]", False), ("[-7]", False)],
+)
+def test_advertised_sequence_indices_are_resolvable(index, advertised):
+    """What the sequence pattern advertises has to survive path_to_index_op.
+
+    The pattern reaches users through the OpenAPI schema and through the
+    validation error that quotes it.
+    """
+    pattern = _path_to_pattern((SEQ_INDEX_SENTINEL,))
+    assert bool(re.fullmatch(pattern, index)) is advertised
+    if advertised:
+        path_to_index_op(index)
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "plain",
+        "with space",
+        "with-hyphen",
+        "a/b",
+        "a:b",
+        "layer.0.weight",
+        "bar{foobar}",
+        "café",
+    ],
+)
+def test_advertised_dict_keys_are_resolvable(key):
+    """Every key the schema advertises has to survive path_to_index_op.
+
+    The pattern reaches users through the OpenAPI schema, so a key it refuses
+    is a key whose gradients cannot be requested at all.
+    """
+    pattern = _path_to_pattern((DICT_INDEX_SENTINEL,))
+    segment = "{" + escape_dict_key(key) + "}"
+    assert re.fullmatch(pattern, segment), f"pattern refuses {segment}"
+    assert path_to_index_op(segment) == ("dict", key)

@@ -10,6 +10,59 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
+DICT_KEY_SPECIALS = "{}\\"
+
+
+def escape_dict_key(key: str) -> str:
+    """Escape the characters that would otherwise end a ``{...}`` path segment."""
+    return "".join("\\" + c if c in DICT_KEY_SPECIALS else c for c in key)
+
+
+def unescape_dict_key(key: str) -> str:
+    """Inverse of :func:`escape_dict_key`."""
+    out: list[str] = []
+    i = 0
+    while i < len(key):
+        if key[i] == "\\" and i + 1 < len(key):
+            out.append(key[i + 1])
+            i += 2
+        else:
+            out.append(key[i])
+            i += 1
+    return "".join(out)
+
+
+def split_path(path: str) -> list[str]:
+    """Split a path on the dots that separate segments.
+
+    A dot inside ``{...}`` belongs to the key, so ``a.{b.c}`` is two segments
+    and not three. Backslash escapes are carried through untouched so that a
+    key containing a brace survives.
+    """
+    parts: list[str] = []
+    buf: list[str] = []
+    depth = 0
+    i = 0
+    while i < len(path):
+        char = path[i]
+        if char == "\\" and i + 1 < len(path):
+            buf.append(char)
+            buf.append(path[i + 1])
+            i += 2
+            continue
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+        if char == "." and depth == 0:
+            parts.append("".join(buf))
+            buf = []
+        else:
+            buf.append(char)
+        i += 1
+    parts.append("".join(buf))
+    return parts
+
 
 def path_to_index_op(
     path: str,
@@ -23,9 +76,9 @@ def path_to_index_op(
     if seq_idx_re:
         return ("seq", int(seq_idx_re.group(1)))
 
-    dict_idx_re = re.match(r"^\{(.+)\}$", path)
+    dict_idx_re = re.match(r"^\{(.+)\}$", path, re.DOTALL)
     if dict_idx_re:
-        return ("dict", dict_idx_re.group(1))
+        return ("dict", unescape_dict_key(dict_idx_re.group(1)))
 
     # Use Python's built-in identifier validation for attribute names
     if path.isidentifier():
@@ -46,7 +99,7 @@ def get_at_path(tree: Any, path: str) -> Any:
     if not path:
         return tree
 
-    split_path = path.split(".")
+    path_parts = split_path(path)
 
     def _get_recursive(tree: Any, path: list[str]) -> Any:
         if not path:
@@ -68,7 +121,7 @@ def get_at_path(tree: Any, path: str) -> Any:
         else:
             raise AssertionError(f"Invalid method: {method}")
 
-    return _get_recursive(tree, split_path)
+    return _get_recursive(tree, path_parts)
 
 
 def set_at_path(tree: Any, values: dict[str, Any]) -> Any:
@@ -110,8 +163,8 @@ def set_at_path(tree: Any, values: dict[str, Any]) -> Any:
             raise AssertionError(f"Invalid method: {method}")
 
     for path, value in values.items():
-        split_path = path.split(".")
-        _set_recursive(tree, split_path, value)
+        path_parts = split_path(path)
+        _set_recursive(tree, path_parts, value)
 
     return tree
 

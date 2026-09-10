@@ -4,11 +4,14 @@ from pydantic import BaseModel
 
 from tesseract_core.runtime.tree_transforms import (
     LRUCache,
+    escape_dict_key,
     filter_func,
     flatten_with_paths,
     get_at_path,
     path_to_index_op,
     set_at_path,
+    split_path,
+    unescape_dict_key,
 )
 
 
@@ -79,6 +82,12 @@ class TestPathToIndexOp:
             # All Unicode characters are correct in dictionary keys
             ("{café}", ("dict", "café")),
             ("{🔑key}", ("dict", "🔑key")),
+            # A dot belongs to the key; the separator is handled by split_path
+            ("{layer.0.weight}", ("dict", "layer.0.weight")),
+            ("{a/b}", ("dict", "a/b")),
+            # Braces inside a key are escaped
+            (r"{bar\{foobar\}}", ("dict", "bar{foobar}")),
+            (r"{back\\slash}", ("dict", "back\\slash")),
         ],
     )
     def test_valid_paths(self, path, expected):
@@ -726,3 +735,36 @@ class TestLRUCache:
         cache = LRUCache(maxsize=0)
         cache.put(b"k", "v")
         assert cache.get(b"k") is None
+
+
+class TestSplitPath:
+    """Dots separate segments except where they belong to a dict key."""
+
+    @pytest.mark.parametrize(
+        "path,expected",
+        [
+            ("a.b.c", ["a", "b", "c"]),
+            ("foo.[0].bar", ["foo", "[0]", "bar"]),
+            ("params.{plain}", ["params", "{plain}"]),
+            ("params.{a.b}", ["params", "{a.b}"]),
+            ("params.{layer.0.weight}", ["params", "{layer.0.weight}"]),
+            ("params.{a}.b", ["params", "{a}", "b"]),
+            (r"params.{bar\{foobar\}}", ["params", r"{bar\{foobar\}}"]),
+            ("", [""]),
+        ],
+    )
+    def test_split(self, path, expected):
+        assert split_path(path) == expected
+
+    @pytest.mark.parametrize(
+        "key", ["plain", "a.b", "a/b", "bar{foobar}", "back\\slash", "}", "{"]
+    )
+    def test_escape_round_trip(self, key):
+        """A key survives being written into a path and read back out."""
+        assert unescape_dict_key(escape_dict_key(key)) == key
+        assert path_to_index_op("{" + escape_dict_key(key) + "}") == ("dict", key)
+
+    def test_a_dotted_key_resolves(self):
+        """The case this was for: a state-dict key reaches its value."""
+        tree = {"params": {"layer.0.weight": 7}}
+        assert get_at_path(tree, "params.{layer.0.weight}") == 7

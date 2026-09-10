@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from rich.progress import Progress
 
 from ..core import create_endpoints, get_input_schema, get_output_schema
-from ..tree_transforms import get_at_path, set_at_path
+from ..tree_transforms import escape_dict_key, get_at_path, set_at_path, split_path
 
 GradientEndpointName = Literal[
     "jacobian", "jacobian_vector_product", "vector_jacobian_product"
@@ -52,7 +52,7 @@ def expand_path_pattern(path_pattern: str, inputs: dict[str, Any]) -> list[str]:
     For example, given the path pattern `a.[].{}`, and the inputs `{"a": [{"b": 1}, {"c": 2}]}`,
     this function would return `["a.[0].{b}", "a.[1].{c}"]`.
     """
-    parts = path_pattern.split(".")
+    parts = split_path(path_pattern)
 
     def _handle_part(
         parts: Sequence[str], current_inputs: Any, current_path: list[str]
@@ -79,7 +79,9 @@ def expand_path_pattern(path_pattern: str, inputs: dict[str, Any]) -> list[str]:
             # dictionary access
             for key in current_inputs:
                 subpaths = _handle_part(
-                    parts[1:], current_inputs[key], [*current_path, f"{{{key}}}"]
+                    parts[1:],
+                    current_inputs[key],
+                    [*current_path, f"{{{escape_dict_key(str(key))}}}"],
                 )
                 paths.extend(subpaths)
         else:

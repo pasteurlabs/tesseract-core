@@ -24,7 +24,7 @@ from pydantic import ValidationError as PydanticValidationError
 from rich.console import Console as RichConsole
 from rich.table import Table as RichTable
 
-from . import engine
+from . import engine, serving
 from .api_parse import (
     EXPECTED_OBJECTS,
     ValidationError,
@@ -600,6 +600,17 @@ def serve(
             ),
         ),
     ] = False,
+    startup_timeout: Annotated[
+        float,
+        typer.Option(
+            "--startup-timeout",
+            help=(
+                "How long to wait, in seconds, for the Tesseract to answer a health "
+                "check. Raise it for one that is slow to initialize, in preference "
+                "to skipping the check altogether."
+            ),
+        ),
+    ] = serving.DEFAULT_STARTUP_TIMEOUT,
     user: Annotated[
         str | None,
         typer.Option(
@@ -699,6 +710,7 @@ def serve(
             output_format=_enum_to_val(output_format),
             docker_args=shlex.split(docker_args) if docker_args else None,
             skip_health_check=skip_health_check,
+            startup_timeout=startup_timeout,
         )
     except RuntimeError as ex:
         raise UserError(

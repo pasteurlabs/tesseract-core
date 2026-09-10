@@ -10,17 +10,18 @@ from contextlib import closing
 from pathlib import Path
 
 import pytest
+import requests
 import yaml
 from jinja2.exceptions import TemplateNotFound
 
-from tesseract_core.sdk import engine
+from tesseract_core.sdk import docker_client, engine, serving
 from tesseract_core.sdk.api_parse import (
     TesseractBuildConfig,
     TesseractConfig,
     validate_tesseract_api,
 )
 from tesseract_core.sdk.cli import AVAILABLE_RECIPES
-from tesseract_core.sdk.docker_client import Container, Image, NotFound
+from tesseract_core.sdk.docker_client import APIError, Container, Image, NotFound
 from tesseract_core.sdk.exceptions import UserError
 
 
@@ -277,9 +278,7 @@ def test_prepare_build_context_uv_platform(tmp_path_factory):
     )
     engine.prepare_build_context(src_dir, build_dir, config)
     dockerfile = (build_dir / "Dockerfile").read_text()
-    assert re.search(
-        r"FROM --platform=linux/amd64 ghcr\.io/astral-sh/uv:\S+ AS uv", dockerfile
-    )
+    assert re.search(r"FROM --platform=linux/amd64 \"\$\{UV_URL\}\" AS uv", dockerfile)
     assert "COPY --from=uv /uv /uvx /bin/" in dockerfile
 
     # Native target: uv stage follows $BUILDPLATFORM.
@@ -288,7 +287,7 @@ def test_prepare_build_context_uv_platform(tmp_path_factory):
     engine.prepare_build_context(src_dir, build_dir2, config_native)
     dockerfile_native = (build_dir2 / "Dockerfile").read_text()
     assert re.search(
-        r"FROM --platform=\$BUILDPLATFORM ghcr\.io/astral-sh/uv:\S+ AS uv",
+        r"FROM --platform=\$BUILDPLATFORM \"\$\{UV_URL\}\" AS uv",
         dockerfile_native,
     )
 
@@ -900,7 +899,7 @@ def test_serve_skip_health_check(mocked_docker, monkeypatch):
             return type("Response", (), {"status_code": 200, "json": dict})()
         raise NotImplementedError(f"Mocked get request to {url} not implemented")
 
-    monkeypatch.setattr(engine.requests, "get", health_get_spy)
+    monkeypatch.setattr(serving.requests, "get", health_get_spy)
 
     res, _ = engine.serve("foobar", skip_health_check=True)
     assert res
@@ -1190,13 +1189,13 @@ def test_serve_retries_on_port_in_use(mocked_docker, monkeypatch):
     seen_ports = []
     fail_times = 2  # fail the first two attempts, succeed on the third
 
-    def flaky_health(container, ping_ip, port, timeout=30):
+    def flaky_health(container, ping_ip, port, timeout):
         seen_ports.append(port)
         if len(seen_ports) <= fail_times:
-            raise engine._PortInUseError(f"Port {port} was already in use")
+            raise engine.PortInUseError(f"Port {port} was already in use")
         # success -> return normally
 
-    monkeypatch.setattr(engine, "_wait_for_health", flaky_health)
+    monkeypatch.setattr(engine, "wait_for_health_or_dispose", flaky_health)
 
     res, _ = engine.serve("foobar")
     assert res
@@ -1207,12 +1206,22 @@ def test_serve_retries_on_port_in_use(mocked_docker, monkeypatch):
     )
 
 
-def test_serve_retries_on_docker_publish_conflict(mocked_docker, monkeypatch):
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        b"docker: Error response from daemon: port is already allocated.",
+        b"Error: rootlessport listen tcp 0.0.0.0:8000: bind: address already in use",
+        b'Error: something went wrong with the request: "proxy already running"',
+    ],
+    ids=["docker", "podman-linux", "podman-machine"],
+)
+def test_serve_retries_on_docker_publish_conflict(mocked_docker, monkeypatch, stderr):
     """A host-port publish collision (ContainerError) triggers a retry.
 
     In port-mapping mode a lost port race fails when the Docker daemon tries to
     publish the host port -- ``containers.run`` raises ``ContainerError`` before
-    any container exists. This must be retried like the host-network case.
+    any container exists. This must be retried like the host-network case,
+    whichever runtime's wording reports it.
     """
     from tesseract_core.sdk.docker_client import ContainerError
 
@@ -1222,13 +1231,7 @@ def test_serve_retries_on_docker_publish_conflict(mocked_docker, monkeypatch):
     def flaky_run(**kwargs):
         calls["n"] += 1
         if calls["n"] <= 2:
-            raise ContainerError(
-                None,
-                125,
-                "docker run ...",
-                kwargs["image"],
-                b"docker: Error response from daemon: port is already allocated.",
-            )
+            raise ContainerError(None, 125, "docker run ...", kwargs["image"], stderr)
         return real_run(**kwargs)
 
     monkeypatch.setattr(mocked_docker.containers, "run", flaky_run)
@@ -1236,6 +1239,56 @@ def test_serve_retries_on_docker_publish_conflict(mocked_docker, monkeypatch):
     res, _ = engine.serve("foobar")
     assert res
     assert calls["n"] == 3  # two conflicts, then success
+
+
+def test_serve_cleans_up_the_leaked_container_on_publish_conflict(
+    mocked_docker, monkeypatch
+):
+    """A port-publish ContainerError with a container id cleans that container up.
+
+    Docker prints the container's id to stdout before the publish step can
+    fail, so it is a container the daemon actually created and left behind in
+    a Created state -- invisible to containers.list()'s running-only default,
+    and so to `tesseract teardown --all`, unless serve() removes it itself.
+    """
+    from tesseract_core.sdk.docker_client import ContainerError
+
+    real_run = mocked_docker.containers.run
+    removed = []
+    calls = {"n": 0}
+
+    def flaky_run(**kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise ContainerError(
+                "deadbeefcafe",
+                125,
+                "docker run ...",
+                kwargs["image"],
+                b"docker: Error response from daemon: port is already allocated.",
+            )
+        return real_run(**kwargs)
+
+    def fake_get(id_or_name, tesseract_only=True):
+        assert id_or_name == "deadbeefcafe"
+        assert tesseract_only is False, (
+            "the leaked container is known to be ours from the run() call that "
+            "created it, so the usual Tesseract-only filter must not apply"
+        )
+
+        class _Leaked:
+            def remove(self, force=False):
+                assert force
+                removed.append(id_or_name)
+
+        return _Leaked()
+
+    monkeypatch.setattr(mocked_docker.containers, "run", flaky_run)
+    monkeypatch.setattr(mocked_docker.containers, "get", fake_get)
+
+    res, _ = engine.serve("foobar")
+    assert res
+    assert removed == ["deadbeefcafe"]
 
 
 def test_serve_reraises_non_port_container_error(mocked_docker, monkeypatch):
@@ -1253,13 +1306,142 @@ def test_serve_reraises_non_port_container_error(mocked_docker, monkeypatch):
         engine.serve("foobar")
 
 
+# `docker inspect` state, as recorded for a container that has stopped. Verified
+# against Docker: an OOM kill reports both the flag and code 137.
+_OOM_KILLED = {"Running": False, "OOMKilled": True, "ExitCode": 137, "Error": ""}
+_EXITED = {"Running": False, "OOMKilled": False, "ExitCode": 1, "Error": ""}
+_DAEMON_ERROR = {
+    "Running": False,
+    "OOMKilled": False,
+    "ExitCode": 127,
+    "Error": 'exec: "tesseract-runtime": not found',
+}
+
+
+@pytest.mark.parametrize(
+    "state,expected",
+    [
+        (_OOM_KILLED, "exceeding its memory limit"),
+        (_DAEMON_ERROR, 'Docker reported: exec: "tesseract-runtime": not found'),
+        (_EXITED, ""),
+    ],
+)
+def test_container_diagnoses_its_own_exit(state, expected):
+    """A stopped container can say things its logs cannot -- an OOM kill writes nothing."""
+    container = Container(
+        id="abc123", short_id="abc123", name="vectoradd", attrs={"State": state}
+    )
+    assert expected in docker_client.diagnose_exit(container, logs="")
+
+
+def _stopped_container(logs=b"", state=None, **overrides):
+    """A Container wired up to answer without a daemon behind it.
+
+    `is_running` is a module function now, so callers patch `serving.is_running`
+    rather than the container.
+    """
+    container = Container(
+        id="abc123",
+        short_id="abc123",
+        name="vectoradd",
+        attrs={"State": state if state is not None else dict(_EXITED)},
+    )
+    container.wait = lambda timeout=None: {"StatusCode": 1}
+    container.logs = lambda **kwargs: logs
+    container.remove = lambda **kwargs: None
+    for name, value in overrides.items():
+        setattr(container, name, value)
+    return container
+
+
+# Nothing listens on port 1, so /health fails immediately and the wait gives up
+# on the first pass rather than sleeping.
+_DEAD = ("127.0.0.1", "1")
+
+
+def test_wait_for_health_reports_a_container_that_never_answers(monkeypatch):
+    """A container still running when time runs out is a timeout, not a crash."""
+    monkeypatch.setattr(serving, "is_running", lambda container: True)
+    container = _stopped_container()
+
+    with pytest.raises(TimeoutError) as excinfo:
+        serving.wait_for_health_or_dispose(container, *_DEAD, timeout=0.05)
+
+    message = str(excinfo.value)
+    assert "did not respond to a health check in time" in message
+    assert "increase `startup_timeout`" in message
+
+
+def test_wait_for_health_singles_out_a_port_collision(monkeypatch):
+    """A collision is racy and retriable, so it must not look like a crash."""
+    monkeypatch.setattr(serving, "is_running", lambda container: False)
+    container = _stopped_container(logs=b"Error: address already in use")
+
+    with pytest.raises(engine.PortInUseError):
+        serving.wait_for_health_or_dispose(container, *_DEAD, timeout=0.05)
+
+
+def test_unreadable_logs_do_not_mask_the_startup_failure(monkeypatch):
+    """Failing to read the logs is not the failure we are trying to report."""
+
+    def cannot_read(**kwargs):
+        raise APIError("daemon went away")
+
+    monkeypatch.setattr(serving, "is_running", lambda container: False)
+    container = _stopped_container()
+    container.logs = cannot_read
+
+    with pytest.raises(RuntimeError) as excinfo:
+        serving.wait_for_health_or_dispose(container, *_DEAD, timeout=0.05)
+
+    assert "stopped running during startup" in str(excinfo.value)
+
+
+def test_failure_to_dispose_does_not_mask_the_startup_failure(monkeypatch):
+    """Nor is failing to remove the container."""
+
+    def cannot_remove(**kwargs):
+        raise APIError("daemon went away")
+
+    monkeypatch.setattr(serving, "is_running", lambda container: False)
+    container = _stopped_container(remove=cannot_remove)
+
+    with pytest.raises(RuntimeError, match="stopped running during startup"):
+        serving.wait_for_health_or_dispose(container, *_DEAD, timeout=0.05)
+
+
+def test_serve_disposes_of_a_container_that_never_starts(mocked_docker, monkeypatch):
+    """A container that fails to become healthy is removed, not left lying around.
+
+    Everything it knew goes into the error before it goes, and the port-conflict
+    retry path would otherwise leave one behind per attempt.
+    """
+    torn_down = []
+
+    def unreachable(*args, **kwargs):
+        raise requests.exceptions.ConnectionError("nothing listening")
+
+    # The fixture answers /health with a 200; this container never will, and is
+    # not running, so waiting gives up on it immediately.
+    monkeypatch.setattr(serving.requests, "get", unreachable)
+    monkeypatch.setattr(serving, "is_running", lambda container: False)
+    # The fixture's container overrides `remove`, so patch the class it actually is
+    mocked_cls = type(mocked_docker.containers.run(detach=True))
+    monkeypatch.setattr(mocked_cls, "remove", lambda self, **kw: torn_down.append(kw))
+
+    with pytest.raises(RuntimeError, match="stopped running during startup"):
+        engine.serve("foobar")
+
+    assert torn_down == [{"force": True}]
+
+
 def test_serve_gives_up_after_max_port_attempts(mocked_docker, monkeypatch):
     """If every attempt loses the port race, serve raises rather than looping forever."""
 
-    def always_in_use(container, ping_ip, port, timeout=30):
-        raise engine._PortInUseError(f"Port {port} was already in use")
+    def always_in_use(container, ping_ip, port, timeout):
+        raise engine.PortInUseError(f"Port {port} was already in use")
 
-    monkeypatch.setattr(engine, "_wait_for_health", always_in_use)
+    monkeypatch.setattr(engine, "wait_for_health_or_dispose", always_in_use)
 
     with pytest.raises(RuntimeError, match="Failed to find a free port"):
         engine.serve("foobar")
@@ -1273,13 +1455,13 @@ def test_serve_does_not_retry_user_supplied_port(mocked_docker, monkeypatch):
     """
     attempts = []
 
-    def always_in_use(container, ping_ip, port, timeout=30):
+    def always_in_use(container, ping_ip, port, timeout):
         attempts.append(port)
-        raise engine._PortInUseError(f"Port {port} was already in use")
+        raise engine.PortInUseError(f"Port {port} was already in use")
 
-    monkeypatch.setattr(engine, "_wait_for_health", always_in_use)
+    monkeypatch.setattr(engine, "wait_for_health_or_dispose", always_in_use)
 
-    with pytest.raises(engine._PortInUseError):
+    with pytest.raises(engine.PortInUseError):
         engine.serve("foobar", port="12345")
 
     # Exactly one attempt, on the exact port requested.
@@ -1519,41 +1701,42 @@ def _stub_serve_docker(monkeypatch):
         return Container(id="cid", short_id="cid", name="test-container", attrs={})
 
     monkeypatch.setattr(engine.docker_client.containers, "run", fake_run)
-    monkeypatch.setattr(engine, "_wait_for_health", lambda *a, **k: None)
+    monkeypatch.setattr(engine, "wait_for_health_or_dispose", lambda *a, **k: None)
     monkeypatch.setattr(engine, "is_podman", lambda: False)
     return captured
 
 
-def test_serve_cuda_ipc_adds_ipc_host(monkeypatch):
-    """json+cuda_ipc serving passes --ipc=host to the container runtime."""
-    captured = _stub_serve_docker(monkeypatch)
-
-    engine.serve(
-        "my-image",
-        output_format="json+cuda_ipc",
-        gpus=["all"],
-        runtime_config={"enable_experimental_cuda_ipc": True},
-        skip_health_check=True,
-    )
-    assert "--ipc=host" in captured["extra_args"]
-
-
-def test_serve_experimental_cuda_ipc_adds_ipc_host_any_format(monkeypatch):
-    """Enabling the flag wires --ipc=host regardless of the output format."""
+def test_serve_cuda_ipc_transport_adds_ipc_host(monkeypatch):
+    """gpu_transport='cuda_ipc' serving passes --ipc=host to the container runtime."""
     captured = _stub_serve_docker(monkeypatch)
 
     engine.serve(
         "my-image",
         output_format="json+base64",
         gpus=["all"],
-        runtime_config={"enable_experimental_cuda_ipc": True},
+        runtime_config={"gpu_transport": "cuda_ipc"},
         skip_health_check=True,
     )
     assert "--ipc=host" in captured["extra_args"]
 
 
-def test_serve_experimental_cuda_ipc_errors_without_gpus(monkeypatch):
-    """Enabling the flag without GPU access is a startup error, not a warning."""
+def test_serve_cuda_ipc_transport_ipc_host_independent_of_format(monkeypatch):
+    """The transport wires --ipc=host regardless of the host output format."""
+    captured = _stub_serve_docker(monkeypatch)
+
+    engine.serve(
+        "my-image",
+        output_format="json+binref",
+        output_path="/tmp",
+        gpus=["all"],
+        runtime_config={"gpu_transport": "cuda_ipc"},
+        skip_health_check=True,
+    )
+    assert "--ipc=host" in captured["extra_args"]
+
+
+def test_serve_cuda_ipc_transport_errors_without_gpus(monkeypatch):
+    """Selecting the cuda_ipc transport without GPU access is a startup error."""
     _stub_serve_docker(monkeypatch)
 
     with pytest.raises(ValueError, match="requires GPU access"):
@@ -1561,20 +1744,21 @@ def test_serve_experimental_cuda_ipc_errors_without_gpus(monkeypatch):
             "my-image",
             output_format="json+base64",
             gpus=None,
-            runtime_config={"enable_experimental_cuda_ipc": True},
+            runtime_config={"gpu_transport": "cuda_ipc"},
             skip_health_check=True,
         )
 
 
-def test_serve_cuda_ipc_errors_without_experimental_flag(monkeypatch):
-    """Requesting the cuda_ipc format without the flag is a startup error."""
+def test_serve_unknown_gpu_transport_errors(monkeypatch):
+    """An unknown gpu_transport value is a startup error."""
     _stub_serve_docker(monkeypatch)
 
-    with pytest.raises(ValueError, match="experimental"):
+    with pytest.raises(ValueError, match="Unknown gpu_transport"):
         engine.serve(
             "my-image",
-            output_format="json+cuda_ipc",
+            output_format="json+base64",
             gpus=["all"],
+            runtime_config={"gpu_transport": "bogus"},
             skip_health_check=True,
         )
 
@@ -1589,6 +1773,46 @@ def test_serve_non_cuda_ipc_has_no_ipc_host(monkeypatch):
         skip_health_check=True,
     )
     assert "--ipc=host" not in (captured.get("extra_args") or [])
+
+
+_UNSET = object()
+
+
+@pytest.mark.parametrize(
+    ("kwarg", "runtime_config", "expected"),
+    [
+        # Neither channel names a transport -> pinned to the explicit default.
+        (_UNSET, None, "none"),
+        # runtime_config selects it while the kwarg is left unset -> deferred to.
+        (_UNSET, {"gpu_transport": "cuda_ipc"}, "cuda_ipc"),
+        # An explicit kwarg wins over runtime_config, in both directions.
+        ("cuda_ipc", {"gpu_transport": "none"}, "cuda_ipc"),
+        ("none", {"gpu_transport": "cuda_ipc"}, "none"),
+        # Passing None explicitly is the same as not passing it: defer.
+        (None, {"gpu_transport": "cuda_ipc"}, "cuda_ipc"),
+    ],
+)
+def test_serve_gpu_transport_precedence(monkeypatch, kwarg, runtime_config, expected):
+    """The gpu_transport kwarg and runtime_config resolve with a defined precedence.
+
+    An explicit kwarg (including ``none``) wins; an unset (``None``) kwarg defers
+    to runtime_config; when neither names a transport the container still gets a
+    definite ``none`` rather than inheriting the image default.
+    """
+    captured = _stub_serve_docker(monkeypatch)
+
+    kwargs = dict(output_format="json+base64", gpus=["all"], skip_health_check=True)
+    if kwarg is not _UNSET:
+        kwargs["gpu_transport"] = kwarg
+    if runtime_config is not None:
+        kwargs["runtime_config"] = runtime_config
+
+    engine.serve("my-image", **kwargs)
+
+    assert captured["environment"]["TESSERACT_GPU_TRANSPORT"] == expected
+    assert ("--ipc=host" in (captured.get("extra_args") or [])) == (
+        expected == "cuda_ipc"
+    )
 
 
 @pytest.mark.parametrize(

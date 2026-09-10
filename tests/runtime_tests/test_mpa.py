@@ -5,6 +5,7 @@
 
 import csv
 import json
+import os
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -90,6 +91,50 @@ def test_nested_runs():
 
         # Should still work in outer context
         log_parameter("outer2", "value3")
+
+
+def test_concurrent_runs_do_not_clobber_stdio(tmp_path):
+    """Concurrent runs must leave stdout and stderr unchanged."""
+    runners = 4
+    runs_each = 25
+    before = {fd: (os.fstat(fd).st_dev, os.fstat(fd).st_ino) for fd in (1, 2)}
+    saved = {fd: os.dup(fd) for fd in (1, 2)}
+    barrier = threading.Barrier(runners)
+    failures = []
+
+    def run_repeatedly(runner):
+        try:
+            barrier.wait()
+            for index in range(runs_each):
+                run_dir = tmp_path / f"runner-{runner}-run-{index}"
+                with start_run(base_dir=str(run_dir)):
+                    pass
+        except BaseException as exc:
+            failures.append(exc)
+
+    try:
+        threads = [
+            threading.Thread(target=run_repeatedly, args=(runner,))
+            for runner in range(runners)
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=60)
+            assert not thread.is_alive(), "a run never finished"
+
+        after = {fd: (os.fstat(fd).st_dev, os.fstat(fd).st_ino) for fd in (1, 2)}
+    finally:
+        # An unpatched failure can poison the test process, so restore the
+        # descriptors before reporting it.
+        for fd, backup in saved.items():
+            os.dup2(backup, fd)
+            os.close(backup)
+
+    assert not failures and after == before, (
+        f"run failures: {failures!r}\n"
+        f"stdio was left pointing elsewhere: {before} -> {after}"
+    )
 
 
 def test_file_backend_default():
