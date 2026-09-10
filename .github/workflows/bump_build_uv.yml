@@ -31,7 +31,7 @@ jobs:
       - name: Extract current version
         id: current
         run: |
-          uv_version=$(sed -n -E 's/^ENV UV_VERSION=(.*)/\1/p' < ${DOCKERFILE_PATH})
+          uv_version=$(sed -n 's/^ARG UV_VERSION=\(.*\)/\1/p' < ${DOCKERFILE_PATH})
           echo "uv-version=${uv_version}" >> ${GITHUB_OUTPUT}
 
       - name: Compare and update uv version
@@ -40,8 +40,9 @@ jobs:
         env:
             NEW_VERSION: ${{ steps.latest.outputs.uv-version }}
         run: |
-          sed -i -E "s/^(ENV UV_VERSION=).*/\1${NEW_VERSION}/" ${DOCKERFILE_PATH}
+          sed -i "s/^\(ARG UV_VERSION=\).*/\1${NEW_VERSION}/" ${DOCKERFILE_PATH}
           echo "updated=true" >> ${GITHUB_OUTPUT}
+          echo $(git status)
           git diff | cat
 
       - name: Create Pull Request
