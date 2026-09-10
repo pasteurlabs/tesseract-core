@@ -51,9 +51,9 @@ class DeviceTransport(abc.ABC):
     """The contract every device-array transport implements.
 
     A transport is a small, mostly-stateless object registered under a ``name``
-    (the suffix of the ``json+<name>`` output format). The runtime looks one up
-    by name and drives the lifecycle below; adding a transport means adding a
-    backend, not editing the encode/decode dispatch.
+    (the ``gpu_transport`` config value that selects it, e.g. ``cuda_ipc``). The
+    runtime looks one up by name and drives the lifecycle below; adding a
+    transport means adding a backend, not editing the encode/decode dispatch.
     """
 
     name: ClassVar[str]
@@ -106,8 +106,8 @@ class DeviceTransport(abc.ABC):
 # Registry
 # ---------------------------------------------------------------------------
 #
-# Transports register here by name, keyed by the ``json+<name>`` format suffix,
-# so the encode/decode dispatch and the eventual negotiation endpoint go through
+# Transports register here by name, keyed by their ``gpu_transport`` value, so
+# the encode/decode dispatch and the eventual negotiation endpoint go through
 # one table rather than a chain of ``if encoding == ...`` branches. Built-in
 # transports are registered by the runtime package ``__init__``.
 

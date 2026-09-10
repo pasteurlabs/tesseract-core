@@ -227,6 +227,7 @@ def test_serve_lifecycle(mock_serving, mock_clients):
         "memory": None,
         "input_path": None,
         "output_format": "json+base64",
+        "gpu_transport": "none",
         "docker_args": None,
         "runtime_config": None,
         "skip_health_check": False,

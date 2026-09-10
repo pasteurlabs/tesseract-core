@@ -156,6 +156,7 @@ class Tesseract:
         input_path: str | Path | None = None,
         output_path: str | Path | None = None,
         output_format: OutputFormat = "json+base64",
+        gpu_transport: str = "none",
         docker_args: list[str] | None = None,
         runtime_config: dict[str, Any] | None = None,
         stream_logs: BoolOrCallable = False,
@@ -195,6 +196,11 @@ class Tesseract:
                 Required when using json+binref output format.
             output_format: Format to use for the output data. json+binref requires output_path to be set.
                 This has no impact on what is returned to Python and only affects the format that is used internally.
+            gpu_transport: How GPU arrays leave the process, independently of ``output_format``
+                (which governs CPU arrays). ``none`` (default) copies GPU arrays to the
+                host and serializes them like any CPU array; ``cuda_ipc`` exports them by
+                reference and requires the container to have GPU access. This value also
+                governs how the client exports GPU *inputs* to the served Tesseract.
             docker_args: Additional arguments to pass to the container runtime (e.g., Docker).
             runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
                 These are converted to TESSERACT_* environment variables. For example,
@@ -272,6 +278,7 @@ class Tesseract:
             input_path=input_path,
             output_path=output_path,
             output_format=output_format,
+            gpu_transport=gpu_transport,
             runtime_config=runtime_config,
             port=port,
             host_ip=host_ip,
@@ -289,6 +296,7 @@ class Tesseract:
         input_path: Path | None = None,
         output_path: Path | None = None,
         output_format: OutputFormat = "json+base64",
+        gpu_transport: str = "none",
         runtime_config: dict[str, Any] | None = None,
         stream_logs: BoolOrCallable = False,
     ) -> Tesseract:
@@ -311,6 +319,9 @@ class Tesseract:
                 result with be given relative to this path. Required when using json+binref.
             output_format: Format to use for the output data. json+binref requires output_path.
                 This has no impact on what is returned to Python and only affects the format that is used internally.
+            gpu_transport: How GPU arrays leave the process, independently of ``output_format``
+                (which governs CPU arrays). ``none`` (default) copies GPU arrays to the host
+                and serializes them like any CPU array; ``cuda_ipc`` exports them by reference.
             runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
                 For example, `{"profiling": True}` enables profiling.
             stream_logs: If True, stream logs to stdout while endpoints run.
@@ -346,7 +357,11 @@ class Tesseract:
             update_config(output_path=str(resolved_output_path))
 
         # Apply runtime_config options
-        config_kwargs: dict[str, Any] = {"output_format": output_format, "debug": True}
+        config_kwargs: dict[str, Any] = {
+            "output_format": output_format,
+            "gpu_transport": gpu_transport,
+            "debug": True,
+        }
         if runtime_config is not None:
             config_kwargs.update(runtime_config)
         update_config(**config_kwargs)
@@ -413,10 +428,13 @@ class Tesseract:
         output_path = self._spawn_config.get("output_path")
         input_path = self._spawn_config.get("input_path")
         output_format = self._spawn_config.get("output_format", "json+base64")
-        # The served container's gpu_transport (set via runtime_config) also
-        # governs how the client exports GPU *inputs*, so mirror it here.
+        # The served container's gpu_transport also governs how the client
+        # exports GPU *inputs*, so mirror it onto the client here. The dedicated
+        # kwarg takes precedence over a value passed through runtime_config.
         runtime_config = self._spawn_config.get("runtime_config") or {}
-        gpu_transport = runtime_config.get("gpu_transport", "none")
+        gpu_transport = self._spawn_config.get("gpu_transport") or runtime_config.get(
+            "gpu_transport", "none"
+        )
         self._client = HTTPClient(
             f"http://{host_ip}:{container.host_port}",
             output_path=Path(output_path) if output_path else None,

@@ -926,6 +926,7 @@ def serve(
     input_path: str | Path | None = None,
     output_path: str | Path | None = None,
     output_format: OutputFormat | None = None,
+    gpu_transport: str | None = None,
     docker_args: list[str] | None = None,
     runtime_config: dict[str, Any] | None = None,
     skip_health_check: bool = False,
@@ -954,6 +955,9 @@ def serve(
         input_path: Input path to read input files from, such as local directory or S3 URI.
         output_path: Output path to write output files to, such as local directory or S3 URI.
         output_format: Output format to use for the results.
+        gpu_transport: How GPU arrays leave the container. ``none`` (default) copies
+            them to the host and serializes them via ``output_format``; ``cuda_ipc``
+            exports them by reference (requires ``gpus`` and a shared IPC namespace).
         docker_args: Additional arguments to pass to the container runtime (e.g., Docker).
         runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
             These are converted to TESSERACT_* environment variables. For example,
@@ -1010,6 +1014,12 @@ def serve(
 
     if output_format:
         environment["TESSERACT_OUTPUT_FORMAT"] = output_format
+
+    # The gpu_transport kwarg is the canonical way to select a transport and
+    # wins over any gpu_transport passed through runtime_config, so it is applied
+    # after the runtime_config conversion.
+    if gpu_transport:
+        environment["TESSERACT_GPU_TRANSPORT"] = gpu_transport
 
     # Read after runtime_config lands in the environment, which is how the SDK
     # passes it. Only a port the caller asked for needs checking afterwards; the

@@ -29,9 +29,13 @@ supported_format_type = Literal["json", "json+base64", "json+binref"]
 # to the host and encoded via the output format). Any other value exports device
 # memory by reference and is an experimental, opt-in capability (see
 # available_gpu_transports).
-# The default is the string ``"none"`` rather than ``None`` so that "no
-# by-reference transport" is an explicit configured value, not an unset field
-# waiting for a default. A GPU array under ``"none"`` is copied to the host.
+#
+# The disabled state is the explicit string ``"none"`` rather than ``None``.
+# ``None`` would read as an unset field waiting for a default and invite
+# fall-through, whereas ``"none"`` says no by-reference transport is available,
+# so a GPU array must be copied to the host. Keeping it a plain ``str`` also
+# lets the value flow through configs, env vars, and Accept headers without a
+# None/str special case at every hop.
 gpu_transport_type = Literal["none", "cuda_ipc"]
 
 # Every output format is always available (none of them are experimental).
