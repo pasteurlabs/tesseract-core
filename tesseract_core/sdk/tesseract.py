@@ -26,6 +26,7 @@ from pydantic_core import InitErrorDetails, PydanticCustomError, from_json
 
 from . import engine
 from .binref import (
+    REF_OBJECT_TYPE,
     SUPPORTS_BINREF_POOL,
     BinrefSlot,
     BinrefWritePool,
@@ -1104,19 +1105,44 @@ class HTTPClient:
             # where several arrays share one file at different offsets.
             mapped_paths: list[Path] = []
 
-            def decode_with_path(arr: dict) -> np.ndarray | IpcDeviceArray:
+            def decode_leaf(leaf: dict) -> Any:
+                if leaf.get("object_type") == REF_OBJECT_TYPE:
+                    return decode_ref(leaf)
                 return _decode_array(
-                    arr,
+                    leaf,
                     output_path=self._output_path,
                     lazy=lazy,
                     mapped_paths=mapped_paths,
                 )
 
-            data = _tree_map(
-                decode_with_path,
-                data,
-                is_leaf=lambda x: type(x) is dict and "shape" in x,
-            )
+            def decode_ref(ref: dict) -> Any:
+                """Load a sidecar JSON file and decode the arrays inside it.
+
+                Sidecar paths are relative to the output path, same as binref
+                buffers. Refs may nest, so the loaded contents go back through
+                the same tree walk.
+                """
+                if self._output_path is None:
+                    raise ValueError(
+                        f"Cannot resolve reference {ref['path']!r}: no output_path is set. "
+                        "Pass output_path when creating the Tesseract."
+                    )
+                full_path = Path(self._output_path) / ref["path"]
+                if not full_path.exists():
+                    raise ValueError(
+                        f"Referenced file not found: {full_path}. "
+                        "Make sure output_path points at the Tesseract's output directory."
+                    )
+                with open(full_path, "rb") as f:
+                    contents = orjson.loads(f.read())
+                return _tree_map(decode_leaf, contents, is_leaf=is_encoded_leaf)
+
+            def is_encoded_leaf(x: Any) -> bool:
+                return type(x) is dict and (
+                    "shape" in x or x.get("object_type") == REF_OBJECT_TYPE
+                )
+
+            data = _tree_map(decode_leaf, data, is_leaf=is_encoded_leaf)
 
             for path in set(mapped_paths):
                 path.unlink(missing_ok=True)

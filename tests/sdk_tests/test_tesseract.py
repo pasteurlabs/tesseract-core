@@ -1029,3 +1029,67 @@ def test_HTTPClient_timeout_fires(free_port):
         shutdown.set()
         httpd.shutdown()
         server_thread.join(timeout=5)
+
+
+def test_HTTPClient_follows_refs(mocker, tmp_path):
+    """Encoded refs are resolved client-side, so callers get decoded models back.
+
+    The client has no access to the Tesseract's schema, so it recognises a ref
+    by its ``object_type`` marker, exactly as it recognises encoded arrays.
+    The response payload here is produced by the real runtime serializer.
+    """
+    import numpy as np
+    from pydantic import BaseModel
+
+    from tesseract_core.runtime import Array, Differentiable, Float32, Float64
+    from tesseract_core.runtime.experimental import Ref
+    from tesseract_core.runtime.file_interactions import output_to_bytes
+
+    class Frame(BaseModel):
+        name: str
+        displacement: Differentiable[Array[(None, 3), Float32]]
+        pressure: Differentiable[Array[(None,), Float64]]
+
+        def __ref_name__(self) -> str:
+            return self.name
+
+    class OutputSchema(BaseModel):
+        frames: list[Ref[Frame]]
+
+    outputs = OutputSchema(
+        frames=[
+            Frame(
+                name=f"frame_{i}",
+                displacement=np.full((2, 3), float(i), dtype="float32"),
+                pressure=np.arange(2, dtype="float64") + i,
+            )
+            for i in range(2)
+        ]
+    )
+    content = output_to_bytes(outputs, "json+binref", base_dir=tmp_path)
+    assert b'"object_type":"ref"' in content
+
+    mock_response = mocker.Mock()
+    mock_response.content = content
+    mock_response.ok = True
+    mock_response.status_code = 200
+    mocker.patch("requests.Session.request", return_value=mock_response)
+
+    client = HTTPClient("somehost", output_path=tmp_path, output_format="json+binref")
+    out = client.run_tesseract("apply", {"inputs": {}})
+
+    assert [frame["name"] for frame in out["frames"]] == ["frame_0", "frame_1"]
+    np.testing.assert_allclose(out["frames"][1]["displacement"], np.ones((2, 3)))
+    np.testing.assert_allclose(out["frames"][1]["pressure"], [1.0, 2.0])
+
+
+def test_HTTPClient_ref_without_output_path_is_rejected(mocker):
+    mock_response = mocker.Mock()
+    mock_response.content = b'{"frames": [{"object_type": "ref", "path": "a.json"}]}'
+    mock_response.ok = True
+    mock_response.status_code = 200
+    mocker.patch("requests.Session.request", return_value=mock_response)
+
+    client = HTTPClient("somehost")
+    with pytest.raises(ValueError, match="no output_path is set"):
+        client.run_tesseract("apply", {"inputs": {}})

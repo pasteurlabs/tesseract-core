@@ -17,6 +17,7 @@ duplicated shape / dtype declarations.
 """
 
 import re
+from collections.abc import Mapping
 from typing import Annotated, Any, TypeVar
 from uuid import uuid4
 
@@ -33,9 +34,32 @@ from tesseract_core.runtime.file_interactions import (
 
 T = TypeVar("T")
 
+#: Discriminator marking an encoded ref, mirroring ``object_type: "array"`` on
+#: encoded arrays. Clients that decode responses without access to the
+#: Tesseract's schema (e.g. the SDK's HTTPClient) rely on it to tell a ref
+#: apart from an ordinary string or object field.
+REF_OBJECT_TYPE = "ref"
+
 # Filenames derived from user data are restricted to a conservative charset so
 # a stem can never escape the output directory or collide with a .bin file.
 _SAFE_STEM = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+def _as_ref_path(value: Any) -> str | None:
+    """Return the referenced path if ``value`` encodes a ref, else None.
+
+    Accepts the encoded form ``{"object_type": "ref", "path": ...}`` as well as
+    a bare path string, so payloads hand-written against the output directory
+    keep working.
+    """
+    if isinstance(value, str):
+        return value
+    if isinstance(value, Mapping) and value.get("object_type") == REF_OBJECT_TYPE:
+        path = value.get("path")
+        if not isinstance(path, str):
+            raise ValueError(f"Ref marker must carry a string 'path', got {path!r}.")
+        return path
+    return None
 
 
 def _ref_filename(value: Any, context: dict) -> str:
@@ -85,17 +109,18 @@ class PydanticRefAnnotation:
 
         def load(value: Any, info: Any) -> Any:
             context = info.context or {}
-            if not isinstance(value, str):
+            relpath = _as_ref_path(value)
+            if relpath is None:
                 # Inline object -- validate it directly.
                 return adapter.validator.validate_python(value, context=context)
 
             base_dir = context.get("base_dir")
             if base_dir is None:
                 raise ValueError(
-                    f"Ref {value!r} is a relative path but no base_dir is set. "
+                    f"Ref {relpath!r} is a relative path but no base_dir is set. "
                     "Invoke the Tesseract with an input / output path set."
                 )
-            payload = orjson.loads(read_from_path(join_paths(base_dir, value)))
+            payload = orjson.loads(read_from_path(join_paths(base_dir, relpath)))
             # Keep base_dir unchanged so binrefs *inside* the sidecar, which are
             # written relative to the same base_dir, still resolve.
             return adapter.validator.validate_python(payload, context=context)
@@ -118,7 +143,7 @@ class PydanticRefAnnotation:
             filename = _ref_filename(value, context)
             relpath = join_paths(subdir, filename) if subdir else filename
             write_to_path(orjson.dumps(payload), join_paths(base_dir, relpath))
-            return relpath
+            return {"object_type": REF_OBJECT_TYPE, "path": relpath}
 
         schema = core_schema.with_info_plain_validator_function(
             load,
@@ -139,9 +164,17 @@ class PydanticRefAnnotation:
         return {
             "oneOf": [
                 {
-                    "type": "string",
-                    "format": "path",
-                    "description": "Relative path to a JSON file holding this object.",
+                    "type": "object",
+                    "description": (
+                        "Reference to a JSON file holding this object, relative to the "
+                        "Tesseract's output path."
+                    ),
+                    "properties": {
+                        "object_type": {"const": REF_OBJECT_TYPE},
+                        "path": {"type": "string", "format": "path"},
+                    },
+                    "required": ["object_type", "path"],
+                    "additionalProperties": False,
                 },
                 inline,
             ]

@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from tesseract_core.runtime import Array, Differentiable, Float32, Float64
 from tesseract_core.runtime.experimental import LazySequence, Ref
+from tesseract_core.runtime.experimental.refs import REF_OBJECT_TYPE
 from tesseract_core.runtime.file_interactions import output_to_bytes
 from tesseract_core.runtime.schema_generation import (
     create_abstract_eval_schema,
@@ -54,7 +55,12 @@ def test_binref_writes_sidecars_and_emits_paths(tmp_path):
     payload = json.loads(
         output_to_bytes(make_output(), "json+binref", base_dir=tmp_path)
     )
-    assert payload == {"result": ["frame_0.json", "frame_1.json", "frame_2.json"]}
+    assert payload == {
+        "result": [
+            {"object_type": REF_OBJECT_TYPE, "path": f"frame_{i}.json"}
+            for i in range(3)
+        ]
+    }
 
     sidecar = json.loads((tmp_path / "frame_1.json").read_text())
     assert sidecar["name"] == "frame_1"
@@ -75,7 +81,9 @@ def test_binref_dir_keeps_sidecars_next_to_buffers(tmp_path):
             make_output(1), "json+binref", base_dir=tmp_path, binref_dir="sub"
         )
     )
-    assert payload == {"result": ["sub/frame_0.json"]}
+    assert payload == {
+        "result": [{"object_type": REF_OBJECT_TYPE, "path": "sub/frame_0.json"}]
+    }
     assert (tmp_path / "sub" / "frame_0.json").exists()
 
     sidecar = json.loads((tmp_path / "sub" / "frame_0.json").read_text())
@@ -103,6 +111,15 @@ def test_roundtrip_through_sidecars(tmp_path):
     for got, want in zip(restored.result, original.result, strict=True):
         np.testing.assert_allclose(got.displacement, want.displacement)
         np.testing.assert_allclose(got.pressure, want.pressure)
+
+
+def test_validate_accepts_bare_path_strings(tmp_path):
+    """Hand-written payloads that just name the file keep working."""
+    output_to_bytes(make_output(1), "json+binref", base_dir=tmp_path)
+    restored = OutputSchema.model_validate(
+        {"result": ["frame_0.json"]}, context={"base_dir": str(tmp_path)}
+    )
+    assert restored.result[0].name == "frame_0"
 
 
 def test_validate_accepts_inline_objects():
@@ -165,8 +182,9 @@ def test_uuid_names_by_default(tmp_path):
     payload = json.loads(
         output_to_bytes(AnonOutput(result=[anon]), "json+binref", base_dir=tmp_path)
     )
-    (name,) = payload["result"]
-    assert name.endswith(".json") and name != "frame_0.json"
+    (ref,) = payload["result"]
+    assert ref["object_type"] == REF_OBJECT_TYPE
+    assert ref["path"].endswith(".json") and ref["path"] != "frame_0.json"
 
 
 # ---------------------------------------------------------------------------
@@ -279,7 +297,13 @@ def test_refs_are_written_over_http(tmp_path, monkeypatch):
         )
         assert response.status_code == 200, response.text
         assert response.json() == {
-            "result": ["run_test_refs/frame_0.json", "run_test_refs/frame_1.json"]
+            "result": [
+                {
+                    "object_type": REF_OBJECT_TYPE,
+                    "path": f"run_test_refs/frame_{i}.json",
+                }
+                for i in range(2)
+            ]
         }
 
         rundir = tmp_path / "run_test_refs"

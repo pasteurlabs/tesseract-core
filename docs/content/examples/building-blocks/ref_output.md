@@ -40,8 +40,18 @@ tesseract-runtime \
 ```
 
 ```json
-{ "frames": ["frame_000.json", "frame_001.json", "frame_002.json"] }
+{
+  "frames": [
+    { "object_type": "ref", "path": "frame_000.json" },
+    { "object_type": "ref", "path": "frame_001.json" },
+    { "object_type": "ref", "path": "frame_002.json" }
+  ]
+}
 ```
+
+Each entry is self-describing, in the same way an encoded array carries
+`"object_type": "array"`. That is what lets a client resolve refs without
+knowing the Tesseract's schema (see [Reading refs back](#reading-refs-back)).
 
 ```
 output/
@@ -74,10 +84,15 @@ the shared buffer:
 
 ## When refs are written
 
-`Ref` writes a sidecar only when the serialization context carries a
-`base_dir`, which is what `json+binref` sets. With the `json` and
-`json+base64` formats there is nowhere to write, so refs are serialized
-**inline** and the same Tesseract keeps working over plain HTTP:
+Whether refs become files depends on the **output format**, not on the
+transport: `Ref` writes a sidecar when the serialization context carries a
+`base_dir`, which is what `json+binref` sets. That applies over HTTP too — a
+served Tesseract writes sidecars into its per-request `run_<id>/` directory
+under `--output-path`, next to the `.bin` buffer they point into.
+
+With the `json` and `json+base64` formats there is no output directory to
+write to, so refs are serialized **inline** and the same Tesseract still
+returns a self-contained response:
 
 ```bash
 tesseract-runtime apply '{"inputs": {"scale": 2.0, "n_nodes": 2, "n_frames": 1}}'
@@ -88,9 +103,28 @@ tesseract-runtime apply '{"inputs": {"scale": 2.0, "n_nodes": 2, "n_frames": 1}}
 ```
 
 Validation accepts both forms, so a payload produced either way can be read
-back. A path is resolved against `base_dir`, the file is read, and the wrapped
+back. A ref is resolved against `base_dir`, the file is read, and the wrapped
 model's own validators run on its contents — array shapes and dtypes inside a
-sidecar are checked exactly as they would be inline.
+sidecar are checked exactly as they would be inline. A bare path string is
+accepted too, so hand-written payloads that just name the file keep working.
+
+## Reading refs back
+
+The Python SDK resolves refs for you, provided it knows where the output
+directory is:
+
+```python
+tess = Tesseract.from_image("ref_output", output_path="./output",
+                            output_format="json+binref")
+out = tess.apply({"scale": 2.0, "n_nodes": 2, "n_frames": 2})
+
+out["frames"][1]["displacement"]   # -> np.ndarray, loaded from the sidecar
+```
+
+The client has no access to your `OutputSchema`, so it recognises a ref by its
+`object_type` marker — exactly how it recognises encoded arrays — loads the
+sidecar, and decodes the arrays inside it (including nested refs). Without an
+`output_path` it raises rather than handing back an unresolvable path.
 
 ## Naming sidecar files
 
