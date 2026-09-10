@@ -21,8 +21,7 @@ PathLike = str | Path
 #
 # They compose freely: a response can inline its CPU arrays as JSON while
 # handing its GPU arrays out as ``cuda_ipc`` handles. The two are set
-# independently (``output_format`` + ``gpu_transport`` config), so there is no
-# combined ``json+cuda_ipc`` format string -- that conflated the two axes.
+# independently, via the ``output_format`` and ``gpu_transport`` config.
 supported_format_type = Literal["json", "json+base64", "json+binref"]
 
 # GPU transports. ``none`` is the always-available default (GPU output is copied
@@ -30,12 +29,9 @@ supported_format_type = Literal["json", "json+base64", "json+binref"]
 # memory by reference and is an experimental, opt-in capability (see
 # available_gpu_transports).
 #
-# The disabled state is the explicit string ``"none"`` rather than ``None``.
-# ``None`` would read as an unset field waiting for a default and invite
-# fall-through, whereas ``"none"`` says no by-reference transport is available,
-# so a GPU array must be copied to the host. Keeping it a plain ``str`` also
-# lets the value flow through configs, env vars, and Accept headers without a
-# None/str special case at every hop.
+# The disabled state is the explicit string ``"none"`` rather than ``None``, so
+# the value stays a plain ``str`` as it flows through configs, env vars, and
+# Accept headers without a None/str special case at every hop.
 gpu_transport_type = Literal["none", "cuda_ipc"]
 
 # Every output format is always available (none of them are experimental).

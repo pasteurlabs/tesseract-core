@@ -199,11 +199,9 @@ class Tesseract:
             gpu_transport: How GPU arrays leave the process, independently of ``output_format``
                 (which governs CPU arrays). ``none`` copies GPU arrays to the host and
                 serializes them like any CPU array; ``cuda_ipc`` exports them by reference
-                and requires the container to have GPU access. An explicit value (including
-                ``none``) wins over a ``gpu_transport`` in ``runtime_config``; leaving it
-                unset (``None``) defers to ``runtime_config``, falling back to ``none`` when
-                neither sets it. This value also governs how the client exports GPU *inputs*
-                to the served Tesseract.
+                and requires the container to have GPU access. Resolved against
+                ``runtime_config`` with the precedence described in ``engine.serve``. This
+                value also governs how the client exports GPU *inputs* to the served Tesseract.
             docker_args: Additional arguments to pass to the container runtime (e.g., Docker).
             runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
                 These are converted to TESSERACT_* environment variables. For example,
@@ -325,9 +323,8 @@ class Tesseract:
             gpu_transport: How GPU arrays leave the process, independently of ``output_format``
                 (which governs CPU arrays). ``none`` copies GPU arrays to the host and
                 serializes them like any CPU array; ``cuda_ipc`` exports them by reference.
-                An explicit value (including ``none``) wins over a ``gpu_transport`` in
-                ``runtime_config``; leaving it unset (``None``) defers to ``runtime_config``,
-                falling back to ``none`` when neither sets it.
+                Resolved against ``runtime_config`` with the precedence described in
+                ``engine.serve``.
             runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
                 For example, `{"profiling": True}` enables profiling.
             stream_logs: If True, stream logs to stdout while endpoints run.
@@ -363,10 +360,9 @@ class Tesseract:
             update_config(output_path=str(resolved_output_path))
 
         # Apply runtime_config options. Resolve the GPU transport with the same
-        # precedence as serve(): an explicit kwarg (including "none") wins over a
-        # value in runtime_config, an unset kwarg (None) defers to runtime_config,
-        # and "none" is the fallback when neither sets it. Resolve it here so the
-        # config never receives None (its field is a plain str literal).
+        # precedence as serve() (explicit kwarg > runtime_config > "none"),
+        # resolving it here so the config never receives None -- its field is a
+        # plain str literal.
         config_kwargs: dict[str, Any] = {
             "output_format": output_format,
             "debug": True,

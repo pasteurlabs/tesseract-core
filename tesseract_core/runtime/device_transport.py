@@ -11,26 +11,22 @@ interface they share so further transports (VMM-fd map-and-read, and later
 cross-host NCCL/NIXL) slot in behind one dispatch path instead of each bolting a
 new encoder, wire format, and release hook onto the runtime.
 
-The interface deliberately mirrors the lifecycle the ``cuda_ipc`` code already
-follows, so wrapping it changes no behavior:
+The interface follows the lifecycle the ``cuda_ipc`` code already uses:
 
 * :meth:`DeviceTransport.register` -- encode side: pin the source array and
-  return an opaque per-array handle (the analog of ``dump_*_arraydict``).
+  return an opaque per-array handle.
 * :meth:`DeviceTransport.descriptor` -- turn that handle into the array dict
   whose ``data.buffer`` field carries the wire string.
 * :meth:`DeviceTransport.flush` -- post any pending transfers. A no-op for
   receiver-driven transports like ``cuda_ipc`` (the consumer pulls); the seam
-  where a push transport (NCCL) posts its matched sends.
+  where a push transport posts its matched sends.
 * :meth:`DeviceTransport.receive` -- decode side: materialise the array into a
-  fresh, consumer-owned buffer (the analog of ``load_*_arraydict``). Returns the
-  framework-agnostic wrapper the consumer adopts.
+  fresh, consumer-owned buffer and return it as a framework-agnostic wrapper.
 * :meth:`DeviceTransport.bootstrap` -- establish any shared state a handshake
-  transport needs before transferring. This is the one axis genuinely new versus
-  ``cuda_ipc``: transports needing a handshake (a shared communicator, a socket
-  for fd passing) establish it here; ``cuda_ipc``'s inert handle needs none, so
-  its bootstrap is a no-op.
+  transport needs before transferring (a shared communicator, a socket for fd
+  passing). A no-op for ``cuda_ipc``, whose handle needs no handshake.
 * :meth:`DeviceTransport.release` -- drop the producer-side pins once the borrow
-  is provably done.
+  is done.
 """
 
 from __future__ import annotations
@@ -133,13 +129,11 @@ def get_transport(name: str) -> DeviceTransport:
 def available_transports() -> tuple[str, ...]:
     """Names of transports currently registered in this process.
 
-    accept: registration says the code exists, whereas whether a transport may be
-    used is gated separately (a by-reference transport such as ``cuda_ipc`` is
-    only offered when the runtime is configured with a non-``none``
-    ``gpu_transport``; see
-    :func:`tesseract_core.runtime.file_interactions.available_gpu_transports`). A
-    caller deciding what to offer a client -- a transport-negotiation endpoint,
-    say -- must apply that gating itself and not treat this list as the enabled
-    set.
+    Registration says the code exists, not that a transport may be used: that is
+    gated separately (a by-reference transport such as ``cuda_ipc`` is only
+    offered when the runtime is configured with a non-``none`` ``gpu_transport``;
+    see :func:`tesseract_core.runtime.file_interactions.available_gpu_transports`).
+    A caller deciding what to offer a client must apply that gating itself and
+    not treat this list as the enabled set.
     """
     return tuple(sorted(_TRANSPORTS))
