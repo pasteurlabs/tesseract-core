@@ -1,8 +1,6 @@
 name: Auto update uv in Dockerfile
 
 on:
-  pull_request:
-
   workflow_dispatch: # Allows manual trigger
 
   schedule:
@@ -36,12 +34,12 @@ jobs:
         id: compare-and-update
         if: steps.latest.outputs.uv-version != steps.current.outputs.uv-version
         env:
-            NEW_VERSION: ${{ steps.latest.outputs.uv-version }}
+          NEW_VERSION: ${{ steps.latest.outputs.uv-version }}
         run: |
           sed -i "s/^\(ARG UV_VERSION=\).*/\1${NEW_VERSION}/" ${DOCKERFILE_PATH}
           RETURN_CODE=$?
           if [ ${RETURN_CODE} -eq 0 ]; then
-            echo "Successfully update uv version"
+            echo "Successfully updated uv version"
             echo "updated=true" >> ${GITHUB_OUTPUT}
           else
             echo "Failed to update uv version"
