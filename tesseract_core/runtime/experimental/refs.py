@@ -19,7 +19,6 @@ duplicated shape / dtype declarations.
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Annotated, Any, TypeVar
 from uuid import uuid4
 
@@ -29,8 +28,8 @@ from pydantic.json_schema import JsonSchemaValue
 from pydantic_core import core_schema
 
 from tesseract_core.runtime.file_interactions import (
-    PathLike,
     join_paths,
+    posix_join,
     read_from_path,
     write_to_path,
 )
@@ -63,19 +62,6 @@ def _as_ref_path(value: Any) -> str | None:
             raise ValueError(f"Ref marker must carry a string 'path', got {path!r}.")
         return path
     return None
-
-
-def _posix_join(subdir: PathLike | None, filename: str) -> str:
-    """Join a sidecar path for the wire, always with forward slashes.
-
-    The emitted path travels in the response and is resolved by whoever reads
-    it, which may not be on the same OS as the Tesseract. ``join_paths`` uses
-    :class:`pathlib.Path`, so it would produce backslashes when the runtime
-    happens to run natively on Windows.
-    """
-    if not subdir:
-        return filename
-    return "/".join((*Path(subdir).parts, filename))
 
 
 def _ref_prefix(value: Any, prefix: str | None) -> str | None:
@@ -184,7 +170,7 @@ class PydanticRefAnnotation:
             # inside them resolve against the same base_dir.
             subdir = context.get("binref_dir")
             filename = _ref_filename(value, prefix, context)
-            relpath = _posix_join(subdir, filename)
+            relpath = posix_join(subdir, filename)
             write_to_path(orjson.dumps(payload), join_paths(base_dir, relpath))
             return {"object_type": REF_OBJECT_TYPE, "path": relpath}
 

@@ -79,6 +79,20 @@ def output_to_bytes(
     return orjson.dumps(python_dict)
 
 
+def posix_join(subdir: PathLike | None, name: str) -> str:
+    """Join a relative path for the wire, always with forward slashes.
+
+    Paths that travel inside a payload (binref buffers, Ref sidecars) are
+    resolved by whoever reads them, which may not be on the same OS as the
+    Tesseract that wrote them. :func:`join_paths` goes through
+    :class:`pathlib.Path` and so yields backslashes when the runtime runs
+    natively on Windows. Readers accept forward slashes on every platform.
+    """
+    if not subdir:
+        return name
+    return "/".join((*Path(subdir).parts, name))
+
+
 def read_from_path(path: PathLike, offset: int = 0, length: int = -1) -> bytes:
     """Read the contents of the given path as bytes.
 

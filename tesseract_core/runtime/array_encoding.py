@@ -28,6 +28,7 @@ from tesseract_core.runtime.file_interactions import (
     is_absolute_path,
     is_url,
     join_paths,
+    posix_join,
     read_from_path,
     write_to_path,
 )
@@ -282,9 +283,10 @@ def _dump_binref_arraydict(
     compression: str | None = None,
 ) -> tuple[ArrayDict, str]:
     """Dump array to json+binref encoded array dict."""
-    target_name = f"{current_binref_uuid}.bin"
-    if subdir is not None:
-        target_name = join_paths(subdir, target_name)
+    # target_name goes into the emitted buffer spec, so it must be POSIX even
+    # when the runtime runs natively on Windows; join_paths handles the
+    # forward slashes fine when resolving it against base_dir.
+    target_name = posix_join(subdir, f"{current_binref_uuid}.bin")
     target_path = join_paths(base_dir, target_name)
 
     current_size = get_filesize(target_path)
@@ -293,9 +295,7 @@ def _dump_binref_arraydict(
     if current_size > max_file_size:
         current_size = 0
         current_binref_uuid = str(uuid4())
-        target_name = f"{current_binref_uuid}.bin"
-        if subdir is not None:
-            target_name = join_paths(subdir, target_name)
+        target_name = posix_join(subdir, f"{current_binref_uuid}.bin")
         target_path = join_paths(base_dir, target_name)
 
     blob = _compress(_fast_tobytes(arr), compression)

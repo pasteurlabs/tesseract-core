@@ -359,7 +359,7 @@ def test_ref_paths_are_posix_regardless_of_host(tmp_path):
     A Tesseract may serve from a different OS than the client that resolves
     the path, and join_paths() goes through pathlib.
     """
-    from tesseract_core.runtime.experimental.refs import _posix_join
+    from tesseract_core.runtime.file_interactions import posix_join
 
     payload = json.loads(
         output_to_bytes(
@@ -371,4 +371,4 @@ def test_ref_paths_are_posix_regardless_of_host(tmp_path):
     assert not any("\\" in path for path in paths)
 
     # a subdir that already arrived with native separators is normalised too
-    assert _posix_join(Path("run_1") / "inner", "f.json") == "run_1/inner/f.json"
+    assert posix_join(Path("run_1") / "inner", "f.json") == "run_1/inner/f.json"
