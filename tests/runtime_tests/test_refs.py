@@ -31,7 +31,7 @@ class Frame(BaseModel):
 
 
 class InputSchema(BaseModel):
-    scale: Differentiable[Array[(), Float32]]
+    scale: Differentiable[Array[(), Float32]] = 1.0
 
 
 class OutputSchema(BaseModel):
@@ -240,3 +240,57 @@ def test_composes_with_lazy_sequence():
         }
     )
     assert restored.result[0].name == "a"
+
+
+# ---------------------------------------------------------------------------
+# Refs over HTTP
+# ---------------------------------------------------------------------------
+
+
+def test_refs_are_written_over_http(tmp_path, monkeypatch):
+    """A served Tesseract must write sidecars into the output path, not inline them.
+
+    serve.create_response always passes base_dir=config.output_path and
+    binref_dir=run_<id>, so refs land in the per-request run directory next to
+    the .bin buffer they point into.
+    """
+    import sys
+    import types
+
+    from fastapi.testclient import TestClient
+
+    from tesseract_core.runtime.config import update_config
+    from tesseract_core.runtime.serve import create_rest_api
+
+    module = types.ModuleType("ref_api")
+    module.InputSchema = InputSchema
+    module.OutputSchema = OutputSchema
+    module.apply = lambda inputs: OutputSchema(result=[make_frame(i) for i in range(2)])
+    monkeypatch.setitem(sys.modules, "ref_api", module)
+
+    update_config(output_path=str(tmp_path))
+    try:
+        client = TestClient(create_rest_api(module))
+        response = client.post(
+            "/apply",
+            json={"inputs": {"scale": 1.0}},
+            headers={"Accept": "application/json+binref"},
+            params={"run_id": "test_refs"},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json() == {
+            "result": ["run_test_refs/frame_0.json", "run_test_refs/frame_1.json"]
+        }
+
+        rundir = tmp_path / "run_test_refs"
+        assert (rundir / "frame_0.json").exists()
+        # one shared buffer for the arrays of both sidecars
+        assert len(list(rundir.glob("*.bin"))) == 1
+
+        # the response round-trips against the output path
+        restored = OutputSchema.model_validate(
+            response.json(), context={"base_dir": str(tmp_path)}
+        )
+        np.testing.assert_allclose(restored.result[1].displacement, np.ones((2, 3)))
+    finally:
+        update_config()
