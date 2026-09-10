@@ -18,8 +18,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
-        with:
-          ref: main
 
         # after this step runs it provides `uv-version` as an output
       - name: Install uv
