@@ -170,24 +170,27 @@ def test_tarball_install(cli_runner, dummy_tesseract_package, docker_cleanup):
     docker_cleanup["images"].append(img_tag)
 
 
-def test_build_inherit_base_image_packages_with_uv_system_python(
+def test_build_inherit_base_image_packages_with_uv_config(
     cli_runner, docker_client, dummy_tesseract_package, docker_cleanup, tmp_path
 ):
-    """inherit_base_image_packages must work when the base image sets UV_SYSTEM_PYTHON.
+    """inherit_base_image_packages must work despite base-image uv configuration.
 
-    Regression test for #747: NVIDIA NGC base images set UV_SYSTEM_PYTHON=1 and
-    UV_BREAK_SYSTEM_PACKAGES=1, which make ``uv pip install`` ignore the active
-    /python-env venv and install into the base image's system site-packages. The
-    run stage only copies /python-env, so the runtime (and everything else) ends
-    up missing and the build fails at the ``tesseract-runtime check`` step.
+    Regression test for #747: base images can redirect ``uv pip install`` away
+    from the active /python-env venv (into the system Python) through two
+    independent channels, and the build copies only /python-env into the run
+    stage, so a redirected install drops the runtime and the build fails at the
+    ``tesseract-runtime check`` step. The mock base image below exercises both:
 
-    We build a small mock base image that mimics NGC: it sets those two env vars
-    and pre-installs a distinctive package (``cowsay``) into the system Python.
-    Building a Tesseract on top with ``inherit_base_image_packages: true`` must
-    succeed, and both the inherited package and the runtime must be importable
-    from /python-env in the final image.
+    * environment variables — NVIDIA NGC images set UV_SYSTEM_PYTHON=1 and
+      UV_BREAK_SYSTEM_PACKAGES=1;
+    * a system-wide config file — /etc/uv/uv.toml with ``[pip] system = true``.
+
+    It also pre-installs a distinctive package (``cowsay``) into the system
+    Python. Building a Tesseract on top with ``inherit_base_image_packages:
+    true`` must succeed, and both the inherited package and the runtime must be
+    importable from /python-env in the final image.
     """
-    base_image_tag = "tesseract-test-uv-system-python-base:latest"
+    base_image_tag = "tesseract-test-uv-config-base:latest"
     dockerfile = tmp_path / "Dockerfile.base"
     dockerfile.write_text(
         dedent(
@@ -195,6 +198,7 @@ def test_build_inherit_base_image_packages_with_uv_system_python(
             FROM python:3.12-slim
             ENV UV_SYSTEM_PYTHON=1
             ENV UV_BREAK_SYSTEM_PACKAGES=1
+            RUN mkdir -p /etc/uv && printf '[pip]\\nsystem = true\\n' > /etc/uv/uv.toml
             RUN pip install --no-cache-dir cowsay==6.1
             """
         )

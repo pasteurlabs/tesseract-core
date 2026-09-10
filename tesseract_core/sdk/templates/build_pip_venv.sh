@@ -5,6 +5,26 @@
 
 set -e  # Exit immediately if a command exits with a non-zero status
 
+# Neutralize uv configuration inherited from the base image so that every `uv`
+# command below installs into /python-env, which is the only thing the run stage
+# copies. A base image can redirect installs (e.g. into the system Python) via
+# two independent channels, each needing its own guard:
+#
+#   1. Environment variables that redirect installs or the target interpreter.
+#      NVIDIA NGC images, for instance, set UV_SYSTEM_PYTHON=1 and
+#      UV_BREAK_SYSTEM_PACKAGES=1. Setting these while building a dedicated venv
+#      is always self-defeating, so we unconditionally unset them. (An empty
+#      value is not enough: uv rejects e.g. UV_SYSTEM_PYTHON="" as an invalid
+#      boolean, so the variable must be fully unset.)
+#
+#   2. Config files (/etc/uv/uv.toml, $XDG_CONFIG_DIRS, ~/.config/uv/uv.toml,
+#      ...), which UV_NO_CONFIG ignores. Unlike the vars above, pointing uv at a
+#      config file can be legitimate, so we only default UV_NO_CONFIG on when the
+#      user has not set it themselves via build_config.build_env (which lands in
+#      the environment before this script runs).
+unset UV_SYSTEM_PYTHON UV_BREAK_SYSTEM_PACKAGES UV_PYTHON UV_PROJECT_ENVIRONMENT
+export UV_NO_CONFIG="${UV_NO_CONFIG:-1}"
+
 # python_version and inherit_base_image_packages are mutually exclusive (enforced
 # at config validation time), so at most one of these branches sets venv options.
 if [ -n "${TESSERACT_PYTHON_VERSION:-}" ]; then
@@ -16,12 +36,6 @@ else
     uv venv /python-env
 fi
 source /python-env/bin/activate
-
-# Some base images (e.g. NVIDIA NGC) set UV_SYSTEM_PYTHON=1 and
-# UV_BREAK_SYSTEM_PACKAGES=1 in their environment. These make `uv pip install`
-# ignore the active venv and install into the base image's system site-packages,
-# which the run stage never copies. Unset them so installs land in /python-env.
-unset UV_SYSTEM_PYTHON UV_BREAK_SYSTEM_PACKAGES
 
 # Set up host credentials (netrc + git-credentials) for authenticated indices,
 # direct-reference wheels, and git+https dependencies. No-op if none declared.
