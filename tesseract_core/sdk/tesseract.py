@@ -940,7 +940,23 @@ def _decode_array(
         # __cuda_array_interface__ and __dlpack__ so Torch/JAX/CuPy can adopt it
         # zero-copy. The server may reuse/free the exported buffer as soon as
         # this returns (it holds it until the next request).
-        return _import_cuda_ipc().load_cuda_ipc_arraydict(encoded_arr)
+        #
+        # cuda_ipc is strictly opt-in, so reaching here means the caller asked
+        # for it. If this client has no usable CUDA context (no driver, no
+        # visible/matching device, or the runtime extra not installed) it cannot
+        # open the handle, so translate the low-level failure into an actionable
+        # message rather than a bare CUDA/import error deep in the decode.
+        try:
+            return _import_cuda_ipc().load_cuda_ipc_arraydict(encoded_arr)
+        except Exception as exc:
+            raise RuntimeError(
+                "Received a GPU array via the 'cuda_ipc' transport, but this "
+                "client could not open it on the local GPU (no CUDA driver, no "
+                "matching device, or the runtime extra is missing). Drop "
+                "gpu_transport='cuda_ipc' to have arrays copied to the host "
+                "instead, or ensure this process shares a GPU and IPC namespace "
+                "with the Tesseract."
+            ) from exc
     else:
         raise ValueError(f"Unexpected array encoding {encoding}. Cannot decode.")
 

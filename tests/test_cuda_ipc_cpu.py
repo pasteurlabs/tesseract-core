@@ -328,6 +328,32 @@ def test_import_cuda_ipc_explains_missing_runtime_extra(monkeypatch):
         sdk._import_cuda_ipc()
 
 
+def test_decode_cuda_ipc_failure_gives_actionable_error(monkeypatch):
+    """A cuda_ipc response this client can't open yields a helpful RuntimeError.
+
+    cuda_ipc is opt-in, so a cuda_ipc-encoded array only comes back when the
+    caller asked for it. If this process has no usable CUDA context (no driver,
+    no matching device, or the runtime extra missing), opening the handle fails
+    deep in the runtime; the SDK decode must translate that into a message
+    naming the fix (drop the transport to get a host copy) instead of leaking a
+    bare CUDA/import error.
+    """
+    from tesseract_core.sdk import tesseract as sdk
+
+    def boom_load(_val):
+        raise RuntimeError("cudaIpcOpenMemHandle failed: simulated")
+
+    monkeypatch.setattr(
+        sdk,
+        "_import_cuda_ipc",
+        lambda: types.SimpleNamespace(load_cuda_ipc_arraydict=boom_load),
+    )
+
+    encoded = _encoded((2,), "float32", device=0, offset=0, storage_size=8)
+    with pytest.raises(RuntimeError, match="gpu_transport='cuda_ipc'"):
+        sdk._decode_array(encoded)
+
+
 # ── Decode-side orchestration (mocked CUDA, no CuPy) ─────────────────────
 #
 # Decoding no longer depends on CuPy: it uses only the plain-Python CUDA runtime
