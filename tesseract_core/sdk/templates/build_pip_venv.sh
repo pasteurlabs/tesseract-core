@@ -17,6 +17,12 @@ else
 fi
 source /python-env/bin/activate
 
+# Some base images (e.g. NVIDIA NGC) set UV_SYSTEM_PYTHON=1 and
+# UV_BREAK_SYSTEM_PACKAGES=1 in their environment. These make `uv pip install`
+# ignore the active venv and install into the base image's system site-packages,
+# which the run stage never copies. Unset them so installs land in /python-env.
+unset UV_SYSTEM_PYTHON UV_BREAK_SYSTEM_PACKAGES
+
 # Set up host credentials (netrc + git-credentials) for authenticated indices,
 # direct-reference wheels, and git+https dependencies. No-op if none declared.
 source setup_host_credentials.sh

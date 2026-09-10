@@ -170,6 +170,96 @@ def test_tarball_install(cli_runner, dummy_tesseract_package, docker_cleanup):
     docker_cleanup["images"].append(img_tag)
 
 
+def test_build_inherit_base_image_packages_with_uv_system_python(
+    cli_runner, docker_client, dummy_tesseract_package, docker_cleanup, tmp_path
+):
+    """inherit_base_image_packages must work when the base image sets UV_SYSTEM_PYTHON.
+
+    Regression test for #747: NVIDIA NGC base images set UV_SYSTEM_PYTHON=1 and
+    UV_BREAK_SYSTEM_PACKAGES=1, which make ``uv pip install`` ignore the active
+    /python-env venv and install into the base image's system site-packages. The
+    run stage only copies /python-env, so the runtime (and everything else) ends
+    up missing and the build fails at the ``tesseract-runtime check`` step.
+
+    We build a small mock base image that mimics NGC: it sets those two env vars
+    and pre-installs a distinctive package (``cowsay``) into the system Python.
+    Building a Tesseract on top with ``inherit_base_image_packages: true`` must
+    succeed, and both the inherited package and the runtime must be importable
+    from /python-env in the final image.
+    """
+    base_image_tag = "tesseract-test-uv-system-python-base:latest"
+    dockerfile = tmp_path / "Dockerfile.base"
+    dockerfile.write_text(
+        dedent(
+            """
+            FROM python:3.12-slim
+            ENV UV_SYSTEM_PYTHON=1
+            ENV UV_BREAK_SYSTEM_PACKAGES=1
+            RUN pip install --no-cache-dir cowsay==6.1
+            """
+        )
+    )
+    subprocess.run(
+        ["docker", "build", "-f", str(dockerfile), "-t", base_image_tag, str(tmp_path)],
+        check=True,
+    )
+
+    try:
+        # The Tesseract imports cowsay, which is only present via the inherited
+        # base image packages (it is deliberately absent from
+        # tesseract_requirements.txt).
+        (dummy_tesseract_package / "tesseract_api.py").write_text(
+            dedent(
+                """
+                import cowsay
+                from pydantic import BaseModel
+
+                class InputSchema(BaseModel):
+                    message: str = "Hello, Tesseractor!"
+
+                class OutputSchema(BaseModel):
+                    out: str
+
+                def apply(inputs: InputSchema) -> OutputSchema:
+                    return OutputSchema(out=cowsay.get_output_string("cow", inputs.message))
+                """
+            )
+        )
+        (dummy_tesseract_package / "tesseract_requirements.txt").write_text("")
+
+        image_name = build_tesseract(
+            docker_client,
+            dummy_tesseract_package,
+            "inherit_uv_system_python",
+            config_override={
+                "build_config.base_image": base_image_tag,
+                "build_config.inherit_base_image_packages": "true",
+            },
+        )
+        docker_cleanup["images"].append(image_name)
+        assert image_exists(docker_client, image_name)
+
+        # A successful build already proves the runtime landed in /python-env (the
+        # build fails at tesseract-runtime check otherwise). Running apply proves
+        # the inherited cowsay package is importable from the final image too.
+        result = cli_runner.invoke(
+            app,
+            ["run", image_name, "apply", '{"inputs": {"message": "moo"}}'],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0, result.stderr
+        assert "moo" in result.stdout
+    finally:
+        # The base is not a Tesseract image, so docker_cleanup cannot remove it.
+        # Force-untag it here; shared layers are reclaimed once docker_cleanup
+        # removes the descendant Tesseract image during teardown.
+        subprocess.run(
+            ["docker", "rmi", "-f", base_image_tag],
+            check=False,
+            capture_output=True,
+        )
+
+
 def test_build_extra_index_url_with_local_dep(
     cli_runner, dummy_tesseract_package, docker_cleanup
 ):
