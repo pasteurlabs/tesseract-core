@@ -17,7 +17,7 @@ Layers:
   as a DLPack capsule.
 
 The main consumer is :mod:`tesseract_core.runtime.cuda.ipc`, which layers the
-``json+cuda_ipc`` array-encoding policy on top of this API.
+``cuda_ipc`` GPU transport on top of this API.
 """
 
 from tesseract_core.runtime.cuda import api, dlpack, loader

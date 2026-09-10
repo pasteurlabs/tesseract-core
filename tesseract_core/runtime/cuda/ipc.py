@@ -1,9 +1,9 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""CUDA IPC array encoding: zero-copy GPU array exchange between processes.
+"""CUDA IPC transport: zero-copy GPU array exchange between processes.
 
-This module holds everything specific to the ``json+cuda_ipc`` encoding, kept
+This module holds everything specific to the ``cuda_ipc`` GPU transport, kept
 separate from the framework-agnostic host encodings in
 :mod:`tesseract_core.runtime.array_encoding`. Nothing here is imported unless a
 Tesseract actually encodes or decodes a CUDA IPC array, so the CUDA runtime and
@@ -12,7 +12,7 @@ driver libraries are only touched on that path.
 All low-level CUDA access lives in the :mod:`tesseract_core.runtime.cuda`
 package: this module works purely with plain Python values (device pointers as
 ``int``, IPC handles as ``bytes``) and never imports ctypes. It contributes only
-the *encoding policy* -- how a GPU array maps to and from the ``cuda_ipc`` JSON
+the *transport policy* -- how a GPU array maps to and from the ``cuda_ipc`` JSON
 payload, plus the keepalive bookkeeping that the transfer protocol requires.
 
 The JSON schema for this encoding (``CudaIpcArrayData``) lives alongside the
@@ -554,7 +554,7 @@ def validate_cuda_array(
 
 
 class CudaIpcTransport(DeviceTransport):
-    """DeviceTransport backend for the same-host ``json+cuda_ipc`` mode."""
+    """DeviceTransport backend for the same-host ``cuda_ipc`` transport."""
 
     name = "cuda_ipc"
     reach = "same_host"

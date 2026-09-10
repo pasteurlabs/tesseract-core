@@ -253,6 +253,65 @@ def free_port():
         return s.getsockname()[1]
 
 
+@pytest.fixture
+def serve_in_subprocess():
+    """Serve a Tesseract runtime over HTTP in a subprocess.
+
+    Yields a context manager ``serve(api_file, port, num_workers=1,
+    timeout=30.0, env=None)`` that starts the server, waits for ``/health``, and
+    yields its base URL. ``env`` supplies extra ``TESSERACT_*`` variables (e.g.
+    to set the output format or GPU transport), layered on the current
+    environment. The server is torn down and its output printed on exit.
+    """
+    from contextlib import contextmanager
+
+    @contextmanager
+    def serve(api_file, port, num_workers=1, timeout=30.0, env=None):
+        proc = None
+        try:
+            proc = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-c",
+                    "from tesseract_core.runtime.serve import serve; "
+                    f"serve(host='localhost', port={port}, num_workers={num_workers})",
+                ],
+                env={**os.environ, "TESSERACT_API_PATH": str(api_file), **(env or {})},
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                if proc.poll() is not None:
+                    out, err = proc.communicate()
+                    raise RuntimeError(
+                        f"server exited early (code {proc.returncode}):\n"
+                        f"{out.decode()}{err.decode()}"
+                    )
+                try:
+                    resp = requests.get(f"http://localhost:{port}/health")
+                except requests.exceptions.ConnectionError:
+                    time.sleep(0.1)
+                else:
+                    if resp.status_code == 200:
+                        break
+            else:
+                raise TimeoutError("Server did not start in time")
+
+            yield f"http://localhost:{port}"
+
+        finally:
+            if proc is not None:
+                proc.terminate()
+                stdout, stderr = proc.communicate()
+                print(stdout.decode())
+                print(stderr.decode())
+                proc.wait(timeout=5)
+
+    return serve
+
+
 @pytest.fixture(scope="module")
 def cli_runner():
     import importlib.metadata
