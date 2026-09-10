@@ -770,79 +770,22 @@ def test_iter_cudart_candidates_exported_from_cuda_package():
     assert cuda.iter_cudart_candidates is loader.iter_cudart_candidates
 
 
-# ── DeviceTransport interface ───────────────────────────────────────────
+# ── cuda_ipc as a DeviceTransport backend ────────────────────────────────
 #
 # cuda_ipc is exposed through the shared DeviceTransport interface so further
-# transports slot in behind one lookup. These check the registry wiring and that
-# the cuda_ipc backend routes to the same functions the direct API uses.
+# transports slot in behind one lookup. These check that the cuda_ipc backend
+# is registered and routes to the same functions the direct API uses; the
+# transport-agnostic registry machinery is covered in test_device_transport.py.
 
 
 def test_cuda_ipc_registered_as_transport():
-    """The cuda_ipc backend is discoverable by name and satisfies the protocol."""
+    """The cuda_ipc backend is discoverable by name and satisfies the interface."""
     from tesseract_core.runtime.device_transport import DeviceTransport, get_transport
 
     transport = get_transport("cuda_ipc")
     assert transport.name == "cuda_ipc"
     assert transport.reach == "same_host"
     assert isinstance(transport, DeviceTransport)
-
-
-def test_get_transport_rejects_unknown():
-    from tesseract_core.runtime.device_transport import get_transport
-
-    with pytest.raises(KeyError, match="No device transport registered"):
-        get_transport("does_not_exist")
-
-
-def test_available_transports_lists_registered_cuda_ipc():
-    """available_transports reports the built-in cuda_ipc backend, sorted."""
-    from tesseract_core.runtime.device_transport import available_transports
-
-    transports = available_transports()
-    assert "cuda_ipc" in transports
-    # Sorted tuple, so a caller can rely on a stable order.
-    assert list(transports) == sorted(transports)
-
-
-def test_register_transport_returns_and_registers():
-    """register_transport adds a backend by name and returns it (usable as a decorator)."""
-    from tesseract_core.runtime import device_transport
-    from tesseract_core.runtime.device_transport import (
-        available_transports,
-        get_transport,
-        register_transport,
-    )
-
-    class _StubTransport:
-        name = "stub_test_transport"
-        reach = "both"
-
-        def bootstrap(self, role, peer_offer):
-            return None
-
-        def register(self, arr, session=None):
-            return arr
-
-        def descriptor(self, handle):
-            return handle
-
-        def flush(self, session=None):
-            return None
-
-        def receive(self, val, session=None):
-            return val
-
-        def release(self, session=None):
-            return None
-
-    stub = _StubTransport()
-    try:
-        assert register_transport(stub) is stub
-        assert get_transport("stub_test_transport") is stub
-        assert "stub_test_transport" in available_transports()
-    finally:
-        # Keep the process-global registry clean for other tests.
-        device_transport._TRANSPORTS.pop("stub_test_transport", None)
 
 
 def test_cuda_ipc_transport_receive_materialises_wrapper(mocked_cuda):

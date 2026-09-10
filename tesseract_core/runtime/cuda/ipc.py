@@ -44,6 +44,7 @@ from pydantic_core import PydanticCustomError
 from tesseract_core.runtime.array_encoding import AllowedDtypes, ArrayDict, ShapeType
 from tesseract_core.runtime.cuda import api as cuda_api
 from tesseract_core.runtime.cuda import dlpack
+from tesseract_core.runtime.device_transport import DeviceTransport
 
 __all__ = [
     "IpcDeviceArray",
@@ -552,7 +553,7 @@ def validate_cuda_array(
     return val
 
 
-class CudaIpcTransport:
+class CudaIpcTransport(DeviceTransport):
     """DeviceTransport backend for the same-host ``json+cuda_ipc`` mode."""
 
     name = "cuda_ipc"

@@ -28,7 +28,8 @@ The interface mirrors the lifecycle the ``cuda_ipc`` code follows:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
+import abc
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 if TYPE_CHECKING:  # pragma: no cover
     from tesseract_core.runtime.array_encoding import ArrayDict
@@ -39,8 +40,7 @@ if TYPE_CHECKING:  # pragma: no cover
 Reach = Literal["same_host", "cross_host", "both"]
 
 
-@runtime_checkable
-class DeviceTransport(Protocol):
+class DeviceTransport(abc.ABC):
     """The contract every device-array transport implements.
 
     A transport is a small, mostly-stateless object registered under a ``name``
@@ -49,9 +49,10 @@ class DeviceTransport(Protocol):
     backend, not editing the encode/decode dispatch.
     """
 
-    name: str
-    reach: Reach
+    name: ClassVar[str]
+    reach: ClassVar[Reach]
 
+    @abc.abstractmethod
     def bootstrap(self, role: Literal["producer", "consumer"], peer_offer: Any) -> Any:
         """Establish any shared state a transfer needs, once per pair.
 
@@ -59,28 +60,28 @@ class DeviceTransport(Protocol):
         other methods. Receiver-driven transports whose handle is self-contained
         (``cuda_ipc``) return ``None`` and ignore the session everywhere.
         """
-        ...  # pragma: no cover
 
+    @abc.abstractmethod
     def register(self, arr: Any, session: Any = None) -> Any:
         """Encode side: pin ``arr`` and return an opaque per-array handle.
 
         Keeps the source allocation alive until :meth:`release`, exactly as the
         cuda_ipc export registry does.
         """
-        ...  # pragma: no cover
 
+    @abc.abstractmethod
     def descriptor(self, handle: Any) -> ArrayDict:
         """Turn a handle from :meth:`register` into the JSON array dict.
 
         The returned dict carries the transport's wire string in
         ``data.buffer`` and its name in ``data.encoding``.
         """
-        ...  # pragma: no cover
 
+    @abc.abstractmethod
     def flush(self, session: Any = None) -> None:
         """Post any pending transfers. No-op for pull transports."""
-        ...  # pragma: no cover
 
+    @abc.abstractmethod
     def receive(self, val: ArrayDict, session: Any = None) -> Any:
         """Decode side: materialise ``val`` into a fresh consumer-owned buffer.
 
@@ -88,11 +89,10 @@ class DeviceTransport(Protocol):
         (``IpcDeviceArray`` for the CUDA transports), unchanged across
         transports so the consumer-facing surface never forks.
         """
-        ...  # pragma: no cover
 
+    @abc.abstractmethod
     def release(self, session: Any = None) -> None:
         """Drop producer-side pins once the borrow is provably complete."""
-        ...  # pragma: no cover
 
 
 # ---------------------------------------------------------------------------
