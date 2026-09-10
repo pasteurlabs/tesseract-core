@@ -61,7 +61,7 @@ docker_client = CLIDockerClient()
 # the SDK, e.g. sdk.tesseract). Mirrors runtime.file_interactions.supported_format_type
 # but is defined here so the SDK does not eagerly import the (optional) runtime
 # package; a test asserts the two stay in sync.
-OutputFormat: TypeAlias = Literal["json", "json+base64", "json+binref", "json+cuda_ipc"]
+OutputFormat: TypeAlias = Literal["json", "json+base64", "json+binref"]
 
 # Fixed port the API server binds *inside* the container when port-mapping is
 # used (i.e. everything except host networking). The container has its own
@@ -926,6 +926,7 @@ def serve(
     input_path: str | Path | None = None,
     output_path: str | Path | None = None,
     output_format: OutputFormat | None = None,
+    gpu_transport: str | None = None,
     docker_args: list[str] | None = None,
     runtime_config: dict[str, Any] | None = None,
     skip_health_check: bool = False,
@@ -954,6 +955,12 @@ def serve(
         input_path: Input path to read input files from, such as local directory or S3 URI.
         output_path: Output path to write output files to, such as local directory or S3 URI.
         output_format: Output format to use for the results.
+        gpu_transport: How GPU arrays leave the container. ``none`` copies them to
+            the host and serializes them via ``output_format``; ``cuda_ipc`` exports
+            them by reference (requires ``gpus`` and a shared IPC namespace). An
+            explicit value (including ``none``) wins over a ``gpu_transport`` in
+            ``runtime_config``; leaving it unset (``None``) defers to
+            ``runtime_config``, falling back to ``none`` when neither sets it.
         docker_args: Additional arguments to pass to the container runtime (e.g., Docker).
         runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
             These are converted to TESSERACT_* environment variables. For example,
@@ -1010,6 +1017,17 @@ def serve(
 
     if output_format:
         environment["TESSERACT_OUTPUT_FORMAT"] = output_format
+
+    # Resolve the GPU transport across its two spellings. The dedicated kwarg is
+    # canonical: any explicit value (including "none", which disables the
+    # transport) wins over one passed through runtime_config. Leaving the kwarg
+    # unset (None) defers to runtime_config, already written to the environment
+    # above. When neither names a transport, pin it to "none" so the container
+    # always receives a definite value rather than inheriting the image default.
+    if gpu_transport is not None:
+        environment["TESSERACT_GPU_TRANSPORT"] = gpu_transport
+    else:
+        environment.setdefault("TESSERACT_GPU_TRANSPORT", "none")
 
     # Read after runtime_config lands in the environment, which is how the SDK
     # passes it. Only a port the caller asked for needs checking afterwards; the
@@ -1104,25 +1122,22 @@ def serve(
         if docker_args:
             extra_args.extend(docker_args)
 
-        # CUDA IPC needs a GPU and a shared IPC namespace between host and
-        # container. Wire both up whenever the experimental flag is set (the
+        # The cuda_ipc GPU transport needs a GPU and a shared IPC namespace
+        # between host and container. Wire both up whenever it is selected (the
         # only reason to enable it is IPC).
-        cuda_ipc_enabled = environment.get(
-            "TESSERACT_ENABLE_EXPERIMENTAL_CUDA_IPC"
-        ) in ("1", "true", "True")
+        gpu_transport = environment.get("TESSERACT_GPU_TRANSPORT", "none")
 
-        if cuda_ipc_enabled:
+        if gpu_transport == "cuda_ipc":
             if not gpus:
                 raise ValueError(
-                    "enable_experimental_cuda_ipc requires GPU access, but no GPUs "
+                    "gpu_transport='cuda_ipc' requires GPU access, but no GPUs "
                     "were requested. Pass gpus=['all'] or specific GPU IDs."
                 )
             extra_args.extend(["--ipc=host"])
-        elif output_format == "json+cuda_ipc":
+        elif gpu_transport != "none":
             raise ValueError(
-                "The 'json+cuda_ipc' output format is experimental and must be "
-                "explicitly enabled. Pass "
-                "runtime_config={'enable_experimental_cuda_ipc': True}."
+                f"Unknown gpu_transport {gpu_transport!r}. "
+                "Supported values: 'none', 'cuda_ipc'."
             )
 
         if network is not None:
