@@ -110,7 +110,7 @@ def _producer_main(build_fn_name, args, to_consumer, from_consumer):
     try:
         import cupy  # noqa: F401
 
-        from tesseract_core.runtime.cuda_ipc import dump_cuda_ipc_arraydict
+        from tesseract_core.runtime.cuda.ipc import dump_cuda_ipc_arraydict
 
         build_fn = _BUILDERS[build_fn_name]
         arrays = build_fn(*args)
@@ -139,7 +139,7 @@ def _consumer_main(to_consumer, from_consumer, result_q):
     -- so this path proves the decoded result is framework-independent.
     """
     try:
-        from tesseract_core.runtime.cuda_ipc import (
+        from tesseract_core.runtime.cuda.ipc import (
             IpcDeviceArray,
             load_cuda_ipc_arraydict,
         )
@@ -327,7 +327,7 @@ _BUILDERS = {
 @requires_cuda
 def test_encode_structure():
     """The encoded dict has the expected structure and metadata."""
-    from tesseract_core.runtime.cuda_ipc import dump_cuda_ipc_arraydict
+    from tesseract_core.runtime.cuda.ipc import dump_cuda_ipc_arraydict
 
     arr = cupy.random.randn(64, 128, dtype=cupy.float32)
     encoded = dump_cuda_ipc_arraydict(arr)
@@ -354,7 +354,7 @@ def test_encode_structure():
 @requires_cuda
 def test_encode_requires_cuda_array():
     """Encoding a host array raises a clear error."""
-    from tesseract_core.runtime.cuda_ipc import dump_cuda_ipc_arraydict
+    from tesseract_core.runtime.cuda.ipc import dump_cuda_ipc_arraydict
 
     with pytest.raises(ValueError, match="cuda_ipc encoding requires a CUDA array"):
         dump_cuda_ipc_arraydict(np.zeros((4, 4), dtype=np.float32))
@@ -367,7 +367,7 @@ def test_encode_rejects_non_contiguous():
     cuda_ipc transfers a flat contiguous byte range; a strided source would be
     silently misread, so encoding must refuse it.
     """
-    from tesseract_core.runtime.cuda_ipc import dump_cuda_ipc_arraydict
+    from tesseract_core.runtime.cuda.ipc import dump_cuda_ipc_arraydict
 
     strided = cupy.arange(100, dtype=cupy.float32)[::2]
     assert strided.__cuda_array_interface__["strides"] is not None
@@ -392,7 +392,7 @@ def test_same_process_open_is_unsupported():
     test_failed_get_mem_handle_clears_sticky_error for the full rationale).
     """
     from tesseract_core.runtime.cuda.api import _get_cudart
-    from tesseract_core.runtime.cuda_ipc import (
+    from tesseract_core.runtime.cuda.ipc import (
         dump_cuda_ipc_arraydict,
         load_cuda_ipc_arraydict,
     )
@@ -510,7 +510,7 @@ def _ring1_server(req_q, resp_q):
     try:
         import cupy
 
-        from tesseract_core.runtime.cuda_ipc import (
+        from tesseract_core.runtime.cuda.ipc import (
             dump_cuda_ipc_arraydict,
             release_pinned_ipc_exports,
         )
@@ -538,7 +538,7 @@ def _ring1_client(req_q, resp_q, result_q, n):
     wrapper); values are read back via its host-copy helper.
     """
     try:
-        from tesseract_core.runtime.cuda_ipc import load_cuda_ipc_arraydict
+        from tesseract_core.runtime.cuda.ipc import load_cuda_ipc_arraydict
 
         kept = []
         for i in range(n):
@@ -631,7 +631,7 @@ def test_decode_to_torch_via_dlpack():
     """
     import torch
 
-    from tesseract_core.runtime.cuda_ipc import (
+    from tesseract_core.runtime.cuda.ipc import (
         IpcDeviceArray,
         load_cuda_ipc_arraydict,
     )
@@ -673,7 +673,7 @@ def test_decode_to_torch_via_cuda_array_interface():
     """
     import torch
 
-    from tesseract_core.runtime.cuda_ipc import load_cuda_ipc_arraydict
+    from tesseract_core.runtime.cuda.ipc import load_cuda_ipc_arraydict
 
     ctx = multiprocessing.get_context("spawn")
     to_consumer = ctx.Queue()
@@ -719,7 +719,7 @@ def _cupy_free_consumer_main(to_consumer, from_consumer, result_q):
     try:
         import torch
 
-        from tesseract_core.runtime.cuda_ipc import (
+        from tesseract_core.runtime.cuda.ipc import (
             IpcDeviceArray,
             load_cuda_ipc_arraydict,
         )

@@ -44,6 +44,7 @@ from pydantic_core import PydanticCustomError
 from tesseract_core.runtime.array_encoding import AllowedDtypes, ArrayDict, ShapeType
 from tesseract_core.runtime.cuda import api as cuda_api
 from tesseract_core.runtime.cuda import dlpack
+from tesseract_core.runtime.device_transport import DeviceTransport
 
 __all__ = [
     "IpcDeviceArray",
@@ -550,3 +551,37 @@ def validate_cuda_array(
         )
 
     return val
+
+
+class CudaIpcTransport(DeviceTransport):
+    """DeviceTransport backend for the same-host ``json+cuda_ipc`` mode."""
+
+    name = "cuda_ipc"
+    reach = "same_host"
+
+    def bootstrap(self, role: Any, peer_offer: Any) -> None:
+        """No-op: the IPC handle is self-contained, so no shared state to set up."""
+
+    def register(self, arr: Any, session: Any = None) -> ArrayDict:
+        """Pin ``arr`` and build its IPC descriptor (the finished array dict).
+
+        cuda_ipc mints the handle and packs the wire string in one call, so the
+        per-array handle *is* the array dict and :meth:`descriptor` is a
+        passthrough. Splitting them would take the IPC handle twice for nothing.
+        """
+        return dump_cuda_ipc_arraydict(arr)
+
+    def descriptor(self, handle: ArrayDict) -> ArrayDict:
+        """Return the array dict :meth:`register` already produced."""
+        return handle
+
+    def flush(self, session: Any = None) -> None:
+        """No-op: cuda_ipc is receiver-driven, so there is nothing to post."""
+
+    def receive(self, val: ArrayDict, session: Any = None) -> "IpcDeviceArray":
+        """Copy the exported bytes into a fresh consumer-owned ``IpcDeviceArray``."""
+        return load_cuda_ipc_arraydict(val)
+
+    def release(self, session: Any = None) -> None:
+        """Drop the producer-side pins from this request's exports."""
+        release_pinned_ipc_exports()
