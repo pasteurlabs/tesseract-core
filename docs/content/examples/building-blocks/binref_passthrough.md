@@ -107,23 +107,53 @@ final = BinrefArray.from_file("field.bin", shape=(size, size), dtype="float64")
 ```
 
 The buffer path is resolved against the served `--output-path`, so it must be
-relative to that directory (a bare filename works) or an absolute path. The data
-must be C-contiguous, row-major, and match the declared `shape` and `dtype`; a
-mismatch is caught when the output is validated.
+relative to that directory (a bare filename works) or an absolute path.
 
-## Differentiable outputs
+```{warning}
+Because the buffer is forwarded without being read, the runtime **cannot** check
+that the bytes on disk actually match what you declared. It only validates the
+`shape` and `dtype` you passed to `from_file` against the field's declared type
+(a mismatch there raises at serialization). The bytes themselves are trusted: the
+data must be **C-contiguous, row-major, and exactly `prod(shape) * dtype.itemsize`
+bytes** at the given offset. If it isn't, the client either reads the wrong number
+of bytes (a decode error) or silently reinterprets the buffer as the wrong array
+— neither is caught server-side. Writing the buffer with the matching NumPy
+`dtype` and `np.ascontiguousarray` (or via `BinrefArray.write`) avoids this.
+```
 
-Because a `BinrefArray` is fed to an ordinary `Array` field, it composes with
-`Differentiable` with no extra work — a large gradient buffer can be forwarded
-from disk exactly like any other output:
+## Forwarding gradients from an AD endpoint
+
+`BinrefArray` is fed to an ordinary `Array` field, so it needs no special support
+to work with the gradient endpoints — and the arrays those endpoints return are
+themselves ordinary arrays, so they can be forwarded from disk too. This matters
+when the Jacobian is as large as (or larger than) the output: a solver that
+writes its adjoint/tangent fields to disk can hand them straight back.
+
+Mark the differentiable input and output on the schema:
 
 ```python
 from tesseract_core.runtime import Array, Differentiable, Float64
 
-class OutputSchema(BaseModel):
-    grad: Differentiable[Array[(None,), Float64]]
+class InputSchema(BaseModel):
+    x: Differentiable[Array[(None,), Float64]]
 
-def apply(inputs):
-    ...
-    return OutputSchema(grad=BinrefArray.write(gradient))
+class OutputSchema(BaseModel):
+    y: Differentiable[Array[(None,), Float64]]
+
+def apply(inputs: InputSchema) -> OutputSchema:
+    return OutputSchema(y=BinrefArray.write(solve(inputs.x)))
 ```
+
+Then a `jacobian` endpoint returns `{output: {input: partial}}`, where each
+partial is a normal array — and therefore may be a `BinrefArray` written to disk
+by the solver instead of held in memory:
+
+```python
+def jacobian(inputs: InputSchema, jac_inputs: set[str], jac_outputs: set[str]):
+    dy_dx = compute_jacobian(inputs.x)  # solver streams this to disk
+    return {"y": {"x": BinrefArray.write(dy_dx)}}
+```
+
+The same holds for the `jacobian_vector_product` and `vector_jacobian_product`
+endpoints: their returned tangents/cotangents are ordinary arrays and can be
+forwarded the same way.
