@@ -524,9 +524,10 @@ def test_output_to_bytes_mixed_gpu_and_cpu_arrays(mocked_cuda):
     """A single response carries a GPU leaf and a CPU leaf together.
 
     The GPU array is exported over the cuda_ipc device transport; the plain host
-    array in the same model falls back to the base64 host encoding. Before the
-    host/device axes were split this raised, because cuda_ipc was applied to
-    every leaf uniformly and rejected the CPU one.
+    array in the same model falls back to the base64 host encoding.
+
+    The config only makes cuda_ipc *available*; the per-call ``gpu_transport``
+    kwarg is what *selects* it for this response.
     """
     import orjson
     import pybase64

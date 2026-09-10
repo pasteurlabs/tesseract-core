@@ -4,10 +4,7 @@
 
 """End-to-end tests for CUDA IPC array encoding.
 
-Run on a GPU machine with either::
-
-    python tests/test_cuda_ipc.py         # standalone runner
-    pytest tests/test_cuda_ipc.py         # via pytest
+Run on a GPU machine with ``pytest tests/test_cuda_ipc.py``.
 
 Requires: cupy (used here only to *produce* GPU inputs) and optionally torch
 (for the DLPack/CUDA-array-interface interop tests). The CUDA IPC implementation
@@ -828,11 +825,12 @@ def apply(inputs: InputSchema) -> OutputSchema:
         from tesseract_core.sdk.tesseract import Tesseract
 
         # The cuda_ipc GPU transport is experimental and off by default; opt in
-        # explicitly via gpu_transport (independent of the host output format).
+        # via the dedicated gpu_transport kwarg, independent of the host output
+        # format.
         with Tesseract.from_tesseract_api(
             api_path,
             output_format="json+base64",
-            runtime_config={"gpu_transport": "cuda_ipc"},
+            gpu_transport="cuda_ipc",
         ) as t:
             x = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
             result = t.apply({"x": x})
@@ -840,60 +838,81 @@ def apply(inputs: InputSchema) -> OutputSchema:
             np.testing.assert_allclose(y, x * 2.0 + 1.0, rtol=1e-6)
 
 
-# ── Standalone runner ───────────────────────────────────────────────────
+# ── Test 6: served HTTP round-trip over the cuda_ipc transport ──────────
 
 
-def _run_standalone():
-    if not _CUDA_AVAILABLE:
-        print("SKIP: CUDA + CuPy not available")
-        return 0
+_MIXED_API_CODE = """
+import cupy as cp
+import numpy as np
+from pydantic import BaseModel
+from tesseract_core.runtime import Array, Float32
 
-    name = cupy.cuda.runtime.getDeviceProperties(0)["name"].decode()
-    print(f"CUDA available: device 0 = {name}\n")
+class InputSchema(BaseModel):
+    x: Array[(None,), Float32]
 
-    tests = [
-        ("encode structure", test_encode_structure),
-        ("encode requires cuda array", test_encode_requires_cuda_array),
-        ("same-process open unsupported", test_same_process_open_is_unsupported),
-        ("cross-process basic", test_cross_process_basic),
-        ("cross-process dtypes", test_cross_process_dtypes),
-        ("cross-process nonzero offset", test_cross_process_nonzero_offset),
-        ("ring-1 serial reuse", test_ring1_serial_reuse),
-        ("sdk encode structure", test_sdk_encode_structure),
-    ]
-    if _TORCH_AVAILABLE:
-        tests += [
-            ("cross-process torch encode", test_cross_process_torch_encode),
-            ("decode to torch via dlpack", test_decode_to_torch_via_dlpack),
-            (
-                "decode to torch via cuda array interface",
-                test_decode_to_torch_via_cuda_array_interface,
-            ),
-            ("decode is cupy-free", test_decode_is_cupy_free),
-        ]
-    if _JAX_AVAILABLE:
-        tests.append(
-            ("cross-process jax vmm fallback", test_cross_process_jax_vmm_fallback)
-        )
-    tests.append(("tesseract api cuda_ipc", test_tesseract_api_cuda_ipc_local))
+class OutputSchema(BaseModel):
+    # gpu stays on the device (cuda_ipc transport); cpu is a host array
+    # serialized via the output format.
+    gpu: Array[(None,), Float32]
+    cpu: Array[(None,), Float32]
 
-    failures = 0
-    for label, fn in tests:
-        try:
-            fn()
-            print(f"  PASSED: {label}")
-        except Exception as exc:
-            failures += 1
-            print(f"  FAILED: {label}: {exc}")
-
-    print("\n" + "=" * 60)
-    if failures:
-        print(f"{failures} TEST(S) FAILED")
-    else:
-        print("ALL TESTS PASSED")
-    print("=" * 60)
-    return 1 if failures else 0
+def apply(inputs: InputSchema) -> OutputSchema:
+    x = np.asarray(inputs.x)
+    return OutputSchema(gpu=cp.asarray(x * 2.0), cpu=x + 1.0)
+"""
 
 
-if __name__ == "__main__":
-    sys.exit(_run_standalone())
+@requires_cuda
+def test_tesseract_api_cuda_ipc_mixed_http(free_port, serve_in_subprocess):
+    """A served endpoint returns a GPU and a CPU array in one response.
+
+    The server makes ``cuda_ipc`` available via its config. The client selects it
+    per request through the ``Accept`` header, so the response encodes the device
+    array as a cuda_ipc handle and the host array as base64. This exercises the
+    mixed CPU/GPU path end to end over real HTTP. The client decodes the handle
+    from a separate process, as CUDA IPC requires (see the module docstring).
+    """
+    import pybase64
+    import requests
+
+    from tesseract_core.runtime.cuda.ipc import load_cuda_ipc_arraydict
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        api_path = Path(tmpdir) / "tesseract_api.py"
+        api_path.write_text(_MIXED_API_CODE)
+
+        server_env = {
+            "TESSERACT_OUTPUT_FORMAT": "json+base64",
+            "TESSERACT_GPU_TRANSPORT": "cuda_ipc",
+        }
+        with serve_in_subprocess(api_path, free_port, env=server_env) as url:
+            x = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
+            inputs = {
+                "x": {
+                    "object_type": "array",
+                    "shape": list(x.shape),
+                    "dtype": "float32",
+                    "data": {"buffer": x.tolist(), "encoding": "json"},
+                }
+            }
+            response = requests.post(
+                f"{url}/apply",
+                json={"inputs": inputs},
+                headers={"Accept": "application/json+base64; gpu_transport=cuda_ipc"},
+                timeout=_TIMEOUT,
+            )
+            assert response.status_code == 200, response.text
+            payload = response.json()
+
+            # GPU leaf exported by handle; CPU leaf serialized inline as base64.
+            assert payload["gpu"]["data"]["encoding"] == "cuda_ipc"
+            assert payload["cpu"]["data"]["encoding"] == "base64"
+
+            # Decode the handle cross-process and compare against expectations.
+            gpu = load_cuda_ipc_arraydict(payload["gpu"])
+            np.testing.assert_allclose(gpu.copy_to_host(), x * 2.0, rtol=1e-6)
+
+            cpu = np.frombuffer(
+                pybase64.b64decode(payload["cpu"]["data"]["buffer"]), dtype=np.float32
+            )
+            np.testing.assert_allclose(cpu, x + 1.0, rtol=1e-6)

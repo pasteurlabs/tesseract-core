@@ -3,13 +3,9 @@
 
 import base64
 import json
-import os
 import platform
-import subprocess
 import sys
-import time
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
 from pathlib import Path
 from textwrap import dedent
 
@@ -63,49 +59,6 @@ def array_from_json(json_data, base_dir=None):
 
 def model_to_json(model):
     return json.loads(model.model_dump_json())
-
-
-@contextmanager
-def serve_in_subprocess(api_file, port, num_workers=1, timeout=30.0):
-    proc = None
-    try:
-        proc = subprocess.Popen(
-            [
-                sys.executable,
-                "-c",
-                "from tesseract_core.runtime.serve import serve; "
-                f"serve(host='localhost', port={port}, num_workers={num_workers})",
-            ],
-            env=dict(os.environ, TESSERACT_API_PATH=str(api_file)),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-
-        # wait for server to start
-        while True:
-            try:
-                response = requests.get(f"http://localhost:{port}/health")
-            except requests.exceptions.ConnectionError:
-                pass
-            else:
-                if response.status_code == 200:
-                    break
-
-            time.sleep(0.1)
-            timeout -= 0.1
-
-            if timeout < 0:
-                raise TimeoutError("Server did not start in time")
-
-        yield f"http://localhost:{port}"
-
-    finally:
-        if proc is not None:
-            proc.terminate()
-            stdout, stderr = proc.communicate()
-            print(stdout.decode())
-            print(stderr.decode())
-            proc.wait(timeout=5)
 
 
 @pytest.fixture
@@ -405,7 +358,7 @@ def test_openapi_schema_advertises_output_formats(dummy_tesseract_module):
     is_wsl(),
     reason="flaky on Windows",
 )
-def test_threading_sanity(tmpdir, free_port):
+def test_threading_sanity(tmpdir, free_port, serve_in_subprocess):
     """Test with a Tesseract that requires to be run in the main thread.
 
     This is important so we don't require users to be aware of threading issues.
@@ -445,7 +398,7 @@ def test_threading_sanity(tmpdir, free_port):
     is_wsl() or sys.platform == "win32",
     reason="flaky on Windows",
 )
-def test_multiple_workers(tmpdir, free_port):
+def test_multiple_workers(tmpdir, free_port, serve_in_subprocess):
     """Test that the server can be run with multiple worker processes."""
     TESSERACT_API = dedent(
         """
