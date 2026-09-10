@@ -35,8 +35,9 @@ from unittest.mock import Mock
 import numpy as np
 import pytest
 
-from tesseract_core.runtime import array_encoding, cuda_ipc
+from tesseract_core.runtime import array_encoding
 from tesseract_core.runtime.cuda import api as cuda_api
+from tesseract_core.runtime.cuda import ipc as cuda_ipc
 from tesseract_core.runtime.cuda import loader
 
 
@@ -311,11 +312,10 @@ def test_import_cuda_ipc_explains_missing_runtime_extra(monkeypatch):
 
     def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
         # Mimic the module being unimportable on a base install (its deep
-        # dependencies, e.g. fsspec, are absent). Covers both `import
-        # tesseract_core.runtime.cuda_ipc` and `from tesseract_core.runtime
-        # import cuda_ipc`.
-        if name == "tesseract_core.runtime.cuda_ipc" or (
-            name == "tesseract_core.runtime" and "cuda_ipc" in (fromlist or ())
+        # dependencies, e.g. fsspec, are absent). Covers `from
+        # tesseract_core.runtime.cuda import ipc`.
+        if name == "tesseract_core.runtime.cuda.ipc" or (
+            name == "tesseract_core.runtime.cuda" and "ipc" in (fromlist or ())
         ):
             raise ImportError("No module named 'fsspec'")
         return real_import(name, globals, locals, fromlist, level)
@@ -768,3 +768,67 @@ def test_iter_cudart_candidates_exported_from_cuda_package():
     from tesseract_core.runtime import cuda
 
     assert cuda.iter_cudart_candidates is loader.iter_cudart_candidates
+
+
+# ── cuda_ipc as a DeviceTransport backend ────────────────────────────────
+#
+# cuda_ipc is exposed through the shared DeviceTransport interface so further
+# transports slot in behind one lookup. These check that the cuda_ipc backend
+# is registered and routes to the same functions the direct API uses; the
+# transport-agnostic registry machinery is covered in test_device_transport.py.
+
+
+def test_cuda_ipc_registered_as_transport():
+    """The cuda_ipc backend is discoverable by name and satisfies the interface."""
+    from tesseract_core.runtime.device_transport import DeviceTransport, get_transport
+
+    transport = get_transport("cuda_ipc")
+    assert transport.name == "cuda_ipc"
+    assert transport.reach == "same_host"
+    assert isinstance(transport, DeviceTransport)
+
+
+def test_cuda_ipc_transport_receive_materialises_wrapper(mocked_cuda):
+    """The cuda_ipc transport's receive() decodes into an on-GPU wrapper.
+
+    This is the decode seam array_encoding.decode_array drives for cuda_ipc; the
+    end-to-end decode through decode_array is covered by the GPU suite (its
+    return type is the framework-agnostic wrapper, outside decode_array's
+    host-array return annotation).
+    """
+    from tesseract_core.runtime.device_transport import get_transport
+
+    transport = get_transport("cuda_ipc")
+    encoded = _encoded((2, 3), "float32", device=0, offset=0, storage_size=24)
+
+    out = transport.receive(encoded)
+
+    assert isinstance(out, cuda_ipc.IpcDeviceArray)
+    assert out.shape == (2, 3)
+    assert out.dtype == np.float32
+
+
+def test_cuda_ipc_transport_delegates(mocked_cuda, monkeypatch):
+    """register/descriptor/flush/receive/release drive the same cuda_ipc code.
+
+    A pull transport's flush is a no-op and its bootstrap needs no shared state,
+    so those return None; register+descriptor produce the same payload the direct
+    dump does, and release drops the export pins.
+    """
+    from tesseract_core.runtime.device_transport import get_transport
+
+    transport = get_transport("cuda_ipc")
+
+    # bootstrap + flush are no-ops for a receiver-driven transport.
+    assert transport.bootstrap("producer", None) is None
+    assert transport.flush() is None
+
+    arr = FakeCudaArray((4, 8), "<f4", data_ptr=0x5000)
+    payload = transport.descriptor(transport.register(arr))
+    # Same structure the direct dump produces (offset/size from the fake base).
+    assert payload["data"]["encoding"] == "cuda_ipc"
+    assert _unpack_cuda_ipc(payload["data"])["storage_offset"] == 256
+    # register pinned the source array; release drops it.
+    assert arr in cuda_ipc._CUDA_IPC_EXPORT_REGISTRY
+    transport.release()
+    assert cuda_ipc._CUDA_IPC_EXPORT_REGISTRY == []

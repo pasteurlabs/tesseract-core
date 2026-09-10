@@ -141,7 +141,7 @@ class CudaIpcArrayData(BaseModel):
 
     This is only the JSON *schema* for the encoding; all the CUDA runtime
     machinery that produces and consumes it lives in
-    :mod:`tesseract_core.runtime.cuda_ipc`.
+    :mod:`tesseract_core.runtime.cuda.ipc`.
     """
 
     buffer: StrictStr = Field(
@@ -588,7 +588,7 @@ def validate_python_or_gpu_array(
     since CuPy refuses implicit conversion). Everything else is coerced to a
     NumPy array via :func:`python_to_array`.
     """
-    from tesseract_core.runtime import cuda_ipc
+    from tesseract_core.runtime.cuda import ipc as cuda_ipc
 
     if cuda_ipc.has_cuda_array_interface(val):
         return cuda_ipc.validate_cuda_array(val, expected_shape, expected_dtype)
@@ -620,10 +620,11 @@ def decode_array(
             data = _load_binref_arraydict(val.model_dump(), base_dir)
 
         elif val.data.encoding == "cuda_ipc":
-            from tesseract_core.runtime import cuda_ipc
+            from tesseract_core.runtime.device_transport import get_transport
 
             # Returns a framework-agnostic on-GPU wrapper — skip numpy coercion
-            return cuda_ipc.load_cuda_ipc_arraydict(val.model_dump())
+            transport = get_transport(val.data.encoding)
+            return transport.receive(val.model_dump())
 
         # keep checking for "raw" for backwards compat
         elif val.data.encoding in {"json", "raw"}:
@@ -664,8 +665,8 @@ def encode_array(
 
     In Python mode, returns the raw array as-is.
     """
-    from tesseract_core.runtime import cuda_ipc
     from tesseract_core.runtime.config import get_config
+    from tesseract_core.runtime.cuda import ipc as cuda_ipc
 
     context = info.context if info.context else {}
     array_encoding = context.get("array_encoding", "json")
@@ -680,7 +681,11 @@ def encode_array(
                 "cuda_ipc encoding requires a CUDA array "
                 f"(object with __cuda_array_interface__), got {type(arr).__name__}"
             )
-        return cuda_ipc.dump_cuda_ipc_arraydict(arr)
+        from tesseract_core.runtime.device_transport import get_transport
+
+        transport = get_transport(array_encoding)
+        handle = transport.register(arr)
+        return transport.descriptor(handle)
 
     # Python mode -> return the array as-is, without any host copy. GPU arrays
     # are preserved on-device so that the intermediate model_dump()/validate
