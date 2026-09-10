@@ -18,6 +18,8 @@ duplicated shape / dtype declarations.
 
 import re
 from collections.abc import Mapping
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Annotated, Any, TypeVar
 from uuid import uuid4
 
@@ -27,6 +29,7 @@ from pydantic.json_schema import JsonSchemaValue
 from pydantic_core import core_schema
 
 from tesseract_core.runtime.file_interactions import (
+    PathLike,
     join_paths,
     read_from_path,
     write_to_path,
@@ -62,42 +65,81 @@ def _as_ref_path(value: Any) -> str | None:
     return None
 
 
-def _ref_filename(value: Any, context: dict) -> str:
-    """Pick the sidecar filename for ``value``, rejecting unsafe or duplicate stems."""
-    namer = getattr(value, "__ref_name__", None)
-    if namer is None:
+def _posix_join(subdir: PathLike | None, filename: str) -> str:
+    """Join a sidecar path for the wire, always with forward slashes.
+
+    The emitted path travels in the response and is resolved by whoever reads
+    it, which may not be on the same OS as the Tesseract. ``join_paths`` uses
+    :class:`pathlib.Path`, so it would produce backslashes when the runtime
+    happens to run natively on Windows.
+    """
+    if not subdir:
+        return filename
+    return "/".join((*Path(subdir).parts, filename))
+
+
+def _ref_prefix(value: Any, prefix: str | None) -> str | None:
+    """Pick the filename prefix for ``value``, or None to fall back to a UUID.
+
+    In order of preference:
+
+    1. the prefix passed to ``Ref[T, "..."]``;
+    2. the model's own ``name`` field, when it holds a usable string;
+    3. the model's class name.
+
+    A ``name`` that is missing, not a string, or not filename-safe falls
+    through to the next option rather than raising: names usually come from
+    runtime data, and a bad one should not sink a whole response. A prefix
+    passed to ``Ref`` is developer-supplied, so an unusable one is an error.
+    """
+    if prefix is not None:
+        if not _SAFE_STEM.match(prefix):
+            raise ValueError(
+                f"Invalid Ref prefix {prefix!r}: must match {_SAFE_STEM.pattern}."
+            )
+        return prefix
+
+    name = getattr(value, "name", None)
+    if isinstance(name, str) and _SAFE_STEM.match(name):
+        return name
+
+    class_name = type(value).__name__
+    if _SAFE_STEM.match(class_name):
+        return class_name
+
+    return None
+
+
+def _ref_filename(value: Any, prefix: str | None, context: dict) -> str:
+    """Build the sidecar filename for ``value``.
+
+    Every prefixed name carries a running index (``frame_000``, ``frame_001``,
+    ...), so sidecars in one payload can never collide no matter how the prefix
+    was derived. Counters live in the serialization context, so they restart on
+    each dump -- the same way ``__binref_uuid`` is threaded through by
+    ``array_encoding.encode_array``. Two dumps into the *same* directory
+    therefore overwrite each other; served Tesseracts avoid this by writing
+    into a per-request ``run_<id>/`` directory.
+    """
+    stem = _ref_prefix(value, prefix)
+    if stem is None:
+        # Nothing usable to name it after; fall back to how binref names .bin files.
         return f"{uuid4()}.json"
 
-    stem = namer()
-    if not isinstance(stem, str) or not _SAFE_STEM.match(stem):
-        raise ValueError(
-            f"{type(value).__name__}.__ref_name__() must return a string matching "
-            f"{_SAFE_STEM.pattern} to be used as a Ref filename, got {stem!r}."
-        )
-
-    filename = f"{stem}.json"
-    # Track names for the duration of one dump, so two refs cannot silently
-    # clobber each other's file. Mirrors how '__binref_uuid' is threaded
-    # through the serialization context by array_encoding.encode_array.
-    written = context.setdefault("__ref_names", set())
-    if filename in written:
-        raise ValueError(
-            f"Duplicate Ref filename {filename!r}: __ref_name__() must be unique "
-            "across all refs in a single output payload."
-        )
-    written.add(filename)
-    return filename
+    counters = context.setdefault("__ref_counters", {})
+    index = counters.get(stem, 0)
+    counters[stem] = index + 1
+    return f"{stem}_{index:03d}.json"
 
 
+@dataclass(frozen=True)
 class PydanticRefAnnotation:
     """Pydantic annotation implementing the sidecar-file encoding for ``Ref``."""
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        raise RuntimeError(f"{self.__class__.__name__} cannot be instantiated")
+    prefix: str | None = None
 
-    @classmethod
     def __get_pydantic_core_schema__(
-        cls,
+        self,
         source_type: Any,
         _handler: GetCoreSchemaHandler,
     ) -> core_schema.CoreSchema:
@@ -106,6 +148,7 @@ class PydanticRefAnnotation:
         # does too: the handler may hand back unresolved definition references,
         # which cannot be turned into a validator on their own.
         adapter = TypeAdapter(source_type)
+        prefix = self.prefix
 
         def load(value: Any, info: Any) -> Any:
             context = info.context or {}
@@ -140,8 +183,8 @@ class PydanticRefAnnotation:
             # Sidecars live next to the .bin files so that relative binrefs
             # inside them resolve against the same base_dir.
             subdir = context.get("binref_dir")
-            filename = _ref_filename(value, context)
-            relpath = join_paths(subdir, filename) if subdir else filename
+            filename = _ref_filename(value, prefix, context)
+            relpath = _posix_join(subdir, filename)
             write_to_path(orjson.dumps(payload), join_paths(base_dir, relpath))
             return {"object_type": REF_OBJECT_TYPE, "path": relpath}
 
@@ -156,9 +199,8 @@ class PydanticRefAnnotation:
         schema["metadata"] = {"ref_inner_schema": adapter.core_schema}
         return schema
 
-    @classmethod
     def __get_pydantic_json_schema__(
-        cls, _core_schema: core_schema.CoreSchema, handler: GetJsonSchemaHandler
+        self, _core_schema: core_schema.CoreSchema, handler: GetJsonSchemaHandler
     ) -> JsonSchemaValue:
         inline = handler(_core_schema["metadata"]["ref_inner_schema"])
         return {
@@ -188,34 +230,38 @@ class Ref:
     serialization context (which is what the ``json+binref`` output format
     sets, see :func:`tesseract_core.runtime.file_interactions.output_to_bytes`),
     each ``Ref`` writes its value to ``<base_dir>/<name>.json`` and serializes
-    as the relative path to that file. Without a ``base_dir`` -- plain ``json``
-    and ``json+base64`` responses, or Python-mode dumps -- the object is
-    serialized inline, so a Tesseract using ``Ref`` still works over plain HTTP.
+    as ``{"object_type": "ref", "path": ...}``. Without a ``base_dir`` -- plain
+    ``json`` and ``json+base64`` responses, or Python-mode dumps -- the object
+    is serialized inline, so the response stays self-contained.
 
-    Validation accepts both forms: a path string is read and validated against
-    the wrapped type, an inline object is validated directly. Either way the
-    wrapped type's own validators run, so array shapes and dtypes inside the
-    sidecar are checked exactly as they would be inline.
+    Validation accepts an encoded ref, a bare path string, or an inline
+    object. In every case the wrapped type's own validators run, so array
+    shapes and dtypes inside a sidecar are checked exactly as they would be
+    inline.
 
-    Sidecars are named with a UUID by default, matching how ``json+binref``
-    names its ``.bin`` files. To get readable filenames, give the wrapped model
-    a ``__ref_name__()`` method returning the filename stem; it must be unique
-    across the payload.
+    Sidecar filenames are ``<prefix>_<index>.json``, where the prefix is taken
+    from the first of these that is usable:
+
+    1. the prefix passed as ``Ref[T, "frame"]``;
+    2. the model's own ``name`` field;
+    3. the model's class name.
+
+    Failing all three (a model with no usable class name), files are named with
+    a UUID, matching how ``json+binref`` names its ``.bin`` files. The index
+    makes collisions impossible within a payload, so ``name`` need not be
+    unique.
 
     Example:
         >>> class Frame(BaseModel):
-        ...     name: str
         ...     u: Differentiable[Array[(None, 3), Float32]]
-        ...
-        ...     def __ref_name__(self) -> str:
-        ...         return self.name
 
         >>> class OutputSchema(BaseModel):
-        ...     result: list[Ref[Frame]]
+        ...     frames: list[Ref[Frame, "frame"]]
 
-        Dumped with ``json+binref``, this produces
-        ``{"result": ["frame_0.json", "frame_1.json"]}`` plus one JSON file per
-        frame, each holding binref pointers into the shared ``.bin`` buffer.
+        Dumped with ``json+binref``, this writes ``frame_000.json``,
+        ``frame_001.json``, ... each holding binref pointers into the shared
+        ``.bin`` buffer. Without the prefix the files would be named after the
+        model's ``name`` field, or ``Frame_000.json`` and so on.
     """
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -226,10 +272,20 @@ class Ref:
         )
 
     def __class_getitem__(cls, key: Any) -> Any:
-        """Wrap the given type so it is serialized to a sidecar JSON file."""
+        """Wrap a type so it is serialized to a sidecar file, with an optional prefix."""
         if isinstance(key, tuple):
-            raise ValueError(
-                "Ref takes a single parameter: Ref[MyModel]. To control sidecar "
-                "filenames, give MyModel a __ref_name__() method."
-            )
-        return Annotated[key, PydanticRefAnnotation]
+            if len(key) != 2:
+                raise ValueError(
+                    "Ref takes at most two parameters: "
+                    'Ref[MyModel] or Ref[MyModel, "filename_prefix"]'
+                )
+            base_type, prefix = key
+            if not isinstance(prefix, str):
+                raise ValueError(
+                    "Second parameter of Ref[...] must be a filename prefix "
+                    f"(a string), got {prefix!r}"
+                )
+        else:
+            base_type, prefix = key, None
+
+        return Annotated[base_type, PydanticRefAnnotation(prefix)]

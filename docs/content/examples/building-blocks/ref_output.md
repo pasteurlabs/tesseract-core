@@ -51,7 +51,7 @@ tesseract-runtime \
 
 Each entry is self-describing, in the same way an encoded array carries
 `"object_type": "array"`. That is what lets a client resolve refs without
-knowing the Tesseract's schema (see [Reading refs back](#reading-refs-back)).
+knowing the Tesseract's schema (see [Reading refs back](reading-refs-back)).
 
 ```
 output/
@@ -66,7 +66,7 @@ the shared buffer:
 
 ```json
 {
-  "name": "frame_001",
+  "name": "step_1",
   "displacement": {
     "object_type": "array",
     "shape": [4, 3],
@@ -99,7 +99,31 @@ tesseract-runtime apply '{"inputs": {"scale": 2.0, "n_nodes": 2, "n_frames": 1}}
 ```
 
 ```json
-{"frames": [{"name": "frame_000", "displacement": {...}, "pressure": {...}}]}
+{
+  "frames": [
+    {
+      "name": "step_0",
+      "displacement": {
+        "object_type": "array",
+        "shape": [2, 3],
+        "dtype": "float32",
+        "data": {
+          "buffer": [
+            [0.0, 0.0, 0.0],
+            [2.0, 2.0, 2.0]
+          ],
+          "encoding": "json"
+        }
+      },
+      "pressure": {
+        "object_type": "array",
+        "shape": [2],
+        "dtype": "float64",
+        "data": { "buffer": [0.0, 2.0], "encoding": "json" }
+      }
+    }
+  ]
+}
 ```
 
 Validation accepts both forms, so a payload produced either way can be read
@@ -107,6 +131,8 @@ back. A ref is resolved against `base_dir`, the file is read, and the wrapped
 model's own validators run on its contents — array shapes and dtypes inside a
 sidecar are checked exactly as they would be inline. A bare path string is
 accepted too, so hand-written payloads that just name the file keep working.
+
+(reading-refs-back)=
 
 ## Reading refs back
 
@@ -128,14 +154,33 @@ sidecar, and decodes the arrays inside it (including nested refs). Without an
 
 ## Naming sidecar files
 
-By default sidecars get UUID names, matching how `json+binref` names `.bin`
-files. Give the wrapped model a `__ref_name__()` method to derive readable
-names from the data instead. The stem must be unique across the payload;
-duplicates and unsafe names are rejected rather than silently clobbered.
+Sidecars are named `<prefix>_<index>.json`, where the prefix comes from the
+first of these that is usable:
 
-```{literalinclude} ../../../../examples/ref_output/tesseract_api.py
-:pyobject: Frame.__ref_name__
-:language: python
+1. the prefix passed as `Ref[Frame, "frame"]` → `frame_000.json`;
+2. the model's own `name` field → `step_0_000.json`;
+3. the model's class name → `Frame_000.json`.
+
+Failing all three, files are named with a UUID, matching how `json+binref`
+names its `.bin` files. Because every name carries a running index, sidecars in
+one payload can never collide — a `name` field need not be unique. A `name`
+that is missing or not filename-safe (a path separator, say) quietly falls
+through to the next option rather than sinking the whole response; a prefix
+passed to `Ref` is developer-supplied, so an unusable one raises.
+
+Counters restart on each dump, so two dumps into the _same_ directory overwrite
+each other. A served Tesseract avoids this by writing into a per-request
+`run_<id>/` directory.
+
+```{note}
+Linters read a bare string in a subscript as a forward reference, so
+`Ref[Frame, "frame"]` may need a `# noqa: F821`. The same applies to Tesseract's
+existing `Array[(2, 3), "float32"]` form.
+```
+
+```python
+class OutputSchema(BaseModel):
+    frames: list[Ref[Frame, "frame"]]
 ```
 
 ## Refs and differentiation

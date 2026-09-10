@@ -10,7 +10,7 @@
   "expected_outputs": {
     "frames": [
       {
-        "name": "frame_000",
+        "name": "step_0",
         "displacement": {
           "object_type": "array",
           "shape": [2, 3],
@@ -34,7 +34,7 @@
         }
       },
       {
-        "name": "frame_001",
+        "name": "step_1",
         "displacement": {
           "object_type": "array",
           "shape": [2, 3],
@@ -58,7 +58,7 @@
         }
       },
       {
-        "name": "frame_002",
+        "name": "step_2",
         "displacement": {
           "object_type": "array",
           "shape": [2, 3],

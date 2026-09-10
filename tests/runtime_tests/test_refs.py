@@ -4,6 +4,7 @@
 """Tests for Ref, the sidecar-JSON encoding for nested models."""
 
 import json
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -27,16 +28,13 @@ class Frame(BaseModel):
     displacement: Differentiable[Array[(None, 3), Float32]]
     pressure: Differentiable[Array[(None,), Float64]]
 
-    def __ref_name__(self) -> str:
-        return self.name
-
 
 class InputSchema(BaseModel):
     scale: Differentiable[Array[(), Float32]] = 1.0
 
 
 class OutputSchema(BaseModel):
-    result: list[Ref[Frame]]
+    result: list[Ref[Frame, "frame"]]  # noqa: F821
 
 
 def make_frame(idx: int, n: int = 2) -> Frame:
@@ -57,12 +55,12 @@ def test_binref_writes_sidecars_and_emits_paths(tmp_path):
     )
     assert payload == {
         "result": [
-            {"object_type": REF_OBJECT_TYPE, "path": f"frame_{i}.json"}
+            {"object_type": REF_OBJECT_TYPE, "path": f"frame_{i:03d}.json"}
             for i in range(3)
         ]
     }
 
-    sidecar = json.loads((tmp_path / "frame_1.json").read_text())
+    sidecar = json.loads((tmp_path / "frame_001.json").read_text())
     assert sidecar["name"] == "frame_1"
     assert sidecar["displacement"]["data"]["encoding"] == "binref"
     assert sidecar["displacement"]["shape"] == [2, 3]
@@ -82,11 +80,11 @@ def test_binref_dir_keeps_sidecars_next_to_buffers(tmp_path):
         )
     )
     assert payload == {
-        "result": [{"object_type": REF_OBJECT_TYPE, "path": "sub/frame_0.json"}]
+        "result": [{"object_type": REF_OBJECT_TYPE, "path": "sub/frame_000.json"}]
     }
-    assert (tmp_path / "sub" / "frame_0.json").exists()
+    assert (tmp_path / "sub" / "frame_000.json").exists()
 
-    sidecar = json.loads((tmp_path / "sub" / "frame_0.json").read_text())
+    sidecar = json.loads((tmp_path / "sub" / "frame_000.json").read_text())
     # binrefs inside the sidecar stay relative to base_dir, not to the sidecar
     assert sidecar["displacement"]["data"]["buffer"].startswith("sub/")
 
@@ -117,7 +115,7 @@ def test_validate_accepts_bare_path_strings(tmp_path):
     """Hand-written payloads that just name the file keep working."""
     output_to_bytes(make_output(1), "json+binref", base_dir=tmp_path)
     restored = OutputSchema.model_validate(
-        {"result": ["frame_0.json"]}, context={"base_dir": str(tmp_path)}
+        {"result": ["frame_000.json"]}, context={"base_dir": str(tmp_path)}
     )
     assert restored.result[0].name == "frame_0"
 
@@ -146,45 +144,80 @@ def test_sidecar_arrays_are_shape_validated(tmp_path):
 
 def test_path_without_base_dir_is_rejected():
     with pytest.raises(ValueError, match="no base_dir is set"):
-        OutputSchema.model_validate({"result": ["frame_0.json"]})
+        OutputSchema.model_validate({"result": ["frame_000.json"]})
 
 
-def test_duplicate_filenames_are_rejected(tmp_path):
+def test_repeated_names_get_distinct_files(tmp_path):
+    """The running index means a non-unique `name` cannot clobber anything."""
     duplicated = OutputSchema(result=[make_frame(0), make_frame(0)])
-    with pytest.raises(Exception, match="Duplicate Ref filename"):
-        output_to_bytes(duplicated, "json+binref", base_dir=tmp_path)
+    payload = json.loads(output_to_bytes(duplicated, "json+binref", base_dir=tmp_path))
+    assert [ref["path"] for ref in payload["result"]] == [
+        "frame_000.json",
+        "frame_001.json",
+    ]
 
 
-def test_ref_rejects_extra_type_parameters():
-    with pytest.raises(ValueError, match="single parameter"):
-        Ref[Frame, "name"]
+def test_invalid_prefix_is_rejected(tmp_path):
+    class Escaping(BaseModel):
+        result: list[Ref[Frame, "../escape"]]  # noqa: F722
+
+    with pytest.raises(Exception, match="Invalid Ref prefix"):
+        output_to_bytes(
+            Escaping(result=[make_frame(0)]), "json+binref", base_dir=tmp_path
+        )
 
 
-def test_unsafe_filename_is_rejected(tmp_path):
+@pytest.mark.parametrize(
+    "field_name,expected",
+    [
+        # no prefix: fall back to the model's own `name` field ...
+        ("name", "frame_0_000.json"),
+        # ... then to the class name
+        ("label", "Unprefixed_000.json"),
+    ],
+)
+def test_name_falls_back_to_field_then_class(tmp_path, field_name, expected):
+    Unprefixed = type(
+        "Unprefixed",
+        (BaseModel,),
+        {
+            "__annotations__": {
+                field_name: str,
+                "displacement": Differentiable[Array[(None, 3), Float32]],
+                "pressure": Differentiable[Array[(None,), Float64]],
+            }
+        },
+    )
+
+    class Out(BaseModel):
+        result: list[Ref[Unprefixed]]
+
+    frame = make_frame(0)
+    item = Unprefixed(
+        **{field_name: "frame_0"},
+        displacement=frame.displacement,
+        pressure=frame.pressure,
+    )
+    payload = json.loads(
+        output_to_bytes(Out(result=[item]), "json+binref", base_dir=tmp_path)
+    )
+    assert payload["result"][0]["path"] == expected
+
+
+def test_unusable_name_falls_through_to_class_name(tmp_path):
+    """A name that is not filename-safe must not sink the whole response."""
     escaping = OutputSchema(result=[make_frame(0)])
     escaping.result[0].name = "../escape"
-    with pytest.raises(Exception, match="as a Ref filename"):
-        output_to_bytes(escaping, "json+binref", base_dir=tmp_path)
 
+    class Unprefixed(BaseModel):
+        result: list[Ref[Frame]]
 
-def test_uuid_names_by_default(tmp_path):
-    class Anon(BaseModel):
-        """Same fields as Frame but no __ref_name__, so sidecars get UUID names."""
-
-        name: str
-        displacement: Differentiable[Array[(None, 3), Float32]]
-        pressure: Differentiable[Array[(None,), Float64]]
-
-    class AnonOutput(BaseModel):
-        result: list[Ref[Anon]]
-
-    anon = Anon(**make_frame(0).model_dump())
     payload = json.loads(
-        output_to_bytes(AnonOutput(result=[anon]), "json+binref", base_dir=tmp_path)
+        output_to_bytes(
+            Unprefixed(result=escaping.result), "json+binref", base_dir=tmp_path
+        )
     )
-    (ref,) = payload["result"]
-    assert ref["object_type"] == REF_OBJECT_TYPE
-    assert ref["path"].endswith(".json") and ref["path"] != "frame_0.json"
+    assert payload["result"][0]["path"] == "Frame_000.json"
 
 
 # ---------------------------------------------------------------------------
@@ -300,14 +333,14 @@ def test_refs_are_written_over_http(tmp_path, monkeypatch):
             "result": [
                 {
                     "object_type": REF_OBJECT_TYPE,
-                    "path": f"run_test_refs/frame_{i}.json",
+                    "path": f"run_test_refs/frame_{i:03d}.json",
                 }
                 for i in range(2)
             ]
         }
 
         rundir = tmp_path / "run_test_refs"
-        assert (rundir / "frame_0.json").exists()
+        assert (rundir / "frame_000.json").exists()
         # one shared buffer for the arrays of both sidecars
         assert len(list(rundir.glob("*.bin"))) == 1
 
@@ -318,3 +351,24 @@ def test_refs_are_written_over_http(tmp_path, monkeypatch):
         np.testing.assert_allclose(restored.result[1].displacement, np.ones((2, 3)))
     finally:
         update_config()
+
+
+def test_ref_paths_are_posix_regardless_of_host(tmp_path):
+    """Ref paths travel in the response, so they must not pick up backslashes.
+
+    A Tesseract may serve from a different OS than the client that resolves
+    the path, and join_paths() goes through pathlib.
+    """
+    from tesseract_core.runtime.experimental.refs import _posix_join
+
+    payload = json.loads(
+        output_to_bytes(
+            make_output(2), "json+binref", base_dir=tmp_path, binref_dir="run_1/inner"
+        )
+    )
+    paths = [ref["path"] for ref in payload["result"]]
+    assert paths == ["run_1/inner/frame_000.json", "run_1/inner/frame_001.json"]
+    assert not any("\\" in path for path in paths)
+
+    # a subdir that already arrived with native separators is normalised too
+    assert _posix_join(Path("run_1") / "inner", "f.json") == "run_1/inner/f.json"

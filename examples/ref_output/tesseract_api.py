@@ -5,7 +5,7 @@
 
 ``apply`` returns one ``Frame`` per requested time step. Each ``Frame`` is a
 user-defined Pydantic model holding two differentiable arrays and a plain
-string. Wrapping it in ``Ref[Frame, "name"]`` means that, when the Tesseract is
+string. Wrapping it in ``Ref[Frame, "frame"]`` means that, when the Tesseract is
 run with an output path and the ``json+binref`` format, the main payload is
 just::
 
@@ -34,19 +34,13 @@ from tesseract_core.runtime.experimental import Ref
 class Frame(BaseModel):
     """A single time step. Two differentiable array leaves plus a string leaf."""
 
-    name: str = Field(
-        description="Frame identifier, also used as the sidecar filename."
-    )
+    name: str = Field(description="Frame identifier.")
     displacement: Differentiable[Array[(None, 3), Float32]] = Field(
         description="Per-node displacement vectors."
     )
     pressure: Differentiable[Array[(None,), Float64]] = Field(
         description="Per-node scalar pressure."
     )
-
-    def __ref_name__(self) -> str:
-        """Name this frame's sidecar file after the frame itself."""
-        return self.name
 
 
 class InputSchema(BaseModel):
@@ -58,7 +52,10 @@ class InputSchema(BaseModel):
 
 
 class OutputSchema(BaseModel):
-    frames: list[Ref[Frame]] = Field(
+    # The "frame" prefix names the sidecar files (frame_000.json, ...).
+    # Linters read a bare string in a subscript as a forward reference, hence
+    # the suppression below; the same applies to Array[(2, 3), "float32"].
+    frames: list[Ref[Frame, "frame"]] = Field(  # noqa: F821
         description="One frame per time step, each serialized to its own JSON file."
     )
 
@@ -82,7 +79,7 @@ def _frames(inputs: InputSchema, scale: float) -> list[Frame]:
         displacement, pressure = _base_fields(inputs.n_nodes, i)
         frames.append(
             Frame(
-                name=f"frame_{i:03d}",
+                name=f"step_{i}",
                 displacement=(scale * displacement).astype("float32"),
                 pressure=scale * pressure,
             )

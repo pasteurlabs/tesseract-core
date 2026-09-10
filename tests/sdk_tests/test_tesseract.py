@@ -1050,11 +1050,8 @@ def test_HTTPClient_follows_refs(mocker, tmp_path):
         displacement: Differentiable[Array[(None, 3), Float32]]
         pressure: Differentiable[Array[(None,), Float64]]
 
-        def __ref_name__(self) -> str:
-            return self.name
-
     class OutputSchema(BaseModel):
-        frames: list[Ref[Frame]]
+        frames: list[Ref[Frame, "frame"]]  # noqa: F821
 
     outputs = OutputSchema(
         frames=[
