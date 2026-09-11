@@ -446,17 +446,24 @@ def _out_of_range(arr: ArrayLike, dtype: str, value: Any) -> PydanticCustomError
 
 
 def _astype_checked(arr: ArrayLike, dtype: str) -> ArrayLike:
-    """Cast to ``dtype``, refusing casts that wrap an integer or overflow a float.
+    """Cast to ``dtype``, refusing casts that lose a value.
 
-    Only narrowing casts are checked, and each kind is checked the cheapest way
-    it can be: NumPy raises on a float or complex overflow by itself, so those
-    cost nothing extra, while an integer cast wraps silently and is caught by
-    comparing the extremes against what the target can hold.
+    That is a fractional part dropped on the way to an integer, an integer
+    wrapped past the target's range, or a finite float overflowing to inf.
+    Only narrowing casts are checked, and each the cheapest way it can be:
+    NumPy raises on a float or complex overflow by itself, while an integer
+    cast truncates and wraps silently and is caught by inspecting the values.
     """
     if np.can_cast(arr.dtype, dtype, casting="safe"):
         return arr.astype(dtype, copy=False)
 
     if np.issubdtype(np.dtype(dtype), np.integer):
+        if np.issubdtype(arr.dtype, np.floating) and np.any(arr % 1):
+            raise PydanticCustomError(
+                "array_expected_integer",
+                "Expected integer data, but array contains floating point values",
+                {},
+            )
         if arr.size:
             info = np.iinfo(dtype)
             low, high = arr.min(), arr.max()
@@ -474,7 +481,7 @@ def _astype_checked(arr: ArrayLike, dtype: str) -> ArrayLike:
         with np.errstate(over="ignore"):
             out = arr.astype(dtype, copy=False)
         overflowed = np.isfinite(arr) & ~np.isfinite(out)
-        example = np.asarray(arr)[np.asarray(overflowed)].ravel()[0]
+        example = arr[overflowed].ravel()[0]
         raise _out_of_range(arr, dtype, example.item()) from None
 
 
@@ -672,15 +679,6 @@ def decode_array(
         # keep checking for "raw" for backwards compat
         elif val.data.encoding in {"json", "raw"}:
             data = np.asarray(val.data.buffer).reshape(val.shape)
-            if np.issubdtype(data.dtype, np.floating) and np.issubdtype(
-                val.dtype, np.integer
-            ):
-                if np.any(data % 1):
-                    raise PydanticCustomError(
-                        "array_expected_integer",
-                        "Expected integer data, but array contains floating point values",
-                        {},
-                    )
             data = _astype_checked(data, val.dtype)
 
         else:
