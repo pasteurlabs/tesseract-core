@@ -1,15 +1,15 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""NIXL array encoding: point-to-point GPU array exchange via NIXL.
+"""NIXL device transport: point-to-point GPU array exchange via NIXL.
 
-This module holds everything specific to the experimental ``json+nixl``
-encoding. Like :mod:`tesseract_core.runtime.cuda_ipc` it passes a GPU array
-between a producer and a consumer process without a host round-trip, but where
-``cuda_ipc`` is same-host only (a legacy CUDA IPC handle), NIXL is a
+This module holds everything specific to the ``nixl`` device transport. Like the
+``cuda_ipc`` transport (:mod:`tesseract_core.runtime.cuda.ipc`) it passes a GPU
+array between a producer and a consumer process without a host round-trip, but
+where ``cuda_ipc`` is same-host only (a legacy CUDA IPC handle), NIXL is a
 point-to-point transfer library that auto-selects its backend -- CUDA IPC /
 shared memory same-host, UCX (RDMA where the hardware supports it, TCP
-otherwise) across hosts -- behind one API. Nothing here is imported unless a
+otherwise) across hosts -- behind one API. Nothing here loads NIXL unless a
 Tesseract actually encodes or decodes a NIXL array.
 
 The transfer is **initiator-driven READ**: the producer (server) registers the
@@ -20,13 +20,8 @@ registers it, and posts a matched READ that pulls the bytes across. This is the
 same receiver-driven shape as ``cuda_ipc`` -- the producer's registration is
 inert until the consumer reads -- so it slots into the same request lifecycle.
 
-Public entry points used via the :class:`NixlTransport` backend:
-
-* :func:`dump_nixl_arraydict` / :func:`load_nixl_arraydict` -- encode/decode,
-* :func:`release_nixl_exports` -- deregister a request's exported buffers.
-
 The consumer-facing result is the framework-agnostic
-:class:`tesseract_core.runtime.cuda_ipc.IpcDeviceArray`, reused unchanged: it
+:class:`tesseract_core.runtime.cuda.ipc.IpcDeviceArray`, reused unchanged: it
 already owns a plain device buffer and exposes ``__cuda_array_interface__`` /
 ``__dlpack__``, so Torch/JAX/CuPy adopt it zero-copy exactly as for ``cuda_ipc``.
 """
@@ -34,23 +29,20 @@ already owns a plain device buffer and exposes ``__cuda_array_interface__`` /
 from __future__ import annotations
 
 import ctypes
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import numpy as np
 import pybase64
 
 from tesseract_core.runtime.array_encoding import ArrayDict
-from tesseract_core.runtime.cuda_ipc import (
+from tesseract_core.runtime.cuda import api as cuda_api
+from tesseract_core.runtime.cuda.ipc import (
     IpcDeviceArray,
-    _cuda_error_string,
-    _get_cudart,
     _is_c_contiguous,
     has_cuda_array_interface,
 )
-
-if TYPE_CHECKING:  # pragma: no cover - typing only
-    pass
-
+from tesseract_core.runtime.cuda.loader import iter_cudart_candidates
+from tesseract_core.runtime.device_transport import DeviceTransport
 
 # ---------------------------------------------------------------------------
 # Lazy NIXL agent (one per process, per role)
@@ -90,18 +82,17 @@ def _preload_cuda_runtime() -> None:
 
     We fix that in-process rather than via a launcher-set ``LD_LIBRARY_PATH``:
     load the same libcudart the cuda_ipc codec resolves (its
-    :func:`~tesseract_core.runtime.cuda_ipc.iter_cudart_candidates` prefers the
-    wheel copy, matching JAX/PyTorch) with ``RTLD_GLOBAL``, so a subsequent bare
-    ``dlopen("libcudart.so.NN")`` from UCX resolves to the already-loaded handle.
-    Best-effort and idempotent: if none load, UCX is left to its own resolution
-    (a host with system CUDA needs no help), and registration surfaces the error.
+    :func:`~tesseract_core.runtime.cuda.loader.iter_cudart_candidates` prefers
+    the wheel copy, matching JAX/PyTorch) with ``RTLD_GLOBAL``, so a subsequent
+    bare ``dlopen("libcudart.so.NN")`` from UCX resolves to the already-loaded
+    handle. Best-effort and idempotent: if none load, UCX is left to its own
+    resolution (a host with system CUDA needs no help), and registration
+    surfaces the error.
     """
     global _CUDA_RUNTIME_PRELOADED
     if _CUDA_RUNTIME_PRELOADED:
         return
     _CUDA_RUNTIME_PRELOADED = True
-
-    from tesseract_core.runtime.cuda_ipc import iter_cudart_candidates
 
     for candidate in iter_cudart_candidates():
         try:
@@ -120,7 +111,7 @@ def _get_nixl_agent() -> Any:
         from nixl._api import nixl_agent, nixl_agent_config
     except ImportError as exc:  # pragma: no cover - env-dependent
         raise RuntimeError(
-            "The 'json+nixl' encoding requires NIXL. Install it with the "
+            "The 'nixl' GPU transport requires NIXL. Install it with the "
             "optional extra: pip install tesseract-core[nixl]."
         ) from exc
 
@@ -146,7 +137,7 @@ _NIXL_EXPORT_REGISTRY: list[Any] = []
 def release_nixl_exports() -> None:
     """Deregister and drop every buffer this side exported via NIXL.
 
-    Mirrors :func:`tesseract_core.runtime.cuda_ipc.release_pinned_ipc_exports`:
+    Mirrors :func:`tesseract_core.runtime.cuda.ipc.release_pinned_ipc_exports`:
     driven by both sides at the same points in the request lifecycle (server at
     the start of the next request; client at the end of the current one), since
     the "consumer is done reading" evidence arrives at the same moments.
@@ -162,21 +153,6 @@ def release_nixl_exports() -> None:
     _NIXL_EXPORT_REGISTRY.clear()
 
 
-def _nixl_tensor_view(arr: Any) -> Any:
-    """Wrap a ``__cuda_array_interface__`` array as something NIXL can register.
-
-    NIXL registers memory by ``(addr, len, device_id)`` tuples. Build that tuple
-    straight from the CUDA array interface so no framework object is required.
-    """
-    iface = arr.__cuda_array_interface__
-    data_ptr = iface["data"][0]
-    shape = tuple(iface["shape"])
-    dtype = np.dtype(iface["typestr"])
-    nbytes = int(np.prod(shape)) * dtype.itemsize if shape else dtype.itemsize
-    device = _device_ordinal(arr)
-    return (data_ptr, nbytes, device, "")
-
-
 def _device_ordinal(arr: Any) -> int:
     """Best-effort CUDA device ordinal for a GPU array (mirrors cuda_ipc)."""
     device = 0
@@ -187,6 +163,21 @@ def _device_ordinal(arr: Any) -> int:
         elif hasattr(dev, "index") and dev.index is not None:
             device = dev.index  # PyTorch
     return device
+
+
+def _nixl_tensor_view(arr: Any) -> tuple[int, int, int, str]:
+    """Wrap a ``__cuda_array_interface__`` array as something NIXL can register.
+
+    NIXL registers memory by ``(addr, len, device_id, "")`` tuples. Build that
+    straight from the CUDA array interface so no framework object is required.
+    """
+    iface = arr.__cuda_array_interface__
+    data_ptr = iface["data"][0]
+    shape = tuple(iface["shape"])
+    dtype = np.dtype(iface["typestr"])
+    nbytes = int(np.prod(shape)) * dtype.itemsize if shape else dtype.itemsize
+    device = _device_ordinal(arr)
+    return (data_ptr, nbytes, device, "")
 
 
 def dump_nixl_arraydict(arr: Any) -> ArrayDict:
@@ -261,17 +252,9 @@ def load_nixl_arraydict(val: ArrayDict) -> IpcDeviceArray:
     nbytes = int(np.prod(shape)) * dtype.itemsize if shape else dtype.itemsize
 
     agent = _get_nixl_agent()
-    cudart = _get_cudart()
 
-    ret = cudart.cudaSetDevice(device)
-    if ret != 0:
-        raise RuntimeError(
-            f"cudaSetDevice({device}) failed: {_cuda_error_string(cudart, ret)}"
-        )
-    owned_ptr = ctypes.c_void_p()
-    ret = cudart.cudaMalloc(ctypes.byref(owned_ptr), ctypes.c_size_t(nbytes))
-    if ret != 0:
-        raise RuntimeError(f"cudaMalloc failed: {_cuda_error_string(cudart, ret)}")
+    cuda_api.set_device(device)
+    owned_ptr = cuda_api.malloc(nbytes)
 
     try:
         peer = agent.add_remote_agent(remote_meta)
@@ -280,7 +263,7 @@ def load_nixl_arraydict(val: ArrayDict) -> IpcDeviceArray:
 
         # Register our owned buffer as the READ destination.
         local_reg = agent.register_memory(
-            agent.get_reg_descs([(owned_ptr.value, nbytes, device, "")], "VRAM")
+            agent.get_reg_descs([(owned_ptr, nbytes, device, "")], "VRAM")
         )
         if local_reg is None:
             raise RuntimeError("nixl register_memory (local) failed")
@@ -294,10 +277,10 @@ def load_nixl_arraydict(val: ArrayDict) -> IpcDeviceArray:
         finally:
             agent.deregister_memory(local_reg)
     except Exception:
-        cudart.cudaFree(owned_ptr)
+        cuda_api.free(owned_ptr)
         raise
 
-    return IpcDeviceArray(owned_ptr.value, device, shape, dtype)
+    return IpcDeviceArray(owned_ptr, device, shape, dtype)
 
 
 def _wait_for_xfer(agent: Any, handle: Any) -> None:
@@ -318,8 +301,8 @@ def _wait_for_xfer(agent: Any, handle: Any) -> None:
 # ---------------------------------------------------------------------------
 
 
-class NixlTransport:
-    """DeviceTransport backend for the experimental ``json+nixl`` mode.
+class NixlTransport(DeviceTransport):
+    """DeviceTransport backend for the ``nixl`` transport.
 
     Point-to-point, auto-selecting: same-host it rides NIXL's CUDA IPC / shared
     memory backend, cross-host it rides UCX (RDMA where available). Receiver
@@ -352,13 +335,3 @@ class NixlTransport:
     def release(self, session: Any = None) -> None:
         """Deregister the buffers this request exported via NIXL."""
         release_nixl_exports()
-
-
-def _register_nixl_transport() -> None:
-    """Register the nixl backend once this module is imported."""
-    from tesseract_core.runtime.device_transport import register_transport
-
-    register_transport(NixlTransport())
-
-
-_register_nixl_transport()

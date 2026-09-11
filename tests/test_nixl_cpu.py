@@ -1,10 +1,10 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""GPU-free tests for the json+nixl encoding's plumbing.
+"""GPU-free tests for the nixl device transport's plumbing.
 
 These cover the Python wiring around the NIXL transport -- the wire schema, the
-experimental-flag gating, the format -> encoding-context mapping, and the
+``gpu_transport`` gating, the transport -> encoding-context mapping, and the
 transport registration -- without a GPU or NIXL installed. The actual
 cross-process transfer (which needs both) is covered by the GPU tests in
 ``test_nixl.py``.
@@ -43,30 +43,31 @@ def test_nixl_array_schema_rejects_malformed(bad):
         NixlArrayData(buffer=bad, encoding="nixl")
 
 
-def test_json_nixl_gated_behind_experimental_flag():
+def test_nixl_gated_behind_gpu_transport_config():
+    """Nixl is a transport, not a format: it is offered only when configured."""
     from tesseract_core.runtime import config
-    from tesseract_core.runtime.file_interactions import available_formats
+    from tesseract_core.runtime.file_interactions import available_gpu_transports
 
-    config.update_config(enable_experimental_cuda_nixl=False)
-    assert "json+nixl" not in available_formats()
+    config.update_config(gpu_transport="none")
+    assert "nixl" not in available_gpu_transports()
 
-    config.update_config(enable_experimental_cuda_nixl=True)
-    assert "json+nixl" in available_formats()
+    config.update_config(gpu_transport="nixl")
+    assert "nixl" in available_gpu_transports()
 
 
 def test_output_to_bytes_rejects_nixl_by_default():
     from tesseract_core.runtime import config, file_interactions
 
-    config.update_config(enable_experimental_cuda_nixl=False)
-    with pytest.raises(ValueError, match=r"Unsupported format json\+nixl"):
-        file_interactions.output_to_bytes({"y": 1}, "json+nixl")
+    config.update_config(gpu_transport="none")
+    with pytest.raises(ValueError, match=r"Unsupported GPU transport nixl"):
+        file_interactions.output_to_bytes({"y": 1}, "json+base64", gpu_transport="nixl")
 
 
 def test_output_to_bytes_nixl_context(monkeypatch):
-    """json+nixl maps to the nixl array-encoding context (flag enabled)."""
+    """gpu_transport=nixl maps to the nixl device-transport context (when configured)."""
     from tesseract_core.runtime import config, file_interactions
 
-    config.update_config(enable_experimental_cuda_nixl=True)
+    config.update_config(gpu_transport="nixl")
     captured = {}
 
     class FakeAdapter:
@@ -80,8 +81,12 @@ def test_output_to_bytes_nixl_context(monkeypatch):
     monkeypatch.setattr(file_interactions, "TypeAdapter", FakeAdapter)
     monkeypatch.setattr(file_interactions.orjson, "dumps", lambda d: b"{}")
 
-    file_interactions.output_to_bytes({"y": 1}, "json+nixl")
-    assert captured["context"] == {"array_encoding": "nixl"}
+    file_interactions.output_to_bytes({"y": 1}, "json+base64", gpu_transport="nixl")
+    assert captured["context"] == {
+        "array_encoding": "base64",
+        "compression": None,
+        "device_transport": "nixl",
+    }
 
 
 def test_client_import_device_transport_explains_missing_nixl(monkeypatch):

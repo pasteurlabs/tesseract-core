@@ -1,7 +1,7 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""GPU tests for the json+nixl encoding: a real cross-process NIXL transfer.
+"""GPU tests for the nixl device transport: a real cross-process NIXL transfer.
 
 Run on a GPU machine with NIXL installed::
 
@@ -75,7 +75,7 @@ def _consumer_main(rendezvous, ready_path, done_path, result_q):
         import orjson
 
         from tesseract_core.runtime import nixl_transport as N
-        from tesseract_core.runtime.cuda_ipc import IpcDeviceArray
+        from tesseract_core.runtime.cuda.ipc import IpcDeviceArray
 
         while not os.path.exists(ready_path):
             pass

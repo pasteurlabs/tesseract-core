@@ -42,7 +42,7 @@ if TYPE_CHECKING:
     # Imported for type hints only. `from __future__ import annotations` makes
     # every annotation below a string, so these names are never needed at
     # runtime and the SDK does not eagerly pull in the runtime/CUDA machinery.
-    from tesseract_core.runtime.cuda_ipc import IpcDeviceArray
+    from tesseract_core.runtime.cuda.ipc import IpcDeviceArray
 
 # Output serialization formats; single SDK-side definition lives in engine.
 OutputFormat: TypeAlias = engine.OutputFormat
@@ -156,6 +156,7 @@ class Tesseract:
         input_path: str | Path | None = None,
         output_path: str | Path | None = None,
         output_format: OutputFormat = "json+base64",
+        gpu_transport: str | None = None,
         docker_args: list[str] | None = None,
         runtime_config: dict[str, Any] | None = None,
         stream_logs: BoolOrCallable = False,
@@ -195,6 +196,12 @@ class Tesseract:
                 Required when using json+binref output format.
             output_format: Format to use for the output data. json+binref requires output_path to be set.
                 This has no impact on what is returned to Python and only affects the format that is used internally.
+            gpu_transport: How GPU arrays leave the process, independently of ``output_format``
+                (which governs CPU arrays). ``none`` copies GPU arrays to the host and
+                serializes them like any CPU array; ``cuda_ipc`` exports them by reference
+                and requires the container to have GPU access. Resolved against
+                ``runtime_config`` with the precedence described in ``engine.serve``. This
+                value also governs how the client exports GPU *inputs* to the served Tesseract.
             docker_args: Additional arguments to pass to the container runtime (e.g., Docker).
             runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
                 These are converted to TESSERACT_* environment variables. For example,
@@ -272,6 +279,7 @@ class Tesseract:
             input_path=input_path,
             output_path=output_path,
             output_format=output_format,
+            gpu_transport=gpu_transport,
             runtime_config=runtime_config,
             port=port,
             host_ip=host_ip,
@@ -289,6 +297,7 @@ class Tesseract:
         input_path: Path | None = None,
         output_path: Path | None = None,
         output_format: OutputFormat = "json+base64",
+        gpu_transport: str | None = None,
         runtime_config: dict[str, Any] | None = None,
         stream_logs: BoolOrCallable = False,
     ) -> Tesseract:
@@ -311,6 +320,11 @@ class Tesseract:
                 result with be given relative to this path. Required when using json+binref.
             output_format: Format to use for the output data. json+binref requires output_path.
                 This has no impact on what is returned to Python and only affects the format that is used internally.
+            gpu_transport: How GPU arrays leave the process, independently of ``output_format``
+                (which governs CPU arrays). ``none`` copies GPU arrays to the host and
+                serializes them like any CPU array; ``cuda_ipc`` exports them by reference.
+                Resolved against ``runtime_config`` with the precedence described in
+                ``engine.serve``.
             runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
                 For example, `{"profiling": True}` enables profiling.
             stream_logs: If True, stream logs to stdout while endpoints run.
@@ -345,10 +359,20 @@ class Tesseract:
             resolved_output_path = engine._resolve_file_path(output_path, make_dir=True)
             update_config(output_path=str(resolved_output_path))
 
-        # Apply runtime_config options
-        config_kwargs: dict[str, Any] = {"output_format": output_format, "debug": True}
+        # Apply runtime_config options. Resolve the GPU transport with the same
+        # precedence as serve() (explicit kwarg > runtime_config > "none"),
+        # resolving it here so the config never receives None -- its field is a
+        # plain str literal.
+        config_kwargs: dict[str, Any] = {
+            "output_format": output_format,
+            "debug": True,
+        }
         if runtime_config is not None:
             config_kwargs.update(runtime_config)
+        if gpu_transport is not None:
+            config_kwargs["gpu_transport"] = gpu_transport
+        else:
+            config_kwargs.setdefault("gpu_transport", "none")
         update_config(**config_kwargs)
 
         obj = cls.__new__(cls)
@@ -413,6 +437,15 @@ class Tesseract:
         output_path = self._spawn_config.get("output_path")
         input_path = self._spawn_config.get("input_path")
         output_format = self._spawn_config.get("output_format", "json+base64")
+        # The served container's gpu_transport also governs how the client
+        # exports GPU *inputs*, so mirror the resolved transport onto the client
+        # here, using the same precedence serve() applies to the container: the
+        # explicit kwarg wins, else a value from runtime_config, else "none". So
+        # client and server always agree on how device arrays cross the boundary.
+        runtime_config = self._spawn_config.get("runtime_config") or {}
+        gpu_transport = self._spawn_config.get("gpu_transport") or runtime_config.get(
+            "gpu_transport", "none"
+        )
         self._client = HTTPClient(
             f"http://{host_ip}:{container.host_port}",
             output_path=Path(output_path) if output_path else None,
@@ -420,6 +453,7 @@ class Tesseract:
             timeout=self._timeout,
             input_path=Path(input_path) if input_path else None,
             experimental_binref_pool=self._binref_pool_enabled,
+            gpu_transport=gpu_transport,
         )
 
         # Ensure that the Tesseract is torn down once the object is garbage collected,
@@ -710,16 +744,16 @@ def _tree_map(func: Callable, tree: Any, is_leaf: Callable | None = None) -> Any
 def _import_cuda_ipc() -> ModuleType:
     """Import the cuda_ipc runtime module, or explain the missing extra.
 
-    The ``json+cuda_ipc`` output format lives in ``tesseract_core.runtime``,
-    which is an optional install (``tesseract-core[runtime]``). A base SDK
-    install lacks its dependencies, so surface a clear message pointing at the
-    extra instead of a bare ``ModuleNotFoundError`` from deep in the import chain.
+    The ``cuda_ipc`` GPU transport lives in ``tesseract_core.runtime``, which is
+    an optional install (``tesseract-core[runtime]``). A base SDK install lacks
+    its dependencies, so surface a clear message pointing at the extra instead of
+    a bare ``ModuleNotFoundError`` from deep in the import chain.
     """
     try:
-        from tesseract_core.runtime import cuda_ipc
+        from tesseract_core.runtime.cuda import ipc as cuda_ipc
     except ImportError as exc:
         raise ImportError(
-            "The 'json+cuda_ipc' output format requires the Tesseract runtime, "
+            "The 'cuda_ipc' GPU transport requires the Tesseract runtime, "
             "which is an optional dependency. Install it with "
             "'pip install tesseract-core[runtime]'."
         ) from exc
@@ -739,7 +773,7 @@ def _import_device_transport(name: str) -> ModuleType:
             from tesseract_core.runtime import nixl_transport
         except ImportError as exc:
             raise ImportError(
-                "The 'json+nixl' output format requires the Tesseract runtime and "
+                "The 'nixl' GPU transport requires the Tesseract runtime and "
                 "NIXL. Install them with "
                 "'pip install tesseract-core[runtime,nixl]'."
             ) from exc
@@ -787,26 +821,28 @@ def _encode_array(
     }
 
 
-# Release function on each device-transport runtime module, keyed by the client
-# output format that exports GPU inputs by reference through that transport.
-_DEVICE_TRANSPORT_FORMATS = {
-    "json+cuda_ipc": ("cuda_ipc", "release_pinned_ipc_exports"),
-    "json+nixl": ("nixl", "release_nixl_exports"),
+# Release function on each device-transport runtime module, keyed by the
+# ``gpu_transport`` name that exports GPU inputs by reference through it.
+_DEVICE_TRANSPORT_RELEASE = {
+    "cuda_ipc": "release_pinned_ipc_exports",
+    "nixl": "release_nixl_exports",
 }
 
 
 @contextmanager
-def _encode_payload(payload: dict | None, output_format: str) -> Iterator[dict | None]:
-    """Encode a request payload's arrays, managing on-device export lifetime.
+def _encode_payload(
+    payload: dict | None, gpu_transport: str = "none"
+) -> Iterator[dict | None]:
+    """Encode a request payload's arrays, managing device-export lifetime.
 
-    Yields the encoded payload (or None for an empty payload). For an on-device
-    transport format (``json+cuda_ipc`` / ``json+nixl``), GPU arrays are exported
-    by reference (base64 for CPU arrays), which pins/registers each exported
+    Yields the encoded payload (or None for an empty payload). When a
+    ``gpu_transport`` other than ``none`` is set, GPU arrays are exported by
+    reference (host arrays still go base64), which pins/registers each exported
     allocation in a process-global registry on the runtime side. Those exports
     are released on context exit -- by then the caller has read the full response,
     so the server has copied the inputs out and they are provably dead. The
-    release is skipped (and the transport never imported) when no GPU array was
-    actually exported.
+    release is skipped (and the transport machinery never imported) when no GPU
+    array was actually exported.
 
     Releasing on exit rather than at the start of the next request keeps pinned
     GPU memory bounded to a single in-flight request.
@@ -815,24 +851,23 @@ def _encode_payload(payload: dict | None, output_format: str) -> Iterator[dict |
         yield None
         return
 
-    transport = _DEVICE_TRANSPORT_FORMATS.get(output_format)
-    if transport is None:
+    if gpu_transport == "none":
         yield _tree_map(
             _encode_array, payload, is_leaf=lambda x: hasattr(x, "__array__")
         )
         return
 
-    transport_name, release_fn = transport
-
-    # On-device transport: a leaf is any array-like on either protocol; GPU leaves
-    # are exported by reference and pin/register their allocation until release.
+    # A device transport is set: a leaf is any array-like on either protocol;
+    # GPU leaves are exported by handle and pin their allocation until we release
+    # below. CPU leaves fall back to base64 inside _encode_array, so a mixed
+    # payload encodes correctly.
     exported = False
 
     def _encode_leaf(x: Any) -> dict:
         nonlocal exported
         if hasattr(x, "__cuda_array_interface__"):
             exported = True
-        return _encode_array(x, encoding=transport_name)
+        return _encode_array(x, encoding=gpu_transport)
 
     def _is_leaf(x: Any) -> bool:
         return hasattr(x, "__array__") or hasattr(x, "__cuda_array_interface__")
@@ -841,7 +876,8 @@ def _encode_payload(payload: dict | None, output_format: str) -> Iterator[dict |
         yield _tree_map(_encode_leaf, payload, is_leaf=_is_leaf)
     finally:
         if exported:
-            getattr(_import_device_transport(transport_name), release_fn)()
+            module = _import_device_transport(gpu_transport)
+            getattr(module, _DEVICE_TRANSPORT_RELEASE[gpu_transport])()
 
 
 def _decode_array(
@@ -954,12 +990,39 @@ def _decode_array(
         # __cuda_array_interface__ and __dlpack__ so Torch/JAX/CuPy can adopt it
         # zero-copy. The server may reuse/free the exported buffer as soon as
         # this returns (it holds it until the next request).
-        return _import_cuda_ipc().load_cuda_ipc_arraydict(encoded_arr)
+        #
+        # cuda_ipc is strictly opt-in, so reaching here means the caller asked
+        # for it. If this client has no usable CUDA context (no driver, no
+        # visible/matching device, or the runtime extra not installed) it cannot
+        # open the handle, so translate the low-level failure into an actionable
+        # message rather than a bare CUDA/import error deep in the decode.
+        try:
+            return _import_cuda_ipc().load_cuda_ipc_arraydict(encoded_arr)
+        except Exception as exc:
+            raise RuntimeError(
+                "Received a GPU array via the 'cuda_ipc' transport, but this "
+                "client could not open it on the local GPU (no CUDA driver, no "
+                "matching device, or the runtime extra is missing). Drop "
+                "gpu_transport='cuda_ipc' to have arrays copied to the host "
+                "instead, or ensure this process shares a GPU and IPC namespace "
+                "with the Tesseract."
+            ) from exc
     elif encoding == "nixl":
         # Like cuda_ipc, returns a fresh client-owned device-array wrapper, but
         # the bytes are pulled across via a matched NIXL READ (same-host IPC or
-        # cross-host transfer) rather than an IPC mapping + copy.
-        return _import_device_transport("nixl").load_nixl_arraydict(encoded_arr)
+        # cross-host transfer) rather than an IPC mapping + copy. Same opt-in
+        # reasoning: translate a failure to open/transfer into an actionable hint.
+        try:
+            return _import_device_transport("nixl").load_nixl_arraydict(encoded_arr)
+        except Exception as exc:
+            raise RuntimeError(
+                "Received a GPU array via the 'nixl' transport, but this client "
+                "could not pull it onto the local GPU (no CUDA driver, no "
+                "matching device, the runtime/nixl extras missing, or the "
+                "producer unreachable). Drop gpu_transport='nixl' to have arrays "
+                "copied to the host instead, or ensure this process can reach the "
+                "Tesseract's NIXL agent and shares a compatible GPU."
+            ) from exc
     else:
         raise ValueError(f"Unexpected array encoding {encoding}. Cannot decode.")
 
@@ -974,6 +1037,7 @@ class HTTPClient:
     # still expose the binref attributes the request/decode paths read.
     _input_path: Path | None = None
     _binref_pool: BinrefWritePool | None = None
+    _gpu_transport: str = "none"
 
     def __init__(
         self,
@@ -983,10 +1047,12 @@ class HTTPClient:
         timeout: float | tuple[float, float] | None = None,
         input_path: str | Path | None = None,
         experimental_binref_pool: bool = False,
+        gpu_transport: str = "none",
     ) -> None:
         self._url = self._sanitize_url(url)
         self._output_path = output_path
         self._output_format = output_format
+        self._gpu_transport = gpu_transport
         self._input_path = Path(input_path) if input_path is not None else None
         self._timeout = timeout
         self._session = requests.Session()
@@ -1091,11 +1157,11 @@ class HTTPClient:
                     for slot in checked_out_slots:
                         self._binref_pool.checkin(slot)
 
-        # Non-binref path: _encode_payload handles base64 and cuda_ipc, holding
-        # any exported GPU inputs alive until the response has been fully read.
-        # `requests` buffers the whole body before `_send` returns, so exiting
-        # the block afterwards releases them at the earliest safe point.
-        with _encode_payload(payload, self._output_format) as encoded_payload:
+        # Non-binref path: _encode_payload handles base64 and the GPU transport,
+        # holding any exported GPU inputs alive until the response has been fully
+        # read. `requests` buffers the whole body before `_send` returns, so
+        # exiting the block afterwards releases them at the earliest safe point.
+        with _encode_payload(payload, self._gpu_transport) as encoded_payload:
             response = self._send(url, method, orjson.dumps(encoded_payload), params)
         return self._decode_response(response, endpoint)
 
