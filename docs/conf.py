@@ -45,6 +45,7 @@ extensions = [
     "myst_nb",
     "sphinx.ext.intersphinx",
     "sphinx.ext.autodoc",
+    "sphinx.ext.extlinks",
     "sphinx.ext.napoleon",
     "sphinx.ext.viewcode",
     "sphinx_autodoc_typehints",
@@ -102,6 +103,26 @@ redirects = {
     "content/api/tesseract-runtime-cli": f"{_R}/reference/tesseract-runtime-cli/",
 }
 
+
+# -- "View on GitHub" links --------------------------------------------------
+# Link example source to the *ref the docs are being built from*, so a link to a
+# brand-new example resolves on a PR/branch preview instead of 404ing against
+# `main` before the branch is merged. Resolution order covers the three build
+# contexts: Read the Docs (versioned + PR previews), the GitHub Actions docs job
+# (which runs linkcheck on PRs), and local builds.
+_repo_url = "https://github.com/pasteurlabs/tesseract-core"
+_git_ref = (
+    os.environ.get("READTHEDOCS_GIT_IDENTIFIER")  # RTD: tag, branch, or PR head
+    or os.environ.get("GITHUB_HEAD_REF")  # GH Actions: PR source branch
+    or os.environ.get("GITHUB_REF_NAME")  # GH Actions: branch/tag on push
+    or "main"  # local build
+)
+extlinks = {
+    # Usage in Markdown, with an explicit title:
+    #   {gh-tree}`View on GitHub <examples/helloworld>`
+    # The path fills %s in the URL; the title is shown verbatim.
+    "gh-tree": (f"{_repo_url}/tree/{_git_ref}/%s", None),
+}
 
 myst_enable_extensions = [
     "dollarmath",

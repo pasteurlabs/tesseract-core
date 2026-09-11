@@ -1,6 +1,6 @@
 # Wrapping MAPDL as a Tesseract
 
-[View on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/demo/_showcase/ansys-shapeopt/pymapdl)
+{gh-tree}`View on GitHub <demo/_showcase/ansys-shapeopt/pymapdl>`
 
 This example wraps Ansys MAPDL as a differentiable Tesseract that can e.g. be used for SIMP (Solid Isotropic Material with Penalization) topology optimization.
 

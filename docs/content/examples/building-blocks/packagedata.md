@@ -1,6 +1,6 @@
 # Packaging local files into a Tesseract
 
-[View on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/package_data)
+{gh-tree}`View on GitHub <examples/package_data>`
 
 ## Context
 
