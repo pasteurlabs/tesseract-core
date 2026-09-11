@@ -1,6 +1,6 @@
 # Differentiating Compiled Code (Enzyme + Fortran)
 
-[View on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/fortran_enzyme)
+{gh-tree}`View on GitHub <examples/fortran_enzyme>`
 
 ## Context
 

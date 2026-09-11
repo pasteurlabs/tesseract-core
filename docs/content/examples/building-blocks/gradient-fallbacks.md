@@ -1,6 +1,6 @@
 # Deriving Gradient Endpoints from Each Other
 
-[View on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/univariate_gradient_fallbacks)
+{gh-tree}`View on GitHub <examples/univariate_gradient_fallbacks>`
 
 This guide shows how to derive missing gradient endpoints from ones you have already
 implemented, using the experimental fallback helpers.

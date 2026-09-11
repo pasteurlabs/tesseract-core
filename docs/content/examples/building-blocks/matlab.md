@@ -1,6 +1,6 @@
 # Wrapping MATLAB Code
 
-[View on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/_matlab_springmass)
+{gh-tree}`View on GitHub <examples/_matlab_springmass>`
 
 ## Context
 

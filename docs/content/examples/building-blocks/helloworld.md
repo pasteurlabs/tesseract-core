@@ -1,6 +1,6 @@
 # HelloWorld
 
-[View on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/helloworld)
+{gh-tree}`View on GitHub <examples/helloworld>`
 
 ## Context
 
