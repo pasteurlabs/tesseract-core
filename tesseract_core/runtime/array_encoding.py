@@ -3,6 +3,7 @@
 
 import os
 import re
+import warnings
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Annotated, Any, Literal, TypeAlias, TypedDict, get_args
@@ -435,6 +436,269 @@ def _load_binref_arraydict(val: ArrayDict, base_dir: str | Path | None) -> np.nd
     return np.frombuffer(buffer, dtype=dtype).reshape(shape)
 
 
+class BinrefArray:
+    """An array whose data lives on disk in binref format, referenced by path.
+
+    Hand one to an ordinary :class:`Array` field in place of a NumPy array and
+    the field forwards it verbatim when the client negotiates ``json+binref``
+    output -- so a buffer written to disk during ``apply`` reaches the client
+    without ever being read back into memory. For any other negotiated format
+    (``json``, ``base64``) the buffer is loaded once and encoded like a normal
+    array. This mirrors how the ``Array`` type already passes GPU arrays through
+    validation untouched and materializes them only when needed (see
+    :func:`validate_python_or_gpu_array` and :func:`encode_array`).
+
+    Construct one via a named constructor (the plain constructor raises):
+
+    * :meth:`write` -- write a NumPy array to disk and reference it.
+    * :meth:`from_file` -- reference a buffer some other code already wrote (e.g.
+      a compiled solver), building the buffer spec from a path + offset.
+    * :meth:`from_spec` -- for full control, pass an explicit buffer spec string.
+
+    Example (compiled code wrote ``mesh.bin`` itself)::
+
+        def apply(inputs):
+            run_solver(out="mesh.bin")  # writes into the output directory
+            arr = BinrefArray.from_file("mesh.bin", shape=(1000, 1000), dtype="float64")
+            return OutputSchema(result=arr)
+
+    The buffer path is resolved by the client against the served
+    ``output_path``, so it must be relative to that directory (a bare filename is
+    resolved as ``output_path / filename``) or an absolute path / URL the
+    decoder can reach. The data must be C-contiguous, row-major and match the
+    declared ``shape`` and ``dtype``; a mismatch is caught when the field is
+    validated.
+
+    Deliberately a plain class (not a dataclass / ``BaseModel``) so Pydantic
+    treats it as an opaque leaf and does not flatten it during the Python-mode
+    ``model_dump()`` the runtime performs before serialization.
+    """
+
+    __slots__ = ("_arraydict",)
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        raise RuntimeError(
+            "BinrefArray cannot be instantiated directly; use one of the named "
+            "constructors: BinrefArray.write(arr), "
+            "BinrefArray.from_file(path, shape, dtype), or "
+            "BinrefArray.from_spec(buffer, shape, dtype)."
+        )
+
+    @classmethod
+    def from_spec(
+        cls,
+        buffer: str,
+        shape: Sequence[int],
+        dtype: str,
+        *,
+        compression: str | None = None,
+    ) -> "BinrefArray":
+        """Reference a binref buffer by its raw spec string.
+
+        Args:
+            buffer: A ``<path>[:<offset>[:<compressed_size>]]`` spec. The path is
+                resolved against the served ``output_path`` (see class docs).
+            shape: Shape of the array.
+            dtype: NumPy dtype name (e.g. ``"float64"``).
+            compression: Compression applied to the buffer, if any (``"lz4"``).
+                When set, ``buffer`` must include the compressed size.
+        """
+        if not isinstance(buffer, str) or not buffer:
+            raise ValueError("BinrefArray buffer must be a non-empty path spec")
+        allowed_dtypes = [d.lower() for d in get_args(AllowedDtypes)]
+        if dtype not in allowed_dtypes:
+            raise ValueError(
+                f"BinrefArray dtype '{dtype}' is not supported; must be one of: "
+                f"{', '.join(allowed_dtypes)}"
+            )
+        data: dict[str, Any] = {"buffer": buffer, "encoding": "binref"}
+        if compression is not None:
+            data["compression"] = compression
+        return cls._from_arraydict(
+            {
+                "object_type": "array",
+                "shape": [int(s) for s in shape],
+                "dtype": dtype,
+                "data": data,
+            }
+        )
+
+    @classmethod
+    def from_file(
+        cls,
+        path: str | Path,
+        shape: Sequence[int],
+        dtype: str,
+        *,
+        offset: int = 0,
+        compression: str | None = None,
+        compressed_size: int | None = None,
+    ) -> "BinrefArray":
+        """Reference a buffer already on disk (e.g. written by compiled code).
+
+        Args:
+            path: Buffer path, relative to the served ``output_path`` (or an
+                absolute path / URL).
+            shape: Shape of the array.
+            dtype: NumPy dtype name (e.g. ``"float64"``).
+            offset: Byte offset of the array within the file.
+            compression: Compression applied to the buffer, if any (``"lz4"``).
+            compressed_size: Number of compressed bytes; required when
+                ``compression`` is set so the reader knows how much to read.
+        """
+        spec = str(path)
+        if compression is not None:
+            if compressed_size is None:
+                raise ValueError("compressed_size is required when compression is set")
+            spec = f"{spec}:{int(offset)}:{int(compressed_size)}"
+        elif offset:
+            spec = f"{spec}:{int(offset)}"
+        return cls.from_spec(spec, shape, dtype, compression=compression)
+
+    @classmethod
+    def write(
+        cls,
+        arr: ArrayLike,
+        *,
+        output_dir: str | Path | None = None,
+        compression: str | None = None,
+    ) -> "BinrefArray":
+        """Write ``arr`` to its own binref buffer on disk and reference it.
+
+        The buffer uses the same on-disk layout as the built-in binref encoder,
+        so the result is indistinguishable from a normally-encoded array. Each
+        call writes an independent file; to pack many arrays into a few shared,
+        rotating buffers use :class:`~tesseract_core.runtime.experimental.BinrefWriter`.
+
+        Args:
+            arr: The array to write. Coerced to a contiguous NumPy array.
+            output_dir: Directory to write into. Defaults to the configured
+                ``output_path`` (see class docs on path resolution).
+            compression: Optional compression to apply (currently only ``"lz4"``).
+        """
+        from tesseract_core.runtime.config import get_config
+
+        if output_dir is None:
+            output_dir = get_config().output_path
+        arr = np.ascontiguousarray(arr)
+        arraydict, _ = _dump_binref_arraydict(
+            arr,
+            base_dir=output_dir,
+            subdir=None,
+            current_binref_uuid=str(uuid4()),
+            max_file_size=MAX_BINREF_BUFFER_SIZE,
+            compression=compression,
+        )
+        return cls._from_arraydict(arraydict)
+
+    @classmethod
+    def _from_arraydict(cls, arraydict: "ArrayDict") -> "BinrefArray":
+        """Wrap a pre-built binref ``ArrayDict`` (internal / writer use)."""
+        obj = cls.__new__(cls)
+        obj._arraydict = arraydict
+        return obj
+
+    @property
+    def shape(self) -> tuple[int, ...]:
+        """The shape of the referenced array."""
+        return tuple(self._arraydict["shape"])
+
+    @property
+    def dtype(self) -> str:
+        """The dtype name of the referenced array."""
+        return self._arraydict["dtype"]
+
+    @property
+    def buffer(self) -> str:
+        """The ``<path>[:<offset>[:<compressed_size>]]`` buffer spec."""
+        return self._arraydict["data"]["buffer"]
+
+    def to_arraydict(self) -> "ArrayDict":
+        """The binref ``ArrayDict`` this reference serializes to."""
+        return self._arraydict
+
+    def load(self, context: dict[str, Any] | None = None) -> np.ndarray:
+        """Read the referenced buffer into a NumPy array.
+
+        This is the one operation that actually touches the buffer bytes; the
+        rest of the reference stays lazy. Paths are resolved against the
+        ``base_dir`` in ``context`` if given, else the configured
+        ``output_path``.
+        """
+        return _load_ref(self, context or {})
+
+    def __array__(self, dtype: Any = None) -> np.ndarray:
+        # Lets NumPy (and any array-like consumer) materialize the reference on
+        # demand via ``np.asarray(ref)``.
+        arr = self.load()
+        return arr.astype(dtype) if dtype is not None else arr
+
+    def __repr__(self) -> str:
+        return (
+            f"BinrefArray(buffer={self.buffer!r}, shape={self.shape!r}, "
+            f"dtype={self.dtype!r})"
+        )
+
+
+def _load_ref(val: BinrefArray, context: dict[str, Any]) -> np.ndarray:
+    """Load a :class:`BinrefArray`'s buffer into a NumPy array.
+
+    The buffer path is relative to the served ``output_path``, which is also
+    where binref serialization resolves relative paths from, so we reuse the
+    binref loader with it as ``base_dir``.
+    """
+    from tesseract_core.runtime.config import get_config
+
+    base_dir = context.get("base_dir", get_config().output_path)
+    return _load_binref_arraydict(val.to_arraydict(), base_dir)
+
+
+def validate_binref_array(
+    val: BinrefArray, expected_shape: ShapeType, expected_dtype: str | None
+) -> BinrefArray:
+    """Validate a :class:`BinrefArray`'s shape/dtype without reading the buffer.
+
+    Returns the reference unchanged so it can later be forwarded verbatim (see
+    :func:`encode_array`). Only the reference's declared ``shape``/``dtype`` are
+    inspected -- no file is opened. Mirrors the shape/dtype checks in
+    :func:`_coerce_shape_dtype` but never casts (a cast would require reading and
+    rewriting the buffer, defeating the point of a passthrough).
+    """
+    shape = val.shape
+    dtype_name = val.dtype
+
+    if expected_shape is not Ellipsis:
+        if len(shape) != len(expected_shape) or any(
+            exp is not None and got != exp
+            for got, exp in zip(shape, expected_shape, strict=False)
+        ):
+            raise PydanticCustomError(
+                "array_shape_mismatch",
+                "Binref array shape {actual_shape} is incompatible with expected "
+                "shape {expected_shape}",
+                {"actual_shape": shape, "expected_shape": tuple(expected_shape)},
+            )
+
+    allowed_dtypes = [dtype.lower() for dtype in get_args(AllowedDtypes)]
+    if dtype_name not in allowed_dtypes:
+        raise PydanticCustomError(
+            "array_invalid_dtype",
+            "Binref array has unsupported dtype '{actual_dtype}'; must be one "
+            "of: {allowed_dtypes}",
+            {"actual_dtype": dtype_name, "allowed_dtypes": ", ".join(allowed_dtypes)},
+        )
+
+    if expected_dtype is not None and dtype_name != expected_dtype:
+        raise PydanticCustomError(
+            "array_dtype_mismatch",
+            "Binref array dtype '{actual_dtype}' does not match expected dtype "
+            "'{expected_dtype}' (a passthrough binref is not cast)",
+            {"actual_dtype": dtype_name, "expected_dtype": expected_dtype},
+        )
+
+    return val
+
+
 def _coerce_shape_dtype(
     arr: ArrayLike,
     expected_shape: ShapeType,
@@ -590,6 +854,12 @@ def validate_python_or_gpu_array(
     """
     from tesseract_core.runtime.cuda import ipc as cuda_ipc
 
+    # A binref reference: validate its declared shape/dtype but leave the buffer
+    # on disk, so it can later be forwarded verbatim (see encode_array). Mirrors
+    # the GPU-array passthrough below.
+    if isinstance(val, BinrefArray):
+        return validate_binref_array(val, expected_shape, expected_dtype)
+
     if cuda_ipc.has_cuda_array_interface(val):
         return cuda_ipc.validate_cuda_array(val, expected_shape, expected_dtype)
 
@@ -659,11 +929,11 @@ def decode_array(
 
 
 def encode_array(
-    arr: ArrayLike | GPUArray,
+    arr: ArrayLike | BinrefArray | GPUArray,
     info: Any,
     expected_shape: ShapeType,
     expected_dtype: str | None,
-) -> ArrayDict | ArrayLike:
+) -> ArrayDict | ArrayLike | BinrefArray | GPUArray:
     """Encode a NumPy or GPU array for serialization.
 
     An output encoding is two orthogonal choices carried in the context (see
@@ -677,9 +947,12 @@ def encode_array(
     Each array is routed per-leaf by *where it lives*, not by a single
     whole-response choice: a GPU array is exported over the device transport when
     one is set, and every host array (plus any GPU array when no transport is
-    set) is serialized via the host encoding. This is what lets one response mix
-    on-device and on-host arrays. In Python mode there is nothing to serialize,
-    so arrays pass through as-is.
+    set) is serialized via the host encoding. In Python mode there is nothing to
+    serialize, so arrays pass through as-is.
+
+    An :class:`Array` field may also hold a :class:`BinrefArray` -- an on-disk
+    buffer forwarded verbatim for binref output, or loaded and re-encoded for any
+    other host encoding.
     """
     from tesseract_core.runtime.config import get_config
     from tesseract_core.runtime.cuda import ipc as cuda_ipc
@@ -687,6 +960,32 @@ def encode_array(
     context = info.context if info.context else {}
     array_encoding = context.get("array_encoding", "json")
     device_transport = context.get("device_transport")
+
+    # A binref reference. In Python mode pass it through untouched so it survives
+    # the runtime's model_dump()/validate round-trip (see runtime.core.apply). In
+    # JSON mode with binref output, forward the on-disk buffer verbatim -- the
+    # whole point, no read-back. For any other host encoding, load the buffer once
+    # and fall through to the normal numpy path so the field behaves like a normal
+    # Array of the same shape and dtype.
+    if isinstance(arr, BinrefArray):
+        if not info.mode_is_json():
+            return arr
+        if array_encoding == "binref":
+            return arr.to_arraydict()
+        # Any other encoding must inline the data, so the on-disk buffer has to
+        # be read into memory -- the exact cost a BinrefArray exists to avoid.
+        # Warn loudly (the values are still correct) so this is not a silent
+        # memory blow-up; request json+binref output to forward it from disk.
+        nbytes = int(np.prod(arr.shape)) * np.dtype(arr.dtype).itemsize
+        warnings.warn(
+            f"A BinrefArray ({nbytes / 1024**2:.1f} MiB) is being read into "
+            f"memory to satisfy a '{array_encoding}' response; the on-disk buffer "
+            "cannot be forwarded for this encoding. Request 'json+binref' output "
+            "to stream it from disk without loading it.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        arr = _load_ref(arr, context)
 
     is_gpu_array = cuda_ipc.has_cuda_array_interface(arr)
 

@@ -17,6 +17,7 @@ building-blocks/arm64.md
 building-blocks/localpackage.md
 building-blocks/dataloader.md
 building-blocks/file_io.md
+building-blocks/binref_passthrough.md
 building-blocks/finitediff.md
 building-blocks/gradient-fallbacks.md
 ```
@@ -101,6 +102,14 @@ Tesseract that passes files and directories through the input/output mounts
 instead of serializing their contents into the request payload.
 Useful when inputs or outputs are large on disk, or consist of
 many (or a variable number of) files.
+:::
+
+:::{grid-item-card} On-disk Arrays with BinrefArray
+:link: building-blocks/binref_passthrough
+:link-type: doc
+
+Return large arrays that a solver wrote to disk without reading them back into
+memory. The runtime forwards the on-disk bytes straight to the client. _(Experimental)_
 :::
 
 :::{grid-item-card} Finite Difference Gradients

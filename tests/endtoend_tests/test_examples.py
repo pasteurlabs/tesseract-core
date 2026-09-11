@@ -107,6 +107,9 @@ TEST_CASES = {
     "filereference": Config(
         input_path="test_cases/testdata", output_path="__tmp_path__"
     ),
+    "binref_passthrough": Config(
+        test_with_random_inputs=True, output_path="__tmp_path__"
+    ),
     "metrics": Config(test_with_random_inputs=True),
     "qp_solve": Config(),
     "inherit_base_image_packages": Config(),
