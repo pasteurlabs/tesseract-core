@@ -1,5 +1,7 @@
 # Returning on-disk arrays with `BinrefArray`
 
+{gh-tree}`View on GitHub <examples/binref_passthrough>`
+
 ## Context
 
 A transient solver often produces more output than fits comfortably in memory: a
