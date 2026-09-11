@@ -2,6 +2,37 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.13.0] - 2026-09-10
+
+### Features
+
+- Let a Tesseract be given longer to start, and dispose of one that never does (#696)
+- Advertise the accepted output formats in the OpenAPI schema (#732)
+- Let both packages be run as modules (#719)
+- [**breaking**] Split CPU array encoding from GPU transport by introducing separate `gpu_transport` knobs (#737)
+- *(runtime)* Accept a per-input eps in check-gradients (#713)
+
+### Bug Fixes
+
+- *(runtime)* Stop advertising negative list indices in gradient path patterns (#700)
+- *(runtime)* Advertise every dict key the path resolver can reach (#707)
+- *(runtime)* Serialize stdio redirection across overlapping runs (#710)
+- *(runtime)* Find wheel-installed libcudart for cuda_ipc decode (#716)
+- *(sdk)* Recognise Podman machine's wording for a taken host port (#733)
+- *(runtime)* Answer an unsupported Accept format with 406, not 500; accept more valid header formats (#728)
+- *(runtime)* Clear the sticky CUDA error from a failed IPC handle export (#727)
+- *(sdk)* Stop leaking a container when a port publish collides (#721)
+
+### Refactor
+
+- Give `Container` a live `is_running` method, and lift the serving primitives out of engine.py (#693)
+- *(runtime)* Isolate CUDA access in a standalone cuda library module (#736)
+- *(runtime)* Introduce a pluggable device-transport interface (#722)
+
+### Documentation
+
+- Remove Tesseract Hackathon 2026 banner from landing page (#735)
+
 ## [1.12.0] - 2026-08-28
 
 ### Features
