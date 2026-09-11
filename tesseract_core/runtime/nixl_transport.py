@@ -5,30 +5,32 @@
 
 This module holds everything specific to the ``nixl`` device transport. Like the
 ``cuda_ipc`` transport (:mod:`tesseract_core.runtime.cuda.ipc`) it passes a GPU
-array between a producer and a consumer process without a host round-trip, but
-where ``cuda_ipc`` is same-host only (a legacy CUDA IPC handle), NIXL is a
-point-to-point transfer library that auto-selects its backend -- CUDA IPC /
-shared memory same-host, UCX (RDMA where the hardware supports it, TCP
-otherwise) across hosts -- behind one API. Nothing here loads NIXL unless a
-Tesseract actually encodes or decodes a NIXL array.
+array between a producer and a consumer process without a host round-trip.
+Unlike ``cuda_ipc``, which is same-host only (a CUDA IPC handle), NIXL selects
+its backend automatically behind one API: CUDA IPC or shared memory same-host,
+UCX (RDMA where the hardware supports it, TCP otherwise) across hosts. Nothing
+here loads NIXL unless a Tesseract actually encodes or decodes a NIXL array.
 
-The transfer is **initiator-driven READ**: the producer (server) registers the
-array's device memory with its NIXL agent and publishes, in the JSON response,
-its agent metadata plus the array's serialized transfer descriptor. The consumer
+The transfer is an initiator-driven READ. The producer (server) registers the
+array's device memory with its NIXL agent and publishes its agent metadata and
+the array's serialized transfer descriptor in the JSON response. The consumer
 (client) adds the producer as a remote agent, allocates its own buffer,
 registers it, and posts a matched READ that pulls the bytes across. This is the
-same receiver-driven shape as ``cuda_ipc`` -- the producer's registration is
-inert until the consumer reads -- so it slots into the same request lifecycle.
+same receiver-driven shape as ``cuda_ipc``: the producer's registration does
+nothing until the consumer reads, so it fits the same request lifecycle.
 
 The consumer-facing result is the framework-agnostic
-:class:`tesseract_core.runtime.cuda.ipc.IpcDeviceArray`, reused unchanged: it
-already owns a plain device buffer and exposes ``__cuda_array_interface__`` /
-``__dlpack__``, so Torch/JAX/CuPy adopt it zero-copy exactly as for ``cuda_ipc``.
+:class:`tesseract_core.runtime.cuda.ipc.IpcDeviceArray`, reused unchanged. It
+already owns a plain device buffer and exposes ``__cuda_array_interface__`` and
+``__dlpack__``, so Torch/JAX/CuPy adopt it zero-copy as they do for ``cuda_ipc``.
 """
 
 from __future__ import annotations
 
 import ctypes
+import os
+import time
+import uuid
 from typing import Any
 
 import numpy as np
@@ -56,6 +58,11 @@ from tesseract_core.runtime.device_transport import DeviceTransport
 _NIXL_AGENT: Any = None
 _CUDA_RUNTIME_PRELOADED = False
 
+# How long a consumer waits for a posted READ to complete before giving up. A
+# generous ceiling: it only trips when a transfer stalls (e.g. the producer died
+# mid-transfer), not on a slow-but-progressing large payload.
+_XFER_TIMEOUT = 120.0
+
 
 def _nixl_agent_name() -> str:
     """A NIXL agent name unique to this process.
@@ -64,9 +71,6 @@ def _nixl_agent_name() -> str:
     the producer and consumer processes must not share a name. The pid alone is
     not enough across hosts (pids collide), so mix in a random component.
     """
-    import os
-    import uuid
-
     return f"tesseract-{os.getpid()}-{uuid.uuid4().hex[:8]}"
 
 
@@ -283,16 +287,21 @@ def load_nixl_arraydict(val: ArrayDict) -> IpcDeviceArray:
     return IpcDeviceArray(owned_ptr, device, shape, dtype)
 
 
-def _wait_for_xfer(agent: Any, handle: Any) -> None:
-    """Block until a NIXL transfer completes, raising on error."""
-    import time
+def _wait_for_xfer(agent: Any, handle: Any, timeout: float = _XFER_TIMEOUT) -> None:
+    """Block until a NIXL transfer completes, raising on error or timeout.
 
+    A posted READ can stall indefinitely if the producer dies mid-transfer, so
+    give up after ``timeout`` seconds rather than hang the consumer forever.
+    """
+    deadline = time.monotonic() + timeout
     while True:
         state = agent.check_xfer_state(handle)
         if state == "DONE":
             return
         if state == "ERR":
             raise RuntimeError("nixl transfer failed")
+        if time.monotonic() > deadline:
+            raise RuntimeError(f"nixl transfer did not complete within {timeout}s")
         time.sleep(0.0005)
 
 
@@ -304,11 +313,11 @@ def _wait_for_xfer(agent: Any, handle: Any) -> None:
 class NixlTransport(DeviceTransport):
     """DeviceTransport backend for the ``nixl`` transport.
 
-    Point-to-point, auto-selecting: same-host it rides NIXL's CUDA IPC / shared
-    memory backend, cross-host it rides UCX (RDMA where available). Receiver
-    driven like ``cuda_ipc`` -- the producer publishes an inert registration and
-    the consumer READs it -- so bootstrap and flush are no-ops: the producer's
-    agent metadata and per-array descriptor ride in-band in the JSON response.
+    Point-to-point and auto-selecting: same-host it uses NIXL's CUDA IPC or
+    shared-memory backend, cross-host it uses UCX (RDMA where available).
+    Receiver-driven like ``cuda_ipc``, so bootstrap and flush are no-ops: the
+    producer's agent metadata and per-array descriptor travel in the JSON
+    response, and the consumer posts the READ.
     """
 
     name = "nixl"
