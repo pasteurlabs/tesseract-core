@@ -761,14 +761,25 @@ def _import_cuda_ipc() -> ModuleType:
 
 
 def _encode_array(
-    arr: Any, encoding: Literal["base64", "raw", "cuda_ipc"] = "base64"
+    arr: Any, encoding: Literal["base64", "raw", "cuda_ipc", "cuda_vmm"] = "base64"
 ) -> dict:
-    # With the cuda_ipc device transport, GPU arrays are exported by reference via
-    # a CUDA IPC handle, keeping the data on-device. Any other array (or any other
+    # With a GPU device transport, GPU arrays are exported by reference, keeping
+    # the data on-device. ``cuda_ipc`` uses the legacy handle (staging a copy for
+    # memory it cannot export directly); ``cuda_vmm`` exports VMM-backed memory
+    # copy-free by fd and errors on non-VMM memory. Any other array (or any other
     # encoding) falls through to a host copy below, so a mixed payload (some GPU,
-    # some CPU arrays) encodes correctly either way.
-    if encoding == "cuda_ipc" and hasattr(arr, "__cuda_array_interface__"):
-        return _import_cuda_ipc().dump_cuda_ipc_arraydict(arr)
+    # some CPU arrays) encodes correctly either way. The transport is looked up by
+    # name in the device-transport registry, so both siblings route uniformly.
+    if encoding in ("cuda_ipc", "cuda_vmm") and hasattr(
+        arr, "__cuda_array_interface__"
+    ):
+        # Import the runtime (populating the transport registry), or raise an
+        # actionable error if the runtime extra is missing.
+        _import_cuda_ipc()
+        from tesseract_core.runtime.device_transport import get_transport
+
+        transport = get_transport(encoding)
+        return transport.descriptor(transport.register(arr))
 
     # Ensure arr is a numpy-compatible array so we guarantee it has a compatible dtype (not e.g. torch bfloat16)
     arr = np.asanyarray(arr, order="A")
@@ -838,7 +849,12 @@ def _encode_payload(
         yield _tree_map(_encode_leaf, payload, is_leaf=_is_leaf)
     finally:
         if exported:
-            _import_cuda_ipc().release_pinned_ipc_exports()
+            # Import the runtime (populating the transport registry) before the
+            # release lookup; already imported by the encode above in practice.
+            _import_cuda_ipc()
+            from tesseract_core.runtime.device_transport import get_transport
+
+            get_transport(gpu_transport).release()
 
 
 def _decode_array(
@@ -944,27 +960,31 @@ def _decode_array(
                 raise ValueError(f"Unknown compression: {compression}")
 
             arr = np.frombuffer(data, dtype=dtype)
-    elif encoding == "cuda_ipc":
+    elif encoding in ("cuda_ipc", "cuda_vmm"):
         # Returns a fresh, client-owned device-array wrapper: the decode opens
-        # the IPC handle, copies device-to-device into our own memory, and
+        # the producer's memory, copies device-to-device into our own memory, and
         # closes the mapping before returning. The result exposes
         # __cuda_array_interface__ and __dlpack__ so Torch/JAX/CuPy can adopt it
         # zero-copy. The server may reuse/free the exported buffer as soon as
         # this returns (it holds it until the next request).
         #
-        # cuda_ipc is strictly opt-in, so reaching here means the caller asked
-        # for it. If this client has no usable CUDA context (no driver, no
+        # These transports are strictly opt-in, so reaching here means the caller
+        # asked for one. If this client has no usable CUDA context (no driver, no
         # visible/matching device, or the runtime extra not installed) it cannot
         # open the handle, so translate the low-level failure into an actionable
-        # message rather than a bare CUDA/import error deep in the decode.
+        # message rather than a bare CUDA/import error deep in the decode. The
+        # encoding name is the transport name, so both siblings route uniformly.
         try:
-            return _import_cuda_ipc().load_cuda_ipc_arraydict(encoded_arr)
+            _import_cuda_ipc()  # import the runtime, populating the transport registry
+            from tesseract_core.runtime.device_transport import get_transport
+
+            return get_transport(encoding).receive(encoded_arr)
         except Exception as exc:
             raise RuntimeError(
-                "Received a GPU array via the 'cuda_ipc' transport, but this "
+                f"Received a GPU array via the {encoding!r} transport, but this "
                 "client could not open it on the local GPU (no CUDA driver, no "
                 "matching device, or the runtime extra is missing). Drop "
-                "gpu_transport='cuda_ipc' to have arrays copied to the host "
+                f"gpu_transport={encoding!r} to have arrays copied to the host "
                 "instead, or ensure this process shares a GPU and IPC namespace "
                 "with the Tesseract."
             ) from exc

@@ -146,9 +146,45 @@ class CudaIpcArrayData(BaseModel):
 
     buffer: StrictStr = Field(
         pattern=r"^\d+:[A-Za-z0-9+/=]+:\d+:\d+$",
-        description="Packed CUDA IPC descriptor: <device>:<handle>:<storage_offset>:<storage_size>",
+        description=(
+            "Packed CUDA IPC descriptor: "
+            "<device>:<handle>:<storage_offset>:<storage_size>"
+        ),
     )
     encoding: Literal["cuda_ipc"]
+    compression: None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class CudaVmmArrayData(BaseModel):
+    """Data structure for CUDA VMM by-fd shared GPU memory.
+
+    The copy-free sibling of :class:`CudaIpcArrayData`: instead of a
+    self-contained IPC handle, the buffer names a Unix-socket path and an export
+    id the consumer uses to fetch the allocation's POSIX file descriptor
+    out-of-band (see :mod:`tesseract_core.runtime.cuda.vmm`). The buffer packs
+    ``vmm:<sockpath>:<export_id>:<storage_offset>:<storage_size>:<device>``:
+
+    - ``sockpath`` is the base64-encoded fd-passing socket path,
+    - ``export_id`` identifies the retained VMM allocation on the producer,
+    - ``storage_offset`` / ``storage_size`` locate the array within the mapped
+      allocation, exactly as for ``cuda_ipc``,
+    - ``device`` is the CUDA device ordinal the memory lives on.
+
+    This is only the JSON *schema* for the encoding; all the CUDA runtime
+    machinery that produces and consumes it lives in
+    :mod:`tesseract_core.runtime.cuda.vmm`.
+    """
+
+    buffer: StrictStr = Field(
+        pattern=r"^vmm:[A-Za-z0-9+/=]+:\d+:\d+:\d+:\d+$",
+        description=(
+            "Packed CUDA VMM descriptor: "
+            "vmm:<sockpath>:<export_id>:<storage_offset>:<storage_size>:<device>"
+        ),
+    )
+    encoding: Literal["cuda_vmm"]
     compression: None = None
 
     model_config = ConfigDict(extra="forbid")
@@ -163,7 +199,13 @@ class EncodedArrayModel(BaseModel):
     object_type: Literal["array"]
     shape: tuple[PositiveInt, ...]
     dtype: AllowedDtypes
-    data: BinrefArrayData | Base64ArrayData | JsonArrayData | CudaIpcArrayData
+    data: (
+        BinrefArrayData
+        | Base64ArrayData
+        | JsonArrayData
+        | CudaIpcArrayData
+        | CudaVmmArrayData
+    )
     model_config = ConfigDict(extra="forbid")
 
 
@@ -243,7 +285,11 @@ def get_array_model(
         ),
         # Choose the appropriate data structure based on the encoding
         "data": (
-            BinrefArrayData | Base64ArrayData | JsonArrayData | CudaIpcArrayData,
+            BinrefArrayData
+            | Base64ArrayData
+            | JsonArrayData
+            | CudaIpcArrayData
+            | CudaVmmArrayData,
             Field(discriminator="encoding"),
         ),
         "model_config": (ConfigDict, config),
@@ -619,10 +665,12 @@ def decode_array(
                 base_dir = join_paths(base_dir, subdir)
             data = _load_binref_arraydict(val.model_dump(), base_dir)
 
-        elif val.data.encoding == "cuda_ipc":
+        elif val.data.encoding in {"cuda_ipc", "cuda_vmm"}:
             from tesseract_core.runtime.device_transport import get_transport
 
-            # Returns a framework-agnostic on-GPU wrapper — skip numpy coercion
+            # Returns a framework-agnostic on-GPU wrapper — skip numpy coercion.
+            # The encoding name is the transport name, so a by-reference GPU
+            # array decodes through whichever transport produced it.
             transport = get_transport(val.data.encoding)
             return transport.receive(val.model_dump())
 

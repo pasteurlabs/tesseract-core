@@ -1749,6 +1749,34 @@ def test_serve_cuda_ipc_transport_errors_without_gpus(monkeypatch):
         )
 
 
+def test_serve_cuda_ipc_errors_with_multiple_workers(monkeypatch):
+    """cuda_ipc requires a single serial producer; >1 worker is a startup error."""
+    _stub_serve_docker(monkeypatch)
+
+    with pytest.raises(ValueError, match="requires num_workers=1"):
+        engine.serve(
+            "my-image",
+            output_format="json+base64",
+            gpus=["all"],
+            num_workers=2,
+            runtime_config={"gpu_transport": "cuda_ipc"},
+            skip_health_check=True,
+        )
+
+
+def test_serve_multiple_workers_allowed_without_gpu_transport(monkeypatch):
+    """The single-worker restriction applies only when a GPU transport is set."""
+    captured = _stub_serve_docker(monkeypatch)
+
+    engine.serve(
+        "my-image",
+        output_format="json+base64",
+        num_workers=2,
+        skip_health_check=True,
+    )
+    assert "--num-workers" in captured["command"]
+
+
 def test_serve_unknown_gpu_transport_errors(monkeypatch):
     """An unknown gpu_transport value is a startup error."""
     _stub_serve_docker(monkeypatch)
