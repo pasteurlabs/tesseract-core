@@ -57,10 +57,10 @@ from tesseract_core.runtime.device_transport import DeviceTransport
 # CUDA driver bindings for the VMM API (via libcuda)
 # ---------------------------------------------------------------------------
 #
-# main's cuda.loader only declares the handful of driver symbols cuda_ipc needs
+# The shared cuda.loader declares only the driver symbols cuda_ipc needs
 # (cuMemGetAddressRange). The VMM export/import path calls a larger, VMM-only
-# slice of the driver API, so we load libcuda and declare those signatures here
-# rather than bloat the shared loader with symbols only this transport uses.
+# slice of the driver API, so we declare those signatures here on top of the
+# shared loader rather than bloat it with symbols only this transport uses.
 
 _CU: Any = None
 
@@ -81,27 +81,18 @@ class _CUmemAccessDesc(ctypes.Structure):
 
 
 def _get_cuda_driver() -> Any:
-    """Lazily load libcuda and declare the VMM signatures used here."""
+    """Lazily load libcuda and declare the VMM-only signatures used here.
+
+    The shared loader handles library discovery, ``cuInit``, and the
+    ``cuMemGetAddressRange`` signature both transports share; we add only the
+    VMM export/import symbols on top.
+    """
     global _CU
     if _CU is not None:
         return _CU
-    import ctypes.util
+    from tesseract_core.runtime.cuda.loader import load_cuda_driver
 
-    lib = None
-    path = ctypes.util.find_library("cuda")
-    if path:
-        lib = ctypes.CDLL(path)
-    else:
-        for name in ("libcuda.so", "libcuda.so.1", "nvcuda.dll"):
-            try:
-                lib = ctypes.CDLL(name)
-                break
-            except OSError:
-                continue
-    if lib is None:
-        raise RuntimeError("Could not find the CUDA driver library (libcuda).")
-
-    lib.cuInit(0)
+    lib = load_cuda_driver()
     P = ctypes.POINTER
     # Recover the VMM allocation handle backing a device pointer.
     lib.cuMemRetainAllocationHandle.argtypes = [P(ctypes.c_ulonglong), ctypes.c_void_p]
@@ -150,16 +141,8 @@ def _get_cuda_driver() -> Any:
     lib.cuMemSetAccess.restype = ctypes.c_int
     lib.cuMemAddressFree.argtypes = [ctypes.c_ulonglong, ctypes.c_size_t]
     lib.cuMemAddressFree.restype = ctypes.c_int
-    lib.cuMemGetAddressRange_v2.argtypes = [
-        P(ctypes.c_ulonglong),
-        P(ctypes.c_size_t),
-        ctypes.c_ulonglong,
-    ]
-    lib.cuMemGetAddressRange_v2.restype = ctypes.c_int
     lib.cuCtxSynchronize.argtypes = []
     lib.cuCtxSynchronize.restype = ctypes.c_int
-    lib.cuDeviceGet.argtypes = [P(ctypes.c_int), ctypes.c_int]
-    lib.cuDeviceGet.restype = ctypes.c_int
 
     _CU = lib
     return _CU

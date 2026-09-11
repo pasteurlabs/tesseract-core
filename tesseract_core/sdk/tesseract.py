@@ -773,7 +773,9 @@ def _encode_array(
     if encoding in ("cuda_ipc", "cuda_vmm") and hasattr(
         arr, "__cuda_array_interface__"
     ):
-        _import_cuda_ipc()  # ensures the runtime + transports are importable
+        # Import the runtime (populating the transport registry), or raise an
+        # actionable error if the runtime extra is missing.
+        _import_cuda_ipc()
         from tesseract_core.runtime.device_transport import get_transport
 
         transport = get_transport(encoding)
@@ -847,7 +849,9 @@ def _encode_payload(
         yield _tree_map(_encode_leaf, payload, is_leaf=_is_leaf)
     finally:
         if exported:
-            _import_cuda_ipc()  # ensure the transport registry is importable
+            # Import the runtime (populating the transport registry) before the
+            # release lookup; already imported by the encode above in practice.
+            _import_cuda_ipc()
             from tesseract_core.runtime.device_transport import get_transport
 
             get_transport(gpu_transport).release()
@@ -971,7 +975,7 @@ def _decode_array(
         # message rather than a bare CUDA/import error deep in the decode. The
         # encoding name is the transport name, so both siblings route uniformly.
         try:
-            _import_cuda_ipc()  # ensure the transport registry is importable
+            _import_cuda_ipc()  # import the runtime, populating the transport registry
             from tesseract_core.runtime.device_transport import get_transport
 
             return get_transport(encoding).receive(encoded_arr)

@@ -8,10 +8,10 @@ JAX, so the result buffer comes from XLA's default GPU allocator -- CUDA VMM,
 single-segment. The JAX array is adopted into CuPy zero-copy via DLPack (same
 device pointer) so it exposes ``__cuda_array_interface__``, which is how the
 runtime recognises an on-device result to export; the underlying memory stays
-VMM-backed. Serving this with ``output_format="json+cuda_ipc"`` therefore
-exercises the VMM export path (``cuMemExportToShareableHandle`` + fd passing)
-rather than legacy ``cudaIpcGetMemHandle``. Built/run only by the GPU
-end-to-end tests (``tests/endtoend_tests/test_serving_gpu.py``).
+VMM-backed. Serving this with ``gpu_transport="cuda_vmm"`` therefore exercises
+the VMM export path (``cuMemExportToShareableHandle`` + fd passing) rather than
+legacy ``cudaIpcGetMemHandle``. Built/run only by the GPU end-to-end tests
+(``tests/endtoend_tests/test_serving_gpu.py``).
 """
 
 import cupy as cp
