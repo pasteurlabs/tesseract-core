@@ -146,30 +146,68 @@ This is enough to get most of the benefit. Measured on an Apple silicon laptop,
 a 40 MB `float64` round trip takes ~26 ms this way against ~168 ms for the
 default `json+base64`.
 
-Note that a directory in `/tmp` is not memory-backed, even though it performs as
-if it were: writeback happens asynchronously and the reader is served from the
-page cache, so the call never waits for the disk. The bytes do reach the disk
-eventually. In one measurement, moving 720 MB of arrays produced 687 MB of
-device writes. If that matters -- for SSD wear, or to enable the pool -- put the
-scratch directories on a memory-backed filesystem and pass them explicitly.
+### Do I need a memory-backed directory?
 
-On Linux that is `/dev/shm`, as above. macOS has no `/dev/shm`, but it does have
-a `tmpfs`:
+Usually not. A directory in `/tmp` is not memory-backed, but for arrays up to
+roughly 100 MB it performs as if it were: the write goes to the page cache and
+reaches the disk after your call has already returned. Arrays do reach the disk
+either way, so expect roughly 2x your array size in disk writes per call.
+
+A memory-backed directory is worth it if you are passing arrays larger than
+about 100 MB, or you want to avoid the disk writes, or you want to enable
+`experimental_binref_pool` (which only helps on a memory-backed directory).
+
+### How big does it need to be?
+
+**At least the size of your inputs plus your outputs.** Both files exist at the
+same time, so a 200 MB input with a 200 MB output needs 400 MB free. With
+`experimental_binref_pool` enabled, an input-sized buffer stays allocated
+between calls.
+
+Also keep it small relative to your RAM. Whatever you put in a memory-backed
+directory cannot be moved out to disk, so it takes memory away from your other
+applications rather than using spare capacity. As a rule of thumb, **do not give
+it more than about an eighth of your RAM** -- 2 GB on a 16 GB machine -- and
+check you have plenty free before you start. Sizing one at half your RAM can
+hang the machine badly enough to need a reboot.
+
+```{note}
+This puts a ceiling on the approach: inputs and outputs of 1 GB or more need a
+mount of 2 GB or more, which is past what is comfortable on a 16 GB machine.
+For arrays that large, stay on ordinary disk. It is only about a third slower
+and it cannot exhaust your memory.
+```
+
+### Setting one up
+
+On Linux, use `/dev/shm` as above -- it is already there, and already capped at
+half your RAM.
+
+macOS has no `/dev/shm`, so create one:
 
 ```bash
 mkdir -p /tmp/tess-shm
 sudo mount_tmpfs -s 1g /tmp/tess-shm   # a cap, not a reservation
 ```
 
-```{warning}
-Do not use `hdiutil attach ram://` for this. That allocates **wired** memory,
-which the memory compressor cannot reclaim, and a large one can wedge the
-machine. A `tmpfs` mounted with `-s` is a ceiling on pages that are allocated on
-demand and stay reclaimable.
+A RAM disk is about 15% faster than `tmpfs` on macOS, if you want it:
+
+```bash
+disk=$(hdiutil attach -nomount ram://2097152)   # 1 GB
+newfs_hfs -v tess-shm "$disk"
+mkdir -p /tmp/tess-shm && mount -t hfs "$disk" /tmp/tess-shm
+# when finished:  umount /tmp/tess-shm && hdiutil detach "$disk"
 ```
 
-With the scratch directories on that mount and the pool enabled, the same 40 MB
-round trip takes ~20 ms.
+```{warning}
+Both options take memory from your applications, so the size rule above matters
+more than which one you pick. Sizing either at half your RAM has caused a kernel
+panic. Remember to detach a RAM disk when you are done -- unlike `tmpfs`, it
+survives until you do.
+```
+
+With the scratch directories on such a mount and the pool enabled, the same
+40 MB round trip takes ~20 ms.
 
 ## When this helps
 
