@@ -352,6 +352,15 @@ jobs:
           uv run --no-sync python -c "import torch; print('torch', torch.__version__, 'cuda', torch.version.cuda, torch.cuda.is_available())"
           uv run --no-sync python -c "import jax; print('jax', jax.__version__, 'devices', jax.devices())"
 
+      # Build the GPU example here so its layers are cached before the tests
+      # run. The test_serving_gpu fixture builds the same example, and pulling
+      # the CUDA base image plus installing the runtime can otherwise exceed the
+      # per-test --timeout=300 from inside the fixture. Warming the layer cache
+      # outside pytest's timeout leaves the fixture build as cache hits.
+      - name: Pre-build GPU example (warm layer cache)
+        run: |
+          uv run --no-sync tesseract build examples/_gpu_cuda_ipc
+
       - name: Run GPU test suite
         run: |
           uv run --no-sync pytest \
