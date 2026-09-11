@@ -31,6 +31,7 @@ jobs:
       fail-fast: false
 
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
 
     defaults:
       run:
@@ -78,6 +79,7 @@ jobs:
 
   get-e2e-matrix:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
 
     outputs:
       matrix: ${{ steps.get-matrix.outputs.matrix }}
@@ -153,6 +155,7 @@ jobs:
       fail-fast: false
 
     runs-on: ${{ matrix.arch == 'x64' && matrix.os == 'ubuntu-24.04' && 'ubuntu-24.04' || matrix.arch == 'arm' && matrix.os == 'ubuntu-24.04' && 'ubuntu-24.04-arm'}}
+    timeout-minutes: 60
 
     defaults:
       run:
@@ -192,6 +195,17 @@ jobs:
           export DOCKER_HOST=unix:///run/user/1001/podman/podman.sock
           echo "DOCKER_HOST=${DOCKER_HOST}" >> $GITHUB_ENV
           echo "TESSERACT_DOCKER_EXECUTABLE=podman" >> $GITHUB_ENV
+
+      # Build the example here so its layers are cached before the tests run.
+      # test_unit_tesseract_endtoend builds the same example inside the timed
+      # test body, and a cold build (pulling the base image plus installing the
+      # runtime) can otherwise exceed the per-test --timeout=300. Warming the
+      # layer cache outside pytest's timeout leaves the in-test build as cache
+      # hits. The "base" shard runs no example build, so it is skipped.
+      - name: Pre-build example (warm layer cache)
+        if: matrix.unit-tesseract != 'base'
+        run: |
+          uv run --no-sync tesseract build examples/${{ matrix.unit-tesseract }}
 
       - name: Run test suite
         run: |
@@ -241,6 +255,7 @@ jobs:
       fail-fast: false
 
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
 
     steps:
       - name: Set up Git repository
@@ -285,6 +300,7 @@ jobs:
 
   tests-gpu:
     runs-on: tesseract-ci-gpu
+    timeout-minutes: 60
 
     # Exercise both CUDA major versions so the ctypes loader's version fallbacks
     # (libcudart.so.12/.13) and the encode/decode path are covered against each.
@@ -387,6 +403,7 @@ jobs:
     needs: [tests-base, tests-e2e, tests-demos, tests-gpu]
 
     runs-on: ubuntu-latest
+    timeout-minutes: 60
 
     steps:
       - name: Check for errors

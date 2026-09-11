@@ -29,6 +29,7 @@ env:
 jobs:
   trigger-pr:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     if: github.event_name == 'workflow_dispatch'
 
     steps:
@@ -80,6 +81,7 @@ jobs:
 
   update-pr:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/bot/release/')
 
     steps:
@@ -124,6 +126,7 @@ jobs:
 
   release:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     if: github.event_name == 'pull_request' && github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'bot/release/')
 
     steps:
