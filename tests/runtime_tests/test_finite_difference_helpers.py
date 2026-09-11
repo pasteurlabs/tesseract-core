@@ -448,16 +448,24 @@ class TestPerInputEps:
         assert np.allclose(vjp["small"], 0.5 / np.sqrt(SMALL), rtol=1e-6)
 
     @pytest.mark.parametrize(
-        "eps", [{"big": 1e-4}, {"big": 1e-4, "small": 1e-9, "medium": 1e-6}]
+        ("eps", "match"),
+        [
+            ({"big": 1e-4}, "missing a step size for input path"),
+            (
+                {"big": 1e-4, "small": 1e-9, "medium": 1e-6},
+                "not being differentiated",
+            ),
+        ],
     )
-    def test_dict_eps_must_match_the_differentiated_paths(
-        self, scale_spread_inputs, eps
+    def test_mapping_eps_must_match_the_differentiated_paths(
+        self, scale_spread_inputs, eps, match
     ):
         """A path that is misspelled or forgotten silently changes the step size.
 
-        Nothing downstream can detect that, so it is rejected up front.
+        Nothing downstream can detect that, so it is rejected up front. The rule
+        and the exception type match ``check_gradients`` in the testing module.
         """
-        with pytest.raises(KeyError):
+        with pytest.raises(ValueError, match=match):
             finite_difference_jacobian(
                 scale_spread_apply,
                 scale_spread_inputs,
@@ -465,3 +473,21 @@ class TestPerInputEps:
                 jac_outputs={"from_big", "from_small"},
                 eps=eps,
             )
+
+    def test_a_non_dict_mapping_is_accepted(self, scale_spread_inputs):
+        """Any Mapping works, not only a dict.
+
+        ``check_gradients`` types its own eps as a Mapping, so a narrower check
+        here would reject a MappingProxyType for no reason.
+        """
+        from types import MappingProxyType
+
+        jac = finite_difference_jacobian(
+            scale_spread_apply,
+            scale_spread_inputs,
+            jac_inputs={"big", "small"},
+            jac_outputs={"from_big", "from_small"},
+            eps=MappingProxyType({"big": 1e-4, "small": 1e-9}),
+        )
+        assert np.allclose(jac["from_big"]["big"], 3 * BIG**2, rtol=1e-6)
+        assert np.allclose(jac["from_small"]["small"], 0.5 / np.sqrt(SMALL), rtol=1e-6)

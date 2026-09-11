@@ -11,7 +11,7 @@ implementing analytical gradients.
     These are experimental and the API may change in future releases.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Literal
 
 import numpy as np
@@ -27,33 +27,36 @@ from tesseract_core.runtime.tree_transforms import get_at_path, set_at_path
 FDAlgorithm = Literal["central", "forward", "stochastic"]
 
 #: A single step size for every differentiated input, or one per input path.
-EpsLike = float | dict[str, float]
+#: Mirrors the ``eps`` accepted by
+#: :func:`~tesseract_core.runtime.testing.finite_differences.check_gradients`.
+EpsLike = float | Mapping[str, float]
 
 
 def _resolve_eps(eps: EpsLike, in_paths: set[str]) -> dict[str, float]:
     """Expand ``eps`` into one step size per differentiated input path.
 
     A scalar applies to every path, which is the default and keeps the cost of
-    the stochastic and JVP algorithms unchanged. A dict must name every path in
-    ``in_paths`` and nothing else, so that a typo in a path is an error rather
-    than a silent fallback to the default step.
+    the stochastic and JVP algorithms unchanged. A mapping must name every path
+    in ``in_paths`` and nothing else, so that a typo in a path is an error
+    rather than a silent fallback to the default step.
+
+    The validation matches ``check_gradients`` in the testing module: same rule,
+    same ``ValueError``.
     """
-    if not isinstance(eps, dict):
+    if not isinstance(eps, Mapping):
         return dict.fromkeys(in_paths, float(eps))
 
-    missing = in_paths - eps.keys()
+    missing = sorted(in_paths - eps.keys())
     if missing:
-        raise KeyError(
-            f"eps is missing an entry for differentiated input(s) "
-            f"{sorted(missing)}. When eps is a dict it must name every path "
-            f"being differentiated; pass a float to use one step size for all."
+        raise ValueError(
+            f"eps is missing a step size for input path(s): {', '.join(missing)}"
         )
 
-    unknown = eps.keys() - in_paths
+    unknown = sorted(eps.keys() - in_paths)
     if unknown:
-        raise KeyError(
-            f"eps names input(s) {sorted(unknown)} that are not being "
-            f"differentiated. Expected a subset of {sorted(in_paths)}."
+        raise ValueError(
+            f"eps names input path(s) that are not being differentiated: "
+            f"{', '.join(unknown)}"
         )
 
     return {path: float(eps[path]) for path in in_paths}
@@ -85,11 +88,11 @@ def finite_difference_jacobian(
             ``"central"`` (central differences, most accurate, 2 evaluations per element),
             ``"forward"`` (forward differences, faster, 1 extra evaluation per element), or
             ``"stochastic"`` (SPSA algorithm, scales better to high-dimensional inputs).
-        eps: Perturbation magnitude. A float applies one step size to every
-            differentiated input. Inputs whose nominal values span many orders
-            of magnitude have no single good step size, so a dict mapping each
-            differentiated input path to its own step size is also accepted; it
-            must name every path being differentiated and no others.
+        eps: The step size for finite differences, as an absolute
+            perturbation. A single float is applied unscaled to every
+            differentiated input; a mapping gives one step per input path,
+            which is what inputs of differing magnitude need, and must name
+            every path being differentiated and no others.
         num_samples: Number of random samples for the stochastic algorithm.
             Only used when ``algorithm="stochastic"``. Defaults to ``max(10, sqrt(n))``
             where ``n`` is the total number of input elements, providing O(sqrt(n))
@@ -388,11 +391,11 @@ def finite_difference_jvp(
         algorithm: The finite difference algorithm to use. Options are
             ``"central"`` (most accurate, default) or ``"forward"`` (faster).
             The ``"stochastic"`` option is accepted but treated as ``"central"``.
-        eps: Perturbation magnitude. A float applies one step size to every
-            differentiated input. Inputs whose nominal values span many orders
-            of magnitude have no single good step size, so a dict mapping each
-            differentiated input path to its own step size is also accepted; it
-            must name every path being differentiated and no others.
+        eps: The step size for finite differences, as an absolute
+            perturbation. A single float is applied unscaled to every
+            differentiated input; a mapping gives one step per input path,
+            which is what inputs of differing magnitude need, and must name
+            every path being differentiated and no others.
 
     Returns:
         Dictionary mapping output paths to JVP result arrays.
@@ -518,11 +521,11 @@ def finite_difference_vjp(
         algorithm: The finite difference algorithm to use. Options are
             ``"central"`` (most accurate), ``"forward"`` (faster), or
             ``"stochastic"`` (SPSA, better for high-dimensional inputs).
-        eps: Perturbation magnitude. A float applies one step size to every
-            differentiated input. Inputs whose nominal values span many orders
-            of magnitude have no single good step size, so a dict mapping each
-            differentiated input path to its own step size is also accepted; it
-            must name every path being differentiated and no others.
+        eps: The step size for finite differences, as an absolute
+            perturbation. A single float is applied unscaled to every
+            differentiated input; a mapping gives one step per input path,
+            which is what inputs of differing magnitude need, and must name
+            every path being differentiated and no others.
         num_samples: Number of random samples for the stochastic algorithm.
             Only used when ``algorithm="stochastic"``. Defaults to ``max(10, sqrt(n))``
             where ``n`` is the total number of input elements.
