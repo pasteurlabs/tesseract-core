@@ -1122,22 +1122,26 @@ def serve(
         if docker_args:
             extra_args.extend(docker_args)
 
-        # The cuda_ipc GPU transport needs a GPU and a shared IPC namespace
-        # between host and container. Wire both up whenever it is selected (the
-        # only reason to enable it is IPC).
+        # A by-reference GPU transport needs a GPU and, for its same-host path, a
+        # shared IPC namespace between host and container. nixl additionally needs
+        # host networking, because its UCX agent advertises its own address to the
+        # client, which is unreachable across a container network namespace. Wire
+        # up whatever the selected transport requires.
         gpu_transport = environment.get("TESSERACT_GPU_TRANSPORT", "none")
 
-        if gpu_transport == "cuda_ipc":
+        if gpu_transport in ("cuda_ipc", "nixl"):
             if not gpus:
                 raise ValueError(
-                    "gpu_transport='cuda_ipc' requires GPU access, but no GPUs "
-                    "were requested. Pass gpus=['all'] or specific GPU IDs."
+                    f"gpu_transport={gpu_transport!r} requires GPU access, but no "
+                    "GPUs were requested. Pass gpus=['all'] or specific GPU IDs."
                 )
             extra_args.extend(["--ipc=host"])
+            if gpu_transport == "nixl":
+                extra_args.extend(["--network=host"])
         elif gpu_transport != "none":
             raise ValueError(
                 f"Unknown gpu_transport {gpu_transport!r}. "
-                "Supported values: 'none', 'cuda_ipc'."
+                "Supported values: 'none', 'cuda_ipc', 'nixl'."
             )
 
         if network is not None:

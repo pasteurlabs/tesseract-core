@@ -760,15 +760,45 @@ def _import_cuda_ipc() -> ModuleType:
     return cuda_ipc
 
 
+def _import_device_transport(name: str) -> ModuleType:
+    """Import the runtime module implementing a device transport by name.
+
+    Mirrors :func:`_import_cuda_ipc` for the pluggable transports: it surfaces a
+    clear message pointing at the required extra rather than a bare import error.
+    """
+    if name == "cuda_ipc":
+        return _import_cuda_ipc()
+    if name == "nixl":
+        try:
+            from tesseract_core.runtime import nixl_transport
+        except ImportError as exc:
+            raise ImportError(
+                "The 'nixl' GPU transport requires the Tesseract runtime and "
+                "NIXL. Install them with "
+                "'pip install tesseract-core[runtime,nixl]'."
+            ) from exc
+        return nixl_transport
+    raise ValueError(f"Unknown device transport {name!r}.")
+
+
+# Array-data dump function on each device-transport runtime module, keyed by the
+# transport name the client uses to encode a GPU input by reference.
+_DEVICE_TRANSPORT_DUMP = {
+    "cuda_ipc": "dump_cuda_ipc_arraydict",
+    "nixl": "dump_nixl_arraydict",
+}
+
+
 def _encode_array(
-    arr: Any, encoding: Literal["base64", "raw", "cuda_ipc"] = "base64"
+    arr: Any, encoding: Literal["base64", "raw", "cuda_ipc", "nixl"] = "base64"
 ) -> dict:
-    # With the cuda_ipc device transport, GPU arrays are exported by reference via
-    # a CUDA IPC handle, keeping the data on-device. Any other array (or any other
-    # encoding) falls through to a host copy below, so a mixed payload (some GPU,
-    # some CPU arrays) encodes correctly either way.
-    if encoding == "cuda_ipc" and hasattr(arr, "__cuda_array_interface__"):
-        return _import_cuda_ipc().dump_cuda_ipc_arraydict(arr)
+    # With an on-device transport encoding (cuda_ipc / nixl), GPU arrays are
+    # exported by reference, keeping the data on-device. Any other array (or any
+    # other encoding) falls through to a host copy below, so a mixed payload
+    # (some GPU, some CPU arrays) encodes correctly either way.
+    if encoding in _DEVICE_TRANSPORT_DUMP and hasattr(arr, "__cuda_array_interface__"):
+        module = _import_device_transport(encoding)
+        return getattr(module, _DEVICE_TRANSPORT_DUMP[encoding])(arr)
 
     # Ensure arr is a numpy-compatible array so we guarantee it has a compatible dtype (not e.g. torch bfloat16)
     arr = np.asanyarray(arr, order="A")
@@ -791,6 +821,14 @@ def _encode_array(
     }
 
 
+# Release function on each device-transport runtime module, keyed by the
+# ``gpu_transport`` name that exports GPU inputs by reference through it.
+_DEVICE_TRANSPORT_RELEASE = {
+    "cuda_ipc": "release_pinned_ipc_exports",
+    "nixl": "release_nixl_exports",
+}
+
+
 @contextmanager
 def _encode_payload(
     payload: dict | None, gpu_transport: str = "none"
@@ -799,12 +837,12 @@ def _encode_payload(
 
     Yields the encoded payload (or None for an empty payload). When a
     ``gpu_transport`` other than ``none`` is set, GPU arrays are exported by
-    reference (host arrays still go base64), which pins each exported allocation
-    in a process-global registry on the runtime side. Those pins are released on
-    context exit -- by then the caller has read the full response, so the server
-    has copied the inputs out and they are provably dead. The release is skipped
-    (and the transport machinery never imported) when no GPU array was actually
-    exported.
+    reference (host arrays still go base64), which pins/registers each exported
+    allocation in a process-global registry on the runtime side. Those exports
+    are released on context exit -- by then the caller has read the full response,
+    so the server has copied the inputs out and they are provably dead. The
+    release is skipped (and the transport machinery never imported) when no GPU
+    array was actually exported.
 
     Releasing on exit rather than at the start of the next request keeps pinned
     GPU memory bounded to a single in-flight request.
@@ -838,7 +876,8 @@ def _encode_payload(
         yield _tree_map(_encode_leaf, payload, is_leaf=_is_leaf)
     finally:
         if exported:
-            _import_cuda_ipc().release_pinned_ipc_exports()
+            module = _import_device_transport(gpu_transport)
+            getattr(module, _DEVICE_TRANSPORT_RELEASE[gpu_transport])()
 
 
 def _decode_array(
@@ -967,6 +1006,22 @@ def _decode_array(
                 "gpu_transport='cuda_ipc' to have arrays copied to the host "
                 "instead, or ensure this process shares a GPU and IPC namespace "
                 "with the Tesseract."
+            ) from exc
+    elif encoding == "nixl":
+        # Like cuda_ipc, returns a fresh client-owned device-array wrapper, but
+        # the bytes are pulled across via a matched NIXL READ (same-host IPC or
+        # cross-host transfer) rather than an IPC mapping + copy. Same opt-in
+        # reasoning: translate a failure to open/transfer into an actionable hint.
+        try:
+            return _import_device_transport("nixl").load_nixl_arraydict(encoded_arr)
+        except Exception as exc:
+            raise RuntimeError(
+                "Received a GPU array via the 'nixl' transport, but this client "
+                "could not pull it onto the local GPU (no CUDA driver, no "
+                "matching device, the runtime/nixl extras missing, or the "
+                "producer unreachable). Drop gpu_transport='nixl' to have arrays "
+                "copied to the host instead, or ensure this process can reach the "
+                "Tesseract's NIXL agent and shares a compatible GPU."
             ) from exc
     else:
         raise ValueError(f"Unexpected array encoding {encoding}. Cannot decode.")
