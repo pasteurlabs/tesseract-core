@@ -66,7 +66,7 @@ def gpu_vmm_image_name(docker_client, docker_cleanup_module, shared_dummy_image_
 
 @requires_cuda
 def test_serve_cuda_ipc_roundtrip(gpu_image_name):
-    """A GPU Tesseract served with json+cuda_ipc returns correct device memory.
+    """A GPU Tesseract with gpu_transport='cuda_ipc' returns correct device memory.
 
     Exercises the full export path end-to-end: the served container computes on
     the GPU, exports the result as a CUDA IPC handle (rather than copying to
@@ -75,7 +75,7 @@ def test_serve_cuda_ipc_roundtrip(gpu_image_name):
     wrapper exposing ``__cuda_array_interface__`` and ``__dlpack__``, read back
     here via its host-copy helper (no CuPy needed to inspect it).
     """
-    from tesseract_core.runtime.cuda_ipc import IpcDeviceArray
+    from tesseract_core.runtime.cuda.ipc import IpcDeviceArray
 
     a = np.arange(8, dtype=np.float32)
     b = np.ones(8, dtype=np.float32)
@@ -85,8 +85,8 @@ def test_serve_cuda_ipc_roundtrip(gpu_image_name):
     with Tesseract.from_image(
         gpu_image_name,
         gpus=["all"],
-        output_format="json+cuda_ipc",
-        runtime_config={"enable_experimental_cuda_ipc": True},
+        output_format="json+base64",
+        runtime_config={"gpu_transport": "cuda_ipc"},
     ) as t:
         result = t.apply({"a": a, "b": b, "s": s})
 
@@ -109,8 +109,8 @@ def test_serve_cuda_ipc_serial_reuse(gpu_image_name):
     with Tesseract.from_image(
         gpu_image_name,
         gpus=["all"],
-        output_format="json+cuda_ipc",
-        runtime_config={"enable_experimental_cuda_ipc": True},
+        output_format="json+base64",
+        runtime_config={"gpu_transport": "cuda_ipc"},
     ) as t:
         for i in range(3):
             a = np.full(4, float(i), dtype=np.float32)
@@ -122,16 +122,16 @@ def test_serve_cuda_ipc_serial_reuse(gpu_image_name):
 
 @requires_cuda
 def test_serve_vmm_roundtrip(gpu_vmm_image_name):
-    """A served JAX (VMM) output round-trips over json+cuda_ipc via the VMM path.
+    """A served JAX (VMM) output round-trips over the copy-free cuda_vmm transport.
 
     The Tesseract computes on JAX, so its result is VMM-backed and the runtime
     exports it with ``cuMemExportToShareableHandle`` rather than legacy
     ``cudaIpcGetMemHandle``. The fd that names the export is passed out-of-band
     over a Unix socket, so host and container must share the directory the
     socket lives in: mount a shared dir and point ``TESSERACT_VMM_SOCKET_DIR``
-    at it. ``--ipc=host`` is added automatically for the cuda_ipc format.
+    at it. ``--ipc=host`` is added automatically for the cuda_vmm transport.
     """
-    from tesseract_core.runtime.cuda_ipc import IpcDeviceArray
+    from tesseract_core.runtime.cuda.ipc import IpcDeviceArray
 
     a = np.arange(8, dtype=np.float32)
     b = np.ones(8, dtype=np.float32)
@@ -142,11 +142,10 @@ def test_serve_vmm_roundtrip(gpu_vmm_image_name):
         with Tesseract.from_image(
             gpu_vmm_image_name,
             gpus=["all"],
-            output_format="json+cuda_ipc",
+            gpu_transport="cuda_vmm",
             # Mount read-write: the server binds its fd-passing socket here.
             volumes=[f"{sock_dir}:{sock_dir}:rw"],
             environment={"TESSERACT_VMM_SOCKET_DIR": sock_dir},
-            runtime_config={"enable_experimental_cuda_ipc": True},
         ) as t:
             result = t.apply({"a": a, "b": b, "s": s})
 

@@ -4,9 +4,9 @@
 """A GPU Tesseract that returns its result as device (CuPy) memory.
 
 Because ``apply`` returns an array that exposes ``__cuda_array_interface__``,
-serving this Tesseract with ``output_format="json+cuda_ipc"`` exercises the full
-CUDA IPC export path: the runtime hands back a device-memory IPC handle instead
-of copying the result to host. This requires a real GPU and is only built/run by
+serving this Tesseract with ``gpu_transport="cuda_ipc"`` exercises the full CUDA
+IPC export path: the runtime hands back a device-memory IPC handle instead of
+copying the result to host. This requires a real GPU and is only built/run by
 the GPU end-to-end tests (``tests/endtoend_tests/test_serving_gpu.py``).
 """
 

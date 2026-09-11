@@ -14,6 +14,10 @@ try:
         if path.stem.startswith("app_"):
             # Instantiated versions of apps for testing and CLI that have side effects at import time.
             continue
+        if path.stem == "__main__":
+            # Importing this as a side effect of importing the package makes
+            # `python -m tesseract_core.runtime` warn about a double import.
+            continue
         if path.stem in ("jax_recipes",):
             # Recipes typically have optional dependencies that we don't want to require
             # for the core runtime.
@@ -32,7 +36,10 @@ except ModuleNotFoundError as e:
     )
     sys.exit(1)
 
-# Import public API
+# Public API and built-in device-transport registration
+from .cuda.ipc import CudaIpcTransport
+from .cuda.vmm import CudaVmmTransport
+from .device_transport import register_transport
 from .schema_types import (
     Array,
     Differentiable,
@@ -49,6 +56,11 @@ from .schema_types import (
     UInt32,
     UInt64,
 )
+
+# Register built-in device transports here rather than as an import-time side
+# effect in the backend modules, so get_transport stays a plain registry lookup.
+register_transport(CudaIpcTransport())
+register_transport(CudaVmmTransport())
 
 __all__ = [
     "Array",

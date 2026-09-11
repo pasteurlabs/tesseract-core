@@ -1,16 +1,16 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""CUDA VMM POSIX-fd sharing: the copy-free path behind ``json+cuda_ipc``.
+"""CUDA VMM POSIX-fd sharing: the copy-free ``cuda_vmm`` GPU transport.
 
 Legacy CUDA IPC (``cudaIpcGetMemHandle``) rejects memory allocated through the
 CUDA Virtual Memory Management API (``cuMemCreate``) -- which is what modern
 pooled allocators use, notably JAX/XLA's default GPU allocator and PyTorch's
-``expandable_segments``. For those, :mod:`tesseract_core.runtime.cuda_ipc` falls
-back to :func:`~tesseract_core.runtime.cuda_ipc._stage_for_legacy_ipc`: an extra
+``expandable_segments``. For those, the ``cuda_ipc`` transport falls back to
+:func:`tesseract_core.runtime.cuda.api.stage_for_legacy_ipc`: an extra
 device-to-device copy into a fresh ``cudaMalloc`` buffer that legacy IPC *can*
-export. This module removes that copy for VMM-backed memory by exporting the VMM
-allocation *by reference* instead.
+export. This transport removes that copy for VMM-backed memory by exporting the
+VMM allocation *by reference* instead.
 
 The mechanics differ from legacy IPC in two ways that shape the code:
 
@@ -24,13 +24,14 @@ The mechanics differ from legacy IPC in two ways that shape the code:
 * **The export carries no cross-process ordering guarantee**, so the producer
   must ``cuCtxSynchronize`` after any pending writes before handing off the fd.
 
-This path is reached *through* ``json+cuda_ipc`` -- :mod:`cuda_ipc` selects it
-automatically when the source memory is VMM-exportable and falls back to the
-legacy/staging path otherwise -- so there is no separate user-facing format.
-The VMM machinery is packaged as a :class:`~tesseract_core.runtime.device_transport.DeviceTransport`
-(:class:`VmmTransport`): the fd-passing server is its session, created in
-:meth:`VmmTransport.bootstrap` (owned by the served app's lifespan) and reused
-across a request's exports.
+``cuda_vmm`` is a sibling of ``cuda_ipc``, selected by ``gpu_transport``. It has
+its own wire encoding (``encoding: "cuda_vmm"``, ``vmm:``-prefixed buffer) but
+returns the same consumer-facing :class:`~tesseract_core.runtime.cuda.ipc.IpcDeviceArray`
+wrapper, so the decode side never forks. The VMM machinery is packaged as a
+:class:`~tesseract_core.runtime.device_transport.DeviceTransport`
+(:class:`CudaVmmTransport`): the fd-passing server is its session, created in
+:meth:`CudaVmmTransport.bootstrap` (owned by the served app's lifespan) and
+reused across a request's exports.
 """
 
 from __future__ import annotations
@@ -44,17 +45,22 @@ from typing import Any
 import numpy as np
 
 from tesseract_core.runtime.array_encoding import ArrayDict
-from tesseract_core.runtime.cuda_ipc import (
+from tesseract_core.runtime.cuda import api as cuda_api
+from tesseract_core.runtime.cuda.ipc import (
     IpcDeviceArray,
-    _cuda_error_string,
-    _get_cudart,
     _is_c_contiguous,
     has_cuda_array_interface,
 )
+from tesseract_core.runtime.device_transport import DeviceTransport
 
 # ---------------------------------------------------------------------------
 # CUDA driver bindings for the VMM API (via libcuda)
 # ---------------------------------------------------------------------------
+#
+# main's cuda.loader only declares the handful of driver symbols cuda_ipc needs
+# (cuMemGetAddressRange). The VMM export/import path calls a larger, VMM-only
+# slice of the driver API, so we load libcuda and declare those signatures here
+# rather than bloat the shared loader with symbols only this transport uses.
 
 _CU: Any = None
 
@@ -86,7 +92,7 @@ def _get_cuda_driver() -> Any:
     if path:
         lib = ctypes.CDLL(path)
     else:
-        for name in ("libcuda.so", "libcuda.so.1"):
+        for name in ("libcuda.so", "libcuda.so.1", "nvcuda.dll"):
             try:
                 lib = ctypes.CDLL(name)
                 break
@@ -169,7 +175,7 @@ def is_vmm_exportable(data_ptr: int) -> bool:
 
     ``cuMemRetainAllocationHandle`` succeeds only for memory allocated via the
     VMM API (``cuMemCreate``) -- JAX/XLA's allocator, PyTorch
-    ``expandable_segments``, or our own :func:`cuMemCreate` buffers. Default
+    ``expandable_segments``, or our own ``cuMemCreate`` buffers. Default
     CuPy/PyTorch pools and legacy ``cudaMalloc`` return an error, so the caller
     keeps the legacy IPC / staging path for those.
     Returns ``False`` (rather than raising) if the CUDA driver cannot even be
@@ -197,8 +203,8 @@ def is_vmm_exportable(data_ptr: int) -> bool:
 # A POSIX fd is only meaningful once passed to another process via SCM_RIGHTS, so
 # the producer runs a small Unix-socket server that hands out the fd for an
 # export id on request. The socket path travels in the JSON descriptor. The
-# server is the transport's *session*: :meth:`VmmTransport.bootstrap` creates it
-# (owned by the served app's lifespan; see ``serve.create_rest_api``), and the
+# server is the transport's *session*: :meth:`CudaVmmTransport.bootstrap` creates
+# it (owned by the served app's lifespan; see ``serve.create_rest_api``), and the
 # same instance serves every export until release.
 
 # AF_UNIX message framing: an 8-byte little-endian count N, followed by N 8-byte
@@ -271,7 +277,7 @@ class _FdPassServer:
 
         The server (and its socket) stay up for the next request; only the
         retained VMM handles are dropped, bounding pinned memory to one request's
-        worth of exports (mirrors ``cuda_ipc.release_pinned_ipc_exports``).
+        worth of exports (mirrors ``cuda.ipc.release_pinned_ipc_exports``).
         """
         with self._lock:
             entries = list(self._registry.values())
@@ -529,17 +535,17 @@ def _device_ordinal(arr: Any) -> int:
 
 
 def _build_vmm_descriptor(arr: Any, server: _FdPassServer) -> ArrayDict:
-    """Export a VMM-backed CUDA array by fd and return a ``cuda_ipc`` descriptor.
+    """Export a VMM-backed CUDA array by fd and return a ``cuda_vmm`` descriptor.
 
-    The descriptor's ``buffer`` uses the VMM variant form
+    The descriptor's ``buffer`` uses the VMM form
     ``vmm:{sockpath_b64}:{export_id}:{storage_offset}:{storage_size}:{device}``.
     Requires :func:`is_vmm_exportable` to be true for the array's pointer; the
     caller checks that before routing here.
     """
     if not has_cuda_array_interface(arr):
-        raise ValueError("vmm encoding requires a CUDA array")
+        raise ValueError("cuda_vmm encoding requires a CUDA array")
     if not _is_c_contiguous(arr):
-        raise ValueError("vmm encoding requires a C-contiguous array")
+        raise ValueError("cuda_vmm encoding requires a C-contiguous array")
 
     driver = _get_cuda_driver()
     iface = arr.__cuda_array_interface__
@@ -563,22 +569,23 @@ def _build_vmm_descriptor(arr: Any, server: _FdPassServer) -> ArrayDict:
     storage_size = size.value
 
     # cuMemRetainAllocationHandle succeeds only for VMM-backed memory. Because
-    # json+cuda_vmm is an explicit opt-in, a non-VMM allocation here is a user
-    # error, not something to silently paper over -- fail loudly and actionably
-    # rather than degrading to a copy behind the user's back (that is what
-    # json+cuda_ipc is for).
+    # cuda_vmm is an explicit opt-in, a non-VMM allocation here is a user error,
+    # not something to silently paper over -- fail loudly and actionably rather
+    # than degrading to a copy behind the user's back (that is what cuda_ipc is
+    # for).
     handle = ctypes.c_ulonglong()
     ret = driver.cuMemRetainAllocationHandle(
         ctypes.byref(handle), ctypes.c_void_p(base.value)
     )
     if ret != 0:
         raise RuntimeError(
-            "json+cuda_vmm requires VMM-backed device memory, but this array's "
-            "allocation is not VMM-exportable (cuMemRetainAllocationHandle failed, "
-            f"CUresult={ret}). This is expected for the default CuPy/PyTorch "
-            "caching allocators. Either use json+cuda_ipc (always works; stages a "
-            "copy for such memory), or allocate through a VMM-backed allocator "
-            "(JAX/XLA, or PyTorch with PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True)."
+            "gpu_transport='cuda_vmm' requires VMM-backed device memory, but this "
+            "array's allocation is not VMM-exportable (cuMemRetainAllocationHandle "
+            f"failed, CUresult={ret}). This is expected for the default CuPy/PyTorch "
+            "caching allocators. Either use gpu_transport='cuda_ipc' (always works; "
+            "stages a copy for such memory), or allocate through a VMM-backed "
+            "allocator (JAX/XLA, or PyTorch with "
+            "PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True)."
         )
 
     # The export carries no ordering guarantee: make sure the producer's writes
@@ -598,18 +605,18 @@ def _build_vmm_descriptor(arr: Any, server: _FdPassServer) -> ArrayDict:
             "buffer": (
                 f"vmm:{sock_b64}:{export_id}:{storage_offset}:{storage_size}:{device}"
             ),
-            "encoding": "cuda_ipc",
+            "encoding": "cuda_vmm",
         },
     }
 
 
 def _import_map_and_copy(val: ArrayDict) -> IpcDeviceArray:
-    """Decode a VMM ``cuda_ipc`` descriptor: map the producer's memory, copy out.
+    """Decode a VMM ``cuda_vmm`` descriptor: map the producer's memory, copy out.
 
     Imports the producer's VMM allocation (via the fd fetched over the socket),
     maps it, copies just this array's own bytes into a fresh ``cudaMalloc``
     buffer owned by this process, unmaps, and returns an :class:`IpcDeviceArray`
-    -- the same consumer-facing wrapper as legacy ``cuda_ipc``. The borrow of the
+    -- the same consumer-facing wrapper as ``cuda_ipc``. The borrow of the
     producer's memory lasts only for the copy.
     """
     import pybase64
@@ -628,17 +635,11 @@ def _import_map_and_copy(val: ArrayDict) -> IpcDeviceArray:
     nbytes = int(np.prod(shape)) * dtype.itemsize if shape else dtype.itemsize
 
     driver = _get_cuda_driver()
-    cudart = _get_cudart()
 
-    ret = cudart.cudaSetDevice(device)
-    if ret != 0:
-        raise RuntimeError(
-            f"cudaSetDevice({device}) failed: {_cuda_error_string(cudart, ret)}"
-        )
-    owned_ptr = ctypes.c_void_p()
-    ret = cudart.cudaMalloc(ctypes.byref(owned_ptr), ctypes.c_size_t(nbytes))
-    if ret != 0:
-        raise RuntimeError(f"cudaMalloc failed: {_cuda_error_string(cudart, ret)}")
+    # Allocate the owned buffer up front (on the target device) so that if any
+    # later step fails we still unmap and free cleanly.
+    cuda_api.set_device(device)
+    owned_ptr = cuda_api.malloc(nbytes)
 
     fd = _fetch_fd(sock_path, export_id)
     handle = ctypes.c_ulonglong()
@@ -668,24 +669,14 @@ def _import_map_and_copy(val: ArrayDict) -> IpcDeviceArray:
             "cuMemSetAccess",
         )
 
-        # Copy just this array's bytes (at its offset) into our owned buffer.
-        ret = cudart.cudaMemcpy(
-            owned_ptr,
-            ctypes.c_void_p(mapped_ptr.value + storage_offset),
-            ctypes.c_size_t(nbytes),
-            ctypes.c_int(3),  # cudaMemcpyDeviceToDevice
+        # Copy just this array's bytes (at its offset) into our owned buffer,
+        # then block until the copy is done so we never unmap mid-copy.
+        cuda_api.memcpy_device_to_device(
+            owned_ptr, mapped_ptr.value + storage_offset, nbytes
         )
-        if ret != 0:
-            raise RuntimeError(
-                f"cudaMemcpy (device->device) failed: {_cuda_error_string(cudart, ret)}"
-            )
-        ret = cudart.cudaDeviceSynchronize()
-        if ret != 0:
-            raise RuntimeError(
-                f"cudaDeviceSynchronize failed: {_cuda_error_string(cudart, ret)}"
-            )
+        cuda_api.device_synchronize()
     except Exception:
-        cudart.cudaFree(owned_ptr)
+        cuda_api.free(owned_ptr)
         raise
     finally:
         if mapped:
@@ -699,22 +690,15 @@ def _import_map_and_copy(val: ArrayDict) -> IpcDeviceArray:
         except OSError:
             pass
 
-    return IpcDeviceArray(owned_ptr.value, device, shape, dtype)
+    return IpcDeviceArray(owned_ptr, device, shape, dtype)
 
 
 # ---------------------------------------------------------------------------
 # DeviceTransport backend
 # ---------------------------------------------------------------------------
-#
-# The VMM path shares the ``cuda_ipc`` wire format (``encoding: "cuda_ipc"``,
-# with a ``vmm:``-prefixed buffer) and is selected transparently by
-# :mod:`cuda_ipc` when the source memory is VMM-exportable. It is packaged here
-# as a DeviceTransport so its fd-passing server lives in ``bootstrap`` (owned by
-# the served app's lifespan) and its export bookkeeping/release ride the shared
-# transport lifecycle rather than a bespoke set of module globals.
 
 
-class VmmTransport:
+class CudaVmmTransport(DeviceTransport):
     """DeviceTransport backend for the copy-free VMM fd path.
 
     The transport's *session* is the :class:`_FdPassServer`. ``bootstrap`` on the
@@ -722,10 +706,10 @@ class VmmTransport:
     ``release``/``close``) via its lifespan. When no session has been
     bootstrapped -- the bare SDK path that encodes without a running server -- a
     process-global fallback server is started lazily, so a direct
-    ``dump``/``load`` still works.
+    ``register``/``receive`` still works.
     """
 
-    name = "vmm"
+    name = "cuda_vmm"
     reach = "same_host"
 
     def bootstrap(self, role: Any, peer_offer: Any = None) -> Any:
@@ -811,49 +795,3 @@ def _get_fallback_server() -> _FdPassServer:
         if _FALLBACK_SERVER is None:
             _FALLBACK_SERVER = _FdPassServer()
         return _FALLBACK_SERVER
-
-
-def _register_vmm_transport() -> None:
-    """Register the VMM backend once this module is imported."""
-    from tesseract_core.runtime.device_transport import register_transport
-
-    register_transport(VmmTransport())
-
-
-_register_vmm_transport()
-
-
-# ---------------------------------------------------------------------------
-# Back-compat entry points used by cuda_ipc and the test suite
-# ---------------------------------------------------------------------------
-#
-# cuda_ipc reaches the VMM path through these thin module-level functions (it
-# selects VMM by pointer, sharing the wire format), and the tests monkeypatch
-# them. They delegate to the registered transport so there is one implementation.
-
-
-def dump_vmm_arraydict(arr: Any) -> ArrayDict:
-    """Export ``arr`` via the VMM transport's fallback server. See :class:`VmmTransport`."""
-    from tesseract_core.runtime.device_transport import get_transport
-
-    transport = get_transport("vmm")
-    return transport.register(arr)
-
-
-def load_vmm_arraydict(val: ArrayDict) -> IpcDeviceArray:
-    """Decode a VMM descriptor via the VMM transport. See :class:`VmmTransport`."""
-    from tesseract_core.runtime.device_transport import get_transport
-
-    return get_transport("vmm").receive(val)
-
-
-def release_vmm_exports() -> None:
-    """Release VMM handles retained by the fallback (sessionless) path.
-
-    The served path releases through its lifespan-owned session; this covers the
-    bare SDK path that dumps/loads without a session. A no-op when nothing was
-    exported.
-    """
-    from tesseract_core.runtime.device_transport import get_transport
-
-    get_transport("vmm").release()

@@ -139,26 +139,52 @@ class CudaIpcArrayData(BaseModel):
     - ``storage_offset`` is the byte offset within the cudaMalloc allocation,
     - ``storage_size`` is the total size in bytes of the cudaMalloc allocation.
 
-    Two variants share this schema (see :mod:`tesseract_core.runtime.cuda_ipc`):
-
-    - the legacy IPC handle ``<device>:<handle>:<storage_offset>:<storage_size>``,
-    - the copy-free VMM variant, prefixed ``vmm:`` and carrying the fd-passing
-      socket path (see :mod:`tesseract_core.runtime.vmm_transport`), selected
-      transparently when the source memory is VMM-exportable.
-
-    This is only the JSON *schema*; all the CUDA runtime machinery that produces
-    and consumes it lives in those modules.
+    This is only the JSON *schema* for the encoding; all the CUDA runtime
+    machinery that produces and consumes it lives in
+    :mod:`tesseract_core.runtime.cuda.ipc`.
     """
 
     buffer: StrictStr = Field(
-        pattern=r"^(\d+:[A-Za-z0-9+/=]+:\d+:\d+|vmm:[A-Za-z0-9+/=]+:\d+:\d+:\d+:\d+)$",
+        pattern=r"^\d+:[A-Za-z0-9+/=]+:\d+:\d+$",
         description=(
-            "Packed CUDA IPC descriptor: either the legacy "
-            "<device>:<handle>:<storage_offset>:<storage_size> or the VMM variant "
-            "vmm:<sockpath>:<export_id>:<storage_offset>:<storage_size>:<device>"
+            "Packed CUDA IPC descriptor: "
+            "<device>:<handle>:<storage_offset>:<storage_size>"
         ),
     )
     encoding: Literal["cuda_ipc"]
+    compression: None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class CudaVmmArrayData(BaseModel):
+    """Data structure for CUDA VMM by-fd shared GPU memory.
+
+    The copy-free sibling of :class:`CudaIpcArrayData`: instead of a
+    self-contained IPC handle, the buffer names a Unix-socket path and an export
+    id the consumer uses to fetch the allocation's POSIX file descriptor
+    out-of-band (see :mod:`tesseract_core.runtime.cuda.vmm`). The buffer packs
+    ``vmm:<sockpath>:<export_id>:<storage_offset>:<storage_size>:<device>``:
+
+    - ``sockpath`` is the base64-encoded fd-passing socket path,
+    - ``export_id`` identifies the retained VMM allocation on the producer,
+    - ``storage_offset`` / ``storage_size`` locate the array within the mapped
+      allocation, exactly as for ``cuda_ipc``,
+    - ``device`` is the CUDA device ordinal the memory lives on.
+
+    This is only the JSON *schema* for the encoding; all the CUDA runtime
+    machinery that produces and consumes it lives in
+    :mod:`tesseract_core.runtime.cuda.vmm`.
+    """
+
+    buffer: StrictStr = Field(
+        pattern=r"^vmm:[A-Za-z0-9+/=]+:\d+:\d+:\d+:\d+$",
+        description=(
+            "Packed CUDA VMM descriptor: "
+            "vmm:<sockpath>:<export_id>:<storage_offset>:<storage_size>:<device>"
+        ),
+    )
+    encoding: Literal["cuda_vmm"]
     compression: None = None
 
     model_config = ConfigDict(extra="forbid")
@@ -173,7 +199,13 @@ class EncodedArrayModel(BaseModel):
     object_type: Literal["array"]
     shape: tuple[PositiveInt, ...]
     dtype: AllowedDtypes
-    data: BinrefArrayData | Base64ArrayData | JsonArrayData | CudaIpcArrayData
+    data: (
+        BinrefArrayData
+        | Base64ArrayData
+        | JsonArrayData
+        | CudaIpcArrayData
+        | CudaVmmArrayData
+    )
     model_config = ConfigDict(extra="forbid")
 
 
@@ -253,7 +285,11 @@ def get_array_model(
         ),
         # Choose the appropriate data structure based on the encoding
         "data": (
-            BinrefArrayData | Base64ArrayData | JsonArrayData | CudaIpcArrayData,
+            BinrefArrayData
+            | Base64ArrayData
+            | JsonArrayData
+            | CudaIpcArrayData
+            | CudaVmmArrayData,
             Field(discriminator="encoding"),
         ),
         "model_config": (ConfigDict, config),
@@ -598,7 +634,7 @@ def validate_python_or_gpu_array(
     since CuPy refuses implicit conversion). Everything else is coerced to a
     NumPy array via :func:`python_to_array`.
     """
-    from tesseract_core.runtime import cuda_ipc
+    from tesseract_core.runtime.cuda import ipc as cuda_ipc
 
     if cuda_ipc.has_cuda_array_interface(val):
         return cuda_ipc.validate_cuda_array(val, expected_shape, expected_dtype)
@@ -629,10 +665,12 @@ def decode_array(
                 base_dir = join_paths(base_dir, subdir)
             data = _load_binref_arraydict(val.model_dump(), base_dir)
 
-        elif val.data.encoding == "cuda_ipc":
+        elif val.data.encoding in {"cuda_ipc", "cuda_vmm"}:
             from tesseract_core.runtime.device_transport import get_transport
 
-            # Returns a framework-agnostic on-GPU wrapper — skip numpy coercion
+            # Returns a framework-agnostic on-GPU wrapper — skip numpy coercion.
+            # The encoding name is the transport name, so a by-reference GPU
+            # array decodes through whichever transport produced it.
             transport = get_transport(val.data.encoding)
             return transport.receive(val.model_dump())
 
@@ -669,48 +707,59 @@ def decode_array(
 
 
 def encode_array(
-    arr: ArrayLike, info: Any, expected_shape: ShapeType, expected_dtype: str | None
+    arr: ArrayLike | GPUArray,
+    info: Any,
+    expected_shape: ShapeType,
+    expected_dtype: str | None,
 ) -> ArrayDict | ArrayLike:
-    """Encode a NumPy array for serialization.
+    """Encode a NumPy or GPU array for serialization.
 
-    In Python mode, returns the raw array as-is.
+    An output encoding is two orthogonal choices carried in the context (see
+    :func:`tesseract_core.runtime.file_interactions.output_to_bytes`):
+
+    - ``array_encoding`` -- how a host (CPU) array is serialized (``json`` /
+      ``base64`` / ``binref``);
+    - ``device_transport`` -- how a device (GPU) array is exported without a
+      host copy (a transport name such as ``cuda_ipc``, or ``None`` for none).
+
+    Each array is routed per-leaf by *where it lives*, not by a single
+    whole-response choice: a GPU array is exported over the device transport when
+    one is set, and every host array (plus any GPU array when no transport is
+    set) is serialized via the host encoding. This is what lets one response mix
+    on-device and on-host arrays. In Python mode there is nothing to serialize,
+    so arrays pass through as-is.
     """
-    from tesseract_core.runtime import cuda_ipc
     from tesseract_core.runtime.config import get_config
+    from tesseract_core.runtime.cuda import ipc as cuda_ipc
 
     context = info.context if info.context else {}
     array_encoding = context.get("array_encoding", "json")
+    device_transport = context.get("device_transport")
 
-    # For the GPU device transports, skip numpy conversion so the array stays on
-    # the GPU. In Python mode there is nothing to serialize, so pass the array
-    # through untouched (the on-device passthrough handled generally below); only
-    # the JSON path emits a device handle, and there the input must be a CUDA
-    # array. ``cuda_ipc`` and ``vmm`` are sibling transports selected here by the
-    # request's format (see file_interactions.output_to_bytes); both share the
-    # cuda_ipc wire encoding but differ in how the producer exports memory.
-    if array_encoding in ("cuda_ipc", "vmm") and info.mode_is_json():
-        if not cuda_ipc.has_cuda_array_interface(arr):
-            raise ValueError(
-                f"{array_encoding} encoding requires a CUDA array "
-                f"(object with __cuda_array_interface__), got {type(arr).__name__}"
-            )
-        from tesseract_core.runtime.device_transport import get_transport
-
-        transport = get_transport(array_encoding)
-        return transport.descriptor(transport.register(arr))
+    is_gpu_array = cuda_ipc.has_cuda_array_interface(arr)
 
     # Python mode -> return the array as-is, without any host copy. GPU arrays
     # are preserved on-device so that the intermediate model_dump()/validate
     # round-trip in the runtime (see runtime.core.apply) is lossless.
     if not info.mode_is_json():
-        if cuda_ipc.has_cuda_array_interface(arr):
+        if is_gpu_array:
             return arr
         return python_to_array(arr, expected_shape, expected_dtype, context)
 
-    # JSON, non-IPC encoding: the data must reach the host. A GPU array survived
+    # A GPU array with a device transport set is exported by reference, staying
+    # on-device. A GPU array without a transport, or any host array, falls
+    # through to the host encoding below -- so a mixed payload (some GPU, some
+    # CPU arrays) serializes each leaf by where it lives instead of failing.
+    if device_transport is not None and is_gpu_array:
+        from tesseract_core.runtime.device_transport import get_transport
+
+        transport = get_transport(device_transport)
+        return transport.descriptor(transport.register(arr))
+
+    # Host encoding: the data must reach the host. A GPU array survived
     # validation untouched (see validate_python_or_gpu_array), so materialise it
     # here with an explicit device-to-host copy before the numpy-based coercion.
-    if cuda_ipc.has_cuda_array_interface(arr) and not isinstance(arr, np.ndarray):
+    if is_gpu_array and not isinstance(arr, np.ndarray):
         arr = cuda_ipc.cuda_array_to_host(arr)
 
     # Convert to a NumPy array if necessary

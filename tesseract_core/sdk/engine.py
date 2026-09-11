@@ -61,9 +61,7 @@ docker_client = CLIDockerClient()
 # the SDK, e.g. sdk.tesseract). Mirrors runtime.file_interactions.supported_format_type
 # but is defined here so the SDK does not eagerly import the (optional) runtime
 # package; a test asserts the two stay in sync.
-OutputFormat: TypeAlias = Literal[
-    "json", "json+base64", "json+binref", "json+cuda_ipc", "json+cuda_vmm"
-]
+OutputFormat: TypeAlias = Literal["json", "json+base64", "json+binref"]
 
 # Fixed port the API server binds *inside* the container when port-mapping is
 # used (i.e. everything except host networking). The container has its own
@@ -928,6 +926,7 @@ def serve(
     input_path: str | Path | None = None,
     output_path: str | Path | None = None,
     output_format: OutputFormat | None = None,
+    gpu_transport: str | None = None,
     docker_args: list[str] | None = None,
     runtime_config: dict[str, Any] | None = None,
     skip_health_check: bool = False,
@@ -956,6 +955,12 @@ def serve(
         input_path: Input path to read input files from, such as local directory or S3 URI.
         output_path: Output path to write output files to, such as local directory or S3 URI.
         output_format: Output format to use for the results.
+        gpu_transport: How GPU arrays leave the container. ``none`` copies them to
+            the host and serializes them via ``output_format``; ``cuda_ipc`` exports
+            them by reference (requires ``gpus`` and a shared IPC namespace). An
+            explicit value (including ``none``) wins over a ``gpu_transport`` in
+            ``runtime_config``; leaving it unset (``None``) defers to
+            ``runtime_config``, falling back to ``none`` when neither sets it.
         docker_args: Additional arguments to pass to the container runtime (e.g., Docker).
         runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
             These are converted to TESSERACT_* environment variables. For example,
@@ -1012,6 +1017,17 @@ def serve(
 
     if output_format:
         environment["TESSERACT_OUTPUT_FORMAT"] = output_format
+
+    # Resolve the GPU transport across its two spellings. The dedicated kwarg is
+    # canonical: any explicit value (including "none", which disables the
+    # transport) wins over one passed through runtime_config. Leaving the kwarg
+    # unset (None) defers to runtime_config, already written to the environment
+    # above. When neither names a transport, pin it to "none" so the container
+    # always receives a definite value rather than inheriting the image default.
+    if gpu_transport is not None:
+        environment["TESSERACT_GPU_TRANSPORT"] = gpu_transport
+    else:
+        environment.setdefault("TESSERACT_GPU_TRANSPORT", "none")
 
     # Read after runtime_config lands in the environment, which is how the SDK
     # passes it. Only a port the caller asked for needs checking afterwards; the
@@ -1106,22 +1122,20 @@ def serve(
         if docker_args:
             extra_args.extend(docker_args)
 
-        # CUDA IPC needs a GPU and a shared IPC namespace between host and
-        # container. Wire both up whenever the experimental flag is set (the
-        # only reason to enable it is IPC).
-        cuda_ipc_enabled = environment.get(
-            "TESSERACT_ENABLE_EXPERIMENTAL_CUDA_IPC"
-        ) in ("1", "true", "True")
+        # The by-reference GPU transports (cuda_ipc, cuda_vmm) need a GPU and a
+        # shared IPC namespace between host and container. Wire both up whenever
+        # one is selected (the only reason to enable it is cross-process sharing).
+        gpu_transport = environment.get("TESSERACT_GPU_TRANSPORT", "none")
 
-        if cuda_ipc_enabled:
+        if gpu_transport in ("cuda_ipc", "cuda_vmm"):
             if not gpus:
                 raise ValueError(
-                    "enable_experimental_cuda_ipc requires GPU access, but no GPUs "
-                    "were requested. Pass gpus=['all'] or specific GPU IDs."
+                    f"gpu_transport={gpu_transport!r} requires GPU access, but no "
+                    "GPUs were requested. Pass gpus=['all'] or specific GPU IDs."
                 )
             if num_workers > 1:
                 raise ValueError(
-                    "enable_experimental_cuda_ipc requires num_workers=1. The IPC "
+                    f"gpu_transport={gpu_transport!r} requires num_workers=1. The "
                     "export lifecycle assumes a single serial producer: exports are "
                     "pinned until the next request releases them, and the fd-passing "
                     "server retains handles in the worker process that produced them. "
@@ -1130,11 +1144,10 @@ def serve(
                     "export, silently returning wrong data. Pass num_workers=1."
                 )
             extra_args.extend(["--ipc=host"])
-        elif output_format in ("json+cuda_ipc", "json+cuda_vmm"):
+        elif gpu_transport != "none":
             raise ValueError(
-                f"The {output_format!r} output format is experimental and must be "
-                "explicitly enabled. Pass "
-                "runtime_config={'enable_experimental_cuda_ipc': True}."
+                f"Unknown gpu_transport {gpu_transport!r}. "
+                "Supported values: 'none', 'cuda_ipc', 'cuda_vmm'."
             )
 
         if network is not None:
@@ -1168,7 +1181,20 @@ def serve(
         except ContainerError as ex:
             if not is_port_conflict(ex.stderr.decode("utf-8", errors="ignore")):
                 raise
-            # Publish failed; no container was created, nothing to clean up.
+            # Publish failing after the container is created leaves it behind in
+            # a Created (never-started) state, invisible to containers.list()'s
+            # running-only default and so to `tesseract teardown --all`.
+            if ex.container is not None:
+                # tesseract_only=False: we already know this is the container we
+                # just tried to create, from our own docker run invocation, so
+                # the usual "is this a Tesseract container" filter would only
+                # risk leaving the leak behind unremoved.
+                try:
+                    docker_client.containers.get(
+                        ex.container, tesseract_only=False
+                    ).remove(force=True)
+                except NotFound:
+                    pass
             retry_or_raise_port_conflict(port, auto_port, attempt, max_attempts)
             continue
         except PortInUseError:
