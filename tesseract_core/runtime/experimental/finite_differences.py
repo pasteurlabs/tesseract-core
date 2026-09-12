@@ -11,7 +11,7 @@ implementing analytical gradients.
     These are experimental and the API may change in future releases.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Literal
 
 import numpy as np
@@ -26,6 +26,41 @@ from tesseract_core.runtime.tree_transforms import get_at_path, set_at_path
 
 FDAlgorithm = Literal["central", "forward", "stochastic"]
 
+#: A single step size for every differentiated input, or one per input path.
+#: Mirrors the ``eps`` accepted by
+#: :func:`~tesseract_core.runtime.testing.finite_differences.check_gradients`.
+EpsLike = float | Mapping[str, float]
+
+
+def _resolve_eps(eps: EpsLike, in_paths: set[str]) -> dict[str, float]:
+    """Expand ``eps`` into one step size per differentiated input path.
+
+    A scalar applies to every path, which is the default and keeps the cost of
+    the stochastic and JVP algorithms unchanged. A mapping must name every path
+    in ``in_paths`` and nothing else, so that a typo in a path is an error
+    rather than a silent fallback to the default step.
+
+    The validation matches ``check_gradients`` in the testing module: same rule,
+    same ``ValueError``.
+    """
+    if not isinstance(eps, Mapping):
+        return dict.fromkeys(in_paths, float(eps))
+
+    missing = sorted(in_paths - eps.keys())
+    if missing:
+        raise ValueError(
+            f"eps is missing a step size for input path(s): {', '.join(missing)}"
+        )
+
+    unknown = sorted(eps.keys() - in_paths)
+    if unknown:
+        raise ValueError(
+            f"eps names input path(s) that are not being differentiated: "
+            f"{', '.join(unknown)}"
+        )
+
+    return {path: float(eps[path]) for path in in_paths}
+
 
 def finite_difference_jacobian(
     apply_fn: Callable,
@@ -34,7 +69,7 @@ def finite_difference_jacobian(
     jac_outputs: set[str],
     *,
     algorithm: FDAlgorithm = "central",
-    eps: float = 1e-4,
+    eps: EpsLike = 1e-4,
     num_samples: int | None = None,
     seed: int | None = None,
 ) -> dict[str, dict[str, ArrayLike]]:
@@ -53,7 +88,11 @@ def finite_difference_jacobian(
             ``"central"`` (central differences, most accurate, 2 evaluations per element),
             ``"forward"`` (forward differences, faster, 1 extra evaluation per element), or
             ``"stochastic"`` (SPSA algorithm, scales better to high-dimensional inputs).
-        eps: Perturbation magnitude for finite differences.
+        eps: The step size for finite differences, as an absolute
+            perturbation. A single float is applied unscaled to every
+            differentiated input; a mapping gives one step per input path,
+            which is what inputs of differing magnitude need, and must name
+            every path being differentiated and no others.
         num_samples: Number of random samples for the stochastic algorithm.
             Only used when ``algorithm="stochastic"``. Defaults to ``max(10, sqrt(n))``
             where ``n`` is the total number of input elements, providing O(sqrt(n))
@@ -87,6 +126,7 @@ def finite_difference_jacobian(
         more computationally expensive than analytical methods.
     """
     inputs_dict = inputs.model_dump()
+    eps = _resolve_eps(eps, jac_inputs)
 
     # Get reference outputs for shape information and for forward differences
     base_outputs = apply_fn(inputs).model_dump()
@@ -145,7 +185,7 @@ def _compute_jacobian_elementwise(
     jac_outputs: set[str],
     result: dict[str, dict[str, ArrayLike]],
     *,
-    eps: float,
+    eps: dict[str, float],
     algorithm: FDAlgorithm,
 ) -> None:
     """Compute Jacobian by perturbing each input element individually."""
@@ -155,6 +195,7 @@ def _compute_jacobian_elementwise(
         in_val = get_at_path(inputs_dict, in_path)
         in_arr = np.asarray(in_val)
         in_shape = in_arr.shape
+        in_eps = eps[in_path]
 
         # Handle scalars
         indices = list(np.ndindex(in_shape)) if in_shape else [()]
@@ -169,7 +210,7 @@ def _compute_jacobian_elementwise(
                         in_path,
                         out_path,
                         idx,
-                        eps,
+                        in_eps,
                     )
                 elif algorithm == "forward":
                     grad = _compute_forward_diff_row(
@@ -180,7 +221,7 @@ def _compute_jacobian_elementwise(
                         in_path,
                         out_path,
                         idx,
-                        eps,
+                        in_eps,
                     )
                 else:
                     raise ValueError(f"Unknown algorithm {algorithm}")
@@ -200,7 +241,7 @@ def _compute_jacobian_stochastic(
     jac_outputs: set[str],
     result: dict[str, dict[str, ArrayLike]],
     *,
-    eps: float,
+    eps: dict[str, float],
     num_samples: int | None,
     seed: int | None,
 ) -> None:
@@ -278,10 +319,10 @@ def _compute_jacobian_stochastic(
         for in_path, delta in perturbations.items():
             in_arr = input_info[in_path]["array"]
             inputs_plus_dict = set_at_path(
-                inputs_plus_dict, {in_path: in_arr + eps * delta}
+                inputs_plus_dict, {in_path: in_arr + eps[in_path] * delta}
             )
             inputs_minus_dict = set_at_path(
-                inputs_minus_dict, {in_path: in_arr - eps * delta}
+                inputs_minus_dict, {in_path: in_arr - eps[in_path] * delta}
             )
 
         # Evaluate function at perturbed points
@@ -296,10 +337,14 @@ def _compute_jacobian_stochastic(
         for out_path in jac_outputs:
             out_plus = np.asarray(get_at_path(outputs_plus, out_path))
             out_minus = np.asarray(get_at_path(outputs_minus, out_path))
-            output_diff = (out_plus - out_minus) / (2 * eps)
+            out_delta = out_plus - out_minus
 
+            # The step taken along each input carries that input's own eps, so
+            # the difference quotient is formed per input rather than once for
+            # the whole simultaneous perturbation.
             for in_path in jac_inputs:
                 delta = perturbations[in_path]
+                output_diff = out_delta / (2 * eps[in_path])
 
                 # SPSA gradient estimate: (f(x+eps*delta) - f(x-eps*delta)) / (2*eps*delta)
                 # For Jacobian: J[i,j] contribution = output_diff[i] / delta[j]
@@ -326,7 +371,7 @@ def finite_difference_jvp(
     tangent_vector: dict[str, ArrayLike],
     *,
     algorithm: FDAlgorithm = "central",
-    eps: float = 1e-4,
+    eps: EpsLike = 1e-4,
 ) -> dict[str, ArrayLike]:
     """Compute the Jacobian-vector product (JVP) using finite differences.
 
@@ -346,7 +391,11 @@ def finite_difference_jvp(
         algorithm: The finite difference algorithm to use. Options are
             ``"central"`` (most accurate, default) or ``"forward"`` (faster).
             The ``"stochastic"`` option is accepted but treated as ``"central"``.
-        eps: Perturbation magnitude.
+        eps: The step size for finite differences, as an absolute
+            perturbation. A single float is applied unscaled to every
+            differentiated input; a mapping gives one step per input path,
+            which is what inputs of differing magnitude need, and must name
+            every path being differentiated and no others.
 
     Returns:
         Dictionary mapping output paths to JVP result arrays.
@@ -372,48 +421,72 @@ def finite_difference_jvp(
         This function is experimental and its API may change in future releases.
     """
     inputs_dict = inputs.model_dump()
+    eps = _resolve_eps(eps, jvp_inputs)
 
     # Stochastic algorithm is treated as central for JVP since JVP already
     # achieves O(1) function evaluations via directional derivatives
     if algorithm == "stochastic":
         algorithm = "central"
 
-    # Construct directional perturbation
-    inputs_plus_dict = inputs_dict.copy()
-    inputs_minus_dict = inputs_dict.copy()
-
+    # A JVP is linear in the tangent, so inputs that share a step size can be
+    # perturbed together and their directional derivatives summed afterwards.
+    # A scalar eps leaves a single group, which is the original two evaluations.
+    groups: dict[float, list[str]] = {}
     for in_path in jvp_inputs:
-        in_val = np.asarray(get_at_path(inputs_dict, in_path))
-        tangent = np.asarray(tangent_vector[in_path])
+        groups.setdefault(eps[in_path], []).append(in_path)
 
-        inputs_plus_dict = set_at_path(
-            inputs_plus_dict, {in_path: in_val + eps * tangent}
-        )
-        if algorithm == "central":
-            inputs_minus_dict = set_at_path(
-                inputs_minus_dict, {in_path: in_val - eps * tangent}
+    base_outputs = None
+    if algorithm == "forward" or not groups:
+        base_outputs = apply_fn(inputs).model_dump()
+
+    if not groups:
+        return {
+            out_path: np.zeros_like(
+                np.asarray(get_at_path(base_outputs, out_path)), dtype=np.float64
             )
+            for out_path in jvp_outputs
+        }
 
-    # Evaluate at perturbed points
-    outputs_plus = apply_fn(type(inputs).model_validate(inputs_plus_dict)).model_dump()
+    result: dict[str, ArrayLike] = {}
+    for group_eps, group_paths in groups.items():
+        # Construct directional perturbation
+        inputs_plus_dict = inputs_dict.copy()
+        inputs_minus_dict = inputs_dict.copy()
 
-    if algorithm == "central":
-        outputs_minus = apply_fn(
-            type(inputs).model_validate(inputs_minus_dict)
+        for in_path in group_paths:
+            in_val = np.asarray(get_at_path(inputs_dict, in_path))
+            tangent = np.asarray(tangent_vector[in_path])
+
+            inputs_plus_dict = set_at_path(
+                inputs_plus_dict, {in_path: in_val + group_eps * tangent}
+            )
+            if algorithm == "central":
+                inputs_minus_dict = set_at_path(
+                    inputs_minus_dict, {in_path: in_val - group_eps * tangent}
+                )
+
+        # Evaluate at perturbed points
+        outputs_plus = apply_fn(
+            type(inputs).model_validate(inputs_plus_dict)
         ).model_dump()
 
-        result = {}
+        if algorithm == "central":
+            reference_outputs = apply_fn(
+                type(inputs).model_validate(inputs_minus_dict)
+            ).model_dump()
+            denominator = 2 * group_eps
+        else:
+            reference_outputs = base_outputs
+            denominator = group_eps
+
         for out_path in jvp_outputs:
             out_plus = np.asarray(get_at_path(outputs_plus, out_path))
-            out_minus = np.asarray(get_at_path(outputs_minus, out_path))
-            result[out_path] = (out_plus - out_minus) / (2 * eps)
-    else:
-        base_outputs = apply_fn(inputs).model_dump()
-        result = {}
-        for out_path in jvp_outputs:
-            out_plus = np.asarray(get_at_path(outputs_plus, out_path))
-            out_base = np.asarray(get_at_path(base_outputs, out_path))
-            result[out_path] = (out_plus - out_base) / eps
+            out_ref = np.asarray(get_at_path(reference_outputs, out_path))
+            contribution = (out_plus - out_ref) / denominator
+            if out_path in result:
+                result[out_path] = result[out_path] + contribution
+            else:
+                result[out_path] = contribution
 
     return result
 
@@ -426,7 +499,7 @@ def finite_difference_vjp(
     cotangent_vector: dict[str, ArrayLike],
     *,
     algorithm: FDAlgorithm = "central",
-    eps: float = 1e-4,
+    eps: EpsLike = 1e-4,
     num_samples: int | None = None,
     seed: int | None = None,
 ) -> dict[str, ArrayLike]:
@@ -448,7 +521,11 @@ def finite_difference_vjp(
         algorithm: The finite difference algorithm to use. Options are
             ``"central"`` (most accurate), ``"forward"`` (faster), or
             ``"stochastic"`` (SPSA, better for high-dimensional inputs).
-        eps: Perturbation magnitude.
+        eps: The step size for finite differences, as an absolute
+            perturbation. A single float is applied unscaled to every
+            differentiated input; a mapping gives one step per input path,
+            which is what inputs of differing magnitude need, and must name
+            every path being differentiated and no others.
         num_samples: Number of random samples for the stochastic algorithm.
             Only used when ``algorithm="stochastic"``. Defaults to ``max(10, sqrt(n))``
             where ``n`` is the total number of input elements.
@@ -478,6 +555,7 @@ def finite_difference_vjp(
         This function is experimental and its API may change in future releases.
     """
     inputs_dict = inputs.model_dump()
+    eps = _resolve_eps(eps, vjp_inputs)
     input_schema = type(inputs)
 
     # Initialize result
@@ -510,6 +588,7 @@ def finite_difference_vjp(
             in_val = get_at_path(inputs_dict, in_path)
             in_arr = np.asarray(in_val)
             in_shape = in_arr.shape
+            in_eps = eps[in_path]
 
             indices = list(np.ndindex(in_shape)) if in_shape else [()]
 
@@ -525,7 +604,7 @@ def finite_difference_vjp(
                             in_path,
                             out_path,
                             idx,
-                            eps,
+                            in_eps,
                         )
                     elif algorithm == "forward":
                         grad = _compute_forward_diff_row(
@@ -536,7 +615,7 @@ def finite_difference_vjp(
                             in_path,
                             out_path,
                             idx,
-                            eps,
+                            in_eps,
                         )
                     else:
                         raise ValueError(f"Unknown algorithm {algorithm}")
@@ -560,7 +639,7 @@ def _compute_vjp_stochastic(
     cotangent_vector: dict[str, ArrayLike],
     result: dict[str, np.ndarray],
     *,
-    eps: float,
+    eps: dict[str, float],
     num_samples: int | None,
     seed: int | None,
 ) -> None:
@@ -605,6 +684,7 @@ def _compute_vjp_stochastic(
             in_val = get_at_path(inputs_dict, in_path)
             in_arr = np.asarray(in_val)
             in_shape = in_arr.shape
+            in_eps = eps[in_path]
             indices = list(np.ndindex(in_shape)) if in_shape else [()]
             for idx in indices:
                 vjp_value = 0.0
@@ -616,7 +696,7 @@ def _compute_vjp_stochastic(
                         in_path,
                         out_path,
                         idx,
-                        eps,
+                        in_eps,
                     )
                     cotangent = np.asarray(cotangent_vector[out_path])
                     vjp_value += np.sum(cotangent * grad)
@@ -643,10 +723,10 @@ def _compute_vjp_stochastic(
         for in_path, delta in perturbations.items():
             in_arr = input_info[in_path]["array"]
             inputs_plus_dict = set_at_path(
-                inputs_plus_dict, {in_path: in_arr + eps * delta}
+                inputs_plus_dict, {in_path: in_arr + eps[in_path] * delta}
             )
             inputs_minus_dict = set_at_path(
-                inputs_minus_dict, {in_path: in_arr - eps * delta}
+                inputs_minus_dict, {in_path: in_arr - eps[in_path] * delta}
             )
 
         # Evaluate function at perturbed points
@@ -659,17 +739,19 @@ def _compute_vjp_stochastic(
 
         # Compute weighted output difference (weighted by cotangent)
         # This is the directional derivative in the direction of the cotangent
-        weighted_output_diff = 0.0
+        weighted_output_delta = 0.0
         for out_path in vjp_outputs:
             out_plus = np.asarray(get_at_path(outputs_plus, out_path))
             out_minus = np.asarray(get_at_path(outputs_minus, out_path))
-            output_diff = (out_plus - out_minus) / (2 * eps)
             cotangent = np.asarray(cotangent_vector[out_path])
-            weighted_output_diff += np.sum(cotangent * output_diff)
+            weighted_output_delta += np.sum(cotangent * (out_plus - out_minus))
 
-        # Update VJP estimate for each input
-        # VJP contribution = weighted_output_diff / delta
+        # Update VJP estimate for each input.
+        # The step taken along each input carries that input's own eps, so the
+        # difference quotient is formed per input rather than once for the whole
+        # simultaneous perturbation.
         for in_path in vjp_inputs:
             delta = perturbations[in_path]
+            weighted_output_diff = weighted_output_delta / (2 * eps[in_path])
             vjp_contrib = weighted_output_diff / delta
             result[in_path] += vjp_contrib / num_samples
