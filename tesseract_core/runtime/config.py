@@ -159,3 +159,19 @@ def active_config(snapshot: ConfigSnapshot) -> Iterator[None]:
         yield
     finally:
         _current_config, _config_overrides = previous[0], set(previous[1])
+
+
+@contextmanager
+def override_config() -> Iterator[None]:
+    """Run a block under a freshly reset runtime config, restoring the previous one after.
+
+    Shorthand for ``active_config((None, frozenset()))``: the block starts
+    from environment variables alone (as if reset_config() had just run), and
+    whatever was globally active before the block is put back on exit,
+    success or failure. Used by from_tesseract_api to build a new instance's
+    config from scratch without a prior in-process Tesseract's overrides
+    leaking in, and without leaving a trace on the global config once
+    construction returns.
+    """
+    with active_config((None, frozenset())):
+        yield

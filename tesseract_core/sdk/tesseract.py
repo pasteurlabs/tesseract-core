@@ -335,26 +335,23 @@ class Tesseract:
             A Tesseract instance.
         """
         from tesseract_core.runtime.config import (
-            active_config,
-            reset_config,
+            override_config,
             snapshot_config,
             update_config,
         )
 
         # Runtime config is process-global (unlike from_image, which passes
         # it via TESSERACT_* environment variables to an isolated
-        # subprocess). reset_config() and the update_config() calls below
-        # need to freely rebuild it from scratch for this instance alone,
-        # without a prior in-process Tesseract's explicit overrides leaking
-        # in (#672), so all of that happens inside active_config(), which
-        # puts back whatever was globally active before this call started
-        # once we're done, success or failure. Construction is therefore
-        # invisible outside this function; only run_tesseract() ever
-        # installs a snapshot for longer than that, and only for the
+        # subprocess). The update_config() calls below need to freely
+        # rebuild it from scratch for this instance alone, without a prior
+        # in-process Tesseract's explicit overrides leaking in (#672), so
+        # all of that happens inside override_config(), which starts from a
+        # blank slate and puts back whatever was globally active before this
+        # call started once we're done, success or failure. Construction is
+        # therefore invisible outside this function; only run_tesseract()
+        # ever installs a snapshot for longer than that, and only for the
         # duration of one call.
-        with active_config(snapshot_config()):
-            reset_config()
-
+        with override_config():
             if isinstance(tesseract_api, str | Path):
                 from tesseract_core.runtime.core import load_module_from_path
 
