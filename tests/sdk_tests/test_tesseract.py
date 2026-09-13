@@ -264,7 +264,7 @@ def test_HTTPClient_run_tesseract(mocker, run_id):
     mock_response.status_code = 200
 
     mocked_request = mocker.patch(
-        "requests.Session.request",
+        "tesseract_core.sdk.tesseract._LeanSession.request",
         return_value=mock_response,
     )
 
@@ -292,7 +292,7 @@ def test_HTTPClient_timeout_passed_to_request(mocker):
     mock_response.status_code = 200
 
     mocked_request = mocker.patch(
-        "requests.Session.request",
+        "tesseract_core.sdk.tesseract._LeanSession.request",
         return_value=mock_response,
     )
 
@@ -316,7 +316,7 @@ def test_HTTPClient_default_timeout(mocker):
     mock_response.status_code = 200
 
     mocked_request = mocker.patch(
-        "requests.Session.request",
+        "tesseract_core.sdk.tesseract._LeanSession.request",
         return_value=mock_response,
     )
 
@@ -336,7 +336,7 @@ def test_HTTPClient_timeout_tuple(mocker):
     mock_response.status_code = 200
 
     mocked_request = mocker.patch(
-        "requests.Session.request",
+        "tesseract_core.sdk.tesseract._LeanSession.request",
         return_value=mock_response,
     )
 
@@ -381,7 +381,7 @@ def test_HTTPClient_run_tesseract_raises_validation_error(mocker):
     mock_response.status_code = 422
 
     mocker.patch(
-        "requests.Session.request",
+        "tesseract_core.sdk.tesseract._LeanSession.request",
         return_value=mock_response,
     )
 
@@ -977,9 +977,9 @@ def test_stale_keepalive_connection_is_handled(monkeypatch):
     """HTTPClient retries once when session.request raises ConnectionError.
 
     Tests the contract directly by injecting a one-shot ConnectionError at the
-    requests.Session.request layer, avoiding the brittleness of real-socket
-    timing (which differs across OS / Python version / urllib3 version) that an
-    integration-style test would depend on.
+    session's request layer, avoiding the brittleness of real-socket timing
+    (which differs across OS / Python version) that an integration-style test
+    would depend on.
     """
     client = HTTPClient("http://127.0.0.1:1")
 

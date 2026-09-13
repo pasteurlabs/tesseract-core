@@ -2,9 +2,11 @@
 # SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
+import http.client
 import shutil
 import sys
 import tempfile
+import threading
 import traceback
 import uuid
 import warnings
@@ -14,8 +16,8 @@ from contextlib import contextmanager
 from functools import cached_property, wraps
 from pathlib import Path
 from types import ModuleType
-from typing import TYPE_CHECKING, Any, Literal, TypeAlias
-from urllib.parse import urlparse, urlunparse
+from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeAlias, runtime_checkable
+from urllib.parse import urlencode, urlparse, urlunparse
 
 import numpy as np
 import orjson
@@ -975,6 +977,137 @@ def _decode_array(
     return arr
 
 
+@runtime_checkable
+class _ResponseLike(Protocol):
+    """The subset of the response interface :class:`HTTPClient` consumes.
+
+    Satisfied by ``requests.Response``, :class:`_LeanResponse`, the Starlette
+    ``TestClient`` response, and the mocks used in tests, so the request path can
+    accept any of them without pinning a concrete type.
+    """
+
+    status_code: int
+    content: bytes
+
+    @property
+    def ok(self) -> bool: ...
+
+    @property
+    def text(self) -> str: ...
+
+
+class _LeanResponse:
+    """Minimal stand-in for ``requests.Response``.
+
+    Exposes only the attributes :class:`HTTPClient` reads: ``status_code``,
+    ``content``, ``ok`` and ``text``.
+    """
+
+    __slots__ = ("content", "status_code")
+
+    def __init__(self, status_code: int, content: bytes) -> None:
+        self.status_code = status_code
+        self.content = content
+
+    @property
+    def ok(self) -> bool:
+        return self.status_code < 400
+
+    @property
+    def text(self) -> str:
+        return self.content.decode("utf-8", errors="replace")
+
+
+class _LeanSession:
+    """A thin persistent-connection HTTP client over ``http.client``.
+
+    Drop-in replacement for the ``requests.Session`` used by
+    :class:`HTTPClient`, exposing the same ``request(method, url, data, params,
+    timeout)`` call and a ``headers`` dict. It keeps one keep-alive connection
+    and skips the per-call ``PreparedRequest``/adapter/cookie machinery that
+    dominates ``requests``' per-request cost, the bulk of client-side latency in
+    a tight request/response loop.
+
+    Only plain ``http``/``https`` with a small JSON body is supported, which is
+    all the Tesseract client sends. On a dropped keep-alive connection it raises
+    :class:`requests.ConnectionError`, so the existing single-retry in
+    :meth:`HTTPClient._send` reconnects transparently.
+    """
+
+    def __init__(self) -> None:
+        self.headers: dict[str, str] = {}
+        self._conn: http.client.HTTPConnection | None = None
+        self._lock = threading.Lock()
+
+    def _get_connection(
+        self, scheme: str, host: str, port: int, timeout: Any
+    ) -> http.client.HTTPConnection:
+        # A client only ever talks to one host, so a single cached connection
+        # suffices; open it on first use.
+        if self._conn is not None:
+            return self._conn
+        # A (connect, read) tuple selects the read timeout for the socket; a
+        # bare float applies to both. None means block indefinitely.
+        sock_timeout = timeout[1] if isinstance(timeout, tuple) else timeout
+        conn_cls = (
+            http.client.HTTPSConnection
+            if scheme == "https"
+            else http.client.HTTPConnection
+        )
+        self._conn = conn_cls(host, port, timeout=sock_timeout)
+        return self._conn
+
+    def request(
+        self,
+        method: str,
+        url: str,
+        data: bytes = b"",
+        params: dict | None = None,
+        timeout: Any = None,
+    ) -> _LeanResponse:
+        parsed = urlparse(url)
+        scheme = parsed.scheme or "http"
+        host = parsed.hostname or "127.0.0.1"
+        port = parsed.port or (443 if scheme == "https" else 80)
+        path = parsed.path or "/"
+        if params:
+            path = f"{path}?{urlencode(params)}"
+
+        body = data if data is not None else b""
+        headers = dict(self.headers)
+        headers.setdefault("Content-Length", str(len(body)))
+
+        with self._lock:
+            conn = self._get_connection(scheme, host, port, timeout)
+            try:
+                conn.request(method, path, body=body, headers=headers)
+                resp = conn.getresponse()
+                content = resp.read()
+            except TimeoutError as exc:
+                # A socket timeout must not trigger the keep-alive retry, unlike
+                # a dropped connection. Mirror requests, which raises ReadTimeout.
+                conn.close()
+                self._conn = None
+                raise requests.exceptions.ReadTimeout(str(exc)) from exc
+            except (
+                http.client.HTTPException,
+                ConnectionError,
+                OSError,
+            ) as exc:
+                # Surface as requests.ConnectionError so HTTPClient._send's
+                # single reconnect-and-retry handles a stale keep-alive.
+                conn.close()
+                self._conn = None
+                raise requests.ConnectionError(str(exc)) from exc
+            return _LeanResponse(resp.status, content)
+
+    def close(self) -> None:
+        with self._lock:
+            if self._conn is not None:
+                self._conn.close()
+                self._conn = None
+
+
 class HTTPClient:
     """HTTP Client for Tesseracts."""
 
@@ -1000,7 +1133,7 @@ class HTTPClient:
         self._gpu_transport = gpu_transport
         self._input_path = Path(input_path) if input_path is not None else None
         self._timeout = timeout
-        self._session = requests.Session()
+        self._session = _LeanSession()
         self._session.headers["Content-Type"] = "application/json"
         # Opt-in warm-buffer pool for binref inputs. Only meaningful when passing
         # inputs as binref into a mounted (ideally shared-memory) input dir.
@@ -1020,6 +1153,7 @@ class HTTPClient:
         if self._binref_pool is not None:
             self._binref_pool.close()
             self._binref_pool = None
+        self._session.close()
 
     @staticmethod
     def _sanitize_url(url: str) -> str:
@@ -1038,9 +1172,7 @@ class HTTPClient:
         """(Sanitized) URL to connect to."""
         return self._url
 
-    def _send(
-        self, url: str, method: str, data: bytes, params: dict
-    ) -> requests.Response:
+    def _send(self, url: str, method: str, data: bytes, params: dict) -> _ResponseLike:
         # Only forward timeout when set; omitting it is equivalent to None for
         # requests.Session, and avoids passing a kwarg that some session
         # implementations (e.g. starlette's TestClient) don't accept.
@@ -1110,7 +1242,7 @@ class HTTPClient:
             response = self._send(url, method, orjson.dumps(encoded_payload), params)
         return self._decode_response(response, endpoint)
 
-    def _decode_response(self, response: requests.Response, endpoint: str) -> dict:
+    def _decode_response(self, response: _ResponseLike, endpoint: str) -> dict:
         if response.status_code == requests.codes.unprocessable_entity:
             # Try and raise a more helpful error if the response is a Pydantic error
             try:
