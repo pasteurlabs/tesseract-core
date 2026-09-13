@@ -1371,7 +1371,11 @@ class LocalClient:
         # on this one) may have changed it since __init__ captured it (#672).
         # Everything below that can read get_config(), the profiler flag
         # here, and the endpoint itself, which may consult input_path/
-        # output_path/etc. deep inside tesseract_api.py, runs under it.
+        # output_path/etc. deep inside tesseract_api.py, runs under it. Any
+        # update_config() call made from within the endpoint itself is
+        # discarded when this block exits, not merged into the snapshot;
+        # mutating runtime config from inside a Tesseract call isn't a
+        # supported pattern.
         with active_config(self._config_snapshot):
             # Set up profiler
             profiler = Profiler(enabled=get_config().profiling)
