@@ -57,8 +57,6 @@ def _short_name(bench: dict) -> str:
         return f"cli/apply_{params}"
     if func == "subprocess":
         return f"subprocess/apply_{params}"
-    if func == "subprocess_binref":
-        return f"subprocess-binref/apply_{params}"
     if func == "subprocess_shmem":
         return f"subprocess-shmem/apply_{params}"
 
