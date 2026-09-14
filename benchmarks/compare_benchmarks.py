@@ -31,6 +31,8 @@ def _short_name(bench: dict) -> str:
         "test_containerized_http[100]"   -> "http/apply_100"
         "test_containerized_http_shmem[100]" -> "http-shmem/apply_100"
         "test_containerized_cli[100]"    -> "cli/apply_100"
+        "test_subprocess[100]"           -> "subprocess/apply_100"
+        "test_subprocess_shmem[100]"     -> "subprocess-shmem/apply_100"
         "test_encoding[json_100]"        -> "encoding/json_100"
         "test_decoding[base64_10,000]"   -> "decoding/base64_10,000"
         "test_roundtrip[binref_1,000]"   -> "roundtrip/binref_1,000"
@@ -53,6 +55,12 @@ def _short_name(bench: dict) -> str:
         return f"http-shmem/apply_{params}"
     if func == "containerized_cli":
         return f"cli/apply_{params}"
+    if func == "subprocess":
+        return f"subprocess/apply_{params}"
+    if func == "subprocess_binref":
+        return f"subprocess-binref/apply_{params}"
+    if func == "subprocess_shmem":
+        return f"subprocess-shmem/apply_{params}"
 
     # Array encoding benchmarks: test_encoding[json_100] etc.
     if func in ("encoding", "decoding", "roundtrip"):
