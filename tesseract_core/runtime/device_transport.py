@@ -4,12 +4,14 @@
 """Pluggable device-array transports.
 
 A *device transport* moves a GPU array's bytes from a producer process to a
-consumer process without a host round-trip. ``json+cuda_ipc`` is the first such
-transport; this module defines the common interface they share so further
-transports slot in behind one dispatch path instead of each bolting a new
-encoder, wire format, and release hook onto the runtime.
+consumer process without a host round-trip. It is selected via the runtime's
+``gpu_transport`` config, independently of the host-array output format;
+``cuda_ipc`` is the first such transport. This module defines the common
+interface they share so further transports (VMM-fd map-and-read, and later
+cross-host NCCL/NIXL) slot in behind one dispatch path instead of each bolting a
+new encoder, wire format, and release hook onto the runtime.
 
-The interface mirrors the lifecycle the ``cuda_ipc`` code follows:
+The interface follows the lifecycle the ``cuda_ipc`` code already uses:
 
 * :meth:`DeviceTransport.register` -- encode side: pin the source array and
   return an opaque per-array handle.
@@ -19,9 +21,10 @@ The interface mirrors the lifecycle the ``cuda_ipc`` code follows:
   receiver-driven transports like ``cuda_ipc`` (the consumer pulls); the seam
   where a push transport posts its matched sends.
 * :meth:`DeviceTransport.receive` -- decode side: materialise the array into a
-  fresh, consumer-owned buffer.
+  fresh, consumer-owned buffer and return it as a framework-agnostic wrapper.
 * :meth:`DeviceTransport.bootstrap` -- establish any shared state a handshake
-  transport needs before transferring. A no-op for ``cuda_ipc``.
+  transport needs before transferring (a shared communicator, a socket for fd
+  passing). A no-op for ``cuda_ipc``, whose handle needs no handshake.
 * :meth:`DeviceTransport.release` -- drop the producer-side pins once the borrow
   is done.
 """
@@ -44,9 +47,9 @@ class DeviceTransport(abc.ABC):
     """The contract every device-array transport implements.
 
     A transport is a small, mostly-stateless object registered under a ``name``
-    (the suffix of the ``json+<name>`` output format). The runtime looks one up
-    by name and drives the lifecycle below; adding a transport means adding a
-    backend, not editing the encode/decode dispatch.
+    (the ``gpu_transport`` config value that selects it, e.g. ``cuda_ipc``). The
+    runtime looks one up by name and drives the lifecycle below; adding a
+    transport means adding a backend, not editing the encode/decode dispatch.
     """
 
     name: ClassVar[str]
@@ -99,10 +102,10 @@ class DeviceTransport(abc.ABC):
 # Registry
 # ---------------------------------------------------------------------------
 #
-# Transports register here by name, keyed by the ``json+<name>`` format suffix,
-# so the encode/decode dispatch goes through one table rather than a chain of
-# ``if encoding == ...`` branches. Built-in transports are registered by the
-# runtime package ``__init__``.
+# Transports register here by name, keyed by their ``gpu_transport`` value, so
+# the encode/decode dispatch and the eventual negotiation endpoint go through
+# one table rather than a chain of ``if encoding == ...`` branches. Built-in
+# transports are registered by the runtime package ``__init__``.
 
 _TRANSPORTS: dict[str, DeviceTransport] = {}
 
@@ -126,12 +129,11 @@ def get_transport(name: str) -> DeviceTransport:
 def available_transports() -> tuple[str, ...]:
     """Names of transports currently registered in this process.
 
-    This reports what has been *registered*, not what a Tesseract will actually
-    accept: whether a transport may be used is gated separately (e.g.
-    ``json+cuda_ipc`` is only an accepted output format when
-    ``enable_experimental_cuda_ipc`` is set; see
-    :func:`tesseract_core.runtime.file_interactions.available_formats`). A caller
-    deciding what to offer a client must apply that gating itself and not treat
-    this list as the enabled set.
+    Registration says the code exists, not that a transport may be used: that is
+    gated separately (a by-reference transport such as ``cuda_ipc`` is only
+    offered when the runtime is configured with a non-``none`` ``gpu_transport``;
+    see :func:`tesseract_core.runtime.file_interactions.available_gpu_transports`).
+    A caller deciding what to offer a client must apply that gating itself and
+    not treat this list as the enabled set.
     """
     return tuple(sorted(_TRANSPORTS))

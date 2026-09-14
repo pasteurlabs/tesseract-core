@@ -619,6 +619,84 @@ def test_check(cli, cli_runner, dummy_tesseract_package):
         )
 
 
+def test_parse_eps_for_overrides_and_default():
+    """--eps-for overrides its paths; every other path falls back to --eps."""
+    from tesseract_core.runtime.cli import _parse_eps_for
+
+    eps = _parse_eps_for(["a=1e-3", "b=2e-6"], default=1e-4)
+    assert eps["a"] == 1e-3
+    assert eps["b"] == 2e-6
+    # Unlisted paths resolve to the global default...
+    assert eps["s"] == 1e-4
+    assert "s" in eps
+    # ...but iteration yields only the explicit overrides, so the core's
+    # unknown-path validation can still flag typos.
+    assert set(eps) == {"a", "b"}
+    assert len(eps) == 2
+
+
+@pytest.mark.parametrize(
+    "bad_value",
+    [
+        "noseparator",
+        "=1e-4",
+        "a=notanumber",
+    ],
+)
+def test_parse_eps_for_rejects_malformed(bad_value):
+    from tesseract_core.runtime.cli import BadParameter, _parse_eps_for
+
+    with pytest.raises(BadParameter):
+        _parse_eps_for([bad_value], default=1e-4)
+
+
+def test_check_gradients_eps_for(cli, cli_runner):
+    """--eps-for applies a per-input step through the CLI to the core check.
+
+    The dummy Tesseract's ``jvp``/``vjp`` endpoints deliberately return zeros,
+    so this pins to ``jacobian`` (which is correct) to assert that a per-input
+    step wired through the CLI still produces a passing check.
+    """
+    result = cli_runner.invoke(
+        cli,
+        [
+            "check-gradients",
+            json.dumps({"inputs": test_input}),
+            "--endpoints",
+            "jacobian",
+            "--eps-for",
+            "a=1e-3",
+            "--no-show-progress",
+            "--seed",
+            "0",
+        ],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0, result.stderr
+    assert "Gradient check for jacobian passed" in result.stdout
+
+
+def test_check_gradients_eps_for_unknown_path(cli, cli_runner):
+    """A --eps-for path that is not being checked is reported, not silently ignored."""
+    result = cli_runner.invoke(
+        cli,
+        [
+            "check-gradients",
+            json.dumps({"inputs": test_input}),
+            "--endpoints",
+            "jacobian",
+            "--eps-for",
+            "does.not.exist=1e-3",
+            "--no-show-progress",
+            "--seed",
+            "0",
+        ],
+        catch_exceptions=True,
+    )
+    assert result.exit_code != 0
+    assert "does.not.exist" in str(result.exception)
+
+
 def test_start_debug_server_blocks_until_client(monkeypatch):
     """One-shot commands must block until a debugger attaches.
 
