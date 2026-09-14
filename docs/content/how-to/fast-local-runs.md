@@ -26,8 +26,14 @@ encoding is what matters instead (see
 ```
 
 A containerized Tesseract needs `/dev/shm` bind-mounted into it, which means a
-Linux host. A Tesseract served in a dedicated process needs nothing of the sort
--- see [Without a container](#without-a-container) below.
+Linux host. A Tesseract served in a dedicated process needs nothing of the sort,
+and works on macOS too -- see [Without a container](#without-a-container) below.
+
+On Windows there is no shared-memory filesystem to point either at, so this page
+does not apply. `json+binref` still works there on an ordinary directory, and is
+still worth choosing over `json+base64` for large arrays, since it keeps array
+data out of the HTTP body either way. What is unavailable is
+`experimental_binref_pool`, which reads outputs back as read-only memory maps.
 
 ## Basic usage
 
