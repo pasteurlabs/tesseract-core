@@ -31,7 +31,7 @@ supported_format_type = Literal["json", "json+base64", "json+binref"]
 #
 # The disabled state is the explicit string ``"none"`` rather than ``None``, so
 # it is clear to users that this means "disabled", not "unspecified".
-gpu_transport_type = Literal["none", "cuda_ipc"]
+gpu_transport_type = Literal["none", "cuda_ipc", "nixl"]
 
 # Every output format is always available (none of them are experimental).
 SUPPORTED_FORMATS = get_args(supported_format_type)
@@ -51,10 +51,11 @@ def available_gpu_transports() -> tuple[str, ...]:
     """GPU transports the runtime currently accepts for device-array output.
 
     Always includes ``none`` (copy GPU output to host and serialize it like any
-    CPU array). A by-reference transport such as ``cuda_ipc`` is experimental and
-    only offered when the runtime is configured with a non-``none``
-    ``gpu_transport`` (e.g. ``TESSERACT_GPU_TRANSPORT=cuda_ipc``); it may change
-    or be removed without notice.
+    CPU array). A by-reference transport such as ``cuda_ipc`` (same-host) or
+    ``nixl`` (same- or cross-host) is experimental and only offered when the
+    runtime is configured with a non-``none`` ``gpu_transport`` (e.g.
+    ``TESSERACT_GPU_TRANSPORT=cuda_ipc``); it may change or be removed without
+    notice.
     """
     from tesseract_core.runtime.config import get_config
 

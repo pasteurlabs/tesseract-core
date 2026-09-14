@@ -154,6 +154,34 @@ class CudaIpcArrayData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class NixlArrayData(BaseModel):
+    """Data structure for a NIXL point-to-point GPU transfer descriptor.
+
+    The buffer field packs three components as
+    ``<agent_metadata>:<descriptors>:<device>``, where:
+
+    - ``agent_metadata`` is the base64-encoded NIXL agent metadata the consumer
+      needs to add the producer as a remote agent,
+    - ``descriptors`` is the base64-encoded serialized transfer descriptor of the
+      producer's registered source buffer,
+    - ``device`` is the CUDA device ordinal the memory lives on.
+
+    Both base64 alphabets are ``:``-free, so ``:`` is a safe field delimiter.
+    This is only the JSON *schema* for the encoding; the NIXL machinery that
+    produces and consumes it lives in
+    :mod:`tesseract_core.runtime.nixl_transport`.
+    """
+
+    buffer: StrictStr = Field(
+        pattern=r"^[A-Za-z0-9+/=]+:[A-Za-z0-9+/=]+:\d+$",
+        description="Packed NIXL descriptor: <agent_metadata>:<descriptors>:<device>",
+    )
+    encoding: Literal["nixl"]
+    compression: None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class EncodedArrayModel(BaseModel):
     """Base class for general encoded arrays.
 
@@ -163,7 +191,13 @@ class EncodedArrayModel(BaseModel):
     object_type: Literal["array"]
     shape: tuple[PositiveInt, ...]
     dtype: AllowedDtypes
-    data: BinrefArrayData | Base64ArrayData | JsonArrayData | CudaIpcArrayData
+    data: (
+        BinrefArrayData
+        | Base64ArrayData
+        | JsonArrayData
+        | CudaIpcArrayData
+        | NixlArrayData
+    )
     model_config = ConfigDict(extra="forbid")
 
 
@@ -243,7 +277,11 @@ def get_array_model(
         ),
         # Choose the appropriate data structure based on the encoding
         "data": (
-            BinrefArrayData | Base64ArrayData | JsonArrayData | CudaIpcArrayData,
+            BinrefArrayData
+            | Base64ArrayData
+            | JsonArrayData
+            | CudaIpcArrayData
+            | NixlArrayData,
             Field(discriminator="encoding"),
         ),
         "model_config": (ConfigDict, config),
@@ -619,10 +657,11 @@ def decode_array(
                 base_dir = join_paths(base_dir, subdir)
             data = _load_binref_arraydict(val.model_dump(), base_dir)
 
-        elif val.data.encoding == "cuda_ipc":
+        elif val.data.encoding in {"cuda_ipc", "nixl"}:
             from tesseract_core.runtime.device_transport import get_transport
 
-            # Returns a framework-agnostic on-GPU wrapper — skip numpy coercion
+            # Returns a framework-agnostic on-GPU wrapper — skip numpy coercion.
+            # The encoding name doubles as the device-transport registry key.
             transport = get_transport(val.data.encoding)
             return transport.receive(val.model_dump())
 

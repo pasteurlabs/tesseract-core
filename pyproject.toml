@@ -55,6 +55,14 @@ runtime = [
 ]
 # END RUNTIME DEPENDENCIES
 
+# NIXL point-to-point GPU transport for the experimental json+nixl output format.
+# NIXL ships Linux/x86-64 CUDA wheels only, so gate the dependency on that
+# platform; on anything else the extra installs nothing and json+nixl stays
+# unavailable.
+nixl = [
+    "nixl; platform_system == 'Linux' and platform_machine == 'x86_64'",
+]
+
 docs = [
     "sphinx",
     "sphinx_autodoc_typehints",
