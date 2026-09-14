@@ -49,7 +49,8 @@ def test_Tesseract_init():
     ):
         t = Tesseract(url="localhost")
 
-    # Using it as a context manager should be a no-op
+    # There is no container here, so the context manager must not serve or tear
+    # down anything (exiting only releases the client's pooled resources).
     with t:
         pass
 
@@ -58,7 +59,8 @@ def test_Tesseract_from_url():
     # Instantiate with a url
     t = Tesseract.from_url("localhost")
 
-    # Using it as a context manager should be a no-op
+    # There is no container here, so the context manager must not serve or tear
+    # down anything (exiting only releases the client's pooled resources).
     with t:
         pass
 
@@ -730,6 +732,78 @@ def test_HTTPClient_close_is_idempotent(tmp_path):
     # an explicit close).
     client.close()
     assert client._binref_pool is None
+
+
+def test_HTTPClient_close_releases_the_connection(free_port):
+    """close() releases the pooled socket, and the client stays usable after.
+
+    Counted at the server: keep-alive makes two back-to-back requests share a
+    single connection, so a third request opening a *second* connection is the
+    observable proof that close() actually dropped the socket rather than
+    leaving it for the garbage collector.
+    """
+    import http.server
+    import threading
+
+    connections = []
+
+    class CountingHandler(http.server.BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"  # keep-alive
+
+        def setup(self):
+            # One handler instance per accepted TCP connection.
+            connections.append(1)
+            super().setup()
+
+        def do_GET(self):
+            # HTTPClient sends a JSON body even on GET, so drain it or the next
+            # request on the same keep-alive connection starts mid-body.
+            self.rfile.read(int(self.headers.get("Content-Length", 0)))
+            body = b'{"status": "ok"}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass  # suppress stderr noise
+
+    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", free_port), CountingHandler)
+    httpd.daemon_threads = True
+    server_thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    server_thread.start()
+
+    try:
+        client = HTTPClient(f"http://127.0.0.1:{free_port}")
+        client._request("health")
+        client._request("health")
+        assert len(connections) == 1
+
+        client.close()
+        client.close()
+
+        client._request("health")
+        assert len(connections) == 2
+    finally:
+        httpd.shutdown()
+        server_thread.join(timeout=5)
+
+
+def test_Tesseract_close_releases_client_without_a_container(free_port):
+    """close() on a Tesseract that owns a client but no container.
+
+    teardown() raises in that case, so close() has to take the client-only path
+    and leave the Tesseract usable.
+    """
+    tess = Tesseract.from_url(f"http://127.0.0.1:{free_port}")
+    assert tess._client is not None
+
+    tess.close()
+    tess.close()
+
+    # close() releases pooled resources; it does not invalidate the object.
+    assert tess._client is not None
 
 
 def test_tree_map():

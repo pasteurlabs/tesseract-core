@@ -400,10 +400,22 @@ class Tesseract:
 
         This will stop the Tesseract server if it is running.
         """
-        if self._serve_context is None:
-            # This can happen if __enter__ short-circuits (e.g., from_tesseract_api)
+        self.close()
+
+    def close(self) -> None:
+        """Release resources held by this Tesseract.
+
+        Tears down the container if this Tesseract is being served, and
+        otherwise (e.g. for ``from_url`` / ``from_tesseract_api`` instances,
+        which own a client but no container) releases the client's resources
+        without invalidating the object. Safe to call repeatedly.
+        """
+        if self._serve_context is not None:
+            # teardown() closes the client too
+            self.teardown()
             return
-        self.teardown()
+        if self._client is not None:
+            self._client.close()
 
     def server_logs(self) -> str:
         """Get the logs of the Tesseract server.
@@ -983,6 +995,7 @@ class HTTPClient:
     _input_path: Path | None = None
     _binref_pool: BinrefWritePool | None = None
     _gpu_transport: str = "none"
+    _session: requests.Session | None = None
 
     def __init__(
         self,
@@ -1016,10 +1029,17 @@ class HTTPClient:
             self._binref_pool = BinrefWritePool(self._input_path)
 
     def close(self) -> None:
-        """Release resources held by the client (e.g. the binref write pool)."""
+        """Release resources held by the client (HTTP session, binref write pool).
+
+        The client stays usable afterwards: ``requests`` re-opens connections on
+        demand, so this only drops pooled sockets and buffers. Safe to call
+        repeatedly.
+        """
         if self._binref_pool is not None:
             self._binref_pool.close()
             self._binref_pool = None
+        if self._session is not None:
+            self._session.close()
 
     @staticmethod
     def _sanitize_url(url: str) -> str:
@@ -1262,6 +1282,13 @@ class LocalClient:
             # Purge the auto-created tempdir when this client is garbage collected.
             weakref.finalize(self, _purge_tempdir, str(output_path))
         self._output_path = output_path
+
+    def close(self) -> None:
+        """Release resources held by the client.
+
+        A no-op: the local client holds no connections. Defined so callers can
+        close any client without knowing which kind they hold.
+        """
 
     def run_tesseract(
         self,
