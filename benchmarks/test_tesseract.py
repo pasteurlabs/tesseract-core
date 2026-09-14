@@ -7,21 +7,25 @@ This module benchmarks actual Tesseract interactions using a no-op Tesseract
 that does nothing but decode inputs and encode outputs. This gives realistic
 measurements of framework overhead for different interaction modes:
 
-1. Non-containerized via `Tesseract.from_tesseract_api()` - Python-only, no HTTP
-2. Containerized via HTTP (`Tesseract.from_image`) - Full Docker + HTTP stack,
-   using json+base64 encoding
-3. Containerized via HTTP with json+binref encoding and the binref directory on
-   a shared-memory tmpfs (/dev/shm), so array payloads are exchanged through
-   shared memory rather than base64 in the HTTP body; uses
-   experimental_binref_pool=True for warm-buffer writes and zero-copy mmap decode
-4. Containerized via CLI (`tesseract run`) - Full Docker + CLI overhead,
-   using json+binref encoding with the binref directory on local disk
-5. In a dedicated subprocess via HTTP (`Tesseract.from_source`) - no container,
-   using json+base64 encoding
-6. The same, using json+binref with the scratch directories created for us (so
-   on ordinary disk), which is what you get by asking for the encoding alone
-7. The same, with the binref directory on /dev/shm and experimental_binref_pool
-   enabled - the fastest configuration available without a container
+Each mode is listed with the name it is reported under.
+
+1. `api` -- `Tesseract.from_tesseract_api()`, in-process: Python only, no HTTP
+2. `http` -- `Tesseract.from_image()` over HTTP: full Docker and HTTP stack,
+   json+base64 encoding
+3. `http-shmem` -- the same over HTTP, json+binref with the binref directory on
+   a shared-memory tmpfs (/dev/shm), so arrays are exchanged through shared
+   memory rather than base64 in the HTTP body, and experimental_binref_pool
+   enabled for warm-buffer writes and zero-copy mmap decode
+4. `cli` -- `tesseract run`: full Docker and CLI overhead, json+binref with the
+   binref directory on ordinary disk
+5. `subprocess` -- `Tesseract.from_source()` over HTTP, no container,
+   json+base64 encoding
+6. `subprocess-binref` -- the same, json+binref with the scratch directories
+   created for us, and so on ordinary disk: what asking for the encoding alone
+   gets you
+7. `subprocess-shmem` -- the same, with the binref directory on /dev/shm and
+   experimental_binref_pool enabled: the fastest configuration available
+   without a container
 
 All benchmarks use the same no-op Tesseract defined in tesseract_noop/.
 """
@@ -219,7 +223,7 @@ def test_containerized_http_shmem(benchmark, http_shmem_tesseract_instance, arra
     )
 
 
-def test_subprocess_http(benchmark, subprocess_tesseract_instance, array_size):
+def test_subprocess(benchmark, subprocess_tesseract_instance, array_size):
     """Benchmark a dedicated-process Tesseract over HTTP, json+base64 encoding.
 
     The same HTTP stack as ``test_containerized_http`` without Docker, so the
@@ -231,9 +235,7 @@ def test_subprocess_http(benchmark, subprocess_tesseract_instance, array_size):
     benchmark(subprocess_tesseract_instance.apply, inputs)
 
 
-def test_subprocess_http_binref(
-    benchmark, subprocess_binref_tesseract_instance, array_size
-):
+def test_subprocess_binref(benchmark, subprocess_binref_tesseract_instance, array_size):
     """Benchmark a dedicated-process Tesseract using json+binref, no shared memory.
 
     Asking for the encoding and nothing else, which is the configuration a user
@@ -253,9 +255,7 @@ def test_subprocess_http_binref(
     )
 
 
-def test_subprocess_http_shmem(
-    benchmark, subprocess_shmem_tesseract_instance, array_size
-):
+def test_subprocess_shmem(benchmark, subprocess_shmem_tesseract_instance, array_size):
     """Benchmark a dedicated-process Tesseract exchanging arrays via /dev/shm.
 
     The fastest configuration available without a container: no array data over
