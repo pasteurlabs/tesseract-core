@@ -20,12 +20,15 @@ Each mode is listed with the name it is reported under.
    binref directory on ordinary disk
 5. `subprocess` -- `Tesseract.from_source()` over HTTP, no container,
    json+base64 encoding
-6. `subprocess-binref` -- the same, json+binref with the scratch directories
-   created for us, and so on ordinary disk: what asking for the encoding alone
-   gets you
-7. `subprocess-shmem` -- the same, with the binref directory on /dev/shm and
+6. `subprocess-shmem` -- the same, with the binref directory on /dev/shm and
    experimental_binref_pool enabled: the fastest configuration available
    without a container
+
+json+binref on ordinary disk is measured only over the CLI, not over HTTP for
+either transport. Every size here is small enough for a memory-backed
+directory, so over HTTP it is dominated everywhere in this range -- by base64
+at the smallest size and by shmem above it. It would be worth adding alongside
+payloads large enough that a memory-backed mount stops being an option.
 
 All benchmarks use the same no-op Tesseract defined in tesseract_noop/.
 """
@@ -127,23 +130,6 @@ def subprocess_tesseract_instance(tmp_path_factory):
 
 
 @pytest.fixture(scope="module")
-def subprocess_binref_tesseract_instance():
-    """Create a dedicated-process Tesseract using json+binref and nothing else.
-
-    Deliberately passes no directories: `from_source` creates them, and this is
-    what a user gets from asking for the encoding alone. They land in the
-    ordinary temp directory, so this measures binref without shared memory.
-    """
-    from tesseract_core.sdk.tesseract import Tesseract
-
-    with Tesseract.from_source(
-        NOOP_TESSERACT_PATH, output_format="json+binref"
-    ) as tesseract:
-        tesseract.health()
-        yield tesseract, Path(tesseract._spawn_config["output_path"])
-
-
-@pytest.fixture(scope="module")
 def subprocess_shmem_tesseract_instance():
     """Create a dedicated-process Tesseract exchanging arrays via shared memory.
 
@@ -233,26 +219,6 @@ def test_subprocess(benchmark, subprocess_tesseract_instance, array_size):
     inputs = {"data": arr}
 
     benchmark(subprocess_tesseract_instance.apply, inputs)
-
-
-def test_subprocess_binref(benchmark, subprocess_binref_tesseract_instance, array_size):
-    """Benchmark a dedicated-process Tesseract using json+binref, no shared memory.
-
-    Asking for the encoding and nothing else, which is the configuration a user
-    is most likely to reach for. The scratch directories are on ordinary disk.
-    """
-    tesseract, output_dir = subprocess_binref_tesseract_instance
-    arr = create_test_array(array_size)
-    inputs = {"data": arr}
-
-    benchmark.pedantic(
-        tesseract.apply,
-        args=(inputs,),
-        teardown=lambda *_: _purge_binref_outputs(output_dir),
-        rounds=100,
-        warmup_rounds=1,
-        iterations=1,
-    )
 
 
 def test_subprocess_shmem(benchmark, subprocess_shmem_tesseract_instance, array_size):
