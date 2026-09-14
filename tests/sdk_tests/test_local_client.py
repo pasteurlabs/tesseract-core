@@ -81,6 +81,12 @@ def test_orphaned_tesseract_shuts_itself_down(dummy_api_path, tmp_path):
     `remove` covers an orderly exit, but nothing runs when the parent is killed
     outright -- and a served subprocess is otherwise invisible and immortal,
     unlike a container, which at least still shows up in `docker ps -a`.
+
+    Signalling it is not an alternative: SIGKILL leaves the parent no chance to
+    send anything, and a terminal's SIGINT goes to the foreground process group,
+    which the Tesseract is deliberately not in. Hence the watch pipe in
+    `tesseract_core.runtime.cli._exit_when_parent_closes`; stubbing
+    `parent_watch_pipe` out fails this test.
     """
     helper = tmp_path / "helper.py"
     helper.write_text(
