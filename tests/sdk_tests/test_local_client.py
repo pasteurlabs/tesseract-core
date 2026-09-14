@@ -586,8 +586,61 @@ def test_missing_interpreter_is_reported(dummy_api_path):
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX process groups")
+def test_removing_a_tesseract_does_not_kill_the_caller(dummy_api_path, tmp_path):
+    """What the child's own process group is actually for.
+
+    `remove` signals the process *group* so that uvicorn's workers go down with
+    the process that spawned them. A child sharing our group puts that signal on
+    us too, so disposing of a Tesseract would kill whoever created it.
+
+    Fatal to whoever runs it, so it runs in a helper: with `popen_kwargs`
+    stubbed out the helper is killed by SIGTERM at `remove`, and never reaches
+    its final print. The helper is started in its own session so that the signal
+    cannot reach this test runner either way.
+    """
+    helper = tmp_path / "helper.py"
+    helper.write_text(
+        textwrap.dedent(f"""
+        import sys
+        from tesseract_core.sdk import local_client
+
+        if "--no-group" in sys.argv:
+            local_client.popen_kwargs = lambda: {{}}
+
+        served = local_client.serve({str(dummy_api_path)!r})
+        served.remove(force=True)
+        print("caller survived", flush=True)
+        """)
+    )
+
+    def run(*args):
+        return subprocess.run(
+            [sys.executable, str(helper), *args],
+            capture_output=True,
+            text=True,
+            start_new_session=True,
+            timeout=120,
+        )
+
+    as_shipped = run()
+    assert as_shipped.returncode == 0, as_shipped.stderr
+    assert "caller survived" in as_shipped.stdout
+
+    without_group = run("--no-group")
+    assert without_group.returncode == -signal.SIGTERM, (
+        "removing a Tesseract in the caller's own process group should have "
+        f"killed the caller, but it exited {without_group.returncode}"
+    )
+    assert "caller survived" not in without_group.stdout
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process groups")
 def test_child_runs_in_its_own_process_group(dummy_api_path):
-    """So that a Ctrl-C in the parent's terminal doesn't race us to the child."""
+    """The mechanism `remove` relies on to reach uvicorn's workers.
+
+    `test_removing_a_tesseract_does_not_kill_the_caller` covers why it matters;
+    this pins the mechanism itself, so a regression says which part broke.
+    """
     served = local_client.serve(dummy_api_path)
     try:
         assert os.getpgid(served.process.pid) != os.getpgid(os.getpid())

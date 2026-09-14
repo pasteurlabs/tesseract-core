@@ -69,12 +69,12 @@ def popen_kwargs() -> dict[str, Any]:
     our group would make that signal land on us as well, so disposing of a
     Tesseract would kill the caller.
 
-    Secondarily, it decides who stops the child. A Ctrl-C in the terminal goes to
-    the whole foreground group, so a child sharing ours would receive it
-    directly: not a worse shutdown -- uvicorn handles SIGINT perfectly well --
-    but one that happens on the terminal's schedule rather than ours, leaving
-    anything the caller still wanted from it (its logs, its exit code) to race
-    against its exit. Its own group means it stops when we say so.
+    See `test_removing_a_tesseract_does_not_kill_the_caller`, which is fatal to
+    whoever runs it without this.
+
+    A Ctrl-C in the terminal also reaches the whole foreground group, so its own
+    group additionally means the child stops when we say so rather than when the
+    terminal does. That is a convenience, not the reason.
     """
     if os.name == "nt":
         return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
