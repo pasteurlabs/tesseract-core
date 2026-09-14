@@ -127,10 +127,8 @@ class Tesseract:
     """
 
     _spawn_config: dict | None = None
-    # Which engine `serve()` should hand `_spawn_config` to. "container" rather
-    # than "docker" because any docker-compatible CLI works here (see
-    # `is_podman`), matching how `container_info` and `Container` are named.
-    _spawn_backend: Literal["container", "subprocess"] | None = None
+    # Which engine `serve()` should hand `_spawn_config` to.
+    _spawn_backend: Literal["docker", "subprocess"] | None = None
     _serve_context: ServedTesseract | None = None
     _lastlog: str | None = None
     _client: HTTPClient | LocalClient | None = None
@@ -328,7 +326,7 @@ class Tesseract:
             skip_health_check=skip_health_check,
             startup_timeout=startup_timeout,
         )
-        obj._spawn_backend = "container"
+        obj._spawn_backend = "docker"
         return obj
 
     @classmethod
@@ -665,7 +663,7 @@ class Tesseract:
             tesseract_core.sdk.docker_client.NotFound: if the container
                 disappeared between :meth:`serve` and this call.
         """
-        if self._spawn_backend != "container":
+        if self._spawn_backend != "docker":
             raise RuntimeError(
                 "`container_info` is only available when using "
                 "`Tesseract.from_image(...)`."
