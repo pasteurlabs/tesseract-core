@@ -29,9 +29,15 @@ supported_format_type = Literal["json", "json+base64", "json+binref"]
 # memory by reference and is an experimental, opt-in capability (see
 # available_gpu_transports).
 #
+# ``cuda_ipc`` exports via the legacy ``cudaIpcGetMemHandle`` API, staging a
+# device-to-device copy for VMM/pool-backed memory it cannot export directly.
+# ``cuda_vmm`` is the copy-free sibling: it exports VMM-backed memory by POSIX
+# fd and requires the source allocation to be VMM-backed (JAX/XLA, PyTorch
+# ``expandable_segments``), erroring otherwise.
+#
 # The disabled state is the explicit string ``"none"`` rather than ``None``, so
 # it is clear to users that this means "disabled", not "unspecified".
-gpu_transport_type = Literal["none", "cuda_ipc"]
+gpu_transport_type = Literal["none", "cuda_ipc", "cuda_vmm"]
 
 # Every output format is always available (none of them are experimental).
 SUPPORTED_FORMATS = get_args(supported_format_type)
