@@ -63,7 +63,9 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
 
             sizes = DEFAULT_ARRAY_SIZES
 
-        params = [(enc, size) for size in sizes for enc in ENCODINGS]
+        # Size 0 is the fixed-floor probe for the framework benchmarks; encoding
+        # an empty array is not a meaningful measurement, so skip it here.
+        params = [(enc, size) for size in sizes if size > 0 for enc in ENCODINGS]
         ids = [f"{enc}_{size:,}" for enc, size in params]
         metafunc.parametrize("encoding_and_size", params, ids=ids)
 

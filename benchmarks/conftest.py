@@ -17,8 +17,9 @@ from tesseract_core.sdk.docker_client import CLIDockerClient
 # Path to the no-op tesseract for benchmarking
 NOOP_TESSERACT_PATH = Path(__file__).parent / "tesseract_noop" / "tesseract_api.py"
 
-# Default array sizes when --array-sizes is not specified.
-DEFAULT_ARRAY_SIZES = [1000, 100_000, 10_000_000]
+# Default array sizes when --array-sizes is not specified. Size 0 sends an empty
+# payload (no array), isolating the fixed per-request floor.
+DEFAULT_ARRAY_SIZES = [0, 1000, 100_000, 10_000_000]
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -63,6 +64,17 @@ def array_sizes(request: pytest.FixtureRequest) -> list[int]:
 def create_test_array(size: int, dtype: str = "float64") -> np.ndarray:
     """Create a random test array of given size."""
     return np.random.default_rng(42).standard_normal(size).astype(dtype)
+
+
+def make_apply_inputs(size: int) -> dict:
+    """Build the ``apply`` inputs for a given array size.
+
+    Size 0 yields an empty payload (no array), which measures the fixed
+    per-request floor; any other size carries an array of that length.
+    """
+    if size == 0:
+        return {}
+    return {"data": create_test_array(size)}
 
 
 @pytest.fixture(scope="session")
