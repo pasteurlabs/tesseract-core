@@ -91,15 +91,10 @@ TEST_CASES = {
     "pyvista-arm64": Config(
         test_with_random_inputs=True, no_from_source="needs pyvista"
     ),
-    "localpackage": Config(
-        test_with_random_inputs=True,
-        no_from_source="needs a local package installed; covered in test_local_client.py",
-    ),
+    "localpackage": Config(test_with_random_inputs=True),
     "vectoradd": Config(test_with_random_inputs=True),
     "vectoradd_jax": Config(test_with_random_inputs=True, check_gradients=True),
-    "vectoradd_torch": Config(
-        test_with_random_inputs=True, no_from_source="needs torch"
-    ),
+    "vectoradd_torch": Config(test_with_random_inputs=True),
     "univariate": Config(test_with_random_inputs=True, check_gradients=True),
     "univariate_gradient_fallbacks": Config(
         test_with_random_inputs=True, check_gradients=True
@@ -119,7 +114,7 @@ TEST_CASES = {
     "fortran_enzyme": Config(
         check_gradients=True, no_from_source="needs a compiled Fortran extension"
     ),
-    "conda": Config(no_from_source="needs a conda environment"),
+    "conda": Config(),
     "required_files": Config(input_path="input"),
     "file_io": Config(input_path="test_cases/testdata", output_path="__tmp_path__"),
     "filereference": Config(
@@ -132,7 +127,7 @@ TEST_CASES = {
             "so this looks like an endpoint gap, not a from_source limitation"
         ),
     ),
-    "qp_solve": Config(no_from_source="needs qpax"),
+    "qp_solve": Config(),
     "inherit_base_image_packages": Config(
         no_from_source="needs firedrake from the base image"
     ),

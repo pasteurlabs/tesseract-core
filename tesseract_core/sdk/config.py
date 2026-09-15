@@ -38,6 +38,23 @@ def maybe_split_args(value: str | Sequence[str]) -> tuple[str, ...]:
     return tuple(value)
 
 
+def validate_optional_executable(
+    value: str | Sequence[str] | None,
+) -> tuple[str, ...] | None:
+    """Like :func:`validate_executable`, but ``None`` means "find it later".
+
+    Provisioning an environment needs uv or conda, and most users have no reason
+    to have either installed. We cannot look them up when the config is built,
+    the way `docker_executable` does, because `get_config()` also runs on every
+    Docker path and a missing program must not make it raise. ``None`` puts the
+    lookup off until something actually needs that tool, which is also where a
+    useful error message can be given.
+    """
+    if value is None:
+        return None
+    return validate_executable(value)
+
+
 class RuntimeConfig(BaseModel):
     """Available runtime configuration."""
 
@@ -48,6 +65,16 @@ class RuntimeConfig(BaseModel):
         tuple[str, ...], BeforeValidator(maybe_split_args)
     ] = ()
     docker_run_args: Annotated[tuple[str, ...], BeforeValidator(maybe_split_args)] = ()
+
+    # Used to build environments for `Tesseract.from_source`. `None` means look
+    # on PATH when something needs the tool. Set either one to choose the
+    # program to run, optionally with leading arguments.
+    uv_executable: Annotated[
+        tuple[str, ...] | None, BeforeValidator(validate_optional_executable)
+    ] = None
+    conda_executable: Annotated[
+        tuple[str, ...] | None, BeforeValidator(validate_optional_executable)
+    ] = None
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
