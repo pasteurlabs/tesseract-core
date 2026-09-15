@@ -563,6 +563,15 @@ class Tesseract:
         output_path = self._spawn_config.get("output_path")
         input_path = self._spawn_config.get("input_path")
         output_format = self._spawn_config.get("output_format", "json+base64")
+        # The served container's gpu_transport also governs how the client
+        # exports GPU *inputs*, so mirror the resolved transport onto the client
+        # here, using the same precedence serve() applies to the container: the
+        # explicit kwarg wins, else a value from runtime_config, else "none". So
+        # client and server always agree on how device arrays cross the boundary.
+        runtime_config = self._spawn_config.get("runtime_config") or {}
+        gpu_transport = self._spawn_config.get("gpu_transport") or runtime_config.get(
+            "gpu_transport", "none"
+        )
         self._client = HTTPClient(
             self._serve_context.url,
             output_path=Path(output_path) if output_path else None,
@@ -570,6 +579,7 @@ class Tesseract:
             timeout=self._timeout,
             input_path=Path(input_path) if input_path else None,
             experimental_binref_pool=self._binref_pool_enabled,
+            gpu_transport=gpu_transport,
         )
 
         # Ensure that the Tesseract is torn down once the object is garbage collected,
@@ -583,33 +593,9 @@ class Tesseract:
             except NotFound:
                 pass
 
-        reap = (_silent_teardown, self._serve_context)
-        url = self._serve_context.url
-
-        self._lastlog = None
-        output_path = self._spawn_config.get("output_path")
-        input_path = self._spawn_config.get("input_path")
-        output_format = self._spawn_config.get("output_format", "json+base64")
-        # The served container's gpu_transport also governs how the client
-        # exports GPU *inputs*, so mirror the resolved transport onto the client
-        # here, using the same precedence serve() applies to the container: the
-        # explicit kwarg wins, else a value from runtime_config, else "none". So
-        # client and server always agree on how device arrays cross the boundary.
-        runtime_config = self._spawn_config.get("runtime_config") or {}
-        gpu_transport = self._spawn_config.get("gpu_transport") or runtime_config.get(
-            "gpu_transport", "none"
+        self._atexit_finalizer = weakref.finalize(
+            self, _silent_teardown, self._serve_context
         )
-        self._client = HTTPClient(
-            url,
-            output_path=Path(output_path) if output_path else None,
-            output_format=output_format,
-            timeout=self._timeout,
-            input_path=Path(input_path) if input_path else None,
-            experimental_binref_pool=self._binref_pool_enabled,
-            gpu_transport=gpu_transport,
-        )
-
-        self._atexit_finalizer = weakref.finalize(self, *reap)
 
     def teardown(self) -> None:
         """Teardown the Tesseract.
