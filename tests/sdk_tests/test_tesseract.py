@@ -604,6 +604,39 @@ def testencode_array_binref_pooled_writes_and_decodes_correctly(tmp_path):
         pool.close()
 
 
+@pytest.mark.parametrize("lazy", [False, True])
+def testencode_array_binref_pooled_handles_empty_array(tmp_path, lazy):
+    """An empty array carries no payload and must not be routed through a slot.
+
+    A zero-length buffer cannot be memory-mapped, so the pool encode must fall
+    back to a plain (empty) file rather than checking out a warm slot, and both
+    the eager and lazy (mmap) decode paths must return an empty array.
+    """
+    from tesseract_core.sdk.binref import (
+        BinrefWritePool,
+        encode_array_binref_pooled,
+    )
+
+    pool = BinrefWritePool(tmp_path, max_slots=4)
+    try:
+        arr = np.array([], dtype="float64")
+        checked_out = []
+        written_files = []
+        encoded = encode_array_binref_pooled(arr, pool, checked_out, written_files)
+
+        assert encoded["shape"] == (0,)
+        # No warm slot: an empty buffer goes through the plain file writer.
+        assert checked_out == []
+        assert len(written_files) == 1
+
+        decoded = _decode_array(encoded, output_path=tmp_path, lazy=lazy)
+        np.testing.assert_array_equal(decoded, arr, strict=True)
+    finally:
+        pool.close()
+        for f in written_files:
+            f.unlink(missing_ok=True)
+
+
 def testencode_array_binref_pooled_falls_back_and_decodes_correctly(tmp_path):
     from tesseract_core.sdk.binref import (
         BinrefWritePool,

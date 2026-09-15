@@ -18,6 +18,7 @@ class TesseractReference:
 
     def __init__(self, tesseract: Any) -> None:
         self._tesseract = tesseract
+        self._reference: dict[str, str] | None = None
 
     def __getattr__(self, name: str) -> Any:
         """Delegate attribute access to the underlying Tesseract instance."""
@@ -67,10 +68,25 @@ class TesseractReference:
             elif tesseract_type == "url":
                 tesseract = Tesseract.from_url(ref)
 
-            return cls(tesseract)
+            result = cls(tesseract)
+            result._reference = {
+                "type": tesseract_type,
+                "ref": ref,
+            }
+            return result
+
+        def serialize_tesseract_reference(v: "TesseractReference") -> dict[str, str]:
+            if v._reference is None:
+                raise ValueError(
+                    "TesseractReference cannot be serialized without originating reference metadata."
+                )
+            return dict(v._reference)
 
         return core_schema.no_info_plain_validator_function(
-            validate_tesseract_reference
+            validate_tesseract_reference,
+            serialization=core_schema.plain_serializer_function_ser_schema(
+                serialize_tesseract_reference,
+            ),
         )
 
     @classmethod
