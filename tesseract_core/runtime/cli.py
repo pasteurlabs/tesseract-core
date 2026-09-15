@@ -514,18 +514,12 @@ def check_gradients(
 
 
 def _exit_when_parent_closes(fd: int) -> None:
-    """Shut down once the far end of `fd` is closed.
+    """Shut down orphaned Tesseract once the far end of `fd` is closed.
 
-    A served Tesseract outlives its parent otherwise: nothing else ties the two
-    together, and a parent that is killed outright runs no cleanup. Reading a
-    pipe the parent holds open covers every way it can go -- exiting, crashing,
-    or being killed -- because the read returns EOF in all of them.
-
-    Signalling the Tesseract instead does not work, for two separate reasons: a
-    parent that is killed outright runs no code and so cannot signal anything,
-    and a terminal's Ctrl-C reaches only the foreground process group, which the
-    Tesseract is deliberately not in (see `popen_kwargs`). Covered by
-    `test_orphaned_tesseract_shuts_itself_down`, which turns red without this.
+    Parent processes are not guaranteed to clean up if ended prematurely.
+    However, reading a pipe the parent is meant to hold open is guaranteed to
+    return EOF if the parent is no longer live.
+    `test_orphaned_tesseract_shuts_itself_down` demonstrates this is load-bearing.
     """
 
     def watch() -> None:
