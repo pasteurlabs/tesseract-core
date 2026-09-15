@@ -176,7 +176,8 @@ hang the machine badly enough to need a reboot.
 
 ### Shared memory on macOS
 
-On Linux, `/dev/shm` is already present (and capped at half your RAM) but macOS requires creating a shared-memory filesystem, either through tmpfs:
+On Linux, `/dev/shm` is already present (and capped at half your RAM)
+but macOS requires creating a shared-memory filesystem, either through tmpfs:
 
 ```bash
 mkdir -p /tmp/tess-shm
