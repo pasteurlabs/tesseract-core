@@ -966,6 +966,24 @@ def test_a_local_requirement_does_not_constrain_the_python(example_copy):
     )
 
 
+def test_a_broken_config_warns_and_serves_anyway(dummy_tesseract_package, caplog):
+    """A config we cannot read should not stop a Tesseract being served.
+
+    The runtime never reads `tesseract_config.yaml`, so a malformed one usually
+    only means we cannot work out what to install. Warn about that and carry on
+    with this interpreter, which is what `tesseract build` would have to refuse
+    to do.
+    """
+    api_path = dummy_tesseract_package / "tesseract_api.py"
+    (dummy_tesseract_package / "tesseract_config.yaml").write_text("name: [unclosed\n")
+
+    with caplog.at_level(logging.WARNING, logger="tesseract"):
+        assert provision.resolve_python_executable(api_path) == Path(sys.executable)
+
+    assert "tesseract_config.yaml" in caplog.text
+    assert not (dummy_tesseract_package / ".venv").exists()
+
+
 def test_an_explicit_interpreter_skips_resolution(dummy_tesseract_package):
     """Naming an interpreter means using it, not stating a preference.
 
