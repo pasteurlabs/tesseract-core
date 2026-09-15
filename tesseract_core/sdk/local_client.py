@@ -28,6 +28,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
+from .provision import _SCRUBBED_IMPORT_VARS, resolve_python_executable
 from .serving import (
     DEFAULT_STARTUP_TIMEOUT,
     PortInUseError,
@@ -264,7 +265,7 @@ def _runtime_env(
         # the point of running it elsewhere. Note that importing a
         # tesseract_api.py in-process sets PYTHONPATH as a side effect, so this
         # is not a hypothetical.
-        for var in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"):
+        for var in _SCRUBBED_IMPORT_VARS:
             env.pop(var, None)
 
     # Applied after the scrub above, so an explicit request always wins.
@@ -334,10 +335,13 @@ def serve(
         runtime_config: Runtime configuration options, converted to
             ``TESSERACT_*`` environment variables just as in the containerized
             path.
-        python_executable: Interpreter used to run the Tesseract. Defaults to the
-            one running this process; pointing it at another environment's
-            ``python`` is what allows a Tesseract to have dependencies that
-            conflict with the caller's.
+        python_executable: Interpreter used to run the Tesseract. If None, one
+            is chosen based on what the Tesseract declares in
+            ``tesseract_config.yaml``: a suitable environment next to the
+            ``tesseract_api.py`` is reused if there is one, and otherwise built
+            (see :func:`~tesseract_core.sdk.provision.resolve_python_executable`).
+            Naming an interpreter skips that and uses it as given, which is how
+            a Tesseract can have dependencies that clash with the caller's.
         skip_health_check: If True, return as soon as the process is spawned
             without waiting for it to answer /health. The caller is then
             responsible for establishing readiness.
@@ -351,7 +355,7 @@ def serve(
         raise FileNotFoundError(f"Tesseract API path {api_path} is not a file.")
 
     if python_executable is None:
-        python_executable = sys.executable
+        python_executable = resolve_python_executable(api_path)
     python_executable = str(python_executable)
 
     foreign_interpreter = os.path.realpath(python_executable) != os.path.realpath(

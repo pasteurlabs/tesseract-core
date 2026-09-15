@@ -2,14 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 """Fixtures and helpers shared by more than one SDK test module."""
 
-import os
 import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(__file__).parents[2]
+from tesseract_core.sdk import provision
 
 
 @pytest.fixture
@@ -22,53 +20,46 @@ def build_venv(
 ) -> Path:
     """Build an environment to point `python_executable` at, and return it.
 
-    The two things a dedicated process is for -- running a Tesseract on an
-    interpreter the caller could not use, and with dependencies the caller does
-    not have -- differ only in what goes into the environment, so they share
-    this. Callers own `dest`, since a venv with the runtime in it is ~180 MB and
+    Built with the same helpers `from_source` uses. If it built environments its
+    own way, they could slowly diverge from the real ones, and a test could pass
+    against an environment the real resolver would reject.
+
+    Two things stay specific to tests: skipping when uv is missing, and naming a
+    Python version, which `from_source` reads from the Tesseract instead.
+
+    Callers own `dest`. A venv with the runtime in it is about 180 MB, so it is
     worth deleting promptly.
 
     Args:
         dest: Directory to create the environment in.
         python: Version to build against, or None for the running one.
-        requirements: A tesseract_requirements.txt to install as well. Specs
-            beginning with "." resolve against its directory, as a build would
-            read them.
+        requirements: A tesseract_requirements.txt to install as well.
 
     Returns:
         Path to the environment's interpreter.
     """
-    uv = shutil.which("uv")
-    if uv is None:
+    if shutil.which("uv") is None:
         pytest.skip("uv is required to build an environment")
 
-    # Importing a tesseract_api.py in-process puts this interpreter's sys.path
-    # on PYTHONPATH as a side effect, and any earlier test may have done so. A
-    # 3.11 interpreter that inherits it picks up 3.13 packages.
-    env = os.environ.copy()
-    env.pop("PYTHONPATH", None)
-
-    def run(*args):
-        result = subprocess.run(args, capture_output=True, text=True, env=env)
-        if result.returncode != 0:
-            pytest.skip(
-                f"could not build an environment: {result.stderr.strip()[-300:]}"
+    try:
+        python_executable = provision._ensure_venv(dest, python)
+        if requirements is not None:
+            provision._run(
+                [
+                    *provision._uv(),
+                    "pip",
+                    "install",
+                    "--python",
+                    python_executable,
+                    *provision._pip_specs(requirements),
+                ],
+                f"Installing {requirements.name}",
             )
+        # No version pins beyond the interpreter: CI rewrites the runtime extras
+        # to exact pins on its oldest-dependency axis, and anything added here
+        # can conflict with them.
+        provision._ensure_runtime(python_executable)
+    except RuntimeError as e:
+        pytest.skip(f"could not build an environment: {str(e)[-300:]}")
 
-    run(uv, "venv", str(dest), *(("--python", python) if python else ()))
-    # No version pins beyond the interpreter: CI rewrites the runtime extras to
-    # exact pins on its oldest-dependency axis, and anything added here can
-    # conflict with them.
-    run(uv, "pip", "install", "--python", str(dest), f"{REPO_ROOT}[runtime]")
-
-    if requirements is not None:
-        for line in requirements.read_text().splitlines():
-            spec = line.strip()
-            if not spec or spec.startswith("#"):
-                continue
-            if spec.startswith("."):
-                spec = str(requirements.parent / spec)
-            run(uv, "pip", "install", "--python", str(dest), spec)
-
-    scripts, exe = ("Scripts", "python.exe") if os.name == "nt" else ("bin", "python")
-    return dest / scripts / exe
+    return python_executable

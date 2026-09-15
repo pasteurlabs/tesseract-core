@@ -1,1 +1,5 @@
-numpy==1.26.4
+# Unpinned deliberately: `from_source` honours what a Tesseract declares, so a
+# pin this interpreter does not satisfy makes every test using this fixture
+# build an environment to satisfy it. numpy 1.26.4 in particular has no cp313
+# wheel, so that meant a source build per test.
+numpy

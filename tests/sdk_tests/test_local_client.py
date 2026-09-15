@@ -9,6 +9,7 @@ they exercise the actual startup / health-check / removal path.
 import logging
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -22,9 +23,9 @@ import pytest
 import requests
 
 from tesseract_core import Tesseract
-from tesseract_core.sdk import local_client, serving
+from tesseract_core.sdk import local_client, provision, serving
+from tesseract_core.sdk.api_parse import get_config
 from tesseract_core.sdk.exceptions import UserError
-from tests.sdk_tests.conftest import build_venv
 
 pytestmark = pytest.mark.timeout(120)
 
@@ -722,32 +723,258 @@ def test_remove_escalates_to_sigkill(dummy_api_path):
 
 # Real Tesseracts from examples/, chosen because each breaks a different
 # assumption that dummy_api_path never exercises. Deliberately not the whole
-# corpus: a third of it cannot run here at all, and which third depends on what
-# happens to be installed. Once a venv is built on demand, most of the rest
-# becomes reachable and this can grow.
+# corpus, which `test_examples.py` covers.
 
 
 EXAMPLES = Path(__file__).parents[2] / "examples"
 
 
-def test_serves_a_tesseract_whose_dependencies_we_do_not_have(tmp_path):
-    """The case `python_executable` exists for.
+@pytest.fixture
+def example_copy(tmp_path):
+    """Copy an example out of the repo, so provisioning cannot pollute it.
+
+    Resolving an environment writes a `.venv` beside the `tesseract_api.py`. A
+    test that let that land in `examples/` would leave ~200 MB behind and make
+    every later test in the session see a pre-built environment.
+    """
+
+    def copy(name: str) -> Path:
+        destination = tmp_path / name
+        # Never copy an environment: one built in a developer's checkout holds
+        # absolute paths back into it, so the copy looks usable and is not.
+        shutil.copytree(
+            EXAMPLES / name,
+            destination,
+            ignore=shutil.ignore_patterns(".venv", "venv", "__pycache__"),
+        )
+        return destination / "tesseract_api.py"
+
+    return copy
+
+
+@pytest.mark.parametrize(
+    "example",
+    [
+        # An empty requirements file: the cheapest possible answer is also the
+        # right one.
+        "helloworld",
+        # Requirements this environment happens to have, since the SDK's own
+        # test suite needs jax as well. This is the common case for anyone who
+        # installed a Tesseract's requirements where they work.
+        "vectoradd_jax",
+    ],
+)
+def test_nothing_is_built_when_this_interpreter_will_do(example_copy, example):
+    """Asserting the absence of a `.venv` is the point.
+
+    This is what stops every Tesseract in a test suite, or a notebook session,
+    paying for an environment it did not need.
+    """
+    api_path = example_copy(example)
+
+    assert provision.resolve_python_executable(api_path) == Path(sys.executable)
+    assert not (api_path.parent / ".venv").exists()
+
+
+def test_builds_an_environment_for_dependencies_we_do_not_have(example_copy):
+    """The case that needed `python_executable` filled in by hand before.
 
     `localpackage` needs a local package installed (``./helloworld``) that this
     interpreter does not have, and imports a sibling module shipped as
     package_data (``goodbyeworld``) which only resolves because the runtime puts
     the API's own directory on sys.path. The greeting proves both halves.
+
+    Its requirement is a relative path, which is also a case
+    `_caller_shortfall` has to decline to judge. So this covers falling through
+    to a build as well.
     """
-    example = EXAMPLES / "localpackage"
-    with tempfile.TemporaryDirectory(dir=tmp_path) as venv_dir:
-        interpreter = build_venv(
-            Path(venv_dir) / "env",
-            requirements=example / "tesseract_requirements.txt",
-        )
-        with Tesseract.from_source(
-            example / "tesseract_api.py", python_executable=interpreter
-        ) as tess:
-            result = tess.apply({"name": "World"})
+    api_path = example_copy("localpackage")
+
+    with Tesseract.from_source(api_path) as tess:
+        result = tess.apply({"name": "World"})
 
     assert "Hello World!" in result["message"], "local package dependency missing"
     assert "Goodbye World!" in result["message"], "package_data sibling missing"
+    assert (api_path.parent / ".venv").is_dir(), "no environment was built"
+
+
+def test_an_environment_built_once_is_reused(dummy_tesseract_package):
+    """The second serve must not install anything.
+
+    Whatever provisioning costs, it should be paid once, not on every serve and
+    certainly not on every endpoint call. That is why it happens before the
+    process starts.
+
+    This uses a remote requirement on purpose. A local path is always built from
+    source, so uv never reports it as satisfied and a Tesseract declaring one is
+    reinstalled every time by design.
+    """
+    api_path = dummy_tesseract_package / "tesseract_api.py"
+    (dummy_tesseract_package / "tesseract_requirements.txt").write_text("cowsay\n")
+
+    first = provision.resolve_python_executable(api_path)
+    assert first == provision._python_in(dummy_tesseract_package / ".venv")
+
+    # Reuse means nothing gets installed, which a wall-clock budget cannot show:
+    # re-running an install against an already-satisfied environment is fast
+    # enough to pass one. Failing outright if provisioning is attempted is the
+    # only assertion that tells the two apart.
+    def provisioned(command, what):
+        raise AssertionError(f"reprovisioned a good environment: {what}")
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(provision, "_run", provisioned)
+        assert provision.resolve_python_executable(api_path) == first
+
+
+def test_an_environment_without_the_runtime_is_completed(example_copy):
+    """A `.venv` that cannot serve gets completed, not handed back as-is.
+
+    ``runtime`` is an optional extra, so an environment can have the SDK and
+    still be unable to serve anything. This is why ``pip install
+    tesseract-core`` followed by ``from_source`` fails. We must not mistake such
+    an environment for a usable one.
+    """
+    api_path = example_copy("localpackage")
+    venv = api_path.parent / ".venv"
+    # Built the way the resolver builds one, so this really is the kind of bare
+    # .venv a user might already have, not an imitation of it.
+    provision._ensure_venv(venv)
+    assert not provision._can_serve(provision._python_in(venv))
+
+    with Tesseract.from_source(api_path) as tess:
+        assert "Hello World!" in tess.apply({"name": "World"})["message"]
+
+    assert provision._can_serve(provision._python_in(venv))
+
+
+def test_python_bounds_exclude_what_the_runtime_cannot_use():
+    """Only bounds are kept, and the SDK's Requires-Python sets the floor.
+
+    We always start from the current interpreter and let uv say which way to go,
+    so there is no list of preferred versions to keep up to date. The ceiling
+    comes from uv, so new releases and prereleases are included automatically.
+    """
+    bounds = provision._python_bounds()
+    if bounds is None:
+        pytest.skip("uv could not report which Pythons it can provide")
+
+    floor, ceiling = bounds
+    # uv offers 3.8 and 3.9, but the runtime will not install on them.
+    assert floor >= 10, "the runtime does not install on end-of-life Pythons"
+    assert floor <= sys.version_info.minor <= ceiling
+
+
+def test_a_newer_python_is_reachable_not_just_an_older_one():
+    """A Tesseract may need a Python newer than the caller's, not just older.
+
+    Only ever searching downwards would break on 3.10, the oldest version we
+    support and one this project tests on, because there is nothing below it. A
+    package that ships wheels only for a newer Python without declaring a floor
+    is a common build-matrix slip, so that case has to work too.
+    """
+    ours = sys.version_info.minor
+    bounds = provision._python_bounds()
+    if bounds is None:
+        pytest.skip("uv could not report which Pythons it can provide")
+    if bounds[1] <= ours:
+        pytest.skip("uv offers nothing newer than the running Python")
+
+    # What uv reports when a package only has wheels for newer versions.
+    assert provision._nearest(range(ours + 1, bounds[1] + 1)) == (
+        f"{sys.version_info.major}.{ours + 1}"
+    )
+
+    # Closest wins over newest, so a built environment stays near ours.
+    assert provision._nearest([ours - 1, bounds[1]]) == (
+        f"{sys.version_info.major}.{ours - 1}"
+    )
+
+
+def test_abi_tag_hint_is_read_as_the_answer():
+    """Uv lists the versions a package does have wheels for.
+
+    That is the answer itself, so we use it instead of trying versions. The tag
+    for the version we asked about appears earlier in the message, and must not
+    be read as one of the available ones.
+    """
+    hint = (
+        "hint: You require CPython 3.13 (`cp313`), but we only found wheels for "
+        "`jaxlib` (v0.4.28) with the following Python ABI tags: `cp39`, `cp310`, "
+        "`cp311`, `cp312`"
+    )
+
+    assert provision._minors_from_abi_tags(hint) == [9, 10, 11, 12]
+
+
+def test_requires_python_hint_is_read_as_the_answer():
+    """Uv names the Python range a dependency wants, so we need not search."""
+    hint = (
+        "Because the requested Python version (>=3.10) does not satisfy "
+        "Python>=3.12 and numpy==2.5.1 depends on Python>=3.12, we can conclude "
+        "that numpy==2.5.1 cannot be used.\n"
+        "hint: The `--python-version` value (>=3.10) includes Python versions "
+        "that are not supported by your dependencies (e.g., numpy==2.5.1 only "
+        "supports >=3.12). Consider using a higher `--python-version` value."
+    )
+
+    assert str(provision._requires_python(hint)) == ">=3.12"
+
+
+def test_an_old_pin_picks_a_python_that_has_wheels_for_it(example_copy):
+    """A build has to use a Python the declared versions can be installed on.
+
+    In a container the Python comes from the base image, which is 3.11 for the
+    default `debian:bookworm-slim`. So `univariate` pinning `jax[cpu]==0.4.28`
+    builds there without trouble. jaxlib 0.4.28 has no wheel past cp312, so
+    building it against a newer interpreter falls back to source and fails.
+    Asking which
+    Pythons the requirements have wheels for avoids having to guess the base
+    image's version, which is not knowable for an arbitrary image.
+    """
+    api_path = example_copy("univariate")
+    build_config = get_config(api_path.parent).build_config
+
+    chosen = provision._build_python_version(
+        build_config, api_path.parent / "tesseract_requirements.txt"
+    )
+
+    assert chosen is not None, (
+        "would have built on this interpreter, which has no wheel"
+    )
+    assert chosen < f"{sys.version_info.major}.{sys.version_info.minor}"
+
+
+def test_a_local_requirement_does_not_constrain_the_python(example_copy):
+    """Local paths must not be mistaken for a version constraint.
+
+    `localpackage` declares only `./helloworld`, which is an sdist by nature and
+    always buildable. Asking whether it has a wheel would reject every Python
+    and say nothing, so it has to be left out of the question entirely.
+    """
+    api_path = example_copy("localpackage")
+    build_config = get_config(api_path.parent).build_config
+
+    assert (
+        provision._build_python_version(
+            build_config, api_path.parent / "tesseract_requirements.txt"
+        )
+        is None
+    )
+
+
+def test_an_explicit_interpreter_skips_resolution(example_copy):
+    """Naming an interpreter means using it, not stating a preference.
+
+    `vectoradd` pins a numpy this environment does not have, so resolving would
+    build a `.venv`. Naming an interpreter has to stop that happening. An
+    explicit argument should win, and this is also the escape hatch that every
+    "could not provision" message points at.
+    """
+    api_path = example_copy("vectoradd")
+
+    with Tesseract.from_source(api_path, python_executable=sys.executable) as tess:
+        result = tess.apply({"a": [1.0], "b": [2.0]})
+
+    assert result["result"] == pytest.approx([3.0])
+    assert not (api_path.parent / ".venv").exists()
