@@ -149,17 +149,6 @@ This is enough to get most of the benefit. Measured on an Apple silicon laptop,
 a 40 MB `float64` round trip takes ~26 ms this way against ~168 ms for the
 default `json+base64`.
 
-### Do I need a memory-backed directory?
-
-Usually not. A directory in `/tmp` is not memory-backed, but for arrays up to
-roughly 100 MB it performs as if it were: the write goes to the page cache and
-reaches the disk after your call has already returned. Arrays do reach the disk
-either way, so expect roughly 2x your array size in disk writes per call.
-
-A memory-backed directory is worth it if you are passing arrays larger than
-about 100 MB, or you want to avoid the disk writes, or you want to enable
-`experimental_binref_pool` (which only helps on a memory-backed directory).
-
 ### How big does it need to be?
 
 **At least the size of your inputs plus your outputs.** Both files exist at the
@@ -167,12 +156,11 @@ same time, so a 200 MB input with a 200 MB output needs 400 MB free. With
 `experimental_binref_pool` enabled, an input-sized buffer stays allocated
 between calls.
 
-Also keep it small relative to your RAM. Whatever you put in a memory-backed
-directory cannot be moved out to disk, so it takes memory away from your other
-applications rather than using spare capacity. As a rule of thumb, **do not give
-it more than about an eighth of your RAM** -- 2 GB on a 16 GB machine -- and
-check you have plenty free before you start. Sizing one at half your RAM can
-hang the machine badly enough to need a reboot.
+```{warning}
+Allocating too much memory relative to your RAM can crash your machine 
+(we have observed crashes on macOS when using a 4GB hfs on 16GB machine).
+With very large payloads it may be safer to stick with `json+binref`.
+```
 
 ### Shared memory on macOS
 
