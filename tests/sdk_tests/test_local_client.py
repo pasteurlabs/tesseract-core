@@ -211,6 +211,43 @@ def test_any_unreadable_log_does_not_mask_the_startup_failure(dummy_api_path):
         served.remove(force=True)
 
 
+@pytest.mark.parametrize(
+    "kwargs,expected",
+    [
+        ({}, "none"),
+        ({"gpu_transport": "cuda_ipc"}, "cuda_ipc"),
+        ({"runtime_config": {"gpu_transport": "cuda_ipc"}}, "cuda_ipc"),
+        # An explicit value wins, including when it is the default.
+        (
+            {"gpu_transport": "none", "runtime_config": {"gpu_transport": "cuda_ipc"}},
+            "none",
+        ),
+    ],
+)
+def test_gpu_transport_reaches_child_and_client_alike(dummy_api_path, kwargs, expected):
+    """Both ends have to agree, or inputs and outputs cross differently.
+
+    The child reads it from its environment and the client from the spawn
+    config, by two separate paths, so this pins that they resolve to the same
+    thing under each way of setting it. Does not exercise the transport itself,
+    which needs a GPU.
+    """
+    tess = Tesseract.from_source(dummy_api_path, **kwargs)
+    runtime_config = tess._spawn_config["runtime_config"]
+
+    child = serving.runtime_config_to_env(runtime_config).get("TESSERACT_GPU_TRANSPORT")
+    client = tess._spawn_config.get("gpu_transport") or runtime_config.get(
+        "gpu_transport", "none"
+    )
+    assert child == expected
+    assert client == expected
+
+
+def test_gpu_transport_rejects_an_unknown_value(dummy_api_path):
+    with pytest.raises(ValueError, match="Unknown gpu_transport"):
+        Tesseract.from_source(dummy_api_path, gpu_transport="nonsense")
+
+
 def test_serve_rejects_binref_without_an_output_path(dummy_api_path):
     """The same error as the containerized path, and the same type.
 
