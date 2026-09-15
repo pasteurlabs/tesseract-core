@@ -40,17 +40,10 @@ DEFAULT_STARTUP_TIMEOUT = 30.0
 class ServedTesseract(Protocol):
     """A Tesseract that has been started and can be reached, inspected and stopped.
 
-    Satisfied by :class:`~tesseract_core.sdk.docker_client.Container` and by
-    :class:`~tesseract_core.sdk.local_client.TesseractProcess`, so callers that
-    only need to talk to a Tesseract, read its output or shut it down need not
-    know which of the two they hold.
-
-    Structural, so neither has to declare allegiance to it: a `Container` is a
-    mirror of docker-py's, and fits this by having the methods docker-py gave it
-    rather than by inheriting anything from us.
-
-    Deliberately narrow: it promises nothing about separating stdout from stderr,
-    since a Tesseract served as a bare process writes both to one file.
+    Protocol satisfied by :class:`~tesseract_core.sdk.docker_client.Container` and
+    :class:`~tesseract_core.sdk.local_client.TesseractProcess` to support
+    polymorphism without forcing our docker-py `Container` mirror to subclass it
+    directly.
     """
 
     host_ip: str | None
@@ -58,7 +51,7 @@ class ServedTesseract(Protocol):
 
     @property
     def url(self) -> str:
-        """Base URL the Tesseract is serving on."""
+        """Base URL the Tesseract is served on."""
 
     def reload(self) -> None:
         """Read the Tesseract's state again."""
@@ -66,10 +59,7 @@ class ServedTesseract(Protocol):
     def remove(self, v: bool = False, link: bool = False, force: bool = False) -> None:
         """Dispose of the Tesseract, leaving nothing of it behind.
 
-        docker-py's ``Container.remove`` signature exactly, since that is what a
-        `Container` has and this is structural -- including refusing one that is
-        still running unless ``force`` is set. ``v`` and ``link`` are Docker's
-        and mean nothing to a Tesseract served any other way.
+        Signature mirrors docker-py's ``Container.remove`` exactly.
         """
 
     def wait(self, timeout: float | None = None) -> dict:
@@ -86,6 +76,9 @@ class ServedTesseract(Protocol):
         """Everything the Tesseract has written so far."""
 
 
+# The following `singledispatch` functions allow dispatch between different `ServedTesseract`
+# instances (currently `Container` and `TesseractProcess`) without introducing inconsistency
+# between our `Container` class and docker-py's.
 @singledispatch
 def diagnose_exit(served: ServedTesseract, logs: str) -> str:
     """Anything this Tesseract can add about why it stopped running.
@@ -113,9 +106,6 @@ def diagnose_exit(served: ServedTesseract, logs: str) -> str:
 @singledispatch
 def is_running(served: ServedTesseract) -> bool:
     """Whether this Tesseract is running now, asking again rather than recalling.
-
-    Dispatched for the same reason as :func:`diagnose_exit`: docker-py has no
-    such method, and asks you to compare `status` yourself after a `reload`.
 
     Raises:
         NotImplementedError: if nothing is registered for this kind of Tesseract.
@@ -184,16 +174,6 @@ def validate_output_format(
 ) -> None:
     """Reject an output format the given output path cannot support.
 
-    ``json+binref`` writes array buffers to .bin sidecar files instead of
-    inlining them, so it needs somewhere durable to put them. Without an output
-    path they land wherever the Tesseract happens to be running -- inside a
-    container that is about to be torn down, or loose in a subprocess's working
-    directory -- and the paths in the response lead nowhere the caller picked.
-
-    Shared so that the check fires the same way, with the same error type,
-    however the Tesseract is served: a caller that switches between the two has
-    no reason to catch two different exceptions.
-
     Raises:
         UserError: if the combination cannot produce output the caller can read.
     """
@@ -206,12 +186,7 @@ def validate_output_format(
 
 
 def runtime_config_to_env(runtime_config: Mapping[str, Any] | None) -> dict[str, str]:
-    """Convert runtime configuration to the variables the Tesseract runtime reads.
-
-    Shared so that ``runtime_config`` means the same thing however a Tesseract is
-    served; booleans in particular have to be spelled the way the config parser
-    expects.
-    """
+    """Convert runtime configuration to the variables the Tesseract runtime reads."""
 
     def encode(value: Any) -> str:
         return ("1" if value else "0") if isinstance(value, bool) else str(value)
@@ -356,7 +331,7 @@ def wait_for_health_or_dispose(
             # Forced: it may still be running, and an unforced remove would refuse.
             served.remove(force=True)
         except Exception as ex:
-            # Broadest of the three: an exception raised in a `finally` replaces
+            # Deliberately broad: an exception raised in a `finally` replaces
             # the one in flight, so anything at all escaping here would destroy
             # the failure we came to report.
             logger.warning(f"Failed to remove {served}: {ex}")

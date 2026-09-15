@@ -713,13 +713,12 @@ class Container:
             raise ex
 
 
+# The following `singledispatch` functions allow dispatch between different `ServedTesseract`
+# instances (currently `Container` and `TesseractProcess`) without introducing inconsistency
+# between our `Container` class and docker-py's.
 @is_running.register
 def _(container: Container) -> bool:
-    """Whether a container is running now, reading it again to find out.
-
-    docker-py has you compare `status` yourself; this is that comparison, with
-    the read that has to come first so the answer is not a stale one.
-    """
+    """Whether a container is running now (includes reload)."""
     container.reload()
     return container.status == "running"
 
@@ -728,10 +727,8 @@ def _(container: Container) -> bool:
 def _(container: Container, logs: str) -> str:
     """Anything `docker inspect` recorded about why a container stopped.
 
-    Reads the recorded state rather than the container, which by the time anything
-    is said about a failure has been disposed of -- liveness is what noticed it
-    had stopped, and reading it refreshed that state, so what it holds is how it
-    stopped.
+    Designed to be called when `is_running()` returns `False` which refreshes `State`
+    to reflect any known failure reasons.
     """
     del logs  # a container's own output is all the other evidence there is
     state = container.attrs.get("State", {})

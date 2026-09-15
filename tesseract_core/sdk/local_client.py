@@ -82,7 +82,7 @@ def popen_kwargs() -> dict[str, Any]:
 
 
 def _stop_process(process: subprocess.Popen, *, force: bool) -> None:
-    """Ask a child and everything it spawned to exit, or force it to.
+    """(Attempt to) exit a child process along with any of its associated subprocesses.
 
     ``signal.SIGKILL`` does not exist on Windows, so it must not be named outside
     the POSIX branch -- not even to compare against.
@@ -214,7 +214,7 @@ class TesseractProcess:
 
 @diagnose_exit.register
 def _(served: TesseractProcess, logs: str) -> str:
-    """Name the interpreter that ran it, which nothing else can see."""
+    """Provides exit message including details of the interpreter."""
     if "No module named 'tesseract_core'" in logs:
         return (
             f"The environment running it ({served.python_executable}) does not "

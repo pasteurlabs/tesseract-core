@@ -132,7 +132,7 @@ TEST_CASES = {
             "so this looks like an endpoint gap, not a from_source limitation"
         ),
     ),
-    "qp_solve": Config(no_from_source="needs a QP solver"),
+    "qp_solve": Config(no_from_source="needs qpax"),
     "inherit_base_image_packages": Config(
         no_from_source="needs firedrake from the base image"
     ),
@@ -245,10 +245,6 @@ def test_unit_tesseract_from_source(unit_tesseract_path, unit_tesseract_config):
             # Raises AssertionError on mismatch, RuntimeError on an endpoint
             # error, and returns nothing when it passes.
             t.test(test_spec=spec)
-
-        # Most examples ship test cases; for the few that do not, serving and
-        # answering is the whole of what this test can check without
-        # duplicating the schema plumbing from the containerized test.
 
 
 def test_unit_tesseract_endtoend(
