@@ -1,6 +1,6 @@
 # Installing local Python modules into a Tesseract
 
-[View on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/localpackage)
+{gh-tree}`View on GitHub <examples/localpackage>`
 
 ## Context
 
