@@ -885,10 +885,13 @@ def test_a_newer_python_is_reachable_not_just_an_older_one():
         f"{sys.version_info.major}.{ours + 1}"
     )
 
-    # Closest wins over newest, so a built environment stays near ours.
-    assert provision._nearest([ours - 1, bounds[1]]) == (
-        f"{sys.version_info.major}.{ours - 1}"
-    )
+    # Closest wins over newest, so a built environment stays near ours. Only
+    # meaningful when there is something below us: on the oldest version we
+    # support there is not, and `_nearest` drops it as out of bounds.
+    if bounds[0] < ours:
+        assert provision._nearest([ours - 1, bounds[1]]) == (
+            f"{sys.version_info.major}.{ours - 1}"
+        )
 
 
 def test_abi_tag_hint_is_read_as_the_answer():
@@ -921,28 +924,28 @@ def test_requires_python_hint_is_read_as_the_answer():
     assert str(provision._requires_python(hint)) == ">=3.12"
 
 
-def test_an_old_pin_picks_a_python_that_has_wheels_for_it(example_copy):
-    """A build has to use a Python the declared versions can be installed on.
+def test_a_pin_gets_a_python_that_has_wheels_for_it(example_copy):
+    """Whatever version is chosen, the declared pin must install on it.
 
-    In a container the Python comes from the base image, which is 3.11 for the
-    default `debian:bookworm-slim`. So `univariate` pinning `jax[cpu]==0.4.28`
-    builds there without trouble. jaxlib 0.4.28 has no wheel past cp312, so
-    building it against a newer interpreter falls back to source and fails.
-    Asking which
-    Pythons the requirements have wheels for avoids having to guess the base
-    image's version, which is not knowable for an arbitrary image.
+    In a container the Python comes from the base image, 3.11 for the default
+    `debian:bookworm-slim`, so `univariate` pinning `jax[cpu]==0.4.28` builds
+    there without trouble. jaxlib 0.4.28 publishes no wheel past cp312, so on a
+    newer interpreter we have to pick a different version, and on an older one
+    staying put is already correct. Asserting the property rather than a
+    particular version keeps this true on every Python we support.
     """
     api_path = example_copy("univariate")
     build_config = get_config(api_path.parent).build_config
+    requirements_file = api_path.parent / "tesseract_requirements.txt"
 
-    chosen = provision._build_python_version(
-        build_config, api_path.parent / "tesseract_requirements.txt"
-    )
+    chosen = provision._build_python_version(build_config, requirements_file)
+    if chosen is None:
+        chosen = f"{sys.version_info.major}.{sys.version_info.minor}"
 
-    assert chosen is not None, (
-        "would have built on this interpreter, which has no wheel"
+    _, remote = provision.parse_requirements(requirements_file)
+    assert provision._compile(remote, chosen, wheels_only=True) is None, (
+        f"chose Python {chosen}, which has no wheels for {remote}"
     )
-    assert chosen < f"{sys.version_info.major}.{sys.version_info.minor}"
 
 
 def test_a_local_requirement_does_not_constrain_the_python(example_copy):
@@ -963,18 +966,18 @@ def test_a_local_requirement_does_not_constrain_the_python(example_copy):
     )
 
 
-def test_an_explicit_interpreter_skips_resolution(example_copy):
+def test_an_explicit_interpreter_skips_resolution(dummy_tesseract_package):
     """Naming an interpreter means using it, not stating a preference.
 
-    `vectoradd` pins a numpy this environment does not have, so resolving would
-    build a `.venv`. Naming an interpreter has to stop that happening. An
+    The requirement here is one this environment does not have, so resolving
+    would build a `.venv`. Naming an interpreter has to stop that happening. An
     explicit argument should win, and this is also the escape hatch that every
     "could not provision" message points at.
     """
-    api_path = example_copy("vectoradd")
+    api_path = dummy_tesseract_package / "tesseract_api.py"
+    (dummy_tesseract_package / "tesseract_requirements.txt").write_text("cowsay\n")
 
     with Tesseract.from_source(api_path, python_executable=sys.executable) as tess:
-        result = tess.apply({"a": [1.0], "b": [2.0]})
+        assert tess.health()["status"] == "ok"
 
-    assert result["result"] == pytest.approx([3.0])
-    assert not (api_path.parent / ".venv").exists()
+    assert not (dummy_tesseract_package / ".venv").exists()

@@ -663,9 +663,21 @@ def _ensure_runtime(
     spec = _runtime_install_spec()
     what = "Installing the Tesseract runtime"
     if installer is not None:
-        _run([*installer, "pip", "install", spec], what)
+        _run([*installer, "install", spec], what)
     else:
         _run([*_uv(), "pip", "install", "--python", python_executable, spec], what)
+
+    # An installer can report success and still leave the environment unable to
+    # serve, for instance by installing somewhere other than where we asked.
+    # Complain here, where we know what was attempted, instead of letting the
+    # Tesseract fail to import much later on.
+    if not _can_serve(python_executable):
+        raise RuntimeError(
+            f"Installed {spec} into {python_executable.parent.parent}, but it "
+            "still cannot serve a Tesseract. Check that the installer put it "
+            "there, or pass `python_executable` to name an environment "
+            "yourself."
+        )
 
 
 def _ensure_venv(
@@ -751,7 +763,12 @@ def _build_conda_env(dest: Path, requirements_file: Path) -> Path:
     # Use the environment's own pip, not uv. Packages installed from conda
     # channels are not all visible to uv, so uv would decide they are missing
     # and reinstall them from PyPI.
-    _ensure_runtime(python_executable, installer=[*conda, "run", "-p", dest])
+    #
+    # Invoked as `<env>/bin/python -m pip` rather than `conda run -p <env> pip`,
+    # which is what `build_conda_venv.sh` does. Inside an image there is only one
+    # pip to find, but on a host `conda run` resolves pip from PATH and can pick
+    # one belonging to another environment, installing there instead.
+    _ensure_runtime(python_executable, installer=[python_executable, "-m", "pip"])
 
     dest.mkdir(parents=True, exist_ok=True)
     stamp_path.write_text(json.dumps({"digest": digest}), encoding="utf-8")
