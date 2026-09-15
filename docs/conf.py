@@ -111,12 +111,17 @@ redirects = {
 # contexts: Read the Docs (versioned + PR previews), the GitHub Actions docs job
 # (which runs linkcheck on PRs), and local builds.
 _repo_url = "https://github.com/pasteurlabs/tesseract-core"
-_git_ref = (
-    os.environ.get("READTHEDOCS_GIT_IDENTIFIER")  # RTD: tag, branch, or PR head
-    or os.environ.get("GITHUB_HEAD_REF")  # GH Actions: PR source branch
-    or os.environ.get("GITHUB_REF_NAME")  # GH Actions: branch/tag on push
-    or "main"  # local build
-)
+if os.environ.get("READTHEDOCS_VERSION_TYPE") == "external":
+    # RTD PR previews: READTHEDOCS_GIT_IDENTIFIER is the PR *number*, which is not
+    # a valid GitHub ref. Use the PR head commit hash, which resolves under /tree/.
+    _git_ref = os.environ["READTHEDOCS_GIT_COMMIT_HASH"]
+else:
+    _git_ref = (
+        os.environ.get("READTHEDOCS_GIT_IDENTIFIER")  # RTD: tag or branch
+        or os.environ.get("GITHUB_HEAD_REF")  # GH Actions: PR source branch
+        or os.environ.get("GITHUB_REF_NAME")  # GH Actions: branch/tag on push
+        or "main"  # local build
+    )
 extlinks = {
     # Usage in Markdown, with an explicit title:
     #   {gh-tree}`View on GitHub <examples/helloworld>`
