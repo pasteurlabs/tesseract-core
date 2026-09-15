@@ -2,6 +2,7 @@ import gc
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, Mock
 
@@ -21,7 +22,7 @@ from tesseract_core.sdk.tesseract import (
     _encode_array,
     _tree_map,
 )
-from tests.sdk_tests.conftest import env_without_pythonpath
+from tests.sdk_tests.conftest import build_venv
 
 # Inputs for the dummy Tesseract, used by the from_source tests below.
 SUBPROCESS_INPUTS = {
@@ -297,34 +298,41 @@ def test_given_scratch_dirs_are_left_alone(dummy_api_path, tmp_path):
     assert given_in.exists() and given_out.exists()
 
 
-@pytest.fixture(scope="session")
-def foreign_python() -> str:
-    """A supported Python version that is not the one running the tests."""
-    ours = f"{sys.version_info.major}.{sys.version_info.minor}"
-    return next(v for v in ("3.12", "3.11", "3.13") if v != ours)
-
-
-def test_tesseract_in_foreign_environment(built_venv, foreign_python, dummy_api_path):
+def test_tesseract_in_foreign_environment(dummy_api_path, tmp_path):
     """A Tesseract runs under an interpreter the caller could not have used."""
-    interpreter = built_venv(python=foreign_python)
+    ours = f"{sys.version_info.major}.{sys.version_info.minor}"
+    foreign = next(v for v in ("3.12", "3.11", "3.13") if v != ours)
 
-    reported = subprocess.run(
-        [str(interpreter), "-c", "import sys; print('%d.%d' % sys.version_info[:2])"],
-        check=True,
-        capture_output=True,
-        text=True,
-        env=env_without_pythonpath(),
-    ).stdout.strip()
+    env = os.environ.copy()
+    # An earlier in-process import may have put our sys.path on PYTHONPATH,
+    # which a different interpreter would inherit and pick our packages from.
+    env.pop("PYTHONPATH", None)
 
-    # Guard the premise: same interpreter would prove nothing
-    assert reported == foreign_python
-    assert reported != f"{sys.version_info.major}.{sys.version_info.minor}"
+    with tempfile.TemporaryDirectory(dir=tmp_path) as venv_dir:
+        interpreter = build_venv(Path(venv_dir) / "env", python=foreign)
 
-    with Tesseract.from_source(
-        dummy_api_path,
-        python_executable=interpreter,
-    ) as tess:
-        result = tess.apply(SUBPROCESS_INPUTS)
+        reported = subprocess.run(
+            [
+                str(interpreter),
+                "-c",
+                "import sys; print('%d.%d' % sys.version_info[:2])",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            env=env,
+        ).stdout.strip()
+
+        # Guard the premise: same interpreter would prove nothing
+        assert reported == foreign
+        assert reported != ours
+
+        # Inside the temporary directory: the Tesseract runs on that
+        # interpreter, so it has to outlive neither more nor less than this.
+        with Tesseract.from_source(
+            dummy_api_path, python_executable=interpreter
+        ) as tess:
+            result = tess.apply(SUBPROCESS_INPUTS)
 
     np.testing.assert_allclose(result["result"], [5.0, 8.0])
 

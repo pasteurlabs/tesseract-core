@@ -24,6 +24,7 @@ import requests
 from tesseract_core import Tesseract
 from tesseract_core.sdk import local_client, serving
 from tesseract_core.sdk.exceptions import UserError
+from tests.sdk_tests.conftest import build_venv
 
 pytestmark = pytest.mark.timeout(120)
 
@@ -692,7 +693,7 @@ def test_remove_escalates_to_sigkill(dummy_api_path):
 EXAMPLES = Path(__file__).parents[2] / "examples"
 
 
-def test_serves_a_tesseract_whose_dependencies_we_do_not_have(built_venv):
+def test_serves_a_tesseract_whose_dependencies_we_do_not_have(tmp_path):
     """The case `python_executable` exists for.
 
     `localpackage` needs a local package installed (``./helloworld``) that this
@@ -700,15 +701,16 @@ def test_serves_a_tesseract_whose_dependencies_we_do_not_have(built_venv):
     package_data (``goodbyeworld``) which only resolves because the runtime puts
     the API's own directory on sys.path. The greeting proves both halves.
     """
-    interpreter = built_venv(
-        requirements=EXAMPLES / "localpackage" / "tesseract_requirements.txt"
-    )
-
-    with Tesseract.from_source(
-        EXAMPLES / "localpackage" / "tesseract_api.py",
-        python_executable=interpreter,
-    ) as tess:
-        result = tess.apply({"name": "World"})
+    example = EXAMPLES / "localpackage"
+    with tempfile.TemporaryDirectory(dir=tmp_path) as venv_dir:
+        interpreter = build_venv(
+            Path(venv_dir) / "env",
+            requirements=example / "tesseract_requirements.txt",
+        )
+        with Tesseract.from_source(
+            example / "tesseract_api.py", python_executable=interpreter
+        ) as tess:
+            result = tess.apply({"name": "World"})
 
     assert "Hello World!" in result["message"], "local package dependency missing"
     assert "Goodbye World!" in result["message"], "package_data sibling missing"
