@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [1.13.0] - 2026-09-10
+## [1.13.0] - 2026-09-15
 
 ### Features
 
@@ -11,6 +11,9 @@ All notable changes to this project will be documented in this file.
 - Let both packages be run as modules (#719)
 - [**breaking**] Split CPU array encoding from GPU transport by introducing separate `gpu_transport` knobs (#737)
 - *(runtime)* Accept a per-input eps in check-gradients (#713)
+- *(runtime)* Sample VJP outputs in check-gradients (#739)
+- *(runtime)* Serialize TesseractReference outputs (#725) (#742)
+- *(runtime)* Accept a per-input eps in the finite-difference helpers (#712)
 
 ### Bug Fixes
 
@@ -22,6 +25,9 @@ All notable changes to this project will be documented in this file.
 - *(runtime)* Answer an unsupported Accept format with 406, not 500; accept more valid header formats (#728)
 - *(runtime)* Clear the sticky CUDA error from a failed IPC handle export (#727)
 - *(sdk)* Stop leaking a container when a port publish collides (#721)
+- *(runtime)* Reject input values that do not fit the declared dtype (#730)
+- Build Tesseracts on base images that set UV_SYSTEM_PYTHON (#750)
+- *(runtime)* Allow empty (zero-length) arrays through encoding (#760)
 
 ### Refactor
 
@@ -32,6 +38,7 @@ All notable changes to this project will be documented in this file.
 ### Documentation
 
 - Remove Tesseract Hackathon 2026 banner from landing page (#735)
+- Make "View on GitHub" links track the build ref (#752)
 
 ## [1.12.0] - 2026-08-28
 
