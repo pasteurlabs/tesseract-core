@@ -13,6 +13,14 @@ import yaml
 from common import build_tesseract, image_exists
 
 from tesseract_core.sdk.cli import AVAILABLE_RECIPES, app
+from tesseract_core.sdk.config import get_config
+
+
+@pytest.fixture(scope="module")
+def docker_executable():
+    """The configured Docker/Podman executable as a command prefix list."""
+    return get_config().docker_executable
+
 
 tested_images = ("ubuntu:24.04",)
 
@@ -171,7 +179,12 @@ def test_tarball_install(cli_runner, dummy_tesseract_package, docker_cleanup):
 
 
 def test_build_inherit_base_image_packages_with_uv_config(
-    cli_runner, docker_client, dummy_tesseract_package, docker_cleanup, tmp_path
+    cli_runner,
+    docker_client,
+    dummy_tesseract_package,
+    docker_cleanup,
+    tmp_path,
+    docker_executable,
 ):
     """inherit_base_image_packages must work despite base-image uv configuration.
 
@@ -204,7 +217,15 @@ def test_build_inherit_base_image_packages_with_uv_config(
         )
     )
     subprocess.run(
-        ["docker", "build", "-f", str(dockerfile), "-t", base_image_tag, str(tmp_path)],
+        [
+            *docker_executable,
+            "build",
+            "-f",
+            str(dockerfile),
+            "-t",
+            base_image_tag,
+            str(tmp_path),
+        ],
         check=True,
     )
 
@@ -258,7 +279,7 @@ def test_build_inherit_base_image_packages_with_uv_config(
         # Force-untag it here; shared layers are reclaimed once docker_cleanup
         # removes the descendant Tesseract image during teardown.
         subprocess.run(
-            ["docker", "rmi", "-f", base_image_tag],
+            [*docker_executable, "rmi", "-f", base_image_tag],
             check=False,
             capture_output=True,
         )
@@ -310,7 +331,7 @@ def test_build_extra_index_url_with_local_dep(
 
 
 def test_build_env_and_host_credential_with_secret(
-    cli_runner, dummy_tesseract_package, docker_cleanup
+    cli_runner, dummy_tesseract_package, docker_cleanup, docker_executable
 ):
     """build_env + an authenticated host credential build, with no credential leak.
 
@@ -354,11 +375,11 @@ def test_build_env_and_host_credential_with_secret(
     # (covers both the netrc and git-credentials files, which live only in the
     # build stage).
     inspect = subprocess.run(
-        ["docker", "inspect", image_tag], capture_output=True, text=True
+        [*docker_executable, "inspect", image_tag], capture_output=True, text=True
     )
     assert secret_value not in inspect.stdout
     history = subprocess.run(
-        ["docker", "history", "--no-trunc", image_tag],
+        [*docker_executable, "history", "--no-trunc", image_tag],
         capture_output=True,
         text=True,
     )
@@ -366,7 +387,7 @@ def test_build_env_and_host_credential_with_secret(
     # The credentials must also not survive into the final image filesystem.
     grep = subprocess.run(
         [
-            "docker",
+            *docker_executable,
             "run",
             "--rm",
             "--entrypoint",
@@ -381,11 +402,11 @@ def test_build_env_and_host_credential_with_secret(
     assert secret_value not in grep.stdout
 
 
-def test_metadata_label(built_image_name):
+def test_metadata_label(built_image_name, docker_executable):
     """Test that metadata from tesseract_config.yaml is stored as a Docker label."""
     result = subprocess.run(
         [
-            "docker",
+            *docker_executable,
             "inspect",
             "--format",
             '{{ index .Config.Labels "ai.pasteurlabs.tesseract.metadata" }}',
