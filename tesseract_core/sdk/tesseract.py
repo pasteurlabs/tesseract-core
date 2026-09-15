@@ -287,9 +287,7 @@ class Tesseract:
                 "experimental_binref_pool=True is only supported for containerized "
                 "Tesseracts on Linux, since it relies on the client and the "
                 "container sharing a page cache. Elsewhere the container runs "
-                "inside a VM, so bind mounts cross the VM boundary and the premise "
-                "does not hold. `from_source` has no VM to cross and needs only "
-                "POSIX."
+                "inside a VM, so bind mounts cross the VM boundary."
             )
         obj._binref_pool_enabled = experimental_binref_pool
         # Purge auto-created tempdirs when the object is garbage collected.
