@@ -1,6 +1,6 @@
 # VectorAdd
 
-[View on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/vectoradd)
+{gh-tree}`View on GitHub <examples/vectoradd>`
 
 ## Context
 

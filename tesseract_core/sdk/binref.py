@@ -192,7 +192,9 @@ def encode_array_binref_pooled(
     """
     arr = np.asanyarray(arr, order="A")
     data = _fast_tobytes(arr)
-    slot = pool.checkout(data.nbytes)
+    # An empty array carries no payload, so the warm-slot mmap buys nothing and
+    # would try to map a zero-length file. Write it as a plain (empty) file.
+    slot = None if data.nbytes == 0 else pool.checkout(data.nbytes)
     if slot is None:
         return encode_array_binref(arr, pool._input_dir, written_files)
     slot.write(data)
@@ -252,6 +254,10 @@ def mmap_binref_array(
     not be overwritten while a returned view is still in use.
     """
     map_len = offset + num_bytes
+    if map_len == 0:
+        # mmap cannot map a zero-length region; an empty buffer has no pages to
+        # map, so return an owned empty array instead.
+        return np.empty(count, dtype=dtype)
     fd = os.open(full_path, os.O_RDONLY)
     try:
         mm = mmap.mmap(fd, map_len, prot=mmap.PROT_READ)

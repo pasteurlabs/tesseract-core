@@ -1,6 +1,6 @@
 # Finite Difference Gradients
 
-[View on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/meshstats_finitediff)
+{gh-tree}`View on GitHub <examples/meshstats_finitediff>`
 
 This example demonstrates how to make any Tesseract differentiable using **finite differences**,
 without implementing analytical gradient code.
@@ -145,4 +145,4 @@ def jacobian(inputs, jac_inputs, jac_outputs):
 ## See also
 
 - {ref}`tr-autodiff` for background on differentiable programming in Tesseracts
-- The [meshstats example](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/meshstats) for the version with analytical gradients
+- The {gh-tree}`meshstats example <examples/meshstats>` for the version with analytical gradients

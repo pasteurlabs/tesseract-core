@@ -1,6 +1,6 @@
 # File IO with `InputPath` / `OutputPath`
 
-[View on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/file_io)
+{gh-tree}`View on GitHub <examples/file_io>`
 
 ## Context
 

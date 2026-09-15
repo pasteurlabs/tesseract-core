@@ -1,6 +1,6 @@
 # Wrapping Compiled Code (Fortran Example)
 
-[View on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/fortran_heat)
+{gh-tree}`View on GitHub <examples/fortran_heat>`
 
 ## Context
 

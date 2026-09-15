@@ -16,7 +16,7 @@ from pydantic import (
     ConfigDict,
     Field,
     JsonValue,
-    PositiveInt,
+    NonNegativeInt,
     StrictStr,
     ValidationInfo,
     create_model,
@@ -161,7 +161,7 @@ class EncodedArrayModel(BaseModel):
     """
 
     object_type: Literal["array"]
-    shape: tuple[PositiveInt, ...]
+    shape: tuple[NonNegativeInt, ...]
     dtype: AllowedDtypes
     data: BinrefArrayData | Base64ArrayData | JsonArrayData | CudaIpcArrayData
     model_config = ConfigDict(extra="forbid")
@@ -190,14 +190,15 @@ def get_array_model(
         shape_type = tuple[int, ...]
     else:
         # There are 3 cases for each dimension `n`:
-        # - n=None: polymorphic dimension, can be any positive int
+        # - n=None: polymorphic dimension, can be any non-negative int (0 allowed,
+        #   so empty arrays are valid)
         # - n=1: fixed dimension, must be 1
         # - n=N: fixed dimension, must be N or 1 (triggers broadcasting to N)
-        # Example: expected_shape=(None, 1, 3) -> allowed_vals=tuple[PositiveInt, Literal[1], Literal[1, 3]]
+        # Example: expected_shape=(None, 1, 3) -> allowed_vals=tuple[NonNegativeInt, Literal[1], Literal[1, 3]]
         allowed_vals = []
         for dim in expected_shape:
             if dim is None:
-                allowed_vals.append(PositiveInt)
+                allowed_vals.append(NonNegativeInt)
             elif dim == 1:
                 allowed_vals.append(Literal[1])
             else:
@@ -435,6 +436,56 @@ def _load_binref_arraydict(val: ArrayDict, base_dir: str | Path | None) -> np.nd
     return np.frombuffer(buffer, dtype=dtype).reshape(shape)
 
 
+def _out_of_range(arr: ArrayLike, dtype: str, value: Any) -> PydanticCustomError:
+    """Build the error for a value the target dtype cannot hold."""
+    return PydanticCustomError(
+        "array_value_out_of_range",
+        "Array values do not fit into dtype '{expected_dtype}' (e.g. {value})",
+        # str(), so the context stays JSON-serializable for a complex value.
+        {"expected_dtype": str(np.dtype(dtype)), "value": str(value)},
+    )
+
+
+def _astype_checked(arr: ArrayLike, dtype: str) -> ArrayLike:
+    """Cast to ``dtype``, refusing casts that lose a value.
+
+    That is a fractional part dropped on the way to an integer, an integer
+    wrapped past the target's range, or a finite float overflowing to inf.
+    Only narrowing casts are checked, and each the cheapest way it can be:
+    NumPy raises on a float or complex overflow by itself, while an integer
+    cast truncates and wraps silently and is caught by inspecting the values.
+    """
+    if np.can_cast(arr.dtype, dtype, casting="safe"):
+        return arr.astype(dtype, copy=False)
+
+    if np.issubdtype(np.dtype(dtype), np.integer):
+        if np.issubdtype(arr.dtype, np.floating) and np.any(arr % 1):
+            raise PydanticCustomError(
+                "array_expected_integer",
+                "Expected integer data, but array contains floating point values",
+                {},
+            )
+        if arr.size:
+            info = np.iinfo(dtype)
+            low, high = arr.min(), arr.max()
+            if low < info.min:
+                raise _out_of_range(arr, dtype, low)
+            if high > info.max:
+                raise _out_of_range(arr, dtype, high)
+        return arr.astype(dtype, copy=False)
+
+    try:
+        with np.errstate(over="raise"):
+            return arr.astype(dtype, copy=False)
+    except FloatingPointError:
+        # Rare, and we are raising anyway, so pay for the scan that names a value.
+        with np.errstate(over="ignore"):
+            out = arr.astype(dtype, copy=False)
+        overflowed = np.isfinite(arr) & ~np.isfinite(out)
+        example = arr[overflowed].ravel()[0]
+        raise _out_of_range(arr, dtype, example.item()) from None
+
+
 def _coerce_shape_dtype(
     arr: ArrayLike,
     expected_shape: ShapeType,
@@ -526,7 +577,7 @@ def _coerce_shape_dtype(
                     "expected_dtype": expected_dtype,
                 },
             )
-        arr = arr.astype(expected_dtype, copy=False)
+        arr = _astype_checked(arr, expected_dtype)
 
     allowed_dtypes = [dtype.lower() for dtype in get_args(AllowedDtypes)]
     if arr.dtype.name not in allowed_dtypes:
@@ -629,16 +680,7 @@ def decode_array(
         # keep checking for "raw" for backwards compat
         elif val.data.encoding in {"json", "raw"}:
             data = np.asarray(val.data.buffer).reshape(val.shape)
-            if np.issubdtype(data.dtype, np.floating) and np.issubdtype(
-                val.dtype, np.integer
-            ):
-                if np.any(data % 1):
-                    raise PydanticCustomError(
-                        "array_expected_integer",
-                        "Expected integer data, but array contains floating point values",
-                        {},
-                    )
-            data = data.astype(val.dtype, casting="unsafe", copy=False)
+            data = _astype_checked(data, val.dtype)
 
         else:
             # Unreachable
