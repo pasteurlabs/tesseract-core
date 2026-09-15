@@ -240,7 +240,7 @@ The `build_config` section of [`tesseract_config.yaml`](../reference/config.md) 
 - **You need a specific Python version or GPU drivers** — override `base_image` (must be Debian-based).
 - **You're deploying to a different architecture** (e.g., ARM64 on AWS Graviton) — set `target_platform`.
 - **Your Tesseract needs data files at runtime** (model weights, config files) — use `package_data` to copy them into the image.
-- **None of the above cover your case** — use `custom_build_steps` to inject arbitrary Dockerfile commands. See the [Dockerfile template](https://github.com/pasteurlabs/tesseract-core/blob/main/tesseract_core/sdk/templates/Dockerfile.base) for where these are injected.
+- **None of the above cover your case** — use `custom_build_steps` to inject arbitrary Dockerfile commands. See the {gh-blob}`Dockerfile template <tesseract_core/sdk/templates/Dockerfile.base>` for where these are injected.
 
 ```{seealso}
 For the full list of options and their defaults, see the [Configuration reference](../reference/config.md).

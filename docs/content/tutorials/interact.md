@@ -8,7 +8,7 @@ computing derivatives, and reading a Tesseract's schema so you know exactly what
 it expects. We recommend working through [Get Started](tr-quickstart) and
 [Creating Tesseracts](tr-create) first.
 
-We'll use the `vectoradd` Tesseract from the [examples](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/vectoradd),
+We'll use the `vectoradd` Tesseract from the {gh-tree}`examples <examples/vectoradd>`,
 which computes `s·a + b` for two vectors `a`, `b` and a scalar `s`. Build it the
 same way you built `helloworld`:
 

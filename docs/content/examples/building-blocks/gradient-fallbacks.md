@@ -1,6 +1,6 @@
 # Deriving Gradient Endpoints from Each Other
 
-[View on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/univariate_gradient_fallbacks)
+{gh-tree}`View on GitHub <examples/univariate_gradient_fallbacks>`
 
 This guide shows how to derive missing gradient endpoints from ones you have already
 implemented, using the experimental fallback helpers.
@@ -98,7 +98,7 @@ def jacobian(inputs, jac_inputs, jac_outputs):
 ## Example code
 
 A concrete example is the `univariate_gradient_fallbacks` Tesseract — a variant of
-[univariate](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/univariate)
+{gh-tree}`univariate <examples/univariate>`
 (Rosenbrock function) where the Jacobian is computed via JAX and JVP/VJP are derived
 automatically using `jvp_from_jacobian` and `vjp_from_jacobian`.
 
@@ -117,5 +117,5 @@ automatically using `jvp_from_jacobian` and `vjp_from_jacobian`.
 - {ref}`tr-autodiff` for background on differentiable programming in Tesseracts
 - {doc}`/content/examples/building-blocks/finitediff` for a gradient-free alternative
   when you have no gradient endpoint at all
-- The [univariate example](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/univariate)
+- The {gh-tree}`univariate example <examples/univariate>`
   for the version with manually implemented JVP and VJP

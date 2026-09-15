@@ -1,6 +1,6 @@
 # Custom build steps: PyVista on ARM64
 
-[View on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/pyvista-arm64)
+{gh-tree}`View on GitHub <examples/pyvista-arm64>`
 
 ## Context
 

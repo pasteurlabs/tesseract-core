@@ -1,11 +1,11 @@
 # Wrapping SpaceClaim as a Tesseract
 
-[View on GitHub](https://github.com/pasteurlabs/tesseract-core/tree/main/demo/_showcase/ansys-shapeopt/spaceclaim)
+{gh-tree}`View on GitHub <demo/_showcase/ansys-shapeopt/spaceclaim>`
 
 This guide outlines how to wrap Ansys SpaceClaim as a Tesseract. For this, we will use [non-containerized execution](project:#running-without-containers) to start an HTTP server that dispatches requests to SpaceClaim through SpaceClaim scripts (`.scscript`).
 
 ```{seealso}
-The full code for this Tesseract can be found under `demo/_showcase/ansys-shapeopt/spaceclaim` in the [Tesseract Core repository](https://github.com/pasteurlabs/tesseract-core/tree/main/demo/_showcase/ansys-shapeopt/spaceclaim).
+The full code for this Tesseract can be found under {gh-tree}`demo/_showcase/ansys-shapeopt/spaceclaim <demo/_showcase/ansys-shapeopt/spaceclaim>` in the Tesseract Core repository.
 
 The Tesseract can be seen in action within our [rocket fin optimization showcase](https://si-tesseract.discourse.group/t/parametric-shape-optimization-of-rocket-fins-with-ansys-spaceclaim-and-pyansys/109).
 ```
