@@ -1,20 +1,20 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
-"""Fixtures shared by the SDK tests.
+"""Fixtures shared by more than one SDK test module.
 
-Chiefly the pieces needed to serve a Tesseract without a container, which both
-`test_local_client.py` (the transport) and `test_tesseract.py` (the public API
-over it) need.
+Only what `test_local_client.py` (the subprocess transport) and
+`test_tesseract.py` (the public API over it) both need. Anything used by one
+module lives in that module.
 """
 
 import os
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
-import numpy as np
 import pytest
+
+REPO_ROOT = Path(__file__).parents[2]
 
 
 @pytest.fixture
@@ -22,16 +22,7 @@ def dummy_api_path(dummy_tesseract_package):
     return dummy_tesseract_package / "tesseract_api.py"
 
 
-@pytest.fixture
-def sample_inputs():
-    return {
-        "a": np.array([1.0, 2.0], dtype=np.float32),
-        "b": np.array([3.0, 4.0], dtype=np.float32),
-        "s": 2,
-    }
-
-
-def _env_without_pythonpath() -> dict[str, str]:
+def env_without_pythonpath() -> dict[str, str]:
     """Environment safe to hand to a different interpreter.
 
     Importing a tesseract_api.py in-process puts this interpreter's sys.path on
@@ -41,102 +32,65 @@ def _env_without_pythonpath() -> dict[str, str]:
     return {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
 
 
-@pytest.fixture
-def env_without_pythonpath() -> dict[str, str]:
-    """`_env_without_pythonpath` as a fixture, for tests that spawn interpreters."""
-    return _env_without_pythonpath()
-
-
 @pytest.fixture(scope="session")
-def foreign_venv(tmp_path_factory):
-    """A separate environment running a different Python from this one.
+def built_venv(tmp_path_factory):
+    """Build an environment to point `python_executable` at, and return it.
 
-    This is what makes subprocess isolation worth more than a nicety: the
-    Tesseract need not be installable alongside the caller. Deliberately no
-    version pins beyond the interpreter -- CI rewrites the runtime extras to
-    exact pins on its oldest-dependency axis, so anything we add here can
-    conflict with them.
-    """
-    uv = shutil.which("uv")
-    if uv is None:
-        pytest.skip("uv is required to build a foreign environment")
+    Two things make a dedicated process worth more than a nicety -- a Tesseract
+    can run on an interpreter the caller could not use, and with dependencies
+    the caller does not have -- and both are the same fixture: build a venv,
+    install the runtime into it, hand back its interpreter.
 
-    # Any supported version that is not the one running the tests.
-    ours = f"{sys.version_info.major}.{sys.version_info.minor}"
-    foreign = next(v for v in ("3.12", "3.11", "3.13") if v != ours)
-
-    venv_dir = tmp_path_factory.mktemp("foreign_venv") / "env"
-    repo_root = Path(__file__).parents[2]
-    env = _env_without_pythonpath()
-
-    def run(*args):
-        result = subprocess.run(args, capture_output=True, text=True, env=env)
-        if result.returncode != 0:
-            pytest.skip(
-                f"could not build a Python {foreign} environment: "
-                f"{result.stderr.strip()[-300:]}"
-            )
-
-    run(uv, "venv", str(venv_dir), "--python", foreign)
-    run(uv, "pip", "install", "--python", str(venv_dir), f"{repo_root}[runtime]")
-
-    scripts, exe = ("Scripts", "python.exe") if os.name == "nt" else ("bin", "python")
-    return venv_dir / scripts / exe, foreign
-
-
-@pytest.fixture(scope="session")
-def example_venv(tmp_path_factory):
-    """Build a venv holding one example's dependencies, and return its interpreter.
-
-    What `python_executable` is for: a Tesseract whose dependencies the caller
-    neither has nor could install alongside its own. Until a venv is built
-    automatically this has to be done by hand, so only examples whose
-    requirements are cheap to install are worth covering here.
-
-    Cached per example for the session -- building one costs seconds, and
+    Results are cached for the session, since building one costs seconds and
     nothing a test does can change it.
+
+    The returned callable takes `python` (a version to build against, or None
+    for the running one) and `requirements` (a tesseract_requirements.txt to
+    install as well; specs beginning with "." resolve against its directory, as
+    the build would read them).
     """
     uv = shutil.which("uv")
-    built: dict[str, Path] = {}
+    built: dict[tuple, Path] = {}
 
-    def build(example: str) -> Path:
-        if example in built:
-            return built[example]
+    def build(python: str | None = None, requirements: Path | None = None) -> Path:
+        key = (python, requirements)
+        if key in built:
+            return built[key]
         if uv is None:
-            pytest.skip("uv is required to build an example environment")
+            pytest.skip("uv is required to build an environment")
 
-        example_dir = Path(__file__).parents[2] / "examples" / example
-        repo_root = Path(__file__).parents[2]
-        venv_dir = tmp_path_factory.mktemp(f"venv_{example}") / "env"
-        env = _env_without_pythonpath()
+        venv_dir = tmp_path_factory.mktemp("venv") / "env"
+        env = env_without_pythonpath()
 
         def run(*args):
             result = subprocess.run(args, capture_output=True, text=True, env=env)
             if result.returncode != 0:
                 pytest.skip(
-                    f"could not build an environment for {example}: "
-                    f"{result.stderr.strip()[-300:]}"
+                    f"could not build an environment: {result.stderr.strip()[-300:]}"
                 )
 
-        run(uv, "venv", str(venv_dir))
-        run(uv, "pip", "install", "--python", str(venv_dir), f"{repo_root}[runtime]")
+        run(uv, "venv", str(venv_dir), *(("--python", python) if python else ()))
+        # No version pins beyond the interpreter: CI rewrites the runtime extras
+        # to exact pins on its oldest-dependency axis, and anything added here
+        # can conflict with them.
+        run(uv, "pip", "install", "--python", str(venv_dir), f"{REPO_ROOT}[runtime]")
 
-        # Requirements are written relative to the example, as the build would
-        # read them; a bare `./helloworld` means nothing from anywhere else.
-        requirements = example_dir / "tesseract_requirements.txt"
-        specs = [
-            line.strip()
-            for line in requirements.read_text().splitlines()
-            if line.strip() and not line.startswith("#")
-        ]
-        for spec in specs:
-            resolved = str(example_dir / spec) if spec.startswith(".") else spec
-            run(uv, "pip", "install", "--python", str(venv_dir), resolved)
+        if requirements is not None:
+            specs = [
+                line.strip()
+                for line in requirements.read_text().splitlines()
+                if line.strip() and not line.startswith("#")
+            ]
+            for spec in specs:
+                resolved = (
+                    str(requirements.parent / spec) if spec.startswith(".") else spec
+                )
+                run(uv, "pip", "install", "--python", str(venv_dir), resolved)
 
         scripts, exe = (
             ("Scripts", "python.exe") if os.name == "nt" else ("bin", "python")
         )
-        built[example] = venv_dir / scripts / exe
-        return built[example]
+        built[key] = venv_dir / scripts / exe
+        return built[key]
 
     return build

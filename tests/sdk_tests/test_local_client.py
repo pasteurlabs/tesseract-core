@@ -591,6 +591,15 @@ def test_missing_interpreter_is_reported(dummy_api_path):
         local_client.serve(dummy_api_path, python_executable="/nonexistent/bin/python")
 
 
+@pytest.fixture
+def sample_inputs():
+    return {
+        "a": np.array([1.0, 2.0], dtype=np.float32),
+        "b": np.array([3.0, 4.0], dtype=np.float32),
+        "s": 2,
+    }
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX process groups")
 def test_removing_a_tesseract_does_not_kill_the_caller(dummy_api_path, tmp_path):
     """What the child's own process group is actually for.
@@ -683,7 +692,7 @@ def test_remove_escalates_to_sigkill(dummy_api_path):
 EXAMPLES = Path(__file__).parents[2] / "examples"
 
 
-def test_serves_a_tesseract_whose_dependencies_we_do_not_have(example_venv):
+def test_serves_a_tesseract_whose_dependencies_we_do_not_have(built_venv):
     """The case `python_executable` exists for.
 
     `localpackage` needs a local package installed (``./helloworld``) that this
@@ -691,7 +700,9 @@ def test_serves_a_tesseract_whose_dependencies_we_do_not_have(example_venv):
     package_data (``goodbyeworld``) which only resolves because the runtime puts
     the API's own directory on sys.path. The greeting proves both halves.
     """
-    interpreter = example_venv("localpackage")
+    interpreter = built_venv(
+        requirements=EXAMPLES / "localpackage" / "tesseract_requirements.txt"
+    )
 
     with Tesseract.from_source(
         EXAMPLES / "localpackage" / "tesseract_api.py",

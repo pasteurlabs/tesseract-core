@@ -21,6 +21,14 @@ from tesseract_core.sdk.tesseract import (
     _encode_array,
     _tree_map,
 )
+from tests.sdk_tests.conftest import env_without_pythonpath
+
+# Inputs for the dummy Tesseract, used by the from_source tests below.
+SUBPROCESS_INPUTS = {
+    "a": np.array([1.0, 2.0], dtype=np.float32),
+    "b": np.array([3.0, 4.0], dtype=np.float32),
+    "s": 2,
+}
 
 
 class FakeContainer(Container):
@@ -235,7 +243,7 @@ def test_del_tesseract_purges_auto_tempdir(mock_serving):
     assert not output_path.exists()
 
 
-def test_auto_created_scratch_dirs_are_purged(dummy_api_path, sample_inputs):
+def test_auto_created_scratch_dirs_are_purged(dummy_api_path):
     """What we made, we clean up -- unlike directories the caller passed in."""
     tess = Tesseract.from_source(dummy_api_path, output_format="json+binref")
     scratch = [
@@ -245,7 +253,7 @@ def test_auto_created_scratch_dirs_are_purged(dummy_api_path, sample_inputs):
     assert all(d.exists() for d in scratch)
 
     with tess:
-        tess.apply(sample_inputs)
+        tess.apply(SUBPROCESS_INPUTS)
     del tess
     gc.collect()
 
@@ -264,7 +272,7 @@ def test_user_output_path_is_not_purged(mock_serving, tmp_path):
     assert tmp_path.is_dir()
 
 
-def test_given_scratch_dirs_are_left_alone(dummy_api_path, sample_inputs, tmp_path):
+def test_given_scratch_dirs_are_left_alone(dummy_api_path, tmp_path):
     given_in, given_out = tmp_path / "in", tmp_path / "out"
     given_in.mkdir()
     given_out.mkdir()
@@ -276,36 +284,41 @@ def test_given_scratch_dirs_are_left_alone(dummy_api_path, sample_inputs, tmp_pa
         output_format="json+binref",
     )
     with tess:
-        tess.apply(sample_inputs)
+        tess.apply(SUBPROCESS_INPUTS)
     del tess
     gc.collect()
 
     assert given_in.exists() and given_out.exists()
 
 
-def test_tesseract_in_foreign_environment(
-    foreign_venv, dummy_api_path, sample_inputs, env_without_pythonpath
-):
+@pytest.fixture(scope="session")
+def foreign_python() -> str:
+    """A supported Python version that is not the one running the tests."""
+    ours = f"{sys.version_info.major}.{sys.version_info.minor}"
+    return next(v for v in ("3.12", "3.11", "3.13") if v != ours)
+
+
+def test_tesseract_in_foreign_environment(built_venv, foreign_python, dummy_api_path):
     """A Tesseract runs under an interpreter the caller could not have used."""
-    interpreter, foreign_version = foreign_venv
+    interpreter = built_venv(python=foreign_python)
 
     reported = subprocess.run(
         [str(interpreter), "-c", "import sys; print('%d.%d' % sys.version_info[:2])"],
         check=True,
         capture_output=True,
         text=True,
-        env=env_without_pythonpath,
+        env=env_without_pythonpath(),
     ).stdout.strip()
 
     # Guard the premise: same interpreter would prove nothing
-    assert reported == foreign_version
+    assert reported == foreign_python
     assert reported != f"{sys.version_info.major}.{sys.version_info.minor}"
 
     with Tesseract.from_source(
         dummy_api_path,
         python_executable=interpreter,
     ) as tess:
-        result = tess.apply(sample_inputs)
+        result = tess.apply(SUBPROCESS_INPUTS)
 
     np.testing.assert_allclose(result["result"], [5.0, 8.0])
 
