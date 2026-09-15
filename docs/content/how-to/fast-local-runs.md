@@ -157,7 +157,7 @@ same time, so a 200 MB input with a 200 MB output needs 400 MB free. With
 between calls.
 
 ```{warning}
-Allocating too much memory relative to your RAM can crash your machine 
+Allocating too much memory relative to your RAM can crash your machine
 (we have observed crashes on macOS when using a 4GB hfs on 16GB machine).
 With very large payloads it may be safer to stick with `json+binref`.
 ```
