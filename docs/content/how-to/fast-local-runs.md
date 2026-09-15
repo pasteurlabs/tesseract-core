@@ -26,14 +26,12 @@ encoding is what matters instead (see
 ```
 
 A containerized Tesseract needs `/dev/shm` bind-mounted into it, which means a
-Linux host. A Tesseract served in a dedicated process needs nothing of the sort,
-and works on macOS too -- see [Without a container](#without-a-container) below.
+Linux host. An uncontainerized Tesseract served in a dedicated process (`Tesseract.from_source`)
+is less restrictive and works on macOS too -- see [Without a container](#without-a-container) below.
 
-On Windows there is no shared-memory filesystem to point either at, so this page
-does not apply. `json+binref` still works there on an ordinary directory, and is
-still worth choosing over `json+base64` for large arrays, since it keeps array
-data out of the HTTP body either way. What is unavailable is
-`experimental_binref_pool`, which reads outputs back as read-only memory maps.
+On Windows there is no shared-memory filesystem, but `json+binref` still works
+on an ordinary directory and should still outperform `json+base64` for large arrays
+by keeping array data out of the HTTP body.
 
 ## Basic usage
 
@@ -120,16 +118,15 @@ Two things to keep in mind when opting in:
   each result you keep pins its backing pages until it is dropped.
 
 The pool needs the binref directory to be **memory-backed**. That is what makes
-its memory-mapped writes free; on an ordinary disk-backed directory the mapping
-machinery costs more than it saves, and the pool is measurably _slower_ than
-plain `json+binref`. It has no effect for output formats other than
+its memory-mapped writes free; an ordinary disk-backed directory does not benefit
+from this. It has no effect for output formats other than
 `json+binref`.
 
 For a containerized Tesseract the pool additionally requires a Linux host, and
-raises elsewhere: on macOS and Windows the container runs inside a Linux VM, so
-bind mounts cross the VM boundary and the client and the container never share a
-page cache. A Tesseract served in a dedicated process has no VM to cross, so the
-pool is available on any platform.
+raises elsewhere (on macOS and Windows the container runs inside a Linux VM, so
+bind mounts cross the VM boundary). A Tesseract served in a dedicated process
+has no VM to cross, so the pool is available on any POSIX platform that offers a
+shared-memory filesystem.
 
 (without-a-container)=
 
@@ -177,26 +174,16 @@ it more than about an eighth of your RAM** -- 2 GB on a 16 GB machine -- and
 check you have plenty free before you start. Sizing one at half your RAM can
 hang the machine badly enough to need a reboot.
 
-```{note}
-This puts a ceiling on the approach: inputs and outputs of 1 GB or more need a
-mount of 2 GB or more, which is past what is comfortable on a 16 GB machine.
-For arrays that large, stay on ordinary disk. It is only about a third slower
-and it cannot exhaust your memory.
-```
+### Shared memory on macOS
 
-### Setting one up
-
-On Linux, use `/dev/shm` as above -- it is already there, and already capped at
-half your RAM.
-
-macOS has no `/dev/shm`, so create one:
+On Linux, `/dev/shm` is already present (and capped at half your RAM) but macOS requires creating a shared-memory filesystem, either through tmpfs:
 
 ```bash
 mkdir -p /tmp/tess-shm
 sudo mount_tmpfs -s 1g /tmp/tess-shm   # a cap, not a reservation
 ```
 
-A RAM disk is about 15% faster than `tmpfs` on macOS, if you want it:
+Or hfs, which we have measured to be about 15% faster than `tmpfs` but requires more conscious cleanup:
 
 ```bash
 disk=$(hdiutil attach -nomount ram://2097152)   # 1 GB
@@ -232,11 +219,6 @@ overhead again.
 If your arrays are small, or your Tesseract runs remotely, stay with the default
 `json+base64`. Reach for shared-memory binref when you are passing large arrays
 to a Tesseract on the same machine and per-call overhead is limiting you.
-
-The crossover is low: 64 kB is 8192 `float64` elements, so anything much larger
-than a short vector is already on the binref side of it. Below the crossover the
-penalty is a fixed fraction of a millisecond -- the cost of handling a file per
-call -- which is the same order as the HTTP round trip you are paying anyway.
 
 For the broader picture of where overhead comes from and how to reason about it,
 see {doc}`/content/concepts/performance`. For encoding-format details, see

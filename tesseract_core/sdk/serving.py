@@ -83,14 +83,8 @@ class ServedTesseract(Protocol):
 def diagnose_exit(served: ServedTesseract, logs: str) -> str:
     """Anything this Tesseract can add about why it stopped running.
 
-    The code it exited with and what it wrote are reported by whoever noticed.
-    This is for what remains: a cause the transport can name and the logs cannot.
-    Takes the logs as evidence, not to repeat them.
-
-    Dispatched rather than a method, so a `Container` keeps to the shape of
-    docker-py, which has nothing like this. Implementations are registered beside
-    the class they are for, which is also why nothing above the clients has to
-    know they exist.
+    Exit code and associated details are typically reported upstream.
+    This function aims to interpret them into an informative message.
 
     Raises:
         NotImplementedError: if nothing is registered for this kind of Tesseract.
