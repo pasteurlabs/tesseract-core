@@ -91,7 +91,7 @@ $ tesseract serve --env=TESSERACT_MLFLOW_TRACKING_URI="..." \
 
 ## Networking and interactions between Tesseracts
 
-Tesseracts can be connected to shared Docker networks, allowing them to communicate with each other and with other services at runtime. A common use case is composing multiple Tesseracts into a pipeline, where one Tesseract calls another via its REST API using `Tesseract.from_url()`. A working end-to-end example of this pattern is available in [`examples/_multi-tesseract/multi-helloworld`](https://github.com/pasteurlabs/tesseract-core/tree/main/examples/_multi-tesseract/multi-helloworld).
+Tesseracts can be connected to shared Docker networks, allowing them to communicate with each other and with other services at runtime. A common use case is composing multiple Tesseracts into a pipeline, where one Tesseract calls another via its REST API using `Tesseract.from_url()`. A working end-to-end example of this pattern is available in {gh-tree}`examples/_multi-tesseract/multi-helloworld <examples/_multi-tesseract/multi-helloworld>`.
 
 You can attach Tesseracts to a named Docker network using the `--network` flag. The network is created automatically if it does not already exist.
 

@@ -7,7 +7,7 @@ This example wraps Ansys MAPDL as a differentiable Tesseract that can e.g. be us
 The Tesseract computes structural compliance using finite element analysis and provides analytical sensitivities for gradient-based optimization.
 
 ```{seealso}
-The full code for this Tesseract can be found under `demo/_showcase/ansys-shapeopt/pymapdl` in the [Tesseract Core repository](https://github.com/pasteurlabs/tesseract-core/tree/main/demo/_showcase/ansys-shapeopt/pymapdl).
+The full code for this Tesseract can be found under {gh-tree}`demo/_showcase/ansys-shapeopt/pymapdl <demo/_showcase/ansys-shapeopt/pymapdl>` in the Tesseract Core repository.
 
 The Tesseract can be seen in action within our [rocket fin optimization showcase](https://si-tesseract.discourse.group/t/parametric-shape-optimization-of-rocket-fins-with-ansys-spaceclaim-and-pyansys/109).
 ```
@@ -99,7 +99,7 @@ The `abstract_eval` function computes output shapes based on input shapes withou
 ## Demo script
 
 ```{seealso}
-The full code for this demo can be found in `demo/_showcase/ansys-shapeopt/pymapdl/demo.py` in the [Tesseract Core repository](https://github.com/pasteurlabs/tesseract-core/blob/main/demo/_showcase/ansys-shapeopt/pymapdl/demo.py).
+The full code for this demo can be found in {gh-blob}`demo/_showcase/ansys-shapeopt/pymapdl/demo.py <demo/_showcase/ansys-shapeopt/pymapdl/demo.py>` in the Tesseract Core repository.
 ```
 
 This demo shows a complete workflow for a cantilever beam problem. It requires you set environment variables pointing to the MAPDL server:

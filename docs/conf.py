@@ -125,8 +125,11 @@ else:
 extlinks = {
     # Usage in Markdown, with an explicit title:
     #   {gh-tree}`View on GitHub <examples/helloworld>`
-    # The path fills %s in the URL; the title is shown verbatim.
+    #   {gh-blob}`Dockerfile <tesseract_core/sdk/templates/Dockerfile.base>`
+    # The path fills %s in the URL; the title is shown verbatim. Use `gh-tree`
+    # for directories and `gh-blob` for single files.
     "gh-tree": (f"{_repo_url}/tree/{_git_ref}/%s", None),
+    "gh-blob": (f"{_repo_url}/blob/{_git_ref}/%s", None),
 }
 
 myst_enable_extensions = [
