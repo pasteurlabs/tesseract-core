@@ -552,9 +552,7 @@ def serve(
         typer.Option(
             # Plumbing between a parent and the child it spawned, not something a
             # user sets: hidden from --help, and kept out of the environment so
-            # that nothing the child spawns in turn inherits it. `--parent-pipe-fd`
-            # names a descriptor that only exists in this process, so an inherited
-            # value would name whatever happened to land on that number here.
+            # it doesn't propagate further.
             hidden=True,
             allow_from_autoenv=False,
             help="Read end of a pipe the spawning process holds open.",

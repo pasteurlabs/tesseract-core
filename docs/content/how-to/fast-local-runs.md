@@ -205,13 +205,6 @@ mkdir -p /tmp/tess-shm && mount -t hfs "$disk" /tmp/tess-shm
 # when finished:  umount /tmp/tess-shm && hdiutil detach "$disk"
 ```
 
-```{warning}
-Both options take memory from your applications, so the size rule above matters
-more than which one you pick. Sizing either at half your RAM has caused a kernel
-panic. Remember to detach a RAM disk when you are done -- unlike `tmpfs`, it
-survives until you do.
-```
-
 With the scratch directories on such a mount and the pool enabled, the same
 40 MB round trip takes ~20 ms.
 

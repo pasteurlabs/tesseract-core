@@ -429,8 +429,9 @@ class Tesseract:
         The Tesseract is served by a dedicated ``tesseract-runtime serve``
         subprocess and reached over HTTP, so it does not share an interpreter,
         global state or signal handlers with the caller. That matters when
-        sharing them is unsafe -- nesting JAX inside JAX can deadlock -- and it
-        lets the Tesseract run in a different environment than the caller.
+        sharing them is unsafe (e.g. nesting JAX inside JAX can deadlock) and it
+        lets the Tesseract run in a different environment than the caller (e.g.
+        with conflicting dependencies).
 
         Unlike :meth:`from_tesseract_api`, which imports the API into this
         process, this must be used as a context manager or served explicitly,
@@ -467,9 +468,9 @@ class Tesseract:
             experimental_binref_pool: Opt-in fast path for ``json+binref`` that
                 reuses warm memory-mapped buffers instead of allocating a file
                 per call. Only pays off when the binref directory is
-                memory-backed (a ``tmpfs``); on an ordinary disk-backed
-                filesystem it is several times *slower* than plain
-                ``json+binref``. See :doc:`/content/how-to/fast-local-runs`.
+                memory-backed (a ``tmpfs``) and has been observed to negatively affect
+                ordinary disk-backed ``json+binref`` on occasion.
+                See :doc:`/content/how-to/fast-local-runs`.
 
         Returns:
             A Tesseract instance.

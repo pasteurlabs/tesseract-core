@@ -10,25 +10,18 @@ measurements of framework overhead for different interaction modes:
 Each mode is listed with the name it is reported under.
 
 1. `api` -- `Tesseract.from_tesseract_api()`, in-process: Python only, no HTTP
-2. `http` -- `Tesseract.from_image()` over HTTP: full Docker and HTTP stack,
+2. `http` -- `Tesseract.from_image()`: full Docker and HTTP stack,
    json+base64 encoding
-3. `http-shmem` -- the same over HTTP, json+binref with the binref directory on
+3. `http-shmem` -- `Tesseract.from_image()`: json+binref with the binref directory on
    a shared-memory tmpfs (/dev/shm), so arrays are exchanged through shared
    memory rather than base64 in the HTTP body, and experimental_binref_pool
    enabled for warm-buffer writes and zero-copy mmap decode
 4. `cli` -- `tesseract run`: full Docker and CLI overhead, json+binref with the
-   binref directory on ordinary disk
+   binref directory on local disk
 5. `subprocess` -- `Tesseract.from_source()` over HTTP, no container,
    json+base64 encoding
-6. `subprocess-shmem` -- the same, with the binref directory on /dev/shm and
-   experimental_binref_pool enabled: the fastest configuration available
-   without a container
-
-json+binref on ordinary disk is measured only over the CLI, not over HTTP for
-either transport. Every size here is small enough for a memory-backed
-directory, so over HTTP it is dominated everywhere in this range -- by base64
-at the smallest size and by shmem above it. It would be worth adding alongside
-payloads large enough that a memory-backed mount stops being an option.
+6. `subprocess-shmem` -- `Tesseract.from_source()`  with the binref directory on
+    /dev/shm and experimental_binref_pool enabled.
 
 All benchmarks use the same no-op Tesseract defined in tesseract_noop/.
 """
