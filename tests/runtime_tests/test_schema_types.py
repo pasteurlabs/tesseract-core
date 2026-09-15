@@ -127,6 +127,24 @@ def test_json_base64_rountrip():
         assert np.array_equal(getattr(roundtrip, field), getattr(model, field))
 
 
+@pytest.mark.parametrize("encoding", ["base64", "json"])
+def test_empty_array_roundtrip(encoding):
+    """A zero-length array round-trips.
+
+    Regression: a polymorphic (None) axis once required each dimension to be > 0,
+    so an empty array failed validation (an empty base64 buffer surfaced as a
+    misleading 'non-numeric' error).
+    """
+
+    class EmptyModel(BaseModel):
+        data: Array[(None,), Float64]
+
+    model = EmptyModel(data=np.empty((0,), dtype=np.float64))
+    serialized = model.model_dump_json(context={"array_encoding": encoding})
+    roundtrip = EmptyModel.model_validate_json(serialized)
+    assert roundtrip.data.shape == (0,)
+
+
 def test_json_binref_roundtrip(tmpdir):
     dumpdir = Path(tmpdir) / "dumpdir"
     model = MyModel(

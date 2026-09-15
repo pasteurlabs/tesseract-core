@@ -16,7 +16,7 @@ from pydantic import (
     ConfigDict,
     Field,
     JsonValue,
-    PositiveInt,
+    NonNegativeInt,
     StrictStr,
     ValidationInfo,
     create_model,
@@ -161,7 +161,7 @@ class EncodedArrayModel(BaseModel):
     """
 
     object_type: Literal["array"]
-    shape: tuple[PositiveInt, ...]
+    shape: tuple[NonNegativeInt, ...]
     dtype: AllowedDtypes
     data: BinrefArrayData | Base64ArrayData | JsonArrayData | CudaIpcArrayData
     model_config = ConfigDict(extra="forbid")
@@ -190,14 +190,15 @@ def get_array_model(
         shape_type = tuple[int, ...]
     else:
         # There are 3 cases for each dimension `n`:
-        # - n=None: polymorphic dimension, can be any positive int
+        # - n=None: polymorphic dimension, can be any non-negative int (0 allowed,
+        #   so empty arrays are valid)
         # - n=1: fixed dimension, must be 1
         # - n=N: fixed dimension, must be N or 1 (triggers broadcasting to N)
-        # Example: expected_shape=(None, 1, 3) -> allowed_vals=tuple[PositiveInt, Literal[1], Literal[1, 3]]
+        # Example: expected_shape=(None, 1, 3) -> allowed_vals=tuple[NonNegativeInt, Literal[1], Literal[1, 3]]
         allowed_vals = []
         for dim in expected_shape:
             if dim is None:
-                allowed_vals.append(PositiveInt)
+                allowed_vals.append(NonNegativeInt)
             elif dim == 1:
                 allowed_vals.append(Literal[1])
             else:

@@ -30,11 +30,13 @@ def _resolve(schema: dict, defs: dict) -> dict:
 def _generate(schema: dict, defs: dict) -> Any:
     schema = _resolve(schema, defs)
 
-    # const / enum take priority
+    # const / enum / examples take priority
     if "const" in schema:
         return schema["const"]
     if "enum" in schema:
         return schema["enum"][0]
+    if schema.get("examples"):
+        return schema["examples"][0]
 
     # Composition keywords
     if "oneOf" in schema:
