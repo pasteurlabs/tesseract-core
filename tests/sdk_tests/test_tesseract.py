@@ -78,9 +78,9 @@ def test_Tesseract_from_tesseract_api(dummy_tesseract_location, dummy_tesseract_
     endpoints = set(t.available_endpoints)
     assert endpoints == all_endpoints
 
-    # should also work when importing the module
-    t = Tesseract.from_tesseract_api(dummy_tesseract_module)
-    endpoints = set(t.available_endpoints)
+    # should also work when importing the module, and as a context manager
+    with Tesseract.from_tesseract_api(dummy_tesseract_module) as t:
+        endpoints = set(t.available_endpoints)
     assert endpoints == all_endpoints
 
 
@@ -763,6 +763,15 @@ def test_HTTPClient_close_is_idempotent(tmp_path):
     # an explicit close).
     client.close()
     assert client._binref_pool is None
+
+
+def test_Tesseract_from_url_closes_session_on_exit(mocker):
+    """Leaving the context of a from_url Tesseract closes its HTTP session."""
+    t = Tesseract.from_url("http://localhost:1234")
+    close = mocker.spy(t._client._session, "close")
+    with t:
+        pass
+    close.assert_called_once()
 
 
 def test_tree_map():

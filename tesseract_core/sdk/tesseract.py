@@ -398,10 +398,14 @@ class Tesseract:
     def __exit__(self, *args: object) -> None:
         """Exit the Tesseract context.
 
-        This will stop the Tesseract server if it is running.
+        This will stop the Tesseract server if it is running, and release the
+        resources held by the client.
         """
         if self._serve_context is None:
-            # This can happen if __enter__ short-circuits (e.g., from_tesseract_api)
+            # Nothing was served by us (e.g., from_url or from_tesseract_api), so
+            # there is no container to stop, but an HTTP session is still ours to close
+            if isinstance(self._client, HTTPClient):
+                self._client.close()
             return
         self.teardown()
 
@@ -1016,10 +1020,11 @@ class HTTPClient:
             self._binref_pool = BinrefWritePool(self._input_path)
 
     def close(self) -> None:
-        """Release resources held by the client (e.g. the binref write pool)."""
+        """Release resources held by the client (HTTP session, binref write pool)."""
         if self._binref_pool is not None:
             self._binref_pool.close()
             self._binref_pool = None
+        self._session.close()
 
     @staticmethod
     def _sanitize_url(url: str) -> str:
