@@ -63,16 +63,14 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
 
             sizes = DEFAULT_ARRAY_SIZES
 
-        # Size 0 is the fixed-floor probe for the framework benchmarks; encoding
-        # an empty array is not a meaningful measurement, so skip it here.
-        params = [(enc, size) for size in sizes if size > 0 for enc in ENCODINGS]
+        params = [(enc, size) for size in sizes for enc in ENCODINGS]
         ids = [f"{enc}_{size:,}" for enc, size in params]
         metafunc.parametrize("encoding_and_size", params, ids=ids)
 
 
 def _binref_rounds(size: int) -> int:
     """Scale rounds inversely with array size: more rounds for smaller, faster arrays."""
-    return max(10, min(int(1e7 / size), 10_000))
+    return max(10, min(int(1e7 / max(size, 1)), 10_000))
 
 
 def _clear_dir(path: str) -> None:

@@ -30,12 +30,7 @@ import uuid
 from pathlib import Path
 
 import pytest
-from conftest import (
-    DEFAULT_ARRAY_SIZES,
-    NOOP_TESSERACT_PATH,
-    create_test_array,
-    make_apply_inputs,
-)
+from conftest import DEFAULT_ARRAY_SIZES, NOOP_TESSERACT_PATH, create_test_array
 
 
 def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
@@ -112,7 +107,8 @@ def http_shmem_tesseract_instance(noop_tesseract_image):
 
 def test_from_tesseract_api(benchmark, tesseract_api_instance, array_size):
     """Benchmark non-containerized Tesseract via from_tesseract_api()."""
-    inputs = make_apply_inputs(array_size)
+    arr = create_test_array(array_size)
+    inputs = {"data": arr}
 
     benchmark(tesseract_api_instance.apply, inputs)
 
@@ -120,7 +116,8 @@ def test_from_tesseract_api(benchmark, tesseract_api_instance, array_size):
 @pytest.mark.docker
 def test_containerized_http(benchmark, http_tesseract_instance, array_size):
     """Benchmark containerized Tesseract via HTTP, json+base64 encoding."""
-    inputs = make_apply_inputs(array_size)
+    arr = create_test_array(array_size)
+    inputs = {"data": arr}
 
     benchmark(http_tesseract_instance.apply, inputs)
 
@@ -148,7 +145,8 @@ def test_containerized_http_shmem(benchmark, http_shmem_tesseract_instance, arra
     fast path.
     """
     tesseract, output_dir = http_shmem_tesseract_instance
-    inputs = make_apply_inputs(array_size)
+    arr = create_test_array(array_size)
+    inputs = {"data": arr}
 
     benchmark.pedantic(
         tesseract.apply,
@@ -174,31 +172,26 @@ def _run_cli_binref_benchmark(benchmark, noop_tesseract_image, array_size, binre
         input_dir.mkdir()
         output_dir.mkdir()
 
-        if array_size == 0:
-            # Empty payload measures the fixed per-request floor: no array, no
-            # binref file to write.
-            payload = {"inputs": {}}
-        else:
-            arr = create_test_array(array_size)
+        arr = create_test_array(array_size)
 
-            # Write array to binary file for binref encoding
-            bin_filename = f"{uuid.uuid4()}.bin"
-            bin_path = input_dir / bin_filename
-            arr.tofile(bin_path)
+        # Write array to binary file for binref encoding
+        bin_filename = f"{uuid.uuid4()}.bin"
+        bin_path = input_dir / bin_filename
+        arr.tofile(bin_path)
 
-            payload = {
-                "inputs": {
+        payload = {
+            "inputs": {
+                "data": {
+                    "object_type": "array",
+                    "shape": list(arr.shape),
+                    "dtype": arr.dtype.name,
                     "data": {
-                        "object_type": "array",
-                        "shape": list(arr.shape),
-                        "dtype": arr.dtype.name,
-                        "data": {
-                            "buffer": f"{bin_filename}:0",
-                            "encoding": "binref",
-                        },
-                    }
+                        "buffer": f"{bin_filename}:0",
+                        "encoding": "binref",
+                    },
                 }
             }
+        }
 
         payload_file = input_dir / f"payload_{array_size}.json"
         payload_file.write_text(json.dumps(payload))
