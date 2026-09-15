@@ -141,6 +141,7 @@ def test_rejects_imported_module(dummy_tesseract_module):
             input_path=None,
             output_path=None,
             output_format="json+base64",
+            gpu_transport=None,
             runtime_config=None,
             python_executable=None,
             startup_timeout=1.0,

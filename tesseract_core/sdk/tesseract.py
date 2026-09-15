@@ -424,6 +424,7 @@ class Tesseract:
         input_path: Path | None = None,
         output_path: Path | None = None,
         output_format: Literal["json", "json+base64", "json+binref"] = "json+base64",
+        gpu_transport: str | None = None,
         runtime_config: dict[str, Any] | None = None,
         stream_logs: BoolOrCallable = False,
         python_executable: str | Path | None = None,
@@ -458,6 +459,13 @@ class Tesseract:
             output_path: Path of output directory. All paths in the tesseract
                 result with be given relative to this path. Required when using json+binref.
             output_format: Format to use for the output data. json+binref requires output_path.
+            gpu_transport: How GPU arrays leave the process, independently of
+                ``output_format`` (which governs CPU arrays). ``none`` copies GPU arrays
+                to the host and serializes them like any CPU array; ``cuda_ipc`` exports
+                them by reference. Unlike a container this needs nothing wired up: two
+                processes on one host already share an IPC namespace. Resolved against
+                ``runtime_config``, an explicit value winning. This also governs how the
+                client exports GPU *inputs* to the served Tesseract.
                 This has no impact on what is returned to Python and only affects the format that is used internally.
             runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
                 For example, `{"profiling": True}` enables profiling.
@@ -495,6 +503,7 @@ class Tesseract:
             input_path=input_path,
             output_path=output_path,
             output_format=output_format,
+            gpu_transport=gpu_transport,
             runtime_config=runtime_config,
             python_executable=python_executable,
             startup_timeout=startup_timeout,
@@ -859,6 +868,7 @@ def _subprocess_spawn_config(
     input_path: Path | None,
     output_path: Path | None,
     output_format: Literal["json", "json+base64", "json+binref"],
+    gpu_transport: str | None,
     runtime_config: dict[str, Any] | None,
     python_executable: str | Path | None,
     startup_timeout: float,
@@ -893,6 +903,22 @@ def _subprocess_spawn_config(
     config_kwargs: dict[str, Any] = {"debug": True}
     if runtime_config is not None:
         config_kwargs.update(runtime_config)
+
+    # Same precedence as the other constructors: an explicit value (including
+    # "none") wins over one in runtime_config, which wins over the default.
+    # Unlike a container there is nothing to wire up for it -- two processes on
+    # one host already share an IPC namespace, so cuda_ipc needs no equivalent
+    # of the container's `--ipc=host`, and the child sees the host's GPUs.
+    if gpu_transport is not None:
+        config_kwargs["gpu_transport"] = gpu_transport
+    else:
+        config_kwargs.setdefault("gpu_transport", "none")
+
+    if config_kwargs["gpu_transport"] not in ("none", "cuda_ipc"):
+        raise ValueError(
+            f"Unknown gpu_transport {config_kwargs['gpu_transport']!r}. "
+            "Supported values: 'none', 'cuda_ipc'."
+        )
 
     return auto_dirs, dict(
         api_path=tesseract_api_path,
