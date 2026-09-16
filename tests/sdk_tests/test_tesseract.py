@@ -276,11 +276,13 @@ def test_HTTPClient_run_tesseract(mocker, run_id):
     expected_params = {} if run_id is None else {"run_id": run_id}
     # timeout is omitted (not passed as None) so that passing the session to a
     # starlette TestClient does not trigger a StarletteDeprecationWarning.
+    # The response is streamed so the body can be read in large chunks.
     mocked_request.assert_called_with(
         method="POST",
         url="http://somehost/apply",
         data=orjson.dumps({"inputs": {"a": 1}}),
         params=expected_params,
+        stream=True,
     )
 
 
@@ -305,6 +307,7 @@ def test_HTTPClient_timeout_passed_to_request(mocker):
         data=b"null",
         params={},
         timeout=42,
+        stream=True,
     )
 
 
