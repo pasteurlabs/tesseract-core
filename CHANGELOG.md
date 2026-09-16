@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [1.13.0] - 2026-09-15
+## [1.13.0] - 2026-09-16
 
 ### Features
 
@@ -28,12 +28,14 @@ All notable changes to this project will be documented in this file.
 - *(runtime)* Reject input values that do not fit the declared dtype (#730)
 - Build Tesseracts on base images that set UV_SYSTEM_PYTHON (#750)
 - *(runtime)* Allow empty (zero-length) arrays through encoding (#760)
+- Make sure `Tesseract.close` also ends open http sessions (#761)
 
 ### Refactor
 
 - Give `Container` a live `is_running` method, and lift the serving primitives out of engine.py (#693)
 - *(runtime)* Isolate CUDA access in a standalone cuda library module (#736)
 - *(runtime)* Introduce a pluggable device-transport interface (#722)
+- [**breaking**] Remove deprecations scheduled for 1.13.0 (#765)
 
 ### Documentation
 
