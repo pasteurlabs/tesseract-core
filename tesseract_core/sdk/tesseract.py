@@ -974,22 +974,16 @@ def _decode_array(
 def _make_tuned_session() -> requests.Session:
     """Build the requests session used to talk to a served Tesseract.
 
-    Tuned for a machine-to-machine JSON client on the hot path:
+    Mounts a pooled adapter with a retry policy so transient connection failures
+    and 5xx responses are retried instead of failing the call. Read timeouts are
+    not retried: a Tesseract endpoint can legitimately run longer than the read
+    timeout, and retrying that would hammer a working-but-slow server.
 
-    - ``trust_env = False`` skips the per-request proxy / ``.netrc`` / CA-bundle
-      environment lookups, which are pure overhead here.
-    - A retry policy on the pooled adapter recovers from transient connection
-      drops instead of failing the call.
-
-    Robustness that ``requests`` provides out of the box -- TLS verification,
-    content-decoding, redirects -- is retained.
+    Environment-based configuration (proxies, ``.netrc``, CA-bundle env vars) is
+    left at the requests default so those still work.
     """
     session = requests.Session()
-    session.trust_env = False
     session.headers["Content-Type"] = "application/json"
-    # Retry transient connection failures and 5xx responses, but not read
-    # timeouts: a Tesseract endpoint can legitimately run longer than the read
-    # timeout, and retrying that would hammer a working-but-slow server.
     retries = requests.adapters.Retry(
         total=2,
         connect=2,
