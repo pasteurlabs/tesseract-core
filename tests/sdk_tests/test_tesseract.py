@@ -42,16 +42,10 @@ def mock_clients(mocker):
     mocker.patch("tesseract_core.sdk.tesseract.HTTPClient.run_tesseract")
 
 
-def test_Tesseract_init():
-    # Instantiate with a url
-    with pytest.warns(
-        UserWarning, match="Direct instantiation of Tesseract is deprecated"
-    ):
-        t = Tesseract(url="localhost")
-
-    # Using it as a context manager should be a no-op
-    with t:
-        pass
+def test_Tesseract_init_raises():
+    # Direct instantiation is not allowed. Use one of the from_* constructors.
+    with pytest.raises(TypeError, match="cannot be instantiated directly"):
+        Tesseract(url="localhost")
 
 
 def test_Tesseract_from_url():

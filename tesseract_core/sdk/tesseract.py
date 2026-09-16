@@ -7,7 +7,6 @@ import sys
 import tempfile
 import traceback
 import uuid
-import warnings
 import weakref
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
@@ -93,19 +92,12 @@ class Tesseract:
     _timeout: float | tuple[float, float] | None = None
     _binref_pool_enabled: bool = False
 
-    def __init__(
-        self,
-        url: str,
-        server_output_path: str | Path | None = None,
-        timeout: float | tuple[float, float] | None = None,
-    ) -> None:
-        warnings.warn(
-            "Direct instantiation of Tesseract is deprecated. "
-            "Use Tesseract.from_url(), Tesseract.from_image(), or Tesseract.from_tesseract_api() instead.",
-            UserWarning,
-            stacklevel=2,
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        raise TypeError(
+            "Tesseract cannot be instantiated directly. "
+            "Use Tesseract.from_url(), Tesseract.from_image(), or "
+            "Tesseract.from_tesseract_api() instead."
         )
-        self._client = HTTPClient(url, output_path=server_output_path, timeout=timeout)
 
     @classmethod
     def from_url(
