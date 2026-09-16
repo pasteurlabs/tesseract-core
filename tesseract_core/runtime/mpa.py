@@ -36,7 +36,17 @@ class BaseBackend(ABC):
         if base_dir is None:
             base_dir = get_config().output_path
         self.log_dir = Path(base_dir) / "logs"
-        self.log_dir.mkdir(parents=True, exist_ok=True)
+        # Metrics, parameters and artifact files are created lazily, on first
+        # write, so a run that logs none of them avoids that filesystem cost.
+        # Call ``ensure_log_dir()`` before writing under the log directory.
+        self._log_dir_ready = False
+
+    def ensure_log_dir(self) -> Path:
+        """Create the run's log directory on first use and return it."""
+        if not self._log_dir_ready:
+            self.log_dir.mkdir(parents=True, exist_ok=True)
+            self._log_dir_ready = True
+        return self.log_dir
 
     @abstractmethod
     def log_parameter(self, key: str, value: Any) -> None:
@@ -69,29 +79,34 @@ class FileBackend(BaseBackend):
 
     def __init__(self, base_dir: str | None = None) -> None:
         super().__init__(base_dir)
-        # Initialize log files
+        # File paths under the (lazily created) log directory. The files
+        # themselves are only written on first log_* call, so a silent run
+        # creates nothing on disk.
         self.params_file = self.log_dir / "parameters.json"
         self.metrics_file = self.log_dir / "metrics.csv"
         self.artifacts_dir = self.log_dir / "artifacts"
-        self.artifacts_dir.mkdir(exist_ok=True)
 
         # Initialize parameters dict and metrics list
         self.parameters = {}
         self.metrics = []
-
-        # Initialize CSV file with headers
-        with open(self.metrics_file, "w", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow(["timestamp", "key", "value", "step"])
+        self._metrics_header_written = False
 
     def log_parameter(self, key: str, value: Any) -> None:
         """Log a parameter to JSON file."""
+        self.ensure_log_dir()
         self.parameters[key] = value
         with open(self.params_file, "w") as f:
             json.dump(self.parameters, f, indent=2, default=str)
 
     def log_metric(self, key: str, value: float, step: int | None = None) -> None:
         """Log a metric to CSV file."""
+        self.ensure_log_dir()
+        if not self._metrics_header_written:
+            with open(self.metrics_file, "w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["timestamp", "key", "value", "step"])
+            self._metrics_header_written = True
+
         timestamp = datetime.now().isoformat()
         step_value = (
             step
@@ -117,6 +132,8 @@ class FileBackend(BaseBackend):
         if not source_path.exists():
             raise FileNotFoundError(f"Artifact file not found: {local_path}")
 
+        self.ensure_log_dir()
+        self.artifacts_dir.mkdir(exist_ok=True)
         dest_path = self.artifacts_dir / source_path.name
         shutil.copy2(source_path, dest_path)
 
@@ -339,7 +356,12 @@ def start_run(
     token = _current_backend.set(backend)
     backend.start_run()
 
-    logfile = backend.log_dir / "tesseract.log"
+    # The log file is written eagerly and live: a client streaming logs tails it
+    # over the shared output directory as the run produces output, and the server
+    # gets no signal that a tailer is attached. Metrics, parameters and artifacts
+    # are still created lazily by the backend, so a run that logs none of those
+    # avoids that part of the filesystem cost.
+    logfile = backend.ensure_log_dir() / "tesseract.log"
 
     try:
         with redirect_stdio(logfile, log_sink=log_sink):
