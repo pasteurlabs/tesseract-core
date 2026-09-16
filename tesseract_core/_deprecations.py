@@ -47,45 +47,6 @@ TOMBSTONES: tuple[Tombstone, ...] = (
     #     what="--foo alias from `tesseract build`",
     #     hint="remove backend support from engine.py, too"
     # ),
-    Tombstone(
-        remove_at="1.13.0",
-        what="'python-pip' requirements provider alias",
-        hint=(
-            "Remove the 'python-pip' -> 'uv-pip' normalization in "
-            "tesseract_core/sdk/api_parse.py (_normalize_provider) and its test."
-        ),
-    ),
-    Tombstone(
-        remove_at="1.13.0",
-        what="build_config.python_version alias",
-        hint=(
-            "Remove the deprecated TesseractBuildConfig.python_version field and its "
-            "forwarding in _validate_python_version_provider "
-            "(tesseract_core/sdk/api_parse.py); python_version now lives on "
-            "PipRequirements. Update the tests, too."
-        ),
-    ),
-    Tombstone(
-        remove_at="1.13.0",
-        what="Tesseract(url) constructor",
-        hint=(
-            "Remove the deprecated Tesseract.__init__ shim in "
-            "tesseract_core/sdk/tesseract.py (callers use Tesseract.from_url / "
-            "from_image / from_tesseract_api); make __init__ raise instead. "
-            "Update the tests, too."
-        ),
-    ),
-    Tombstone(
-        remove_at="1.13.0",
-        what="InputFileReference / OutputFileReference aliases",
-        hint=(
-            "Remove InputFileReference, OutputFileReference and their validators "
-            "(_resolve_input_file, _strip_output_file) from "
-            "tesseract_core/runtime/experimental/paths.py, and drop them from the "
-            "experimental __init__ exports; use InputPath / OutputPath instead. "
-            "Update the tests, too."
-        ),
-    ),
 )
 
 
