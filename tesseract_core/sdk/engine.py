@@ -425,7 +425,19 @@ def prepare_build_context(
     local_requirements_path = context_dir / "local_requirements"
     Path.mkdir(local_requirements_path, parents=True, exist_ok=True)
 
-    if requirement_config.provider == "uv-pip":
+    if requirement_config.provider == "uv-pip" and requirement_config.is_pylock:
+        # A lockfile has no local-path dependencies to split out, so it is installed
+        # as-is from its staged location without rewriting. Check it exists here to
+        # fail with a clear message instead of a missing COPY during `docker build`.
+        lockfile = src_dir / requirement_config._filename
+        if not lockfile.exists():
+            raise UserError(
+                f"requirements_file is set to {requirement_config._filename!r} but "
+                f"that file was not found in {src_dir}. Generate one with, e.g., "
+                f"`uv export --format pylock.toml -o {requirement_config._filename}`."
+            )
+
+    elif requirement_config.provider == "uv-pip":
         reqstxt = src_dir / requirement_config._filename
         if reqstxt.exists():
             local_dependencies, remote_dependencies = parse_requirements(reqstxt)
@@ -444,7 +456,7 @@ def prepare_build_context(
         # We need to write a new requirements file in the build dir, where the
         # local dependencies are rewritten to their staged locations.
         requirements_file_path = (
-            context_dir / "__tesseract_source__" / "tesseract_requirements.txt"
+            context_dir / "__tesseract_source__" / requirement_config._filename
         )
         lines = remote_dependencies + staged_dependencies
         with requirements_file_path.open("w", encoding="utf-8") as f:

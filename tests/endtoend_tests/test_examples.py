@@ -102,6 +102,7 @@ TEST_CASES = {
     "fortran_heat": Config(),
     "fortran_enzyme": Config(check_gradients=True),
     "conda": Config(),
+    "pylock": Config(test_with_random_inputs=True),
     "required_files": Config(input_path="input"),
     "file_io": Config(input_path="test_cases/testdata", output_path="__tmp_path__"),
     "metrics": Config(test_with_random_inputs=True),
