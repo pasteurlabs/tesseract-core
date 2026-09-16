@@ -167,11 +167,11 @@ def test_build_tesseract_requires_secret_for_host_credential(tmp_path):
     "keypath,raw_value,expected",
     [
         # Numeric-looking string fields must not be parsed as numbers (#678).
-        (("build_config", "python_version"), "3.12", "3.12"),
+        (("build_config", "requirements", "python_version"), "3.12", "3.12"),
         # Trailing zero must be preserved (YAML would parse 3.10 -> 3.1).
-        (("build_config", "python_version"), "3.10", "3.10"),
+        (("build_config", "requirements", "python_version"), "3.10", "3.10"),
         # Explicit quoting still works.
-        (("build_config", "python_version"), '"3.12"', "3.12"),
+        (("build_config", "requirements", "python_version"), '"3.12"', "3.12"),
         (("build_config", "target_platform"), "linux/arm64", "linux/arm64"),
         # Non-string fields still get their structured value.
         (("build_config", "inherit_base_image_packages"), "true", True),

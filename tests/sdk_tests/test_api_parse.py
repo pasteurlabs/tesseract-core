@@ -225,44 +225,6 @@ def test_config_with_python_version(
     assert config.build_config.effective_python_version == "3.12"
 
 
-def test_config_python_version_deprecated_location(
-    tmp_path, valid_tesseract_api, valid_tesseract_config, caplog
-):
-    """The old build_config.python_version location is forwarded onto the provider."""
-    _write_tesseract_api_to_file(valid_tesseract_api, tmp_path)
-
-    config = yaml.safe_load(valid_tesseract_config)
-    config["build_config"]["python_version"] = "3.12"
-    _write_tesseract_config_to_file(yaml.dump(config), tmp_path)
-
-    from tesseract_core.sdk.api_parse import get_config
-
-    with caplog.at_level(logging.WARNING, logger="tesseract"):
-        parsed = get_config(tmp_path)
-
-    assert parsed.build_config.requirements.python_version == "3.12"
-    assert parsed.build_config.effective_python_version == "3.12"
-    # The move must be surfaced to the user (via the logger, since a
-    # library-emitted DeprecationWarning would be suppressed by default).
-    assert "has moved to the uv-pip provider" in caplog.text
-
-
-def test_config_python_version_rejects_conda(
-    tmp_path, valid_tesseract_api, valid_tesseract_config
-):
-    _write_tesseract_api_to_file(valid_tesseract_api, tmp_path)
-
-    config = yaml.safe_load(valid_tesseract_config)
-    config["build_config"]["python_version"] = "3.12"
-    config["build_config"]["requirements"] = {"provider": "conda"}
-    _write_tesseract_config_to_file(yaml.dump(config), tmp_path)
-
-    with pytest.raises(
-        ValidationError, match="python_version cannot be used with conda"
-    ):
-        validate_tesseract_api(tmp_path)
-
-
 def test_config_python_version_rejects_inherit_base_image_packages(
     tmp_path, valid_tesseract_api, valid_tesseract_config
 ):
@@ -281,27 +243,6 @@ def test_config_python_version_rejects_inherit_base_image_packages(
         match="python_version cannot be used with inherit_base_image_packages",
     ):
         validate_tesseract_api(tmp_path)
-
-
-def test_provider_python_pip_alias(
-    tmp_path, valid_tesseract_api, valid_tesseract_config, caplog
-):
-    """The legacy 'python-pip' provider name is accepted as a deprecated alias."""
-    _write_tesseract_api_to_file(valid_tesseract_api, tmp_path)
-
-    config = yaml.safe_load(valid_tesseract_config)
-    config["build_config"]["requirements"] = {"provider": "python-pip"}
-    _write_tesseract_config_to_file(yaml.dump(config), tmp_path)
-
-    from tesseract_core.sdk.api_parse import get_config
-
-    with caplog.at_level(logging.WARNING, logger="tesseract"):
-        parsed = get_config(tmp_path)
-
-    assert parsed.build_config.requirements.provider == "uv-pip"
-    # The rename must be surfaced to the user (via the logger, since a
-    # library-emitted DeprecationWarning would be suppressed by default).
-    assert "renamed to 'uv-pip'" in caplog.text
 
 
 def test_host_credential_rejects_disallowed_characters():

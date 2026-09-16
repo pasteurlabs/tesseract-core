@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import ast
-import logging
 import re
 from pathlib import Path
 from typing import Annotated, Any, Literal, NamedTuple
@@ -86,23 +85,6 @@ RelativePath = Annotated[str, AfterValidator(assert_relative_path)]
 StrictStr = Annotated[str, Strict()]
 
 
-def _normalize_provider(value: Any) -> Any:
-    """Accept the deprecated ``python-pip`` provider name as an alias for ``uv-pip``."""
-    if value == "python-pip":
-        # Emit through the logger rather than warnings.warn: a library-emitted
-        # DeprecationWarning is suppressed under Python's default filters, so a
-        # real CLI user would never see it.
-        # Scheduled for removal in 1.13.0; see tesseract_core/_deprecations.py.
-        logging.getLogger("tesseract").warning(
-            "The 'python-pip' requirements provider has been renamed to 'uv-pip' "
-            "(the build has always used uv under the hood). Set `provider: uv-pip` "
-            "in tesseract_config.yaml; 'python-pip' still works but will be "
-            "removed in Tesseract 1.13.0."
-        )
-        return "uv-pip"
-    return value
-
-
 # Host credential fields are written verbatim into the tab-separated credentials
 # file and, at build time, into netrc and git-credential entries. Each field is
 # constrained to an allowlist so no crafted value -- whitespace, NUL, or any other
@@ -169,7 +151,7 @@ class HostCredential(BaseModel):
 class PipRequirements(BaseModel):
     """Configuration options for Python environments built via uv."""
 
-    provider: Annotated[Literal["uv-pip"], BeforeValidator(_normalize_provider)]
+    provider: Literal["uv-pip"]
     python_version: StrictStr | None = Field(
         None,
         description=(
@@ -230,15 +212,6 @@ class TesseractBuildConfig(BaseModel, validate_assignment=True):
             "Example: ``[\"RUN echo 'Hello, world!'\"]``"
         ),
     )
-    python_version: StrictStr | None = Field(
-        None,
-        description=(
-            "Deprecated alias for ``build_config.requirements.python_version``. "
-            "Kept for backwards compatibility; set the version under the provider "
-            "settings instead. Removed in Tesseract 1.13.0."
-        ),
-    )
-
     inherit_base_image_packages: bool = Field(
         False,
         description=(
@@ -287,37 +260,6 @@ class TesseractBuildConfig(BaseModel, validate_assignment=True):
 
     @model_validator(mode="after")
     def _validate_python_version_provider(self):
-        # Forward the deprecated build_config.python_version onto the provider so
-        # the rest of the code only reads requirements.python_version (via
-        # effective_python_version). Scheduled for removal in 1.13.0; see
-        # tesseract_core/_deprecations.py.
-        if self.python_version is not None:
-            # Emit through the logger rather than relying on the Field's
-            # deprecated= warning: a library-emitted DeprecationWarning is
-            # suppressed under Python's default filters, so a real CLI user would
-            # never see it (mirrors _normalize_provider).
-            logging.getLogger("tesseract").warning(
-                "build_config.python_version has moved to the uv-pip provider "
-                "settings. Set `build_config.requirements.python_version` in "
-                "tesseract_config.yaml; the old location still works but will be "
-                "removed in Tesseract 1.13.0."
-            )
-            if not isinstance(self.requirements, PipRequirements):
-                raise ValueError(
-                    "python_version cannot be used with conda requirements. "
-                    "Set the Python version in tesseract_environment.yaml instead."
-                )
-            if (
-                self.requirements.python_version is not None
-                and self.requirements.python_version != self.python_version
-            ):
-                raise ValueError(
-                    "python_version is set both on build_config and on "
-                    "build_config.requirements. Set it only once, under "
-                    "build_config.requirements.python_version."
-                )
-            self.requirements.python_version = self.python_version
-
         if (
             self.effective_python_version is not None
             and self.inherit_base_image_packages
