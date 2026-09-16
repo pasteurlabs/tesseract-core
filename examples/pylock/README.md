@@ -15,8 +15,8 @@ build_config:
     requirements_file: pylock.toml
 ```
 
-Any PEP 751 filename is accepted (`pylock.toml` or a named variant like
-`pylock.prod.toml`); the format is inferred from the name. Then build and run as
+Any PEP 751 filename is accepted, either `pylock.toml` or a named variant like
+`pylock.prod.toml`. The format is inferred from the name. Then build and run as
 usual:
 
 ```bash
@@ -39,12 +39,11 @@ $ ./examples/pylock/regenerate_lockfile.sh
 The script resolves a lockfile from `_pyproject.toml` and exports it to
 `pylock.toml` with `uv export --no-emit-project`, the same command you would use
 to turn a [uv workspace lock](https://docs.astral.sh/uv/concepts/projects/sync/#exporting-the-lockfile)
-into a standalone `pylock.toml`.
+into a standalone `pylock.toml`. Here the root project is an empty stub, so this
+drops it and keeps only the third-party dependencies.
 
-## Private and multi-index lockfiles
+## Learn more
 
-A lockfile records each package's index location and hashes, but never
-credentials. To install from an authenticated index (a private PyPI, an Azure
-Artifacts feed, etc.), declare the host under `build_config.host_credentials`
-and supply the token at build time with `tesseract build --secret`. See the
-[build documentation](../../docs/) for details.
+See the [Lockfile building block](../../docs/content/examples/building-blocks/lockfile.md)
+in the documentation for details, including how the Tesseract runtime is installed
+on top of the lockfile and how to install from an authenticated (private) index.
