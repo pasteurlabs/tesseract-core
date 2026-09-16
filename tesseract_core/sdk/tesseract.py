@@ -1104,20 +1104,39 @@ class HTTPClient:
             # ConnectionError on an otherwise healthy server.
             return self._session.request(**request_kwargs)
 
+    # Cap on the streamed read chunk. The chunk is sized to the response's
+    # Content-Length so a small body is read in one shot, but capped so a huge
+    # response is read in bounded pieces rather than one buffer the size of the
+    # whole body. 8 MB captures nearly all of the large-payload speedup over
+    # requests' 10 KB default while keeping the peak read buffer small.
+    _READ_CHUNK_CAP = 8 << 20
+
     @staticmethod
     def _read_body(response: requests.Response) -> bytes:
-        """Read a response body in large chunks.
+        """Read a response body in large, bounded chunks.
 
         ``requests`` reassembles ``response.content`` from 10 KB chunks and then
         copies the whole buffer again, which is a large fraction of decode time
-        for big array payloads. Reading a streamed response in 1 MB chunks avoids
-        both. Falls back to ``.content`` for a non-streamed response (e.g. an
-        injected test client), where the body is already buffered.
+        for big array payloads. Streaming with a chunk sized to the response's
+        ``Content-Length`` (capped at ``_READ_CHUNK_CAP``) reads a small body in
+        one iteration and a large one in a few, avoiding both the per-10 KB loop
+        and an unbounded read buffer. ``iter_content`` still applies any
+        content-decoding, so a compressed Content-Length is a safe read hint; if
+        the header is absent, the cap is used directly.
+
+        Falls back to ``.content`` for a non-streamed response (e.g. an injected
+        test client), where the body is already buffered.
         """
         if getattr(response, "raw", None) is not None and not getattr(
             response, "_content_consumed", True
         ):
-            return b"".join(response.iter_content(chunk_size=1 << 20))
+            content_length = response.headers.get("Content-Length")
+            if content_length is not None and content_length.isdigit():
+                chunk_size = min(int(content_length), HTTPClient._READ_CHUNK_CAP)
+            else:
+                chunk_size = HTTPClient._READ_CHUNK_CAP
+            # chunk_size must be a positive int; a zero-length body yields none.
+            return b"".join(response.iter_content(chunk_size=max(chunk_size, 1)))
         return response.content
 
     def _request(
