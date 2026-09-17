@@ -19,12 +19,19 @@ HTTP. Because `/dev/shm` is a `tmpfs` shared between the host and the container,
 the array data never leaves memory and is never copied through the socket.
 
 ```{note}
-This is a Linux optimization. It relies on `/dev/shm` (a shared-memory `tmpfs`)
-being available and bind-mounted into the container. This is only possible when the
-client and the Tesseract share a host; for remote Tesseracts, array data has to
-cross the network regardless, so a compact wire encoding is what matters instead
-(see {doc}`/content/reference/array-encodings`).
+This only helps when the client and the Tesseract share a host. For remote
+Tesseracts, array data has to cross the network regardless, so a compact wire
+encoding is what matters instead (see
+{doc}`/content/reference/array-encodings`).
 ```
+
+A containerized Tesseract needs `/dev/shm` bind-mounted into it, which means a
+Linux host. An uncontainerized Tesseract served in a dedicated process (`Tesseract.from_source`)
+is less restrictive and works on macOS too -- see [Without a container](#without-a-container) below.
+
+On Windows there is no shared-memory filesystem, but `json+binref` still works
+on an ordinary directory and should still outperform `json+base64` for large arrays
+by keeping array data out of the HTTP body.
 
 ## Basic usage
 
@@ -110,8 +117,72 @@ Two things to keep in mind when opting in:
 - **The pool holds some resident memory** until the Tesseract is torn down, and
   each result you keep pins its backing pages until it is dropped.
 
-The pool is Linux-only (it raises on other platforms) and has no effect for
-output formats other than `json+binref`.
+The pool needs the binref directory to be **memory-backed**. That is what makes
+its memory-mapped writes free; an ordinary disk-backed directory does not benefit
+from this. It has no effect for output formats other than
+`json+binref`.
+
+For a containerized Tesseract the pool additionally requires a Linux host, and
+raises elsewhere (on macOS and Windows the container runs inside a Linux VM, so
+bind mounts cross the VM boundary). A Tesseract served in a dedicated process
+has no VM to cross, so the pool is available on any POSIX platform that offers a
+shared-memory filesystem.
+
+(without-a-container)=
+
+## Without a container
+
+`Tesseract.from_source()` serves a `tesseract_api.py` in a dedicated subprocess
+rather than a container (see {doc}`/content/how-to/debugging`). Client and server
+are then two ordinary processes on one host, which removes both of the
+constraints above -- and you do not have to name any directories, because
+scratch directories are created and cleaned up for you:
+
+```python
+with Tesseract.from_source(
+    "/path/to/tesseract_api.py", output_format="json+binref"
+) as t:
+    result = t.apply({"x": x})
+```
+
+This is enough to get most of the benefit. Measured on an Apple silicon laptop,
+a 40 MB `float64` round trip takes ~26 ms this way against ~168 ms for the
+default `json+base64`.
+
+### How big does it need to be?
+
+**At least the size of your inputs plus your outputs.** Both files exist at the
+same time, so a 200 MB input with a 200 MB output needs 400 MB free. With
+`experimental_binref_pool` enabled, an input-sized buffer stays allocated
+between calls.
+
+```{warning}
+Allocating too much memory relative to your RAM can crash your machine
+(we have observed crashes on macOS when using a 4GB hfs on 16GB machine).
+With very large payloads it may be safer to stick with `json+binref`.
+```
+
+### Shared memory on macOS
+
+On Linux, `/dev/shm` is already present (and capped at half your RAM)
+but macOS requires creating a shared-memory filesystem, either through tmpfs:
+
+```bash
+mkdir -p /tmp/tess-shm
+sudo mount_tmpfs -s 1g /tmp/tess-shm   # a cap, not a reservation
+```
+
+Or hfs, which we have measured to be about 15% faster than `tmpfs` but requires more conscious cleanup:
+
+```bash
+disk=$(hdiutil attach -nomount ram://2097152)   # 1 GB
+newfs_hfs -v tess-shm "$disk"
+mkdir -p /tmp/tess-shm && mount -t hfs "$disk" /tmp/tess-shm
+# when finished:  umount /tmp/tess-shm && hdiutil detach "$disk"
+```
+
+With the scratch directories on such a mount and the pool enabled, the same
+40 MB round trip takes ~20 ms.
 
 ## When this helps
 
