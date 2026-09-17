@@ -111,17 +111,30 @@ redirects = {
 # contexts: Read the Docs (versioned + PR previews), the GitHub Actions docs job
 # (which runs linkcheck on PRs), and local builds.
 _repo_url = "https://github.com/pasteurlabs/tesseract-core"
-_git_ref = (
-    os.environ.get("READTHEDOCS_GIT_IDENTIFIER")  # RTD: tag, branch, or PR head
-    or os.environ.get("GITHUB_HEAD_REF")  # GH Actions: PR source branch
-    or os.environ.get("GITHUB_REF_NAME")  # GH Actions: branch/tag on push
-    or "main"  # local build
-)
+if os.environ.get("READTHEDOCS_VERSION_TYPE") == "external":
+    # RTD PR previews: READTHEDOCS_GIT_IDENTIFIER is the PR *number*, which is not
+    # a valid GitHub ref. Use the PR head commit hash, which resolves under /tree/.
+    _git_ref = os.environ["READTHEDOCS_GIT_COMMIT_HASH"]
+else:
+    _git_ref = (
+        os.environ.get("READTHEDOCS_GIT_IDENTIFIER")  # RTD: tag or branch
+        # GH Actions PR builds: the PR *head commit*, not GITHUB_HEAD_REF. A
+        # fork PR's head branch lives in the fork, so `tree/<branch>` 404s
+        # against this repo; the head commit is reachable here via refs/pull/N
+        # and, unlike the branch, is guaranteed to contain any example the PR
+        # adds. Set in build_docs.yml.
+        or os.environ.get("DOCS_GIT_REF")
+        or os.environ.get("GITHUB_REF_NAME")  # GH Actions: branch/tag on push
+        or "main"  # local build
+    )
 extlinks = {
     # Usage in Markdown, with an explicit title:
     #   {gh-tree}`View on GitHub <examples/helloworld>`
-    # The path fills %s in the URL; the title is shown verbatim.
+    #   {gh-blob}`Dockerfile <tesseract_core/sdk/templates/Dockerfile.base>`
+    # The path fills %s in the URL; the title is shown verbatim. Use `gh-tree`
+    # for directories and `gh-blob` for single files.
     "gh-tree": (f"{_repo_url}/tree/{_git_ref}/%s", None),
+    "gh-blob": (f"{_repo_url}/blob/{_git_ref}/%s", None),
 }
 
 myst_enable_extensions = [

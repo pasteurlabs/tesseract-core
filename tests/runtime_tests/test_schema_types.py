@@ -15,10 +15,14 @@ from tesseract_core.runtime.schema_types import (
     Array,
     ArrayFlags,
     Bool,
+    Complex64,
     Differentiable,
+    Float32,
     Float64,
+    Int8,
     Int32,
     Int64,
+    UInt8,
     is_differentiable,
 )
 
@@ -122,6 +126,24 @@ def test_json_base64_rountrip():
 
     for field in model.model_fields:
         assert np.array_equal(getattr(roundtrip, field), getattr(model, field))
+
+
+@pytest.mark.parametrize("encoding", ["base64", "json"])
+def test_empty_array_roundtrip(encoding):
+    """A zero-length array round-trips.
+
+    Regression: a polymorphic (None) axis once required each dimension to be > 0,
+    so an empty array failed validation (an empty base64 buffer surfaced as a
+    misleading 'non-numeric' error).
+    """
+
+    class EmptyModel(BaseModel):
+        data: Array[(None,), Float64]
+
+    model = EmptyModel(data=np.empty((0,), dtype=np.float64))
+    serialized = model.model_dump_json(context={"array_encoding": encoding})
+    roundtrip = EmptyModel.model_validate_json(serialized)
+    assert roundtrip.data.shape == (0,)
 
 
 def test_json_binref_roundtrip(tmpdir):
@@ -515,6 +537,98 @@ def test_dtype_casting():
         ValidationError, match="Could not parse value as a numeric array"
     ):
         MyModel.model_validate(json_payload)
+
+
+def test_narrowing_casts_must_preserve_values():
+    class Narrow(BaseModel):
+        i8: Array[(None,), Int8]
+        f32: Array[(None,), Float32]
+
+    def json_array(dtype, buffer):
+        return {
+            "object_type": "array",
+            "shape": [len(buffer)],
+            "dtype": dtype,
+            "data": {"buffer": buffer, "encoding": "json"},
+        }
+
+    # Narrowing is fine as long as the values survive it: precision loss and
+    # non-finite values passing through are not errors.
+    res = Narrow.model_validate(
+        {"i8": [1, -2, 127], "f32": [0.1, 1e30, float("inf"), float("nan")]}
+    )
+    assert res.i8.dtype == np.int8 and res.i8.tolist() == [1, -2, 127]
+    assert res.f32.dtype == np.float32 and res.f32[0] == np.float32(0.1)
+    assert np.isinf(res.f32[2]) and np.isnan(res.f32[3])
+
+    res = Narrow.model_validate(
+        {"i8": json_array("int8", [1.0, -2.0]), "f32": json_array("float32", [1e30])}
+    )
+    assert res.i8.tolist() == [1, -2]
+
+    # Values that wrap or overflow are rejected instead of silently changed,
+    # on both the Python and the JSON-encoded path.
+    for bad in (
+        {"i8": [300], "f32": [0.0]},
+        {"i8": np.array([300]), "f32": [0.0]},
+        {"i8": [-129], "f32": [0.0]},
+        {"i8": [0], "f32": [1e40]},
+        {"i8": json_array("int8", [300]), "f32": [0.0]},
+        {"i8": json_array("int8", [-129.0]), "f32": [0.0]},
+        {"i8": [0], "f32": json_array("float32", [1e40])},
+    ):
+        with pytest.raises(ValidationError, match="do not fit into dtype"):
+            Narrow.model_validate(bad)
+
+
+def test_unsigned_field_accepts_signed_integers():
+    """A JSON number arrives as int64, which an unsigned field has to take."""
+
+    class Unsigned(BaseModel):
+        u8: Array[(None,), UInt8]
+
+    def json_array(dtype, buffer):
+        return {
+            "object_type": "array",
+            "shape": [len(buffer)],
+            "dtype": dtype,
+            "data": {"buffer": buffer, "encoding": "json"},
+        }
+
+    assert Unsigned.model_validate({"u8": [1, 2, 255]}).u8.tolist() == [1, 2, 255]
+    assert Unsigned.model_validate({"u8": np.array([7])}).u8.tolist() == [7]
+    assert Unsigned.model_validate({"u8": json_array("int64", [7])}).u8.tolist() == [7]
+
+    for bad in ({"u8": [-1]}, {"u8": [256]}, {"u8": json_array("int64", [-1])}):
+        with pytest.raises(ValidationError, match="do not fit into dtype"):
+            Unsigned.model_validate(bad)
+
+
+def test_out_of_range_error_survives_json():
+    """A complex value in the error context must not break the 422 response.
+
+    FastAPI encodes the error context to build the response body, and cannot
+    encode a Python complex, so an overflow here used to surface as a 500.
+    """
+
+    class Complex(BaseModel):
+        c64: Array[(None,), Complex64]
+
+    for bad in (
+        {"c64": np.array([1e40 + 0j])},
+        {
+            "c64": {
+                "object_type": "array",
+                "shape": [1],
+                "dtype": "complex128",
+                "data": {"buffer": [1e40], "encoding": "json"},
+            }
+        },
+    ):
+        with pytest.raises(ValidationError, match="do not fit into dtype") as exc:
+            Complex.model_validate(bad)
+        context = [error["ctx"] for error in exc.value.errors(include_url=False)]
+        assert json.dumps(context)
 
 
 def test_strict_types():
