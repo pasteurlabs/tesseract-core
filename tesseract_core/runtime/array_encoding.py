@@ -500,6 +500,46 @@ def _astype_checked(arr: ArrayLike, dtype: str) -> ArrayLike:
         raise _out_of_range(arr, dtype, example.item()) from None
 
 
+def resolve_dtype(
+    actual_dtype: str,
+    expected_dtype: str | None,
+    context: dict[str, Any] | None = None,
+) -> str:
+    """Resolve the dtype a value takes on, without touching the value itself.
+
+    The behavior can be controlled via the ``context`` dict:
+    - ``strict_types`` (bool): When True, reject dtypes that don't match the
+      expected dtype exactly (no same-kind casting).
+    """
+    if expected_dtype is None:
+        return actual_dtype
+
+    strict_types = (context or {}).get("strict_types", False)
+
+    if strict_types:
+        if actual_dtype != expected_dtype:
+            raise PydanticCustomError(
+                "array_dtype_mismatch",
+                "Array dtype '{actual_dtype}' does not match expected dtype '{expected_dtype}' "
+                "(strict_types=True, no casting)",
+                {
+                    "actual_dtype": actual_dtype,
+                    "expected_dtype": expected_dtype,
+                },
+            )
+    elif not _castable(actual_dtype, expected_dtype):
+        raise PydanticCustomError(
+            "array_dtype_mismatch",
+            "Array dtype '{actual_dtype}' cannot be safely cast to '{expected_dtype}'",
+            {
+                "actual_dtype": actual_dtype,
+                "expected_dtype": expected_dtype,
+            },
+        )
+
+    return expected_dtype
+
+
 def _coerce_shape_dtype(
     arr: ArrayLike,
     expected_shape: ShapeType,
@@ -524,7 +564,6 @@ def _coerce_shape_dtype(
         context = {}
 
     strict_shapes = context.get("strict_shapes", False)
-    strict_types = context.get("strict_types", False)
 
     if expected_shape is Ellipsis:
         # No shape check
@@ -571,27 +610,9 @@ def _coerce_shape_dtype(
         ) from None
 
     if expected_dtype is not None:
-        if strict_types:
-            if str(arr.dtype) != expected_dtype:
-                raise PydanticCustomError(
-                    "array_dtype_mismatch",
-                    "Array dtype '{actual_dtype}' does not match expected dtype '{expected_dtype}' "
-                    "(strict_types=True, no casting)",
-                    {
-                        "actual_dtype": str(arr.dtype),
-                        "expected_dtype": expected_dtype,
-                    },
-                )
-        elif not _castable(arr.dtype, expected_dtype):
-            raise PydanticCustomError(
-                "array_dtype_mismatch",
-                "Array dtype '{actual_dtype}' cannot be safely cast to '{expected_dtype}'",
-                {
-                    "actual_dtype": str(arr.dtype),
-                    "expected_dtype": expected_dtype,
-                },
-            )
-        arr = _astype_checked(arr, expected_dtype)
+        arr = _astype_checked(
+            arr, resolve_dtype(str(arr.dtype), expected_dtype, context)
+        )
 
     allowed_dtypes = [dtype.lower() for dtype in get_args(AllowedDtypes)]
     if arr.dtype.name not in allowed_dtypes:
