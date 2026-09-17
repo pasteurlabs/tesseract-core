@@ -17,7 +17,7 @@ To schedule a removal:
 Removals only ever happen on *minor* (or major) releases, never on patch
 releases, so that a hotfix is never forced to drop a deprecated shim. A tombstone
 is therefore overdue only when the release being cut both postdates its removal
-date and bumps the minor version relative to the previous release.
+date and is a minor (or major) release (i.e. its patch number is zero).
 
 Dating removals rather than pinning them to a version gives users a predictable
 migration window. Releases can land in quick succession, so a version-based
@@ -35,8 +35,8 @@ from packaging.version import InvalidVersion, Version
 class Tombstone(NamedTuple):
     """A deprecation scheduled for removal after a specific date."""
 
-    remove_after: str
-    """Date by which the deprecated code must be gone (ISO ``"YYYY-MM-DD"``)."""
+    remove_after: date
+    """Date by which the deprecated code must be gone."""
 
     what: str
     """Short name of the deprecated feature, shown when the removal is due."""
@@ -57,12 +57,12 @@ class Release(NamedTuple):
 TOMBSTONES: tuple[Tombstone, ...] = (
     # Example:
     # Tombstone(
-    #     remove_after="2026-12-01",
+    #     remove_after=date(2026, 12, 1),
     #     what="--foo alias from `tesseract build`",
     #     hint="remove backend support from engine.py, too"
     # ),
     Tombstone(
-        remove_after="2026-12-01",
+        remove_after=date(2026, 12, 1),
         what="'python-pip' requirements provider alias",
         hint=(
             "Remove the 'python-pip' -> 'uv-pip' normalization in "
@@ -70,7 +70,7 @@ TOMBSTONES: tuple[Tombstone, ...] = (
         ),
     ),
     Tombstone(
-        remove_after="2026-12-01",
+        remove_after=date(2026, 12, 1),
         what="build_config.python_version alias",
         hint=(
             "Remove the deprecated TesseractBuildConfig.python_version field and its "
@@ -80,7 +80,7 @@ TOMBSTONES: tuple[Tombstone, ...] = (
         ),
     ),
     Tombstone(
-        remove_after="2026-12-01",
+        remove_after=date(2026, 12, 1),
         what="Tesseract(url) constructor",
         hint=(
             "Remove the deprecated Tesseract.__init__ shim in "
@@ -90,7 +90,7 @@ TOMBSTONES: tuple[Tombstone, ...] = (
         ),
     ),
     Tombstone(
-        remove_after="2026-12-01",
+        remove_after=date(2026, 12, 1),
         what="InputFileReference / OutputFileReference aliases",
         hint=(
             "Remove InputFileReference, OutputFileReference and their validators "
@@ -143,26 +143,23 @@ def latest_releases() -> list[Release]:
     return releases
 
 
-def _is_minor_bump(current: Version, previous: Version | None) -> bool:
-    """Whether ``current`` bumps the minor (or major) version over ``previous``.
+def _is_minor_release(version: Version) -> bool:
+    """Whether ``version`` is a minor (or major) release, i.e. of the form ``x.y.0``.
 
-    With no previous release to compare against we can't tell a minor from a
-    patch, so we assume a minor bump. Surfacing an overdue removal is safer than
-    silently letting a stale shim ship.
+    A patch release always has a non-zero patch number, so a zero patch marks a
+    minor or major bump. Post-releases (``x.y.0.postN``) and longer release tuples
+    are patches to an existing release, not new minors.
     """
-    if previous is None:
-        return True
-    return (current.major, current.minor) > (previous.major, previous.minor)
+    return version.micro == 0 and version.post is None and len(version.release) <= 3
 
 
 def overdue_tombstones(releases: list[Release]) -> list[Tombstone]:
     """Return tombstones due for removal in the release being cut (``releases[0]``).
 
     A tombstone is overdue only when that release postdates its removal date and
-    is a minor (or major) bump. Patch releases never force a removal.
+    is a minor (or major) release. Patch releases never force a removal.
     """
     current = releases[0]
-    previous = releases[1].version if len(releases) > 1 else None
-    if not _is_minor_bump(current.version, previous):
+    if not _is_minor_release(current.version):
         return []
-    return [t for t in TOMBSTONES if current.when > date.fromisoformat(t.remove_after)]
+    return [t for t in TOMBSTONES if current.when > t.remove_after]

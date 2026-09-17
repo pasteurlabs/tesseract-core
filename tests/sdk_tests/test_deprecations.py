@@ -64,7 +64,7 @@ def one_tombstone(monkeypatch):
     monkeypatch.setattr(
         _deprecations,
         "TOMBSTONES",
-        (Tombstone(remove_after="2026-12-01", what="thing", hint="delete it"),),
+        (Tombstone(remove_after=date(2026, 12, 1), what="thing", hint="delete it"),),
     )
 
 
@@ -72,24 +72,25 @@ def _overdue(*entries: tuple[str, str]) -> int:
     return len(overdue_tombstones(_releases(*entries)))
 
 
-def test_overdue_fires_after_target_date_on_minor_bump(one_tombstone):
+def test_overdue_fires_after_target_date_on_minor_release(one_tombstone):
     """A tombstone is due only once a minor release postdates its target."""
-    prev = ("1.12.0", "2026-08-01")
-    # Minor bump, but date not yet past the target.
-    assert _overdue(("1.13.0", "2026-11-30"), prev) == 0
+    # Minor release, but date not yet past the target.
+    assert _overdue(("1.13.0", "2026-11-30")) == 0
     # Not overdue on the target date itself; only afterwards.
-    assert _overdue(("1.13.0", "2026-12-01"), prev) == 0
-    assert _overdue(("1.13.0", "2026-12-02"), prev) == 1
+    assert _overdue(("1.13.0", "2026-12-01")) == 0
+    assert _overdue(("1.13.0", "2026-12-02")) == 1
 
 
 def test_patch_release_never_fires(one_tombstone):
     """A patch release past the target date must not force a removal."""
-    # 1.12.1 postdates the target, but a patch bump over 1.12.0 doesn't count.
-    assert _overdue(("1.12.1", "2026-12-15"), ("1.12.0", "2026-08-01")) == 0
+    # 1.12.1 postdates the target, but a patch release doesn't count.
+    assert _overdue(("1.12.1", "2026-12-15")) == 0
+    # A post-release of a minor doesn't count either.
+    assert _overdue(("1.13.0.post1", "2026-12-15")) == 0
     # The following minor release does trip it.
-    assert _overdue(("1.13.0", "2027-01-01"), ("1.12.1", "2026-12-15")) == 1
+    assert _overdue(("1.13.0", "2027-01-01")) == 1
 
 
-def test_first_ever_release_assumes_minor(one_tombstone):
-    """With no previous release to compare, a past-date tombstone is overdue."""
-    assert _overdue(("1.0.0", "2026-12-15")) == 1
+def test_major_release_fires(one_tombstone):
+    """A major release (x.0.0) past the target date is overdue."""
+    assert _overdue(("2.0.0", "2026-12-15")) == 1
