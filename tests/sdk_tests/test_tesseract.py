@@ -1,3 +1,4 @@
+import functools
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock
@@ -125,21 +126,14 @@ def test_Tesseract_from_tesseract_api_does_not_leak_config_between_instances(
 def test_Tesseract_apply_runs_under_its_own_config_after_a_later_instance_is_built(
     dummy_tesseract_module, tmp_path, mocker
 ):
-    """A call on an *earlier* Tesseract must still see its own config.
+    """A call on an earlier Tesseract runs under its own config, not the global one.
 
-    Not whichever config happens to be globally active at call time.
-    Construction no longer leaves any trace on the process-global config
-    once it returns (#672 and the follow-up review on #703), so this
-    simulates the case that guard still has to cover: some other code
-    (another in-process Tesseract's own call, most plausibly) is the one
-    genuinely, transiently active as the global config while first.apply()
-    runs.
-
-    profiling is the config value run_tesseract() itself reads via
-    get_config(), so it directly shows whether that other config leaks
-    into this call.
+    Simulates a second instance's config being globally active (e.g. because
+    it is mid-call) while the first instance's apply() runs. profiling is the
+    config value run_tesseract() reads via get_config(), so it shows directly
+    whether the wrong config leaks in.
     """
-    from tesseract_core.runtime.config import active_config
+    from tesseract_core.runtime.config import override_config
 
     first_output = tmp_path / "first_output"
     first_output.mkdir()
@@ -155,7 +149,7 @@ def test_Tesseract_apply_runs_under_its_own_config_after_a_later_instance_is_bui
 
     # While second's own snapshot is (hypothetically) the active global
     # config, e.g. because second.apply() is itself mid-call right now.
-    with active_config(second._client._config_snapshot):
+    with override_config(second._client._config_snapshot):
         profiler_spy = mocker.patch("tesseract_core.runtime.profiler.Profiler")
         result = first.apply({"a": [1.0, 2.0], "b": [0.0, 0.0], "s": 1})
         assert list(result["result"]) == [1.0, 2.0]
@@ -167,6 +161,41 @@ def test_Tesseract_apply_runs_under_its_own_config_after_a_later_instance_is_bui
         # The run went to first's own output dir, not second's.
         run_dirs = list(first_output.glob("run_*"))
         assert len(run_dirs) == 1
+
+
+def test_Tesseract_config_edit_from_within_endpoint_persists_across_calls(
+    dummy_tesseract_module, mocker
+):
+    """A config edit made inside an endpoint carries over to later calls.
+
+    This mirrors the containerized case, where the runtime config is a live
+    process global for the lifetime of the container.
+    """
+    from tesseract_core.runtime.config import get_config, update_config
+
+    tess = Tesseract.from_tesseract_api(dummy_tesseract_module)
+    assert tess._client._config_snapshot[0].profiling is False
+
+    original_apply = tess._client._endpoints["apply"]
+
+    @functools.wraps(original_apply)
+    def apply_that_enables_profiling(payload):
+        update_config(profiling=True)
+        return original_apply(payload)
+
+    tess._client._endpoints["apply"] = apply_that_enables_profiling
+
+    tess.apply({"a": [1.0, 2.0], "b": [0.0, 0.0], "s": 1})
+    assert tess._client._config_snapshot[0].profiling is True
+
+    # A subsequent call runs under the edited config: the profiler is enabled.
+    tess._client._endpoints["apply"] = original_apply
+    profiler_spy = mocker.patch("tesseract_core.runtime.profiler.Profiler")
+    tess.apply({"a": [1.0, 2.0], "b": [0.0, 0.0], "s": 1})
+    assert profiler_spy.call_args.kwargs["enabled"] is True
+
+    # The edit stayed contained to this instance's snapshot, not the global.
+    assert get_config().profiling is False
 
 
 def test_Tesseract_from_image(mock_serving, mock_clients):

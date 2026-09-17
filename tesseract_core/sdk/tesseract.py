@@ -340,17 +340,9 @@ class Tesseract:
             update_config,
         )
 
-        # Runtime config is process-global (unlike from_image, which passes
-        # it via TESSERACT_* environment variables to an isolated
-        # subprocess). The update_config() calls below need to freely
-        # rebuild it from scratch for this instance alone, without a prior
-        # in-process Tesseract's explicit overrides leaking in (#672), so
-        # all of that happens inside override_config(), which starts from a
-        # blank slate and puts back whatever was globally active before this
-        # call started once we're done, success or failure. Construction is
-        # therefore invisible outside this function; only run_tesseract()
-        # ever installs a snapshot for longer than that, and only for the
-        # duration of one call.
+        # Runtime config is process-global. The update_config() calls below
+        # need to rebuild it from scratch for this instance alone, without a
+        # prior in-process Tesseract's explicit overrides leaking in.
         with override_config():
             if isinstance(tesseract_api, str | Path):
                 from tesseract_core.runtime.core import load_module_from_path
@@ -394,11 +386,8 @@ class Tesseract:
                 config_kwargs.setdefault("gpu_transport", "none")
             update_config(**config_kwargs)
 
-            # Captured now, after this instance's own config settles, so its
-            # endpoints run under exactly this config later regardless of
-            # what any other in-process Tesseract (or a later call to this
-            # same classmethod) does to the process-global config in the
-            # meantime.
+            # Capture this instance's config so its endpoints run under it
+            # later, regardless of what else touches the global config.
             config_snapshot = snapshot_config()
 
         obj = cls.__new__(cls)
@@ -1282,23 +1271,17 @@ class LocalClient:
         config_snapshot: ConfigSnapshot | None = None,
     ) -> None:
         # Import here to not depend on runtime dependencies globally
-        from tesseract_core.runtime.config import active_config, snapshot_config
+        from tesseract_core.runtime.config import override_config, snapshot_config
         from tesseract_core.runtime.core import create_endpoints
         from tesseract_core.runtime.serve import create_rest_api
 
-        # Whatever the process-global config happens to be right now, if the
-        # caller didn't capture one of its own (e.g. a direct LocalClient
-        # user rather than Tesseract.from_tesseract_api). Endpoints run
-        # under this snapshot regardless of what runs before or after them,
-        # starting right here: create_endpoints()/create_rest_api() below
-        # read get_config() too, and must see this instance's own config,
-        # not whatever get_config() would lazily default to if nothing had
-        # set it yet, or whatever another in-process Tesseract leaves behind.
+        # Fall back to the current global config for direct LocalClient users
+        # (Tesseract.from_tesseract_api passes its own snapshot).
         self._config_snapshot = (
             config_snapshot if config_snapshot is not None else snapshot_config()
         )
 
-        with active_config(self._config_snapshot):
+        with override_config(self._config_snapshot):
             self._endpoints = {
                 func.__name__: func for func in create_endpoints(tesseract_api)
             }
@@ -1335,7 +1318,11 @@ class LocalClient:
             raise RuntimeError(f"Endpoint {endpoint} not found in Tesseract API.")
 
         # Import here to not depend on runtime dependencies globally
-        from tesseract_core.runtime.config import active_config, get_config
+        from tesseract_core.runtime.config import (
+            get_config,
+            override_config,
+            snapshot_config,
+        )
         from tesseract_core.runtime.file_interactions import join_paths
         from tesseract_core.runtime.mpa import start_run
         from tesseract_core.runtime.profiler import Profiler
@@ -1366,17 +1353,11 @@ class LocalClient:
                 f"Invalid value for stream_logs: {stream_logs}. Must be True, False, or a callable."
             )
 
-        # This instance's own config, not whatever the process-global config
-        # happens to be by now: another in-process Tesseract (or a later call
-        # on this one) may have changed it since __init__ captured it (#672).
-        # Everything below that can read get_config(), the profiler flag
-        # here, and the endpoint itself, which may consult input_path/
-        # output_path/etc. deep inside tesseract_api.py, runs under it. Any
-        # update_config() call made from within the endpoint itself is
-        # discarded when this block exits, not merged into the snapshot;
-        # mutating runtime config from inside a Tesseract call isn't a
-        # supported pattern.
-        with active_config(self._config_snapshot):
+        # Run under this instance's own config rather than whatever the global
+        # happens to be. Any update_config() the endpoint makes is captured back
+        # into the snapshot afterwards, so it persists to later calls (matching
+        # the containerized case).
+        with override_config(self._config_snapshot):
             # Set up profiler
             profiler = Profiler(enabled=get_config().profiling)
 
@@ -1398,6 +1379,8 @@ class LocalClient:
                 raise RuntimeError(
                     f"{tb}\nError running Tesseract API {endpoint}: {ex} (see above for full traceback)"
                 ) from None
+            finally:
+                self._config_snapshot = snapshot_config()
 
         if OutputSchema is not None:
             # Validate via schema, then dump to stay consistent with other clients
