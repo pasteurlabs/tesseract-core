@@ -22,6 +22,7 @@ from typing import Any, TypeAlias
 from typing import List as list_  # noqa: UP035
 
 from tesseract_core.sdk.config import get_config
+from tesseract_core.sdk.serving import diagnose_exit, is_running
 
 logger = logging.getLogger("tesseract")
 
@@ -576,6 +577,11 @@ class Container:
             )
         return result.returncode, result.stdout
 
+    @property
+    def url(self) -> str:
+        """Base URL the container is serving on."""
+        return f"http://{self.host_ip}:{self.host_port}"
+
     def __str__(self) -> str:
         """Name this container in a message meant for a person.
 
@@ -707,33 +713,22 @@ class Container:
             raise ex
 
 
-def is_running(container: Container) -> bool:
-    """Whether a container is running now, reading it again to find out.
-
-    A function rather than a method: `Container` mirrors docker-py, where you ask
-    by comparing `status` yourself. This is that comparison, with the read that
-    has to come first so the answer is not a stale one.
-    """
+# The following `singledispatch` functions allow dispatch between different `ServedTesseract`
+# instances (currently `Container` and `TesseractProcess`) without introducing inconsistency
+# between our `Container` class and docker-py's.
+@is_running.register
+def _(container: Container) -> bool:
+    """Whether a container is running now (includes reload)."""
     container.reload()
     return container.status == "running"
 
 
-def diagnose_exit(container: Container, logs: str) -> str:
+@diagnose_exit.register
+def _(container: Container, logs: str) -> str:
     """Anything `docker inspect` recorded about why a container stopped.
 
-    A function rather than a method: `Container` mirrors docker-py, and docker-py
-    has nothing like this. Reads the recorded state rather than the container,
-    which by the time anything is said about a failure has been disposed of --
-    liveness is what noticed it had stopped, and reading it refreshed that state,
-    so what it holds is how it stopped.
-
-    Params:
-        container: The container that stopped.
-        logs: What it wrote, for context. Not repeated in the result.
-
-    Returns:
-        A sentence for whoever has to read the failure, or an empty string if
-        there is nothing to add beyond the exit code and the logs.
+    Designed to be called when `is_running()` returns `False` which refreshes `State`
+    to reflect any known failure reasons.
     """
     del logs  # a container's own output is all the other evidence there is
     state = container.attrs.get("State", {})
