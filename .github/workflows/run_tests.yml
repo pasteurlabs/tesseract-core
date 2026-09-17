@@ -60,7 +60,9 @@ jobs:
 
       - name: Run test suite
         run: |
+          # No typeguard here: it breaks coverage's branch mapping (gh#691).
           uv run --no-sync pytest \
+            -o addopts="--durations=10" \
             -v \
             --skip-endtoend \
             --timeout=300 \
@@ -76,6 +78,37 @@ jobs:
           slug: pasteurlabs/tesseract-core
           files: coverage*.xml
           fail_ci_if_error: true
+
+  # Enforces typeguard's runtime type checks. The coverage jobs disable
+  # typeguard (gh#691), so this is where type annotations are validated in CI.
+  tests-typeguard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    defaults:
+      run:
+        shell: bash -el {0}
+
+    steps:
+      - name: Set up Git repository
+        uses: actions/checkout@v7
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install package
+        run: |
+          cp production.uv.lock uv.lock
+          uv sync --python 3.14 --extra dev --frozen
+
+      - name: Run test suite with typeguard
+        run: |
+          uv run --no-sync pytest \
+            -v \
+            --skip-endtoend \
+            --timeout=300
 
   get-e2e-matrix:
     runs-on: ubuntu-latest
@@ -209,8 +242,10 @@ jobs:
 
       - name: Run test suite
         run: |
+          # No typeguard here: it breaks coverage's branch mapping (gh#691).
           if [ "${{ matrix.unit-tesseract }}" == "base" ]; then
             uv run --no-sync pytest \
+              -o addopts="--durations=10" \
               --always-run-endtoend \
               --timeout=300 \
               --cov-branch \
@@ -221,6 +256,7 @@ jobs:
               -k "not test_examples"
           else
             uv run --no-sync pytest \
+              -o addopts="--durations=10" \
               --always-run-endtoend \
               --timeout=300 \
               --cov-branch \
@@ -379,7 +415,9 @@ jobs:
 
       - name: Run GPU test suite
         run: |
+          # No typeguard here: it breaks coverage's branch mapping (gh#691).
           uv run --no-sync pytest \
+            -o addopts="--durations=10" \
             -v \
             -m gpu \
             --always-run-endtoend \
@@ -400,7 +438,7 @@ jobs:
 
   all-ok:
     if: always()
-    needs: [tests-base, tests-e2e, tests-demos, tests-gpu]
+    needs: [tests-base, tests-typeguard, tests-e2e, tests-demos, tests-gpu]
 
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -410,6 +448,11 @@ jobs:
         run: |
           if [[ "${{ needs.tests-base.result }}" != "success" && "${{ needs.tests-base.result }}" != "skipped" ]]; then
             echo "Base tests failed"
+            exit 1
+          fi
+
+          if [[ "${{ needs.tests-typeguard.result }}" != "success" && "${{ needs.tests-typeguard.result }}" != "skipped" ]]; then
+            echo "Typeguard tests failed"
             exit 1
           fi
 
