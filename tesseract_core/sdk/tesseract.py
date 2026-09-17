@@ -43,6 +43,7 @@ if TYPE_CHECKING:
     # Imported for type hints only. `from __future__ import annotations` makes
     # every annotation below a string, so these names are never needed at
     # runtime and the SDK does not eagerly pull in the runtime/CUDA machinery.
+    from tesseract_core.runtime.config import ConfigSnapshot
     from tesseract_core.runtime.cuda.ipc import IpcDeviceArray
 
 # Output serialization formats; single SDK-side definition lives in engine.
@@ -362,51 +363,69 @@ class Tesseract:
         Returns:
             A Tesseract instance.
         """
-        from tesseract_core.runtime.config import update_config
+        from tesseract_core.runtime.config import (
+            override_config,
+            snapshot_config,
+            update_config,
+        )
 
-        if isinstance(tesseract_api, str | Path):
-            from tesseract_core.runtime.core import load_module_from_path
+        # Runtime config is process-global. The update_config() calls below
+        # need to rebuild it from scratch for this instance alone, without a
+        # prior in-process Tesseract's explicit overrides leaking in.
+        with override_config():
+            if isinstance(tesseract_api, str | Path):
+                from tesseract_core.runtime.core import load_module_from_path
 
-            tesseract_api_path = Path(tesseract_api).resolve(strict=True)
-            if not tesseract_api_path.is_file():
-                raise RuntimeError(
-                    f"Tesseract API path {tesseract_api_path} is not a file."
+                tesseract_api_path = Path(tesseract_api).resolve(strict=True)
+                if not tesseract_api_path.is_file():
+                    raise RuntimeError(
+                        f"Tesseract API path {tesseract_api_path} is not a file."
+                    )
+
+                try:
+                    tesseract_api = load_module_from_path(tesseract_api_path)
+                except ImportError as ex:
+                    raise RuntimeError(
+                        f"Cannot load Tesseract API from {tesseract_api_path}"
+                    ) from ex
+
+            if input_path is not None:
+                update_config(input_path=str(input_path.resolve()))
+
+            resolved_output_path = None
+            if output_path is not None:
+                resolved_output_path = engine._resolve_file_path(
+                    output_path, make_dir=True
                 )
+                update_config(output_path=str(resolved_output_path))
 
-            try:
-                tesseract_api = load_module_from_path(tesseract_api_path)
-            except ImportError as ex:
-                raise RuntimeError(
-                    f"Cannot load Tesseract API from {tesseract_api_path}"
-                ) from ex
+            # Apply runtime_config options. Resolve the GPU transport with the same
+            # precedence as serve() (explicit kwarg > runtime_config > "none"),
+            # resolving it here so the config never receives None -- its field is a
+            # plain str literal.
+            config_kwargs: dict[str, Any] = {
+                "output_format": output_format,
+                "debug": True,
+            }
+            if runtime_config is not None:
+                config_kwargs.update(runtime_config)
+            if gpu_transport is not None:
+                config_kwargs["gpu_transport"] = gpu_transport
+            else:
+                config_kwargs.setdefault("gpu_transport", "none")
+            update_config(**config_kwargs)
 
-        if input_path is not None:
-            update_config(input_path=str(input_path.resolve()))
-
-        resolved_output_path = None
-        if output_path is not None:
-            resolved_output_path = engine._resolve_file_path(output_path, make_dir=True)
-            update_config(output_path=str(resolved_output_path))
-
-        # Apply runtime_config options. Resolve the GPU transport with the same
-        # precedence as serve() (explicit kwarg > runtime_config > "none"),
-        # resolving it here so the config never receives None -- its field is a
-        # plain str literal.
-        config_kwargs: dict[str, Any] = {
-            "output_format": output_format,
-            "debug": True,
-        }
-        if runtime_config is not None:
-            config_kwargs.update(runtime_config)
-        if gpu_transport is not None:
-            config_kwargs["gpu_transport"] = gpu_transport
-        else:
-            config_kwargs.setdefault("gpu_transport", "none")
-        update_config(**config_kwargs)
+            # Capture this instance's config so its endpoints run under it
+            # later, regardless of what else touches the global config.
+            config_snapshot = snapshot_config()
 
         obj = cls.__new__(cls)
         obj._stream_logs = stream_logs
-        obj._client = LocalClient(tesseract_api, output_path=resolved_output_path)
+        obj._client = LocalClient(
+            tesseract_api,
+            output_path=resolved_output_path,
+            config_snapshot=config_snapshot,
+        )
         return obj
 
     @classmethod
@@ -1003,10 +1022,10 @@ def _encode_payload(
     ``gpu_transport`` other than ``none`` is set, GPU arrays are exported by
     reference (host arrays still go base64), which pins each exported allocation
     in a process-global registry on the runtime side. Those pins are released on
-    context exit -- by then the caller has read the full response, so the server
-    has copied the inputs out and they are provably dead. The release is skipped
-    (and the transport machinery never imported) when no GPU array was actually
-    exported.
+    context exit, by which point the caller has read the full response, so the
+    server has copied the inputs out and they are provably dead. The release is
+    skipped (and the transport machinery never imported) when no GPU array was
+    actually exported.
 
     Releasing on exit rather than at the start of the next request keeps pinned
     GPU memory bounded to a single in-flight request.
@@ -1445,16 +1464,27 @@ class LocalClient:
     """Local Client for Tesseracts."""
 
     def __init__(
-        self, tesseract_api: ModuleType, output_path: Path | None = None
+        self,
+        tesseract_api: ModuleType,
+        output_path: Path | None = None,
+        config_snapshot: ConfigSnapshot | None = None,
     ) -> None:
         # Import here to not depend on runtime dependencies globally
+        from tesseract_core.runtime.config import override_config, snapshot_config
         from tesseract_core.runtime.core import create_endpoints
         from tesseract_core.runtime.serve import create_rest_api
 
-        self._endpoints = {
-            func.__name__: func for func in create_endpoints(tesseract_api)
-        }
-        self._openapi_schema = create_rest_api(tesseract_api).openapi()
+        # Fall back to the current global config for direct LocalClient users
+        # (Tesseract.from_tesseract_api passes its own snapshot).
+        self._config_snapshot = (
+            config_snapshot if config_snapshot is not None else snapshot_config()
+        )
+
+        with override_config(self._config_snapshot):
+            self._endpoints = {
+                func.__name__: func for func in create_endpoints(tesseract_api)
+            }
+            self._openapi_schema = create_rest_api(tesseract_api).openapi()
 
         if output_path is None:
             output_path = Path(tempfile.mkdtemp(prefix="tesseract_output_"))
@@ -1487,7 +1517,11 @@ class LocalClient:
             raise RuntimeError(f"Endpoint {endpoint} not found in Tesseract API.")
 
         # Import here to not depend on runtime dependencies globally
-        from tesseract_core.runtime.config import get_config
+        from tesseract_core.runtime.config import (
+            get_config,
+            override_config,
+            snapshot_config,
+        )
         from tesseract_core.runtime.file_interactions import join_paths
         from tesseract_core.runtime.mpa import start_run
         from tesseract_core.runtime.profiler import Profiler
@@ -1518,27 +1552,34 @@ class LocalClient:
                 f"Invalid value for stream_logs: {stream_logs}. Must be True, False, or a callable."
             )
 
-        # Set up profiler
-        profiler = Profiler(enabled=get_config().profiling)
+        # Run under this instance's own config rather than whatever the global
+        # happens to be. Any update_config() the endpoint makes is captured back
+        # into the snapshot afterwards, so it persists to later calls (matching
+        # the containerized case).
+        with override_config(self._config_snapshot):
+            # Set up profiler
+            profiler = Profiler(enabled=get_config().profiling)
 
-        try:
-            with start_run(base_dir=rundir, log_sink=log_sink):
-                with profiler:
-                    if parsed_payload is not None:
-                        result = self._endpoints[endpoint](parsed_payload)
-                    else:
-                        result = self._endpoints[endpoint]()
+            try:
+                with start_run(base_dir=rundir, log_sink=log_sink):
+                    with profiler:
+                        if parsed_payload is not None:
+                            result = self._endpoints[endpoint](parsed_payload)
+                        else:
+                            result = self._endpoints[endpoint]()
 
-                # Print profiling stats inside start_run context
-                # so they go through stdio redirection to the configured sink
-                profiler.print_stats()
-        except Exception as ex:
-            # Some clients like Tesseract-JAX swallow tracebacks from re-raised exceptions, so we explicitly
-            # format the traceback here to include it in the error message.
-            tb = traceback.format_exc()
-            raise RuntimeError(
-                f"{tb}\nError running Tesseract API {endpoint}: {ex} (see above for full traceback)"
-            ) from None
+                    # Print profiling stats inside start_run context
+                    # so they go through stdio redirection to the configured sink
+                    profiler.print_stats()
+            except Exception as ex:
+                # Some clients like Tesseract-JAX swallow tracebacks from re-raised exceptions, so we explicitly
+                # format the traceback here to include it in the error message.
+                tb = traceback.format_exc()
+                raise RuntimeError(
+                    f"{tb}\nError running Tesseract API {endpoint}: {ex} (see above for full traceback)"
+                ) from None
+            finally:
+                self._config_snapshot = snapshot_config()
 
         if OutputSchema is not None:
             # Validate via schema, then dump to stay consistent with other clients
