@@ -22,6 +22,7 @@ from tesseract_core.runtime.schema_types import (
     Int8,
     Int32,
     Int64,
+    UInt8,
     is_differentiable,
 )
 
@@ -542,6 +543,7 @@ def test_narrowing_casts_must_preserve_values():
     class Narrow(BaseModel):
         i8: Array[(None,), Int8]
         f32: Array[(None,), Float32]
+        u8: Array[(None,), UInt8]
 
     def json_array(dtype, buffer):
         return {
@@ -551,30 +553,46 @@ def test_narrowing_casts_must_preserve_values():
             "data": {"buffer": buffer, "encoding": "json"},
         }
 
+    ok = {"u8": [0]}
+
     # Narrowing is fine as long as the values survive it: precision loss and
-    # non-finite values passing through are not errors.
+    # non-finite values passing through are not errors. A plain integer reaches
+    # an unsigned field, which is the common shape of a JSON number.
     res = Narrow.model_validate(
-        {"i8": [1, -2, 127], "f32": [0.1, 1e30, float("inf"), float("nan")]}
+        {
+            "i8": [1, -2, 127],
+            "f32": [0.1, 1e30, float("inf"), float("nan")],
+            "u8": [1, 2, 255],
+        }
     )
     assert res.i8.dtype == np.int8 and res.i8.tolist() == [1, -2, 127]
     assert res.f32.dtype == np.float32 and res.f32[0] == np.float32(0.1)
     assert np.isinf(res.f32[2]) and np.isnan(res.f32[3])
+    assert res.u8.dtype == np.uint8 and res.u8.tolist() == [1, 2, 255]
 
     res = Narrow.model_validate(
-        {"i8": json_array("int8", [1.0, -2.0]), "f32": json_array("float32", [1e30])}
+        {
+            "i8": json_array("int8", [1.0, -2.0]),
+            "f32": json_array("float32", [1e30]),
+            "u8": json_array("int64", [7]),
+        }
     )
     assert res.i8.tolist() == [1, -2]
+    assert res.u8.tolist() == [7]
 
     # Values that wrap or overflow are rejected instead of silently changed,
     # on both the Python and the JSON-encoded path.
     for bad in (
-        {"i8": [300], "f32": [0.0]},
-        {"i8": np.array([300]), "f32": [0.0]},
-        {"i8": [-129], "f32": [0.0]},
-        {"i8": [0], "f32": [1e40]},
-        {"i8": json_array("int8", [300]), "f32": [0.0]},
-        {"i8": json_array("int8", [-129.0]), "f32": [0.0]},
-        {"i8": [0], "f32": json_array("float32", [1e40])},
+        {"i8": [300], "f32": [0.0], **ok},
+        {"i8": np.array([300]), "f32": [0.0], **ok},
+        {"i8": [-129], "f32": [0.0], **ok},
+        {"i8": [0], "f32": [1e40], **ok},
+        {"i8": json_array("int8", [300]), "f32": [0.0], **ok},
+        {"i8": json_array("int8", [-129.0]), "f32": [0.0], **ok},
+        {"i8": [0], "f32": json_array("float32", [1e40]), **ok},
+        {"i8": [0], "f32": [0.0], "u8": [-1]},
+        {"i8": [0], "f32": [0.0], "u8": [256]},
+        {"i8": [0], "f32": [0.0], "u8": json_array("int64", [-1])},
     ):
         with pytest.raises(ValidationError, match="do not fit into dtype"):
             Narrow.model_validate(bad)

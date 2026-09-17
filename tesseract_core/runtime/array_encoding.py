@@ -167,6 +167,20 @@ class EncodedArrayModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+def _castable(src_dtype: Any, expected_dtype: str) -> bool:
+    """Whether *src_dtype* can reach *expected_dtype* without losing a value.
+
+    NumPy counts signed to unsigned as a change of kind, but the only thing
+    such a cast can lose is a value the target cannot hold, and
+    :func:`_astype_checked` refuses those.
+    """
+    if np.can_cast(src_dtype, expected_dtype, casting="same_kind"):
+        return True
+    return np.issubdtype(np.dtype(src_dtype), np.integer) and np.issubdtype(
+        np.dtype(expected_dtype), np.integer
+    )
+
+
 def get_array_model(
     expected_shape: ShapeType, expected_dtype: str | None, flags: Sequence[str]
 ) -> type[EncodedArrayModel]:
@@ -178,7 +192,7 @@ def get_array_model(
         subdtypes = [
             dtype
             for dtype in get_args(AllowedDtypes)
-            if np.can_cast(dtype, expected_dtype, casting="same_kind")
+            if _castable(dtype, expected_dtype)
         ]
         dtype_type = Literal[tuple(subdtypes)]
 
@@ -568,7 +582,7 @@ def _coerce_shape_dtype(
                         "expected_dtype": expected_dtype,
                     },
                 )
-        elif not np.can_cast(arr.dtype, expected_dtype, casting="same_kind"):
+        elif not _castable(arr.dtype, expected_dtype):
             raise PydanticCustomError(
                 "array_dtype_mismatch",
                 "Array dtype '{actual_dtype}' cannot be safely cast to '{expected_dtype}'",
