@@ -72,6 +72,31 @@ def test_type_adapter_round_trip():
     assert dumped_json == envelope
 
 
+def test_json_schema_identifies_tesseract_reference():
+    """Expose stable metadata and the accepted reference envelope to clients."""
+
+    class InputSchema(BaseModel):
+        target: TesseractReference
+
+    schema = InputSchema.model_json_schema()["properties"]["target"]
+
+    assert schema["title"] == "TesseractReference"
+    assert schema["x-tesseract-type"] == "reference"
+    assert schema["properties"] == {
+        "type": {
+            "type": "string",
+            "enum": ["api_path", "image", "url"],
+            "description": "Type of tesseract reference",
+        },
+        "ref": {
+            "type": "string",
+            "description": "URL or file path to the tesseract",
+        },
+    }
+    assert schema["required"] == ["type", "ref"]
+    assert schema["additionalProperties"] is False
+
+
 def test_base_model_model_dump():
     """OutputSchema.model_dump() contains the exact reference envelope."""
 

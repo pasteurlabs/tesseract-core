@@ -14,7 +14,12 @@ from pydantic_core import CoreSchema, core_schema
 
 
 class TesseractReference:
-    """Allows passing a reference to another Tesseract as input."""
+    """Allows passing a reference to another Tesseract as input.
+
+    Inputs use a ``{"type": ..., "ref": ...}`` envelope. ``type`` is one of
+    ``"api_path"``, ``"image"``, or ``"url"``, and ``ref`` is the corresponding
+    path, image name, or URL.
+    """
 
     def __init__(self, tesseract: Any) -> None:
         self._tesseract = tesseract
@@ -96,6 +101,8 @@ class TesseractReference:
         """Generate JSON schema for OpenAPI."""
         return {
             "type": "object",
+            "title": "TesseractReference",
+            "x-tesseract-type": "reference",
             "properties": {
                 "type": {
                     "type": "string",
