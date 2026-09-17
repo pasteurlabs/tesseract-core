@@ -9,6 +9,7 @@ on:
 jobs:
   auto-update-hooks:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
 
     steps:
       - name: Checkout code

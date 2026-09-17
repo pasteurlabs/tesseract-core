@@ -8,6 +8,7 @@ jobs:
   test-pip-install:
     name: "Test pip install"
     runs-on: "${{ matrix.os }}"
+    timeout-minutes: 60
     strategy:
       matrix:
         os:
