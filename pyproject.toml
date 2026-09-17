@@ -120,9 +120,6 @@ include = [
 ]
 
 [tool.pytest.ini_options]
-# typeguard is on by default for local dev and the tests-typeguard CI job. Its
-# AST rewriting confuses coverage's branch mapping and creates phantom partial
-# branches (gh#691), so the coverage CI jobs override addopts to drop it.
 addopts = ["--typeguard-packages=tesseract_core", "--durations=10"]
 testpaths = ["tests"]
 markers = [
