@@ -7,7 +7,6 @@ import sys
 import tempfile
 import traceback
 import uuid
-import warnings
 import weakref
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
@@ -93,19 +92,12 @@ class Tesseract:
     _timeout: float | tuple[float, float] | None = None
     _binref_pool_enabled: bool = False
 
-    def __init__(
-        self,
-        url: str,
-        server_output_path: str | Path | None = None,
-        timeout: float | tuple[float, float] | None = None,
-    ) -> None:
-        warnings.warn(
-            "Direct instantiation of Tesseract is deprecated. "
-            "Use Tesseract.from_url(), Tesseract.from_image(), or Tesseract.from_tesseract_api() instead.",
-            UserWarning,
-            stacklevel=2,
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        raise TypeError(
+            "Tesseract cannot be instantiated directly. "
+            "Use Tesseract.from_url(), Tesseract.from_image(), or "
+            "Tesseract.from_tesseract_api() instead."
         )
-        self._client = HTTPClient(url, output_path=server_output_path, timeout=timeout)
 
     @classmethod
     def from_url(
@@ -398,10 +390,14 @@ class Tesseract:
     def __exit__(self, *args: object) -> None:
         """Exit the Tesseract context.
 
-        This will stop the Tesseract server if it is running.
+        This will stop the Tesseract server if it is running, and release the
+        resources held by the client.
         """
         if self._serve_context is None:
-            # This can happen if __enter__ short-circuits (e.g., from_tesseract_api)
+            # Nothing was served by us (e.g., from_url or from_tesseract_api), so
+            # there is no container to stop, but an HTTP session is still ours to close
+            if isinstance(self._client, HTTPClient):
+                self._client.close()
             return
         self.teardown()
 
@@ -1016,10 +1012,11 @@ class HTTPClient:
             self._binref_pool = BinrefWritePool(self._input_path)
 
     def close(self) -> None:
-        """Release resources held by the client (e.g. the binref write pool)."""
+        """Release resources held by the client (HTTP session, binref write pool)."""
         if self._binref_pool is not None:
             self._binref_pool.close()
             self._binref_pool = None
+        self._session.close()
 
     @staticmethod
     def _sanitize_url(url: str) -> str:

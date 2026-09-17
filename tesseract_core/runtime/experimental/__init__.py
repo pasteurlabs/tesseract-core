@@ -21,9 +21,7 @@ from .mpa import (
     log_parameter,
 )
 from .paths import (
-    InputFileReference,
     InputPath,
-    OutputFileReference,
     OutputPath,
     require_file,
 )
@@ -62,10 +60,8 @@ for _obj in (
 del _obj
 
 __all__ = [
-    "InputFileReference",
     "InputPath",
     "LazySequence",
-    "OutputFileReference",
     "OutputPath",
     "TesseractReference",
     "finite_difference_jacobian",

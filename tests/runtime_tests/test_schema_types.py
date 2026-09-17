@@ -22,6 +22,7 @@ from tesseract_core.runtime.schema_types import (
     Int8,
     Int32,
     Int64,
+    UInt8,
     is_differentiable,
 )
 
@@ -578,6 +579,29 @@ def test_narrowing_casts_must_preserve_values():
     ):
         with pytest.raises(ValidationError, match="do not fit into dtype"):
             Narrow.model_validate(bad)
+
+
+def test_unsigned_field_accepts_signed_integers():
+    """A JSON number arrives as int64, which an unsigned field has to take."""
+
+    class Unsigned(BaseModel):
+        u8: Array[(None,), UInt8]
+
+    def json_array(dtype, buffer):
+        return {
+            "object_type": "array",
+            "shape": [len(buffer)],
+            "dtype": dtype,
+            "data": {"buffer": buffer, "encoding": "json"},
+        }
+
+    assert Unsigned.model_validate({"u8": [1, 2, 255]}).u8.tolist() == [1, 2, 255]
+    assert Unsigned.model_validate({"u8": np.array([7])}).u8.tolist() == [7]
+    assert Unsigned.model_validate({"u8": json_array("int64", [7])}).u8.tolist() == [7]
+
+    for bad in ({"u8": [-1]}, {"u8": [256]}, {"u8": json_array("int64", [-1])}):
+        with pytest.raises(ValidationError, match="do not fit into dtype"):
+            Unsigned.model_validate(bad)
 
 
 def test_out_of_range_error_survives_json():

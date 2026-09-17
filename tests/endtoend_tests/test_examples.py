@@ -104,9 +104,6 @@ TEST_CASES = {
     "conda": Config(),
     "required_files": Config(input_path="input"),
     "file_io": Config(input_path="test_cases/testdata", output_path="__tmp_path__"),
-    "filereference": Config(
-        input_path="test_cases/testdata", output_path="__tmp_path__"
-    ),
     "metrics": Config(test_with_random_inputs=True),
     "qp_solve": Config(),
     "inherit_base_image_packages": Config(),

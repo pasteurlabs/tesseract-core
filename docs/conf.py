@@ -118,7 +118,12 @@ if os.environ.get("READTHEDOCS_VERSION_TYPE") == "external":
 else:
     _git_ref = (
         os.environ.get("READTHEDOCS_GIT_IDENTIFIER")  # RTD: tag or branch
-        or os.environ.get("GITHUB_HEAD_REF")  # GH Actions: PR source branch
+        # GH Actions PR builds: the PR *head commit*, not GITHUB_HEAD_REF. A
+        # fork PR's head branch lives in the fork, so `tree/<branch>` 404s
+        # against this repo; the head commit is reachable here via refs/pull/N
+        # and, unlike the branch, is guaranteed to contain any example the PR
+        # adds. Set in build_docs.yml.
+        or os.environ.get("DOCS_GIT_REF")
         or os.environ.get("GITHUB_REF_NAME")  # GH Actions: branch/tag on push
         or "main"  # local build
     )
