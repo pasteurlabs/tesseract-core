@@ -75,6 +75,11 @@ class Config:
     volume_mounts: list[str] = None
     input_path: str = None
     output_path: str = None
+    # Why this example cannot be served by `Tesseract.from_source` yet, or None
+    # if it can. A dedicated process runs on the caller's interpreter, so
+    # anything needing dependencies of its own is out until a virtual
+    # environment is built for it automatically. Deleting a reason enables it.
+    no_from_source: str = None
 
 
 # Add config and test cases for specific unit Tesseracts here
@@ -83,11 +88,18 @@ TEST_CASES = {
     "py310": Config(test_with_random_inputs=True),
     "helloworld": Config(test_with_random_inputs=True),
     "pip_custom_step": Config(test_with_random_inputs=True),
-    "pyvista-arm64": Config(test_with_random_inputs=True),
-    "localpackage": Config(test_with_random_inputs=True),
+    "pyvista-arm64": Config(
+        test_with_random_inputs=True, no_from_source="needs pyvista"
+    ),
+    "localpackage": Config(
+        test_with_random_inputs=True,
+        no_from_source="needs a local package installed; covered in test_local_client.py",
+    ),
     "vectoradd": Config(test_with_random_inputs=True),
     "vectoradd_jax": Config(test_with_random_inputs=True, check_gradients=True),
-    "vectoradd_torch": Config(test_with_random_inputs=True),
+    "vectoradd_torch": Config(
+        test_with_random_inputs=True, no_from_source="needs torch"
+    ),
     "univariate": Config(test_with_random_inputs=True, check_gradients=True),
     "univariate_gradient_fallbacks": Config(
         test_with_random_inputs=True, check_gradients=True
@@ -96,20 +108,36 @@ TEST_CASES = {
     "cuda": Config(test_with_random_inputs=True),
     "meshstats": Config(check_gradients=True),
     "dataloader": Config(
-        check_gradients=True, volume_mounts=["testdata:/tesseract/input_data:ro"]
+        check_gradients=True,
+        volume_mounts=["testdata:/tesseract/input_data:ro"],
+        no_from_source="needs its data volume-mounted into the container",
     ),
     "meshstats_finitediff": Config(check_gradients=True),
-    "fortran_heat": Config(),
-    "fortran_enzyme": Config(check_gradients=True),
-    "conda": Config(),
+    "fortran_heat": Config(
+        no_from_source="needs the solver binary compiled into the image"
+    ),
+    "fortran_enzyme": Config(
+        check_gradients=True, no_from_source="needs a compiled Fortran extension"
+    ),
+    "conda": Config(no_from_source="needs a conda environment"),
     "pylock": Config(test_with_random_inputs=True),
     "required_files": Config(input_path="input"),
     "file_io": Config(input_path="test_cases/testdata", output_path="__tmp_path__"),
-    "metrics": Config(test_with_random_inputs=True),
-    "qp_solve": Config(),
-    "inherit_base_image_packages": Config(),
+    "metrics": Config(
+        test_with_random_inputs=True,
+        no_from_source=(
+            "the test endpoint runs outside an MPA run; plain apply works, "
+            "so this looks like an endpoint gap, not a from_source limitation"
+        ),
+    ),
+    "qp_solve": Config(no_from_source="needs qpax"),
+    "inherit_base_image_packages": Config(
+        no_from_source="needs firedrake from the base image"
+    ),
     "tesseractreference": Config(),  # Can't test requests standalone; needs target Tesseract. Covered in separate test.
-    "userhandling": Config(),
+    "userhandling": Config(
+        no_from_source="creates /home/tesseract-user, which exists only in the image"
+    ),
 }
 
 
@@ -180,6 +208,41 @@ def example_from_json_schema(schema):
     payload = generate_example(schema)
     payload = fix_fake_arrays(payload)
     return payload
+
+
+def test_unit_tesseract_from_source(unit_tesseract_path, unit_tesseract_config):
+    """Serve each example in a dedicated process and run its own test cases.
+
+    The counterpart to `test_unit_tesseract_endtoend` without a container. It
+    deliberately covers the same corpus, so that the examples a dedicated
+    process cannot serve are visible as declared holes rather than as absences:
+    each is a `no_from_source` reason in TEST_CASES, and removing one is how an
+    example gets enabled once its dependencies can be provided.
+
+    No image is built, so this exercises the API and the transport only -- the
+    build itself is already covered by the containerized test.
+    """
+    if unit_tesseract_config.no_from_source:
+        pytest.skip(unit_tesseract_config.no_from_source)
+
+    from tesseract_core import Tesseract
+
+    kwargs = {}
+    if unit_tesseract_config.input_path:
+        kwargs["input_path"] = unit_tesseract_path / unit_tesseract_config.input_path
+
+    with Tesseract.from_source(unit_tesseract_path / "tesseract_api.py", **kwargs) as t:
+        assert "apply" in t.available_endpoints
+
+        test_cases = sorted((unit_tesseract_path / "test_cases").glob("*.json"))
+        for case in test_cases:
+            spec = json.loads(case.read_text())
+            # `cli_config` names CLI flags, which are settings of the serving
+            # process here and so are already fixed by the time we get a client.
+            spec.pop("cli_config", None)
+            # Raises AssertionError on mismatch, RuntimeError on an endpoint
+            # error, and returns nothing when it passes.
+            t.test(test_spec=spec)
 
 
 def test_unit_tesseract_endtoend(

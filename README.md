@@ -128,9 +128,9 @@ with Tesseract.from_image("my-tesseract") as t:
 ## Learn more
 
 - [Documentation](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/)
-- [Creating your first Tesseract](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/creating-tesseracts/create.html)
-- [Differentiable programming guide](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/introduction/differentiable-programming.html)
-- [Design patterns](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/creating-tesseracts/design-patterns.html)
+- [Creating your first Tesseract](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/tutorials/create.html)
+- [Differentiable programming guide](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/concepts/differentiable-programming.html)
+- [Design patterns](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/concepts/design-patterns.html)
 - [Example gallery](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/examples/example_gallery.html)
 
 ## Citing Tesseract
