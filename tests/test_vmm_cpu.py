@@ -13,9 +13,19 @@ error contract -- without a GPU. The real cross-process VMM transfer lives in
 
 from __future__ import annotations
 
+import socket
 import types
 
 import pytest
+
+# The fd-passing server binds an AF_UNIX socket and passes fds over SCM_RIGHTS,
+# a POSIX-only mechanism (Windows Python has no socket.AF_UNIX). cuda_vmm is a
+# same-host, Linux/container transport and is never selected elsewhere, so its
+# socket-level tests skip where AF_UNIX is unavailable. The schema, gating, and
+# exportability tests below are platform-independent and always run.
+requires_af_unix = pytest.mark.skipif(
+    not hasattr(socket, "AF_UNIX"), reason="requires AF_UNIX socket support (POSIX)"
+)
 
 
 def test_non_vmm_pointer_is_not_exportable():
@@ -64,6 +74,7 @@ def test_cuda_vmm_schema_rejects_malformed(bad):
         CudaVmmArrayData(buffer=bad, encoding="cuda_vmm")
 
 
+@requires_af_unix
 def test_vmm_export_raises_on_non_vmm_memory(monkeypatch):
     """An explicit VMM export of non-VMM memory fails loudly and actionably."""
     from tesseract_core.runtime.cuda import api as cuda_api
@@ -150,6 +161,7 @@ def _stub_driver_export(monkeypatch):
     monkeypatch.setattr(cuda_api, "mem_release", lambda _handle: None)
 
 
+@requires_af_unix
 def test_fd_server_roundtrip_and_reuse(monkeypatch):
     """A single connection fetches an fd, then reuses the same socket for more."""
     import os
@@ -177,6 +189,7 @@ def test_fd_server_roundtrip_and_reuse(monkeypatch):
         server.close()
 
 
+@requires_af_unix
 def test_fd_server_batch_fetch(monkeypatch):
     """One request fetches many fds in a single SCM_RIGHTS message."""
     import os
@@ -197,6 +210,7 @@ def test_fd_server_batch_fetch(monkeypatch):
         server.close()
 
 
+@requires_af_unix
 def test_fd_server_miss_raises(monkeypatch):
     """An unknown export id is reported as a miss and raises, leaking no fd."""
     from tesseract_core.runtime.cuda import vmm
@@ -211,6 +225,7 @@ def test_fd_server_miss_raises(monkeypatch):
         server.close()
 
 
+@requires_af_unix
 def test_fd_server_reconnects_after_close(monkeypatch):
     """A dropped/broken cached connection is transparently reconnected."""
     import os
@@ -264,6 +279,7 @@ def test_recv_exactly_partial_frame_raises():
         a.close()
 
 
+@requires_af_unix
 def test_session_opens_and_closes_active_server(monkeypatch):
     """session() installs the active server on enter and tears it down on exit."""
     from tesseract_core.runtime.cuda import vmm

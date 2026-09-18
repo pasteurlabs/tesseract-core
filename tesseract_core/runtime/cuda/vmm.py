@@ -149,6 +149,17 @@ class _FdPassServer:
     """
 
     def __init__(self) -> None:
+        # cuda_vmm passes fds over an AF_UNIX socket via SCM_RIGHTS, a POSIX-only
+        # mechanism (Windows has no socket.AF_UNIX). The transport is same-host
+        # and never selected on such platforms, but guard here so a misconfigured
+        # opt-in fails with a clear message instead of an opaque AttributeError.
+        if not hasattr(socket, "AF_UNIX"):
+            raise RuntimeError(
+                "gpu_transport='cuda_vmm' requires AF_UNIX socket support "
+                "(POSIX fd passing over SCM_RIGHTS), which this platform lacks. "
+                "Use gpu_transport='cuda_ipc' or 'none'."
+            )
+
         # The socket must live on a path the *consumer* can reach. When the
         # Tesseract is served in a container, the consumer runs on the host, so
         # the socket has to sit on the shared bind-mount -- the runtime's
