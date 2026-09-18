@@ -19,6 +19,13 @@ Point the build at a lockfile with `requirements_file` in `tesseract_config.yaml
 Any PEP 751 filename is accepted, either `pylock.toml` or a named variant like
 `pylock.prod.toml`. The format is inferred from the name.
 
+If you already have a `pyproject.toml` (or a `uv.lock`), export a lockfile with
+[`uv export`](https://docs.astral.sh/uv/reference/cli/#uv-export):
+
+```bash
+$ uv export --format pylock.toml -o pylock.toml
+```
+
 ## Example Tesseract
 
 The example computes a sum with `torch` and passes it through `numpy`, so both

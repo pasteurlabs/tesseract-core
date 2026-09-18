@@ -148,8 +148,9 @@ class HostCredential(BaseModel):
         return value
 
 
-# Matches the named PEP 751 lockfile variants, e.g. ``pylock.prod.toml``.
-_PYLOCK_NAME_RE = re.compile(r"^pylock\.([^.]+)\.toml$")
+# Matches PEP 751 lockfile names, i.e. ``pylock.toml`` and named variants like
+# ``pylock.prod.toml``.
+_PYLOCK_NAME_RE = re.compile(r"^pylock(\.[^.]+)?\.toml$")
 
 
 class PipRequirements(BaseModel):
@@ -201,7 +202,7 @@ class PipRequirements(BaseModel):
     def is_pylock(self) -> bool:
         """Whether the requirements file is a PEP 751 lockfile, per its name."""
         name = Path(self.requirements_file).name
-        return name == "pylock.toml" or _PYLOCK_NAME_RE.match(name) is not None
+        return _PYLOCK_NAME_RE.match(name) is not None
 
 
 class CondaRequirements(BaseModel):
