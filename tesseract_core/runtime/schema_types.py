@@ -17,6 +17,7 @@ from pydantic import (
     ConfigDict,
     GetCoreSchemaHandler,
     GetJsonSchemaHandler,
+    ValidationInfo,
 )
 from pydantic.json_schema import JsonSchemaValue
 from pydantic_core import PydanticCustomError, ValidationError, core_schema
@@ -26,6 +27,7 @@ from tesseract_core.runtime.array_encoding import (
     decode_array,
     encode_array,
     get_array_model,
+    resolve_dtype,
     validate_python_or_gpu_array,
 )
 
@@ -364,17 +366,19 @@ class ShapeDType(BaseModel):
         cls,
         key: tuple[
             tuple[int | None, ...] | EllipsisType,
-            AnnotatedType | str | None,
+            ArrayAnnotationType | str | None,
         ],
     ) -> AnnotatedType:
-        expected_shape, _ = _ensure_valid_shapedtype(*key)
+        """Create a new type annotation based on the given shape and dtype."""
+        expected_shape, expected_dtype = _ensure_valid_shapedtype(*key)
 
-        def validate(shapedtype: ShapeDType) -> ShapeDType:
-            """Validator to check if the shape and dtype match the expected values."""
-            if isinstance(shapedtype, ShapeDType):
+        def validate(shapedtype: ShapeDType, info: ValidationInfo) -> ShapeDType:
+            """Validator to check the shape and resolve the dtype to the expected value."""
+            if not isinstance(shapedtype, ShapeDType):
+                return shapedtype
+
+            if expected_shape is not Ellipsis:
                 shape = shapedtype.shape
-                if expected_shape is Ellipsis:
-                    return shapedtype
 
                 if len(shape) != len(expected_shape):
                     raise ValueError(
@@ -386,6 +390,12 @@ class ShapeDType(BaseModel):
                         raise ValueError(
                             f"Expected shape: {expected_shape}. Found: {shape}."
                         )
+
+            # Resolve the dtype the same way array data is resolved during apply
+            new_dtype = resolve_dtype(shapedtype.dtype, expected_dtype, info.context)
+            if new_dtype != shapedtype.dtype:
+                shapedtype = shapedtype.model_copy(update={"dtype": new_dtype})
+
             return shapedtype
 
         return Annotated[ShapeDType, AfterValidator(validate)]
