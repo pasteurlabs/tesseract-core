@@ -83,6 +83,7 @@ def test_vmm_export_raises_on_non_vmm_memory(monkeypatch):
     monkeypatch.setattr(cuda_api, "get_allocation_base", lambda _ptr: (0x1000, 4096))
     # non-VMM memory: the driver rejects retaining a handle for it.
     monkeypatch.setattr(cuda_api, "retain_allocation_handle", lambda _base: None)
+    _pin_short_socket_dir(monkeypatch)
 
     class FakeCudaArray:
         def __init__(self):
@@ -153,12 +154,34 @@ def _pipe_fd() -> int:
     return r
 
 
+def _pin_short_socket_dir(monkeypatch):
+    """Bind the fd-passing socket under a short base dir.
+
+    Keeps tests off the ambient default, whose fallback (the system temp dir) is
+    deep enough on macOS to blow the AF_UNIX path limit.
+    """
+    import os
+    import tempfile
+
+    from tesseract_core.runtime.cuda import vmm
+
+    short_dir = tempfile.mkdtemp(
+        prefix="v-", dir="/tmp" if os.path.isdir("/tmp") else None
+    )
+    monkeypatch.setattr(vmm, "_fd_socket_base_dir", lambda: short_dir)
+
+
 def _stub_driver_export(monkeypatch):
-    """Make export_to_shareable_fd hand back a fresh pipe fd, and mem_release a no-op."""
+    """Make export_to_shareable_fd hand back a fresh pipe fd, mem_release a no-op.
+
+    Also pins the socket dir short (see :func:`_pin_short_socket_dir`) so the
+    server binds a path within the AF_UNIX limit.
+    """
     from tesseract_core.runtime.cuda import api as cuda_api
 
     monkeypatch.setattr(cuda_api, "export_to_shareable_fd", lambda _handle: _pipe_fd())
     monkeypatch.setattr(cuda_api, "mem_release", lambda _handle: None)
+    _pin_short_socket_dir(monkeypatch)
 
 
 @requires_af_unix
