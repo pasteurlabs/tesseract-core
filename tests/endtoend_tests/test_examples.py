@@ -137,6 +137,9 @@ TEST_CASES = {
     "inherit_base_image_packages": Config(
         no_from_source="needs firedrake from the base image"
     ),
+    "binref_passthrough": Config(
+        test_with_random_inputs=True, output_path="__tmp_path__"
+    ),
     "tesseractreference": Config(),  # Can't test requests standalone; needs target Tesseract. Covered in separate test.
     "userhandling": Config(
         no_from_source="creates /home/tesseract-user, which exists only in the image"
