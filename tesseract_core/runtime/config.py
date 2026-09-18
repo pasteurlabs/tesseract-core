@@ -3,6 +3,8 @@
 
 import ast
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -103,3 +105,30 @@ def get_config() -> RuntimeConfig:
         update_config()
     assert _current_config is not None
     return _current_config
+
+
+ConfigSnapshot = tuple[RuntimeConfig | None, frozenset[str]]
+
+
+def snapshot_config() -> ConfigSnapshot:
+    """Capture the current (config, overrides) pair."""
+    return _current_config, frozenset(_config_overrides)
+
+
+@contextmanager
+def override_config(snapshot: ConfigSnapshot | None = None) -> Iterator[None]:
+    """Install ``snapshot`` as the runtime config for a block, restoring the previous one after.
+
+    Passing ``None`` starts from a blank slate (environment variables only).
+    The previous config is restored on exit, whether the block succeeds or
+    raises.
+    """
+    global _current_config, _config_overrides
+    if snapshot is None:
+        snapshot = (None, frozenset())
+    previous = (_current_config, frozenset(_config_overrides))
+    _current_config, _config_overrides = snapshot[0], set(snapshot[1])
+    try:
+        yield
+    finally:
+        _current_config, _config_overrides = previous[0], set(previous[1])
