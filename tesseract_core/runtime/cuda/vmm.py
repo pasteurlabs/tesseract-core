@@ -99,6 +99,44 @@ def is_vmm_exportable(data_ptr: int) -> bool:
 _REQ_COUNT_BYTES = 8
 _ID_BYTES = 8
 
+# AF_UNIX socket paths are capped by the OS (108 bytes on Linux, 104 on macOS).
+# A shared bind-mount (container output_path) or a long system tempdir can push
+# an absolute socket path past that. The portable escape hatch is to operate on
+# the path relative to its directory -- the kernel only ever sees the short leaf
+# name -- by temporarily changing into that directory around the bind/connect.
+# chdir is process-global, so it is serialized and restored under this lock.
+_CWD_LOCK = threading.Lock()
+# Comfortably under the smaller (macOS) limit, leaving room for the NUL and any
+# platform slack; absolute paths at or below this bind directly.
+_AF_UNIX_MAX = 100
+
+
+def _bind_or_connect_short(sock: socket.socket, path: str, *, bind: bool) -> None:
+    """Bind or connect ``sock`` to ``path``, tolerating over-long AF_UNIX paths.
+
+    If the absolute ``path`` fits the AF_UNIX limit it is used directly. Otherwise
+    the operation is retried from inside the socket's directory using the leaf
+    name only, so the kernel sees a short relative path. The directory switch is
+    process-global, hence serialized under ``_CWD_LOCK`` and always restored.
+    """
+    op = sock.bind if bind else sock.connect
+    if len(os.fsencode(path)) <= _AF_UNIX_MAX:
+        op(path)
+        return
+    directory, name = os.path.split(path)
+    if len(os.fsencode(name)) > _AF_UNIX_MAX:
+        raise OSError(
+            f"AF_UNIX socket name {name!r} is itself too long ({len(name)} bytes); "
+            "set a shorter TESSERACT_VMM_SOCKET_DIR."
+        )
+    with _CWD_LOCK:
+        prev = os.getcwd()
+        os.chdir(directory)
+        try:
+            op(name)
+        finally:
+            os.chdir(prev)
+
 
 class _FdPassServer:
     """A Unix-socket server that hands out exported VMM fds by export id.
@@ -127,11 +165,15 @@ class _FdPassServer:
 
         base_dir = _fd_socket_base_dir()
         os.makedirs(base_dir, exist_ok=True)
+        # One private dir per server (isolates the socket so it can be made
+        # world-connectable without exposing siblings); the socket name inside it
+        # is kept short so the full path stays within the AF_UNIX limit where it
+        # can (and _bind_or_connect_short covers the case where base_dir alone is
+        # already long, e.g. a deep macOS tempdir or a nested output_path mount).
         self._dir = tempfile.mkdtemp(prefix="tsr-vmm-", dir=base_dir)
-        # AF_UNIX paths are capped at ~108 bytes; keep the socket name short.
         self.path = os.path.join(self._dir, f"{uuid.uuid4().hex[:8]}.sock")
         self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self._sock.bind(self.path)
+        _bind_or_connect_short(self._sock, self.path, bind=True)
         # The consumer may run under a different uid than this server -- notably
         # a host client connecting to a containerized server (often root). Make
         # the socket (and its dir) connectable regardless of uid; the data it
@@ -327,7 +369,7 @@ def _fetch_conn(sock_path: str) -> socket.socket:
         if conn is not None:
             return conn
         conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        conn.connect(sock_path)
+        _bind_or_connect_short(conn, sock_path, bind=False)
         _FETCH_CONNS[sock_path] = conn
         return conn
 

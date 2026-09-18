@@ -12,12 +12,14 @@ SCM_RIGHTS), so it needs two separate processes -- a producer that allocates
 VMM-backed memory and exports it via the ``cuda_vmm`` transport, and a consumer
 that decodes it via the same transport.
 
-VMM-backed memory here is produced with CuPy's stream-ordered async pool
-(``MemoryAsyncPool``), which allocates through CUDA's Virtual Memory Management
-API (``cuMemCreate``) -- the same allocator class the transport targets
-(JAX/XLA, PyTorch ``expandable_segments``). CuPy exposes it via
-``__cuda_array_interface__`` as a single contiguous allocation, which is exactly
-what the VMM export path requires. The test skips without CuPy + CUDA.
+The producer allocates with JAX, whose XLA GPU allocator uses CUDA's Virtual
+Memory Management API (``cuMemCreate``) -- the allocator class the transport
+requires, and the only one available here that ``cuMemRetainAllocationHandle``
+(and thus the fd export) accepts. JAX arrays do not expose
+``__cuda_array_interface__``, so the buffer is adopted zero-copy by CuPy via
+DLPack (``cupy.from_dlpack``), which exposes the interface the encoder reads --
+the same bridge the ``_gpu_vmm`` example uses. The test skips without JAX +
+CuPy + CUDA.
 """
 
 from __future__ import annotations
@@ -32,19 +34,22 @@ import numpy as np
 import pytest
 
 
-def _cupy_cuda_available() -> bool:
+def _jax_cupy_cuda_available() -> bool:
     try:
         import cupy
+        import jax
 
-        return cupy.cuda.runtime.getDeviceCount() > 0
+        return cupy.cuda.runtime.getDeviceCount() > 0 and any(
+            d.platform == "gpu" for d in jax.devices()
+        )
     except Exception:
         return False
 
 
 pytestmark = pytest.mark.gpu
 
-requires_cupy_cuda = pytest.mark.skipif(
-    not _cupy_cuda_available(), reason="requires CuPy with CUDA"
+requires_jax_cupy_cuda = pytest.mark.skipif(
+    not _jax_cupy_cuda_available(), reason="requires JAX + CuPy with CUDA"
 )
 
 _TIMEOUT = 120
@@ -53,24 +58,27 @@ _TIMEOUT = 120
 def _producer_main(rendezvous, ready, done, q):
     try:
         import cupy
+        import jax
+        import jax.numpy as jnp
         import orjson
 
         from tesseract_core.runtime.device_transport import get_transport
 
         cupy.cuda.Device(0).use()
         transport = get_transport("cuda_vmm")
-        # A VMM-backed allocation: CuPy's async pool uses cuMemCreate, which is
-        # what cuMemRetainAllocationHandle (and thus the fd export) accepts.
-        pool = cupy.cuda.MemoryAsyncPool()
-        with cupy.cuda.using_allocator(pool.malloc):
-            arr = (cupy.arange(4096, dtype=cupy.float32) % 997.0).copy()
-            with transport.session("producer") as server:
-                ad = transport.descriptor(transport.register(arr, server))
-                with open(rendezvous, "wb") as f:
-                    f.write(orjson.dumps(ad))
-                open(ready, "w").close()
-                while not os.path.exists(done):
-                    pass
+        # JAX gives a VMM-backed (cuMemCreate) allocation; CuPy adopts the same
+        # buffer zero-copy via DLPack so it exposes __cuda_array_interface__ for
+        # the encoder. Same device pointer, no copy.
+        jarr = jnp.arange(4096, dtype=jnp.float32) % 997.0
+        jax.block_until_ready(jarr)
+        arr = cupy.from_dlpack(jarr)
+        with transport.session("producer") as server:
+            ad = transport.descriptor(transport.register(arr, server))
+            with open(rendezvous, "wb") as f:
+                f.write(orjson.dumps(ad))
+            open(ready, "w").close()
+            while not os.path.exists(done):
+                pass
         q.put(("PRODUCER_OK", ad["data"]["buffer"][:4], ad["data"]["encoding"]))
     except Exception:
         q.put(("PRODUCER_ERROR", traceback.format_exc(), None))
@@ -135,7 +143,7 @@ def _run():
         return results
 
 
-@requires_cupy_cuda
+@requires_jax_cupy_cuda
 def test_vmm_export_round_trip():
     """VMM-backed memory takes the fd-passing path and round-trips correctly."""
     results = _run()

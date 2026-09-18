@@ -841,13 +841,16 @@ def apply(inputs: InputSchema) -> OutputSchema:
 # ── Test 6: served HTTP round-trip over the cuda_ipc transport ──────────
 
 
-# The GPU output is allocated through CuPy's stream-ordered async pool, which is
-# VMM-backed (``cuMemCreate``). cuda_ipc stages a device-to-device copy for such
-# memory; cuda_vmm exports it by reference. Using one VMM-backed allocator keeps
-# the apply identical across both transports, so the same served endpoint covers
-# each mode by parametrization.
+# The GPU output is computed with JAX, whose XLA allocator is VMM-backed
+# (``cuMemCreate``), then adopted zero-copy by CuPy via DLPack so it exposes
+# ``__cuda_array_interface__`` for the encoder (the ``_gpu_vmm`` example bridge).
+# cuda_ipc stages a device-to-device copy for such memory; cuda_vmm exports it by
+# reference. One VMM-backed allocation keeps the apply identical across both
+# transports, so the same served endpoint covers each mode by parametrization.
 _MIXED_API_CODE = """
 import cupy as cp
+import jax
+import jax.numpy as jnp
 import numpy as np
 from pydantic import BaseModel
 from tesseract_core.runtime import Array, Float32
@@ -863,14 +866,14 @@ class OutputSchema(BaseModel):
 
 def apply(inputs: InputSchema) -> OutputSchema:
     x = np.asarray(inputs.x)
-    pool = cp.cuda.MemoryAsyncPool()
-    with cp.cuda.using_allocator(pool.malloc):
-        gpu = (cp.asarray(x) * 2.0).copy()
-    return OutputSchema(gpu=gpu, cpu=x + 1.0)
+    gpu = jnp.asarray(x) * 2.0
+    jax.block_until_ready(gpu)
+    return OutputSchema(gpu=cp.from_dlpack(gpu), cpu=x + 1.0)
 """
 
 
 @requires_cuda
+@requires_jax_cuda
 @pytest.mark.parametrize("gpu_transport", ["cuda_ipc", "cuda_vmm"])
 def test_tesseract_api_mixed_http(free_port, serve_in_subprocess, gpu_transport):
     """A served endpoint returns a GPU and a CPU array in one response.
