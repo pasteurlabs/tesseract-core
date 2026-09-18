@@ -63,6 +63,12 @@ class RuntimeConfig(BaseModel):
     # by-reference handles unless explicitly opted in. Independent of
     # ``output_format``, which only governs CPU arrays.
     gpu_transport: gpu_transport_type = "none"
+    # Directory the ``cuda_vmm`` transport binds its fd-passing Unix socket
+    # under. Empty (default) lets the transport pick: the ``output_path``
+    # shared mount when set (so a host consumer can reach a containerized
+    # server's socket), else the system temp dir. Set it (e.g.
+    # TESSERACT_VMM_SOCKET_DIR=/dev/shm) only to override that choice.
+    vmm_socket_dir: str = ""
 
     @field_validator("input_path", "output_path")
     @classmethod

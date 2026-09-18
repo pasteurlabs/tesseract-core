@@ -9,6 +9,8 @@ import fsspec
 import orjson
 from pydantic import TypeAdapter
 
+from tesseract_core.runtime.device_transport import gpu_transport_type
+
 PathLike = str | Path
 
 # An output encoding is two orthogonal choices:
@@ -17,21 +19,13 @@ PathLike = str | Path
 #   response (``json`` inline / ``json+base64`` / ``json+binref``);
 # - the *GPU transport* -- how device (GPU) arrays leave the process (``none`` =
 #   copied to host and serialized like any CPU array, or a device transport such
-#   as ``cuda_ipc`` that exports them by reference without a host round-trip).
+#   as ``cuda_ipc`` that exports them by reference without a host round-trip; see
+#   :data:`~tesseract_core.runtime.device_transport.gpu_transport_type`).
 #
 # They compose freely: a response can inline its CPU arrays as JSON while
 # handing its GPU arrays out as ``cuda_ipc`` handles. The two are set
 # independently, via the ``output_format`` and ``gpu_transport`` config.
 supported_format_type = Literal["json", "json+base64", "json+binref"]
-
-# GPU transports. ``none`` is the always-available default (GPU output is copied
-# to the host and encoded via the output format). Any other value exports device
-# memory by reference and is an experimental, opt-in capability (see
-# available_gpu_transports).
-#
-# The disabled state is the explicit string ``"none"`` rather than ``None``, so
-# it is clear to users that this means "disabled", not "unspecified".
-gpu_transport_type = Literal["none", "cuda_ipc"]
 
 # Every output format is always available (none of them are experimental).
 SUPPORTED_FORMATS = get_args(supported_format_type)

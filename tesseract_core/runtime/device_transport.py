@@ -42,6 +42,22 @@ if TYPE_CHECKING:  # pragma: no cover
 # any handle is minted.
 Reach = Literal["same_host", "cross_host", "both"]
 
+# The ``gpu_transport`` config value: how device (GPU) arrays leave the process.
+# ``none`` is the always-available default (GPU output is copied to the host and
+# encoded via the output format). Any other value exports device memory by
+# reference and is an experimental, opt-in capability (see
+# :func:`tesseract_core.runtime.file_interactions.available_gpu_transports`).
+#
+# ``cuda_ipc`` exports via the legacy ``cudaIpcGetMemHandle`` API, staging a
+# device-to-device copy for VMM/pool-backed memory it cannot export directly.
+# ``cuda_vmm`` is the copy-free sibling: it exports VMM-backed memory by POSIX fd
+# and requires the source allocation to be VMM-backed (JAX/XLA, PyTorch
+# ``expandable_segments``), erroring otherwise.
+#
+# The disabled state is the explicit string ``"none"`` rather than ``None``, so
+# it is clear to users that this means "disabled", not "unspecified".
+gpu_transport_type = Literal["none", "cuda_ipc", "cuda_vmm"]
+
 
 class DeviceTransport(abc.ABC):
     """The contract every device-array transport implements.

@@ -1111,22 +1111,34 @@ def serve(
         if docker_args:
             extra_args.extend(docker_args)
 
-        # The cuda_ipc GPU transport needs a GPU and a shared IPC namespace
-        # between host and container. Wire both up whenever it is selected (the
-        # only reason to enable it is IPC).
+        # The by-reference GPU transports (cuda_ipc, cuda_vmm) need a GPU and a
+        # shared IPC namespace between host and container. Wire both up whenever
+        # one is selected (the only reason to enable it is cross-process sharing).
         gpu_transport = environment.get("TESSERACT_GPU_TRANSPORT", "none")
 
-        if gpu_transport == "cuda_ipc":
+        if gpu_transport in ("cuda_ipc", "cuda_vmm"):
             if not gpus:
                 raise ValueError(
-                    "gpu_transport='cuda_ipc' requires GPU access, but no GPUs "
-                    "were requested. Pass gpus=['all'] or specific GPU IDs."
+                    f"gpu_transport={gpu_transport!r} requires GPU access, but no "
+                    "GPUs were requested. Pass gpus=['all'] or specific GPU IDs."
+                )
+            # A device transport pins each export in the worker process that
+            # produced it (cuda_vmm's fd-passing server retains the handle there;
+            # cuda_ipc's pin registry is per-process), and exports live until the
+            # next request releases them. With >1 worker the daemon load-balances
+            # requests across processes, so a release or fd fetch can land on a
+            # worker that never held the export -- silently serving wrong data.
+            if num_workers > 1:
+                raise ValueError(
+                    f"gpu_transport={gpu_transport!r} requires num_workers=1 "
+                    "(exports are pinned per-producer-process and cannot be "
+                    "load-balanced). Pass num_workers=1."
                 )
             extra_args.extend(["--ipc=host"])
         elif gpu_transport != "none":
             raise ValueError(
                 f"Unknown gpu_transport {gpu_transport!r}. "
-                "Supported values: 'none', 'cuda_ipc'."
+                "Supported values: 'none', 'cuda_ipc', 'cuda_vmm'."
             )
 
         if network is not None:
