@@ -21,10 +21,12 @@ source /python-env/bin/activate
 # direct-reference wheels, and git+https dependencies. No-op if none declared.
 source setup_host_credentials.sh
 
-# Install dependencies. Local dependencies (if any) are rewritten into the
-# requirements file as paths under ./local_requirements/, so a single install
-# from the requirements file covers both remote and local dependencies.
-uv -v pip install --compile-bytecode -r tesseract_requirements.txt
+# Install dependencies from the requirements file. For a flat requirements.txt,
+# local dependencies (if any) have been rewritten into it as paths under
+# ./local_requirements/, so this single install covers both remote and local
+# dependencies. A PEP 751 pylock.toml is installed as-is. `uv pip install -r`
+# dispatches on the file format, so the same command handles both.
+uv -v pip install --compile-bytecode -r "${TESSERACT_REQUIREMENTS_FILE:-tesseract_requirements.txt}"
 
 # HACK: If `tesseract_core` is part of tesseract_requirements.txt, it may install an incompatible version
 # of the runtime from PyPI. We remove the runtime folder and install the local version instead.

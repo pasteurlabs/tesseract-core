@@ -15,6 +15,7 @@ building-blocks/matlab.md
 building-blocks/packagedata.md
 building-blocks/arm64.md
 building-blocks/localpackage.md
+building-blocks/lockfile.md
 building-blocks/dataloader.md
 building-blocks/file_io.md
 building-blocks/finitediff.md
@@ -85,6 +86,14 @@ A guide showcasing how to use custom build steps to install pyvista within an AR
 :link-type: doc
 
 A guide on installing local Python packages into a Tesseract.
+:::
+
+:::{grid-item-card} Lockfile
+:link: building-blocks/lockfile
+:link-type: doc
+
+Install a Tesseract's dependencies from a PEP 751 lockfile (`pylock.toml`) for a
+fully pinned, resolution-free build.
 :::
 :::{grid-item-card} Data Loader
 :link: building-blocks/dataloader

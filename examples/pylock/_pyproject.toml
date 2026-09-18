@@ -1,0 +1,18 @@
+[project]
+name = "tesseract-pylock-example"
+version = "0.0.0"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=2",
+    "torch>=2",
+]
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cpu" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true

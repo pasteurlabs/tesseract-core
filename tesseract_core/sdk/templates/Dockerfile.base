@@ -61,6 +61,12 @@ COPY local_requirements/ ./local_requirements
 COPY setup_host_credentials.sh ./
 COPY host_credentials.txt ./
 
+{% if config.build_config.requirements.provider == "uv-pip" %}
+# Name of the dependency file the uv build script installs from (a flat
+# requirements.txt or a PEP 751 pylock.toml). Copied above by basename.
+ENV TESSERACT_REQUIREMENTS_FILE="{{ config.build_config.requirements._filename }}"
+{% endif %}
+
 {% if config.build_config.inherit_base_image_packages %}
 ENV TESSERACT_INHERIT_BASE_IMAGE_PACKAGES=1
 {% endif %}
