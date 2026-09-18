@@ -10,8 +10,14 @@ Run on a GPU machine::
 The VMM transport exports memory *by reference* over a POSIX fd (passed via
 SCM_RIGHTS), so it needs two separate processes -- a producer that allocates
 VMM-backed memory and exports it via the ``cuda_vmm`` transport, and a consumer
-that decodes it via the same transport. VMM-backed memory is produced with
-PyTorch's ``expandable_segments`` allocator; the test skips without torch+CUDA.
+that decodes it via the same transport.
+
+VMM-backed memory here is produced with CuPy's stream-ordered async pool
+(``MemoryAsyncPool``), which allocates through CUDA's Virtual Memory Management
+API (``cuMemCreate``) -- the same allocator class the transport targets
+(JAX/XLA, PyTorch ``expandable_segments``). CuPy exposes it via
+``__cuda_array_interface__`` as a single contiguous allocation, which is exactly
+what the VMM export path requires. The test skips without CuPy + CUDA.
 """
 
 from __future__ import annotations
@@ -26,19 +32,19 @@ import numpy as np
 import pytest
 
 
-def _torch_cuda_available() -> bool:
+def _cupy_cuda_available() -> bool:
     try:
-        import torch
+        import cupy
 
-        return torch.cuda.is_available()
+        return cupy.cuda.runtime.getDeviceCount() > 0
     except Exception:
         return False
 
 
 pytestmark = pytest.mark.gpu
 
-requires_torch_cuda = pytest.mark.skipif(
-    not _torch_cuda_available(), reason="requires torch with CUDA"
+requires_cupy_cuda = pytest.mark.skipif(
+    not _cupy_cuda_available(), reason="requires CuPy with CUDA"
 )
 
 _TIMEOUT = 120
@@ -46,23 +52,25 @@ _TIMEOUT = 120
 
 def _producer_main(rendezvous, ready, done, q):
     try:
-        os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+        import cupy
         import orjson
-        import torch
 
         from tesseract_core.runtime.device_transport import get_transport
 
-        torch.cuda.set_device(0)
+        cupy.cuda.Device(0).use()
         transport = get_transport("cuda_vmm")
-        server = transport.bootstrap("producer")
-        arr = torch.arange(4096, dtype=torch.float32, device="cuda") % 997.0
-        ad = transport.descriptor(transport.register(arr, server))
-        with open(rendezvous, "wb") as f:
-            f.write(orjson.dumps(ad))
-        open(ready, "w").close()
-        while not os.path.exists(done):
-            pass
-        transport.release(server)
+        # A VMM-backed allocation: CuPy's async pool uses cuMemCreate, which is
+        # what cuMemRetainAllocationHandle (and thus the fd export) accepts.
+        pool = cupy.cuda.MemoryAsyncPool()
+        with cupy.cuda.using_allocator(pool.malloc):
+            arr = (cupy.arange(4096, dtype=cupy.float32) % 997.0).copy()
+            with transport.session("producer") as server:
+                ad = transport.descriptor(transport.register(arr, server))
+                with open(rendezvous, "wb") as f:
+                    f.write(orjson.dumps(ad))
+                open(ready, "w").close()
+                while not os.path.exists(done):
+                    pass
         q.put(("PRODUCER_OK", ad["data"]["buffer"][:4], ad["data"]["encoding"]))
     except Exception:
         q.put(("PRODUCER_ERROR", traceback.format_exc(), None))
@@ -127,7 +135,7 @@ def _run():
         return results
 
 
-@requires_torch_cuda
+@requires_cupy_cuda
 def test_vmm_export_round_trip():
     """VMM-backed memory takes the fd-passing path and round-trips correctly."""
     results = _run()

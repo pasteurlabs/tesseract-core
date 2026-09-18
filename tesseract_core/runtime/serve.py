@@ -118,26 +118,21 @@ def create_response(
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     """App-scoped setup/teardown for the served Tesseract.
 
-    When the configured GPU transport is ``cuda_vmm``, bootstrap its fd-passing
-    server here so the Unix socket is created at startup and closed at shutdown
-    -- owned by the app rather than leaked as a lazily-started daemon thread.
-    Bootstrapping also installs it as the process fallback the encode path uses,
-    so exports and this server share one instance. No CUDA machinery is touched
-    for the other transports (``cuda_ipc`` needs no handshake) or when GPU
-    transport is off.
+    When the configured GPU transport is ``cuda_vmm``, open its fd-passing
+    session for the life of the app, so the Unix socket is created at startup and
+    closed at shutdown. The open session installs itself as the process-active
+    server the encode path uses, so exports and this server share one instance. No
+    CUDA machinery is touched for the other transports (``cuda_ipc`` needs no
+    handshake) or when GPU transport is off.
     """
     config = get_config()
-    vmm = None
     if config.gpu_transport == "cuda_vmm":
         from tesseract_core.runtime.device_transport import get_transport
 
-        vmm = get_transport("cuda_vmm")
-        vmm.bootstrap("producer")
-    try:
+        with get_transport("cuda_vmm").session("producer"):
+            yield
+    else:
         yield
-    finally:
-        if vmm is not None:
-            vmm.shutdown()
 
 
 def create_rest_api(api_module: ModuleType) -> FastAPI:

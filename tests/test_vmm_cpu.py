@@ -13,6 +13,8 @@ error contract -- without a GPU. The real cross-process VMM transfer lives in
 
 from __future__ import annotations
 
+import types
+
 import pytest
 
 
@@ -26,12 +28,13 @@ def test_non_vmm_pointer_is_not_exportable():
 
 def test_is_vmm_exportable_false_without_driver(monkeypatch):
     """Without a loadable CUDA driver, exportability is False (legacy fallback)."""
+    from tesseract_core.runtime.cuda import api as cuda_api
     from tesseract_core.runtime.cuda import vmm
 
-    def _no_driver():
+    def _no_driver(_base_ptr):
         raise RuntimeError("no libcuda")
 
-    monkeypatch.setattr(vmm, "_get_cuda_driver", _no_driver)
+    monkeypatch.setattr(cuda_api, "retain_allocation_handle", _no_driver)
     assert vmm.is_vmm_exportable(0x1000) is False
 
 
@@ -63,18 +66,12 @@ def test_cuda_vmm_schema_rejects_malformed(bad):
 
 def test_vmm_export_raises_on_non_vmm_memory(monkeypatch):
     """An explicit VMM export of non-VMM memory fails loudly and actionably."""
+    from tesseract_core.runtime.cuda import api as cuda_api
     from tesseract_core.runtime.cuda import vmm
 
-    class _Driver:
-        def cuMemGetAddressRange_v2(self, base, size, ptr):
-            base._obj.value = 0x1000
-            size._obj.value = 4096
-            return 0
-
-        def cuMemRetainAllocationHandle(self, handle, base):
-            return 1  # non-VMM memory: the driver rejects it
-
-    monkeypatch.setattr(vmm, "_get_cuda_driver", lambda: _Driver())
+    monkeypatch.setattr(cuda_api, "get_allocation_base", lambda _ptr: (0x1000, 4096))
+    # non-VMM memory: the driver rejects retaining a handle for it.
+    monkeypatch.setattr(cuda_api, "retain_allocation_handle", lambda _base: None)
 
     class FakeCudaArray:
         def __init__(self):
@@ -117,8 +114,6 @@ def test_cuda_vmm_consumer_bootstrap_is_noop():
 
 def test_cuda_vmm_gated_by_gpu_transport(monkeypatch):
     """cuda_vmm is offered only when configured via gpu_transport."""
-    import types
-
     from tesseract_core.runtime import config, file_interactions
 
     monkeypatch.setattr(
@@ -148,23 +143,11 @@ def _pipe_fd() -> int:
 
 
 def _stub_driver_export(monkeypatch):
-    """Make cuMemExportToShareableHandle hand back a fresh pipe fd, ret 0."""
-    import ctypes
+    """Make export_to_shareable_fd hand back a fresh pipe fd, and mem_release a no-op."""
+    from tesseract_core.runtime.cuda import api as cuda_api
 
-    from tesseract_core.runtime.cuda import vmm
-
-    class _Driver:
-        def cuMemExportToShareableHandle(self, fd_ptr, _handle, _type, _flags):
-            fd_ptr._obj.value = _pipe_fd()
-            return 0
-
-        def cuMemRelease(self, _handle):
-            return 0
-
-    monkeypatch.setattr(vmm, "_get_cuda_driver", lambda: _Driver())
-    # ctypes.byref returns a lightweight object exposing ._obj; the stub above
-    # writes through it, matching how the real ctypes out-param is filled.
-    return ctypes
+    monkeypatch.setattr(cuda_api, "export_to_shareable_fd", lambda _handle: _pipe_fd())
+    monkeypatch.setattr(cuda_api, "mem_release", lambda _handle: None)
 
 
 def test_fd_server_roundtrip_and_reuse(monkeypatch):
@@ -281,16 +264,39 @@ def test_recv_exactly_partial_frame_raises():
         a.close()
 
 
-def test_shutdown_closes_server(monkeypatch):
-    """The transport shutdown releases and closes the fallback server."""
+def test_session_opens_and_closes_active_server(monkeypatch):
+    """session() installs the active server on enter and tears it down on exit."""
     from tesseract_core.runtime.cuda import vmm
     from tesseract_core.runtime.device_transport import get_transport
 
     _stub_driver_export(monkeypatch)
-    server = vmm._FdPassServer()
-    vmm._set_fallback_server(server)
-    server.register(handle=5, keepalive=None)
-
-    get_transport("cuda_vmm").shutdown()
-    assert vmm._FALLBACK_SERVER is None
+    assert vmm._active_server() is None
+    with get_transport("cuda_vmm").session("producer") as server:
+        assert server is not None
+        assert vmm._active_server() is server
+        assert server._running is True
+    assert vmm._active_server() is None
     assert server._running is False
+
+
+def test_consumer_session_is_noop():
+    """A consumer session holds no server state and yields None."""
+    from tesseract_core.runtime.cuda import vmm
+    from tesseract_core.runtime.device_transport import get_transport
+
+    with get_transport("cuda_vmm").session("consumer") as server:
+        assert server is None
+        assert vmm._active_server() is None
+
+
+def test_register_without_active_session_raises(monkeypatch):
+    """Exporting with no open session raises rather than exporting silently."""
+    from tesseract_core.runtime.cuda import vmm
+    from tesseract_core.runtime.device_transport import get_transport
+
+    _stub_driver_export(monkeypatch)
+    assert vmm._active_server() is None
+    fake_arr = types.SimpleNamespace(__cuda_array_interface__={})
+    with pytest.raises(RuntimeError, match="no active fd-passing session"):
+        get_transport("cuda_vmm").register(fake_arr)
+    assert vmm._active_server() is None

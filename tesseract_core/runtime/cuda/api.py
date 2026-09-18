@@ -26,6 +26,13 @@ MEMCPY_DEVICE_TO_DEVICE = 3
 # cudaIpcMemLazyEnablePeerAccess
 _IPC_LAZY_ENABLE_PEER_ACCESS = 0x01
 
+# CUmemAllocationHandleType
+_CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR = 1
+# CUmemLocationType
+_CU_MEM_LOCATION_TYPE_DEVICE = 1
+# CUmemAccess_flags
+_CU_MEM_ACCESS_FLAGS_PROT_READWRITE = 3
+
 # Re-exported so callers that assemble/validate IPC payloads can reason about the
 # handle width without importing the loader's ABI details.
 IPC_HANDLE_SIZE = loader.CUDA_IPC_HANDLE_SIZE
@@ -246,3 +253,131 @@ def get_allocation_base(device_ptr: int) -> tuple[int, int]:
     if ret != 0:
         raise RuntimeError(f"cuMemGetAddressRange failed with error code {ret}")
     return base.value, size.value
+
+
+# -- VMM (virtual memory management) ----------------------------------------
+
+
+def _cu_check(ret: int, what: str) -> None:
+    """Raise ``RuntimeError`` if a driver call returned a non-zero ``CUresult``.
+
+    Unlike the runtime API, the driver API exposes no ``cudaGetErrorString``
+    equivalent we use here, so the raw ``CUresult`` code is reported directly.
+    """
+    if ret != 0:
+        raise RuntimeError(f"{what} failed: CUresult={ret}")
+
+
+def retain_allocation_handle(base_ptr: int) -> int | None:
+    """Retain the VMM allocation handle backing ``base_ptr``.
+
+    Returns the handle as a plain ``int`` on success, or ``None`` if the pointer
+    is not backed by a VMM allocation (``cuMemRetainAllocationHandle`` returns a
+    non-zero ``CUresult``). Only memory allocated through the VMM API
+    (``cuMemCreate``) -- JAX/XLA's allocator, PyTorch ``expandable_segments``, or
+    our own ``cuMemCreate`` buffers -- can be retained; default CuPy/PyTorch pools
+    and legacy ``cudaMalloc`` are rejected.
+    """
+    driver = _get_driver()
+    handle = ctypes.c_ulonglong()
+    ret = driver.cuMemRetainAllocationHandle(
+        ctypes.byref(handle), ctypes.c_void_p(base_ptr)
+    )
+    if ret != 0:
+        return None
+    return handle.value
+
+
+def mem_release(handle: int) -> None:
+    """Release a VMM allocation handle (best effort)."""
+    _get_driver().cuMemRelease(ctypes.c_ulonglong(handle))
+
+
+def export_to_shareable_fd(handle: int) -> int | None:
+    """Export a VMM handle to a shareable POSIX file descriptor.
+
+    Returns the fd as a plain ``int`` on success, or ``None`` if the driver
+    rejects the export (a non-zero ``CUresult``), so a caller serving a batch can
+    skip a miss without raising.
+    """
+    driver = _get_driver()
+    fd = ctypes.c_int()
+    ret = driver.cuMemExportToShareableHandle(
+        ctypes.byref(fd),
+        ctypes.c_ulonglong(handle),
+        _CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR,
+        0,
+    )
+    if ret != 0:
+        return None
+    return fd.value
+
+
+def import_from_shareable_fd(fd: int) -> int:
+    """Import a VMM handle from a shareable POSIX file descriptor.
+
+    Returns the imported handle as a plain ``int``; raises ``RuntimeError`` on
+    failure. The fd is passed to the driver cast to a pointer-width value, as the
+    handle type is POSIX_FILE_DESCRIPTOR.
+    """
+    driver = _get_driver()
+    handle = ctypes.c_ulonglong()
+    _cu_check(
+        driver.cuMemImportFromShareableHandle(
+            ctypes.byref(handle),
+            ctypes.cast(fd, ctypes.c_void_p),
+            _CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR,
+        ),
+        "cuMemImportFromShareableHandle",
+    )
+    return handle.value
+
+
+def address_reserve(size: int) -> int:
+    """Reserve a ``size``-byte virtual address range; return the mapped pointer."""
+    driver = _get_driver()
+    mapped_ptr = ctypes.c_ulonglong()
+    _cu_check(
+        driver.cuMemAddressReserve(ctypes.byref(mapped_ptr), size, 0, 0, 0),
+        "cuMemAddressReserve",
+    )
+    return mapped_ptr.value
+
+
+def mem_map(mapped_ptr: int, size: int, handle: int) -> None:
+    """Map a VMM ``handle`` into a reserved address range at ``mapped_ptr``."""
+    _cu_check(
+        _get_driver().cuMemMap(
+            ctypes.c_ulonglong(mapped_ptr), size, 0, ctypes.c_ulonglong(handle), 0
+        ),
+        "cuMemMap",
+    )
+
+
+def mem_set_access_rw(mapped_ptr: int, size: int, device: int) -> None:
+    """Grant read/write access to a mapped VMM range for ``device``."""
+    acc = loader._CUmemAccessDesc()
+    acc.location.type = _CU_MEM_LOCATION_TYPE_DEVICE
+    acc.location.id = device
+    acc.flags = _CU_MEM_ACCESS_FLAGS_PROT_READWRITE
+    _cu_check(
+        _get_driver().cuMemSetAccess(
+            ctypes.c_ulonglong(mapped_ptr), size, ctypes.byref(acc), 1
+        ),
+        "cuMemSetAccess",
+    )
+
+
+def mem_unmap(mapped_ptr: int, size: int) -> None:
+    """Unmap a mapped VMM range (best effort)."""
+    _get_driver().cuMemUnmap(ctypes.c_ulonglong(mapped_ptr), size)
+
+
+def address_free(mapped_ptr: int, size: int) -> None:
+    """Free a reserved virtual address range (best effort)."""
+    _get_driver().cuMemAddressFree(ctypes.c_ulonglong(mapped_ptr), size)
+
+
+def ctx_synchronize() -> None:
+    """Block until all work in the current driver context has completed."""
+    _cu_check(_get_driver().cuCtxSynchronize(), "cuCtxSynchronize")

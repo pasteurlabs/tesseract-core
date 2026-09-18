@@ -29,18 +29,22 @@ its own wire encoding (``encoding: "cuda_vmm"``, ``vmm:``-prefixed buffer) but
 returns the same consumer-facing :class:`~tesseract_core.runtime.cuda.ipc.IpcDeviceArray`
 wrapper, so the decode side never forks. The VMM machinery is packaged as a
 :class:`~tesseract_core.runtime.device_transport.DeviceTransport`
-(:class:`CudaVmmTransport`): the fd-passing server is its session, created in
-:meth:`CudaVmmTransport.bootstrap` (owned by the served app's lifespan) and
-reused across a request's exports.
+(:class:`CudaVmmTransport`): the fd-passing server is its session, opened for the
+producer via :meth:`CudaVmmTransport.session` (a context manager the served
+app's lifespan, the CLI, and tests each wrap around their export work) and reused
+across a request's exports. The open server is held in a process-global slot
+because the encode path reaches VMM by pointer deep inside serialization, with no
+session object in scope to thread down. Exporting without an open session raises.
 """
 
 from __future__ import annotations
 
-import ctypes
 import os
 import socket
 import threading
-from typing import Any
+from collections.abc import Iterator
+from contextlib import contextmanager
+from typing import Any, Literal
 
 import numpy as np
 
@@ -52,105 +56,6 @@ from tesseract_core.runtime.cuda.ipc import (
     has_cuda_array_interface,
 )
 from tesseract_core.runtime.device_transport import DeviceTransport
-
-# ---------------------------------------------------------------------------
-# CUDA driver bindings for the VMM API (via libcuda)
-# ---------------------------------------------------------------------------
-#
-# The shared cuda.loader declares only the driver symbols cuda_ipc needs
-# (cuMemGetAddressRange). The VMM export/import path calls a larger, VMM-only
-# slice of the driver API, so we declare those signatures here on top of the
-# shared loader rather than bloat it with symbols only this transport uses.
-
-_CU: Any = None
-
-# CUmemAllocationHandleType
-_CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR = 1
-# CUmemLocationType
-_CU_MEM_LOCATION_TYPE_DEVICE = 1
-# CUmemAccess_flags
-_CU_MEM_ACCESS_FLAGS_PROT_READWRITE = 3
-
-
-class _CUmemLocation(ctypes.Structure):
-    _fields_ = [("type", ctypes.c_int), ("id", ctypes.c_int)]
-
-
-class _CUmemAccessDesc(ctypes.Structure):
-    _fields_ = [("location", _CUmemLocation), ("flags", ctypes.c_int)]
-
-
-def _get_cuda_driver() -> Any:
-    """Lazily load libcuda and declare the VMM-only signatures used here.
-
-    The shared loader handles library discovery, ``cuInit``, and the
-    ``cuMemGetAddressRange`` signature both transports share; we add only the
-    VMM export/import symbols on top.
-    """
-    global _CU
-    if _CU is not None:
-        return _CU
-    from tesseract_core.runtime.cuda.loader import load_cuda_driver
-
-    lib = load_cuda_driver()
-    P = ctypes.POINTER
-    # Recover the VMM allocation handle backing a device pointer.
-    lib.cuMemRetainAllocationHandle.argtypes = [P(ctypes.c_ulonglong), ctypes.c_void_p]
-    lib.cuMemRetainAllocationHandle.restype = ctypes.c_int
-    # Export it to a shareable POSIX fd.
-    lib.cuMemExportToShareableHandle.argtypes = [
-        ctypes.c_void_p,
-        ctypes.c_ulonglong,
-        ctypes.c_int,
-        ctypes.c_ulonglong,
-    ]
-    lib.cuMemExportToShareableHandle.restype = ctypes.c_int
-    lib.cuMemRelease.argtypes = [ctypes.c_ulonglong]
-    lib.cuMemRelease.restype = ctypes.c_int
-    # Import + map on the consumer.
-    lib.cuMemImportFromShareableHandle.argtypes = [
-        P(ctypes.c_ulonglong),
-        ctypes.c_void_p,
-        ctypes.c_int,
-    ]
-    lib.cuMemImportFromShareableHandle.restype = ctypes.c_int
-    lib.cuMemAddressReserve.argtypes = [
-        P(ctypes.c_ulonglong),
-        ctypes.c_size_t,
-        ctypes.c_size_t,
-        ctypes.c_ulonglong,
-        ctypes.c_ulonglong,
-    ]
-    lib.cuMemAddressReserve.restype = ctypes.c_int
-    lib.cuMemMap.argtypes = [
-        ctypes.c_ulonglong,
-        ctypes.c_size_t,
-        ctypes.c_size_t,
-        ctypes.c_ulonglong,
-        ctypes.c_ulonglong,
-    ]
-    lib.cuMemMap.restype = ctypes.c_int
-    lib.cuMemUnmap.argtypes = [ctypes.c_ulonglong, ctypes.c_size_t]
-    lib.cuMemUnmap.restype = ctypes.c_int
-    lib.cuMemSetAccess.argtypes = [
-        ctypes.c_ulonglong,
-        ctypes.c_size_t,
-        P(_CUmemAccessDesc),
-        ctypes.c_size_t,
-    ]
-    lib.cuMemSetAccess.restype = ctypes.c_int
-    lib.cuMemAddressFree.argtypes = [ctypes.c_ulonglong, ctypes.c_size_t]
-    lib.cuMemAddressFree.restype = ctypes.c_int
-    lib.cuCtxSynchronize.argtypes = []
-    lib.cuCtxSynchronize.restype = ctypes.c_int
-
-    _CU = lib
-    return _CU
-
-
-def _cu_check(ret: int, what: str) -> None:
-    if ret != 0:
-        raise RuntimeError(f"{what} failed: CUresult={ret}")
 
 
 def is_vmm_exportable(data_ptr: int) -> bool:
@@ -166,16 +71,12 @@ def is_vmm_exportable(data_ptr: int) -> bool:
     transparently keeps the legacy path there too.
     """
     try:
-        driver = _get_cuda_driver()
+        handle = cuda_api.retain_allocation_handle(data_ptr)
     except RuntimeError:
         return False
-    handle = ctypes.c_ulonglong()
-    ret = driver.cuMemRetainAllocationHandle(
-        ctypes.byref(handle), ctypes.c_void_p(data_ptr)
-    )
-    if ret != 0:
+    if handle is None:
         return False
-    driver.cuMemRelease(handle)
+    cuda_api.mem_release(handle)
     return True
 
 
@@ -186,9 +87,9 @@ def is_vmm_exportable(data_ptr: int) -> bool:
 # A POSIX fd is only meaningful once passed to another process via SCM_RIGHTS, so
 # the producer runs a small Unix-socket server that hands out the fd for an
 # export id on request. The socket path travels in the JSON descriptor. The
-# server is the transport's *session*: :meth:`CudaVmmTransport.bootstrap` creates
-# it (owned by the served app's lifespan; see ``serve.create_rest_api``), and the
-# same instance serves every export until release.
+# server is the transport's *session*: :meth:`CudaVmmTransport.session` opens it
+# (owned by the served app's lifespan; see ``serve.create_rest_api``), and the
+# same instance serves every export until the session closes.
 
 # AF_UNIX message framing: an 8-byte little-endian count N, followed by N 8-byte
 # little-endian export ids. The reply is N status bytes plus one SCM_RIGHTS
@@ -270,9 +171,8 @@ class _FdPassServer:
             # the driver at all, so this stays a no-op rather than failing to
             # load libcuda on a host without it.
             return
-        driver = _get_cuda_driver()
         for handle, _keepalive in entries:
-            driver.cuMemRelease(ctypes.c_ulonglong(handle))
+            cuda_api.mem_release(handle)
 
     # -- socket server --------------------------------------------------------
 
@@ -319,7 +219,6 @@ class _FdPassServer:
 
         statuses = bytearray(count)
         fds: list[int] = []
-        driver = _get_cuda_driver()
         try:
             for pos, export_id in enumerate(export_ids):
                 with self._lock:
@@ -327,17 +226,11 @@ class _FdPassServer:
                 if entry is None:
                     continue  # miss: status stays 0, no fd
                 handle, _keepalive = entry
-                fd = ctypes.c_int()
-                ret = driver.cuMemExportToShareableHandle(
-                    ctypes.byref(fd),
-                    ctypes.c_ulonglong(handle),
-                    _CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR,
-                    0,
-                )
-                if ret != 0:
+                fd = cuda_api.export_to_shareable_fd(handle)
+                if fd is None:
                     continue
                 statuses[pos] = 1
-                fds.append(fd.value)
+                fds.append(fd)
             ancdata = (
                 [
                     (
@@ -389,20 +282,20 @@ def _recv_exactly(conn: socket.socket, n: int) -> bytes | None:
 def _fd_socket_base_dir() -> str:
     """Directory to bind the fd-passing socket under.
 
-    Prefers the runtime's ``output_path`` (the host<->container shared mount, so
-    a host consumer can reach the socket a containerized server binds), then an
-    explicit ``TESSERACT_VMM_SOCKET_DIR`` override, else the system temp dir for
-    the bare same-host case. Never raises: falls back to temp on any error.
+    An explicit ``vmm_socket_dir`` config value (``TESSERACT_VMM_SOCKET_DIR``)
+    wins; otherwise the runtime's ``output_path`` -- the host<->container shared
+    mount, so a host consumer can reach the socket a containerized server binds --
+    is used, falling back to the system temp dir for the bare same-host case.
+    Never raises: falls back to temp on any error.
     """
-    override = os.environ.get("TESSERACT_VMM_SOCKET_DIR")
-    if override:
-        return override
     try:
         from tesseract_core.runtime.config import get_config
 
-        output_path = get_config().output_path
-        if output_path and output_path != ".":
-            return output_path
+        config = get_config()
+        if config.vmm_socket_dir:
+            return config.vmm_socket_dir
+        if config.output_path and config.output_path != ".":
+            return config.output_path
     except Exception:
         pass
     import tempfile
@@ -530,7 +423,6 @@ def _build_vmm_descriptor(arr: Any, server: _FdPassServer) -> ArrayDict:
     if not _is_c_contiguous(arr):
         raise ValueError("cuda_vmm encoding requires a C-contiguous array")
 
-    driver = _get_cuda_driver()
     iface = arr.__cuda_array_interface__
     data_ptr = iface["data"][0]
     shape = tuple(iface["shape"])
@@ -540,31 +432,20 @@ def _build_vmm_descriptor(arr: Any, server: _FdPassServer) -> ArrayDict:
     # Retain the VMM handle backing this pointer, and record the byte offset of
     # the array within the whole mapped allocation (pooled VMM allocators hand
     # out many arrays from one reservation).
-    base = ctypes.c_ulonglong()
-    size = ctypes.c_size_t()
-    _cu_check(
-        driver.cuMemGetAddressRange_v2(
-            ctypes.byref(base), ctypes.byref(size), ctypes.c_ulonglong(data_ptr)
-        ),
-        "cuMemGetAddressRange",
-    )
-    storage_offset = data_ptr - base.value
-    storage_size = size.value
+    base_ptr, storage_size = cuda_api.get_allocation_base(data_ptr)
+    storage_offset = data_ptr - base_ptr
 
     # cuMemRetainAllocationHandle succeeds only for VMM-backed memory. Because
     # cuda_vmm is an explicit opt-in, a non-VMM allocation here is a user error,
     # not something to silently paper over -- fail loudly and actionably rather
     # than degrading to a copy behind the user's back (that is what cuda_ipc is
     # for).
-    handle = ctypes.c_ulonglong()
-    ret = driver.cuMemRetainAllocationHandle(
-        ctypes.byref(handle), ctypes.c_void_p(base.value)
-    )
-    if ret != 0:
+    handle = cuda_api.retain_allocation_handle(base_ptr)
+    if handle is None:
         raise RuntimeError(
             "gpu_transport='cuda_vmm' requires VMM-backed device memory, but this "
             "array's allocation is not VMM-exportable (cuMemRetainAllocationHandle "
-            f"failed, CUresult={ret}). This is expected for the default CuPy/PyTorch "
+            "failed). This is expected for the default CuPy/PyTorch "
             "caching allocators. Either use gpu_transport='cuda_ipc' (always works; "
             "stages a copy for such memory), or allocate through a VMM-backed "
             "allocator (JAX/XLA, or PyTorch with "
@@ -573,9 +454,9 @@ def _build_vmm_descriptor(arr: Any, server: _FdPassServer) -> ArrayDict:
 
     # The export carries no ordering guarantee: make sure the producer's writes
     # to this memory are complete before a consumer can map and read it.
-    _cu_check(driver.cuCtxSynchronize(), "cuCtxSynchronize")
+    cuda_api.ctx_synchronize()
 
-    export_id = server.register(handle.value, arr)
+    export_id = server.register(handle, arr)
 
     import pybase64
 
@@ -617,56 +498,35 @@ def _import_map_and_copy(val: ArrayDict) -> IpcDeviceArray:
     shape = tuple(val["shape"])
     nbytes = int(np.prod(shape)) * dtype.itemsize if shape else dtype.itemsize
 
-    driver = _get_cuda_driver()
-
     # Allocate the owned buffer up front (on the target device) so that if any
     # later step fails we still unmap and free cleanly.
     cuda_api.set_device(device)
     owned_ptr = cuda_api.malloc(nbytes)
 
     fd = _fetch_fd(sock_path, export_id)
-    handle = ctypes.c_ulonglong()
-    mapped_ptr = ctypes.c_ulonglong()
+    handle = 0
+    mapped_ptr = 0
     mapped = False
     try:
-        _cu_check(
-            driver.cuMemImportFromShareableHandle(
-                ctypes.byref(handle),
-                ctypes.cast(fd, ctypes.c_void_p),
-                _CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR,
-            ),
-            "cuMemImportFromShareableHandle",
-        )
-        _cu_check(
-            driver.cuMemAddressReserve(ctypes.byref(mapped_ptr), storage_size, 0, 0, 0),
-            "cuMemAddressReserve",
-        )
-        _cu_check(driver.cuMemMap(mapped_ptr, storage_size, 0, handle, 0), "cuMemMap")
+        handle = cuda_api.import_from_shareable_fd(fd)
+        mapped_ptr = cuda_api.address_reserve(storage_size)
+        cuda_api.mem_map(mapped_ptr, storage_size, handle)
         mapped = True
-        acc = _CUmemAccessDesc()
-        acc.location.type = _CU_MEM_LOCATION_TYPE_DEVICE
-        acc.location.id = device
-        acc.flags = _CU_MEM_ACCESS_FLAGS_PROT_READWRITE
-        _cu_check(
-            driver.cuMemSetAccess(mapped_ptr, storage_size, ctypes.byref(acc), 1),
-            "cuMemSetAccess",
-        )
+        cuda_api.mem_set_access_rw(mapped_ptr, storage_size, device)
 
         # Copy just this array's bytes (at its offset) into our owned buffer,
         # then block until the copy is done so we never unmap mid-copy.
-        cuda_api.memcpy_device_to_device(
-            owned_ptr, mapped_ptr.value + storage_offset, nbytes
-        )
+        cuda_api.memcpy_device_to_device(owned_ptr, mapped_ptr + storage_offset, nbytes)
         cuda_api.device_synchronize()
     except Exception:
         cuda_api.free(owned_ptr)
         raise
     finally:
         if mapped:
-            driver.cuMemUnmap(mapped_ptr, storage_size)
-            driver.cuMemAddressFree(mapped_ptr, storage_size)
-        if handle.value:
-            driver.cuMemRelease(handle)
+            cuda_api.mem_unmap(mapped_ptr, storage_size)
+            cuda_api.address_free(mapped_ptr, storage_size)
+        if handle:
+            cuda_api.mem_release(handle)
         # The imported fd is dup'd into our process; close our copy.
         try:
             os.close(fd)
@@ -684,42 +544,61 @@ def _import_map_and_copy(val: ArrayDict) -> IpcDeviceArray:
 class CudaVmmTransport(DeviceTransport):
     """DeviceTransport backend for the copy-free VMM fd path.
 
-    The transport's *session* is the :class:`_FdPassServer`. ``bootstrap`` on the
-    producer creates it; the served app owns that call (and the matching
-    ``release``/``close``) via its lifespan. When no session has been
-    bootstrapped -- the bare SDK path that encodes without a running server -- a
-    process-global fallback server is started lazily, so a direct
-    ``register``/``receive`` still works.
+    The transport's *session* is the :class:`_FdPassServer`. A producer opens one
+    with :meth:`session` (a context manager) for the span of its export work, and
+    the open server installs itself as the process-active server so the encode
+    path can find it.
     """
 
     name = "cuda_vmm"
     reach = "same_host"
 
-    def bootstrap(self, role: Any, peer_offer: Any = None) -> Any:
-        """Producer: create and return the fd-passing server (the session).
+    @contextmanager
+    def session(
+        self, role: Literal["producer", "consumer"] = "producer"
+    ) -> Iterator[Any]:
+        """Open a producer fd-passing server for the duration of the ``with``.
 
-        The server is also installed as the process fallback, so the encode path
-        (which reaches VMM by pointer, deep inside serialization, without a
-        session in hand) and this session are the *same* instance. The served
-        app calls this once from its lifespan, giving the socket a deterministic
-        startup and teardown instead of a leaked lazy daemon.
+        This is the explicit lifecycle every producer uses -- the served app's
+        lifespan, the CLI ``run`` path, and tests each wrap their export work in
+        it. On enter it creates the :class:`_FdPassServer` and installs it as the
+        process-active server, so the encode path (which reaches VMM by pointer
+        deep inside serialization, without a session object in hand) finds it. On
+        exit it releases the request's retained handles and closes the socket.
+
+        Consumers need no producer-side state (they pull fds over the socket named
+        in each descriptor), so a consumer session is a no-op yielding ``None``.
+        """
+        if role != "producer":
+            yield None
+            return
+        server = _FdPassServer()
+        _set_active_server(server)
+        try:
+            yield server
+        finally:
+            _clear_active_server(server)
+            server.release()
+            server.close()
+
+    def bootstrap(self, role: Any, peer_offer: Any = None) -> Any:
+        """Satisfy the ``DeviceTransport`` contract; prefer :meth:`session`.
 
         The consumer needs no producer-side state (it pulls fds over the socket
-        named in each descriptor), so its bootstrap is a no-op returning None.
+        named in each descriptor), so it returns ``None``. The producer lifecycle
+        lives in :meth:`session`, whose ``with`` block guarantees teardown.
         """
-        if role == "producer":
-            server = _FdPassServer()
-            _set_fallback_server(server)
-            return server
         return None
 
     def register(self, arr: Any, session: Any = None) -> ArrayDict:
         """Export ``arr`` by fd and build its ``vmm:`` descriptor.
 
         As with cuda_ipc, the per-array handle *is* the finished array dict, so
-        :meth:`descriptor` is a passthrough.
+        :meth:`descriptor` is a passthrough. ``session`` is used when supplied;
+        otherwise the process-active server (from an open :meth:`session`) is
+        required -- exporting with no session open is a programming error.
         """
-        server = session if session is not None else _get_fallback_server()
+        server = session if session is not None else _require_active_server()
         return _build_vmm_descriptor(arr, server)
 
     def descriptor(self, handle: ArrayDict) -> ArrayDict:
@@ -736,45 +615,50 @@ class CudaVmmTransport(DeviceTransport):
     def release(self, session: Any = None) -> None:
         """Drop this request's retained VMM handles.
 
-        A bootstrapped session installs itself as the fallback, so releasing the
-        fallback covers both the served path and the sessionless SDK path; the
-        explicit ``session`` release is a harmless no-op in that case. A no-op
-        overall when nothing was ever exported.
+        Releases the given ``session`` when supplied, else the process-active
+        server. A no-op when no server is active (nothing was ever exported).
         """
-        if session is not None:
-            session.release()
-        with _FALLBACK_LOCK:
-            server = _FALLBACK_SERVER
-        if server is not None and server is not session:
-            server.release()
-
-    def shutdown(self) -> None:
-        """Close the fallback/session server. Called by the app's lifespan."""
-        global _FALLBACK_SERVER
-        with _FALLBACK_LOCK:
-            server = _FALLBACK_SERVER
-            _FALLBACK_SERVER = None
+        server = session if session is not None else _active_server()
         if server is not None:
             server.release()
-            server.close()
 
 
-# The fallback server backs both the served path (installed by ``bootstrap``)
-# and the sessionless SDK path (started on first use). Kept process-global since
-# the encode path reaches VMM by pointer without a session in hand.
-_FALLBACK_SERVER: _FdPassServer | None = None
-_FALLBACK_LOCK = threading.Lock()
+# The producer's fd-passing server, held process-global for the life of an open
+# session so the encode path can look it up (it reaches VMM by pointer, with no
+# session object to thread down). Populated only by an open ``session``, so
+# exporting with none open raises.
+_ACTIVE_SERVER: _FdPassServer | None = None
+_ACTIVE_SERVER_LOCK = threading.Lock()
 
 
-def _set_fallback_server(server: _FdPassServer) -> None:
-    global _FALLBACK_SERVER
-    with _FALLBACK_LOCK:
-        _FALLBACK_SERVER = server
+def _set_active_server(server: _FdPassServer) -> None:
+    global _ACTIVE_SERVER
+    with _ACTIVE_SERVER_LOCK:
+        _ACTIVE_SERVER = server
 
 
-def _get_fallback_server() -> _FdPassServer:
-    global _FALLBACK_SERVER
-    with _FALLBACK_LOCK:
-        if _FALLBACK_SERVER is None:
-            _FALLBACK_SERVER = _FdPassServer()
-        return _FALLBACK_SERVER
+def _clear_active_server(expected: _FdPassServer) -> None:
+    """Clear the active slot iff it still holds ``expected``.
+
+    Guards against clobbering a newer session that opened concurrently.
+    """
+    global _ACTIVE_SERVER
+    with _ACTIVE_SERVER_LOCK:
+        if _ACTIVE_SERVER is expected:
+            _ACTIVE_SERVER = None
+
+
+def _active_server() -> _FdPassServer | None:
+    with _ACTIVE_SERVER_LOCK:
+        return _ACTIVE_SERVER
+
+
+def _require_active_server() -> _FdPassServer:
+    server = _active_server()
+    if server is None:
+        raise RuntimeError(
+            "cuda_vmm export attempted with no active fd-passing session. Open one "
+            "with CudaVmmTransport.session() (the served app does this in its "
+            "lifespan) before encoding GPU arrays via gpu_transport='cuda_vmm'."
+        )
+    return server

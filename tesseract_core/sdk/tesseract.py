@@ -1066,16 +1066,27 @@ def _encode_payload(
     def _is_leaf(x: Any) -> bool:
         return hasattr(x, "__array__") or hasattr(x, "__cuda_array_interface__")
 
+    # Import the runtime (populating the transport registry) before encoding.
+    _import_cuda_ipc()
+    from tesseract_core.runtime.device_transport import get_transport
+
+    transport = get_transport(gpu_transport)
+
+    # cuda_vmm serves exported fds over a Unix socket that the server pulls from
+    # while it reads this request, so as a producer the client must hold an open
+    # session for the whole exchange -- register() needs the active server, and
+    # closing it releases the pinned handles once the response is read. cuda_ipc's
+    # handle is self-contained (no server), so it just releases on exit.
+    if gpu_transport == "cuda_vmm":
+        with transport.session("producer"):
+            yield _tree_map(_encode_leaf, payload, is_leaf=_is_leaf)
+        return
+
     try:
         yield _tree_map(_encode_leaf, payload, is_leaf=_is_leaf)
     finally:
         if exported:
-            # Import the runtime (populating the transport registry) before the
-            # release lookup; already imported by the encode above in practice.
-            _import_cuda_ipc()
-            from tesseract_core.runtime.device_transport import get_transport
-
-            get_transport(gpu_transport).release()
+            transport.release()
 
 
 def _decode_array(

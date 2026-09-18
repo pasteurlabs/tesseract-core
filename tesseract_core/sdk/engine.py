@@ -1122,15 +1122,17 @@ def serve(
                     f"gpu_transport={gpu_transport!r} requires GPU access, but no "
                     "GPUs were requested. Pass gpus=['all'] or specific GPU IDs."
                 )
+            # A device transport pins each export in the worker process that
+            # produced it (cuda_vmm's fd-passing server retains the handle there;
+            # cuda_ipc's pin registry is per-process), and exports live until the
+            # next request releases them. With >1 worker the daemon load-balances
+            # requests across processes, so a release or fd fetch can land on a
+            # worker that never held the export -- silently serving wrong data.
             if num_workers > 1:
                 raise ValueError(
-                    f"gpu_transport={gpu_transport!r} requires num_workers=1. The "
-                    "export lifecycle assumes a single serial producer: exports are "
-                    "pinned until the next request releases them, and the fd-passing "
-                    "server retains handles in the worker process that produced them. "
-                    "Multiple workers would load-balance requests across processes, so "
-                    "a release (or an fd fetch) could hit a worker that never held the "
-                    "export, silently returning wrong data. Pass num_workers=1."
+                    f"gpu_transport={gpu_transport!r} requires num_workers=1 "
+                    "(exports are pinned per-producer-process and cannot be "
+                    "load-balanced). Pass num_workers=1."
                 )
             extra_args.extend(["--ipc=host"])
         elif gpu_transport != "none":

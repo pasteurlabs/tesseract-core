@@ -198,6 +198,18 @@ class CudaIpcMemHandle(ctypes.Structure):
     _fields_ = [("reserved", ctypes.c_byte * CUDA_IPC_HANDLE_SIZE)]
 
 
+class _CUmemLocation(ctypes.Structure):
+    """ctypes mirror of ``CUmemLocation`` (a VMM allocation location)."""
+
+    _fields_ = [("type", ctypes.c_int), ("id", ctypes.c_int)]
+
+
+class _CUmemAccessDesc(ctypes.Structure):
+    """ctypes mirror of ``CUmemAccessDesc`` (access rights for a VMM mapping)."""
+
+    _fields_ = [("location", _CUmemLocation), ("flags", ctypes.c_int)]
+
+
 def _find_cudart() -> Any:
     """Locate and load libcudart (a ``ctypes.CDLL``), or ``None`` if not found.
 
@@ -273,11 +285,15 @@ def load_cudart() -> Any:
 def load_cuda_driver() -> Any:
     """Load the CUDA driver library (libcuda) and declare the signatures we call.
 
-    The driver API is only needed for ``cuMemGetAddressRange``, which recovers
-    the base pointer and size of the allocation backing a device pointer. This
-    is required because IPC handles reference the *whole* allocation, while a
-    given array may point partway into it (common with pooled allocators like
-    CuPy and PyTorch). Raises ``RuntimeError`` if libcuda cannot be found.
+    The driver API serves two callers in :mod:`api`: ``cuMemGetAddressRange``
+    recovers the base pointer and size of the allocation backing a device pointer
+    (IPC handles reference the *whole* allocation, while a given array may point
+    partway into it, common with pooled allocators like CuPy and PyTorch), and
+    the VMM export/import symbols (``cuMemRetainAllocationHandle``,
+    ``cuMemExportToShareableHandle``, ``cuMemImportFromShareableHandle``,
+    ``cuMemAddressReserve``/``cuMemMap``/``cuMemSetAccess`` and their teardown
+    counterparts) back the copy-free ``cuda_vmm`` transport. Raises
+    ``RuntimeError`` if libcuda cannot be found.
     """
     driver = None
     path = ctypes.util.find_library("cuda")
@@ -305,5 +321,61 @@ def load_cuda_driver() -> Any:
         ctypes.c_ulonglong,
     ]
     driver.cuMemGetAddressRange_v2.restype = ctypes.c_int
+
+    # VMM export/import symbols backing the cuda_vmm transport.
+    P = ctypes.POINTER
+    # Recover the VMM allocation handle backing a device pointer.
+    driver.cuMemRetainAllocationHandle.argtypes = [
+        P(ctypes.c_ulonglong),
+        ctypes.c_void_p,
+    ]
+    driver.cuMemRetainAllocationHandle.restype = ctypes.c_int
+    # Export it to a shareable POSIX fd.
+    driver.cuMemExportToShareableHandle.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_ulonglong,
+        ctypes.c_int,
+        ctypes.c_ulonglong,
+    ]
+    driver.cuMemExportToShareableHandle.restype = ctypes.c_int
+    driver.cuMemRelease.argtypes = [ctypes.c_ulonglong]
+    driver.cuMemRelease.restype = ctypes.c_int
+    # Import + map on the consumer.
+    driver.cuMemImportFromShareableHandle.argtypes = [
+        P(ctypes.c_ulonglong),
+        ctypes.c_void_p,
+        ctypes.c_int,
+    ]
+    driver.cuMemImportFromShareableHandle.restype = ctypes.c_int
+    driver.cuMemAddressReserve.argtypes = [
+        P(ctypes.c_ulonglong),
+        ctypes.c_size_t,
+        ctypes.c_size_t,
+        ctypes.c_ulonglong,
+        ctypes.c_ulonglong,
+    ]
+    driver.cuMemAddressReserve.restype = ctypes.c_int
+    driver.cuMemMap.argtypes = [
+        ctypes.c_ulonglong,
+        ctypes.c_size_t,
+        ctypes.c_size_t,
+        ctypes.c_ulonglong,
+        ctypes.c_ulonglong,
+    ]
+    driver.cuMemMap.restype = ctypes.c_int
+    driver.cuMemUnmap.argtypes = [ctypes.c_ulonglong, ctypes.c_size_t]
+    driver.cuMemUnmap.restype = ctypes.c_int
+    driver.cuMemSetAccess.argtypes = [
+        ctypes.c_ulonglong,
+        ctypes.c_size_t,
+        P(_CUmemAccessDesc),
+        ctypes.c_size_t,
+    ]
+    driver.cuMemSetAccess.restype = ctypes.c_int
+    driver.cuMemAddressFree.argtypes = [ctypes.c_ulonglong, ctypes.c_size_t]
+    driver.cuMemAddressFree.restype = ctypes.c_int
+    driver.cuCtxSynchronize.argtypes = []
+    driver.cuCtxSynchronize.restype = ctypes.c_int
+
     driver.cuInit(0)
     return driver
