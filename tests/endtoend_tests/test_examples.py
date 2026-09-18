@@ -120,7 +120,10 @@ TEST_CASES = {
         check_gradients=True, no_from_source="needs a compiled Fortran extension"
     ),
     "conda": Config(no_from_source="needs a conda environment"),
-    "pylock": Config(test_with_random_inputs=True),
+    "pylock": Config(
+        test_with_random_inputs=True,
+        no_from_source="lockfile deps are installed at image build time, not on the host",
+    ),
     "required_files": Config(input_path="input"),
     "file_io": Config(input_path="test_cases/testdata", output_path="__tmp_path__"),
     "metrics": Config(
