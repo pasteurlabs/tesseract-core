@@ -47,6 +47,8 @@ from .serving import (
     get_free_port,
     is_port_conflict,
     retry_or_raise_port_conflict,
+    runtime_config_to_env,
+    validate_output_format,
     wait_for_health_or_dispose,
 )
 
@@ -425,7 +427,19 @@ def prepare_build_context(
     local_requirements_path = context_dir / "local_requirements"
     Path.mkdir(local_requirements_path, parents=True, exist_ok=True)
 
-    if requirement_config.provider == "uv-pip":
+    if requirement_config.provider == "uv-pip" and requirement_config.is_pylock:
+        # A lockfile has no local-path dependencies to split out, so it is installed
+        # as-is from its staged location without rewriting. Check it exists here to
+        # fail with a clear message instead of a missing COPY during `docker build`.
+        lockfile = src_dir / requirement_config._filename
+        if not lockfile.exists():
+            raise UserError(
+                f"requirements_file is set to {requirement_config._filename!r} but "
+                f"that file was not found in {src_dir}. Generate one with, e.g., "
+                f"`uv export --format pylock.toml -o {requirement_config._filename}`."
+            )
+
+    elif requirement_config.provider == "uv-pip":
         reqstxt = src_dir / requirement_config._filename
         if reqstxt.exists():
             local_dependencies, remote_dependencies = parse_requirements(reqstxt)
@@ -444,7 +458,7 @@ def prepare_build_context(
         # We need to write a new requirements file in the build dir, where the
         # local dependencies are rewritten to their staged locations.
         requirements_file_path = (
-            context_dir / "__tesseract_source__" / "tesseract_requirements.txt"
+            context_dir / "__tesseract_source__" / requirement_config._filename
         )
         lines = remote_dependencies + staged_dependencies
         with requirements_file_path.open("w", encoding="utf-8") as f:
@@ -979,12 +993,7 @@ def serve(
     if not image_name or not isinstance(image_name, str):
         raise ValueError("Tesseract image name must be provided")
 
-    if output_format == "json+binref" and output_path is None:
-        raise UserError(
-            "The 'json+binref' output format writes array buffers to .bin files, "
-            "which are lost when the container is torn down unless an output path "
-            "is set. Specify one with --output-path (or output_path=...)."
-        )
+    validate_output_format(output_format, output_path)
 
     image = docker_client.images.get(image_name)
 
@@ -1005,15 +1014,7 @@ def serve(
         environment = {}
     environment.update(volume_environment)
 
-    # Convert runtime_config to TESSERACT_* environment variables
-    if runtime_config is not None:
-        for key, value in runtime_config.items():
-            env_key = f"TESSERACT_{key.upper()}"
-            if isinstance(value, bool):
-                env_value = "1" if value else "0"
-            else:
-                env_value = str(value)
-            environment[env_key] = env_value
+    environment.update(runtime_config_to_env(runtime_config))
 
     if output_format:
         environment["TESSERACT_OUTPUT_FORMAT"] = output_format
@@ -1167,7 +1168,9 @@ def serve(
                 break
 
             logger.info("Waiting for Tesseract to start...")
-            wait_for_health_or_dispose(container, ping_ip, port, startup_timeout)
+            wait_for_health_or_dispose(
+                container, f"http://{ping_ip}:{port}", startup_timeout
+            )
         except ContainerError as ex:
             if not is_port_conflict(ex.stderr.decode("utf-8", errors="ignore")):
                 raise
@@ -1386,12 +1389,7 @@ def run_tesseract(
     Returns:
         Tuple with the stdout and stderr of the Tesseract.
     """
-    if output_format == "json+binref" and output_path is None:
-        raise UserError(
-            "The 'json+binref' output format writes array buffers to .bin files, "
-            "which are lost when the container is torn down unless an output path "
-            "is set. Specify one with --output-path (or output_path=...)."
-        )
+    validate_output_format(output_format, output_path)
 
     if user is None:
         # Use the current user if not specified
@@ -1517,16 +1515,3 @@ def _resolve_file_path(path: str | Path, make_dir: bool = False) -> Path:
         raise RuntimeError(f"Path {local_path} provided is not a directory")
 
     return local_path
-
-
-def logs(container_id: str) -> str:
-    """Get logs from a container.
-
-    Args:
-        container_id: the ID of the container.
-
-    Returns:
-        The logs of the container.
-    """
-    container = docker_client.containers.get(container_id)
-    return container.logs().decode("utf-8")

@@ -143,6 +143,103 @@ def test_prepare_build_context_no_host_credentials(tmp_path_factory):
     assert "--mount=type=tmpfs" not in dockerfile
 
 
+def test_prepare_build_context_pylock(tmp_path_factory):
+    """A pylock.toml requirements_file is staged verbatim and wired into the build."""
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "tesseract_api.py").touch()
+    # A PEP 751 lockfile with two indexes and a platform marker.
+    lockfile = src_dir / "pylock.toml"
+    lockfile.write_text(
+        'lock-version = "1.0"\n'
+        'created-by = "uv"\n'
+        'requires-python = ">=3.11"\n\n'
+        "[[packages]]\n"
+        'name = "numpy"\n'
+        'version = "2.5.3"\n'
+        'index = "https://pypi.org/simple"\n\n'
+        "[[packages]]\n"
+        'name = "torch"\n'
+        'version = "2.14.0+cpu"\n'
+        'index = "https://download.pytorch.org/whl/cpu"\n'
+        "marker = \"sys_platform == 'linux'\"\n"
+    )
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(
+        name="foobar",
+        build_config=TesseractBuildConfig(
+            requirements={"provider": "uv-pip", "requirements_file": "pylock.toml"}
+        ),
+    )
+    engine.prepare_build_context(src_dir, build_dir, config)
+
+    # A lockfile has no local deps to stage, so it is not rewritten: the staged
+    # contents must match the input byte-for-byte.
+    staged = build_dir / "__tesseract_source__" / "pylock.toml"
+    assert staged.read_text() == lockfile.read_text()
+
+    dockerfile = (build_dir / "Dockerfile").read_text()
+    # The build script is pointed at the lockfile, which is copied in by that name.
+    assert 'TESSERACT_REQUIREMENTS_FILE="pylock.toml"' in dockerfile
+    assert "__tesseract_source__/pylock.toml" in dockerfile
+
+
+def test_prepare_build_context_pylock_missing_file_errors(tmp_path_factory):
+    """A configured-but-absent lockfile fails early with a clear message, not in Docker."""
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "tesseract_api.py").touch()
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(
+        name="foobar",
+        build_config=TesseractBuildConfig(
+            requirements={"provider": "uv-pip", "requirements_file": "pylock.toml"}
+        ),
+    )
+    with pytest.raises(UserError, match=r"pylock\.toml"):
+        engine.prepare_build_context(src_dir, build_dir, config)
+
+
+def test_prepare_build_context_pylock_with_private_index_credential(tmp_path_factory):
+    """A lockfile build with a private-index credential generates the auth wiring.
+
+    Checks the secret mount, the tmpfs for assembled credentials, and the
+    host->secret entry the build script turns into a netrc line. No token is
+    present in the build context.
+    """
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "tesseract_api.py").touch()
+    (src_dir / "pylock.toml").write_text(
+        'lock-version = "1.0"\ncreated-by = "uv"\nrequires-python = ">=3.11"\n'
+    )
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(
+        name="foobar",
+        build_config=TesseractBuildConfig(
+            requirements={"provider": "uv-pip", "requirements_file": "pylock.toml"},
+            host_credentials=[
+                {
+                    "host": "pkgs.dev.azure.com",
+                    "secret_id": "azure_artifacts",
+                    "username": "az",
+                }
+            ],
+        ),
+    )
+    engine.prepare_build_context(
+        src_dir, build_dir, config, secret_ids=["azure_artifacts"]
+    )
+
+    dockerfile = (build_dir / "Dockerfile").read_text()
+    assert "--mount=type=secret,id=azure_artifacts" in dockerfile
+    assert "--mount=type=tmpfs" in dockerfile
+
+    creds = (build_dir / "host_credentials.txt").read_text()
+    # host, secret id, and username the setup script maps to a netrc entry; no token.
+    assert "pkgs.dev.azure.com\tazure_artifacts\taz" in creds
+
+
 def test_build_tesseract_requires_secret_for_host_credential(tmp_path):
     """A credential errors if no matching --secret is provided (#675)."""
     (tmp_path / "tesseract_api.py").write_text(
@@ -1186,13 +1283,13 @@ def test_serve_retries_on_port_in_use(mocked_docker, monkeypatch):
     fails to bind it) should cause serve to pick a fresh port and try again,
     rather than surfacing the failure to the caller.
     """
-    seen_ports = []
+    seen_urls = []
     fail_times = 2  # fail the first two attempts, succeed on the third
 
-    def flaky_health(container, ping_ip, port, timeout):
-        seen_ports.append(port)
-        if len(seen_ports) <= fail_times:
-            raise engine.PortInUseError(f"Port {port} was already in use")
+    def flaky_health(served, url, timeout):
+        seen_urls.append(url)
+        if len(seen_urls) <= fail_times:
+            raise engine.PortInUseError(f"{url} was already in use")
         # success -> return normally
 
     monkeypatch.setattr(engine, "wait_for_health_or_dispose", flaky_health)
@@ -1200,10 +1297,8 @@ def test_serve_retries_on_port_in_use(mocked_docker, monkeypatch):
     res, _ = engine.serve("foobar")
     assert res
     # It retried until success and used a distinct port each time.
-    assert len(seen_ports) == fail_times + 1
-    assert len(set(seen_ports)) == len(seen_ports), (
-        f"retries reused a port: {seen_ports}"
-    )
+    assert len(seen_urls) == fail_times + 1
+    assert len(set(seen_urls)) == len(seen_urls), f"retries reused a port: {seen_urls}"
 
 
 @pytest.mark.parametrize(
@@ -1356,7 +1451,7 @@ def _stopped_container(logs=b"", state=None, **overrides):
 
 # Nothing listens on port 1, so /health fails immediately and the wait gives up
 # on the first pass rather than sleeping.
-_DEAD = ("127.0.0.1", "1")
+_DEAD_URL = "http://127.0.0.1:1"
 
 
 def test_wait_for_health_reports_a_container_that_never_answers(monkeypatch):
@@ -1365,7 +1460,7 @@ def test_wait_for_health_reports_a_container_that_never_answers(monkeypatch):
     container = _stopped_container()
 
     with pytest.raises(TimeoutError) as excinfo:
-        serving.wait_for_health_or_dispose(container, *_DEAD, timeout=0.05)
+        serving.wait_for_health_or_dispose(container, _DEAD_URL, timeout=0.05)
 
     message = str(excinfo.value)
     assert "did not respond to a health check in time" in message
@@ -1378,7 +1473,7 @@ def test_wait_for_health_singles_out_a_port_collision(monkeypatch):
     container = _stopped_container(logs=b"Error: address already in use")
 
     with pytest.raises(engine.PortInUseError):
-        serving.wait_for_health_or_dispose(container, *_DEAD, timeout=0.05)
+        serving.wait_for_health_or_dispose(container, _DEAD_URL, timeout=0.05)
 
 
 def test_unreadable_logs_do_not_mask_the_startup_failure(monkeypatch):
@@ -1392,7 +1487,7 @@ def test_unreadable_logs_do_not_mask_the_startup_failure(monkeypatch):
     container.logs = cannot_read
 
     with pytest.raises(RuntimeError) as excinfo:
-        serving.wait_for_health_or_dispose(container, *_DEAD, timeout=0.05)
+        serving.wait_for_health_or_dispose(container, _DEAD_URL, timeout=0.05)
 
     assert "stopped running during startup" in str(excinfo.value)
 
@@ -1407,7 +1502,7 @@ def test_failure_to_dispose_does_not_mask_the_startup_failure(monkeypatch):
     container = _stopped_container(remove=cannot_remove)
 
     with pytest.raises(RuntimeError, match="stopped running during startup"):
-        serving.wait_for_health_or_dispose(container, *_DEAD, timeout=0.05)
+        serving.wait_for_health_or_dispose(container, _DEAD_URL, timeout=0.05)
 
 
 def test_serve_disposes_of_a_container_that_never_starts(mocked_docker, monkeypatch):
@@ -1427,19 +1522,50 @@ def test_serve_disposes_of_a_container_that_never_starts(mocked_docker, monkeypa
     monkeypatch.setattr(serving, "is_running", lambda container: False)
     # The fixture's container overrides `remove`, so patch the class it actually is
     mocked_cls = type(mocked_docker.containers.run(detach=True))
-    monkeypatch.setattr(mocked_cls, "remove", lambda self, **kw: torn_down.append(kw))
+    monkeypatch.setattr(
+        mocked_cls,
+        "remove",
+        lambda self, v=False, link=False, force=False: torn_down.append(force),
+    )
 
     with pytest.raises(RuntimeError, match="stopped running during startup"):
         engine.serve("foobar")
 
-    assert torn_down == [{"force": True}]
+    assert torn_down == [True]
+
+
+def test_port_conflict_detected_in_wrapped_traceback():
+    """A conflict must be recognised even when rich has wrapped the message.
+
+    An uncaught error in the runtime is rendered into a fixed-width box, and
+    debugpy's message is long enough to be split across two lines. Matching the
+    raw text misses it, so a real port collision is reported as an unexplained
+    startup failure instead of being retried.
+    """
+    # Verbatim from a real debugpy bind failure captured through the runtime CLI
+    wrapped = (
+        "RuntimeError: Can't listen for client connections: [Errno 48] Address "
+        "already in\nuse"
+    )
+
+    assert engine.is_port_conflict(wrapped)
+    # Unwrapped forms must keep working
+    assert engine.is_port_conflict("[Errno 98] Address already in use")
+    assert engine.is_port_conflict("port is already allocated")
+    # Windows words it entirely differently for the same condition
+    assert engine.is_port_conflict(
+        "RuntimeError: Can't listen for client connections: [WinError 10048] Only "
+        "one usage of each socket address (protocol/network address/port) is "
+        "normally permitted"
+    )
+    assert not engine.is_port_conflict("some unrelated failure")
 
 
 def test_serve_gives_up_after_max_port_attempts(mocked_docker, monkeypatch):
     """If every attempt loses the port race, serve raises rather than looping forever."""
 
-    def always_in_use(container, ping_ip, port, timeout):
-        raise engine.PortInUseError(f"Port {port} was already in use")
+    def always_in_use(served, url, timeout):
+        raise engine.PortInUseError(f"{url} was already in use")
 
     monkeypatch.setattr(engine, "wait_for_health_or_dispose", always_in_use)
 
@@ -1455,9 +1581,9 @@ def test_serve_does_not_retry_user_supplied_port(mocked_docker, monkeypatch):
     """
     attempts = []
 
-    def always_in_use(container, ping_ip, port, timeout):
-        attempts.append(port)
-        raise engine.PortInUseError(f"Port {port} was already in use")
+    def always_in_use(served, url, timeout):
+        attempts.append(url)
+        raise engine.PortInUseError(f"{url} was already in use")
 
     monkeypatch.setattr(engine, "wait_for_health_or_dispose", always_in_use)
 
@@ -1465,7 +1591,7 @@ def test_serve_does_not_retry_user_supplied_port(mocked_docker, monkeypatch):
         engine.serve("foobar", port="12345")
 
     # Exactly one attempt, on the exact port requested.
-    assert attempts == ["12345"]
+    assert attempts == ["http://127.0.0.1:12345"]
 
 
 def test_needs_docker(mocked_docker, monkeypatch):
