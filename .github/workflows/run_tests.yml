@@ -411,7 +411,7 @@ jobs:
       # outside pytest's timeout leaves the fixture builds as cache hits.
       - name: Pre-build GPU examples (warm layer cache)
         run: |
-          for example in _gpu_cuda_ipc _gpu_jax _gpu_torch; do
+          for example in _gpu_cupy _gpu_jax _gpu_torch; do
             uv run --no-sync tesseract build "examples/$example"
           done
 

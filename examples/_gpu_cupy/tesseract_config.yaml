@@ -1,6 +1,6 @@
-name: "gpu-cuda-ipc"
+name: "gpu-cupy"
 version: "0.1.0"
-description: "GPU Tesseract returning device memory, for CUDA IPC end-to-end tests."
+description: "GPU Tesseract returning CuPy device memory, for CUDA IPC end-to-end tests."
 
 build_config:
   # CUDA runtime base image so libcudart is present for the IPC export path.

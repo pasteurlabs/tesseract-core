@@ -44,7 +44,7 @@ requires_cuda = pytest.mark.skipif(
 
 # The framework runs inside the container, so the host stays framework-agnostic
 # and needs only a GPU to decode the handle (hence the plain requires_cuda skip).
-GPU_EXAMPLES = ["_gpu_cuda_ipc", "_gpu_jax", "_gpu_torch"]
+GPU_EXAMPLES = ["_gpu_cupy", "_gpu_jax", "_gpu_torch"]
 
 
 @pytest.fixture(scope="module", params=GPU_EXAMPLES)
