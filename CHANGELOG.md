@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.14.0] - 2026-09-21
+
+### Features
+
+- Add `Tesseract.from_source` to serve a Tesseract a separate subprocess without a container (#669)
+- Install dependencies from a PEP 751 lockfile (#767)
+- Machine readable output flag for tesseract list (#780)
+
+### Bug Fixes
+
+- *(runtime)* Let a signed integer reach an unsigned field (#769)
+- Reset runtime config before each in-process Tesseract instance (#703)
+- Coerce abstract_eval input avals to the schema dtype (#772)
+
+### Refactor
+
+- *(sdk)* Make deprecation tombstones time-based (#764)
+
+### Documentation
+
+- Fix broken 'Learn more' links in README (#774)
+
 ## [1.13.0] - 2026-09-16
 
 ### Features
