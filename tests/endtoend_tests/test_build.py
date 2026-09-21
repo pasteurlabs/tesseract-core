@@ -418,3 +418,26 @@ def test_metadata_label(built_image_name, docker_executable):
     assert result.returncode == 0
     label_data = json.loads(result.stdout.strip())
     assert label_data == {"tags": ["ml", "physics"], "nested": {"key": "value"}}
+
+
+def test_list_json_output(cli_runner, built_image_name, docker_executable):
+    """Test that `tesseract list --format json` returns unabridged image metadata."""
+    result = cli_runner.invoke(app, ["list", "--format", "json"])
+    assert result.exit_code == 0, result.stderr
+
+    images = json.loads(result.stdout)
+    [image] = [i for i in images if built_image_name in i["tags"]]
+    name = built_image_name.split(":")[0]
+    image_id = subprocess.run(
+        [*docker_executable, "inspect", "--format", "{{.Id}}", built_image_name],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert image == {
+        "id": image_id,
+        "name": name,
+        "tags": [f"{name}:1.2.3", f"{name}:latest"],
+        "version": "1.2.3",
+        "description": "Simple tesseract that adds two vectors.\\n",
+    }
