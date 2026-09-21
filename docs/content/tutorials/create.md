@@ -128,7 +128,7 @@ The output is a table of Tesseract images with their ID, name, version, and desc
 └─────────────────────┴───────────────────────┴────────────┴─────────┴───────────────────────────────────────────┘
 ```
 
-The table is sized to your terminal, so names and tags wrap and truncate. The machine-readable `tesseract list --format json` is also available.
+For machine-readable output unaffected by rich formatting use `tesseract list --format json`.
 
 (testing-a-tesseract)=
 
