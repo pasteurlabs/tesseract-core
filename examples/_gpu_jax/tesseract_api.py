@@ -32,7 +32,14 @@ class OutputSchema(BaseModel):
 
 def apply(inputs: InputSchema) -> OutputSchema:
     """Compute ``s * a + b`` on the GPU and return device memory."""
+    import jax
+
     a = jnp.asarray(inputs.a)
     b = jnp.asarray(inputs.b)
     result = inputs.s * a + b
+    # TEMP diagnostic: surface the actual JAX backend/device in CI.
+    raise RuntimeError(
+        f"JAX_DIAG backend={jax.default_backend()} "
+        f"devices={jax.devices()} result_device={result.devices()}"
+    )
     return OutputSchema(result=result)
