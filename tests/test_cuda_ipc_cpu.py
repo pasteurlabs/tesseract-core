@@ -377,10 +377,9 @@ def test_client_request_releases_input_exports(mocked_cuda):
 def test_client_request_exports_dlpack_only_input(mocked_cuda):
     """The SDK client exports a JAX-style DLPack-only GPU input by reference.
 
-    Regression for the reported bug: a DLPack-only array (no
-    ``__cuda_array_interface__``) reached the client encode path and raised
-    "cuda_ipc encoding requires a CUDA array". It must now be detected as a GPU
-    leaf, exported over cuda_ipc, and released afterwards like a CAI array.
+    A DLPack-only array (no ``__cuda_array_interface__``) reaching the client
+    encode path is detected as a GPU leaf, exported over cuda_ipc, and released
+    afterwards like a CAI array.
     """
     import orjson
 

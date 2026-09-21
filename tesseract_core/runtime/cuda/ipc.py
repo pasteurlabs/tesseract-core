@@ -114,10 +114,11 @@ def cuda_array_to_host(arr: Any) -> np.ndarray:
 class _CudaArrayMeta:
     """Unified device-array metadata, read from CAI or DLPack.
 
-    Normalises the two metadata sources the transports accept into one shape:
+    Normalizes the two metadata sources the transports accept into one shape:
     ``__cuda_array_interface__`` (CuPy, PyTorch, Numba) and DLPack (JAX, which
-    does not implement CAI). ``strides`` is in *elements* when present, mirroring
-    both protocols; ``None`` means row-major contiguous.
+    does not implement CAI). Strides are stored in *bytes* when present (DLPack's
+    element strides are converted on the way in); ``None`` means row-major
+    contiguous.
     """
 
     __slots__ = ("_strides_bytes", "data_ptr", "device", "dtype", "shape")

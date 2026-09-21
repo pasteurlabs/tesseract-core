@@ -192,9 +192,7 @@ def drop_unconsumed_bundle(token: int) -> None:
 # ``__cuda_array_interface__``. To route such an array over a CUDA device
 # transport we need its device pointer, shape, dtype, and contiguity -- exactly
 # what a DLPack capsule already carries. The helpers below borrow that metadata
-# without adopting the buffer: the producer keeps ownership, so we must consume
-# the capsule (rename it to ``"used_dltensor"`` so the producer does not double
-# free) and invoke its deleter to release the managed tensor before returning.
+# without adopting the buffer, leaving the producer as sole owner.
 
 
 def is_dlpack_cuda(obj: Any) -> bool:
@@ -263,7 +261,7 @@ def read_dlpack_cuda_metadata(
 def _numpy_dtype(dl_dtype: _DLDataType) -> np.dtype:
     """Map a DLPack ``DLDataType`` back to a NumPy dtype.
 
-    Rejects vectorised lanes (``lanes != 1``): the CUDA transports move a flat
+    Rejects vectorized lanes (``lanes != 1``): the CUDA transports move a flat
     scalar-typed byte range, so a packed multi-lane element has no NumPy dtype
     to rebuild it from.
     """

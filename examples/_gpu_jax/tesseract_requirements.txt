@@ -1,0 +1,5 @@
+# JAX provides the device arrays returned by apply(). The [cuda12-local] variant
+# builds against the CUDA runtime already in the base image rather than pulling
+# its own CUDA wheels, matching the 12.x runtime base_image. JAX exposes device
+# buffers only via DLPack, which is the path this example exercises.
+jax[cuda12-local]
