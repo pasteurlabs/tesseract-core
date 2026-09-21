@@ -738,7 +738,7 @@ def list_tesseract_images(
         typer.Option(
             "--format",
             "-f",
-            help="Output format to use. table is human-readable, json is machine-readable. ",
+            help="Output format to use. table uses rich formatting, json is machine-readable. ",
         ),
     ] = "table",
 ) -> None:
