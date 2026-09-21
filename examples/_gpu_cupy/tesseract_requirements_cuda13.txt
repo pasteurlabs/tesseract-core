@@ -1,0 +1,5 @@
+# CUDA 13 variant of tesseract_requirements.txt, selected by the GPU CI matrix
+# via --config-override so the container's libcudart matches the 13.x base image.
+# The [ctk] extra pulls in the CUDA toolkit headers CuPy needs to JIT-compile the
+# elementwise kernel for `s * a + b`.
+cupy-cuda13x[ctk]

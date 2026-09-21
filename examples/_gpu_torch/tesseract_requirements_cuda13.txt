@@ -1,0 +1,6 @@
+# CUDA 13 variant of tesseract_requirements.txt, selected by the GPU CI matrix
+# via --config-override so the container's libcudart matches the 13.x base image.
+# The cu130 wheel index gives a CUDA 13 build; the wheel bundles its own CUDA
+# libraries.
+--extra-index-url https://download.pytorch.org/whl/cu130
+torch

@@ -1,0 +1,5 @@
+# CUDA 13 variant of tesseract_requirements.txt, selected by the GPU CI matrix
+# via --config-override so the container's libcudart matches the 13.x base image.
+# The [cuda13-local] variant builds against the CUDA runtime already in the base
+# image rather than pulling its own CUDA wheels.
+jax[cuda13-local]

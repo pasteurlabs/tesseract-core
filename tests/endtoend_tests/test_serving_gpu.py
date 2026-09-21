@@ -18,6 +18,7 @@ host does not need CuPy to read cuda_ipc outputs. They are marked ``gpu`` so
 GPU-less CI runners skip them.
 """
 
+import os
 from pathlib import Path
 
 import numpy as np
@@ -46,6 +47,16 @@ requires_cuda = pytest.mark.skipif(
 # and needs only a GPU to decode the handle (hence the plain requires_cuda skip).
 GPU_EXAMPLES = ["_gpu_cupy", "_gpu_jax", "_gpu_torch"]
 
+# Build the container against the same CUDA major the GPU CI matrix leg uses, so
+# the runtime's in-container libcudart matches the host frameworks it exchanges
+# handles with. The example ships CUDA 12 by default (so it builds standalone)
+# plus a tesseract_requirements_cuda13.txt; the 13.x leg selects the latter and a
+# 13.x base image. CI sets both env vars per matrix leg and pre-builds with the
+# same overrides, so the fixture builds hit the warm layer cache. A local GPU run
+# with neither set falls back to the CUDA 12 default the examples already carry.
+CUDA_MAJOR = os.environ.get("TESSERACT_TEST_CUDA_MAJOR", "12")
+CUDA_BASE_IMAGE = os.environ.get("TESSERACT_TEST_CUDA_BASE_IMAGE")
+
 
 @pytest.fixture(scope="module", params=GPU_EXAMPLES)
 def gpu_image_name(
@@ -53,10 +64,18 @@ def gpu_image_name(
 ):
     """Build a GPU example image once per framework for this module."""
     source = EXAMPLES_DIR / request.param
+    config_override = {}
+    if CUDA_BASE_IMAGE:
+        config_override["build_config.base_image"] = CUDA_BASE_IMAGE
+    if CUDA_MAJOR != "12":
+        config_override["build_config.requirements.requirements_file"] = (
+            f"tesseract_requirements_cuda{CUDA_MAJOR}.txt"
+        )
     image_tag = build_tesseract(
         docker_client,
         source,
         f"{shared_dummy_image_name}-{request.param.lstrip('_')}",
+        config_override=config_override,
         tag="sometag",
     )
     assert image_exists(docker_client, image_tag)

@@ -1,6 +1,7 @@
 # PyTorch provides the device arrays returned by apply(). The cu126 wheel index
 # gives a CUDA 12 build matching the 12.x runtime base_image; the wheel bundles
 # its own CUDA libraries. Torch tensors expose __cuda_array_interface__, the CAI
-# path of the CUDA IPC export.
+# path of the CUDA IPC export. The GPU CI matrix swaps in
+# tesseract_requirements_cuda13.txt for the 13.x leg.
 --extra-index-url https://download.pytorch.org/whl/cu126
 torch
