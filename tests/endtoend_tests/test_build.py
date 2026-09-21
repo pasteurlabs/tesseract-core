@@ -427,17 +427,19 @@ def test_list_json_output(cli_runner, built_image_name, docker_executable):
 
     images = json.loads(result.stdout)
     [image] = [i for i in images if built_image_name in i["tags"]]
-    name = built_image_name.split(":")[0]
+    repo = built_image_name.split(":")[0]
     image_id = subprocess.run(
         [*docker_executable, "inspect", "--format", "{{.Id}}", built_image_name],
         capture_output=True,
         text=True,
         check=True,
     ).stdout.strip()
+    # Podman orders the tags the other way round than Docker.
+    assert sorted(image.pop("tags")) == sorted([f"{repo}:1.2.3", f"{repo}:latest"])
     assert image == {
         "id": image_id,
-        "name": name,
-        "tags": [f"{name}:1.2.3", f"{name}:latest"],
+        # Podman namespaces tags with `localhost/`, TESSERACT_NAME stays bare.
+        "name": repo.split("/")[-1],
         "version": "1.2.3",
         "description": "Simple tesseract that adds two vectors.\\n",
     }
