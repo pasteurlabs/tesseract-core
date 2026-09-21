@@ -8,10 +8,11 @@ Run on a GPU machine with ``pytest tests/test_cuda_ipc.py``.
 
 Requires: cupy (used here only to *produce* GPU inputs) and optionally torch
 (for the DLPack/CUDA-array-interface interop tests). The CUDA IPC implementation
-is framework-agnostic on *both* sides: encode works with any object that
-implements ``__cuda_array_interface__`` (CuPy, PyTorch, JAX, Numba), and decode
-returns a framework-agnostic ``IpcDeviceArray`` (no CuPy dependency) that
-exposes ``__cuda_array_interface__`` and ``__dlpack__`` plus a host-copy helper.
+is framework-agnostic on *both* sides: encode reads an array's metadata from
+``__cuda_array_interface__`` (CuPy, PyTorch, Numba) or from DLPack on a CUDA
+device (JAX, which does not implement CAI), and decode returns a
+framework-agnostic ``IpcDeviceArray`` (no CuPy dependency) that exposes
+``__cuda_array_interface__`` and ``__dlpack__`` plus a host-copy helper.
 
 Note on process model
 ---------------------
