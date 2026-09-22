@@ -418,11 +418,15 @@ jobs:
       # libcudart.so.13.
       - name: Pre-build GPU examples (warm layer cache)
         run: |
+          # jax runs on the CUDA 13 leg only (its cuda12 plugin won't register
+          # under the CI's CUDA 13 driver); cupy/torch cover the .so.12 path.
+          examples="_gpu_cupy _gpu_torch"
           reqs_override=""
           if [ "${{ matrix.cuda.major }}" != "12" ]; then
             reqs_override="--config-override build_config.requirements.requirements_file=tesseract_requirements_cuda${{ matrix.cuda.major }}.txt"
+            examples="$examples _gpu_jax"
           fi
-          for example in _gpu_cupy _gpu_jax _gpu_torch; do
+          for example in $examples; do
             uv run --no-sync tesseract build "examples/$example" $reqs_override
           done
 

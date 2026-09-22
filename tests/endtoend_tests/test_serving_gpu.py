@@ -61,6 +61,11 @@ def gpu_image_name(
     request, docker_client, docker_cleanup_module, shared_dummy_image_name
 ):
     """Build a GPU example image once per framework for this module."""
+    # jax only has a cuda13 build (its cuda12 plugin won't register under the CI's
+    # CUDA 13 driver), so run it on the 13 leg only; cupy/torch cover .so.12.
+    if request.param == "_gpu_jax" and CUDA_MAJOR == "12":
+        pytest.skip("_gpu_jax runs on the CUDA 13 leg only")
+
     source = EXAMPLES_DIR / request.param
     config_override = {}
     if CUDA_MAJOR != "12":
