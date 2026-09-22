@@ -101,9 +101,8 @@ class TesseractReference:
         """Generate JSON schema for OpenAPI."""
         return {
             "type": "object",
-            # Without an explicit title, Pydantic falls back to the field name
             "title": "TesseractReference",
-            "x-tesseract-type": "reference",
+            "x-tesseract-type": "TesseractReference",
             "properties": {
                 "type": {
                     "type": "string",
