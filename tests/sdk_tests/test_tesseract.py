@@ -740,35 +740,95 @@ def test_decode_array_lz4(encoding, tmp_path):
     np.testing.assert_array_equal(decoded, arr, strict=True)
 
 
-@pytest.mark.parametrize("compression", [None, "lz4"])
-def test_decode_array_binref_rejects_path_escape(compression, tmp_path):
+def _binref_encoded(bufferpath):
+    """Build a json+binref encoded-array dict pointing at ``bufferpath``."""
+    return {
+        "shape": (2,),
+        "dtype": "float64",
+        "data": {"buffer": f"{bufferpath}:0", "encoding": "binref"},
+    }
+
+
+def test_decode_array_binref_rejects_path_escape(tmp_path):
     """A binref reference from the server must not escape output_path.
 
-    The buffer reference is server-controlled and untrusted; an absolute path
-    or a ``..`` traversal would otherwise let a malicious server read arbitrary
-    client-side files. See _decode_array's containment check.
+    The buffer reference is server-controlled and untrusted for a client talking
+    to a remote Tesseract; letting it escape output_path would let a malicious
+    server read (or, on the lazy path, unlink) arbitrary client-side files. Each
+    vector below is a distinct way to try to break out of the sandbox. The guard
+    runs before compression is even read, so it is independent of the read path
+    taken afterwards. See _decode_array's containment check.
     """
     output_path = tmp_path / "output_dir"
     output_path.mkdir()
 
+    # Secrets living outside the sandbox.
     secret = tmp_path / "secret.bin"
     secret.write_bytes(b"\x00" * 16)
+    outside_dir = tmp_path / "etc"
+    outside_dir.mkdir()
+    (outside_dir / "passwd").write_bytes(b"\x00" * 16)
 
-    for bufferpath in (str(secret), "../secret.bin"):
-        buffer = f"{bufferpath}:0"
-        if compression == "lz4":
-            buffer = f"{buffer}:16"
-        encoded = {
-            "shape": (2,),
-            "dtype": "float64",
-            "data": {
-                "buffer": buffer,
-                "encoding": "binref",
-                "compression": compression,
-            },
-        }
+    # A sibling dir whose name shares output_dir's prefix -- a naive
+    # ``str.startswith`` containment check would wrongly allow this.
+    sibling = tmp_path / "output_dir_evil"
+    sibling.mkdir()
+    (sibling / "x.bin").write_bytes(b"\x00" * 16)
+
+    # Symlinks that live inside the sandbox but point outside it. resolve()
+    # must follow them so the guard sees the real out-of-sandbox target.
+    os.symlink(outside_dir, output_path / "link_to_dir")
+    os.symlink(secret, output_path / "link_to_file")
+
+    escape_vectors = [
+        str(secret),  # absolute path
+        str(outside_dir / "passwd"),  # absolute, /etc/passwd style
+        "../secret.bin",  # single ..
+        "../../../../../../etc/passwd",  # deep ..
+        "subdir/../../secret.bin",  # .. that nets outside
+        "..",  # parent of the sandbox
+        "../output_dir_evil/x.bin",  # prefix-sibling trick
+        "link_to_dir/passwd",  # traverse a symlinked dir to outside
+        "link_to_file",  # a symlink file pointing outside
+    ]
+
+    for bufferpath in escape_vectors:
+        encoded = _binref_encoded(bufferpath)
         with pytest.raises(ValueError, match="escapes output_path"):
             _decode_array(encoded, output_path=output_path)
+
+
+def test_decode_array_binref_rejects_missing_output_path():
+    """A json+binref response cannot be decoded without a sandbox to confine it."""
+    encoded = _binref_encoded("/etc/passwd")
+    with pytest.raises(ValueError, match="output_path must be set"):
+        _decode_array(encoded, output_path=None)
+
+
+def test_decode_array_binref_allows_legitimate_paths(tmp_path):
+    """Containment must not break in-sandbox reads, incl. tricky-but-safe ones.
+
+    A ``..`` that nets back inside the sandbox, and a sandbox reached via a
+    symlink, are both legitimate and must still decode.
+    """
+    real_output = tmp_path / "real_output"
+    real_output.mkdir()
+    payload = np.array([1.0, 2.0], dtype="float64")
+    (real_output / "data.bin").write_bytes(payload.tobytes())
+
+    # Plain in-sandbox read.
+    decoded = _decode_array(_binref_encoded("data.bin"), output_path=real_output)
+    np.testing.assert_array_equal(decoded, payload, strict=True)
+
+    # A .. that resolves back inside the sandbox.
+    decoded = _decode_array(_binref_encoded("sub/../data.bin"), output_path=real_output)
+    np.testing.assert_array_equal(decoded, payload, strict=True)
+
+    # output_path itself reached via a symlink must still work.
+    linked_output = tmp_path / "linked_output"
+    os.symlink(real_output, linked_output)
+    decoded = _decode_array(_binref_encoded("data.bin"), output_path=linked_output)
+    np.testing.assert_array_equal(decoded, payload, strict=True)
 
 
 def test_binref_pool_checkout_reuses_slot(tmp_path):
