@@ -752,12 +752,9 @@ def _binref_encoded(bufferpath):
 def test_decode_array_binref_rejects_path_escape(tmp_path):
     """A binref reference from the server must not escape output_path.
 
-    The buffer reference is server-controlled and untrusted for a client talking
-    to a remote Tesseract; letting it escape output_path would let a malicious
-    server read (or, on the lazy path, unlink) arbitrary client-side files. Each
-    vector below is a distinct way to try to break out of the sandbox. The guard
-    runs before compression is even read, so it is independent of the read path
-    taken afterwards. See _decode_array's containment check.
+    Each vector below is a distinct way to try to break out of output_path,
+    including absolute paths, ``..`` traversal, a prefix-sibling directory, and
+    symlinks pointing outside.
     """
     output_path = tmp_path / "output_dir"
     output_path.mkdir()
@@ -806,10 +803,10 @@ def test_decode_array_binref_rejects_missing_output_path():
 
 
 def test_decode_array_binref_allows_legitimate_paths(tmp_path):
-    """Containment must not break in-sandbox reads, incl. tricky-but-safe ones.
+    """Containment must not break legitimate in-directory reads.
 
-    A ``..`` that nets back inside the sandbox, and a sandbox reached via a
-    symlink, are both legitimate and must still decode.
+    A ``..`` that resolves back inside output_path, and an output_path reached
+    via a symlink, are both safe and must still decode.
     """
     real_output = tmp_path / "real_output"
     real_output.mkdir()
