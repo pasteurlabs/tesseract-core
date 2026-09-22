@@ -302,7 +302,7 @@ def test_post_abstract_eval(http_client):
     response = http_client.post("/abstract_eval", json=payload)
 
     assert response.status_code == 200, response.text
-    assert response.json() == {"result": {"shape": [4], "dtype": "float64"}}
+    assert response.json() == {"result": {"shape": [4], "dtype": "float32"}}
 
 
 def test_post_abstract_eval_throws_validation_errors(http_client):

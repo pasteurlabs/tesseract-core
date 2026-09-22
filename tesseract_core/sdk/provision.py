@@ -279,7 +279,7 @@ def _conda() -> tuple[str, ...]:
 
 
 def _capture(
-    command: Sequence[Any], *, stdin: str | None = None
+    command: Sequence[Any], *, stdin: str | None = None, cwd: Path | None = None
 ) -> subprocess.CompletedProcess:
     """Run a command, log it, and return the result for the caller to check."""
     argv = [str(part) for part in command]
@@ -290,37 +290,30 @@ def _capture(
         capture_output=True,
         text=True,
         env=_provisioning_env(),
+        cwd=None if cwd is None else str(cwd),
     )
 
 
-def _run(command: Sequence[Any], what: str) -> None:
+def _run(command: Sequence[Any], what: str, *, cwd: Path | None = None) -> None:
     """Run a command, raising with its output if it fails."""
-    result = _capture(command)
+    result = _capture(command, cwd=cwd)
     if result.returncode != 0:
         output = (result.stderr or result.stdout or "").strip()
         raise RuntimeError(f"{what} failed:\n{output[-2000:]}")
 
 
-def _pip_specs(requirements_file: Path) -> list[str]:
-    """Turn a pip requirements file into arguments for ``uv pip install``.
+def _install_from(requirements_file: Path) -> tuple[list[str], Path]:
+    """Arguments and working directory to install a requirements file.
 
-    Local paths in the file are relative to the file itself, which is how a
-    build reads them. We make them absolute, because uv runs from a different
-    working directory.
+    `uv pip install -r` works out the format for itself, so a flat
+    `tesseract_requirements.txt` and a PEP 751 lockfile are installed the same
+    way. This is the same command `build_pip_venv.sh` runs in a container.
+
+    Run from the file's own directory, because relative local paths inside it
+    are written relative to the file. A build gets that for free by copying
+    everything to one place first.
     """
-    local, remote = parse_requirements(requirements_file)
-    specs: list[str] = []
-    for spec in remote:
-        # Option lines like `--index-url https://...` come through as one
-        # string. uv accepts them on the command line, but only split up.
-        specs.extend(spec.split() if spec.startswith("-") else [spec])
-    for spec in local:
-        # `./pkg[extra]` has to be split before the path can be resolved, and
-        # a `file://` line needs converting first. A build already does both
-        # through this helper.
-        path, extras = _split_local_dependency(spec)
-        specs.append(f"{(requirements_file.parent / path).resolve()}{extras}")
-    return specs
+    return ["-r", requirements_file.name], requirements_file.parent
 
 
 def _venv_satisfies(python_executable: Path, requirements_file: Path) -> bool:
@@ -330,16 +323,10 @@ def _venv_satisfies(python_executable: Path, requirements_file: Path) -> bool:
     they mean to a build. When the answer is yes uv exits almost immediately,
     which matters because this runs every time a Tesseract is served.
     """
+    args, cwd = _install_from(requirements_file)
     result = _capture(
-        [
-            *_uv(),
-            "pip",
-            "install",
-            "--dry-run",
-            "--python",
-            python_executable,
-            *_pip_specs(requirements_file),
-        ]
+        [*_uv(), "pip", "install", "--dry-run", "--python", python_executable, *args],
+        cwd=cwd,
     )
     # uv prints this on stderr, along with the rest of its progress output.
     return result.returncode == 0 and "Would make no changes" in (
@@ -347,7 +334,9 @@ def _venv_satisfies(python_executable: Path, requirements_file: Path) -> bool:
     )
 
 
-def _caller_shortfall(requirements_file: Path) -> tuple[list[str], list[str]] | None:
+def _caller_shortfall(
+    requirements_file: Path, is_pylock: bool = False
+) -> tuple[list[str], list[str]] | None:
     """What this interpreter is missing for a requirements file.
 
     Returns two lists: packages that are not installed, and packages installed
@@ -365,7 +354,15 @@ def _caller_shortfall(requirements_file: Path) -> tuple[list[str], list[str]] | 
     When in doubt it returns None, so the caller builds an environment instead
     of guessing. That covers local paths, direct URLs, environment markers and
     option lines.
+
+    A PEP 751 lockfile always returns None. It is TOML, so the requirements
+    parser cannot read it, and a lockfile asks for one exact set of versions,
+    which is a request for its own environment rather than for whatever happens
+    to be installed here.
     """
+    if is_pylock:
+        return None
+
     from importlib.metadata import PackageNotFoundError
 
     local, remote = parse_requirements(requirements_file)
@@ -534,6 +531,48 @@ def _requires_python(error: str) -> SpecifierSet | None:
         return None
 
 
+def _pylock_requires_python(lockfile: Path) -> SpecifierSet | None:
+    """The Python range a PEP 751 lockfile says it is for, if it says one.
+
+    A lockfile states this itself, which is just as well: `uv pip compile`
+    refuses a `pylock.toml` outright, so the resolver cannot be asked the
+    question the way it is for a flat requirements file.
+
+    `requires-python` is a top-level key, so on Pythons without `tomllib` we
+    read the lines above the first table header rather than take a dependency
+    on a TOML parser for one field.
+    """
+    try:
+        import tomllib
+    except ModuleNotFoundError:  # Python 3.10
+        tomllib = None
+
+    try:
+        if tomllib is not None:
+            with lockfile.open("rb") as handle:
+                declared = tomllib.load(handle).get("requires-python")
+        else:
+            declared = None
+            for line in lockfile.read_text(encoding="utf-8").splitlines():
+                stripped = line.strip()
+                if stripped.startswith("["):
+                    break
+                match = re.match(r"""requires-python\s*=\s*["'](.+?)["']""", stripped)
+                if match:
+                    declared = match.group(1)
+                    break
+    except (OSError, ValueError) as e:
+        logger.debug("Could not read requires-python from %s: %s", lockfile, e)
+        return None
+
+    if not declared:
+        return None
+    try:
+        return SpecifierSet(declared)
+    except InvalidSpecifier:
+        return None
+
+
 def _build_python_version(build_config: Any, requirements_file: Path) -> str | None:
     """Choose a Python version to build on. None means use this interpreter.
 
@@ -571,6 +610,29 @@ def _build_python_version(build_config: Any, requirements_file: Path) -> str | N
     # is no version to choose here.
     if build_config.inherit_base_image_packages:
         return None
+
+    # A lockfile states its own Python range, and `uv pip compile` will not
+    # accept one, so this is both the better answer and the only one available.
+    if build_config.requirements.is_pylock:
+        wanted = _pylock_requires_python(requirements_file)
+        if wanted is None:
+            return None
+        allowed = [
+            minor
+            for minor in range(sys.version_info.minor + 50)
+            if f"{sys.version_info.major}.{minor}.0" in wanted
+        ]
+        picked = _nearest(allowed)
+        here = f"{sys.version_info.major}.{sys.version_info.minor}"
+        if picked is None or picked == here:
+            return None
+        logger.debug(
+            "%s is locked for Python %s; building on %s",
+            requirements_file.name,
+            wanted,
+            picked,
+        )
+        return picked
 
     _, remote = parse_requirements(requirements_file)
     if not remote:
@@ -713,16 +775,11 @@ def _build_pip_venv(dest: Path, build_config: Any, requirements_file: Path) -> P
         _build_python_version(build_config, requirements_file),
         system_site_packages=build_config.inherit_base_image_packages,
     )
+    args, cwd = _install_from(requirements_file)
     _run(
-        [
-            *_uv(),
-            "pip",
-            "install",
-            "--python",
-            python_executable,
-            *_pip_specs(requirements_file),
-        ],
+        [*_uv(), "pip", "install", "--python", python_executable, *args],
         f"Installing {requirements_file.name}",
+        cwd=cwd,
     )
     _ensure_runtime(python_executable)
     return python_executable
@@ -844,7 +901,9 @@ def resolve_python_executable(api_path: Path) -> Path:
             return python_executable
 
     if _can_serve(this_interpreter):
-        shortfall = _caller_shortfall(requirements_file)
+        shortfall = _caller_shortfall(
+            requirements_file, build_config.requirements.is_pylock
+        )
         # We only require that nothing is missing, not that versions match
         # exactly. Building a whole environment to satisfy a pin is expensive
         # when the package is already installed, and it can fail outright: a pin

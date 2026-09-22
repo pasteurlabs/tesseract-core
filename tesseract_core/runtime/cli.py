@@ -519,7 +519,6 @@ def _exit_when_parent_closes(fd: int) -> None:
     Parent processes are not guaranteed to clean up if ended prematurely.
     However, reading a pipe the parent is meant to hold open is guaranteed to
     return EOF if the parent is no longer live.
-    `test_orphaned_tesseract_shuts_itself_down` demonstrates this is load-bearing.
     """
 
     def watch() -> None:

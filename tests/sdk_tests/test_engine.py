@@ -143,6 +143,103 @@ def test_prepare_build_context_no_host_credentials(tmp_path_factory):
     assert "--mount=type=tmpfs" not in dockerfile
 
 
+def test_prepare_build_context_pylock(tmp_path_factory):
+    """A pylock.toml requirements_file is staged verbatim and wired into the build."""
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "tesseract_api.py").touch()
+    # A PEP 751 lockfile with two indexes and a platform marker.
+    lockfile = src_dir / "pylock.toml"
+    lockfile.write_text(
+        'lock-version = "1.0"\n'
+        'created-by = "uv"\n'
+        'requires-python = ">=3.11"\n\n'
+        "[[packages]]\n"
+        'name = "numpy"\n'
+        'version = "2.5.3"\n'
+        'index = "https://pypi.org/simple"\n\n'
+        "[[packages]]\n"
+        'name = "torch"\n'
+        'version = "2.14.0+cpu"\n'
+        'index = "https://download.pytorch.org/whl/cpu"\n'
+        "marker = \"sys_platform == 'linux'\"\n"
+    )
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(
+        name="foobar",
+        build_config=TesseractBuildConfig(
+            requirements={"provider": "uv-pip", "requirements_file": "pylock.toml"}
+        ),
+    )
+    engine.prepare_build_context(src_dir, build_dir, config)
+
+    # A lockfile has no local deps to stage, so it is not rewritten: the staged
+    # contents must match the input byte-for-byte.
+    staged = build_dir / "__tesseract_source__" / "pylock.toml"
+    assert staged.read_text() == lockfile.read_text()
+
+    dockerfile = (build_dir / "Dockerfile").read_text()
+    # The build script is pointed at the lockfile, which is copied in by that name.
+    assert 'TESSERACT_REQUIREMENTS_FILE="pylock.toml"' in dockerfile
+    assert "__tesseract_source__/pylock.toml" in dockerfile
+
+
+def test_prepare_build_context_pylock_missing_file_errors(tmp_path_factory):
+    """A configured-but-absent lockfile fails early with a clear message, not in Docker."""
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "tesseract_api.py").touch()
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(
+        name="foobar",
+        build_config=TesseractBuildConfig(
+            requirements={"provider": "uv-pip", "requirements_file": "pylock.toml"}
+        ),
+    )
+    with pytest.raises(UserError, match=r"pylock\.toml"):
+        engine.prepare_build_context(src_dir, build_dir, config)
+
+
+def test_prepare_build_context_pylock_with_private_index_credential(tmp_path_factory):
+    """A lockfile build with a private-index credential generates the auth wiring.
+
+    Checks the secret mount, the tmpfs for assembled credentials, and the
+    host->secret entry the build script turns into a netrc line. No token is
+    present in the build context.
+    """
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "tesseract_api.py").touch()
+    (src_dir / "pylock.toml").write_text(
+        'lock-version = "1.0"\ncreated-by = "uv"\nrequires-python = ">=3.11"\n'
+    )
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(
+        name="foobar",
+        build_config=TesseractBuildConfig(
+            requirements={"provider": "uv-pip", "requirements_file": "pylock.toml"},
+            host_credentials=[
+                {
+                    "host": "pkgs.dev.azure.com",
+                    "secret_id": "azure_artifacts",
+                    "username": "az",
+                }
+            ],
+        ),
+    )
+    engine.prepare_build_context(
+        src_dir, build_dir, config, secret_ids=["azure_artifacts"]
+    )
+
+    dockerfile = (build_dir / "Dockerfile").read_text()
+    assert "--mount=type=secret,id=azure_artifacts" in dockerfile
+    assert "--mount=type=tmpfs" in dockerfile
+
+    creds = (build_dir / "host_credentials.txt").read_text()
+    # host, secret id, and username the setup script maps to a netrc entry; no token.
+    assert "pkgs.dev.azure.com\tazure_artifacts\taz" in creds
+
+
 def test_build_tesseract_requires_secret_for_host_credential(tmp_path):
     """A credential errors if no matching --secret is provided (#675)."""
     (tmp_path / "tesseract_api.py").write_text(
@@ -167,11 +264,11 @@ def test_build_tesseract_requires_secret_for_host_credential(tmp_path):
     "keypath,raw_value,expected",
     [
         # Numeric-looking string fields must not be parsed as numbers (#678).
-        (("build_config", "python_version"), "3.12", "3.12"),
+        (("build_config", "requirements", "python_version"), "3.12", "3.12"),
         # Trailing zero must be preserved (YAML would parse 3.10 -> 3.1).
-        (("build_config", "python_version"), "3.10", "3.10"),
+        (("build_config", "requirements", "python_version"), "3.10", "3.10"),
         # Explicit quoting still works.
-        (("build_config", "python_version"), '"3.12"', "3.12"),
+        (("build_config", "requirements", "python_version"), '"3.12"', "3.12"),
         (("build_config", "target_platform"), "linux/arm64", "linux/arm64"),
         # Non-string fields still get their structured value.
         (("build_config", "inherit_base_image_packages"), "true", True),

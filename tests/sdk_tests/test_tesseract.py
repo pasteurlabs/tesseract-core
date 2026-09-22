@@ -1,3 +1,4 @@
+import functools
 import gc
 import os
 import subprocess
@@ -84,16 +85,10 @@ def mock_clients(mocker):
     mocker.patch("tesseract_core.sdk.tesseract.HTTPClient.run_tesseract")
 
 
-def test_Tesseract_init():
-    # Instantiate with a url
-    with pytest.warns(
-        UserWarning, match="Direct instantiation of Tesseract is deprecated"
-    ):
-        t = Tesseract(url="localhost")
-
-    # Using it as a context manager should be a no-op
-    with t:
-        pass
+def test_Tesseract_init_raises():
+    # Direct instantiation is not allowed. Use one of the from_* constructors.
+    with pytest.raises(TypeError, match="cannot be instantiated directly"):
+        Tesseract(url="localhost")
 
 
 def test_Tesseract_from_url():
@@ -120,10 +115,122 @@ def test_Tesseract_from_tesseract_api(dummy_tesseract_location, dummy_tesseract_
     endpoints = set(t.available_endpoints)
     assert endpoints == all_endpoints
 
-    # should also work when importing the module
-    t = Tesseract.from_tesseract_api(dummy_tesseract_module)
-    endpoints = set(t.available_endpoints)
+    # should also work when importing the module, and as a context manager
+    with Tesseract.from_tesseract_api(dummy_tesseract_module) as t:
+        endpoints = set(t.available_endpoints)
     assert endpoints == all_endpoints
+
+
+def test_Tesseract_from_tesseract_api_does_not_leak_config_between_instances(
+    dummy_tesseract_module, tmp_path
+):
+    """Check that a second in-process Tesseract stays isolated from a prior one.
+
+    Each instance's configuration must be independent, the same way it
+    already is for from_image (#672). Construction must also leave the
+    process-global config exactly as it found it, since a Tesseract's own
+    config lives in its client's captured snapshot, not in global state.
+    """
+    from tesseract_core.runtime.config import snapshot_config
+
+    outer_snapshot = snapshot_config()
+
+    first_output = tmp_path / "first_output"
+    first_output.mkdir()
+    first = Tesseract.from_tesseract_api(
+        dummy_tesseract_module,
+        output_path=first_output,
+        output_format="json",
+    )
+    first_config = first._client._config_snapshot[0]
+    assert Path(first_config.output_path) == first_output
+    assert first_config.output_format == "json"
+
+    # A fresh instance that requests neither option must not see the first
+    # instance's explicit overrides leaking into its runtime config.
+    second = Tesseract.from_tesseract_api(dummy_tesseract_module)
+    second_config = second._client._config_snapshot[0]
+    assert Path(second_config.output_path) != first_output
+    assert second_config.output_format == "json+base64"  # from_tesseract_api's default
+
+    # Neither construction should have left a mark on the process-global
+    # config that anything outside these two instances could observe.
+    assert snapshot_config() == outer_snapshot
+
+
+def test_Tesseract_apply_runs_under_its_own_config_after_a_later_instance_is_built(
+    dummy_tesseract_module, tmp_path, mocker
+):
+    """A call on an earlier Tesseract runs under its own config, not the global one.
+
+    Simulates a second instance's config being globally active (e.g. because
+    it is mid-call) while the first instance's apply() runs. profiling is the
+    config value run_tesseract() reads via get_config(), so it shows directly
+    whether the wrong config leaks in.
+    """
+    from tesseract_core.runtime.config import override_config
+
+    first_output = tmp_path / "first_output"
+    first_output.mkdir()
+    first = Tesseract.from_tesseract_api(
+        dummy_tesseract_module,
+        output_path=first_output,
+        runtime_config={"profiling": True},
+    )
+
+    second = Tesseract.from_tesseract_api(dummy_tesseract_module)
+    assert second._client._config_snapshot[0].profiling is False
+    assert Path(second._client._config_snapshot[0].output_path) != first_output
+
+    # While second's own snapshot is (hypothetically) the active global
+    # config, e.g. because second.apply() is itself mid-call right now.
+    with override_config(second._client._config_snapshot):
+        profiler_spy = mocker.patch("tesseract_core.runtime.profiler.Profiler")
+        result = first.apply({"a": [1.0, 2.0], "b": [0.0, 0.0], "s": 1})
+        assert list(result["result"]) == [1.0, 2.0]
+
+        # first's own profiling=True setting reached the Profiler, not the
+        # profiling=False that's globally active for second's sake.
+        assert profiler_spy.call_args.kwargs["enabled"] is True
+
+        # The run went to first's own output dir, not second's.
+        run_dirs = list(first_output.glob("run_*"))
+        assert len(run_dirs) == 1
+
+
+def test_Tesseract_config_edit_from_within_endpoint_persists_across_calls(
+    dummy_tesseract_module, mocker
+):
+    """A config edit made inside an endpoint carries over to later calls.
+
+    This mirrors the containerized case, where the runtime config is a live
+    process global for the lifetime of the container.
+    """
+    from tesseract_core.runtime.config import get_config, update_config
+
+    tess = Tesseract.from_tesseract_api(dummy_tesseract_module)
+    assert tess._client._config_snapshot[0].profiling is False
+
+    original_apply = tess._client._endpoints["apply"]
+
+    @functools.wraps(original_apply)
+    def apply_that_enables_profiling(payload):
+        update_config(profiling=True)
+        return original_apply(payload)
+
+    tess._client._endpoints["apply"] = apply_that_enables_profiling
+
+    tess.apply({"a": [1.0, 2.0], "b": [0.0, 0.0], "s": 1})
+    assert tess._client._config_snapshot[0].profiling is True
+
+    # A subsequent call runs under the edited config: the profiler is enabled.
+    tess._client._endpoints["apply"] = original_apply
+    profiler_spy = mocker.patch("tesseract_core.runtime.profiler.Profiler")
+    tess.apply({"a": [1.0, 2.0], "b": [0.0, 0.0], "s": 1})
+    assert profiler_spy.call_args.kwargs["enabled"] is True
+
+    # The edit stayed contained to this instance's snapshot, not the global.
+    assert get_config().profiling is False
 
 
 def test_rejects_imported_module(dummy_tesseract_module):
@@ -898,6 +1005,15 @@ def test_HTTPClient_close_is_idempotent(tmp_path):
     # an explicit close).
     client.close()
     assert client._binref_pool is None
+
+
+def test_Tesseract_from_url_closes_session_on_exit(mocker):
+    """Leaving the context of a from_url Tesseract closes its HTTP session."""
+    t = Tesseract.from_url("http://localhost:1234")
+    close = mocker.spy(t._client._session, "close")
+    with t:
+        pass
+    close.assert_called_once()
 
 
 def test_tree_map():

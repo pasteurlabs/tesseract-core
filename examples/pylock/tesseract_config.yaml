@@ -1,0 +1,14 @@
+name: "pylock"
+version: "0.1.0"
+description: |
+  Tesseract whose dependencies are installed from a PEP 751 lockfile
+  (build_config.requirements.requirements_file: pylock.toml) instead of a flat
+  tesseract_requirements.txt. The committed pylock.toml spans two indexes (PyPI
+  for numpy, the PyTorch CPU index for torch) with platform markers.
+
+  See README.md for how to regenerate the lockfile from _pyproject.toml.
+
+build_config:
+  requirements:
+    provider: uv-pip
+    requirements_file: pylock.toml

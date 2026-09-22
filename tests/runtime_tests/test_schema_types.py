@@ -22,6 +22,8 @@ from tesseract_core.runtime.schema_types import (
     Int8,
     Int32,
     Int64,
+    ShapeDType,
+    UInt8,
     is_differentiable,
 )
 
@@ -31,6 +33,13 @@ class MyModel(BaseModel):
     array_float: Differentiable[Array[(None, 3), Float64]]
     array_bool: Array[..., Bool]
     scalar_int: Differentiable[Int32]
+
+
+AbstractInt64 = ShapeDType[(2, 3), "int64"]
+
+
+class MyAbstractModel(BaseModel):
+    array_int: AbstractInt64
 
 
 arr_int = np.array([[1, 2, 3], [4, 5, 6]])
@@ -537,6 +546,18 @@ def test_dtype_casting():
     ):
         MyModel.model_validate(json_payload)
 
+    # Case 9: abstract aval with a castable dtype (should work fine)
+    aval = MyAbstractModel.model_validate(
+        {"array_int": {"shape": [2, 3], "dtype": "int32"}}
+    )
+    assert aval.array_int.dtype == "int64"
+
+    # Case 10: abstract aval with an incompatible dtype (should raise)
+    with pytest.raises(ValidationError, match="cannot be safely cast"):
+        MyAbstractModel.model_validate(
+            {"array_int": {"shape": [2, 3], "dtype": "float32"}}
+        )
+
 
 def test_narrowing_casts_must_preserve_values():
     class Narrow(BaseModel):
@@ -578,6 +599,29 @@ def test_narrowing_casts_must_preserve_values():
     ):
         with pytest.raises(ValidationError, match="do not fit into dtype"):
             Narrow.model_validate(bad)
+
+
+def test_unsigned_field_accepts_signed_integers():
+    """A JSON number arrives as int64, which an unsigned field has to take."""
+
+    class Unsigned(BaseModel):
+        u8: Array[(None,), UInt8]
+
+    def json_array(dtype, buffer):
+        return {
+            "object_type": "array",
+            "shape": [len(buffer)],
+            "dtype": dtype,
+            "data": {"buffer": buffer, "encoding": "json"},
+        }
+
+    assert Unsigned.model_validate({"u8": [1, 2, 255]}).u8.tolist() == [1, 2, 255]
+    assert Unsigned.model_validate({"u8": np.array([7])}).u8.tolist() == [7]
+    assert Unsigned.model_validate({"u8": json_array("int64", [7])}).u8.tolist() == [7]
+
+    for bad in ({"u8": [-1]}, {"u8": [256]}, {"u8": json_array("int64", [-1])}):
+        with pytest.raises(ValidationError, match="do not fit into dtype"):
+            Unsigned.model_validate(bad)
 
 
 def test_out_of_range_error_survives_json():
@@ -633,6 +677,13 @@ def test_strict_types():
     json_payload["array_int"]["dtype"] = "int32"
     with pytest.raises(ValidationError, match="strict_types=True, no casting"):
         MyModel.model_validate(json_payload, context={"strict_types": True})
+
+    # Also rejects abstract avals, which carry no data
+    with pytest.raises(ValidationError, match="strict_types=True, no casting"):
+        MyAbstractModel.model_validate(
+            {"array_int": {"shape": [2, 3], "dtype": "int32"}},
+            context={"strict_types": True},
+        )
 
     # Exact dtypes pass
     model = MyModel.model_validate(
