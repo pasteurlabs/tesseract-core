@@ -1,8 +1,9 @@
-# JAX provides the device arrays returned by apply(). The [cuda12] variant
-# bundles its own CUDA pip wheels, so it runs on the GPU even though the runtime
-# base image ships only the CUDA runtime (the [cuda12-local] variant links
-# against a full in-image CUDA toolkit that isn't present and silently falls back
-# to CPU). JAX exposes device buffers only via DLPack, which is the path this
-# example exercises. The GPU CI matrix swaps in tesseract_requirements_cuda13.txt
-# for the 13.x leg.
-jax[cuda12]
+# JAX provides the device arrays returned by apply(). The [cuda13] variant
+# bundles its own CUDA pip wheels, so it runs on the GPU regardless of the base
+# image's CUDA major -- JAX's plugin registers against the host driver (CUDA 13
+# on the CI runners), not the in-image runtime. The [cuda12] plugin fails to
+# register under a CUDA 13 driver ("Unknown backend cuda") and silently falls
+# back to CPU, so both matrix legs use cuda13 here (see the sibling
+# tesseract_requirements_cuda13.txt). JAX exposes device buffers only via DLPack,
+# the path this example exercises.
+jax[cuda13]

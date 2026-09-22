@@ -1,5 +1,6 @@
-# CUDA 13 variant of tesseract_requirements.txt, selected by the GPU CI matrix
-# via --config-override so the container's CUDA wheels match the 13.x base image.
-# The [cuda13] variant bundles its own CUDA pip wheels (see the note in
-# tesseract_requirements.txt on why the -local variant falls back to CPU here).
+# CUDA 13 variant selected by the GPU CI matrix on the 13.x leg. Identical to the
+# default tesseract_requirements.txt: JAX's plugin registers against the host
+# driver (CUDA 13), not the base image, so both legs use jax[cuda13]. Kept as a
+# separate file only because the matrix overrides requirements_file uniformly
+# across the GPU examples.
 jax[cuda13]
