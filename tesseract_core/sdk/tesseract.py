@@ -1121,16 +1121,27 @@ def _decode_array(
         size = 1 if len(shape) == 0 else int(np.prod(shape))
         num_bytes = size * dtype.itemsize
 
-        # Resolve the path
-        if output_path is not None:
-            full_path = Path(output_path) / bufferpath
-        else:
-            full_path = Path(bufferpath)
+        # The buffer reference comes from the (untrusted) server response, so it
+        # must stay within output_path. Otherwise an absolute path or `..`
+        # traversal could read, or on the lazy path unlink, arbitrary client
+        # files.
+        if output_path is None:
+            raise ValueError(
+                "output_path must be set to decode a json+binref response."
+            )
+        base = Path(output_path).resolve()
+        full_path = (base / bufferpath).resolve()
+        if not full_path.is_relative_to(base):
+            raise ValueError(
+                f"Binref buffer reference {bufferpath!r} escapes output_path. "
+                "Refusing to read a file outside the output directory."
+            )
 
         if not full_path.exists():
             raise ValueError(
                 f"Binary file not found: {full_path}. "
-                "Make sure output_path is set when using json+binref encoding."
+                "The server referenced a binref buffer that is not present in "
+                "output_path."
             )
 
         compression = encoded_arr["data"].get("compression")
