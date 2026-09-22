@@ -81,7 +81,7 @@ def test_json_schema_identifies_reference_ports():
     schema = InputSchema.model_json_schema()["properties"]["target"]
 
     assert schema["title"] == "TesseractReference"
-    assert schema["x-tesseract-type"] == "reference"
+    assert schema["x-tesseract-type"] == "TesseractReference"
 
 
 def test_base_model_model_dump():
