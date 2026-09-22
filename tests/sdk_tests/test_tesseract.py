@@ -740,6 +740,37 @@ def test_decode_array_lz4(encoding, tmp_path):
     np.testing.assert_array_equal(decoded, arr, strict=True)
 
 
+@pytest.mark.parametrize("compression", [None, "lz4"])
+def test_decode_array_binref_rejects_path_escape(compression, tmp_path):
+    """A binref reference from the server must not escape output_path.
+
+    The buffer reference is server-controlled and untrusted; an absolute path
+    or a ``..`` traversal would otherwise let a malicious server read arbitrary
+    client-side files. See _decode_array's containment check.
+    """
+    output_path = tmp_path / "output_dir"
+    output_path.mkdir()
+
+    secret = tmp_path / "secret.bin"
+    secret.write_bytes(b"\x00" * 16)
+
+    for bufferpath in (str(secret), "../secret.bin"):
+        buffer = f"{bufferpath}:0"
+        if compression == "lz4":
+            buffer = f"{buffer}:16"
+        encoded = {
+            "shape": (2,),
+            "dtype": "float64",
+            "data": {
+                "buffer": buffer,
+                "encoding": "binref",
+                "compression": compression,
+            },
+        }
+        with pytest.raises(ValueError, match="escapes output_path"):
+            _decode_array(encoded, output_path=output_path)
+
+
 def test_binref_pool_checkout_reuses_slot(tmp_path):
     from tesseract_core.sdk.binref import BinrefWritePool
 

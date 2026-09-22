@@ -1121,11 +1121,23 @@ def _decode_array(
         size = 1 if len(shape) == 0 else int(np.prod(shape))
         num_bytes = size * dtype.itemsize
 
-        # Resolve the path
-        if output_path is not None:
-            full_path = Path(output_path) / bufferpath
-        else:
-            full_path = Path(bufferpath)
+        # Resolve the buffer reference against output_path, which confines it.
+        # The reference comes from the server's response, which is untrusted for
+        # a client connected to a remote Tesseract, so it must not be allowed to
+        # escape output_path: an absolute path or a `..` traversal would
+        # otherwise let a malicious server read (or, on the lazy path, unlink)
+        # arbitrary client-side files.
+        if output_path is None:
+            raise ValueError(
+                "output_path must be set to decode a json+binref response."
+            )
+        base = Path(output_path).resolve()
+        full_path = (base / bufferpath).resolve()
+        if not full_path.is_relative_to(base):
+            raise ValueError(
+                f"Binref buffer reference {bufferpath!r} escapes output_path. "
+                "Refusing to read a file outside the output directory."
+            )
 
         if not full_path.exists():
             raise ValueError(
