@@ -684,6 +684,29 @@ class Tesseract:
             )
         return self._serve_context
 
+    @property
+    def api_module(self) -> ModuleType:
+        """The raw Tesseract API module, for Tesseracts created via `from_tesseract_api`.
+
+        This is the actual ``tesseract_api`` module (containing ``apply``,
+        ``InputSchema``, ``OutputSchema``, etc.), as opposed to the
+        schema-validating endpoints normally used to call it. Useful for
+        callers that need to introspect or call the raw functions directly,
+        e.g. to trace them inside a JAX transform.
+
+        Raises:
+            RuntimeError: if this Tesseract was not created via
+                :meth:`from_tesseract_api` (e.g. it is a served Tesseract
+                created via :meth:`from_url` or :meth:`from_image`), since
+                only in-process Tesseracts have a Python module to expose.
+        """
+        if not isinstance(self._client, LocalClient):
+            raise RuntimeError(
+                "`api_module` is only available for Tesseracts created via "
+                "`Tesseract.from_tesseract_api(...)`."
+            )
+        return self._client.api_module
+
     @requires_client
     def apply(
         self,
@@ -1528,6 +1551,21 @@ class LocalClient:
             # Purge the auto-created tempdir when this client is garbage collected.
             weakref.finalize(self, _purge_tempdir, str(output_path))
         self._output_path = output_path
+        self._api_module = tesseract_api
+
+    @property
+    def api_module(self) -> ModuleType:
+        """The raw Tesseract API module backing this client.
+
+        This is the actual ``tesseract_api`` module (containing ``apply``,
+        ``InputSchema``, ``OutputSchema``, etc.) as passed to
+        :meth:`Tesseract.from_tesseract_api`, before it was wrapped into
+        schema-validating endpoints. Useful for callers that need to
+        introspect or call the raw functions directly -- for example to trace
+        them inside a JAX transform, where pydantic validation cannot run on
+        a JAX tracer -- rather than going through the validated endpoints.
+        """
+        return self._api_module
 
     def run_tesseract(
         self,

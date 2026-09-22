@@ -121,6 +121,29 @@ def test_Tesseract_from_tesseract_api(dummy_tesseract_location, dummy_tesseract_
     assert endpoints == all_endpoints
 
 
+def test_Tesseract_api_module_exposes_raw_module(dummy_tesseract_module):
+    """`api_module` returns the exact module passed to `from_tesseract_api`.
+
+    Downstream consumers (e.g. tesseract-jax) need this to call the raw,
+    non-schema-validated `apply`/`jacobian`/etc. functions directly, e.g. to
+    trace them inside a JAX transform.
+    """
+    t = Tesseract.from_tesseract_api(dummy_tesseract_module)
+
+    assert t.api_module is dummy_tesseract_module
+    assert t._client.api_module is dummy_tesseract_module
+    assert t.api_module.apply is dummy_tesseract_module.apply
+    assert t.api_module.InputSchema is dummy_tesseract_module.InputSchema
+    assert t.api_module.OutputSchema is dummy_tesseract_module.OutputSchema
+
+
+def test_Tesseract_api_module_raises_for_served_tesseract():
+    """`api_module` has no meaning for a served (non-in-process) Tesseract."""
+    t = Tesseract.from_url("http://localhost:1234")
+    with pytest.raises(RuntimeError, match="only available for Tesseracts created via"):
+        _ = t.api_module
+
+
 def test_Tesseract_from_tesseract_api_does_not_leak_config_between_instances(
     dummy_tesseract_module, tmp_path
 ):
