@@ -6,7 +6,10 @@
 Unlike ``tests/test_cuda_ipc.py`` (which drives the encode/decode functions
 in-process), these tests build a real GPU Tesseract image, serve it in a
 container with ``--gpus all`` and ``--ipc=host``, and round-trip device memory
-across the process/container boundary via a genuine ``cudaIpcMemHandle_t``.
+across the process/container boundary via a genuine ``cudaIpcMemHandle_t``. One
+image is built per GPU array framework (CuPy, JAX, PyTorch) so the export path
+is covered against both metadata sources it reads: ``__cuda_array_interface__``
+(CuPy, PyTorch) and DLPack (JAX).
 
 Requires a physical CUDA GPU and Docker with the NVIDIA container runtime. CuPy
 is used only as a convenient GPU-availability probe on the host; the decoded
@@ -15,6 +18,7 @@ host does not need CuPy to read cuda_ipc outputs. They are marked ``gpu`` so
 GPU-less CI runners skip them.
 """
 
+import os
 from pathlib import Path
 
 import numpy as np
@@ -39,12 +43,41 @@ requires_cuda = pytest.mark.skipif(
 )
 
 
-@pytest.fixture(scope="module")
-def gpu_image_name(docker_client, docker_cleanup_module, shared_dummy_image_name):
-    """Build the GPU CUDA-IPC example image once for this module."""
-    source = EXAMPLES_DIR / "_gpu_cuda_ipc"
+# The framework runs inside the container, so the host stays framework-agnostic
+# and needs only a GPU to decode the handle (hence the plain requires_cuda skip).
+GPU_EXAMPLES = ["_gpu_cupy", "_gpu_jax", "_gpu_torch"]
+
+# The CUDA runtime comes from the framework wheels (the runtime loader prefers
+# the pip-wheel libcudart), so the wheel's CUDA major is what libcudart resolves
+# to. The example ships CUDA 12 by default plus a tesseract_requirements_cuda13.txt;
+# CI sets TESSERACT_TEST_CUDA_MAJOR per matrix leg and pre-builds with the same
+# override, so the fixture builds hit the warm layer cache. A local GPU run
+# without it falls back to the CUDA 12 default the examples already carry.
+CUDA_MAJOR = os.environ.get("TESSERACT_TEST_CUDA_MAJOR", "12")
+
+
+@pytest.fixture(scope="module", params=GPU_EXAMPLES)
+def gpu_image_name(
+    request, docker_client, docker_cleanup_module, shared_dummy_image_name
+):
+    """Build a GPU example image once per framework for this module."""
+    # jax only has a cuda13 build (its cuda12 plugin won't register under the CI's
+    # CUDA 13 driver), so run it on the 13 leg only; cupy/torch cover .so.12.
+    if request.param == "_gpu_jax" and CUDA_MAJOR == "12":
+        pytest.skip("_gpu_jax runs on the CUDA 13 leg only")
+
+    source = EXAMPLES_DIR / request.param
+    config_override = {}
+    if CUDA_MAJOR != "12":
+        config_override["build_config.requirements.requirements_file"] = (
+            f"tesseract_requirements_cuda{CUDA_MAJOR}.txt"
+        )
     image_tag = build_tesseract(
-        docker_client, source, shared_dummy_image_name, tag="sometag"
+        docker_client,
+        source,
+        f"{shared_dummy_image_name}-{request.param.lstrip('_')}",
+        config_override=config_override,
+        tag="sometag",
     )
     assert image_exists(docker_client, image_tag)
     docker_cleanup_module["images"].append(image_tag)

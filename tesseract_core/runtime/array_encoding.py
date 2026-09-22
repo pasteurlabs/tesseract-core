@@ -668,15 +668,15 @@ def validate_python_or_gpu_array(
     """Validate a Python array-like input, keeping GPU arrays on-device.
 
     Used as the "load from a Python object" validator. Objects that live in GPU
-    memory (exposing ``__cuda_array_interface__``) are validated but returned
-    unchanged, so they can later be encoded via CUDA IPC without a host copy;
-    coercing them to NumPy here would force a device-to-host transfer (or fail,
-    since CuPy refuses implicit conversion). Everything else is coerced to a
-    NumPy array via :func:`python_to_array`.
+    memory (exposing ``__cuda_array_interface__`` or DLPack on a CUDA device) are
+    validated but returned unchanged, so they can later be encoded via CUDA IPC
+    without a host copy; coercing them to NumPy here would force a device-to-host
+    transfer (or fail, since CuPy refuses implicit conversion). Everything else
+    is coerced to a NumPy array via :func:`python_to_array`.
     """
     from tesseract_core.runtime.cuda import ipc as cuda_ipc
 
-    if cuda_ipc.has_cuda_array_interface(val):
+    if cuda_ipc.is_gpu_array(val):
         return cuda_ipc.validate_cuda_array(val, expected_shape, expected_dtype)
 
     context = info.context if info.context else {}
@@ -765,7 +765,7 @@ def encode_array(
     array_encoding = context.get("array_encoding", "json")
     device_transport = context.get("device_transport")
 
-    is_gpu_array = cuda_ipc.has_cuda_array_interface(arr)
+    is_gpu_array = cuda_ipc.is_gpu_array(arr)
 
     # Python mode -> return the array as-is, without any host copy. GPU arrays
     # are preserved on-device so that the intermediate model_dump()/validate

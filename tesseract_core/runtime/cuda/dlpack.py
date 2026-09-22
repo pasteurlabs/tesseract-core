@@ -1,17 +1,21 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""DLPack ABI: hand an owned device buffer to Torch/JAX/CuPy zero-copy.
+"""DLPack ABI: exchange CUDA device buffers with Torch/JAX/CuPy zero-copy.
 
-This module mirrors just enough of the DLPack C ABI to export a device buffer
-as a ``"dltensor"`` PyCapsule, plus the capsule handshake and lifetime
-bookkeeping. It is used by :class:`tesseract_core.runtime.cuda.ipc.IpcDeviceArray`
-to expose its buffer via ``__dlpack__`` without depending on any GPU framework.
+This module mirrors just enough of the DLPack C ABI to move buffers in both
+directions without depending on any GPU framework:
 
-All ctypes and the CPython capsule API stay here. The public surface is two
-functions -- :func:`make_dlpack_capsule` and :func:`drop_unconsumed_bundle` --
-and the buffer is always freed through
-:func:`tesseract_core.runtime.cuda.api.free`.
+* *export* -- :func:`make_dlpack_capsule` / :func:`drop_unconsumed_bundle` wrap an
+  owned device buffer as a ``"dltensor"`` PyCapsule, used by
+  :class:`tesseract_core.runtime.cuda.ipc.IpcDeviceArray` to expose its buffer
+  via ``__dlpack__``.
+* *import* -- :func:`is_dlpack_cuda` / :func:`read_dlpack_cuda_metadata` borrow a
+  foreign producer's device pointer, shape, and dtype, used by the encode path to
+  route a CAI-less array (e.g. JAX) over a CUDA transport.
+
+All ctypes and the CPython capsule API stay here; the buffer is always freed
+through :func:`tesseract_core.runtime.cuda.api.free`.
 """
 
 import ctypes
@@ -68,6 +72,11 @@ _DLPACK_TYPE_CODES = {
     "b": 6,  # kDLBool
     "c": 5,  # kDLComplex
 }
+
+# Reverse of _DLPACK_TYPE_CODES: DLDataTypeCode -> NumPy dtype kind, used to
+# reconstruct a NumPy dtype from a DLPack tensor's (code, bits) when reading
+# metadata off a foreign array (e.g. a JAX buffer that exposes only DLPack).
+_NUMPY_KINDS = {code: kind for kind, code in _DLPACK_TYPE_CODES.items()}
 
 # Keep PyCapsule_* usable from ctypes for the DLPack capsule handshake.
 _pythonapi = ctypes.pythonapi
@@ -172,3 +181,95 @@ def drop_unconsumed_bundle(token: int) -> None:
     if still_dltensor:
         # Nobody adopted it -> free now (the deleter pops the registry entry).
         c_deleter(0)
+
+
+# ---------------------------------------------------------------------------
+# Reading metadata off a foreign DLPack producer
+# ---------------------------------------------------------------------------
+#
+# Some frameworks (notably JAX) expose their device buffers only through DLPack
+# (``__dlpack__`` / ``__dlpack_device__``) and never implement
+# ``__cuda_array_interface__``. To route such an array over a CUDA device
+# transport we need its device pointer, shape, dtype, and contiguity -- exactly
+# what a DLPack capsule already carries. The helpers below borrow that metadata
+# without adopting the buffer, leaving the producer as sole owner.
+
+
+def is_dlpack_cuda(obj: Any) -> bool:
+    """Whether ``obj`` is a DLPack producer whose buffer lives in CUDA device memory.
+
+    Checks the cheap ``__dlpack_device__`` handshake (no capsule is requested, so
+    no buffer is exported). Only plain CUDA global memory (``kDLCUDA``) qualifies:
+    the CUDA transports export a device pointer by reference, which pinned host
+    memory (``kDLCUDAHost``) is not, matching the device-only
+    ``__cuda_array_interface__`` path.
+    """
+    dlpack_device = getattr(obj, "__dlpack_device__", None)
+    if not callable(dlpack_device) or not callable(getattr(obj, "__dlpack__", None)):
+        return False
+    try:
+        device_type, _device_id = dlpack_device()
+    except Exception:
+        return False
+    return device_type == _kDLCUDA
+
+
+def read_dlpack_cuda_metadata(
+    obj: Any,
+) -> tuple[int, int, tuple[int, ...], tuple[int, ...] | None, np.dtype]:
+    """Read ``(data_ptr, device, shape, strides, dtype)`` from a DLPack producer.
+
+    Requests one DLPack capsule from ``obj``, reads the ``DLTensor`` fields, then
+    consumes the capsule and runs its deleter so ``obj`` retains sole ownership
+    of the underlying buffer (we only borrowed its metadata). ``strides`` is in
+    elements, or ``None`` for a C-contiguous tensor. Raises ``TypeError`` if the
+    capsule is not on a CUDA device or carries an unsupported dtype.
+    """
+    device_type, device_id = obj.__dlpack_device__()
+    if device_type != _kDLCUDA:
+        raise TypeError(
+            f"DLPack tensor is not on a CUDA device (device_type={device_type})"
+        )
+
+    capsule = obj.__dlpack__()
+    managed_ptr = _pythonapi.PyCapsule_GetPointer(capsule, b"dltensor")
+    if not managed_ptr:
+        raise TypeError("object did not return a valid 'dltensor' DLPack capsule")
+
+    managed = ctypes.cast(managed_ptr, ctypes.POINTER(_DLManagedTensor)).contents
+    tensor = managed.dl_tensor
+    try:
+        ndim = tensor.ndim
+        shape = tuple(tensor.shape[i] for i in range(ndim))
+        strides = (
+            None
+            if not tensor.strides
+            else tuple(tensor.strides[i] for i in range(ndim))
+        )
+        dtype = _numpy_dtype(tensor.dtype)
+        data_ptr = (tensor.data or 0) + tensor.byte_offset
+    finally:
+        # We borrowed metadata only; hand ownership back by consuming the capsule
+        # (so the producer's own deleter is disarmed) and releasing the tensor.
+        _pythonapi.PyCapsule_SetName(capsule, b"used_dltensor")
+        if managed.deleter:
+            managed.deleter(managed_ptr)
+
+    return data_ptr, device_id, shape, strides, dtype
+
+
+def _numpy_dtype(dl_dtype: _DLDataType) -> np.dtype:
+    """Map a DLPack ``DLDataType`` back to a NumPy dtype.
+
+    Rejects vectorized lanes (``lanes != 1``): the CUDA transports move a flat
+    scalar-typed byte range, so a packed multi-lane element has no NumPy dtype
+    to rebuild it from.
+    """
+    if dl_dtype.lanes != 1:
+        raise TypeError(f"DLPack dtype with {dl_dtype.lanes} lanes is not supported")
+    kind = _NUMPY_KINDS.get(dl_dtype.code)
+    if kind is None:
+        raise TypeError(f"DLPack dtype code {dl_dtype.code} is not supported")
+    if dl_dtype.bits % 8 != 0:
+        raise TypeError(f"DLPack dtype with {dl_dtype.bits} bits is not supported")
+    return np.dtype(f"{kind}{dl_dtype.bits // 8}")

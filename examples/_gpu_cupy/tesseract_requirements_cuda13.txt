@@ -1,0 +1,5 @@
+# CUDA 13 variant selected by the GPU CI matrix on the 13.x leg. The runtime
+# loads libcudart from this cuda13x wheel, so it exercises libcudart.so.13 (the
+# default tesseract_requirements.txt pulls cuda12x -> libcudart.so.12). The [ctk]
+# extra pulls in the CUDA toolkit CuPy needs to JIT-compile the kernel.
+cupy-cuda13x[ctk]
