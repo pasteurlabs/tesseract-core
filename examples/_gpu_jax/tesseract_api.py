@@ -34,12 +34,23 @@ def apply(inputs: InputSchema) -> OutputSchema:
     """Compute ``s * a + b`` on the GPU and return device memory."""
     import jax
 
+    # TEMP diagnostic: capture why jaxlib picks its backend. Force a fresh CUDA
+    # init and surface any "CUDA backend failed to initialize" reason jaxlib logs.
+    diag = {}
+    try:
+        from jax._src import xla_bridge
+
+        xla_bridge.get_backend("cuda")
+        diag["cuda_init"] = "ok"
+    except Exception as exc:
+        diag["cuda_init"] = f"{type(exc).__name__}: {exc}"
+
     a = jnp.asarray(inputs.a)
     b = jnp.asarray(inputs.b)
     result = inputs.s * a + b
-    # TEMP diagnostic: surface the actual JAX backend/device in CI.
     raise RuntimeError(
         f"JAX_DIAG backend={jax.default_backend()} "
-        f"devices={jax.devices()} result_device={result.devices()}"
+        f"devices={jax.devices()} result_device={result.devices()} "
+        f"cuda_backend={diag['cuda_init']}"
     )
     return OutputSchema(result=result)
