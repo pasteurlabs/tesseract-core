@@ -3,6 +3,7 @@ version: "0.1.0"
 description: "GPU Tesseract returning CuPy device memory, for CUDA IPC end-to-end tests."
 
 build_config:
-  # CUDA runtime base image so libcudart is present for the IPC export path.
-  base_image: "nvidia/cuda:12.8.1-runtime-ubuntu24.04"
+  # The default Debian base image is enough: libcudart comes from the CuPy CUDA
+  # wheel (the runtime loader prefers the pip-wheel copy), and the GPU driver is
+  # injected by the container runtime at `docker run --gpus all`.
   target_platform: "native"
