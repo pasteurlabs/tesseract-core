@@ -1528,6 +1528,7 @@ class LocalClient:
             # Purge the auto-created tempdir when this client is garbage collected.
             weakref.finalize(self, _purge_tempdir, str(output_path))
         self._output_path = output_path
+        self._api_module = tesseract_api
 
     def run_tesseract(
         self,
