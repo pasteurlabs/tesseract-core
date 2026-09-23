@@ -49,11 +49,8 @@ class RuntimeConfig(BaseModel):
     ] = ()
     docker_run_args: Annotated[tuple[str, ...], BeforeValidator(maybe_split_args)] = ()
 
-    # Used to build environments for `Tesseract.from_source`. Empty means look
-    # for the tool when something needs it, which is also when a useful error
-    # can be given; pydantic does not validate a default, so nothing here
-    # requires uv or conda to be installed. Set either one to choose the program
-    # to run, optionally with leading arguments.
+    # Used to build environments for `Tesseract.from_source`. If empty the
+    # executables will be looked for in the standard places if needed.
     uv_executable: Annotated[tuple[str, ...], BeforeValidator(validate_executable)] = ()
     conda_executable: Annotated[
         tuple[str, ...], BeforeValidator(validate_executable)
