@@ -14,7 +14,7 @@ services:
       - mlflow-data:/mlflow-data
 
   mlflow-server:
-    image: ghcr.io/mlflow/mlflow:latest
+    image: ghcr.io/mlflow/mlflow:v3.16.1
     restart: unless-stopped
     user: 1000:1000
     command: >
