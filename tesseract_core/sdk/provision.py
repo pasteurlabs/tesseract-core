@@ -233,7 +233,7 @@ def _declared_requirements(api_path: Path) -> tuple[Any, Path] | None:
 def _uv() -> tuple[str, ...]:
     """How to invoke uv, or raise explaining what to do without it."""
     configured = get_sdk_config().uv_executable
-    if configured is not None:
+    if configured:
         return configured
 
     found = shutil.which("uv")
@@ -255,7 +255,7 @@ def _conda() -> tuple[str, ...]:
     are several installations, that is the one the user actually works in.
     """
     configured = get_sdk_config().conda_executable
-    if configured is not None:
+    if configured:
         return configured
 
     from_env = os.environ.get("CONDA_EXE")
