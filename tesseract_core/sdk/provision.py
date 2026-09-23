@@ -573,6 +573,19 @@ def _pylock_requires_python(lockfile: Path) -> SpecifierSet | None:
         return None
 
 
+def _minors_matching(wanted: SpecifierSet) -> list[int]:
+    """Python minor versions a Requires-Python range allows.
+
+    The upper limit is arbitrary and generous; `_nearest` applies the real
+    bounds.
+    """
+    return [
+        minor
+        for minor in range(sys.version_info.minor + 50)
+        if f"{sys.version_info.major}.{minor}.0" in wanted
+    ]
+
+
 def _build_python_version(build_config: Any, requirements_file: Path) -> str | None:
     """Choose a Python version to build on. None means use this interpreter.
 
@@ -611,54 +624,36 @@ def _build_python_version(build_config: Any, requirements_file: Path) -> str | N
     if build_config.inherit_base_image_packages:
         return None
 
+    ours = sys.version_info.minor
+    here = f"{sys.version_info.major}.{ours}"
+
+    def chosen(version: str | None, why: str) -> str | None:
+        """Log and return a pick, or None when it is the interpreter we are on."""
+        if version is None:
+            return None
+        logger.debug("%s %s; building on %s", requirements_file.name, why, version)
+        return None if version == here else version
+
     # A lockfile states its own Python range, and `uv pip compile` will not
     # accept one, so this is both the better answer and the only one available.
     if build_config.requirements.is_pylock:
         wanted = _pylock_requires_python(requirements_file)
         if wanted is None:
             return None
-        allowed = [
-            minor
-            for minor in range(sys.version_info.minor + 50)
-            if f"{sys.version_info.major}.{minor}.0" in wanted
-        ]
-        picked = _nearest(allowed)
-        here = f"{sys.version_info.major}.{sys.version_info.minor}"
-        if picked is None or picked == here:
-            return None
-        logger.debug(
-            "%s is locked for Python %s; building on %s",
-            requirements_file.name,
-            wanted,
-            picked,
+        return chosen(
+            _nearest(_minors_matching(wanted)), f"is locked for Python {wanted}"
         )
-        return picked
 
     _, remote = parse_requirements(requirements_file)
     if not remote:
         return None
-
-    ours = sys.version_info.minor
-    here = f"{sys.version_info.major}.{ours}"
-
-    def chosen(version: str | None, why: str) -> str | None:
-        if version is None:
-            return None
-        logger.debug("%s %s; building on %s", requirements_file.name, why, version)
-        return None if version == here else version
 
     # 1. Is our version excluded by something's Requires-Python? If so uv names
     #    the range it wants, which tells us where to go without trying.
     error = _compile(remote, here, wheels_only=False)
     wanted = _requires_python(error) if error is not None else None
     if wanted is not None:
-        allowed = [
-            minor
-            for minor in range(sys.version_info.minor + 50)
-            if f"{sys.version_info.major}.{minor}.0" in wanted
-        ]
-        # `_nearest` applies the bounds, so this range can be generous.
-        picked = chosen(_nearest(allowed), f"needs Python {wanted}")
+        picked = chosen(_nearest(_minors_matching(wanted)), f"needs Python {wanted}")
         if picked is not None:
             return picked
 
