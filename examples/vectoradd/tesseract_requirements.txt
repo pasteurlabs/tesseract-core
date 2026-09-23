@@ -1,1 +1,6 @@
-numpy==1.26.4
+# Tesseract requirements file
+#
+# Add Python requirements like this:
+# numpy==1.18.1
+
+numpy
