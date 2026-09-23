@@ -483,14 +483,14 @@ class Tesseract:
             stream_logs: If True, stream logs to stdout while endpoints run.
                 If a callable, stream logs to that callable instead.
             python_executable: Interpreter used to run the Tesseract (must
-                have ``tessseract-core[runtime]`` and the Tesseract's own
-                requirements installed. Pass ``sys.executable`` to serve using
+                have ``tesseract-core[runtime]`` and the Tesseract's own
+                requirements installed). Pass ``sys.executable`` to serve using
                 the SDK's Python environment.
-                
+
                 If not provided, an existing compatible virtual environment is
                 first searched for in the Tesseract's directory. Failing this,
                 a compatible ``.venv`` is attempted to be built automatically.
-                Automatic building requires ``uv`` on PATH, or ``conda`` 
+                Automatic building requires ``uv`` on PATH, or ``conda``
                 if the Tesseract sets ``requirements.provider: conda``.
             startup_timeout: How long to wait, in seconds, for the Tesseract to
                 become healthy before giving up.

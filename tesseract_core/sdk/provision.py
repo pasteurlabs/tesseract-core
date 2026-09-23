@@ -857,8 +857,7 @@ def resolve_python_executable(api_path: Path) -> Path:
 
     1. an environment next to the ``tesseract_api.py`` that already has
        everything;
-    2. the SDK's interpreter, if it already has everything.
-       nothing at all;
+    2. the SDK's interpreter, if it already has everything;
     3. otherwise, create or update an environment next to the
        ``tesseract_api.py``.
     """
