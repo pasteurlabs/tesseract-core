@@ -81,8 +81,14 @@ _SCRUBBED_IMPORT_VARS = ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV")
 
 _MANAGED_VENV_NAME = ".venv"
 
-# Looked for next to the api file before we create anything.
-_VENV_CANDIDATES = (_MANAGED_VENV_NAME, "venv")
+# Looked for next to the api file before we create anything. These are the
+# directory names GitHub's Python .gitignore calls "Environments", minus two:
+# `ENV` is the same directory as `env` on macOS and Windows and is rare
+# elsewhere, and `.env` is nearly always a dotenv file rather than a directory.
+#
+# An environment the user has *activated* needs no entry here, whether it is a
+# venv or a conda prefix, because it is already `sys.executable`.
+_VENV_CANDIDATES = (_MANAGED_VENV_NAME, "venv", "env")
 
 # Records which environment file a conda environment was built from. conda has
 # no quick way to check whether an environment is already up to date, and
