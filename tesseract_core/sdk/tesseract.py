@@ -989,6 +989,32 @@ def _import_cuda_ipc() -> ModuleType:
     return cuda_ipc
 
 
+# DLPack DLDeviceType for CUDA global memory (stable part of the DLPack spec).
+_DLDEVICE_CUDA = 2
+
+
+def _is_gpu_array(arr: Any) -> bool:
+    """Whether ``arr`` holds data in CUDA device memory (host-side, no runtime import).
+
+    Mirrors :func:`tesseract_core.runtime.cuda.ipc.is_gpu_array` but stays purely
+    on host protocols so a base SDK install (no runtime extra) can still route a
+    mixed payload: an object either exposes ``__cuda_array_interface__`` (CuPy,
+    PyTorch, Numba) or is a DLPack producer whose buffer lives on a CUDA device
+    (JAX, which does not implement CAI). The DLPack check only runs the cheap
+    ``__dlpack_device__`` handshake -- no capsule is exported here.
+    """
+    if hasattr(arr, "__cuda_array_interface__"):
+        return True
+    dlpack_device = getattr(arr, "__dlpack_device__", None)
+    if not callable(dlpack_device) or not callable(getattr(arr, "__dlpack__", None)):
+        return False
+    try:
+        device_type, _device_id = dlpack_device()
+    except Exception:
+        return False
+    return device_type == _DLDEVICE_CUDA
+
+
 def _encode_array(
     arr: Any, encoding: Literal["base64", "raw", "cuda_ipc"] = "base64"
 ) -> dict:
@@ -996,7 +1022,7 @@ def _encode_array(
     # a CUDA IPC handle, keeping the data on-device. Any other array (or any other
     # encoding) falls through to a host copy below, so a mixed payload (some GPU,
     # some CPU arrays) encodes correctly either way.
-    if encoding == "cuda_ipc" and hasattr(arr, "__cuda_array_interface__"):
+    if encoding == "cuda_ipc" and _is_gpu_array(arr):
         return _import_cuda_ipc().dump_cuda_ipc_arraydict(arr)
 
     # Ensure arr is a numpy-compatible array so we guarantee it has a compatible dtype (not e.g. torch bfloat16)
@@ -1056,12 +1082,12 @@ def _encode_payload(
 
     def _encode_leaf(x: Any) -> dict:
         nonlocal exported
-        if hasattr(x, "__cuda_array_interface__"):
+        if _is_gpu_array(x):
             exported = True
         return _encode_array(x, encoding=gpu_transport)
 
     def _is_leaf(x: Any) -> bool:
-        return hasattr(x, "__array__") or hasattr(x, "__cuda_array_interface__")
+        return hasattr(x, "__array__") or _is_gpu_array(x)
 
     try:
         yield _tree_map(_encode_leaf, payload, is_leaf=_is_leaf)
@@ -1129,16 +1155,27 @@ def _decode_array(
         size = 1 if len(shape) == 0 else int(np.prod(shape))
         num_bytes = size * dtype.itemsize
 
-        # Resolve the path
-        if output_path is not None:
-            full_path = Path(output_path) / bufferpath
-        else:
-            full_path = Path(bufferpath)
+        # The buffer reference comes from the (untrusted) server response, so it
+        # must stay within output_path. Otherwise an absolute path or `..`
+        # traversal could read, or on the lazy path unlink, arbitrary client
+        # files.
+        if output_path is None:
+            raise ValueError(
+                "output_path must be set to decode a json+binref response."
+            )
+        base = Path(output_path).resolve()
+        full_path = (base / bufferpath).resolve()
+        if not full_path.is_relative_to(base):
+            raise ValueError(
+                f"Binref buffer reference {bufferpath!r} escapes output_path. "
+                "Refusing to read a file outside the output directory."
+            )
 
         if not full_path.exists():
             raise ValueError(
                 f"Binary file not found: {full_path}. "
-                "Make sure output_path is set when using json+binref encoding."
+                "The server referenced a binref buffer that is not present in "
+                "output_path."
             )
 
         compression = encoded_arr["data"].get("compression")

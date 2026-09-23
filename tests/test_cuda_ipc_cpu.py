@@ -77,6 +77,56 @@ class FakeCudaArray:
             self.device = device
 
 
+class FakeDLPackCudaArray:
+    """Mimics a JAX-style array: DLPack-on-CUDA only, no ``__cuda_array_interface__``.
+
+    Backs ``__dlpack__`` with the real capsule machinery so the encode path reads
+    genuine ``DLManagedTensor`` metadata. The producer keeps ownership (as JAX
+    does), so consuming the capsule for metadata must not free anything real; the
+    ``mocked_cuda`` fixture stubs ``cuda_api.free`` regardless.
+    """
+
+    def __init__(
+        self,
+        shape: tuple[int, ...],
+        dtype: str,
+        data_ptr: int = 0x7000,
+        device: int = 0,
+        strides: tuple[int, ...] | None = None,
+    ) -> None:
+        self._ptr = data_ptr
+        self._device = device
+        self._shape = tuple(shape)
+        self._dtype = np.dtype(dtype)
+        self._strides = strides
+
+    def __dlpack_device__(self) -> tuple[int, int]:
+        from tesseract_core.runtime.cuda import dlpack
+
+        return (dlpack.DLDEVICE_CUDA, self._device)
+
+    def __dlpack__(self, stream: Any = None, **kwargs: Any) -> Any:
+        from tesseract_core.runtime.cuda import dlpack
+
+        capsule, _token = dlpack.make_dlpack_capsule(
+            self._ptr, self._device, self._shape, self._dtype
+        )
+        if self._strides is not None:
+            # make_dlpack_capsule always emits contiguous (strides=NULL); rebuild
+            # with explicit element strides to exercise the contiguity check.
+            import ctypes
+
+            managed_ptr = dlpack._pythonapi.PyCapsule_GetPointer(capsule, b"dltensor")
+            managed = ctypes.cast(
+                managed_ptr, ctypes.POINTER(dlpack._DLManagedTensor)
+            ).contents
+            strides_arr = (ctypes.c_int64 * len(self._strides))(*self._strides)
+            managed.dl_tensor.strides = strides_arr
+            # Keep the strides array alive for as long as the capsule may be read.
+            dlpack._BUNDLES[_token] = (*dlpack._BUNDLES[_token], strides_arr)
+        return capsule
+
+
 class _CuPyDevice:
     """Stand-in for ``cupy.ndarray.device`` (exposes ``.id``)."""
 
@@ -163,6 +213,72 @@ def test_dump_accepts_explicit_contiguous_strides(mocked_cuda):
     # strides given but equal to the row-major strides -> still contiguous.
     arr = FakeCudaArray((3, 4), "<f4", strides=(16, 4))
     out = cuda_ipc.dump_cuda_ipc_arraydict(arr)
+    assert out["data"]["encoding"] == "cuda_ipc"
+
+
+# ── DLPack-only producers (JAX has no __cuda_array_interface__) ──────────
+
+
+def test_is_gpu_array_accepts_dlpack_cuda(mocked_cuda):
+    """A DLPack-on-CUDA producer counts as a GPU array even without CAI."""
+    arr = FakeDLPackCudaArray((3,), "float32")
+    assert not cuda_ipc.has_cuda_array_interface(arr)
+    assert cuda_ipc.is_gpu_array(arr)
+    # A plain host array is neither.
+    assert not cuda_ipc.is_gpu_array(np.zeros(3, dtype=np.float32))
+
+
+def test_dump_dlpack_only_array(mocked_cuda):
+    """A JAX-style DLPack-only array encodes via cuda_ipc without a CuPy bridge."""
+    arr = FakeDLPackCudaArray((4, 8), "float32", data_ptr=0x5000, device=2)
+    out = cuda_ipc.dump_cuda_ipc_arraydict(arr)
+
+    assert out["object_type"] == "array"
+    assert out["shape"] == [4, 8]
+    assert out["dtype"] == "float32"
+    unpacked = _unpack_cuda_ipc(out["data"])
+    assert out["data"]["encoding"] == "cuda_ipc"
+    # Device ordinal comes from __dlpack_device__.
+    assert unpacked["device"] == 2
+    # base = 0x5000 - 256; offset = data_ptr - base = 256 (fake alloc base).
+    assert unpacked["storage_offset"] == 256
+    assert mocked_cuda.calls["get_handle"] == [0x5000 - 256]
+
+
+def test_dump_dlpack_only_falls_back_to_staging(mocked_cuda):
+    """A VMM-backed DLPack-only array (JAX/XLA) takes the staging fallback path."""
+    mocked_cuda.reject_non_staging_ipc = True
+    arr = FakeDLPackCudaArray((4, 8), "float32", data_ptr=0x5000)  # nbytes 128
+    out = cuda_ipc.dump_cuda_ipc_arraydict(arr)
+
+    assert mocked_cuda.calls["stage"] == [(0x5000, 128)]
+    unpacked = _unpack_cuda_ipc(out["data"])
+    assert unpacked["storage_offset"] == 0
+    assert unpacked["storage_size"] == 128
+
+
+def test_dump_dlpack_only_rejects_non_contiguous(mocked_cuda):
+    """A non-contiguous DLPack-only array is rejected like a CAI one."""
+    # Transposed 3x4 float32: element strides (1, 4) -> byte strides (4, 16).
+    arr = FakeDLPackCudaArray((4, 3), "float32", strides=(1, 4))
+    with pytest.raises(ValueError, match="C-contiguous"):
+        cuda_ipc.dump_cuda_ipc_arraydict(arr)
+
+
+def test_validate_dlpack_only_array_passthrough(mocked_cuda):
+    """A DLPack-only array validates on shape/dtype and is returned unchanged."""
+    arr = FakeDLPackCudaArray((4, 8), "float32")
+    assert cuda_ipc.validate_cuda_array(arr, (None, 8), "float32") is arr
+
+
+def test_encode_array_exports_dlpack_only_gpu_leaf(mocked_cuda):
+    """A DLPack-only GPU leaf under cuda_ipc is exported by handle, not host-copied."""
+    out = array_encoding.encode_array(
+        FakeDLPackCudaArray((3,), "float32"),
+        _info(True, {"array_encoding": "base64", "device_transport": "cuda_ipc"}),
+        (None,),
+        "float32",
+    )
     assert out["data"]["encoding"] == "cuda_ipc"
 
 
@@ -255,6 +371,44 @@ def test_client_request_releases_input_exports(mocked_cuda):
     # Pinned during the request (so the server can copy it out) ...
     assert arr in seen_during_request["pinned"]
     # ... and released once the request returned (no leak across calls).
+    assert cuda_ipc._CUDA_IPC_EXPORT_REGISTRY == []
+
+
+def test_client_request_exports_dlpack_only_input(mocked_cuda):
+    """The SDK client exports a JAX-style DLPack-only GPU input by reference.
+
+    A DLPack-only array (no ``__cuda_array_interface__``) reaching the client
+    encode path is detected as a GPU leaf, exported over cuda_ipc, and released
+    afterwards like a CAI array.
+    """
+    import orjson
+
+    from tesseract_core.sdk.tesseract import HTTPClient
+
+    encoded_payloads = {}
+    response = Mock(status_code=200, ok=True, content=b"{}")
+
+    class FakeSession:
+        def __init__(self) -> None:
+            self.headers = {}
+
+        def request(self, **kwargs):
+            encoded_payloads["data"] = orjson.loads(kwargs["data"])
+            return response
+
+    client = HTTPClient.__new__(HTTPClient)
+    client._url = "http://localhost:8000"
+    client._output_path = None
+    client._output_format = "json+base64"
+    client._gpu_transport = "cuda_ipc"
+    client._timeout = None
+    client._session = FakeSession()
+
+    arr = FakeDLPackCudaArray((3,), "float32")
+    client._request("apply", method="POST", payload={"a": arr})
+
+    assert encoded_payloads["data"]["a"]["data"]["encoding"] == "cuda_ipc"
+    # Released once the request returned (no leak across calls).
     assert cuda_ipc._CUDA_IPC_EXPORT_REGISTRY == []
 
 

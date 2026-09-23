@@ -1,0 +1,9 @@
+# JAX provides the device arrays returned by apply(). The [cuda13] variant
+# bundles its own CUDA pip wheels, so it runs on the default Debian base image.
+# Unlike CuPy/PyTorch, JAX's plugin registers against the host GPU driver (CUDA
+# 13 on the CI runners), not the CUDA runtime it ships: the [cuda12] plugin fails
+# to register under a CUDA 13 driver ("Unknown backend cuda") and silently falls
+# back to CPU, so both matrix legs use cuda13 here (see the sibling
+# tesseract_requirements_cuda13.txt). JAX exposes device buffers only via DLPack,
+# the path this example exercises.
+jax[cuda13]

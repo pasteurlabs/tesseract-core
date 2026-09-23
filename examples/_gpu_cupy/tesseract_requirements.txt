@@ -1,0 +1,7 @@
+# CuPy provides the device arrays returned by apply(). The [ctk] extra pulls in
+# the CUDA toolkit (nvrtc etc.) as wheels so CuPy can JIT-compile the elementwise
+# kernel for `s * a + b` on the default Debian base image. The runtime loads
+# libcudart from this cuda12x wheel, so the wheel's CUDA major (not the base
+# image) is what the loader picks up; the GPU CI matrix swaps in
+# tesseract_requirements_cuda13.txt on the 13.x leg to exercise libcudart.so.13.
+cupy-cuda12x[ctk]
