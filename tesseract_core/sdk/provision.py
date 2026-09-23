@@ -46,10 +46,11 @@ import yaml
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 
-from .api_parse import ValidationError, get_config
+from .api_parse import TesseractBuildConfig, ValidationError, get_config
 from .config import get_config as get_sdk_config
 from .engine import _split_local_dependency
 from .engine import parse_requirements as _parse_requirements
+from .exceptions import UserError
 
 logger = logging.getLogger("tesseract")
 
@@ -195,23 +196,28 @@ def _declared_requirements(api_path: Path) -> tuple[Any, Path] | None:
     requirements file containing only comments.
     """
     src_dir = api_path.parent
+
     if not (src_dir / "tesseract_config.yaml").is_file():
-        return None
+        # No config is not an error: `tesseract_api.py` is all the runtime
+        # needs. But a `tesseract_requirements.txt` sitting next to it still
+        # says what to install, and the defaults are exactly the provider and
+        # filename a build would assume, so use those.
+        default = TesseractBuildConfig()
+        requirements_file = src_dir / default.requirements._filename
+        return (default, requirements_file) if requirements_file.is_file() else None
 
     try:
         build_config = get_config(src_dir).build_config
-    except (ValidationError, FileNotFoundError, yaml.YAMLError) as e:
-        # A config we cannot read still leaves a Tesseract we can probably
-        # serve, since the runtime never reads the config. Warn and carry on
-        # with this interpreter. Only these three errors mean "bad file"; any
-        # other exception here is our bug and should not be hidden.
-        logger.warning(
-            "Could not read %s/tesseract_config.yaml, so no environment will be "
-            "provisioned for it: %s",
-            src_dir,
-            e,
-        )
-        return None
+    except (ValidationError, yaml.YAMLError) as e:
+        # `tesseract build` would reject this file, so say so now. Serving from
+        # source is usually the step before building, and quietly carrying on
+        # would hide a problem the user is going to hit anyway. Only these two
+        # errors mean "bad file"; any other exception here is our bug and must
+        # not be turned into a user-facing message.
+        raise UserError(
+            f"Could not read {src_dir / 'tesseract_config.yaml'}, so there is no "
+            f"way to tell what this Tesseract needs installed: {e}"
+        ) from e
 
     requirements = build_config.requirements
     requirements_file = src_dir / requirements._filename
@@ -342,10 +348,8 @@ def _caller_shortfall(
     Returns two lists: packages that are not installed, and packages installed
     at a version the file disallows. Returns None if it cannot tell.
 
-    The two lists are kept apart because they are not equally serious. A missing
-    package means the Tesseract cannot even import. A version that disagrees
-    with the file usually still works, and is what ``from_source`` ran on before
-    this module existed. Exact pins are honoured in a container.
+    Either one is reason enough to build an environment. They are reported
+    separately so the log can say which it was.
 
     This uses ``importlib.metadata`` instead of uv because uv refuses to look at
     an externally managed interpreter at all (PEP 668), so it cannot answer for
@@ -904,22 +908,20 @@ def resolve_python_executable(api_path: Path) -> Path:
         shortfall = _caller_shortfall(
             requirements_file, build_config.requirements.is_pylock
         )
-        # We only require that nothing is missing, not that versions match
-        # exactly. Building a whole environment to satisfy a pin is expensive
-        # when the package is already installed, and it can fail outright: a pin
-        # older than the running Python has no wheel to install. Exact versions
-        # are honoured in a container.
-        if shortfall is not None and not shortfall[0]:
-            if shortfall[1]:
-                logger.warning(
-                    "Serving %s on this interpreter, which does not match what "
-                    "it declares: %s. Pass `python_executable`, or build a "
-                    "container, to run it against the declared versions.",
-                    api_path.name,
-                    "; ".join(shortfall[1]),
-                )
+        if shortfall == ([], []):
             logger.debug("Serving %s from the current interpreter", api_path.name)
             return this_interpreter
+        if shortfall is not None:
+            # A version that disagrees is reason enough to build. A Tesseract
+            # pinning an old numpy may well be pinned because it breaks on a new
+            # one, and serving it on the wrong version gives quietly wrong
+            # answers. Building costs a couple of seconds, once.
+            logger.debug(
+                "Building for %s: missing %s; wrong version %s",
+                api_path.name,
+                shortfall[0] or "nothing",
+                shortfall[1] or "nothing",
+            )
 
     dest = _managed_env_dir(api_path)
     logger.info("Building an environment for %s at %s", api_path.name, dest)

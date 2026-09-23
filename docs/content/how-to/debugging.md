@@ -18,7 +18,6 @@ To set up local development:
 
 1. Make sure you have a development installation of Tesseract (see <project:#installation-dev>).
 2. Install your Tesseract's dependencies: `pip install -r tesseract_requirements.txt`
-   (not needed if you use `Tesseract.from_source()`, which installs them for you)
 3. Set the `TESSERACT_API_PATH` environment variable:
    ```bash
    $ export TESSERACT_API_PATH=/path/to/your/tesseract_api.py
@@ -35,44 +34,6 @@ $ tesseract-runtime apply '{"inputs": {"name": "Tessie"}}'
 ```
 
 This enables fast iteration cycles—edit your code, run, and see results immediately without rebuilding containers.
-
-## Serving a Tesseract in its own process
-
-`Tesseract.from_source()` serves a `tesseract_api.py` in a dedicated
-`tesseract-runtime serve` subprocess, with no container and no setup:
-
-```python
-from tesseract_core import Tesseract
-
-with Tesseract.from_source("/path/to/tesseract_api.py") as tess:
-    result = tess.apply({"a": [1.0], "b": [2.0]})
-```
-
-The environment is chosen from your `tesseract_config.yaml`, trying three
-things in order:
-
-1. an environment next to the `tesseract_api.py` (`.venv` or `venv`) that
-   already has what the Tesseract declares;
-2. the interpreter you are running, if it already has everything;
-3. otherwise a `.venv` is built next to the `tesseract_api.py`, holding the
-   declared requirements and `tesseract-core[runtime]`.
-
-Building one takes a second or two. Later runs reuse it.
-
-You need [`uv`](https://docs.astral.sh/uv/) on your `PATH` for this, or `conda`
-if the Tesseract sets `requirements.provider: conda`. To manage the environment
-yourself, pass `python_executable`, which is used exactly as given:
-
-```python
-Tesseract.from_source("tesseract_api.py", python_executable="/path/to/venv/bin/python")
-```
-
-```{note}
-An environment is only built when a package is missing. If you have a package
-but at a version the requirements file disallows, your interpreter is used
-anyway and a warning is logged. Build a container if you need the declared
-versions honoured exactly.
-```
 
 ## Using the Python SDK for local development
 

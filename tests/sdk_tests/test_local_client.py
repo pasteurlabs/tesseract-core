@@ -966,22 +966,35 @@ def test_a_local_requirement_does_not_constrain_the_python(example_copy):
     )
 
 
-def test_a_broken_config_warns_and_serves_anyway(dummy_tesseract_package, caplog):
-    """A config we cannot read should not stop a Tesseract being served.
+def test_a_broken_config_is_reported_not_worked_around(dummy_tesseract_package):
+    """A config `tesseract build` would reject should fail here too.
 
-    The runtime never reads `tesseract_config.yaml`, so a malformed one usually
-    only means we cannot work out what to install. Warn about that and carry on
-    with this interpreter, which is what `tesseract build` would have to refuse
-    to do.
+    Serving from source is usually the step before building, so a malformed
+    `tesseract_config.yaml` is something the user is about to hit anyway.
+    Carrying on with this interpreter would hide it.
     """
     api_path = dummy_tesseract_package / "tesseract_api.py"
     (dummy_tesseract_package / "tesseract_config.yaml").write_text("name: [unclosed\n")
 
-    with caplog.at_level(logging.WARNING, logger="tesseract"):
-        assert provision.resolve_python_executable(api_path) == Path(sys.executable)
+    with pytest.raises(UserError, match=r"tesseract_config\.yaml"):
+        provision.resolve_python_executable(api_path)
 
-    assert "tesseract_config.yaml" in caplog.text
-    assert not (dummy_tesseract_package / ".venv").exists()
+
+def test_requirements_are_honoured_without_a_config(dummy_tesseract_package):
+    """A requirements file says what to install even with no config beside it.
+
+    `tesseract_api.py` is all the runtime needs, so a missing
+    `tesseract_config.yaml` is not an error. The defaults name the same provider
+    and filename a build would assume.
+    """
+    api_path = dummy_tesseract_package / "tesseract_api.py"
+    (dummy_tesseract_package / "tesseract_config.yaml").unlink()
+    (dummy_tesseract_package / "tesseract_requirements.txt").write_text("cowsay\n")
+
+    declared = provision._declared_requirements(api_path)
+
+    assert declared is not None, "a requirements file on its own was ignored"
+    assert declared[1].name == "tesseract_requirements.txt"
 
 
 def test_an_explicit_interpreter_skips_resolution(dummy_tesseract_package):
