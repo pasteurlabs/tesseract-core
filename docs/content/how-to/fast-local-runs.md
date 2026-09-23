@@ -136,8 +136,8 @@ shared-memory filesystem.
 rather than a container (see {doc}`/content/how-to/debugging`). Client and server
 are then two ordinary processes on one host, which removes both of the
 constraints above. You also do not have to name any directories or set up an
-environment: scratch directories are created and cleaned up for you, and the
-Tesseract's dependencies are installed on demand:
+environment, since scratch directories are created and cleaned up for you,
+and the Tesseract's dependencies are installed on demand:
 
 ```python
 with Tesseract.from_source(

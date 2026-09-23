@@ -857,12 +857,10 @@ def resolve_python_executable(api_path: Path) -> Path:
 
     1. an environment next to the ``tesseract_api.py`` that already has
        everything;
-    2. this interpreter, if it already has everything, in which case we build
+    2. the SDK's interpreter, if it already has everything.
        nothing at all;
     3. otherwise, create or update an environment next to the
        ``tesseract_api.py``.
-
-    Passing ``python_executable`` to ``from_source`` skips all of this.
     """
     this_interpreter = Path(sys.executable)
     declared = _declared_requirements(api_path)
