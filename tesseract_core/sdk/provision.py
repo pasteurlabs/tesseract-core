@@ -90,16 +90,6 @@ _VENV_CANDIDATES = (_MANAGED_VENV_NAME, "venv")
 _CONDA_STAMP_NAME = ".tesseract-conda-stamp.json"
 
 
-def _provisioning_env() -> dict[str, str]:
-    """Environment variables to give an installer we run.
-
-    Importing a ``tesseract_api.py`` in this process sets PYTHONPATH as a side
-    effect. An installer that inherited it would look at our packages instead of
-    the ones in the environment it is building, so drop those variables.
-    """
-    return {k: v for k, v in os.environ.items() if k not in _SCRUBBED_IMPORT_VARS}
-
-
 def _python_in(prefix: Path) -> Path:
     """Path to the interpreter inside an environment directory."""
     if os.name == "nt":
@@ -144,11 +134,6 @@ def _dist_versions(python_executable: Path) -> dict[str, str]:
     return versions
 
 
-def _installed_version(python_executable: Path, distribution: str) -> str | None:
-    """Version of one distribution installed in an environment, or None."""
-    return _dist_versions(python_executable).get(distribution.replace("-", "_"))
-
-
 def _can_serve(python_executable: Path, version: str | None = None) -> bool:
     """Whether an environment can serve a Tesseract, optionally at `version`.
 
@@ -157,10 +142,11 @@ def _can_serve(python_executable: Path, version: str | None = None) -> bool:
     We test for uvicorn to tell the two apart: serving needs it, and the base
     dependencies do not include it.
     """
-    installed = _installed_version(python_executable, "tesseract-core")
-    if installed is None or (version is not None and installed != version):
+    installed = _dist_versions(python_executable)
+    core = installed.get("tesseract_core")
+    if core is None or (version is not None and core != version):
         return False
-    return _installed_version(python_executable, "uvicorn") is not None
+    return "uvicorn" in installed
 
 
 @functools.cache
@@ -290,12 +276,16 @@ def _capture(
     """Run a command, log it, and return the result for the caller to check."""
     argv = [str(part) for part in command]
     logger.debug("Running %s", " ".join(argv))
+    # Importing a `tesseract_api.py` in this process sets PYTHONPATH as a side
+    # effect. An installer that inherited it would look at our packages instead
+    # of the ones in the environment it is building, so drop those variables.
+    env = {k: v for k, v in os.environ.items() if k not in _SCRUBBED_IMPORT_VARS}
     return subprocess.run(
         argv,
         input=stdin,
         capture_output=True,
         text=True,
-        env=_provisioning_env(),
+        env=env,
         cwd=None if cwd is None else str(cwd),
     )
 
