@@ -11,7 +11,6 @@ Add test cases for specific unit Tesseracts to the TEST_CASES dictionary.
 
 import base64
 import json
-import sys
 import traceback
 from dataclasses import dataclass
 from pathlib import Path
@@ -82,11 +81,6 @@ class Config:
     # from the base image, a compiled artifact, or a mounted volume. Deleting a
     # reason enables it.
     no_from_source: str = None
-    # Passed straight to `Tesseract.from_source`. Set to this interpreter for a
-    # couple of examples whose pins it does not satisfy, so the corpus covers
-    # `python_executable` overriding that deliberately, and not only the
-    # building that happens by default.
-    python_executable: Path | None = None
 
 
 # Add config and test cases for specific unit Tesseracts here
@@ -102,15 +96,9 @@ TEST_CASES = {
     "vectoradd": Config(test_with_random_inputs=True),
     "vectoradd_jax": Config(test_with_random_inputs=True, check_gradients=True),
     "vectoradd_torch": Config(test_with_random_inputs=True),
-    "univariate": Config(
-        test_with_random_inputs=True,
-        check_gradients=True,
-        python_executable=Path(sys.executable),
-    ),
+    "univariate": Config(test_with_random_inputs=True, check_gradients=True),
     "univariate_gradient_fallbacks": Config(
-        test_with_random_inputs=True,
-        check_gradients=True,
-        python_executable=Path(sys.executable),
+        test_with_random_inputs=True, check_gradients=True
     ),
     "package_data": Config(test_with_random_inputs=True),
     "cuda": Config(test_with_random_inputs=True),
@@ -238,8 +226,6 @@ def test_unit_tesseract_from_source(unit_tesseract_path, unit_tesseract_config):
     kwargs = {}
     if unit_tesseract_config.input_path:
         kwargs["input_path"] = unit_tesseract_path / unit_tesseract_config.input_path
-    if unit_tesseract_config.python_executable:
-        kwargs["python_executable"] = unit_tesseract_config.python_executable
 
     with Tesseract.from_source(unit_tesseract_path / "tesseract_api.py", **kwargs) as t:
         assert "apply" in t.available_endpoints

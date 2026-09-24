@@ -46,7 +46,7 @@ import yaml
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 
-from .api_parse import TesseractBuildConfig, ValidationError, get_config
+from .api_parse import ValidationError, get_config
 from .config import get_config as get_sdk_config
 from .engine import _split_local_dependency
 from .engine import parse_requirements as _parse_requirements
@@ -76,7 +76,7 @@ def parse_requirements(path: Path) -> tuple[list[str], list[str]]:
 # These variables tie a process to one interpreter's packages. If a different
 # interpreter inherits them, it looks in our site-packages first, which is the
 # opposite of what a separate environment is for.
-_SCRUBBED_IMPORT_VARS = ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV")
+SCRUBBED_IMPORT_VARS = ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV")
 
 
 _MANAGED_VENV_NAME = ".venv"
@@ -184,19 +184,13 @@ def _declared_requirements(api_path: Path) -> tuple[Any, Path] | None:
 
     Returns its build config and the requirements file its provider names, or
     None if there is nothing to install. None covers three cases: no
-    ``tesseract_config.yaml`` next to the api file, no requirements file, or a
-    requirements file containing only comments.
+    ``tesseract_config.yaml`` next to the api file, no requirements file named
+    by it, or a requirements file containing only comments.
     """
     src_dir = api_path.parent
 
     if not (src_dir / "tesseract_config.yaml").is_file():
-        # No config is not an error: `tesseract_api.py` is all the runtime
-        # needs. But a `tesseract_requirements.txt` sitting next to it still
-        # says what to install, and the defaults are exactly the provider and
-        # filename a build would assume, so use those.
-        default = TesseractBuildConfig()
-        requirements_file = src_dir / default.requirements._filename
-        return (default, requirements_file) if requirements_file.is_file() else None
+        return None
 
     try:
         build_config = get_config(src_dir).build_config
@@ -285,7 +279,7 @@ def _capture(
     # Importing a `tesseract_api.py` in this process sets PYTHONPATH as a side
     # effect. An installer that inherited it would look at our packages instead
     # of the ones in the environment it is building, so drop those variables.
-    env = {k: v for k, v in os.environ.items() if k not in _SCRUBBED_IMPORT_VARS}
+    env = {k: v for k, v in os.environ.items() if k not in SCRUBBED_IMPORT_VARS}
     return subprocess.run(
         argv,
         input=stdin,
@@ -831,18 +825,16 @@ def _managed_env_dir(api_path: Path) -> Path:
     """Where to put an environment we create for a Tesseract.
 
     Next to the ``tesseract_api.py``, since that is where people look for a
-    ``.venv`` and where their tooling already ignores one. Some Tesseracts live
-    somewhere we cannot write, such as site-packages or a read-only mount, so
-    fall back to the user cache directory.
+    ``.venv`` and where their tooling already ignores one.
     """
     src_dir = api_path.parent
-    if os.access(src_dir, os.W_OK):
-        return src_dir / _MANAGED_VENV_NAME
-
-    digest = hashlib.sha256(str(src_dir).encode()).hexdigest()[:12]
-    cache_home = os.environ.get("XDG_CACHE_HOME")
-    base = Path(cache_home) if cache_home else Path.home() / ".cache"
-    return base / "tesseract" / "envs" / f"{src_dir.name}-{digest}"
+    if not os.access(src_dir, os.W_OK):
+        raise UserError(
+            f"Cannot build an environment for {api_path.name}: {src_dir} is not "
+            "writable. Make it writable, or pass `python_executable` to name an "
+            "interpreter that already has what the Tesseract needs."
+        )
+    return src_dir / _MANAGED_VENV_NAME
 
 
 def resolve_python_executable(api_path: Path) -> Path:

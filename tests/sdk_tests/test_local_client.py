@@ -23,7 +23,7 @@ import pytest
 import requests
 
 from tesseract_core import Tesseract
-from tesseract_core.sdk import local_client, provision, serving
+from tesseract_core.sdk import local_client, serving, venv_provision
 from tesseract_core.sdk.api_parse import get_config
 from tesseract_core.sdk.exceptions import UserError
 
@@ -772,7 +772,7 @@ def test_nothing_is_built_when_this_interpreter_will_do(example_copy, example):
     """
     api_path = example_copy(example)
 
-    assert provision.resolve_python_executable(api_path) == Path(sys.executable)
+    assert venv_provision.resolve_python_executable(api_path) == Path(sys.executable)
     assert not (api_path.parent / ".venv").exists()
 
 
@@ -812,8 +812,8 @@ def test_an_environment_built_once_is_reused(dummy_tesseract_package):
     api_path = dummy_tesseract_package / "tesseract_api.py"
     (dummy_tesseract_package / "tesseract_requirements.txt").write_text("cowsay\n")
 
-    first = provision.resolve_python_executable(api_path)
-    assert first == provision._python_in(dummy_tesseract_package / ".venv")
+    first = venv_provision.resolve_python_executable(api_path)
+    assert first == venv_provision._python_in(dummy_tesseract_package / ".venv")
 
     # Reuse means nothing gets installed, which a wall-clock budget cannot show:
     # re-running an install against an already-satisfied environment is fast
@@ -823,8 +823,8 @@ def test_an_environment_built_once_is_reused(dummy_tesseract_package):
         raise AssertionError(f"reprovisioned a good environment: {what}")
 
     with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(provision, "_run", provisioned)
-        assert provision.resolve_python_executable(api_path) == first
+        patch.setattr(venv_provision, "_run", provisioned)
+        assert venv_provision.resolve_python_executable(api_path) == first
 
 
 def test_an_environment_without_the_runtime_is_completed(example_copy):
@@ -839,13 +839,13 @@ def test_an_environment_without_the_runtime_is_completed(example_copy):
     venv = api_path.parent / ".venv"
     # Built the way the resolver builds one, so this really is the kind of bare
     # .venv a user might already have, not an imitation of it.
-    provision._ensure_venv(venv)
-    assert not provision._can_serve(provision._python_in(venv))
+    venv_provision._ensure_venv(venv)
+    assert not venv_provision._can_serve(venv_provision._python_in(venv))
 
     with Tesseract.from_source(api_path) as tess:
         assert "Hello World!" in tess.apply({"name": "World"})["message"]
 
-    assert provision._can_serve(provision._python_in(venv))
+    assert venv_provision._can_serve(venv_provision._python_in(venv))
 
 
 def test_python_bounds_exclude_what_the_runtime_cannot_use():
@@ -855,7 +855,7 @@ def test_python_bounds_exclude_what_the_runtime_cannot_use():
     so there is no list of preferred versions to keep up to date. The ceiling
     comes from uv, so new releases and prereleases are included automatically.
     """
-    bounds = provision._python_bounds()
+    bounds = venv_provision._python_bounds()
     if bounds is None:
         pytest.skip("uv could not report which Pythons it can provide")
 
@@ -874,14 +874,14 @@ def test_a_newer_python_is_reachable_not_just_an_older_one():
     is a common build-matrix slip, so that case has to work too.
     """
     ours = sys.version_info.minor
-    bounds = provision._python_bounds()
+    bounds = venv_provision._python_bounds()
     if bounds is None:
         pytest.skip("uv could not report which Pythons it can provide")
     if bounds[1] <= ours:
         pytest.skip("uv offers nothing newer than the running Python")
 
     # What uv reports when a package only has wheels for newer versions.
-    assert provision._nearest(range(ours + 1, bounds[1] + 1)) == (
+    assert venv_provision._nearest(range(ours + 1, bounds[1] + 1)) == (
         f"{sys.version_info.major}.{ours + 1}"
     )
 
@@ -889,7 +889,7 @@ def test_a_newer_python_is_reachable_not_just_an_older_one():
     # meaningful when there is something below us: on the oldest version we
     # support there is not, and `_nearest` drops it as out of bounds.
     if bounds[0] < ours:
-        assert provision._nearest([ours - 1, bounds[1]]) == (
+        assert venv_provision._nearest([ours - 1, bounds[1]]) == (
             f"{sys.version_info.major}.{ours - 1}"
         )
 
@@ -907,7 +907,7 @@ def test_abi_tag_hint_is_read_as_the_answer():
         "`cp311`, `cp312`"
     )
 
-    assert provision._minors_from_abi_tags(hint) == [9, 10, 11, 12]
+    assert venv_provision._minors_from_abi_tags(hint) == [9, 10, 11, 12]
 
 
 def test_requires_python_hint_is_read_as_the_answer():
@@ -921,7 +921,7 @@ def test_requires_python_hint_is_read_as_the_answer():
         "supports >=3.12). Consider using a higher `--python-version` value."
     )
 
-    assert str(provision._requires_python(hint)) == ">=3.12"
+    assert str(venv_provision._requires_python(hint)) == ">=3.12"
 
 
 def test_a_pin_gets_a_python_that_has_wheels_for_it(example_copy):
@@ -938,12 +938,12 @@ def test_a_pin_gets_a_python_that_has_wheels_for_it(example_copy):
     build_config = get_config(api_path.parent).build_config
     requirements_file = api_path.parent / "tesseract_requirements.txt"
 
-    chosen = provision._build_python_version(build_config, requirements_file)
+    chosen = venv_provision._build_python_version(build_config, requirements_file)
     if chosen is None:
         chosen = f"{sys.version_info.major}.{sys.version_info.minor}"
 
-    _, remote = provision.parse_requirements(requirements_file)
-    assert provision._compile(remote, chosen, wheels_only=True) is None, (
+    _, remote = venv_provision.parse_requirements(requirements_file)
+    assert venv_provision._compile(remote, chosen, wheels_only=True) is None, (
         f"chose Python {chosen}, which has no wheels for {remote}"
     )
 
@@ -959,7 +959,7 @@ def test_a_local_requirement_does_not_constrain_the_python(example_copy):
     build_config = get_config(api_path.parent).build_config
 
     assert (
-        provision._build_python_version(
+        venv_provision._build_python_version(
             build_config, api_path.parent / "tesseract_requirements.txt"
         )
         is None
@@ -977,24 +977,7 @@ def test_a_broken_config_is_reported_not_worked_around(dummy_tesseract_package):
     (dummy_tesseract_package / "tesseract_config.yaml").write_text("name: [unclosed\n")
 
     with pytest.raises(UserError, match=r"tesseract_config\.yaml"):
-        provision.resolve_python_executable(api_path)
-
-
-def test_requirements_are_honoured_without_a_config(dummy_tesseract_package):
-    """A requirements file says what to install even with no config beside it.
-
-    `tesseract_api.py` is all the runtime needs, so a missing
-    `tesseract_config.yaml` is not an error. The defaults name the same provider
-    and filename a build would assume.
-    """
-    api_path = dummy_tesseract_package / "tesseract_api.py"
-    (dummy_tesseract_package / "tesseract_config.yaml").unlink()
-    (dummy_tesseract_package / "tesseract_requirements.txt").write_text("cowsay\n")
-
-    declared = provision._declared_requirements(api_path)
-
-    assert declared is not None, "a requirements file on its own was ignored"
-    assert declared[1].name == "tesseract_requirements.txt"
+        venv_provision.resolve_python_executable(api_path)
 
 
 def test_an_explicit_interpreter_skips_resolution(dummy_tesseract_package):

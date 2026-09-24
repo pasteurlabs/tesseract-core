@@ -28,7 +28,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from .provision import _SCRUBBED_IMPORT_VARS, resolve_python_executable
 from .serving import (
     DEFAULT_STARTUP_TIMEOUT,
     PortInUseError,
@@ -40,6 +39,7 @@ from .serving import (
     validate_output_format,
     wait_for_health_or_dispose,
 )
+from .venv_provision import SCRUBBED_IMPORT_VARS, resolve_python_executable
 
 logger = logging.getLogger("tesseract")
 
@@ -265,7 +265,7 @@ def _runtime_env(
         # the point of running it elsewhere. Note that importing a
         # tesseract_api.py in-process sets PYTHONPATH as a side effect, so this
         # is not a hypothetical.
-        for var in _SCRUBBED_IMPORT_VARS:
+        for var in SCRUBBED_IMPORT_VARS:
             env.pop(var, None)
 
     # Applied after the scrub above, so an explicit request always wins.
@@ -339,7 +339,7 @@ def serve(
             is chosen based on what the Tesseract declares in
             ``tesseract_config.yaml``: a suitable environment next to the
             ``tesseract_api.py`` is reused if there is one, and otherwise built
-            (see :func:`~tesseract_core.sdk.provision.resolve_python_executable`).
+            (see :func:`~tesseract_core.sdk.venv_provision.resolve_python_executable`).
             Naming an interpreter skips that and uses it as given, which is how
             a Tesseract can have dependencies that clash with the caller's.
         skip_health_check: If True, return as soon as the process is spawned

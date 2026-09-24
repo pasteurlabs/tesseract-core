@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from tesseract_core.sdk import provision
+from tesseract_core.sdk import venv_provision
 
 
 @pytest.fixture
@@ -42,23 +42,23 @@ def build_venv(
         pytest.skip("uv is required to build an environment")
 
     try:
-        python_executable = provision._ensure_venv(dest, python)
+        python_executable = venv_provision._ensure_venv(dest, python)
         if requirements is not None:
-            provision._run(
+            venv_provision._run(
                 [
-                    *provision._uv(),
+                    *venv_provision._uv(),
                     "pip",
                     "install",
                     "--python",
                     python_executable,
-                    *provision._pip_specs(requirements),
+                    *venv_provision._pip_specs(requirements),
                 ],
                 f"Installing {requirements.name}",
             )
         # No version pins beyond the interpreter: CI rewrites the runtime extras
         # to exact pins on its oldest-dependency axis, and anything added here
         # can conflict with them.
-        provision._ensure_runtime(python_executable)
+        venv_provision._ensure_runtime(python_executable)
     except RuntimeError as e:
         pytest.skip(f"could not build an environment: {str(e)[-300:]}")
 
