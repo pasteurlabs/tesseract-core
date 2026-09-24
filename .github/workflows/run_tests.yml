@@ -404,16 +404,35 @@ jobs:
           uv run --no-sync python -c "import torch; print('torch', torch.__version__, 'cuda', torch.version.cuda, torch.cuda.is_available())"
           uv run --no-sync python -c "import jax; print('jax', jax.__version__, 'devices', jax.devices())"
 
-      # Build the GPU example here so its layers are cached before the tests
-      # run. The test_serving_gpu fixture builds the same example, and pulling
-      # the CUDA base image plus installing the runtime can otherwise exceed the
-      # per-test --timeout=300 from inside the fixture. Warming the layer cache
-      # outside pytest's timeout leaves the fixture build as cache hits.
-      - name: Pre-build GPU example (warm layer cache)
+      # Build the GPU examples here so their layers are cached before the tests
+      # run. The test_serving_gpu fixture builds the same examples with the same
+      # requirements override, and installing the CUDA framework wheels can
+      # otherwise exceed the per-test --timeout=300 from inside the fixture.
+      # Warming the layer cache outside pytest's timeout leaves the fixture builds
+      # as cache hits, so the override must match exactly.
+      #
+      # The examples build on the default Debian base image; the CUDA runtime
+      # comes from the framework wheels, which the runtime loader prefers over any
+      # system copy. The wheel's CUDA major is therefore what libcudart resolves
+      # to, so the 13.x leg swaps in tesseract_requirements_cuda13.txt to exercise
+      # libcudart.so.13.
+      - name: Pre-build GPU examples (warm layer cache)
         run: |
-          uv run --no-sync tesseract build examples/_gpu_cuda_ipc
+          # jax runs on the CUDA 13 leg only (its cuda12 plugin won't register
+          # under the CI's CUDA 13 driver); cupy/torch cover the .so.12 path.
+          examples="_gpu_cupy _gpu_torch"
+          reqs_override=""
+          if [ "${{ matrix.cuda.major }}" != "12" ]; then
+            reqs_override="--config-override build_config.requirements.requirements_file=tesseract_requirements_cuda${{ matrix.cuda.major }}.txt"
+            examples="$examples _gpu_jax"
+          fi
+          for example in $examples; do
+            uv run --no-sync tesseract build "examples/$example" $reqs_override
+          done
 
       - name: Run GPU test suite
+        env:
+          TESSERACT_TEST_CUDA_MAJOR: ${{ matrix.cuda.major }}
         run: |
           # No typeguard here: it breaks coverage's branch mapping (gh#691).
           uv run --no-sync pytest \
