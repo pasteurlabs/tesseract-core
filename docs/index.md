@@ -379,12 +379,12 @@ code required.
 
 :::{div} section-intro
 Wrap your solver or model as a Tesseract, or compose existing ones into a new pipeline.
-Show us what you built in the [community showcase](https://si-tesseract.discourse.group/c/showcase/11), or help improve the project.
+Show us what you built, or help improve the project.
 :::
 
 :::{div} landing-cta
-{bdg-link-primary-line}`Community Forum <https://si-tesseract.discourse.group/>`
 {bdg-link-primary-line}`GitHub <https://github.com/pasteurlabs/tesseract-core>`
+{bdg-ref-primary-line}`Blog <blog/index>`
 {bdg-ref-primary-line}`Example Gallery <content/examples/example_gallery>`
 :::
 
