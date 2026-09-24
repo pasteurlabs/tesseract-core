@@ -1032,6 +1032,30 @@ def test_a_local_requirement_does_not_constrain_the_python(example_copy):
     )
 
 
+def test_a_declared_python_version_applies_with_no_requirements(
+    dummy_tesseract_package,
+):
+    """`python_version` is a property of the environment, not of its contents.
+
+    A Tesseract can name the Python it wants and install nothing at all. The
+    two used to be handled by separate paths, and the one for "nothing to
+    install" quietly ignored the version.
+    """
+    (dummy_tesseract_package / "tesseract_config.yaml").write_text(
+        'name: "pinned"\n'
+        "build_config:\n"
+        "  requirements:\n"
+        "    provider: uv-pip\n"
+        '    python_version: "3.11"\n'
+    )
+    api_path = dummy_tesseract_package / "tesseract_api.py"
+
+    build_config, requirements_file = venv_provision._declared_requirements(api_path)
+
+    assert requirements_file is None, "the fixture declares no requirements"
+    assert venv_provision._build_python_version(build_config, None) == "3.11"
+
+
 def test_a_missing_config_is_reported(dummy_tesseract_package):
     """No config means no way to tell what to install, so say so.
 

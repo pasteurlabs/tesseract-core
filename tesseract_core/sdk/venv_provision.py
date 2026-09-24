@@ -175,13 +175,13 @@ def _runtime_install_spec() -> str:
     return f"tesseract-core[runtime]=={dist.version}"
 
 
-def _declared_requirements(api_path: Path) -> tuple[Any, Path] | None:
+def _declared_requirements(api_path: Path) -> tuple[Any, Path | None]:
     """Read what a Tesseract says it needs installed.
 
-    Returns its build config and the requirements file its provider names, or
-    None if there is nothing to install. None covers three cases: no
-    ``tesseract_config.yaml`` next to the api file, no requirements file named
-    by it, or a requirements file containing only comments.
+    Returns its build config, and the requirements file its provider names or
+    None when there is nothing to install. The build config comes back either
+    way, because it carries settings that still apply to an environment with no
+    requirements in it, such as ``python_version``.
     """
     src_dir = api_path.parent
 
@@ -209,7 +209,7 @@ def _declared_requirements(api_path: Path) -> tuple[Any, Path] | None:
     requirements = build_config.requirements
     requirements_file = src_dir / requirements._filename
     if not requirements_file.is_file():
-        return None
+        return build_config, None
 
     # A crude check on purpose. `parse_requirements` would be exact, but it
     # imports pip's internals (~150ms), which is a lot to pay just to find out
@@ -219,10 +219,7 @@ def _declared_requirements(api_path: Path) -> tuple[Any, Path] | None:
         line.strip() and not line.strip().startswith("#")
         for line in requirements_file.read_text(encoding="utf-8").splitlines()
     )
-    if not declares_something:
-        return None
-
-    return build_config, requirements_file
+    return build_config, requirements_file if declares_something else None
 
 
 def _uv() -> tuple[str, ...]:
@@ -526,7 +523,9 @@ def _minors_matching(wanted: SpecifierSet) -> list[int]:
     ]
 
 
-def _build_python_version(build_config: Any, requirements_file: Path) -> str | None:
+def _build_python_version(
+    build_config: Any, requirements_file: Path | None
+) -> str | None:
     """Choose a Python version to build on. None means use this interpreter.
 
     In a container the Python comes from the base image: 3.11 for the default
@@ -562,6 +561,9 @@ def _build_python_version(build_config: Any, requirements_file: Path) -> str | N
     # Config validation rejects this together with `python_version`, so there
     # is no version to choose here.
     if build_config.inherit_base_image_packages:
+        return None
+
+    if requirements_file is None:
         return None
 
     ours = sys.version_info.minor
@@ -698,7 +700,9 @@ def _ensure_venv(
     return python_executable
 
 
-def _build_pip_venv(dest: Path, build_config: Any, requirements_file: Path) -> Path:
+def _build_pip_venv(
+    dest: Path, build_config: Any, requirements_file: Path | None
+) -> Path:
     """Create or update a uv virtual environment for a Tesseract.
 
     Follows ``templates/build_pip_venv.sh``, which a container build runs, so a
@@ -710,12 +714,13 @@ def _build_pip_venv(dest: Path, build_config: Any, requirements_file: Path) -> P
         _build_python_version(build_config, requirements_file),
         system_site_packages=build_config.inherit_base_image_packages,
     )
-    args, cwd = _install_from(requirements_file)
-    _run(
-        [*_uv(), "pip", "install", "--python", python_executable, *args],
-        f"Installing {requirements_file.name}",
-        cwd=cwd,
-    )
+    if requirements_file is not None:
+        args, cwd = _install_from(requirements_file)
+        _run(
+            [*_uv(), "pip", "install", "--python", python_executable, *args],
+            f"Installing {requirements_file.name}",
+            cwd=cwd,
+        )
     _ensure_runtime(python_executable)
     return python_executable
 
@@ -800,19 +805,9 @@ def resolve_python_executable(api_path: Path) -> Path:
     skips all of this.
     """
     dest = _managed_env_dir(api_path)
-    declared = _declared_requirements(api_path)
+    build_config, requirements_file = _declared_requirements(api_path)
 
-    if declared is None:
-        # Nothing declared, but an environment is still needed: `runtime` is an
-        # optional extra, so there is no guarantee anything here can serve.
-        logger.info("Installing the Tesseract runtime into %s", dest)
-        python_executable = _ensure_venv(dest)
-        _ensure_runtime(python_executable)
-        return python_executable
-
-    build_config, requirements_file = declared
-
-    if build_config.requirements.provider == "conda":
+    if requirements_file is not None and build_config.requirements.provider == "conda":
         # No point checking first. Packages from conda channels are not all
         # visible as pip distributions, so uv cannot tell us whether the
         # environment is up to date. The stamp inside `_build_conda_env` is what
@@ -823,7 +818,10 @@ def resolve_python_executable(api_path: Path) -> Path:
         python_executable = _python_in(api_path.parent / candidate)
         if not python_executable.is_file() or not _can_serve(python_executable):
             continue
-        if _venv_satisfies(python_executable, requirements_file):
+        # With nothing declared, being able to serve is the whole test.
+        if requirements_file is None or _venv_satisfies(
+            python_executable, requirements_file
+        ):
             logger.debug("Serving %s from %s", api_path.name, python_executable)
             return python_executable
 
