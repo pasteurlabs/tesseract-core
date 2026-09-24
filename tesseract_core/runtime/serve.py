@@ -104,6 +104,7 @@ def create_response(
         output_format,
         base_dir=base_dir,
         binref_dir=binref_dir,
+        compression=config.compression,
         gpu_transport=gpu_transport,
     )
     # Name the format actually produced, which is not necessarily what the

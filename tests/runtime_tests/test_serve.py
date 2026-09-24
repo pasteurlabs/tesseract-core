@@ -520,3 +520,46 @@ def test_custom_validation_error_over_http(dummy_tesseract_module):
 
     err_types = {e["type"] for e in exc_info.value.errors()}
     assert "array_decode_error" in err_types
+
+
+def test_apply_encodes_arrays_with_configured_compression(dummy_tesseract_module):
+    """Served endpoints respect the configured compression setting (e.g. lz4)."""
+    import lz4.frame
+    from tesseract_core.runtime.config import update_config
+
+    update_config(compression="lz4")
+    try:
+        client = TestClient(
+            create_rest_api(dummy_tesseract_module), raise_server_exceptions=False
+        )
+        test_inputs = dummy_tesseract_module.InputSchema.model_validate(test_input)
+        response = client.post(
+            "/apply",
+            json={"inputs": model_to_json(test_inputs)},
+            headers={"Accept": "application/json+base64"},
+        )
+        assert response.status_code == 200, response.text
+        array_data = response.json()["result"]["data"]
+        assert array_data.get("compression") == "lz4"
+
+        # Verify buffer decompresses and matches expected data
+        compressed_bytes = base64.b64decode(array_data["buffer"])
+        decompressed_bytes = lz4.frame.decompress(compressed_bytes)
+        result = np.frombuffer(decompressed_bytes, dtype=response.json()["result"]["dtype"]).reshape(
+            response.json()["result"]["shape"]
+        )
+        assert np.array_equal(result, np.array([3.5, 6.0, 8.5]))
+
+        # Also test with binref output format
+        response_binref = client.post(
+            "/apply",
+            json={"inputs": model_to_json(test_inputs)},
+            headers={"Accept": "application/json+binref"},
+        )
+        assert response_binref.status_code == 200, response_binref.text
+        binref_data = response_binref.json()["result"]["data"]
+        assert binref_data.get("compression") == "lz4"
+    finally:
+        update_config(compression=None)
+
+
