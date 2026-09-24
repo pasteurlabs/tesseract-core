@@ -36,14 +36,10 @@ from importlib.metadata import (
     distribution,
     metadata,
 )
-from importlib.metadata import (
-    version as installed_version,
-)
 from pathlib import Path
 from typing import Any
 
 import yaml
-from packaging.requirements import InvalidRequirement, Requirement
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 
 from .api_parse import ValidationError, get_config
@@ -333,61 +329,6 @@ def _venv_satisfies(python_executable: Path, requirements_file: Path) -> bool:
     return result.returncode == 0 and "Would make no changes" in (
         result.stderr + result.stdout
     )
-
-
-def _caller_shortfall(
-    requirements_file: Path, is_pylock: bool = False
-) -> tuple[list[str], list[str]] | None:
-    """What this interpreter is missing for a requirements file.
-
-    Returns two lists: packages that are not installed, and packages installed
-    at a version the file disallows. Returns None if it cannot tell.
-
-    Either one is reason enough to build an environment. They are reported
-    separately so the log can say which it was.
-
-    This uses ``importlib.metadata`` instead of uv because uv refuses to look at
-    an externally managed interpreter at all (PEP 668), so it cannot answer for
-    a system or Homebrew Python.
-
-    When in doubt it returns None, so the caller builds an environment instead
-    of guessing. That covers local paths, direct URLs, environment markers and
-    option lines.
-
-    A PEP 751 lockfile always returns None. It is TOML, so the requirements
-    parser cannot read it, and a lockfile asks for one exact set of versions,
-    which is a request for its own environment rather than for whatever happens
-    to be installed here.
-    """
-    if is_pylock:
-        return None
-
-    from importlib.metadata import PackageNotFoundError
-
-    local, remote = parse_requirements(requirements_file)
-    if local:
-        return None
-
-    missing: list[str] = []
-    mismatched: list[str] = []
-    for spec in remote:
-        if spec.startswith("-"):
-            return None
-        try:
-            requirement = Requirement(spec)
-        except InvalidRequirement:
-            return None
-        if requirement.marker is not None or requirement.url is not None:
-            return None
-        try:
-            have = installed_version(requirement.name)
-        except PackageNotFoundError:
-            missing.append(requirement.name)
-            continue
-        if not requirement.specifier.contains(have, prereleases=True):
-            mismatched.append(f"{requirement.name} {have} (wanted {requirement})")
-
-    return missing, mismatched
 
 
 @functools.cache
@@ -845,28 +786,25 @@ def _managed_env_dir(api_path: Path) -> Path:
 def resolve_python_executable(api_path: Path) -> Path:
     """Pick the interpreter to serve a Tesseract on, building one if needed.
 
-    A Tesseract needs an environment with both its own dependencies and
-    ``tesseract-core[runtime]`` in it. That runtime is an optional extra, so
-    even the interpreter running this may not have it.
+    A Tesseract needs an environment holding both its own dependencies and
+    ``tesseract-core[runtime]``, either an existing one next to the
+    ``tesseract_api.py`` that already has everything, or one built there.
 
-    We work out which interpreter to use from ``tesseract_config.yaml``, trying
-    in order:
-
-    1. an environment next to the ``tesseract_api.py`` that already has
-       everything;
-    2. the SDK's interpreter, if it already has everything;
-    3. otherwise, create or update an environment next to the
-       ``tesseract_api.py``.
+    This never falls back to the interpreter the SDK is running on, even when
+    that one would do. Doing so silently makes behaviour depend on what happens
+    to be installed here: a constructor that was instant starts taking seconds
+    because something got upgraded, no environment appears where one was
+    expected, or a Tesseract that could import an undeclared package stops
+    being able to with no change to its code. Pass
+    ``python_executable=sys.executable`` to ask for it explicitly, which also
+    skips all of this.
     """
-    this_interpreter = Path(sys.executable)
+    dest = _managed_env_dir(api_path)
     declared = _declared_requirements(api_path)
 
     if declared is None:
-        # Nothing to install, but the runtime is still needed, so this is not
-        # automatically free. An SDK-only install cannot serve anything.
-        if _can_serve(this_interpreter):
-            return this_interpreter
-        dest = _managed_env_dir(api_path)
+        # Nothing declared, but an environment is still needed: `runtime` is an
+        # optional extra, so there is no guarantee anything here can serve.
         logger.info("Installing the Tesseract runtime into %s", dest)
         python_executable = _ensure_venv(dest)
         _ensure_runtime(python_executable)
@@ -876,10 +814,10 @@ def resolve_python_executable(api_path: Path) -> Path:
 
     if build_config.requirements.provider == "conda":
         # No point checking first. Packages from conda channels are not all
-        # visible as pip distributions, so neither uv nor importlib.metadata can
-        # tell us whether the environment is up to date. The stamp inside
-        # `_build_conda_env` is what makes the second call cheap.
-        return _build_conda_env(_managed_env_dir(api_path), requirements_file)
+        # visible as pip distributions, so uv cannot tell us whether the
+        # environment is up to date. The stamp inside `_build_conda_env` is what
+        # makes the second call cheap.
+        return _build_conda_env(dest, requirements_file)
 
     for candidate in _VENV_CANDIDATES:
         python_executable = _python_in(api_path.parent / candidate)
@@ -889,25 +827,5 @@ def resolve_python_executable(api_path: Path) -> Path:
             logger.debug("Serving %s from %s", api_path.name, python_executable)
             return python_executable
 
-    if _can_serve(this_interpreter):
-        shortfall = _caller_shortfall(
-            requirements_file, build_config.requirements.is_pylock
-        )
-        if shortfall == ([], []):
-            logger.debug("Serving %s from the current interpreter", api_path.name)
-            return this_interpreter
-        if shortfall is not None:
-            # A version that disagrees is reason enough to build. A Tesseract
-            # pinning an old numpy may well be pinned because it breaks on a new
-            # one, and serving it on the wrong version gives quietly wrong
-            # answers. Building costs a couple of seconds, once.
-            logger.debug(
-                "Building for %s: missing %s; wrong version %s",
-                api_path.name,
-                shortfall[0] or "nothing",
-                shortfall[1] or "nothing",
-            )
-
-    dest = _managed_env_dir(api_path)
     logger.info("Building an environment for %s at %s", api_path.name, dest)
     return _build_pip_venv(dest, build_config, requirements_file)

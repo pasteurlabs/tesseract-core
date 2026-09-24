@@ -40,7 +40,7 @@ def _process_alive(pid: int) -> bool:
 
 
 def test_serve_and_remove(dummy_api_path):
-    served = local_client.serve(dummy_api_path)
+    served = local_client.serve(dummy_api_path, python_executable=sys.executable)
     try:
         assert local_client.is_running(served)
         assert served.port != 0
@@ -60,7 +60,7 @@ def test_serve_and_remove(dummy_api_path):
 
 def test_wait_reports_the_exit_code(dummy_api_path):
     """`wait` answers with a StatusCode dict, as a container's does."""
-    served = local_client.serve(dummy_api_path)
+    served = local_client.serve(dummy_api_path, python_executable=sys.executable)
     served.remove(force=True)
 
     assert served.wait(timeout=5)["StatusCode"] is not None
@@ -68,7 +68,7 @@ def test_wait_reports_the_exit_code(dummy_api_path):
 
 def test_wait_times_out_on_a_running_process(dummy_api_path):
     """Waiting on a live Tesseract gives up rather than blocking for its lifetime."""
-    served = local_client.serve(dummy_api_path)
+    served = local_client.serve(dummy_api_path, python_executable=sys.executable)
     try:
         with pytest.raises(TimeoutError, match="still running"):
             served.wait(timeout=0.2)
@@ -93,10 +93,11 @@ def test_orphaned_tesseract_shuts_itself_down(dummy_api_path, tmp_path):
     helper = tmp_path / "helper.py"
     helper.write_text(
         textwrap.dedent(f"""
+        import sys
         import time
         from tesseract_core.sdk import local_client
 
-        served = local_client.serve({str(dummy_api_path)!r})
+        served = local_client.serve({str(dummy_api_path)!r}, python_executable=sys.executable)
         print(served.process.pid, flush=True)
         time.sleep(600)
         """)
@@ -127,7 +128,7 @@ def test_orphaned_tesseract_shuts_itself_down(dummy_api_path, tmp_path):
 
 def test_remove_refuses_a_running_process(dummy_api_path):
     """Unforced removal refuses a live Tesseract, as removing a container does."""
-    served = local_client.serve(dummy_api_path)
+    served = local_client.serve(dummy_api_path, python_executable=sys.executable)
     try:
         with pytest.raises(RuntimeError, match="still running"):
             served.remove()
@@ -137,7 +138,7 @@ def test_remove_refuses_a_running_process(dummy_api_path):
 
 
 def test_remove_is_idempotent(dummy_api_path):
-    served = local_client.serve(dummy_api_path)
+    served = local_client.serve(dummy_api_path, python_executable=sys.executable)
     served.remove(force=True)
     # Must not raise, even though the process and its log file are gone
     served.remove(force=True)
@@ -171,7 +172,9 @@ def test_unreadable_logs_do_not_mask_a_subprocess_startup_failure(dummy_api_path
     `test_any_unreadable_log_does_not_mask_the_startup_failure` makes the same
     point everywhere, without needing the file to actually go away.
     """
-    served = local_client.serve(dummy_api_path, skip_health_check=True)
+    served = local_client.serve(
+        dummy_api_path, python_executable=sys.executable, skip_health_check=True
+    )
     try:
         # Really stopped, rather than pretended so by patching `is_running`:
         # otherwise the startup path asks a live process for its exit code and
@@ -194,7 +197,9 @@ def test_any_unreadable_log_does_not_mask_the_startup_failure(dummy_api_path):
     reading the logs is how the failure gets reported, so it must not become the
     failure. Runs on every platform, unlike the vanished-file case above.
     """
-    served = local_client.serve(dummy_api_path, skip_health_check=True)
+    served = local_client.serve(
+        dummy_api_path, python_executable=sys.executable, skip_health_check=True
+    )
     try:
         served.process.terminate()
         served.process.wait(timeout=30)
@@ -233,7 +238,9 @@ def test_gpu_transport_reaches_child_and_client_alike(dummy_api_path, kwargs, ex
     thing under each way of setting it. Does not exercise the transport itself,
     which needs a GPU.
     """
-    tess = Tesseract.from_source(dummy_api_path, **kwargs)
+    tess = Tesseract.from_source(
+        dummy_api_path, python_executable=sys.executable, **kwargs
+    )
     runtime_config = tess._spawn_config["runtime_config"]
 
     child = serving.runtime_config_to_env(runtime_config).get("TESSERACT_GPU_TRANSPORT")
@@ -246,7 +253,9 @@ def test_gpu_transport_reaches_child_and_client_alike(dummy_api_path, kwargs, ex
 
 def test_gpu_transport_rejects_an_unknown_value(dummy_api_path):
     with pytest.raises(ValueError, match="Unknown gpu_transport"):
-        Tesseract.from_source(dummy_api_path, gpu_transport="nonsense")
+        Tesseract.from_source(
+            dummy_api_path, python_executable=sys.executable, gpu_transport="nonsense"
+        )
 
 
 def test_serve_rejects_binref_without_an_output_path(dummy_api_path):
@@ -256,7 +265,11 @@ def test_serve_rejects_binref_without_an_output_path(dummy_api_path):
     different exceptions for one mistake.
     """
     with pytest.raises(UserError, match=r"json\+binref"):
-        local_client.serve(dummy_api_path, output_format="json+binref")
+        local_client.serve(
+            dummy_api_path,
+            python_executable=sys.executable,
+            output_format="json+binref",
+        )
 
 
 def test_serve_rejects_missing_api():
@@ -268,7 +281,9 @@ def test_serve_on_explicit_port(dummy_api_path):
     from tesseract_core.sdk.engine import get_free_port
 
     port = get_free_port()
-    served = local_client.serve(dummy_api_path, port=port)
+    served = local_client.serve(
+        dummy_api_path, python_executable=sys.executable, port=port
+    )
     try:
         assert served.port == port
         assert served.url.endswith(f":{port}")
@@ -277,7 +292,9 @@ def test_serve_on_explicit_port(dummy_api_path):
 
 
 def test_endpoints_over_subprocess(dummy_api_path, sample_inputs):
-    with Tesseract.from_source(dummy_api_path) as tess:
+    with Tesseract.from_source(
+        dummy_api_path, python_executable=sys.executable
+    ) as tess:
         result = tess.apply(sample_inputs)
         np.testing.assert_allclose(result["result"], [5.0, 8.0])
 
@@ -313,7 +330,7 @@ def test_runs_in_a_different_process(dummy_tesseract_package, sample_inputs):
 
 
 def test_remove_stops_the_process(dummy_api_path):
-    tess = Tesseract.from_source(dummy_api_path)
+    tess = Tesseract.from_source(dummy_api_path, python_executable=sys.executable)
     tess.serve()
     served = tess._serve_context
     assert local_client.is_running(served)
@@ -326,7 +343,7 @@ def test_remove_stops_the_process(dummy_api_path):
 
 
 def test_logs_are_captured(dummy_api_path):
-    tess = Tesseract.from_source(dummy_api_path)
+    tess = Tesseract.from_source(dummy_api_path, python_executable=sys.executable)
     with tess:
         assert "Uvicorn running" in tess.server_logs()
 
@@ -338,7 +355,9 @@ def test_stream_logs_without_output_path(dummy_api_path, sample_inputs):
     """Streaming must work without the caller specifying an output directory."""
     lines = []
 
-    with Tesseract.from_source(dummy_api_path, stream_logs=lines.append) as tess:
+    with Tesseract.from_source(
+        dummy_api_path, python_executable=sys.executable, stream_logs=lines.append
+    ) as tess:
         tess.apply(sample_inputs)
 
     # The dummy Tesseract logs nothing itself, so assert on the mechanism having
@@ -365,7 +384,9 @@ def test_reported_debug_address_honours_an_inherited_runtime_override(
     monkeypatch.setenv("TESSERACT_RUNTIME_DEBUGPY_HOST", "0.0.0.0")
     caplog.set_level(logging.INFO, logger="tesseract")
 
-    served = local_client.serve(dummy_api_path, runtime_config={"debug": True})
+    served = local_client.serve(
+        dummy_api_path, python_executable=sys.executable, runtime_config={"debug": True}
+    )
     try:
         bound_host, _ = _debug_address(served)
         assert bound_host == "0.0.0.0", "override did not reach the runtime"
@@ -383,7 +404,9 @@ def test_debugger_listens_on_loopback_by_default(dummy_api_path):
     ...but on loopback: unlike a container, there is no network namespace here,
     and debugpy is unauthenticated code execution.
     """
-    served = local_client.serve(dummy_api_path, runtime_config={"debug": True})
+    served = local_client.serve(
+        dummy_api_path, python_executable=sys.executable, runtime_config={"debug": True}
+    )
     try:
         host, port = _debug_address(served)
         assert host == "127.0.0.1"
@@ -394,8 +417,12 @@ def test_debugger_listens_on_loopback_by_default(dummy_api_path):
 
 def test_two_tesseracts_get_distinct_debugpy_ports(dummy_api_path):
     """The whole reason the address is configurable: both must be debuggable."""
-    first = local_client.serve(dummy_api_path, runtime_config={"debug": True})
-    second = local_client.serve(dummy_api_path, runtime_config={"debug": True})
+    first = local_client.serve(
+        dummy_api_path, python_executable=sys.executable, runtime_config={"debug": True}
+    )
+    second = local_client.serve(
+        dummy_api_path, python_executable=sys.executable, runtime_config={"debug": True}
+    )
     try:
         assert _debug_address(first) != _debug_address(second)
     finally:
@@ -433,7 +460,10 @@ def test_debugpy_port_collision_recovers_even_with_a_pinned_api_port(
         occupied.listen(1)
 
         served = local_client.serve(
-            dummy_api_path, port=api_port, runtime_config={"debug": True}
+            dummy_api_path,
+            port=api_port,
+            runtime_config={"debug": True},
+            python_executable=sys.executable,
         )
         try:
             assert local_client.is_running(served)
@@ -457,8 +487,12 @@ def test_inherited_runtime_override_cannot_hijack_the_debugpy_port(
     monkeypatch.setenv("TESSERACT_RUNTIME_DEBUGPY_PORT", "47777")
 
     with (
-        Tesseract.from_source(dummy_api_path) as first,
-        Tesseract.from_source(dummy_api_path) as second,
+        Tesseract.from_source(
+            dummy_api_path, python_executable=sys.executable
+        ) as first,
+        Tesseract.from_source(
+            dummy_api_path, python_executable=sys.executable
+        ) as second,
     ):
         ports = {_debug_address(t._serve_context)[1] for t in (first, second)}
 
@@ -474,7 +508,11 @@ def test_debugger_can_be_opted_out(dummy_api_path):
     processes for isolation rather than debugging wants anyway, since debug mode
     also exposes tracebacks and the `test` endpoint.
     """
-    served = local_client.serve(dummy_api_path, runtime_config={"debug": False})
+    served = local_client.serve(
+        dummy_api_path,
+        python_executable=sys.executable,
+        runtime_config={"debug": False},
+    )
     try:
         assert _debug_address(served) is None
     finally:
@@ -486,8 +524,12 @@ def test_debugger_can_be_opted_out(dummy_api_path):
 
 def test_two_tesseracts_get_distinct_ports(dummy_api_path, sample_inputs):
     with (
-        Tesseract.from_source(dummy_api_path) as first,
-        Tesseract.from_source(dummy_api_path) as second,
+        Tesseract.from_source(
+            dummy_api_path, python_executable=sys.executable
+        ) as first,
+        Tesseract.from_source(
+            dummy_api_path, python_executable=sys.executable
+        ) as second,
     ):
         assert first._client.url != second._client.url
         np.testing.assert_allclose(first.apply(sample_inputs)["result"], [5.0, 8.0])
@@ -500,19 +542,23 @@ def test_runtime_config_does_not_leak_into_parent(dummy_api_path):
 
     before = get_config().output_format
 
-    with Tesseract.from_source(dummy_api_path, output_format="json"):
+    with Tesseract.from_source(
+        dummy_api_path, python_executable=sys.executable, output_format="json"
+    ):
         assert get_config().output_format == before
 
 
 def test_requires_context_manager(dummy_api_path, sample_inputs):
-    tess = Tesseract.from_source(dummy_api_path)
+    tess = Tesseract.from_source(dummy_api_path, python_executable=sys.executable)
     with pytest.raises(RuntimeError, match="from_source"):
         tess.apply(sample_inputs)
 
 
 def test_binref_works_without_being_given_directories(dummy_api_path, sample_inputs):
     """Binref needs scratch dirs; not being told about them is not the user's problem."""
-    with Tesseract.from_source(dummy_api_path, output_format="json+binref") as tess:
+    with Tesseract.from_source(
+        dummy_api_path, python_executable=sys.executable, output_format="json+binref"
+    ) as tess:
         result = tess.apply(sample_inputs)
 
     assert result["result"].shape == sample_inputs["a"].shape
@@ -528,7 +574,10 @@ def test_binref_pool_is_available_without_a_linux_host(dummy_api_path, sample_in
         pytest.skip("the pool decodes with a read-only mmap, which needs POSIX")
 
     tess = Tesseract.from_source(
-        dummy_api_path, output_format="json+binref", experimental_binref_pool=True
+        dummy_api_path,
+        output_format="json+binref",
+        experimental_binref_pool=True,
+        python_executable=sys.executable,
     )
     with tess:
         assert tess._client._binref_pool is not None
@@ -583,11 +632,15 @@ def test_startup_timeout_is_reported(dummy_api_path, monkeypatch):
     monkeypatch.setattr(requests, "get", never_healthy)
 
     with pytest.raises(TimeoutError, match="did not respond to a health check"):
-        local_client.serve(dummy_api_path, startup_timeout=1.0)
+        local_client.serve(
+            dummy_api_path, python_executable=sys.executable, startup_timeout=1.0
+        )
 
 
 def test_skip_health_check_returns_immediately(dummy_api_path):
-    served = local_client.serve(dummy_api_path, skip_health_check=True)
+    served = local_client.serve(
+        dummy_api_path, python_executable=sys.executable, skip_health_check=True
+    )
     try:
         assert local_client.is_running(served)
     finally:
@@ -671,7 +724,7 @@ def test_removing_a_tesseract_does_not_kill_the_caller(dummy_api_path, tmp_path)
         if "--no-group" in sys.argv:
             local_client.popen_kwargs = lambda: {{}}
 
-        served = local_client.serve({str(dummy_api_path)!r})
+        served = local_client.serve({str(dummy_api_path)!r}, python_executable=sys.executable)
         served.remove(force=True)
         print("caller survived", flush=True)
         """)
@@ -705,7 +758,7 @@ def test_child_runs_in_its_own_process_group(dummy_api_path):
     `test_removing_a_tesseract_does_not_kill_the_caller` covers why it matters;
     this pins the mechanism itself, so a regression says which part broke.
     """
-    served = local_client.serve(dummy_api_path)
+    served = local_client.serve(dummy_api_path, python_executable=sys.executable)
     try:
         assert os.getpgid(served.process.pid) != os.getpgid(os.getpid())
     finally:
@@ -715,7 +768,7 @@ def test_child_runs_in_its_own_process_group(dummy_api_path):
 @pytest.mark.skipif(os.name == "nt", reason="POSIX signals")
 def test_remove_escalates_to_sigkill(dummy_api_path):
     """A Tesseract that ignores SIGTERM still gets cleaned up."""
-    served = local_client.serve(dummy_api_path)
+    served = local_client.serve(dummy_api_path, python_executable=sys.executable)
 
     # Make the child ignore SIGTERM by shortening our patience instead of
     # modifying the child: escalation must happen either way.
@@ -762,28 +815,31 @@ def example_copy(tmp_path):
     return copy
 
 
-@pytest.mark.parametrize(
-    "example",
-    [
-        # An empty requirements file: the cheapest possible answer is also the
-        # right one.
-        "helloworld",
-        # Requirements this environment happens to have, since the SDK's own
-        # test suite needs jax as well. This is the common case for anyone who
-        # installed a Tesseract's requirements where they work.
-        "vectoradd_jax",
-    ],
-)
-def test_nothing_is_built_when_this_interpreter_will_do(example_copy, example):
-    """Asserting the absence of a `.venv` is the point.
+def test_an_environment_is_built_even_when_this_one_would_do(
+    example_copy, dummy_tesseract_package
+):
+    """Provisioning never quietly falls back to the interpreter we are running.
 
-    This is what stops every Tesseract in a test suite, or a notebook session,
-    paying for an environment it did not need.
+    `helloworld` declares nothing, and the dummy Tesseract here declares only
+    something this environment already has, so both could be served from here.
+    Doing that would make behaviour depend on what is installed alongside the
+    SDK: an upgrade elsewhere turns an instant constructor into a slow one, no
+    environment appears where the user expected one, and a Tesseract can import
+    packages it never declared. `python_executable=sys.executable` asks for
+    this interpreter explicitly.
+
+    `packaging` rather than something heavier because the point is the decision,
+    not the download.
     """
-    api_path = example_copy(example)
+    declares_nothing = example_copy("helloworld")
+    declares_what_we_have = dummy_tesseract_package / "tesseract_api.py"
+    (dummy_tesseract_package / "tesseract_requirements.txt").write_text("packaging\n")
 
-    assert venv_provision.resolve_python_executable(api_path) == Path(sys.executable)
-    assert not (api_path.parent / ".venv").exists()
+    for api_path in (declares_nothing, declares_what_we_have):
+        chosen = venv_provision.resolve_python_executable(api_path)
+
+        assert chosen != Path(sys.executable)
+        assert chosen == venv_provision._python_in(api_path.parent / ".venv")
 
 
 def test_builds_an_environment_for_dependencies_we_do_not_have(example_copy):
