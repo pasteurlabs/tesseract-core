@@ -32,7 +32,7 @@ OPEN ITEMS
 - Gates: tesseract-core release with #781 and #669 (from_source), tesseract-jax
   v0.5.0, docs how-to for the GPU transport (drafted at
   docs/content/how-to/gpu-transport.md, has its own TODOs), 2026 winners
-  announced, and this post goes out before the NVIDIA closed-loop post.
+  announced.
 - Permission: the Multi-Agent-DPC/CINOC team (story, CINOC mention, appendix
   quote; offer review of the first two sections), and the authors of Prismo,
   δsnow17-sacsma, and Differentiable Silicon. Check each description against the
@@ -48,7 +48,6 @@ OPEN ITEMS
 - The solver's apply runs eqx.filter_jit on its raw inputs. Handle-backed inputs
   arrive as device wrappers, so it probably needs to adopt them with
   jnp.from_dlpack first (untested: Tesseract-JAX's GPU tests serve CuPy).
-- Once the NVIDIA post is out, link it from the served-surrogate sentence.
 -->
 
 # `jax.grad` across a process boundary, without leaving the GPU
