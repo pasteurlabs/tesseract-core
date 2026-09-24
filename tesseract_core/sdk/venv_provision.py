@@ -42,7 +42,7 @@ from packaging.specifiers import InvalidSpecifier, SpecifierSet
 
 from .api_parse import ValidationError, get_config
 from .config import get_config as get_sdk_config
-from .engine import declared_requirements_file
+from .engine import declared_requirements_file, get_runtime_dir
 from .engine import parse_requirements as _parse_requirements
 from .exceptions import UserError
 
@@ -73,21 +73,16 @@ def parse_requirements(path: Path) -> tuple[list[str], list[str]]:
 SCRUBBED_IMPORT_VARS = ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV")
 
 
-_MANAGED_VENV_NAME = ".venv"
+# The environment we build belongs to us, so it gets a name nothing else uses.
+# A `.venv` beside a Tesseract is the user's, and installing a Tesseract's pinned
+# dependencies into it would be rude; we do not read it either, because picking
+# up whatever happens to be lying next to the api file is the same guessing that
+# `python_executable` exists to replace.
+_MANAGED_VENV_NAME = ".tesseract-venv"
 
-# Looked for next to the api file before we create anything. These are the
-# directory names GitHub's Python .gitignore calls "Environments", minus two:
-# `ENV` is the same directory as `env` on macOS and Windows and is rare
-# elsewhere, and `.env` is nearly always a dotenv file rather than a directory.
-#
-# An environment the user has *activated* needs no entry here, whether it is a
-# venv or a conda prefix, because it is already `sys.executable`.
-_VENV_CANDIDATES = (_MANAGED_VENV_NAME, "venv", "env")
-
-# Records which environment file a conda environment was built from. conda has
-# no quick way to check whether an environment is already up to date, and
-# solving one takes minutes, so we compare a hash instead.
-_CONDA_STAMP_NAME = ".tesseract-conda-stamp.json"
+# Records what the environment was built from, so that a serve which changes
+# nothing costs a file read instead of asking an installer.
+_STAMP_NAME = ".tesseract-stamp.json"
 
 
 def _python_in(prefix: Path) -> Path:
@@ -130,16 +125,15 @@ def _dist_versions(python_executable: Path) -> dict[str, str]:
     return versions
 
 
-def _can_serve(python_executable: Path, version: str | None = None) -> bool:
-    """Whether an environment can serve a Tesseract, optionally at `version`.
+def _can_serve(python_executable: Path) -> bool:
+    """Whether an environment has the runtime in it.
 
     Looks for the `tesseract_runtime` distribution that
     :func:`~tesseract_core.sdk.engine.stage_runtime_package` produces, which is
     what a container installs too. Nothing publishes that name, so finding it
     means we put it there, with the dependencies it declares.
     """
-    runtime = _dist_versions(python_executable).get("tesseract_runtime")
-    return runtime is not None and (version is None or runtime == version)
+    return "tesseract_runtime" in _dist_versions(python_executable)
 
 
 def _declared_requirements(api_path: Path) -> tuple[Any, Path | None]:
@@ -226,6 +220,46 @@ def _conda() -> tuple[str, ...]:
     )
 
 
+@functools.cache
+def _runtime_source_hash() -> str:
+    """Digest of the runtime we would install.
+
+    The SDK's `__version__` cannot stand in for this. It is baked into a
+    generated `_version.py` when the SDK is installed, so editing the runtime in
+    a development checkout leaves it unchanged and an environment built earlier
+    would keep serving the old code.
+    """
+    digest = hashlib.sha256()
+    for path in sorted(get_runtime_dir().rglob("*.py")):
+        digest.update(path.read_bytes())
+    return digest.hexdigest()
+
+
+def _expected_stamp(requirements_file: Path | None) -> str:
+    """What an environment built for these requirements should be stamped with."""
+    digest = hashlib.sha256()
+    digest.update(_runtime_source_hash().encode())
+    if requirements_file is not None:
+        digest.update(requirements_file.read_bytes())
+    return digest.hexdigest()
+
+
+def _stamp_matches(dest: Path, requirements_file: Path | None) -> bool:
+    """Whether the environment at `dest` was built from exactly this."""
+    try:
+        stamped = json.loads((dest / _STAMP_NAME).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return stamped.get("digest") == _expected_stamp(requirements_file)
+
+
+def _write_stamp(dest: Path, requirements_file: Path | None) -> None:
+    """Record what the environment was built from."""
+    (dest / _STAMP_NAME).write_text(
+        json.dumps({"digest": _expected_stamp(requirements_file)}), encoding="utf-8"
+    )
+
+
 def _capture(
     command: Sequence[Any], *, stdin: str | None = None, cwd: Path | None = None
 ) -> subprocess.CompletedProcess:
@@ -266,24 +300,6 @@ def _install_from(requirements_file: Path) -> tuple[list[str], Path]:
     everything to one place first.
     """
     return ["-r", requirements_file.name], requirements_file.parent
-
-
-def _venv_satisfies(python_executable: Path, requirements_file: Path) -> bool:
-    """Whether an environment already satisfies a pip requirements file.
-
-    We ask uv, so that markers, pins, extras and index options all mean what
-    they mean to a build. When the answer is yes uv exits almost immediately,
-    which matters because this runs every time a Tesseract is served.
-    """
-    args, cwd = _install_from(requirements_file)
-    result = _capture(
-        [*_uv(), "pip", "install", "--dry-run", "--python", python_executable, *args],
-        cwd=cwd,
-    )
-    # uv prints this on stderr, along with the rest of its progress output.
-    return result.returncode == 0 and "Would make no changes" in (
-        result.stderr + result.stdout
-    )
 
 
 @functools.cache
@@ -612,16 +628,10 @@ def _ensure_runtime(
     itself was installed, and guarantees the Tesseract runs against the same
     code as the SDK that started it.
 
-    We check the installed version ourselves instead of letting the installer
-    work it out, because building the package to find out costs about as long
-    as starting a Tesseract.
+    Always installs: the stamp decides whether an environment needs rebuilding
+    at all, so reaching here means it does.
     """
-    from tesseract_core import __version__
-
     from .engine import stage_runtime_package
-
-    if _can_serve(python_executable, __version__):
-        return
 
     what = "Installing the Tesseract runtime"
     with tempfile.TemporaryDirectory() as scratch:
@@ -711,40 +721,25 @@ def _build_pip_venv(
             cwd=cwd,
         )
     _ensure_runtime(python_executable)
+    _write_stamp(dest, requirements_file)
     return python_executable
 
 
 def _build_conda_env(dest: Path, requirements_file: Path) -> Path:
     """Create or update a conda environment for a Tesseract.
 
-    Follows ``templates/build_conda_venv.sh``. conda has no quick way to check
-    whether an environment already matches the file, and solving one takes
-    minutes, so we compare a hash of the file against a stamp we wrote.
+    Follows ``templates/build_conda_venv.sh``. Reaching here means the stamp
+    said something changed, so the environment is created or brought up to date
+    unconditionally.
     """
     conda = _conda()
     python_executable = _python_in(dest)
-    digest = hashlib.sha256(requirements_file.read_bytes()).hexdigest()
-    stamp_path = dest / _CONDA_STAMP_NAME
 
-    stamped = None
-    if stamp_path.is_file():
-        try:
-            stamped = json.loads(stamp_path.read_text(encoding="utf-8")).get("digest")
-        except ValueError:
-            stamped = None
-
-    if not python_executable.is_file():
-        action = "create"
-    elif stamped != digest:
-        action = "update"
-    else:
-        action = None
-
-    if action is not None:
-        _run(
-            [*conda, "env", action, "--file", requirements_file, "-p", dest, "--quiet"],
-            f"Running `conda env {action}` for {dest}",
-        )
+    action = "create" if not python_executable.is_file() else "update"
+    _run(
+        [*conda, "env", action, "--file", requirements_file, "-p", dest, "--quiet"],
+        f"Running `conda env {action}` for {dest}",
+    )
 
     if not python_executable.is_file():
         # conda is happy to create an environment from a file that asks for
@@ -759,23 +754,18 @@ def _build_conda_env(dest: Path, requirements_file: Path) -> Path:
     # Use the environment's own pip, not uv. Packages installed from conda
     # channels are not all visible to uv, so uv would decide they are missing
     # and reinstall them from PyPI.
-    #
-    # Invoked as `<env>/bin/python -m pip` rather than `conda run -p <env> pip`,
-    # which is what `build_conda_venv.sh` does. Inside an image there is only one
-    # pip to find, but on a host `conda run` resolves pip from PATH and can pick
-    # one belonging to another environment, installing there instead.
     _ensure_runtime(python_executable, installer=[python_executable, "-m", "pip"])
 
-    dest.mkdir(parents=True, exist_ok=True)
-    stamp_path.write_text(json.dumps({"digest": digest}), encoding="utf-8")
+    _write_stamp(dest, requirements_file)
     return python_executable
 
 
 def _managed_env_dir(api_path: Path) -> Path:
-    """Where to put an environment we create for a Tesseract.
+    """Where to put the environment we build for a Tesseract.
 
-    Next to the ``tesseract_api.py``, since that is where people look for a
-    ``.venv`` and where their tooling already ignores one.
+    Next to the ``tesseract_api.py``, under a name of our own. uv writes a
+    ``.gitignore`` into every environment it creates, so this stays out of the
+    user's repository despite not being a name their tooling knows.
     """
     src_dir = api_path.parent
     if not os.access(src_dir, os.W_OK):
@@ -790,39 +780,30 @@ def _managed_env_dir(api_path: Path) -> Path:
 def resolve_python_executable(api_path: Path) -> Path:
     """Pick the interpreter to serve a Tesseract on, building one if needed.
 
-    A Tesseract needs an environment holding both its own dependencies and
-    ``tesseract-core[runtime]``, either an existing one next to the
-    ``tesseract_api.py`` that already has everything, or one built there.
-
-    This never falls back to the interpreter the SDK is running on, even when
-    that one would do. Doing so silently makes behaviour depend on what happens
-    to be installed here: a constructor that was instant starts taking seconds
-    because something got upgraded, no environment appears where one was
-    expected, or a Tesseract that could import an undeclared package stops
-    being able to with no change to its code. Pass
-    ``python_executable=sys.executable`` to ask for it explicitly, which also
+    The environment is one we build and own, next to the ``tesseract_api.py``.
+    Nothing else is considered: not the interpreter the SDK runs on, and not a
+    ``.venv`` the user happens to keep beside their Tesseract. Either would make
+    behaviour depend on what is lying around rather than on what the Tesseract
+    declares, which shows up as a constructor that was instant taking seconds
+    because something unrelated was upgraded, or a Tesseract importing a package
+    it never declared. ``python_executable`` is how to supply your own, and
     skips all of this.
+
+    A stamp of the requirements and of the runtime source says whether the
+    environment is still what it should be, so a serve that changes nothing
+    costs a file read. It covers the runtime source because the SDK's version
+    is fixed when the SDK is installed, and would not notice a runtime edited
+    in a development checkout.
     """
     dest = _managed_env_dir(api_path)
     build_config, requirements_file = _declared_requirements(api_path)
 
-    if build_config.requirements.provider == "conda":
-        # No point checking first. Packages from conda channels are not all
-        # visible as pip distributions, so uv cannot tell us whether the
-        # environment is up to date. The stamp inside `_build_conda_env` is what
-        # makes the second call cheap.
-        return _build_conda_env(dest, requirements_file)
+    if _stamp_matches(dest, requirements_file):
+        logger.debug("Serving %s from %s", api_path.name, dest)
+        return _python_in(dest)
 
-    for candidate in _VENV_CANDIDATES:
-        python_executable = _python_in(api_path.parent / candidate)
-        if not python_executable.is_file() or not _can_serve(python_executable):
-            continue
-        # With nothing declared, being able to serve is the whole test.
-        if requirements_file is None or _venv_satisfies(
-            python_executable, requirements_file
-        ):
-            logger.debug("Serving %s from %s", api_path.name, python_executable)
-            return python_executable
+    if build_config.requirements.provider == "conda":
+        return _build_conda_env(dest, requirements_file)
 
     logger.info("Building an environment for %s at %s", api_path.name, dest)
     return _build_pip_venv(dest, build_config, requirements_file)

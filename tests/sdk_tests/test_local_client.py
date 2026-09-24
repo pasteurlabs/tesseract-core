@@ -808,7 +808,9 @@ def example_copy(tmp_path):
         shutil.copytree(
             EXAMPLES / name,
             destination,
-            ignore=shutil.ignore_patterns(".venv", "venv", "__pycache__"),
+            ignore=shutil.ignore_patterns(
+                ".venv", "venv", ".tesseract-venv", "__pycache__"
+            ),
         )
         return destination / "tesseract_api.py"
 
@@ -839,7 +841,9 @@ def test_an_environment_is_built_even_when_this_one_would_do(
         chosen = venv_provision.resolve_python_executable(api_path)
 
         assert chosen != Path(sys.executable)
-        assert chosen == venv_provision._python_in(api_path.parent / ".venv")
+        assert chosen == venv_provision._python_in(
+            api_path.parent / venv_provision._MANAGED_VENV_NAME
+        )
 
 
 def test_builds_an_environment_for_dependencies_we_do_not_have(example_copy):
@@ -861,7 +865,9 @@ def test_builds_an_environment_for_dependencies_we_do_not_have(example_copy):
 
     assert "Hello World!" in result["message"], "local package dependency missing"
     assert "Goodbye World!" in result["message"], "package_data sibling missing"
-    assert (api_path.parent / ".venv").is_dir(), "no environment was built"
+    assert (api_path.parent / venv_provision._MANAGED_VENV_NAME).is_dir(), (
+        "no environment was built"
+    )
 
 
 def test_an_environment_built_once_is_reused(dummy_tesseract_package):
@@ -876,7 +882,9 @@ def test_an_environment_built_once_is_reused(dummy_tesseract_package):
     (dummy_tesseract_package / "tesseract_requirements.txt").write_text("cowsay\n")
 
     first = venv_provision.resolve_python_executable(api_path)
-    assert first == venv_provision._python_in(dummy_tesseract_package / ".venv")
+    assert first == venv_provision._python_in(
+        dummy_tesseract_package / venv_provision._MANAGED_VENV_NAME
+    )
 
     # Reuse means nothing gets installed, which a wall-clock budget cannot show:
     # re-running an install against an already-satisfied environment is fast
@@ -899,7 +907,7 @@ def test_an_environment_without_the_runtime_is_completed(example_copy):
     an environment for a usable one.
     """
     api_path = example_copy("localpackage")
-    venv = api_path.parent / ".venv"
+    venv = api_path.parent / venv_provision._MANAGED_VENV_NAME
     # Built the way the resolver builds one, so this really is the kind of bare
     # .venv a user might already have, not an imitation of it.
     venv_provision._ensure_venv(venv)
@@ -1118,4 +1126,4 @@ def test_an_explicit_interpreter_skips_resolution(dummy_tesseract_package):
     with Tesseract.from_source(api_path, python_executable=sys.executable) as tess:
         assert tess.health()["status"] == "ok"
 
-    assert not (dummy_tesseract_package / ".venv").exists()
+    assert not (dummy_tesseract_package / venv_provision._MANAGED_VENV_NAME).exists()
