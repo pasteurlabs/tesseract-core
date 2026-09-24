@@ -1056,6 +1056,24 @@ def test_a_declared_python_version_applies_with_no_requirements(
     assert venv_provision._build_python_version(build_config, None) == "3.11"
 
 
+def test_conda_without_its_environment_file_is_reported(dummy_tesseract_package):
+    """Declaring conda and providing nothing to build from is an error.
+
+    The pip provider can build an environment with only the runtime in it, so a
+    missing requirements file is fine there. conda cannot: a build copies
+    `tesseract_environment.yaml` into the image and runs `conda env create
+    --file` on it. Building a uv environment instead would ignore the provider
+    the Tesseract asked for.
+    """
+    (dummy_tesseract_package / "tesseract_config.yaml").write_text(
+        'name: "condaless"\nbuild_config:\n  requirements:\n    provider: conda\n'
+    )
+    api_path = dummy_tesseract_package / "tesseract_api.py"
+
+    with pytest.raises(UserError, match=r"tesseract_environment\.yaml"):
+        venv_provision.resolve_python_executable(api_path)
+
+
 def test_a_missing_config_is_reported(dummy_tesseract_package):
     """No config means no way to tell what to install, so say so.
 

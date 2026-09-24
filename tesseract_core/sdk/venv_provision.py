@@ -208,18 +208,31 @@ def _declared_requirements(api_path: Path) -> tuple[Any, Path | None]:
 
     requirements = build_config.requirements
     requirements_file = src_dir / requirements._filename
-    if not requirements_file.is_file():
-        return build_config, None
 
     # A crude check on purpose. `parse_requirements` would be exact, but it
     # imports pip's internals (~150ms), which is a lot to pay just to find out
     # a Tesseract needs nothing. Option lines count as content so that this
     # agrees with `parse_requirements` about files like `-r other.txt`.
-    declares_something = any(
+    declares_something = requirements_file.is_file() and any(
         line.strip() and not line.strip().startswith("#")
         for line in requirements_file.read_text(encoding="utf-8").splitlines()
     )
-    return build_config, requirements_file if declares_something else None
+    if declares_something:
+        return build_config, requirements_file
+
+    if requirements.provider == "conda":
+        # Unlike the pip provider, conda has nothing to fall back on: a build
+        # copies this file into the image and runs `conda env create --file` on
+        # it, so without it there is no environment to make. Quietly building a
+        # uv one instead would ignore the provider the Tesseract asked for.
+        raise UserError(
+            f"tesseract_config.yaml sets `requirements.provider: conda`, but "
+            f"{requirements._filename} is missing or declares nothing in "
+            f"{src_dir}. Write one (`conda env export --no-builds > "
+            f"{requirements._filename}`), or switch the provider to uv-pip."
+        )
+
+    return build_config, None
 
 
 def _uv() -> tuple[str, ...]:
@@ -807,7 +820,7 @@ def resolve_python_executable(api_path: Path) -> Path:
     dest = _managed_env_dir(api_path)
     build_config, requirements_file = _declared_requirements(api_path)
 
-    if requirements_file is not None and build_config.requirements.provider == "conda":
+    if build_config.requirements.provider == "conda":
         # No point checking first. Packages from conda channels are not all
         # visible as pip distributions, so uv cannot tell us whether the
         # environment is up to date. The stamp inside `_build_conda_env` is what
