@@ -525,6 +525,7 @@ def test_custom_validation_error_over_http(dummy_tesseract_module):
 def test_apply_encodes_arrays_with_configured_compression(dummy_tesseract_module):
     """Served endpoints respect the configured compression setting (e.g. lz4)."""
     import lz4.frame
+
     from tesseract_core.runtime.config import update_config
 
     update_config(compression="lz4")
@@ -545,9 +546,9 @@ def test_apply_encodes_arrays_with_configured_compression(dummy_tesseract_module
         # Verify buffer decompresses and matches expected data
         compressed_bytes = base64.b64decode(array_data["buffer"])
         decompressed_bytes = lz4.frame.decompress(compressed_bytes)
-        result = np.frombuffer(decompressed_bytes, dtype=response.json()["result"]["dtype"]).reshape(
-            response.json()["result"]["shape"]
-        )
+        result = np.frombuffer(
+            decompressed_bytes, dtype=response.json()["result"]["dtype"]
+        ).reshape(response.json()["result"]["shape"])
         assert np.array_equal(result, np.array([3.5, 6.0, 8.5]))
 
         # Also test with binref output format
@@ -565,7 +566,6 @@ def test_apply_encodes_arrays_with_configured_compression(dummy_tesseract_module
 
 def test_apply_accept_compression_param_overrides_config(dummy_tesseract_module):
     """An Accept ``compression=...`` parameter overrides server config per request."""
-    import lz4.frame
     from tesseract_core.runtime.config import update_config
 
     client = TestClient(
@@ -594,7 +594,10 @@ def test_apply_accept_compression_param_overrides_config(dummy_tesseract_module)
         )
         assert response_none.status_code == 200, response_none.text
         array_data_none = response_none.json()["result"]["data"]
-        assert "compression" not in array_data_none or array_data_none["compression"] is None
+        assert (
+            "compression" not in array_data_none
+            or array_data_none["compression"] is None
+        )
     finally:
         update_config(compression=None)
 
@@ -605,6 +608,3 @@ def test_apply_accept_compression_param_overrides_config(dummy_tesseract_module)
         headers={"Accept": "application/json+base64; compression=invalid"},
     )
     assert response_invalid.status_code >= 400
-
-
-

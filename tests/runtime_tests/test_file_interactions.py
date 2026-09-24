@@ -142,7 +142,10 @@ def test_output_to_bytes_scalar_only():
             ("json+base64", "cuda_ipc", "lz4"),
         ),
         # No space after ';' and an explicit 'none' both parse.
-        ("application/json+base64;gpu_transport=none;compression=none", ("json+base64", "none", "none")),
+        (
+            "application/json+base64;gpu_transport=none;compression=none",
+            ("json+base64", "none", "none"),
+        ),
         # Other parameters (charset, q) are ignored; quoted values are unwrapped.
         (
             'application/json+binref; charset=utf-8; gpu_transport="cuda_ipc"; compression="lz4"',
