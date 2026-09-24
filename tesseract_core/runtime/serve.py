@@ -87,14 +87,21 @@ def create_response(
 
     if not accept or accept == "*/*":
         gpu_transport = config.gpu_transport
+        compression = config.compression
     else:
-        _, requested_transport = parse_accept_header(accept)
-        # Header wins when it names a transport; otherwise fall back to config.
+        _, requested_transport, requested_compression = parse_accept_header(accept)
+        # Header wins when it names a transport/compression; otherwise fall back to config.
         gpu_transport = (
             requested_transport
             if requested_transport is not None
             else config.gpu_transport
         )
+        if requested_compression is not None:
+            compression = (
+                None if requested_compression == "none" else requested_compression
+            )
+        else:
+            compression = config.compression
 
     if base_dir is None:
         base_dir = config.output_path
@@ -104,6 +111,7 @@ def create_response(
         output_format,
         base_dir=base_dir,
         binref_dir=binref_dir,
+        compression=compression,
         gpu_transport=gpu_transport,
     )
     # Name the format actually produced, which is not necessarily what the
