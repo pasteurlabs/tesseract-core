@@ -871,9 +871,6 @@ def test_an_environment_built_once_is_reused(dummy_tesseract_package):
     certainly not on every endpoint call. That is why it happens before the
     process starts.
 
-    This uses a remote requirement on purpose. A local path is always built from
-    source, so uv never reports it as satisfied and a Tesseract declaring one is
-    reinstalled every time by design.
     """
     api_path = dummy_tesseract_package / "tesseract_api.py"
     (dummy_tesseract_package / "tesseract_requirements.txt").write_text("cowsay\n")
