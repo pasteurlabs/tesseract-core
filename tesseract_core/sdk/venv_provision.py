@@ -44,7 +44,7 @@ from packaging.specifiers import InvalidSpecifier, SpecifierSet
 
 from .api_parse import ValidationError, get_config
 from .config import get_config as get_sdk_config
-from .engine import _split_local_dependency
+from .engine import _split_local_dependency, declared_requirements_file
 from .engine import parse_requirements as _parse_requirements
 from .exceptions import UserError
 
@@ -206,33 +206,11 @@ def _declared_requirements(api_path: Path) -> tuple[Any, Path | None]:
             f"way to tell what this Tesseract needs installed: {e}"
         ) from e
 
-    requirements = build_config.requirements
-    requirements_file = src_dir / requirements._filename
-
-    # A crude check on purpose. `parse_requirements` would be exact, but it
-    # imports pip's internals (~150ms), which is a lot to pay just to find out
-    # a Tesseract needs nothing. Option lines count as content so that this
-    # agrees with `parse_requirements` about files like `-r other.txt`.
-    declares_something = requirements_file.is_file() and any(
-        line.strip() and not line.strip().startswith("#")
-        for line in requirements_file.read_text(encoding="utf-8").splitlines()
-    )
-    if declares_something:
-        return build_config, requirements_file
-
-    if requirements.provider == "conda":
-        # Unlike the pip provider, conda has nothing to fall back on: a build
-        # copies this file into the image and runs `conda env create --file` on
-        # it, so without it there is no environment to make. Quietly building a
-        # uv one instead would ignore the provider the Tesseract asked for.
-        raise UserError(
-            f"tesseract_config.yaml sets `requirements.provider: conda`, but "
-            f"{requirements._filename} is missing or declares nothing in "
-            f"{src_dir}. Write one (`conda env export --no-builds > "
-            f"{requirements._filename}`), or switch the provider to uv-pip."
-        )
-
-    return build_config, None
+    # Shared with the build, which asks the same question about the same file
+    # and raises the same way when the provider cannot do without it. Whether
+    # the file declares anything is left to the installer: an empty one is
+    # legal to uv and to conda alike.
+    return build_config, declared_requirements_file(src_dir, build_config)
 
 
 def _uv() -> tuple[str, ...]:
@@ -768,6 +746,16 @@ def _build_conda_env(dest: Path, requirements_file: Path) -> Path:
         _run(
             [*conda, "env", action, "--file", requirements_file, "-p", dest, "--quiet"],
             f"Running `conda env {action}` for {dest}",
+        )
+
+    if not python_executable.is_file():
+        # conda is happy to create an environment from a file that asks for
+        # nothing, and what it makes then has no interpreter in it. Say that
+        # here, rather than failing on a missing `python` a step later.
+        raise UserError(
+            f"{requirements_file.name} produced an environment with no Python "
+            f"in {dest}. Declare a python version in it, for example "
+            "`dependencies: [python=3.12]`."
         )
 
     # Use the environment's own pip, not uv. Packages installed from conda

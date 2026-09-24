@@ -1048,22 +1048,26 @@ def test_a_declared_python_version_applies_with_no_requirements(
         "    provider: uv-pip\n"
         '    python_version: "3.11"\n'
     )
+    (dummy_tesseract_package / "tesseract_requirements.txt").unlink()
     api_path = dummy_tesseract_package / "tesseract_api.py"
 
     build_config, requirements_file = venv_provision._declared_requirements(api_path)
 
-    assert requirements_file is None, "the fixture declares no requirements"
+    assert requirements_file is None, "there is no requirements file to install"
     assert venv_provision._build_python_version(build_config, None) == "3.11"
 
 
 def test_conda_without_its_environment_file_is_reported(dummy_tesseract_package):
-    """Declaring conda and providing nothing to build from is an error.
+    """Declaring conda and providing no environment file is an error.
 
     The pip provider can build an environment with only the runtime in it, so a
     missing requirements file is fine there. conda cannot: a build copies
     `tesseract_environment.yaml` into the image and runs `conda env create
     --file` on it. Building a uv environment instead would ignore the provider
     the Tesseract asked for.
+
+    An *empty* file is a different matter and not checked here: conda accepts
+    one and creates an environment from it, so that is left to conda.
     """
     (dummy_tesseract_package / "tesseract_config.yaml").write_text(
         'name: "condaless"\nbuild_config:\n  requirements:\n    provider: conda\n'

@@ -152,6 +152,45 @@ def parse_requirements(
 _LOCAL_DEPENDENCY_PREFIXES = (".", "/", "file://")
 
 
+def declared_requirements_file(src_dir: Path, build_config: Any) -> Path | None:
+    """The dependency file a Tesseract declares, or None when it declares none.
+
+    Raises a `UserError` when the provider cannot work without one, so that the
+    problem is reported here instead of much later: the Dockerfile copies this
+    file unconditionally, so a build that gets past this point dies at a `COPY`
+    with a message that names neither the config nor the provider.
+
+    Only the plain uv-pip case tolerates a missing file, because a build writes
+    an empty requirements file into the context for it. A lockfile and a conda
+    environment file have nothing to fall back on.
+
+    Shared with `Tesseract.from_source`, which asks the same question about the
+    same file but builds an environment on the host rather than in an image.
+    """
+    requirements = build_config.requirements
+    path = src_dir / requirements._filename
+
+    if path.is_file():
+        return path
+
+    if requirements.provider == "conda":
+        raise UserError(
+            f"tesseract_config.yaml sets `requirements.provider: conda`, but "
+            f"there is no {requirements._filename} in {src_dir}. Write one "
+            f"(`conda env export --no-builds > {requirements._filename}`), or "
+            f"switch the provider to uv-pip."
+        )
+
+    if requirements.is_pylock:
+        raise UserError(
+            f"requirements_file is set to {requirements._filename!r} but "
+            f"that file was not found in {src_dir}. Generate one with, e.g., "
+            f"`uv export --format pylock.toml -o {requirements._filename}`."
+        )
+
+    return None
+
+
 def _is_local_dependency(spec: str) -> bool:
     """Return whether a requirement spec refers to a local filesystem path."""
     return spec.startswith(_LOCAL_DEPENDENCY_PREFIXES)
@@ -427,22 +466,14 @@ def prepare_build_context(
     local_requirements_path = context_dir / "local_requirements"
     Path.mkdir(local_requirements_path, parents=True, exist_ok=True)
 
-    if requirement_config.provider == "uv-pip" and requirement_config.is_pylock:
-        # A lockfile has no local-path dependencies to split out, so it is installed
-        # as-is from its staged location without rewriting. Check it exists here to
-        # fail with a clear message instead of a missing COPY during `docker build`.
-        lockfile = src_dir / requirement_config._filename
-        if not lockfile.exists():
-            raise UserError(
-                f"requirements_file is set to {requirement_config._filename!r} but "
-                f"that file was not found in {src_dir}. Generate one with, e.g., "
-                f"`uv export --format pylock.toml -o {requirement_config._filename}`."
-            )
+    # Raises when the declared file is missing and the provider needs it.
+    declared_file = declared_requirements_file(src_dir, user_config.build_config)
 
-    elif requirement_config.provider == "uv-pip":
-        reqstxt = src_dir / requirement_config._filename
-        if reqstxt.exists():
-            local_dependencies, remote_dependencies = parse_requirements(reqstxt)
+    # A lockfile is skipped here: it has no local-path dependencies to split
+    # out, so it is installed as-is from its staged location.
+    if requirement_config.provider == "uv-pip" and not requirement_config.is_pylock:
+        if declared_file is not None:
+            local_dependencies, remote_dependencies = parse_requirements(declared_file)
         else:
             local_dependencies, remote_dependencies = [], []
 
@@ -472,9 +503,9 @@ def prepare_build_context(
         # into the build stage, not the surrounding Tesseract source. Stage each
         # local path into the build context and rewrite it to point at the
         # staged copy, mirroring the uv provider.
-        env_file = src_dir / requirement_config._filename
+        env_file = declared_file
         env_dest = context_dir / "__tesseract_source__" / requirement_config._filename
-        if env_file.exists():
+        if env_file is not None:
             with env_file.open(encoding="utf-8") as f:
                 env_spec = yaml.safe_load(f) or {}
 
