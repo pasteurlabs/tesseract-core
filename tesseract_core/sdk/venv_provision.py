@@ -635,10 +635,20 @@ def _ensure_runtime(
     with tempfile.TemporaryDirectory() as scratch:
         staged = stage_runtime_package(Path(scratch) / "tesseract_runtime")
         if installer is not None:
+            # pip compiles bytecode by default; uv has to be asked.
             _run([*installer, "install", staged], what)
         else:
             _run(
-                [*_uv(), "pip", "install", "--python", python_executable, staged], what
+                [
+                    *_uv(),
+                    "pip",
+                    "install",
+                    "--compile-bytecode",
+                    "--python",
+                    python_executable,
+                    staged,
+                ],
+                what,
             )
 
     # An installer can report success and still leave the environment unable to
@@ -683,6 +693,10 @@ def _build_pip_venv(
     Follows ``templates/build_pip_venv.sh``, which a container build runs, so a
     Tesseract gets the same environment either way. Every step is idempotent, so
     this both creates and updates.
+
+    Bytecode is compiled during the install, as it is in a build. Otherwise the
+    first import pays for it, and that happens while the caller is waiting for
+    the Tesseract to answer a health check.
     """
     python_executable = _ensure_venv(
         dest,
@@ -692,7 +706,15 @@ def _build_pip_venv(
     if requirements_file is not None:
         args, cwd = _install_from(requirements_file)
         _run(
-            [*_uv(), "pip", "install", "--python", python_executable, *args],
+            [
+                *_uv(),
+                "pip",
+                "install",
+                "--compile-bytecode",
+                "--python",
+                python_executable,
+                *args,
+            ],
             f"Installing {requirements_file.name}",
             cwd=cwd,
         )
