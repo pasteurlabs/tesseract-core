@@ -126,11 +126,7 @@ def _dist_versions(python_executable: Path) -> dict[str, str]:
             name, separator, tail = entry.name.partition("-")
             if not separator or not tail.endswith(".dist-info"):
                 continue
-            version = tail[: -len(".dist-info")]
-            # Versions never contain a hyphen. If this one does, we split in
-            # the wrong place: the distribution's own name has a hyphen in it.
-            if "-" not in version:
-                versions.setdefault(name, version)
+            versions[name] = tail[: -len(".dist-info")]
     return versions
 
 
@@ -139,15 +135,11 @@ def _can_serve(python_executable: Path, version: str | None = None) -> bool:
 
     Looks for the `tesseract_runtime` distribution that
     :func:`~tesseract_core.sdk.engine.stage_runtime_package` produces, which is
-    what a container installs too. uvicorn is checked as well because an
-    environment can carry the package without its dependencies having been
-    resolved, and serving cannot start without it.
+    what a container installs too. Nothing publishes that name, so finding it
+    means we put it there, with the dependencies it declares.
     """
-    installed = _dist_versions(python_executable)
-    runtime = installed.get("tesseract_runtime")
-    if runtime is None or (version is not None and runtime != version):
-        return False
-    return "uvicorn" in installed
+    runtime = _dist_versions(python_executable).get("tesseract_runtime")
+    return runtime is not None and (version is None or runtime == version)
 
 
 def _declared_requirements(api_path: Path) -> tuple[Any, Path | None]:
