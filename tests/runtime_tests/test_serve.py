@@ -563,3 +563,48 @@ def test_apply_encodes_arrays_with_configured_compression(dummy_tesseract_module
         update_config(compression=None)
 
 
+def test_apply_accept_compression_param_overrides_config(dummy_tesseract_module):
+    """An Accept ``compression=...`` parameter overrides server config per request."""
+    import lz4.frame
+    from tesseract_core.runtime.config import update_config
+
+    client = TestClient(
+        create_rest_api(dummy_tesseract_module), raise_server_exceptions=False
+    )
+    test_inputs = dummy_tesseract_module.InputSchema.model_validate(test_input)
+
+    # 1. Server config is None, but client specifies compression=lz4 in Accept header
+    update_config(compression=None)
+    response = client.post(
+        "/apply",
+        json={"inputs": model_to_json(test_inputs)},
+        headers={"Accept": "application/json+base64; compression=lz4"},
+    )
+    assert response.status_code == 200, response.text
+    array_data = response.json()["result"]["data"]
+    assert array_data.get("compression") == "lz4"
+
+    # 2. Server config is lz4, but client specifies compression=none in Accept header
+    update_config(compression="lz4")
+    try:
+        response_none = client.post(
+            "/apply",
+            json={"inputs": model_to_json(test_inputs)},
+            headers={"Accept": "application/json+base64; compression=none"},
+        )
+        assert response_none.status_code == 200, response_none.text
+        array_data_none = response_none.json()["result"]["data"]
+        assert "compression" not in array_data_none or array_data_none["compression"] is None
+    finally:
+        update_config(compression=None)
+
+    # 3. Invalid compression parameter in Accept header is rejected
+    response_invalid = client.post(
+        "/apply",
+        json={"inputs": model_to_json(test_inputs)},
+        headers={"Accept": "application/json+base64; compression=invalid"},
+    )
+    assert response_invalid.status_code >= 400
+
+
+
