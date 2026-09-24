@@ -2,19 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
-## [1.14.0] - 2026-09-21
+## [1.14.0] - 2026-09-24
 
 ### Features
 
 - Add `Tesseract.from_source` to serve a Tesseract a separate subprocess without a container (#669)
 - Install dependencies from a PEP 751 lockfile (#767)
 - Machine readable output flag for tesseract list (#780)
+- Expose `LocalClient.api_module` (#785)
 
 ### Bug Fixes
 
 - *(runtime)* Let a signed integer reach an unsigned field (#769)
 - Reset runtime config before each in-process Tesseract instance (#703)
 - Coerce abstract_eval input avals to the schema dtype (#772)
+- Confine json+binref buffer references to output_path (#783)
+- *(runtime)* Identify TesseractReference port in OpenAPI schema (#777)
+- Accept DLPack CUDA arrays (e.g. JAX) in GPU transports (#781)
 
 ### Refactor
 
