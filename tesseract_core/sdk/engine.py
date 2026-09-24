@@ -152,6 +152,44 @@ def parse_requirements(
 _LOCAL_DEPENDENCY_PREFIXES = (".", "/", "file://")
 
 
+def stage_runtime_package(dest: Path) -> Path:
+    """Write the runtime out as an installable package, and return where.
+
+    The result is a distribution named `tesseract_runtime` holding
+    `tesseract_core/runtime` and a `pyproject.toml` naming this SDK's version
+    and the dependencies of its `runtime` extra. Installing it is how both a
+    container and `Tesseract.from_source` give a Tesseract a runtime, so both
+    get the same code as the SDK that started them, with no index involved.
+
+    Note there is deliberately no `tesseract_core/__init__.py` in it, so
+    `tesseract_core` is a namespace package wherever this is installed and
+    importing `tesseract_core.runtime` does not drag in the SDK.
+    """
+    from jinja2 import Template
+
+    from tesseract_core import __version__ as tesseract_version
+
+    runtime_source_dir = get_runtime_dir()
+    copytree(
+        runtime_source_dir,
+        dest / "tesseract_core" / "runtime",
+        ignore=_ignore_pycache,
+    )
+
+    # Copy meta files, rendering the Jinja templates among them.
+    for metafile in (runtime_source_dir / "meta").glob("*"):
+        if metafile.suffix == ".jinja":
+            rendered = Template(metafile.read_text()).render(
+                runtime_dependencies=get_runtime_dependencies(),
+                version=tesseract_version,
+            )
+            (dest / metafile.stem).write_text(rendered)
+        else:
+            copy(metafile, dest)
+
+    return dest
+
+
 def declared_requirements_file(src_dir: Path, build_config: Any) -> Path | None:
     """The dependency file a Tesseract declares, or None when it declares none.
 
@@ -160,12 +198,7 @@ def declared_requirements_file(src_dir: Path, build_config: Any) -> Path | None:
     file unconditionally, so a build that gets past this point dies at a `COPY`
     with a message that names neither the config nor the provider.
 
-    Only the plain uv-pip case tolerates a missing file, because a build writes
-    an empty requirements file into the context for it. A lockfile and a conda
-    environment file have nothing to fall back on.
-
-    Shared with `Tesseract.from_source`, which asks the same question about the
-    same file but builds an environment on the host rather than in an image.
+    Shared with `Tesseract.from_source` in venv provisioning.
     """
     requirements = build_config.requirements
     path = src_dir / requirements._filename
@@ -188,6 +221,7 @@ def declared_requirements_file(src_dir: Path, build_config: Any) -> Path | None:
             f"`uv export --format pylock.toml -o {requirements._filename}`."
         )
 
+    # plain uv-pip case tolerates a missing file.
     return None
 
 
@@ -530,29 +564,7 @@ def prepare_build_context(
                 yaml.safe_dump(env_spec, f, sort_keys=False)
 
     runtime_source_dir = get_runtime_dir()
-    copytree(
-        runtime_source_dir,
-        context_dir / "__tesseract_runtime__" / "tesseract_core" / "runtime",
-        ignore=_ignore_pycache,
-    )
-    # Copy meta files (except Jinja templates, which we render)
-    from tesseract_core import __version__ as tesseract_version
-
-    for metafile in (runtime_source_dir / "meta").glob("*"):
-        if metafile.suffix == ".jinja":
-            # Render Jinja template
-            target_name = metafile.stem  # Remove .jinja suffix
-            template_content = metafile.read_text()
-            from jinja2 import Template
-
-            template = Template(template_content)
-            rendered = template.render(
-                runtime_dependencies=get_runtime_dependencies(),
-                version=tesseract_version,
-            )
-            (context_dir / "__tesseract_runtime__" / target_name).write_text(rendered)
-        else:
-            copy(metafile, context_dir / "__tesseract_runtime__")
+    stage_runtime_package(context_dir / "__tesseract_runtime__")
 
     # Docker requires a .dockerignore file to be at the root of the build context
     dockerignore_path = runtime_source_dir / "meta" / ".dockerignore"

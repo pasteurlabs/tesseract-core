@@ -32,8 +32,6 @@ import sys
 import tempfile
 from collections.abc import Iterable, Sequence
 from importlib.metadata import (
-    PackageNotFoundError,
-    distribution,
     metadata,
 )
 from pathlib import Path
@@ -44,7 +42,7 @@ from packaging.specifiers import InvalidSpecifier, SpecifierSet
 
 from .api_parse import ValidationError, get_config
 from .config import get_config as get_sdk_config
-from .engine import _split_local_dependency, declared_requirements_file
+from .engine import declared_requirements_file
 from .engine import parse_requirements as _parse_requirements
 from .exceptions import UserError
 
@@ -139,40 +137,17 @@ def _dist_versions(python_executable: Path) -> dict[str, str]:
 def _can_serve(python_executable: Path, version: str | None = None) -> bool:
     """Whether an environment can serve a Tesseract, optionally at `version`.
 
-    ``runtime`` is an optional extra, so having the SDK installed is not enough.
-    This is why ``pip install tesseract-core`` on its own cannot serve anything.
-    We test for uvicorn to tell the two apart: serving needs it, and the base
-    dependencies do not include it.
+    Looks for the `tesseract_runtime` distribution that
+    :func:`~tesseract_core.sdk.engine.stage_runtime_package` produces, which is
+    what a container installs too. uvicorn is checked as well because an
+    environment can carry the package without its dependencies having been
+    resolved, and serving cannot start without it.
     """
     installed = _dist_versions(python_executable)
-    core = installed.get("tesseract_core")
-    if core is None or (version is not None and core != version):
+    runtime = installed.get("tesseract_runtime")
+    if runtime is None or (version is not None and runtime != version):
         return False
     return "uvicorn" in installed
-
-
-@functools.cache
-def _runtime_install_spec() -> str:
-    """The spec to install so an environment has ``tesseract-core[runtime]``.
-
-    For a released install this pins our own version, so the Tesseract runs
-    against the same runtime as the SDK that started it. A development checkout
-    installs from the source tree, since its version is not on any index.
-    """
-    try:
-        dist = distribution("tesseract-core")
-    except PackageNotFoundError:  # pragma: no cover - the SDK is what is running
-        return "tesseract-core[runtime]"
-
-    direct_url = dist.read_text("direct_url.json")
-    if direct_url:
-        url = json.loads(direct_url).get("url", "")
-        if url.startswith("file://"):
-            local_path = Path(_split_local_dependency(url)[0])
-            if (local_path / "pyproject.toml").is_file():
-                return f"{local_path}[runtime]"
-
-    return f"tesseract-core[runtime]=={dist.version}"
 
 
 def _declared_requirements(api_path: Path) -> tuple[Any, Path | None]:
@@ -638,24 +613,33 @@ def _build_python_version(
 def _ensure_runtime(
     python_executable: Path, installer: Sequence[Any] | None = None
 ) -> None:
-    """Install ``tesseract-core[runtime]`` into an environment if it is missing.
+    """Install the Tesseract runtime into an environment if it is missing.
+
+    Built from this SDK's own source rather than fetched from an index, which
+    is what a container does too. That works offline, works however the SDK
+    itself was installed, and guarantees the Tesseract runs against the same
+    code as the SDK that started it.
 
     We check the installed version ourselves instead of letting the installer
-    work it out. In a development checkout the runtime comes from a local source
-    tree, and asking uv about it rebuilds the wheel every time, which costs
-    about as long as starting a Tesseract.
+    work it out, because building the package to find out costs about as long
+    as starting a Tesseract.
     """
     from tesseract_core import __version__
+
+    from .engine import stage_runtime_package
 
     if _can_serve(python_executable, __version__):
         return
 
-    spec = _runtime_install_spec()
     what = "Installing the Tesseract runtime"
-    if installer is not None:
-        _run([*installer, "install", spec], what)
-    else:
-        _run([*_uv(), "pip", "install", "--python", python_executable, spec], what)
+    with tempfile.TemporaryDirectory() as scratch:
+        staged = stage_runtime_package(Path(scratch) / "tesseract_runtime")
+        if installer is not None:
+            _run([*installer, "install", staged], what)
+        else:
+            _run(
+                [*_uv(), "pip", "install", "--python", python_executable, staged], what
+            )
 
     # An installer can report success and still leave the environment unable to
     # serve, for instance by installing somewhere other than where we asked.
@@ -663,10 +647,10 @@ def _ensure_runtime(
     # Tesseract fail to import much later on.
     if not _can_serve(python_executable):
         raise RuntimeError(
-            f"Installed {spec} into {python_executable.parent.parent}, but it "
-            "still cannot serve a Tesseract. Check that the installer put it "
-            "there, or pass `python_executable` to name an environment "
-            "yourself."
+            f"Installed the Tesseract runtime into "
+            f"{python_executable.parent.parent}, but it still cannot serve a "
+            "Tesseract. Check that the installer put it there, or pass "
+            "`python_executable` to name an environment yourself."
         )
 
 

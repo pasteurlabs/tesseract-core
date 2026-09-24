@@ -82,6 +82,27 @@ def popen_kwargs() -> dict[str, Any]:
     return {"start_new_session": True}
 
 
+def _runtime_command(python_executable: str) -> list[str]:
+    """How to invoke `tesseract-runtime` on a given interpreter.
+
+    Prefers the console script next to the interpreter, which is what a
+    container's entrypoint runs. `python -m` would do the same job, except that
+    it puts the working directory at the front of `sys.path`: a Tesseract
+    served from a checkout of this project would then import that checkout's
+    `tesseract_core` rather than the one installed in its own environment. A
+    script puts its own directory there instead.
+
+    Falls back to `-m` when the script is not beside the interpreter, which
+    happens for a `pip install --user`, where scripts land in `~/.local/bin`.
+    """
+    script = Path(python_executable).parent / (
+        "tesseract-runtime.exe" if os.name == "nt" else "tesseract-runtime"
+    )
+    if script.is_file():
+        return [str(script)]
+    return [python_executable, "-m", "tesseract_core.runtime"]
+
+
 def _stop_process(process: subprocess.Popen, *, force: bool) -> None:
     """(Attempt to) exit a child process along with any of its associated subprocesses.
 
@@ -430,9 +451,7 @@ def serve(
         pass_fds = (watch_read,) if watch_read is not None else ()
 
         command = [
-            python_executable,
-            "-m",
-            "tesseract_core.runtime",
+            *_runtime_command(python_executable),
             "serve",
             "--host",
             host_ip,
