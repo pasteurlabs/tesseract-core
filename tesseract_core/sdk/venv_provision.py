@@ -190,7 +190,12 @@ def _declared_requirements(api_path: Path) -> tuple[Any, Path] | None:
     src_dir = api_path.parent
 
     if not (src_dir / "tesseract_config.yaml").is_file():
-        return None
+        raise UserError(
+            f"No tesseract_config.yaml next to {api_path.name}, so there is no "
+            "way to tell what this Tesseract needs installed. Add one, or pass "
+            "`python_executable` to name an interpreter that already has what "
+            "it needs."
+        )
 
     try:
         build_config = get_config(src_dir).build_config

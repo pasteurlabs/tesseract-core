@@ -537,9 +537,18 @@ def test_binref_pool_is_available_without_a_linux_host(dummy_api_path, sample_in
     assert result["result"].shape == sample_inputs["a"].shape
 
 
+def _scratch_tesseract(directory: Path, api: str) -> Path:
+    """Write the smallest Tesseract that can be served, and return its api file."""
+    (directory / "tesseract_config.yaml").write_text('name: "scratch"\n')
+    api_path = directory / "tesseract_api.py"
+    api_path.write_text(api)
+    return api_path
+
+
 def test_startup_failure_surfaces_child_traceback(tmp_path):
-    api_path = tmp_path / "tesseract_api.py"
-    api_path.write_text("raise RuntimeError('kaboom at import time')\n")
+    api_path = _scratch_tesseract(
+        tmp_path, "raise RuntimeError('kaboom at import time')\n"
+    )
 
     tess = Tesseract.from_source(api_path)
     with pytest.raises(RuntimeError) as excinfo:
@@ -552,8 +561,9 @@ def test_startup_failure_surfaces_child_traceback(tmp_path):
 
 def test_failed_startup_leaves_no_log_file(tmp_path):
     """The captured output is read into the error, so its file has served its purpose."""
-    api_path = tmp_path / "tesseract_api.py"
-    api_path.write_text("raise RuntimeError('kaboom at import time')\n")
+    api_path = _scratch_tesseract(
+        tmp_path, "raise RuntimeError('kaboom at import time')\n"
+    )
 
     temp_dir = Path(tempfile.gettempdir())
     before = set(temp_dir.glob("tesseract_serve_*.log"))
@@ -964,6 +974,21 @@ def test_a_local_requirement_does_not_constrain_the_python(example_copy):
         )
         is None
     )
+
+
+def test_a_missing_config_is_reported(dummy_tesseract_package):
+    """No config means no way to tell what to install, so say so.
+
+    The runtime itself never reads `tesseract_config.yaml`, so this could serve
+    on the caller's interpreter instead. But then a `tesseract_requirements.txt`
+    sitting next to the api file would be silently ignored, and `tesseract
+    build` would reject the same directory anyway.
+    """
+    api_path = dummy_tesseract_package / "tesseract_api.py"
+    (dummy_tesseract_package / "tesseract_config.yaml").unlink()
+
+    with pytest.raises(UserError, match=r"tesseract_config\.yaml"):
+        venv_provision.resolve_python_executable(api_path)
 
 
 def test_a_broken_config_is_reported_not_worked_around(dummy_tesseract_package):
