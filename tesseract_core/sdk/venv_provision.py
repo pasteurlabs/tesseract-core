@@ -355,9 +355,9 @@ def _build_pip_venv(
                 raise
             raise RuntimeError(
                 f"{e}\n\nThis environment was built on Python {python_version}, "
-                "the default (as in `tesseract build`). If a dependency needs a "
-                "different Python, set `build_config.requirements.python_version` "
-                "in tesseract_config.yaml."
+                "the default (as in `tesseract build`). If the error above says a "
+                "dependency needs another Python, set "
+                "`build_config.requirements.python_version` in tesseract_config.yaml."
             ) from e
         if not build_config.requirements.is_pylock:
             editable = _local_directories(requirements_file)
