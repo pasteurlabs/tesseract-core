@@ -14,7 +14,6 @@ import hashlib
 import json
 import logging
 import os
-import re
 import shutil
 import subprocess
 import tempfile
@@ -213,28 +212,16 @@ def _local_directories(requirements_file: Path) -> list[str]:
 def _pylock_requires_python(lockfile: Path) -> SpecifierSet | None:
     """A PEP 751 lockfile's top-level `requires-python`, if any.
 
-    The key is optional, but an unreadable file or invalid value raises. Without
-    `tomllib` (3.10) the lines before the first table are scanned.
+    The key is optional, but an unreadable file or invalid value raises.
     """
     try:
         import tomllib
-    except ModuleNotFoundError:  # Python 3.10
-        tomllib = None
+    except ModuleNotFoundError:  # Python 3.10; pip is an SDK dependency.
+        from pip._vendor import tomli as tomllib
 
     try:
-        if tomllib is not None:
-            with lockfile.open("rb") as handle:
-                declared = tomllib.load(handle).get("requires-python")
-        else:
-            declared = None
-            for line in lockfile.read_text(encoding="utf-8").splitlines():
-                stripped = line.strip()
-                if stripped.startswith("["):
-                    break
-                match = re.match(r"""requires-python\s*=\s*["'](.+?)["']""", stripped)
-                if match:
-                    declared = match.group(1)
-                    break
+        with lockfile.open("rb") as handle:
+            declared = tomllib.load(handle).get("requires-python")
     except (OSError, ValueError) as e:
         raise UserError(f"Could not read {lockfile}: {e}") from e
 
