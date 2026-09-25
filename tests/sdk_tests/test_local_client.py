@@ -1305,10 +1305,11 @@ def test_a_broken_config_is_reported_not_worked_around(dummy_tesseract_package):
     Carrying on with this interpreter would hide it.
     """
     api_path = dummy_tesseract_package / "tesseract_api.py"
-    (dummy_tesseract_package / "tesseract_config.yaml").write_text("name: [unclosed\n")
+    for content in ("name: [unclosed\n", ""):
+        (dummy_tesseract_package / "tesseract_config.yaml").write_text(content)
 
-    with pytest.raises(UserError, match=r"tesseract_config\.yaml"):
-        venv_provision.resolve_python_executable(api_path)
+        with pytest.raises(UserError, match=r"tesseract_config\.yaml"):
+            venv_provision.resolve_python_executable(api_path)
 
 
 def test_an_explicit_interpreter_skips_resolution(dummy_tesseract_package):

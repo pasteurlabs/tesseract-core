@@ -22,7 +22,6 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-import yaml
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 
 from .api_parse import DEFAULT_BASE_IMAGE_PYTHON, ValidationError, get_config
@@ -75,8 +74,7 @@ def _declared_requirements(api_path: Path) -> tuple[Any, Path | None]:
 
     try:
         build_config = get_config(src_dir).build_config
-    except (ValidationError, yaml.YAMLError) as e:
-        # Only these mean "bad file"; anything else is our bug and should propagate.
+    except ValidationError as e:
         raise UserError(
             f"Could not read {src_dir / 'tesseract_config.yaml'}, so there is no "
             f"way to tell what this Tesseract needs installed: {e}"
@@ -87,20 +85,17 @@ def _declared_requirements(api_path: Path) -> tuple[Any, Path | None]:
 
 def _uv() -> tuple[str, ...]:
     """How to invoke uv, or raise explaining what to do without it."""
-    configured = get_sdk_config().uv_executable
-    if configured:
-        return configured
-
-    found = shutil.which("uv")
-    if found is None:
+    uv = get_sdk_config().uv_executable
+    if shutil.which(uv[0]) is None:
         raise RuntimeError(
             "uv is needed to build an environment for this Tesseract and was "
-            "not found on PATH. Install it (https://docs.astral.sh/uv/), point "
+            "not found on PATH. Install it "
+            "(https://docs.astral.sh/uv/getting-started/installation/), point "
             "TESSERACT_UV_EXECUTABLE at it, or pass `python_executable` to name "
             "an interpreter that already has the Tesseract's dependencies and "
             "`tesseract-core[runtime]`."
         )
-    return (found,)
+    return uv
 
 
 def _conda() -> tuple[str, ...]:
@@ -437,7 +432,7 @@ def declared_env(api_path: Path) -> dict[str, str]:
     """
     try:
         return dict(get_config(api_path.parent).env)
-    except (OSError, TypeError, ValidationError, yaml.YAMLError):
+    except (OSError, ValidationError):
         return {}
 
 

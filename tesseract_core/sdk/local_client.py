@@ -365,9 +365,12 @@ def serve(
         runtime_config: Runtime configuration options, converted to
             ``TESSERACT_*`` environment variables just as in the containerized
             path.
-        python_executable: Interpreter used to run the Tesseract. If None, a
-            managed environment is built from ``tesseract_config.yaml`` (see
+        python_executable: Interpreter used to run the Tesseract. If None, an
+            environment is built from ``tesseract_config.yaml`` next to
+            ``tesseract_api.py`` and reused while it is up to date (see
             :func:`~tesseract_core.sdk.venv_provision.resolve_python_executable`).
+            A path is used as-is (e.g. ``sys.executable`` for the current
+            interpreter).
         skip_health_check: If True, return as soon as the process is spawned
             without waiting for it to answer /health. The caller is then
             responsible for establishing readiness.

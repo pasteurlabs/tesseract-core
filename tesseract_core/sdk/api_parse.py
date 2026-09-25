@@ -523,8 +523,14 @@ def get_config(src_dir: Path) -> TesseractConfig:
     if not config_file.exists():
         raise FileNotFoundError(f"No file found at {config_file}")
 
-    with open(config_file) as f:
-        config = yaml.safe_load(f)
+    try:
+        with open(config_file) as f:
+            config = yaml.safe_load(f)
+    except yaml.YAMLError as err:
+        raise ValidationError(f"Invalid YAML in {config_file}: {err}") from err
+
+    if not isinstance(config, dict):
+        raise ValidationError(f"{config_file} must contain a YAML mapping.")
 
     try:
         return TesseractConfig(**config)

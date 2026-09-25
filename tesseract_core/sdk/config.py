@@ -49,9 +49,11 @@ class RuntimeConfig(BaseModel):
     ] = ()
     docker_run_args: Annotated[tuple[str, ...], BeforeValidator(maybe_split_args)] = ()
 
-    # Used to build environments for `Tesseract.from_source`. If empty the
-    # executables will be looked for in the standard places if needed.
-    uv_executable: Annotated[tuple[str, ...], BeforeValidator(validate_executable)] = ()
+    # Used to build environments for `Tesseract.from_source`. If conda is
+    # unset, CONDA_EXE and then conda, mamba and micromamba on PATH are tried.
+    uv_executable: Annotated[tuple[str, ...], BeforeValidator(validate_executable)] = (
+        "uv",
+    )
     conda_executable: Annotated[
         tuple[str, ...], BeforeValidator(validate_executable)
     ] = ()
