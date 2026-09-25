@@ -217,10 +217,6 @@ class CondaRequirements(BaseModel):
 PythonRequirements = PipRequirements | CondaRequirements
 
 
-# The Python in the default `base_image`, used when no python_version is set.
-DEFAULT_BASE_IMAGE_PYTHON = "3.11"
-
-
 class TesseractBuildConfig(BaseModel, validate_assignment=True):
     """Configuration options for building a Tesseract."""
 

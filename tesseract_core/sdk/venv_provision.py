@@ -24,7 +24,7 @@ from typing import Any
 
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 
-from .api_parse import DEFAULT_BASE_IMAGE_PYTHON, ValidationError, get_config
+from .api_parse import ValidationError, get_config
 from .config import get_config as get_sdk_config
 from .engine import (
     _split_local_dependency,
@@ -45,6 +45,11 @@ SCRUBBED_IMPORT_VARS = ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV")
 # PIP_* settings (index urls etc.) are honoured.
 _SCRUBBED_INSTALL_VARS = ("PIP_TARGET", "PIP_PREFIX", "PIP_ROOT", "PIP_USER")
 
+
+# The Python in the default `build_config.base_image`, which `tesseract build`
+# uses when no python_version is set. debian:bookworm-slim is Debian 12, which
+# ships 3.11 for its whole lifetime; a test fails if the default image changes.
+DEFAULT_BASE_IMAGE_PYTHON = "3.11"
 
 # Deliberately not `.venv`: that one is the user's, and we neither read nor write it.
 _MANAGED_VENV_NAME = ".tesseract-venv"

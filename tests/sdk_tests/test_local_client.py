@@ -24,8 +24,9 @@ import requests
 
 from tesseract_core import Tesseract
 from tesseract_core.sdk import local_client, serving, venv_provision
-from tesseract_core.sdk.api_parse import DEFAULT_BASE_IMAGE_PYTHON
+from tesseract_core.sdk.api_parse import TesseractBuildConfig
 from tesseract_core.sdk.exceptions import UserError
+from tesseract_core.sdk.venv_provision import DEFAULT_BASE_IMAGE_PYTHON
 
 pytestmark = pytest.mark.timeout(120)
 
@@ -942,6 +943,15 @@ def test_a_removed_interpreter_is_not_trusted(example_copy):
     venv_provision._python_in(venv).unlink()
 
     assert not venv_provision._stamp_matches(venv, stamp)
+
+
+def test_default_python_tracks_the_default_base_image():
+    """Changing the default base image means updating DEFAULT_BASE_IMAGE_PYTHON."""
+    assert (
+        TesseractBuildConfig.model_fields["base_image"].default
+        == "debian:bookworm-slim"
+    ), "update DEFAULT_BASE_IMAGE_PYTHON to the new base image's Python"
+    assert DEFAULT_BASE_IMAGE_PYTHON == "3.11"
 
 
 def test_undeclared_python_matches_the_build(example_copy):
