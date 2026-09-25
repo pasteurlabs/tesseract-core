@@ -1000,6 +1000,47 @@ def test_a_lockfile_python_range_is_honoured(
     )
 
 
+@pytest.mark.parametrize(
+    "content",
+    ['lock-version = "1.0"\nrequires-python = "not a range"\n', "lock-version = [\n"],
+)
+def test_a_broken_lockfile_is_reported(dummy_tesseract_package, content):
+    """A lockfile that cannot be read fails loudly rather than guessing a Python."""
+    (dummy_tesseract_package / "tesseract_config.yaml").write_text(
+        'name: "locked"\n'
+        "build_config:\n"
+        "  requirements:\n"
+        "    provider: uv-pip\n"
+        "    requirements_file: pylock.toml\n"
+    )
+    (dummy_tesseract_package / "pylock.toml").write_text(content)
+
+    with pytest.raises(UserError, match=r"pylock\.toml"):
+        venv_provision.resolve_python_executable(
+            dummy_tesseract_package / "tesseract_api.py"
+        )
+
+
+def test_a_lockfile_without_requires_python_uses_the_default(dummy_tesseract_package):
+    """requires-python is optional in PEP 751, and the build ignores it anyway."""
+    (dummy_tesseract_package / "tesseract_config.yaml").write_text(
+        'name: "locked"\n'
+        "build_config:\n"
+        "  requirements:\n"
+        "    provider: uv-pip\n"
+        "    requirements_file: pylock.toml\n"
+    )
+    (dummy_tesseract_package / "pylock.toml").write_text('lock-version = "1.0"\n')
+    build_config, requirements_file = venv_provision._declared_requirements(
+        dummy_tesseract_package / "tesseract_api.py"
+    )
+
+    assert (
+        venv_provision._build_python_version(build_config, requirements_file)
+        == DEFAULT_BASE_IMAGE_PYTHON
+    )
+
+
 def test_changing_the_python_version_invalidates_the_stamp(dummy_tesseract_package):
     """Build settings are part of the stamp, not just the requirements file."""
     api_path = dummy_tesseract_package / "tesseract_api.py"

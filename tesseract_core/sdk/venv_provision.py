@@ -213,7 +213,8 @@ def _local_directories(requirements_file: Path) -> list[str]:
 def _pylock_requires_python(lockfile: Path) -> SpecifierSet | None:
     """A PEP 751 lockfile's top-level `requires-python`, if any.
 
-    Without `tomllib` (3.10) the lines before the first table are scanned.
+    The key is optional, but an unreadable file or invalid value raises. Without
+    `tomllib` (3.10) the lines before the first table are scanned.
     """
     try:
         import tomllib
@@ -235,15 +236,16 @@ def _pylock_requires_python(lockfile: Path) -> SpecifierSet | None:
                     declared = match.group(1)
                     break
     except (OSError, ValueError) as e:
-        logger.debug("Could not read requires-python from %s: %s", lockfile, e)
-        return None
+        raise UserError(f"Could not read {lockfile}: {e}") from e
 
-    if not declared:
+    if declared is None:
         return None
     try:
         return SpecifierSet(declared)
-    except InvalidSpecifier:
-        return None
+    except (InvalidSpecifier, TypeError) as e:
+        raise UserError(
+            f"{lockfile.name} has an invalid requires-python: {declared!r}"
+        ) from e
 
 
 def _build_python_version(
