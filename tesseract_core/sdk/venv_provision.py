@@ -104,30 +104,19 @@ def _uv() -> tuple[str, ...]:
 
 
 def _conda() -> tuple[str, ...]:
-    """How to invoke conda, or raise explaining what to do without it.
-
-    CONDA_EXE (exported by conda's shell hook) wins over PATH.
-    """
-    configured = get_sdk_config().conda_executable
-    if configured:
-        return configured
-
-    from_env = os.environ.get("CONDA_EXE")
-    if from_env and Path(from_env).is_file():
-        return (from_env,)
-
-    for candidate in ("conda", "mamba", "micromamba"):
-        found = shutil.which(candidate)
-        if found is not None:
-            return (found,)
-
-    raise RuntimeError(
-        "This Tesseract declares `requirements.provider: conda`, but no conda "
-        "was found: CONDA_EXE is unset and none of conda, mamba or micromamba "
-        "is on PATH. Install one, point TESSERACT_CONDA_EXECUTABLE at it, or "
-        "pass `python_executable` to name an interpreter that already has the "
-        "Tesseract's dependencies and `tesseract-core[runtime]`."
-    )
+    """How to invoke conda, or raise explaining what to do without it."""
+    conda = get_sdk_config().conda_executable
+    if shutil.which(conda[0]) is None:
+        raise RuntimeError(
+            "This Tesseract declares `requirements.provider: conda`, but conda "
+            f"(`{conda[0]}`) was not found. Install it "
+            "(https://docs.conda.io/projects/conda/en/latest/user-guide/install/), "
+            "point TESSERACT_CONDA_EXECUTABLE at it or at a conda-compatible tool "
+            "such as mamba, or pass `python_executable` to name an interpreter "
+            "that already has the Tesseract's dependencies and "
+            "`tesseract-core[runtime]`."
+        )
+    return conda
 
 
 @functools.cache

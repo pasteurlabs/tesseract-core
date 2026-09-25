@@ -1271,6 +1271,27 @@ def test_a_declared_python_version_applies_with_no_requirements(
     assert venv_provision._build_python_version(build_config, None) == "3.11"
 
 
+def test_conda_defaults_to_the_active_installation(monkeypatch):
+    """The shell hook's CONDA_EXE names the conda to use."""
+    from tesseract_core.sdk.config import RuntimeConfig
+
+    monkeypatch.setenv("CONDA_EXE", "/opt/miniforge/bin/conda")
+    assert RuntimeConfig().conda_executable == ("/opt/miniforge/bin/conda",)
+
+    monkeypatch.delenv("CONDA_EXE")
+    assert RuntimeConfig().conda_executable == ("conda",)
+
+
+def test_a_missing_conda_is_reported(monkeypatch):
+    from tesseract_core.sdk.config import RuntimeConfig
+
+    monkeypatch.setenv("CONDA_EXE", "/nonexistent/conda")
+    monkeypatch.setattr(venv_provision, "get_sdk_config", RuntimeConfig)
+
+    with pytest.raises(RuntimeError, match="TESSERACT_CONDA_EXECUTABLE"):
+        venv_provision._conda()
+
+
 def test_conda_without_its_environment_file_is_reported(dummy_tesseract_package):
     """Declaring conda and providing no environment file is an error.
 

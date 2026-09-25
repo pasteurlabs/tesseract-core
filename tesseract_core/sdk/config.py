@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Annotated, Any
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
 
 def validate_executable(value: str | Sequence[str]) -> tuple[str, ...]:
@@ -49,14 +49,14 @@ class RuntimeConfig(BaseModel):
     ] = ()
     docker_run_args: Annotated[tuple[str, ...], BeforeValidator(maybe_split_args)] = ()
 
-    # Used to build environments for `Tesseract.from_source`. If conda is
-    # unset, CONDA_EXE and then conda, mamba and micromamba on PATH are tried.
+    # Used to build environments for `Tesseract.from_source`. conda defaults to
+    # CONDA_EXE, which conda's shell hook exports for the active installation.
     uv_executable: Annotated[tuple[str, ...], BeforeValidator(validate_executable)] = (
         "uv",
     )
     conda_executable: Annotated[
         tuple[str, ...], BeforeValidator(validate_executable)
-    ] = ()
+    ] = Field(default_factory=lambda: (os.environ.get("CONDA_EXE") or "conda",))
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
