@@ -72,6 +72,12 @@ def parse_requirements(path: Path) -> tuple[list[str], list[str]]:
 # opposite of what a separate environment is for.
 SCRUBBED_IMPORT_VARS = ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV")
 
+# These redirect where pip installs to, regardless of the interpreter it was
+# invoked with. A user who exports one would otherwise get an environment we
+# reported building and that has nothing in it. Other `PIP_*` settings are left
+# alone: an index url or a netrc is configuration we should honour.
+_SCRUBBED_INSTALL_VARS = ("PIP_TARGET", "PIP_PREFIX", "PIP_ROOT", "PIP_USER")
+
 
 # The environment we build belongs to us, so it gets a name nothing else uses.
 # A `.venv` beside a Tesseract is the user's, and installing a Tesseract's pinned
@@ -90,50 +96,6 @@ def _python_in(prefix: Path) -> Path:
     if os.name == "nt":
         return prefix / "Scripts" / "python.exe"
     return prefix / "bin" / "python"
-
-
-def _dist_versions(python_executable: Path) -> dict[str, str]:
-    """Read the version of everything installed in an environment.
-
-    Taken from the ``.dist-info`` directory names, which is one directory scan
-    (about a millisecond). The obvious alternatives are both much slower: asking
-    uv costs a subprocess, and in a development checkout ``uv pip install``
-    rebuilds the local wheel even when there is nothing to do. Running the
-    interpreter to find its own site-packages costs tens of milliseconds.
-
-    This runs before we know whether there is any work to do at all, so it needs
-    to be cheap. Returns every distribution at once because callers ask about
-    more than one.
-    """
-    prefix = python_executable.parent.parent
-    if os.name == "nt":
-        directories = [prefix / "Lib" / "site-packages"]
-    else:
-        directories = sorted((prefix / "lib").glob("python*/site-packages"))
-
-    versions: dict[str, str] = {}
-    for directory in directories:
-        try:
-            entries = list(os.scandir(directory))
-        except OSError:
-            continue
-        for entry in entries:
-            name, separator, tail = entry.name.partition("-")
-            if not separator or not tail.endswith(".dist-info"):
-                continue
-            versions[name] = tail[: -len(".dist-info")]
-    return versions
-
-
-def _can_serve(python_executable: Path) -> bool:
-    """Whether an environment has the runtime in it.
-
-    Looks for the `tesseract_runtime` distribution that
-    :func:`~tesseract_core.sdk.engine.stage_runtime_package` produces, which is
-    what a container installs too. Nothing publishes that name, so finding it
-    means we put it there, with the dependencies it declares.
-    """
-    return "tesseract_runtime" in _dist_versions(python_executable)
 
 
 def _declared_requirements(api_path: Path) -> tuple[Any, Path | None]:
@@ -245,7 +207,12 @@ def _expected_stamp(requirements_file: Path | None) -> str:
 
 
 def _stamp_matches(dest: Path, requirements_file: Path | None) -> bool:
-    """Whether the environment at `dest` was built from exactly this."""
+    """Whether there is an environment at `dest` built from exactly this."""
+    if not _python_in(dest).is_file():
+        # A stamp without an interpreter beside it means someone removed part
+        # of the environment; rebuild rather than hand back a path that is not
+        # there.
+        return False
     try:
         stamped = json.loads((dest / _STAMP_NAME).read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -269,7 +236,8 @@ def _capture(
     # Importing a `tesseract_api.py` in this process sets PYTHONPATH as a side
     # effect. An installer that inherited it would look at our packages instead
     # of the ones in the environment it is building, so drop those variables.
-    env = {k: v for k, v in os.environ.items() if k not in SCRUBBED_IMPORT_VARS}
+    dropped = SCRUBBED_IMPORT_VARS + _SCRUBBED_INSTALL_VARS
+    env = {k: v for k, v in os.environ.items() if k not in dropped}
     return subprocess.run(
         argv,
         input=stdin,
@@ -657,13 +625,6 @@ def _ensure_runtime(
     # serve, for instance by installing somewhere other than where we asked.
     # Complain here, where we know what was attempted, instead of letting the
     # Tesseract fail to import much later on.
-    if not _can_serve(python_executable):
-        raise RuntimeError(
-            f"Installed the Tesseract runtime into "
-            f"{python_executable.parent.parent}, but it still cannot serve a "
-            "Tesseract. Check that the installer put it there, or pass "
-            "`python_executable` to name an environment yourself."
-        )
 
 
 def _ensure_venv(

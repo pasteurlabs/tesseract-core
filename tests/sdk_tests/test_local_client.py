@@ -898,25 +898,37 @@ def test_an_environment_built_once_is_reused(dummy_tesseract_package):
         assert venv_provision.resolve_python_executable(api_path) == first
 
 
-def test_an_environment_without_the_runtime_is_completed(example_copy):
-    """A `.venv` that cannot serve gets completed, not handed back as-is.
+def test_an_incomplete_environment_is_completed(example_copy):
+    """A directory that looks like our environment but is not gets rebuilt.
 
-    ``runtime`` is an optional extra, so an environment can have the SDK and
-    still be unable to serve anything. This is why ``pip install
-    tesseract-core`` followed by ``from_source`` fails. We must not mistake such
-    an environment for a usable one.
+    An interrupted build can leave one behind. Nothing is stamped, so there is
+    no claim that it holds anything, and the next serve finishes the job rather
+    than trusting the directory's existence.
     """
     api_path = example_copy("localpackage")
     venv = api_path.parent / venv_provision._MANAGED_VENV_NAME
-    # Built the way the resolver builds one, so this really is the kind of bare
-    # .venv a user might already have, not an imitation of it.
+
     venv_provision._ensure_venv(venv)
-    assert not venv_provision._can_serve(venv_provision._python_in(venv))
+    assert not (venv / venv_provision._STAMP_NAME).exists()
 
     with Tesseract.from_source(api_path) as tess:
         assert "Hello World!" in tess.apply({"name": "World"})["message"]
 
-    assert venv_provision._can_serve(venv_provision._python_in(venv))
+    assert (venv / venv_provision._STAMP_NAME).is_file()
+
+
+def test_a_removed_interpreter_is_not_trusted(example_copy):
+    """A stamp on its own is not enough; the interpreter has to be there too."""
+    api_path = example_copy("localpackage")
+    venv = api_path.parent / venv_provision._MANAGED_VENV_NAME
+    requirements = api_path.parent / "tesseract_requirements.txt"
+
+    venv_provision.resolve_python_executable(api_path)
+    assert venv_provision._stamp_matches(venv, requirements)
+
+    venv_provision._python_in(venv).unlink()
+
+    assert not venv_provision._stamp_matches(venv, requirements)
 
 
 def test_python_bounds_exclude_what_the_runtime_cannot_use():
