@@ -1251,6 +1251,33 @@ def _decode_array(
     return arr
 
 
+def _make_tuned_session() -> requests.Session:
+    """Build the requests session used to talk to a served Tesseract.
+
+    Mounts a pooled adapter with a retry policy so transient connection failures
+    and 5xx responses are retried instead of failing the call. Read timeouts are
+    not retried: a Tesseract endpoint can legitimately run longer than the read
+    timeout, and retrying that would hammer a working-but-slow server.
+
+    Environment-based configuration (proxies, ``.netrc``, CA-bundle env vars) is
+    left at the requests default so those still work.
+    """
+    session = requests.Session()
+    session.headers["Content-Type"] = "application/json"
+    retries = requests.adapters.Retry(
+        total=2,
+        connect=2,
+        read=False,
+        status=2,
+        backoff_factor=0.1,
+        status_forcelist=(502, 503, 504),
+    )
+    adapter = requests.adapters.HTTPAdapter(max_retries=retries)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    return session
+
+
 class HTTPClient:
     """HTTP Client for Tesseracts."""
 
@@ -1276,8 +1303,7 @@ class HTTPClient:
         self._gpu_transport = gpu_transport
         self._input_path = Path(input_path) if input_path is not None else None
         self._timeout = timeout
-        self._session = requests.Session()
-        self._session.headers["Content-Type"] = "application/json"
+        self._session = _make_tuned_session()
         # Opt-in warm-buffer pool for binref inputs. Only meaningful when passing
         # inputs as binref into a mounted (ideally shared-memory) input dir.
         self._binref_pool: BinrefWritePool | None = None
@@ -1332,6 +1358,12 @@ class HTTPClient:
         }
         if self._timeout is not None:
             request_kwargs["timeout"] = self._timeout
+        # Stream the response so the body is read in large chunks (see
+        # _read_body) instead of requests' default 10 KB reassembly, which
+        # dominates decode time for large array payloads. Only real
+        # requests sessions accept `stream`; injected test doubles may not.
+        if type(self._session) is requests.Session:
+            request_kwargs["stream"] = True
         try:
             return self._session.request(**request_kwargs)
         except requests.ConnectionError:
@@ -1340,6 +1372,41 @@ class HTTPClient:
             # connections (uvicorn timeout_keep_alive) that can cause
             # ConnectionError on an otherwise healthy server.
             return self._session.request(**request_kwargs)
+
+    # Cap on the streamed read chunk. The chunk is sized to the response's
+    # Content-Length so a small body is read in one shot, but capped so a huge
+    # response is read in bounded pieces rather than one buffer the size of the
+    # whole body. 8 MB captures nearly all of the large-payload speedup over
+    # requests' 10 KB default while keeping the peak read buffer small.
+    _READ_CHUNK_CAP = 8 << 20
+
+    @staticmethod
+    def _read_body(response: requests.Response) -> bytes:
+        """Read a response body in large, bounded chunks.
+
+        ``requests`` reassembles ``response.content`` from 10 KB chunks and then
+        copies the whole buffer again, which is a large fraction of decode time
+        for big array payloads. Streaming with a chunk sized to the response's
+        ``Content-Length`` (capped at ``_READ_CHUNK_CAP``) reads a small body in
+        one iteration and a large one in a few, avoiding both the per-10 KB loop
+        and an unbounded read buffer. ``iter_content`` still applies any
+        content-decoding, so a compressed Content-Length is a safe read hint; if
+        the header is absent, the cap is used directly.
+
+        Falls back to ``.content`` for a non-streamed response (e.g. an injected
+        test client), where the body is already buffered.
+        """
+        if getattr(response, "raw", None) is not None and not getattr(
+            response, "_content_consumed", True
+        ):
+            content_length = response.headers.get("Content-Length")
+            if content_length is not None and content_length.isdigit():
+                chunk_size = min(int(content_length), HTTPClient._READ_CHUNK_CAP)
+            else:
+                chunk_size = HTTPClient._READ_CHUNK_CAP
+            # chunk_size must be a positive int; a zero-length body yields none.
+            return b"".join(response.iter_content(chunk_size=max(chunk_size, 1)))
+        return response.content
 
     def _request(
         self,
@@ -1374,7 +1441,9 @@ class HTTPClient:
                 response = self._send(
                     url, method, orjson.dumps(encoded_payload), params
                 )
-                return self._decode_response(response, endpoint)
+                # Read the body before the finally releases the input files.
+                body = self._read_body(response)
+                return self._decode_response(response, endpoint, body)
             finally:
                 for f in binref_input_files:
                     f.unlink(missing_ok=True)
@@ -1383,18 +1452,21 @@ class HTTPClient:
                         self._binref_pool.checkin(slot)
 
         # Non-binref path: _encode_payload handles base64 and the GPU transport,
-        # holding any exported GPU inputs alive until the response has been fully
-        # read. `requests` buffers the whole body before `_send` returns, so
-        # exiting the block afterwards releases them at the earliest safe point.
+        # holding any exported GPU inputs alive until the response body has been
+        # read. Reading it inside the block releases them at the earliest safe
+        # point, matching the lifetime the streamed read no longer gets for free.
         with _encode_payload(payload, self._gpu_transport) as encoded_payload:
             response = self._send(url, method, orjson.dumps(encoded_payload), params)
-        return self._decode_response(response, endpoint)
+            body = self._read_body(response)
+        return self._decode_response(response, endpoint, body)
 
-    def _decode_response(self, response: requests.Response, endpoint: str) -> dict:
+    def _decode_response(
+        self, response: requests.Response, endpoint: str, body: bytes
+    ) -> dict:
         if response.status_code == requests.codes.unprocessable_entity:
             # Try and raise a more helpful error if the response is a Pydantic error
             try:
-                data = from_json(response.content)
+                data = from_json(body)
             except requests.JSONDecodeError:
                 # Is not a Pydantic error
                 data = {}
@@ -1418,10 +1490,11 @@ class HTTPClient:
 
         if not response.ok:
             raise RuntimeError(
-                f"Error {response.status_code} from Tesseract: {response.text}"
+                f"Error {response.status_code} from Tesseract: "
+                f"{body.decode('utf-8', errors='replace')}"
             )
 
-        data = from_json(response.content)
+        data = from_json(body)
 
         if endpoint in [
             "apply",
