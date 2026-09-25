@@ -657,6 +657,22 @@ class Tesseract:
         """
         return [endpoint.lstrip("/") for endpoint in self.openapi_schema["paths"]]
 
+    @property
+    @requires_client
+    def supported_device_transports(self) -> tuple[str, ...]:
+        """Device transports that can be used to exchange arrays with this Tesseract.
+
+        These are the ``gpu_transport`` values (e.g. ``cuda_ipc``) this client
+        uses to pass GPU arrays by reference instead of copying them to the host.
+        Tesseracts served without a GPU transport, and in-process Tesseracts
+        created via :meth:`from_tesseract_api` (which share memory with the
+        caller), support none.
+
+        Returns:
+            a tuple of supported device transport names, empty if none.
+        """
+        return self._client.supported_device_transports
+
     def container_info(self) -> Container:
         """Retrieve information on the Docker container serving this Tesseract.
 
@@ -1293,6 +1309,13 @@ class HTTPClient:
         """(Sanitized) URL to connect to."""
         return self._url
 
+    @property
+    def supported_device_transports(self) -> tuple[str, ...]:
+        """Device transports this client uses for GPU arrays (empty if none)."""
+        if self._gpu_transport == "none":
+            return ()
+        return (self._gpu_transport,)
+
     def _send(
         self, url: str, method: str, data: bytes, params: dict
     ) -> requests.Response:
@@ -1530,6 +1553,15 @@ class LocalClient:
         self._output_path = output_path
         # Allows external clients (e.g. tesseract-jax) to access module directly
         self.api_module = tesseract_api
+
+    @property
+    def supported_device_transports(self) -> tuple[str, ...]:
+        """Device transports this client supports.
+
+        Always empty: in-process Tesseracts share memory with the caller, so
+        arrays never need to be transported.
+        """
+        return ()
 
     def run_tesseract(
         self,
