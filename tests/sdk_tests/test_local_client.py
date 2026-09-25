@@ -28,7 +28,8 @@ from tesseract_core.sdk.api_parse import TesseractBuildConfig
 from tesseract_core.sdk.exceptions import UserError
 from tesseract_core.sdk.venv_provision import DEFAULT_BASE_IMAGE_PYTHON
 
-pytestmark = pytest.mark.timeout(120)
+# Many tests here build an environment, which is slow on Windows runners.
+pytestmark = pytest.mark.timeout(300)
 
 
 def _process_alive(pid: int) -> bool:
