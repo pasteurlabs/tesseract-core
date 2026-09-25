@@ -659,7 +659,7 @@ class Tesseract:
 
     @property
     @requires_client
-    def supported_device_transports(self) -> tuple[str, ...]:
+    def supported_gpu_transports(self) -> tuple[str, ...]:
         """Device transports that can be used to exchange arrays with this Tesseract.
 
         These are the ``gpu_transport`` values (e.g. ``cuda_ipc``) this client
@@ -671,7 +671,7 @@ class Tesseract:
         Returns:
             a tuple of supported device transport names, empty if none.
         """
-        return self._client.supported_device_transports
+        return self._client.supported_gpu_transports
 
     def container_info(self) -> Container:
         """Retrieve information on the Docker container serving this Tesseract.
@@ -1310,7 +1310,7 @@ class HTTPClient:
         return self._url
 
     @property
-    def supported_device_transports(self) -> tuple[str, ...]:
+    def supported_gpu_transports(self) -> tuple[str, ...]:
         """Device transports this client uses for GPU arrays (empty if none)."""
         if self._gpu_transport == "none":
             return ()
@@ -1555,7 +1555,7 @@ class LocalClient:
         self.api_module = tesseract_api
 
     @property
-    def supported_device_transports(self) -> tuple[str, ...]:
+    def supported_gpu_transports(self) -> tuple[str, ...]:
         """Device transports this client supports.
 
         Always empty: in-process Tesseracts share memory with the caller, so
