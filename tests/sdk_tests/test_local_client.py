@@ -24,7 +24,7 @@ import requests
 
 from tesseract_core import Tesseract
 from tesseract_core.sdk import local_client, serving, venv_provision
-from tesseract_core.sdk.api_parse import get_config
+from tesseract_core.sdk.api_parse import DEFAULT_BASE_IMAGE_PYTHON
 from tesseract_core.sdk.exceptions import UserError
 
 pytestmark = pytest.mark.timeout(120)
@@ -637,6 +637,16 @@ def test_startup_timeout_is_reported(dummy_api_path, monkeypatch):
         )
 
 
+def test_a_venv_on_our_base_python_is_a_different_interpreter(tmp_path):
+    """Venv interpreters are symlinks to a shared base; the link location counts."""
+    link = tmp_path / "bin" / "python"
+    link.parent.mkdir()
+    link.symlink_to(os.path.realpath(sys.executable))
+
+    assert local_client._is_foreign_interpreter(str(link))
+    assert not local_client._is_foreign_interpreter(sys.executable)
+
+
 def test_skip_health_check_returns_immediately(dummy_api_path):
     served = local_client.serve(
         dummy_api_path, python_executable=sys.executable, skip_health_check=True
@@ -908,7 +918,7 @@ def test_an_incomplete_environment_is_completed(example_copy):
     api_path = example_copy("localpackage")
     venv = api_path.parent / venv_provision._MANAGED_VENV_NAME
 
-    venv_provision._ensure_venv(venv)
+    venv_provision._create_venv(venv)
     assert not (venv / venv_provision._STAMP_NAME).exists()
 
     with Tesseract.from_source(api_path) as tess:
@@ -921,132 +931,309 @@ def test_a_removed_interpreter_is_not_trusted(example_copy):
     """A stamp on its own is not enough; the interpreter has to be there too."""
     api_path = example_copy("localpackage")
     venv = api_path.parent / venv_provision._MANAGED_VENV_NAME
-    requirements = api_path.parent / "tesseract_requirements.txt"
+
+    stamp = venv_provision._expected_stamp(
+        *venv_provision._declared_requirements(api_path)
+    )
 
     venv_provision.resolve_python_executable(api_path)
-    assert venv_provision._stamp_matches(venv, requirements)
+    assert venv_provision._stamp_matches(venv, stamp)
 
     venv_provision._python_in(venv).unlink()
 
-    assert not venv_provision._stamp_matches(venv, requirements)
+    assert not venv_provision._stamp_matches(venv, stamp)
 
 
-def test_python_bounds_exclude_what_the_runtime_cannot_use():
-    """Only bounds are kept, and the SDK's Requires-Python sets the floor.
+def test_undeclared_python_matches_the_build(example_copy):
+    """With no python_version, build on the default base image's Python.
 
-    We always start from the current interpreter and let uv say which way to go,
-    so there is no list of preferred versions to keep up to date. The ceiling
-    comes from uv, so new releases and prereleases are included automatically.
+    That is what `tesseract build` does, so a Tesseract that builds there serves
+    here too: `univariate` pins `jax[cpu]==0.4.28`, which has no wheel past
+    cp312.
     """
-    bounds = venv_provision._python_bounds()
-    if bounds is None:
-        pytest.skip("uv could not report which Pythons it can provide")
-
-    floor, ceiling = bounds
-    # uv offers 3.8 and 3.9, but the runtime will not install on them.
-    assert floor >= 10, "the runtime does not install on end-of-life Pythons"
-    assert floor <= sys.version_info.minor <= ceiling
-
-
-def test_a_newer_python_is_reachable_not_just_an_older_one():
-    """A Tesseract may need a Python newer than the caller's, not just older.
-
-    Only ever searching downwards would break on 3.10, the oldest version we
-    support and one this project tests on, because there is nothing below it. A
-    package that ships wheels only for a newer Python without declaring a floor
-    is a common build-matrix slip, so that case has to work too.
-    """
-    ours = sys.version_info.minor
-    bounds = venv_provision._python_bounds()
-    if bounds is None:
-        pytest.skip("uv could not report which Pythons it can provide")
-    if bounds[1] <= ours:
-        pytest.skip("uv offers nothing newer than the running Python")
-
-    # What uv reports when a package only has wheels for newer versions.
-    assert venv_provision._nearest(range(ours + 1, bounds[1] + 1)) == (
-        f"{sys.version_info.major}.{ours + 1}"
-    )
-
-    # Closest wins over newest, so a built environment stays near ours. Only
-    # meaningful when there is something below us: on the oldest version we
-    # support there is not, and `_nearest` drops it as out of bounds.
-    if bounds[0] < ours:
-        assert venv_provision._nearest([ours - 1, bounds[1]]) == (
-            f"{sys.version_info.major}.{ours - 1}"
+    for name in ("univariate", "localpackage"):
+        api_path = example_copy(name)
+        build_config, requirements_file = venv_provision._declared_requirements(
+            api_path
+        )
+        assert (
+            venv_provision._build_python_version(build_config, requirements_file)
+            == DEFAULT_BASE_IMAGE_PYTHON
         )
 
 
-def test_abi_tag_hint_is_read_as_the_answer():
-    """Uv lists the versions a package does have wheels for.
-
-    That is the answer itself, so we use it instead of trying versions. The tag
-    for the version we asked about appears earlier in the message, and must not
-    be read as one of the available ones.
-    """
-    hint = (
-        "hint: You require CPython 3.13 (`cp313`), but we only found wheels for "
-        "`jaxlib` (v0.4.28) with the following Python ABI tags: `cp39`, `cp310`, "
-        "`cp311`, `cp312`"
+@pytest.mark.parametrize(
+    "requires_python, expected",
+    [(">=3.10", DEFAULT_BASE_IMAGE_PYTHON), (">=3.12", ">=3.12")],
+)
+def test_a_lockfile_python_range_is_honoured(
+    dummy_tesseract_package, requires_python, expected
+):
+    """A lockfile excluding the default Python gets its own range passed to uv."""
+    (dummy_tesseract_package / "tesseract_config.yaml").write_text(
+        'name: "locked"\n'
+        "build_config:\n"
+        "  requirements:\n"
+        "    provider: uv-pip\n"
+        "    requirements_file: pylock.toml\n"
     )
-
-    assert venv_provision._minors_from_abi_tags(hint) == [9, 10, 11, 12]
-
-
-def test_requires_python_hint_is_read_as_the_answer():
-    """Uv names the Python range a dependency wants, so we need not search."""
-    hint = (
-        "Because the requested Python version (>=3.10) does not satisfy "
-        "Python>=3.12 and numpy==2.5.1 depends on Python>=3.12, we can conclude "
-        "that numpy==2.5.1 cannot be used.\n"
-        "hint: The `--python-version` value (>=3.10) includes Python versions "
-        "that are not supported by your dependencies (e.g., numpy==2.5.1 only "
-        "supports >=3.12). Consider using a higher `--python-version` value."
+    (dummy_tesseract_package / "pylock.toml").write_text(
+        f'lock-version = "1.0"\nrequires-python = "{requires_python}"\n'
     )
-
-    assert str(venv_provision._requires_python(hint)) == ">=3.12"
-
-
-def test_a_pin_gets_a_python_that_has_wheels_for_it(example_copy):
-    """Whatever version is chosen, the declared pin must install on it.
-
-    In a container the Python comes from the base image, 3.11 for the default
-    `debian:bookworm-slim`, so `univariate` pinning `jax[cpu]==0.4.28` builds
-    there without trouble. jaxlib 0.4.28 publishes no wheel past cp312, so on a
-    newer interpreter we have to pick a different version, and on an older one
-    staying put is already correct. Asserting the property rather than a
-    particular version keeps this true on every Python we support.
-    """
-    api_path = example_copy("univariate")
-    build_config = get_config(api_path.parent).build_config
-    requirements_file = api_path.parent / "tesseract_requirements.txt"
-
-    chosen = venv_provision._build_python_version(build_config, requirements_file)
-    if chosen is None:
-        chosen = f"{sys.version_info.major}.{sys.version_info.minor}"
-
-    _, remote = venv_provision.parse_requirements(requirements_file)
-    assert venv_provision._compile(remote, chosen, wheels_only=True) is None, (
-        f"chose Python {chosen}, which has no wheels for {remote}"
+    build_config, requirements_file = venv_provision._declared_requirements(
+        dummy_tesseract_package / "tesseract_api.py"
     )
-
-
-def test_a_local_requirement_does_not_constrain_the_python(example_copy):
-    """Local paths must not be mistaken for a version constraint.
-
-    `localpackage` declares only `./helloworld`, which is an sdist by nature and
-    always buildable. Asking whether it has a wheel would reject every Python
-    and say nothing, so it has to be left out of the question entirely.
-    """
-    api_path = example_copy("localpackage")
-    build_config = get_config(api_path.parent).build_config
 
     assert (
-        venv_provision._build_python_version(
-            build_config, api_path.parent / "tesseract_requirements.txt"
-        )
-        is None
+        venv_provision._build_python_version(build_config, requirements_file)
+        == expected
     )
+
+
+def test_changing_the_python_version_invalidates_the_stamp(dummy_tesseract_package):
+    """Build settings are part of the stamp, not just the requirements file."""
+    api_path = dummy_tesseract_package / "tesseract_api.py"
+    before = venv_provision._expected_stamp(
+        *venv_provision._declared_requirements(api_path)
+    )
+
+    (dummy_tesseract_package / "tesseract_config.yaml").write_text(
+        'name: "pinned"\n'
+        "build_config:\n"
+        "  requirements:\n"
+        "    provider: uv-pip\n"
+        '    python_version: "3.12"\n'
+    )
+    after = venv_provision._expected_stamp(
+        *venv_provision._declared_requirements(api_path)
+    )
+
+    assert before != after
+
+
+def test_a_conda_tesseract_can_be_stamped(dummy_tesseract_package):
+    """The stamp does not assume uv-pip settings exist."""
+    (dummy_tesseract_package / "tesseract_config.yaml").write_text(
+        'name: "conda"\nbuild_config:\n  requirements:\n    provider: conda\n'
+    )
+    (dummy_tesseract_package / "tesseract_environment.yaml").write_text(
+        "dependencies: [python=3.12]\n"
+    )
+
+    venv_provision._expected_stamp(
+        *venv_provision._declared_requirements(
+            dummy_tesseract_package / "tesseract_api.py"
+        )
+    )
+
+
+def test_an_up_to_date_environment_is_served_from_a_read_only_directory(
+    dummy_tesseract_package,
+):
+    """Writability is only needed to build, not to use what is already built."""
+    api_path = dummy_tesseract_package / "tesseract_api.py"
+    built = venv_provision.resolve_python_executable(api_path)
+
+    mode = dummy_tesseract_package.stat().st_mode
+    dummy_tesseract_package.chmod(0o555)
+    try:
+        assert venv_provision.resolve_python_executable(api_path) == built
+    finally:
+        dummy_tesseract_package.chmod(mode)
+
+
+def test_host_credentials_are_reported_as_ignored(
+    dummy_tesseract_package, monkeypatch, caplog
+):
+    """from_source cannot use build secrets, so it must not stay silent about them."""
+    (dummy_tesseract_package / "tesseract_config.yaml").write_text(
+        'name: "private"\n'
+        "build_config:\n"
+        "  host_credentials:\n"
+        "    - host: pkgs.example.com\n"
+        "      secret_id: token\n"
+    )
+
+    class Built(Exception):
+        pass
+
+    def build(*args):
+        raise Built
+
+    monkeypatch.setattr(venv_provision, "_build_pip_venv", build)
+    with caplog.at_level(logging.WARNING, logger="tesseract"):
+        with pytest.raises(Built):
+            venv_provision.resolve_python_executable(
+                dummy_tesseract_package / "tesseract_api.py"
+            )
+
+    assert "host_credentials" in caplog.text
+
+
+def test_a_runtime_dependency_change_invalidates_the_stamp(
+    dummy_tesseract_package, monkeypatch
+):
+    """An SDK upgrade that only moves the runtime's dependency floors rebuilds."""
+    declared = venv_provision._declared_requirements(
+        dummy_tesseract_package / "tesseract_api.py"
+    )
+    before = venv_provision._expected_stamp(*declared)
+
+    monkeypatch.setattr(
+        venv_provision, "get_runtime_dependencies", lambda: ["numpy>=99"]
+    )
+
+    assert venv_provision._expected_stamp(*declared) != before
+
+
+def test_edits_to_a_local_package_need_no_rebuild(example_copy):
+    """Local directory requirements are installed editable."""
+    api_path = example_copy("localpackage")
+    python = venv_provision.resolve_python_executable(api_path)
+
+    module = api_path.parent / "helloworld" / "helloworld.py"
+    module.write_text(module.read_text() + "\nEDITED = True\n")
+
+    result = subprocess.run(
+        [python, "-c", "import helloworld; print(helloworld.EDITED)"],
+        capture_output=True,
+        text=True,
+        env={
+            k: v
+            for k, v in os.environ.items()
+            if k not in venv_provision.SCRUBBED_IMPORT_VARS
+        },
+    )
+    assert result.stdout.strip() == "True", result.stderr
+
+
+def test_concurrent_resolves_build_once(dummy_tesseract_package, monkeypatch):
+    """A second process waiting on the lock uses the first one's environment."""
+    import threading
+
+    api_path = dummy_tesseract_package / "tesseract_api.py"
+    builds = []
+
+    def build(dest, build_config, requirements_file):
+        builds.append(dest)
+        time.sleep(0.5)
+        python = venv_provision._python_in(dest)
+        python.parent.mkdir(parents=True)
+        python.touch()
+        return python
+
+    monkeypatch.setattr(venv_provision, "_build_pip_venv", build)
+    threads = [
+        threading.Thread(
+            target=venv_provision.resolve_python_executable, args=(api_path,)
+        )
+        for _ in range(2)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert len(builds) == 1
+
+
+def test_build_env_reaches_every_install_step(dummy_tesseract_package, monkeypatch):
+    """`build_config.build_env` applies to the build here as in a container."""
+    (dummy_tesseract_package / "tesseract_config.yaml").write_text(
+        'name: "tuned"\n'
+        "build_config:\n"
+        "  build_env:\n"
+        "    UV_INDEX_STRATEGY: unsafe-best-match\n"
+    )
+    (dummy_tesseract_package / "tesseract_requirements.txt").write_text("cowsay\n")
+    envs = []
+
+    def run(command, what, *, cwd=None, env=None):
+        envs.append((what, env))
+
+    monkeypatch.setattr(venv_provision, "_run", run)
+    venv_provision._build_pip_venv(
+        dummy_tesseract_package / venv_provision._MANAGED_VENV_NAME,
+        *venv_provision._declared_requirements(
+            dummy_tesseract_package / "tesseract_api.py"
+        ),
+    )
+
+    assert envs
+    for what, env in envs:
+        assert env == {"UV_INDEX_STRATEGY": "unsafe-best-match"}, what
+
+
+def test_changing_build_env_invalidates_the_stamp(dummy_tesseract_package):
+    api_path = dummy_tesseract_package / "tesseract_api.py"
+    before = venv_provision._expected_stamp(
+        *venv_provision._declared_requirements(api_path)
+    )
+    (dummy_tesseract_package / "tesseract_config.yaml").write_text(
+        'name: "tuned"\nbuild_config:\n  build_env:\n    UV_PRERELEASE: allow\n'
+    )
+
+    assert (
+        venv_provision._expected_stamp(*venv_provision._declared_requirements(api_path))
+        != before
+    )
+
+
+def test_config_env_reaches_the_tesseract(dummy_tesseract_package, monkeypatch):
+    """The config's `env` is set as in a container; an explicit value wins."""
+    (dummy_tesseract_package / "tesseract_config.yaml").write_text(
+        'name: "envy"\nenv:\n  FROM_CONFIG: "1"\n  OVERRIDDEN: config\n'
+    )
+    seen = {}
+
+    class Captured(Exception):
+        pass
+
+    def runtime_env(api_path, *, environment, **kwargs):
+        seen.update(environment)
+        raise Captured
+
+    monkeypatch.setattr(local_client, "_runtime_env", runtime_env)
+    with pytest.raises(Captured):
+        local_client.serve(
+            dummy_tesseract_package / "tesseract_api.py",
+            python_executable=sys.executable,
+            environment={"OVERRIDDEN": "explicit"},
+        )
+
+    assert seen == {"FROM_CONFIG": "1", "OVERRIDDEN": "explicit"}
+
+
+def test_a_rebuild_drops_packages_no_longer_declared(dummy_tesseract_package):
+    """A stale environment is rebuilt from scratch, not installed over."""
+    api_path = dummy_tesseract_package / "tesseract_api.py"
+    requirements = dummy_tesseract_package / "tesseract_requirements.txt"
+
+    def has_cowsay(python: Path) -> bool:
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if k not in venv_provision.SCRUBBED_IMPORT_VARS
+        }
+        return subprocess.run([python, "-c", "import cowsay"], env=env).returncode == 0
+
+    requirements.write_text("cowsay\n")
+    assert has_cowsay(venv_provision.resolve_python_executable(api_path))
+
+    requirements.write_text("")
+    assert not has_cowsay(venv_provision.resolve_python_executable(api_path))
+
+
+def test_a_failed_install_points_at_python_version(dummy_tesseract_package):
+    """With no declared Python, an install failure says how to choose one."""
+    (dummy_tesseract_package / "tesseract_requirements.txt").write_text(
+        "tesseract-core-no-such-package==0.0.1\n"
+    )
+
+    with pytest.raises(RuntimeError, match="python_version"):
+        venv_provision.resolve_python_executable(
+            dummy_tesseract_package / "tesseract_api.py"
+        )
 
 
 def test_a_declared_python_version_applies_with_no_requirements(

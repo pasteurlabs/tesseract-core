@@ -39,7 +39,11 @@ from .serving import (
     validate_output_format,
     wait_for_health_or_dispose,
 )
-from .venv_provision import SCRUBBED_IMPORT_VARS, resolve_python_executable
+from .venv_provision import (
+    SCRUBBED_IMPORT_VARS,
+    declared_env,
+    resolve_python_executable,
+)
 
 logger = logging.getLogger("tesseract")
 
@@ -85,15 +89,10 @@ def popen_kwargs() -> dict[str, Any]:
 def _runtime_command(python_executable: str) -> list[str]:
     """How to invoke `tesseract-runtime` on a given interpreter.
 
-    Prefers the console script next to the interpreter, which is what a
-    container's entrypoint runs. `python -m` would do the same job, except that
-    it puts the working directory at the front of `sys.path`: a Tesseract
-    served from a checkout of this project would then import that checkout's
-    `tesseract_core` rather than the one installed in its own environment. A
-    script puts its own directory there instead.
-
-    Falls back to `-m` when the script is not beside the interpreter, which
-    happens for a `pip install --user`, where scripts land in `~/.local/bin`.
+    Prefers the console script beside the interpreter, since `python -m` puts
+    the cwd first on `sys.path` and would import a local `tesseract_core`
+    checkout. Falls back to `-m` when there is no script there (e.g.
+    `pip install --user`).
     """
     script = Path(python_executable).parent / (
         "tesseract-runtime.exe" if os.name == "nt" else "tesseract-runtime"
@@ -101,6 +100,15 @@ def _runtime_command(python_executable: str) -> list[str]:
     if script.is_file():
         return [str(script)]
     return [python_executable, "-m", "tesseract_core.runtime"]
+
+
+def _is_foreign_interpreter(python_executable: str) -> bool:
+    """Whether `python_executable` is a different environment from ours.
+
+    Compares unresolved paths: venv interpreters are symlinks to a shared base,
+    and which environment they belong to depends on where the link is.
+    """
+    return os.path.abspath(python_executable) != os.path.abspath(sys.executable)
 
 
 def _stop_process(process: subprocess.Popen, *, force: bool) -> None:
@@ -349,20 +357,17 @@ def serve(
             (and re-picked if it gets taken before the server binds it).
         num_workers: Number of uvicorn worker processes.
         environment: Extra environment variables for the child process. These are
-            layered on top of the parent's environment, not a replacement for it.
+            layered on top of the parent's environment and the config's ``env``,
+            not a replacement for them.
         input_path: Value for ``TESSERACT_INPUT_PATH``.
         output_path: Value for ``TESSERACT_OUTPUT_PATH``.
         output_format: Value for ``TESSERACT_OUTPUT_FORMAT``.
         runtime_config: Runtime configuration options, converted to
             ``TESSERACT_*`` environment variables just as in the containerized
             path.
-        python_executable: Interpreter used to run the Tesseract. If None, one
-            is chosen based on what the Tesseract declares in
-            ``tesseract_config.yaml``: a suitable environment next to the
-            ``tesseract_api.py`` is reused if there is one, and otherwise built
-            (see :func:`~tesseract_core.sdk.venv_provision.resolve_python_executable`).
-            Naming an interpreter skips that and uses it as given, which is how
-            a Tesseract can have dependencies that clash with the caller's.
+        python_executable: Interpreter used to run the Tesseract. If None, a
+            managed environment is built from ``tesseract_config.yaml`` (see
+            :func:`~tesseract_core.sdk.venv_provision.resolve_python_executable`).
         skip_health_check: If True, return as soon as the process is spawned
             without waiting for it to answer /health. The caller is then
             responsible for establishing readiness.
@@ -379,9 +384,9 @@ def serve(
         python_executable = resolve_python_executable(api_path)
     python_executable = str(python_executable)
 
-    foreign_interpreter = os.path.realpath(python_executable) != os.path.realpath(
-        sys.executable
-    )
+    foreign_interpreter = _is_foreign_interpreter(python_executable)
+    # As in a container: the config's `env` is set, and an explicit request wins.
+    environment = {**declared_env(api_path), **(environment or {})}
     if foreign_interpreter and not os.path.isfile(python_executable):
         raise FileNotFoundError(
             f"Python interpreter {python_executable} does not exist."

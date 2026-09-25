@@ -482,16 +482,14 @@ class Tesseract:
                 For example, `{"profiling": True}` enables profiling.
             stream_logs: If True, stream logs to stdout while endpoints run.
                 If a callable, stream logs to that callable instead.
-            python_executable: Interpreter used to run the Tesseract (must
-                have ``tesseract-core[runtime]`` and the Tesseract's own
-                requirements installed). Pass ``sys.executable`` to serve using
-                the SDK's Python environment.
-
-                If not provided, an existing compatible virtual environment is
-                first searched for in the Tesseract's directory. Failing this,
-                a compatible ``.venv`` is attempted to be built automatically.
-                Automatic building requires ``uv`` on PATH, or ``conda``
-                if the Tesseract sets ``requirements.provider: conda``.
+            python_executable: Interpreter to run the Tesseract on. It must
+                have ``tesseract-core[runtime]`` and the Tesseract's
+                requirements installed; pass ``sys.executable`` to use the
+                SDK's own environment. If None, an environment is built from
+                ``tesseract_config.yaml`` into ``.tesseract-venv`` next to the
+                ``tesseract_api.py`` and reused while its requirements are
+                unchanged. This needs ``uv``, or ``conda`` for
+                ``requirements.provider: conda``.
             startup_timeout: How long to wait, in seconds, for the Tesseract to
                 become healthy before giving up.
             experimental_binref_pool: Opt-in fast path for ``json+binref`` that
