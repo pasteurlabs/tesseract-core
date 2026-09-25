@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [1.14.0] - 2026-09-24
+## [1.14.0] - 2026-09-25
 
 ### Features
 
@@ -10,6 +10,7 @@ All notable changes to this project will be documented in this file.
 - Install dependencies from a PEP 751 lockfile (#767)
 - Machine readable output flag for tesseract list (#780)
 - Expose `LocalClient.api_module` (#785)
+- *(sdk)* Build environments for from_source automatically (#762)
 
 ### Bug Fixes
 
@@ -19,6 +20,7 @@ All notable changes to this project will be documented in this file.
 - Confine json+binref buffer references to output_path (#783)
 - *(runtime)* Identify TesseractReference port in OpenAPI schema (#777)
 - Accept DLPack CUDA arrays (e.g. JAX) in GPU transports (#781)
+- *(runtime)* Apply configured compression in serve endpoints (#789)
 
 ### Refactor
 
