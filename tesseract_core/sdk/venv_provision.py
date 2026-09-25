@@ -194,15 +194,6 @@ def _run(
         raise RuntimeError(f"{what} failed:\n{output[-2000:]}")
 
 
-def _install_from(requirements_file: Path) -> tuple[list[str], Path]:
-    """Arguments and cwd for `uv pip install`, as in `build_pip_venv.sh`.
-
-    `-r` handles both flat requirements and PEP 751 lockfiles. Runs from the
-    file's directory so relative local paths in it resolve.
-    """
-    return ["-r", requirements_file.name], requirements_file.parent
-
-
 def _local_directories(requirements_file: Path) -> list[str]:
     """Local directory requirements, as editable install specs.
 
@@ -338,8 +329,10 @@ def _build_pip_venv(
         env=env,
     )
     if requirements_file is not None:
-        args, cwd = _install_from(requirements_file)
         try:
+            # `-r` handles flat files and PEP 751 lockfiles alike, as in
+            # build_pip_venv.sh. Run from the file's directory so relative local
+            # paths in it resolve.
             _run(
                 [
                     *_uv(),
@@ -348,10 +341,11 @@ def _build_pip_venv(
                     "--compile-bytecode",
                     "--python",
                     python_executable,
-                    *args,
+                    "-r",
+                    requirements_file.name,
                 ],
                 f"Installing {requirements_file.name}",
-                cwd=cwd,
+                cwd=requirements_file.parent,
                 env=env,
             )
         except RuntimeError as e:
