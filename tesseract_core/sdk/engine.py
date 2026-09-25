@@ -152,6 +152,79 @@ def parse_requirements(
 _LOCAL_DEPENDENCY_PREFIXES = (".", "/", "file://")
 
 
+def stage_runtime_package(dest: Path) -> Path:
+    """Write the runtime out as an installable package, and return where.
+
+    The result is a distribution named `tesseract_runtime` holding
+    `tesseract_core/runtime` and a `pyproject.toml` naming this SDK's version
+    and the dependencies of its `runtime` extra. Installing it is how both a
+    container and `Tesseract.from_source` give a Tesseract a runtime, so both
+    get the same code as the SDK that started them, with no index involved.
+
+    Note there is deliberately no `tesseract_core/__init__.py` in it, so
+    `tesseract_core` is a namespace package wherever this is installed and
+    importing `tesseract_core.runtime` does not drag in the SDK.
+    """
+    from jinja2 import Template
+
+    from tesseract_core import __version__ as tesseract_version
+
+    runtime_source_dir = get_runtime_dir()
+    copytree(
+        runtime_source_dir,
+        dest / "tesseract_core" / "runtime",
+        ignore=_ignore_pycache,
+    )
+
+    # Copy meta files, rendering the Jinja templates among them.
+    for metafile in (runtime_source_dir / "meta").glob("*"):
+        if metafile.suffix == ".jinja":
+            rendered = Template(metafile.read_text()).render(
+                runtime_dependencies=get_runtime_dependencies(),
+                version=tesseract_version,
+            )
+            (dest / metafile.stem).write_text(rendered)
+        else:
+            copy(metafile, dest)
+
+    return dest
+
+
+def declared_requirements_file(src_dir: Path, build_config: Any) -> Path | None:
+    """The dependency file a Tesseract declares, or None when it declares none.
+
+    Raises a `UserError` when the provider cannot work without one, so that the
+    problem is reported here instead of much later: the Dockerfile copies this
+    file unconditionally, so a build that gets past this point dies at a `COPY`
+    with a message that names neither the config nor the provider.
+
+    Shared with `Tesseract.from_source` in venv provisioning.
+    """
+    requirements = build_config.requirements
+    path = src_dir / requirements._filename
+
+    if path.is_file():
+        return path
+
+    if requirements.provider == "conda":
+        raise UserError(
+            f"tesseract_config.yaml sets `requirements.provider: conda`, but "
+            f"there is no {requirements._filename} in {src_dir}. Write one "
+            f"(`conda env export --no-builds > {requirements._filename}`), or "
+            f"switch the provider to uv-pip."
+        )
+
+    if requirements.is_pylock:
+        raise UserError(
+            f"requirements_file is set to {requirements._filename!r} but "
+            f"that file was not found in {src_dir}. Generate one with, e.g., "
+            f"`uv export --format pylock.toml -o {requirements._filename}`."
+        )
+
+    # plain uv-pip case tolerates a missing file.
+    return None
+
+
 def _is_local_dependency(spec: str) -> bool:
     """Return whether a requirement spec refers to a local filesystem path."""
     return spec.startswith(_LOCAL_DEPENDENCY_PREFIXES)
@@ -427,22 +500,14 @@ def prepare_build_context(
     local_requirements_path = context_dir / "local_requirements"
     Path.mkdir(local_requirements_path, parents=True, exist_ok=True)
 
-    if requirement_config.provider == "uv-pip" and requirement_config.is_pylock:
-        # A lockfile has no local-path dependencies to split out, so it is installed
-        # as-is from its staged location without rewriting. Check it exists here to
-        # fail with a clear message instead of a missing COPY during `docker build`.
-        lockfile = src_dir / requirement_config._filename
-        if not lockfile.exists():
-            raise UserError(
-                f"requirements_file is set to {requirement_config._filename!r} but "
-                f"that file was not found in {src_dir}. Generate one with, e.g., "
-                f"`uv export --format pylock.toml -o {requirement_config._filename}`."
-            )
+    # Raises when the declared file is missing and the provider needs it.
+    declared_file = declared_requirements_file(src_dir, user_config.build_config)
 
-    elif requirement_config.provider == "uv-pip":
-        reqstxt = src_dir / requirement_config._filename
-        if reqstxt.exists():
-            local_dependencies, remote_dependencies = parse_requirements(reqstxt)
+    # A lockfile is skipped here: it has no local-path dependencies to split
+    # out, so it is installed as-is from its staged location.
+    if requirement_config.provider == "uv-pip" and not requirement_config.is_pylock:
+        if declared_file is not None:
+            local_dependencies, remote_dependencies = parse_requirements(declared_file)
         else:
             local_dependencies, remote_dependencies = [], []
 
@@ -472,9 +537,9 @@ def prepare_build_context(
         # into the build stage, not the surrounding Tesseract source. Stage each
         # local path into the build context and rewrite it to point at the
         # staged copy, mirroring the uv provider.
-        env_file = src_dir / requirement_config._filename
+        env_file = declared_file
         env_dest = context_dir / "__tesseract_source__" / requirement_config._filename
-        if env_file.exists():
+        if env_file is not None:
             with env_file.open(encoding="utf-8") as f:
                 env_spec = yaml.safe_load(f) or {}
 
@@ -499,29 +564,7 @@ def prepare_build_context(
                 yaml.safe_dump(env_spec, f, sort_keys=False)
 
     runtime_source_dir = get_runtime_dir()
-    copytree(
-        runtime_source_dir,
-        context_dir / "__tesseract_runtime__" / "tesseract_core" / "runtime",
-        ignore=_ignore_pycache,
-    )
-    # Copy meta files (except Jinja templates, which we render)
-    from tesseract_core import __version__ as tesseract_version
-
-    for metafile in (runtime_source_dir / "meta").glob("*"):
-        if metafile.suffix == ".jinja":
-            # Render Jinja template
-            target_name = metafile.stem  # Remove .jinja suffix
-            template_content = metafile.read_text()
-            from jinja2 import Template
-
-            template = Template(template_content)
-            rendered = template.render(
-                runtime_dependencies=get_runtime_dependencies(),
-                version=tesseract_version,
-            )
-            (context_dir / "__tesseract_runtime__" / target_name).write_text(rendered)
-        else:
-            copy(metafile, context_dir / "__tesseract_runtime__")
+    stage_runtime_package(context_dir / "__tesseract_runtime__")
 
     # Docker requires a .dockerignore file to be at the root of the build context
     dockerignore_path = runtime_source_dir / "meta" / ".dockerignore"
