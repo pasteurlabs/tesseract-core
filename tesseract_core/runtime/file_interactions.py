@@ -64,30 +64,38 @@ def available_gpu_transports() -> tuple[str, ...]:
     return ("none",)
 
 
-def parse_accept_header(accept: str) -> tuple[str, str | None]:
-    """Split an ``Accept`` value into (output_format, gpu_transport).
+def parse_accept_header(accept: str) -> tuple[str, str | None, str | None]:
+    """Split an ``Accept`` value into (output_format, gpu_transport, compression).
 
     The media type's structured-syntax suffix selects the host-array output
-    format (``application/json+binref`` -> ``json+binref``). The GPU transport
-    rides as a media-type parameter, e.g. an ``Accept`` of
-    ``application/json+base64; gpu_transport=cuda_ipc`` parses to
-    ``("json+base64", "cuda_ipc")``.
+    format (``application/json+binref`` -> ``json+binref``). Parameters such as
+    ``gpu_transport`` and ``compression`` ride as media-type parameters, e.g. an
+    ``Accept`` of ``application/json+base64; compression=lz4; gpu_transport=cuda_ipc``
+    parses to ``("json+base64", "cuda_ipc", "lz4")``.
 
-    Returns the parsed format and the transport parameter, or ``None`` for the
-    transport when the header omits it (the caller falls back to the configured
-    ``gpu_transport``). Only the ``gpu_transport`` parameter is recognised; other
-    parameters (e.g. a charset) are ignored. This does no validation of the
-    values -- :func:`output_to_bytes` checks them against the accepted sets.
+    Returns the parsed format, transport parameter, and compression parameter.
+    Parameters return ``None`` when the header omits them (the caller falls back
+    to the configured ``gpu_transport`` / ``compression``). Only recognized
+    parameters are extracted; other parameters (e.g. a charset) are ignored.
+    This does no validation of the values -- :func:`output_to_bytes` checks them
+    against the accepted sets.
     """
     media_type, _, params_str = accept.partition(";")
     output_format = media_type.strip().split("/")[-1]
 
     gpu_transport: str | None = None
+    compression: str | None = None
     for param in params_str.split(";"):
         key, sep, value = param.partition("=")
-        if sep and key.strip() == "gpu_transport":
-            gpu_transport = value.strip().strip('"')
-    return output_format, gpu_transport
+        if sep:
+            key_clean = key.strip()
+            val_clean = value.strip().strip('"')
+            if key_clean == "gpu_transport":
+                gpu_transport = val_clean
+            elif key_clean == "compression":
+                compression = val_clean
+
+    return output_format, gpu_transport, compression
 
 
 def output_to_bytes(
@@ -119,6 +127,9 @@ def output_to_bytes(
             f"Unsupported GPU transport {gpu_transport} "
             f"(must be one of {allowed_transports})"
         )
+
+    if compression not in (None, "lz4"):
+        raise ValueError(f"Unsupported compression {compression}")
 
     ObjSchema = TypeAdapter(type(obj))
     # The host-array encoding (``array_encoding``) and the device transport
