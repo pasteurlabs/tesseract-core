@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 - Machine readable output flag for tesseract list (#780)
 - Expose `LocalClient.api_module` (#785)
 - *(sdk)* Build environments for from_source automatically (#762)
+- *(sdk)* Expose `Tesseract.supported_device_transports` (#793)
 
 ### Bug Fixes
 
