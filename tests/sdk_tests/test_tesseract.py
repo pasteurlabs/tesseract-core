@@ -509,6 +509,38 @@ def test_serve_lifecycle(mock_serving, mock_clients):
 
 
 @pytest.mark.parametrize(
+    ("kwargs", "expected"),
+    [
+        ({}, ()),
+        ({"gpu_transport": "none"}, ()),
+        ({"gpu_transport": "cuda_ipc"}, ("cuda_ipc",)),
+        ({"runtime_config": {"gpu_transport": "cuda_ipc"}}, ("cuda_ipc",)),
+    ],
+)
+def test_supported_gpu_transports_served(mock_serving, mock_clients, kwargs, expected):
+    t = Tesseract.from_image("sometesseract:0.2.3", **kwargs)
+
+    # The transport is a property of the client, which only exists once served
+    with pytest.raises(RuntimeError, match="context manager"):
+        _ = t.supported_gpu_transports
+
+    with t:
+        assert t.supported_gpu_transports == expected
+
+
+def test_supported_gpu_transports_unserved(dummy_tesseract_module):
+    # A remote Tesseract is reached without any device transport configured
+    assert Tesseract.from_url("localhost").supported_gpu_transports == ()
+
+    # In-process Tesseracts share memory with the caller, so there is nothing to
+    # transport -- even when a GPU transport is configured.
+    local = Tesseract.from_tesseract_api(
+        dummy_tesseract_module, gpu_transport="cuda_ipc"
+    )
+    assert local.supported_gpu_transports == ()
+
+
+@pytest.mark.parametrize(
     "run_id",
     [None, "fizzbuzz"],
 )
