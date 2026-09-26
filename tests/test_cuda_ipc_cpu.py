@@ -740,6 +740,68 @@ def test_output_to_bytes_mixed_gpu_and_cpu_arrays(mocked_cuda):
     np.testing.assert_array_equal(decoded_cpu, np.arange(3, dtype=np.float32))
 
 
+def test_encode_payload_mixed_gpu_and_binref(mocked_cuda, tmp_path):
+    """The SDK client encodes mixed GPU and binref input arrays in a single request.
+
+    GPU leaves are exported by handle via cuda_ipc (without host copies), while host
+    leaves are written as .bin files to the input directory. Both the pinned GPU
+    allocations and the temporary disk files are released on context exit.
+    """
+    from tesseract_core.sdk.tesseract import _encode_payload
+
+    payload = {
+        "gpu": FakeCudaArray((3,), "<f4"),
+        "cpu": np.arange(3, dtype=np.float32),
+    }
+
+    bin_file = None
+    with _encode_payload(
+        payload,
+        gpu_transport="cuda_ipc",
+        input_path=tmp_path,
+        output_format="json+binref",
+    ) as encoded:
+        assert encoded["gpu"]["data"]["encoding"] == "cuda_ipc"
+        assert encoded["cpu"]["data"]["encoding"] == "binref"
+        bin_name = encoded["cpu"]["data"]["buffer"].split(":")[0]
+        bin_file = tmp_path / bin_name
+        assert bin_file.exists()
+        # Pinned registry should track the exported allocation during context
+        assert len(cuda_ipc._CUDA_IPC_EXPORT_REGISTRY) == 1
+
+    # Context exit should unlink disk files and release pinned allocations
+    assert not bin_file.exists()
+    assert len(cuda_ipc._CUDA_IPC_EXPORT_REGISTRY) == 0
+
+
+def test_encode_payload_triple_mixed_gpu_binref_base64(mocked_cuda, tmp_path):
+    """The SDK client supports a triple-mixed payload (cuda_ipc, binref, base64)."""
+    from tesseract_core.sdk.tesseract import Base64, Binref, _encode_payload
+
+    payload = {
+        "gpu": FakeCudaArray((3,), "<f4"),
+        "disk": Binref(np.arange(3, dtype=np.float32)),
+        "inline": Base64(np.arange(3, dtype=np.int64)),
+    }
+
+    bin_file = None
+    with _encode_payload(
+        payload,
+        gpu_transport="cuda_ipc",
+        input_path=tmp_path,
+    ) as encoded:
+        assert encoded["gpu"]["data"]["encoding"] == "cuda_ipc"
+        assert encoded["disk"]["data"]["encoding"] == "binref"
+        assert encoded["inline"]["data"]["encoding"] == "base64"
+        bin_name = encoded["disk"]["data"]["buffer"].split(":")[0]
+        bin_file = tmp_path / bin_name
+        assert bin_file.exists()
+        assert len(cuda_ipc._CUDA_IPC_EXPORT_REGISTRY) == 1
+
+    assert not bin_file.exists()
+    assert len(cuda_ipc._CUDA_IPC_EXPORT_REGISTRY) == 0
+
+
 def test_cuda_array_to_host_branches():
     """cuda_array_to_host handles CuPy-, torch-, __array__-like, and rejects others."""
 
