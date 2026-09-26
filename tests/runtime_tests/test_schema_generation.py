@@ -158,6 +158,27 @@ def test_create_abstract_eval_schema():
     AbstractOutputSchema.model_validate(testinput_abstract)
 
 
+def test_abstract_eval_schema_array_defaults():
+    class Sub(BaseModel):
+        s: Differentiable[Float32] = 1.0
+
+    class Model(BaseModel):
+        x: Differentiable[Array[(None,), Float32]]
+        y: Array[(2,), Float64] = [1, 2]
+        sub: Sub
+
+    AbstractInputSchema, _ = create_abstract_eval_schema(Model, Model)
+    inputs = AbstractInputSchema.model_validate(
+        {"inputs": {"x": {"shape": [3], "dtype": "float32"}, "sub": {}}}
+    ).inputs
+
+    assert inputs.model_dump() == {
+        "x": {"shape": (3,), "dtype": "float32"},
+        "y": {"shape": (2,), "dtype": "float64"},
+        "sub": {"s": {"shape": (), "dtype": "float32"}},
+    }
+
+
 def test_create_jacobian_schema():
     arr = testinput["testdiffarr"]
     testoutput = {
