@@ -20,7 +20,16 @@ __version__ = scm_version
 # import public API of the package
 # from . import <obj>
 from .sdk.engine import build_tesseract, run_tesseract, serve, teardown
-from .sdk.tesseract import Tesseract
+from .sdk.tesseract import Base64, Binref, Raw, Tesseract
 
 # add public API as strings here, for example __all__ = ["obj"]
-__all__ = ["Tesseract", "build_tesseract", "run_tesseract", "serve", "teardown"]
+__all__ = [
+    "Base64",
+    "Binref",
+    "Raw",
+    "Tesseract",
+    "build_tesseract",
+    "run_tesseract",
+    "serve",
+    "teardown",
+]
