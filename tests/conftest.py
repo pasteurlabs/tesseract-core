@@ -669,7 +669,7 @@ def mocked_cuda(monkeypatch):
             # Force legacy IPC to reject pointers this fake did not allocate
             # (simulating VMM/pool-backed memory); its own cudaMalloc buffers,
             # such as staging buffers, stay exportable.
-            self.reject_non_staging_ipc = False
+            self.reject_foreign_ipc = False
 
         # -- device / memory management ---------------------------------
 
@@ -709,7 +709,7 @@ def mocked_cuda(monkeypatch):
             return device_ptr - 256, 4096
 
         def _rejects(self, device_ptr: int) -> bool:
-            return self.reject_non_staging_ipc and device_ptr not in self._buffers
+            return self.reject_foreign_ipc and device_ptr not in self._buffers
 
         def is_legacy_ipc_capable(self, device_ptr: int) -> bool:
             self.calls["capable"].append(device_ptr)
@@ -751,7 +751,6 @@ def mocked_cuda(monkeypatch):
         cuda_ipc._CUDA_IPC_EXPORT_REGISTRY.clear()
         cuda_ipc._CUDA_IPC_STAGING_BUFFERS.clear()
         cuda_ipc._STAGING_POOL.clear()
-        cuda_ipc._STAGING_HANDLES.clear()
         cuda_ipc._OPEN_MAPPINGS.clear()
         cuda_ipc._staging_pool_bytes = 0
         cuda_ipc._open_mappings_bytes = 0

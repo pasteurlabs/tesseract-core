@@ -270,7 +270,7 @@ def _build_torch():
 
 
 def _build_jax():
-    """JAX arrays exercise the VMM staging fallback (see cuda.api.stage_for_legacy_ipc).
+    """JAX arrays exercise the VMM staging fallback (see cuda.ipc._stage_for_export).
 
     JAX/XLA's default GPU allocator uses CUDA's Virtual Memory Management API
     (``cuMemCreate``/``cuMemAddressReserve``), which the legacy
@@ -472,7 +472,7 @@ def test_cross_process_jax_vmm_fallback():
     fast path (which works for CuPy/PyTorch's default cudaMalloc-based pools)
     rejects it; ``dump_cuda_ipc_arraydict`` should transparently fall back to
     staging the array into a fresh ``cudaMalloc`` buffer (see
-    cuda.api.stage_for_legacy_ipc) and export a handle to that instead.
+    cuda.ipc._stage_for_export) and export a handle to that instead.
     """
     results = run_cross_process("jax")
     assert len(results) == 1
@@ -485,12 +485,12 @@ def test_cross_process_jax_vmm_fallback():
 
 @requires_cuda
 def test_cross_process_staging_fallback_forced():
-    """Force the staging fallback (without JAX) and verify correctness + free.
+    """Force the staging fallback (without JAX) and verify correctness.
 
     Simulates a VMM-backed pointer by making the first ``cudaIpcGetMemHandle``
     call fail, so ``dump_cuda_ipc_arraydict`` stages a CuPy array into a fresh
     ``cudaMalloc`` buffer and exports a handle to that. Exercises the real
-    staging cudaMalloc/cudaMemcpy/cudaFree path on GPU.
+    staging cudaMalloc/cudaMemcpy path on GPU.
     """
     results = run_cross_process("force_staging")
     assert len(results) == 1

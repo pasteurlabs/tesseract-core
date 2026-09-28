@@ -258,49 +258,43 @@ def _cai_device_ordinal(arr: Any) -> int:
 #      unconditionally; see :func:`load_cuda_ipc_arraydict`).
 _CUDA_IPC_EXPORT_REGISTRY: list[Any] = []
 
-# Device pointers of VMM-fallback staging buffers (see _stage_for_export) in use
-# by the current exports. Kept separate from _CUDA_IPC_EXPORT_REGISTRY (which
-# holds plain pinned array references) since these go back to the staging pool
-# instead of just dropping a reference, but are released at the same point and
-# for the same reasons.
-_CUDA_IPC_STAGING_BUFFERS: list[tuple[int, int]] = []
+# VMM-fallback staging buffers (see _stage_for_export) in use by the current
+# exports, as (device pointer, size, IPC handle). Kept separate from
+# _CUDA_IPC_EXPORT_REGISTRY (which holds plain pinned array references) since
+# these go back to the staging pool instead of just dropping a reference, but
+# are released at the same point and for the same reasons.
+_CUDA_IPC_STAGING_BUFFERS: list[tuple[int, int, bytes]] = []
 
-# Idle staging buffers by size, and the IPC handle of every pooled buffer.
-# Iterative callers export the same shapes on every request, so reusing the
-# buffers saves a cudaMalloc/cudaFree and a cudaIpcGetMemHandle per array. It
-# also keeps the handles stable, which lets the consumer keep its mapping open
-# (see _open_mapping). Idle buffers beyond _STAGING_POOL_MAX_BYTES are freed.
-_STAGING_POOL: dict[int, list[int]] = {}
-_STAGING_HANDLES: dict[int, bytes] = {}
+# Idle staging buffers as (device pointer, IPC handle), by size. Iterative
+# callers export the same shapes on every request, so reusing the buffers saves
+# a cudaMalloc/cudaFree and a cudaIpcGetMemHandle per array. It also keeps the
+# handles stable, which lets the consumer keep its mapping open (see
+# _open_mapping). Idle buffers beyond _STAGING_POOL_MAX_BYTES are freed.
+_STAGING_POOL: dict[int, list[tuple[int, bytes]]] = {}
 _STAGING_POOL_MAX_BYTES = 1 << 30
 _staging_pool_bytes = 0
 _staging_lock = threading.Lock()
 
 
-def _stage_for_export(src_ptr: int, nbytes: int) -> tuple[int, bytes]:
-    """Copy ``nbytes`` into a legacy-IPC-exportable buffer; return it and its handle."""
+def _stage_for_export(src_ptr: int, nbytes: int) -> bytes:
+    """Copy ``nbytes`` into a legacy-IPC-exportable buffer; return its handle."""
     global _staging_pool_bytes
     with _staging_lock:
         free_list = _STAGING_POOL.get(nbytes)
-        ptr = free_list.pop() if free_list else None
-        if ptr is not None:
+        pooled = free_list.pop() if free_list else None
+        if pooled is not None:
             _staging_pool_bytes -= nbytes
-        handle = _STAGING_HANDLES.get(ptr) if ptr is not None else None
-    if ptr is None:
-        ptr = cuda_api.malloc(nbytes)
+    ptr, handle = pooled if pooled is not None else (cuda_api.malloc(nbytes), None)
     try:
         cuda_api.memcpy_device_to_device(ptr, src_ptr, nbytes)
         if handle is None:
             handle = cuda_api.ipc_get_mem_handle(ptr)
     except Exception:
-        with _staging_lock:
-            _STAGING_HANDLES.pop(ptr, None)
         cuda_api.free(ptr)
         raise
     with _staging_lock:
-        _STAGING_HANDLES[ptr] = handle
-        _CUDA_IPC_STAGING_BUFFERS.append((ptr, nbytes))
-    return ptr, handle
+        _CUDA_IPC_STAGING_BUFFERS.append((ptr, nbytes, handle))
+    return handle
 
 
 def release_pinned_ipc_exports() -> None:
@@ -318,12 +312,11 @@ def release_pinned_ipc_exports() -> None:
     to_free = []
     with _staging_lock:
         staging, _CUDA_IPC_STAGING_BUFFERS[:] = list(_CUDA_IPC_STAGING_BUFFERS), []
-        for ptr, nbytes in staging:
+        for ptr, nbytes, handle in staging:
             if _staging_pool_bytes + nbytes <= _STAGING_POOL_MAX_BYTES:
-                _STAGING_POOL.setdefault(nbytes, []).append(ptr)
+                _STAGING_POOL.setdefault(nbytes, []).append((ptr, handle))
                 _staging_pool_bytes += nbytes
             else:
-                _STAGING_HANDLES.pop(ptr, None)
                 to_free.append(ptr)
     for ptr in to_free:
         cuda_api.free(ptr)
@@ -412,7 +405,7 @@ def dump_cuda_ipc_arraydict(arr: Any) -> ArrayDict:
         # VMM-backed. Copy just this array's own bytes (not the whole, possibly
         # huge, backing allocation) into a plain cudaMalloc buffer and export
         # a handle to *that* instead.
-        _, handle_bytes = _stage_for_export(data_ptr, nbytes)
+        handle_bytes = _stage_for_export(data_ptr, nbytes)
         storage_offset = 0
         storage_size = nbytes
 

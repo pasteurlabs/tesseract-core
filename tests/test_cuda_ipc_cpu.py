@@ -247,7 +247,7 @@ def test_dump_dlpack_only_array(mocked_cuda):
 
 def test_dump_dlpack_only_falls_back_to_staging(mocked_cuda):
     """A VMM-backed DLPack-only array (JAX/XLA) takes the staging fallback path."""
-    mocked_cuda.reject_non_staging_ipc = True
+    mocked_cuda.reject_foreign_ipc = True
     arr = FakeDLPackCudaArray((4, 8), "float32", data_ptr=0x5000)  # nbytes 128
     out = cuda_ipc.dump_cuda_ipc_arraydict(arr)
 
@@ -293,7 +293,7 @@ def test_dump_falls_back_to_staging_on_ipc_reject(mocked_cuda):
     """
     # Reject the array's pointer (VMM-backed) but let the staging buffer succeed,
     # matching real behavior where the fresh cudaMalloc buffer is IPC-exportable.
-    mocked_cuda.reject_non_staging_ipc = True
+    mocked_cuda.reject_foreign_ipc = True
 
     arr = FakeCudaArray((4, 8), "<f4", data_ptr=0x5000)  # nbytes = 4*8*4 = 128
     out = cuda_ipc.dump_cuda_ipc_arraydict(arr)
@@ -308,18 +308,22 @@ def test_dump_falls_back_to_staging_on_ipc_reject(mocked_cuda):
     assert unpacked["storage_offset"] == 0
     assert unpacked["storage_size"] == 128
     # Staging buffer registered for a later release.
-    assert cuda_ipc._CUDA_IPC_STAGING_BUFFERS == [(0xD000, 128)]
+    assert cuda_ipc._CUDA_IPC_STAGING_BUFFERS == [
+        (0xD000, 128, b"\x01" * cuda_api.IPC_HANDLE_SIZE)
+    ]
 
 
 def test_dump_falls_back_to_staging_when_handle_fails(mocked_cuda, monkeypatch):
     """A handle failure on memory reported as capable still falls back."""
-    mocked_cuda.reject_non_staging_ipc = True
+    mocked_cuda.reject_foreign_ipc = True
     monkeypatch.setattr(cuda_api, "is_legacy_ipc_capable", lambda ptr: True)
 
     out = cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((4,), "<f4", data_ptr=0x5000))
 
     assert _unpack_cuda_ipc(out["data"])["storage_offset"] == 0
-    assert cuda_ipc._CUDA_IPC_STAGING_BUFFERS == [(0xD000, 16)]
+    assert cuda_ipc._CUDA_IPC_STAGING_BUFFERS == [
+        (0xD000, 16, b"\x01" * cuda_api.IPC_HANDLE_SIZE)
+    ]
 
 
 def test_dump_synchronizes_before_returning_handle(mocked_cuda):
@@ -343,7 +347,7 @@ def test_export_registry_pins_and_releases(mocked_cuda):
 
 def test_release_recycles_staging_buffers(mocked_cuda):
     """Released staging buffers are reused, handle included, by the next export."""
-    mocked_cuda.reject_non_staging_ipc = True
+    mocked_cuda.reject_foreign_ipc = True
     first = cuda_ipc.dump_cuda_ipc_arraydict(
         FakeCudaArray((4,), "<f4", data_ptr=0x5000)
     )
@@ -363,7 +367,7 @@ def test_release_recycles_staging_buffers(mocked_cuda):
 def test_release_frees_staging_beyond_pool_limit(mocked_cuda, monkeypatch):
     """Idle staging buffers beyond the pool's byte limit are freed."""
     monkeypatch.setattr(cuda_ipc, "_STAGING_POOL_MAX_BYTES", 16)
-    mocked_cuda.reject_non_staging_ipc = True
+    mocked_cuda.reject_foreign_ipc = True
     cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((4,), "<f4", data_ptr=0x5000))
     cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((4,), "<f4", data_ptr=0x6000))
     cuda_ipc.release_pinned_ipc_exports()

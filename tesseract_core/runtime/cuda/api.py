@@ -147,7 +147,7 @@ def ipc_get_mem_handle(device_ptr: int) -> bytes:
 
     Raises ``RuntimeError`` if the pointer is rejected by the legacy IPC API
     (e.g. VMM/pool-backed memory, which callers should stage into a plain
-    ``cudaMalloc`` buffer instead; see ``cuda.ipc._stage_for_export``).
+    ``cudaMalloc`` buffer instead).
     """
     cudart = _get_cudart()
     handle = loader.CudaIpcMemHandle()

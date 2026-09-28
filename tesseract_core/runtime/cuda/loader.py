@@ -263,8 +263,8 @@ def load_cudart() -> Any:
         ctypes.c_int,
     ]
     cudart.cudaMemcpy.restype = ctypes.c_int
-    # Used by decode to block until a device-to-device copy completes before the
-    # IPC mapping is closed.
+    # Used by encode to wait for pending device work before a handle leaves the
+    # process, and by decode to block until its device-to-device copy completes.
     cudart.cudaDeviceSynchronize.argtypes = []
     cudart.cudaDeviceSynchronize.restype = ctypes.c_int
     return cudart
