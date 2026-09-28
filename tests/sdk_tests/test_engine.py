@@ -693,10 +693,12 @@ def test_init(tmpdir, recipe):
             target_dir=Path(tmpdir) / "test_dir", tesseract_name="foo"
         )
 
-    # Make sure that all tesseract related files are created
-    assert api_path.exists()
-    assert (tmpdir / "test_dir/tesseract_requirements.txt").exists()
-    assert (tmpdir / "test_dir/tesseract_config.yaml").exists()
+    # Make sure that every file of the recipe is created, including subdirectories
+    template_dir = Path(engine.__file__).parent / "templates" / (recipe or "base")
+    template_files = [p for p in template_dir.rglob("*") if p.is_file()]
+    assert template_files
+    for template_file in template_files:
+        assert (api_path.parent / template_file.relative_to(template_dir)).exists()
 
     # Ensure the name in the config is correct
     with open(tmpdir / "test_dir/tesseract_config.yaml") as config_yaml:

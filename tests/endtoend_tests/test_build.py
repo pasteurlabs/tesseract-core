@@ -25,7 +25,9 @@ def docker_executable():
 tested_images = ("ubuntu:24.04",)
 
 build_matrix = [
-    *[(r, None) for r in AVAILABLE_RECIPES],
+    # The julia recipe takes minutes to precompile Enzyme, so it is exercised by
+    # the bandedblock_cholmod example instead.
+    *[(r, None) for r in AVAILABLE_RECIPES if r != "julia"],
     *[(None, img) for img in tested_images],
 ]
 

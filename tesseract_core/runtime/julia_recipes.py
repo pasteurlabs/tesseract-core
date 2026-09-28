@@ -19,16 +19,16 @@ The wrapped Julia function must follow this contract::
 - The returned NamedTuple has one entry per top-level field of the output
   schema, e.g. ``(; x = solution)``.
 
-Importing this module starts Julia via ``juliacall``. The active Julia project
-must provide ``Enzyme`` and ``PythonCall``.
+The first helper call loads the Julia side via ``juliacall``, so the active
+Julia project must provide ``Enzyme`` and ``PythonCall``.
 """
 
 from collections.abc import Callable, Collection
+from functools import cache
 from pathlib import Path
 from typing import Any, NamedTuple
 
 import numpy as np
-from juliacall import Main as jl
 from pydantic import BaseModel
 
 from tesseract_core.runtime.schema_generation import (
@@ -38,7 +38,12 @@ from tesseract_core.runtime.schema_generation import (
 from tesseract_core.runtime.schema_types import is_differentiable
 from tesseract_core.runtime.tree_transforms import expand_path_pattern, get_at_path
 
-_recipes = jl.include(str(Path(__file__).with_suffix(".jl")))
+
+@cache
+def _recipes() -> Any:
+    from juliacall import Main as jl
+
+    return jl.include(str(Path(__file__).with_suffix(".jl")))
 
 
 class _FlatInputs(NamedTuple):
@@ -91,7 +96,7 @@ def _from_julia(julia_dict: Any, keys: Collection[str] | None = None) -> dict[st
 
 def julia_apply(apply_fn: Any, inputs: BaseModel) -> dict:
     """Call ``apply_fn`` on ``inputs`` and return its outputs as a dict."""
-    return _from_julia(_recipes.apply(apply_fn, *_flatten_inputs(inputs)))
+    return _from_julia(_recipes().apply(apply_fn, *_flatten_inputs(inputs)))
 
 
 def julia_jvp(
@@ -104,7 +109,7 @@ def julia_jvp(
     """Compute the Jacobian-vector product of ``apply_fn`` with forward-mode Enzyme."""
     jvp_paths = list(jvp_inputs)
     tangents = [np.asarray(tangent_vector[p], dtype=np.float64) for p in jvp_paths]
-    out = _recipes.jvp(apply_fn, *_flatten_inputs(inputs), jvp_paths, tangents)
+    out = _recipes().jvp(apply_fn, *_flatten_inputs(inputs), jvp_paths, tangents)
     return _from_julia(out, keys=jvp_outputs)
 
 
@@ -120,7 +125,7 @@ def julia_vjp(
     cotangents = [
         np.asarray(cotangent_vector[name], dtype=np.float64) for name in output_names
     ]
-    out = _recipes.vjp(
+    out = _recipes().vjp(
         apply_fn,
         *_flatten_inputs(inputs),
         list(vjp_inputs),
