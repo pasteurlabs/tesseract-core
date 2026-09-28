@@ -6,12 +6,12 @@ from pathlib import Path
 
 import pytest
 
-# NOTE: This tests .github/workflows/update_runtime_deps.py, which is not part of the
+# NOTE: This tests .github/scripts/update_runtime_deps.py, which is not part of the
 # package. It runs unattended every Monday and rewrites pyproject.toml in place, so its
 # failure mode is a silently mangled manifest rather than a crash -- worth locking down.
 # Being outside the package, it is not importable by name, so load it by path here rather
-# than putting .github/workflows on the import path of the whole test suite.
-SCRIPT = Path(__file__).parents[1] / ".github" / "workflows" / "update_runtime_deps.py"
+# than putting .github/scripts on the import path of the whole test suite.
+SCRIPT = Path(__file__).parents[1] / ".github" / "scripts" / "update_runtime_deps.py"
 
 spec = importlib.util.spec_from_file_location("update_runtime_deps", SCRIPT)
 update_runtime_deps = importlib.util.module_from_spec(spec)
