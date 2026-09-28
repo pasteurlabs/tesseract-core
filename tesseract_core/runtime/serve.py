@@ -57,13 +57,12 @@ def negotiate_encoding(accept: str | None) -> NegotiatedEncoding:
     """Resolve the Accept header to an encoding the runtime currently offers.
 
     Media ranges are tried by descending q-value, and the first one whose format,
-    ``gpu_transport`` and ``compression`` this runtime can all produce wins. That
-    way a request that cannot be served is rejected before the endpoint runs.
+    ``gpu_transport`` and ``compression`` this runtime can all produce wins.
+    Raises a 406 error if there is none.
 
-    Whatever a range leaves unspecified falls back to a default. The format and
-    compression use the configured ``output_format`` and ``compression``. The
-    GPU transport always falls back to ``none``: enabling a transport in the
-    config offers it, but only requests that ask for it get it.
+    Values a range leaves out fall back to the configured ``output_format`` and
+    ``compression``. The GPU transport falls back to ``none`` regardless of the
+    config, which only controls which transports a request may ask for.
     """
     config = get_config()
     default_compression = config.compression or "none"

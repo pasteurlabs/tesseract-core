@@ -512,8 +512,8 @@ def test_serve_lifecycle(mock_serving, mock_clients):
     ("encoding", "expected"),
     [
         ({}, None),
-        # What from_image / from_source clients send by default: a bare media
-        # type, which runtimes that cannot parse media-type parameters understand
+        # from_image / from_source clients send a bare media type by default,
+        # which runtimes that cannot parse media-type parameters understand
         (
             {"output_format": "json+base64", "gpu_transport": "none"},
             "application/json+base64",
@@ -526,9 +526,9 @@ def test_serve_lifecycle(mock_serving, mock_clients):
     ],
 )
 def test_accept_header(encoding, expected):
-    from tesseract_core.sdk.tesseract import _Encoding
+    from tesseract_core.sdk.tesseract import _RequestedEncoding
 
-    assert _Encoding(**encoding).accept_header() == expected
+    assert _RequestedEncoding(**encoding).accept_header() == expected
 
 
 def test_in_process_tesseracts_have_no_server_capabilities(dummy_tesseract_module):

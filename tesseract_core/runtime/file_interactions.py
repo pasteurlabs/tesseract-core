@@ -21,14 +21,14 @@ PathLike = str | Path
 #
 # They compose freely: a response can inline its CPU arrays as JSON while
 # handing its GPU arrays out as ``cuda_ipc`` handles. Clients choose both per
-# request via the ``Accept`` header; the runtime config only sets the default
-# output format and which GPU transports are offered at all.
+# request via the ``Accept`` header, while the runtime config sets the default
+# output format and which GPU transports are offered.
 supported_format_type = Literal["json", "json+base64", "json+binref"]
 
 # GPU transports. ``none`` is the always-available default (GPU output is copied
-# to the host and encoded via the output format). Any other value exports device
+# to the host and encoded via the output format). Any other value passes device
 # memory by reference and is an experimental capability that must be enabled on
-# the server and requested by the client (see available_gpu_transports).
+# the server and requested by the client.
 #
 # The disabled state is the explicit string ``"none"`` rather than ``None``, so
 # it is clear to users that this means "disabled", not "unspecified".
@@ -49,14 +49,10 @@ def available_formats() -> tuple[str, ...]:
 
 
 def available_gpu_transports() -> tuple[str, ...]:
-    """GPU transports the runtime currently accepts, for both inputs and outputs.
+    """GPU transports the runtime accepts for inputs and outputs.
 
-    Always includes ``none`` (copy GPU arrays to host and serialize them like any
-    CPU array). A by-reference transport such as ``cuda_ipc`` is experimental and
-    only offered when the runtime is configured with a non-``none``
-    ``gpu_transport`` (e.g. ``TESSERACT_GPU_TRANSPORT=cuda_ipc``); it may change
-    or be removed without notice. Offering a transport does not make it the
-    default: outputs use it only when a request asks for it.
+    Always includes ``none``, plus the configured ``gpu_transport`` if it is
+    anything else.
     """
     from tesseract_core.runtime.config import get_config
 

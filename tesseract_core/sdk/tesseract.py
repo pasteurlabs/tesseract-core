@@ -129,27 +129,27 @@ class ServerCapabilities:
     """Formats for CPU arrays in responses (e.g. ``json+base64``)."""
 
     gpu_transports: tuple[str, ...]
-    """How GPU arrays may cross the boundary, in either direction. ``none``
-    (copy to host) is always included by servers that advertise this field;
-    anything else (e.g. ``cuda_ipc``) passes arrays by reference."""
+    """How GPU arrays may cross the boundary in either direction. ``none`` copies
+    them to the host, and anything else (e.g. ``cuda_ipc``) passes them by
+    reference."""
 
     compressions: tuple[str, ...]
     """Compressions for array buffers in responses (``none`` disables it)."""
 
 
 @dataclass(frozen=True)
-class _Encoding:
-    """What a client requests for a call; ``None`` fields express no preference."""
+class _RequestedEncoding:
+    """What a client requests for a call, with ``None`` meaning no preference."""
 
     output_format: str | None = None
     gpu_transport: str | None = None
     compression: str | None = None
 
-    def merge(self, overrides: _Encoding | None) -> _Encoding:
+    def merge(self, overrides: _RequestedEncoding | None) -> _RequestedEncoding:
         """Return a copy with the fields ``overrides`` sets taking precedence."""
         if overrides is None:
             return self
-        return _Encoding(
+        return _RequestedEncoding(
             output_format=overrides.output_format or self.output_format,
             gpu_transport=overrides.gpu_transport or self.gpu_transport,
             compression=overrides.compression or self.compression,
@@ -158,10 +158,9 @@ class _Encoding:
     def accept_header(self) -> str | None:
         """The ``Accept`` value requesting this encoding, or None if there is no preference.
 
-        Anything left unset is filled in by the server's defaults. Parameters are
-        only added when needed, since runtimes older than 1.13 cannot parse any.
-        A GPU transport of ``none`` is what servers use unless asked otherwise,
-        so it is never sent.
+        Parameters are only added when needed, since runtimes older than 1.13
+        cannot parse them. ``gpu_transport=none`` is the server default and is
+        never sent.
         """
         params = []
         if self.gpu_transport not in (None, "none"):
@@ -193,10 +192,9 @@ class Tesseract:
     _stream_logs: BoolOrCallable = False
     _timeout: float | tuple[float, float] | None = None
     _binref_pool_enabled: bool = False
-    # Encoding overrides applied to every call made through this object; see
-    # with_encoding. Objects derived that way share their parent's client
+    # Set on views created by with_encoding, which share their parent's client
     # without owning it.
-    _encoding: _Encoding | None = None
+    _encoding: _RequestedEncoding | None = None
     _owns_client: bool = True
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -295,14 +293,12 @@ class Tesseract:
                 Required when using json+binref output format.
             output_format: Format to use for the output data. json+binref requires output_path to be set.
                 This has no impact on what is returned to Python and only affects the format that is used internally.
-            gpu_transport: How GPU arrays cross the boundary in both directions,
-                independently of ``output_format`` (which governs CPU arrays). ``none``
-                copies GPU arrays to the host and serializes them like any CPU array;
-                ``cuda_ipc`` passes them by reference and requires the container to have
-                GPU access. Enables the transport on the served Tesseract and makes it
-                this client's default; see :meth:`with_encoding` to change it per call.
-                Resolved against ``runtime_config`` with the precedence described in
-                ``engine.serve``.
+            gpu_transport: GPU transport to enable on the served Tesseract and use for
+                this client's calls (see :meth:`with_encoding` to change it per call).
+                ``none`` copies GPU arrays to the host, and ``cuda_ipc`` passes them by
+                reference, which requires the container to have GPU access. Independent
+                of ``output_format``, which governs CPU arrays. Resolved against
+                ``runtime_config`` with the precedence described in ``engine.serve``.
             docker_args: Additional arguments to pass to the container runtime (e.g., Docker).
             runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
                 These are converted to TESSERACT_* environment variables. For example,
@@ -535,15 +531,13 @@ class Tesseract:
             output_path: Path of output directory. All paths in the tesseract
                 result with be given relative to this path. Required when using json+binref.
             output_format: Format to use for the output data. json+binref requires output_path.
-            gpu_transport: How GPU arrays cross the boundary in both directions,
-                independently of ``output_format`` (which governs CPU arrays). ``none``
-                copies GPU arrays to the host and serializes them like any CPU array;
-                ``cuda_ipc`` passes them by reference. Unlike a container this needs
-                nothing wired up: two processes on one host already share an IPC
-                namespace. Enables the transport on the served Tesseract and makes it
-                this client's default; see :meth:`with_encoding` to change it per call.
-                Resolved against ``runtime_config``, an explicit value winning.
                 This has no impact on what is returned to Python and only affects the format that is used internally.
+            gpu_transport: GPU transport to enable on the served Tesseract and use for
+                this client's calls (see :meth:`with_encoding` to change it per call).
+                ``none`` copies GPU arrays to the host, and ``cuda_ipc`` passes them by
+                reference, which needs no setup since processes on one host share an
+                IPC namespace. Independent of ``output_format``, which governs CPU
+                arrays. Resolved against ``runtime_config``, an explicit value winning.
             runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
                 For example, `{"profiling": True}` enables profiling.
             stream_logs: If True, stream logs to stdout while endpoints run.
@@ -728,16 +722,14 @@ class Tesseract:
     @property
     @requires_client
     def server_capabilities(self) -> ServerCapabilities | None:
-        """The encodings this Tesseract's server accepts.
+        """The encodings this Tesseract's server accepts, read from its OpenAPI schema.
 
-        Read from the server's OpenAPI schema, so it reflects how the server was
-        actually configured, however this object was created. A listed value can
-        still fail from this client for reasons the server cannot know about;
-        ``cuda_ipc``, for example, requires both sides to share a host and a GPU.
+        A listed value can still fail for reasons the server cannot know about.
+        For example, ``cuda_ipc`` requires client and server to share a host and a GPU.
 
         Returns:
             the advertised capabilities, or None for in-process Tesseracts created
-            via :meth:`from_tesseract_api`, which never serialize arrays.
+            via :meth:`from_tesseract_api`, which do not serialize arrays.
         """
         if isinstance(self._client, LocalClient):
             return None
@@ -758,31 +750,28 @@ class Tesseract:
     ) -> Tesseract:
         """Get a view of this Tesseract that requests a different encoding.
 
-        The view shares this Tesseract's connection and runs calls on the same
-        server; only how arrays are exchanged differs. Arguments left as None
-        keep this Tesseract's setting. The view stays usable for as long as
-        this Tesseract is served, and never serves or tears anything down itself.
+        The view shares this Tesseract's connection and stays usable while this
+        Tesseract is served. Arguments left as None keep this Tesseract's setting.
 
             >>> with Tesseract.from_image(
             ...     "my_tesseract", gpu_transport="cuda_ipc"
             ... ) as t:
             ...     t.with_encoding(gpu_transport="none").apply(inputs)
 
-        In-process Tesseracts created via :meth:`from_tesseract_api` pass arrays
-        in memory, so the encoding has no effect on them.
+        Has no effect on in-process Tesseracts created via :meth:`from_tesseract_api`.
 
         Args:
             output_format: Format for CPU arrays in responses.
-            gpu_transport: How GPU arrays cross the boundary, for both inputs and
-                outputs. ``none`` copies them to the host; ``cuda_ipc`` passes
-                them by reference.
+            gpu_transport: How GPU arrays cross the boundary in either direction.
+                ``none`` copies them to the host, and ``cuda_ipc`` passes them by
+                reference.
             compression: Compression for array buffers in responses (``none``
                 disables it).
 
         Returns:
             A Tesseract that uses the requested encoding for every call.
         """
-        requested = _Encoding(output_format, gpu_transport, compression)
+        requested = _RequestedEncoding(output_format, gpu_transport, compression)
         capabilities = self.server_capabilities
         if capabilities is not None:
             for value, accepted, name in (
@@ -801,7 +790,7 @@ class Tesseract:
         view._client = self._client
         view._owns_client = False
         view._stream_logs = self._stream_logs
-        view._encoding = (self._encoding or _Encoding()).merge(requested)
+        view._encoding = (self._encoding or _RequestedEncoding()).merge(requested)
         if "openapi_schema" in self.__dict__:
             view.openapi_schema = self.openapi_schema
         return view
@@ -1414,7 +1403,7 @@ class HTTPClient:
     ) -> None:
         self._url = self._sanitize_url(url)
         self._output_path = output_path
-        # What this client requests by default; None leaves it to the server.
+        # Requested by default, with None deferring to the server.
         self._output_format = output_format
         self._gpu_transport = gpu_transport
         self._input_path = Path(input_path) if input_path is not None else None
@@ -1455,9 +1444,9 @@ class HTTPClient:
         return self._url
 
     @property
-    def default_encoding(self) -> _Encoding:
+    def default_encoding(self) -> _RequestedEncoding:
         """What this client requests for calls that do not override it."""
-        return _Encoding(self._output_format, self._gpu_transport)
+        return _RequestedEncoding(self._output_format, self._gpu_transport)
 
     def _send(
         self,
@@ -1497,7 +1486,7 @@ class HTTPClient:
         method: str = "GET",
         payload: dict | None = None,
         run_id: str | None = None,
-        encoding: _Encoding | None = None,
+        encoding: _RequestedEncoding | None = None,
     ) -> dict:
         url = f"{self.url}/{endpoint.lstrip('/')}"
         params = {"run_id": run_id} if run_id is not None else {}
@@ -1624,7 +1613,7 @@ class HTTPClient:
         payload: dict | None = None,
         run_id: str | None = None,
         stream_logs: BoolOrCallable = False,
-        encoding: _Encoding | None = None,
+        encoding: _RequestedEncoding | None = None,
     ) -> dict:
         """Run a Tesseract endpoint.
 
@@ -1721,7 +1710,7 @@ class LocalClient:
         payload: dict | None = None,
         run_id: str | None = None,
         stream_logs: BoolOrCallable = False,
-        encoding: _Encoding | None = None,
+        encoding: _RequestedEncoding | None = None,
     ) -> dict:
         """Run a Tesseract endpoint.
 

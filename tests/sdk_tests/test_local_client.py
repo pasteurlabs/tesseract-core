@@ -261,7 +261,7 @@ def test_server_capabilities_reflect_the_server(
 ):
     """A client that did not configure the server still sees what it accepts.
 
-    Only reads what the server advertises; exercising the transport needs a GPU.
+    Only reads what the server advertises, since exercising the transport needs a GPU.
     """
     with Tesseract.from_source(dummy_api_path, gpu_transport=gpu_transport) as tess:
         remote = Tesseract.from_url(tess._client.url)

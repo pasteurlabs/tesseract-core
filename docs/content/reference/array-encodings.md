@@ -168,7 +168,7 @@ When calling `tesseract-runtime` directly (e.g. inside a container), the plain `
 
 ## Choosing the encoding per request
 
-For a served Tesseract, `--output-format` and `TESSERACT_COMPRESSION` only set defaults. A client can request a different encoding for each call through the `Accept` header: the media type selects the output format, and the `compression` parameter selects the compression.
+For a served Tesseract, `--output-format` and `TESSERACT_COMPRESSION` only set defaults. A client can request a different encoding for each call through the `Accept` header, where the media type selects the output format and the `compression` parameter selects the compression.
 
 ```bash
 $ curl \
@@ -178,7 +178,7 @@ $ curl \
   http://<tesseract-address>:<port>/apply
 ```
 
-Anything the header leaves out falls back to the server's defaults. If the server cannot produce any encoding the header accepts, it responds with `406 Not Acceptable` and lists what it supports, before running the endpoint. The same values are advertised in the server's OpenAPI schema (`/openapi.json`) as `x-supported-output-formats`, `x-supported-compressions` and `x-supported-gpu-transports`.
+Anything the header leaves out falls back to the server's defaults. If the server cannot produce any encoding the header accepts, it responds with `406 Not Acceptable` without running the endpoint and lists what it supports. The same values are advertised in the server's OpenAPI schema (`/openapi.json`) as `x-supported-output-formats`, `x-supported-compressions` and `x-supported-gpu-transports`.
 
 The experimental GPU transports (the `gpu_transport` parameter) must also be enabled on the server, and are only used for requests that ask for them.
 

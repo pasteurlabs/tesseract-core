@@ -292,7 +292,7 @@ def test_negotiate_encoding(gpu_transport, compression, accept, expected):
     assert tuple(negotiate_encoding(accept)) == expected
 
 
-def test_gpu_transport_inputs_require_the_transport_enabled(dummy_tesseract_module):
+def test_gpu_transport_inputs_rejected_when_not_enabled(dummy_tesseract_module):
     """The server rejects by-reference inputs it has not been configured to accept.
 
     Checked before the transport is touched, so this needs no GPU.
@@ -383,9 +383,8 @@ def test_get_openapi_schema(http_client):
 def test_openapi_schema_advertises_encodings(dummy_tesseract_module):
     """Clients can read which encodings this server accepts from openapi.json.
 
-    Output formats describe how *host* (CPU) arrays are serialized and are always
-    the same three; a configured GPU transport (``cuda_ipc``) is a separate axis,
-    advertised on its own and never among the output formats.
+    A configured GPU transport is advertised separately and never appears among
+    the output formats, which are always the same three.
     """
     from tesseract_core.runtime.config import update_config
 
