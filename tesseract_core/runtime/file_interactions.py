@@ -71,38 +71,6 @@ def available_compressions() -> tuple[str, ...]:
     return ("none", "lz4")
 
 
-def parse_accept_header(accept: str) -> tuple[str, str | None, str | None]:
-    """Split an ``Accept`` value into (output_format, gpu_transport, compression).
-
-    The media type's structured-syntax suffix selects the host-array output
-    format (``application/json+binref`` -> ``json+binref``). Parameters such as
-    ``gpu_transport`` and ``compression`` ride as media-type parameters, e.g. an
-    ``Accept`` of ``application/json+base64; compression=lz4; gpu_transport=cuda_ipc``
-    parses to ``("json+base64", "cuda_ipc", "lz4")``.
-
-    Returns the parsed format, transport parameter, and compression parameter.
-    Parameters return ``None`` when the header omits them. Only recognized
-    parameters are extracted; other parameters (e.g. a charset) are ignored.
-    This parses a single media range and does no validation of the values.
-    """
-    media_type, _, params_str = accept.partition(";")
-    output_format = media_type.strip().split("/")[-1]
-
-    gpu_transport: str | None = None
-    compression: str | None = None
-    for param in params_str.split(";"):
-        key, sep, value = param.partition("=")
-        if sep:
-            key_clean = key.strip()
-            val_clean = value.strip().strip('"')
-            if key_clean == "gpu_transport":
-                gpu_transport = val_clean
-            elif key_clean == "compression":
-                compression = val_clean
-
-    return output_format, gpu_transport, compression
-
-
 def output_to_bytes(
     obj: Any,
     format: supported_format_type,

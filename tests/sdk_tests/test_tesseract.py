@@ -539,9 +539,6 @@ def test_in_process_tesseracts_have_no_server_capabilities(dummy_tesseract_modul
     )
     assert local.server_capabilities is None
 
-    with pytest.warns(DeprecationWarning, match="supported_gpu_transports"):
-        assert local.supported_gpu_transports == ()
-
 
 @pytest.mark.parametrize(
     "run_id",

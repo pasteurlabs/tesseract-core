@@ -271,10 +271,6 @@ def test_server_capabilities_reflect_the_server(
             assert capabilities.output_formats == ("json", "json+base64", "json+binref")
             assert capabilities.compressions == ("none", "lz4")
 
-        # The deprecated property reports what this client requests, not the server
-        with pytest.warns(DeprecationWarning):
-            assert tess.supported_gpu_transports == expected[1:]
-
 
 def test_with_encoding_applies_to_the_view_only(
     dummy_api_path, sample_inputs, tmp_path

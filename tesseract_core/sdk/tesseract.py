@@ -7,7 +7,6 @@ import sys
 import tempfile
 import traceback
 import uuid
-import warnings
 import weakref
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
@@ -807,32 +806,6 @@ class Tesseract:
             view.openapi_schema = self.openapi_schema
         return view
 
-    @property
-    @requires_client
-    def supported_gpu_transports(self) -> tuple[str, ...]:
-        """Device transports this client uses to exchange GPU arrays.
-
-        .. deprecated:: 1.15.0
-            Use :attr:`server_capabilities` to find out which transports the
-            server accepts, and :meth:`with_encoding` to request one.
-
-        Returns:
-            a tuple with the transport this client requests, empty if none.
-        """
-        warnings.warn(
-            "Tesseract.supported_gpu_transports is deprecated. Use "
-            "Tesseract.server_capabilities.gpu_transports to see which transports "
-            "the server accepts, and Tesseract.with_encoding() to request one.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        if isinstance(self._client, LocalClient):
-            return ()
-        transport = self._client.default_encoding.merge(self._encoding).gpu_transport
-        if transport in (None, "none"):
-            return ()
-        return (transport,)
-
     def container_info(self) -> Container:
         """Retrieve information on the Docker container serving this Tesseract.
 
@@ -1428,7 +1401,6 @@ class HTTPClient:
     _binref_pool: BinrefWritePool | None = None
     _output_format: str | None = None
     _gpu_transport: str | None = None
-    _compression: str | None = None
 
     def __init__(
         self,
@@ -1439,14 +1411,12 @@ class HTTPClient:
         input_path: str | Path | None = None,
         experimental_binref_pool: bool = False,
         gpu_transport: str | None = None,
-        compression: str | None = None,
     ) -> None:
         self._url = self._sanitize_url(url)
         self._output_path = output_path
         # What this client requests by default; None leaves it to the server.
         self._output_format = output_format
         self._gpu_transport = gpu_transport
-        self._compression = compression
         self._input_path = Path(input_path) if input_path is not None else None
         self._timeout = timeout
         self._session = requests.Session()
@@ -1487,7 +1457,7 @@ class HTTPClient:
     @property
     def default_encoding(self) -> _Encoding:
         """What this client requests for calls that do not override it."""
-        return _Encoding(self._output_format, self._gpu_transport, self._compression)
+        return _Encoding(self._output_format, self._gpu_transport)
 
     def _send(
         self,

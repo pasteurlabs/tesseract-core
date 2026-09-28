@@ -222,6 +222,38 @@ def test_unacceptable_encoding_is_rejected_before_running(
 
 
 @pytest.mark.parametrize(
+    ("media_range", "expected"),
+    [
+        ("application/json+base64", ("application/json+base64", {})),
+        (
+            "application/json+base64; gpu_transport=cuda_ipc; compression=lz4",
+            (
+                "application/json+base64",
+                {"gpu_transport": "cuda_ipc", "compression": "lz4"},
+            ),
+        ),
+        # No space after ';' parses the same
+        (
+            "application/json;compression=none",
+            ("application/json", {"compression": "none"}),
+        ),
+        # Case-insensitive type and names; quoted values are unwrapped
+        (
+            'Application/JSON+binref; Charset=utf-8; q=0.5; compression="lz4"',
+            (
+                "application/json+binref",
+                {"charset": "utf-8", "q": "0.5", "compression": "lz4"},
+            ),
+        ),
+    ],
+)
+def test_parse_media_range(media_range, expected):
+    from tesseract_core.runtime.serve import parse_media_range
+
+    assert parse_media_range(media_range) == expected
+
+
+@pytest.mark.parametrize(
     ("gpu_transport", "compression", "accept", "expected"),
     [
         # Without an Accept header, the configured defaults apply...
@@ -281,36 +313,6 @@ def test_gpu_transport_inputs_require_the_transport_enabled(dummy_tesseract_modu
     response = client.post("/apply", json={"inputs": inputs})
     assert response.status_code == 422, response.text
     assert "not enabled" in response.text
-
-
-def test_apply_accept_gpu_transport_param_overrides_config(dummy_tesseract_module):
-    """An Accept ``gpu_transport=none`` overrides a configured transport per request.
-
-    The dummy Tesseract returns host arrays, so opting the transport back to
-    ``none`` for this request must succeed and serialize normally, even though
-    the server is configured with cuda_ipc. Proves the header wins over config
-    when present.
-    """
-    from tesseract_core.runtime.config import update_config
-
-    update_config(gpu_transport="cuda_ipc")
-    try:
-        client = TestClient(
-            create_rest_api(dummy_tesseract_module), raise_server_exceptions=False
-        )
-        test_inputs = dummy_tesseract_module.InputSchema.model_validate(test_input)
-        response = client.post(
-            "/apply",
-            json={"inputs": model_to_json(test_inputs)},
-            headers={"Accept": "application/json+base64; gpu_transport=none"},
-        )
-        assert response.status_code == 200, response.text
-        result = array_from_json(
-            response.json()["result"], Path(get_config().output_path)
-        )
-        assert np.array_equal(result, np.array([3.5, 6.0, 8.5]))
-    finally:
-        update_config(gpu_transport="none")
 
 
 def test_create_rest_api_jacobian_endpoint(http_client, dummy_tesseract_module):

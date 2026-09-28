@@ -20,7 +20,6 @@ from .file_interactions import (
     available_gpu_transports,
     join_paths,
     output_to_bytes,
-    parse_accept_header,
 )
 from .mpa import start_run
 from .profiler import Profiler
@@ -35,6 +34,23 @@ class NegotiatedEncoding(NamedTuple):
     output_format: str
     gpu_transport: str
     compression: str | None
+
+
+def parse_media_range(media_range: str) -> tuple[str, dict[str, str]]:
+    """Split one media range of an ``Accept`` header into its type and parameters.
+
+    For example, ``application/json+base64; compression="lz4"`` parses to
+    ``("application/json+base64", {"compression": "lz4"})``. The media type and
+    parameter names are lowercased and quoted values are unwrapped. This does no
+    validation of the values.
+    """
+    media_type, *param_strs = media_range.split(";")
+    params = {}
+    for param in param_strs:
+        key, sep, value = param.partition("=")
+        if sep:
+            params[key.strip().lower()] = value.strip().strip('"')
+    return media_type.strip().lower(), params
 
 
 def negotiate_encoding(accept: str | None) -> NegotiatedEncoding:
@@ -54,31 +70,24 @@ def negotiate_encoding(accept: str | None) -> NegotiatedEncoding:
     if not accept:
         return NegotiatedEncoding(config.output_format, "none", config.compression)
 
-    def quality(media_range: str) -> float:
-        _, _, params = media_range.partition(";")
-        for param in params.split(";"):
-            key, sep, value = param.partition("=")
-            if sep and key.strip() == "q":
-                try:
-                    return float(value.strip())
-                except ValueError:
-                    return 0.0
-        return 1.0
+    def quality(parsed: tuple[str, dict[str, str]]) -> float:
+        try:
+            return float(parsed[1].get("q", 1.0))
+        except ValueError:
+            return 0.0
 
     formats = available_formats()
     transports = available_gpu_transports()
     compressions = available_compressions()
-    ranges = [r.strip() for r in accept.split(",") if r.strip()]
+    ranges = [parse_media_range(r) for r in accept.split(",") if r.strip()]
     # Sorting is stable, so equal-quality ranges keep the client's ordering.
-    for media_range in sorted(ranges, key=quality, reverse=True):
-        media_type = media_range.partition(";")[0].strip().lower()
+    for media_type, params in sorted(ranges, key=quality, reverse=True):
         if media_type in ("*/*", "application/*"):
             output_format = config.output_format
         else:
             output_format = media_type.rpartition("/")[2]
-        _, gpu_transport, compression = parse_accept_header(media_range)
-        gpu_transport = gpu_transport or "none"
-        compression = compression or default_compression
+        gpu_transport = params.get("gpu_transport", "none")
+        compression = params.get("compression", default_compression)
         if (
             output_format in formats
             and gpu_transport in transports

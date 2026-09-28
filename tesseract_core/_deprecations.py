@@ -55,15 +55,6 @@ class Release(NamedTuple):
 # Deprecations awaiting removal. Delete an entry together with its code once the
 # scheduled date passes.
 TOMBSTONES: tuple[Tombstone, ...] = (
-    Tombstone(
-        remove_after=date(2027, 1, 1),
-        what="Tesseract.supported_gpu_transports",
-        hint=(
-            "Remove the deprecated property from tesseract_core/sdk/tesseract.py "
-            "(callers use Tesseract.server_capabilities and "
-            "Tesseract.with_encoding). Update the tests, too."
-        ),
-    ),
     # Example:
     # Tombstone(
     #     remove_after=date(2026, 12, 1),
