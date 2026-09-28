@@ -28,6 +28,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Set up Python
+        id: setup-python
         uses: actions/setup-python@v7
         with:
           python-version: "3.13"
@@ -37,16 +38,14 @@ jobs:
         with:
           enable-cache: true
 
+      # Build both environments on the setup-python interpreter before benchmarking.
+      # uv otherwise prefers any managed Python the benchmarks download along the way
+      # (e.g. for `Tesseract.from_source`), and the two arms end up on different ones.
       - name: Restore UV environment
         run: cp production.uv.lock uv.lock
 
       - name: Install package
-        run: uv sync --extra dev --frozen
-
-      - name: Run benchmarks on current commit
-        run: |
-          uv run --no-sync pytest benchmarks/ \
-            --benchmark-json current_benchmarks.json
+        run: uv sync --extra dev --frozen --python "${{ steps.setup-python.outputs.python-path }}"
 
       - name: Check out baseline branch
         if: github.event_name == 'pull_request'
@@ -60,13 +59,18 @@ jobs:
         working-directory: baseline
         run: |
           cp production.uv.lock uv.lock 2>/dev/null || true
-          uv sync --extra dev --frozen
+          uv sync --extra dev --frozen --python "${{ steps.setup-python.outputs.python-path }}"
 
       - name: Use PR benchmark scripts for baseline
         if: github.event_name == 'pull_request'
         working-directory: baseline
         run: |
           cp -r ../benchmarks/* benchmarks/
+
+      - name: Run benchmarks on current commit
+        run: |
+          uv run --no-sync pytest benchmarks/ \
+            --benchmark-json current_benchmarks.json
 
       - name: Run benchmarks on baseline
         if: github.event_name == 'pull_request'
