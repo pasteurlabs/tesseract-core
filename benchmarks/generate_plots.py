@@ -51,7 +51,12 @@ def extract_suite_data(results: dict, suite_name: str) -> dict[int, float]:
     Returns dict mapping array size to median time in ms.
     """
     # Map suite names to test function names
-    suite_names = ("from_tesseract_api", "containerized_http", "containerized_cli")
+    suite_names = (
+        "from_tesseract_api",
+        "containerized_http",
+        "containerized_http_shmem",
+        "containerized_cli",
+    )
     if suite_name not in suite_names:
         return {}
 
@@ -140,13 +145,19 @@ def generate_guidance_plot(output_path: Path, benchmark_results: dict) -> None:
     containerized_http_data = extract_suite_data(
         benchmark_results, "containerized_http"
     )
-    containerized_cli_data = extract_suite_data(benchmark_results, "containerized_cli")
+    containerized_http_shmem_data = extract_suite_data(
+        benchmark_results, "containerized_http_shmem"
+    )
 
-    # Colorblind-safe palette (blue / orange / purple)
+    # Colorblind-safe palette (blue / orange / green)
     modes = [
         ("Non-containerized, in-memory", from_api_data, "#0072B2"),
         ("Containerized, json+base64 via HTTP", containerized_http_data, "#E69F00"),
-        ("Containerized, json+binref via CLI", containerized_cli_data, "#9467BD"),
+        (
+            "Containerized, json+binref via HTTP (shmem)",
+            containerized_http_shmem_data,
+            "#009E73",
+        ),
     ]
 
     io_sizes = [
@@ -161,11 +172,16 @@ def generate_guidance_plot(output_path: Path, benchmark_results: dict) -> None:
 
         sizes_arr = np.array(sorted(mode_data.keys()), dtype=float)
         times_arr = np.array([mode_data[int(s)] for s in sizes_arr])
-        slope, intercept = np.polyfit(sizes_arr, times_arr, 1)
+        # Affine model: overhead = intercept + slope * size
+        # Use min observed time as intercept (fixed overhead floor),
+        # then fit slope through the residuals.
+        intercept = float(np.min(times_arr))
+        residuals = times_arr - intercept
+        slope = float(np.dot(sizes_arr, residuals) / np.dot(sizes_arr, sizes_arr))
 
         for size, linestyle in io_sizes:
             array_size = size // 8  # Convert bytes to number of float64 elements
-            overhead_ms = max(0.0, intercept + slope * array_size)
+            overhead_ms = intercept + slope * array_size
 
             data_label = _size_to_label(size)
 
@@ -351,31 +367,44 @@ def generate_overhead_comparison_plot(
     containerized_http_data = extract_suite_data(
         benchmark_results, "containerized_http"
     )
+    containerized_http_shmem_data = extract_suite_data(
+        benchmark_results, "containerized_http_shmem"
+    )
     containerized_cli_data = extract_suite_data(benchmark_results, "containerized_cli")
 
     from_api = [from_api_data.get(s, 0) for s in sizes]
     containerized_http = [containerized_http_data.get(s, 0) for s in sizes]
+    containerized_http_shmem = [containerized_http_shmem_data.get(s, 0) for s in sizes]
     containerized_cli = [containerized_cli_data.get(s, 0) for s in sizes]
 
     x = np.arange(len(sizes))
-    width = 0.25
+    width = 0.2
+    # Four bars per group, centered on each tick.
+    offsets = np.array([-1.5, -0.5, 0.5, 1.5]) * width
 
     bars1 = ax.bar(
-        x - width,
+        x + offsets[0],
         from_api,
         width,
         label="Non-containerized, in-memory",
         color="#0072B2",
     )
     bars2 = ax.bar(
-        x,
+        x + offsets[1],
         containerized_http,
         width,
         label="Containerized, json+base64 via HTTP",
         color="#E69F00",
     )
     bars3 = ax.bar(
-        x + width,
+        x + offsets[2],
+        containerized_http_shmem,
+        width,
+        label="Containerized, json+binref via HTTP (shmem)",
+        color="#009E73",
+    )
+    bars4 = ax.bar(
+        x + offsets[3],
         containerized_cli,
         width,
         label="Containerized, json+binref via CLI",
@@ -383,6 +412,7 @@ def generate_overhead_comparison_plot(
     )
 
     ax.set_xlabel("Array Size (elements)", fontsize=12)
+    ax.set_ylabel("Overhead (ms, log scale)", fontsize=12)
     ax.set_title("Tesseract Overhead by Interaction Mode", fontsize=18, pad=30)
     ax.text(
         0.5,
@@ -430,6 +460,7 @@ def generate_overhead_comparison_plot(
     add_labels(bars1)
     add_labels(bars2)
     add_labels(bars3)
+    add_labels(bars4)
 
     plt.tight_layout()
     plt.savefig(output_path, dpi=150, bbox_inches="tight")

@@ -1,0 +1,5 @@
+jax[cpu]
+matplotlib
+numpy
+scipy
+tesseract-jax

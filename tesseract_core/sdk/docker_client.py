@@ -11,17 +11,22 @@ import shlex
 import subprocess
 import sys
 import threading
+import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from io import IOBase
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeAlias
 
 # store a reference to the list type, which is shadowed by some function names below
 from typing import List as list_  # noqa: UP035
 
 from tesseract_core.sdk.config import get_config
+from tesseract_core.sdk.serving import diagnose_exit, is_running
 
 logger = logging.getLogger("tesseract")
+
+BoolOrCallable: TypeAlias = bool | Callable[[str], Any]
 
 
 def _get_docker_executable() -> list_[str]:  # noqa: UP006
@@ -31,6 +36,25 @@ def _get_docker_executable() -> list_[str]:  # noqa: UP006
     if isinstance(docker_executable, str):
         return shlex.split(docker_executable)
     return list(docker_executable)
+
+
+def _get_io_callable(
+    stream: BoolOrCallable,
+    default_stream: Callable[[str], Any],
+) -> Callable[[str], Any] | None:
+    """Get the IO streams for stdout and stderr based on the provided parameters."""
+    if stream is False:
+        target_stream = None
+    elif stream is True:
+        target_stream = default_stream
+    elif callable(stream):
+        target_stream = stream
+    else:
+        raise ValueError(
+            "stream_stdout/stream_stderr must be a boolean or a callable that accepts a string."
+        )
+
+    return target_stream
 
 
 def _read_stream(
@@ -43,7 +67,8 @@ def _read_stream(
     Args:
         stream: The subprocess pipe to read from.
         collected: List to append raw byte lines to.
-        echo_to: If provided, decoded lines are written to this stream in real-time.
+        echo_to: If provided, decoded lines are echoed in real-time. Can be a file-like
+            object (with .write/.flush) or a callable that accepts a string.
     """
     while True:
         line = stream.readline()
@@ -51,16 +76,20 @@ def _read_stream(
             break
         collected.append(line)
         if echo_to is not None:
-            echo_to.write(line.decode("utf-8", errors="replace"))
-            echo_to.flush()
+            decoded = line.decode("utf-8", errors="replace")
+            if callable(echo_to) and not hasattr(echo_to, "write"):
+                echo_to(decoded.rstrip("\n"))
+            else:
+                echo_to.write(decoded)
+                echo_to.flush()
 
 
 def _run_process(
     cmd: list[str],
     *,
     merge_stderr: bool = False,
-    stream_stdout: Any = None,
-    stream_stderr: Any = None,
+    stream_stdout: Callable[[str], Any] | None = None,
+    stream_stderr: Callable[[str], Any] | None = None,
 ) -> tuple[int, bytes, bytes]:
     """Run a subprocess with threaded stream reading.
 
@@ -201,16 +230,46 @@ class Images:
             raise ValueError("Image name cannot be empty.")
 
         docker = _get_docker_executable()
-        try:
-            result = subprocess.run(
+        inspect_result = subprocess.run(
+            [*docker, "inspect", image_id_or_name, "--type", "image"],
+            capture_output=True,
+            text=True,
+        )
+
+        # `docker inspect` can fail when Docker Desktop is in Resource Saver
+        # mode, which caches metadata and may return stale results. Running a
+        # container reliably wakes the Docker VM, so we attempt a no-op run
+        # and retry the inspect.
+        if inspect_result.returncode != 0:
+            logger.debug(
+                f"`docker inspect` failed for {image_id_or_name}, "
+                "attempting to wake Docker Desktop and retrying."
+            )
+            wake_result = subprocess.run(
+                [
+                    *docker,
+                    "run",
+                    "--rm",
+                    "--entrypoint",
+                    "true",
+                    "--pull",
+                    "never",
+                    str(image_id_or_name),
+                ],
+                capture_output=True,
+            )
+            if wake_result.returncode != 0:
+                raise ImageNotFound(f"Image {image_id_or_name} not found.")
+
+            inspect_result = subprocess.run(
                 [*docker, "inspect", image_id_or_name, "--type", "image"],
-                check=True,
                 capture_output=True,
                 text=True,
             )
-            json_dict = json.loads(result.stdout)
-        except subprocess.CalledProcessError as ex:
-            raise ImageNotFound(f"Image {image_id_or_name} not found.") from ex
+            if inspect_result.returncode != 0:
+                raise ImageNotFound(f"Image {image_id_or_name} not found.")
+
+        json_dict = json.loads(inspect_result.stdout)
         if not json_dict:
             raise ImageNotFound(f"Image {image_id_or_name} not found.")
 
@@ -260,6 +319,7 @@ class Images:
         tags: list_[str],  # noqa: UP006
         dockerfile: str | Path,
         ssh: str | None = None,
+        secrets: list_[str] | None = None,  # noqa: UP006
     ) -> list_[str]:  # noqa: UP006
         """Get the buildx command for building Docker images.
 
@@ -269,6 +329,9 @@ class Images:
         config = get_config()
         docker = _get_docker_executable()
         extra_args = config.docker_build_args
+
+        for secret in secrets or []:
+            extra_args = ("--secret", secret, *extra_args)
 
         if ssh is not None:
             extra_args = ("--ssh", ssh, *extra_args)
@@ -296,6 +359,8 @@ class Images:
         tags: list_[str],  # noqa: UP006
         dockerfile: str | Path,
         ssh: str | None = None,
+        secrets: list_[str] | None = None,  # noqa: UP006
+        stream_logs: BoolOrCallable = False,
     ) -> Image:
         """Build a Docker image from a Dockerfile using BuildKit.
 
@@ -304,6 +369,10 @@ class Images:
             tag: The name of the image to build.
             dockerfile: path within the build context to the Dockerfile.
             ssh: If not None, pass given argument to buildx --ssh command.
+            secrets: BuildKit secret specs to pass as buildx --secret arguments.
+            stream_logs: If True, stream build logs to sys.stdout in real-time instead of
+                    buffering. Can also be a callable that accepts a string to use as a custom
+                    sink.
 
         Returns:
             Built Image object.
@@ -321,9 +390,14 @@ class Images:
             tags=tags,
             dockerfile=dockerfile,
             ssh=ssh,
+            secrets=secrets,
         )
 
-        returncode, stdout_data, _ = _run_process(build_cmd, merge_stderr=True)
+        returncode, stdout_data, _ = _run_process(
+            build_cmd,
+            merge_stderr=True,
+            stream_stdout=_get_io_callable(stream_logs, sys.stdout.write),
+        )
 
         if returncode != 0:
             logs = stdout_data.decode("utf-8", errors="replace").splitlines()
@@ -460,8 +534,26 @@ class Container:
 
     @property
     def status(self) -> str:
-        """Gets the status of the container."""
+        """Gets the status of the container, as of the last read.
+
+        Like docker-py, this reports what ``docker inspect`` said when this
+        object was built or last reloaded, so it goes stale once the container
+        stops. Call :meth:`reload` first, or use :meth:`is_running`, to ask about
+        the container now.
+        """
         return self.attrs.get("State", {}).get("Status", "unknown")
+
+    def reload(self) -> None:
+        """Read the container again, updating ``attrs`` with the new data.
+
+        A container that no longer exists leaves ``attrs`` untouched apart from
+        its state, which becomes "unknown" -- callers wait on containers that are
+        expected to disappear, so that must not raise.
+        """
+        try:
+            self.attrs = Containers.get(self.id, tesseract_only=False).attrs
+        except NotFound:
+            self.attrs = {**self.attrs, "State": {"Status": "unknown"}}
 
     def exec_run(self, command: list) -> tuple[int, bytes]:
         """Run a command in this container.
@@ -484,6 +576,19 @@ class Container:
                 result.stderr,
             )
         return result.returncode, result.stdout
+
+    @property
+    def url(self) -> str:
+        """Base URL the container is serving on."""
+        return f"http://{self.host_ip}:{self.host_port}"
+
+    def __str__(self) -> str:
+        """Name this container in a message meant for a person.
+
+        `__repr__` is left to the dataclass, which spells out the constructor as
+        it should; this is what belongs in an error someone has to read.
+        """
+        return f"Tesseract container {self.name}"
 
     def stop(self) -> None:
         """Stop the container."""
@@ -539,11 +644,22 @@ class Container:
 
         return getattr(result, output_attr)
 
-    def wait(self) -> dict:
-        """Wait for container to finish running.
+    def wait(self, timeout: float | None = None) -> dict:
+        """Block until the container stops, then report the status it stopped with.
+
+        Params:
+            timeout: Seconds to wait before giving up. `docker wait` blocks for as
+                long as the container runs, so without this a live container waits
+                forever.
 
         Returns:
             A dict with the exit code of the container.
+
+        Raises:
+            TimeoutError: If the container is still running when `timeout` expires.
+                Note this differs from docker-py, which raises
+                `requests.exceptions.ReadTimeout`; nothing here speaks HTTP.
+            APIError: If the command fails, e.g. for a container that is gone.
         """
         docker = _get_docker_executable()
 
@@ -553,9 +669,14 @@ class Container:
                 check=True,
                 capture_output=True,
                 text=True,
+                timeout=timeout,
             )
             # Container's exit code is printed by the wait command
             return {"StatusCode": int(result.stdout)}
+        except subprocess.TimeoutExpired as ex:
+            raise TimeoutError(
+                f"Container {self.id} was still running after {timeout}s"
+            ) from ex
         except subprocess.CalledProcessError as ex:
             raise APIError(f"Cannot wait for container {self.id}: {ex}") from ex
 
@@ -590,6 +711,37 @@ class Container:
             if "docker" in ex.stderr:
                 raise APIError(f"Cannot remove container {self.id}: {ex}") from ex
             raise ex
+
+
+# The following `singledispatch` functions allow dispatch between different `ServedTesseract`
+# instances (currently `Container` and `TesseractProcess`) without introducing inconsistency
+# between our `Container` class and docker-py's.
+@is_running.register
+def _(container: Container) -> bool:
+    """Whether a container is running now (includes reload)."""
+    container.reload()
+    return container.status == "running"
+
+
+@diagnose_exit.register
+def _(container: Container, logs: str) -> str:
+    """Anything `docker inspect` recorded about why a container stopped.
+
+    Designed to be called when `is_running()` returns `False` which refreshes `State`
+    to reflect any known failure reasons.
+    """
+    del logs  # a container's own output is all the other evidence there is
+    state = container.attrs.get("State", {})
+    if state.get("OOMKilled"):
+        # Nothing else can report this: the process is killed outright, so it has
+        # no chance to say anything about it in its own logs.
+        return (
+            "It was killed for exceeding its memory limit, which is why it may "
+            "have written nothing. Give it a higher `memory` limit."
+        )
+    if state.get("Error"):
+        return f"Docker reported: {state['Error']}"
+    return ""
 
 
 class Containers:
@@ -660,8 +812,8 @@ class Containers:
         user: str | None = None,
         memory: str | None = None,
         extra_args: list_[str] | None = None,  # noqa: UP006
-        stream_stdout: bool = False,
-        stream_stderr: bool = False,
+        stream_stdout: BoolOrCallable = False,
+        stream_stderr: BoolOrCallable = False,
     ) -> Container | tuple[bytes, bytes] | bytes:
         """Run a command in a container from an image.
 
@@ -688,8 +840,9 @@ class Containers:
             extra_args: Additional arguments to pass to the `docker run` CLI command.
             stream_stdout: If True, stream stdout to sys.stdout in real-time instead of
                     buffering. Cannot be used with detach.
-            stream_stderr: If True, stream stderr to sys.stderr in real-time instead of
-                    buffering. Cannot be used with detach.
+            stream_stderr: If True, stream stderr to sys.stderr in real-time. Can also be
+                    a callable that accepts a string to use as a custom sink.
+                    Cannot be used with detach.
 
         Returns:
             Container object if detach is True, otherwise returns list of stdout and stderr.
@@ -741,6 +894,14 @@ class Containers:
             raise ValueError(
                 "Cannot use stream_stdout or stream_stderr with detach=True."
             )
+
+        # A name we control lets us find this specific container after the
+        # fact, regardless of what (if anything) the CLI prints to stdout when
+        # the run fails partway through: Docker prints the new id before a
+        # port-publish failure, Podman prints nothing on the same failure.
+        run_name = f"tesseract-{uuid.uuid4().hex[:12]}" if detach else None
+        if run_name is not None:
+            optional_args.extend(["--name", run_name])
         if detach:
             optional_args.append("--detach")
         if remove:
@@ -767,16 +928,29 @@ class Containers:
 
         returncode, stdout_data, stderr_data = _run_process(
             full_cmd,
-            stream_stdout=sys.stdout if stream_stdout else None,
-            stream_stderr=sys.stderr if stream_stderr else None,
+            stream_stdout=_get_io_callable(stream_stdout, sys.stdout.write),
+            stream_stderr=_get_io_callable(stream_stderr, sys.stderr.write),
         )
 
         if returncode != 0:
             stderr_str = stderr_data.decode("utf-8", errors="ignore")
             if "repository" in stderr_str:
                 raise ImageNotFound(stderr_str)
+            # A failure past the "does the image exist" check can still have
+            # created a container before whatever step actually failed (e.g.
+            # publishing a port); look it up by the name we gave it rather than
+            # guessing from stdout, since that only exists on the daemon if the
+            # daemon actually created it.
+            leaked_container_id = None
+            if run_name is not None:
+                try:
+                    leaked_container_id = Containers.get(
+                        run_name, tesseract_only=False
+                    ).id
+                except NotFound:
+                    pass
             raise ContainerError(
-                None,
+                leaked_container_id,
                 returncode,
                 shlex.join(full_cmd),
                 image,
@@ -950,6 +1124,60 @@ class Volumes:
         return result.stdout.strip().split("\n")
 
 
+class Networks:
+    """Namespace for functions to interface with Docker networks."""
+
+    @staticmethod
+    def get(name: str) -> dict:
+        """Get metadata for a Docker network.
+
+        Params:
+            name: The name of the network to get.
+
+        Returns:
+            The network metadata dict.
+
+        Raises:
+            NotFound: If the network does not exist.
+        """
+        docker = _get_docker_executable()
+        try:
+            result = subprocess.run(
+                [*docker, "network", "inspect", name],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            json_dict = json.loads(result.stdout)
+        except subprocess.CalledProcessError as ex:
+            raise NotFound(f"Network {name} not found: {ex}") from ex
+        if not json_dict:
+            raise NotFound(f"Network {name} not found.")
+        return json_dict[0]
+
+    @staticmethod
+    def create(name: str) -> dict:
+        """Create a Docker network.
+
+        Params:
+            name: The name of the network to create.
+
+        Returns:
+            The created network metadata dict.
+        """
+        docker = _get_docker_executable()
+        try:
+            subprocess.run(
+                [*docker, "network", "create", name],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            return Networks.get(name)
+        except subprocess.CalledProcessError as ex:
+            raise APIError(f"Error creating network {name}: {ex}") from ex
+
+
 class DockerException(Exception):
     """Base class for Docker CLI exceptions."""
 
@@ -1021,6 +1249,7 @@ class CLIDockerClient:
         self.containers = Containers()
         self.images = Images()
         self.volumes = Volumes()
+        self.networks = Networks()
 
     @staticmethod
     def info() -> tuple:
@@ -1105,7 +1334,9 @@ def build_docker_image(
     tags: list[str],
     dockerfile: str | Path,
     inject_ssh: bool = False,
+    secrets: list[str] | None = None,
     print_and_exit: bool = False,
+    stream_logs: BoolOrCallable = False,
 ) -> Image | None:
     """Build a Docker image from a Dockerfile using BuildKit.
 
@@ -1114,7 +1345,11 @@ def build_docker_image(
         tag: The name of the image to build.
         dockerfile: path within the build context to the Dockerfile.
         inject_ssh: If True, inject SSH keys into the build.
+        secrets: BuildKit secret specs (``id=name,env=VAR`` or ``id=name,src=file``)
+            forwarded to the build as ``--secret`` arguments.
         print_and_exit: If True, log the build command and exit without building.
+        stream_logs: If True, stream build logs to sys.stdout in real-time instead of buffering.
+            Can also be a callable that accepts a string to use as a custom sink.
 
     Returns:
         Built Image object if print_and_exit is False, otherwise None.
@@ -1122,18 +1357,24 @@ def build_docker_image(
     # use an instantiated client here, which may be mocked in tests
     client = CLIDockerClient()
     build_args = dict(path=path, tags=tags, dockerfile=dockerfile)
+    if secrets:
+        build_args["secrets"] = secrets
 
     if inject_ssh:
-        ssh_sock = os.environ.get("SSH_AUTH_SOCK")
-        if ssh_sock is None:
-            raise ValueError(
-                "SSH_AUTH_SOCK environment variable not set (try running `ssh-agent`)"
-            )
-
         ssh_keys = subprocess.run(["ssh-add", "-L"], capture_output=True)
         if ssh_keys.returncode != 0 or not ssh_keys.stdout:
             raise ValueError("No SSH keys found in SSH agent (try running `ssh-add`)")
-        build_args["ssh"] = f"default={ssh_sock}"
+
+        if sys.platform == "win32":
+            # On Windows, Docker Desktop connects to the SSH agent directly
+            build_args["ssh"] = "default"
+        else:
+            ssh_sock = os.environ.get("SSH_AUTH_SOCK")
+            if ssh_sock is None:
+                raise ValueError(
+                    "SSH_AUTH_SOCK environment variable not set (try running `ssh-agent`)"
+                )
+            build_args["ssh"] = f"default={ssh_sock}"
 
     build_cmd = Images._get_buildx_command(**build_args)
 
@@ -1143,4 +1384,4 @@ def build_docker_image(
         )
         return None
 
-    return client.images.buildx(**build_args)
+    return client.images.buildx(**build_args, stream_logs=stream_logs)

@@ -1,0 +1,127 @@
+name: Bump UV lockfile and template UV version
+
+env:
+  DOCKERFILE_PATH: "tesseract_core/sdk/templates/Dockerfile.base"
+
+on:
+  workflow_dispatch: # Allows manual trigger
+
+  schedule:
+    - cron: "0 0 * * 1" # 12AM only on Mondays
+
+jobs:
+  bump-lockfile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Set up Git repository
+        uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version-file: "pyproject.toml"
+
+      - name: Update runtime dependencies
+        run: |
+          pip install toml packaging
+          python .github/scripts/update_runtime_deps.py pyproject.toml
+
+      - name: Install pre-commit
+        # uv provides the interpreter and puts pre-commit on PATH for the steps
+        # below.
+        run: |
+          uv tool install pre-commit
+
+      - name: Update lockfile
+        run: |
+          # Remove lockfile to force update
+          rm production.uv.lock
+          pre-commit run update-uv-env --all-files || true
+
+      - name: Generate new requirements.txt
+        run: |
+          pre-commit run update-requirements --all-files || true
+
+      - name: Detect if changes were made
+        id: git-diff
+        run: |
+          changes=false
+          git diff --exit-code || changes=true
+          echo "update_done=$changes" >> $GITHUB_OUTPUT
+
+      - name: Create Pull Request
+        if: steps.git-diff.outputs.update_done == 'true'
+        uses: peter-evans/create-pull-request@v8
+        with:
+          token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
+          committer: PasteurBot <${{ vars.PL_PASTEURBOT_EMAIL }}>
+          author: PasteurBot <${{ vars.PL_PASTEURBOT_EMAIL }}>
+          commit-message: Update dependencies
+          title: "chore: 📦 Update dependencies"
+          branch: _bot/update-deps
+          draft: false
+          base: main
+          body: |
+            This PR updates the lockfile to the latest versions of the dependencies.
+            Please review the changes and merge when ready.
+
+  bump-template-uv:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+        # after this step runs it provides `uv-version` as an output
+      - name: Install uv
+        id: latest
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+
+      - name: Extract current version
+        id: current
+        run: |
+          uv_version=$(sed -n 's/^ARG UV_VERSION=\(.*\)/\1/p' < ${DOCKERFILE_PATH})
+          echo "uv-version=${uv_version}" >> ${GITHUB_OUTPUT}
+
+      - name: Compare and update uv version
+        id: compare-and-update
+        if: steps.latest.outputs.uv-version != steps.current.outputs.uv-version
+        env:
+          NEW_VERSION: ${{ steps.latest.outputs.uv-version }}
+        run: |
+          sed -i "s/^\(ARG UV_VERSION=\).*/\1${NEW_VERSION}/" ${DOCKERFILE_PATH}
+          RETURN_CODE=$?
+          if [ ${RETURN_CODE} -eq 0 ]; then
+            echo "Successfully updated uv version"
+            echo "updated=true" >> ${GITHUB_OUTPUT}
+          else
+            echo "Failed to update uv version"
+            echo "updated=false" >> ${GITHUB_OUTPUT}
+            exit 1
+          fi
+
+      - name: Create Pull Request
+        id: create-pr-ok
+        if: steps.compare-and-update.outputs.updated == 'true'
+        uses: peter-evans/create-pull-request@v8
+        with:
+          token: ${{ secrets.PL_PASTEURBOT_PAT_PUBLIC }}
+          committer: PasteurBot <${{ vars.PL_PASTEURBOT_EMAIL }}>
+          author: PasteurBot <${{ vars.PL_PASTEURBOT_EMAIL }}>
+          commit-message: Update uv version in Dockerfile template
+          title: "chore: Update uv version in Dockerfile template"
+          branch: _bot/update-template-uv
+          draft: false
+          base: main
+          body: |
+            Dockerfile.base updated to latest uv version

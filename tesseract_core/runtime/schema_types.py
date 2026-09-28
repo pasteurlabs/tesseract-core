@@ -5,20 +5,19 @@ from abc import ABCMeta
 from enum import IntEnum
 from functools import partial
 from typing import (
-    TYPE_CHECKING,
     Annotated,
     Any,
     TypeAlias,
     get_args,
 )
 
-import numpy as np
 from pydantic import (
     AfterValidator,
     BaseModel,
     ConfigDict,
     GetCoreSchemaHandler,
     GetJsonSchemaHandler,
+    ValidationInfo,
 )
 from pydantic.json_schema import JsonSchemaValue
 from pydantic_core import PydanticCustomError, ValidationError, core_schema
@@ -28,7 +27,8 @@ from tesseract_core.runtime.array_encoding import (
     decode_array,
     encode_array,
     get_array_model,
-    python_to_array,
+    resolve_dtype,
+    validate_python_or_gpu_array,
 )
 
 AnnotatedType: TypeAlias = type(Annotated[Any, Any])
@@ -113,7 +113,7 @@ class PydanticArrayAnnotation(metaclass=ArrayAnnotationType):
         )
 
         python_to_array_ = partial(
-            python_to_array,
+            validate_python_or_gpu_array,
             expected_shape=cls.expected_shape,
             expected_dtype=cls.expected_dtype,
         )
@@ -366,17 +366,19 @@ class ShapeDType(BaseModel):
         cls,
         key: tuple[
             tuple[int | None, ...] | EllipsisType,
-            AnnotatedType | str | None,
+            ArrayAnnotationType | str | None,
         ],
     ) -> AnnotatedType:
-        expected_shape, _ = _ensure_valid_shapedtype(*key)
+        """Create a new type annotation based on the given shape and dtype."""
+        expected_shape, expected_dtype = _ensure_valid_shapedtype(*key)
 
-        def validate(shapedtype: ShapeDType) -> ShapeDType:
-            """Validator to check if the shape and dtype match the expected values."""
-            if isinstance(shapedtype, ShapeDType):
+        def validate(shapedtype: ShapeDType, info: ValidationInfo) -> ShapeDType:
+            """Validator to check the shape and resolve the dtype to the expected value."""
+            if not isinstance(shapedtype, ShapeDType):
+                return shapedtype
+
+            if expected_shape is not Ellipsis:
                 shape = shapedtype.shape
-                if expected_shape is Ellipsis:
-                    return shapedtype
 
                 if len(shape) != len(expected_shape):
                     raise ValueError(
@@ -388,6 +390,12 @@ class ShapeDType(BaseModel):
                         raise ValueError(
                             f"Expected shape: {expected_shape}. Found: {shape}."
                         )
+
+            # Resolve the dtype the same way array data is resolved during apply
+            new_dtype = resolve_dtype(shapedtype.dtype, expected_dtype, info.context)
+            if new_dtype != shapedtype.dtype:
+                shapedtype = shapedtype.model_copy(update={"dtype": new_dtype})
+
             return shapedtype
 
         return Annotated[ShapeDType, AfterValidator(validate)]
@@ -398,21 +406,6 @@ class ShapeDType(BaseModel):
         shape = obj.expected_shape
         dtype = obj.expected_dtype
         return cls[shape, dtype]
-
-
-if TYPE_CHECKING:
-    # HACK: When type checking, we pretend that Array is a subclass of numpy.ndarray.
-    # This gives IDEs and type checkers the ability to infer types correctly
-    # when using Array annotations.
-    BaseArray: TypeAlias = Array
-
-    class Array(np.typing.NDArray, BaseArray):  # noqa: D101
-        pass
-
-    BaseDifferentiable: TypeAlias = Differentiable
-
-    class Differentiable(np.typing.NDArray, BaseDifferentiable):  # noqa: D101
-        pass
 
 
 # Export concrete scalar types

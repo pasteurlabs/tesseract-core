@@ -13,3 +13,6 @@ updates:
       actions:
         patterns:
           - "*"
+
+    commit-message:
+      prefix: "chore:"

@@ -1,12 +1,14 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import os
 import re
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Annotated, Any, Literal, TypeAlias, TypedDict, get_args
 from uuid import uuid4
 
+import lz4.frame
 import numpy as np
 import pybase64
 from pydantic import (
@@ -14,7 +16,7 @@ from pydantic import (
     ConfigDict,
     Field,
     JsonValue,
-    PositiveInt,
+    NonNegativeInt,
     StrictStr,
     ValidationInfo,
     create_model,
@@ -47,6 +49,7 @@ AllowedDtypes = Literal[
     "complex128",
 ]
 
+GPUArray: TypeAlias = Any  # Placeholder for GPU array types (e.g., CuPy, PyTorch, etc.)
 EllipsisType: TypeAlias = type(Ellipsis)
 ArrayLike: TypeAlias = np.ndarray | np.number | np.bool_
 ShapeType: TypeAlias = tuple[int | None, ...] | EllipsisType
@@ -64,6 +67,22 @@ class ArrayDict(TypedDict):
 MAX_BINREF_BUFFER_SIZE = 100 * 1024 * 1024  # 100 MB
 
 
+def _compress(data: bytes, compression: str | None) -> bytes:
+    if compression is None:
+        return data
+    if compression == "lz4":
+        return lz4.frame.compress(data)
+    raise ValueError(f"Unknown compression: {compression}")
+
+
+def _decompress(data: bytes, compression: str | None) -> bytes:
+    if compression is None:
+        return data
+    if compression == "lz4":
+        return lz4.frame.decompress(data)
+    raise ValueError(f"Unknown compression: {compression}")
+
+
 # Base classes for the different array encodings
 # The actual models are created dynamically based on the expected shape and dtype by get_array_model
 
@@ -79,14 +98,22 @@ class Base64ArrayData(BaseModel):
         ),
     ]
     encoding: Literal["base64"]
+    compression: Literal["lz4"] | None = None
     model_config = ConfigDict(extra="forbid")
 
 
 class BinrefArrayData(BaseModel):
-    """Data structure that dumps array data to binary file."""
+    """Data structure that dumps array data to binary file.
 
-    buffer: StrictStr = Field(pattern=r"^.+?(\:\d+)?$")
+    The buffer field format is ``<path>[:<offset>[:<compressed_size>]]``.
+    When compression is set, the buffer must include ``:<compressed_size>``
+    so readers know how many compressed bytes to read.
+    """
+
+    buffer: StrictStr = Field(pattern=r"^.+?(\:\d+(\:\d+)?)?$")
     encoding: Literal["binref"]
+    compression: Literal["lz4"] | None = None
+
     model_config = ConfigDict(extra="forbid")
 
 
@@ -95,6 +122,35 @@ class JsonArrayData(BaseModel):
 
     buffer: JsonValue
     encoding: Literal["json"]
+    compression: None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class CudaIpcArrayData(BaseModel):
+    """Data structure for CUDA IPC shared GPU memory handles.
+
+    The buffer field packs all four components as
+    ``<device>:<handle>:<storage_offset>:<storage_size>``, where:
+
+    - ``device`` is the CUDA device ordinal the memory lives on,
+    - ``handle`` is the base64-encoded 64-byte cudaIpcMemHandle_t (its base64
+      alphabet never contains ``:``, so it is safe as a field delimiter),
+    - ``storage_offset`` is the byte offset within the cudaMalloc allocation,
+    - ``storage_size`` is the total size in bytes of the cudaMalloc allocation.
+
+    This is only the JSON *schema* for the encoding; all the CUDA runtime
+    machinery that produces and consumes it lives in
+    :mod:`tesseract_core.runtime.cuda.ipc`.
+    """
+
+    buffer: StrictStr = Field(
+        pattern=r"^\d+:[A-Za-z0-9+/=]+:\d+:\d+$",
+        description="Packed CUDA IPC descriptor: <device>:<handle>:<storage_offset>:<storage_size>",
+    )
+    encoding: Literal["cuda_ipc"]
+    compression: None = None
+
     model_config = ConfigDict(extra="forbid")
 
 
@@ -105,10 +161,24 @@ class EncodedArrayModel(BaseModel):
     """
 
     object_type: Literal["array"]
-    shape: tuple[PositiveInt, ...]
+    shape: tuple[NonNegativeInt, ...]
     dtype: AllowedDtypes
-    data: BinrefArrayData | Base64ArrayData | JsonArrayData
+    data: BinrefArrayData | Base64ArrayData | JsonArrayData | CudaIpcArrayData
     model_config = ConfigDict(extra="forbid")
+
+
+def _castable(src_dtype: Any, expected_dtype: str) -> bool:
+    """Whether *src_dtype* can reach *expected_dtype* without losing a value.
+
+    NumPy counts signed to unsigned as a change of kind, but the only thing
+    such a cast can lose is a value the target cannot hold, and
+    :func:`_astype_checked` refuses those.
+    """
+    if np.can_cast(src_dtype, expected_dtype, casting="same_kind"):
+        return True
+    return np.issubdtype(np.dtype(src_dtype), np.integer) and np.issubdtype(
+        np.dtype(expected_dtype), np.integer
+    )
 
 
 def get_array_model(
@@ -122,7 +192,7 @@ def get_array_model(
         subdtypes = [
             dtype
             for dtype in get_args(AllowedDtypes)
-            if np.can_cast(dtype, expected_dtype, casting="same_kind")
+            if _castable(dtype, expected_dtype)
         ]
         dtype_type = Literal[tuple(subdtypes)]
 
@@ -134,14 +204,15 @@ def get_array_model(
         shape_type = tuple[int, ...]
     else:
         # There are 3 cases for each dimension `n`:
-        # - n=None: polymorphic dimension, can be any positive int
+        # - n=None: polymorphic dimension, can be any non-negative int (0 allowed,
+        #   so empty arrays are valid)
         # - n=1: fixed dimension, must be 1
         # - n=N: fixed dimension, must be N or 1 (triggers broadcasting to N)
-        # Example: expected_shape=(None, 1, 3) -> allowed_vals=tuple[PositiveInt, Literal[1], Literal[1, 3]]
+        # Example: expected_shape=(None, 1, 3) -> allowed_vals=tuple[NonNegativeInt, Literal[1], Literal[1, 3]]
         allowed_vals = []
         for dim in expected_shape:
             if dim is None:
-                allowed_vals.append(PositiveInt)
+                allowed_vals.append(NonNegativeInt)
             elif dim == 1:
                 allowed_vals.append(Literal[1])
             else:
@@ -157,9 +228,6 @@ def get_array_model(
             # Dimensionality must match exactly
             min_length=len(expected_shape),
             max_length=len(expected_shape),
-            # TODO: This is a hack to allow JSF to parse the JSON schema
-            # see https://github.com/ghandic/jsf/issues/118
-            json_schema_extra={"items": {"type": "integer"}},
         )
 
     # Add flags to the model config
@@ -190,7 +258,7 @@ def get_array_model(
         ),
         # Choose the appropriate data structure based on the encoding
         "data": (
-            BinrefArrayData | Base64ArrayData | JsonArrayData,
+            BinrefArrayData | Base64ArrayData | JsonArrayData | CudaIpcArrayData,
             Field(discriminator="encoding"),
         ),
         "model_config": (ConfigDict, config),
@@ -226,6 +294,7 @@ def _dump_binref_arraydict(
     subdir: Path | str | None,
     current_binref_uuid: str,
     max_file_size: int = MAX_BINREF_BUFFER_SIZE,
+    compression: str | None = None,
 ) -> tuple[ArrayDict, str]:
     """Dump array to json+binref encoded array dict."""
     target_name = f"{current_binref_uuid}.bin"
@@ -244,28 +313,41 @@ def _dump_binref_arraydict(
             target_name = join_paths(subdir, target_name)
         target_path = join_paths(base_dir, target_name)
 
-    write_to_path(_fast_tobytes(arr), target_path, append=True)
+    blob = _compress(_fast_tobytes(arr), compression)
+    write_to_path(blob, target_path, append=True)
     offset = current_size
 
+    if compression is not None:
+        data = {
+            "buffer": f"{target_name}:{offset}:{len(blob)}",
+            "encoding": "binref",
+            "compression": compression,
+        }
+    else:
+        data = {"buffer": f"{target_name}:{offset}", "encoding": "binref"}
     arraydict = {
         "object_type": "array",
         "shape": list(arr.shape),
         "dtype": arr.dtype.name,
-        "data": {"buffer": f"{target_name}:{offset}", "encoding": "binref"},
+        "data": data,
     }
     return arraydict, current_binref_uuid
 
 
-def _dump_base64_arraydict(arr: ArrayLike) -> ArrayDict:
+def _dump_base64_arraydict(arr: ArrayLike, compression: str | None = None) -> ArrayDict:
     """Dump array to json+base64 encoded array dict (plain dict, no Pydantic models)."""
+    blob = _compress(_fast_tobytes(arr), compression)
+    data: dict[str, Any] = {
+        "buffer": pybase64.b64encode_as_string(blob),
+        "encoding": "base64",
+    }
+    if compression is not None:
+        data["compression"] = compression
     return {
         "object_type": "array",
         "shape": list(arr.shape),
         "dtype": arr.dtype.name,
-        "data": {
-            "buffer": pybase64.b64encode_as_string(_fast_tobytes(arr)),
-            "encoding": "base64",
-        },
+        "data": data,
     }
 
 
@@ -282,22 +364,49 @@ def _dump_json_arraydict(arr: ArrayLike) -> ArrayDict:
 def _load_base64_arraydict(val: ArrayDict) -> np.ndarray:
     """Load array from json+base64 encoded array dict."""
     buffer = pybase64.b64decode(val["data"]["buffer"], validate=True)
+    buffer = _decompress(buffer, val["data"].get("compression"))
     return np.frombuffer(buffer, dtype=val["dtype"]).reshape(val["shape"])
+
+
+def _read_binref_array(
+    full_path: str | Path,
+    offset: int,
+    num_bytes: int,
+    dtype: np.dtype,
+    count: int,
+) -> np.ndarray:
+    """Read an uncompressed binref buffer into an owned, writable array.
+
+    The array owns its data and does not depend on the file afterwards, so the
+    backing file may be safely recycled (e.g. by a client-side input write pool
+    that reuses buffers across requests) once this returns. The result is
+    writable, matching what the caller-facing schema expects for array inputs.
+    """
+    out = np.empty(count, dtype=dtype)
+    with open(full_path, "rb") as f:
+        if offset:
+            f.seek(offset)
+        f.readinto(memoryview(out).cast("B"))
+    return out
 
 
 def _load_binref_arraydict(val: ArrayDict, base_dir: str | Path | None) -> np.ndarray:
     """Load array from json+binref encoded array dict."""
-    path_match = re.match(r"^(?P<path>.+?)(\:(?P<offset>\d+))?$", val["data"]["buffer"])
+    path_match = re.match(
+        r"^(?P<path>.+?)(\:(?P<offset>\d+)(\:(?P<compressed_size>\d+))?)?$",
+        val["data"]["buffer"],
+    )
     if not path_match:
         raise ValueError(
             f"Invalid binref path format: {val['data']['buffer']}. "
-            "Expected format is '<path>[:<offset>]'."
+            "Expected format is '<path>[:<offset>[:<compressed_size>]]'."
         )
     bufferpath = path_match.group("path")
     if path_match.group("offset") is None:
         offset = 0
     else:
         offset = int(path_match.group("offset"))
+    compressed_size_str = path_match.group("compressed_size")
 
     uses_relative_path = not is_absolute_path(bufferpath) and not is_url(bufferpath)
     if uses_relative_path and base_dir is None:
@@ -311,11 +420,124 @@ def _load_binref_arraydict(val: ArrayDict, base_dir: str | Path | None) -> np.nd
     size = 1 if len(shape) == 0 else np.prod(shape)
     num_bytes = int(size * dtype.itemsize)
 
+    compression = val["data"].get("compression")
+
     if base_dir is not None:
         bufferpath = join_paths(base_dir, bufferpath)
 
-    buffer = read_from_path(bufferpath, offset=offset, length=num_bytes)
+    if compression is None:
+        # For uncompressed data on a local filesystem, read directly into an
+        # owned array via readinto, avoiding an intermediate bytes copy. The
+        # result owns its data, so a client-side input write pool may recycle
+        # the backing file after the request. Non-local paths (URLs, object
+        # stores) and empty arrays fall back to a plain read.
+        if num_bytes > 0 and not is_url(bufferpath) and os.path.isfile(bufferpath):
+            count = 1 if len(shape) == 0 else int(size)
+            return _read_binref_array(
+                bufferpath, offset, num_bytes, dtype, count
+            ).reshape(shape)
+        buffer = read_from_path(bufferpath, offset=offset, length=num_bytes)
+    else:
+        if compressed_size_str is None:
+            raise ValueError(
+                "compressed_size is required in buffer spec when compression is set "
+                "(expected format: '<path>:<offset>:<compressed_size>')"
+            )
+        buffer = _decompress(
+            read_from_path(bufferpath, offset=offset, length=int(compressed_size_str)),
+            compression,
+        )
     return np.frombuffer(buffer, dtype=dtype).reshape(shape)
+
+
+def _out_of_range(arr: ArrayLike, dtype: str, value: Any) -> PydanticCustomError:
+    """Build the error for a value the target dtype cannot hold."""
+    return PydanticCustomError(
+        "array_value_out_of_range",
+        "Array values do not fit into dtype '{expected_dtype}' (e.g. {value})",
+        # str(), so the context stays JSON-serializable for a complex value.
+        {"expected_dtype": str(np.dtype(dtype)), "value": str(value)},
+    )
+
+
+def _astype_checked(arr: ArrayLike, dtype: str) -> ArrayLike:
+    """Cast to ``dtype``, refusing casts that lose a value.
+
+    That is a fractional part dropped on the way to an integer, an integer
+    wrapped past the target's range, or a finite float overflowing to inf.
+    Only narrowing casts are checked, and each the cheapest way it can be:
+    NumPy raises on a float or complex overflow by itself, while an integer
+    cast truncates and wraps silently and is caught by inspecting the values.
+    """
+    if np.can_cast(arr.dtype, dtype, casting="safe"):
+        return arr.astype(dtype, copy=False)
+
+    if np.issubdtype(np.dtype(dtype), np.integer):
+        if np.issubdtype(arr.dtype, np.floating) and np.any(arr % 1):
+            raise PydanticCustomError(
+                "array_expected_integer",
+                "Expected integer data, but array contains floating point values",
+                {},
+            )
+        if arr.size:
+            info = np.iinfo(dtype)
+            low, high = arr.min(), arr.max()
+            if low < info.min:
+                raise _out_of_range(arr, dtype, low)
+            if high > info.max:
+                raise _out_of_range(arr, dtype, high)
+        return arr.astype(dtype, copy=False)
+
+    try:
+        with np.errstate(over="raise"):
+            return arr.astype(dtype, copy=False)
+    except FloatingPointError:
+        # Rare, and we are raising anyway, so pay for the scan that names a value.
+        with np.errstate(over="ignore"):
+            out = arr.astype(dtype, copy=False)
+        overflowed = np.isfinite(arr) & ~np.isfinite(out)
+        example = arr[overflowed].ravel()[0]
+        raise _out_of_range(arr, dtype, example.item()) from None
+
+
+def resolve_dtype(
+    actual_dtype: str,
+    expected_dtype: str | None,
+    context: dict[str, Any] | None = None,
+) -> str:
+    """Resolve the dtype a value takes on, without touching the value itself.
+
+    The behavior can be controlled via the ``context`` dict:
+    - ``strict_types`` (bool): When True, reject dtypes that don't match the
+      expected dtype exactly (no same-kind casting).
+    """
+    if expected_dtype is None:
+        return actual_dtype
+
+    strict_types = (context or {}).get("strict_types", False)
+
+    if strict_types:
+        if actual_dtype != expected_dtype:
+            raise PydanticCustomError(
+                "array_dtype_mismatch",
+                "Array dtype '{actual_dtype}' does not match expected dtype '{expected_dtype}' "
+                "(strict_types=True, no casting)",
+                {
+                    "actual_dtype": actual_dtype,
+                    "expected_dtype": expected_dtype,
+                },
+            )
+    elif not _castable(actual_dtype, expected_dtype):
+        raise PydanticCustomError(
+            "array_dtype_mismatch",
+            "Array dtype '{actual_dtype}' cannot be safely cast to '{expected_dtype}'",
+            {
+                "actual_dtype": actual_dtype,
+                "expected_dtype": expected_dtype,
+            },
+        )
+
+    return expected_dtype
 
 
 def _coerce_shape_dtype(
@@ -342,7 +564,6 @@ def _coerce_shape_dtype(
         context = {}
 
     strict_shapes = context.get("strict_shapes", False)
-    strict_types = context.get("strict_types", False)
 
     if expected_shape is Ellipsis:
         # No shape check
@@ -389,27 +610,9 @@ def _coerce_shape_dtype(
         ) from None
 
     if expected_dtype is not None:
-        if strict_types:
-            if str(arr.dtype) != expected_dtype:
-                raise PydanticCustomError(
-                    "array_dtype_mismatch",
-                    "Array dtype '{actual_dtype}' does not match expected dtype '{expected_dtype}' "
-                    "(strict_types=True, no casting)",
-                    {
-                        "actual_dtype": str(arr.dtype),
-                        "expected_dtype": expected_dtype,
-                    },
-                )
-        elif not np.can_cast(arr.dtype, expected_dtype, casting="same_kind"):
-            raise PydanticCustomError(
-                "array_dtype_mismatch",
-                "Array dtype '{actual_dtype}' cannot be safely cast to '{expected_dtype}'",
-                {
-                    "actual_dtype": str(arr.dtype),
-                    "expected_dtype": expected_dtype,
-                },
-            )
-        arr = arr.astype(expected_dtype, copy=False)
+        arr = _astype_checked(
+            arr, resolve_dtype(str(arr.dtype), expected_dtype, context)
+        )
 
     allowed_dtypes = [dtype.lower() for dtype in get_args(AllowedDtypes)]
     if arr.dtype.name not in allowed_dtypes:
@@ -431,11 +634,19 @@ def _coerce_shape_dtype(
 
 def python_to_array(
     val: Any,
-    info: ValidationInfo,
     expected_shape: ShapeType,
     expected_dtype: str | None,
+    context: dict[str, Any] | None = None,
 ) -> ArrayLike:
-    """Convert a Python object to a NumPy array."""
+    """Coerce a Python object to a NumPy array of the given shape and dtype.
+
+    Always materialises a host NumPy array. ``context`` carries the validation
+    flags consumed by :func:`_coerce_shape_dtype` (e.g. ``strict_shapes`` /
+    ``strict_types``). Callers that want to keep a GPU array on-device (e.g. to
+    encode it via CUDA IPC) must special-case it *before* calling this -- see
+    :func:`validate_python_or_gpu_array` for the input-validation path and
+    :func:`encode_array` for serialization.
+    """
     val = np.asarray(val, order="C")
     if not np.issubdtype(val.dtype, np.number) and not np.issubdtype(
         val.dtype, np.bool_
@@ -445,8 +656,31 @@ def python_to_array(
             "Could not parse value as a numeric array (contains non-numeric data)",
             {},
         )
-    context = info.context if info.context else {}
     return _coerce_shape_dtype(val, expected_shape, expected_dtype, context)
+
+
+def validate_python_or_gpu_array(
+    val: Any,
+    info: ValidationInfo,
+    expected_shape: ShapeType,
+    expected_dtype: str | None,
+) -> ArrayLike | GPUArray:
+    """Validate a Python array-like input, keeping GPU arrays on-device.
+
+    Used as the "load from a Python object" validator. Objects that live in GPU
+    memory (exposing ``__cuda_array_interface__`` or DLPack on a CUDA device) are
+    validated but returned unchanged, so they can later be encoded via CUDA IPC
+    without a host copy; coercing them to NumPy here would force a device-to-host
+    transfer (or fail, since CuPy refuses implicit conversion). Everything else
+    is coerced to a NumPy array via :func:`python_to_array`.
+    """
+    from tesseract_core.runtime.cuda import ipc as cuda_ipc
+
+    if cuda_ipc.is_gpu_array(val):
+        return cuda_ipc.validate_cuda_array(val, expected_shape, expected_dtype)
+
+    context = info.context if info.context else {}
+    return python_to_array(val, expected_shape, expected_dtype, context)
 
 
 def decode_array(
@@ -471,19 +705,17 @@ def decode_array(
                 base_dir = join_paths(base_dir, subdir)
             data = _load_binref_arraydict(val.model_dump(), base_dir)
 
+        elif val.data.encoding == "cuda_ipc":
+            from tesseract_core.runtime.device_transport import get_transport
+
+            # Returns a framework-agnostic on-GPU wrapper — skip numpy coercion
+            transport = get_transport(val.data.encoding)
+            return transport.receive(val.model_dump())
+
         # keep checking for "raw" for backwards compat
         elif val.data.encoding in {"json", "raw"}:
             data = np.asarray(val.data.buffer).reshape(val.shape)
-            if np.issubdtype(data.dtype, np.floating) and np.issubdtype(
-                val.dtype, np.integer
-            ):
-                if np.any(data % 1):
-                    raise PydanticCustomError(
-                        "array_expected_integer",
-                        "Expected integer data, but array contains floating point values",
-                        {},
-                    )
-            data = data.astype(val.dtype, casting="unsafe", copy=False)
+            data = _astype_checked(data, val.dtype)
 
         else:
             # Unreachable
@@ -504,26 +736,65 @@ def decode_array(
 
 
 def encode_array(
-    arr: ArrayLike, info: Any, expected_shape: ShapeType, expected_dtype: str | None
+    arr: ArrayLike | GPUArray,
+    info: Any,
+    expected_shape: ShapeType,
+    expected_dtype: str | None,
 ) -> ArrayDict | ArrayLike:
-    """Encode a NumPy array for serialization.
+    """Encode a NumPy or GPU array for serialization.
 
-    In Python mode, returns the raw array as-is.
+    An output encoding is two orthogonal choices carried in the context (see
+    :func:`tesseract_core.runtime.file_interactions.output_to_bytes`):
+
+    - ``array_encoding`` -- how a host (CPU) array is serialized (``json`` /
+      ``base64`` / ``binref``);
+    - ``device_transport`` -- how a device (GPU) array is exported without a
+      host copy (a transport name such as ``cuda_ipc``, or ``None`` for none).
+
+    Each array is routed per-leaf by *where it lives*, not by a single
+    whole-response choice: a GPU array is exported over the device transport when
+    one is set, and every host array (plus any GPU array when no transport is
+    set) is serialized via the host encoding. This is what lets one response mix
+    on-device and on-host arrays. In Python mode there is nothing to serialize,
+    so arrays pass through as-is.
     """
     from tesseract_core.runtime.config import get_config
-
-    # Convert to a NumPy array if necessary
-    arr = python_to_array(arr, info, expected_shape, expected_dtype)
+    from tesseract_core.runtime.cuda import ipc as cuda_ipc
 
     context = info.context if info.context else {}
-
-    # Python mode -> just return the array without encoding
-    if not info.mode_is_json():
-        return arr
-
     array_encoding = context.get("array_encoding", "json")
+    device_transport = context.get("device_transport")
+
+    is_gpu_array = cuda_ipc.is_gpu_array(arr)
+
+    # Python mode -> return the array as-is, without any host copy. GPU arrays
+    # are preserved on-device so that the intermediate model_dump()/validate
+    # round-trip in the runtime (see runtime.core.apply) is lossless.
+    if not info.mode_is_json():
+        if is_gpu_array:
+            return arr
+        return python_to_array(arr, expected_shape, expected_dtype, context)
+
+    # A GPU array with a device transport set is exported by reference, staying
+    # on-device. A GPU array without a transport, or any host array, falls
+    # through to the host encoding below -- so a mixed payload (some GPU, some
+    # CPU arrays) serializes each leaf by where it lives instead of failing.
+    if device_transport is not None and is_gpu_array:
+        from tesseract_core.runtime.device_transport import get_transport
+
+        transport = get_transport(device_transport)
+        return transport.descriptor(transport.register(arr))
+
+    # Host encoding: the data must reach the host. A GPU array survived
+    # validation untouched (see validate_python_or_gpu_array), so materialise it
+    # here with an explicit device-to-host copy before the numpy-based coercion.
+    if is_gpu_array and not isinstance(arr, np.ndarray):
+        arr = cuda_ipc.cuda_array_to_host(arr)
+
+    # Convert to a NumPy array if necessary
+    arr = python_to_array(arr, expected_shape, expected_dtype, context)
     if array_encoding == "base64":
-        return _dump_base64_arraydict(arr)
+        return _dump_base64_arraydict(arr, compression=context.get("compression"))
     elif array_encoding == "binref":
         base_dir = context.get("base_dir", get_config().output_path)
         subdir = context.get("binref_dir", None)
@@ -533,6 +804,7 @@ def encode_array(
             subdir=subdir,
             current_binref_uuid=context.get("__binref_uuid", str(uuid4())),
             max_file_size=context.get("max_file_size", MAX_BINREF_BUFFER_SIZE),
+            compression=context.get("compression"),
         )
         context["__binref_uuid"] = new_binref_uuid
         return data

@@ -1,0 +1,37 @@
+{# Template for the blog index page. Set via "template: blog_index.html" in
+   frontmatter. Renders the post listing from blog_posts context variable
+   (injected by conf.py via html-page-context). #}
+{% extends "page.html" %}
+
+{% macro format_author(raw) -%}
+  {%- for part in raw.split(",") -%}
+    {%- set name = part.strip() -%}
+    {%- if name.startswith("@") -%}
+      <a href="https://github.com/{{ name[1:] }}">{{ name }}</a>
+    {%- else -%}
+      {{ name }}
+    {%- endif -%}
+    {%- if not loop.last %}, {% endif -%}
+  {%- endfor -%}
+{%- endmacro %}
+
+{% block body %}
+<div class="blog-page blog-index">
+{{ super() }}
+</div>
+{% endblock %}
+
+{% block content %}
+{{ body }}
+{% if blog_posts %}
+<div class="blog-post-listing">
+  {% for post in blog_posts %}
+  <div class="blog-post-entry">
+    <h3><a href="{{ post.url }}">{{ post.title }}</a></h3>
+    <p class="blog-post-entry-meta"><em>{{ post.date }}</em> · {{ format_author(post.author) }}</p>
+    <p class="blog-post-entry-excerpt">{{ post.description }}</p>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

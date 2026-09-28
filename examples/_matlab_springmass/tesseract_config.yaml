@@ -1,0 +1,26 @@
+name: "matlab-springmass"
+version: "1.0.0"
+description: |
+  Spring-mass-damper ODE solver demonstrating MATLAB integration.
+
+  This example shows how to wrap MATLAB code as a Tesseract using the
+  official MathWorks MATLAB Docker image. The solver uses ode45 to solve
+  the damped harmonic oscillator equation:
+
+    m * x'' + c * x' + k * x = F(t)
+
+  Industry relevance: vibration analysis, mechanical system design,
+  control system prototyping, and structural dynamics.
+
+  Prerequisites:
+    - A MATLAB network license server reachable from the container
+    - Set MLM_LICENSE_FILE at runtime (e.g. 27000@your-license-server)
+
+build_config:
+  # Official MathWorks MATLAB image — includes a full MATLAB installation.
+  # Change the tag to match your license version if needed.
+  base_image: "mathworks/matlab:r2025b"
+
+  # Copy the MATLAB .m source file into the container
+  package_data:
+    - ["matlab/spring_mass_damper.m", "matlab/spring_mass_damper.m"]

@@ -1,5 +1,7 @@
 # VectorAdd
 
+{gh-tree}`View on GitHub <examples/vectoradd>`
+
 ## Context
 
 Example using vector add with differentiable inputs and jacobians.

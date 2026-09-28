@@ -1,5 +1,7 @@
 # Installing local Python modules into a Tesseract
 
+{gh-tree}`View on GitHub <examples/localpackage>`
+
 ## Context
 
 Sometimes it might be necessary to bundle local Python modules into a Tesseract.

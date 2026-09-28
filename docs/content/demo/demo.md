@@ -6,8 +6,14 @@ End-to-end examples that show Tesseracts in action — from optimization workflo
 :maxdepth: 1
 :hidden:
 
-data-assimilation-4dvar.ipynb
+data-assimilation.ipynb
+bayesian-inference.ipynb
 lorenz_tesseract.md
+cfd-optimization.ipynb
+fem-shape-optimization.ipynb
+multiphysics-optimization.ipynb
+enzyme-lfortran.ipynb
+learned-closure.ipynb
 JAX Rosenbrock Minimization <https://si-tesseract.discourse.group/t/jax-based-rosenbrock-function-minimization/48>
 PyTorch Rosenbrock Minimization <https://si-tesseract.discourse.group/t/pytorch-based-rosenbrock-function-minimization/44>
 JAX RBF Fitting <https://si-tesseract.discourse.group/t/jax-auto-diff-templates-gaussian-radial-basis-function-fitting/51>
@@ -27,14 +33,62 @@ A complete 4D-Variational data assimilation scheme for a chaotic dynamical syste
 :gutter: 2
 
 :::{grid-item-card} 4D-Var Data Assimilation
-:link: data-assimilation-4dvar.html
+:link: data-assimilation
+:link-type: doc
 
 Full walkthrough of a 4D-Var scheme using a differentiable Lorenz-96 Tesseract — from building the Tesseract to running the optimization loop.
 :::
 :::{grid-item-card} Lorenz Tesseract
-:link: lorenz_tesseract.html
+:link: lorenz_tesseract
+:link-type: doc
 
 Detailed implementation of the JAX-based Lorenz-96 solver Tesseract used in the 4D-Var demo.
+:::
+:::{grid-item-card} Bayesian Inference
+:link: bayesian-inference
+:link-type: doc
+
+Use the same Lorenz-96 Tesseract as the forward model inside a NumPyro probabilistic workflow — recover the posterior over an unknown forcing parameter with gradient-based MCMC.
+:::
+
+::::
+
+## Simulation & design optimization demos
+
+End-to-end differentiable optimization through physics simulators, composing Tesseracts with JAX or PyTorch code via Tesseract-JAX and Tesseract-Torch.
+
+::::{grid} 2
+:gutter: 2
+
+:::{grid-item-card} CFD Flow Optimization
+:link: cfd-optimization
+:link-type: doc
+
+Optimize the initial velocity field of a 2D Navier-Stokes simulation so its vorticity evolves into a target image — gradient-based optimization through a JAX-CFD Tesseract.
+:::
+:::{grid-item-card} FEM Shape Optimization
+:link: fem-shape-optimization
+:link-type: doc
+
+Compose a geometry Tesseract (PyVista, finite-difference gradients) with a FEM Tesseract (jax-fem) to optimize structural bar configurations for minimum compliance.
+:::
+:::{grid-item-card} Multi-Physics Optimization
+:link: multiphysics-optimization
+:link-type: doc
+
+Couple two independently built thermal and structural Tesseracts with two-way thermoelastic feedback, and differentiate through the resulting equilibrium to solve an inverse-design problem — with constant-memory gradients via implicit differentiation.
+:::
+:::{grid-item-card} Differentiable Fortran (Enzyme)
+:link: enzyme-lfortran
+:link-type: doc
+
+Solve two inverse heat-transfer problems by differentiating a Fortran solver end-to-end: Enzyme generates exact derivatives at the LLVM IR level, and `jax.value_and_grad` drives the optimization through Tesseract-JAX.
+:::
+:::{grid-item-card} Learned Closure (PyTorch)
+:link: learned-closure
+:link-type: doc
+
+Train a native PyTorch neural viscosity closure end-to-end through a containerized Burgers' equation solver Tesseract used as a differentiable layer. Gradients flow from the loss through the solver's VJP, over HTTP, into the network using Tesseract-Torch.
 :::
 
 ::::

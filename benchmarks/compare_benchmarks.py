@@ -29,7 +29,10 @@ def _short_name(bench: dict) -> str:
     Maps pytest-benchmark names like:
         "test_from_tesseract_api[1,000]" -> "api/apply_1,000"
         "test_containerized_http[100]"   -> "http/apply_100"
+        "test_containerized_http_shmem[100]" -> "http-shmem/apply_100"
         "test_containerized_cli[100]"    -> "cli/apply_100"
+        "test_subprocess[100]"           -> "subprocess/apply_100"
+        "test_subprocess_shmem[100]"     -> "subprocess-shmem/apply_100"
         "test_encoding[json_100]"        -> "encoding/json_100"
         "test_decoding[base64_10,000]"   -> "decoding/base64_10,000"
         "test_roundtrip[binref_1,000]"   -> "roundtrip/binref_1,000"
@@ -48,8 +51,14 @@ def _short_name(bench: dict) -> str:
         return f"api/apply_{params}"
     if func == "containerized_http":
         return f"http/apply_{params}"
+    if func == "containerized_http_shmem":
+        return f"http-shmem/apply_{params}"
     if func == "containerized_cli":
         return f"cli/apply_{params}"
+    if func == "subprocess":
+        return f"subprocess/apply_{params}"
+    if func == "subprocess_shmem":
+        return f"subprocess-shmem/apply_{params}"
 
     # Array encoding benchmarks: test_encoding[json_100] etc.
     if func in ("encoding", "decoding", "roundtrip"):
@@ -95,6 +104,15 @@ def _get_runner_description(data: dict) -> str:
     machine_arch = machine.get("machine", "")
     parts = [p for p in (system, release, machine_arch) if p]
     return " ".join(parts) if parts else "unknown"
+
+
+def _metadata_lines(current_data: dict, pr_number: str | None) -> list[str]:
+    """Provenance bullets describing where the results came from."""
+    lines = []
+    if pr_number is not None:
+        lines.append(f"- **PR:** #{pr_number}")
+    lines.append(f"- **Runner:** {_get_runner_description(current_data)}")
+    return lines
 
 
 def _load_benchmark_file(path: str | None) -> dict | None:
@@ -182,7 +200,9 @@ def _format_comparison_row(comp: dict) -> str:
     return f"| `{comp['name']}` | {base_str} | {curr_str} | {change_str} | {comp['status']} |"
 
 
-def _generate_current_only_report(current: dict[str, dict], current_data: dict) -> str:
+def _generate_current_only_report(
+    current: dict[str, dict], current_data: dict, pr_number: str | None = None
+) -> str:
     """Generate a report when no baseline exists, marking every benchmark as new."""
     all_names = _sort_names(list(current.keys()))
     comparisons = [
@@ -203,14 +223,13 @@ def _generate_current_only_report(current: dict[str, dict], current_data: dict) 
     for comp in comparisons:
         lines.append(_format_comparison_row(comp))
 
-    runner = _get_runner_description(current_data)
     lines.extend(
         [
             "",
             "<details>",
             "<summary>Benchmark details</summary>",
             "",
-            f"- **Runner:** {runner}",
+            *_metadata_lines(current_data, pr_number),
             "",
             "</details>",
         ]
@@ -219,7 +238,9 @@ def _generate_current_only_report(current: dict[str, dict], current_data: dict) 
     return "\n".join(lines)
 
 
-def generate_report(baseline_path: str | None, current_path: str) -> str | None:
+def generate_report(
+    baseline_path: str | None, current_path: str, pr_number: str | None = None
+) -> str | None:
     """Generate markdown comparison report.
 
     Returns None only if current results don't exist.
@@ -234,7 +255,7 @@ def generate_report(baseline_path: str | None, current_path: str) -> str | None:
     current = _index_benchmarks(current_data)
 
     if baseline_data is None:
-        return _generate_current_only_report(current, current_data)
+        return _generate_current_only_report(current, current_data, pr_number)
 
     baseline = _index_benchmarks(baseline_data)
 
@@ -288,11 +309,10 @@ def generate_report(baseline_path: str | None, current_path: str) -> str | None:
     for comp in comparisons:
         lines.append(_format_comparison_row(comp))
 
-    runner = _get_runner_description(current_data)
     lines.extend(
         [
             "",
-            f"- **Runner:** {runner}",
+            *_metadata_lines(current_data, pr_number),
             "",
             "</details>",
         ]
@@ -307,13 +327,16 @@ def main() -> int:
     parser.add_argument("--baseline", default=None, help="Baseline benchmark JSON file")
     parser.add_argument("--current", required=True, help="Current benchmark JSON file")
     parser.add_argument("--output", required=True, help="Output markdown report path")
+    parser.add_argument(
+        "--pr-number", default=None, help="PR number to record in the report"
+    )
     args = parser.parse_args()
 
     if not Path(args.current).exists():
         print(f"Current benchmark file not found: {args.current}", file=sys.stderr)
         return 1
 
-    report = generate_report(args.baseline, args.current)
+    report = generate_report(args.baseline, args.current, args.pr_number)
 
     if report is None:
         print(

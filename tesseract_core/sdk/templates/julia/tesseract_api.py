@@ -13,8 +13,7 @@ from pydantic import BaseModel
 
 from tesseract_core.runtime import Array, Differentiable, Float64
 from tesseract_core.runtime.schema_generation import (
-    DICT_INDEX_SENTINEL,
-    SEQ_INDEX_SENTINEL,
+    _path_tuple_to_str,
     get_all_model_path_patterns,
 )
 from tesseract_core.runtime.schema_types import is_differentiable
@@ -47,25 +46,12 @@ class OutputSchema(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _path_tuple_to_pattern(path_tuple: tuple) -> str:
-    """Convert a path tuple with sentinels to a pattern string with [] and {}."""
-    parts = []
-    for part in path_tuple:
-        if part is SEQ_INDEX_SENTINEL:
-            parts.append("[]")
-        elif part is DICT_INDEX_SENTINEL:
-            parts.append("{}")
-        else:
-            parts.append(str(part))
-    return ".".join(parts)
-
-
 # Pre-compute path patterns from schema at module load time
 _ALL_PATTERNS = [
-    _path_tuple_to_pattern(p) for p in get_all_model_path_patterns(InputSchema)
+    _path_tuple_to_str(p) for p in get_all_model_path_patterns(InputSchema)
 ]
 _DIFF_PATTERNS = [
-    _path_tuple_to_pattern(p)
+    _path_tuple_to_str(p)
     for p in get_all_model_path_patterns(InputSchema, filter_fn=is_differentiable)
 ]
 

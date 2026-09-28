@@ -1,0 +1,9 @@
+name: "inherit_base_image_packages"
+version: "0.1.0"
+description: |
+  Tesseract that uses inherit_base_image_packages to access Firedrake,
+  a finite element library pre-installed in the base image.
+
+build_config:
+  base_image: "firedrakeproject/firedrake:2026.4.0"
+  inherit_base_image_packages: true

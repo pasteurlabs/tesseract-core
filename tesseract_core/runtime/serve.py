@@ -9,12 +9,17 @@ from types import ModuleType
 from typing import Annotated, Any
 
 import uvicorn
-from fastapi import FastAPI, Header, Query, Response
+from fastapi import FastAPI, Header, HTTPException, Query, Response
 from pydantic import BaseModel
 
 from .config import get_config
 from .core import create_endpoints
-from .file_interactions import SUPPORTED_FORMATS, join_paths, output_to_bytes
+from .file_interactions import (
+    available_formats,
+    join_paths,
+    output_to_bytes,
+    parse_accept_header,
+)
 from .mpa import start_run
 from .profiler import Profiler
 
@@ -22,24 +27,98 @@ from .profiler import Profiler
 GET_ENDPOINTS = {"health"}
 
 
+def negotiate_output_format(accept: str | None) -> str:
+    """Resolve the Accept header to an output format the runtime currently offers.
+
+    Media ranges are tried by descending q-value, so a client listing several
+    types gets the first one this runtime can actually produce.
+    """
+    if not accept:
+        return get_config().output_format
+
+    def quality(media_range: str) -> float:
+        _, _, params = media_range.partition(";")
+        for param in params.split(";"):
+            key, sep, value = param.partition("=")
+            if sep and key.strip() == "q":
+                try:
+                    return float(value.strip())
+                except ValueError:
+                    return 0.0
+        return 1.0
+
+    allowed = available_formats()
+    ranges = [r.strip() for r in accept.split(",") if r.strip()]
+    # Sorting is stable, so equal-quality ranges keep the client's ordering.
+    for media_range in sorted(ranges, key=quality, reverse=True):
+        media_type = media_range.partition(";")[0].strip().lower()
+        if media_type in ("*/*", "application/*"):
+            return get_config().output_format
+        output_format = media_type.rpartition("/")[2]
+        if output_format in allowed:
+            return output_format
+
+    raise HTTPException(
+        status_code=406,
+        detail={
+            "message": f"Cannot produce any format accepted by {accept!r}",
+            "available_formats": list(allowed),
+        },
+    )
+
+
 def create_response(
-    model: BaseModel, accept: str, base_dir: str | None, binref_dir: str | None
+    model: BaseModel,
+    output_format: str,
+    accept: str | None,
+    base_dir: str | None,
+    binref_dir: str | None,
 ) -> Response:
-    """Create a response of the format specified by the Accept header."""
+    """Create a response in the given (already negotiated) output format.
+
+    ``output_format`` is the host-array output format the caller already
+    negotiated from the ``Accept`` header. How GPU arrays leave the process is a
+    separate axis: it may ride the header as a ``gpu_transport`` media-type
+    parameter (``application/json+base64; gpu_transport=cuda_ipc``), and when the
+    header omits it the served Tesseract's ``gpu_transport`` config applies. So a
+    raw HTTP client can opt in (or out) per request on top of the served default.
+    """
     config = get_config()
 
-    if accept is None or accept == "*/*":
-        output_format = config.output_format
+    if not accept or accept == "*/*":
+        gpu_transport = config.gpu_transport
+        compression = config.compression
     else:
-        output_format: SUPPORTED_FORMATS = accept.split("/")[-1]
+        _, requested_transport, requested_compression = parse_accept_header(accept)
+        # Header wins when it names a transport/compression; otherwise fall back to config.
+        gpu_transport = (
+            requested_transport
+            if requested_transport is not None
+            else config.gpu_transport
+        )
+        if requested_compression is not None:
+            compression = (
+                None if requested_compression == "none" else requested_compression
+            )
+        else:
+            compression = config.compression
 
     if base_dir is None:
         base_dir = config.output_path
 
     content = output_to_bytes(
-        model, output_format, base_dir=base_dir, binref_dir=binref_dir
+        model,
+        output_format,
+        base_dir=base_dir,
+        binref_dir=binref_dir,
+        compression=compression,
+        gpu_transport=gpu_transport,
     )
-    return Response(status_code=200, content=content, media_type=accept)
+    # Name the format actually produced, which is not necessarily what the
+    # client asked for: an Accept header may hold several media ranges.
+    return Response(
+        status_code=200, content=content, media_type=f"application/{output_format}"
+    )
 
 
 def create_rest_api(api_module: ModuleType) -> FastAPI:
@@ -65,9 +144,23 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
 
         @wraps(endpoint_func)
         async def wrapper(*args: Any, accept: str, run_id: str | None, **kwargs: Any):
+            config = get_config()
+            output_format = negotiate_output_format(accept)
+
+            # Release device buffers exported by the previous request's GPU
+            # transport. Releasing at the start of each request keeps every
+            # export alive long enough for a serial client to copy it out of the
+            # response before it is reclaimed. See cuda_ipc for the assumptions
+            # this relies on. Gated on a configured GPU transport so the default
+            # path never imports the CUDA machinery.
+            if config.gpu_transport != "none":
+                from tesseract_core.runtime.device_transport import get_transport
+
+                get_transport(config.gpu_transport).release()
+
             if run_id is None:
                 run_id = str(uuid.uuid4())
-            output_path = get_config().output_path
+            output_path = config.output_path
             rundir_name = f"run_{run_id}"
             rundir = join_paths(output_path, rundir_name)
             profiler = Profiler()
@@ -79,7 +172,11 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
                 # so they go through stdio redirection to the log file
                 profiler.print_stats()
             return create_response(
-                result, accept, base_dir=output_path, binref_dir=rundir_name
+                result,
+                output_format,
+                accept=accept,
+                base_dir=output_path,
+                binref_dir=rundir_name,
             )
 
         if endpoint_func.__name__ not in endpoints_to_wrap:
@@ -122,17 +219,28 @@ def create_rest_api(api_module: ModuleType) -> FastAPI:
         http_methods = ["GET"] if endpoint_name in GET_ENDPOINTS else ["POST"]
         app.add_api_route(f"/{endpoint_name}", wrapped_endpoint, methods=http_methods)
 
+    generate_openapi = app.openapi
+
+    def openapi_with_output_formats() -> dict:
+        from .file_interactions import available_formats
+
+        schema = generate_openapi()
+        schema["x-supported-output-formats"] = list(available_formats())
+        return schema
+
+    app.openapi = openapi_with_output_formats
     return app
 
 
 def serve(host: str, port: int, num_workers: int) -> None:
     """Start the REST API."""
-    config = get_config()
-    if config.debug:
-        import debugpy
-
-        debugpy.listen(("0.0.0.0", 5678))
-
     uvicorn.run(
-        "tesseract_core.runtime.app_http:app", host=host, port=port, workers=num_workers
+        "tesseract_core.runtime.app_http:app",
+        host=host,
+        port=port,
+        workers=num_workers,
+        # Increase from uvicorn's default of 5s to account for the fact that Tesseract endpoints
+        # tend to run longer than your average HTTP request. A higher value means that the server
+        # will wait longer before closing idle connections, so we can avoid the overhead of reconnecting.
+        timeout_keep_alive=60,
     )

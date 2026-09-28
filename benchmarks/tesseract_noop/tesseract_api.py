@@ -32,8 +32,3 @@ def apply(inputs: InputSchema) -> OutputSchema:
     HTTP transport, and deserialization.
     """
     return OutputSchema(result=inputs.data)
-
-
-def abstract_eval(abstract_inputs):
-    """Return output shapes from input shapes."""
-    return {"result": abstract_inputs.data}

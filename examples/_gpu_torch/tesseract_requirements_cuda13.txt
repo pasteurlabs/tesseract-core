@@ -1,0 +1,6 @@
+# CUDA 13 variant selected by the GPU CI matrix on the 13.x leg. The cu130 wheel
+# index gives a CUDA 13 build; the runtime loads libcudart from this wheel, so it
+# exercises libcudart.so.13 (the default tesseract_requirements.txt pulls cu126
+# -> libcudart.so.12).
+--extra-index-url https://download.pytorch.org/whl/cu130
+torch

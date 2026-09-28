@@ -58,7 +58,7 @@ def test_s3_server():
     """Fixture to run a mocked AWS server for testing."""
     current_conf = copy.deepcopy(fsspec.config.conf)
 
-    server = ThreadedMotoServer(port=0)
+    server = ThreadedMotoServer(ip_address="127.0.0.1", port=0)
     server.start()
 
     os.environ.update(
@@ -121,7 +121,7 @@ def test_http_server(free_port):
             self.end_headers()
             self.wfile.write(bytes)
 
-    httpd = socketserver.TCPServer(("", free_port), Handler)
+    httpd = socketserver.TCPServer(("127.0.0.1", free_port), Handler)
 
     def run_server():
         httpd.serve_forever()
@@ -335,6 +335,50 @@ def test_outputs_to_local_file(
         raise AssertionError(f"Unexpected output format: {output_format}")
 
 
+@pytest.mark.parametrize("via_env", [True, False], ids=["env", "cli_flag"])
+def test_apply_command_binref_lz4(
+    cli, cli_runner, tmpdir, dummy_tesseract_module, via_env
+):
+    """Test that binref lz4 compression works when set via env var or CLI flag."""
+    tmpdir = Path(tmpdir)
+    args = [
+        "--output-path",
+        tmpdir,
+        "--output-format",
+        "json+binref",
+    ]
+    if not via_env:
+        args += ["--compression", "lz4"]
+    args += ["apply", json.dumps({"inputs": test_input})]
+
+    result = cli_runner.invoke(
+        cli,
+        args,
+        env={"TESSERACT_COMPRESSION": "lz4"} if via_env else {},
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0, result.stderr
+
+    output = json.loads(result.stdout)
+    # Verify compression metadata is present on array fields
+    for field in dummy_tesseract_module.OutputSchema.model_fields:
+        val = output[field]
+        if isinstance(val, dict) and val.get("object_type") == "array":
+            assert val["data"]["encoding"] == "binref"
+            assert val["data"]["compression"] == "lz4"
+            # compressed_size is now embedded in the buffer spec as path:offset:compressed_size
+            assert val["data"]["buffer"].count(":") == 2
+
+    # Verify the data roundtrips correctly
+    test_input_val = dummy_tesseract_module.InputSchema.model_validate(test_input)
+    expected = dummy_tesseract_module.apply(test_input_val)
+    roundtrip = dummy_tesseract_module.OutputSchema.model_validate_json(
+        result.stdout, context={"base_dir": tmpdir}
+    )
+    for field in expected.model_fields:
+        assert np.array_equal(getattr(roundtrip, field), getattr(expected, field))
+
+
 @pytest.mark.parametrize(
     "test_server",
     [
@@ -435,7 +479,7 @@ def test_stdout_redirect_cli():
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout == b""
-    assert "Usage:" in result.stderr.decode("utf-8")
+    assert "Usage:" in result.stderr.decode("utf-8", errors="replace")
 
 
 @pytest.mark.parametrize("target", ["file", "stderr"])
@@ -453,7 +497,7 @@ def test_stdout_redirect_subprocess(tmpdir, target):
         "from tesseract_core.runtime.core import redirect_fd",
         "print('stdout', file=sys.stdout)",
         "print('stderr', file=sys.stderr)",
-        f"with open(\"{tmpdir / 'test_output.log'}\", 'w') as f:",
+        f"with open(r\"{tmpdir / 'test_output.log'}\", 'w') as f:",
         f"  with redirect_fd(sys.stdout, {target_stream}) as orig_stdout:",
         "    os.system('echo stderr')",
         "    print('stderr', file=sys.stdout)",
@@ -468,19 +512,23 @@ def test_stdout_redirect_subprocess(tmpdir, target):
         f.write("\n".join(testscript))
 
     # Use subprocess since pytest messes with stdout/stderr
-    result = subprocess.run([sys.executable, testscript_path], capture_output=True)
+    result = subprocess.run(
+        [sys.executable, "-W", "ignore", testscript_path], capture_output=True
+    )
     assert result.returncode == 0, (result.stdout, result.stderr)
-    assert result.stdout == b"stdout\n" * 4
+    stdout = result.stdout.replace(b"\r\n", b"\n")
+    stderr = result.stderr.replace(b"\r\n", b"\n")
+    assert stdout == b"stdout\n" * 4
 
     if target == "file":
-        assert result.stderr == b"stderr\n" * 3
+        assert stderr == b"stderr\n" * 3
         # Find the log file
         log_file = tmpdir / "test_output.log"
         with open(log_file, "rb") as f:
             log_content = f.read()
-        assert log_content == b"stderr\n" * 2
+        assert log_content.replace(b"\r\n", b"\n") == b"stderr\n" * 2
     else:
-        assert result.stderr == b"stderr\n" * 5
+        assert stderr == b"stderr\n" * 5
 
 
 def test_suggestion_on_misspelled_command(cli, cli_runner):
@@ -569,6 +617,196 @@ def test_check(cli, cli_runner, dummy_tesseract_package):
             f"{schema_name} is not a subclass of pydantic.BaseModel"
             in result.exception.args[0]
         )
+
+
+def test_parse_eps_for_overrides_and_default():
+    """--eps-for overrides its paths; every other path falls back to --eps."""
+    from tesseract_core.runtime.cli import _parse_eps_for
+
+    eps = _parse_eps_for(["a=1e-3", "b=2e-6"], default=1e-4)
+    assert eps["a"] == 1e-3
+    assert eps["b"] == 2e-6
+    # Unlisted paths resolve to the global default...
+    assert eps["s"] == 1e-4
+    assert "s" in eps
+    # ...but iteration yields only the explicit overrides, so the core's
+    # unknown-path validation can still flag typos.
+    assert set(eps) == {"a", "b"}
+    assert len(eps) == 2
+
+
+@pytest.mark.parametrize(
+    "bad_value",
+    [
+        "noseparator",
+        "=1e-4",
+        "a=notanumber",
+    ],
+)
+def test_parse_eps_for_rejects_malformed(bad_value):
+    from tesseract_core.runtime.cli import BadParameter, _parse_eps_for
+
+    with pytest.raises(BadParameter):
+        _parse_eps_for([bad_value], default=1e-4)
+
+
+def test_check_gradients_eps_for(cli, cli_runner):
+    """--eps-for applies a per-input step through the CLI to the core check.
+
+    The dummy Tesseract's ``jvp``/``vjp`` endpoints deliberately return zeros,
+    so this pins to ``jacobian`` (which is correct) to assert that a per-input
+    step wired through the CLI still produces a passing check.
+    """
+    result = cli_runner.invoke(
+        cli,
+        [
+            "check-gradients",
+            json.dumps({"inputs": test_input}),
+            "--endpoints",
+            "jacobian",
+            "--eps-for",
+            "a=1e-3",
+            "--no-show-progress",
+            "--seed",
+            "0",
+        ],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0, result.stderr
+    assert "Gradient check for jacobian passed" in result.stdout
+
+
+def test_check_gradients_eps_for_unknown_path(cli, cli_runner):
+    """A --eps-for path that is not being checked is reported, not silently ignored."""
+    result = cli_runner.invoke(
+        cli,
+        [
+            "check-gradients",
+            json.dumps({"inputs": test_input}),
+            "--endpoints",
+            "jacobian",
+            "--eps-for",
+            "does.not.exist=1e-3",
+            "--no-show-progress",
+            "--seed",
+            "0",
+        ],
+        catch_exceptions=True,
+    )
+    assert result.exit_code != 0
+    assert "does.not.exist" in str(result.exception)
+
+
+def test_start_debug_server_blocks_until_client(monkeypatch):
+    """One-shot commands must block until a debugger attaches.
+
+    We fake the ``debugpy`` module so ``wait_for_client`` blocks on an event we
+    control, then assert that ``_start_debug_server`` only returns once a
+    (fake) client has "attached".
+    """
+    import threading
+    import types
+
+    from tesseract_core.runtime import cli
+
+    attached = threading.Event()
+    calls = {}
+
+    fake_debugpy = types.SimpleNamespace()
+    fake_debugpy.listen = lambda addr: calls.setdefault("listen", addr)
+    fake_debugpy.wait_for_client = attached.wait
+    monkeypatch.setitem(sys.modules, "debugpy", fake_debugpy)
+
+    returned = threading.Event()
+
+    def run():
+        cli._start_debug_server(wait_for_client=True, host="127.0.0.1", port=12345)
+        returned.set()
+
+    server_thread = threading.Thread(target=run, daemon=True)
+    server_thread.start()
+
+    # The server should be listening but blocked, since no client has attached.
+    server_thread.join(timeout=1.0)
+    assert calls["listen"] == ("127.0.0.1", 12345)
+    assert not returned.is_set(), "Debug server returned before a client attached"
+
+    # Simulate a debugger attaching; the call should now return promptly.
+    attached.set()
+    server_thread.join(timeout=5.0)
+    assert returned.is_set(), "Debug server did not return after a client attached"
+
+
+def test_start_debug_server_no_wait(monkeypatch):
+    """The ``serve`` code path listens but does not block on a client."""
+    import types
+
+    from tesseract_core.runtime import cli
+
+    calls = {"wait": 0}
+
+    def wait_for_client():
+        calls["wait"] += 1
+
+    fake_debugpy = types.SimpleNamespace()
+    fake_debugpy.listen = lambda addr: calls.setdefault("listen", addr)
+    fake_debugpy.wait_for_client = wait_for_client
+    monkeypatch.setitem(sys.modules, "debugpy", fake_debugpy)
+
+    cli._start_debug_server(wait_for_client=False, host="127.0.0.1", port=12345)
+
+    assert calls["listen"] == ("127.0.0.1", 12345)
+    assert calls["wait"] == 0, "Debug server blocked on a client when it should not"
+
+
+def _fake_debugpy(monkeypatch, calls):
+    import types
+
+    fake = types.SimpleNamespace()
+    fake.listen = lambda addr: calls.setdefault("listen", addr)
+    fake.wait_for_client = lambda: None
+    monkeypatch.setitem(sys.modules, "debugpy", fake)
+    return fake
+
+
+def test_debug_server_binds_and_reports_given_address(monkeypatch, capsys):
+    """Host and port are arguments so several Tesseracts can be debugged at once."""
+    from tesseract_core.runtime import cli
+
+    calls = {}
+    _fake_debugpy(monkeypatch, calls)
+
+    cli._start_debug_server(wait_for_client=False, host="127.0.0.1", port=54321)
+
+    assert calls["listen"] == ("127.0.0.1", 54321)
+    # The bound address must be reported, or it cannot be attached to
+    assert "127.0.0.1:54321" in capsys.readouterr().err
+
+
+def test_debug_server_defaults_to_loopback():
+    """A debugger is unauthenticated code execution, so default to loopback.
+
+    Containers need all interfaces for their port mapping to reach the listener,
+    and set that explicitly; nothing else should have to opt out of exposing a
+    debugger on every interface of the machine it runs on.
+    """
+    from tesseract_core.runtime.config import get_config, update_config
+
+    update_config(debug=True)
+    config = get_config()
+
+    assert (config.debugpy_host, config.debugpy_port) == ("127.0.0.1", 5678)
+
+
+def test_debugpy_port_from_env_var(monkeypatch):
+    from tesseract_core.runtime.config import get_config, update_config
+
+    monkeypatch.setenv("TESSERACT_DEBUGPY_PORT", "45678")
+    monkeypatch.setenv("TESSERACT_DEBUGPY_HOST", "127.0.0.1")
+    update_config()
+
+    config = get_config()
+    assert (config.debugpy_host, config.debugpy_port) == ("127.0.0.1", 45678)
 
 
 def test_local_module(cli, cli_runner, dummy_tesseract_package):

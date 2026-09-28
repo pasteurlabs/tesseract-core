@@ -78,7 +78,11 @@ Some shells treat `[` and `]` as special characters. If the command above fails,
 
 ### Windows support
 
-Tesseract is fully supported on Windows via the Windows Subsystem for Linux (WSL). See the [official WSL documentation](https://docs.microsoft.com/en-us/windows/wsl/) for setup instructions.
+Tesseract is natively supported on Windows with [Docker Desktop](https://www.docker.com/products/docker-desktop/). No additional setup beyond Docker Desktop and Python is required.
+
+```{tip}
+For GPU-accelerated workloads or maximum performance, consider using the [Windows Subsystem for Linux (WSL)](https://docs.microsoft.com/en-us/windows/wsl/) instead. WSL provides direct access to Linux-native Docker Engine (avoiding Docker Desktop's virtualization overhead) and GPU passthrough via NVIDIA Container Toolkit.
+```
 
 (exe-conflicts)=
 
@@ -98,6 +102,14 @@ We recommend always using a dedicated Python virtual environment. If you use `zs
 
 ```bash
 $ hash -r
+```
+
+You can also bypass the name entirely and invoke Tesseract through the
+interpreter you installed it into, which is unambiguous:
+
+```bash
+$ python -m tesseract_core build examples/vectoradd/ vectoradd
+$ python -m tesseract_core.runtime --help   # the runtime, likewise
 ```
 
 To confirm which executable `tesseract` resolves to:

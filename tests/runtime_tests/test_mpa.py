@@ -5,6 +5,7 @@
 
 import csv
 import json
+import os
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -13,12 +14,12 @@ from pydantic import ValidationError
 
 from tesseract_core.runtime import mpa
 from tesseract_core.runtime.config import update_config
-from tesseract_core.runtime.mpa import (
+from tesseract_core.runtime.experimental import (
     log_artifact,
     log_metric,
     log_parameter,
-    start_run,
 )
+from tesseract_core.runtime.mpa import start_run
 
 
 class Always200Handler(BaseHTTPRequestHandler):
@@ -90,6 +91,50 @@ def test_nested_runs():
 
         # Should still work in outer context
         log_parameter("outer2", "value3")
+
+
+def test_concurrent_runs_do_not_clobber_stdio(tmp_path):
+    """Concurrent runs must leave stdout and stderr unchanged."""
+    runners = 4
+    runs_each = 25
+    before = {fd: (os.fstat(fd).st_dev, os.fstat(fd).st_ino) for fd in (1, 2)}
+    saved = {fd: os.dup(fd) for fd in (1, 2)}
+    barrier = threading.Barrier(runners)
+    failures = []
+
+    def run_repeatedly(runner):
+        try:
+            barrier.wait()
+            for index in range(runs_each):
+                run_dir = tmp_path / f"runner-{runner}-run-{index}"
+                with start_run(base_dir=str(run_dir)):
+                    pass
+        except BaseException as exc:
+            failures.append(exc)
+
+    try:
+        threads = [
+            threading.Thread(target=run_repeatedly, args=(runner,))
+            for runner in range(runners)
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=60)
+            assert not thread.is_alive(), "a run never finished"
+
+        after = {fd: (os.fstat(fd).st_dev, os.fstat(fd).st_ino) for fd in (1, 2)}
+    finally:
+        # An unpatched failure can poison the test process, so restore the
+        # descriptors before reporting it.
+        for fd, backup in saved.items():
+            os.dup2(backup, fd)
+            os.close(backup)
+
+    assert not failures and after == before, (
+        f"run failures: {failures!r}\n"
+        f"stdio was left pointing elsewhere: {before} -> {after}"
+    )
 
 
 def test_file_backend_default():
@@ -213,7 +258,7 @@ def test_mlflow_run_extra_args(mocker, dummy_mlflow_server):
     kwargs_str = repr(kwargs)
 
     # Mock the mlflow module to avoid actual MLflow calls
-    mocked_start_run = mocker.patch("tesseract_core.runtime.mpa.mlflow.start_run")
+    mocked_start_run = mocker.patch("mlflow.start_run")
 
     update_config(
         mlflow_tracking_uri=dummy_mlflow_server, mlflow_run_extra_args=kwargs_str

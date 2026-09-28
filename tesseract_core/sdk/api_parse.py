@@ -14,7 +14,9 @@ from pydantic import (
     ConfigDict,
     Field,
     Strict,
+    ValidationInfo,
     field_validator,
+    model_validator,
 )
 from pydantic import ValidationError as PydanticValidationError
 
@@ -26,6 +28,12 @@ class _ApiObject(NamedTuple):
     arg_names: tuple[str, ...] | None = None
     optional: bool = False
 
+
+# Canonical location of the published JSON Schema for tesseract_config.yaml.
+# The `stable` alias on Read the Docs tracks the latest tagged *release* (not the
+# tip of main), so this one URL is both stable and correctly versioned. It is the
+# URL scaffolded into new configs and registered with SchemaStore.
+CONFIG_SCHEMA_URL = "https://docs.pasteurlabs.ai/projects/tesseract-core/stable/tesseract_config.schema.json"
 
 ORDINALS = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth"]
 
@@ -66,7 +74,9 @@ EXPECTED_OBJECTS = (
 
 def assert_relative_path(value: str) -> str:
     """Assert that a string encodes a relative path."""
-    if Path(value).is_absolute():
+    from pathlib import PurePosixPath, PureWindowsPath
+
+    if PurePosixPath(value).is_absolute() or PureWindowsPath(value).is_absolute():
         raise ValueError(f"value must be a relative path (got {value})")
     return value
 
@@ -75,13 +85,124 @@ RelativePath = Annotated[str, AfterValidator(assert_relative_path)]
 StrictStr = Annotated[str, Strict()]
 
 
-class PipRequirements(BaseModel):
-    """Configuration options for Python environments built via pip."""
+# Host credential fields are written verbatim into the tab-separated credentials
+# file and, at build time, into netrc and git-credential entries. Each field is
+# constrained to an allowlist so no crafted value -- whitespace, NUL, or any other
+# control character -- can span fields or inject extra credential lines. The sets
+# differ per field: ``secret_id`` also becomes a ``/run/secrets/<id>`` path, and
+# ``host`` is written unencoded into the netrc ``machine`` entry.
+_HOST_CREDENTIAL_ALLOWED = {
+    # Valid DNS hostname characters, plus ``:`` for an optional ``host:port``.
+    "host": re.compile(r"^[A-Za-z0-9.\-:]+$"),
+    # BuildKit secret IDs; also safe as a path component under /run/secrets.
+    "secret_id": re.compile(r"^[A-Za-z0-9._-]+$"),
+    # Usernames are looser but must stay printable-ASCII and single-field.
+    "username": re.compile(r"^[\x21-\x7e]+$"),
+}
 
-    provider: Literal["python-pip"]
-    _filename: Literal["tesseract_requirements.txt"] = "tesseract_requirements.txt"
+
+class HostCredential(BaseModel):
+    """Credentials for authenticating HTTPS access to a host during the build.
+
+    The credential is keyed by host and applies to everything fetched from that
+    host at build time -- package indices (``--extra-index-url``), PEP 508 direct
+    references (``pkg @ https://host/...whl``), conda channels, and
+    ``git+https://host/...`` dependencies alike. The token is supplied
+    out-of-band via a build secret and assembled into netrc and git-credential
+    entries inside the build stage; it never lands in the config or an image layer.
+    """
+
+    host: StrictStr = Field(
+        ...,
+        description=(
+            "Host the credential authenticates against (e.g. ``pkgs.dev.azure.com`` "
+            "or ``github.com``). Just the host, not a full URL."
+        ),
+    )
+    secret_id: StrictStr = Field(
+        ...,
+        description=(
+            "ID of the build secret carrying the token/password for this host, "
+            "matching the ``id`` of a ``tesseract build --secret "
+            "id=<id>,env=<VAR>`` (or ``,src=<file>``)."
+        ),
+    )
+    username: StrictStr = Field(
+        "__token__",
+        description=(
+            "Username paired with the secret. Defaults to ``__token__``, which "
+            "suits PAT-style tokens; set it for hosts that require a real username."
+        ),
+    )
+    model_config: ConfigDict = ConfigDict(extra="forbid")
+
+    @field_validator("host", "secret_id", "username")
+    @classmethod
+    def _allowed_characters(cls, value: str, info: "ValidationInfo") -> str:
+        pattern = _HOST_CREDENTIAL_ALLOWED[info.field_name]
+        if not pattern.match(value):
+            raise ValueError(
+                f"{info.field_name} contains disallowed characters "
+                f"(must match {pattern.pattern}, got {value!r})"
+            )
+        return value
+
+
+# Matches PEP 751 lockfile names, i.e. ``pylock.toml`` and named variants like
+# ``pylock.prod.toml``.
+_PYLOCK_NAME_RE = re.compile(r"^pylock(\.[^.]+)?\.toml$")
+
+
+class PipRequirements(BaseModel):
+    """Configuration options for Python environments built via uv."""
+
+    provider: Literal["uv-pip"]
+    python_version: StrictStr | None = Field(
+        None,
+        description=(
+            "Python version to use inside the Tesseract (e.g., '3.12'). "
+            "When set, ``uv python install`` is used to install the specified version, "
+            "decoupling the Python version from the base image. "
+            "When unset, the system Python from the base image is used."
+        ),
+    )
+    requirements_file: StrictStr = Field(
+        "tesseract_requirements.txt",
+        description=(
+            "Name of the dependency file (a bare filename in the Tesseract source "
+            "directory) to install from. Defaults to a flat "
+            "``tesseract_requirements.txt``. A PEP 751 lockfile "
+            "(``pylock.toml`` or a ``pylock.*.toml`` variant) is also accepted, in "
+            "which case dependencies are installed with pinned versions and hashes "
+            "and no build-time resolution. Export one from a ``uv.lock`` with "
+            "``uv export --format pylock.toml``."
+        ),
+    )
     _build_script: Literal["build_pip_venv.sh"] = "build_pip_venv.sh"
     model_config: ConfigDict = ConfigDict(extra="forbid")
+
+    @field_validator("requirements_file")
+    @classmethod
+    def _bare_filename(cls, value: str) -> str:
+        # The file is copied into the build stage by basename (Dockerfile COPYs it
+        # to `./`), so a path with directory components would silently install from
+        # the wrong place. Require a bare filename living in the source directory.
+        if value != Path(value).name or not value:
+            raise ValueError(
+                f"requirements_file must be a bare filename in the Tesseract source "
+                f"directory, not a path (got {value!r})."
+            )
+        return value
+
+    @property
+    def _filename(self) -> str:
+        return self.requirements_file
+
+    @property
+    def is_pylock(self) -> bool:
+        """Whether the requirements file is a PEP 751 lockfile, per its name."""
+        name = Path(self.requirements_file).name
+        return _PYLOCK_NAME_RE.match(name) is not None
 
 
 class CondaRequirements(BaseModel):
@@ -130,10 +251,73 @@ class TesseractBuildConfig(BaseModel, validate_assignment=True):
             "Example: ``[\"RUN echo 'Hello, world!'\"]``"
         ),
     )
+    inherit_base_image_packages: bool = Field(
+        False,
+        description=(
+            "If True, create the Python virtual environment with --system-site-packages "
+            "so it inherits Python packages pre-installed in the base image "
+            "(e.g. Firedrake, FEniCS, OpenFOAM). Cannot be combined with python_version."
+        ),
+    )
 
-    requirements: PythonRequirements = PipRequirements(provider="python-pip")
+    requirements: PythonRequirements = PipRequirements(provider="uv-pip")
+
+    host_credentials: tuple[HostCredential, ...] = Field(
+        (),
+        description=(
+            "Credentials for authenticated hosts accessed during the build. Each "
+            "entry maps a host to a build secret supplied out-of-band at build time "
+            "(see ``HostCredential`` and ``tesseract build --secret``). Applies to "
+            "package indices, direct-reference wheels, conda channels, and "
+            "``git+https`` dependencies on that host."
+        ),
+    )
+
+    build_env: dict[StrictStr, StrictStr] = Field(
+        default_factory=dict,
+        description=(
+            "Environment variables to set during the build stage only (not in the "
+            "final image). Useful for configuring the package resolver, e.g. "
+            "``{UV_INDEX_STRATEGY: unsafe-best-match}``. "
+            "Do not put secrets here: values are written into the build context. "
+            "Use ``tesseract build --secret`` for credentials instead."
+        ),
+    )
 
     model_config = ConfigDict(extra="forbid")
+
+    @property
+    def effective_python_version(self) -> str | None:
+        """Python version requested for the build, or None to use the base image's.
+
+        Only the uv-pip provider supports pinning the version; conda pins it via
+        ``tesseract_environment.yaml`` instead.
+        """
+        if isinstance(self.requirements, PipRequirements):
+            return self.requirements.python_version
+        return None
+
+    @property
+    def uses_base_image_python(self) -> bool:
+        """Whether /python-env uses the base image's Python instead of bundling its own."""
+        return (
+            isinstance(self.requirements, PipRequirements)
+            and self.requirements.python_version is None
+        )
+
+    @model_validator(mode="after")
+    def _validate_python_version_provider(self):
+        if (
+            self.effective_python_version is not None
+            and self.inherit_base_image_packages
+        ):
+            raise ValueError(
+                "python_version cannot be used with inherit_base_image_packages. "
+                "inherit_base_image_packages exposes the base image's system Python "
+                "packages, which belong to a different interpreter than the one "
+                "installed by python_version. Set only one of the two."
+            )
+        return self
 
     skip_checks: bool = Field(
         False,
@@ -167,6 +351,14 @@ class TesseractConfig(BaseModel, validate_assignment=True):
         default_factory=TesseractBuildConfig,
         description="Configuration options for building the Tesseract.",
     )
+    env: dict[StrictStr, StrictStr] = Field(
+        default_factory=dict,
+        description=(
+            "Environment variables to set in the Docker image. "
+            "Rendered as ``ENV`` lines in the Dockerfile. "
+            "Example: ``{XLA_PYTHON_CLIENT_PREALLOCATE: 'false'}``"
+        ),
+    )
     metadata: dict[str, Any] = Field(
         default_factory=dict,
         description="Arbitrary user-defined metadata. "
@@ -189,6 +381,34 @@ class TesseractConfig(BaseModel, validate_assignment=True):
             )
 
         return v
+
+
+def generate_config_schema() -> dict:
+    """Generate a JSON Schema for ``tesseract_config.yaml``.
+
+    The schema is derived directly from the :class:`TesseractConfig` model, so it
+    always matches the fields, defaults, and descriptions the SDK actually
+    accepts. It is published to the docs site and registered with SchemaStore so
+    IDEs can validate ``tesseract_config.yaml`` and offer inline help.
+
+    A ``tesseract_config.yaml`` may carry an editor schema reference as a
+    ``# yaml-language-server: $schema=...`` comment, which the YAML parser
+    ignores. The schema therefore does not need to allow a ``$schema`` property
+    (and cannot, since the model forbids extra fields).
+    """
+    schema = TesseractConfig.model_json_schema()
+    # Draft 2020-12 is what pydantic emits; declare it so validators don't guess.
+    schema = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": CONFIG_SCHEMA_URL,
+        "$comment": (
+            "Auto-generated from tesseract_core.sdk.api_parse.TesseractConfig. "
+            "Do not edit by hand."
+        ),
+        "title": "Tesseract configuration",
+        **schema,
+    }
+    return schema
 
 
 class ValidationError(Exception):
@@ -307,8 +527,14 @@ def get_config(src_dir: Path) -> TesseractConfig:
     if not config_file.exists():
         raise FileNotFoundError(f"No file found at {config_file}")
 
-    with open(config_file) as f:
-        config = yaml.safe_load(f)
+    try:
+        with open(config_file) as f:
+            config = yaml.safe_load(f)
+    except yaml.YAMLError as err:
+        raise ValidationError(f"Invalid YAML in {config_file}: {err}") from err
+
+    if not isinstance(config, dict):
+        raise ValidationError(f"{config_file} must contain a YAML mapping.")
 
     try:
         return TesseractConfig(**config)
@@ -324,3 +550,59 @@ def get_submodel_fields_in_tesseract_config() -> list[tuple[str, type]]:
         if isinstance(origin, type) and issubclass(origin, BaseModel):
             non_base_fields.append((field_name, field_info.annotation))
     return non_base_fields
+
+
+def _submodels_in_annotation(annotation: Any) -> list[type[BaseModel]]:
+    """Return the directly-settable ``BaseModel`` subclasses in a field annotation.
+
+    Handles bare models, optionals (``Model | None``), and unions of models
+    (e.g. the ``requirements`` field, which is ``PipRequirements | CondaRequirements``).
+    Models nested inside collections (``tuple[HostCredential, ...]``) are ignored:
+    their elements cannot be reached by a dotted ``--config-override`` keypath.
+    """
+    import types
+    import typing
+
+    origin = typing.get_origin(annotation)
+    # Only descend through bare annotations and unions -- not list/tuple/dict.
+    if origin not in (None, typing.Union, types.UnionType):
+        return []
+
+    args = typing.get_args(annotation)
+    candidates = args if args else (annotation,)
+    seen: dict[type[BaseModel], None] = {}
+    for arg in candidates:
+        # ``isinstance(arg, type)`` is not enough to guarantee ``issubclass`` won't
+        # raise: some parameterized generics report as types on older pydantic/typing
+        # versions but reject ``issubclass``. Guard the check so such args are simply
+        # treated as non-models.
+        try:
+            is_model = isinstance(arg, type) and issubclass(arg, BaseModel)
+        except TypeError:
+            is_model = False
+        if is_model:
+            seen.setdefault(arg, None)
+    return list(seen)
+
+
+def get_config_keypaths(model: type[BaseModel] = TesseractConfig) -> list[str]:
+    """Enumerate dot-separated config keypaths a ``--config-override`` may target.
+
+    Recurses through nested sub-models (including union members like the
+    requirements providers) so nested attributes such as
+    ``build_config.requirements.python_version`` are surfaced, not just top-level
+    fields. Both intermediate sub-model paths and leaf paths are returned.
+    """
+    # dict preserves insertion order and dedupes paths shared across union members
+    # (e.g. `provider` on both requirements providers).
+    keypaths: dict[str, None] = {}
+
+    def _walk(current: type[BaseModel], prefix: str) -> None:
+        for field_name, field_info in current.model_fields.items():
+            path = f"{prefix}{field_name}"
+            keypaths.setdefault(path, None)
+            for submodel in _submodels_in_annotation(field_info.annotation):
+                _walk(submodel, f"{path}.")
+
+    _walk(model, "")
+    return list(keypaths)

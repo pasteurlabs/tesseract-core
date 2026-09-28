@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import traceback
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from functools import wraps
 from pathlib import Path
 from types import ModuleType
@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from rich.progress import Progress
 
 from ..core import create_endpoints, get_input_schema, get_output_schema
-from ..tree_transforms import get_at_path, set_at_path
+from ..tree_transforms import escape_dict_key, get_at_path, set_at_path, split_path
 
 GradientEndpointName = Literal[
     "jacobian", "jacobian_vector_product", "vector_jacobian_product"
@@ -52,15 +52,15 @@ def expand_path_pattern(path_pattern: str, inputs: dict[str, Any]) -> list[str]:
     For example, given the path pattern `a.[].{}`, and the inputs `{"a": [{"b": 1}, {"c": 2}]}`,
     this function would return `["a.[0].{b}", "a.[1].{c}"]`.
     """
-    parts = path_pattern.split(".")
+    parts = split_path(path_pattern)
 
     def _handle_part(
         parts: Sequence[str], current_inputs: Any, current_path: list[str]
     ) -> list[str]:
         """Recursively expand each part separately."""
         if current_inputs is None:
-            # None means this branch doesn't exist (e.g. None entry in a
-            # list, or an Optional field that is absent). No paths here.
+            # An optional field (container or leaf) that was not supplied, or a
+            # None entry in a list. No paths here.
             return []
 
         if not parts:
@@ -80,7 +80,9 @@ def expand_path_pattern(path_pattern: str, inputs: dict[str, Any]) -> list[str]:
             # dictionary access
             for key in current_inputs:
                 subpaths = _handle_part(
-                    parts[1:], current_inputs[key], [*current_path, f"{{{key}}}"]
+                    parts[1:],
+                    current_inputs[key],
+                    [*current_path, f"{{{escape_dict_key(str(key))}}}"],
                 )
                 paths.extend(subpaths)
         else:
@@ -117,25 +119,64 @@ def get_differentiable_paths(
     return ad_inputs, ad_outputs
 
 
-def _cached_jacobian(fn: Callable) -> Callable:
-    """Cache the result of the jacobian computation based on input_path, output_path, and input_idx."""
-    cache = {}
+def _by_index(input_path: Any, output_path: Any, input_idx: Any) -> tuple:
+    """Key a per-index Jacobian row on the triple it depends on."""
+    return (input_path, output_path, tuple(input_idx))
 
-    @wraps(fn)
-    def _wrapper(*args: Any, **kwargs: Any) -> Any:
-        _, _, input_path, output_path, input_idx, *_ = args
-        key = (input_path, output_path, tuple(input_idx))
-        if key not in cache:
-            try:
-                cache[key] = fn(*args, **kwargs)
-            except Exception as e:
-                cache[key] = e
-        if isinstance(cache[key], Exception):
-            raise cache[key]
-        return cache[key]
 
-    _wrapper.clear_cache = cache.clear
-    return _wrapper
+class _VjpSweepTarget(NamedTuple):
+    """Target specification for a shared VJP sweep.
+
+    When ``sampled_outputs`` is None, all output elements are evaluated
+    exhaustively. When it is a tuple of coordinates, only those coordinates are
+    evaluated.
+    """
+
+    wanted_inputs: tuple[tuple[int, ...], ...]
+    sampled_outputs: tuple[tuple[int, ...], ...] | None = None
+
+
+def _by_sampled_set(
+    input_path: Any,
+    output_path: Any,
+    target: _VjpSweepTarget,
+) -> tuple:
+    """Key a VJP sweep on the path pair and the sampled input/output set it answers for."""
+    return (
+        input_path,
+        output_path,
+        tuple(target.wanted_inputs),
+        target.sampled_outputs,
+    )
+
+
+def _cached_function(*, key_fn: Callable) -> Callable:
+    """Memoise on a key derived from the call's path arguments.
+
+    ``key_fn`` receives ``(input_path, output_path, fifth_positional)`` and
+    returns the cache key, so the caller decides the granularity.
+    """
+
+    def _decorate(fn: Callable) -> Callable:
+        cache = {}
+
+        @wraps(fn)
+        def _wrapper(*args: Any, **kwargs: Any) -> Any:
+            _, _, input_path, output_path, fifth, *_ = args
+            key = key_fn(input_path, output_path, fifth)
+            if key not in cache:
+                try:
+                    cache[key] = fn(*args, **kwargs)
+                except Exception as e:
+                    cache[key] = e
+            if isinstance(cache[key], Exception):
+                raise cache[key]
+            return cache[key]
+
+        _wrapper.clear_cache = cache.clear
+        return _wrapper
+
+    return _decorate
 
 
 def _perturb_input(
@@ -233,7 +274,7 @@ def _compute_forward_diff_row(
     ) / eps
 
 
-@_cached_jacobian
+@_cached_function(key_fn=_by_index)
 def _jacobian_via_apply(
     endpoints_func: dict[str, Callable],
     inputs: dict[str, Any],
@@ -263,7 +304,7 @@ def _jacobian_via_apply(
     )
 
 
-@_cached_jacobian
+@_cached_function(key_fn=_by_index)
 def _jacobian_via_jacobian(
     endpoints_func: dict[str, Callable],
     inputs: dict[str, Any],
@@ -294,7 +335,7 @@ def _jacobian_via_jacobian(
     return output_val[jac_slice]
 
 
-@_cached_jacobian
+@_cached_function(key_fn=_by_index)
 def _jacobian_via_jvp(
     endpoints_func: dict[str, Callable],
     inputs: dict[str, Any],
@@ -321,25 +362,55 @@ def _jacobian_via_jvp(
     return jvp[output_path]
 
 
-@_cached_jacobian
-def _jacobian_via_vjp(
+@_cached_function(key_fn=_by_sampled_set)
+def _vjp_sweep(
     endpoints_func: dict[str, Callable],
     inputs: dict[str, Any],
     input_path: Sequence[str],
     output_path: Sequence[str],
-    input_idx: tuple[int, ...],
-) -> ArrayLike:
-    """Compute a Jacobian row using the vector_jacobian_product endpoint."""
-    apply_fn = endpoints_func["apply"]
-    ApplySchema = get_input_schema(apply_fn)
-    outputs = apply_fn(ApplySchema.model_validate({"inputs": inputs})).model_dump()
+    target: _VjpSweepTarget,
+    outputs: dict[str, Any],
+) -> dict[tuple[int, ...], ArrayLike]:
+    """Sweep one-hot cotangents over the output and keep the wanted rows.
 
+    One VJP call with a one-hot cotangent returns the gradient with respect
+    to every element of ``input_path``, so a single sweep over the output
+    elements answers for all sampled indices at once.
+
+    When ``target.sampled_outputs`` is None, all output elements are swept
+    exhaustively. When it is a tuple of coordinates, only those coordinates are
+    evaluated.
+    """
     vjp_fn = endpoints_func["vector_jacobian_product"]
     VjpSchema = get_input_schema(vjp_fn)
-    jac_row = np.zeros_like(get_at_path(outputs, output_path))
+    template = np.zeros_like(get_at_path(outputs, output_path))
 
-    for col_idx in np.ndindex(jac_row.shape):
-        cotangent = np.zeros_like(jac_row)
+    if target.sampled_outputs is None:
+        rows = {idx: np.zeros_like(template) for idx in target.wanted_inputs}
+        for col_idx in np.ndindex(template.shape):
+            cotangent = np.zeros_like(template)
+            cotangent[col_idx] = 1
+            vjp = vjp_fn(
+                VjpSchema.model_validate(
+                    {
+                        "inputs": inputs,
+                        "vjp_inputs": [input_path],
+                        "vjp_outputs": [output_path],
+                        "cotangent_vector": {output_path: cotangent},
+                    }
+                )
+            ).model_dump()
+            grad = vjp[input_path]
+            for idx in target.wanted_inputs:
+                rows[idx][col_idx] = grad[idx]
+        return rows
+
+    rows = {
+        idx: np.zeros(len(target.sampled_outputs), dtype=template.dtype)
+        for idx in target.wanted_inputs
+    }
+    for col_pos, col_idx in enumerate(target.sampled_outputs):
+        cotangent = np.zeros_like(template)
         cotangent[col_idx] = 1
         vjp = vjp_fn(
             VjpSchema.model_validate(
@@ -351,9 +422,66 @@ def _jacobian_via_vjp(
                 }
             )
         ).model_dump()
-        jac_row[col_idx] = vjp[input_path][input_idx]
+        grad = vjp[input_path]
+        for idx in target.wanted_inputs:
+            rows[idx][col_pos] = grad[idx]
+    return rows
 
-    return jac_row
+
+def _jacobian_via_vjp(
+    endpoints_func: dict[str, Callable],
+    inputs: dict[str, Any],
+    input_path: Sequence[str],
+    output_path: Sequence[str],
+    input_idx: tuple[int, ...],
+    outputs: dict[str, Any],
+    sampled_input_idx: tuple[tuple[int, ...], ...] = (),
+    sampled_output_idx: tuple[tuple[int, ...], ...] | None = None,
+) -> ArrayLike:
+    """Return one Jacobian row from the sweep shared by this path pair.
+
+    ``sampled_input_idx`` is the set this pair will be asked for. It goes
+    into the cache key so that one sweep serves every index in it, which is
+    the granularity the sweep actually answers at, while callers keep asking
+    for a single row like the other three helpers.
+    """
+    wanted = tuple(dict.fromkeys((*sampled_input_idx, tuple(input_idx))))
+    target = _VjpSweepTarget(wanted_inputs=wanted, sampled_outputs=sampled_output_idx)
+    return _vjp_sweep(endpoints_func, inputs, input_path, output_path, target, outputs)[
+        tuple(input_idx)
+    ]
+
+
+_jacobian_via_vjp.clear_cache = _vjp_sweep.clear_cache
+
+
+def _sample_coordinates(
+    shape: tuple[int, ...],
+    count: int,
+    rng: np.random.RandomState,
+    *,
+    replace: bool = True,
+) -> list[tuple[int, ...]]:
+    """Sample coordinate tuples from an array of the given shape.
+
+    Args:
+        shape: Shape of the array to sample from.
+        count: Number of coordinates to sample.
+        rng: Random number generator to use.
+        replace: Whether to sample with or without replacement.
+
+    Returns:
+        List of coordinate tuples within the given shape.
+    """
+    if not shape:
+        return [()] * count
+    total_elements = int(np.prod(shape, dtype=int))
+    if total_elements == 0:
+        return []
+    flat_indices = rng.choice(total_elements, size=count, replace=replace)
+    unraveled = np.unravel_index(flat_indices, shape)
+    coords = zip(*(tuple(int(x) for x in dim) for dim in unraveled), strict=True)
+    return list(coords)
 
 
 def _sample_indices(
@@ -376,8 +504,7 @@ def _sample_indices(
             idx_per_input[path] = [()]
             continue
         n_evals = max(1, int(max_evals * np.prod(shape) / total_elements))
-        idx_tuple = np.unravel_index(rng.choice(int(np.prod(shape)), n_evals), shape)
-        idx_per_input[path] = list(zip(*idx_tuple, strict=True))
+        idx_per_input[path] = _sample_coordinates(shape, n_evals, rng, replace=True)
 
     items_to_check = []
     for in_path in diff_inputs:
@@ -393,13 +520,16 @@ def check_endpoint_gradients(
     endpoint_functions: dict[str, Callable],
     inputs: dict[str, Any],
     endpoint: str,
+    outputs: dict[str, Any],
     *,
     diff_inputs: list[str],
     diff_outputs: list[str],
     max_evals: int,
-    eps: float,
+    max_output_samples: int | None = None,
+    eps: float | Mapping[str, float],
     rtol: float,
     rng: np.random.RandomState,
+    output_rng: np.random.RandomState | None = None,
     show_progress: bool,
 ) -> tuple[list[GradientCheckResult], int]:
     """Check gradients of an endpoint against a finite difference approximation."""
@@ -416,6 +546,37 @@ def check_endpoint_gradients(
 
     items_to_check = _sample_indices(inputs, diff_inputs, diff_outputs, max_evals, rng)
     num_evals = 0
+
+    # Indices this run will ask for, per path pair. The VJP sweep answers for
+    # all of them in one pass, so it needs to know them up front.
+    sampled_by_pair: dict[tuple[str, str], tuple] = {}
+    for in_path, out_path, idx in items_to_check:
+        sampled_by_pair.setdefault((in_path, out_path), ())
+        sampled_by_pair[(in_path, out_path)] += (tuple(idx),)
+
+    sampled_outputs_by_pair: dict[
+        tuple[str, str], tuple[tuple[int, ...], ...] | None
+    ] = {}
+    if endpoint == "vector_jacobian_product" and max_output_samples is not None:
+        actual_output_rng = output_rng if output_rng is not None else rng
+        for in_path, out_path in sampled_by_pair:
+            out_val = get_at_path(outputs, out_path)
+            out_shape = np.shape(out_val)
+            n_output_elements = int(np.prod(out_shape, dtype=int)) if out_shape else 1
+            if max_output_samples < n_output_elements:
+                sampled_outputs_by_pair[(in_path, out_path)] = tuple(
+                    _sample_coordinates(
+                        out_shape,
+                        max_output_samples,
+                        actual_output_rng,
+                        replace=False,
+                    )
+                )
+            else:
+                sampled_outputs_by_pair[(in_path, out_path)] = None
+    else:
+        for in_path, out_path in sampled_by_pair:
+            sampled_outputs_by_pair[(in_path, out_path)] = None
 
     try:
         with Progress(disable=not show_progress) as progress:
@@ -434,14 +595,25 @@ def check_endpoint_gradients(
                         in_path,
                         out_path,
                         idx,
-                        eps=eps,
+                        eps=eps[in_path] if isinstance(eps, Mapping) else eps,
                     )
+                    if endpoint == "vector_jacobian_product":
+                        col_indices = sampled_outputs_by_pair.get((in_path, out_path))
+                        grad_kwargs = {
+                            "outputs": outputs,
+                            "sampled_input_idx": sampled_by_pair[(in_path, out_path)],
+                            "sampled_output_idx": col_indices,
+                        }
+                    else:
+                        col_indices = None
+                        grad_kwargs = {}
                     result_grad = _jacobian_via_grad(
                         endpoint_functions,
                         inputs,
                         in_path,
                         out_path,
                         idx,
+                        **grad_kwargs,
                     )
                 except Exception as e:
                     tb = traceback.extract_tb(e.__traceback__)
@@ -455,13 +627,21 @@ def check_endpoint_gradients(
                         exception=exc_info,
                     )
                 else:
-                    if not np.allclose(result_apply, result_grad, atol=1e-8, rtol=rtol):
+                    if col_indices is not None:
+                        reference = np.asarray(result_apply)
+                        ref_val = np.asarray([reference[c] for c in col_indices])
+                        grad_val = np.asarray(result_grad)
+                    else:
+                        ref_val = result_apply
+                        grad_val = result_grad
+
+                    if not np.allclose(ref_val, grad_val, atol=1e-8, rtol=rtol):
                         failure = GradientCheckResult(
                             in_path=in_path,
                             out_path=out_path,
                             idx=idx,
-                            ref_val=result_apply,
-                            grad_val=result_grad,
+                            ref_val=ref_val,
+                            grad_val=grad_val,
                             exception=None,
                         )
 
@@ -493,7 +673,8 @@ def check_gradients(
     base_dir: Path | None = None,
     endpoints: Sequence[GradientEndpointName] | None = None,
     max_evals: int = 1000,
-    eps: float = 1e-4,
+    max_output_samples: int | None = None,
+    eps: float | Mapping[str, float] = 1e-4,
     rtol: float = 0.1,
     seed: int | None = None,
     show_progress: bool = True,
@@ -508,11 +689,21 @@ def check_gradients(
         base_dir: The base directory to resolve relative paths.
         endpoints: The gradient endpoints to check. If not provided, all available endpoints are checked.
         max_evals: The target number of ``apply`` evaluations to perform.
-        eps: The epsilon to use for finite differences, as a fraction of the maximum absolute value of each input.
+        max_output_samples: Maximum number of output elements sampled when checking the
+            vector_jacobian_product endpoint. If None, all output elements are checked
+            exhaustively.
+        eps: The step size to use for finite differences, as an absolute
+            perturbation. A single float is applied unscaled to every
+            differentiated input; a mapping gives one step per input path,
+            which is what inputs of differing magnitude need, and must name
+            every path being checked.
         rtol: The relative tolerance to use for comparison.
         seed: The random seed to use for sampling. If not provided, a random seed is used.
         show_progress: Whether to show a progress bar.
     """
+    if max_output_samples is not None and max_output_samples <= 0:
+        raise ValueError("max_output_samples must be greater than 0")
+
     # We apply a global cache to these functions to avoid hashing `inputs` multiple times,
     # so we need to clear the cache before each run.
     _jacobian_via_apply.clear_cache()
@@ -563,6 +754,19 @@ def check_gradients(
     if not output_paths:
         output_paths = diff_outputs
 
+    if isinstance(eps, Mapping):
+        missing = [path for path in input_paths if path not in eps]
+        if missing:
+            raise ValueError(
+                f"eps is missing a step size for input path(s): {', '.join(missing)}"
+            )
+        unknown = [path for path in eps if path not in input_paths]
+        if unknown:
+            raise ValueError(
+                f"eps names input path(s) that are not being checked: "
+                f"{', '.join(unknown)}"
+            )
+
     for path in output_paths:
         if path not in diff_outputs:
             raise ValueError(
@@ -571,669 +775,22 @@ def check_gradients(
 
     # Check gradients for each endpoint separately
     rng = np.random.RandomState(seed)
+    output_rng = np.random.RandomState(seed)
 
     for endpoint in endpoints:
         failures, num_evals = check_endpoint_gradients(
             endpoint_functions,
             inputs,
             endpoint,
+            outputs=outputs,
             diff_inputs=input_paths,
             diff_outputs=output_paths,
             max_evals=max_evals,
+            max_output_samples=max_output_samples,
             eps=eps,
             rtol=rtol,
             rng=rng,
+            output_rng=output_rng,
             show_progress=show_progress,
         )
         yield endpoint, failures, num_evals
-
-
-FDAlgorithm = Literal["central", "forward", "stochastic"]
-
-
-def finite_difference_jacobian(
-    apply_fn: Callable,
-    inputs: BaseModel,
-    jac_inputs: set[str],
-    jac_outputs: set[str],
-    *,
-    algorithm: FDAlgorithm = "central",
-    eps: float = 1e-4,
-    num_samples: int | None = None,
-    seed: int | None = None,
-) -> dict[str, dict[str, ArrayLike]]:
-    """Compute the Jacobian of a Tesseract apply function using finite differences.
-
-    This function provides a generic way to make any Tesseract differentiable
-    by computing gradients numerically. It can be used directly as the implementation
-    of a ``jacobian`` endpoint.
-
-    Args:
-        apply_fn: The Tesseract's apply function with signature ``apply(inputs) -> outputs``.
-        inputs: The input data at which to compute the Jacobian.
-        jac_inputs: Set of input paths to differentiate with respect to.
-        jac_outputs: Set of output paths to compute derivatives of.
-        algorithm: The finite difference algorithm to use. Options are
-            ``"central"`` (central differences, most accurate, 2 evaluations per element),
-            ``"forward"`` (forward differences, faster, 1 extra evaluation per element), or
-            ``"stochastic"`` (SPSA algorithm, scales better to high-dimensional inputs).
-        eps: Perturbation magnitude for finite differences.
-        num_samples: Number of random samples for the stochastic algorithm.
-            Only used when ``algorithm="stochastic"``. Defaults to ``max(10, sqrt(n))``
-            where ``n`` is the total number of input elements, providing O(sqrt(n))
-            cost instead of O(n) for full finite differences.
-        seed: Random seed for reproducibility (only used with ``algorithm="stochastic"``).
-
-    Returns:
-        A nested dictionary with structure ``{output_path: {input_path: jacobian_array}}``,
-        where each jacobian_array has shape ``(*output_shape, *input_shape)``.
-
-    Example:
-        In a Tesseract's ``tesseract_api.py``::
-
-            from tesseract_core.runtime.experimental import finite_difference_jacobian
-
-
-            def jacobian(
-                inputs: InputSchema,
-                jac_inputs: set[str],
-                jac_outputs: set[str],
-            ):
-                return finite_difference_jacobian(
-                    apply, inputs, jac_inputs, jac_outputs
-                )
-
-    .. note::
-
-        This function is experimental and its API may change in future releases.
-        It is useful for prototyping or when analytical gradients are difficult
-        to derive, but numerical differentiation is generally less accurate and
-        more computationally expensive than analytical methods.
-    """
-    inputs_dict = inputs.model_dump()
-
-    # Get reference outputs for shape information and for forward differences
-    base_outputs = apply_fn(inputs).model_dump()
-
-    # Build the result structure
-    result: dict[str, dict[str, ArrayLike]] = {}
-    for out_path in jac_outputs:
-        result[out_path] = {}
-        out_val = get_at_path(base_outputs, out_path)
-        out_shape = np.asarray(out_val).shape
-
-        for in_path in jac_inputs:
-            in_val = get_at_path(inputs_dict, in_path)
-            in_arr = np.asarray(in_val)
-            in_shape = in_arr.shape
-
-            # Initialize Jacobian with shape (*output_shape, *input_shape)
-            jac_shape = (*out_shape, *in_shape) if in_shape else out_shape
-            result[out_path][in_path] = np.zeros(jac_shape, dtype=np.float64)
-
-    if algorithm == "stochastic":
-        _compute_jacobian_stochastic(
-            apply_fn,
-            inputs,
-            inputs_dict,
-            base_outputs,
-            jac_inputs,
-            jac_outputs,
-            result,
-            eps=eps,
-            num_samples=num_samples,
-            seed=seed,
-        )
-    else:
-        _compute_jacobian_elementwise(
-            apply_fn,
-            inputs,
-            inputs_dict,
-            base_outputs,
-            jac_inputs,
-            jac_outputs,
-            result,
-            eps=eps,
-            algorithm=algorithm,
-        )
-
-    return result
-
-
-def _compute_jacobian_elementwise(
-    apply_fn: Callable,
-    inputs: BaseModel,
-    inputs_dict: dict,
-    base_outputs: dict,
-    jac_inputs: set[str],
-    jac_outputs: set[str],
-    result: dict[str, dict[str, ArrayLike]],
-    *,
-    eps: float,
-    algorithm: FDAlgorithm,
-) -> None:
-    """Compute Jacobian by perturbing each input element individually."""
-    input_schema = type(inputs)
-
-    for in_path in jac_inputs:
-        in_val = get_at_path(inputs_dict, in_path)
-        in_arr = np.asarray(in_val)
-        in_shape = in_arr.shape
-
-        # Handle scalars
-        indices = list(np.ndindex(in_shape)) if in_shape else [()]
-
-        for idx in indices:
-            for out_path in jac_outputs:
-                if algorithm == "central":
-                    grad = _compute_central_diff_row(
-                        apply_fn,
-                        inputs_dict,
-                        input_schema,
-                        in_path,
-                        out_path,
-                        idx,
-                        eps,
-                    )
-                elif algorithm == "forward":
-                    grad = _compute_forward_diff_row(
-                        apply_fn,
-                        inputs_dict,
-                        base_outputs,
-                        input_schema,
-                        in_path,
-                        out_path,
-                        idx,
-                        eps,
-                    )
-                else:
-                    raise ValueError(f"Unknown algorithm {algorithm}")
-
-                if idx:
-                    result[out_path][in_path][(Ellipsis, *idx)] = grad
-                else:
-                    result[out_path][in_path][...] = grad
-
-
-def _compute_jacobian_stochastic(
-    apply_fn: Callable,
-    inputs: BaseModel,
-    inputs_dict: dict,
-    base_outputs: dict,
-    jac_inputs: set[str],
-    jac_outputs: set[str],
-    result: dict[str, dict[str, ArrayLike]],
-    *,
-    eps: float,
-    num_samples: int | None,
-    seed: int | None,
-) -> None:
-    """Compute Jacobian using Simultaneous Perturbation Stochastic Approximation (SPSA).
-
-    This algorithm estimates the Jacobian by:
-    1. Generating random perturbation directions (Rademacher distributed: ±1)
-    2. Computing the gradient approximation using these directions
-    3. Averaging over multiple samples to reduce variance
-
-    SPSA requires only 2 function evaluations per sample, regardless of the input
-    dimension, making it efficient for high-dimensional inputs.
-    """
-    rng = np.random.RandomState(seed)
-
-    # Collect all input arrays and their metadata
-    input_info = {}
-    total_input_elements = 0
-    for in_path in jac_inputs:
-        in_val = get_at_path(inputs_dict, in_path)
-        in_arr = np.asarray(in_val)
-        input_info[in_path] = {
-            "array": in_arr,
-            "shape": in_arr.shape,
-            "size": in_arr.size if in_arr.shape else 1,
-        }
-        total_input_elements += input_info[in_path]["size"]
-
-    # Default number of samples: use sqrt(n) which balances cost vs accuracy.
-    # This gives O(sqrt(n)) evaluations instead of O(n) for full FD,
-    # while still providing reasonable gradient estimates.
-    if num_samples is None:
-        num_samples = max(10, int(np.sqrt(total_input_elements)))
-
-    # If num_samples >= total_input_elements, stochastic is no cheaper than
-    # elementwise but less accurate. Fall back to central differences.
-    if num_samples >= total_input_elements:
-        _compute_jacobian_elementwise(
-            apply_fn,
-            inputs,
-            inputs_dict,
-            base_outputs,
-            jac_inputs,
-            jac_outputs,
-            result,
-            eps=eps,
-            algorithm="central",
-        )
-        return
-
-    # Collect output shapes
-    output_info = {}
-    for out_path in jac_outputs:
-        out_val = get_at_path(base_outputs, out_path)
-        out_arr = np.asarray(out_val)
-        output_info[out_path] = {
-            "shape": out_arr.shape,
-            "size": out_arr.size if out_arr.shape else 1,
-        }
-
-    # Accumulate Jacobian estimates
-    for _ in range(num_samples):
-        # Generate random perturbation directions (Rademacher: ±1)
-        perturbations = {}
-        for in_path, info in input_info.items():
-            perturbation_size = None if info["shape"] == () else info["shape"]
-            perturbations[in_path] = rng.choice(
-                np.array([-1, 1], dtype=np.float64), size=perturbation_size
-            )
-
-        # Compute perturbed inputs
-        inputs_plus_dict = inputs_dict.copy()
-        inputs_minus_dict = inputs_dict.copy()
-
-        for in_path, delta in perturbations.items():
-            in_arr = input_info[in_path]["array"]
-            inputs_plus_dict = set_at_path(
-                inputs_plus_dict, {in_path: in_arr + eps * delta}
-            )
-            inputs_minus_dict = set_at_path(
-                inputs_minus_dict, {in_path: in_arr - eps * delta}
-            )
-
-        # Evaluate function at perturbed points
-        outputs_plus = apply_fn(
-            type(inputs).model_validate(inputs_plus_dict)
-        ).model_dump()
-        outputs_minus = apply_fn(
-            type(inputs).model_validate(inputs_minus_dict)
-        ).model_dump()
-
-        # Update Jacobian estimate for each (output, input) pair
-        for out_path in jac_outputs:
-            out_plus = np.asarray(get_at_path(outputs_plus, out_path))
-            out_minus = np.asarray(get_at_path(outputs_minus, out_path))
-            output_diff = (out_plus - out_minus) / (2 * eps)
-
-            for in_path in jac_inputs:
-                delta = perturbations[in_path]
-
-                # SPSA gradient estimate: (f(x+eps*delta) - f(x-eps*delta)) / (2*eps*delta)
-                # For Jacobian: J[i,j] contribution = output_diff[i] / delta[j]
-                # We accumulate and average over samples
-                if input_info[in_path]["shape"]:
-                    # For each output element, divide by each input perturbation
-                    # Result shape: (*output_shape, *input_shape)
-                    jac_contrib = np.outer(output_diff.ravel(), 1.0 / delta.ravel())
-                    jac_contrib = jac_contrib.reshape(
-                        *output_info[out_path]["shape"], *input_info[in_path]["shape"]
-                    )
-                else:
-                    # Scalar input
-                    jac_contrib = output_diff / delta
-
-                result[out_path][in_path] += jac_contrib / num_samples
-
-
-def finite_difference_jvp(
-    apply_fn: Callable,
-    inputs: BaseModel,
-    jvp_inputs: set[str],
-    jvp_outputs: set[str],
-    tangent_vector: dict[str, ArrayLike],
-    *,
-    algorithm: FDAlgorithm = "central",
-    eps: float = 1e-4,
-) -> dict[str, ArrayLike]:
-    """Compute the Jacobian-vector product (JVP) using finite differences.
-
-    The JVP computes ``J @ v`` where ``J`` is the Jacobian and ``v`` is the tangent vector.
-    This is done efficiently using directional derivatives without computing the full Jacobian.
-
-    Note: The ``"stochastic"`` algorithm is treated as ``"central"`` for JVP computation.
-    JVP naturally requires only O(1) function evaluations regardless of input dimension
-    (2 for central, 1 for forward), so stochastic estimation provides no benefit.
-
-    Args:
-        apply_fn: The Tesseract's apply function with signature ``apply(inputs) -> outputs``.
-        inputs: The input data at which to compute the JVP.
-        jvp_inputs: Set of input paths to differentiate with respect to.
-        jvp_outputs: Set of output paths to compute derivatives of.
-        tangent_vector: Dictionary mapping input paths to tangent arrays.
-        algorithm: The finite difference algorithm to use. Options are
-            ``"central"`` (most accurate, default) or ``"forward"`` (faster).
-            The ``"stochastic"`` option is accepted but treated as ``"central"``.
-        eps: Perturbation magnitude.
-
-    Returns:
-        Dictionary mapping output paths to JVP result arrays.
-
-    Example:
-        In a Tesseract's ``tesseract_api.py``::
-
-            from tesseract_core.runtime.experimental import finite_difference_jvp
-
-
-            def jacobian_vector_product(
-                inputs: InputSchema,
-                jvp_inputs: set[str],
-                jvp_outputs: set[str],
-                tangent_vector: dict[str, Any],
-            ):
-                return finite_difference_jvp(
-                    apply, inputs, jvp_inputs, jvp_outputs, tangent_vector
-                )
-
-    .. note::
-
-        This function is experimental and its API may change in future releases.
-    """
-    inputs_dict = inputs.model_dump()
-
-    # Stochastic algorithm is treated as central for JVP since JVP already
-    # achieves O(1) function evaluations via directional derivatives
-    if algorithm == "stochastic":
-        algorithm = "central"
-
-    # Construct directional perturbation
-    inputs_plus_dict = inputs_dict.copy()
-    inputs_minus_dict = inputs_dict.copy()
-
-    for in_path in jvp_inputs:
-        in_val = np.asarray(get_at_path(inputs_dict, in_path))
-        tangent = np.asarray(tangent_vector[in_path])
-
-        inputs_plus_dict = set_at_path(
-            inputs_plus_dict, {in_path: in_val + eps * tangent}
-        )
-        if algorithm == "central":
-            inputs_minus_dict = set_at_path(
-                inputs_minus_dict, {in_path: in_val - eps * tangent}
-            )
-
-    # Evaluate at perturbed points
-    outputs_plus = apply_fn(type(inputs).model_validate(inputs_plus_dict)).model_dump()
-
-    if algorithm == "central":
-        outputs_minus = apply_fn(
-            type(inputs).model_validate(inputs_minus_dict)
-        ).model_dump()
-
-        result = {}
-        for out_path in jvp_outputs:
-            out_plus = np.asarray(get_at_path(outputs_plus, out_path))
-            out_minus = np.asarray(get_at_path(outputs_minus, out_path))
-            result[out_path] = (out_plus - out_minus) / (2 * eps)
-    else:
-        base_outputs = apply_fn(inputs).model_dump()
-        result = {}
-        for out_path in jvp_outputs:
-            out_plus = np.asarray(get_at_path(outputs_plus, out_path))
-            out_base = np.asarray(get_at_path(base_outputs, out_path))
-            result[out_path] = (out_plus - out_base) / eps
-
-    return result
-
-
-def finite_difference_vjp(
-    apply_fn: Callable,
-    inputs: BaseModel,
-    vjp_inputs: set[str],
-    vjp_outputs: set[str],
-    cotangent_vector: dict[str, ArrayLike],
-    *,
-    algorithm: FDAlgorithm = "central",
-    eps: float = 1e-4,
-    num_samples: int | None = None,
-    seed: int | None = None,
-) -> dict[str, ArrayLike]:
-    """Compute the vector-Jacobian product (VJP) using finite differences.
-
-    The VJP computes ``v @ J`` where ``J`` is the Jacobian and ``v`` is the cotangent vector.
-
-    Note: For ``"central"`` and ``"forward"`` algorithms, the VJP is computed by
-    explicitly computing the Jacobian rows and contracting with the cotangent vector.
-    This requires O(n_inputs) function evaluations, the same cost as computing the
-    full Jacobian. For high-dimensional inputs, consider using ``algorithm="stochastic"``.
-
-    Args:
-        apply_fn: The Tesseract's apply function with signature ``apply(inputs) -> outputs``.
-        inputs: The input data at which to compute the VJP.
-        vjp_inputs: Set of input paths to differentiate with respect to.
-        vjp_outputs: Set of output paths to compute derivatives of.
-        cotangent_vector: Dictionary mapping output paths to cotangent arrays.
-        algorithm: The finite difference algorithm to use. Options are
-            ``"central"`` (most accurate), ``"forward"`` (faster), or
-            ``"stochastic"`` (SPSA, better for high-dimensional inputs).
-        eps: Perturbation magnitude.
-        num_samples: Number of random samples for the stochastic algorithm.
-            Only used when ``algorithm="stochastic"``. Defaults to ``max(10, sqrt(n))``
-            where ``n`` is the total number of input elements.
-        seed: Random seed for reproducibility (only used with ``algorithm="stochastic"``).
-
-    Returns:
-        Dictionary mapping input paths to VJP result arrays.
-
-    Example:
-        In a Tesseract's ``tesseract_api.py``::
-
-            from tesseract_core.runtime.experimental import finite_difference_vjp
-
-
-            def vector_jacobian_product(
-                inputs: InputSchema,
-                vjp_inputs: set[str],
-                vjp_outputs: set[str],
-                cotangent_vector: dict[str, Any],
-            ):
-                return finite_difference_vjp(
-                    apply, inputs, vjp_inputs, vjp_outputs, cotangent_vector
-                )
-
-    .. note::
-
-        This function is experimental and its API may change in future releases.
-    """
-    inputs_dict = inputs.model_dump()
-    input_schema = type(inputs)
-
-    # Initialize result
-    result: dict[str, np.ndarray] = {}
-    for in_path in vjp_inputs:
-        in_val = get_at_path(inputs_dict, in_path)
-        in_arr = np.asarray(in_val)
-        result[in_path] = np.zeros_like(in_arr, dtype=np.float64)
-
-    if algorithm == "stochastic":
-        _compute_vjp_stochastic(
-            apply_fn,
-            inputs,
-            inputs_dict,
-            vjp_inputs,
-            vjp_outputs,
-            cotangent_vector,
-            result,
-            eps=eps,
-            num_samples=num_samples,
-            seed=seed,
-        )
-    else:
-        # Only needed for forward differences
-        base_outputs = apply_fn(inputs).model_dump() if algorithm == "forward" else None
-
-        # VJP = sum over outputs of cotangent[output] @ J[output, input]
-        # We need to compute each row of J (one per input element) and contract with cotangent
-        for in_path in vjp_inputs:
-            in_val = get_at_path(inputs_dict, in_path)
-            in_arr = np.asarray(in_val)
-            in_shape = in_arr.shape
-
-            indices = list(np.ndindex(in_shape)) if in_shape else [()]
-
-            for idx in indices:
-                # Compute gradient and contract with cotangent for each output
-                vjp_value = 0.0
-                for out_path in vjp_outputs:
-                    if algorithm == "central":
-                        grad = _compute_central_diff_row(
-                            apply_fn,
-                            inputs_dict,
-                            input_schema,
-                            in_path,
-                            out_path,
-                            idx,
-                            eps,
-                        )
-                    elif algorithm == "forward":
-                        grad = _compute_forward_diff_row(
-                            apply_fn,
-                            inputs_dict,
-                            base_outputs,
-                            input_schema,
-                            in_path,
-                            out_path,
-                            idx,
-                            eps,
-                        )
-                    else:
-                        raise ValueError(f"Unknown algorithm {algorithm}")
-                    cotangent = np.asarray(cotangent_vector[out_path])
-                    vjp_value += np.sum(cotangent * grad)
-
-                if idx:
-                    result[in_path][idx] = vjp_value
-                else:
-                    result[in_path] = np.float64(vjp_value)
-
-    return result
-
-
-def _compute_vjp_stochastic(
-    apply_fn: Callable,
-    inputs: BaseModel,
-    inputs_dict: dict,
-    vjp_inputs: set[str],
-    vjp_outputs: set[str],
-    cotangent_vector: dict[str, ArrayLike],
-    result: dict[str, np.ndarray],
-    *,
-    eps: float,
-    num_samples: int | None,
-    seed: int | None,
-) -> None:
-    """Compute VJP using Simultaneous Perturbation Stochastic Approximation (SPSA).
-
-    For VJP, we want to compute v @ J for each input, which is:
-        VJP[in_path] = sum over out_path of: cotangent[out_path] * J[out_path, in_path]
-
-    Using SPSA, we can estimate this efficiently by:
-    1. Generating random perturbation directions delta (Rademacher: ±1)
-    2. Computing output differences: (f(x + eps*delta) - f(x - eps*delta)) / (2*eps)
-    3. Computing gradient estimate: (output_diff · cotangent) / delta
-
-    This requires only 2 function evaluations per sample, regardless of dimension.
-    """
-    rng = np.random.RandomState(seed)
-
-    # Collect input metadata
-    input_info = {}
-    total_input_elements = 0
-    for in_path in vjp_inputs:
-        in_val = get_at_path(inputs_dict, in_path)
-        in_arr = np.asarray(in_val)
-        input_info[in_path] = {
-            "array": in_arr,
-            "shape": in_arr.shape,
-            "size": in_arr.size if in_arr.shape else 1,
-        }
-        total_input_elements += input_info[in_path]["size"]
-
-    # Default number of samples: use sqrt(n) which balances cost vs accuracy.
-    # This gives O(sqrt(n)) evaluations instead of O(n) for full FD,
-    # while still providing reasonable gradient estimates.
-    if num_samples is None:
-        num_samples = max(10, int(np.sqrt(total_input_elements)))
-
-    # If num_samples >= total_input_elements, stochastic is no cheaper than
-    # elementwise but less accurate. Fall back to central differences.
-    if num_samples >= total_input_elements:
-        input_schema = type(inputs)
-        for in_path in vjp_inputs:
-            in_val = get_at_path(inputs_dict, in_path)
-            in_arr = np.asarray(in_val)
-            in_shape = in_arr.shape
-            indices = list(np.ndindex(in_shape)) if in_shape else [()]
-            for idx in indices:
-                vjp_value = 0.0
-                for out_path in vjp_outputs:
-                    grad = _compute_central_diff_row(
-                        apply_fn,
-                        inputs_dict,
-                        input_schema,
-                        in_path,
-                        out_path,
-                        idx,
-                        eps,
-                    )
-                    cotangent = np.asarray(cotangent_vector[out_path])
-                    vjp_value += np.sum(cotangent * grad)
-                if idx:
-                    result[in_path][idx] = vjp_value
-                else:
-                    result[in_path] = np.float64(vjp_value)
-        return
-
-    # Accumulate VJP estimates
-    for _ in range(num_samples):
-        # Generate random perturbation directions (Rademacher: ±1)
-        perturbations = {}
-        for in_path, info in input_info.items():
-            perturbation_size = None if info["shape"] == () else info["shape"]
-            perturbations[in_path] = rng.choice(
-                np.array([-1, 1], dtype=np.float64), size=perturbation_size
-            )
-
-        # Compute perturbed inputs
-        inputs_plus_dict = inputs_dict.copy()
-        inputs_minus_dict = inputs_dict.copy()
-
-        for in_path, delta in perturbations.items():
-            in_arr = input_info[in_path]["array"]
-            inputs_plus_dict = set_at_path(
-                inputs_plus_dict, {in_path: in_arr + eps * delta}
-            )
-            inputs_minus_dict = set_at_path(
-                inputs_minus_dict, {in_path: in_arr - eps * delta}
-            )
-
-        # Evaluate function at perturbed points
-        outputs_plus = apply_fn(
-            type(inputs).model_validate(inputs_plus_dict)
-        ).model_dump()
-        outputs_minus = apply_fn(
-            type(inputs).model_validate(inputs_minus_dict)
-        ).model_dump()
-
-        # Compute weighted output difference (weighted by cotangent)
-        # This is the directional derivative in the direction of the cotangent
-        weighted_output_diff = 0.0
-        for out_path in vjp_outputs:
-            out_plus = np.asarray(get_at_path(outputs_plus, out_path))
-            out_minus = np.asarray(get_at_path(outputs_minus, out_path))
-            output_diff = (out_plus - out_minus) / (2 * eps)
-            cotangent = np.asarray(cotangent_vector[out_path])
-            weighted_output_diff += np.sum(cotangent * output_diff)
-
-        # Update VJP estimate for each input
-        # VJP contribution = weighted_output_diff / delta
-        for in_path in vjp_inputs:
-            delta = perturbations[in_path]
-            vjp_contrib = weighted_output_diff / delta
-            result[in_path] += vjp_contrib / num_samples

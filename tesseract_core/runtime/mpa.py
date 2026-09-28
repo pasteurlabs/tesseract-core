@@ -8,6 +8,7 @@ import json
 import os
 import shutil
 import sys
+import threading
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Generator
 from contextlib import ExitStack, contextmanager
@@ -18,11 +19,13 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-import mlflow
 import requests
 
 from tesseract_core.runtime.config import get_config
-from tesseract_core.runtime.logs import TeePipe
+from tesseract_core.runtime.logs import LogStreamer
+
+# File descriptor redirection changes process-global state and must remain nested.
+_STDIO_REDIRECT_LOCK = threading.RLock()
 
 
 class BaseBackend(ABC):
@@ -134,6 +137,12 @@ class MLflowBackend(BaseBackend):
             "quiet"  # Suppress potential MLflow git warnings
         )
 
+        # Imported lazily because importing mlflow dominates runtime startup
+        # time, and most Tesseracts never use it.
+        import mlflow
+
+        self._mlflow = mlflow
+
         config = get_config()
         tracking_uri = config.mlflow_tracking_uri
 
@@ -148,7 +157,7 @@ class MLflowBackend(BaseBackend):
             )
 
         self._ensure_mlflow_reachable(tracking_uri)
-        mlflow.set_tracking_uri(tracking_uri)
+        self._mlflow.set_tracking_uri(tracking_uri)
 
     def _ensure_mlflow_reachable(self, mlflow_tracking_uri: str) -> None:
         """Check if the MLflow tracking server is reachable."""
@@ -190,25 +199,25 @@ class MLflowBackend(BaseBackend):
 
     def log_parameter(self, key: str, value: Any) -> None:
         """Log a parameter to MLflow."""
-        mlflow.log_param(key, value)
+        self._mlflow.log_param(key, value)
 
     def log_metric(self, key: str, value: float, step: int | None = None) -> None:
         """Log a metric to MLflow."""
-        mlflow.log_metric(key, value, step=step)
+        self._mlflow.log_metric(key, value, step=step)
 
     def log_artifact(self, local_path: str) -> None:
         """Log an artifact to MLflow."""
-        mlflow.log_artifact(local_path)
+        self._mlflow.log_artifact(local_path)
 
     def start_run(self) -> None:
         """Start a new MLflow run with optional extra arguments from config."""
         config = get_config()
         run_extra_args = config.mlflow_run_extra_args
-        mlflow.start_run(**run_extra_args)
+        self._mlflow.start_run(**run_extra_args)
 
     def end_run(self) -> None:
         """End the current MLflow run."""
-        mlflow.end_run()
+        self._mlflow.end_run()
 
 
 def _create_backend(base_dir: str | None) -> BaseBackend:
@@ -234,28 +243,26 @@ def _get_current_backend() -> BaseBackend:
         ) from exc
 
 
-# Public API functions that work with the current context
-def log_parameter(key: str, value: Any) -> None:
-    """Log a parameter to the current run context."""
-    _get_current_backend().log_parameter(key, value)
-
-
-def log_metric(key: str, value: float, step: int | None = None) -> None:
-    """Log a metric to the current run context."""
-    _get_current_backend().log_metric(key, value, step)
-
-
-def log_artifact(local_path: str) -> None:
-    """Log an artifact to the current run context."""
-    _get_current_backend().log_artifact(local_path)
-
-
 @contextmanager
 def redirect_stdio(
     logfile: str | Path,
     log_sink: Callable[[str], Any] | None = None,
 ) -> Generator[None, None, None]:
-    """Context manager for redirecting stdout and stderr to a custom pipe.
+    """Context manager for redirecting stdout and stderr to a log file.
+
+    Both stdout and stderr are redirected at the OS level (via ``dup2``) to a
+    regular file.  This is safe for foreign runtimes (Julia, CUDA, MPI, …)
+    that write to fd 1 / fd 2 from their own threads — regular-file writes
+    never block on buffer pressure, unlike ``os.pipe()`` which can deadlock
+    when the kernel buffer fills and the Python reader thread is starved by
+    the GIL.
+
+    If *log_sink* is provided, a :class:`LogStreamer` thread tails the log
+    file and forwards each line to the sink in near-real-time.
+
+    Because file descriptor redirection changes process-global state,
+    concurrent uses are serialized for the entire context. Streams without
+    a file descriptor are not redirected and therefore not serialized.
 
     Args:
         logfile: Path to the log file to write to.
@@ -276,9 +283,12 @@ def redirect_stdio(
         return
 
     with ExitStack() as stack:
+        # Hold the lock through descriptor restoration and all other cleanup.
+        stack.enter_context(_STDIO_REDIRECT_LOCK)
         f = stack.enter_context(open(logfile, "w"))
 
-        # Duplicate the original stdout/stderr file descriptors before any redirection
+        # Duplicate the original stdout/stderr fds before any redirection so
+        # that the log_sink can write to the real streams without recursion.
         orig_stdout_fd = os.dup(sys.stdout.fileno())
         orig_stdout_file = os.fdopen(orig_stdout_fd, "w")
         stack.callback(orig_stdout_file.close)
@@ -287,12 +297,16 @@ def redirect_stdio(
         orig_stderr_file = os.fdopen(orig_stderr_fd, "w")
         stack.callback(orig_stderr_file.close)
 
-        # Use `print` instead of `.write` so we get appropriate newlines and flush behavior
-        write_to_file = lambda msg: print(msg, file=f, flush=True)
+        # Redirect both stdout and stderr to the log file at the OS level.
+        # Using the same underlying file description (f.fileno()) for both
+        # means the kernel serialises writes — giving proper interleaving,
+        # the same as shell `cmd > log 2>&1`.
+        stack.enter_context(redirect_fd(sys.stdout, f.fileno()))
+        stack.enter_context(redirect_fd(sys.stderr, f.fileno()))
 
         if log_sink is not None:
-            # Wrap user sink to prevent infinite loops when sink writes to stdout/stderr
-            # (e.g., stream_logs=print would cause infinite recursion otherwise)
+            # Wrap the user sink so it writes to the *original* stdout/stderr,
+            # preventing infinite recursion when the sink itself prints.
             def safe_sink(msg: str) -> None:
                 old_stdout, old_stderr = sys.stdout, sys.stderr
                 sys.stdout, sys.stderr = orig_stdout_file, orig_stderr_file
@@ -301,16 +315,15 @@ def redirect_stdio(
                 finally:
                     sys.stdout, sys.stderr = old_stdout, old_stderr
 
-            sinks = [safe_sink, write_to_file]
-        else:
-            # No log_sink provided: only write to file (no stderr output)
-            sinks = [write_to_file]
+            streamer = LogStreamer(logfile, safe_sink)
+            streamer.start()
+            # Register in this order so LIFO cleanup does:
+            #   1. flush Python buffers → data lands in logfile
+            #   2. stop streamer → drains remaining logfile content
+            stack.callback(streamer.stop)
+            stack.callback(sys.stderr.flush)
+            stack.callback(sys.stdout.flush)
 
-        pipe_fd = stack.enter_context(TeePipe(*sinks))
-
-        # Redirect file descriptors at OS level
-        stack.enter_context(redirect_fd(sys.stdout, pipe_fd))
-        stack.enter_context(redirect_fd(sys.stderr, pipe_fd))
         yield
 
 

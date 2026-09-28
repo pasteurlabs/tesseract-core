@@ -4,36 +4,53 @@
 """Engine to power Tesseract commands."""
 
 import datetime
+import ipaddress
 import linecache
 import logging
 import optparse
 import os
-import random
-import socket
+import re
 import tempfile
-import time
-from collections.abc import Callable, Collection, Sequence
-from contextlib import closing
+from collections.abc import Callable, Collection
 from importlib.metadata import requires
 from pathlib import Path
 from shutil import copy, copytree, rmtree
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, TypeAlias
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 
-import requests
+import yaml
 from jinja2 import Environment, PackageLoader, StrictUndefined
 from packaging.requirements import Requirement
+from pydantic import TypeAdapter
+from pydantic import ValidationError as PydanticValidationError
 
-from .api_parse import TesseractConfig, get_config, validate_tesseract_api
+from .api_parse import (
+    TesseractConfig,
+    get_config,
+    validate_tesseract_api,
+)
 from .docker_client import (
     APIError,
     CLIDockerClient,
     Container,
     ContainerError,
     Image,
+    NotFound,
     build_docker_image,
     is_podman,
 )
 from .exceptions import UserError
+from .serving import (
+    DEFAULT_STARTUP_TIMEOUT,
+    PortInUseError,
+    get_free_port,
+    is_port_conflict,
+    retry_or_raise_port_conflict,
+    runtime_config_to_env,
+    validate_output_format,
+    wait_for_health_or_dispose,
+)
 
 if TYPE_CHECKING:
     from pip._internal.index.package_finder import PackageFinder
@@ -41,6 +58,21 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("tesseract")
 docker_client = CLIDockerClient()
+
+# Output serialization formats. Single SDK-side source of truth (re-used across
+# the SDK, e.g. sdk.tesseract). Mirrors runtime.file_interactions.supported_format_type
+# but is defined here so the SDK does not eagerly import the (optional) runtime
+# package; a test asserts the two stay in sync.
+OutputFormat: TypeAlias = Literal["json", "json+base64", "json+binref"]
+
+# Fixed port the API server binds *inside* the container when port-mapping is
+# used (i.e. everything except host networking). The container has its own
+# network namespace, so this need not be dynamic -- only the host-side port
+# does. Keeping it fixed mirrors how debugpy is handled (fixed 5678 inside,
+# dynamic host mapping) and decouples the container port from the host port.
+CONTAINER_API_PORT = "8000"
+# Fixed port the debugpy server binds inside the container (see runtime serve).
+CONTAINER_DEBUGPY_PORT = "5678"
 
 # Jinja2 Environment
 ENV = Environment(
@@ -66,33 +98,6 @@ def needs_docker(func: Callable) -> Callable:
         return func(*args, **kwargs)
 
     return wrapper_needs_docker
-
-
-def get_free_port(
-    within_range: tuple[int, int] = (49152, 65535),
-    exclude: Sequence[int] = (),
-) -> int:
-    """Find a random free port to use for HTTP."""
-    start, end = within_range
-    if start < 0 or end > 65535 or start > end:
-        raise ValueError("Invalid port range, must be between 0 and 65535")
-
-    # Try random ports in the given range
-    portlist = list(range(start, end))
-    random.shuffle(portlist)
-    for port in portlist:
-        if port in exclude:
-            continue
-        # Check if the port is free
-        with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
-            try:
-                s.bind(("127.0.0.1", port))
-            except OSError:
-                # Port is already in use
-                continue
-            else:
-                return port
-    raise RuntimeError(f"No free ports found in range {start}-{end}")
 
 
 def parse_requirements(
@@ -135,11 +140,173 @@ def parse_requirements(
             # this is probably a cli option like --extra-index-url, so we make
             # sure to keep it.
             remote_dependencies.append(line)
-        elif parsed_line.requirement.startswith((".", "/", "file://")):
+        elif _is_local_dependency(parsed_line.requirement):
             local_dependencies.append(line)
         else:
             remote_dependencies.append(line)
     return local_dependencies, remote_dependencies
+
+
+# Prefixes that mark a requirement as a local filesystem path rather than a
+# package name to resolve from an index.
+_LOCAL_DEPENDENCY_PREFIXES = (".", "/", "file://")
+
+
+def stage_runtime_package(dest: Path) -> Path:
+    """Write the runtime out as an installable package, and return where.
+
+    The result is a distribution named `tesseract_runtime` holding
+    `tesseract_core/runtime` and a `pyproject.toml` naming this SDK's version
+    and the dependencies of its `runtime` extra. Installing it is how both a
+    container and `Tesseract.from_source` give a Tesseract a runtime, so both
+    get the same code as the SDK that started them, with no index involved.
+
+    Note there is deliberately no `tesseract_core/__init__.py` in it, so
+    `tesseract_core` is a namespace package wherever this is installed and
+    importing `tesseract_core.runtime` does not drag in the SDK.
+    """
+    from jinja2 import Template
+
+    from tesseract_core import __version__ as tesseract_version
+
+    runtime_source_dir = get_runtime_dir()
+    copytree(
+        runtime_source_dir,
+        dest / "tesseract_core" / "runtime",
+        ignore=_ignore_pycache,
+    )
+
+    # Copy meta files, rendering the Jinja templates among them.
+    for metafile in (runtime_source_dir / "meta").glob("*"):
+        if metafile.suffix == ".jinja":
+            rendered = Template(metafile.read_text()).render(
+                runtime_dependencies=get_runtime_dependencies(),
+                version=tesseract_version,
+            )
+            (dest / metafile.stem).write_text(rendered)
+        else:
+            copy(metafile, dest)
+
+    return dest
+
+
+def declared_requirements_file(src_dir: Path, build_config: Any) -> Path | None:
+    """The dependency file a Tesseract declares, or None when it declares none.
+
+    Raises a `UserError` when the provider cannot work without one, so that the
+    problem is reported here instead of much later: the Dockerfile copies this
+    file unconditionally, so a build that gets past this point dies at a `COPY`
+    with a message that names neither the config nor the provider.
+
+    Shared with `Tesseract.from_source` in venv provisioning.
+    """
+    requirements = build_config.requirements
+    path = src_dir / requirements._filename
+
+    if path.is_file():
+        return path
+
+    if requirements.provider == "conda":
+        raise UserError(
+            f"tesseract_config.yaml sets `requirements.provider: conda`, but "
+            f"there is no {requirements._filename} in {src_dir}. Write one "
+            f"(`conda env export --no-builds > {requirements._filename}`), or "
+            f"switch the provider to uv-pip."
+        )
+
+    if requirements.is_pylock:
+        raise UserError(
+            f"requirements_file is set to {requirements._filename!r} but "
+            f"that file was not found in {src_dir}. Generate one with, e.g., "
+            f"`uv export --format pylock.toml -o {requirements._filename}`."
+        )
+
+    # plain uv-pip case tolerates a missing file.
+    return None
+
+
+def _is_local_dependency(spec: str) -> bool:
+    """Return whether a requirement spec refers to a local filesystem path."""
+    return spec.startswith(_LOCAL_DEPENDENCY_PREFIXES)
+
+
+def _parse_secret_id(spec: str) -> str:
+    """Extract the ``id`` from a BuildKit ``--secret`` spec (``id=name,env=VAR``)."""
+    for part in spec.split(","):
+        key, _, value = part.partition("=")
+        if key.strip() == "id":
+            return value.strip()
+    raise ValueError(
+        f"Invalid --secret spec {spec!r}: expected 'id=<name>,env=<VAR>' "
+        "or 'id=<name>,src=<file>'."
+    )
+
+
+def _ignore_pycache(_: Any, names: list[str]) -> list[str]:
+    """`copytree` ignore filter that drops ``__pycache__`` directories."""
+    return ["__pycache__"] if "__pycache__" in names else []
+
+
+def _split_local_dependency(line: str) -> tuple[str, str]:
+    """Split a local dependency line into its filesystem path and extras suffix.
+
+    A local requirement may carry an extras specifier, e.g. ``./mypkg[extra]``.
+    The extras belong to the install spec, not to the path on disk, so they must
+    be separated before the path is resolved and staged.
+
+    A ``file://`` scheme is stripped so the returned path is a plain filesystem
+    path (``file://`` URLs are always absolute).
+
+    Returns a ``(path, extras)`` tuple where ``extras`` includes the surrounding
+    brackets (e.g. ``"[extra]"``) or is empty if none are present.
+    """
+    # This pattern matches any non-empty string, so a match is always found.
+    match = re.match(r"^(?P<path>.+?)(?P<extras>\[[^\]]*\])?\s*\Z", line.strip())
+    path = match.group("path")
+    if path.startswith("file://"):
+        # `Path(...)` does not understand the `file://` scheme, so convert the
+        # URL back to a native filesystem path (handles percent-encoding and an
+        # optional `localhost` authority).
+        path = url2pathname(urlparse(path).path)
+    return path, match.group("extras") or ""
+
+
+def _stage_local_dependency(
+    line: str, src_dir: Path, local_requirements_path: Path
+) -> str:
+    """Copy a local dependency into the build context and return its install spec.
+
+    The source path is resolved relative to ``src_dir`` (so ``.``/``..`` segments
+    are collapsed) to derive a valid, unique destination name under
+    ``local_requirements/``. Returns the install spec relative to the build
+    working directory, with any extras suffix preserved.
+    """
+    path, extras = _split_local_dependency(line)
+    resolved_src = (src_dir / path).resolve()
+
+    if not resolved_src.exists():
+        raise RuntimeError(
+            f"local dependency not found: {path} (resolved to {resolved_src})"
+        )
+
+    # Derive a valid, unique destination name from the resolved path. Using the
+    # raw path directly would break for lines like ``../..`` (whose ``.name`` is
+    # ``..``, not a real directory name). The collision suffix uses the full
+    # name so versioned names like ``pkg-1.0`` are not split on the dot.
+    dest_name = resolved_src.name
+    dest = local_requirements_path / dest_name
+    counter = 1
+    while dest.exists():
+        dest_name = f"{resolved_src.name}_{counter}"
+        dest = local_requirements_path / dest_name
+        counter += 1
+
+    if resolved_src.is_file():
+        copy(resolved_src, dest)
+    else:
+        copytree(resolved_src, dest, ignore=_ignore_pycache)
+
+    return f"./local_requirements/{dest_name}{extras}"
 
 
 def get_runtime_dir() -> Path:
@@ -182,6 +349,7 @@ def prepare_build_context(
     context_dir: str | Path,
     user_config: TesseractConfig,
     use_ssh_mount: bool = False,
+    secret_ids: list[str] | None = None,
 ) -> Path:
     """Populate the build context for a Tesseract.
 
@@ -206,10 +374,13 @@ def prepare_build_context(
         context_dir: The directory where the build context will be created.
         user_config: The Tesseract configuration object.
         use_ssh_mount: Whether to use SSH mount to install dependencies (prevents caching).
+        secret_ids: BuildKit secret ids to mount during the dependency install step
+            (one per authenticated package index).
 
     Returns:
         The path to the build context directory.
     """
+    secret_ids = list(secret_ids or [])
     src_dir = Path(src_dir)
     context_dir = Path(context_dir)
     context_dir.mkdir(parents=True, exist_ok=True)
@@ -281,6 +452,7 @@ def prepare_build_context(
         "tesseract_runtime_location": "__tesseract_runtime__",
         "config": resolved_config,
         "use_ssh_mount": use_ssh_mount,
+        "secret_ids": secret_ids,
     }
 
     logger.debug(f"Generating Dockerfile from template: {template_name}")
@@ -299,8 +471,28 @@ def prepare_build_context(
     requirement_config = user_config.build_config.requirements
     extra_files.append(template_dir / requirement_config._build_script)
 
+    # Shared credential-setup script, sourced by both provider build scripts.
+    # Always staged (and COPYed by the Dockerfile) so the build scripts can source
+    # it unconditionally; it is a no-op when host_credentials.txt is empty.
+    extra_files.append(template_dir / "setup_host_credentials.sh")
+
     for path in extra_files:
         copy(path, context_dir / path.relative_to(template_dir))
+
+    # Write the declared host credentials (host + secret id + username, never
+    # tokens) into a file both build scripts read. At install time the script
+    # reads each token from its secret mount and assembles netrc + git-credential
+    # entries. This is provider-agnostic: netrc/git auth applies to uv, pip, and
+    # conda alike. The file is always written (empty when none are declared) so the
+    # Dockerfile can COPY it unconditionally.
+    credentials_file_path = context_dir / "host_credentials.txt"
+    with credentials_file_path.open("w", encoding="utf-8") as f:
+        for credential in user_config.build_config.host_credentials:
+            # Tab-separated host, secret id, and username. None of these may
+            # contain a tab; the allowlist validators guarantee that.
+            f.write(
+                f"{credential.host}\t{credential.secret_id}\t{credential.username}\n"
+            )
 
     # When building from a requirements.txt we support local dependencies.
     # We separate local dep. lines from the requirements.txt and copy the
@@ -308,61 +500,71 @@ def prepare_build_context(
     local_requirements_path = context_dir / "local_requirements"
     Path.mkdir(local_requirements_path, parents=True, exist_ok=True)
 
-    if requirement_config.provider == "python-pip":
-        reqstxt = src_dir / requirement_config._filename
-        if reqstxt.exists():
-            local_dependencies, remote_dependencies = parse_requirements(reqstxt)
+    # Raises when the declared file is missing and the provider needs it.
+    declared_file = declared_requirements_file(src_dir, user_config.build_config)
+
+    # A lockfile is skipped here: it has no local-path dependencies to split
+    # out, so it is installed as-is from its staged location.
+    if requirement_config.provider == "uv-pip" and not requirement_config.is_pylock:
+        if declared_file is not None:
+            local_dependencies, remote_dependencies = parse_requirements(declared_file)
         else:
             local_dependencies, remote_dependencies = [], []
 
-        if local_dependencies:
-            for dependency in local_dependencies:
-                src = src_dir / dependency
-                dest = context_dir / "local_requirements" / src.name
-                if src.is_file():
-                    copy(src, dest)
-                else:
-                    copytree(src, dest)
+        # Stage each local dependency into the build context and rewrite it to
+        # point at the staged copy (preserving any extras suffix). The install
+        # specs are written back into the requirements file so pip installs them
+        # alongside the remote dependencies.
+        staged_dependencies = [
+            _stage_local_dependency(dependency, src_dir, local_requirements_path)
+            for dependency in local_dependencies
+        ]
 
-        # We need to write a new requirements file in the build dir, where we explicitly
-        # removed the local dependencies
+        # We need to write a new requirements file in the build dir, where the
+        # local dependencies are rewritten to their staged locations.
         requirements_file_path = (
-            context_dir / "__tesseract_source__" / "tesseract_requirements.txt"
+            context_dir / "__tesseract_source__" / requirement_config._filename
         )
+        lines = remote_dependencies + staged_dependencies
         with requirements_file_path.open("w", encoding="utf-8") as f:
-            for dependency in remote_dependencies:
-                f.write(f"{dependency}\n")
+            if lines:
+                f.write("\n".join(lines) + "\n")
 
-    def _ignore_pycache(_: Any, names: list[str]) -> list[str]:
-        ignore = []
-        if "__pycache__" in names:
-            ignore.append("__pycache__")
-        return ignore
+    elif requirement_config.provider == "conda":
+        # The conda environment file may declare local-path pip dependencies via
+        # a `pip:` sub-list (e.g. `- ./mypkg_src`). conda resolves those paths
+        # relative to the environment file, but only the file itself is copied
+        # into the build stage, not the surrounding Tesseract source. Stage each
+        # local path into the build context and rewrite it to point at the
+        # staged copy, mirroring the uv provider.
+        env_file = declared_file
+        env_dest = context_dir / "__tesseract_source__" / requirement_config._filename
+        if env_file is not None:
+            with env_file.open(encoding="utf-8") as f:
+                env_spec = yaml.safe_load(f) or {}
+
+            for entry in env_spec.get("dependencies", []) or []:
+                if not (isinstance(entry, dict) and "pip" in entry):
+                    continue
+                rewritten_pip = []
+                for pip_dep in entry["pip"] or []:
+                    if isinstance(pip_dep, str) and _is_local_dependency(
+                        pip_dep.strip()
+                    ):
+                        rewritten_pip.append(
+                            _stage_local_dependency(
+                                pip_dep, src_dir, local_requirements_path
+                            )
+                        )
+                    else:
+                        rewritten_pip.append(pip_dep)
+                entry["pip"] = rewritten_pip
+
+            with env_dest.open("w", encoding="utf-8") as f:
+                yaml.safe_dump(env_spec, f, sort_keys=False)
 
     runtime_source_dir = get_runtime_dir()
-    copytree(
-        runtime_source_dir,
-        context_dir / "__tesseract_runtime__" / "tesseract_core" / "runtime",
-        ignore=_ignore_pycache,
-    )
-    # Copy meta files (except Jinja templates, which we render)
-    from tesseract_core import __version__ as tesseract_version
-
-    for metafile in (runtime_source_dir / "meta").glob("*"):
-        if metafile.suffix == ".jinja":
-            # Render Jinja template
-            target_name = metafile.stem  # Remove .jinja suffix
-            template_content = metafile.read_text()
-            from jinja2 import Template
-
-            template = Template(template_content)
-            rendered = template.render(
-                runtime_dependencies=get_runtime_dependencies(),
-                version=tesseract_version,
-            )
-            (context_dir / "__tesseract_runtime__" / target_name).write_text(rendered)
-        else:
-            copy(metafile, context_dir / "__tesseract_runtime__")
+    stage_runtime_package(context_dir / "__tesseract_runtime__")
 
     # Docker requires a .dockerignore file to be at the root of the build context
     dockerignore_path = runtime_source_dir / "meta" / ".dockerignore"
@@ -380,7 +582,7 @@ def _write_template_file(
     exist_ok: bool = False,
 ):
     """Write a template to a target directory."""
-    template = ENV.get_template(str(recipe / template_name))
+    template = ENV.get_template((recipe / template_name).as_posix())
 
     target_file = target_dir / template_name
 
@@ -434,13 +636,58 @@ def init_api(
     return target_dir / "tesseract_api.py"
 
 
+def _coerce_config_override(value: Any, annotation: Any, path: tuple[str, ...]) -> Any:
+    """Coerce a config override value to the target field's declared type.
+
+    CLI overrides arrive as raw strings (see ``_parse_config_override``). We first
+    interpret the string as YAML so that structured values (lists, dicts, ints,
+    bools) work, then fall back to the raw string if that fails to validate. This
+    lets string fields like ``python_version=3.12`` work without the user having
+    to quote the value, while ``3.10`` is preserved verbatim instead of being
+    parsed as the float ``3.1``. Non-string values (e.g. passed via the Python
+    SDK) are validated as-is.
+    """
+    if annotation is None:
+        # Unknown field; let the assignment raise a validation error as usual.
+        return value
+
+    adapter = TypeAdapter(annotation)
+
+    if not isinstance(value, str):
+        return adapter.validate_python(value)
+
+    # Try the YAML-interpreted value first so structured values (lists, dicts,
+    # ints, bools) work, then fall back to the raw string so string fields accept
+    # unquoted scalars. If both fail, report the error from the YAML-interpreted
+    # value: it matches the user's evident intent, whereas the raw-string error
+    # is often a misleading "not a valid <type>" for non-string fields.
+    try:
+        parsed = yaml.safe_load(value)
+    except yaml.YAMLError:
+        parsed = value
+
+    try:
+        return adapter.validate_python(parsed)
+    except PydanticValidationError as parsed_error:
+        try:
+            return adapter.validate_python(value)
+        except PydanticValidationError:
+            keypath = ".".join(path)
+            raise UserError(
+                f'Invalid value "{value}" for config override "{keypath}": '
+                f"{parsed_error}"
+            ) from parsed_error
+
+
 def build_tesseract(
     src_dir: str | Path,
     image_tag: str | None,
     build_dir: Path | None = None,
     inject_ssh: bool = False,
+    secrets: list[str] | None = None,
     config_override: dict[tuple[str, ...], Any] | None = None,
     generate_only: bool = False,
+    stream_logs: Callable[[str], Any] | bool = False,
 ) -> Image | Path:
     """Build a new Tesseract from a context directory.
 
@@ -452,8 +699,13 @@ def build_tesseract(
         build_dir: directory to be used to store the build context.
           If not provided, a temporary directory will be created.
         inject_ssh: whether or not to forward SSH agent when building the image.
+        secrets: BuildKit secret specs (e.g. ``id=name,env=VAR`` or
+          ``id=name,src=file``) to forward to the build for authenticated
+          package indices. Credentials are mounted, never stored in a layer.
         config_override: overrides for configuration options in the Tesseract.
         generate_only: only generate the build context but do not build the image.
+        stream_logs: if True, stream build logs to stderr. If a callable is provided,
+            it will be called with each log line.
 
     Returns:
         Image object representing the built Tesseract image,
@@ -468,9 +720,24 @@ def build_tesseract(
     if config_override is not None:
         for path, value in config_override.items():
             c = config
-            for k in path[:-1]:
-                c = getattr(c, k)
-            setattr(c, path[-1], value)
+            for depth, k in enumerate(path):
+                fields = getattr(type(c), "model_fields", None)
+                if fields is None or k not in fields:
+                    keypath = ".".join(path)
+                    reached = ".".join(path[:depth]) or "(top level)"
+                    valid = (
+                        ", ".join(sorted(fields)) if fields is not None else "(none)"
+                    )
+                    raise UserError(
+                        f'Invalid config override "{keypath}": '
+                        f'"{".".join(path[: depth + 1])}" is not a known config '
+                        f"option. Valid options under {reached}: {valid}."
+                    )
+                if depth == len(path) - 1:
+                    annotation = fields[k].annotation
+                    setattr(c, k, _coerce_config_override(value, annotation, path))
+                else:
+                    c = getattr(c, k)
 
     image_name = config.name
     if image_tag:
@@ -491,8 +758,28 @@ def build_tesseract(
         build_dir.mkdir(exist_ok=True)
         keep_build_dir = True
 
+    # Build secrets are supplied generically on the command line and mounted into
+    # the dependency install step. Any secret referenced by a host credential must
+    # be backed by a --secret; check that up front.
+    secrets = list(secrets or [])
+    provided_secret_ids = [_parse_secret_id(spec) for spec in secrets]
+    required_secret_ids = [
+        credential.secret_id for credential in config.build_config.host_credentials
+    ]
+    missing = sorted(set(required_secret_ids) - set(provided_secret_ids))
+    if missing:
+        raise ValueError(
+            "Missing build secret(s) for authenticated host credentials: "
+            f"{', '.join(missing)}. Provide them with "
+            "`tesseract build --secret id=<name>,env=<VAR>` (or `,src=<file>`)."
+        )
+
     context_dir = prepare_build_context(
-        src_dir, build_dir, config, use_ssh_mount=inject_ssh
+        src_dir,
+        build_dir,
+        config,
+        use_ssh_mount=inject_ssh,
+        secret_ids=provided_secret_ids,
     )
 
     if generate_only:
@@ -506,7 +793,9 @@ def build_tesseract(
             tags=tags,
             dockerfile=context_dir / "Dockerfile",
             inject_ssh=inject_ssh,
+            secrets=secrets,
             print_and_exit=generate_only,
+            stream_logs=stream_logs,
         )
     finally:
         if not keep_build_dir:
@@ -550,25 +839,16 @@ def teardown(
     if isinstance(container_ids, str):
         container_ids = [container_ids]
 
-    def _is_container_id(container_id: str) -> bool:
-        try:
-            docker_client.containers.get(container_id)
-            return True
-        except ContainerError:
-            return False
+    # Validate all container IDs exist before removing any
+    containers = {
+        # containers.get raises NotFound if any container ID is invalid, preventing partial teardown
+        cid: docker_client.containers.get(cid)
+        for cid in container_ids
+    }
 
-    for container_id in container_ids:
-        if _is_container_id(container_id):
-            container = docker_client.containers.get(container_id)
-            container.remove(force=True)
-            logger.info(
-                f"Tesseract is shutdown for Docker container ID: {container_id}"
-            )
-        else:
-            raise ValueError(
-                f"A Docker container with ID {container_id} cannot be found, "
-                "use `tesseract ps` to find container ID"
-            )
+    for container_id, container in containers.items():
+        container.remove(force=True)
+        logger.info(f"Tesseract is shutdown for Docker container ID: {container_id}")
 
 
 def get_tesseract_containers() -> list[Container]:
@@ -579,6 +859,120 @@ def get_tesseract_containers() -> list[Container]:
 def get_tesseract_images() -> list[Image]:
     """Get Tesseract images."""
     return docker_client.images.list()
+
+
+# Built-in Docker/Podman networks that can/should not be created.
+_BUILTIN_NETWORKS = {"host", "bridge", "none"}
+
+
+def _ensure_network_exists(network: str) -> None:
+    """Create the Docker network if it does not exist yet.
+
+    Params:
+        network: The network name to create.
+    """
+    if network in _BUILTIN_NETWORKS:
+        return
+    try:
+        docker_client.networks.get(network)
+    except NotFound:
+        create_network = True
+    else:
+        create_network = False
+    if create_network:
+        logger.info("Network '%s' not found, creating it.", network)
+        docker_client.networks.create(network)
+
+
+def _warn_if_debugger_unreachable(container: Container, expected_port: str) -> None:
+    """Warn if the container did not bind the debug port we published a mapping to.
+
+    Which port it binds is decided by the runtime inside the image, and one built
+    before the port was configurable ignores it and uses the default, leaving the
+    mapping published with nothing behind it. Nothing else fails -- the Tesseract
+    is healthy and only the debugger is unreachable -- so it would otherwise look
+    like it worked.
+
+    A warning rather than an error, because this reads a log line the runtime
+    prints: reformatting it there would make this miss and condemn a working
+    setup. Serving is still useful either way.
+    """
+    logs = container.logs(stdout=True, stderr=True).decode("utf-8", errors="replace")
+    match = re.search(r"Debugger listening on \S+?:(\d+)", logs)
+    if match is not None and match.group(1) == expected_port:
+        return
+    bound = f"port {match.group(1)}" if match else "an unknown port"
+    logger.warning(
+        f"Tesseract is debugging on {bound}, not the requested {expected_port}, "
+        "so no debugger can attach. Rebuild it to choose the port."
+    )
+
+
+def _get_runtime_setting(environment: dict[str, str], setting: str) -> str | None:
+    """Read a runtime setting from an environment, under either name it takes.
+
+    Typer binds every config option to ``TESSERACT_RUNTIME_*`` as well, and that
+    takes precedence over the ``TESSERACT_*`` the config itself reads.
+    """
+    return environment.get(f"TESSERACT_RUNTIME_{setting}") or environment.get(
+        f"TESSERACT_{setting}"
+    )
+
+
+def _is_loopback(host: str) -> bool:
+    """Whether an address only accepts connections from the same host."""
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return host.lower() == "localhost"
+
+
+def _resolve_container_debug_address(
+    requested_port: str | None,
+    requested_host: str | None,
+    *,
+    port_mapped: bool,
+    reserved_ports: Collection[str],
+) -> tuple[dict[str, str], str]:
+    """Settle the debugpy address for a container, without touching the caller's.
+
+    A published mapping sends a host port to a port on the container, so the port
+    debugpy binds and the container side of that mapping must agree. Nothing is
+    special about the default, so a chosen port is honoured and published against.
+    Refused only where it cannot work: a port already taken inside the container,
+    or, under port mapping, a loopback host -- publishing reaches the container
+    over its network interface, so it cannot see a debugger that only accepts
+    connections from inside. Any routable address is fine, including the
+    container's own.
+
+    Returns:
+        Environment entries to apply, and the port debugpy will bind, which the
+        caller must publish against.
+    """
+    port = requested_port or CONTAINER_DEBUGPY_PORT
+
+    if port in reserved_ports:
+        raise UserError(
+            f"Port {port} is already in use inside the container. Choose another "
+            f"debug port, or leave it unset to use {CONTAINER_DEBUGPY_PORT}."
+        )
+
+    if port_mapped and requested_host is not None and _is_loopback(requested_host):
+        raise UserError(
+            f"TESSERACT_DEBUGPY_HOST={requested_host} will not work in a "
+            "container: its published port reaches the container from outside, "
+            "which an address that only accepts local connections rejects. Leave "
+            "it unset."
+        )
+
+    # Written under both names, so a value inherited under the other cannot win.
+    updates = {f"TESSERACT{p}_DEBUGPY_PORT": port for p in ("", "_RUNTIME")}
+    if port_mapped:
+        # All interfaces unless asked for something specific, which the runtime
+        # would otherwise default to loopback and be unreachable.
+        host = requested_host or "0.0.0.0"
+        updates.update({f"TESSERACT{p}_DEBUGPY_HOST": host for p in ("", "_RUNTIME")})
+    return updates, port
 
 
 def serve(
@@ -597,9 +991,12 @@ def serve(
     memory: str | None = None,
     input_path: str | Path | None = None,
     output_path: str | Path | None = None,
-    output_format: Literal["json", "json+base64", "json+binref"] | None = None,
+    output_format: OutputFormat | None = None,
+    gpu_transport: str | None = None,
     docker_args: list[str] | None = None,
     runtime_config: dict[str, Any] | None = None,
+    skip_health_check: bool = False,
+    startup_timeout: float = DEFAULT_STARTUP_TIMEOUT,
 ) -> tuple:
     """Serve one or more Tesseract images.
 
@@ -624,10 +1021,23 @@ def serve(
         input_path: Input path to read input files from, such as local directory or S3 URI.
         output_path: Output path to write output files to, such as local directory or S3 URI.
         output_format: Output format to use for the results.
+        gpu_transport: How GPU arrays leave the container. ``none`` copies them to
+            the host and serializes them via ``output_format``; ``cuda_ipc`` exports
+            them by reference (requires ``gpus`` and a shared IPC namespace). An
+            explicit value (including ``none``) wins over a ``gpu_transport`` in
+            ``runtime_config``; leaving it unset (``None``) defers to
+            ``runtime_config``, falling back to ``none`` when neither sets it.
         docker_args: Additional arguments to pass to the container runtime (e.g., Docker).
         runtime_config: Dictionary of runtime configuration options to pass to the Tesseract.
             These are converted to TESSERACT_* environment variables. For example,
             ``{"profiling": True}`` sets ``TESSERACT_PROFILING=1``.
+        skip_health_check: If True, skip the startup health check poll. Useful for
+            Tesseracts with slow initialization (e.g., Julia runtime startup, large
+            model loading). The caller is responsible for ensuring readiness,
+            e.g. by polling ``/health``, before calling other endpoints.
+        startup_timeout: How long to wait for the Tesseract to answer a health
+            check, in seconds. Raise it for one that is slow to initialize, in
+            preference to skipping the check altogether.
 
     Returns:
         A tuple of the Tesseract container name and the port it is serving on.
@@ -635,11 +1045,7 @@ def serve(
     if not image_name or not isinstance(image_name, str):
         raise ValueError("Tesseract image name must be provided")
 
-    if output_format == "json+binref" and output_path is None:
-        logger.warning(
-            "Consider specifying --output-path when using the 'json+binref' output format "
-            "to easily retrieve .bin files."
-        )
+    validate_output_format(output_format, output_path)
 
     image = docker_client.images.get(image_name)
 
@@ -660,138 +1066,227 @@ def serve(
         environment = {}
     environment.update(volume_environment)
 
-    # Convert runtime_config to TESSERACT_* environment variables
-    if runtime_config is not None:
-        for key, value in runtime_config.items():
-            env_key = f"TESSERACT_{key.upper()}"
-            if isinstance(value, bool):
-                env_value = "1" if value else "0"
-            else:
-                env_value = str(value)
-            environment[env_key] = env_value
+    environment.update(runtime_config_to_env(runtime_config))
 
     if output_format:
         environment["TESSERACT_OUTPUT_FORMAT"] = output_format
 
+    # Resolve the GPU transport across its two spellings. The dedicated kwarg is
+    # canonical: any explicit value (including "none", which disables the
+    # transport) wins over one passed through runtime_config. Leaving the kwarg
+    # unset (None) defers to runtime_config, already written to the environment
+    # above. When neither names a transport, pin it to "none" so the container
+    # always receives a definite value rather than inheriting the image default.
+    if gpu_transport is not None:
+        environment["TESSERACT_GPU_TRANSPORT"] = gpu_transport
+    else:
+        environment.setdefault("TESSERACT_GPU_TRANSPORT", "none")
+
+    # Read after runtime_config lands in the environment, which is how the SDK
+    # passes it. Only a port the caller asked for needs checking afterwards; the
+    # default works whatever the image was built with.
+    requested_debugpy_port = _get_runtime_setting(environment, "DEBUGPY_PORT")
+
+    # A port picked by get_free_port can be grabbed by another process between
+    # our check and the container binding it (an unavoidable race, since the
+    # port must be released before the container can bind it). When we choose
+    # the port, retry a few times with a fresh one; a user-supplied fixed port
+    # is honored as-is and never retried.
     if not port:
-        port = str(get_free_port())
+        auto_port = True
+
+        def pick_port() -> str:
+            return str(get_free_port())
+    elif "-" in port:
+        auto_port = True
+        port_start, port_end = (int(p) for p in port.split("-"))
+
+        def pick_port() -> str:
+            return str(get_free_port(within_range=(port_start, port_end)))
     else:
-        # Convert port ranges to fixed ports
-        if "-" in port:
-            port_start, port_end = port.split("-")
-            port = str(get_free_port(within_range=(int(port_start), int(port_end))))
+        auto_port = False
+        fixed_port = port
 
-    args = []
-    container_api_port = port
-    container_debugpy_port = "5678"
+        def pick_port() -> str:
+            return fixed_port
 
-    args.extend(["--port", container_api_port])
+    max_attempts = 5 if auto_port else 1
+    for attempt in range(max_attempts):
+        # `port` is always the host-side port (what we publish and health-check).
+        port = pick_port()
 
-    if num_workers > 1:
-        args.extend(["--num-workers", str(num_workers)])
-
-    # Always bind to all interfaces inside the container
-    args.extend(["--host", "0.0.0.0"])
-
-    # When using host network, no port mapping is needed (container binds directly to host ports)
-    # and we should always ping on localhost
-    if network == "host":
-        ping_ip = "127.0.0.1"
-        port_mappings = None
-    elif host_ip == "0.0.0.0":
-        ping_ip = "127.0.0.1"
-        port_mappings = {f"{host_ip}:{port}": container_api_port}
-    else:
-        ping_ip = host_ip
-        port_mappings = {f"{host_ip}:{port}": container_api_port}
-
-    if debug:
-        debugpy_port = str(get_free_port())
-        if port_mappings is not None:
-            port_mappings[f"{host_ip}:{debugpy_port}"] = container_debugpy_port
-        environment["TESSERACT_DEBUG"] = "1"
-
-    extra_args = [
-        "--restart",
-        "unless-stopped",
-    ]
-
-    if is_podman():
-        # This ensures podman behaves like Docker in terms of user namespaces
-        # and allows the container to run with the same user ID as the host.
-        extra_args.extend(["--userns", "keep-id"])
-
-    if network_alias is not None:
-        if network is None:
-            raise ValueError("Network must be specified if network_alias is provided")
-        extra_args.extend(["--network-alias", network_alias])
-
-    if docker_args:
-        extra_args.extend(docker_args)
-
-    container = docker_client.containers.run(
-        image=image_name,
-        command=["serve", *args],
-        device_requests=gpus,
-        ports=port_mappings,
-        network=network,
-        detach=True,
-        volumes=parsed_volumes,
-        user=user,
-        memory=memory,
-        environment=environment,
-        extra_args=extra_args,
-    )
-    assert isinstance(container, Container)
-
-    logger.info("Waiting for Tesseract to start...")
-    # wait for server to start
-    timeout = 30
-    while True:
-        try:
-            response = requests.get(f"http://{ping_ip}:{port}/health")
-        except requests.exceptions.ConnectionError:
-            pass
+        # When using host network there is no port mapping: the container binds
+        # the host's namespace directly, so the container port must equal the
+        # host port. Otherwise the container binds a fixed internal port and we
+        # map the (dynamic) host port onto it.
+        if network == "host":
+            ping_ip = "127.0.0.1"
+            port_mappings = None
+            container_api_port = port
         else:
-            if response.status_code == 200:
+            ping_ip = "127.0.0.1" if host_ip == "0.0.0.0" else host_ip
+            container_api_port = CONTAINER_API_PORT
+            port_mappings = {f"{host_ip}:{port}": container_api_port}
+
+        args = ["--port", container_api_port]
+        if num_workers > 1:
+            args.extend(["--num-workers", str(num_workers)])
+        # Always bind to all interfaces inside the container
+        args.extend(["--host", "0.0.0.0"])
+
+        if debug:
+            environment["TESSERACT_DEBUG"] = "1"
+            debug_updates, container_debugpy_port = _resolve_container_debug_address(
+                requested_debugpy_port,
+                _get_runtime_setting(environment, "DEBUGPY_HOST"),
+                port_mapped=port_mappings is not None,
+                reserved_ports={container_api_port},
+            )
+            environment.update(debug_updates)
+            # Only the host side of the debugger's mapping is dynamic. Exclude
+            # the host API port so the two host ports never collide (they share
+            # the same range).
+            debugpy_port = str(get_free_port(exclude=(int(port),)))
+            if port_mappings is not None:
+                port_mappings[f"{host_ip}:{debugpy_port}"] = container_debugpy_port
+            else:
+                # Host networking: the container binds the host's namespace
+                # directly, so there is nothing to map and the port it binds is
+                # the one to attach to.
+                debugpy_port = container_debugpy_port
+
+        extra_args = [
+            "--restart",
+            "unless-stopped",
+        ]
+
+        if is_podman():
+            # This ensures podman behaves like Docker in terms of user namespaces
+            # and allows the container to run with the same user ID as the host.
+            extra_args.extend(["--userns", "keep-id"])
+
+        if network_alias is not None:
+            if network is None:
+                raise ValueError(
+                    "Network must be specified if network_alias is provided"
+                )
+            extra_args.extend(["--network-alias", network_alias])
+
+        if docker_args:
+            extra_args.extend(docker_args)
+
+        # The cuda_ipc GPU transport needs a GPU and a shared IPC namespace
+        # between host and container. Wire both up whenever it is selected (the
+        # only reason to enable it is IPC).
+        gpu_transport = environment.get("TESSERACT_GPU_TRANSPORT", "none")
+
+        if gpu_transport == "cuda_ipc":
+            if not gpus:
+                raise ValueError(
+                    "gpu_transport='cuda_ipc' requires GPU access, but no GPUs "
+                    "were requested. Pass gpus=['all'] or specific GPU IDs."
+                )
+            extra_args.extend(["--ipc=host"])
+        elif gpu_transport != "none":
+            raise ValueError(
+                f"Unknown gpu_transport {gpu_transport!r}. "
+                "Supported values: 'none', 'cuda_ipc'."
+            )
+
+        if network is not None:
+            _ensure_network_exists(network)
+
+        try:
+            # In port-mapping mode a host-port collision fails here, when the
+            # daemon tries to publish the port. In host-network mode it instead
+            # surfaces from wait_for_health_or_dispose (uvicorn's own bind fails).
+            container = docker_client.containers.run(
+                image=image_name,
+                command=["serve", *args],
+                device_requests=gpus,
+                ports=port_mappings,
+                network=network,
+                detach=True,
+                volumes=parsed_volumes,
+                user=user,
+                memory=memory,
+                environment=environment,
+                extra_args=extra_args,
+            )
+            assert isinstance(container, Container)
+
+            if skip_health_check:
+                logger.info("Skipping health check, Tesseract may not be ready yet")
                 break
 
-        time.sleep(0.1)
-        timeout -= 0.1
+            logger.info("Waiting for Tesseract to start...")
+            wait_for_health_or_dispose(
+                container, f"http://{ping_ip}:{port}", startup_timeout
+            )
+        except ContainerError as ex:
+            if not is_port_conflict(ex.stderr.decode("utf-8", errors="ignore")):
+                raise
+            # Publish failing after the container is created leaves it behind in
+            # a Created (never-started) state, invisible to containers.list()'s
+            # running-only default and so to `tesseract teardown --all`.
+            if ex.container is not None:
+                # tesseract_only=False: we already know this is the container we
+                # just tried to create, from our own docker run invocation, so
+                # the usual "is this a Tesseract container" filter would only
+                # risk leaving the leak behind unremoved.
+                try:
+                    docker_client.containers.get(
+                        ex.container, tesseract_only=False
+                    ).remove(force=True)
+                except NotFound:
+                    pass
+            retry_or_raise_port_conflict(port, auto_port, attempt, max_attempts)
+            continue
+        except PortInUseError:
+            container.remove(force=True)
+            retry_or_raise_port_conflict(port, auto_port, attempt, max_attempts)
+            continue
+        break
 
-        container_status = docker_client.containers.get(container.id).status
-
-        if timeout < 0 or container_status != "running":
-            try:
-                container_logs = container.logs(stdout=True, stderr=True)
-                logger.error(
-                    f"Tesseract container {container.name} failed to start:\n{container_logs.decode()}"
-                )
-            except APIError as ex:
-                logger.warning(
-                    f"Failed to get logs for container {container.name}: {ex}"
-                )
-            try:
-                container.stop()
-            except APIError as ex:
-                logger.warning(f"Failed to stop container {container.name}: {ex}")
-
-            if timeout < 0:
-                raise TimeoutError("Tesseract did not start in time")
-            else:
-                raise RuntimeError("Tesseract failed to start")
+    if debug and requested_debugpy_port and not skip_health_check:
+        _warn_if_debugger_unreachable(container, container_debugpy_port)
 
     logger.info(f"Serving Tesseract at http://{ping_ip}:{port}")
     logger.info(f"View Tesseract: http://{ping_ip}:{port}/docs")
     if debug:
-        logger.info(f"Debugpy server listening at http://{ping_ip}:{debugpy_port}")
+        logger.info(
+            f"Debug mode enabled. Attach a debugger to {ping_ip}:{debugpy_port}"
+        )
 
     return container.name, container
 
 
 def _is_local_volume(volume: str) -> bool:
     """Check if a volume is a local path."""
+    # Windows absolute paths like C:\foo
+    if (
+        len(volume) >= 3
+        and volume[0].isalpha()
+        and volume[1] == ":"
+        and volume[2] in ("/", "\\")
+    ):
+        return True
     return "/" in volume or "." in volume
+
+
+def _split_volume_spec(volume_spec: str) -> list[str]:
+    r"""Split a volume spec string on colons, respecting Windows drive letters.
+
+    E.g., ``C:\\foo:/bar:ro`` -> ``['C:\\foo', '/bar', 'ro']``
+         ``/foo:/bar:ro``    -> ``['/foo', '/bar', 'ro']``
+    """
+    # Check for Windows drive letter prefix (e.g., "C:")
+    if len(volume_spec) >= 2 and volume_spec[0].isalpha() and volume_spec[1] == ":":
+        rest = volume_spec[2:]
+        parts = rest.split(":")
+        parts[0] = volume_spec[:2] + parts[0]
+        return parts
+    return volume_spec.split(":")
 
 
 def _parse_volumes(volume_specs: list[str]) -> dict[str, dict[str, str]]:
@@ -802,7 +1297,7 @@ def _parse_volumes(volume_specs: list[str]) -> dict[str, dict[str, str]]:
     """
 
     def _parse_volume_spec(volume_spec: str):
-        args = volume_spec.split(":")
+        args = _split_volume_spec(volume_spec)
         if len(args) == 2:
             source, target = args
             mode = "ro"
@@ -910,10 +1405,11 @@ def run_tesseract(
     memory: str | None = None,
     input_path: str | Path | None = None,
     output_path: str | Path | None = None,
-    output_format: Literal["json", "json+base64", "json+binref"] | None = None,
+    output_format: OutputFormat | None = None,
     output_file: str | None = None,
     docker_args: list[str] | None = None,
-    stream_logs: bool = False,
+    debug: bool = False,
+    stream_logs: bool | Callable[[str], None] = False,
 ) -> tuple[str, str]:
     """Start a Tesseract and execute a given command.
 
@@ -937,21 +1433,15 @@ def run_tesseract(
         output_file: If specified, the output will be written to this file within output_path
             instead of stdout.
         docker_args: Additional arguments to pass to the container runtime (e.g., Docker).
-        stream_logs: If True, stream logs to stderr in real-time. Requires output_path to be set.
+        debug: Enable debug mode. This starts a debugpy server in the Tesseract and
+            blocks execution until a debugger attaches to the forwarded port.
+        stream_logs: If set, stream logs in real-time. Can be True (streams to stderr)
+            or a callable that accepts a string (e.g., logger.info).
 
     Returns:
         Tuple with the stdout and stderr of the Tesseract.
     """
-    if command == "test":
-        logger.warning(
-            "The 'test' command is experimental and may change without warning."
-        )
-
-    if output_format == "json+binref" and output_path is None:
-        logger.warning(
-            "Consider specifying --output-path when using the 'json+binref' output format "
-            "to easily retrieve .bin files."
-        )
+    validate_output_format(output_format, output_path)
 
     if user is None:
         # Use the current user if not specified
@@ -965,9 +1455,7 @@ def run_tesseract(
             if not local_path.is_file():
                 raise RuntimeError(f"Path {local_path} provided as input is not a file")
 
-            path_in_container = os.path.join(
-                "/tesseract", f"payload{local_path.suffix}"
-            )
+            path_in_container = f"/tesseract/payload{local_path.suffix}"
             file_inputs.append((local_path, path_in_container))
 
     parsed_volumes, volume_environment = _prepare_and_validate_volumes(
@@ -1008,6 +1496,44 @@ def run_tesseract(
     if docker_args:
         extra_args.extend(docker_args)
 
+    if network is not None:
+        _ensure_network_exists(network)
+
+    if debug:
+        requested_debugpy_port = _get_runtime_setting(environment, "DEBUGPY_PORT")
+        environment["TESSERACT_DEBUG"] = "1"
+        debug_updates, container_debugpy_port = _resolve_container_debug_address(
+            requested_debugpy_port,
+            _get_runtime_setting(environment, "DEBUGPY_HOST"),
+            port_mapped=network != "host",
+            reserved_ports=set(),
+        )
+        environment.update(debug_updates)
+        if requested_debugpy_port:
+            # This command blocks until a debugger attaches and never hands
+            # control back, so unlike `serve` there is no point at which we could
+            # check the port was honoured.
+            logger.warning(
+                "Cannot verify whether the debugpy port is configurable when "
+                "using `tesseract run`. Configuration is not possible for some "
+                "old Tesseracts. Rebuild the Tesseract if your debugger cannot "
+                "attach."
+            )
+        # `network="host"` binds the container's debugpy port directly on the host,
+        # so no explicit port mapping is needed (and would actually be rejected).
+        if network == "host":
+            debugpy_port = container_debugpy_port
+        else:
+            debugpy_port = str(get_free_port())
+            if ports is None:
+                ports = {}
+            ports[f"127.0.0.1:{debugpy_port}"] = container_debugpy_port
+        logger.info(
+            f"Debug mode enabled. Attach a debugger to localhost:{debugpy_port} "
+            "to start execution (see the 'Debug mode' section of the docs for a "
+            "sample VSCode launch config)."
+        )
+
     # Run the container, optionally streaming stderr to the terminal
     result = docker_client.containers.run(
         image=image,
@@ -1041,16 +1567,3 @@ def _resolve_file_path(path: str | Path, make_dir: bool = False) -> Path:
         raise RuntimeError(f"Path {local_path} provided is not a directory")
 
     return local_path
-
-
-def logs(container_id: str) -> str:
-    """Get logs from a container.
-
-    Args:
-        container_id: the ID of the container.
-
-    Returns:
-        The logs of the container.
-    """
-    container = docker_client.containers.get(container_id)
-    return container.logs().decode("utf-8")

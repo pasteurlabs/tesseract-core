@@ -3,21 +3,25 @@
 
 import json
 import logging
+import re
+import socket
 import time
+from contextlib import closing
 from pathlib import Path
 
 import pytest
+import requests
 import yaml
 from jinja2.exceptions import TemplateNotFound
 
-from tesseract_core.sdk import engine
+from tesseract_core.sdk import docker_client, engine, serving
 from tesseract_core.sdk.api_parse import (
     TesseractBuildConfig,
     TesseractConfig,
     validate_tesseract_api,
 )
 from tesseract_core.sdk.cli import AVAILABLE_RECIPES
-from tesseract_core.sdk.docker_client import Image, NotFound
+from tesseract_core.sdk.docker_client import APIError, Container, Image, NotFound
 from tesseract_core.sdk.exceptions import UserError
 
 
@@ -31,6 +35,381 @@ def test_prepare_build_context(tmp_path_factory):
     assert (build_dir / "__tesseract_source__" / "foo").exists()
     assert (build_dir / "__tesseract_runtime__").exists()
     assert (build_dir / "Dockerfile").exists()
+
+
+def test_prepare_build_context_python_version(tmp_path_factory):
+    """Test that python_version is rendered as ENV in the Dockerfile."""
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "foo").touch()
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(
+        name="foobar",
+        build_config=TesseractBuildConfig(
+            requirements={"provider": "uv-pip", "python_version": "3.12"}
+        ),
+    )
+    engine.prepare_build_context(src_dir, build_dir, config)
+
+    dockerfile = (build_dir / "Dockerfile").read_text()
+    assert 'TESSERACT_PYTHON_VERSION="3.12"' in dockerfile
+
+    # Without python_version, the env var should not appear
+    build_dir2 = tmp_path_factory.mktemp("build2")
+    config_default = TesseractConfig(name="foobar")
+    engine.prepare_build_context(src_dir, build_dir2, config_default)
+
+    dockerfile_default = (build_dir2 / "Dockerfile").read_text()
+    assert "TESSERACT_PYTHON_VERSION" not in dockerfile_default
+
+
+def test_prepare_build_context_build_env(tmp_path_factory):
+    """build_env is rendered in the build stage only, not the final image (#676)."""
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "foo").touch()
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(
+        name="foobar",
+        build_config=TesseractBuildConfig(
+            build_env={"UV_INDEX_STRATEGY": "unsafe-best-match"}
+        ),
+    )
+    engine.prepare_build_context(src_dir, build_dir, config)
+
+    dockerfile = (build_dir / "Dockerfile").read_text()
+    build_stage, run_stage = dockerfile.split("AS run_stage", 1)
+    # Present in the build stage, before the run stage begins.
+    assert 'UV_INDEX_STRATEGY="unsafe-best-match"' in build_stage
+    # Never carried into the final image.
+    assert "UV_INDEX_STRATEGY" not in run_stage
+
+
+@pytest.mark.parametrize("provider", ["uv-pip", "conda"])
+def test_prepare_build_context_host_credentials(tmp_path_factory, provider):
+    """host_credentials render secret mounts + a credentials file, no tokens (#675).
+
+    Provider-agnostic: the same setup applies to uv-pip and conda builds.
+    """
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "foo").touch()
+    if provider == "conda":
+        # Incidental: conda cannot build without one, so staging now says so.
+        (src_dir / "tesseract_environment.yaml").write_text("name: foobar\n")
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(
+        name="foobar",
+        build_config=TesseractBuildConfig(
+            requirements={"provider": provider},
+            host_credentials=[
+                {"host": "priv.example.com", "secret_id": "tok"},
+                {"host": "github.com", "secret_id": "tok2", "username": "u"},
+            ],
+        ),
+    )
+    engine.prepare_build_context(src_dir, build_dir, config, secret_ids=["tok", "tok2"])
+
+    dockerfile = (build_dir / "Dockerfile").read_text()
+    assert "--mount=type=secret,id=tok" in dockerfile
+    assert "--mount=type=secret,id=tok2" in dockerfile
+
+    # The shared credential-setup script is staged into the context.
+    assert (build_dir / "setup_host_credentials.sh").exists()
+
+    creds = (build_dir / "host_credentials.txt").read_text()
+    # host, secret id, and username -- but never a token (there are none to leak).
+    assert "priv.example.com\ttok\t__token__" in creds
+    assert "github.com\ttok2\tu" in creds
+
+
+def test_prepare_build_context_no_host_credentials(tmp_path_factory):
+    """Without host_credentials, files are still staged but the build step is clean.
+
+    The setup script and an empty credentials file are always staged (so the
+    Dockerfile can COPY them unconditionally), and no secret or tmpfs mounts
+    appear in the build step.
+    """
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "foo").touch()
+    build_dir = tmp_path_factory.mktemp("build")
+
+    engine.prepare_build_context(src_dir, build_dir, TesseractConfig(name="foobar"))
+
+    # Both files are always staged; the credentials file is empty, which the
+    # setup script treats as a no-op.
+    assert (build_dir / "setup_host_credentials.sh").exists()
+    assert (build_dir / "host_credentials.txt").read_text() == ""
+
+    dockerfile = (build_dir / "Dockerfile").read_text()
+    assert "--mount=type=secret" not in dockerfile
+    assert "--mount=type=tmpfs" not in dockerfile
+
+
+def test_prepare_build_context_pylock(tmp_path_factory):
+    """A pylock.toml requirements_file is staged verbatim and wired into the build."""
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "tesseract_api.py").touch()
+    # A PEP 751 lockfile with two indexes and a platform marker.
+    lockfile = src_dir / "pylock.toml"
+    lockfile.write_text(
+        'lock-version = "1.0"\n'
+        'created-by = "uv"\n'
+        'requires-python = ">=3.11"\n\n'
+        "[[packages]]\n"
+        'name = "numpy"\n'
+        'version = "2.5.3"\n'
+        'index = "https://pypi.org/simple"\n\n'
+        "[[packages]]\n"
+        'name = "torch"\n'
+        'version = "2.14.0+cpu"\n'
+        'index = "https://download.pytorch.org/whl/cpu"\n'
+        "marker = \"sys_platform == 'linux'\"\n"
+    )
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(
+        name="foobar",
+        build_config=TesseractBuildConfig(
+            requirements={"provider": "uv-pip", "requirements_file": "pylock.toml"}
+        ),
+    )
+    engine.prepare_build_context(src_dir, build_dir, config)
+
+    # A lockfile has no local deps to stage, so it is not rewritten: the staged
+    # contents must match the input byte-for-byte.
+    staged = build_dir / "__tesseract_source__" / "pylock.toml"
+    assert staged.read_text() == lockfile.read_text()
+
+    dockerfile = (build_dir / "Dockerfile").read_text()
+    # The build script is pointed at the lockfile, which is copied in by that name.
+    assert 'TESSERACT_REQUIREMENTS_FILE="pylock.toml"' in dockerfile
+    assert "__tesseract_source__/pylock.toml" in dockerfile
+
+
+def test_prepare_build_context_pylock_missing_file_errors(tmp_path_factory):
+    """A configured-but-absent lockfile fails early with a clear message, not in Docker."""
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "tesseract_api.py").touch()
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(
+        name="foobar",
+        build_config=TesseractBuildConfig(
+            requirements={"provider": "uv-pip", "requirements_file": "pylock.toml"}
+        ),
+    )
+    with pytest.raises(UserError, match=r"pylock\.toml"):
+        engine.prepare_build_context(src_dir, build_dir, config)
+
+
+def test_prepare_build_context_pylock_with_private_index_credential(tmp_path_factory):
+    """A lockfile build with a private-index credential generates the auth wiring.
+
+    Checks the secret mount, the tmpfs for assembled credentials, and the
+    host->secret entry the build script turns into a netrc line. No token is
+    present in the build context.
+    """
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "tesseract_api.py").touch()
+    (src_dir / "pylock.toml").write_text(
+        'lock-version = "1.0"\ncreated-by = "uv"\nrequires-python = ">=3.11"\n'
+    )
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(
+        name="foobar",
+        build_config=TesseractBuildConfig(
+            requirements={"provider": "uv-pip", "requirements_file": "pylock.toml"},
+            host_credentials=[
+                {
+                    "host": "pkgs.dev.azure.com",
+                    "secret_id": "azure_artifacts",
+                    "username": "az",
+                }
+            ],
+        ),
+    )
+    engine.prepare_build_context(
+        src_dir, build_dir, config, secret_ids=["azure_artifacts"]
+    )
+
+    dockerfile = (build_dir / "Dockerfile").read_text()
+    assert "--mount=type=secret,id=azure_artifacts" in dockerfile
+    assert "--mount=type=tmpfs" in dockerfile
+
+    creds = (build_dir / "host_credentials.txt").read_text()
+    # host, secret id, and username the setup script maps to a netrc entry; no token.
+    assert "pkgs.dev.azure.com\tazure_artifacts\taz" in creds
+
+
+def test_build_tesseract_requires_secret_for_host_credential(tmp_path):
+    """A credential errors if no matching --secret is provided (#675)."""
+    (tmp_path / "tesseract_api.py").write_text(
+        "from pydantic import BaseModel\n"
+        "class InputSchema(BaseModel):\n    x: int = 0\n"
+        "class OutputSchema(BaseModel):\n    y: int = 0\n"
+        "def apply(inputs: InputSchema) -> OutputSchema:\n    return OutputSchema()\n"
+    )
+    (tmp_path / "tesseract_config.yaml").write_text(
+        "name: demo\n"
+        "build_config:\n"
+        "  host_credentials:\n"
+        "    - host: priv.example.com\n"
+        "      secret_id: tok\n"
+    )
+
+    with pytest.raises(ValueError, match="Missing build secret"):
+        engine.build_tesseract(tmp_path, None, generate_only=True)
+
+
+@pytest.mark.parametrize(
+    "keypath,raw_value,expected",
+    [
+        # Numeric-looking string fields must not be parsed as numbers (#678).
+        (("build_config", "requirements", "python_version"), "3.12", "3.12"),
+        # Trailing zero must be preserved (YAML would parse 3.10 -> 3.1).
+        (("build_config", "requirements", "python_version"), "3.10", "3.10"),
+        # Explicit quoting still works.
+        (("build_config", "requirements", "python_version"), '"3.12"', "3.12"),
+        (("build_config", "target_platform"), "linux/arm64", "linux/arm64"),
+        # Non-string fields still get their structured value.
+        (("build_config", "inherit_base_image_packages"), "true", True),
+        (("build_config", "extra_packages"), "[a, b]", ("a", "b")),
+        # Values that aren't valid YAML fall back to the raw string.
+        (("build_config", "target_platform"), "@invalid", "@invalid"),
+    ],
+)
+def test_coerce_config_override(keypath, raw_value, expected):
+    """Config override values are coerced to the target field's declared type."""
+    config = TesseractConfig(name="demo")
+    c = config
+    for k in keypath[:-1]:
+        c = getattr(c, k)
+    annotation = type(c).model_fields[keypath[-1]].annotation
+    coerced = engine._coerce_config_override(raw_value, annotation, keypath)
+    assert coerced == expected
+    # The coerced value must be assignable without a validation error.
+    setattr(c, keypath[-1], coerced)
+
+
+def test_coerce_config_override_native_value():
+    """Non-string values (e.g. from the Python SDK) are validated as-is."""
+    annotation = TesseractBuildConfig.model_fields["extra_packages"].annotation
+    coerced = engine._coerce_config_override(
+        ["a", "b"], annotation, ("build_config", "extra_packages")
+    )
+    assert coerced == ("a", "b")
+
+
+def test_coerce_config_override_unknown_field():
+    """An unknown field (no annotation) passes the value through unchanged.
+
+    The subsequent assignment then raises the usual validation error.
+    """
+    assert engine._coerce_config_override("whatever", None, ("nope",)) == "whatever"
+
+
+def test_coerce_config_override_reports_structured_error():
+    """A structurally-wrong value surfaces the error against the parsed value.
+
+    The raw-string fallback exists for string fields; for a non-string field it
+    would report a misleading "not a valid <type>", masking the real problem. The
+    error must instead describe the parsed value (e.g. wrong tuple arity).
+    """
+    keypath = ("build_config", "package_data")
+    annotation = TesseractBuildConfig.model_fields["package_data"].annotation
+    # package_data entries are (source, destination) pairs; three items is wrong.
+    with pytest.raises(UserError) as excinfo:
+        engine._coerce_config_override("[[a, b, c]]", annotation, keypath)
+    message = str(excinfo.value)
+    assert "at most 2 items" in message
+    assert "not a valid tuple" not in message
+
+
+@pytest.mark.parametrize(
+    "keypath,offending",
+    [
+        # Unknown top-level option.
+        (("nonexistent",), "nonexistent"),
+        # Unknown intermediate group (nothing under it can be valid).
+        (("nonexistent", "python_version"), "nonexistent"),
+        # Unknown leaf under a valid group.
+        (("build_config", "nonexistent"), "build_config.nonexistent"),
+        # Descending into a non-model field (e.g. a dict) is also rejected.
+        (("env", "SOME_VAR"), "env.SOME_VAR"),
+    ],
+)
+def test_build_tesseract_unknown_config_override(
+    dummy_tesseract_package, keypath, offending
+):
+    """An unknown config override path raises a helpful UserError, not a traceback.
+
+    The path is validated before the image build, so no Docker mock is needed.
+    """
+    with pytest.raises(UserError) as excinfo:
+        engine.build_tesseract(
+            dummy_tesseract_package,
+            None,
+            config_override={keypath: "whatever"},
+            generate_only=True,
+        )
+    message = str(excinfo.value)
+    assert ".".join(keypath) in message
+    assert f'"{offending}" is not a known config option' in message
+    # The valid options at the offending level are listed to guide the user.
+    assert "Valid options under" in message
+
+
+def test_prepare_build_context_uv_platform(tmp_path_factory):
+    """The uv image must be pinned to the same platform as the build stage.
+
+    Otherwise `uv python install` fetches an interpreter for the host arch
+    instead of the target arch (see #684).
+    """
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "foo").touch()
+
+    # Non-native target: uv stage is pinned to the target platform, not the host.
+    build_dir = tmp_path_factory.mktemp("build")
+    config = TesseractConfig(
+        name="foobar",
+        build_config=TesseractBuildConfig(target_platform="linux/amd64"),
+    )
+    engine.prepare_build_context(src_dir, build_dir, config)
+    dockerfile = (build_dir / "Dockerfile").read_text()
+    assert re.search(r"FROM --platform=linux/amd64 \"\$\{UV_URL\}\" AS uv", dockerfile)
+    assert "COPY --from=uv /uv /uvx /bin/" in dockerfile
+
+    # Native target: uv stage follows $BUILDPLATFORM.
+    build_dir2 = tmp_path_factory.mktemp("build2")
+    config_native = TesseractConfig(name="foobar")
+    engine.prepare_build_context(src_dir, build_dir2, config_native)
+    dockerfile_native = (build_dir2 / "Dockerfile").read_text()
+    assert re.search(
+        r"FROM --platform=\$BUILDPLATFORM \"\$\{UV_URL\}\" AS uv",
+        dockerfile_native,
+    )
+
+
+def test_prepare_build_context_env(tmp_path_factory):
+    """Test that env variables are rendered as ENV lines in the Dockerfile."""
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "tesseract_api.py").touch()
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(
+        name="foobar",
+        env={
+            "XLA_PYTHON_CLIENT_PREALLOCATE": "false",
+            "MY_VAR": "hello world",
+        },
+    )
+
+    engine.prepare_build_context(src_dir, build_dir, config)
+    dockerfile = (build_dir / "Dockerfile").read_text()
+    assert 'ENV XLA_PYTHON_CLIENT_PREALLOCATE="false"' in dockerfile
+    assert 'ENV MY_VAR="hello world"' in dockerfile
 
 
 def test_prepare_build_context_external_package_data(tmp_path_factory):
@@ -138,6 +517,141 @@ def test_prepare_build_context_package_data_not_found(tmp_path_factory):
         engine.prepare_build_context(src_dir, build_dir, config)
 
 
+def test_prepare_build_context_local_dependency_with_extras(tmp_path_factory):
+    """Local pip dependency with an extras specifier is staged (issue #643)."""
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "tesseract_api.py").touch()
+    (src_dir / "mylocaldep").mkdir()
+    (src_dir / "tesseract_requirements.txt").write_text("numpy\n./mylocaldep[extra]\n")
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(name="foobar")
+    engine.prepare_build_context(src_dir, build_dir, config)
+
+    # The directory (without the extras suffix) is staged.
+    assert (build_dir / "local_requirements" / "mylocaldep").is_dir()
+    assert not (build_dir / "local_requirements" / "mylocaldep[extra]").exists()
+
+    # The rewritten requirements file installs it from the staged copy, keeping
+    # the extra so pip installs it.
+    reqs = (
+        (build_dir / "__tesseract_source__" / "tesseract_requirements.txt")
+        .read_text()
+        .splitlines()
+    )
+    assert "numpy" in reqs
+    assert "./local_requirements/mylocaldep[extra]" in reqs
+    # The original local line is rewritten, not carried over verbatim.
+    assert "./mylocaldep[extra]" not in reqs
+
+
+def test_prepare_build_context_local_dependency_file_url(tmp_path_factory):
+    """Local pip dependency given as a file:// URL is staged (issue #643)."""
+    dep_dir = tmp_path_factory.mktemp("dep") / "mylocaldep"
+    dep_dir.mkdir()
+    (dep_dir / "setup.py").touch()
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "tesseract_api.py").touch()
+    # `Path.as_uri()` yields a well-formed file:// URL on any platform.
+    (src_dir / "tesseract_requirements.txt").write_text(f"numpy\n{dep_dir.as_uri()}\n")
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(name="foobar")
+    engine.prepare_build_context(src_dir, build_dir, config)
+
+    # The file:// URL is resolved to a native path and staged by its name.
+    assert (build_dir / "local_requirements" / "mylocaldep").is_dir()
+
+    reqs = (
+        (build_dir / "__tesseract_source__" / "tesseract_requirements.txt")
+        .read_text()
+        .splitlines()
+    )
+    assert "numpy" in reqs
+    assert "./local_requirements/mylocaldep" in reqs
+
+
+def test_prepare_build_context_local_dependency_not_found(tmp_path_factory):
+    """A local dependency that does not exist raises a clear error."""
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "tesseract_api.py").touch()
+    (src_dir / "tesseract_requirements.txt").write_text("./does_not_exist\n")
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(name="foobar")
+    with pytest.raises(RuntimeError, match="local dependency not found"):
+        engine.prepare_build_context(src_dir, build_dir, config)
+
+
+def test_prepare_build_context_local_dependency_parent_path(tmp_path_factory):
+    """Local pip dependency reached via ../.. is staged (issue #630)."""
+    parent_dir = tmp_path_factory.mktemp("parent")
+    # A package that lives two levels above the Tesseract source directory.
+    (parent_dir / "mypkg").mkdir()
+    (parent_dir / "mypkg" / "setup.py").touch()
+    src_dir = parent_dir / "sub" / "tesseract"
+    src_dir.mkdir(parents=True)
+    (src_dir / "tesseract_api.py").touch()
+    (src_dir / "tesseract_requirements.txt").write_text("../../mypkg\n")
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(name="foobar")
+    engine.prepare_build_context(src_dir, build_dir, config)
+
+    # The staged name comes from the resolved path, not from `../..`.
+    assert (build_dir / "local_requirements" / "mypkg").is_dir()
+    assert [p.name for p in (build_dir / "local_requirements").iterdir()] == ["mypkg"]
+    reqs = (
+        (build_dir / "__tesseract_source__" / "tesseract_requirements.txt")
+        .read_text()
+        .splitlines()
+    )
+    assert "./local_requirements/mypkg" in reqs
+    assert "../../mypkg" not in reqs
+
+
+def test_prepare_build_context_conda_local_dependency(tmp_path_factory):
+    """Conda provider stages local-path pip dependencies (issue #641)."""
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "tesseract_api.py").touch()
+    (src_dir / "mypkg_src").mkdir()
+    (src_dir / "mypkg_src" / "setup.py").touch()
+    env_spec = {
+        "name": "tesseract",
+        "channels": ["conda-forge"],
+        "dependencies": [
+            "python=3.12",
+            "pip",
+            {"pip": ["requests", "./mypkg_src"]},
+        ],
+    }
+    with (src_dir / "tesseract_environment.yaml").open("w") as f:
+        yaml.safe_dump(env_spec, f)
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(
+        name="foobar",
+        build_config=TesseractBuildConfig(
+            requirements={"provider": "conda"},
+        ),
+    )
+    engine.prepare_build_context(src_dir, build_dir, config)
+
+    # The local package is staged into the build context.
+    assert (build_dir / "local_requirements" / "mypkg_src").is_dir()
+
+    # The rewritten environment file points pip at the staged copy while leaving
+    # remote dependencies untouched.
+    rewritten = yaml.safe_load(
+        (build_dir / "__tesseract_source__" / "tesseract_environment.yaml").read_text()
+    )
+    pip_entry = next(e["pip"] for e in rewritten["dependencies"] if isinstance(e, dict))
+    assert "requests" in pip_entry
+    assert "./local_requirements/mypkg_src" in pip_entry
+    # The original local path is rewritten, not carried over verbatim.
+    assert "./mypkg_src" not in pip_entry
+
+
 @pytest.mark.parametrize("generate_only", [True, False])
 def test_build_tesseract(dummy_tesseract_package, mocked_docker, generate_only, caplog):
     """Test we can build an image for a package and keep build directory."""
@@ -240,6 +754,83 @@ def test_run_tesseract(mocked_docker):
 
     # Check that we did not request GPUs by accident
     assert res["device_requests"] is None
+
+
+def test_run_binref_without_output_path_errors(mocked_docker, tmp_path):
+    """json+binref without an output path is a hard error, not silent data loss.
+
+    Without an output path, the runtime writes .bin buffers inside the container,
+    which are discarded on teardown, leaving dangling references in the result.
+    """
+    with pytest.raises(UserError, match="json\\+binref"):
+        engine.run_tesseract(
+            "foobar",
+            "apply",
+            ['{"inputs": {"a": [1, 2, 3], "b": [4, 5, 6]}}'],
+            output_format="json+binref",
+        )
+
+    # With an output path it goes through.
+    engine.run_tesseract(
+        "foobar",
+        "apply",
+        ['{"inputs": {"a": [1, 2, 3], "b": [4, 5, 6]}}'],
+        output_format="json+binref",
+        output_path=str(tmp_path),
+    )
+
+
+def test_run_debug(mocked_docker):
+    """Test running a tesseract in debug mode forwards a debugpy port."""
+    res_out, _ = engine.run_tesseract(
+        "foobar",
+        "apply",
+        ['{"inputs": {"a": [1, 2, 3], "b": [4, 5, 6]}}'],
+        debug=True,
+    )
+
+    res = json.loads(res_out)
+    # TESSERACT_DEBUG is set so the runtime starts debugpy and waits for a client.
+    assert res["environment"]["TESSERACT_DEBUG"] == "1"
+
+    assert engine.CONTAINER_DEBUGPY_PORT in res["ports"].values()
+
+
+def test_run_warns_about_a_chosen_debugpy_port(mocked_docker, caplog):
+    """This command never hands control back, so there is nothing to check.
+
+    An image that ignores the request waits for a debugger on an unpublished
+    port, so say up front that a rebuild is what fixes it.
+    """
+    with caplog.at_level(logging.WARNING, logger="tesseract"):
+        engine.run_tesseract(
+            "foobar",
+            "apply",
+            ["{}"],
+            debug=True,
+            environment={"TESSERACT_DEBUGPY_PORT": "6789"},
+        )
+
+    assert any("debugger cannot attach" in r.message for r in caplog.records)
+
+
+def test_run_debugpy_host_network(mocked_docker):
+    """With host networking, debugpy binds the host port directly (no mapping)."""
+    res_out, _ = engine.run_tesseract(
+        "foobar",
+        "apply",
+        ['{"inputs": {"a": [1, 2, 3], "b": [4, 5, 6]}}'],
+        debug=True,
+        network="host",
+    )
+
+    res = json.loads(res_out)
+
+    assert res["network"] == "host"
+    assert res["environment"]["TESSERACT_DEBUG"] == "1"
+    # No port mapping is added: the container binds the debugpy port on the host
+    # directly, so an explicit mapping would be rejected.
+    assert not res["ports"]
 
 
 def test_run_gpu(mocked_docker):
@@ -397,6 +988,24 @@ def test_serve_tesseracts(mocked_docker):
     engine.teardown(json.loads(container_name_with_memory)["name"])
 
 
+def test_serve_skip_health_check(mocked_docker, monkeypatch):
+    """Test serving a tesseract with --skip-health-check."""
+    health_called = False
+
+    def health_get_spy(url, *args, **kwargs):
+        nonlocal health_called
+        if url.endswith("/health"):
+            health_called = True
+            return type("Response", (), {"status_code": 200, "json": dict})()
+        raise NotImplementedError(f"Mocked get request to {url} not implemented")
+
+    monkeypatch.setattr(serving.requests, "get", health_get_spy)
+
+    res, _ = engine.serve("foobar", skip_health_check=True)
+    assert res
+    assert not health_called
+
+
 def test_serve_memory(mocked_docker):
     """Test serving a tesseract with memory limit."""
     res, _ = engine.serve(
@@ -476,6 +1085,516 @@ def test_serve_tesseract_volumes(mocked_docker, tmpdir):
     with pytest.raises(ValueError):
         # test that input_path cannot be the same as output_path
         engine.serve("foobar", input_path=str(indir), output_path=str(indir))
+
+
+def test_serve_debugpy_port_distinct_from_api_port(mocked_docker, monkeypatch):
+    """The debugpy port must never reuse the API port.
+
+    Regression test: in debug mode, ``serve`` picks two free ports (API and
+    debugpy). Both are drawn from the same range, so if the second draw is not
+    told to exclude the first, they can collide. When they do, the two entries
+    in ``port_mappings`` share the same host key and the dict silently collapses
+    to one entry, publishing the wrong container port. This showed up as a rare,
+    flaky ``[Errno 98] address already in use`` inside the container.
+
+    We stub ``get_free_port`` to always hand back the same port unless it is
+    excluded. The two draws can therefore only differ if ``serve`` passes the
+    API port in ``exclude`` on the second draw -- exactly the fix under test.
+    Without it, both draws return the same port and the two ``port_mappings``
+    entries collapse onto one host key. Stubbing removes any dependence on which
+    OS ports happen to be free, which made an earlier socket-based version of
+    this test flaky on CI.
+    """
+    preferred, fallback = 60001, 60002
+
+    def fake_get_free_port(within_range=None, exclude=()):
+        # Return the preferred port unless it is excluded, mirroring
+        # get_free_port's contract that it never returns an excluded port.
+        return fallback if preferred in exclude else preferred
+
+    monkeypatch.setattr(engine, "get_free_port", fake_get_free_port)
+
+    res, _ = engine.serve("foobar", debug=True)
+    port_mappings = json.loads(res)["ports"]
+    host_ports = [key.split(":")[-1] for key in port_mappings]
+    # Both the API and debugpy mappings must survive as separate entries.
+    assert len(port_mappings) == 2, f"port mapping collapsed: {port_mappings}"
+    assert len(set(host_ports)) == 2, f"debug and API host ports collided: {host_ports}"
+
+
+@pytest.fixture
+def skip_debugger_check(monkeypatch):
+    """The mocked container cannot report a debug address; tested separately."""
+    monkeypatch.setattr(engine, "_warn_if_debugger_unreachable", lambda *a: None)
+
+
+def test_chosen_container_debugpy_port_is_published(mocked_docker, skip_debugger_check):
+    """A caller-chosen port must be honoured, with the mapping following it.
+
+    Nothing is special about the default: the only requirement is that the port
+    debugpy binds and the container side of the published mapping agree.
+    """
+    res, _ = engine.serve(
+        "foobar", debug=True, environment={"TESSERACT_DEBUGPY_PORT": "6789"}
+    )
+    parsed = json.loads(res)
+
+    assert parsed["environment"]["TESSERACT_DEBUGPY_PORT"] == "6789"
+    # Both spellings, since TESSERACT_RUNTIME_* would otherwise take precedence
+    assert parsed["environment"]["TESSERACT_RUNTIME_DEBUGPY_PORT"] == "6789"
+    # The mapping must target what the container actually binds
+    assert "6789" in parsed["ports"].values()
+    assert engine.CONTAINER_DEBUGPY_PORT not in parsed["ports"].values()
+
+
+def test_default_container_debugpy_port_is_unchanged(mocked_docker):
+    """Left unset, the container side stays fixed, as #649 established."""
+    res, _ = engine.serve("foobar", debug=True)
+    parsed = json.loads(res)
+
+    assert parsed["environment"]["TESSERACT_DEBUGPY_PORT"] == (
+        engine.CONTAINER_DEBUGPY_PORT
+    )
+    assert engine.CONTAINER_DEBUGPY_PORT in parsed["ports"].values()
+
+
+def test_container_debugpy_port_colliding_with_api_is_rejected(mocked_docker):
+    """The one port that cannot work: the API already has it inside the container."""
+    with pytest.raises(UserError, match="already in use inside the container"):
+        engine.serve(
+            "foobar",
+            debug=True,
+            environment={"TESSERACT_DEBUGPY_PORT": engine.CONTAINER_API_PORT},
+        )
+
+
+class _ReportingContainer(Container):
+    """Minimal container that reports a given startup log."""
+
+    def __init__(self, report: bytes):
+        self._report = report
+
+    def logs(self, **kwargs):
+        return self._report
+
+
+@pytest.mark.parametrize(
+    "report,should_warn",
+    [
+        (b"Debugger listening on 0.0.0.0:6789\n", False),
+        # An image whose runtime ignores the setting binds the old default
+        (b"Debugger listening on 0.0.0.0:5678\n", True),
+        # One old enough not to report at all, or a reformatted line
+        (b"Uvicorn running\n", True),
+    ],
+)
+def test_warn_if_debugger_unreachable(report, should_warn, caplog):
+    """The container's own report of where it listens is what gives it away.
+
+    Nothing else fails when a request is ignored: the Tesseract is healthy and
+    only the debugger is unreachable. A warning rather than an error, since a
+    reformatted log line would otherwise condemn a working setup.
+    """
+    with caplog.at_level(logging.WARNING, logger="tesseract"):
+        engine._warn_if_debugger_unreachable(_ReportingContainer(report), "6789")
+
+    warned = any("no debugger can attach" in r.message for r in caplog.records)
+    assert warned is should_warn
+
+
+def test_serve_checks_only_a_requested_debugpy_port(mocked_docker, monkeypatch):
+    """The check costs a log read, and the default needs none."""
+    checked = []
+    monkeypatch.setattr(
+        engine, "_warn_if_debugger_unreachable", lambda _c, port: checked.append(port)
+    )
+
+    engine.serve("foobar", debug=True)
+    assert checked == []
+
+    engine.serve("foobar", debug=True, environment={"TESSERACT_DEBUGPY_PORT": "6789"})
+    assert checked == ["6789"]
+
+    # The SDK passes it as runtime_config, which only reaches the environment
+    # further down; capturing the request too early would skip the check there.
+    engine.serve("foobar", debug=True, runtime_config={"debugpy_port": 4321})
+    assert checked == ["6789", "4321"]
+
+
+@pytest.mark.parametrize(
+    "host",
+    ["127.0.0.1", "localhost", "::1", "127.1.2.3"],
+)
+def test_container_debugpy_loopback_host_is_rejected(mocked_docker, host):
+    """Only a loopback bind is impossible, and it is impossible at any version.
+
+    Publishing reaches the container from outside, which an address accepting
+    only local connections rejects -- and it fails unhelpfully, with docker's
+    proxy accepting on the host before failing to reach the container. Verified
+    against a current image.
+    """
+    with pytest.raises(UserError, match="only accepts local connections"):
+        engine.serve("foobar", debug=True, environment={"TESSERACT_DEBUGPY_HOST": host})
+
+
+@pytest.mark.parametrize("host", ["0.0.0.0", "172.17.0.3", "some-hostname"])
+def test_routable_container_debugpy_host_is_honoured(
+    mocked_docker, skip_debugger_check, host
+):
+    """Anything the published port can actually reach is fine, not just 0.0.0.0.
+
+    A container's own address on its network works, so do not insist on all
+    interfaces.
+    """
+    res, _ = engine.serve(
+        "foobar", debug=True, environment={"TESSERACT_DEBUGPY_HOST": host}
+    )
+    parsed = json.loads(res)
+
+    assert parsed["environment"]["TESSERACT_DEBUGPY_HOST"] == host
+    assert parsed["environment"]["TESSERACT_RUNTIME_DEBUGPY_HOST"] == host
+
+
+def test_container_debugpy_host_defaults_to_all_interfaces(mocked_docker):
+    """Unset, it must not inherit the runtime's loopback default."""
+    res, _ = engine.serve("foobar", debug=True)
+
+    assert json.loads(res)["environment"]["TESSERACT_DEBUGPY_HOST"] == "0.0.0.0"
+
+
+def test_serve_container_port_decoupled_from_host_port(mocked_docker):
+    """The container-side API port is fixed and independent of the host port.
+
+    In port-mapping mode the container binds a fixed internal port; only the
+    host port is dynamic. This mirrors debugpy and removes the coupling that
+    let a host-port collision corrupt the internal mapping.
+    """
+    res, _ = engine.serve("foobar", debug=True)
+    port_mappings = json.loads(res)["ports"]
+
+    # Keys are host side (dynamic), values are container side (fixed constants).
+    assert set(port_mappings.values()) == {
+        engine.CONTAINER_API_PORT,
+        engine.CONTAINER_DEBUGPY_PORT,
+    }
+
+
+def test_serve_retries_on_port_in_use(mocked_docker, monkeypatch):
+    """A port that is taken before the container binds triggers a retry.
+
+    When serve picks the port itself, a lost race for that port (the container
+    fails to bind it) should cause serve to pick a fresh port and try again,
+    rather than surfacing the failure to the caller.
+    """
+    seen_urls = []
+    fail_times = 2  # fail the first two attempts, succeed on the third
+
+    def flaky_health(served, url, timeout):
+        seen_urls.append(url)
+        if len(seen_urls) <= fail_times:
+            raise engine.PortInUseError(f"{url} was already in use")
+        # success -> return normally
+
+    monkeypatch.setattr(engine, "wait_for_health_or_dispose", flaky_health)
+
+    res, _ = engine.serve("foobar")
+    assert res
+    # It retried until success and used a distinct port each time.
+    assert len(seen_urls) == fail_times + 1
+    assert len(set(seen_urls)) == len(seen_urls), f"retries reused a port: {seen_urls}"
+
+
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        b"docker: Error response from daemon: port is already allocated.",
+        b"Error: rootlessport listen tcp 0.0.0.0:8000: bind: address already in use",
+        b'Error: something went wrong with the request: "proxy already running"',
+    ],
+    ids=["docker", "podman-linux", "podman-machine"],
+)
+def test_serve_retries_on_docker_publish_conflict(mocked_docker, monkeypatch, stderr):
+    """A host-port publish collision (ContainerError) triggers a retry.
+
+    In port-mapping mode a lost port race fails when the Docker daemon tries to
+    publish the host port -- ``containers.run`` raises ``ContainerError`` before
+    any container exists. This must be retried like the host-network case,
+    whichever runtime's wording reports it.
+    """
+    from tesseract_core.sdk.docker_client import ContainerError
+
+    real_run = mocked_docker.containers.run
+    calls = {"n": 0}
+
+    def flaky_run(**kwargs):
+        calls["n"] += 1
+        if calls["n"] <= 2:
+            raise ContainerError(None, 125, "docker run ...", kwargs["image"], stderr)
+        return real_run(**kwargs)
+
+    monkeypatch.setattr(mocked_docker.containers, "run", flaky_run)
+
+    res, _ = engine.serve("foobar")
+    assert res
+    assert calls["n"] == 3  # two conflicts, then success
+
+
+def test_serve_cleans_up_the_leaked_container_on_publish_conflict(
+    mocked_docker, monkeypatch
+):
+    """A port-publish ContainerError with a container id cleans that container up.
+
+    Docker prints the container's id to stdout before the publish step can
+    fail, so it is a container the daemon actually created and left behind in
+    a Created state -- invisible to containers.list()'s running-only default,
+    and so to `tesseract teardown --all`, unless serve() removes it itself.
+    """
+    from tesseract_core.sdk.docker_client import ContainerError
+
+    real_run = mocked_docker.containers.run
+    removed = []
+    calls = {"n": 0}
+
+    def flaky_run(**kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise ContainerError(
+                "deadbeefcafe",
+                125,
+                "docker run ...",
+                kwargs["image"],
+                b"docker: Error response from daemon: port is already allocated.",
+            )
+        return real_run(**kwargs)
+
+    def fake_get(id_or_name, tesseract_only=True):
+        assert id_or_name == "deadbeefcafe"
+        assert tesseract_only is False, (
+            "the leaked container is known to be ours from the run() call that "
+            "created it, so the usual Tesseract-only filter must not apply"
+        )
+
+        class _Leaked:
+            def remove(self, force=False):
+                assert force
+                removed.append(id_or_name)
+
+        return _Leaked()
+
+    monkeypatch.setattr(mocked_docker.containers, "run", flaky_run)
+    monkeypatch.setattr(mocked_docker.containers, "get", fake_get)
+
+    res, _ = engine.serve("foobar")
+    assert res
+    assert removed == ["deadbeefcafe"]
+
+
+def test_serve_reraises_non_port_container_error(mocked_docker, monkeypatch):
+    """A ContainerError that is not a port conflict is not retried."""
+    from tesseract_core.sdk.docker_client import ContainerError
+
+    def failing_run(**kwargs):
+        raise ContainerError(
+            None, 1, "docker run ...", kwargs["image"], b"some other failure"
+        )
+
+    monkeypatch.setattr(mocked_docker.containers, "run", failing_run)
+
+    with pytest.raises(ContainerError):
+        engine.serve("foobar")
+
+
+# `docker inspect` state, as recorded for a container that has stopped. Verified
+# against Docker: an OOM kill reports both the flag and code 137.
+_OOM_KILLED = {"Running": False, "OOMKilled": True, "ExitCode": 137, "Error": ""}
+_EXITED = {"Running": False, "OOMKilled": False, "ExitCode": 1, "Error": ""}
+_DAEMON_ERROR = {
+    "Running": False,
+    "OOMKilled": False,
+    "ExitCode": 127,
+    "Error": 'exec: "tesseract-runtime": not found',
+}
+
+
+@pytest.mark.parametrize(
+    "state,expected",
+    [
+        (_OOM_KILLED, "exceeding its memory limit"),
+        (_DAEMON_ERROR, 'Docker reported: exec: "tesseract-runtime": not found'),
+        (_EXITED, ""),
+    ],
+)
+def test_container_diagnoses_its_own_exit(state, expected):
+    """A stopped container can say things its logs cannot -- an OOM kill writes nothing."""
+    container = Container(
+        id="abc123", short_id="abc123", name="vectoradd", attrs={"State": state}
+    )
+    assert expected in docker_client.diagnose_exit(container, logs="")
+
+
+def _stopped_container(logs=b"", state=None, **overrides):
+    """A Container wired up to answer without a daemon behind it.
+
+    `is_running` is a module function now, so callers patch `serving.is_running`
+    rather than the container.
+    """
+    container = Container(
+        id="abc123",
+        short_id="abc123",
+        name="vectoradd",
+        attrs={"State": state if state is not None else dict(_EXITED)},
+    )
+    container.wait = lambda timeout=None: {"StatusCode": 1}
+    container.logs = lambda **kwargs: logs
+    container.remove = lambda **kwargs: None
+    for name, value in overrides.items():
+        setattr(container, name, value)
+    return container
+
+
+# Nothing listens on port 1, so /health fails immediately and the wait gives up
+# on the first pass rather than sleeping.
+_DEAD_URL = "http://127.0.0.1:1"
+
+
+def test_wait_for_health_reports_a_container_that_never_answers(monkeypatch):
+    """A container still running when time runs out is a timeout, not a crash."""
+    monkeypatch.setattr(serving, "is_running", lambda container: True)
+    container = _stopped_container()
+
+    with pytest.raises(TimeoutError) as excinfo:
+        serving.wait_for_health_or_dispose(container, _DEAD_URL, timeout=0.05)
+
+    message = str(excinfo.value)
+    assert "did not respond to a health check in time" in message
+    assert "increase `startup_timeout`" in message
+
+
+def test_wait_for_health_singles_out_a_port_collision(monkeypatch):
+    """A collision is racy and retriable, so it must not look like a crash."""
+    monkeypatch.setattr(serving, "is_running", lambda container: False)
+    container = _stopped_container(logs=b"Error: address already in use")
+
+    with pytest.raises(engine.PortInUseError):
+        serving.wait_for_health_or_dispose(container, _DEAD_URL, timeout=0.05)
+
+
+def test_unreadable_logs_do_not_mask_the_startup_failure(monkeypatch):
+    """Failing to read the logs is not the failure we are trying to report."""
+
+    def cannot_read(**kwargs):
+        raise APIError("daemon went away")
+
+    monkeypatch.setattr(serving, "is_running", lambda container: False)
+    container = _stopped_container()
+    container.logs = cannot_read
+
+    with pytest.raises(RuntimeError) as excinfo:
+        serving.wait_for_health_or_dispose(container, _DEAD_URL, timeout=0.05)
+
+    assert "stopped running during startup" in str(excinfo.value)
+
+
+def test_failure_to_dispose_does_not_mask_the_startup_failure(monkeypatch):
+    """Nor is failing to remove the container."""
+
+    def cannot_remove(**kwargs):
+        raise APIError("daemon went away")
+
+    monkeypatch.setattr(serving, "is_running", lambda container: False)
+    container = _stopped_container(remove=cannot_remove)
+
+    with pytest.raises(RuntimeError, match="stopped running during startup"):
+        serving.wait_for_health_or_dispose(container, _DEAD_URL, timeout=0.05)
+
+
+def test_serve_disposes_of_a_container_that_never_starts(mocked_docker, monkeypatch):
+    """A container that fails to become healthy is removed, not left lying around.
+
+    Everything it knew goes into the error before it goes, and the port-conflict
+    retry path would otherwise leave one behind per attempt.
+    """
+    torn_down = []
+
+    def unreachable(*args, **kwargs):
+        raise requests.exceptions.ConnectionError("nothing listening")
+
+    # The fixture answers /health with a 200; this container never will, and is
+    # not running, so waiting gives up on it immediately.
+    monkeypatch.setattr(serving.requests, "get", unreachable)
+    monkeypatch.setattr(serving, "is_running", lambda container: False)
+    # The fixture's container overrides `remove`, so patch the class it actually is
+    mocked_cls = type(mocked_docker.containers.run(detach=True))
+    monkeypatch.setattr(
+        mocked_cls,
+        "remove",
+        lambda self, v=False, link=False, force=False: torn_down.append(force),
+    )
+
+    with pytest.raises(RuntimeError, match="stopped running during startup"):
+        engine.serve("foobar")
+
+    assert torn_down == [True]
+
+
+def test_port_conflict_detected_in_wrapped_traceback():
+    """A conflict must be recognised even when rich has wrapped the message.
+
+    An uncaught error in the runtime is rendered into a fixed-width box, and
+    debugpy's message is long enough to be split across two lines. Matching the
+    raw text misses it, so a real port collision is reported as an unexplained
+    startup failure instead of being retried.
+    """
+    # Verbatim from a real debugpy bind failure captured through the runtime CLI
+    wrapped = (
+        "RuntimeError: Can't listen for client connections: [Errno 48] Address "
+        "already in\nuse"
+    )
+
+    assert engine.is_port_conflict(wrapped)
+    # Unwrapped forms must keep working
+    assert engine.is_port_conflict("[Errno 98] Address already in use")
+    assert engine.is_port_conflict("port is already allocated")
+    # Windows words it entirely differently for the same condition
+    assert engine.is_port_conflict(
+        "RuntimeError: Can't listen for client connections: [WinError 10048] Only "
+        "one usage of each socket address (protocol/network address/port) is "
+        "normally permitted"
+    )
+    assert not engine.is_port_conflict("some unrelated failure")
+
+
+def test_serve_gives_up_after_max_port_attempts(mocked_docker, monkeypatch):
+    """If every attempt loses the port race, serve raises rather than looping forever."""
+
+    def always_in_use(served, url, timeout):
+        raise engine.PortInUseError(f"{url} was already in use")
+
+    monkeypatch.setattr(engine, "wait_for_health_or_dispose", always_in_use)
+
+    with pytest.raises(RuntimeError, match="Failed to find a free port"):
+        engine.serve("foobar")
+
+
+def test_serve_does_not_retry_user_supplied_port(mocked_docker, monkeypatch):
+    """A user-supplied fixed port is honored verbatim and never retried.
+
+    Retrying would silently move the Tesseract to a different port than the one
+    the caller explicitly asked for, so a bind failure must surface immediately.
+    """
+    attempts = []
+
+    def always_in_use(served, url, timeout):
+        attempts.append(url)
+        raise engine.PortInUseError(f"{url} was already in use")
+
+    monkeypatch.setattr(engine, "wait_for_health_or_dispose", always_in_use)
+
+    with pytest.raises(engine.PortInUseError):
+        engine.serve("foobar", port="12345")
+
+    # Exactly one attempt, on the exact port requested.
+    assert attempts == ["http://127.0.0.1:12345"]
 
 
 def test_needs_docker(mocked_docker, monkeypatch):
@@ -588,3 +1707,323 @@ def test_parse_requirements(tmpdir):
         "--find-links https://data.pyg.org/whl/torch-2.5.1+cpu.html",
         "torch_scatter==2.1.2+pt25cpu",
     ]
+
+
+def test_prepare_build_context_conda_no_env_file(tmp_path_factory):
+    """Conda provider without an environment file is reported at staging.
+
+    Letting staging succeed only defers the failure: the Dockerfile copies
+    `tesseract_environment.yaml` unconditionally, so the build dies several
+    stages later on a cache-key error that names neither the config nor the
+    provider.
+    """
+    src_dir = tmp_path_factory.mktemp("src")
+    (src_dir / "tesseract_api.py").touch()
+    build_dir = tmp_path_factory.mktemp("build")
+
+    config = TesseractConfig(
+        name="foobar",
+        build_config=TesseractBuildConfig(requirements={"provider": "conda"}),
+    )
+    with pytest.raises(UserError, match=r"tesseract_environment\.yaml"):
+        engine.prepare_build_context(src_dir, build_dir, config)
+
+
+@pytest.mark.parametrize(
+    "line, expected",
+    [
+        ("./mylocaldep", ("./mylocaldep", "")),
+        ("./mylocaldep[extra]", ("./mylocaldep", "[extra]")),
+        ("../../pkg[a,b]", ("../../pkg", "[a,b]")),
+        ("/abs/path", ("/abs/path", "")),
+        ("./a[b] ", ("./a", "[b]")),
+    ],
+)
+def test_split_local_dependency(line, expected):
+    assert engine._split_local_dependency(line) == expected
+
+
+def test_split_local_dependency_file_url(tmp_path):
+    """A file:// URL is converted back to a native filesystem path."""
+    target = tmp_path / "mypkg"
+    # `Path.as_uri()` produces a correctly-formed file:// URL on any platform,
+    # so this round-trips regardless of the OS path separator.
+    path, extras = engine._split_local_dependency(target.as_uri())
+    assert path == str(target)
+    assert extras == ""
+
+    path, extras = engine._split_local_dependency(target.as_uri() + "[extra]")
+    assert path == str(target)
+    assert extras == "[extra]"
+
+
+def test_stage_local_dependency_file(tmp_path):
+    """A local file dependency (e.g. a wheel) is copied, not tree-copied."""
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "mypkg-1.0-py3-none-any.whl").write_text("wheel contents")
+    local_requirements = tmp_path / "local_requirements"
+    local_requirements.mkdir()
+
+    spec = engine._stage_local_dependency(
+        "./mypkg-1.0-py3-none-any.whl", src_dir, local_requirements
+    )
+    staged = local_requirements / "mypkg-1.0-py3-none-any.whl"
+    assert spec == "./local_requirements/mypkg-1.0-py3-none-any.whl"
+    assert staged.is_file()
+    assert staged.read_text() == "wheel contents"
+
+
+def test_stage_local_dependency_name_collision(tmp_path):
+    """Two dependencies resolving to the same basename get distinct staged names."""
+    src_dir = tmp_path / "src"
+    (src_dir / "a" / "mypkg").mkdir(parents=True)
+    (src_dir / "b" / "mypkg").mkdir(parents=True)
+    local_requirements = tmp_path / "local_requirements"
+    local_requirements.mkdir()
+
+    spec_a = engine._stage_local_dependency("./a/mypkg", src_dir, local_requirements)
+    spec_b = engine._stage_local_dependency("./b/mypkg", src_dir, local_requirements)
+    assert spec_a == "./local_requirements/mypkg"
+    assert spec_b == "./local_requirements/mypkg_1"
+    assert (local_requirements / "mypkg").is_dir()
+    assert (local_requirements / "mypkg_1").is_dir()
+
+
+@pytest.mark.parametrize(
+    "spec, expected",
+    [
+        ("/foo:/bar:ro", ["/foo", "/bar", "ro"]),
+        ("/foo:/bar", ["/foo", "/bar"]),
+        ("./foo:/bar:rw", ["./foo", "/bar", "rw"]),
+        ("myvolume:/bar", ["myvolume", "/bar"]),
+        ("C:\\Users\\foo:/bar:ro", ["C:\\Users\\foo", "/bar", "ro"]),
+        ("C:\\Users\\foo:/bar", ["C:\\Users\\foo", "/bar"]),
+        ("D:/data:/mnt/data:rw", ["D:/data", "/mnt/data", "rw"]),
+    ],
+)
+def test_split_volume_spec(spec, expected):
+    assert engine._split_volume_spec(spec) == expected
+
+
+@pytest.mark.parametrize(
+    "volume, expected",
+    [
+        ("/foo/bar", True),
+        ("./foo", True),
+        ("../foo", True),
+        ("myvolume", False),
+        ("C:\\Users\\foo", True),
+        ("D:/data", True),
+    ],
+)
+def test_is_local_volume(volume, expected):
+    assert engine._is_local_volume(volume) == expected
+
+
+def _stub_serve_docker(monkeypatch):
+    """Stub the Docker seams in engine.serve, returning captured run kwargs."""
+    captured = {}
+
+    monkeypatch.setattr(
+        engine.docker_client.images,
+        "get",
+        lambda name: Image(id="sha256:abc", short_id="abc", tags=[name], attrs={}),
+    )
+
+    def fake_run(**kwargs):
+        captured.update(kwargs)
+        return Container(id="cid", short_id="cid", name="test-container", attrs={})
+
+    monkeypatch.setattr(engine.docker_client.containers, "run", fake_run)
+    monkeypatch.setattr(engine, "wait_for_health_or_dispose", lambda *a, **k: None)
+    monkeypatch.setattr(engine, "is_podman", lambda: False)
+    return captured
+
+
+def test_serve_cuda_ipc_transport_adds_ipc_host(monkeypatch):
+    """gpu_transport='cuda_ipc' serving passes --ipc=host to the container runtime."""
+    captured = _stub_serve_docker(monkeypatch)
+
+    engine.serve(
+        "my-image",
+        output_format="json+base64",
+        gpus=["all"],
+        runtime_config={"gpu_transport": "cuda_ipc"},
+        skip_health_check=True,
+    )
+    assert "--ipc=host" in captured["extra_args"]
+
+
+def test_serve_cuda_ipc_transport_ipc_host_independent_of_format(monkeypatch):
+    """The transport wires --ipc=host regardless of the host output format."""
+    captured = _stub_serve_docker(monkeypatch)
+
+    engine.serve(
+        "my-image",
+        output_format="json+binref",
+        output_path="/tmp",
+        gpus=["all"],
+        runtime_config={"gpu_transport": "cuda_ipc"},
+        skip_health_check=True,
+    )
+    assert "--ipc=host" in captured["extra_args"]
+
+
+def test_serve_cuda_ipc_transport_errors_without_gpus(monkeypatch):
+    """Selecting the cuda_ipc transport without GPU access is a startup error."""
+    _stub_serve_docker(monkeypatch)
+
+    with pytest.raises(ValueError, match="requires GPU access"):
+        engine.serve(
+            "my-image",
+            output_format="json+base64",
+            gpus=None,
+            runtime_config={"gpu_transport": "cuda_ipc"},
+            skip_health_check=True,
+        )
+
+
+def test_serve_unknown_gpu_transport_errors(monkeypatch):
+    """An unknown gpu_transport value is a startup error."""
+    _stub_serve_docker(monkeypatch)
+
+    with pytest.raises(ValueError, match="Unknown gpu_transport"):
+        engine.serve(
+            "my-image",
+            output_format="json+base64",
+            gpus=["all"],
+            runtime_config={"gpu_transport": "bogus"},
+            skip_health_check=True,
+        )
+
+
+def test_serve_non_cuda_ipc_has_no_ipc_host(monkeypatch):
+    """Other output formats do not add --ipc=host."""
+    captured = _stub_serve_docker(monkeypatch)
+
+    engine.serve(
+        "my-image",
+        output_format="json+base64",
+        skip_health_check=True,
+    )
+    assert "--ipc=host" not in (captured.get("extra_args") or [])
+
+
+_UNSET = object()
+
+
+@pytest.mark.parametrize(
+    ("kwarg", "runtime_config", "expected"),
+    [
+        # Neither channel names a transport -> pinned to the explicit default.
+        (_UNSET, None, "none"),
+        # runtime_config selects it while the kwarg is left unset -> deferred to.
+        (_UNSET, {"gpu_transport": "cuda_ipc"}, "cuda_ipc"),
+        # An explicit kwarg wins over runtime_config, in both directions.
+        ("cuda_ipc", {"gpu_transport": "none"}, "cuda_ipc"),
+        ("none", {"gpu_transport": "cuda_ipc"}, "none"),
+        # Passing None explicitly is the same as not passing it: defer.
+        (None, {"gpu_transport": "cuda_ipc"}, "cuda_ipc"),
+    ],
+)
+def test_serve_gpu_transport_precedence(monkeypatch, kwarg, runtime_config, expected):
+    """The gpu_transport kwarg and runtime_config resolve with a defined precedence.
+
+    An explicit kwarg (including ``none``) wins; an unset (``None``) kwarg defers
+    to runtime_config; when neither names a transport the container still gets a
+    definite ``none`` rather than inheriting the image default.
+    """
+    captured = _stub_serve_docker(monkeypatch)
+
+    kwargs = dict(output_format="json+base64", gpus=["all"], skip_health_check=True)
+    if kwarg is not _UNSET:
+        kwargs["gpu_transport"] = kwarg
+    if runtime_config is not None:
+        kwargs["runtime_config"] = runtime_config
+
+    engine.serve("my-image", **kwargs)
+
+    assert captured["environment"]["TESSERACT_GPU_TRANSPORT"] == expected
+    assert ("--ipc=host" in (captured.get("extra_args") or [])) == (
+        expected == "cuda_ipc"
+    )
+
+
+@pytest.mark.parametrize(
+    "within_range",
+    [
+        (-1, 100),
+        (0, 65536),
+        (100, 50),
+    ],
+)
+def test_get_free_port_invalid_range(within_range):
+    with pytest.raises(ValueError, match="Invalid port range"):
+        engine.get_free_port(within_range=within_range)
+
+
+def test_get_free_port_skips_port_in_use():
+    """A port that is already bound is skipped in favor of a free one."""
+    # Reserve two adjacent ports up front so we know both belong to the test,
+    # then release one of them to act as the only free candidate.
+    with (
+        closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as occupied,
+        closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as spare,
+    ):
+        occupied.bind(("127.0.0.1", 0))
+        in_use = occupied.getsockname()[1]
+        # Find an adjacent port we can also reserve, so the range holds exactly
+        # the occupied port plus one known-free port.
+        free = None
+        for candidate in (in_use + 1, in_use - 1):
+            if 0 <= candidate <= 65535:
+                try:
+                    spare.bind(("127.0.0.1", candidate))
+                except OSError:
+                    continue
+                free = candidate
+                break
+        assert free is not None, "could not reserve an adjacent port"
+        # Release the spare port so it becomes the only free port in the range.
+        spare.close()
+
+        within_range = (min(in_use, free), max(in_use, free) + 1)
+        port = engine.get_free_port(within_range=within_range)
+
+    assert port == free
+
+
+def test_get_free_port_no_free_ports():
+    """RuntimeError is raised when every port in the range is in use."""
+    with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as occupied:
+        occupied.bind(("127.0.0.1", 0))
+        in_use = occupied.getsockname()[1]
+
+        # Range containing only the single occupied port (end is exclusive).
+        with pytest.raises(RuntimeError, match="No free ports found"):
+            engine.get_free_port(within_range=(in_use, in_use + 1))
+
+
+def test_get_free_port_all_excluded():
+    """RuntimeError is raised when the only candidate port is excluded."""
+    with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
+        s.bind(("127.0.0.1", 0))
+        free = s.getsockname()[1]
+
+    with pytest.raises(RuntimeError, match="No free ports found"):
+        engine.get_free_port(within_range=(free, free + 1), exclude=(free,))
+
+
+def test_output_format_matches_runtime_source_of_truth():
+    """engine.OutputFormat mirrors the runtime canonical format list.
+
+    The SDK defines the format literal locally (in engine) to avoid eagerly
+    importing the optional runtime package. This guards against the two copies
+    drifting apart.
+    """
+    from typing import get_args
+
+    from tesseract_core.runtime.file_interactions import supported_format_type
+
+    assert get_args(engine.OutputFormat) == get_args(supported_format_type)

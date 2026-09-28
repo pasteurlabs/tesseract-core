@@ -1,5 +1,7 @@
 # Out-of-core data loading
 
+{gh-tree}`View on GitHub <examples/dataloader>`
+
 ## Context
 
 This is an example of a Tesseract that loads in data from a folder by mounting the folder in the cli.

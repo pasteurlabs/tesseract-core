@@ -9,6 +9,7 @@ on:
 jobs:
   cla-assistant:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - name: "CLA Assistant"
         if: startsWith(github.event.comment.body, '@PasteurBot') || github.event.comment.body == 'recheck' || github.event_name == 'pull_request_target'

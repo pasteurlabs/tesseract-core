@@ -104,6 +104,7 @@ celerybeat.pid
 # Environments
 .env
 .venv
+.tesseract-venv
 env/
 venv/
 ENV/
@@ -153,3 +154,6 @@ logs/
 
 # Jupyter execution artifacts
 jupyter_execute/
+
+# Ruff cache
+.ruff_cache/

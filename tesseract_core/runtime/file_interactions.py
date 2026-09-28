@@ -11,8 +11,91 @@ from pydantic import TypeAdapter
 
 PathLike = str | Path
 
+# An output encoding is two orthogonal choices:
+#
+# - the *output format* -- how host (CPU) arrays are serialized into the JSON
+#   response (``json`` inline / ``json+base64`` / ``json+binref``);
+# - the *GPU transport* -- how device (GPU) arrays leave the process (``none`` =
+#   copied to host and serialized like any CPU array, or a device transport such
+#   as ``cuda_ipc`` that exports them by reference without a host round-trip).
+#
+# They compose freely: a response can inline its CPU arrays as JSON while
+# handing its GPU arrays out as ``cuda_ipc`` handles. The two are set
+# independently, via the ``output_format`` and ``gpu_transport`` config.
 supported_format_type = Literal["json", "json+base64", "json+binref"]
+
+# GPU transports. ``none`` is the always-available default (GPU output is copied
+# to the host and encoded via the output format). Any other value exports device
+# memory by reference and is an experimental, opt-in capability (see
+# available_gpu_transports).
+#
+# The disabled state is the explicit string ``"none"`` rather than ``None``, so
+# it is clear to users that this means "disabled", not "unspecified".
+gpu_transport_type = Literal["none", "cuda_ipc"]
+
+# Every output format is always available (none of them are experimental).
 SUPPORTED_FORMATS = get_args(supported_format_type)
+
+
+def available_formats() -> tuple[str, ...]:
+    """Output (host-array) formats the runtime accepts.
+
+    These describe how *CPU* arrays are serialized and are always available. How
+    *GPU* arrays leave the process is a separate axis; see
+    :func:`available_gpu_transports`.
+    """
+    return SUPPORTED_FORMATS
+
+
+def available_gpu_transports() -> tuple[str, ...]:
+    """GPU transports the runtime currently accepts for device-array output.
+
+    Always includes ``none`` (copy GPU output to host and serialize it like any
+    CPU array). A by-reference transport such as ``cuda_ipc`` is experimental and
+    only offered when the runtime is configured with a non-``none``
+    ``gpu_transport`` (e.g. ``TESSERACT_GPU_TRANSPORT=cuda_ipc``); it may change
+    or be removed without notice.
+    """
+    from tesseract_core.runtime.config import get_config
+
+    configured = get_config().gpu_transport
+    if configured != "none":
+        return ("none", configured)
+    return ("none",)
+
+
+def parse_accept_header(accept: str) -> tuple[str, str | None, str | None]:
+    """Split an ``Accept`` value into (output_format, gpu_transport, compression).
+
+    The media type's structured-syntax suffix selects the host-array output
+    format (``application/json+binref`` -> ``json+binref``). Parameters such as
+    ``gpu_transport`` and ``compression`` ride as media-type parameters, e.g. an
+    ``Accept`` of ``application/json+base64; compression=lz4; gpu_transport=cuda_ipc``
+    parses to ``("json+base64", "cuda_ipc", "lz4")``.
+
+    Returns the parsed format, transport parameter, and compression parameter.
+    Parameters return ``None`` when the header omits them (the caller falls back
+    to the configured ``gpu_transport`` / ``compression``). Only recognized
+    parameters are extracted; other parameters (e.g. a charset) are ignored.
+    This does no validation of the values -- :func:`output_to_bytes` checks them
+    against the accepted sets.
+    """
+    media_type, _, params_str = accept.partition(";")
+    output_format = media_type.strip().split("/")[-1]
+
+    gpu_transport: str | None = None
+    compression: str | None = None
+    for param in params_str.split(";"):
+        key, sep, value = param.partition("=")
+        if sep:
+            key_clean = key.strip()
+            val_clean = value.strip().strip('"')
+            if key_clean == "gpu_transport":
+                gpu_transport = val_clean
+            elif key_clean == "compression":
+                compression = val_clean
+
+    return output_format, gpu_transport, compression
 
 
 def output_to_bytes(
@@ -20,26 +103,55 @@ def output_to_bytes(
     format: supported_format_type,
     base_dir: str | Path | None = None,
     binref_dir: str | Path | None = None,
+    compression: Literal["lz4"] | None = None,
+    gpu_transport: gpu_transport_type = "none",
 ) -> bytes:
-    """Encode endpoint output to bytes in the given format.
+    """Encode endpoint output to bytes.
+
+    ``format`` chooses how host (CPU) arrays are serialized; ``gpu_transport``
+    chooses how device (GPU) arrays leave the process (``none`` copies them to
+    the host and serializes them via ``format``; ``cuda_ipc`` exports them by
+    reference). The two are independent -- a response may serialize its CPU
+    arrays one way and hand out its GPU arrays another -- and ``encode_array``
+    routes each array by where it lives.
 
     obj may contain pydantic.BaseModel / RootModel instances, or regular Python objects.
     """
+    allowed = available_formats()
+    if format not in allowed:
+        raise ValueError(f"Unsupported format {format} (must be one of {allowed})")
+
+    allowed_transports = available_gpu_transports()
+    if gpu_transport not in allowed_transports:
+        raise ValueError(
+            f"Unsupported GPU transport {gpu_transport} "
+            f"(must be one of {allowed_transports})"
+        )
+
+    if compression not in (None, "lz4"):
+        raise ValueError(f"Unsupported compression {compression}")
+
     ObjSchema = TypeAdapter(type(obj))
+    # The host-array encoding (``array_encoding``) and the device transport
+    # (``device_transport``) are independent context keys, read per-leaf by
+    # encode_array. ``array_encoding`` names only the CPU encoding; a GPU array
+    # goes over ``device_transport`` when set, else it is copied to host and
+    # encoded like a CPU array.
     if format == "json":
-        context = {"array_encoding": "json"}
+        context: dict[str, Any] = {"array_encoding": "json"}
     elif format == "json+base64":
-        context = {"array_encoding": "base64"}
+        context = {"array_encoding": "base64", "compression": compression}
     elif format == "json+binref":
         context = {
             "array_encoding": "binref",
             "base_dir": base_dir,
             "binref_dir": binref_dir,
+            "compression": compression,
         }
     else:
-        raise ValueError(
-            f"Unsupported format {format} (must be one of {SUPPORTED_FORMATS})"
-        )
+        raise ValueError(f"Unsupported format {format} (must be one of {allowed})")
+
+    context["device_transport"] = None if gpu_transport == "none" else gpu_transport
 
     # Two-phase serialization to bypass serde_json's slow UTF-8 scanning
     # on large base64 strings (https://github.com/pydantic/pydantic/issues/12911).
@@ -99,11 +211,15 @@ def join_paths(base: PathLike, other: PathLike) -> str:
 
     If the other path is an absolute URL, return it as is.
     """
+    # Coerce to str to avoid "Cannot mix str and non-str arguments"
+    # when mixing PurePosixPath / PureWindowsPath on Windows
+    base = str(base)
+    other = str(other)
     if is_absolute_path(other):
-        return str(other)
+        return other
     if is_url(base):
         return urllib.parse.urljoin(base, other)
-    return Path(base).joinpath(other).as_posix()
+    return str(Path(base).joinpath(other))
 
 
 def is_absolute_path(path: PathLike) -> bool:
@@ -113,7 +229,9 @@ def is_absolute_path(path: PathLike) -> bool:
 
 def is_url(path: PathLike) -> bool:
     """Check if path is a url."""
-    return bool(urllib.parse.urlparse(str(path)).scheme)
+    scheme = urllib.parse.urlparse(str(path)).scheme
+    # Single-letter schemes are Windows drive letters (e.g., C:), not URLs
+    return bool(scheme) and len(scheme) > 1
 
 
 def parent_path(x: PathLike) -> PathLike:
@@ -121,4 +239,4 @@ def parent_path(x: PathLike) -> PathLike:
     if is_url(x):
         return urllib.parse.urljoin(x, "..")
 
-    return type(x)(Path(x).parent.as_posix())
+    return type(x)(str(Path(x).parent))

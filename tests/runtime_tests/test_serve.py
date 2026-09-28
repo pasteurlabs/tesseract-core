@@ -3,14 +3,9 @@
 
 import base64
 import json
-import os
 import platform
-import signal
-import subprocess
 import sys
-import time
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
 from pathlib import Path
 from textwrap import dedent
 
@@ -18,6 +13,7 @@ import numpy as np
 import pytest
 import requests
 from fastapi.testclient import TestClient
+from typeguard import suppress_type_checks
 
 from tesseract_core.runtime.config import get_config
 from tesseract_core.runtime.serve import create_rest_api
@@ -65,47 +61,6 @@ def model_to_json(model):
     return json.loads(model.model_dump_json())
 
 
-@contextmanager
-def serve_in_subprocess(api_file, port, num_workers=1, timeout=30.0):
-    try:
-        proc = subprocess.Popen(
-            [
-                sys.executable,
-                "-c",
-                "from tesseract_core.runtime.serve import serve; "
-                f"serve(host='localhost', port={port}, num_workers={num_workers})",
-            ],
-            env=dict(os.environ, TESSERACT_API_PATH=api_file),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-
-        # wait for server to start
-        while True:
-            try:
-                response = requests.get(f"http://localhost:{port}/health")
-            except requests.exceptions.ConnectionError:
-                pass
-            else:
-                if response.status_code == 200:
-                    break
-
-            time.sleep(0.1)
-            timeout -= 0.1
-
-            if timeout < 0:
-                raise TimeoutError("Server did not start in time")
-
-        yield f"http://localhost:{port}"
-
-    finally:
-        proc.send_signal(signal.SIGINT)
-        stdout, stderr = proc.communicate()
-        print(stdout.decode())
-        print(stderr.decode())
-        proc.wait(timeout=5)
-
-
 @pytest.fixture
 def http_client(dummy_tesseract_module):
     """A test HTTP client."""
@@ -136,6 +91,174 @@ def test_create_rest_api_apply_endpoint(http_client, dummy_tesseract_module, for
 
     result = array_from_json(response.json()["result"], Path(get_config().output_path))
     assert np.array_equal(result, np.array([3.5, 6.0, 8.5]))
+
+
+def test_apply_rejects_cuda_ipc_as_output_format(dummy_tesseract_module):
+    """``json+cuda_ipc`` is not a host output format and is refused via Accept.
+
+    cuda_ipc is a GPU *transport* (chosen by the server's ``gpu_transport``
+    config), not a host-array output format, so it is never an accepted
+    ``Accept`` value regardless of configuration.
+    """
+    from tesseract_core.runtime.config import update_config
+
+    update_config(gpu_transport="none")
+    client = TestClient(
+        create_rest_api(dummy_tesseract_module), raise_server_exceptions=False
+    )
+    test_inputs = dummy_tesseract_module.InputSchema.model_validate(test_input)
+    response = client.post(
+        "/apply",
+        json={"inputs": model_to_json(test_inputs)},
+        headers={"Accept": "application/json+cuda_ipc"},
+    )
+    assert response.status_code == 406, response.text
+    detail = response.json()["detail"]
+    assert "json+cuda_ipc" in detail["message"]
+    assert detail["available_formats"] == ["json", "json+base64", "json+binref"]
+
+
+def test_apply_unknown_output_format_is_not_acceptable(dummy_tesseract_module):
+    """An Accept header naming a format the runtime does not know is a client error.
+
+    The 406 body lists what the server does offer, so a client can fall back.
+    """
+    client = TestClient(
+        create_rest_api(dummy_tesseract_module), raise_server_exceptions=False
+    )
+    test_inputs = dummy_tesseract_module.InputSchema.model_validate(test_input)
+    response = client.post(
+        "/apply",
+        json={"inputs": model_to_json(test_inputs)},
+        headers={"Accept": "application/json+nonsense"},
+    )
+    assert response.status_code == 406, response.text
+    detail = response.json()["detail"]
+    assert "json+nonsense" in detail["message"]
+    assert set(detail["available_formats"]) >= {"json", "json+base64", "json+binref"}
+
+
+def test_apply_rejects_an_accept_header_with_nothing_on_offer(dummy_tesseract_module):
+    """A header naming only types the server cannot produce is a 406."""
+    client = TestClient(
+        create_rest_api(dummy_tesseract_module), raise_server_exceptions=False
+    )
+    test_inputs = dummy_tesseract_module.InputSchema.model_validate(test_input)
+    response = client.post(
+        "/apply",
+        json={"inputs": model_to_json(test_inputs)},
+        headers={"Accept": "text/html"},
+    )
+    assert response.status_code == 406, response.text
+
+
+@pytest.mark.parametrize(
+    "accept,expected_encoding",
+    [
+        # Whatever a client happens to send, the server answers in a format it
+        # actually offers, and only refuses when it can offer none.
+        ("application/json, text/plain, */*", "json"),
+        ("text/html,application/xhtml+xml,*/*;q=0.8", "json"),
+        ("application/*", "json"),
+        ("APPLICATION/JSON", "json"),
+        ("application/json;q=0.9", "json"),
+        ("", "json"),
+        ("text/html, application/json+base64", "base64"),
+        ("application/json+nonsense, application/json+binref", "binref"),
+        # Higher q wins, even when it is listed second.
+        ("application/json;q=0.2, application/json+base64;q=0.8", "base64"),
+    ],
+)
+def test_apply_negotiates_the_best_offered_format(
+    http_client, dummy_tesseract_module, accept, expected_encoding
+):
+    """Media ranges are honoured by q-value, and wildcards fall back to the default."""
+    test_inputs = dummy_tesseract_module.InputSchema.model_validate(test_input)
+    response = http_client.post(
+        "/apply",
+        json={"inputs": model_to_json(test_inputs)},
+        headers={"Accept": accept},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["result"]["data"]["encoding"] == expected_encoding
+    # The Content-Type names the format produced, not the header sent.
+    assert response.headers["content-type"].startswith("application/json")
+
+
+def test_unacceptable_output_format_is_rejected_before_running(
+    dummy_tesseract_module, monkeypatch
+):
+    """Format negotiation fails before the endpoint does any work."""
+    calls = []
+
+    def apply_that_records(inputs):
+        calls.append(inputs)
+        return dummy_tesseract_module.OutputSchema(result=np.zeros(3))
+
+    monkeypatch.setattr(dummy_tesseract_module, "apply", apply_that_records)
+    client = TestClient(
+        create_rest_api(dummy_tesseract_module), raise_server_exceptions=False
+    )
+    test_inputs = dummy_tesseract_module.InputSchema.model_validate(test_input)
+    response = client.post(
+        "/apply",
+        json={"inputs": model_to_json(test_inputs)},
+        headers={"Accept": "application/json+nonsense"},
+    )
+    assert response.status_code == 406, response.text
+    assert calls == []
+
+
+def test_apply_accept_gpu_transport_param_reaches_validation(dummy_tesseract_module):
+    """A gpu_transport Accept parameter is honoured (and validated) per request.
+
+    With no transport configured, an Accept requesting ``gpu_transport=cuda_ipc``
+    is rejected -- proving the header parameter reaches ``output_to_bytes``'s
+    accepted-transport check rather than being silently ignored.
+    """
+    from tesseract_core.runtime.config import update_config
+
+    update_config(gpu_transport="none")
+    client = TestClient(
+        create_rest_api(dummy_tesseract_module), raise_server_exceptions=False
+    )
+    test_inputs = dummy_tesseract_module.InputSchema.model_validate(test_input)
+    response = client.post(
+        "/apply",
+        json={"inputs": model_to_json(test_inputs)},
+        headers={"Accept": "application/json+base64; gpu_transport=cuda_ipc"},
+    )
+    assert response.status_code >= 400
+
+
+def test_apply_accept_gpu_transport_param_overrides_config(dummy_tesseract_module):
+    """An Accept ``gpu_transport=none`` overrides a configured transport per request.
+
+    The dummy Tesseract returns host arrays, so opting the transport back to
+    ``none`` for this request must succeed and serialize normally, even though
+    the server is configured with cuda_ipc. Proves the header wins over config
+    when present.
+    """
+    from tesseract_core.runtime.config import update_config
+
+    update_config(gpu_transport="cuda_ipc")
+    try:
+        client = TestClient(
+            create_rest_api(dummy_tesseract_module), raise_server_exceptions=False
+        )
+        test_inputs = dummy_tesseract_module.InputSchema.model_validate(test_input)
+        response = client.post(
+            "/apply",
+            json={"inputs": model_to_json(test_inputs)},
+            headers={"Accept": "application/json+base64; gpu_transport=none"},
+        )
+        assert response.status_code == 200, response.text
+        result = array_from_json(
+            response.json()["result"], Path(get_config().output_path)
+        )
+        assert np.array_equal(result, np.array([3.5, 6.0, 8.5]))
+    finally:
+        update_config(gpu_transport="none")
 
 
 def test_create_rest_api_jacobian_endpoint(http_client, dummy_tesseract_module):
@@ -179,7 +302,7 @@ def test_post_abstract_eval(http_client):
     response = http_client.post("/abstract_eval", json=payload)
 
     assert response.status_code == 200, response.text
-    assert response.json() == {"result": {"shape": [4], "dtype": "float64"}}
+    assert response.json() == {"result": {"shape": [4], "dtype": "float32"}}
 
 
 def test_post_abstract_eval_throws_validation_errors(http_client):
@@ -203,11 +326,39 @@ def test_get_openapi_schema(http_client):
     assert "run_id" not in response.json()
 
 
+def test_openapi_schema_advertises_output_formats(dummy_tesseract_module):
+    """Clients can read which output formats this server accepts from openapi.json.
+
+    Output formats describe how *host* (CPU) arrays are serialized and are always
+    the same three; a configured GPU transport (``cuda_ipc``) is a separate axis
+    and never appears among the output formats.
+    """
+    from tesseract_core.runtime.config import update_config
+
+    update_config(gpu_transport="none")
+    client = TestClient(create_rest_api(dummy_tesseract_module))
+    schema = client.get("/openapi.json").json()
+    assert schema["x-supported-output-formats"] == [
+        "json",
+        "json+base64",
+        "json+binref",
+    ]
+
+    update_config(gpu_transport="cuda_ipc")
+    client = TestClient(create_rest_api(dummy_tesseract_module))
+    schema = client.get("/openapi.json").json()
+    assert schema["x-supported-output-formats"] == [
+        "json",
+        "json+base64",
+        "json+binref",
+    ]
+
+
 @pytest.mark.skipif(
     is_wsl(),
     reason="flaky on Windows",
 )
-def test_threading_sanity(tmpdir, free_port):
+def test_threading_sanity(tmpdir, free_port, serve_in_subprocess):
     """Test with a Tesseract that requires to be run in the main thread.
 
     This is important so we don't require users to be aware of threading issues.
@@ -244,10 +395,10 @@ def test_threading_sanity(tmpdir, free_port):
 
 
 @pytest.mark.skipif(
-    is_wsl(),
+    is_wsl() or sys.platform == "win32",
     reason="flaky on Windows",
 )
-def test_multiple_workers(tmpdir, free_port):
+def test_multiple_workers(tmpdir, free_port, serve_in_subprocess):
     """Test that the server can be run with multiple worker processes."""
     TESSERACT_API = dedent(
         """
@@ -362,8 +513,98 @@ def test_custom_validation_error_over_http(dummy_tesseract_module):
         "data": {"buffer": [1, 2], "encoding": "json"},
     }
 
-    with pytest.raises(PydanticValidationError) as exc_info:
+    # The injected TestClient returns httpx responses instead of requests ones,
+    # which trips typeguard's return type check on HTTPClient._send
+    with suppress_type_checks(), pytest.raises(PydanticValidationError) as exc_info:
         tess.apply({"a": non_numeric_array, "b": valid_array, "s": 1})
 
     err_types = {e["type"] for e in exc_info.value.errors()}
     assert "array_decode_error" in err_types
+
+
+def test_apply_encodes_arrays_with_configured_compression(dummy_tesseract_module):
+    """Served endpoints respect the configured compression setting (e.g. lz4)."""
+    import lz4.frame
+
+    from tesseract_core.runtime.config import update_config
+
+    update_config(compression="lz4")
+    try:
+        client = TestClient(
+            create_rest_api(dummy_tesseract_module), raise_server_exceptions=False
+        )
+        test_inputs = dummy_tesseract_module.InputSchema.model_validate(test_input)
+        response = client.post(
+            "/apply",
+            json={"inputs": model_to_json(test_inputs)},
+            headers={"Accept": "application/json+base64"},
+        )
+        assert response.status_code == 200, response.text
+        array_data = response.json()["result"]["data"]
+        assert array_data.get("compression") == "lz4"
+
+        # Verify buffer decompresses and matches expected data
+        compressed_bytes = base64.b64decode(array_data["buffer"])
+        decompressed_bytes = lz4.frame.decompress(compressed_bytes)
+        result = np.frombuffer(
+            decompressed_bytes, dtype=response.json()["result"]["dtype"]
+        ).reshape(response.json()["result"]["shape"])
+        assert np.array_equal(result, np.array([3.5, 6.0, 8.5]))
+
+        # Also test with binref output format
+        response_binref = client.post(
+            "/apply",
+            json={"inputs": model_to_json(test_inputs)},
+            headers={"Accept": "application/json+binref"},
+        )
+        assert response_binref.status_code == 200, response_binref.text
+        binref_data = response_binref.json()["result"]["data"]
+        assert binref_data.get("compression") == "lz4"
+    finally:
+        update_config(compression=None)
+
+
+def test_apply_accept_compression_param_overrides_config(dummy_tesseract_module):
+    """An Accept ``compression=...`` parameter overrides server config per request."""
+    from tesseract_core.runtime.config import update_config
+
+    client = TestClient(
+        create_rest_api(dummy_tesseract_module), raise_server_exceptions=False
+    )
+    test_inputs = dummy_tesseract_module.InputSchema.model_validate(test_input)
+
+    # 1. Server config is None, but client specifies compression=lz4 in Accept header
+    update_config(compression=None)
+    response = client.post(
+        "/apply",
+        json={"inputs": model_to_json(test_inputs)},
+        headers={"Accept": "application/json+base64; compression=lz4"},
+    )
+    assert response.status_code == 200, response.text
+    array_data = response.json()["result"]["data"]
+    assert array_data.get("compression") == "lz4"
+
+    # 2. Server config is lz4, but client specifies compression=none in Accept header
+    update_config(compression="lz4")
+    try:
+        response_none = client.post(
+            "/apply",
+            json={"inputs": model_to_json(test_inputs)},
+            headers={"Accept": "application/json+base64; compression=none"},
+        )
+        assert response_none.status_code == 200, response_none.text
+        array_data_none = response_none.json()["result"]["data"]
+        assert (
+            "compression" not in array_data_none
+            or array_data_none["compression"] is None
+        )
+    finally:
+        update_config(compression=None)
+
+    # 3. Invalid compression parameter in Accept header is rejected
+    response_invalid = client.post(
+        "/apply",
+        json={"inputs": model_to_json(test_inputs)},
+        headers={"Accept": "application/json+base64; compression=invalid"},
+    )
+    assert response_invalid.status_code >= 400

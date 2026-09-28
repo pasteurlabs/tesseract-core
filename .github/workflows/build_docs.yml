@@ -7,10 +7,11 @@ on:
 jobs:
   test-docs:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
 
     steps:
       - name: Set up Git repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install system requirements
         run: |
@@ -23,7 +24,7 @@ jobs:
           enable-cache: true
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version-file: "pyproject.toml"
 
@@ -36,6 +37,23 @@ jobs:
 
       - name: Build docs
         working-directory: docs
+        env:
+          # Point "View on GitHub" links at the PR head commit so a link to a
+          # brand-new example resolves instead of 404ing against main. The head
+          # commit (not GITHUB_HEAD_REF) is used because a fork PR's branch does
+          # not exist in this repo; see docs/conf.py.
+          DOCS_GIT_REF: ${{ github.event.pull_request.head.sha }}
         run: |
           export SPHINXOPTS="-W"  # treat warnings as errors
-          uv run --no-sync make html
+          # dirhtml matches the production build (see .readthedocs.yaml)
+          uv run --no-sync make dirhtml
+
+      - name: Check links
+        working-directory: docs
+        env:
+          DOCS_GIT_REF: ${{ github.event.pull_request.head.sha }}
+        # Catches broken links that -W cannot, in particular asset paths inside
+        # raw HTML, which Sphinx emits verbatim without resolving. Known false
+        # positives (bot-blocked hosts, JS-generated anchors) are configured via
+        # linkcheck_ignore / linkcheck_anchors_ignore_for_url in conf.py.
+        run: uv run --no-sync make linkcheck

@@ -13,6 +13,14 @@ import yaml
 from common import build_tesseract, image_exists
 
 from tesseract_core.sdk.cli import AVAILABLE_RECIPES, app
+from tesseract_core.sdk.config import get_config
+
+
+@pytest.fixture(scope="module")
+def docker_executable():
+    """The configured Docker/Podman executable as a command prefix list."""
+    return get_config().docker_executable
+
 
 tested_images = ("ubuntu:24.04",)
 
@@ -170,11 +178,235 @@ def test_tarball_install(cli_runner, dummy_tesseract_package, docker_cleanup):
     docker_cleanup["images"].append(img_tag)
 
 
-def test_metadata_label(built_image_name):
+def test_build_inherit_base_image_packages_with_uv_config(
+    cli_runner,
+    docker_client,
+    dummy_tesseract_package,
+    docker_cleanup,
+    tmp_path,
+    docker_executable,
+):
+    """inherit_base_image_packages must work despite base-image uv configuration.
+
+    Regression test for #747: base images can redirect ``uv pip install`` away
+    from the active /python-env venv (into the system Python) through two
+    independent channels, and the build copies only /python-env into the run
+    stage, so a redirected install drops the runtime and the build fails at the
+    ``tesseract-runtime check`` step. The mock base image below exercises both:
+
+    * environment variables — NVIDIA NGC images set UV_SYSTEM_PYTHON=1 and
+      UV_BREAK_SYSTEM_PACKAGES=1;
+    * a system-wide config file — /etc/uv/uv.toml with ``[pip] system = true``.
+
+    It also pre-installs a distinctive package (``cowsay``) into the system
+    Python. Building a Tesseract on top with ``inherit_base_image_packages:
+    true`` must succeed, and both the inherited package and the runtime must be
+    importable from /python-env in the final image.
+    """
+    base_image_tag = "tesseract-test-uv-config-base:latest"
+    dockerfile = tmp_path / "Dockerfile.base"
+    dockerfile.write_text(
+        dedent(
+            """
+            FROM python:3.12-slim
+            ENV UV_SYSTEM_PYTHON=1
+            ENV UV_BREAK_SYSTEM_PACKAGES=1
+            RUN mkdir -p /etc/uv && printf '[pip]\\nsystem = true\\n' > /etc/uv/uv.toml
+            RUN pip install --no-cache-dir cowsay==6.1
+            """
+        )
+    )
+    subprocess.run(
+        [
+            *docker_executable,
+            "build",
+            "-f",
+            str(dockerfile),
+            "-t",
+            base_image_tag,
+            str(tmp_path),
+        ],
+        check=True,
+    )
+
+    try:
+        # The Tesseract imports cowsay, which is only present via the inherited
+        # base image packages (it is deliberately absent from
+        # tesseract_requirements.txt).
+        (dummy_tesseract_package / "tesseract_api.py").write_text(
+            dedent(
+                """
+                import cowsay
+                from pydantic import BaseModel
+
+                class InputSchema(BaseModel):
+                    message: str = "Hello, Tesseractor!"
+
+                class OutputSchema(BaseModel):
+                    out: str
+
+                def apply(inputs: InputSchema) -> OutputSchema:
+                    return OutputSchema(out=cowsay.get_output_string("cow", inputs.message))
+                """
+            )
+        )
+        (dummy_tesseract_package / "tesseract_requirements.txt").write_text("")
+
+        image_name = build_tesseract(
+            docker_client,
+            dummy_tesseract_package,
+            "inherit_uv_system_python",
+            config_override={
+                "build_config.base_image": base_image_tag,
+                "build_config.inherit_base_image_packages": "true",
+            },
+        )
+        docker_cleanup["images"].append(image_name)
+        assert image_exists(docker_client, image_name)
+
+        # A successful build already proves the runtime landed in /python-env (the
+        # build fails at tesseract-runtime check otherwise). Running apply proves
+        # the inherited cowsay package is importable from the final image too.
+        result = cli_runner.invoke(
+            app,
+            ["run", image_name, "apply", '{"inputs": {"message": "moo"}}'],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0, result.stderr
+        assert "moo" in result.stdout
+    finally:
+        # The base is not a Tesseract image, so docker_cleanup cannot remove it.
+        # Force-untag it here; shared layers are reclaimed once docker_cleanup
+        # removes the descendant Tesseract image during teardown.
+        subprocess.run(
+            [*docker_executable, "rmi", "-f", base_image_tag],
+            check=False,
+            capture_output=True,
+        )
+
+
+def test_build_extra_index_url_with_local_dep(
+    cli_runner, dummy_tesseract_package, docker_cleanup
+):
+    """A supplementary index (--extra-index-url) must not shadow PyPI.
+
+    Regression test for #651: an ``--index-url`` pins resolution to a single
+    index that does not host build backends, so a local path dependency using a
+    non-setuptools backend (here hatchling) fails to build. ``--extra-index-url``
+    supplements PyPI instead of replacing it, so the backend still resolves.
+    """
+    local_dep = dummy_tesseract_package / "mylib"
+    (local_dep / "mylib").mkdir(parents=True)
+    (local_dep / "mylib" / "__init__.py").touch()
+    (local_dep / "pyproject.toml").write_text(
+        dedent(
+            """
+            [build-system]
+            requires = ["hatchling"]
+            build-backend = "hatchling.build"
+
+            [project]
+            name = "mylib"
+            version = "0.1.0"
+            """
+        )
+    )
+
+    (dummy_tesseract_package / "tesseract_requirements.txt").write_text(
+        dedent(
+            """
+            --extra-index-url https://download.pytorch.org/whl/cpu
+            ./mylib
+            """
+        )
+    )
+
+    result = cli_runner.invoke(
+        app,
+        ["build", str(dummy_tesseract_package)],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0, result.stderr
+    docker_cleanup["images"].append(json.loads(result.stdout)[0])
+
+
+def test_build_env_and_host_credential_with_secret(
+    cli_runner, dummy_tesseract_package, docker_cleanup, docker_executable
+):
+    """build_env + an authenticated host credential build, with no credential leak.
+
+    Exercises #676 (build_env reaching the resolver) and #675 (a host credential
+    whose token is supplied out-of-band via ``--secret``, mounted at build time,
+    and assembled into netrc + git-credential entries). PyTorch's CPU host is used
+    as the credentialed host; with the default first-index strategy numpy still
+    resolves from PyPI, so the authenticated host is never actually queried and
+    the build stays deterministic while the secret-mount + credential-setup code
+    path runs. An invalid build_env value would make uv error, so a successful
+    build also proves build_env reaches the resolver. Afterwards we assert the
+    secret value never lands in the image config or history.
+    """
+    secret_value = "s3cr3t-token-value"
+
+    config_path = dummy_tesseract_package / "tesseract_config.yaml"
+    config = yaml.safe_load(config_path.read_text())
+    build_config = config.setdefault("build_config", {})
+    build_config["build_env"] = {"UV_INDEX_STRATEGY": "first-index"}
+    build_config["host_credentials"] = [
+        {"host": "download.pytorch.org", "secret_id": "host_token"},
+    ]
+    config_path.write_text(yaml.dump(config))
+
+    result = cli_runner.invoke(
+        app,
+        [
+            "build",
+            str(dummy_tesseract_package),
+            "--secret",
+            "id=host_token,env=HOST_TOKEN",
+        ],
+        env={"HOST_TOKEN": secret_value},
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0, result.stderr
+    image_tag = json.loads(result.stdout)[0]
+    docker_cleanup["images"].append(image_tag)
+
+    # The secret must not be recoverable from image metadata or layer history
+    # (covers both the netrc and git-credentials files, which live only in the
+    # build stage).
+    inspect = subprocess.run(
+        [*docker_executable, "inspect", image_tag], capture_output=True, text=True
+    )
+    assert secret_value not in inspect.stdout
+    history = subprocess.run(
+        [*docker_executable, "history", "--no-trunc", image_tag],
+        capture_output=True,
+        text=True,
+    )
+    assert secret_value not in history.stdout
+    # The credentials must also not survive into the final image filesystem.
+    grep = subprocess.run(
+        [
+            *docker_executable,
+            "run",
+            "--rm",
+            "--entrypoint",
+            "sh",
+            image_tag,
+            "-c",
+            "cat ~/.netrc ~/.git-credentials 2>/dev/null || true",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert secret_value not in grep.stdout
+
+
+def test_metadata_label(built_image_name, docker_executable):
     """Test that metadata from tesseract_config.yaml is stored as a Docker label."""
     result = subprocess.run(
         [
-            "docker",
+            *docker_executable,
             "inspect",
             "--format",
             '{{ index .Config.Labels "ai.pasteurlabs.tesseract.metadata" }}',
@@ -186,3 +418,28 @@ def test_metadata_label(built_image_name):
     assert result.returncode == 0
     label_data = json.loads(result.stdout.strip())
     assert label_data == {"tags": ["ml", "physics"], "nested": {"key": "value"}}
+
+
+def test_list_json_output(cli_runner, built_image_name, docker_executable):
+    """Test that `tesseract list --format json` returns unabridged image metadata."""
+    result = cli_runner.invoke(app, ["list", "--format", "json"])
+    assert result.exit_code == 0, result.stderr
+
+    images = json.loads(result.stdout)
+    [image] = [i for i in images if built_image_name in i["tags"]]
+    repo = built_image_name.split(":")[0]
+    image_id = subprocess.run(
+        [*docker_executable, "inspect", "--format", "{{.Id}}", built_image_name],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    # Podman orders the tags the other way round than Docker.
+    assert sorted(image.pop("tags")) == sorted([f"{repo}:1.2.3", f"{repo}:latest"])
+    assert image == {
+        "id": image_id,
+        # Podman namespaces tags with `localhost/`, TESSERACT_NAME stays bare.
+        "name": repo.split("/")[-1],
+        "version": "1.2.3",
+        "description": "Simple tesseract that adds two vectors.\\n",
+    }

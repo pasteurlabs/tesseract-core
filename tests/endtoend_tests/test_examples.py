@@ -75,6 +75,12 @@ class Config:
     volume_mounts: list[str] = None
     input_path: str = None
     output_path: str = None
+    # Why this example cannot be served by `Tesseract.from_source`, or None if
+    # it can. An environment is built for whatever the Tesseract declares, so
+    # what is left here needs something provisioning cannot supply: a package
+    # from the base image, a compiled artifact, or a mounted volume. Deleting a
+    # reason enables it.
+    no_from_source: str = None
 
 
 # Add config and test cases for specific unit Tesseracts here
@@ -83,7 +89,9 @@ TEST_CASES = {
     "py310": Config(test_with_random_inputs=True),
     "helloworld": Config(test_with_random_inputs=True),
     "pip_custom_step": Config(test_with_random_inputs=True),
-    "pyvista-arm64": Config(test_with_random_inputs=True),
+    "pyvista-arm64": Config(
+        test_with_random_inputs=True, no_from_source="needs pyvista"
+    ),
     "localpackage": Config(test_with_random_inputs=True),
     "vectoradd": Config(test_with_random_inputs=True),
     "vectoradd_jax": Config(test_with_random_inputs=True, check_gradients=True),
@@ -96,18 +104,39 @@ TEST_CASES = {
     "cuda": Config(test_with_random_inputs=True),
     "meshstats": Config(check_gradients=True),
     "dataloader": Config(
-        check_gradients=True, volume_mounts=["testdata:/tesseract/input_data:ro"]
+        check_gradients=True,
+        volume_mounts=["testdata:/tesseract/input_data:ro"],
+        no_from_source="needs its data volume-mounted into the container",
     ),
     "meshstats_finitediff": Config(check_gradients=True),
-    "fortran_heat": Config(),
+    "fortran_heat": Config(
+        no_from_source="needs the solver binary compiled into the image"
+    ),
+    "fortran_enzyme": Config(
+        check_gradients=True, no_from_source="needs a compiled Fortran extension"
+    ),
     "conda": Config(),
+    "pylock": Config(test_with_random_inputs=True),
     "required_files": Config(input_path="input"),
-    "filereference": Config(input_path="test_cases/testdata", output_path="output"),
-    "metrics": Config(test_with_random_inputs=True),
+    "file_io": Config(input_path="test_cases/testdata", output_path="__tmp_path__"),
+    "metrics": Config(
+        test_with_random_inputs=True,
+        no_from_source=(
+            "the test endpoint runs outside an MPA run; plain apply works, "
+            "so this looks like an endpoint gap, not a from_source limitation"
+        ),
+    ),
     "qp_solve": Config(),
-    "bandedblock_cholmod": Config(),
+    "bandedblock_cholmod": Config(
+        no_from_source="needs Julia and its precompiled depot from the image"
+    ),
+    "inherit_base_image_packages": Config(
+        no_from_source="needs firedrake from the base image"
+    ),
     "tesseractreference": Config(),  # Can't test requests standalone; needs target Tesseract. Covered in separate test.
-    "userhandling": Config(),
+    "userhandling": Config(
+        no_from_source="creates /home/tesseract-user, which exists only in the image"
+    ),
 }
 
 
@@ -158,6 +187,7 @@ def fix_fake_arrays(fakedata, seed=42):
                 # in the tesseract
                 data["data"]["encoding"] = "base64"
                 data["data"]["buffer"] = base64.b64encode(new_data.tobytes()).decode()
+                data["data"].pop("compression", None)
         elif isinstance(data, dict):
             for key, value in data.items():
                 data[key] = _walk(value)
@@ -172,12 +202,46 @@ def fix_fake_arrays(fakedata, seed=42):
 
 def example_from_json_schema(schema):
     """Generate a random example JSON object from a JSON schema."""
-    import jsf
+    from schema_example_generator import generate_example
 
-    faker = jsf.JSF(schema)
-    payload = faker.generate()
+    payload = generate_example(schema)
     payload = fix_fake_arrays(payload)
     return payload
+
+
+def test_unit_tesseract_from_source(unit_tesseract_path, unit_tesseract_config):
+    """Serve each example in a dedicated process and run its own test cases.
+
+    The counterpart to `test_unit_tesseract_endtoend` without a container. It
+    deliberately covers the same corpus, so that the examples a dedicated
+    process cannot serve are visible as declared holes rather than as absences:
+    each is a `no_from_source` reason in TEST_CASES, and removing one is how an
+    example gets enabled once its dependencies can be provided.
+
+    No image is built, so this exercises the API and the transport only -- the
+    build itself is already covered by the containerized test.
+    """
+    if unit_tesseract_config.no_from_source:
+        pytest.skip(unit_tesseract_config.no_from_source)
+
+    from tesseract_core import Tesseract
+
+    kwargs = {}
+    if unit_tesseract_config.input_path:
+        kwargs["input_path"] = unit_tesseract_path / unit_tesseract_config.input_path
+
+    with Tesseract.from_source(unit_tesseract_path / "tesseract_api.py", **kwargs) as t:
+        assert "apply" in t.available_endpoints
+
+        test_cases = sorted((unit_tesseract_path / "test_cases").glob("*.json"))
+        for case in test_cases:
+            spec = json.loads(case.read_text())
+            # `cli_config` names CLI flags, which are settings of the serving
+            # process here and so are already fixed by the time we get a client.
+            spec.pop("cli_config", None)
+            # Raises AssertionError on mismatch, RuntimeError on an endpoint
+            # error, and returns nothing when it passes.
+            t.test(test_spec=spec)
 
 
 def test_unit_tesseract_endtoend(
@@ -188,6 +252,7 @@ def test_unit_tesseract_endtoend(
     unit_tesseract_config,
     free_port,
     docker_cleanup,
+    tmp_path,
 ):
     """Test that unit Tesseract images can be built and used to serve REST API."""
     from tesseract_core.sdk.cli import app
@@ -217,8 +282,7 @@ def test_unit_tesseract_endtoend(
 
     def _input_schema_from_openapi(openapi_schema):
         input_schema = openapi_schema["components"]["schemas"]["ApplyInputSchema"]
-        # For some reason, jsf can't handle #/components/schemas/<x> references,
-        # so we convert them to #$defs/<x>
+        # Convert OpenAPI-style references to JSON Schema $defs
         input_schema.update({"$defs": openapi_schema["components"]["schemas"]})
         input_schema["$defs"].pop("ApplyInputSchema", None)
         input_schema = json.loads(
@@ -248,12 +312,12 @@ def test_unit_tesseract_endtoend(
             ]
         )
     if unit_tesseract_config.output_path:
-        output_args.extend(
-            [
-                "--output-path",
-                str(unit_tesseract_path / unit_tesseract_config.output_path),
-            ]
-        )
+        if unit_tesseract_config.output_path == "__tmp_path__":
+            output_dir = tmp_path / "output"
+            output_dir.mkdir()
+        else:
+            output_dir = unit_tesseract_path / unit_tesseract_config.output_path
+        output_args.extend(["--output-path", str(output_dir)])
 
     if unit_tesseract_config.test_with_random_inputs:
         random_input = example_from_json_schema(input_schema)

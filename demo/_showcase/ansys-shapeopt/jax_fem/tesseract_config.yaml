@@ -10,7 +10,6 @@ description: |
 build_config:
   target_platform: "native"
   # conda-forge has binaries for gmsh and friends, even on ARM64
-  base_image: "condaforge/miniforge3:latest"
   requirements:
     provider: conda
   extra_packages:

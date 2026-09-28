@@ -1,0 +1,34 @@
+{
+  "endpoint": "apply",
+  "expected_outputs": {
+    "T_out": {
+      "object_type": "array",
+      "shape": [6],
+      "dtype": "float64",
+      "data": {
+        "buffer": [10.0, 25.0064, 79.9848, 40.0024, 15.0024, 5.0],
+        "encoding": "json"
+      }
+    }
+  },
+  "expected_exception": null,
+  "expected_exception_regex": null,
+  "atol": 1e-8,
+  "rtol": 1e-5,
+  "payload": {
+    "inputs": {
+      "T_in": {
+        "object_type": "array",
+        "shape": [6],
+        "dtype": "float64",
+        "data": {
+          "buffer": [10.0, 25.0, 80.0, 40.0, 15.0, 5.0],
+          "encoding": "json"
+        }
+      },
+      "alpha": 0.01,
+      "dx": 0.25,
+      "dt": 0.001
+    }
+  }
+}

@@ -1,12 +1,17 @@
+import numpy as np
 import pytest
 from pydantic import BaseModel
 
 from tesseract_core.runtime.tree_transforms import (
+    LRUCache,
+    escape_dict_key,
     filter_func,
     flatten_with_paths,
     get_at_path,
     path_to_index_op,
     set_at_path,
+    split_path,
+    unescape_dict_key,
 )
 
 
@@ -77,6 +82,12 @@ class TestPathToIndexOp:
             # All Unicode characters are correct in dictionary keys
             ("{café}", ("dict", "café")),
             ("{🔑key}", ("dict", "🔑key")),
+            # A dot belongs to the key; the separator is handled by split_path
+            ("{layer.0.weight}", ("dict", "layer.0.weight")),
+            ("{a/b}", ("dict", "a/b")),
+            # Braces inside a key are escaped
+            (r"{bar\{foobar\}}", ("dict", "bar{foobar}")),
+            (r"{back\\slash}", ("dict", "back\\slash")),
         ],
     )
     def test_valid_paths(self, path, expected):
@@ -628,3 +639,132 @@ class TestFilterFunc:
         # Should expect a dictionary argument
         with pytest.raises(TypeError, match="Expected argument to be a dictionary"):
             filtered_func(invalid_arg)
+
+
+class TestLRUCache:
+    """Test cases for LRUCache."""
+
+    def test_put_and_get(self):
+        cache = LRUCache(maxsize=2)
+        cache.put(b"a", "value_a")
+        cache.put(b"b", "value_b")
+        assert cache.size == 2
+        assert cache.get(b"a") == "value_a"
+        assert cache.get(b"b") == "value_b"
+
+    def test_eviction_maxsize_1(self):
+        cache = LRUCache(maxsize=1)
+        cache.put(b"a", "value_a")
+        cache.put(b"b", "value_b")
+        assert cache.size == 1
+        assert cache.get(b"a") is None
+        assert cache.get(b"b") == "value_b"
+
+    def test_eviction_maxsize_3(self):
+        cache = LRUCache(maxsize=3)
+        for i in range(5):
+            cache.put(bytes([i]), f"value_{i}")
+        assert cache.size == 3
+        # First two should be evicted
+        assert cache.get(bytes([0])) is None
+        assert cache.get(bytes([1])) is None
+        # Last three should remain
+        assert cache.get(bytes([2])) == "value_2"
+        assert cache.get(bytes([3])) == "value_3"
+        assert cache.get(bytes([4])) == "value_4"
+
+    def test_lru_order_evicts_least_recent(self):
+        """Accessing an entry should move it to most-recent, protecting it from eviction."""
+        cache = LRUCache(maxsize=2)
+        cache.put(b"a", "value_a")
+        cache.put(b"b", "value_b")
+        # Re-put "a" to make it most-recently-used
+        cache.put(b"a", "value_a_updated")
+        # Adding "c" should evict "b" (least recent), not "a"
+        cache.put(b"c", "value_c")
+        assert cache.get(b"b") is None
+        assert cache.get(b"a") == "value_a_updated"
+        assert cache.get(b"c") == "value_c"
+
+    def test_put_updates_existing_key(self):
+        cache = LRUCache(maxsize=2)
+        cache.put(b"k", "old")
+        cache.put(b"k", "new")
+        assert cache.size == 1
+        assert cache.get(b"k") == "new"
+
+    def test_maxsize_zero_disables_caching(self):
+        cache = LRUCache(maxsize=0)
+        cache.put(b"k", "v")
+        assert cache.size == 0
+        assert cache.get(b"k") is None
+
+    def test_stores_arbitrary_values(self):
+        cache = LRUCache(maxsize=1)
+        value = (lambda x: x, {"template": np.zeros(3)})
+        cache.put(b"k", value)
+        result = cache.get(b"k")
+        assert result[0] is value[0]
+        np.testing.assert_array_equal(result[1]["template"], np.zeros(3))
+
+    def test_get_miss_returns_none(self):
+        cache = LRUCache(maxsize=2)
+        assert cache.get(b"nonexistent") is None
+
+    def test_get_does_not_consume(self):
+        cache = LRUCache(maxsize=1)
+        cache.put(b"k", "v")
+        assert cache.get(b"k") == "v"
+        assert cache.get(b"k") == "v"
+        assert cache.size == 1
+
+    def test_get_marks_mru(self):
+        """get() on an older entry should protect it from eviction on the next put."""
+        cache = LRUCache(maxsize=2)
+        cache.put(b"a", "value_a")
+        cache.put(b"b", "value_b")
+        # Touch "a" via get -- should make it MRU.
+        assert cache.get(b"a") == "value_a"
+        # Adding "c" should now evict "b", not "a".
+        cache.put(b"c", "value_c")
+        assert cache.get(b"b") is None
+        assert cache.get(b"a") == "value_a"
+        assert cache.get(b"c") == "value_c"
+
+    def test_get_maxsize_zero_always_misses(self):
+        cache = LRUCache(maxsize=0)
+        cache.put(b"k", "v")
+        assert cache.get(b"k") is None
+
+
+class TestSplitPath:
+    """Dots separate segments except where they belong to a dict key."""
+
+    @pytest.mark.parametrize(
+        "path,expected",
+        [
+            ("a.b.c", ["a", "b", "c"]),
+            ("foo.[0].bar", ["foo", "[0]", "bar"]),
+            ("params.{plain}", ["params", "{plain}"]),
+            ("params.{a.b}", ["params", "{a.b}"]),
+            ("params.{layer.0.weight}", ["params", "{layer.0.weight}"]),
+            ("params.{a}.b", ["params", "{a}", "b"]),
+            (r"params.{bar\{foobar\}}", ["params", r"{bar\{foobar\}}"]),
+            ("", [""]),
+        ],
+    )
+    def test_split(self, path, expected):
+        assert split_path(path) == expected
+
+    @pytest.mark.parametrize(
+        "key", ["plain", "a.b", "a/b", "bar{foobar}", "back\\slash", "}", "{"]
+    )
+    def test_escape_round_trip(self, key):
+        """A key survives being written into a path and read back out."""
+        assert unescape_dict_key(escape_dict_key(key)) == key
+        assert path_to_index_op("{" + escape_dict_key(key) + "}") == ("dict", key)
+
+    def test_a_dotted_key_resolves(self):
+        """The case this was for: a state-dict key reaches its value."""
+        tree = {"params": {"layer.0.weight": 7}}
+        assert get_at_path(tree, "params.{layer.0.weight}") == 7

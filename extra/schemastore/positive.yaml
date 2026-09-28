@@ -1,0 +1,14 @@
+name: "helloworld"
+version: "1.0.0"
+description: "A sample Tesseract"
+
+env:
+  XLA_PYTHON_CLIENT_PREALLOCATE: "false"
+
+build_config:
+  base_image: "debian:bookworm-slim"
+  target_platform: "native"
+  extra_packages:
+    - libgomp1
+  custom_build_steps:
+    - RUN echo "Hello, World!"

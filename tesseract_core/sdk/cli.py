@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
+import logging
 import re
 import shlex
 import sys
@@ -17,20 +18,17 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Annotated, Any, NoReturn
 
-import click
 import typer
-import yaml
 from jinja2 import Environment, PackageLoader, StrictUndefined
 from pydantic import ValidationError as PydanticValidationError
 from rich.console import Console as RichConsole
 from rich.table import Table as RichTable
 
-from . import engine
+from . import engine, serving
 from .api_parse import (
     EXPECTED_OBJECTS,
-    TesseractBuildConfig,
-    TesseractConfig,
     ValidationError,
+    get_config_keypaths,
     get_submodel_fields_in_tesseract_config,
 )
 from .config import get_config
@@ -47,6 +45,16 @@ from .docker_client import (
 from .exceptions import UserError
 from .logs import DEFAULT_CONSOLE, set_logger
 
+# typer >= 0.26 vendors its own click (and drops the click dependency), so the
+# Context type, exceptions, and context lookups must come from the click typer
+# actually runs; fall back to real click on older typer (which still ships it).
+try:
+    from typer._click.core import Context
+    from typer._click.exceptions import UsageError
+    from typer._click.globals import get_current_context
+except ImportError:  # typer < 0.26
+    from click import Context, UsageError, get_current_context
+
 logger = getLogger("tesseract")
 
 # Jinja2 Template Environment
@@ -61,7 +69,7 @@ docker_client = CLIDockerClient()
 class SpellcheckedTyperGroup(typer.core.TyperGroup):
     """A Typer group that suggests similar commands if a command is not found."""
 
-    def get_command(self, ctx: click.Context, invoked_command: str) -> Any:
+    def get_command(self, ctx: Context, invoked_command: str) -> Any:
         """Get a command from the Typer group, suggesting similar commands if the command is not found."""
         import difflib
 
@@ -71,7 +79,7 @@ class SpellcheckedTyperGroup(typer.core.TyperGroup):
                 invoked_command, possible_commands, n=1, cutoff=0.6
             )
             if close_match:
-                raise click.UsageError(
+                raise UsageError(
                     f"No such command '{invoked_command}'. Did you mean '{close_match[0]}'?",
                     ctx,
                 )
@@ -106,11 +114,11 @@ POSSIBLE_CMDS.update(
     }
 )
 
-# All fields in TesseractConfig and TesseractBuildConfig for config override
-POSSIBLE_KEYPATHS = TesseractConfig.model_fields.keys()
 # Check that the only field that has nested models is build_config
 assert len(get_submodel_fields_in_tesseract_config()) == 1
-POSSIBLE_BUILD_CONFIGS = TesseractBuildConfig.model_fields.keys()
+# Dot-separated keypaths a --config-override may target, recursing into nested
+# sub-models (e.g. build_config.requirements.python_version).
+POSSIBLE_KEYPATHS = get_config_keypaths()
 
 # Traverse templates folder to seach for recipes
 AVAILABLE_RECIPES = set()
@@ -122,6 +130,7 @@ AVAILABLE_RECIPES = sorted(AVAILABLE_RECIPES)
 
 LOGLEVELS = ("debug", "info", "warning", "error", "critical")
 OUTPUT_FORMATS = ("json", "json+base64", "json+binref")
+LIST_FORMATS = ("table", "json")
 
 
 def make_choice_enum(name: str, choices: Iterable[str]) -> type[Enum]:
@@ -213,12 +222,17 @@ def main_callback(
 
 def _parse_config_override(
     options: list[str] | None,
-) -> dict[tuple[str, ...], Any]:
-    """Parse `["path1.path2.path3=value"]` into `[(["path1", "path2", "path3"], "value")]`."""
+) -> dict[tuple[str, ...], str]:
+    """Parse `["path1.path2.path3=value"]` into `{("path1", "path2", "path3"): "value"}`.
+
+    Values are kept as raw strings and coerced to the target field's declared type
+    when applied (see ``engine._coerce_config_override``), so that e.g.
+    ``build_config.python_version=3.12`` does not need to be quoted.
+    """
     if options is None:
         return {}
 
-    def _parse_option(option: str) -> tuple[tuple[str, ...], Any]:
+    def _parse_option(option: str) -> tuple[tuple[str, ...], str]:
         if "=" not in option:
             raise typer.BadParameter(
                 f'Invalid config override "{option}" (must be `keypath=value`)',
@@ -233,15 +247,6 @@ def _parse_config_override(
             )
 
         path = tuple(key.split("."))
-
-        try:
-            value = yaml.safe_load(value)
-        except yaml.YAMLError as e:
-            raise typer.BadParameter(
-                f'Invalid value for config override "{option}", could not parse value as YAML: {e}',
-                param_hint="config_override",
-            ) from e
-
         return path, value
 
     return dict(_parse_option(option) for option in options)
@@ -291,6 +296,22 @@ def build_image(
             ),
         ),
     ] = False,
+    secret: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--secret",
+            help=(
+                "Supply a build secret via a BuildKit secret mount (never stored in "
+                "the image). The only thing that currently consumes a secret is a "
+                "``build_config.host_credentials`` entry: the ``id`` here must "
+                "match the ``secret_id`` declared on such an entry. "
+                "Format: ``id=<id>,env=<VAR>`` to read from an environment "
+                "variable, or ``id=<id>,src=<file>`` to read from a file. "
+                "Repeatable."
+            ),
+            metavar="id=NAME,env=VAR|src=FILE",
+        ),
+    ] = None,
     config_override: Annotated[
         list[str] | None,
         typer.Option(
@@ -300,8 +321,6 @@ def build_image(
                 "attribute in tesseract_config.yaml. "
                 "Possible keypaths are: "
                 f"{', '.join(POSSIBLE_KEYPATHS)}. \n"
-                "\n Possible build_config options are: "
-                f"{', '.join(POSSIBLE_BUILD_CONFIGS)}. \n"
                 "\nExample: ``--config-override build_config.target_platform=linux/arm64``."
             ),
             metavar="KEYPATH=VALUE",
@@ -341,13 +360,26 @@ def build_image(
                 tag,
                 build_dir=build_dir,
                 inject_ssh=forward_ssh_agent,
+                secrets=secret,
                 config_override=parsed_config_override,
                 generate_only=generate_only,
+                stream_logs=logger.debug,
             )
     except BuildError as e:
-        # raise from None to Avoid overly long tracebacks,
-        # all the information is in the printed logs / exception str already
-        raise UserError(f"Error building Tesseract: {e}") from None
+        loglevel = logging.getLogger("tesseract").handlers[0].level
+        error_string = "Error building Tesseract."
+        if loglevel <= logging.DEBUG:
+            # Build logs already streamed via logger.debug
+            pass
+        elif loglevel <= logging.ERROR:
+            # Re-emit build log at error level so it's visible
+            logger.error("\n".join(e.build_log))
+        else:
+            error_string = (
+                "Error building Tesseract. "
+                "Run with `--loglevel debug` for more details."
+            )
+        raise UserError(error_string) from None
     except APIError as e:
         raise UserError(f"Docker server error: {e}") from e
     except TypeError as e:
@@ -558,6 +590,28 @@ def serve(
             ),
         ),
     ] = False,
+    skip_health_check: Annotated[
+        bool,
+        typer.Option(
+            "--skip-health-check",
+            help=(
+                "Skip the startup health check. Useful for Tesseracts with slow "
+                "initialization (e.g., Julia runtime startup, large model loading). "
+                "The caller is responsible for ensuring readiness, e.g. by polling /health."
+            ),
+        ),
+    ] = False,
+    startup_timeout: Annotated[
+        float,
+        typer.Option(
+            "--startup-timeout",
+            help=(
+                "How long to wait, in seconds, for the Tesseract to answer a health "
+                "check. Raise it for one that is slow to initialize, in preference "
+                "to skipping the check altogether."
+            ),
+        ),
+    ] = serving.DEFAULT_STARTUP_TIMEOUT,
     user: Annotated[
         str | None,
         typer.Option(
@@ -656,6 +710,8 @@ def serve(
             output_path=output_path,
             output_format=_enum_to_val(output_format),
             docker_args=shlex.split(docker_args) if docker_args else None,
+            skip_health_check=skip_health_check,
+            startup_timeout=startup_timeout,
         )
     except RuntimeError as ex:
         raise UserError(
@@ -671,11 +727,27 @@ def serve(
     typer.echo(json_info, nl=False)
 
 
+ListFormatChoices = make_choice_enum("ListFormat", LIST_FORMATS)
+
+
 @app.command("list")
 @engine.needs_docker
-def list_tesseract_images() -> None:
-    """Display all Tesseract images."""
-    _display_tesseract_image_meta()
+def list_tesseract_images(
+    output_format: Annotated[
+        ListFormatChoices,
+        typer.Option(
+            "--format",
+            "-f",
+            help="Output format to use. table uses rich formatting, json is machine-readable. ",
+        ),
+    ] = "table",
+) -> None:
+    """Display all Tesseract container images."""
+    images = _get_tesseract_image_meta()
+    if _enum_to_val(output_format) == "json":
+        typer.echo(json.dumps(images))
+    else:
+        _display_tesseract_image_meta(images)
 
 
 @app.command("ps")
@@ -685,21 +757,36 @@ def list_tesseract_containers() -> None:
     _display_tesseract_containers_meta()
 
 
-def _display_tesseract_image_meta() -> None:
-    """Display Tesseract image metadata."""
-    table = RichTable("ID", "Tags", "Name", "Version", "Description")
-    images = docker_client.images.list()
-    for image in images:
+def _get_tesseract_image_meta() -> list[dict]:
+    """Collect Tesseract image metadata, unabridged and free of display formatting."""
+    images = []
+    for image in docker_client.images.list():
         tesseract_vals = _get_tesseract_env_vals(image)
         if tesseract_vals:
-            table.add_row(
-                # Checksum Type + First 12 Chars of ID
-                image.id[:19],
-                str(image.tags),
-                tesseract_vals["TESSERACT_NAME"],
-                tesseract_vals.get("TESSERACT_VERSION", ""),
-                tesseract_vals.get("TESSERACT_DESCRIPTION", "").replace("\n", " "),
+            images.append(
+                {
+                    "id": image.id,
+                    "name": tesseract_vals["TESSERACT_NAME"],
+                    "tags": list(image.tags),
+                    "version": tesseract_vals.get("TESSERACT_VERSION", ""),
+                    "description": tesseract_vals.get("TESSERACT_DESCRIPTION", ""),
+                }
             )
+    return images
+
+
+def _display_tesseract_image_meta(images: list[dict]) -> None:
+    """Display Tesseract image metadata."""
+    table = RichTable("ID", "Tags", "Name", "Version", "Description")
+    for image in images:
+        table.add_row(
+            # Checksum Type + First 12 Chars of ID
+            image["id"][:19],
+            str(image["tags"]),
+            image["name"],
+            image["version"],
+            image["description"].replace("\\n", " ").replace("\n", " "),
+        )
     RichConsole().print(table)
 
 
@@ -728,7 +815,7 @@ def _get_tesseract_env_vals(
 ) -> dict:
     """Convert Tesseract environment variables from list to dictionary."""
     env_vals = [s for s in docker_asset.attrs["Config"]["Env"] if "TESSERACT_" in s]
-    return {item.split("=")[0]: item.split("=")[1] for item in env_vals}
+    return dict(item.split("=", maxsplit=1) for item in env_vals)
 
 
 def _get_tesseract_network_meta(container: Container) -> dict:
@@ -844,7 +931,10 @@ def teardown(
             f"Internal Docker error occurred while tearing down Tesseracts: {ex}"
         ) from ex
     except NotFound as ex:
-        raise UserError(f"Tesseract Project ID not found: {ex}") from ex
+        raise UserError(
+            f"Tesseract container not found: {ex}\n"
+            "Use `tesseract ps` to list running containers."
+        ) from ex
 
 
 def _sanitize_error_output(error_output: str, tesseract_image: str) -> str:
@@ -887,9 +977,12 @@ def _extract_cli_config(
         if not Path(input_path).is_absolute():
             input_path = str(base_dir / input_path)
 
+    from tesseract_core.sdk.engine import _split_volume_spec
+
     volume_mounts = []
     for vol_mount in cli_config.get("volume_mounts", []):
-        if not Path(vol_mount.split(":", 1)[0]).is_absolute():
+        source = _split_volume_spec(vol_mount)[0]
+        if not Path(source).is_absolute():
             volume_mounts.append(str(base_dir / vol_mount))
         else:
             volume_mounts.append(vol_mount)
@@ -910,7 +1003,6 @@ def _extract_cli_config(
 )
 @engine.needs_docker
 def run_container(
-    context: click.Context,
     tesseract_image: Annotated[
         str | None,
         typer.Argument(
@@ -1076,6 +1168,17 @@ def run_container(
             help="Enable tracing for detailed debug output.",
         ),
     ] = False,
+    debug: Annotated[
+        bool,
+        typer.Option(
+            "--debug",
+            help=(
+                "Enable debug mode. This starts a debugpy server in the Tesseract and "
+                "blocks until a debugger attaches to the forwarded port. "
+                "WARNING: This may expose sensitive information, use with caution (and never in production)."
+            ),
+        ),
+    ] = False,
     invoke_help: Annotated[
         bool,
         typer.Option(
@@ -1094,7 +1197,7 @@ def run_container(
 
     if not tesseract_image:
         if invoke_help:
-            context.get_help()
+            get_current_context().get_help()
             return
         raise typer.BadParameter(
             "Tesseract image name is required.",
@@ -1103,7 +1206,7 @@ def run_container(
 
     if not cmd:
         if invoke_help:
-            context.get_help()
+            get_current_context().get_help()
             return
         else:
             error_string = f"Command is required. Are you sure your Tesseract image name is `{tesseract_image}`?"
@@ -1190,7 +1293,10 @@ def run_container(
             user=user,
             memory=memory,
             docker_args=shlex.split(docker_args) if docker_args else None,
-            stream_logs=True,  # Always stream for CLI
+            # `--debug` is meaningless when only forwarding `--help`, and would
+            # otherwise block waiting for a debugger on a help invocation.
+            debug=debug and not invoke_help,
+            stream_logs=logger.info,  # Stream logs via logger
         )
 
     except ImageNotFound as e:
@@ -1204,9 +1310,20 @@ def run_container(
         if "No such command" in msg:
             error_string = f"Error running Tesseract '{tesseract_image}' \n\n Error: Unimplemented command '{cmd}'.  "
         else:
-            error_string = _sanitize_error_output(
-                f"Error running Tesseract. \n\n{msg}", tesseract_image
-            )
+            loglevel = logging.getLogger("tesseract").handlers[0].level
+            error_string = "Error running Tesseract."
+            if loglevel <= logging.INFO:
+                # Errors already streamed via logger.info, don't repeat them
+                pass
+            elif loglevel <= logging.ERROR:
+                # Re-emit errors at error level so they're visible
+                logger.error(msg)
+            else:
+                # Logs are squelched, tell user how to see them
+                error_string = (
+                    "Error running Tesseract. "
+                    "Run with `--loglevel info` for more details."
+                )
 
         raise UserError(error_string) from e
 
@@ -1239,9 +1356,6 @@ def entrypoint() -> NoReturn:
 
     raise SystemExit(result)
 
-
-# Expose the underlying click object for doc generation
-typer_click_object = typer.main.get_command(app)
 
 if __name__ == "__main__":
     entrypoint()

@@ -1,9 +1,11 @@
 # Wrapping SpaceClaim as a Tesseract
 
+{gh-tree}`View on GitHub <demo/_showcase/ansys-shapeopt/spaceclaim>`
+
 This guide outlines how to wrap Ansys SpaceClaim as a Tesseract. For this, we will use [non-containerized execution](project:#running-without-containers) to start an HTTP server that dispatches requests to SpaceClaim through SpaceClaim scripts (`.scscript`).
 
 ```{seealso}
-The full code for this Tesseract can be found under `demo/_showcase/ansys-shapeopt/spaceclaim` in the [Tesseract Core repository](https://github.com/pasteurlabs/tesseract-core/tree/main/demo/_showcase/ansys-shapeopt/spaceclaim).
+The full code for this Tesseract can be found under {gh-tree}`demo/_showcase/ansys-shapeopt/spaceclaim <demo/_showcase/ansys-shapeopt/spaceclaim>` in the Tesseract Core repository.
 
 The Tesseract can be seen in action within our [rocket fin optimization showcase](https://si-tesseract.discourse.group/t/parametric-shape-optimization-of-rocket-fins-with-ansys-spaceclaim-and-pyansys/109).
 ```
@@ -35,7 +37,7 @@ spaceclaim
 ```
 
 ```{seealso}
-If this doesn't look familiar you can learn more about Tesseract basics [here](../../introduction/get-started.md).
+If this doesn't look familiar you can learn more about Tesseract basics [here](../../tutorials/get-started.md).
 ```
 
 To wrap SpaceClaim as a Tesseract, we will have to implement each of these files:
@@ -50,7 +52,7 @@ To wrap SpaceClaim as a Tesseract, we will have to implement each of these files
 **Tesseract without containerization** --- Tesseracts are most commonly used in the form of Docker containers. This is not a neccessary requirement, and any object that adheres to the Tesseract interface is a valid Tesseract (see also <project:#running-without-containers>).
 ```
 
-SpaceClaim is typically running directly on a Windows host machine, so instead of using Docker to build an image and spin up a container, we leverage the [Tesseract runtime CLI](../../api/tesseract-runtime-cli) to serve the SpaceClaim Tesseract on bare metal and expose SpaceClaim's functionality over HTTP.
+SpaceClaim is typically running directly on a Windows host machine, so instead of using Docker to build an image and spin up a container, we leverage the [Tesseract runtime CLI](../../reference/tesseract-runtime-cli) to serve the SpaceClaim Tesseract on bare metal and expose SpaceClaim's functionality over HTTP.
 
 So instead of using the more common `tesseract build`, we install and use the `tesseract-runtime` CLI application which will provide us an interface with the Tesseract:
 
@@ -58,9 +60,8 @@ So instead of using the more common `tesseract build`, we install and use the `t
 $ pip install tesseract-core[runtime]
 ```
 
-```{warning}
-Windows is officially only supported via Windows Subsystem for Linux (WSL), see [](#windows-support).
-Make sure to use an appropriate WSL setup when running into issues.
+```{note}
+Windows is natively supported. If you run into performance issues, consider using [WSL](https://docs.microsoft.com/en-us/windows/wsl/) to avoid Docker Desktop's virtualization overhead (see [](#windows-support)).
 ```
 
 Now with an a open port of your choice, and from within the Tesseract directory, we can execute:
@@ -222,4 +223,4 @@ Grid fin geometry shown with randomised beam locations.
 
 Invoking SpaceClaim via HTTP is only the start of the Tesseract journey.
 
-For example, by using finite difference approximations under the hood, we can make the resulting geometry [differentiable](../../misc/differentiable-programming.md) with respect to the design parameters. For a concrete demonstration of end-to-end shape optimization in action, please have a look at our [rocket fin optimization showcase](https://si-tesseract.discourse.group/t/parametric-shape-optimization-of-rocket-fins-with-ansys-spaceclaim-and-pyansys/109).
+For example, by using finite difference approximations under the hood, we can make the resulting geometry [differentiable](../../concepts/differentiable-programming.md) with respect to the design parameters. For a concrete demonstration of end-to-end shape optimization in action, please have a look at our [rocket fin optimization showcase](https://si-tesseract.discourse.group/t/parametric-shape-optimization-of-rocket-fins-with-ansys-spaceclaim-and-pyansys/109).

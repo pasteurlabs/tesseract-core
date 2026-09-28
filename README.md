@@ -5,7 +5,7 @@
 
 ### Tesseract Core
 
-Universal, autodiff-native software components for [Simulation Intelligence](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/misc/faq.html#what-is-simulation-intelligence) 📦
+Universal components for differentiable scientific computing 📦
 
 [Read the docs](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/) |
 [Showcases & tutorials](https://si-tesseract.discourse.group/c/showcase/11) |
@@ -122,14 +122,15 @@ with Tesseract.from_image("my-tesseract") as t:
 
 - **[Tesseract Core](https://github.com/pasteurlabs/tesseract-core)** — CLI, Python SDK, and runtime (this repo).
 - **[Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax)** — Embed Tesseracts as JAX primitives into end-to-end differentiable JAX programs.
+- **[Tesseract-Torch](https://github.com/pasteurlabs/tesseract-torch)** — Embed Tesseracts as PyTorch operators into end-to-end differentiable PyTorch programs.
 - **[Tesseract-Streamlit](https://github.com/pasteurlabs/tesseract-streamlit)** — Auto-generate interactive web apps from Tesseracts.
 
 ## Learn more
 
 - [Documentation](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/)
-- [Creating your first Tesseract](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/creating-tesseracts/create.html)
-- [Differentiable programming guide](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/introduction/differentiable-programming.html)
-- [Design patterns](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/creating-tesseracts/design-patterns.html)
+- [Creating your first Tesseract](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/tutorials/create.html)
+- [Differentiable programming guide](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/concepts/differentiable-programming.html)
+- [Design patterns](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/concepts/design-patterns.html)
 - [Example gallery](https://docs.pasteurlabs.ai/projects/tesseract-core/latest/content/examples/example_gallery.html)
 
 ## Citing Tesseract

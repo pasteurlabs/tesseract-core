@@ -1,36 +1,82 @@
-from types import SimpleNamespace
-from unittest.mock import Mock
+import functools
+import gc
+import os
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+from unittest.mock import MagicMock, Mock
 
 import numpy as np
 import orjson
+import pybase64
 import pytest
 import requests
 from pydantic import ValidationError
 
 from tesseract_core import Tesseract
+from tesseract_core.sdk import engine
+from tesseract_core.sdk.docker_client import Container
 from tesseract_core.sdk.tesseract import (
     HTTPClient,
     _decode_array,
     _encode_array,
     _tree_map,
 )
+from tests.sdk_tests.conftest import build_venv
+
+# Inputs for the dummy Tesseract, used by the from_source tests below.
+SUBPROCESS_INPUTS = {
+    "a": np.array([1.0, 2.0], dtype=np.float32),
+    "b": np.array([3.0, 4.0], dtype=np.float32),
+    "s": 2,
+}
+
+
+class FakeContainer(Container):
+    """Stands in for a served container, without touching docker.
+
+    A real `Container` subclass rather than a bare stub, so it satisfies both the
+    `ServedTesseract` interface and the `Container` that `container_info` returns
+    -- a member added to either without one here is an error, not a surprise in
+    production.
+    """
+
+    host_ip = "127.0.0.1"
+    host_port = "1234"
+
+    def __init__(self):
+        super().__init__(
+            id="container-id-123",
+            short_id="container-id",
+            name="container-id-123",
+            attrs={},
+        )
+        self.removals = []
+
+    def reload(self) -> None:
+        pass
+
+    def is_running(self) -> bool:
+        return True
+
+    def remove(self, v: bool = False, link: bool = False, force: bool = False) -> None:
+        self.removals.append(force)
+
+    def logs(self) -> bytes:
+        return b"fake container logs"
 
 
 @pytest.fixture
 def mock_serving(mocker):
-    fake_container = SimpleNamespace()
-    fake_container.host_port = 1234
-    fake_container.id = "container-id-123"
+    fake_container = FakeContainer()
 
     serve_mock = mocker.patch("tesseract_core.sdk.engine.serve")
     serve_mock.return_value = fake_container.id, fake_container
 
-    teardown_mock = mocker.patch("tesseract_core.sdk.engine.teardown")
-    logs_mock = mocker.patch("tesseract_core.sdk.engine.logs")
     return {
         "serve_mock": serve_mock,
-        "teardown_mock": teardown_mock,
-        "logs_mock": logs_mock,
+        "container": fake_container,
     }
 
 
@@ -39,16 +85,10 @@ def mock_clients(mocker):
     mocker.patch("tesseract_core.sdk.tesseract.HTTPClient.run_tesseract")
 
 
-def test_Tesseract_init():
-    # Instantiate with a url
-    with pytest.warns(
-        UserWarning, match="Direct instantiation of Tesseract is deprecated"
-    ):
-        t = Tesseract(url="localhost")
-
-    # Using it as a context manager should be a no-op
-    with t:
-        pass
+def test_Tesseract_init_raises():
+    # Direct instantiation is not allowed. Use one of the from_* constructors.
+    with pytest.raises(TypeError, match="cannot be instantiated directly"):
+        Tesseract(url="localhost")
 
 
 def test_Tesseract_from_url():
@@ -75,10 +115,144 @@ def test_Tesseract_from_tesseract_api(dummy_tesseract_location, dummy_tesseract_
     endpoints = set(t.available_endpoints)
     assert endpoints == all_endpoints
 
-    # should also work when importing the module
-    t = Tesseract.from_tesseract_api(dummy_tesseract_module)
-    endpoints = set(t.available_endpoints)
+    # should also work when importing the module, and as a context manager
+    with Tesseract.from_tesseract_api(dummy_tesseract_module) as t:
+        endpoints = set(t.available_endpoints)
     assert endpoints == all_endpoints
+
+
+def test_Tesseract_from_tesseract_api_does_not_leak_config_between_instances(
+    dummy_tesseract_module, tmp_path
+):
+    """Check that a second in-process Tesseract stays isolated from a prior one.
+
+    Each instance's configuration must be independent, the same way it
+    already is for from_image (#672). Construction must also leave the
+    process-global config exactly as it found it, since a Tesseract's own
+    config lives in its client's captured snapshot, not in global state.
+    """
+    from tesseract_core.runtime.config import snapshot_config
+
+    outer_snapshot = snapshot_config()
+
+    first_output = tmp_path / "first_output"
+    first_output.mkdir()
+    first = Tesseract.from_tesseract_api(
+        dummy_tesseract_module,
+        output_path=first_output,
+        output_format="json",
+    )
+    first_config = first._client._config_snapshot[0]
+    assert Path(first_config.output_path) == first_output
+    assert first_config.output_format == "json"
+
+    # A fresh instance that requests neither option must not see the first
+    # instance's explicit overrides leaking into its runtime config.
+    second = Tesseract.from_tesseract_api(dummy_tesseract_module)
+    second_config = second._client._config_snapshot[0]
+    assert Path(second_config.output_path) != first_output
+    assert second_config.output_format == "json+base64"  # from_tesseract_api's default
+
+    # Neither construction should have left a mark on the process-global
+    # config that anything outside these two instances could observe.
+    assert snapshot_config() == outer_snapshot
+
+
+def test_Tesseract_apply_runs_under_its_own_config_after_a_later_instance_is_built(
+    dummy_tesseract_module, tmp_path, mocker
+):
+    """A call on an earlier Tesseract runs under its own config, not the global one.
+
+    Simulates a second instance's config being globally active (e.g. because
+    it is mid-call) while the first instance's apply() runs. profiling is the
+    config value run_tesseract() reads via get_config(), so it shows directly
+    whether the wrong config leaks in.
+    """
+    from tesseract_core.runtime.config import override_config
+
+    first_output = tmp_path / "first_output"
+    first_output.mkdir()
+    first = Tesseract.from_tesseract_api(
+        dummy_tesseract_module,
+        output_path=first_output,
+        runtime_config={"profiling": True},
+    )
+
+    second = Tesseract.from_tesseract_api(dummy_tesseract_module)
+    assert second._client._config_snapshot[0].profiling is False
+    assert Path(second._client._config_snapshot[0].output_path) != first_output
+
+    # While second's own snapshot is (hypothetically) the active global
+    # config, e.g. because second.apply() is itself mid-call right now.
+    with override_config(second._client._config_snapshot):
+        profiler_spy = mocker.patch("tesseract_core.runtime.profiler.Profiler")
+        result = first.apply({"a": [1.0, 2.0], "b": [0.0, 0.0], "s": 1})
+        assert list(result["result"]) == [1.0, 2.0]
+
+        # first's own profiling=True setting reached the Profiler, not the
+        # profiling=False that's globally active for second's sake.
+        assert profiler_spy.call_args.kwargs["enabled"] is True
+
+        # The run went to first's own output dir, not second's.
+        run_dirs = list(first_output.glob("run_*"))
+        assert len(run_dirs) == 1
+
+
+def test_Tesseract_config_edit_from_within_endpoint_persists_across_calls(
+    dummy_tesseract_module, mocker
+):
+    """A config edit made inside an endpoint carries over to later calls.
+
+    This mirrors the containerized case, where the runtime config is a live
+    process global for the lifetime of the container.
+    """
+    from tesseract_core.runtime.config import get_config, update_config
+
+    tess = Tesseract.from_tesseract_api(dummy_tesseract_module)
+    assert tess._client._config_snapshot[0].profiling is False
+
+    original_apply = tess._client._endpoints["apply"]
+
+    @functools.wraps(original_apply)
+    def apply_that_enables_profiling(payload):
+        update_config(profiling=True)
+        return original_apply(payload)
+
+    tess._client._endpoints["apply"] = apply_that_enables_profiling
+
+    tess.apply({"a": [1.0, 2.0], "b": [0.0, 0.0], "s": 1})
+    assert tess._client._config_snapshot[0].profiling is True
+
+    # A subsequent call runs under the edited config: the profiler is enabled.
+    tess._client._endpoints["apply"] = original_apply
+    profiler_spy = mocker.patch("tesseract_core.runtime.profiler.Profiler")
+    tess.apply({"a": [1.0, 2.0], "b": [0.0, 0.0], "s": 1})
+    assert profiler_spy.call_args.kwargs["enabled"] is True
+
+    # The edit stayed contained to this instance's snapshot, not the global.
+    assert get_config().profiling is False
+
+
+def test_rejects_imported_module(dummy_tesseract_module):
+    """A module cannot be handed to another process, so say so clearly.
+
+    Tested against the helper rather than `from_source`, whose annotation lets
+    typeguard reject it first under the test suite -- but nothing enforces
+    annotations at runtime, so the check still has to exist.
+    """
+    from tesseract_core.sdk.tesseract import _subprocess_spawn_config
+
+    with pytest.raises(ValueError, match="already imported module was given"):
+        _subprocess_spawn_config(
+            dummy_tesseract_module,
+            input_path=None,
+            output_path=None,
+            output_format="json+base64",
+            gpu_transport=None,
+            runtime_config=None,
+            python_executable=None,
+            startup_timeout=1.0,
+        )
 
 
 def test_Tesseract_from_image(mock_serving, mock_clients):
@@ -102,6 +276,176 @@ def test_Tesseract_from_image(mock_serving, mock_clients):
         _ = t.available_endpoints
     finally:
         t.teardown()
+
+
+def test_container_info_returns_container_during_serve(mock_serving, mock_clients):
+    """``container_info()`` returns the container being served.
+
+    Each call delegates to ``Containers.get(container_name)``, so we
+    patch that lookup and verify the call site forwards the running
+    container's name through unchanged. Outside the serve window the
+    call must raise.
+    """
+    t = Tesseract.from_image("sometesseract:0.2.3")
+
+    # Pre-serve: not yet running, so the call raises.
+    with pytest.raises(RuntimeError, match="only available for served Tesseracts"):
+        t.container_info()
+
+    with t:
+        # The container we are already holding, rather than a fresh lookup
+        assert t.container_info() is mock_serving["container"]
+
+    # Post-teardown: container is gone, so the call raises again.
+    with pytest.raises(RuntimeError, match="only available for served Tesseracts"):
+        t.container_info()
+
+
+def test_container_info_raises_for_non_image_tesseract():
+    """Tesseracts created via from_url have no Docker container backing them."""
+    t = Tesseract.from_url("http://localhost:1234")
+    with pytest.raises(
+        RuntimeError, match=r"only available when using `Tesseract\.from_image"
+    ):
+        t.container_info()
+
+
+def test_container_info_unavailable(dummy_api_path):
+    tess = Tesseract.from_source(dummy_api_path, python_executable=sys.executable)
+    with pytest.raises(RuntimeError, match="from_image"):
+        tess.container_info()
+
+
+def test_del_tesseract_triggers_teardown(mock_serving):
+    """Deleting a served Tesseract must tear down its container via weakref.finalize."""
+    import gc
+
+    container = mock_serving["container"]
+    t = Tesseract.from_image("sometesseract:0.2.3")
+    t.serve()
+    assert container.removals == []
+
+    del t
+    gc.collect()
+    assert container.removals == [True]
+
+
+def test_garbage_collection_reaps_process(dummy_api_path):
+    """A forgotten Tesseract must not leave an orphaned process behind."""
+    import gc
+
+    tess = Tesseract.from_source(dummy_api_path, python_executable=sys.executable)
+    tess.serve()
+    # Hold the process, not the Tesseract, so it can still be collected.
+    process = tess._serve_context.process
+
+    del tess
+    gc.collect()
+
+    assert process.poll() is not None
+
+
+def test_del_tesseract_purges_auto_tempdir(mock_serving):
+    """The auto-created output tempdir is removed when the Tesseract is collected."""
+    import gc
+
+    t = Tesseract.from_image("sometesseract:0.2.3")
+    output_path = t._spawn_config["output_path"]
+    assert output_path.is_dir()
+
+    del t
+    gc.collect()
+    assert not output_path.exists()
+
+
+def test_auto_created_scratch_dirs_are_purged(dummy_api_path):
+    """What we made, we clean up -- unlike directories the caller passed in."""
+    tess = Tesseract.from_source(
+        dummy_api_path, python_executable=sys.executable, output_format="json+binref"
+    )
+    scratch = [
+        Path(tess._spawn_config["input_path"]),
+        Path(tess._spawn_config["output_path"]),
+    ]
+    assert all(d.exists() for d in scratch)
+
+    with tess:
+        tess.apply(SUBPROCESS_INPUTS)
+    del tess
+    gc.collect()
+
+    assert not any(d.exists() for d in scratch)
+
+
+def test_user_output_path_is_not_purged(mock_serving, tmp_path):
+    """A user-supplied output path must survive garbage collection of the Tesseract."""
+    import gc
+
+    t = Tesseract.from_image("sometesseract:0.2.3", output_path=tmp_path)
+    assert t._spawn_config["output_path"] == tmp_path.resolve()
+
+    del t
+    gc.collect()
+    assert tmp_path.is_dir()
+
+
+def test_given_scratch_dirs_are_left_alone(dummy_api_path, tmp_path):
+    given_in, given_out = tmp_path / "in", tmp_path / "out"
+    given_in.mkdir()
+    given_out.mkdir()
+
+    tess = Tesseract.from_source(
+        dummy_api_path,
+        python_executable=sys.executable,
+        input_path=given_in,
+        output_path=given_out,
+        output_format="json+binref",
+    )
+    with tess:
+        tess.apply(SUBPROCESS_INPUTS)
+    del tess
+    gc.collect()
+
+    assert given_in.exists() and given_out.exists()
+
+
+def test_tesseract_in_foreign_environment(dummy_api_path, tmp_path):
+    """A Tesseract runs under an interpreter the caller could not have used."""
+    ours = f"{sys.version_info.major}.{sys.version_info.minor}"
+    foreign = next(v for v in ("3.12", "3.11", "3.13") if v != ours)
+
+    env = os.environ.copy()
+    # An earlier in-process import may have put our sys.path on PYTHONPATH,
+    # which a different interpreter would inherit and pick our packages from.
+    env.pop("PYTHONPATH", None)
+
+    with tempfile.TemporaryDirectory(dir=tmp_path) as venv_dir:
+        interpreter = build_venv(Path(venv_dir) / "env", python=foreign)
+
+        reported = subprocess.run(
+            [
+                str(interpreter),
+                "-c",
+                "import sys; print('%d.%d' % sys.version_info[:2])",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            env=env,
+        ).stdout.strip()
+
+        # Guard the premise: same interpreter would prove nothing
+        assert reported == foreign
+        assert reported != ours
+
+        # Inside the temporary directory: the Tesseract runs on that
+        # interpreter, so it has to outlive neither more nor less than this.
+        with Tesseract.from_source(
+            dummy_api_path, python_executable=interpreter
+        ) as tess:
+            result = tess.apply(SUBPROCESS_INPUTS)
+
+    np.testing.assert_allclose(result["result"], [5.0, 8.0])
 
 
 def test_Tesseract_schema_method(mocker, mock_serving):
@@ -138,8 +482,13 @@ def test_serve_lifecycle(mock_serving, mock_clients):
         "memory": None,
         "input_path": None,
         "output_format": "json+base64",
+        # Unset by the caller: forwarded as None so serve() defers to
+        # runtime_config, falling back to "none" when neither sets it.
+        "gpu_transport": None,
         "docker_args": None,
         "runtime_config": None,
+        "skip_health_check": False,
+        "startup_timeout": engine.DEFAULT_STARTUP_TIMEOUT,
     }
 
     for key, expected_value in expected_kwargs.items():
@@ -150,13 +499,45 @@ def test_serve_lifecycle(mock_serving, mock_clients):
     # Check that no unexpected kwargs were passed
     assert call_kwargs.keys() == expected_kwargs.keys() | {"output_path"}
 
-    mock_serving["teardown_mock"].assert_called_with("container-id-123")
+    assert mock_serving["container"].removals == [True]
 
     # check that the same Tesseract obj cannot be used to instantiate two containers
     with pytest.raises(RuntimeError):
         with t:
             with t:
                 pass
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "expected"),
+    [
+        ({}, ()),
+        ({"gpu_transport": "none"}, ()),
+        ({"gpu_transport": "cuda_ipc"}, ("cuda_ipc",)),
+        ({"runtime_config": {"gpu_transport": "cuda_ipc"}}, ("cuda_ipc",)),
+    ],
+)
+def test_supported_gpu_transports_served(mock_serving, mock_clients, kwargs, expected):
+    t = Tesseract.from_image("sometesseract:0.2.3", **kwargs)
+
+    # The transport is a property of the client, which only exists once served
+    with pytest.raises(RuntimeError, match="context manager"):
+        _ = t.supported_gpu_transports
+
+    with t:
+        assert t.supported_gpu_transports == expected
+
+
+def test_supported_gpu_transports_unserved(dummy_tesseract_module):
+    # A remote Tesseract is reached without any device transport configured
+    assert Tesseract.from_url("localhost").supported_gpu_transports == ()
+
+    # In-process Tesseracts share memory with the caller, so there is nothing to
+    # transport -- even when a GPU transport is configured.
+    local = Tesseract.from_tesseract_api(
+        dummy_tesseract_module, gpu_transport="cuda_ipc"
+    )
+    assert local.supported_gpu_transports == ()
 
 
 @pytest.mark.parametrize(
@@ -180,12 +561,76 @@ def test_HTTPClient_run_tesseract(mocker, run_id):
 
     assert out == {"result": [4, 4, 4]}
     expected_params = {} if run_id is None else {"run_id": run_id}
+    # timeout is omitted (not passed as None) so that passing the session to a
+    # starlette TestClient does not trigger a StarletteDeprecationWarning.
     mocked_request.assert_called_with(
         method="POST",
         url="http://somehost/apply",
         data=orjson.dumps({"inputs": {"a": 1}}),
         params=expected_params,
     )
+
+
+def test_HTTPClient_timeout_passed_to_request(mocker):
+    """HTTPClient passes its timeout to every requests.Session.request call."""
+    mock_response = mocker.Mock()
+    mock_response.content = b'{"status": "ok"}'
+    mock_response.ok = True
+    mock_response.status_code = 200
+
+    mocked_request = mocker.patch(
+        "requests.Session.request",
+        return_value=mock_response,
+    )
+
+    client = HTTPClient("somehost", timeout=42)
+    client.run_tesseract("health")
+
+    mocked_request.assert_called_with(
+        method="GET",
+        url="http://somehost/health",
+        data=b"null",
+        params={},
+        timeout=42,
+    )
+
+
+def test_HTTPClient_default_timeout(mocker):
+    """HTTPClient has no timeout by default."""
+    mock_response = mocker.Mock()
+    mock_response.content = b'{"status": "ok"}'
+    mock_response.ok = True
+    mock_response.status_code = 200
+
+    mocked_request = mocker.patch(
+        "requests.Session.request",
+        return_value=mock_response,
+    )
+
+    client = HTTPClient("somehost")
+    client.run_tesseract("health")
+
+    # The timeout kwarg is omitted entirely when unset (equivalent to None for
+    # requests) to avoid a StarletteDeprecationWarning with a TestClient session.
+    assert "timeout" not in mocked_request.call_args.kwargs
+
+
+def test_HTTPClient_timeout_tuple(mocker):
+    """HTTPClient accepts a (connect, read) timeout tuple."""
+    mock_response = mocker.Mock()
+    mock_response.content = b'{"status": "ok"}'
+    mock_response.ok = True
+    mock_response.status_code = 200
+
+    mocked_request = mocker.patch(
+        "requests.Session.request",
+        return_value=mock_response,
+    )
+
+    client = HTTPClient("somehost", timeout=(5, 300))
+    client.run_tesseract("health")
+
+    assert mocked_request.call_args.kwargs["timeout"] == (5, 300)
 
 
 def test_HTTPClient_run_tesseract_raises_validation_error(mocker):
@@ -240,16 +685,16 @@ def test_HTTPClient_run_tesseract_raises_validation_error(mocker):
 
 
 @pytest.mark.parametrize(
-    "b64, expected_data",
+    "encoding, expected_data",
     [
-        (True, {"buffer": "AACAPwAAAEAAAEBA", "encoding": "base64"}),
-        (False, {"buffer": [1.0, 2.0, 3.0], "encoding": "raw"}),
+        ("base64", {"buffer": "AACAPwAAAEAAAEBA", "encoding": "base64"}),
+        ("raw", {"buffer": [1.0, 2.0, 3.0], "encoding": "raw"}),
     ],
 )
-def test_encode_array(b64, expected_data):
+def test_encode_array(encoding, expected_data):
     a = np.array([1.0, 2.0, 3.0], dtype="float32")
 
-    encoded = _encode_array(a, b64=b64)
+    encoded = _encode_array(a, encoding=encoding)
 
     assert encoded["shape"] == (3,)
     assert encoded["dtype"] == "float32"
@@ -295,7 +740,7 @@ def test_decode_array_various_dtypes(dtype):
         original = np.array([1, 2, 3], dtype=dtype)
 
     # Encode using _encode_array with base64
-    encoded = _encode_array(original, b64=True)
+    encoded = _encode_array(original, encoding="base64")
 
     # Decode back
     decoded = _decode_array(encoded)
@@ -303,6 +748,395 @@ def test_decode_array_various_dtypes(dtype):
     # Verify equivalence
     np.testing.assert_array_equal(decoded, original, strict=True)
     assert decoded.dtype == original.dtype
+
+
+@pytest.mark.parametrize("encoding", ["binref", "base64"])
+def test_decode_array_lz4(encoding, tmp_path):
+    from tesseract_core.runtime.array_encoding import _compress
+
+    arr = np.array([1.0, 2.0, 3.0], dtype="float32")
+    blob = _compress(arr.tobytes(), "lz4")
+
+    if encoding == "binref":
+        bin_file = tmp_path / "data.bin"
+        bin_file.write_bytes(blob)
+        buffer = f"data.bin:0:{len(blob)}"
+        output_path = tmp_path
+    else:
+        buffer = pybase64.b64encode_as_string(blob)
+        output_path = None
+
+    encoded = {
+        "shape": (3,),
+        "dtype": "float32",
+        "data": {"buffer": buffer, "encoding": encoding, "compression": "lz4"},
+    }
+    decoded = _decode_array(encoded, output_path=output_path)
+    np.testing.assert_array_equal(decoded, arr, strict=True)
+
+
+def _binref_encoded(bufferpath):
+    """Build a json+binref encoded-array dict pointing at ``bufferpath``."""
+    return {
+        "shape": (2,),
+        "dtype": "float64",
+        "data": {"buffer": f"{bufferpath}:0", "encoding": "binref"},
+    }
+
+
+def test_decode_array_binref_rejects_path_escape(tmp_path):
+    """A binref reference from the server must not escape output_path.
+
+    Each vector below is a distinct way to try to break out of output_path,
+    including absolute paths, ``..`` traversal, a prefix-sibling directory, and
+    symlinks pointing outside.
+    """
+    output_path = tmp_path / "output_dir"
+    output_path.mkdir()
+
+    # Secrets living outside the sandbox.
+    secret = tmp_path / "secret.bin"
+    secret.write_bytes(b"\x00" * 16)
+    outside_dir = tmp_path / "etc"
+    outside_dir.mkdir()
+    (outside_dir / "passwd").write_bytes(b"\x00" * 16)
+
+    # A sibling dir whose name shares output_dir's prefix -- a naive
+    # ``str.startswith`` containment check would wrongly allow this.
+    sibling = tmp_path / "output_dir_evil"
+    sibling.mkdir()
+    (sibling / "x.bin").write_bytes(b"\x00" * 16)
+
+    # Symlinks that live inside the sandbox but point outside it. resolve()
+    # must follow them so the guard sees the real out-of-sandbox target.
+    os.symlink(outside_dir, output_path / "link_to_dir")
+    os.symlink(secret, output_path / "link_to_file")
+
+    escape_vectors = [
+        str(secret),  # absolute path
+        str(outside_dir / "passwd"),  # absolute, /etc/passwd style
+        "../secret.bin",  # single ..
+        "../../../../../../etc/passwd",  # deep ..
+        "subdir/../../secret.bin",  # .. that nets outside
+        "..",  # parent of the sandbox
+        "../output_dir_evil/x.bin",  # prefix-sibling trick
+        "link_to_dir/passwd",  # traverse a symlinked dir to outside
+        "link_to_file",  # a symlink file pointing outside
+    ]
+
+    for bufferpath in escape_vectors:
+        encoded = _binref_encoded(bufferpath)
+        with pytest.raises(ValueError, match="escapes output_path"):
+            _decode_array(encoded, output_path=output_path)
+
+
+def test_decode_array_binref_rejects_missing_output_path():
+    """A json+binref response cannot be decoded without a sandbox to confine it."""
+    encoded = _binref_encoded("/etc/passwd")
+    with pytest.raises(ValueError, match="output_path must be set"):
+        _decode_array(encoded, output_path=None)
+
+
+def test_decode_array_binref_allows_legitimate_paths(tmp_path):
+    """Containment must not break legitimate in-directory reads.
+
+    A ``..`` that resolves back inside output_path, and an output_path reached
+    via a symlink, are both safe and must still decode.
+    """
+    real_output = tmp_path / "real_output"
+    real_output.mkdir()
+    payload = np.array([1.0, 2.0], dtype="float64")
+    (real_output / "data.bin").write_bytes(payload.tobytes())
+
+    # Plain in-sandbox read.
+    decoded = _decode_array(_binref_encoded("data.bin"), output_path=real_output)
+    np.testing.assert_array_equal(decoded, payload, strict=True)
+
+    # A .. that resolves back inside the sandbox.
+    decoded = _decode_array(_binref_encoded("sub/../data.bin"), output_path=real_output)
+    np.testing.assert_array_equal(decoded, payload, strict=True)
+
+    # output_path itself reached via a symlink must still work.
+    linked_output = tmp_path / "linked_output"
+    os.symlink(real_output, linked_output)
+    decoded = _decode_array(_binref_encoded("data.bin"), output_path=linked_output)
+    np.testing.assert_array_equal(decoded, payload, strict=True)
+
+
+def test_binref_pool_checkout_reuses_slot(tmp_path):
+    from tesseract_core.sdk.binref import BinrefWritePool
+
+    pool = BinrefWritePool(tmp_path, max_slots=4)
+    try:
+        arr = np.array([1.0, 2.0, 3.0], dtype="float64")
+        slot = pool.checkout(arr.nbytes)
+        assert slot is not None
+        assert slot.path.exists()
+        pool.checkin(slot)
+
+        # Checking out the same size again should reuse the same slot, not
+        # allocate a new one.
+        slot2 = pool.checkout(arr.nbytes)
+        assert slot2 is slot
+    finally:
+        pool.close()
+
+
+def test_binref_pool_grows_slot_for_larger_array(tmp_path):
+    from tesseract_core.sdk.binref import BinrefWritePool
+
+    pool = BinrefWritePool(tmp_path, max_slots=4)
+    try:
+        small = np.array([1.0, 2.0], dtype="float64")
+        slot = pool.checkout(small.nbytes)
+        original_capacity = slot.capacity
+        pool.checkin(slot)
+
+        big = np.zeros(10_000, dtype="float64")
+        slot2 = pool.checkout(big.nbytes)
+        assert slot2 is slot
+        # Growth happens lazily in write(), not in checkout() itself.
+        slot2.write(memoryview(big))
+        assert slot2.capacity >= big.nbytes
+        assert slot2.capacity > original_capacity
+    finally:
+        pool.close()
+
+
+def test_binref_pool_falls_back_when_slots_exhausted(tmp_path):
+    from tesseract_core.sdk.binref import BinrefWritePool
+
+    pool = BinrefWritePool(tmp_path, max_slots=2)
+    try:
+        arr = np.array([1.0, 2.0], dtype="float64")
+        slot_a = pool.checkout(arr.nbytes)
+        slot_b = pool.checkout(arr.nbytes)
+        assert slot_a is not None
+        assert slot_b is not None
+
+        # Both slots are checked out (never returned), so a third checkout
+        # must signal fallback rather than exceeding max_slots.
+        assert pool.checkout(arr.nbytes) is None
+
+        pool.checkin(slot_a)
+        # Now that a slot was returned, a checkout should succeed again.
+        assert pool.checkout(arr.nbytes) is slot_a
+    finally:
+        pool.close()
+
+
+def test_binref_pool_falls_back_when_over_byte_cap(tmp_path):
+    from tesseract_core.sdk.binref import BinrefWritePool
+
+    small = np.array([1.0, 2.0], dtype="float64")
+    pool = BinrefWritePool(tmp_path, max_slots=4, max_bytes=small.nbytes)
+    try:
+        slot = pool.checkout(small.nbytes)
+        assert slot is not None
+        pool.checkin(slot)
+
+        # A request that would exceed max_bytes by growing the existing slot
+        # must fall back, not silently exceed the cap.
+        big = np.zeros(10_000, dtype="float64")
+        assert pool.checkout(big.nbytes) is None
+    finally:
+        pool.close()
+
+
+def test_binref_pool_close_removes_slot_files(tmp_path):
+    from tesseract_core.sdk.binref import BinrefWritePool
+
+    pool = BinrefWritePool(tmp_path, max_slots=4)
+    arr = np.array([1.0, 2.0], dtype="float64")
+    slot = pool.checkout(arr.nbytes)
+    assert slot.path.exists()
+
+    pool.close()
+    assert not slot.path.exists()
+
+
+def testencode_array_binref_pooled_writes_and_decodes_correctly(tmp_path):
+    from tesseract_core.sdk.binref import (
+        BinrefWritePool,
+        encode_array_binref_pooled,
+    )
+
+    pool = BinrefWritePool(tmp_path, max_slots=4)
+    try:
+        arr = np.array([1.0, 2.0, 3.0], dtype="float64")
+        checked_out = []
+        written_files = []
+        encoded = encode_array_binref_pooled(arr, pool, checked_out, written_files)
+
+        assert encoded["data"]["encoding"] == "binref"
+        assert len(checked_out) == 1
+        # A pool hit must not fall back to a plain written file.
+        assert written_files == []
+
+        decoded = _decode_array(encoded, output_path=tmp_path)
+        np.testing.assert_array_equal(decoded, arr, strict=True)
+    finally:
+        pool.close()
+
+
+@pytest.mark.parametrize("lazy", [False, True])
+def testencode_array_binref_pooled_handles_empty_array(tmp_path, lazy):
+    """An empty array carries no payload and must not be routed through a slot.
+
+    A zero-length buffer cannot be memory-mapped, so the pool encode must fall
+    back to a plain (empty) file rather than checking out a warm slot, and both
+    the eager and lazy (mmap) decode paths must return an empty array.
+    """
+    from tesseract_core.sdk.binref import (
+        BinrefWritePool,
+        encode_array_binref_pooled,
+    )
+
+    pool = BinrefWritePool(tmp_path, max_slots=4)
+    try:
+        arr = np.array([], dtype="float64")
+        checked_out = []
+        written_files = []
+        encoded = encode_array_binref_pooled(arr, pool, checked_out, written_files)
+
+        assert encoded["shape"] == (0,)
+        # No warm slot: an empty buffer goes through the plain file writer.
+        assert checked_out == []
+        assert len(written_files) == 1
+
+        decoded = _decode_array(encoded, output_path=tmp_path, lazy=lazy)
+        np.testing.assert_array_equal(decoded, arr, strict=True)
+    finally:
+        pool.close()
+        for f in written_files:
+            f.unlink(missing_ok=True)
+
+
+def testencode_array_binref_pooled_falls_back_and_decodes_correctly(tmp_path):
+    from tesseract_core.sdk.binref import (
+        BinrefWritePool,
+        encode_array_binref_pooled,
+    )
+
+    pool = BinrefWritePool(tmp_path, max_slots=1)
+    try:
+        arr_a = np.array([1.0, 2.0], dtype="float64")
+        arr_b = np.array([3.0, 4.0, 5.0], dtype="float64")
+        checked_out = []
+        written_files = []
+
+        encoded_a = encode_array_binref_pooled(arr_a, pool, checked_out, written_files)
+        # Pool is now exhausted (max_slots=1, slot not checked in yet), so the
+        # second encode must fall back to a plain file write.
+        encoded_b = encode_array_binref_pooled(arr_b, pool, checked_out, written_files)
+
+        assert len(checked_out) == 1
+        assert len(written_files) == 1
+
+        decoded_a = _decode_array(encoded_a, output_path=tmp_path)
+        decoded_b = _decode_array(encoded_b, output_path=tmp_path)
+        np.testing.assert_array_equal(decoded_a, arr_a, strict=True)
+        np.testing.assert_array_equal(decoded_b, arr_b, strict=True)
+    finally:
+        pool.close()
+        for f in written_files:
+            f.unlink(missing_ok=True)
+
+
+def test_binref_pool_lazy_decode_is_readonly_view(tmp_path):
+    from tesseract_core.sdk.binref import (
+        BinrefWritePool,
+        encode_array_binref_pooled,
+    )
+
+    if os.name != "posix":
+        pytest.skip("the pool and its mmap decode are POSIX-only")
+
+    pool = BinrefWritePool(tmp_path, max_slots=4)
+    try:
+        arr = np.array([1.0, 2.0, 3.0], dtype="float64")
+        checked_out = []
+        written_files = []
+        encoded = encode_array_binref_pooled(arr, pool, checked_out, written_files)
+
+        decoded = _decode_array(encoded, output_path=tmp_path, lazy=True)
+        np.testing.assert_array_equal(decoded, arr, strict=True)
+        assert not decoded.flags.writeable
+        with pytest.raises(ValueError):
+            decoded[0] = 99.0
+    finally:
+        pool.close()
+
+
+def test_binref_pool_lazy_decode_survives_unlink(tmp_path):
+    from tesseract_core.sdk.binref import (
+        BinrefWritePool,
+        encode_array_binref_pooled,
+    )
+
+    if os.name != "posix":
+        pytest.skip("the pool and its mmap decode are POSIX-only")
+
+    pool = BinrefWritePool(tmp_path, max_slots=4)
+    try:
+        arr = np.array([1.0, 2.0, 3.0], dtype="float64")
+        checked_out = []
+        written_files = []
+        encoded = encode_array_binref_pooled(arr, pool, checked_out, written_files)
+
+        mapped_paths = []
+        decoded = _decode_array(
+            encoded, output_path=tmp_path, lazy=True, mapped_paths=mapped_paths
+        )
+        # The lazy decode records the backing file so the caller can unlink it.
+        assert len(mapped_paths) == 1
+        mapped = mapped_paths[0]
+        assert mapped.exists()
+
+        # After unlinking, the mmap keeps the inode alive: the view stays valid
+        # and read-only, and the disk space is reclaimed.
+        mapped.unlink()
+        assert not mapped.exists()
+        np.testing.assert_array_equal(decoded, arr, strict=True)
+        assert not decoded.flags.writeable
+    finally:
+        pool.close()
+
+
+def test_HTTPClient_binref_pool_only_created_with_input_path(tmp_path):
+    from tesseract_core.sdk.tesseract import HTTPClient
+
+    # experimental_binref_pool=True without an input_path is meaningless (no
+    # mounted dir to put pooled files in), so no pool should be created.
+    client_no_input_path = HTTPClient("localhost", experimental_binref_pool=True)
+    assert client_no_input_path._binref_pool is None
+
+    client_with_input_path = HTTPClient(
+        "localhost", input_path=tmp_path, experimental_binref_pool=True
+    )
+    assert client_with_input_path._binref_pool is not None
+    client_with_input_path.close()
+    assert client_with_input_path._binref_pool is None
+
+
+def test_HTTPClient_close_is_idempotent(tmp_path):
+    from tesseract_core.sdk.tesseract import HTTPClient
+
+    client = HTTPClient("localhost", input_path=tmp_path, experimental_binref_pool=True)
+    client.close()
+    # Closing twice must not raise (e.g. via context-manager __exit__ after
+    # an explicit close).
+    client.close()
+    assert client._binref_pool is None
+
+
+def test_Tesseract_from_url_closes_session_on_exit(mocker):
+    """Leaving the context of a from_url Tesseract closes its HTTP session."""
+    t = Tesseract.from_url("http://localhost:1234")
+    close = mocker.spy(t._client._session, "close")
+    with t:
+        pass
+    close.assert_called_once()
 
 
 def test_tree_map():
@@ -313,7 +1147,7 @@ def test_tree_map():
         "f": "hello",
     }
 
-    encoded = _tree_map(_encode_array, tree, is_leaf=lambda x: hasattr(x, "shape"))
+    encoded = _tree_map(_encode_array, tree, is_leaf=lambda x: hasattr(x, "__array__"))
 
     assert encoded == {
         "a": [10, 20],
@@ -336,6 +1170,54 @@ def test_tree_map():
         },
         "f": "hello",
     }
+
+
+class _ForeignDtype:
+    """Mimics torch.float32 — has no .name attribute unlike numpy dtypes."""
+
+    pass
+
+
+class _ForeignTensor:
+    """Mimics a torch tensor: has .shape, a non-numpy dtype, and supports __array__."""
+
+    def __init__(self, data):
+        self._data = np.array(data, dtype=np.float32)
+        self.shape = self._data.shape
+        self.dtype = _ForeignDtype()
+
+    def __array__(self, dtype=None, copy=None):
+        if dtype is not None:
+            return self._data.astype(dtype)
+        return self._data
+
+
+def test_encode_array_foreign_tensor():
+    """_encode_array should handle non-numpy array-likes (e.g. torch tensors)."""
+    tensor = _ForeignTensor([1.0, 2.0, 3.0])
+    encoded = _encode_array(tensor)
+
+    assert encoded["shape"] == (3,)
+    assert encoded["dtype"] == "float32"
+    assert encoded["data"]["encoding"] == "base64"
+
+    decoded = _decode_array(encoded)
+    np.testing.assert_array_equal(decoded, [1.0, 2.0, 3.0])
+
+
+def test_tree_map_with_foreign_tensor():
+    """tree_map + _encode_array should work when payloads contain non-numpy arrays."""
+    tensor = _ForeignTensor([4.0, 5.0])
+    tree = {"inputs": {"x": tensor, "flag": True}}
+
+    encoded = _tree_map(_encode_array, tree, is_leaf=lambda x: hasattr(x, "__array__"))
+
+    assert encoded["inputs"]["flag"] is True
+    assert encoded["inputs"]["x"]["shape"] == (2,)
+    assert encoded["inputs"]["x"]["dtype"] == "float32"
+
+    decoded = _decode_array(encoded["inputs"]["x"])
+    np.testing.assert_array_equal(decoded, [4.0, 5.0])
 
 
 def test_test_endpoint_success_local(dummy_tesseract_package):
@@ -496,3 +1378,64 @@ class TestHTTPClientValidationErrors:
         err = exc_info.value.errors()[0]
         assert err["type"] == "array_decode_error"
         assert err["loc"] == ("body", "inputs", "a")
+
+
+def test_stale_keepalive_connection_is_handled(monkeypatch):
+    """HTTPClient retries once when session.request raises ConnectionError.
+
+    Tests the contract directly by injecting a one-shot ConnectionError at the
+    requests.Session.request layer, avoiding the brittleness of real-socket
+    timing (which differs across OS / Python version / urllib3 version) that an
+    integration-style test would depend on.
+    """
+    client = HTTPClient("http://127.0.0.1:1")
+
+    call_count = 0
+    response = MagicMock()
+    response.status_code = 200
+    response.ok = True
+    response.content = b'{"status": "ok"}'
+
+    def _fail_once_then_succeed(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise requests.ConnectionError("simulated stale keep-alive")
+        return response
+
+    monkeypatch.setattr(client._session, "request", _fail_once_then_succeed)
+
+    result = client._request("health")
+
+    assert result == {"status": "ok"}
+    assert call_count == 2
+
+
+def test_HTTPClient_timeout_fires(free_port):
+    """HTTPClient raises a timeout error when the server takes too long to respond."""
+    import http.server
+    import socketserver
+    import threading
+
+    shutdown = threading.Event()
+
+    class SlowHandler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            shutdown.wait(timeout=10)
+
+        def log_message(self, *args):
+            pass  # suppress stderr noise
+
+    httpd = socketserver.TCPServer(("127.0.0.1", free_port), SlowHandler)
+    httpd.daemon_threads = True
+    server_thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    server_thread.start()
+
+    try:
+        client = HTTPClient(f"http://127.0.0.1:{free_port}", timeout=0.5)
+        with pytest.raises(requests.exceptions.ReadTimeout):
+            client._request("health")
+    finally:
+        shutdown.set()
+        httpd.shutdown()
+        server_thread.join(timeout=5)

@@ -1,11 +1,14 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import ctypes
 import json
 import os
 import random
+import shutil
 import string
 import subprocess
+import sys
 import time
 from pathlib import Path
 from shutil import copytree
@@ -77,6 +80,36 @@ def pytest_collection_modifyitems(config, items):
             if dir_mapping[item] == "endtoend_tests":
                 item.add_marker(pytest.mark.skip(reason=skip_reason))
 
+    # Auto-skip GPU-marked tests when no CUDA GPU is present, so a full test run
+    # on a GPU-less machine (including CI) is a benign skip rather than a failure
+    # and does not depend on passing `-m "not gpu"`.
+    if not _has_cuda_gpu():
+        skip_gpu = pytest.mark.skip(reason="No CUDA GPU available")
+        for item in items:
+            if item.get_closest_marker("gpu") is not None:
+                item.add_marker(skip_gpu)
+
+
+def _has_cuda_gpu() -> bool:
+    """Whether a CUDA GPU is visible on this host (best effort, via nvidia-smi).
+
+    Probed through ``nvidia-smi`` rather than importing CuPy/torch so the check
+    stays dependency-free and cheap on GPU-less runners.
+    """
+    if not shutil.which("nvidia-smi"):
+        return False
+    try:
+        return (
+            subprocess.run(
+                ["nvidia-smi", "-L"],
+                capture_output=True,
+                timeout=10,
+            ).returncode
+            == 0
+        )
+    except Exception:
+        return False
+
 
 @pytest.fixture(scope="session", autouse=True)
 def tesseract_output_dir(tmp_path_factory):
@@ -143,6 +176,43 @@ def dummy_docker_file(tmp_path):
     return dockerfile_path
 
 
+@pytest.fixture(scope="session", autouse=True)
+def use_this_environments_console_scripts():
+    """Make shelled-out `tesseract`/`tesseract-runtime` this environment's.
+
+    Several tests invoke the console scripts as real subprocesses, which is the
+    point -- it covers the entry points, unlike invoking a module. But a bare
+    name is resolved through PATH, and anyone with tesseract-core installed
+    globally (as a uv tool or pipx app) has that copy first, with its own
+    site-packages. The tests then exercise code that is not the code under test.
+    In CI everything runs under `uv run`, which puts the project environment
+    first, so this only ever bites locally -- and intermittently, since loading
+    a tesseract_api.py sets PYTHONPATH as a side effect, which sometimes lends
+    the shadowing copy enough of this environment to work.
+
+    Applied to os.environ for the whole session rather than offered as an opt-in
+    fixture, so that tests added later cannot forget it. The failure it prevents
+    is silent, so it must not be possible to omit.
+    """
+    scripts_dir = Path(sys.executable).parent
+    if not list(scripts_dir.glob("tesseract-runtime*")):
+        # Prepending a directory that lacks the scripts is not a harmless no-op:
+        # PATH lookup falls straight through to the next entry, which is the
+        # globally installed copy this exists to avoid.
+        raise RuntimeError(
+            f"No tesseract-runtime console script in {scripts_dir}, so PATH would "
+            "fall through to any other copy on it. Install tesseract-core into "
+            "the environment running the tests (e.g. `uv sync`)."
+        )
+
+    original_path = os.environ["PATH"]
+    os.environ["PATH"] = f"{scripts_dir}{os.pathsep}{original_path}"
+    try:
+        yield
+    finally:
+        os.environ["PATH"] = original_path
+
+
 @pytest.fixture(scope="session")
 def dummy_tesseract_location():
     """Return the dummy tesseract location."""
@@ -181,6 +251,65 @@ def free_port():
     with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
+
+
+@pytest.fixture
+def serve_in_subprocess():
+    """Serve a Tesseract runtime over HTTP in a subprocess.
+
+    Yields a context manager ``serve(api_file, port, num_workers=1,
+    timeout=30.0, env=None)`` that starts the server, waits for ``/health``, and
+    yields its base URL. ``env`` supplies extra ``TESSERACT_*`` variables (e.g.
+    to set the output format or GPU transport), layered on the current
+    environment. The server is torn down and its output printed on exit.
+    """
+    from contextlib import contextmanager
+
+    @contextmanager
+    def serve(api_file, port, num_workers=1, timeout=30.0, env=None):
+        proc = None
+        try:
+            proc = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-c",
+                    "from tesseract_core.runtime.serve import serve; "
+                    f"serve(host='localhost', port={port}, num_workers={num_workers})",
+                ],
+                env={**os.environ, "TESSERACT_API_PATH": str(api_file), **(env or {})},
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                if proc.poll() is not None:
+                    out, err = proc.communicate()
+                    raise RuntimeError(
+                        f"server exited early (code {proc.returncode}):\n"
+                        f"{out.decode()}{err.decode()}"
+                    )
+                try:
+                    resp = requests.get(f"http://localhost:{port}/health")
+                except requests.exceptions.ConnectionError:
+                    time.sleep(0.1)
+                else:
+                    if resp.status_code == 200:
+                        break
+            else:
+                raise TimeoutError("Server did not start in time")
+
+            yield f"http://localhost:{port}"
+
+        finally:
+            if proc is not None:
+                proc.terminate()
+                stdout, stderr = proc.communicate()
+                print(stdout.decode())
+                print(stderr.decode())
+                proc.wait(timeout=5)
+
+    return serve
 
 
 @pytest.fixture(scope="module")
@@ -355,7 +484,7 @@ def dummy_network_name():
 def mocked_docker(monkeypatch):
     """Mock CLIDockerClient class."""
     import tesseract_core.sdk.docker_client
-    from tesseract_core.sdk import engine
+    from tesseract_core.sdk import engine, serving
     from tesseract_core.sdk.docker_client import Container, Image, NotFound
 
     class MockedContainer(Container):
@@ -364,9 +493,9 @@ def mocked_docker(monkeypatch):
         def __init__(self, return_args: dict):
             self.return_args = return_args
 
-        def wait(self, **kwargs: Any):
+        def wait(self, timeout: float | None = None) -> dict:
             """Mock wait method for Container."""
-            return {"StatusCode": 0, "Error": None}
+            return {"StatusCode": 0}
 
         @property
         def name(self):
@@ -388,9 +517,9 @@ def mocked_docker(monkeypatch):
                 return res_stdout
             return res_stderr
 
-        def remove(self, **kwargs: Any):
+        def remove(self, v: bool = False, link: bool = False, force: bool = False):
             """Mock remove method for Container."""
-            pass
+            return ""
 
     class MockedDocker:
         """Mock CLIDockerClient class."""
@@ -491,9 +620,138 @@ def mocked_docker(monkeypatch):
             return type("Response", (), {"status_code": 200, "json": lambda: {}})()
         raise NotImplementedError(f"Mocked get request to {url} not implemented")
 
-    monkeypatch.setattr(engine.requests, "get", hacked_get)
+    monkeypatch.setattr(serving.requests, "get", hacked_get)
 
     yield mock_instance
+
+
+@pytest.fixture
+def mocked_cuda(monkeypatch):
+    """Mock the CUDA runtime so cuda_ipc encode/decode runs without a GPU.
+
+    Mirrors ``mocked_docker``: rather than reaching into ctypes internals, it
+    swaps the plain-Python functions in ``tesseract_core.runtime.cuda.api``
+    for an in-process fake, so the ``cuda_ipc`` encoding *policy* exercises its
+    real module boundary. Device memory is modelled with Python ``bytearray``s
+    keyed by pointer, and every primitive call is recorded so tests can assert
+    on the orchestration (which pointer the handle was taken on, that the mapping
+    was closed, the copy synchronised before close, etc.).
+
+    Yields a ``FakeCuda`` whose ``.calls`` dict holds the recorded call log and
+    whose ``.device_bytes`` / ``.reject_ipc_below`` attributes let a test seed
+    device-to-host reads or force the VMM staging fallback.
+    """
+    from tesseract_core.runtime.cuda import api as cuda_api
+    from tesseract_core.runtime.cuda import ipc as cuda_ipc
+
+    IPC_HANDLE_SIZE = cuda_api.IPC_HANDLE_SIZE
+
+    class FakeCuda:
+        def __init__(self) -> None:
+            self.calls: dict[str, list] = {
+                "set_device": [],
+                "malloc": [],
+                "free": [],
+                "memcpy_d2d": [],
+                "memcpy_d2h": [],
+                "sync": [],
+                "alloc_base": [],
+                "get_handle": [],
+                "open": [],
+                "close": [],
+                "stage": [],
+            }
+            # Simulated device memory, keyed by device pointer.
+            self._buffers: dict[int, bytearray] = {}
+            self._next_ptr = 0xD000
+            # Bytes returned by the next device->host copy, if a test seeds them.
+            self.device_bytes: bytes | None = None
+            # Force ipc_get_mem_handle to reject a pointer (simulating a
+            # VMM/pool-backed allocation) unless it is a staging buffer.
+            self.reject_non_staging_ipc = False
+            self._staging_ptrs: set[int] = set()
+
+        # -- device / memory management ---------------------------------
+
+        def set_device(self, device: int) -> None:
+            self.calls["set_device"].append(device)
+
+        def malloc(self, nbytes: int) -> int:
+            ptr = self._next_ptr
+            self._next_ptr += 0x1000
+            self._buffers[ptr] = bytearray(nbytes)
+            self.calls["malloc"].append(nbytes)
+            return ptr
+
+        def free(self, device_ptr: int) -> None:
+            if not device_ptr:
+                return
+            self.calls["free"].append(device_ptr)
+            self._buffers.pop(device_ptr, None)
+            self._staging_ptrs.discard(device_ptr)
+
+        def memcpy_device_to_device(self, dst: int, src: int, nbytes: int) -> None:
+            self.calls["memcpy_d2d"].append((dst, src, nbytes))
+
+        def memcpy_device_to_host(self, host_ptr: int, src: int, nbytes: int) -> None:
+            self.calls["memcpy_d2h"].append((host_ptr, src, nbytes))
+            if self.device_bytes is not None:
+                ctypes.memmove(host_ptr, self.device_bytes, nbytes)
+
+        def device_synchronize(self) -> None:
+            self.calls["sync"].append(True)
+
+        # -- IPC --------------------------------------------------------
+
+        def get_allocation_base(self, device_ptr: int) -> tuple[int, int]:
+            self.calls["alloc_base"].append(device_ptr)
+            # Report a base 256 bytes below the data pointer so storage_offset
+            # arithmetic is exercised with a non-zero value.
+            return device_ptr - 256, 4096
+
+        def ipc_get_mem_handle(self, device_ptr: int) -> bytes:
+            if self.reject_non_staging_ipc and device_ptr not in self._staging_ptrs:
+                raise RuntimeError("cudaIpcGetMemHandle failed: simulated VMM reject")
+            self.calls["get_handle"].append(device_ptr)
+            return b"\x01" * IPC_HANDLE_SIZE
+
+        def ipc_open_mem_handle(self, handle_bytes: bytes, device: int) -> int:
+            self.calls["open"].append((handle_bytes, device))
+            return 0x2000  # pretend mapped base pointer
+
+        def ipc_close_mem_handle(self, device_ptr: int) -> None:
+            self.calls["close"].append(device_ptr)
+
+        def stage_for_legacy_ipc(self, src_ptr: int, nbytes: int) -> int:
+            self.calls["stage"].append((src_ptr, nbytes))
+            ptr = 0x9000
+            self._staging_ptrs.add(ptr)
+            self._buffers[ptr] = bytearray(nbytes)
+            return ptr
+
+    fake = FakeCuda()
+
+    for name in (
+        "set_device",
+        "malloc",
+        "free",
+        "memcpy_device_to_device",
+        "memcpy_device_to_host",
+        "device_synchronize",
+        "get_allocation_base",
+        "ipc_get_mem_handle",
+        "ipc_open_mem_handle",
+        "ipc_close_mem_handle",
+        "stage_for_legacy_ipc",
+    ):
+        monkeypatch.setattr(cuda_api, name, getattr(fake, name))
+
+    # Each test starts with empty export registries.
+    cuda_ipc._CUDA_IPC_EXPORT_REGISTRY.clear()
+    cuda_ipc._CUDA_IPC_STAGING_BUFFERS.clear()
+    yield fake
+    cuda_ipc._CUDA_IPC_EXPORT_REGISTRY.clear()
+    cuda_ipc._CUDA_IPC_STAGING_BUFFERS.clear()
 
 
 @pytest.fixture(scope="module")

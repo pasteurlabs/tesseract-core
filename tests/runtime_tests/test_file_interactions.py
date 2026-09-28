@@ -5,10 +5,13 @@ from pathlib import Path
 import numpy as np
 import pytest
 from pydantic import BaseModel
-from typeguard import TypeCheckError
+from typeguard import suppress_type_checks
 
 from tesseract_core.runtime import Array, Float32
-from tesseract_core.runtime.file_interactions import output_to_bytes
+from tesseract_core.runtime.file_interactions import (
+    output_to_bytes,
+    parse_accept_header,
+)
 
 
 class OutputSchema(BaseModel):
@@ -71,9 +74,33 @@ def test_output_to_bytes_json_binref(output_data):
         _check_decoded_data(decoded, "binref")
 
 
+def test_output_to_bytes_json_binref_lz4(output_data):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        base_dir = Path(tmpdir)
+
+        result = output_to_bytes(
+            output_data, "json+binref", base_dir=base_dir, compression="lz4"
+        )
+        assert isinstance(result, bytes)
+
+        decoded = json.loads(result.decode())
+        _check_decoded_data(decoded, "binref")
+        assert decoded["array"]["data"]["compression"] == "lz4"
+        # compressed_size is now embedded in the buffer spec as path:offset:compressed_size
+        assert decoded["array"]["data"]["buffer"].count(":") == 2
+
+        roundtrip = OutputSchema.model_validate_json(
+            result, context={"base_dir": base_dir}
+        )
+        assert np.array_equal(roundtrip.array, output_data.array)
+        assert roundtrip.scalar == output_data.scalar
+        assert roundtrip.string == output_data.string
+
+
 def test_output_to_bytes_unsupported_format(output_data):
-    with pytest.raises(TypeCheckError):
-        output_to_bytes(output_data, "invalid")  # type: ignore
+    with pytest.raises(ValueError, match="Unsupported format invalid"):
+        with suppress_type_checks():
+            output_to_bytes(output_data, "invalid")  # type: ignore
 
 
 def test_output_to_bytes_empty_dict():
@@ -90,3 +117,41 @@ def test_output_to_bytes_scalar_only():
     assert isinstance(result, bytes)
     decoded = json.loads(result.decode())
     assert decoded == 42.0
+
+
+@pytest.mark.parametrize(
+    "accept, expected",
+    [
+        # Bare media type: format from the suffix, no transport/compression (config decides).
+        ("application/json", ("json", None, None)),
+        ("application/json+base64", ("json+base64", None, None)),
+        ("application/json+binref", ("json+binref", None, None)),
+        # gpu_transport parameter is picked up alongside the format.
+        (
+            "application/json+base64; gpu_transport=cuda_ipc",
+            ("json+base64", "cuda_ipc", None),
+        ),
+        # compression parameter is picked up alongside format.
+        (
+            "application/json+base64; compression=lz4",
+            ("json+base64", None, "lz4"),
+        ),
+        # Both gpu_transport and compression parameters specified.
+        (
+            "application/json+base64; gpu_transport=cuda_ipc; compression=lz4",
+            ("json+base64", "cuda_ipc", "lz4"),
+        ),
+        # No space after ';' and an explicit 'none' both parse.
+        (
+            "application/json+base64;gpu_transport=none;compression=none",
+            ("json+base64", "none", "none"),
+        ),
+        # Other parameters (charset, q) are ignored; quoted values are unwrapped.
+        (
+            'application/json+binref; charset=utf-8; gpu_transport="cuda_ipc"; compression="lz4"',
+            ("json+binref", "cuda_ipc", "lz4"),
+        ),
+    ],
+)
+def test_parse_accept_header(accept, expected):
+    assert parse_accept_header(accept) == expected

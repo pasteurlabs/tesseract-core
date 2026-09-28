@@ -2,6 +2,225 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.14.0] - 2026-09-25
+
+### Features
+
+- Add `Tesseract.from_source` to serve a Tesseract a separate subprocess without a container (#669)
+- Install dependencies from a PEP 751 lockfile (#767)
+- Machine readable output flag for tesseract list (#780)
+- Expose `LocalClient.api_module` (#785)
+- *(sdk)* Build environments for from_source automatically (#762)
+- *(sdk)* Expose `Tesseract.supported_device_transports` (#793)
+
+### Bug Fixes
+
+- *(runtime)* Let a signed integer reach an unsigned field (#769)
+- Reset runtime config before each in-process Tesseract instance (#703)
+- Coerce abstract_eval input avals to the schema dtype (#772)
+- Confine json+binref buffer references to output_path (#783)
+- *(runtime)* Identify TesseractReference port in OpenAPI schema (#777)
+- Accept DLPack CUDA arrays (e.g. JAX) in GPU transports (#781)
+- *(runtime)* Apply configured compression in serve endpoints (#789)
+
+### Refactor
+
+- *(sdk)* Make deprecation tombstones time-based (#764)
+
+### Documentation
+
+- Fix broken 'Learn more' links in README (#774)
+
+## [1.13.0] - 2026-09-16
+
+### Features
+
+- Let a Tesseract be given longer to start, and dispose of one that never does (#696)
+- Advertise the accepted output formats in the OpenAPI schema (#732)
+- Let both packages be run as modules (#719)
+- [**breaking**] Split CPU array encoding from GPU transport by introducing separate `gpu_transport` knobs (#737)
+- *(runtime)* Accept a per-input eps in check-gradients (#713)
+- *(runtime)* Sample VJP outputs in check-gradients (#739)
+- *(runtime)* Serialize TesseractReference outputs (#725) (#742)
+- *(runtime)* Accept a per-input eps in the finite-difference helpers (#712)
+
+### Bug Fixes
+
+- *(runtime)* Stop advertising negative list indices in gradient path patterns (#700)
+- *(runtime)* Advertise every dict key the path resolver can reach (#707)
+- *(runtime)* Serialize stdio redirection across overlapping runs (#710)
+- *(runtime)* Find wheel-installed libcudart for cuda_ipc decode (#716)
+- *(sdk)* Recognise Podman machine's wording for a taken host port (#733)
+- *(runtime)* Answer an unsupported Accept format with 406, not 500; accept more valid header formats (#728)
+- *(runtime)* Clear the sticky CUDA error from a failed IPC handle export (#727)
+- *(sdk)* Stop leaking a container when a port publish collides (#721)
+- *(runtime)* Reject input values that do not fit the declared dtype (#730)
+- Build Tesseracts on base images that set UV_SYSTEM_PYTHON (#750)
+- *(runtime)* Allow empty (zero-length) arrays through encoding (#760)
+- Make sure `Tesseract.close` also ends open http sessions (#761)
+
+### Refactor
+
+- Give `Container` a live `is_running` method, and lift the serving primitives out of engine.py (#693)
+- *(runtime)* Isolate CUDA access in a standalone cuda library module (#736)
+- *(runtime)* Introduce a pluggable device-transport interface (#722)
+- [**breaking**] Remove deprecations scheduled for 1.13.0 (#765)
+
+### Documentation
+
+- Remove Tesseract Hackathon 2026 banner from landing page (#735)
+- Make "View on GitHub" links track the build ref (#752)
+
+## [1.12.0] - 2026-08-28
+
+### Features
+
+- Add debug mode to one-shot commands (#631)
+- Make the debugpy address configurable (#663)
+- *(sdk)* Add deprecation tombstone registry (#681)
+- Add `json+cuda_ipc` array encoding for GPU-direct tensor transfer (#588)
+- Add shared memory tooling, docs, and example for fast same-machine IPC on Linux (#664)
+- Add yaml schema for tesseract_config.yaml, ready for integration with SchemaStore (#683)
+- Secret handling for private dependencies + more configurability of the build process (#680)
+
+### Bug Fixes
+
+- Get rid of hardcoded ports in run_tesseract's debug logic (#657)
+- Run the console scripts under test, not whichever are on PATH (#662)
+- *(runtime)* Compare VJP cache keys, and don't trace non-JAX inputs (#667)
+- *(sdk)* Pin uv image to target platform for cross-arch builds (#686)
+- *(runtime)* Skip absent optional containers when expanding paths (#689)
+- Config parsing with string fallbacks (#679)
+- *(sdk)* Purge auto-created output tempdirs on garbage collection (#685)
+
+### Documentation
+
+- Refactor according to Diátaxis, eliminate .html suffixes (#655)
+- Add Bayesian inference via NumPyro demo (#628)
+- Add hackathon banner (#653)
+- Set runtime license (#659)
+- Fix dead links and broken images throughout docs (#661)
+- Blog post on cookiecutter-tesseract announcement (#665)
+- Add multiphysics demo (#627)
+
+### Performance
+
+- *(runtime)* Sweep the VJP once per path pair in check-gradients (#688)
+
+### Testing
+
+- *(runtime)* Cover the gradient fallbacks with more than one key (#701)
+
+## [1.11.0] - 2026-07-23
+
+### Features
+
+- Add optional lz4 compression support for arrays passed via `base64` or `binref` encoding (#579)
+
+### Bug Fixes
+
+- Squash all requirement handling bugs (#644)
+- Random port binding collisions (#649)
+
+### Documentation
+
+- Replace sphinx-click with sphinxcontrib-typer (#634)
+- Add learned closure demo, add T-torch to landing page + docs (#626)
+- Add enzyme integration demo + blog post (#542)
+- Add pipeline guide and document `tesseract run test` (#642)
+
+## [1.10.0] - 2026-06-17
+
+### Features
+
+- Make Python version configurable (#592)
+- Add `inherit_base_image_packages` flag to tesseract_config.yaml (#600)
+- Reduce boilerplate in JAX recipe, add experimental VJP cache (#577)
+
+### Bug Fixes
+
+- Force building for the current arch when platform is set to native (#615)
+
+## [1.9.0] - 2026-05-27
+
+### Features
+
+- Add `env:` section to `tesseract_config.yaml` to allow setting environment variables in built Tesseracts (#591)
+- Add `timeout` parameter to Python API functions (#597)
+- Add `tesseract serve --skip-health-check` argument (#596)
+- Add `Tesseract.container_info` to expose information about running containers in Python API (#601)
+- Explicitly export IO schema field order (#595)
+
+### Bug Fixes
+
+- Better support for foreign arrays (like torch tensors) in Python API (#587)
+- Always become root at the start of docker builds (#598)
+- Add `click` to base install dependencies (#610)
+
+### Documentation
+
+- Add new landing page for Tesseract ecosystem (#562)
+- Add Tesseract Blog (#549)
+
+### Testing
+
+- Rewrite stale-keepalive retry test without real socket dependence (#611)
+
+## [1.8.2] - 2026-05-06
+
+### Bug Fixes
+
+- Mark InputPath/OutputPath fields with format: "path" in JSON schema (#583)
+
+## [1.8.1] - 2026-05-05
+
+### Bug Fixes
+
+- Bug when using chdir with OutputPath (#578)
+- OutputFileReference validation was broken (#581)
+
+### Documentation
+
+- Move unclickable GH links to example subpages (#570)
+
+## [1.8.0] - 2026-04-22
+
+### Features
+
+- Allow `*PathReference`s in apply schemas (#555)
+- Add native windows support (#559)
+
+### Bug Fixes
+
+- Support Python 3.14 (#388)
+
+### Documentation
+
+- Add matlab example (#560)
+
+## [1.7.0] - 2026-04-17
+
+### Features
+
+- Automatically create network specified via --network option if it does not exist (#544)
+
+### Bug Fixes
+
+- Don't hard wrap tracebacks (#539)
+- False-positive 'image not found' errors when docker is in resource saving mode (#535)
+- Resource leak when using `TesseractReference` + more fault tolerance when HTTP sessions time out (#543)
+- Make logging from subprocesses more reliable (#551)
+
+### Refactor
+
+- Thread live logging through `logger.info` instead of printing directly to stderr (#536)
+
+### Documentation
+
+- Add performance guide (#508)
+- Document how to use `tesseract serve --network` parameter (#530)
+- Update rocket fin example to recent versions of Tesseract (#541)
+
 ## [1.6.0] - 2026-03-19
 
 ### Features
