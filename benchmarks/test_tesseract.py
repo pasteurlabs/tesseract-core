@@ -19,7 +19,7 @@ Each mode is listed with the name it is reported under.
 4. `cli` -- `tesseract run`: full Docker and CLI overhead, json+binref with the
    binref directory on local disk
 5. `subprocess` -- `Tesseract.from_source()` over HTTP, no container,
-   json+base64 encoding
+   json+base64 encoding, served on the benchmark's own interpreter
 6. `subprocess-shmem` -- `Tesseract.from_source()`  with the binref directory on
     /dev/shm and experimental_binref_pool enabled.
 
@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 import tempfile
 import time
 import uuid
@@ -104,6 +105,7 @@ def http_shmem_tesseract_instance(noop_tesseract_image):
         input_path=input_dir,
         output_path=output_dir,
         output_format="json+binref",
+        python_executable=sys.executable,
         experimental_binref_pool=True,
     ) as tesseract:
         # Warmup - first request is slow due to container startup
@@ -117,7 +119,9 @@ def subprocess_tesseract_instance(tmp_path_factory):
     from tesseract_core.sdk.tesseract import Tesseract
 
     tmpdir = tmp_path_factory.mktemp("tesseract_subprocess")
-    with Tesseract.from_source(NOOP_TESSERACT_PATH, output_path=tmpdir) as tesseract:
+    with Tesseract.from_source(
+        NOOP_TESSERACT_PATH, output_path=tmpdir, python_executable=sys.executable
+    ) as tesseract:
         tesseract.health()  # warm up: the first request pays for process startup
         yield tesseract
 

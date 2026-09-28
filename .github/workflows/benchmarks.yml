@@ -38,14 +38,16 @@ jobs:
         with:
           enable-cache: true
 
-      # Build both environments on the setup-python interpreter before benchmarking.
-      # uv otherwise prefers any managed Python the benchmarks download along the way
-      # (e.g. for `Tesseract.from_source`), and the two arms end up on different ones.
       - name: Restore UV environment
         run: cp production.uv.lock uv.lock
 
       - name: Install package
         run: uv sync --extra dev --frozen --python "${{ steps.setup-python.outputs.python-path }}"
+
+      - name: Run benchmarks on current commit
+        run: |
+          uv run --no-sync pytest benchmarks/ \
+            --benchmark-json current_benchmarks.json
 
       - name: Check out baseline branch
         if: github.event_name == 'pull_request'
@@ -66,11 +68,6 @@ jobs:
         working-directory: baseline
         run: |
           cp -r ../benchmarks/* benchmarks/
-
-      - name: Run benchmarks on current commit
-        run: |
-          uv run --no-sync pytest benchmarks/ \
-            --benchmark-json current_benchmarks.json
 
       - name: Run benchmarks on baseline
         if: github.event_name == 'pull_request'
