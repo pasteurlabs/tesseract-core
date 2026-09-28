@@ -10,6 +10,91 @@ import numpy as np
 from tesseract_core.runtime.jax_recipes import _cache_key
 
 
+def test_as_jax_arrays_preserves_structure_and_static_leaves():
+    import jax
+    import jax.numpy as jnp
+
+    from tesseract_core.runtime import jax_recipes
+
+    host = np.array([1.0, 2.0], dtype=np.float32)
+    host.setflags(write=False)
+    existing = jnp.asarray([3.0])
+    tree = {"arrays": [host, np.float32(4), existing], "static": ("tag", None, 2)}
+    result = jax_recipes.as_jax_arrays(tree)
+    assert all(isinstance(x, jax.Array) for x in result["arrays"])
+    np.testing.assert_array_equal(result["arrays"][0], host)
+    assert result["arrays"][1].item() == 4
+    assert result["arrays"][2] is existing
+    assert result["static"] == tree["static"]
+    assert tree["arrays"][0] is host
+
+
+def test_jax_apply_converts_readonly_host_inputs():
+    import jax
+    from pydantic import BaseModel
+
+    from tesseract_core.runtime import Array, Float32
+    from tesseract_core.runtime.jax_recipes import jax_apply
+
+    class Inputs(BaseModel):
+        x: Array[(2,), Float32]
+
+    host = np.array([1.0, 2.0], dtype=np.float32)
+    host.setflags(write=False)
+
+    def apply(inputs):
+        assert isinstance(inputs["x"], jax.Array)
+        return {"y": inputs["x"] * 2}
+
+    np.testing.assert_array_equal(jax_apply(apply, Inputs(x=host))["y"], [2, 4])
+
+
+def test_jax_endpoints_convert_device_inputs(monkeypatch):
+    from typing import Any
+
+    import jax.numpy as jnp
+    from pydantic import BaseModel
+
+    from tesseract_core.runtime import jax_recipes as recipes
+
+    class DeviceInput:
+        # Only the metadata/dispatch boundary is simulated; the differentiation
+        # below runs through real JAX arrays on CPU.
+        def __init__(self, values):
+            self.__cuda_array_interface__ = {
+                "shape": (2,),
+                "typestr": "<f4",
+                "data": (0, False),
+                "version": 3,
+            }
+            self.array = jnp.asarray(values, dtype=jnp.float32)
+
+    class Inputs(BaseModel):
+        x: Any
+
+    monkeypatch.setattr(jnp, "from_dlpack", lambda x: x.array)
+    inputs = Inputs(x=DeviceInput([2, 3]))
+    vector = DeviceInput([1, 1])
+    apply = lambda x: {"y": x["x"] ** 2}
+    recipes._set_jax_vjp_cache_size(0)
+    np.testing.assert_array_equal(recipes.jax_apply(apply, inputs)["y"], [4, 9])
+    np.testing.assert_array_equal(
+        recipes.jax_jvp(apply, inputs, {"x"}, {"y"}, {"x": vector})["y"], [4, 6]
+    )
+    np.testing.assert_array_equal(
+        recipes.jax_jacobian(apply, inputs, {"x"}, {"y"})["y"]["x"], [[4, 0], [0, 6]]
+    )
+    for cache_size in (0, 1):
+        recipes._set_jax_vjp_cache_size(cache_size)
+        try:
+            recipes.jax_apply(apply, inputs)
+            np.testing.assert_array_equal(
+                recipes.jax_vjp(apply, inputs, {"x"}, {"y"}, {"y": vector})["x"], [4, 6]
+            )
+        finally:
+            recipes._set_jax_vjp_cache_size(0)
+
+
 class TestCacheKey:
     """Tests for _cache_key -- the LRUCache key used by the jax-cache recipe."""
 
