@@ -13,8 +13,8 @@ sys.path.insert(0, "burgers_solver")
 import burgers_solver.tesseract_api as solver_api
 import numpy as np
 import torch
-import torch.nn as nn
 from tesseract_torch import apply_tesseract
+from torch import nn
 
 from tesseract_core import Tesseract
 

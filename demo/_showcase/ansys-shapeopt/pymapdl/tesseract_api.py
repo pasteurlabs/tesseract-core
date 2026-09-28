@@ -512,7 +512,7 @@ class SIMPElasticity:
         try:
             self.pvmesh = self.mapdl.result.grid
             logger.debug("Successfully loaded mesh directly from result.grid")
-        except (AttributeError, Exception) as e:
+        except Exception as e:  # noqa: BLE001 - any MAPDL failure falls back to the file path
             # Fallback to file-based approach if direct access fails
             logger.debug(f"Direct grid access failed ({e}), using file-based approach")
             self.mapdl.download_result(".")

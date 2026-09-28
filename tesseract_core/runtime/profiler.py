@@ -11,7 +11,6 @@ import cProfile
 import pstats
 import re
 from io import StringIO
-from typing import Any
 
 from .config import get_config
 
@@ -66,12 +65,12 @@ class Profiler:
         if self._profiler is not None:
             self._profiler.disable()
 
-    def __enter__(self) -> "Profiler":
+    def __enter__(self) -> "Profiler":  # noqa: PYI034 - typing.Self needs py3.11
         """Start profiling and return self."""
         self.start()
         return self
 
-    def __exit__(self, *args: Any) -> None:
+    def __exit__(self, *args: object) -> None:
         """Stop profiling."""
         self.stop()
 

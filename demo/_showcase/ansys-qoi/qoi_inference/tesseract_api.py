@@ -107,7 +107,7 @@ def evaluate(inputs: Any) -> Any:
     qoi_predictions = torch.tensor(qoi_predictions_original, dtype=torch.float32)
 
     # Save predictions to multiple formats
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now().astimezone().strftime("%Y%m%d_%H%M%S")
 
     # Save as CSV
     csv_path = output_base / f"predictions_{timestamp}.csv"

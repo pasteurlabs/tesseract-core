@@ -99,10 +99,10 @@ state = SimpleNamespace()
 state.print_user_error_tracebacks = False
 
 # Create a list of possible commands based on the ones in api_parse (kebab-cased)
-POSSIBLE_CMDS = set(
+POSSIBLE_CMDS = {
     re.sub(r"([a-z])([A-Z])", r"\1-\2", object.name).replace("_", "-").lower()
     for object in EXPECTED_OBJECTS
-)
+}
 POSSIBLE_CMDS.update(
     {
         "health",
@@ -209,8 +209,10 @@ def main_callback(
         get_config()
     except PydanticValidationError as err:
         message = [
-            "Error while parsing Tesseract configuration. "
-            "Please check your environment variables.",
+            (
+                "Error while parsing Tesseract configuration. "
+                "Please check your environment variables."
+            ),
             "Errors found:",
         ]
         for error in err.errors():
@@ -973,9 +975,10 @@ def _extract_cli_config(
     """Extracts and resolve (input_path, volume_mounts, user) from a parsed test spec."""
     cli_config = test_spec.get("cli_config", {})
 
-    if input_path := cli_config.get("input_path"):
-        if not Path(input_path).is_absolute():
-            input_path = str(base_dir / input_path)
+    if (input_path := cli_config.get("input_path")) and not Path(
+        input_path
+    ).is_absolute():
+        input_path = str(base_dir / input_path)
 
     from tesseract_core.sdk.engine import _split_volume_spec
 
@@ -1342,7 +1345,7 @@ def entrypoint() -> NoReturn:
     except UserError as e:
         if state.print_user_error_tracebacks:
             # Do not print the exception here since it's part of the traceback
-            logger.error("UserError occurred, traceback:", exc_info=True)
+            logger.exception("UserError occurred, traceback:")
         else:
             # Prints only the error message without traceback
             logger.error(str(e), exc_info=False)
