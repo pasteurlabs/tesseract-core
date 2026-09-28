@@ -75,7 +75,7 @@ dev = [
     "httpx",  # required by fastapi older test client
     "httpx2",  # required by fastapi newer test client
     "pre-commit",
-    "toml",  # required to test .github/workflows/update_runtime_deps.py
+    "toml",  # required to test .github/scripts/update_runtime_deps.py
     "pytest",
     "pytest-cov",
     "pytest-mock",
