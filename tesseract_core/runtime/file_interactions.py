@@ -20,14 +20,15 @@ PathLike = str | Path
 #   as ``cuda_ipc`` that exports them by reference without a host round-trip).
 #
 # They compose freely: a response can inline its CPU arrays as JSON while
-# handing its GPU arrays out as ``cuda_ipc`` handles. The two are set
-# independently, via the ``output_format`` and ``gpu_transport`` config.
+# handing its GPU arrays out as ``cuda_ipc`` handles. Clients choose both per
+# request via the ``Accept`` header; the runtime config only sets the default
+# output format and which GPU transports are offered at all.
 supported_format_type = Literal["json", "json+base64", "json+binref"]
 
 # GPU transports. ``none`` is the always-available default (GPU output is copied
 # to the host and encoded via the output format). Any other value exports device
-# memory by reference and is an experimental, opt-in capability (see
-# available_gpu_transports).
+# memory by reference and is an experimental capability that must be enabled on
+# the server and requested by the client (see available_gpu_transports).
 #
 # The disabled state is the explicit string ``"none"`` rather than ``None``, so
 # it is clear to users that this means "disabled", not "unspecified".
@@ -48,13 +49,14 @@ def available_formats() -> tuple[str, ...]:
 
 
 def available_gpu_transports() -> tuple[str, ...]:
-    """GPU transports the runtime currently accepts for device-array output.
+    """GPU transports the runtime currently accepts, for both inputs and outputs.
 
-    Always includes ``none`` (copy GPU output to host and serialize it like any
+    Always includes ``none`` (copy GPU arrays to host and serialize them like any
     CPU array). A by-reference transport such as ``cuda_ipc`` is experimental and
     only offered when the runtime is configured with a non-``none``
     ``gpu_transport`` (e.g. ``TESSERACT_GPU_TRANSPORT=cuda_ipc``); it may change
-    or be removed without notice.
+    or be removed without notice. Offering a transport does not make it the
+    default: outputs use it only when a request asks for it.
     """
     from tesseract_core.runtime.config import get_config
 
@@ -62,6 +64,11 @@ def available_gpu_transports() -> tuple[str, ...]:
     if configured != "none":
         return ("none", configured)
     return ("none",)
+
+
+def available_compressions() -> tuple[str, ...]:
+    """Output compressions the runtime accepts (``none`` disables compression)."""
+    return ("none", "lz4")
 
 
 def parse_accept_header(accept: str) -> tuple[str, str | None, str | None]:
@@ -74,11 +81,9 @@ def parse_accept_header(accept: str) -> tuple[str, str | None, str | None]:
     parses to ``("json+base64", "cuda_ipc", "lz4")``.
 
     Returns the parsed format, transport parameter, and compression parameter.
-    Parameters return ``None`` when the header omits them (the caller falls back
-    to the configured ``gpu_transport`` / ``compression``). Only recognized
+    Parameters return ``None`` when the header omits them. Only recognized
     parameters are extracted; other parameters (e.g. a charset) are ignored.
-    This does no validation of the values -- :func:`output_to_bytes` checks them
-    against the accepted sets.
+    This parses a single media range and does no validation of the values.
     """
     media_type, _, params_str = accept.partition(";")
     output_format = media_type.strip().split("/")[-1]
