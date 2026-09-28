@@ -45,10 +45,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 {% if config.build_config.requirements.provider == "conda" %}
-# Install conda if the base image does not provide it. conda is only needed to
-# create /python-env, which is self-contained, so it stays in the build stage
-# and does not end up in the final image. Miniforge is pinned to a released
-# version for reproducible builds; bump it manually.
+# Install conda if the base image lacks it. conda is only needed to create the
+# self-contained /python-env, so Miniforge stays out of the final image.
 ARG MINIFORGE_VERSION=26.7.2-0
 RUN if [ ! -x "$(command -v conda)" ]; then \
     curl -fsSL -o /tmp/miniforge.sh \
@@ -217,13 +215,10 @@ ENV HOME=/home/tesseract-user
 RUN _TESSERACT_IS_BUILDING=1 /tesseract/entrypoint.sh tesseract-runtime check
 {% endif %}
 
-# Make sure /tesseract, /home/tesseract-user, and /tmp are writable by non-root users,
-# especially important if some folders are created at build time and owned by 9999:9999.
-# This intentionally drops the sticky bit from /tmp: containers usually run as the
-# host user's uid, which could otherwise not rename or delete entries in /tmp that
-# were created at build time.
-# Paths that were given an explicit mode above are skipped so they keep it. New
-# ones must be added to the list below.
+# Make /tesseract, /home/tesseract-user, and /tmp writable by any uid, since containers
+# usually run as the host user's uid rather than 9999. This also drops the sticky bit
+# from /tmp so that uid can rename or delete files created at build time.
+# Paths that set an explicit mode above are excluded here so they keep it.
 USER root
 RUN find /tesseract /home/tesseract-user /tmp \
         \( -path /tesseract/entrypoint.sh -o -path /tesseract/tesseract_api.py \

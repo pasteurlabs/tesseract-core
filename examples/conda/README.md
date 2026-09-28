@@ -11,11 +11,10 @@ Then, set the requirements `provider` as shown in
 [`tesseract_config.yaml`](tesseract_config.yaml).
 
 If the base image does not ship with conda, Tesseract installs
-[Miniforge](https://github.com/conda-forge/miniforge) to create the environment.
-conda itself stays out of the final image, which only contains the environment.
-To use your own conda installation instead, set `base_image` to an image
-that provides `conda` on its `PATH` (the final image is then based on that
-image too, including its conda installation).
+[Miniforge](https://github.com/conda-forge/miniforge) to create the environment,
+but leaves it out of the final image. To use your own conda installation instead,
+set `base_image` to an image that provides `conda` on its `PATH`. The final image
+also derives from `base_image`, so it then includes that conda installation.
 
 Finally, you can build and use the Tesseract as usual:
 

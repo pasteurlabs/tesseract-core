@@ -137,8 +137,8 @@ class MLflowBackend(BaseBackend):
             "quiet"  # Suppress potential MLflow git warnings
         )
 
-        # Imported here rather than at module level because importing mlflow
-        # dominates runtime startup time, and most Tesseracts never use it.
+        # Imported lazily because importing mlflow dominates runtime startup
+        # time, and most Tesseracts never use it.
         import mlflow
 
         self._mlflow = mlflow
