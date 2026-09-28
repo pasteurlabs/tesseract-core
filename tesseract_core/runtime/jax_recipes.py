@@ -37,6 +37,13 @@ def _set_jax_vjp_cache_size(size: int) -> None:
     _jax_vjp_cache = LRUCache(maxsize=size) if size > 0 else None
 
 
+def _is_device_array(leaf: Any) -> bool:
+    """Whether ``leaf`` is a JAX array whose data lives off the host."""
+    return isinstance(leaf, jax.Array) and any(
+        d.platform != "cpu" for d in leaf.devices()
+    )
+
+
 def _cache_key(tree: Any) -> Hashable:
     """Build an :class:`LRUCache` key from a pytree's structure and leaves.
 
@@ -44,6 +51,11 @@ def _cache_key(tree: Any) -> Hashable:
     identical bytes but different interpretations (e.g. ``int64[4]`` vs
     ``int64[2,2]``) don't collide. Non-array leaves contribute their type
     alongside their value; they must be hashable.
+
+    JAX arrays on an accelerator contribute only their dtype and shape, since
+    reading their bytes would copy them to the host on every call. Their
+    contents are compared on the device instead (see :func:`_device_leaves`
+    and :func:`_bitwise_equal`), so a key match alone is not a cache hit.
 
     The key is returned as a tuple rather than collapsed with :func:`hash`,
     so that :class:`LRUCache`'s dict lookup compares it with ``__eq__``
@@ -61,11 +73,59 @@ def _cache_key(tree: Any) -> Hashable:
     # use its string form as the discriminator instead.
     items: list = [str(treedef)]
     for leaf in leaves:
-        if hasattr(leaf, "tobytes"):
+        if _is_device_array(leaf):
+            items.append((leaf.dtype.str, leaf.shape, "device"))
+        elif hasattr(leaf, "tobytes"):
             items.append((leaf.dtype.str, leaf.shape, bytes(_fast_tobytes(leaf))))
         else:
             items.append((type(leaf), leaf))
     return tuple(items)
+
+
+def _device_leaves(tree: Any) -> tuple[jax.Array, ...]:
+    """The leaves of ``tree`` that :func:`_cache_key` leaves out of the key."""
+    return tuple(leaf for leaf in jax.tree.leaves(tree) if _is_device_array(leaf))
+
+
+def _as_bits(x: jax.Array) -> tuple[jax.Array, ...]:
+    """Reinterpret ``x`` as unsigned integers, so that comparing is bitwise."""
+    if jnp.issubdtype(x.dtype, jnp.complexfloating):
+        return (*_as_bits(jnp.real(x)), *_as_bits(jnp.imag(x)))
+    if x.dtype == jnp.bool_:
+        return (x.astype(jnp.uint8),)
+    return (jax.lax.bitcast_convert_type(x, jnp.dtype(f"uint{x.dtype.itemsize * 8}")),)
+
+
+@jax.jit
+def _bitwise_equal_jit(a: tuple, b: tuple) -> jax.Array:
+    result = jnp.bool_(True)
+    for x, y in zip(a, b, strict=True):
+        for xb, yb in zip(_as_bits(x), _as_bits(y), strict=True):
+            result &= jnp.all(xb == yb)
+    return result
+
+
+def _bitwise_equal(a: tuple[jax.Array, ...], b: tuple[jax.Array, ...]) -> bool:
+    """Whether two sequences of device arrays hold identical bytes.
+
+    Bitwise rather than numeric, to match the byte comparison used for host
+    leaves: ``-0.0`` and ``0.0`` differ, and a NaN equals itself. Only one
+    boolean leaves the device.
+    """
+    if not a:
+        return True
+    return bool(_bitwise_equal_jit(a, b))
+
+
+def _cache_lookup(inputs_dict: dict) -> Any | None:
+    """Return the cached ``(vjp_func, cotangent_template)`` for these inputs."""
+    cached = _jax_vjp_cache.get(_cache_key(inputs_dict))
+    if cached is None:
+        return None
+    vjp_func, cotangent_template, device_leaves = cached
+    if not _bitwise_equal(device_leaves, _device_leaves(inputs_dict)):
+        return None
+    return vjp_func, cotangent_template
 
 
 def jax_apply(apply_jit: Callable, inputs: BaseModel) -> dict:
@@ -113,7 +173,10 @@ def jax_apply(apply_jit: Callable, inputs: BaseModel) -> dict:
     out = eqx.combine(diff_primals, static_primals)
 
     cotangent_template = jax.tree.map(jnp.zeros_like, diff_primals)
-    _jax_vjp_cache.put(_cache_key(inputs_dict), (vjp_func, cotangent_template))
+    _jax_vjp_cache.put(
+        _cache_key(inputs_dict),
+        (vjp_func, cotangent_template, _device_leaves(inputs_dict)),
+    )
     return out
 
 
@@ -140,7 +203,7 @@ def jax_vjp(
     # vjp calls per output basis vector.
     if (
         _jax_vjp_cache is not None
-        and (cached := _jax_vjp_cache.get(_cache_key(inputs_dict))) is not None
+        and (cached := _cache_lookup(inputs_dict)) is not None
     ):
         vjp_func, cotangent_template = cached
         full_cotangent = jax.tree.map(jnp.zeros_like, cotangent_template)
