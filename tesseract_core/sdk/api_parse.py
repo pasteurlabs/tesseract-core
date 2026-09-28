@@ -406,8 +406,6 @@ def generate_config_schema() -> dict:
 class ValidationError(Exception):
     """Raised when inputs needed to build a tesseract are invalid."""
 
-    pass
-
 
 def _get_func_argnames(func: ast.FunctionDef) -> tuple[str, ...]:
     """Get the names of the arguments of a function node.

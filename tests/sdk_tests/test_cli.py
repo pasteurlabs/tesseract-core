@@ -177,6 +177,7 @@ def test_runnable_as_a_module(module, dummy_tesseract_package):
             "TERM": "dumb",
             "COLUMNS": "1000",
         },
+        check=False,
     )
 
     assert result.returncode == 0, result.stderr

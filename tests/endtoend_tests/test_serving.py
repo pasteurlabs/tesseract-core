@@ -27,6 +27,7 @@ def test_env_passthrough_serve(docker_cleanup, docker_client, built_image_name):
         ],
         capture_output=True,
         text=True,
+        check=False,
     )
     assert run_res.returncode == 0, run_res.stderr
     assert run_res.stdout
@@ -512,6 +513,7 @@ def test_serve_with_network_host_interop(
         ],
         capture_output=True,
         text=True,
+        check=False,
     )
     assert serve_res.returncode == 0, serve_res.stderr
     serve_meta = json.loads(serve_res.stdout)
@@ -533,6 +535,7 @@ def test_serve_with_network_host_interop(
         ],
         capture_output=True,
         text=True,
+        check=False,
     )
     assert serve_res2.returncode == 0, serve_res2.stderr
     serve_meta2 = json.loads(serve_res2.stdout)

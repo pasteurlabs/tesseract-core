@@ -202,7 +202,7 @@ def _find_and_replace_keys_in_archive(file: Path, keyvalues: dict) -> None:
                 try:
                     with open(filepath) as f:
                         filedata = f.read()
-                except Exception:
+                except (OSError, UnicodeDecodeError):
                     filedata = None
 
                 # find/replace

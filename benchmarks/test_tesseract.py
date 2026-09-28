@@ -289,6 +289,7 @@ def _run_cli_binref_benchmark(benchmark, noop_tesseract_image, array_size, binre
                 ],
                 capture_output=True,
                 text=True,
+                check=False,
             )
             if result.returncode != 0:
                 raise RuntimeError(f"CLI failed: {result.stderr}")

@@ -198,6 +198,11 @@ ignore = [
     "D213", # Pydocstyle: multiline docstring summary start on 2nd line. Conflicts with D212
     "ANN202", # Type annotations: allow missing return type for private functions
     "ANN401", # Type annotations: allow Any
+    # Unnecessary dict() call. Enabled by default as of ruff 0.16. The
+    # dict(x=..., y=...) form mirrors Tesseract's named-input API and reads
+    # better than quoted literals when building kwargs, configs and endpoint
+    # results; none of the call sites are performance-critical.
+    "C408",
 ]
 
 [tool.ruff.lint.extend-per-file-ignores]
