@@ -297,6 +297,14 @@ class TesseractBuildConfig(BaseModel, validate_assignment=True):
             return self.requirements.python_version
         return None
 
+    @property
+    def uses_base_image_python(self) -> bool:
+        """Whether /python-env uses the base image's Python instead of bundling its own."""
+        return (
+            isinstance(self.requirements, PipRequirements)
+            and self.requirements.python_version is None
+        )
+
     @model_validator(mode="after")
     def _validate_python_version_provider(self):
         if (
