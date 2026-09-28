@@ -258,7 +258,7 @@ def test_mlflow_run_extra_args(mocker, dummy_mlflow_server):
     kwargs_str = repr(kwargs)
 
     # Mock the mlflow module to avoid actual MLflow calls
-    mocked_start_run = mocker.patch("tesseract_core.runtime.mpa.mlflow.start_run")
+    mocked_start_run = mocker.patch("mlflow.start_run")
 
     update_config(
         mlflow_tracking_uri=dummy_mlflow_server, mlflow_run_extra_args=kwargs_str
