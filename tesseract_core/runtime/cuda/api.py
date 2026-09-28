@@ -146,8 +146,8 @@ def ipc_get_mem_handle(device_ptr: int) -> bytes:
     underlying allocation.
 
     Raises ``RuntimeError`` if the pointer is rejected by the legacy IPC API
-    (e.g. VMM/pool-backed memory; see :func:`stage_for_legacy_ipc`, which
-    callers should fall back to on failure).
+    (e.g. VMM/pool-backed memory, which callers should stage into a plain
+    ``cudaMalloc`` buffer instead; see ``cuda.ipc._stage_for_export``).
     """
     cudart = _get_cudart()
     handle = loader.CudaIpcMemHandle()
@@ -194,38 +194,6 @@ def ipc_close_mem_handle(device_ptr: int) -> None:
     )
 
 
-def stage_for_legacy_ipc(src_ptr: int, nbytes: int) -> int:
-    """Copy ``nbytes`` into a fresh ``cudaMalloc`` buffer IPC-exportable via the legacy API.
-
-    The legacy ``cudaIpcGetMemHandle`` API rejects memory that CUDA's Virtual
-    Memory Management API (``cuMemCreate``/``cuMemAddressReserve``) allocated,
-    which is what modern pool allocators use, including JAX/XLA's default GPU
-    allocator (confirmed: ``cudaIpcGetMemHandle`` returns
-    ``cudaErrorInvalidValue`` for such pointers; CuPy's and PyTorch's default
-    caching allocators happen to use plain ``cudaMalloc`` pools, so they don't
-    hit this).
-
-    Rather than replicate CUDA's VMM export path (which requires transferring
-    a POSIX file descriptor between processes via ``SCM_RIGHTS`` over a Unix
-    domain socket, since a real fd, not just its integer value, is meaningless
-    in another process's fd table), we take the simpler route of copying the data
-    device-to-device into a plain ``cudaMalloc`` allocation, which *is*
-    IPC-exportable via the legacy API. This costs one on-GPU copy but avoids a
-    new cross-process handshake; it is still far cheaper than a host round-trip.
-
-    Returns the device pointer of the new (caller-owned, offset-zero) buffer.
-    The caller is responsible for freeing it via :func:`free` once the export
-    is no longer needed.
-    """
-    staging_ptr = malloc(nbytes)
-    try:
-        memcpy_device_to_device(staging_ptr, src_ptr, nbytes)
-    except Exception:
-        free(staging_ptr)
-        raise
-    return staging_ptr
-
-
 # -- driver API ------------------------------------------------------------
 
 
@@ -246,3 +214,24 @@ def get_allocation_base(device_ptr: int) -> tuple[int, int]:
     if ret != 0:
         raise RuntimeError(f"cuMemGetAddressRange failed with error code {ret}")
     return base.value, size.value
+
+
+_CU_POINTER_ATTRIBUTE_IS_LEGACY_CUDA_IPC_CAPABLE = 10
+
+
+def is_legacy_ipc_capable(device_ptr: int) -> bool:
+    """Whether ``cudaIpcGetMemHandle`` accepts the allocation containing ``device_ptr``.
+
+    Memory from CUDA's Virtual Memory Management API (JAX/XLA's default
+    allocator, for example) is not. Asking up front avoids a call that is
+    expected to fail on every export of such memory.
+    """
+    flag = ctypes.c_int()
+    ret = _get_driver().cuPointerGetAttribute(
+        ctypes.byref(flag),
+        _CU_POINTER_ATTRIBUTE_IS_LEGACY_CUDA_IPC_CAPABLE,
+        ctypes.c_ulonglong(device_ptr),
+    )
+    if ret != 0:
+        raise RuntimeError(f"cuPointerGetAttribute failed with error code {ret}")
+    return bool(flag.value)

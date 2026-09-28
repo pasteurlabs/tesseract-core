@@ -251,7 +251,7 @@ def load_cudart() -> Any:
     # (see the ``_check`` helper in the api module).
     cudart.cudaGetLastError.argtypes = []
     cudart.cudaGetLastError.restype = ctypes.c_int
-    # Used by the VMM staging-buffer fallback (see api.stage_for_legacy_ipc).
+    # Used by the VMM staging-buffer fallback (see ipc._stage_for_export).
     cudart.cudaMalloc.argtypes = [ctypes.POINTER(ctypes.c_void_p), ctypes.c_size_t]
     cudart.cudaMalloc.restype = ctypes.c_int
     cudart.cudaFree.argtypes = [ctypes.c_void_p]
@@ -274,10 +274,12 @@ def load_cuda_driver() -> Any:
     """Load the CUDA driver library (libcuda) and declare the signatures we call.
 
     The driver API is only needed for ``cuMemGetAddressRange``, which recovers
-    the base pointer and size of the allocation backing a device pointer. This
-    is required because IPC handles reference the *whole* allocation, while a
-    given array may point partway into it (common with pooled allocators like
-    CuPy and PyTorch). Raises ``RuntimeError`` if libcuda cannot be found.
+    the base pointer and size of the allocation backing a device pointer, and
+    ``cuPointerGetAttribute``, which tells whether that allocation can be
+    exported with a legacy IPC handle. The former is required because IPC
+    handles reference the *whole* allocation, while a given array may point
+    partway into it (common with pooled allocators like CuPy and PyTorch).
+    Raises ``RuntimeError`` if libcuda cannot be found.
     """
     driver = None
     path = ctypes.util.find_library("cuda")
@@ -305,5 +307,11 @@ def load_cuda_driver() -> Any:
         ctypes.c_ulonglong,
     ]
     driver.cuMemGetAddressRange_v2.restype = ctypes.c_int
+    driver.cuPointerGetAttribute.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_int,
+        ctypes.c_ulonglong,
+    ]
+    driver.cuPointerGetAttribute.restype = ctypes.c_int
     driver.cuInit(0)
     return driver
