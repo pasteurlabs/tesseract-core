@@ -28,10 +28,14 @@ end
 
 _to_python(outputs::NamedTuple) = Dict(String(k) => v for (k, v) in pairs(outputs))
 
-# Mark requested inputs as Duplicated and the rest as Const, so Enzyme skips
-# inputs that were not requested.
-function _activity_annotations(args, paths, shadow_of)
-    return [haskey(shadow_of, p) ? Duplicated(a, shadow_of[p]) : Const(a) for (a, p) in zip(args, paths)]
+# All differentiable inputs go to Enzyme as a single Duplicated vector, with zero
+# shadows for inputs that were not requested. Annotating each input separately
+# would compile a new derivative for every distinct set of requested inputs.
+_zero_shadows(inputs) = [zero(a) for a in inputs.diff_args]
+
+# apply_fn with the differentiable arrays as its only argument
+_closure(apply_fn, inputs) = let rest = (inputs.non_diff_args, inputs.diff_paths, inputs.non_diff_paths)
+    d -> apply_fn(d, rest...)
 end
 
 function apply(apply_fn, diff_args, non_diff_args, diff_paths, non_diff_paths)
@@ -46,9 +50,12 @@ Returns the tangent of every output, keyed by output name.
 """
 function jvp(apply_fn, diff_args, non_diff_args, diff_paths, non_diff_paths, jvp_paths, tangents)
     inputs = _to_julia(diff_args, non_diff_args, diff_paths, non_diff_paths)
-    shadow_of = Dict(zip(_strings(jvp_paths), _vecs(tangents)))
-    f(d...) = apply_fn(collect(d), inputs.non_diff_args, inputs.diff_paths, inputs.non_diff_paths)
-    out = autodiff(set_runtime_activity(Forward), Const(f), _activity_annotations(inputs.diff_args, inputs.diff_paths, shadow_of)...)
+    shadows = _zero_shadows(inputs)
+    for (p, t) in zip(_strings(jvp_paths), _vecs(tangents))
+        shadows[findfirst(==(p), inputs.diff_paths)] = t
+    end
+    f = _closure(apply_fn, inputs)
+    out = autodiff(set_runtime_activity(Forward), Const(f), Duplicated(inputs.diff_args, shadows))
     return _to_python(out[1])
 end
 
@@ -60,20 +67,21 @@ Reverse-mode AD. `cotangents[i]` is the cotangent of the output named
 """
 function vjp(apply_fn, diff_args, non_diff_args, diff_paths, non_diff_paths, vjp_paths, output_names, cotangents)
     inputs = _to_julia(diff_args, non_diff_args, diff_paths, non_diff_paths)
-    active = Set(_strings(vjp_paths))
-    shadow_of = Dict(p => zero(a) for (a, p) in zip(inputs.diff_args, inputs.diff_paths) if p in active)
+    shadows = _zero_shadows(inputs)
     names = Symbol.(_strings(output_names))
     cts = _vecs(cotangents)
-    function f(d...)
-        out = apply_fn(collect(d), inputs.non_diff_args, inputs.diff_paths, inputs.non_diff_paths)
+    apply_d = _closure(apply_fn, inputs)
+    function f(d)
+        out = apply_d(d)
         s = 0.0
         for (name, ct) in zip(names, cts)
             s += dot(ct, getproperty(out, name))
         end
         return s
     end
-    autodiff(set_runtime_activity(Reverse), Const(f), Active, _activity_annotations(inputs.diff_args, inputs.diff_paths, shadow_of)...)
-    return shadow_of
+    autodiff(set_runtime_activity(Reverse), Const(f), Active, Duplicated(inputs.diff_args, shadows))
+    requested = Set(_strings(vjp_paths))
+    return Dict(p => g for (p, g) in zip(inputs.diff_paths, shadows) if p in requested)
 end
 
 end
