@@ -112,7 +112,16 @@ def _metadata_lines(current_data: dict, pr_number: str | None) -> list[str]:
     if pr_number is not None:
         lines.append(f"- **PR:** #{pr_number}")
     lines.append(f"- **Runner:** {_get_runner_description(current_data)}")
+    lines.append(f"- **Python:** {_python_description(current_data)}")
     return lines
+
+
+def _python_description(data: dict) -> str:
+    """Describe the Python interpreter a benchmark run used."""
+    machine = data.get("machine_info", {})
+    implementation = machine.get("python_implementation", "")
+    version = machine.get("python_version", "")
+    return " ".join(p for p in (implementation, version) if p) or "unknown"
 
 
 def _load_benchmark_file(path: str | None) -> dict | None:
@@ -201,9 +210,12 @@ def _format_comparison_row(comp: dict) -> str:
 
 
 def _generate_current_only_report(
-    current: dict[str, dict], current_data: dict, pr_number: str | None = None
+    current: dict[str, dict],
+    current_data: dict,
+    pr_number: str | None = None,
+    notice: str = ":information_source: No baseline found — all benchmarks marked as new.",
 ) -> str:
-    """Generate a report when no baseline exists, marking every benchmark as new."""
+    """Generate a report without a usable baseline, marking every benchmark as new."""
     all_names = _sort_names(list(current.keys()))
     comparisons = [
         _compute_comparison(name, baseline={}, current=current) for name in all_names
@@ -212,7 +224,7 @@ def _generate_current_only_report(
     lines = [
         "## Benchmark Results",
         "",
-        ":information_source: No baseline found — all benchmarks marked as new.",
+        notice,
         "",
         "Benchmarks use a no-op Tesseract to measure pure framework overhead.",
         "",
@@ -256,6 +268,22 @@ def generate_report(
 
     if baseline_data is None:
         return _generate_current_only_report(current, current_data, pr_number)
+
+    # Timings from different interpreters can differ by more than the notable
+    # threshold, which the report would then attribute to the PR.
+    baseline_python = _python_description(baseline_data)
+    current_python = _python_description(current_data)
+    if baseline_python != current_python:
+        return _generate_current_only_report(
+            current,
+            current_data,
+            pr_number,
+            notice=(
+                f":warning: Baseline ran on {baseline_python} but current ran on "
+                f"{current_python}, so the results are not comparable. "
+                "Showing current results only."
+            ),
+        )
 
     baseline = _index_benchmarks(baseline_data)
 
