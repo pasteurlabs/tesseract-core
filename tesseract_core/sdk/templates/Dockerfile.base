@@ -161,8 +161,7 @@ ENV {{ key }}="{{ value | replace('\\', '\\\\') | replace('"', '\\"') }}"
 {% if config.build_config.package_data %}
 # Copy package data to image
 {% for source_path, target_path in config.build_config.package_data %}
-COPY ["{{ tesseract_source_directory }}/{{ source_path }}", "{{ target_path }}"]
-RUN chmod 777 {{ target_path }}
+COPY --chmod=777 ["{{ tesseract_source_directory }}/{{ source_path }}", "{{ target_path }}"]
 {% endfor %}
 {% endif %}
 
@@ -203,10 +202,13 @@ RUN _TESSERACT_IS_BUILDING=1 /tesseract/entrypoint.sh tesseract-runtime check
 
 # Make sure /tesseract, /home/tesseract-user, and /tmp are writable by non-root users,
 # especially important if some folders are created at build time and owned by 9999:9999.
+# This intentionally drops the sticky bit from /tmp: containers usually run as the
+# host user's uid, which could otherwise not rename or delete entries in /tmp that
+# were created at build time.
 USER root
-RUN chmod -R 777 /tesseract && chmod 555 /tesseract/tesseract_api.py \
-    && chmod -R 777 /home/tesseract-user \
-    && chmod -R 777 /tmp
+RUN find /tesseract /home/tesseract-user /tmp ! -type l ! -perm 777 \
+        ! -path /tesseract/tesseract_api.py -exec chmod 777 {} + \
+    && chmod 555 /tesseract/tesseract_api.py
 USER 9999:9999
 
 ENTRYPOINT ["/tesseract/entrypoint.sh", "tesseract-runtime"]
