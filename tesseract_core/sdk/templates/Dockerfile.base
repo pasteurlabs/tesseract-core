@@ -40,6 +40,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ssh \
     && rm -rf /var/lib/apt/lists/*
 
+{% if config.build_config.requirements.provider == "conda" %}
+# Install conda if the base image does not provide it. conda is only needed to
+# create /python-env, which is self-contained, so it stays in the build stage
+# and does not end up in the final image. Miniforge is pinned to a released
+# version for reproducible builds; bump it manually.
+ARG MINIFORGE_VERSION=26.7.2-0
+RUN if [ ! -x "$(command -v conda)" ]; then \
+    apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -fsSL -o /tmp/miniforge.sh \
+        "https://github.com/conda-forge/miniforge/releases/download/${MINIFORGE_VERSION}/Miniforge3-${MINIFORGE_VERSION}-Linux-$(uname -m).sh" \
+    && bash /tmp/miniforge.sh -b -p /opt/miniforge \
+    && rm /tmp/miniforge.sh; \
+fi
+# Appended so that a conda provided by the base image takes precedence
+ENV PATH="$PATH:/opt/miniforge/bin"
+{% endif %}
+
 {% if config.build_config.extra_packages %}
 # Install extra packages
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -119,7 +139,7 @@ USER root
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libnss-wrapper \
-{%- if not config.build_config.effective_python_version %}
+{%- if not config.build_config.effective_python_version and config.build_config.requirements.provider != "conda" %}
     && { [ -x "$(command -v python3)" ] || apt-get install -y --no-install-recommends python3; } \
 {%- endif %}
     && rm -rf /var/lib/apt/lists/*
