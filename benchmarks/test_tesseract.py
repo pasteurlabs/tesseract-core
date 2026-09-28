@@ -105,7 +105,6 @@ def http_shmem_tesseract_instance(noop_tesseract_image):
         input_path=input_dir,
         output_path=output_dir,
         output_format="json+binref",
-        python_executable=sys.executable,
         experimental_binref_pool=True,
     ) as tesseract:
         # Warmup - first request is slow due to container startup
@@ -147,6 +146,7 @@ def subprocess_shmem_tesseract_instance():
         input_path=input_dir,
         output_path=output_dir,
         output_format="json+binref",
+        python_executable=sys.executable,
         experimental_binref_pool=True,
     ) as tesseract:
         tesseract.health()
