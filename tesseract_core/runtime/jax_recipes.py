@@ -83,7 +83,7 @@ def _cache_key(tree: Any) -> Hashable:
 
 
 def _device_leaves(tree: Any) -> tuple[jax.Array, ...]:
-    """The leaves of ``tree`` that :func:`_cache_key` leaves out of the key."""
+    """The accelerator-resident leaves of ``tree``, whose bytes :func:`_cache_key` omits."""
     return tuple(leaf for leaf in jax.tree.leaves(tree) if _is_device_array(leaf))
 
 
@@ -108,9 +108,8 @@ def _bitwise_equal_jit(a: tuple, b: tuple) -> jax.Array:
 def _bitwise_equal(a: tuple[jax.Array, ...], b: tuple[jax.Array, ...]) -> bool:
     """Whether two sequences of device arrays hold identical bytes.
 
-    Bitwise rather than numeric, to match the byte comparison used for host
-    leaves: ``-0.0`` and ``0.0`` differ, and a NaN equals itself. Only one
-    boolean leaves the device.
+    Matches the byte comparison of host leaves, so ``-0.0`` and ``0.0`` differ
+    and a NaN equals itself.
     """
     if not a:
         return True
@@ -118,7 +117,7 @@ def _bitwise_equal(a: tuple[jax.Array, ...], b: tuple[jax.Array, ...]) -> bool:
 
 
 def _cache_lookup(inputs_dict: dict) -> Any | None:
-    """Return the cached ``(vjp_func, cotangent_template)`` for these inputs."""
+    """Return the cached ``(vjp_func, cotangent_template)`` for these inputs, or None."""
     cached = _jax_vjp_cache.get(_cache_key(inputs_dict))
     if cached is None:
         return None

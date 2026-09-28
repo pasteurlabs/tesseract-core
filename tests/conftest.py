@@ -666,9 +666,9 @@ def mocked_cuda(monkeypatch):
             self._next_ptr = 0xD000
             # Bytes returned by the next device->host copy, if a test seeds them.
             self.device_bytes: bytes | None = None
-            # Force legacy IPC to reject pointers this fake did not allocate
-            # (simulating VMM/pool-backed memory); its own cudaMalloc buffers,
-            # such as staging buffers, stay exportable.
+            # Make legacy IPC reject pointers this fake did not allocate,
+            # simulating VMM-backed memory. Its own cudaMalloc buffers, such as
+            # staging buffers, stay exportable.
             self.reject_foreign_ipc = False
 
         # -- device / memory management ---------------------------------

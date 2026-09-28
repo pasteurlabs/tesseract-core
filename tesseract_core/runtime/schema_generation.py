@@ -61,11 +61,7 @@ def _type_adapter(annotation: Any) -> TypeAdapter:
 
 @functools.lru_cache(maxsize=1024)
 def _exact_array_adapter(shape: tuple, dtype: str | None) -> TypeAdapter:
-    """TypeAdapter for ``Array[shape, dtype]``, keyed by value rather than identity.
-
-    ``Array[...]`` returns a new class on every call, so adapters for shapes that
-    are only known per request are cached by shape and dtype instead.
-    """
+    """TypeAdapter for ``Array[shape, dtype]``, cached by value since ``Array[...]`` returns a new class per call."""
     return TypeAdapter(Array[shape, dtype])
 
 

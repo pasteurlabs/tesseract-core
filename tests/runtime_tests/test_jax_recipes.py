@@ -301,7 +301,7 @@ class TestCacheWithDeviceArrays:
     """
 
     @staticmethod
-    def _device_everything(monkeypatch):
+    def _treat_all_arrays_as_device(monkeypatch):
         import jax
 
         from tesseract_core.runtime import jax_recipes
@@ -314,7 +314,7 @@ class TestCacheWithDeviceArrays:
     def test_key_leaves_out_device_bytes(self, monkeypatch):
         import jax.numpy as jnp
 
-        jax_recipes = self._device_everything(monkeypatch)
+        jax_recipes = self._treat_all_arrays_as_device(monkeypatch)
         a = {"x": jnp.array([1.0, 2.0])}
         b = {"x": jnp.array([1.0, 3.0])}
         assert jax_recipes._cache_key(a) == jax_recipes._cache_key(b)
@@ -325,7 +325,7 @@ class TestCacheWithDeviceArrays:
     def test_lookup_compares_contents(self, monkeypatch):
         import jax.numpy as jnp
 
-        jax_recipes = self._device_everything(monkeypatch)
+        jax_recipes = self._treat_all_arrays_as_device(monkeypatch)
         jax_recipes._set_jax_vjp_cache_size(1)
         try:
             x = {"x": jnp.array([0.0, 1.0, jnp.nan])}
@@ -335,7 +335,7 @@ class TestCacheWithDeviceArrays:
             )
             same = {"x": jnp.array([0.0, 1.0, jnp.nan])}
             assert jax_recipes._cache_lookup(same) == ("vjp", "template")
-            # Bitwise, like the host path: -0.0 is a different input.
+            # Comparison is bitwise like the host path, so -0.0 is a new input.
             assert (
                 jax_recipes._cache_lookup({"x": jnp.array([-0.0, 1.0, jnp.nan])})
                 is None
@@ -365,7 +365,7 @@ class TestCacheWithDeviceArrays:
 
         from tesseract_core.runtime.jax_recipes import jax_apply, jax_vjp
 
-        jax_recipes = self._device_everything(monkeypatch)
+        jax_recipes = self._treat_all_arrays_as_device(monkeypatch)
         InputSchema, apply_jit = _build_api()
 
         def inputs(offset):

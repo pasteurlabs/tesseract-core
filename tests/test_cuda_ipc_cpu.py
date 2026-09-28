@@ -373,7 +373,7 @@ def test_release_frees_staging_beyond_pool_limit(mocked_cuda, monkeypatch):
     cuda_ipc.release_pinned_ipc_exports()
     assert mocked_cuda.calls["free"] == [0xE000]
 
-    # The buffer kept in the pool is reused; the freed one is not.
+    # The next export reuses the pooled buffer, not the freed one.
     cuda_ipc.dump_cuda_ipc_arraydict(FakeCudaArray((4,), "<f4", data_ptr=0x7000))
     assert mocked_cuda.calls["memcpy_d2d"][-1] == (0xD000, 0x7000, 16)
     assert mocked_cuda.calls["malloc"] == [16, 16]
@@ -675,8 +675,7 @@ def test_load_closes_handle_even_on_copy_failure(mocked_cuda, monkeypatch):
         cuda_ipc.load_cuda_ipc_arraydict(
             _encoded((2,), "float32", device=0, offset=0, storage_size=8)
         )
-    # Owned buffer freed and the IPC mapping closed (and forgotten) despite the
-    # failure.
+    # Owned buffer freed, IPC mapping closed and evicted from the cache.
     assert mocked_cuda.calls["free"] == [0xD000]
     assert mocked_cuda.calls["close"] == [0x2000]
 

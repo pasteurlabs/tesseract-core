@@ -222,9 +222,7 @@ _CU_POINTER_ATTRIBUTE_IS_LEGACY_CUDA_IPC_CAPABLE = 10
 def is_legacy_ipc_capable(device_ptr: int) -> bool:
     """Whether ``cudaIpcGetMemHandle`` accepts the allocation containing ``device_ptr``.
 
-    Memory from CUDA's Virtual Memory Management API (JAX/XLA's default
-    allocator, for example) is not. Asking up front avoids a call that is
-    expected to fail on every export of such memory.
+    VMM-backed memory, such as JAX/XLA's default allocator hands out, is not.
     """
     flag = ctypes.c_int()
     ret = _get_driver().cuPointerGetAttribute(
