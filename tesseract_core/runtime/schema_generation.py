@@ -1,6 +1,7 @@
 # Copyright 2025 Pasteur Labs. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import functools
 import re
 import types
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -47,6 +48,25 @@ T = TypeVar("T")
 # Python has funnily enough two union types now. See https://github.com/python/cpython/issues/105499
 # We check against both for compatibility with older versions of Python.
 UNION_TYPES = [Union, types.UnionType]
+
+
+# Building a TypeAdapter generates a pydantic core schema, which for an array
+# annotation means creating a new model class. That costs far more than the
+# validation itself, so gradient endpoints must not build adapters per request.
+@functools.lru_cache(maxsize=1024)
+def _type_adapter(annotation: Any) -> TypeAdapter:
+    """TypeAdapter for an annotation taken from a Tesseract's schema."""
+    return TypeAdapter(annotation)
+
+
+@functools.lru_cache(maxsize=1024)
+def _exact_array_adapter(shape: tuple, dtype: str | None) -> TypeAdapter:
+    """TypeAdapter for ``Array[shape, dtype]``, keyed by value rather than identity.
+
+    ``Array[...]`` returns a new class on every call, so adapters for shapes that
+    are only known per request are cached by shape and dtype instead.
+    """
+    return TypeAdapter(Array[shape, dtype])
 
 
 def _construct_annotated(obj: Any, metadata: Iterable[Any]) -> Any:
@@ -577,10 +597,9 @@ def create_gradient_schema(
                     else:
                         expected_shape = (*output_shape, *input_shape)
 
-                    expected_annotation = Array[expected_shape, str(arr.dtype)]
                     try:
-                        result[output_path][input_path] = TypeAdapter(
-                            expected_annotation
+                        result[output_path][input_path] = _exact_array_adapter(
+                            expected_shape, str(arr.dtype)
                         ).validate_python(arr, context=info.context)
                     except ValidationError as e:
                         raise ValueError(
@@ -597,7 +616,7 @@ def create_gradient_schema(
                     diffable_output_patterns, output_path
                 )
                 try:
-                    result[output_path] = TypeAdapter(
+                    result[output_path] = _type_adapter(
                         expected_annotation
                     ).validate_python(arr, context=info.context)
                 except ValidationError as e:
@@ -613,7 +632,7 @@ def create_gradient_schema(
                     diffable_input_patterns, input_path
                 )
                 try:
-                    result[input_path] = TypeAdapter(
+                    result[input_path] = _type_adapter(
                         expected_annotation
                     ).validate_python(arr, context=info.context)
                 except ValidationError as e:
@@ -721,11 +740,10 @@ def create_gradient_schema(
                     annotation = _find_annotation_from_path(
                         diffable_input_patterns, path
                     )
-                    exact_annotation = Array[ref_shape, annotation.expected_dtype]
                     try:
-                        validated[path] = TypeAdapter(exact_annotation).validate_python(
-                            arr, context=info.context
-                        )
+                        validated[path] = _exact_array_adapter(
+                            tuple(ref_shape), annotation.expected_dtype
+                        ).validate_python(arr, context=info.context)
                     except ValidationError as e:
                         raise ValueError(f"Tangent vector '{path}': {e}") from e
                 return validated
@@ -797,7 +815,7 @@ def create_gradient_schema(
                         diffable_output_patterns, path
                     )
                     try:
-                        validated[path] = TypeAdapter(annotation).validate_python(
+                        validated[path] = _type_adapter(annotation).validate_python(
                             arr, context=info.context
                         )
                     except ValidationError as e:
