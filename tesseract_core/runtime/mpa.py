@@ -19,7 +19,6 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-import mlflow
 import requests
 
 from tesseract_core.runtime.config import get_config
@@ -138,6 +137,12 @@ class MLflowBackend(BaseBackend):
             "quiet"  # Suppress potential MLflow git warnings
         )
 
+        # Imported here rather than at module level because importing mlflow
+        # dominates runtime startup time, and most Tesseracts never use it.
+        import mlflow
+
+        self._mlflow = mlflow
+
         config = get_config()
         tracking_uri = config.mlflow_tracking_uri
 
@@ -152,7 +157,7 @@ class MLflowBackend(BaseBackend):
             )
 
         self._ensure_mlflow_reachable(tracking_uri)
-        mlflow.set_tracking_uri(tracking_uri)
+        self._mlflow.set_tracking_uri(tracking_uri)
 
     def _ensure_mlflow_reachable(self, mlflow_tracking_uri: str) -> None:
         """Check if the MLflow tracking server is reachable."""
@@ -194,25 +199,25 @@ class MLflowBackend(BaseBackend):
 
     def log_parameter(self, key: str, value: Any) -> None:
         """Log a parameter to MLflow."""
-        mlflow.log_param(key, value)
+        self._mlflow.log_param(key, value)
 
     def log_metric(self, key: str, value: float, step: int | None = None) -> None:
         """Log a metric to MLflow."""
-        mlflow.log_metric(key, value, step=step)
+        self._mlflow.log_metric(key, value, step=step)
 
     def log_artifact(self, local_path: str) -> None:
         """Log an artifact to MLflow."""
-        mlflow.log_artifact(local_path)
+        self._mlflow.log_artifact(local_path)
 
     def start_run(self) -> None:
         """Start a new MLflow run with optional extra arguments from config."""
         config = get_config()
         run_extra_args = config.mlflow_run_extra_args
-        mlflow.start_run(**run_extra_args)
+        self._mlflow.start_run(**run_extra_args)
 
     def end_run(self) -> None:
         """End the current MLflow run."""
-        mlflow.end_run()
+        self._mlflow.end_run()
 
 
 def _create_backend(base_dir: str | None) -> BaseBackend:
