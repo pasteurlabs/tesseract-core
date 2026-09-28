@@ -147,10 +147,11 @@ intersphinx_mapping = {
     "numpy": ("http://docs.scipy.org/doc/numpy/", None),
 }
 
-# jax_recipes imports optional JAX dependencies (jax, equinox) at module level
-# that aren't installed in the docs environment; mock them so autodoc can
-# introspect the module without importing the real packages.
-autodoc_mock_imports = ["jax", "equinox"]
+# jax_recipes and julia_recipes import optional dependencies (jax, equinox,
+# juliacall) at module level that aren't installed in the docs environment;
+# mock them so autodoc can introspect the modules without importing the real
+# packages.
+autodoc_mock_imports = ["jax", "equinox", "juliacall"]
 
 templates_path = ["_templates"]
 exclude_patterns = ["build", "_build", "jupyter_execute", "Thumbs.db", ".DS_Store"]

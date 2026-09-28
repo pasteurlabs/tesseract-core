@@ -1,1 +1,1 @@
-juliacall
+juliacall==0.9.36

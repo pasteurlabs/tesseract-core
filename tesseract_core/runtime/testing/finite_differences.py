@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from rich.progress import Progress
 
 from ..core import create_endpoints, get_input_schema, get_output_schema
-from ..tree_transforms import escape_dict_key, get_at_path, set_at_path, split_path
+from ..tree_transforms import expand_path_pattern, get_at_path, set_at_path
 
 GradientEndpointName = Literal[
     "jacobian", "jacobian_vector_product", "vector_jacobian_product"
@@ -44,58 +44,6 @@ class GradientCheckResult(NamedTuple):
     grad_val: ArrayLike | None
     ref_val: ArrayLike | None
     exception: str | None
-
-
-def expand_path_pattern(path_pattern: str, inputs: dict[str, Any]) -> list[str]:
-    """Expand a path pattern to a list of all matching paths in the given pytree.
-
-    For example, given the path pattern `a.[].{}`, and the inputs `{"a": [{"b": 1}, {"c": 2}]}`,
-    this function would return `["a.[0].{b}", "a.[1].{c}"]`.
-    """
-    parts = split_path(path_pattern)
-
-    def _handle_part(
-        parts: Sequence[str], current_inputs: Any, current_path: list[str]
-    ) -> list[str]:
-        """Recursively expand each part separately."""
-        if current_inputs is None:
-            # An optional field (container or leaf) that was not supplied, or a
-            # None entry in a list. No paths here.
-            return []
-
-        if not parts:
-            return [".".join(current_path)]
-
-        paths = []
-        part = parts[0]
-
-        if part == "[]":
-            # sequence access
-            for i, _ in enumerate(current_inputs):
-                subpaths = _handle_part(
-                    parts[1:], current_inputs[i], [*current_path, f"[{i}]"]
-                )
-                paths.extend(subpaths)
-        elif part == "{}":
-            # dictionary access
-            for key in current_inputs:
-                subpaths = _handle_part(
-                    parts[1:],
-                    current_inputs[key],
-                    [*current_path, f"{{{escape_dict_key(str(key))}}}"],
-                )
-                paths.extend(subpaths)
-        else:
-            value = (
-                current_inputs.get(part)
-                if isinstance(current_inputs, dict)
-                else getattr(current_inputs, part, None)
-            )
-            subpaths = _handle_part(parts[1:], value, [*current_path, part])
-            paths.extend(subpaths)
-        return paths
-
-    return _handle_part(parts, inputs, [])
 
 
 def get_differentiable_paths(

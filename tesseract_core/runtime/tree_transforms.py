@@ -169,6 +169,55 @@ def set_at_path(tree: Any, values: dict[str, Any]) -> Any:
     return tree
 
 
+def expand_path_pattern(path_pattern: str, inputs: dict[str, Any]) -> list[str]:
+    """Expand a path pattern to a list of all matching paths in the given pytree.
+
+    For example, given the path pattern `a.[].{}`, and the inputs `{"a": [{"b": 1}, {"c": 2}]}`,
+    this function would return `["a.[0].{b}", "a.[1].{c}"]`.
+    """
+    parts = split_path(path_pattern)
+
+    def _handle_part(
+        parts: Sequence[str], current_inputs: Any, current_path: list[str]
+    ) -> list[str]:
+        """Recursively expand each part separately."""
+        if current_inputs is None:
+            # An optional field (container or leaf) that was not supplied, or a
+            # None entry in a list. No paths here.
+            return []
+
+        if not parts:
+            return [".".join(current_path)]
+
+        paths = []
+        part = parts[0]
+
+        if part == "[]":
+            # sequence access
+            for i, _ in enumerate(current_inputs):
+                subpaths = _handle_part(
+                    parts[1:], current_inputs[i], [*current_path, f"[{i}]"]
+                )
+                paths.extend(subpaths)
+        elif part == "{}":
+            # dictionary access
+            for key in current_inputs:
+                subpaths = _handle_part(
+                    parts[1:],
+                    current_inputs[key],
+                    [*current_path, f"{{{escape_dict_key(str(key))}}}"],
+                )
+                paths.extend(subpaths)
+        else:
+            subpaths = _handle_part(
+                parts[1:], current_inputs[part], [*current_path, part]
+            )
+            paths.extend(subpaths)
+        return paths
+
+    return _handle_part(parts, inputs, [])
+
+
 def flatten_with_paths(
     tree: Mapping | Sequence | BaseModel,
     include_paths: Iterable[str],

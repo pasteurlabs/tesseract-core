@@ -3,8 +3,7 @@
 # Assembles a sparse SparseMatrixCSC from tridiagonal block diagonals
 # (identified by their Tesseract paths) and solves via CHOLMOD.
 #
-# Contract:
-#   apply_jl(diff_args, non_diff_args, diff_paths, non_diff_paths) -> Vector{Float64}
+# Follows the apply_jl contract of tesseract_core.runtime.julia_recipes.
 
 using LinearAlgebra, SparseArrays, LinearSolve
 
@@ -59,5 +58,5 @@ function apply_jl(diff_args, non_diff_args, diff_paths, non_diff_paths)
 
     prob = LinearProblem(A_sym, b)
     sol = solve(prob, CHOLMODFactorization())
-    return copy(sol.u)
+    return (; x = copy(sol.u))
 end
