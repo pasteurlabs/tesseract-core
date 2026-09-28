@@ -552,12 +552,14 @@ class Tesseract:
                 For example, `{"profiling": True}` enables profiling.
             stream_logs: If True, stream logs to stdout while endpoints run.
                 If a callable, stream logs to that callable instead.
-            python_executable: Interpreter used to run the Tesseract. Defaults to
-                the one running this process; point it at another environment's
-                ``python`` (for example one created with ``uv venv``) to give the
-                Tesseract dependencies that conflict with the caller's. That
-                environment must have ``tesseract-core[runtime]`` and the
-                Tesseract's own requirements installed.
+            python_executable: Interpreter to run the Tesseract on. It must
+                have ``tesseract-core[runtime]`` and the Tesseract's
+                requirements installed; pass ``sys.executable`` to use the
+                SDK's own environment. If None, an environment is built from
+                ``tesseract_config.yaml`` into ``.tesseract-venv`` next to the
+                ``tesseract_api.py`` and reused while its requirements are
+                unchanged. This needs ``uv``, or ``conda`` for
+                ``requirements.provider: conda``.
             startup_timeout: How long to wait, in seconds, for the Tesseract to
                 become healthy before giving up.
             experimental_binref_pool: Opt-in fast path for ``json+binref`` that
@@ -729,6 +731,22 @@ class Tesseract:
             a list with all available endpoints for this Tesseract.
         """
         return [endpoint.lstrip("/") for endpoint in self.openapi_schema["paths"]]
+
+    @property
+    @requires_client
+    def supported_gpu_transports(self) -> tuple[str, ...]:
+        """Device transports that can be used to exchange arrays with this Tesseract.
+
+        These are the ``gpu_transport`` values (e.g. ``cuda_ipc``) this client
+        uses to pass GPU arrays by reference instead of copying them to the host.
+        Tesseracts served without a GPU transport, and in-process Tesseracts
+        created via :meth:`from_tesseract_api` (which share memory with the
+        caller), support none.
+
+        Returns:
+            a tuple of supported device transport names, empty if none.
+        """
+        return self._client.supported_gpu_transports
 
     def container_info(self) -> Container:
         """Retrieve information on the Docker container serving this Tesseract.
@@ -1443,6 +1461,13 @@ class HTTPClient:
         """(Sanitized) URL to connect to."""
         return self._url
 
+    @property
+    def supported_gpu_transports(self) -> tuple[str, ...]:
+        """Device transports this client uses for GPU arrays (empty if none)."""
+        if self._gpu_transport == "none":
+            return ()
+        return (self._gpu_transport,)
+
     def _send(
         self, url: str, method: str, data: bytes, params: dict
     ) -> requests.Response:
@@ -1652,6 +1677,15 @@ class LocalClient:
         self._output_path = output_path
         # Allows external clients (e.g. tesseract-jax) to access module directly
         self.api_module = tesseract_api
+
+    @property
+    def supported_gpu_transports(self) -> tuple[str, ...]:
+        """Device transports this client supports.
+
+        Always empty: in-process Tesseracts share memory with the caller, so
+        arrays never need to be transported.
+        """
+        return ()
 
     def run_tesseract(
         self,

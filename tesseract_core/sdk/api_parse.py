@@ -297,6 +297,14 @@ class TesseractBuildConfig(BaseModel, validate_assignment=True):
             return self.requirements.python_version
         return None
 
+    @property
+    def uses_base_image_python(self) -> bool:
+        """Whether /python-env uses the base image's Python instead of bundling its own."""
+        return (
+            isinstance(self.requirements, PipRequirements)
+            and self.requirements.python_version is None
+        )
+
     @model_validator(mode="after")
     def _validate_python_version_provider(self):
         if (
@@ -519,8 +527,14 @@ def get_config(src_dir: Path) -> TesseractConfig:
     if not config_file.exists():
         raise FileNotFoundError(f"No file found at {config_file}")
 
-    with open(config_file) as f:
-        config = yaml.safe_load(f)
+    try:
+        with open(config_file) as f:
+            config = yaml.safe_load(f)
+    except yaml.YAMLError as err:
+        raise ValidationError(f"Invalid YAML in {config_file}: {err}") from err
+
+    if not isinstance(config, dict):
+        raise ValidationError(f"{config_file} must contain a YAML mapping.")
 
     try:
         return TesseractConfig(**config)

@@ -315,7 +315,7 @@ def test_container_info_raises_for_non_image_tesseract():
 
 
 def test_container_info_unavailable(dummy_api_path):
-    tess = Tesseract.from_source(dummy_api_path)
+    tess = Tesseract.from_source(dummy_api_path, python_executable=sys.executable)
     with pytest.raises(RuntimeError, match="from_image"):
         tess.container_info()
 
@@ -338,7 +338,7 @@ def test_garbage_collection_reaps_process(dummy_api_path):
     """A forgotten Tesseract must not leave an orphaned process behind."""
     import gc
 
-    tess = Tesseract.from_source(dummy_api_path)
+    tess = Tesseract.from_source(dummy_api_path, python_executable=sys.executable)
     tess.serve()
     # Hold the process, not the Tesseract, so it can still be collected.
     process = tess._serve_context.process
@@ -364,7 +364,9 @@ def test_del_tesseract_purges_auto_tempdir(mock_serving):
 
 def test_auto_created_scratch_dirs_are_purged(dummy_api_path):
     """What we made, we clean up -- unlike directories the caller passed in."""
-    tess = Tesseract.from_source(dummy_api_path, output_format="json+binref")
+    tess = Tesseract.from_source(
+        dummy_api_path, python_executable=sys.executable, output_format="json+binref"
+    )
     scratch = [
         Path(tess._spawn_config["input_path"]),
         Path(tess._spawn_config["output_path"]),
@@ -398,6 +400,7 @@ def test_given_scratch_dirs_are_left_alone(dummy_api_path, tmp_path):
 
     tess = Tesseract.from_source(
         dummy_api_path,
+        python_executable=sys.executable,
         input_path=given_in,
         output_path=given_out,
         output_format="json+binref",
@@ -507,6 +510,38 @@ def test_serve_lifecycle(mock_serving, mock_clients):
         with t:
             with t:
                 pass
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "expected"),
+    [
+        ({}, ()),
+        ({"gpu_transport": "none"}, ()),
+        ({"gpu_transport": "cuda_ipc"}, ("cuda_ipc",)),
+        ({"runtime_config": {"gpu_transport": "cuda_ipc"}}, ("cuda_ipc",)),
+    ],
+)
+def test_supported_gpu_transports_served(mock_serving, mock_clients, kwargs, expected):
+    t = Tesseract.from_image("sometesseract:0.2.3", **kwargs)
+
+    # The transport is a property of the client, which only exists once served
+    with pytest.raises(RuntimeError, match="context manager"):
+        _ = t.supported_gpu_transports
+
+    with t:
+        assert t.supported_gpu_transports == expected
+
+
+def test_supported_gpu_transports_unserved(dummy_tesseract_module):
+    # A remote Tesseract is reached without any device transport configured
+    assert Tesseract.from_url("localhost").supported_gpu_transports == ()
+
+    # In-process Tesseracts share memory with the caller, so there is nothing to
+    # transport -- even when a GPU transport is configured.
+    local = Tesseract.from_tesseract_api(
+        dummy_tesseract_module, gpu_transport="cuda_ipc"
+    )
+    assert local.supported_gpu_transports == ()
 
 
 @pytest.mark.parametrize(
