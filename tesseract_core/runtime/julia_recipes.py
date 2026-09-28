@@ -48,7 +48,7 @@ class _FlatInputs(NamedTuple):
     non_diff_paths: list[str]
 
 
-def _expand(
+def _expand_paths(
     schema: type[BaseModel],
     inputs: dict,
     filter_fn: Callable[[type], bool] | None = None,
@@ -64,13 +64,13 @@ def _flatten_inputs(inputs: BaseModel) -> _FlatInputs:
     """Split the leaves of ``inputs`` into differentiable arrays and everything else."""
     schema = type(inputs)
     inputs_dict = inputs.model_dump()
-    diff_paths = set(_expand(schema, inputs_dict, filter_fn=is_differentiable))
+    diff_paths = set(_expand_paths(schema, inputs_dict, filter_fn=is_differentiable))
 
     flat = _FlatInputs([], [], [], [])
-    for path in _expand(schema, inputs_dict):
+    for path in _expand_paths(schema, inputs_dict):
         value = get_at_path(inputs_dict, path)
         if isinstance(value, (dict, list)):
-            # Container patterns expand too; only their leaves are passed on.
+            # Container patterns expand too, but only leaves are passed to Julia.
             continue
         if path in diff_paths:
             flat.diff_args.append(np.asarray(value, dtype=np.float64))

@@ -3,16 +3,14 @@
 
 """Tesseract wrapping a sparse CHOLMOD solver for SPD block systems with Enzyme AD.
 
-Solves A * x = b where A is a symmetric positive definite matrix with block
-structure. Each nonzero block is tridiagonal (or diagonal), stored compactly
-as up to 3 diagonal vectors. Zero blocks are represented as None.
+Solves A x = b, where A is symmetric positive definite with block structure.
+Each nonzero block is tridiagonal (or diagonal) and stored as up to three
+diagonal vectors. Zero blocks are None.
 
-The matrix is assembled as a sparse SparseMatrixCSC and solved via
-SuiteSparse CHOLMOD — a sparse Cholesky factorization not available in JAX.
-Enzyme provides both forward-mode (JVP) and reverse-mode (VJP) automatic
-differentiation through the LinearSolve.jl Enzyme extension, which
-implements the implicit function theorem adjoint without differentiating
-through CHOLMOD internals.
+The solve uses SuiteSparse CHOLMOD, a sparse Cholesky factorization that JAX
+does not provide. Forward- and reverse-mode gradients come from the Enzyme
+extension of LinearSolve.jl, which applies the implicit function theorem
+instead of differentiating through CHOLMOD internals.
 
 Example arrow structure (SPD, blocks [0][1]=[1][0]^T, [0][2]=[2][0]^T):
 
@@ -67,7 +65,7 @@ class InputSchema(BaseModel):
         description="Right-hand side vector, length sum(block_sizes).",
     )
     block_sizes: list[int] = Field(
-        description="Size of each block group.",
+        description="Size of each block row (and column).",
     )
 
 

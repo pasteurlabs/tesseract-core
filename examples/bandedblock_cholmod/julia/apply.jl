@@ -1,9 +1,5 @@
 # Sparse CHOLMOD solver for SPD block systems with tridiagonal blocks.
-#
-# Assembles a sparse SparseMatrixCSC from tridiagonal block diagonals
-# (identified by their Tesseract paths) and solves via CHOLMOD.
-#
-# Follows the apply_jl contract of tesseract_core.runtime.julia_recipes.
+# Implements the apply_jl contract of tesseract_core.runtime.julia_recipes.
 
 using LinearAlgebra, SparseArrays, LinearSolve
 
@@ -30,7 +26,7 @@ function apply_jl(diff_args, non_diff_args, diff_paths, non_diff_paths)
         m = match(r"^blocks\.\[(\d+)\]\.\[(\d+)\]\.(sub|main|sup)$", path)
         m === nothing && continue
 
-        bi = parse(Int, m[1]) + 1  # 1-indexed
+        bi = parse(Int, m[1]) + 1  # Julia is 1-indexed
         bj = parse(Int, m[2]) + 1
         comp = m[3]
         r0 = offsets[bi]
@@ -52,8 +48,8 @@ function apply_jl(diff_args, non_diff_args, diff_paths, non_diff_paths)
     end
 
     A_raw = sparse(I_idx, J_idx, V, N, N)
-    # Materialize symmetry into a plain SparseMatrixCSC (avoids Symmetric wrapper
-    # which has a known bug with Enzyme reverse-mode in LinearSolve)
+    # Materialize the symmetric matrix as a plain SparseMatrixCSC, since
+    # LinearSolve has a known bug in Enzyme reverse mode with Symmetric wrappers.
     A_sym = sparse(Symmetric(A_raw))
 
     prob = LinearProblem(A_sym, b)

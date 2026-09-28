@@ -182,8 +182,7 @@ def expand_path_pattern(path_pattern: str, inputs: dict[str, Any]) -> list[str]:
     ) -> list[str]:
         """Recursively expand each part separately."""
         if current_inputs is None:
-            # An optional field (container or leaf) that was not supplied, or a
-            # None entry in a list. No paths here.
+            # Unset optional field or None list entry
             return []
 
         if not parts:

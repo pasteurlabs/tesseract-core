@@ -148,9 +148,8 @@ intersphinx_mapping = {
 }
 
 # jax_recipes and julia_recipes import optional dependencies (jax, equinox,
-# juliacall) at module level that aren't installed in the docs environment;
-# mock them so autodoc can introspect the modules without importing the real
-# packages.
+# juliacall) at module level. These aren't installed in the docs environment,
+# so mock them to let autodoc introspect the modules.
 autodoc_mock_imports = ["jax", "equinox", "juliacall"]
 
 templates_path = ["_templates"]

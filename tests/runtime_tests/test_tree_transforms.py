@@ -772,14 +772,7 @@ class TestSplitPath:
 
 
 class TestExpandPathPatternOptionalFields:
-    """Optional container fields must not abort path expansion.
-
-    The pattern comes from the schema, so an optional field that was simply
-    not supplied is a normal input rather than a bad path. Every branch of
-    the walk raises on ``None`` though: ``[]`` and ``{}`` iterate it and a
-    named part subscripts it, so a Tesseract with an optional container
-    input used to fail before checking a single gradient.
-    """
+    """Unset optional fields expand to no paths instead of raising."""
 
     @pytest.mark.parametrize(
         "pattern,inputs",
@@ -794,7 +787,6 @@ class TestExpandPathPatternOptionalFields:
         assert expand_path_pattern(pattern, inputs) == []
 
     def test_none_entry_inside_a_populated_list_is_skipped(self):
-        """The present entries still expand; only the missing one drops out."""
         assert expand_path_pattern("a.[].b", {"a": [{"b": 1}, None]}) == ["a.[0].b"]
 
     @pytest.mark.parametrize(
@@ -806,7 +798,6 @@ class TestExpandPathPatternOptionalFields:
         ids=["optional_leaf", "optional_leaf_in_list"],
     )
     def test_absent_optional_leaf_expands_to_nothing(self, pattern, inputs):
-        """A None leaf has no array to perturb, so it yields no path."""
         assert expand_path_pattern(pattern, inputs) == []
 
     @pytest.mark.parametrize(
