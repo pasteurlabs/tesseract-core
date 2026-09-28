@@ -59,6 +59,12 @@ jobs:
           fi
 
       - name: Run test suite
+        env:
+          # Tests build environments in temp dirs. Keep those on the uv cache's
+          # drive (RUNNER_TEMP) so uv hardlinks rather than copies on Windows.
+          TMP: ${{ runner.temp }}
+          TEMP: ${{ runner.temp }}
+          TMPDIR: ${{ runner.temp }}
         run: |
           # No typeguard here: it breaks coverage's branch mapping (gh#691).
           uv run --no-sync pytest \
