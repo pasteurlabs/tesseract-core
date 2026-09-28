@@ -3,12 +3,11 @@
 
 """A GPU Tesseract that returns its result as device (JAX) memory.
 
-JAX exposes its device buffers only through DLPack, never
-``__cuda_array_interface__``. Serving this Tesseract with
-``gpu_transport="cuda_ipc"`` therefore exercises the DLPack metadata path of the
-CUDA IPC export: the runtime reads the device pointer, shape, and dtype off the
-DLPack capsule and hands back an IPC handle instead of copying the result to
-host. This requires a real GPU and is only built/run by the GPU end-to-end tests
+Because ``apply`` returns a single-device JAX array, which exposes
+``__cuda_array_interface__``, serving this Tesseract with
+``gpu_transport="cuda_ipc"`` exercises the full CUDA IPC export path: the runtime
+hands back a device-memory IPC handle instead of copying the result to host. This
+requires a real GPU and is only built/run by the GPU end-to-end tests
 (``tests/endtoend_tests/test_serving_gpu.py``).
 """
 

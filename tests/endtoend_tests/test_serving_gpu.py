@@ -8,8 +8,7 @@ in-process), these tests build a real GPU Tesseract image, serve it in a
 container with ``--gpus all`` and ``--ipc=host``, and round-trip device memory
 across the process/container boundary via a genuine ``cudaIpcMemHandle_t``. One
 image is built per GPU array framework (CuPy, JAX, PyTorch) so the export path
-is covered against both metadata sources it reads: ``__cuda_array_interface__``
-(CuPy, PyTorch) and DLPack (JAX).
+is covered against the device arrays each framework returns.
 
 Requires a physical CUDA GPU and Docker with the NVIDIA container runtime. CuPy
 is used only as a convenient GPU-availability probe on the host; the decoded
