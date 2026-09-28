@@ -179,10 +179,20 @@ with Tesseract.from_image(
     grad_a = jax.jit(jax.grad(loss))(a, b)
 ```
 
-The native path is a compiled extension that ships with Tesseract-JAX. If it is
-unavailable, or JAX sees no CUDA device, a call that asks for the GPU transport
-raises an error instead of silently falling back to the host round trip. Omit
-`gpu_transport` to use the host path explicitly.
+The native path is a compiled extension that ships with Tesseract-JAX, and it is
+used only when the call is compiled for a CUDA device. If JAX compiles the call
+for the GPU but the extension is unavailable, the call raises an error instead of
+silently falling back to the host round trip.
+
+```{warning}
+If JAX itself runs on the CPU, `gpu_transport` has no effect and the call takes
+the host round trip without an error. This happens with a CPU-only jaxlib, with
+`JAX_PLATFORMS=cpu`, or when JAX fails to load its CUDA plugin, in which case it
+falls back to the CPU with only a warning at startup. Check that
+`jax.default_backend()` returns `"gpu"` before relying on the GPU transport.
+```
+
+Omit `gpu_transport` to use the host path explicitly.
 
 ### Tesseract-Torch
 
@@ -276,9 +286,11 @@ with a C++ compiler available.
 **The GPU transport is enabled, but calls are no faster.** Check that your
 arrays actually live on the GPU on both sides. Common causes are inputs created
 on the CPU, a Tesseract that computes with NumPy, and adopting inputs with
-`np.asarray`. With Tesseract-JAX, setting `TESSERACT_JAX_DEBUG_CHECK_DEVICE_PTRS=1`
-makes any host pointer at the native boundary raise an error, which pinpoints
-where an array left the device.
+`np.asarray`. With Tesseract-JAX, first check that `jax.default_backend()`
+returns `"gpu"` in the calling process: if JAX runs on the CPU, the native path is
+never used and nothing raises. Once JAX runs on the GPU, setting
+`TESSERACT_JAX_DEBUG_CHECK_DEVICE_PTRS=1` makes any host pointer at the native
+boundary raise an error, which pinpoints where an array left the device.
 
 **Two JAX processes, and one fails with an out-of-memory error at startup.** See
 [Two JAX processes on one GPU](#two-jax-processes).

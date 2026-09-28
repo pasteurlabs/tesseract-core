@@ -12,58 +12,60 @@ blog_description: "Tesseract-JAX can now call a solver running in another proces
 <!--
 DRAFT STATUS
 
-Plan: repo-root gpu-jax-post-plan.md. Note that `blog_draft: true` is not honored by
-docs/conf.py (_collect_blog_posts lists every post with a blog_date), so committing
-this file publishes it in the blog index. Before publishing, rename the file, set
-blog_date to the publication date, update the link in 2026-12-01-boring-envelope.md,
-and drop `blog_draft`.
+Note that `blog_draft: true` is not honored by docs/conf.py (_collect_blog_posts lists
+every post with a blog_date), so committing this file publishes it in the blog index.
+Before publishing, rename the file, set blog_date to the publication date, update the
+link in 2026-12-01-boring-envelope.md, and drop `blog_draft`.
 
-PLACEHOLDERS. Every number marked **[placeholder: ...]** is invented. Replace all of
-them with measurements from workstream B of the plan (Multi-Agent-DPC on one GPU box):
-- GPU model, CUDA version, driver
-- the four rows of the timing table
-- the share of the gap closed by the GPU transport
-- the remaining per-step overhead and its breakdown
+MEASUREMENTS. All numbers were measured on 2026-09-28 on an NVIDIA A100 80GB PCIe
+(driver 580.159.03, CUDA 13.0), JAX 0.11.2 (jax[cuda13]), flax 0.12.10,
+tesseract-core d57ae07 + #806, tesseract-jax ed62941, Multi-Agent-DPC @ 109973e.
+Each table row is the median over 3 fresh processes x 50 timed steps (5 warm-up
+steps). Loss trajectories agree with the single-process run to within the GPU solver's
+own run-to-run nondeterminism (relative 2e-5). Rerun once #804, #806 and #726 are in a
+release, since the table assumes all three.
+Computed from the code: 300 steps; batch of 32; the rollout returns
+32 x 300 x (100 + 3 x 8) = 1,190,400 float32 values, and the VJP sends as many
+cotangents (plus 368,192 primal inputs, mostly the 11,298 policy weights broadcast 32
+times).
 
-Computed from the code, not placeholders: 300 steps; batch of 32; about 1.2 million
-float32 values per call (32 x 300 x (100 + 3 x 8)).
+The measured Tesseract is the team's solver.py and policy.py, unchanged, wrapped in the
+JAX recipe with Array[..., Float32] shapes and jnp.from_dlpack adoption. The linked port
+on github.com/dionhaefner/Multi-Agent-DPC (repro-performance-issue, 90cb2e9) is that Tesseract
+with the VJP cache always on; with it, the fork's train.py runs 500 epochs in 70 s and
+the step time matches the table's last row (127 ms).
 
 OPEN ITEMS
-- Gates: tesseract-core release with #781 and #669 (from_source), tesseract-jax
-  v0.5.0, docs how-to for the GPU transport (drafted at
-  docs/content/how-to/gpu-transport.md, has its own TODOs), 2026 winners
-  announced.
-- Permission: the Multi-Agent-DPC/CINOC team (story, CINOC mention, appendix
-  quote; offer review of the first two sections), and the authors of Prismo,
-  δsnow17-sacsma, and Differentiable Silicon. Check each description against the
-  project's README.
-- The VJP-cache row assumes the solver uses the recipe's experimental cache
-  (set_jax_vjp_cache_size, core #577). The team's Tesseract has a hand-rolled one on
-  the repro branch. Make the measured setup match the sentence.
-- If tesseract-jax #274 (traceable=True) has merged, add one sentence to "Why would
-  you ever do that" (marked below).
+- Gates: tesseract-core release with #669, #804, #806 and #726; tesseract-jax v0.5.0
+  with #274 (drop the traceable=True sentence if #274 doesn't land); docs how-to for
+  the GPU transport (docs/content/how-to/gpu-transport.md, has its own TODOs); 2026
+  winners announced.
+- Permission: the Multi-Agent-DPC/CINOC team (story, CINOC mention, appendix quote;
+  offer review of the first two sections), and the authors of Prismo, δsnow17-sacsma,
+  and Differentiable Silicon. Check each description against the project's README.
+- The cuda_vmm figures in "What's next" are from #726's own benchmark (containerized,
+  JAX in and out). The per-step comparison in this example was measured on #726's
+  branch without #806, against cuda_ipc on the same branch.
 - Figure: docs/static/blog/gpu-call-stack.png is rendered from gpu-call-stack.svg
   (rsvg-convert -z 1.25 gpu-call-stack.svg -o gpu-call-stack.png). Leave `vmap` on
-  the GPU path unclaimed unless workstream B exercises it beyond broadcast_all.
-- The solver's apply runs eqx.filter_jit on its raw inputs. Handle-backed inputs
-  arrive as device wrappers, so it probably needs to adopt them with
-  jnp.from_dlpack first (untested: Tesseract-JAX's GPU tests serve CuPy).
+  the GPU path unclaimed unless it is exercised beyond broadcast_all.
 -->
 
 # `jax.grad` across a process boundary, without leaving the GPU
 
 The winning entry of our first hackathon, [Multi-Agent-DPC](https://github.com/SOLARIS-JHU/Multi-Agent-DPC) by Pietro Zanotta, Dibakar Roy, and Honghui Zheng, teaches a swarm of mobile heat sources to shape a temperature field. A small policy network decides how each agent moves, and it learns by backpropagating through 300 steps of a differentiable PDE solver. The team wrapped that solver as a [Tesseract](https://github.com/pasteurlabs/tesseract-core) and called it from their JAX training loop through [Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax), which makes a Tesseract behave like any other differentiable JAX function.
 
-It worked, but it was far too slow to train with, and their published training script calls the solver directly with the Tesseract path switched off. Two things stood in the way. The solver's container installed the CPU build of JAX, so while the training loop ran on a laptop GPU, the solver did not. And every call across the boundary took the long way round. Each array left the GPU for host memory, was base64-encoded into a JSON body, crossed HTTP, was decoded on the other side, and made the same trip back. A training step makes two such calls, the forward rollout and the vector-Jacobian product (VJP) on the way back, and each carries about 1.2 million float32 values. Rather than giving up quietly, the team published a [branch that reproduces the slowdown](https://github.com/SOLARIS-JHU/Multi-Agent-DPC/tree/repro-performance-issue), and that is where this work started.
+It worked, but it was far too slow to train with, and their published training script calls the solver directly with the Tesseract path switched off. Two things stood in the way. The solver's container installed the CPU build of JAX, so while the training loop ran on a laptop GPU, the solver did not. And every call across the boundary took the long way round. Each array left the GPU for host memory, was base64-encoded into a JSON body, crossed HTTP, was decoded on the other side, and made the same trip back. A training step makes two such calls, the forward rollout and the vector-Jacobian product (VJP) on the way back. The rollout returns about 1.2 million float32 values, and the VJP sends as many back. Rather than giving up quietly, the team published a [branch that reproduces the slowdown](https://github.com/SOLARIS-JHU/Multi-Agent-DPC/tree/repro-performance-issue), and that is where this work started.
 
 Tesseract-JAX can now keep both calls on the GPU. The solver runs in its own process, and only 64-byte memory handles cross the boundary. Below, we rerun the team's training step, take on the obvious question of why anyone would put a process boundary inside a GPU training loop, and walk down the call stack that makes it work.
 
 ## The same training step, on the GPU
 
-Running the solver in its own process no longer requires a container. `Tesseract.from_source` serves a `tesseract_api.py` from a subprocess, so the solver picks up the same CUDA-enabled JAX as the training loop. Asking for the GPU transport takes one keyword on each end (the [how-to guide](../content/how-to/gpu-transport.md) has the details):
+Running the solver in its own process no longer requires a container. `Tesseract.from_source` serves a `tesseract_api.py` from a subprocess. By default it builds the Tesseract an environment from its own requirements, as `tesseract build` would, so we point it at the training loop's interpreter instead, which gives the solver the same CUDA-enabled JAX. Asking for the GPU transport takes one keyword on each end (the [how-to guide](../content/how-to/gpu-transport.md) has the details):
 
 ```python
 import os
+import sys
 
 # Two JAX processes share one GPU, so neither should claim 75% of it at startup.
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
@@ -74,6 +76,7 @@ from tesseract_jax import apply_tesseract
 
 with Tesseract.from_source(
     "tesseracts/solverHeat_decentralized/tesseract_api.py",
+    python_executable=sys.executable,
     gpu_transport="cuda_ipc",
 ) as solver:
 
@@ -94,23 +97,36 @@ with Tesseract.from_source(
     # jax.jit(jax.value_and_grad(mean over jax.vmap(loss))), then an Adam update.
 ```
 
-We timed one training step, a batch of 32 rollouts forward and backward plus the optimizer update, on an NVIDIA **[placeholder: GPU model]** with CUDA **[placeholder: version]**. All four rows ran on that machine with the solver on the GPU. The team's original numbers came from a setup with the solver on the CPU, so they aren't comparable.
+The Tesseract itself needed two changes, and we took the chance to [port it to Tesseract's JAX recipe](https://github.com/dionhaefner/Multi-Agent-DPC/blob/repro-performance-issue/tesseracts/solverHeat_decentralized/tesseract_api.py), which the last row of the table below relies on. Its arrays accept an optional leading batch dimension, so `broadcast_all` can send all 32 rollouts in one call. And it adopts the arrays that arrive by handle before computing with them. Those arrive as framework-agnostic device arrays, which JAX takes without a copy through DLPack but won't accept as they are:
 
-| Setup                                                 |    Time per training step |
-| ----------------------------------------------------- | ------------------------: |
-| Solver imported directly, one process                 | **[placeholder: 0.30 s]** |
-| Solver in its own process, arrays through host memory | **[placeholder: 1.12 s]** |
-| Solver in its own process, `cuda_ipc`                 | **[placeholder: 0.49 s]** |
-| Same, with the solver's VJP cache                     | **[placeholder: 0.34 s]** |
+```python
+def _adopt(x):
+    if hasattr(x, "__cuda_array_interface__") and not isinstance(x, jax.Array):
+        return jnp.from_dlpack(x)
+    return x
 
-Removing the host round trip closes **[placeholder: about three quarters]** of the gap to the single-process version. The last row turns on an experimental option in Tesseract's JAX recipe that keeps the residuals from the forward pass, so the VJP call can reuse them instead of rerunning all 300 steps. What remains, about **[placeholder: 40 ms]** per step, is mostly fixed cost: **[placeholder: two HTTP requests and their validation (~20 ms), full stream synchronization around each call (~15 ms), and a few device-to-device copies (~5 ms)]**. That overhead is roughly constant per call, so it matters less the more work the solver does per call. Here each call runs an entire 300-step rollout, which is about as coarse as calls get.
+
+def apply(inputs: InputSchema) -> OutputSchema:
+    inputs = inputs.model_copy(update={k: _adopt(v) for k, v in inputs})
+    return OutputSchema(**jax_apply(apply_jit, inputs))
+```
+
+We timed one training step, a batch of 32 rollouts forward and backward plus the optimizer update, on an NVIDIA A100 80GB with CUDA 13 and JAX 0.11.2. All four rows ran on that machine with the solver on the GPU, and each is the median over three fresh processes of 50 steps. The team's original numbers came from a setup with the solver on the CPU, so they aren't comparable.
+
+| Setup                                                 | Time per training step |
+| ----------------------------------------------------- | ---------------------: |
+| Solver imported directly, one process                 |                 105 ms |
+| Solver in its own process, arrays through host memory |                 288 ms |
+| Solver in its own process, `cuda_ipc`                 |                 204 ms |
+| Same, with the solver's VJP cache                     |                 128 ms |
+
+Removing the host round trip closes a little under half of the gap to the single-process version. Most of what the third row still pays for is compute rather than transport: to compute the VJP, the solver reruns the entire 300-step forward pass before it can go backward. The last row turns on an experimental option in Tesseract's JAX recipe that keeps the residuals from the forward pass, so the VJP call can reuse them instead, and together the two close almost 90% of the gap.
+
+What remains, about 23 ms per step, has two parts. About 13 ms is compute, because the forward pass and the VJP now run as two separate XLA programs, and together they cost more than the single program XLA builds when it sees both at once. The other 10 ms or so is fixed cost: roughly 5 ms for the two HTTP requests and their validation, 3 ms for exchanging handles and copying arrays on both sides, and 2 ms for adopting the inputs in JAX and for the shim's synchronization and copies. That overhead is roughly constant per call, so it matters less the more work the solver does per call. Here each call runs an entire 300-step rollout, which is about as coarse as calls get.
 
 ## Why would you ever do that
 
-The pipeline above has JAX on both sides of a process boundary, and nobody should build that on purpose. If both halves are JAX, you own both, and they can share an environment, import the solver. The Multi-Agent-DPC team came to the same conclusion. [CINOC](https://github.com/SOLARIS-JHU/CINOC), the ICML 2026 paper that grew out of the project, imports its solvers directly, which is the right call for two JAX components with the same authors.
-
-<!-- If tesseract-jax #274 (traceable=True) has merged, add one sentence here:
-when both sides are JAX, Tesseract-JAX can inline the call instead. -->
+The pipeline above has JAX on both sides of a process boundary, and nobody should build that on purpose. If both halves are JAX, you own both, and they can share an environment, import the solver. The Multi-Agent-DPC team came to the same conclusion. [CINOC](https://github.com/SOLARIS-JHU/CINOC), the ICML 2026 paper that grew out of the project, imports its solvers directly, which is the right call for two JAX components with the same authors. For that case, `apply_tesseract(..., traceable=True)` inlines a pure-JAX Tesseract loaded in the same process, so XLA compiles both sides as one program.
 
 JAX within JAX was still the right test for us because it isolates the one thing we changed. With the same framework, dtype, and device on both sides, the rows of the table differ only in what it costs to cross.
 
@@ -138,28 +154,30 @@ Under `jit`, XLA needs to know how to run that primitive. On the CPU it runs as 
 
 The shim receives raw device pointers from XLA. It synchronizes XLA's stream so the inputs are ready, wraps each pointer in a minimal object that exposes `__cuda_array_interface__`, takes the GIL, and calls back into Python with those views. It loads the CUDA runtime with `dlopen` on first use and links against no CUDA library at build time, so the same wheel installs and runs on machines without a GPU.
 
-In Python, the views go to the same dispatch function the CPU path uses, which passes them to the Tesseract's HTTP client. With the GPU transport enabled, the client doesn't encode any bytes. For each array it asks CUDA for an IPC handle, a 64-byte token that another process on the same machine can use to map the same allocation, and it puts that handle in the JSON request where the base64 would otherwise go. Shapes and dtypes stay in the JSON, so the server still validates every request against its schema.
+In Python, the views go to the same dispatch function the CPU path uses, which passes them to the Tesseract's HTTP client. With the GPU transport enabled, the client doesn't encode any bytes. For each array it asks CUDA for an IPC handle, a 64-byte token that another process on the same machine can use to map the same allocation, and it puts that handle in the JSON request where the base64 would otherwise go. Shapes and dtypes stay in the JSON, so the server still validates every request against its schema. One complication is that XLA allocates memory through CUDA's virtual memory management API, which legacy IPC handles can't refer to. The client therefore first copies each array into a plain `cudaMalloc` buffer it can export. Those staging buffers are reused from call to call, so the handles repeat and the other process can keep its mapping open instead of reopening it every time.
 
-The solver process opens the handles, copies the inputs into memory it owns, and computes the VJP. Its outputs travel back the same way, with two complications. JAX exposes its arrays through DLPack rather than `__cuda_array_interface__`, so the runtime reads the device pointer from a DLPack capsule. And XLA allocates memory through CUDA's virtual memory management API, which legacy IPC handles can't refer to, so the runtime first copies each output into a plain `cudaMalloc` buffer it can export. The response carrying those handles is sent only after the endpoint returns, so the server keeps the buffers alive until the next request arrives. This is also why a Tesseract serving the GPU transport handles one request at a time for now.
+The solver process maps the handles, copies the inputs into memory it owns, and computes the VJP. Its outputs are XLA allocations too, and they travel back the same way. The response carrying their handles is sent only after the endpoint returns, so the server keeps the buffers alive until the next request arrives. This is also why a Tesseract serving the GPU transport handles one request at a time for now.
 
-Back in the training process, the client opens the returned handles, and the shim copies the results into XLA's output buffers, synchronizes once more, and returns control to XLA.
+Back in the training process, the client maps the returned handles, and the shim copies the results into XLA's output buffers, synchronizes once more, and returns control to XLA.
 
 We wrote this shim twice. The first version was in Rust and ran about a millisecond faster, but only because it reimplemented the entire Tesseract client, HTTP and JSON included, in thousands of extra lines. The C++ shim only moves pointers and leaves everything else to the existing Python client. Once the array bytes stopped passing through that client, there was very little left in it to optimize.
 
 ## Failing silently
 
-When a GPU transport breaks, it rarely crashes. Usually it just gets slow, and nothing tells you. The most instructive bug of this project was one of those. The runtime decided whether an output lived on the GPU by looking for `__cuda_array_interface__`, the protocol CuPy and PyTorch implement. JAX arrays expose their device memory only through DLPack. A Tesseract written in JAX, like the Multi-Agent-DPC solver, therefore returned arrays the runtime didn't recognize as GPU arrays, and they quietly took the host path. Every test passed, because every result was correct. [#781](https://github.com/pasteurlabs/tesseract-core/pull/781) fixed it by reading device metadata from either protocol.
+When a GPU transport breaks, it rarely crashes. Usually it just gets slow, and nothing tells you. The team's original setup is an example: the solver's container installed the CPU build of JAX, every result was correct, and the only symptom was the time each step took. Asking for `gpu_transport="cuda_ipc"` guards against part of this, because on a machine where the shim isn't available it raises an error instead of silently falling back to the host path. That guard only runs when JAX compiles the call for a GPU, though. If JAX itself ends up on the CPU, for example because its CUDA plugin failed to load, the GPU transport has no effect and nothing raises, so it is worth checking that `jax.default_backend()` returns `"gpu"` in both processes.
 
-The more general lesson is that the fast path has to check itself. Tesseract-JAX's GPU tests now run with a residency check switched on (`TESSERACT_JAX_DEBUG_CHECK_DEVICE_PTRS`), which makes the shim reject any pointer that isn't in device memory, so an accidental host round trip on any dispatch path fails loudly. For the same reason, asking for `gpu_transport="cuda_ipc"` on a machine where the shim isn't available raises an error instead of silently falling back to the host path.
+Once both processes are on the GPU, the fast path has to check itself. Tesseract-JAX's GPU tests run with a residency check switched on (`TESSERACT_JAX_DEBUG_CHECK_DEVICE_PTRS`), which makes the shim reject any pointer that isn't in device memory, so an accidental host round trip on any dispatch path fails loudly. That check covers the boundary, but not what happens behind it. Timing each piece of the training step above turned up two costs that no test could catch, because every result was correct. The VJP cache found its entries by hashing the raw bytes of its inputs, which copied every GPU input back to the host on every call. And the gradient endpoints rebuilt a schema validator for every array on every request, about a millisecond each. Fixing both, and reusing staging buffers and IPC mappings across calls, roughly halved the fixed cost of a call.
 
 Two other bugs are worth recording. The staging copy for XLA's memory begins with a `cudaIpcGetMemHandle` call that is expected to fail, and does. CUDA also records that failure as a process-wide error, which XLA's next kernel launch picks up as its own. The first `jit`-compiled function ran fine and every newly compiled one after it aborted, until we cleared the error right after the expected failure. The second bug appeared only at exit, when a Python object held in a C++ static variable was destroyed after the interpreter had shut down and took the process with it. The fix is to allocate the object on the heap and never free it, one of the few cases where a memory leak is the correct answer.
 
+A third one we found by reading the code rather than by watching it fail. The runtime handed out an IPC handle without waiting for the GPU to finish writing the memory behind it, so nothing guaranteed that the other process would read finished data. In practice the HTTP round trip always took longer than the copy, which is exactly why the race never showed. The runtime now synchronizes before a handle leaves the process.
+
 ## Limits
 
-The GPU transport is experimental and opt-in, and it is built on CUDA IPC, which sets its boundaries. Client and Tesseract must run on the same machine and see the same GPU. They must also share an IPC namespace, which means `--ipc=host` when the Tesseract runs in a container. A Tesseract serving the GPU transport handles one request at a time. Arrays must be C-contiguous, and their dtypes must match the schema exactly. The shim synchronizes the stream before and after every call, which gives up overlap with other GPU work in exchange for simple correctness. When two JAX processes share a GPU, as in the example above, set `XLA_PYTHON_CLIENT_PREALLOCATE=false` or lower `XLA_PYTHON_CLIENT_MEM_FRACTION`, because otherwise each process tries to claim 75% of device memory at startup.
+The GPU transport is experimental and opt-in, and it is built on CUDA IPC, which sets its boundaries. Client and Tesseract must run on the same machine and see the same GPU. They must also share an IPC namespace, which means `--ipc=host` when the Tesseract runs in a container. A Tesseract serving the GPU transport handles one request at a time. Arrays must be C-contiguous, and their dtypes must match the schema exactly. The shim synchronizes the stream before and after every call, which gives up overlap with other GPU work in exchange for simple correctness. To avoid setting up buffers on every call, each process keeps up to 1 GiB of idle staging buffers and up to 1 GiB of IPC mappings open. When two JAX processes share a GPU, as in the example above, set `XLA_PYTHON_CLIENT_PREALLOCATE=false` or lower `XLA_PYTHON_CLIENT_MEM_FRACTION`, because otherwise each process tries to claim 75% of device memory at startup.
 
 ## What's next
 
-The staging copy goes away with a transport designed for the memory XLA actually allocates. `cuda_vmm`, currently [in review](https://github.com/pasteurlabs/tesseract-core/pull/726), exports that memory directly. It also avoids a cost that grows with allocation size whenever the receiving process opens a legacy handle. In our tests it is about seven times faster than `cuda_ipc` on 2 GB arrays and a couple of milliseconds slower below roughly 150 MB. Replacing the full synchronization with CUDA events would let other GPU work overlap with Tesseract calls, and serving more than one request at a time is the obvious usability item. Beyond a single machine, the same idea extends to GPUs on other hosts, and that deserves a post of its own once we have measured it.
+The staging copy is the last copy a transport could remove. [`cuda_vmm`](https://github.com/pasteurlabs/tesseract-core/pull/726) exports XLA's memory by reference instead, which also avoids the cost of mapping a legacy handle, a cost that grows with the size of the allocation. In its own benchmark it is about seven times faster than `cuda_ipc` on 2 GB arrays. It pays a fixed cost per array for passing a file descriptor between the processes, though, which makes it a couple of milliseconds slower below roughly 150 MB. In the training step above, whose arrays are all under 4 MB, it made each step between 13 and 24 ms slower, and Tesseract-JAX doesn't use it yet. Most of the remaining fixed cost here sits in HTTP handling and validation instead. Replacing the full synchronization with CUDA events would let other GPU work overlap with Tesseract calls, and serving more than one request at a time is the obvious usability item. Beyond a single machine, the same idea extends to GPUs on other hosts, and that deserves a post of its own once we have measured it.
 
 To try it, start with the [GPU transport how-to](../content/how-to/gpu-transport.md). If you have a GPU component that lives in another stack, or a training loop that bounces arrays through the CPU to reach one, we'd like to hear how this works for you on the [Forum](https://si-tesseract.discourse.group/). New to Tesseract? The [getting started guide](../content/tutorials/get-started.md) covers building and serving your first Tesseract, and the [Tesseract-JAX docs](https://docs.pasteurlabs.ai/projects/tesseract-jax/latest/) explain how to make it differentiable from JAX.
