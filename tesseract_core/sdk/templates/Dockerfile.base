@@ -152,13 +152,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /tesseract
 RUN chmod 777 /tesseract
 
-# Set environment variables
-ENV TESSERACT_NAME="{{ config.name | replace('"', '\\"') | replace('\n', '\\n') }}" \
-    TESSERACT_VERSION="{{ config.version | replace('"', '\\"') | replace('\n', '\\n') }}" \
-    TESSERACT_DESCRIPTION="{{ config.description | replace('"', '\\"') | replace('\n', '\\n') }}" \
-    TESSERACT_API_PATH="/tesseract/tesseract_api.py"
-
-LABEL ai.pasteurlabs.tesseract.metadata="{{ config.metadata | tojson | replace('\\', '\\\\') | replace('"', '\\"') }}"
+ENV TESSERACT_API_PATH="/tesseract/tesseract_api.py"
 
 # Copy only necessary files
 COPY --from=build_stage /python-env /python-env
@@ -185,6 +179,14 @@ COPY --chmod=777 ["{{ tesseract_source_directory }}/{{ source_path }}", "{{ targ
 # Custom build steps
 {{ config.build_config.custom_build_steps | join("\n") }}
 {% endif %}
+
+# Set after the custom build steps so that changing the name, version or
+# metadata does not invalidate their layer cache.
+ENV TESSERACT_NAME="{{ config.name | replace('"', '\\"') | replace('\n', '\\n') }}" \
+    TESSERACT_VERSION="{{ config.version | replace('"', '\\"') | replace('\n', '\\n') }}" \
+    TESSERACT_DESCRIPTION="{{ config.description | replace('"', '\\"') | replace('\n', '\\n') }}"
+
+LABEL ai.pasteurlabs.tesseract.metadata="{{ config.metadata | tojson | replace('\\', '\\\\') | replace('"', '\\"') }}"
 
 RUN mkdir -p /tesseract/input_data /tesseract/output_data && \
     chmod 755 /tesseract/input_data && \

@@ -127,6 +127,10 @@ TEST_CASES = {
         ),
     ),
     "qp_solve": Config(),
+    "bandedblock_cholmod": Config(
+        check_gradients=True,
+        no_from_source="needs Julia and its precompiled depot from the image",
+    ),
     "inherit_base_image_packages": Config(
         no_from_source="needs firedrake from the base image"
     ),

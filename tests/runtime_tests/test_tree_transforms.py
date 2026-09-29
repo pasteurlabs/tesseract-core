@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from tesseract_core.runtime.tree_transforms import (
     LRUCache,
     escape_dict_key,
+    expand_path_pattern,
     filter_func,
     flatten_with_paths,
     get_at_path,
@@ -768,3 +769,45 @@ class TestSplitPath:
         """The case this was for: a state-dict key reaches its value."""
         tree = {"params": {"layer.0.weight": 7}}
         assert get_at_path(tree, "params.{layer.0.weight}") == 7
+
+
+class TestExpandPathPatternOptionalFields:
+    """Unset optional fields expand to no paths instead of raising."""
+
+    @pytest.mark.parametrize(
+        "pattern,inputs",
+        [
+            ("a.[].b", {"a": None}),
+            ("a.b", {"a": None}),
+            ("a.{}.b", {"a": None}),
+        ],
+        ids=["optional_list", "optional_submodel", "optional_dict"],
+    )
+    def test_absent_optional_container_expands_to_nothing(self, pattern, inputs):
+        assert expand_path_pattern(pattern, inputs) == []
+
+    def test_none_entry_inside_a_populated_list_is_skipped(self):
+        assert expand_path_pattern("a.[].b", {"a": [{"b": 1}, None]}) == ["a.[0].b"]
+
+    @pytest.mark.parametrize(
+        "pattern,inputs",
+        [
+            ("a.b", {"a": {"b": None}}),
+            ("a.[].b", {"a": [{"b": None}]}),
+        ],
+        ids=["optional_leaf", "optional_leaf_in_list"],
+    )
+    def test_absent_optional_leaf_expands_to_nothing(self, pattern, inputs):
+        assert expand_path_pattern(pattern, inputs) == []
+
+    @pytest.mark.parametrize(
+        "pattern,inputs,expected",
+        [
+            ("a.[].b", {"a": [{"b": 1}, {"b": 2}]}, ["a.[0].b", "a.[1].b"]),
+            ("a.{}.b", {"a": {"x": {"b": 1}}}, ["a.{x}.b"]),
+            ("a.b", {"a": {"b": 1}}, ["a.b"]),
+        ],
+        ids=["list", "dict", "plain"],
+    )
+    def test_populated_paths_are_unchanged(self, pattern, inputs, expected):
+        assert expand_path_pattern(pattern, inputs) == expected

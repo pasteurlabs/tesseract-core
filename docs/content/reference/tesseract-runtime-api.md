@@ -90,3 +90,12 @@ The `tesseract_core.runtime.jax_recipes` module contains utilities for working w
 .. automodule:: tesseract_core.runtime.jax_recipes
    :members:
 ```
+
+## `tesseract_core.runtime.julia_recipes`
+
+The `tesseract_core.runtime.julia_recipes` module contains utilities for wrapping Julia code in `tesseract_api.py`, with gradients computed by Enzyme. Used by default when initializing Tesseracts via `tesseract init --recipe julia`.
+
+```{eval-rst}
+.. automodule:: tesseract_core.runtime.julia_recipes
+   :members:
+```
